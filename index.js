@@ -1433,7 +1433,7 @@ client.on('interactionCreate', async interaction => {
     await interaction.update({ embeds: [updatedEmbed], components: [] });
 
     // Notif dans #contrats
-    const ch = interaction.guild.channels.cache.get('1508756442730074222');
+    const ch = interaction.guild.channels.cache.get('1509340674779254876'); // contrats-reponses
     if (ch) await ch.send({ embeds: [new EmbedBuilder().setColor(0x57F287)
       .setTitle('✅ CONTRAT ACCEPTÉ — ' + contratId)
       .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n       SIGNATURE CLIENT ENREGISTRÉE\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
@@ -1487,7 +1487,7 @@ client.on('interactionCreate', async interaction => {
       .spliceFields(6, 1, { name: '📌 Statut', value: '❌ Refusé le ' + fmtShort(new Date()), inline: true });
     await interaction.update({ embeds: [updatedEmbed], components: [] });
 
-    const ch = interaction.guild.channels.cache.get('1508756442730074222');
+    const ch = interaction.guild.channels.cache.get('1509340674779254876'); // contrats-reponses
     if (ch) await ch.send({ embeds: [new EmbedBuilder().setColor(0xED4245)
       .setTitle('❌ CONTRAT REFUSÉ — ' + contratId)
       .addFields(
@@ -1602,7 +1602,7 @@ client.on('interactionCreate', async interaction => {
       .spliceFields(6, 1, { name: '📌 Statut', value: '✅ Signé le ' + fmtShort(new Date()) + ' par ' + interaction.user.username, inline: true });
     await interaction.update({ embeds: [updatedEmbed], components: [] });
 
-    const ch = interaction.guild.channels.cache.get('1508756442730074222');
+    const ch = interaction.guild.channels.cache.get('1509340674779254876'); // contrats-reponses
     if (ch) await ch.send({ embeds: [new EmbedBuilder().setColor(0x57F287)
       .setTitle('✅ MISSION ACCEPTÉE — ' + contratId)
       .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n     IRON WOLF COMPANY — SIGNATURE VALIDÉE\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
@@ -1650,6 +1650,17 @@ client.on('interactionCreate', async interaction => {
     const updatedEmbed = EmbedBuilder.from(interaction.message.embeds[0]).setColor(0xED4245)
       .spliceFields(6, 1, { name: '📌 Statut', value: '❌ Décliné le ' + fmtShort(new Date()), inline: true });
     await interaction.update({ embeds: [updatedEmbed], components: [] });
+
+    const chDecline = interaction.guild.channels.cache.get('1509340674779254876');
+    if (chDecline) await chDecline.send({ embeds: [new EmbedBuilder().setColor(0xED4245)
+      .setTitle('❌ MISSION DÉCLINÉE — ' + contratId)
+      .addFields(
+        { name: '🆔 Référence',  value: '`' + contratId + '`', inline: true },
+        { name: '📅 Décliné le', value: fmtShort(new Date()), inline: true },
+        { name: '🏭 Employeur',  value: contrat.employeurNom },
+        { name: '📋 Mission',    value: contrat.objet }
+      ).setFooter({ text: 'Iron Wolf Company • ' + fmtShort(new Date()) })]
+    });
 
     try {
       const employeur = await interaction.guild.members.fetch(contrat.userId).catch(() => null);
