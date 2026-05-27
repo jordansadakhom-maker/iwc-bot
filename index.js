@@ -552,7 +552,8 @@ client.on('messageReactionAdd', async (reaction, user) => {
     if (!member) return;
 
     // Vérifier minimum 4 votes ✅
-    const voteCount = reaction.count - 1; // -1 pour enlever le bot
+    const reactUsers = await reaction.users.fetch();
+    const voteCount = reactUsers.filter(u => !u.bot).size;
     if (voteCount < 3) {
       await reaction.message.channel.send({
         content: `⏳ **${voteCount}/3 votes** pour accepter **${cand.nomPerso}**. Il manque encore **${3 - voteCount} vote(s)**.`
@@ -652,7 +653,8 @@ client.on('messageReactionAdd', async (reaction, user) => {
     if (!cand) return;
 
     // Vérifier minimum 4 votes ❌
-    const refuseCount = reaction.count - 1;
+    const refuseUsers = await reaction.users.fetch();
+    const refuseCount = refuseUsers.filter(u => !u.bot).size;
     if (refuseCount < 3) {
       await reaction.message.channel.send({
         content: `⏳ **${refuseCount}/3 votes** pour refuser **${cand.nomPerso}**. Il manque encore **${3 - refuseCount} vote(s)**.`
