@@ -551,6 +551,15 @@ client.on('messageReactionAdd', async (reaction, user) => {
     const member = await guild.members.fetch(cand.userId).catch(() => null);
     if (!member) return;
 
+    // Vérifier minimum 4 votes ✅
+    const voteCount = reaction.count - 1; // -1 pour enlever le bot
+    if (voteCount < 3) {
+      await reaction.message.channel.send({
+        content: `⏳ **${voteCount}/3 votes** pour accepter **${cand.nomPerso}**. Il manque encore **${3 - voteCount} vote(s)**.`
+      }).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+      return;
+    }
+
     // Rôle selon type
     if (isIllegal) {
       const role = guild.roles.cache.find(r => r.name.includes('Maudit') || r.name.includes('Ombre'));
@@ -591,43 +600,30 @@ client.on('messageReactionAdd', async (reaction, user) => {
       }).catch(() => {});
     }
 
-    // Annonce dans #parlote-hrp
-    const annCh = getCh(guild, 'parlote-hrp', 'discussion');
-    if (annCh) {
-      if (isIllegal) {
-        await annCh.send({
-          embeds: [new EmbedBuilder()
-            .setColor(0x8B1A1A)
-            .setTitle('🔪 La Confrérie — Un nouveau visage dans l\'ombre')
-            .setDescription(`**${cand.nomPerso}** a intégré la Compagnie.\n*Certains chemins ne se montrent pas à la lumière.*`)
-            .setThumbnail(member.user.displayAvatarURL())]
-        });
-      } else {
-        await annCh.send({
-          embeds: [new EmbedBuilder()
-            .setColor(0x3B82F6)
-            .setTitle('⚖️ Nouveau membre légal — IWC')
-            .setDescription(`**${cand.nomPerso}** rejoint la Compagnie.\n*Bienvenue dans la meute.*`)
-            .setThumbnail(member.user.displayAvatarURL())]
-        });
-      }
-    }
-
-    // Confirmation dans #-dossier-recrutement
+    // Annonce dans le bon -dossier-recrutement selon type
     const dossierFinalCh = isIllegal
       ? guild.channels.cache.get('1509252295127466096')  // -dossier-recrutement ILLÉGAL
       : guild.channels.cache.get('1509254295717941278'); // -dossier-recrutement LÉGAL
     if (dossierFinalCh) {
-      await dossierFinalCh.send({
-        embeds: [new EmbedBuilder()
-          .setColor(isIllegal ? 0x8B1A1A : 0x3B82F6)
-          .setTitle(`✅ ACCEPTÉ — ${cand.nomPerso}`)
-          .setDescription(
-            `**${cand.nomPerso}** a été accepté — **${isIllegal ? '🔪 La Confrérie' : '⚖️ Iron Wolf Company'}**\n` +
-            `Joueur : <@${cand.userId}>`
-          )
-          .setFooter({ text: `IWC • ${fmtShort(new Date())}` })]
-      });
+      if (isIllegal) {
+        await dossierFinalCh.send({
+          embeds: [new EmbedBuilder()
+            .setColor(0x8B1A1A)
+            .setTitle('🔪 La Confrérie — Un nouveau visage dans l\'ombre')
+            .setDescription(`**${cand.nomPerso}** a intégré la Confrérie.\n*Certains chemins ne se montrent pas à la lumière.*`)
+            .setThumbnail(member.user.displayAvatarURL())
+            .setFooter({ text: `La Confrérie • ${fmtShort(new Date())}` })]
+        });
+      } else {
+        await dossierFinalCh.send({
+          embeds: [new EmbedBuilder()
+            .setColor(0x3B82F6)
+            .setTitle('⚖️ Nouveau membre — Iron Wolf Company')
+            .setDescription(`**${cand.nomPerso}** rejoint la Compagnie.\n*Bienvenue dans la meute.*`)
+            .setThumbnail(member.user.displayAvatarURL())
+            .setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` })]
+        });
+      }
     }
 
     try {
@@ -654,6 +650,15 @@ client.on('messageReactionAdd', async (reaction, user) => {
       .trim();
     const cand = db.candidatures.find(c => c.nomPerso === nom && c.status === 'reçue');
     if (!cand) return;
+
+    // Vérifier minimum 4 votes ❌
+    const refuseCount = reaction.count - 1;
+    if (refuseCount < 3) {
+      await reaction.message.channel.send({
+        content: `⏳ **${refuseCount}/3 votes** pour refuser **${cand.nomPerso}**. Il manque encore **${3 - refuseCount} vote(s)**.`
+      }).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+      return;
+    }
 
     cand.status = 'refusee';
     saveDB(db);
