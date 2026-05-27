@@ -1,0 +1,181 @@
+# 🐺 IWC BOT — GUIDE COMPLET
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ÉTAPE 1 — REMPLIR LE FICHIER .env
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Ouvre le fichier ".env" avec le Bloc-notes.
+Tu as besoin de 2 valeurs :
+
+BOT_TOKEN :
+→ discord.com/developers/applications
+→ Clique sur ton application (IWC Setup)
+→ Menu gauche : Bot
+→ Reset Token → Copy
+→ Colle après "BOT_TOKEN="
+
+GUILD_ID :
+→ Dans Discord, active le Mode développeur :
+  Paramètres → Avancé → Mode développeur ✅
+→ Clic droit sur le nom de ton serveur (sidebar gauche)
+→ "Copier l'identifiant du serveur"
+→ Colle après "GUILD_ID="
+
+Exemple de .env rempli :
+  BOT_TOKEN=MTIzNDU2Nzg5MDEy...longuesuitedecaractères
+  GUILD_ID=1234567890123456789
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ÉTAPE 2 — OUVRIR LE TERMINAL DANS CE DOSSIER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Dans le dossier "iwc-v3" :
+→ Clique sur la barre d'adresse en haut
+→ Tape : cmd
+→ Appuie sur Entrée
+
+Une fenêtre noire s'ouvre.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ÉTAPE 3 — INSTALLER LES DÉPENDANCES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Dans la fenêtre noire, tape :
+
+  npm install
+
+Attends que ça finisse (quelques secondes).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ÉTAPE 4 — LANCER LE BOT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  node index.js
+
+Tu dois voir :
+
+  🐺 IWC Bot — [nom du bot]
+  MODE FULL AUTO — Zéro commande requise
+  ✅ Auto-setup terminé
+  ✅ Automatismes actifs...
+
+C'est tout. Le bot fait le reste seul.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CE QUE LE BOT FAIT AUTOMATIQUEMENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+AU DÉMARRAGE (une seule fois) :
+→ Poste le message de validation dans #règlement
+→ Poste le message + bouton dans #recrutement
+→ Crée le dashboard dans #dashboard
+
+EN TEMPS RÉEL :
+→ Nouveau membre → rôle Visiteur + DM + log arrivées
+→ Compte suspect → alerte Le Concepteur + Le Fléau
+→ Réaction ✅ sous le règlement → notif Direction
+→ Clic "Soumettre ma candidature" → formulaire popup
+→ Formulaire soumis → dossier dans #-dossier-recrutement
+   + thread de discussion + ping Direction
+→ Réaction ✅ sur un dossier → candidat accepté automatiquement
+→ Réaction ❌ sur un dossier → candidat refusé + DM automatique
+→ Message dans #absences → statut mis à jour automatiquement
+→ Message dans #opérations → fiche créée avec boutons
+→ Boutons Lancer/Terminer/Annuler → statut mis à jour
+→ Message dans #planning-sessions → session créée + rappel 1h avant
+→ Membre quitte → log automatique
+
+TOUTES LES HEURES :
+→ Dashboard mis à jour
+
+TOUTES LES 5 MIN (si Notion configuré) :
+→ Vérification des RDV agenda
+→ Notifications 24h / 1h / 15min avant
+
+CHAQUE MATIN À 8H :
+→ Agenda du jour posté dans #planning-sessions
+
+CHAQUE JOUR À 9H30 :
+→ Rapport inactivité (7+ jours)
+→ Membres 14+ jours → inactif automatique
+→ Absences expirées → actif automatique
+
+CHAQUE LUNDI À 9H :
+→ Rapport hebdomadaire dans #logs-modération
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FORMATS POUR LA DIRECTION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Pour créer une opération dans #opérations-en-cours :
+
+  OPÉRATION
+  NOM : Nom de l'opération
+  LIEU : Rhodes
+  ÉQUIPE : Jonas, Cyrus
+  OBJECTIF : Description de l'objectif
+
+Pour planifier une session dans #planning-sessions :
+
+  SESSION
+  NOM : Nom de la session
+  DATE : 15/06/2025
+  HEURE : 20:00
+  LIEU : Saint Denis
+  TYPE : RP Principal
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+HÉBERGEMENT 24H/24 — RAILWAY (gratuit)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Pour que le bot tourne sans allumer ton PC :
+
+1. Crée un compte sur github.com
+2. Nouveau repository → "iwc-bot" → Public
+3. Upload tous les fichiers de ce dossier
+   (sauf node_modules)
+4. Crée un compte sur railway.app
+5. New Project → Deploy from GitHub
+6. Sélectionne "iwc-bot"
+7. Variables → ajoute :
+   BOT_TOKEN = ton token
+   GUILD_ID = ton guild id
+8. Deploy
+
+Le bot tourne 24h/24 sans ton PC.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+NOTION AGENDA (optionnel)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Si tu veux le système de rendez-vous avec secrétaire :
+
+1. notion.so → crée un compte gratuit
+2. notion.so/my-integrations → New integration
+   → Nom : IWC Bot → Submit → copie le token
+3. Crée une base de données "Agenda" avec ces colonnes :
+   - Titre (Title)
+   - Date (Date)
+   - Heure (Text)
+   - Type (Select) : Réunion / Opération / Session RP / etc.
+   - Statut (Select) : Confirmé / Annulé
+   - Participants (Multi-select)
+   - Lieu (Text)
+   - Notes (Text)
+   - Notif 24h (Checkbox)
+   - Notif 1h (Checkbox)
+   - Notif 15min (Checkbox)
+4. Sur la page Notion → "..." → Connections → IWC Bot
+5. Copie l'ID dans l'URL (les 32 caractères avant le "?")
+6. Remplis dans .env :
+   NOTION_TOKEN=secret_xxx...
+   NOTION_AGENDA_DB_ID=xxx...
+7. Relance le bot
+
+La secrétaire crée des RDV sur Notion.
+Le bot envoie les notifications automatiquement sur Discord.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Iron Wolf Company • Bot permanent • 1895
+Mode SAFE — Aucune permission modifiée
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
