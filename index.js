@@ -1433,7 +1433,7 @@ client.on('interactionCreate', async interaction => {
     await interaction.update({ embeds: [updatedEmbed], components: [] });
 
     // Notif dans #contrats
-    const ch = interaction.guild.channels.cache.get('1509340674779254876'); // contrats-reponses
+    const ch = interaction.guild.channels.cache.get('1509340729808388208'); // fil Contrats Accepter
     if (ch) await ch.send({ embeds: [new EmbedBuilder().setColor(0x57F287)
       .setTitle('✅ CONTRAT ACCEPTÉ — ' + contratId)
       .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n       SIGNATURE CLIENT ENREGISTRÉE\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
@@ -1487,7 +1487,7 @@ client.on('interactionCreate', async interaction => {
       .spliceFields(6, 1, { name: '📌 Statut', value: '❌ Refusé le ' + fmtShort(new Date()), inline: true });
     await interaction.update({ embeds: [updatedEmbed], components: [] });
 
-    const ch = interaction.guild.channels.cache.get('1509340674779254876'); // contrats-reponses
+    const ch = interaction.guild.channels.cache.get('1509340853808664627'); // fil Contrats Refuser
     if (ch) await ch.send({ embeds: [new EmbedBuilder().setColor(0xED4245)
       .setTitle('❌ CONTRAT REFUSÉ — ' + contratId)
       .addFields(
@@ -1602,7 +1602,7 @@ client.on('interactionCreate', async interaction => {
       .spliceFields(6, 1, { name: '📌 Statut', value: '✅ Signé le ' + fmtShort(new Date()) + ' par ' + interaction.user.username, inline: true });
     await interaction.update({ embeds: [updatedEmbed], components: [] });
 
-    const ch = interaction.guild.channels.cache.get('1509340674779254876'); // contrats-reponses
+    const ch = interaction.guild.channels.cache.get('1509340729808388208'); // fil Contrats Accepter
     if (ch) await ch.send({ embeds: [new EmbedBuilder().setColor(0x57F287)
       .setTitle('✅ MISSION ACCEPTÉE — ' + contratId)
       .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n     IRON WOLF COMPANY — SIGNATURE VALIDÉE\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
@@ -1651,7 +1651,7 @@ client.on('interactionCreate', async interaction => {
       .spliceFields(6, 1, { name: '📌 Statut', value: '❌ Décliné le ' + fmtShort(new Date()), inline: true });
     await interaction.update({ embeds: [updatedEmbed], components: [] });
 
-    const chDecline = interaction.guild.channels.cache.get('1509340674779254876');
+    const chDecline = interaction.guild.channels.cache.get('1509340853808664627'); // fil Contrats Refuser
     if (chDecline) await chDecline.send({ embeds: [new EmbedBuilder().setColor(0xED4245)
       .setTitle('❌ MISSION DÉCLINÉE — ' + contratId)
       .addFields(
