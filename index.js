@@ -554,9 +554,9 @@ client.on('messageReactionAdd', async (reaction, user) => {
     // Vérifier minimum 4 votes ✅
     const reactUsers = await reaction.users.fetch();
     const voteCount = reactUsers.filter(u => !u.bot).size;
-    if (voteCount < 3) {
+    if (voteCount < 2) {
       await reaction.message.channel.send({
-        content: `⏳ **${voteCount}/3 votes** pour accepter **${cand.nomPerso}**. Il manque encore **${3 - voteCount} vote(s)**.`
+        content: `⏳ **${voteCount}/2 votes** pour accepter **${cand.nomPerso}**. Il manque encore **${2 - voteCount} vote(s)**.`
       }).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
       return;
     }
@@ -655,9 +655,9 @@ client.on('messageReactionAdd', async (reaction, user) => {
     // Vérifier minimum 4 votes ❌
     const refuseUsers = await reaction.users.fetch();
     const refuseCount = refuseUsers.filter(u => !u.bot).size;
-    if (refuseCount < 3) {
+    if (refuseCount < 2) {
       await reaction.message.channel.send({
-        content: `⏳ **${refuseCount}/3 votes** pour refuser **${cand.nomPerso}**. Il manque encore **${3 - refuseCount} vote(s)**.`
+        content: `⏳ **${refuseCount}/2 votes** pour refuser **${cand.nomPerso}**. Il manque encore **${2 - refuseCount} vote(s)**.`
       }).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
       return;
     }
