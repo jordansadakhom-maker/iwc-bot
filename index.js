@@ -535,10 +535,16 @@ client.on('messageReactionAdd', async (reaction, user) => {
   if (reaction.emoji.name === '✅') {
     const msg   = reaction.message;
     const title = msg.embeds[0]?.title || '';
-    if (!title.startsWith('📁 DOSSIER')) return;
+    if (!title.includes('DOSSIER')) return;
 
     const isIllegal = title.includes('ILLÉGAL');
-    const nom  = title.replace('📁 DOSSIER LÉGAL — ', '').replace('📁 DOSSIER ILLÉGAL — ', '').trim();
+    const nom  = title
+      .replace('📁 [IRON WOLF COMPANY] DOSSIER LÉGAL — ', '')
+      .replace('📁 [LA CONFRÉRIE] DOSSIER ILLÉGAL — ', '')
+      .replace('📁 DOSSIER LÉGAL — ', '')
+      .replace('📁 DOSSIER ILLÉGAL — ', '')
+      .replace('✅ ACCEPTÉ — ', '')
+      .trim();
     const cand = db.candidatures.find(c => c.nomPerso === nom && c.status === 'reçue');
     if (!cand) return;
 
@@ -637,10 +643,15 @@ client.on('messageReactionAdd', async (reaction, user) => {
   if (reaction.emoji.name === '❌') {
     const msg   = reaction.message;
     const title = msg.embeds[0]?.title || '';
-    if (!title.startsWith('📁 DOSSIER')) return;
+    if (!title.includes('DOSSIER')) return;
 
     const isIllegal = title.includes('ILLÉGAL');
-    const nom  = title.replace('📁 DOSSIER LÉGAL — ', '').replace('📁 DOSSIER ILLÉGAL — ', '').trim();
+    const nom  = title
+      .replace('📁 [IRON WOLF COMPANY] DOSSIER LÉGAL — ', '')
+      .replace('📁 [LA CONFRÉRIE] DOSSIER ILLÉGAL — ', '')
+      .replace('📁 DOSSIER LÉGAL — ', '')
+      .replace('📁 DOSSIER ILLÉGAL — ', '')
+      .trim();
     const cand = db.candidatures.find(c => c.nomPerso === nom && c.status === 'reçue');
     if (!cand) return;
 
