@@ -34,6 +34,7 @@ function loadDB() {
       operations: [],
       sessions: [],
       candidatures: [],
+      contrats: [],
       dashboardMsgId: null,
       reglementMsgId: null,
       recrutementMsgId: null,
@@ -271,6 +272,36 @@ async function autoSetup(guild) {
       console.log('  ✅ Message recrutement + bouton posté');
     }
     saveDB(db);
+  }
+
+  // ── Message contrats avec bouton pour June ──
+  const contratsCh = guild.channels.cache.get('1508756442730074222');
+  if (contratsCh) {
+    const msgs = await contratsCh.messages.fetch({ limit: 20 });
+    const existing = msgs.find(m =>
+      m.author.id === client.user.id &&
+      m.embeds.length > 0 &&
+      m.embeds[0]?.title?.includes('CONTRATS')
+    );
+    if (!existing) {
+      const embed = new EmbedBuilder()
+        .setColor(0x2C3E50)
+        .setTitle('📜 IRON WOLF COMPANY — CONTRATS')
+        .setDescription(
+          '*Tout accord entre la Compagnie et ses partenaires doit être formalisé.*\n' +
+          '*Un contrat signé engage les deux parties sans exception.*'
+        )
+        .addFields({ name: '📝 Créer un contrat', value: '→ Réservé à la Direction & Secrétariat\n→ Remplis le formulaire\n→ Le contrat sera envoyé au signataire' })
+        .setFooter({ text: 'Iron Wolf Company • Secrétariat officiel • June McCall' });
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('open_contrat_modal')
+          .setLabel('📝 Créer un contrat')
+          .setStyle(ButtonStyle.Primary)
+      );
+      await contratsCh.send({ embeds: [embed], components: [row] });
+      console.log('  ✅ Message contrats posté');
+    }
   }
 
   console.log('✅ Auto-setup terminé\n');
@@ -1278,6 +1309,235 @@ client.once('ready', async () => {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('Bot opérationnel. Rien à faire sur Discord.');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+});
+
+// ═══════════════════════════════════════════════════════════════
+// SYSTÈME DE CONTRATS — June McCall
+// ═══════════════════════════════════════════════════════════════
+client.on('interactionCreate', async interaction => {
+
+  // ── Bouton créer contrat ──
+  if (interaction.isButton() && interaction.customId === 'open_contrat_modal') {
+    const isDir = interaction.member?.roles.cache.some(r =>
+      ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier', 'Instructeur', 'Secrétaire'].some(n => r.name.includes(n))
+    );
+    if (!isDir) {
+      await interaction.reply({ content: '❌ Seule la Direction peut créer des contrats.', ephemeral: true });
+      return;
+    }
+    const modal = new ModalBuilder()
+      .setCustomId('contrat_modal')
+      .setTitle('📜 Nouveau Contrat — IWC');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('client_nom').setLabel('Nom du signataire (nom RP)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Jonas Caverly')
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('objet').setLabel('Objet du contrat').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Prestation de sécurité...')
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('conditions').setLabel('Conditions & Obligations').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000).setPlaceholder('Décris les termes et obligations...')
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('duree').setLabel('Durée & Rémunération').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 30 jours • 500$ / semaine')
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('user_id').setLabel('ID Discord du signataire').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Clic droit sur le membre → Copier l\'identifiant')
+      ),
+    );
+    await interaction.showModal(modal);
+    return;
+  }
+
+  // ── Soumission contrat ──
+  if (interaction.isModalSubmit() && interaction.customId === 'contrat_modal') {
+    await interaction.deferReply({ ephemeral: true });
+    const db    = loadDB();
+    const guild = interaction.guild;
+    if (!db.contrats) db.contrats = [];
+
+    const contratId = 'IWC-' + Date.now().toString().slice(-6);
+    const contrat = {
+      id: contratId,
+      clientNom: interaction.fields.getTextInputValue('client_nom'),
+      objet: interaction.fields.getTextInputValue('objet'),
+      conditions: interaction.fields.getTextInputValue('conditions'),
+      duree: interaction.fields.getTextInputValue('duree'),
+      userId: interaction.fields.getTextInputValue('user_id').trim(),
+      createdBy: interaction.user.username,
+      status: 'en_attente',
+      createdAt: new Date().toISOString(),
+    };
+    db.contrats.push(contrat);
+    saveDB(db);
+
+    await interaction.editReply({ content: '✅ **Contrat ' + contratId + ' créé** et envoyé au signataire.' });
+
+    const embed = new EmbedBuilder()
+      .setColor(0x2C3E50)
+      .setTitle('📜 CONTRAT OFFICIEL — ' + contratId)
+      .setDescription(
+        '```\n' +
+        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+        '     IRON WOLF COMPANY — CONTRAT OFFICIEL\n' +
+        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+        '```'
+      )
+      .addFields(
+        { name: '🆔 Référence',              value: '`' + contratId + '`', inline: true },
+        { name: '📅 Date d\'émission',       value: fmtShort(new Date()), inline: true },
+        { name: '✍️ Émis par',              value: 'June McCall — Secrétaire IWC', inline: true },
+        { name: '👤 Signataire',             value: contrat.clientNom },
+        { name: '📋 Objet du contrat',       value: contrat.objet },
+        { name: '⚖️ Conditions & Obligations', value: contrat.conditions },
+        { name: '⏱️ Durée & Rémunération',  value: contrat.duree },
+        { name: '📌 Statut',                value: '🟡 En attente de signature', inline: true },
+        { name: '\u200b',                   value: '*En signant, le signataire s\'engage à respecter l\'ensemble des conditions. Tout manquement pourra entraîner des conséquences au sein de la Compagnie.*' }
+      )
+      .setFooter({ text: 'Iron Wolf Company • Secrétariat Officiel • ' + fmtShort(new Date()) });
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('signer_contrat_' + contratId).setLabel('✍️ Signer le contrat').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('refuser_contrat_' + contratId).setLabel('❌ Refuser').setStyle(ButtonStyle.Danger)
+    );
+
+    const contratsCh = guild.channels.cache.get('1508756442730074222');
+    if (contratsCh) {
+      await contratsCh.send({
+        content: '<@' + contrat.userId + '> — Un contrat officiel vous a été soumis par la Compagnie.',
+        embeds: [embed],
+        components: [row]
+      });
+    }
+
+    try {
+      const member = await guild.members.fetch(contrat.userId).catch(() => null);
+      if (member) {
+        await member.send({
+          embeds: [new EmbedBuilder()
+            .setColor(0x2C3E50)
+            .setTitle('📜 Contrat officiel — Iron Wolf Company')
+            .setDescription(
+              'Un contrat vous a été soumis par **June McCall**, Secrétaire de l\'Iron Wolf Company.\n\n' +
+              '**Référence :** `' + contratId + '`\n' +
+              '**Objet :** ' + contrat.objet + '\n\n' +
+              'Rendez-vous dans **#contrats** pour lire et signer.'
+            )
+            .setFooter({ text: 'Iron Wolf Company • Secrétariat Officiel' })]
+        });
+      }
+    } catch (e) {}
+    return;
+  }
+
+  // ── Bouton Signer ──
+  if (interaction.isButton() && interaction.customId.startsWith('signer_contrat_')) {
+    const contratId = interaction.customId.replace('signer_contrat_', '');
+    const db = loadDB();
+    if (!db.contrats) db.contrats = [];
+    const contrat = db.contrats.find(c => c.id === contratId);
+    if (!contrat) { await interaction.reply({ content: '❌ Contrat introuvable.', ephemeral: true }); return; }
+    if (contrat.userId !== interaction.user.id) { await interaction.reply({ content: '❌ Ce contrat ne vous est pas destiné.', ephemeral: true }); return; }
+    if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Ce contrat a déjà été traité.', ephemeral: true }); return; }
+
+    contrat.status = 'signe';
+    contrat.signedAt = new Date().toISOString();
+    saveDB(db);
+
+    const updatedEmbed = EmbedBuilder.from(interaction.message.embeds[0])
+      .setColor(0x57F287)
+      .spliceFields(7, 1, { name: '📌 Statut', value: '✅ Signé le ' + fmtShort(new Date()) + ' par ' + interaction.user.username, inline: true });
+    await interaction.update({ embeds: [updatedEmbed], components: [] });
+
+    const contratsCh = interaction.guild.channels.cache.get('1508756442730074222');
+    if (contratsCh) {
+      await contratsCh.send({
+        embeds: [new EmbedBuilder()
+          .setColor(0x57F287)
+          .setTitle('✅ CONTRAT SIGNÉ — ' + contratId)
+          .setDescription(
+            '```\n' +
+            '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+            '        SIGNATURE ÉLECTRONIQUE VALIDÉE\n' +
+            '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+            '```'
+          )
+          .addFields(
+            { name: '🆔 Référence',     value: '`' + contratId + '`', inline: true },
+            { name: '📅 Signé le',      value: fmtShort(new Date()), inline: true },
+            { name: '✍️ Signataire',    value: interaction.user.username, inline: true },
+            { name: '📋 Objet',         value: contrat.objet },
+            { name: '⚖️ Valeur légale', value: '*Ce contrat signé électroniquement a valeur d\'engagement officiel au sein de l\'Iron Wolf Company. Les deux parties sont liées par ses termes.*' }
+          )
+          .setFooter({ text: 'Iron Wolf Company • Contrat validé • ' + fmtShort(new Date()) })]
+      });
+    }
+
+    interaction.user.send({
+      embeds: [new EmbedBuilder()
+        .setColor(0x57F287)
+        .setTitle('✅ Contrat signé — Iron Wolf Company')
+        .setDescription(
+          'Votre signature pour le contrat **' + contratId + '** a bien été enregistrée.\n\n' +
+          '**Objet :** ' + contrat.objet + '\n' +
+          '**Date de signature :** ' + fmtShort(new Date()) + '\n\n' +
+          '*Vous êtes désormais lié(e) par les termes de ce contrat avec l\'Iron Wolf Company.*\n' +
+          '— June McCall, Secrétaire'
+        )
+        .setFooter({ text: 'Iron Wolf Company • Secrétariat Officiel' })]
+    }).catch(() => {});
+    return;
+  }
+
+  // ── Bouton Refuser ──
+  if (interaction.isButton() && interaction.customId.startsWith('refuser_contrat_')) {
+    const contratId = interaction.customId.replace('refuser_contrat_', '');
+    const db = loadDB();
+    if (!db.contrats) db.contrats = [];
+    const contrat = db.contrats.find(c => c.id === contratId);
+    if (!contrat) { await interaction.reply({ content: '❌ Contrat introuvable.', ephemeral: true }); return; }
+    if (contrat.userId !== interaction.user.id) { await interaction.reply({ content: '❌ Ce contrat ne vous est pas destiné.', ephemeral: true }); return; }
+    if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Ce contrat a déjà été traité.', ephemeral: true }); return; }
+
+    contrat.status = 'refuse';
+    contrat.refusedAt = new Date().toISOString();
+    saveDB(db);
+
+    const updatedEmbed = EmbedBuilder.from(interaction.message.embeds[0])
+      .setColor(0xED4245)
+      .spliceFields(7, 1, { name: '📌 Statut', value: '❌ Refusé le ' + fmtShort(new Date()) + ' par ' + interaction.user.username, inline: true });
+    await interaction.update({ embeds: [updatedEmbed], components: [] });
+
+    const contratsCh = interaction.guild.channels.cache.get('1508756442730074222');
+    if (contratsCh) {
+      await contratsCh.send({
+        embeds: [new EmbedBuilder()
+          .setColor(0xED4245)
+          .setTitle('❌ CONTRAT REFUSÉ — ' + contratId)
+          .addFields(
+            { name: '🆔 Référence', value: '`' + contratId + '`', inline: true },
+            { name: '📅 Refusé le', value: fmtShort(new Date()), inline: true },
+            { name: '👤 Par',       value: interaction.user.username, inline: true },
+            { name: '📋 Objet',     value: contrat.objet }
+          )
+          .setFooter({ text: 'Iron Wolf Company • ' + fmtShort(new Date()) })]
+      });
+    }
+
+    interaction.user.send({
+      embeds: [new EmbedBuilder()
+        .setColor(0xED4245)
+        .setTitle('❌ Contrat refusé — Iron Wolf Company')
+        .setDescription(
+          'Votre refus pour le contrat **' + contratId + '** a été enregistré.\n\n' +
+          '*La Direction a été informée de votre décision.*\n' +
+          '— June McCall, Secrétaire'
+        )
+        .setFooter({ text: 'Iron Wolf Company • Secrétariat Officiel' })]
+    }).catch(() => {});
+    return;
+  }
+
 });
 
 client.login(process.env.BOT_TOKEN);
