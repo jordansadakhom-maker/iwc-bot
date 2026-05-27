@@ -292,7 +292,7 @@ async function autoSetup(guild) {
           '*Un contrat signé engage les deux parties sans exception.*'
         )
         .addFields({ name: '📝 Créer un contrat', value: '→ Réservé à la Direction & Secrétariat\n→ Remplis le formulaire\n→ Le contrat sera envoyé au signataire' })
-        .setFooter({ text: 'Iron Wolf Company • Secrétariat officiel • June McCall' });
+        .setFooter({ text: 'Iron Wolf Company • Secrétariat officiel • Iron Wolf Company' });
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('open_contrat_modal')
@@ -1312,7 +1312,7 @@ client.once('ready', async () => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// SYSTÈME DE CONTRATS — June McCall
+// SYSTÈME DE CONTRATS — Iron Wolf Company
 // ═══════════════════════════════════════════════════════════════
 client.on('interactionCreate', async interaction => {
 
@@ -1330,19 +1330,19 @@ client.on('interactionCreate', async interaction => {
       .setTitle('📜 Nouveau Contrat — IWC');
     modal.addComponents(
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('client_nom').setLabel('Nom du signataire (nom RP)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Jonas Caverly')
+        new TextInputBuilder().setCustomId('client_nom').setLabel('Nom RP du signataire (Partie B)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Jonas Caverly')
       ),
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('objet').setLabel('Objet du contrat').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Prestation de sécurité...')
+        new TextInputBuilder().setCustomId('objet').setLabel('Objet du contrat').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Prestation de sécurité, Protection...')
       ),
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('conditions').setLabel('Conditions & Obligations').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000).setPlaceholder('Décris les termes et obligations...')
+        new TextInputBuilder().setCustomId('conditions_iwc').setLabel('Nos conditions — Partie A (IWC)').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500).setPlaceholder('Ce que la Compagnie exige, ses droits, ses attentes...')
       ),
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('duree').setLabel('Durée & Rémunération').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 30 jours • 500$ / semaine')
+        new TextInputBuilder().setCustomId('conditions_sign').setLabel('Obligations du signataire — Partie B').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500).setPlaceholder('Ce que le signataire doit faire, respecter, fournir...')
       ),
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('user_id').setLabel('ID Discord du signataire').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Clic droit sur le membre → Copier l\'identifiant')
+        new TextInputBuilder().setCustomId('user_id').setLabel('ID Discord du signataire').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Clic droit sur le membre → Copier l'identifiant")
       ),
     );
     await interaction.showModal(modal);
@@ -1361,10 +1361,11 @@ client.on('interactionCreate', async interaction => {
       id: contratId,
       clientNom: interaction.fields.getTextInputValue('client_nom'),
       objet: interaction.fields.getTextInputValue('objet'),
-      conditions: interaction.fields.getTextInputValue('conditions'),
-      duree: interaction.fields.getTextInputValue('duree'),
+      conditionsIWC: interaction.fields.getTextInputValue('conditions_iwc'),
+      conditionsSign: interaction.fields.getTextInputValue('conditions_sign'),
       userId: interaction.fields.getTextInputValue('user_id').trim(),
-      createdBy: interaction.user.username,
+      emetteurNom: interaction.user.username,
+      emetteurId: interaction.user.id,
       status: 'en_attente',
       createdAt: new Date().toISOString(),
     };
@@ -1377,24 +1378,23 @@ client.on('interactionCreate', async interaction => {
       .setColor(0x2C3E50)
       .setTitle('📜 CONTRAT OFFICIEL — ' + contratId)
       .setDescription(
-        '```\n' +
-        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
-        '     IRON WOLF COMPANY — CONTRAT OFFICIEL\n' +
-        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
-        '```'
+        '```' +
+        '\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' +
+        '\n     IRON WOLF COMPANY — CONTRAT OFFICIEL' +
+        '\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```'
       )
       .addFields(
-        { name: '🆔 Référence',              value: '`' + contratId + '`', inline: true },
-        { name: '📅 Date d\'émission',       value: fmtShort(new Date()), inline: true },
-        { name: '✍️ Émis par',              value: 'June McCall — Secrétaire IWC', inline: true },
-        { name: '👤 Signataire',             value: contrat.clientNom },
-        { name: '📋 Objet du contrat',       value: contrat.objet },
-        { name: '⚖️ Conditions & Obligations', value: contrat.conditions },
-        { name: '⏱️ Durée & Rémunération',  value: contrat.duree },
-        { name: '📌 Statut',                value: '🟡 En attente de signature', inline: true },
-        { name: '\u200b',                   value: '*En signant, le signataire s\'engage à respecter l\'ensemble des conditions. Tout manquement pourra entraîner des conséquences au sein de la Compagnie.*' }
+        { name: '🆔 Référence',                    value: '`' + contratId + '`', inline: true },
+        { name: "📅 Date d'émission",             value: fmtShort(new Date()), inline: true },
+        { name: '📤 Émis par',                     value: contrat.emetteurNom, inline: true },
+        { name: '📋 Objet',                        value: contrat.objet },
+        { name: '🏢 PARTIE A — Iron Wolf Company', value: contrat.conditionsIWC },
+        { name: '👤 PARTIE B — ' + contrat.clientNom, value: contrat.conditionsSign },
+        { name: '📌 Statut',                       value: '🟡 En attente de signature de la Partie B', inline: true },
+        { name: '\u200b',                         value: '*En signant ce contrat, la Partie B reconnaît avoir pris connaissance des termes ci-dessus et s\'engage à les respecter. Tout manquement pourra entraîner des conséquences au sein de la Compagnie.*' }
       )
-      .setFooter({ text: 'Iron Wolf Company • Secrétariat Officiel • ' + fmtShort(new Date()) });
+      .setFooter({ text: 'Iron Wolf Company • Document Officiel • ' + fmtShort(new Date()) });
+
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('signer_contrat_' + contratId).setLabel('✍️ Signer le contrat').setStyle(ButtonStyle.Success),
@@ -1418,9 +1418,11 @@ client.on('interactionCreate', async interaction => {
             .setColor(0x2C3E50)
             .setTitle('📜 Contrat officiel — Iron Wolf Company')
             .setDescription(
-              'Un contrat vous a été soumis par **June McCall**, Secrétaire de l\'Iron Wolf Company.\n\n' +
+              'L\'**Iron Wolf Company** vous soumet un contrat officiel pour signature.\n\n' +
               '**Référence :** `' + contratId + '`\n' +
-              '**Objet :** ' + contrat.objet + '\n\n' +
+              '**Objet :** ' + contrat.objet + '\n' +
+              '**Émis par :** ' + contrat.emetteurNom + '\n\n' +
+              '**Vos obligations (Partie B) :**\n' + contrat.conditionsSign + '\n\n' +
               'Rendez-vous dans **#contrats** pour lire et signer.'
             )
             .setFooter({ text: 'Iron Wolf Company • Secrétariat Officiel' })]
@@ -1481,8 +1483,8 @@ client.on('interactionCreate', async interaction => {
           'Votre signature pour le contrat **' + contratId + '** a bien été enregistrée.\n\n' +
           '**Objet :** ' + contrat.objet + '\n' +
           '**Date de signature :** ' + fmtShort(new Date()) + '\n\n' +
-          '*Vous êtes désormais lié(e) par les termes de ce contrat avec l\'Iron Wolf Company.*\n' +
-          '— June McCall, Secrétaire'
+          '**Vos obligations (Partie B) :**\n' + contrat.conditionsSign + '\n\n' +
+          '*En signant, vous vous êtes engagé(e) à respecter ces termes avec l\'Iron Wolf Company.*'
         )
         .setFooter({ text: 'Iron Wolf Company • Secrétariat Officiel' })]
     }).catch(() => {});
@@ -1531,7 +1533,7 @@ client.on('interactionCreate', async interaction => {
         .setDescription(
           'Votre refus pour le contrat **' + contratId + '** a été enregistré.\n\n' +
           '*La Direction a été informée de votre décision.*\n' +
-          '— June McCall, Secrétaire'
+          '— Iron Wolf Company'
         )
         .setFooter({ text: 'Iron Wolf Company • Secrétariat Officiel' })]
     }).catch(() => {});
