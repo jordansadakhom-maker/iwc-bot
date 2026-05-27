@@ -202,17 +202,27 @@ async function autoSetup(guild) {
   }
 
   // ── Message recrutement avec bouton ──
-  const recrutCh = getCh(guild, 'recrutement');
+  const recrutCh = guild.channels.cache.get('1508756414779232277'); // #recrutement GÉNÉRAL
   if (recrutCh) {
     const msgs = await recrutCh.messages.fetch({ limit: 20 });
     const existing = msgs.find(m =>
       m.author.id === client.user.id &&
       m.embeds.length > 0 &&
-      m.embeds[0]?.title?.includes('RECRUTEMENT')
+      m.embeds[0]?.title?.includes('RECRUTEMENT') &&
+      m.components.length > 0 &&
+      m.components[0]?.components?.length >= 2
     );
     if (existing) {
       db.recrutementMsgId = existing.id;
-    } else if (!db.recrutementMsgId) {
+    } else {
+      // Supprimer l'ancien message s'il existe
+      if (db.recrutementMsgId) {
+        const old = await recrutCh.messages.fetch(db.recrutementMsgId).catch(() => null);
+        if (old) await old.delete().catch(() => {});
+        db.recrutementMsgId = null;
+      }
+    }
+    if (!db.recrutementMsgId) {
       const embed = new EmbedBuilder()
         .setColor(0x8B1A1A)
         .setTitle('📋 IRON WOLF COMPANY — RECRUTEMENT')
@@ -222,11 +232,18 @@ async function autoSetup(guild) {
         )
         .addFields(
           {
-            name: '📋 Comment postuler',
+            name: '⚖️ Recrutement Légal',
             value:
-              '→ Clique sur le bouton ci-dessous\n' +
-              '→ Remplis le formulaire qui s\'ouvre\n' +
-              '→ Ton dossier est transmis automatiquement à la Direction'
+              '→ Tu exerces un métier légal au sein de la Compagnie\n' +
+              '→ Marchand, médecin, forgeron, avocat...\n' +
+              '→ Clique sur **⚖️ Candidature Légale**'
+          },
+          {
+            name: '🔪 Recrutement Illégal',
+            value:
+              '→ Tu opères dans l\'ombre pour la Compagnie\n' +
+              '→ Contrebande, sécurité, bras droit...\n' +
+              '→ Clique sur **🔪 Candidature Illégale**'
           },
           {
             name: '⚠️ Important',
@@ -591,7 +608,9 @@ client.on('messageReactionAdd', async (reaction, user) => {
     }
 
     // Confirmation dans #-dossier-recrutement
-    const dossierFinalCh = getCh(guild, 'dossier-recrutement', 'dossierrecrutement');
+    const dossierFinalCh = isIllegal
+      ? guild.channels.cache.get('1509252295127466096')  // -dossier-recrutement ILLÉGAL
+      : guild.channels.cache.get('1509254295717941278'); // -dossier-recrutement LÉGAL
     if (dossierFinalCh) {
       await dossierFinalCh.send({
         embeds: [new EmbedBuilder()
@@ -818,7 +837,7 @@ client.on('interactionCreate', async interaction => {
         .setFooter({ text: 'Iron Wolf Company • Recrutement Légal' })]
     }).catch(() => {});
 
-    const dossierCh = getCh(guild, 'recrutement-interne', 'recrutementinterne');
+    const dossierCh = guild.channels.cache.get('1509254315712188438'); // recrutement-interne LÉGAL
     if (dossierCh) {
       const mention = getMention(guild);
       const embed = new EmbedBuilder()
@@ -906,7 +925,7 @@ client.on('interactionCreate', async interaction => {
         .setFooter({ text: 'Iron Wolf Company • Confidentiel' })]
     }).catch(() => {});
 
-    const dossierCh = getCh(guild, 'direction-illegal', 'directionillegal');
+    const dossierCh = guild.channels.cache.get('1508756516830842960'); // recrutement-interne ILLÉGAL
     if (dossierCh) {
       const mention = getMention(guild);
       const embed = new EmbedBuilder()
