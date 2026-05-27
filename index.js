@@ -53,6 +53,160 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Envoyer dans un fil (thread) Discord
+async function sendToThread(guild, threadId, payload) {
+  try {
+    // Cherche dans tous les channels texte
+    for (const channel of guild.channels.cache.values()) {
+      if (channel.isTextBased && channel.isTextBased()) {
+        try {
+          await channel.threads.fetch();
+          const thread = channel.threads.cache.get(threadId);
+          if (thread) {
+            await thread.send(payload);
+            return true;
+          }
+        } catch(e) {}
+      }
+    }
+    // Fallback: cherche directement
+    const thread = await guild.channels.fetch(threadId).catch(() => null);
+    if (thread) { await thread.send(payload); return true; }
+  } catch(e) { console.log('Thread send error:', e.message); }
+  return false;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SYSTÈME DE LOGS CENTRALISÉ
+// ═══════════════════════════════════════════════════════════════
+const LOGS_ID = '1509337860724228137';
+
+async function sendLog(guild, type, data) {
+  const ch = guild.channels.cache.get(LOGS_ID);
+  if (!ch) return;
+
+  const configs = {
+    ARRIVEE: {
+      color: 0x57F287, emoji: '👋',
+      title: 'ARRIVÉE — ' + data.username,
+      fields: [
+        { name: '👤 Membre',        value: '<@' + data.userId + '> (' + data.username + ')', inline: true },
+        { name: '📅 Rejoint le',    value: fmtShort(new Date()), inline: true },
+        { name: '🔢 Âge du compte', value: data.accountAge + ' jours', inline: true },
+      ]
+    },
+    DEPART: {
+      color: 0x555555, emoji: '🚪',
+      title: 'DÉPART — ' + data.username,
+      fields: [
+        { name: '👤 Membre',   value: data.username, inline: true },
+        { name: '🎖️ Rang',    value: data.rang || '—', inline: true },
+        { name: '⏱️ Durée',   value: data.duree || '—', inline: true },
+      ]
+    },
+    COMPTE_SUSPECT: {
+      color: 0xED4245, emoji: '⚠️',
+      title: 'COMPTE SUSPECT — ' + data.username,
+      fields: [
+        { name: '👤 Membre',        value: '<@' + data.userId + '>', inline: true },
+        { name: '🔢 Âge du compte', value: data.accountAge + ' jours', inline: true },
+        { name: '⚠️ Risque',        value: 'Compte créé il y a moins de 7 jours', inline: true },
+      ]
+    },
+    REGLEMENT_VALIDE: {
+      color: 0x3B82F6, emoji: '📜',
+      title: 'RÈGLEMENT VALIDÉ — ' + data.username,
+      fields: [
+        { name: '👤 Membre', value: '<@' + data.userId + '> (' + data.username + ')', inline: true },
+        { name: '📅 Date',   value: fmtShort(new Date()), inline: true },
+      ]
+    },
+    CANDIDATURE_RECUE: {
+      color: 0xFFA500, emoji: '📥',
+      title: 'CANDIDATURE REÇUE — ' + data.nomPerso,
+      fields: [
+        { name: '👤 Joueur',  value: '<@' + data.userId + '>', inline: true },
+        { name: '⚖️ Type',   value: data.type || '—', inline: true },
+        { name: '📅 Date',   value: fmtShort(new Date()), inline: true },
+      ]
+    },
+    CANDIDATURE_ACCEPTEE: {
+      color: 0x57F287, emoji: '✅',
+      title: 'CANDIDATURE ACCEPTÉE — ' + data.nomPerso,
+      fields: [
+        { name: '👤 Joueur',    value: '<@' + data.userId + '>', inline: true },
+        { name: '⚖️ Type',     value: data.type || '—', inline: true },
+        { name: '✅ Accepté par', value: data.validePar || '—', inline: true },
+      ]
+    },
+    CANDIDATURE_REFUSEE: {
+      color: 0xED4245, emoji: '❌',
+      title: 'CANDIDATURE REFUSÉE — ' + data.nomPerso,
+      fields: [
+        { name: '👤 Joueur', value: '<@' + data.userId + '>', inline: true },
+        { name: '⚖️ Type',  value: data.type || '—', inline: true },
+        { name: '📅 Date',  value: fmtShort(new Date()), inline: true },
+      ]
+    },
+    ABSENCE: {
+      color: 0xFFA500, emoji: '🟡',
+      title: 'ABSENCE SIGNALÉE — ' + data.username,
+      fields: [
+        { name: '👤 Membre',  value: '<@' + data.userId + '>', inline: true },
+        { name: '📅 Date',    value: fmtShort(new Date()), inline: true },
+      ]
+    },
+    INACTIVITE: {
+      color: 0xED4245, emoji: '💤',
+      title: 'INACTIVITÉ — ' + data.username,
+      fields: [
+        { name: '👤 Membre',      value: data.username, inline: true },
+        { name: '📅 Dernière activité', value: data.lastActivity || '—', inline: true },
+        { name: '⏱️ Depuis',     value: data.jours + ' jours', inline: true },
+      ]
+    },
+    CONTRAT_SIGNE: {
+      color: 0x57F287, emoji: '📜',
+      title: 'CONTRAT SIGNÉ — ' + data.contratId,
+      fields: [
+        { name: '🆔 Référence', value: '`' + data.contratId + '`', inline: true },
+        { name: '📋 Objet',     value: data.objet, inline: true },
+        { name: '✍️ Signé par', value: data.signe, inline: true },
+      ]
+    },
+    CONTRAT_REFUSE: {
+      color: 0xED4245, emoji: '📜',
+      title: 'CONTRAT REFUSÉ — ' + data.contratId,
+      fields: [
+        { name: '🆔 Référence',  value: '`' + data.contratId + '`', inline: true },
+        { name: '📋 Objet',      value: data.objet, inline: true },
+        { name: '❌ Refusé par', value: data.refuse, inline: true },
+      ]
+    },
+    OPERATION: {
+      color: 0xFFA500, emoji: '🎯',
+      title: 'OPÉRATION — ' + data.nom,
+      fields: [
+        { name: '🎯 Nom',      value: data.nom, inline: true },
+        { name: '📍 Lieu',     value: data.lieu || '—', inline: true },
+        { name: '👥 Équipe',   value: data.equipe || '—', inline: true },
+        { name: '📋 Statut',   value: data.statut || '—', inline: true },
+      ]
+    },
+  };
+
+  const cfg = configs[type];
+  if (!cfg) return;
+
+  const embed = new EmbedBuilder()
+    .setColor(cfg.color)
+    .setTitle(cfg.emoji + ' ' + cfg.title)
+    .addFields(...cfg.fields)
+    .setFooter({ text: 'IWC • Logs • ' + new Date().toLocaleString('fr-FR') });
+
+  await ch.send({ embeds: [embed] }).catch(() => {});
+}
+
 // ═══════════════════════════════════════════════════════════════
 // UTILITAIRES
 // ═══════════════════════════════════════════════════════════════
@@ -483,20 +637,13 @@ client.on('guildMemberAdd', async member => {
         .setFooter({ text: 'IWC • Automatique' })]
     });
   }
+  await sendLog(guild, 'ARRIVEE', { userId: member.id, username: member.user.username, accountAge: daysSince(member.user.createdAt) });
 
   // Alerte compte suspect
   if (daysSince(member.user.createdAt) < 7) {
+    await sendLog(guild, 'COMPTE_SUSPECT', { userId: member.id, username: member.user.username, accountAge: daysSince(member.user.createdAt) });
     const logsCh = getCh(guild, 'logs-moderation', 'logs');
-    if (logsCh) {
-      await logsCh.send({
-        content: `${getMention(guild)} — ⚠️ Compte suspect`,
-        embeds: [new EmbedBuilder()
-          .setColor(0xED4245)
-          .setTitle('⚠️ ALERTE — Compte récent')
-          .setDescription(`**${member.user.username}** a rejoint avec un compte créé il y a **${daysSince(member.user.createdAt)} jours**.`)
-          .setFooter({ text: 'IWC • Sécurité automatique' })]
-      });
-    }
+    if (logsCh) await logsCh.send({ content: `${getMention(guild)} — ⚠️ Compte suspect (<@${member.id}> — ${daysSince(member.user.createdAt)} jours)` });
   }
 
   // DM de bienvenue
@@ -521,19 +668,7 @@ client.on('guildMemberRemove', async member => {
   const m  = db.members[member.id];
   const ch = getCh(member.guild, 'logs-moderation', 'logs');
 
-  if (ch) {
-    await ch.send({
-      embeds: [new EmbedBuilder()
-        .setColor(0x555555)
-        .setTitle('🚪 Départ')
-        .setDescription(`**${member.user.username}** a quitté le serveur.`)
-        .addFields(
-          { name: 'Rang',   value: m?.rang || '—',                                 inline: true },
-          { name: 'Durée',  value: m ? `${daysSince(m.joinedAt)} jours` : '—', inline: true }
-        )
-        .setFooter({ text: fmtShort(new Date()) })]
-    });
-  }
+  await sendLog(member.guild, 'DEPART', { username: member.user.username, rang: m?.rang, duree: m ? daysSince(m.joinedAt) + ' jours' : '—' });
 
   if (db.members[member.id]) {
     db.members[member.id].status = 'parti';
@@ -555,16 +690,11 @@ client.on('messageReactionAdd', async (reaction, user) => {
 
   // Validation règlement ✅
   if (reaction.message.id === db.reglementMsgId && reaction.emoji.name === '✅') {
-    const logsCh = getCh(guild, 'logs-moderation', 'logs');
-    if (logsCh) {
-      await logsCh.send({
-        content: getMention(guild),
-        embeds: [new EmbedBuilder()
-          .setColor(0x57F287)
-          .setTitle('✅ Règlement validé')
-          .setDescription(`**${user.username}** a validé le règlement et peut désormais postuler dans **#recrutement**.`)
-          .setFooter({ text: fmtShort(new Date()) })]
-      });
+    await sendLog(guild, 'REGLEMENT_VALIDE', { userId: user.id, username: user.username });
+    const mention = getMention(guild);
+    if (mention) {
+      const logsCh = getCh(guild, 'logs-moderation', 'logs');
+      if (logsCh) await logsCh.send({ content: mention + ' — ' + user.username + ' a validé le règlement.' });
     }
     return;
   }
@@ -610,6 +740,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
 
     cand.status = 'acceptee';
     saveDB(db);
+    await sendLog(guild, 'CANDIDATURE_ACCEPTEE', { userId: cand.userId, nomPerso: cand.nomPerso, type: isIllegal ? '🔪 Illégal' : '⚖️ Légal', validePar: user.username });
 
     // DM selon type
     if (isIllegal) {
@@ -702,6 +833,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
 
     cand.status = 'refusee';
     saveDB(db);
+    await sendLog(guild, 'CANDIDATURE_REFUSEE', { userId: cand.userId, nomPerso: cand.nomPerso, type: isIllegal ? '🔪 Illégal' : '⚖️ Légal' });
 
     const member = await guild.members.fetch(cand.userId).catch(() => null);
     if (member) {
@@ -880,6 +1012,7 @@ client.on('interactionCreate', async interaction => {
         'Ta demande a été enregistrée. Tu recevras une réponse en DM sous 48h.\n' +
         '*La Compagnie ne recrute pas au hasard.*'
     });
+    await sendLog(interaction.guild, 'CANDIDATURE_RECUE', { userId: cand.userId, nomPerso: cand.nomPerso, type: '⚖️ Légal' });
 
     interaction.user.send({
       embeds: [new EmbedBuilder()
@@ -968,6 +1101,7 @@ client.on('interactionCreate', async interaction => {
         'Ton dossier a été acheminé. Reste discret.\n' +
         '*On te contactera si tu es jugé digne.*'
     });
+    await sendLog(interaction.guild, 'CANDIDATURE_RECUE', { userId: cand.userId, nomPerso: cand.nomPerso, type: '🔪 Illégal' });
 
     interaction.user.send({
       embeds: [new EmbedBuilder()
@@ -1086,16 +1220,7 @@ client.on('messageCreate', async message => {
       db.members[message.author.id].status = 'absent';
       saveDB(db);
       await message.react('✅');
-      const logsCh = getCh(guild, 'logs-moderation', 'logs');
-      if (logsCh) {
-        await logsCh.send({
-          embeds: [new EmbedBuilder()
-            .setColor(0xFFA500)
-            .setTitle('⚠️ Absence signalée')
-            .setDescription(`**${message.author.username}** a signalé une absence.`)
-            .setFooter({ text: fmtShort(new Date()) })]
-        });
-      }
+      await sendLog(guild, 'ABSENCE', { userId: message.author.id, username: message.author.username });
     }
     return;
   }
@@ -1121,6 +1246,7 @@ client.on('messageCreate', async message => {
       };
       db.operations.push(op);
       saveDB(db);
+      await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: '🟡 En préparation' });
 
       const embed = new EmbedBuilder()
         .setColor(0xFFA500)
@@ -1433,8 +1559,7 @@ client.on('interactionCreate', async interaction => {
     await interaction.update({ embeds: [updatedEmbed], components: [] });
 
     // Notif dans #contrats
-    const ch = interaction.guild.channels.cache.get('1509340729808388208'); // fil Contrats Accepter
-    if (ch) await ch.send({ embeds: [new EmbedBuilder().setColor(0x57F287)
+    await sendToThread(interaction.guild, '1509340729808388208', { embeds: [new EmbedBuilder().setColor(0x57F287)
       .setTitle('✅ CONTRAT ACCEPTÉ — ' + contratId)
       .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n       SIGNATURE CLIENT ENREGISTRÉE\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
       .addFields(
@@ -1487,8 +1612,7 @@ client.on('interactionCreate', async interaction => {
       .spliceFields(6, 1, { name: '📌 Statut', value: '❌ Refusé le ' + fmtShort(new Date()), inline: true });
     await interaction.update({ embeds: [updatedEmbed], components: [] });
 
-    const ch = interaction.guild.channels.cache.get('1509340853808664627'); // fil Contrats Refuser
-    if (ch) await ch.send({ embeds: [new EmbedBuilder().setColor(0xED4245)
+    await sendToThread(interaction.guild, '1509340853808664627', { embeds: [new EmbedBuilder().setColor(0xED4245)
       .setTitle('❌ CONTRAT REFUSÉ — ' + contratId)
       .addFields(
         { name: '🆔 Référence', value: '`' + contratId + '`', inline: true },
@@ -1602,8 +1726,7 @@ client.on('interactionCreate', async interaction => {
       .spliceFields(6, 1, { name: '📌 Statut', value: '✅ Signé le ' + fmtShort(new Date()) + ' par ' + interaction.user.username, inline: true });
     await interaction.update({ embeds: [updatedEmbed], components: [] });
 
-    const ch = interaction.guild.channels.cache.get('1509340729808388208'); // fil Contrats Accepter
-    if (ch) await ch.send({ embeds: [new EmbedBuilder().setColor(0x57F287)
+    await sendToThread(interaction.guild, '1509340729808388208', { embeds: [new EmbedBuilder().setColor(0x57F287)
       .setTitle('✅ MISSION ACCEPTÉE — ' + contratId)
       .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n     IRON WOLF COMPANY — SIGNATURE VALIDÉE\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
       .addFields(
@@ -1651,8 +1774,7 @@ client.on('interactionCreate', async interaction => {
       .spliceFields(6, 1, { name: '📌 Statut', value: '❌ Décliné le ' + fmtShort(new Date()), inline: true });
     await interaction.update({ embeds: [updatedEmbed], components: [] });
 
-    const chDecline = interaction.guild.channels.cache.get('1509340853808664627'); // fil Contrats Refuser
-    if (chDecline) await chDecline.send({ embeds: [new EmbedBuilder().setColor(0xED4245)
+    await sendToThread(interaction.guild, '1509340853808664627', { embeds: [new EmbedBuilder().setColor(0xED4245)
       .setTitle('❌ MISSION DÉCLINÉE — ' + contratId)
       .addFields(
         { name: '🆔 Référence',  value: '`' + contratId + '`', inline: true },
