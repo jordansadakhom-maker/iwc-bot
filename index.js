@@ -235,14 +235,14 @@ async function autoSetup(guild) {
             name: '⚖️ Recrutement Légal',
             value:
               '→ Tu exerces un métier légal au sein de la Compagnie\n' +
-              '→ Marchand, médecin, forgeron, avocat...\n' +
+              '→ Protection, escorte en tout genre etc...\n' +
               '→ Clique sur **⚖️ Candidature Légale**'
           },
           {
             name: '🔪 Recrutement Illégal',
             value:
-              '→ Tu opères dans l\'ombre pour la Compagnie\n' +
-              '→ Contrebande, sécurité, bras droit...\n' +
+              '→ Tu opères dans l\'ombre pour une organisation\n' +
+              '→ Contrebande, sécurité, assassinat etc...\n' +
               '→ Clique sur **🔪 Candidature Illégale**'
           },
           {
@@ -253,7 +253,7 @@ async function autoSetup(guild) {
               '→ *La porte est ouverte une fois. Une seule.*'
           }
         )
-        .setFooter({ text: 'Iron Wolf Company • Recrutement officiel' });
+        .setFooter({ text: 'Iron Wolf Company • Recrutement officiel • Organisation Hors la loi' });
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -562,14 +562,14 @@ client.on('messageReactionAdd', async (reaction, user) => {
       member.send({
         embeds: [new EmbedBuilder()
           .setColor(0x8B1A1A)
-          .setTitle('🔪 Bienvenue dans l\'ombre — Iron Wolf Company')
+          .setTitle('🔪 Bienvenue dans l\'ombre — La Confrérie')
           .setDescription(
-            'Tu as été **accepté** au sein de la Compagnie.\n\n' +
+            'Tu as été **accepté** au sein de la Confrérie.\n\n' +
             'Tu opères désormais dans l\'ombre. Discrétion absolue.\n\n' +
             '*Ne fais confiance qu\'à ceux que la Direction te désignera.*\n' +
             '*Un faux pas et tu disparais.*\n— La Direction'
           )
-          .setFooter({ text: 'Iron Wolf Company • Confidentiel' })]
+          .setFooter({ text: 'La Confrérie • Confidentiel' })]
       }).catch(() => {});
     } else {
       member.send({
@@ -592,7 +592,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
         await annCh.send({
           embeds: [new EmbedBuilder()
             .setColor(0x8B1A1A)
-            .setTitle('🔪 Un nouveau visage dans l\'ombre')
+            .setTitle('🔪 La Confrérie — Un nouveau visage dans l\'ombre')
             .setDescription(`**${cand.nomPerso}** a intégré la Compagnie.\n*Certains chemins ne se montrent pas à la lumière.*`)
             .setThumbnail(member.user.displayAvatarURL())]
         });
@@ -617,7 +617,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
           .setColor(isIllegal ? 0x8B1A1A : 0x3B82F6)
           .setTitle(`✅ ACCEPTÉ — ${cand.nomPerso}`)
           .setDescription(
-            `**${cand.nomPerso}** a été accepté — **${isIllegal ? '🔪 Illégal' : '⚖️ Légal'}**\n` +
+            `**${cand.nomPerso}** a été accepté — **${isIllegal ? '🔪 La Confrérie' : '⚖️ Iron Wolf Company'}**\n` +
             `Joueur : <@${cand.userId}>`
           )
           .setFooter({ text: `IWC • ${fmtShort(new Date())}` })]
@@ -653,12 +653,12 @@ client.on('messageReactionAdd', async (reaction, user) => {
         member.send({
           embeds: [new EmbedBuilder()
             .setColor(0x555555)
-            .setTitle('Iron Wolf Company')
+            .setTitle('La Confrérie')
             .setDescription(
               'Ta demande n\'a pas été retenue.\n\n' +
               '*On ne donne pas d\'explication. On ne discute pas.*\n— La Direction'
             )
-            .setFooter({ text: 'Iron Wolf Company • Confidentiel' })]
+            .setFooter({ text: 'La Confrérie • Confidentiel' })]
         }).catch(() => {});
       } else {
         member.send({
@@ -692,7 +692,7 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isButton() && interaction.customId === 'open_candidature_legal') {
     const modal = new ModalBuilder()
       .setCustomId('candidature_modal_legal')
-      .setTitle('⚖️ Candidature Légale — IWC');
+      .setTitle('⚖️ Iron Wolf Company — Légal');
 
     modal.addComponents(
       new ActionRowBuilder().addComponents(
@@ -746,7 +746,7 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isButton() && interaction.customId === 'open_candidature_illegal') {
     const modal = new ModalBuilder()
       .setCustomId('candidature_modal_illegal')
-      .setTitle('🔪 Candidature Illégale — IWC');
+      .setTitle('🔪 Organisation Hors la Loi — Illégal');
 
     modal.addComponents(
       new ActionRowBuilder().addComponents(
@@ -842,7 +842,7 @@ client.on('interactionCreate', async interaction => {
       const mention = getMention(guild);
       const embed = new EmbedBuilder()
         .setColor(0x3B82F6)
-        .setTitle(`📁 DOSSIER LÉGAL — ${cand.nomPerso}`)
+        .setTitle(`📁 [IRON WOLF COMPANY] DOSSIER LÉGAL — ${cand.nomPerso}`)
         .setDescription(
           `> *"Chaque talent a sa place au sein de la Compagnie."*\n\n` +
           `Candidature de <@${cand.userId}> (**${cand.username}**)\n` +
@@ -859,7 +859,7 @@ client.on('interactionCreate', async interaction => {
           { name: '\u200b', value: '**Réagissez pour voter :** ✅ Accepter · ❌ Refuser · 🤔 À revoir' }
         )
         .setThumbnail(interaction.user.displayAvatarURL())
-        .setFooter({ text: `IWC • Dossier Légal • ${fmtShort(new Date())}` });
+        .setFooter({ text: `Iron Wolf Company • Dossier Légal • ${fmtShort(new Date())}` });
 
       const dossierMsg = await dossierCh.send({
         content: `${mention} — 📋 Nouveau dossier **LÉGAL**`,
@@ -930,7 +930,7 @@ client.on('interactionCreate', async interaction => {
       const mention = getMention(guild);
       const embed = new EmbedBuilder()
         .setColor(0x8B1A1A)
-        .setTitle(`📁 DOSSIER ILLÉGAL — ${cand.nomPerso}`)
+        .setTitle(`📁 [LA CONFRÉRIE] DOSSIER ILLÉGAL — ${cand.nomPerso}`)
         .setDescription(
           `> *"L'ombre protège ceux qui savent s'y fondre."*\n\n` +
           `Candidature de <@${cand.userId}> (**${cand.username}**)\n` +
@@ -947,7 +947,7 @@ client.on('interactionCreate', async interaction => {
           { name: '\u200b', value: '**Réagissez pour voter :** ✅ Accepter · ❌ Refuser · 🤔 À revoir' }
         )
         .setThumbnail(interaction.user.displayAvatarURL())
-        .setFooter({ text: `IWC • Dossier Illégal — CONFIDENTIEL • ${fmtShort(new Date())}` });
+        .setFooter({ text: `La Confrérie • Dossier Illégal — CONFIDENTIEL • ${fmtShort(new Date())}` });
 
       const dossierMsg = await dossierCh.send({
         content: `${mention} — 🔪 Nouveau dossier **ILLÉGAL**`,
