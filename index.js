@@ -240,8 +240,12 @@ async function autoSetup(guild) {
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-          .setCustomId('open_candidature_modal')
-          .setLabel('📋 Soumettre ma candidature')
+          .setCustomId('open_candidature_legal')
+          .setLabel('⚖️ Candidature Légale')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('open_candidature_illegal')
+          .setLabel('🔪 Candidature Illégale')
           .setStyle(ButtonStyle.Danger)
       );
 
@@ -516,48 +520,94 @@ client.on('messageReactionAdd', async (reaction, user) => {
     const title = msg.embeds[0]?.title || '';
     if (!title.startsWith('📁 DOSSIER')) return;
 
-    const nom  = title.replace('📁 DOSSIER — ', '').trim();
+    const isIllegal = title.includes('ILLÉGAL');
+    const nom  = title.replace('📁 DOSSIER LÉGAL — ', '').replace('📁 DOSSIER ILLÉGAL — ', '').trim();
     const cand = db.candidatures.find(c => c.nomPerso === nom && c.status === 'reçue');
     if (!cand) return;
 
     const member = await guild.members.fetch(cand.userId).catch(() => null);
     if (!member) return;
 
-    // Assigner rôle Recrue / Le Maudit
-    const role = guild.roles.cache.find(r => r.name.includes('Recrue') || r.name.includes('Maudit'));
-    if (role) await member.roles.add(role).catch(() => {});
+    // Rôle selon type
+    if (isIllegal) {
+      const role = guild.roles.cache.find(r => r.name.includes('Maudit') || r.name.includes('Ombre'));
+      if (role) await member.roles.add(role).catch(() => {});
+    } else {
+      const role = guild.roles.cache.find(r => r.name.includes('Recrue') || r.name.includes('Employé'));
+      if (role) await member.roles.add(role).catch(() => {});
+    }
 
     cand.status = 'acceptee';
     saveDB(db);
 
-    // DM au candidat
-    member.send({
-      embeds: [new EmbedBuilder()
-        .setColor(0x57F287)
-        .setTitle('🐺 Candidature acceptée — Iron Wolf Company')
-        .setDescription(
-          'Ta candidature a été **acceptée**.\n\n' +
-          'Tu rejoins la Compagnie. La période d\'observation commence maintenant.\n\n' +
-          '*Tu connais les règles. Tu connais les conséquences.*\n— La Direction'
-        )]
-    }).catch(() => {});
+    // DM selon type
+    if (isIllegal) {
+      member.send({
+        embeds: [new EmbedBuilder()
+          .setColor(0x8B1A1A)
+          .setTitle('🔪 Bienvenue dans l\'ombre — Iron Wolf Company')
+          .setDescription(
+            'Tu as été **accepté** au sein de la Compagnie.\n\n' +
+            'Tu opères désormais dans l\'ombre. Discrétion absolue.\n\n' +
+            '*Ne fais confiance qu\'à ceux que la Direction te désignera.*\n' +
+            '*Un faux pas et tu disparais.*\n— La Direction'
+          )
+          .setFooter({ text: 'Iron Wolf Company • Confidentiel' })]
+      }).catch(() => {});
+    } else {
+      member.send({
+        embeds: [new EmbedBuilder()
+          .setColor(0x3B82F6)
+          .setTitle('⚖️ Candidature acceptée — Iron Wolf Company')
+          .setDescription(
+            'Ta candidature a été **acceptée**.\n\n' +
+            'Tu rejoins la Compagnie dans le cadre légal. La période d\'observation commence maintenant.\n\n' +
+            '*Tu connais les règles. Tu connais les attentes.*\n— La Direction'
+          )
+          .setFooter({ text: 'Iron Wolf Company • Recrutement Légal' })]
+      }).catch(() => {});
+    }
 
     // Annonce dans #parlote-hrp
     const annCh = getCh(guild, 'parlote-hrp', 'discussion');
     if (annCh) {
-      await annCh.send({
+      if (isIllegal) {
+        await annCh.send({
+          embeds: [new EmbedBuilder()
+            .setColor(0x8B1A1A)
+            .setTitle('🔪 Un nouveau visage dans l\'ombre')
+            .setDescription(`**${cand.nomPerso}** a intégré la Compagnie.\n*Certains chemins ne se montrent pas à la lumière.*`)
+            .setThumbnail(member.user.displayAvatarURL())]
+        });
+      } else {
+        await annCh.send({
+          embeds: [new EmbedBuilder()
+            .setColor(0x3B82F6)
+            .setTitle('⚖️ Nouveau membre légal — IWC')
+            .setDescription(`**${cand.nomPerso}** rejoint la Compagnie.\n*Bienvenue dans la meute.*`)
+            .setThumbnail(member.user.displayAvatarURL())]
+        });
+      }
+    }
+
+    // Confirmation dans #-dossier-recrutement
+    const dossierFinalCh = getCh(guild, 'dossier-recrutement', 'dossierrecrutement');
+    if (dossierFinalCh) {
+      await dossierFinalCh.send({
         embeds: [new EmbedBuilder()
-          .setColor(0x57F287)
-          .setTitle('✅ Nouveau membre — IWC')
-          .setDescription(`**${cand.nomPerso}** rejoint la Compagnie.\n*Bienvenue dans la meute.*`)
-          .setThumbnail(member.user.displayAvatarURL())]
+          .setColor(isIllegal ? 0x8B1A1A : 0x3B82F6)
+          .setTitle(`✅ ACCEPTÉ — ${cand.nomPerso}`)
+          .setDescription(
+            `**${cand.nomPerso}** a été accepté — **${isIllegal ? '🔪 Illégal' : '⚖️ Légal'}**\n` +
+            `Joueur : <@${cand.userId}>`
+          )
+          .setFooter({ text: `IWC • ${fmtShort(new Date())}` })]
       });
     }
 
-    // Mettre à jour le dossier
     try {
       const updated = EmbedBuilder.from(msg.embeds[0])
-        .setColor(0x57F287)
+        .setColor(isIllegal ? 0x8B1A1A : 0x3B82F6)
         .setTitle(`✅ ACCEPTÉ — ${cand.nomPerso}`);
       await msg.edit({ embeds: [updated] });
     } catch (e) {}
@@ -570,7 +620,8 @@ client.on('messageReactionAdd', async (reaction, user) => {
     const title = msg.embeds[0]?.title || '';
     if (!title.startsWith('📁 DOSSIER')) return;
 
-    const nom  = title.replace('📁 DOSSIER — ', '').trim();
+    const isIllegal = title.includes('ILLÉGAL');
+    const nom  = title.replace('📁 DOSSIER LÉGAL — ', '').replace('📁 DOSSIER ILLÉGAL — ', '').trim();
     const cand = db.candidatures.find(c => c.nomPerso === nom && c.status === 'reçue');
     if (!cand) return;
 
@@ -579,15 +630,29 @@ client.on('messageReactionAdd', async (reaction, user) => {
 
     const member = await guild.members.fetch(cand.userId).catch(() => null);
     if (member) {
-      member.send({
-        embeds: [new EmbedBuilder()
-          .setColor(0xED4245)
-          .setTitle('Iron Wolf Company')
-          .setDescription(
-            'Ta candidature n\'a pas été retenue.\n\n' +
-            '*La Direction se réserve le droit de refuser sans justification.*\n— La Direction'
-          )]
-      }).catch(() => {});
+      if (isIllegal) {
+        member.send({
+          embeds: [new EmbedBuilder()
+            .setColor(0x555555)
+            .setTitle('Iron Wolf Company')
+            .setDescription(
+              'Ta demande n\'a pas été retenue.\n\n' +
+              '*On ne donne pas d\'explication. On ne discute pas.*\n— La Direction'
+            )
+            .setFooter({ text: 'Iron Wolf Company • Confidentiel' })]
+        }).catch(() => {});
+      } else {
+        member.send({
+          embeds: [new EmbedBuilder()
+            .setColor(0xED4245)
+            .setTitle('Iron Wolf Company')
+            .setDescription(
+              'Ta candidature n\'a pas été retenue.\n\n' +
+              '*La Direction se réserve le droit de refuser sans justification.*\n— La Direction'
+            )
+            .setFooter({ text: 'Iron Wolf Company • Recrutement Légal' })]
+        }).catch(() => {});
+      }
     }
 
     try {
@@ -604,11 +669,11 @@ client.on('messageReactionAdd', async (reaction, user) => {
 // ═══════════════════════════════════════════════════════════════
 client.on('interactionCreate', async interaction => {
 
-  // ── Bouton "Soumettre ma candidature" ──
-  if (interaction.isButton() && interaction.customId === 'open_candidature_modal') {
+  // ── Bouton Candidature LÉGALE ──
+  if (interaction.isButton() && interaction.customId === 'open_candidature_legal') {
     const modal = new ModalBuilder()
-      .setCustomId('candidature_modal')
-      .setTitle('Candidature — Iron Wolf Company');
+      .setCustomId('candidature_modal_legal')
+      .setTitle('⚖️ Candidature Légale — IWC');
 
     modal.addComponents(
       new ActionRowBuilder().addComponents(
@@ -629,21 +694,20 @@ client.on('interactionCreate', async interaction => {
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
-          .setCustomId('background')
-          .setLabel('Background (résumé)')
-          .setStyle(TextInputStyle.Paragraph)
+          .setCustomId('metier')
+          .setLabel('Métier / Compétences légales')
+          .setStyle(TextInputStyle.Short)
           .setRequired(true)
-          .setMaxLength(1000)
-          .setPlaceholder('Décris le passé de ton personnage...')
+          .setPlaceholder('Ex: Médecin, Avocat, Marchand, Forgeron...')
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
-          .setCustomId('pourquoi')
-          .setLabel("Pourquoi rejoindre l'IWC ?")
+          .setCustomId('background')
+          .setLabel('Background du personnage')
           .setStyle(TextInputStyle.Paragraph)
           .setRequired(true)
-          .setMaxLength(500)
-          .setPlaceholder("Qu'est-ce qui t'amène vers la Compagnie ?")
+          .setMaxLength(1000)
+          .setPlaceholder('Qui est ton personnage ? Décris son passé...')
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
@@ -659,10 +723,63 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  // ── Soumission du formulaire candidature ──
-  if (interaction.isModalSubmit() && interaction.customId === 'candidature_modal') {
-    await interaction.deferReply({ ephemeral: true });
+  // ── Bouton Candidature ILLÉGALE ──
+  if (interaction.isButton() && interaction.customId === 'open_candidature_illegal') {
+    const modal = new ModalBuilder()
+      .setCustomId('candidature_modal_illegal')
+      .setTitle('🔪 Candidature Illégale — IWC');
 
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('nom_perso')
+          .setLabel('Nom du personnage')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setPlaceholder('Ex: Viktor Crane')
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('age_perso')
+          .setLabel('Âge du personnage')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setPlaceholder('Ex: 29 ans')
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('specialite')
+          .setLabel('Spécialité / Activités')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setPlaceholder('Ex: Contrebande, Sécurité, Bras droit...')
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('background')
+          .setLabel('Background du personnage')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+          .setMaxLength(1000)
+          .setPlaceholder('Qui est ton personnage ? Ce qui l’a amené dans l’ombre...')
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('dispos')
+          .setLabel('Disponibilités & Expérience RP')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setPlaceholder('Ex: Soir semaine, week-end / Expérience confirmée')
+      ),
+    );
+
+    await interaction.showModal(modal);
+    return;
+  }
+
+  // ── Soumission formulaire LÉGAL ──
+  if (interaction.isModalSubmit() && interaction.customId === 'candidature_modal_legal') {
+    await interaction.deferReply({ ephemeral: true });
     const db    = loadDB();
     const guild = interaction.guild;
 
@@ -672,77 +789,74 @@ client.on('interactionCreate', async interaction => {
       username: interaction.user.username,
       nomPerso: interaction.fields.getTextInputValue('nom_perso'),
       agePerso: interaction.fields.getTextInputValue('age_perso'),
+      metier: interaction.fields.getTextInputValue('metier'),
       background: interaction.fields.getTextInputValue('background'),
-      pourquoi: interaction.fields.getTextInputValue('pourquoi'),
       dispos: interaction.fields.getTextInputValue('dispos'),
+      type: 'legal',
       status: 'reçue',
       receivedAt: new Date().toISOString(),
     };
     db.candidatures.push(cand);
     saveDB(db);
 
-    // Confirmation visible uniquement par le candidat
     await interaction.editReply({
       content:
-        '✅ **Candidature transmise à la Direction**\n\n' +
-        'Tu recevras une réponse en DM sous 48h.\n' +
-        '*La Direction juge. Pas toi.*'
+        '✅ **Candidature légale transmise à la Direction**\n\n' +
+        'Ta demande a été enregistrée. Tu recevras une réponse en DM sous 48h.\n' +
+        '*La Compagnie ne recrute pas au hasard.*'
     });
 
-    // DM de confirmation au candidat
     interaction.user.send({
       embeds: [new EmbedBuilder()
-        .setColor(0x8B5A2A)
-        .setTitle('📥 Candidature reçue — IWC')
+        .setColor(0x3B82F6)
+        .setTitle('📥 Candidature légale reçue — IWC')
         .setDescription(
           'Ta candidature a bien été transmise à la Direction.\n\n' +
           'Une réponse en DM sous 48h.\n\n' +
-          '*La porte est ouverte une fois. Une seule.*'
+          '*La Compagnie choisit ses membres avec soin.*\n— La Direction, Iron Wolf Company'
         )
-        .setFooter({ text: 'Iron Wolf Company' })]
+        .setFooter({ text: 'Iron Wolf Company • Recrutement Légal' })]
     }).catch(() => {});
 
-    // ── Dossier dans #-dossier-recrutement ──
-    const dossierCh = getCh(guild, 'dossier-recrutement', 'dossierrecrutement');
+    const dossierCh = getCh(guild, 'recrutement-interne', 'recrutementinterne');
     if (dossierCh) {
       const mention = getMention(guild);
-
       const embed = new EmbedBuilder()
-        .setColor(0x8B1A1A)
-        .setTitle(`📁 DOSSIER — ${cand.nomPerso}`)
+        .setColor(0x3B82F6)
+        .setTitle(`📁 DOSSIER LÉGAL — ${cand.nomPerso}`)
         .setDescription(
-          `> *"On ne choisit pas la Compagnie. On y est invité."*\n\n` +
-          `Candidature de <@${cand.userId}> (**${cand.username}**)`
+          `> *"Chaque talent a sa place au sein de la Compagnie."*\n\n` +
+          `Candidature de <@${cand.userId}> (**${cand.username}**)\n` +
+          `**⚖️ TYPE : RECRUTEMENT LÉGAL**`
         )
         .addFields(
-          { name: '👤 Personnage',      value: `**${cand.nomPerso}**, ${cand.agePerso}`, inline: true },
-          { name: '📅 Reçue le',        value: fmtShort(new Date()), inline: true },
-          { name: '🆔 ID',              value: `\`${cand.id}\``, inline: true },
-          { name: '📖 Background',      value: cand.background.slice(0, 1000) },
-          { name: '❓ Pourquoi l\'IWC', value: cand.pourquoi.slice(0, 500) },
-          { name: '🕐 Disponibilités',  value: cand.dispos, inline: true },
-          { name: '📋 Statut',          value: '🟡 En attente d\'examen', inline: true },
+          { name: '👤 Personnage',       value: `**${cand.nomPerso}**, ${cand.agePerso}`, inline: true },
+          { name: '📅 Reçue le',         value: fmtShort(new Date()), inline: true },
+          { name: '🆔 ID',               value: `\`${cand.id}\``, inline: true },
+          { name: '💼 Métier / Compétences', value: cand.metier },
+          { name: '📖 Background',       value: cand.background.slice(0, 1000) },
+          { name: '🕐 Disponibilités',   value: cand.dispos, inline: true },
+          { name: '📋 Statut',           value: '🟡 En attente d\'examen', inline: true },
           { name: '\u200b', value: '**Réagissez pour voter :** ✅ Accepter · ❌ Refuser · 🤔 À revoir' }
         )
         .setThumbnail(interaction.user.displayAvatarURL())
-        .setFooter({ text: `IWC • Dossier automatique • ${fmtShort(new Date())}` });
+        .setFooter({ text: `IWC • Dossier Légal • ${fmtShort(new Date())}` });
 
       const dossierMsg = await dossierCh.send({
-        content: `${mention} — Nouveau dossier de candidature`,
+        content: `${mention} — 📋 Nouveau dossier **LÉGAL**`,
         embeds: [embed]
       });
       await dossierMsg.react('✅');
       await dossierMsg.react('❌');
       await dossierMsg.react('🤔');
 
-      // Thread de discussion interne
       try {
         const thread = await dossierMsg.startThread({
-          name: `Discussion — ${cand.nomPerso}`,
-          autoArchiveDuration: 10080, // 7 jours
+          name: `[LÉGAL] Discussion — ${cand.nomPerso}`,
+          autoArchiveDuration: 10080,
         });
         await thread.send(
-          `**Discussion interne — ${cand.nomPerso}**\n\n` +
+          `**Discussion interne — ${cand.nomPerso}** ⚖️ Recrutement Légal\n\n` +
           `Échangez ici avant de voter.\n` +
           `Réagissez sur le message principal avec ✅ ❌ 🤔`
         );
@@ -751,7 +865,95 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  // ── Boutons statut opérations ──
+  // ── Soumission formulaire ILLÉGAL ──
+  if (interaction.isModalSubmit() && interaction.customId === 'candidature_modal_illegal') {
+    await interaction.deferReply({ ephemeral: true });
+    const db    = loadDB();
+    const guild = interaction.guild;
+
+    const cand = {
+      id: Date.now().toString(),
+      userId: interaction.user.id,
+      username: interaction.user.username,
+      nomPerso: interaction.fields.getTextInputValue('nom_perso'),
+      agePerso: interaction.fields.getTextInputValue('age_perso'),
+      specialite: interaction.fields.getTextInputValue('specialite'),
+      background: interaction.fields.getTextInputValue('background'),
+      dispos: interaction.fields.getTextInputValue('dispos'),
+      type: 'illegal',
+      status: 'reçue',
+      receivedAt: new Date().toISOString(),
+    };
+    db.candidatures.push(cand);
+    saveDB(db);
+
+    await interaction.editReply({
+      content:
+        '🔒 **Demande transmise**\n\n' +
+        'Ton dossier a été acheminé. Reste discret.\n' +
+        '*On te contactera si tu es jugé digne.*'
+    });
+
+    interaction.user.send({
+      embeds: [new EmbedBuilder()
+        .setColor(0x8B1A1A)
+        .setTitle('🔒 Dossier transmis — IWC')
+        .setDescription(
+          'Ton dossier a été acheminé aux bonnes personnes.\n\n' +
+          'Une réponse en DM sous 48h.\n\n' +
+          '*Ne parle de cela à personne.*\n— La Direction, Iron Wolf Company'
+        )
+        .setFooter({ text: 'Iron Wolf Company • Confidentiel' })]
+    }).catch(() => {});
+
+    const dossierCh = getCh(guild, 'direction-illegal', 'directionillegal');
+    if (dossierCh) {
+      const mention = getMention(guild);
+      const embed = new EmbedBuilder()
+        .setColor(0x8B1A1A)
+        .setTitle(`📁 DOSSIER ILLÉGAL — ${cand.nomPerso}`)
+        .setDescription(
+          `> *"L'ombre protège ceux qui savent s'y fondre."*\n\n` +
+          `Candidature de <@${cand.userId}> (**${cand.username}**)\n` +
+          `**🔪 TYPE : RECRUTEMENT ILLÉGAL**`
+        )
+        .addFields(
+          { name: '👤 Personnage',       value: `**${cand.nomPerso}**, ${cand.agePerso}`, inline: true },
+          { name: '📅 Reçue le',         value: fmtShort(new Date()), inline: true },
+          { name: '🆔 ID',               value: `\`${cand.id}\``, inline: true },
+          { name: '🔪 Spécialité',       value: cand.specialite },
+          { name: '📖 Background',       value: cand.background.slice(0, 1000) },
+          { name: '🕐 Disponibilités',   value: cand.dispos, inline: true },
+          { name: '📋 Statut',           value: '🟡 En attente d\'examen', inline: true },
+          { name: '\u200b', value: '**Réagissez pour voter :** ✅ Accepter · ❌ Refuser · 🤔 À revoir' }
+        )
+        .setThumbnail(interaction.user.displayAvatarURL())
+        .setFooter({ text: `IWC • Dossier Illégal — CONFIDENTIEL • ${fmtShort(new Date())}` });
+
+      const dossierMsg = await dossierCh.send({
+        content: `${mention} — 🔪 Nouveau dossier **ILLÉGAL**`,
+        embeds: [embed]
+      });
+      await dossierMsg.react('✅');
+      await dossierMsg.react('❌');
+      await dossierMsg.react('🤔');
+
+      try {
+        const thread = await dossierMsg.startThread({
+          name: `[ILLÉGAL] Discussion — ${cand.nomPerso}`,
+          autoArchiveDuration: 10080,
+        });
+        await thread.send(
+          `**Discussion interne — ${cand.nomPerso}** 🔪 Recrutement Illégal\n\n` +
+          `Échangez ici avant de voter.\n` +
+          `Réagissez sur le message principal avec ✅ ❌ 🤔`
+        );
+      } catch (e) {}
+    }
+    return;
+  }
+
+    // ── Boutons statut opérations ──
   if (interaction.isButton()) {
     const parts = interaction.customId.split('_');
     if (parts[0] !== 'op') return;
