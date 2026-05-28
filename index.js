@@ -9,7 +9,7 @@ const cron = require('node-cron');
 const fs   = require('fs');
 
 // ═══════════════════════════════════════════════════════════════
-// CLIENT DISCORD
+// CLIENT
 // ═══════════════════════════════════════════════════════════════
 const client = new Client({
   intents: [
@@ -27,199 +27,102 @@ const client = new Client({
 });
 
 // ═══════════════════════════════════════════════════════════════
-// BASE DE DONNÉES LOCALE (data.json)
+// CHANNELS HARDCODÉS
+// ═══════════════════════════════════════════════════════════════
+const CH = {
+  RECRUTEMENT:           '1508756414779232277',
+  RECRUTEMENT_INT_LEGAL: '1509254315712188438',
+  RECRUTEMENT_INT_ILLEG: '1508756516830842960',
+  DOSSIER_LEGAL:         '1509254295717941278',
+  DOSSIER_ILLEG:         '1509252295127466096',
+  CONTRATS:              '1508756442730074222',
+  FIL_CONTRATS_SIGNE:    '1509340729808388208',
+  FIL_CONTRATS_REFUSE:   '1509340853808664627',
+  LOGS:                  '1509337860724228137',
+};
+
+// ═══════════════════════════════════════════════════════════════
+// BASE DE DONNÉES
 // ═══════════════════════════════════════════════════════════════
 const DB_PATH = './data.json';
 
 function loadDB() {
   if (!fs.existsSync(DB_PATH)) {
-    const init = {
-      members: {},
-      operations: [],
-      sessions: [],
-      candidatures: [],
-      contrats: [],
-      dashboardMsgId: null,
-      reglementMsgId: null,
-      recrutementMsgId: null,
-    };
-    fs.writeFileSync(DB_PATH, JSON.stringify(init, null, 2));
-    return init;
+    fs.writeFileSync(DB_PATH, JSON.stringify({
+      members: {}, operations: [], sessions: [],
+      candidatures: [], contrats: [],
+      dashboardMsgId: null, reglementMsgId: null, recrutementMsgId: null,
+    }, null, 2));
   }
   return JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
 }
+function saveDB(d) { fs.writeFileSync(DB_PATH, JSON.stringify(d, null, 2)); }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-function saveDB(data) {
-  fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
-}
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// Envoyer dans un fil (thread) Discord
+// ═══════════════════════════════════════════════════════════════
+// SEND TO THREAD
+// ═══════════════════════════════════════════════════════════════
 async function sendToThread(guild, threadId, payload) {
   try {
-    // Cherche dans tous les channels texte
+    // Méthode directe d'abord
+    const direct = await guild.channels.fetch(threadId).catch(() => null);
+    if (direct) { await direct.send(payload); return true; }
+    // Fallback: chercher dans tous les canaux texte
     for (const channel of guild.channels.cache.values()) {
-      if (channel.isTextBased && channel.isTextBased()) {
-        try {
-          await channel.threads.fetch();
-          const thread = channel.threads.cache.get(threadId);
-          if (thread) {
-            await thread.send(payload);
-            return true;
-          }
-        } catch(e) {}
-      }
+      if (!channel.isTextBased?.()) continue;
+      try {
+        const fetched = await channel.threads.fetch().catch(() => null);
+        if (!fetched) continue;
+        const thread = fetched.threads?.get(threadId) || channel.threads.cache.get(threadId);
+        if (thread) { await thread.send(payload); return true; }
+      } catch(e) {}
     }
-    // Fallback: cherche directement
-    const thread = await guild.channels.fetch(threadId).catch(() => null);
-    if (thread) { await thread.send(payload); return true; }
-  } catch(e) { console.log('Thread send error:', e.message); }
+  } catch(e) { console.log('sendToThread error:', e.message); }
   return false;
 }
 
 // ═══════════════════════════════════════════════════════════════
-// SYSTÈME DE LOGS CENTRALISÉ
+// SYSTÈME DE LOGS
 // ═══════════════════════════════════════════════════════════════
-const LOGS_ID = '1509337860724228137';
+async function getLogsCh(guild) {
+  let ch = guild.channels.cache.get(CH.LOGS);
+  if (!ch) ch = await guild.channels.fetch(CH.LOGS).catch(() => null);
+  return ch;
+}
 
 async function sendLog(guild, type, data) {
-  let ch = guild.channels.cache.get(LOGS_ID);
-  if (!ch) ch = await guild.channels.fetch(LOGS_ID).catch(() => null);
-  if (!ch) { console.log('⚠️ LOGS channel introuvable — ID:', LOGS_ID); return; }
+  const ch = await getLogsCh(guild);
+  if (!ch) return;
 
   const configs = {
-    ARRIVEE: {
-      color: 0x57F287, emoji: '👋',
-      title: 'ARRIVÉE — ' + data.username,
-      fields: [
-        { name: '👤 Membre',        value: '<@' + data.userId + '> (' + data.username + ')', inline: true },
-        { name: '📅 Rejoint le',    value: fmtShort(new Date()), inline: true },
-        { name: '🔢 Âge du compte', value: data.accountAge + ' jours', inline: true },
-      ]
-    },
-    DEPART: {
-      color: 0x555555, emoji: '🚪',
-      title: 'DÉPART — ' + data.username,
-      fields: [
-        { name: '👤 Membre',   value: data.username, inline: true },
-        { name: '🎖️ Rang',    value: data.rang || '—', inline: true },
-        { name: '⏱️ Durée',   value: data.duree || '—', inline: true },
-      ]
-    },
-    COMPTE_SUSPECT: {
-      color: 0xED4245, emoji: '⚠️',
-      title: 'COMPTE SUSPECT — ' + data.username,
-      fields: [
-        { name: '👤 Membre',        value: '<@' + data.userId + '>', inline: true },
-        { name: '🔢 Âge du compte', value: data.accountAge + ' jours', inline: true },
-        { name: '⚠️ Risque',        value: 'Compte créé il y a moins de 7 jours', inline: true },
-      ]
-    },
-    REGLEMENT_VALIDE: {
-      color: 0x3B82F6, emoji: '📜',
-      title: 'RÈGLEMENT VALIDÉ — ' + data.username,
-      fields: [
-        { name: '👤 Membre', value: '<@' + data.userId + '> (' + data.username + ')', inline: true },
-        { name: '📅 Date',   value: fmtShort(new Date()), inline: true },
-      ]
-    },
-    CANDIDATURE_RECUE: {
-      color: 0xFFA500, emoji: '📥',
-      title: 'CANDIDATURE REÇUE — ' + data.nomPerso,
-      fields: [
-        { name: '👤 Joueur',  value: '<@' + data.userId + '>', inline: true },
-        { name: '⚖️ Type',   value: data.type || '—', inline: true },
-        { name: '📅 Date',   value: fmtShort(new Date()), inline: true },
-      ]
-    },
-    CANDIDATURE_ACCEPTEE: {
-      color: 0x57F287, emoji: '✅',
-      title: 'CANDIDATURE ACCEPTÉE — ' + data.nomPerso,
-      fields: [
-        { name: '👤 Joueur',    value: '<@' + data.userId + '>', inline: true },
-        { name: '⚖️ Type',     value: data.type || '—', inline: true },
-        { name: '✅ Accepté par', value: data.validePar || '—', inline: true },
-      ]
-    },
-    CANDIDATURE_REFUSEE: {
-      color: 0xED4245, emoji: '❌',
-      title: 'CANDIDATURE REFUSÉE — ' + data.nomPerso,
-      fields: [
-        { name: '👤 Joueur', value: '<@' + data.userId + '>', inline: true },
-        { name: '⚖️ Type',  value: data.type || '—', inline: true },
-        { name: '📅 Date',  value: fmtShort(new Date()), inline: true },
-      ]
-    },
-    ABSENCE: {
-      color: 0xFFA500, emoji: '🟡',
-      title: 'ABSENCE SIGNALÉE — ' + data.username,
-      fields: [
-        { name: '👤 Membre',  value: '<@' + data.userId + '>', inline: true },
-        { name: '📅 Date',    value: fmtShort(new Date()), inline: true },
-      ]
-    },
-    INACTIVITE: {
-      color: 0xED4245, emoji: '💤',
-      title: 'INACTIVITÉ — ' + data.username,
-      fields: [
-        { name: '👤 Membre',      value: data.username, inline: true },
-        { name: '📅 Dernière activité', value: data.lastActivity || '—', inline: true },
-        { name: '⏱️ Depuis',     value: data.jours + ' jours', inline: true },
-      ]
-    },
-    CONTRAT_SIGNE: {
-      color: 0x57F287, emoji: '📜',
-      title: 'CONTRAT SIGNÉ — ' + data.contratId,
-      fields: [
-        { name: '🆔 Référence', value: '`' + data.contratId + '`', inline: true },
-        { name: '📋 Objet',     value: data.objet, inline: true },
-        { name: '✍️ Signé par', value: data.signe, inline: true },
-      ]
-    },
-    CONTRAT_REFUSE: {
-      color: 0xED4245, emoji: '📜',
-      title: 'CONTRAT REFUSÉ — ' + data.contratId,
-      fields: [
-        { name: '🆔 Référence',  value: '`' + data.contratId + '`', inline: true },
-        { name: '📋 Objet',      value: data.objet, inline: true },
-        { name: '❌ Refusé par', value: data.refuse, inline: true },
-      ]
-    },
-    OPERATION: {
-      color: 0xFFA500, emoji: '🎯',
-      title: 'OPÉRATION — ' + data.nom,
-      fields: [
-        { name: '🎯 Nom',      value: data.nom, inline: true },
-        { name: '📍 Lieu',     value: data.lieu || '—', inline: true },
-        { name: '👥 Équipe',   value: data.equipe || '—', inline: true },
-        { name: '📋 Statut',   value: data.statut || '—', inline: true },
-      ]
-    },
+    ARRIVEE:             { color: 0x57F287, emoji: '👋', title: 'ARRIVÉE — '              + data.username,  fields: [{ name: '👤 Membre', value: `<@${data.userId}> (${data.username})`, inline: true }, { name: '🔢 Âge du compte', value: data.accountAge + ' jours', inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }] },
+    DEPART:              { color: 0x555555, emoji: '🚪', title: 'DÉPART — '               + data.username,  fields: [{ name: '👤 Membre', value: data.username, inline: true }, { name: '🎖️ Rang', value: data.rang || '—', inline: true }, { name: '⏱️ Durée', value: data.duree || '—', inline: true }] },
+    COMPTE_SUSPECT:      { color: 0xED4245, emoji: '⚠️', title: 'COMPTE SUSPECT — '       + data.username,  fields: [{ name: '👤 Membre', value: `<@${data.userId}>`, inline: true }, { name: '🔢 Âge', value: data.accountAge + ' jours', inline: true }] },
+    REGLEMENT_VALIDE:    { color: 0x3B82F6, emoji: '📜', title: 'RÈGLEMENT VALIDÉ — '     + data.username,  fields: [{ name: '👤 Membre', value: `<@${data.userId}> (${data.username})`, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }] },
+    CANDIDATURE_RECUE:   { color: 0xFFA500, emoji: '📥', title: 'CANDIDATURE REÇUE — '    + data.nomPerso,  fields: [{ name: '👤 Joueur', value: `<@${data.userId}>`, inline: true }, { name: '⚖️ Type', value: data.type || '—', inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }] },
+    CANDIDATURE_ACCEPTEE:{ color: 0x57F287, emoji: '✅', title: 'CANDIDATURE ACCEPTÉE — ' + data.nomPerso,  fields: [{ name: '👤 Joueur', value: `<@${data.userId}>`, inline: true }, { name: '⚖️ Type', value: data.type || '—', inline: true }, { name: '✅ Par', value: data.validePar || '—', inline: true }] },
+    CANDIDATURE_REFUSEE: { color: 0xED4245, emoji: '❌', title: 'CANDIDATURE REFUSÉE — '  + data.nomPerso,  fields: [{ name: '👤 Joueur', value: `<@${data.userId}>`, inline: true }, { name: '⚖️ Type', value: data.type || '—', inline: true }] },
+    ABSENCE:             { color: 0xFFA500, emoji: '🟡', title: 'ABSENCE — '               + data.username,  fields: [{ name: '👤 Membre', value: `<@${data.userId}>`, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }] },
+    INACTIVITE:          { color: 0xED4245, emoji: '💤', title: 'INACTIVITÉ — '            + data.username,  fields: [{ name: '👤 Membre', value: data.username, inline: true }, { name: '⏱️ Depuis', value: data.jours + ' jours', inline: true }] },
+    CONTRAT_SIGNE:       { color: 0x57F287, emoji: '📜', title: 'CONTRAT SIGNÉ — '        + data.contratId, fields: [{ name: '🆔 Réf', value: '`' + data.contratId + '`', inline: true }, { name: '📋 Objet', value: data.objet, inline: true }, { name: '✍️ Signé par', value: data.signe, inline: true }] },
+    CONTRAT_REFUSE:      { color: 0xED4245, emoji: '📜', title: 'CONTRAT REFUSÉ — '       + data.contratId, fields: [{ name: '🆔 Réf', value: '`' + data.contratId + '`', inline: true }, { name: '📋 Objet', value: data.objet, inline: true }] },
+    OPERATION:           { color: 0xFFA500, emoji: '🎯', title: 'OPÉRATION — '            + data.nom,       fields: [{ name: '🎯 Nom', value: data.nom, inline: true }, { name: '📍 Lieu', value: data.lieu || '—', inline: true }, { name: '📋 Statut', value: data.statut || '—', inline: true }] },
   };
 
   const cfg = configs[type];
   if (!cfg) return;
-
   const embed = new EmbedBuilder()
     .setColor(cfg.color)
     .setTitle(cfg.emoji + ' ' + cfg.title)
     .addFields(...cfg.fields)
     .setFooter({ text: 'IWC • Logs • ' + new Date().toLocaleString('fr-FR') });
-
   await ch.send({ embeds: [embed] }).catch(e => console.log('Log error:', e.message));
 }
 
-// Log silencieux rapide
 async function log(guild, color, emoji, title, fields = []) {
-  let ch = guild.channels.cache.get(LOGS_ID);
-  if (!ch) ch = await guild.channels.fetch(LOGS_ID).catch(() => null);
+  const ch = await getLogsCh(guild);
   if (!ch) return;
-  const embed = new EmbedBuilder()
-    .setColor(color)
-    .setTitle(emoji + ' ' + title)
+  const embed = new EmbedBuilder().setColor(color).setTitle(emoji + ' ' + title)
     .setFooter({ text: new Date().toLocaleString('fr-FR') });
   if (fields.length) embed.addFields(...fields);
   await ch.send({ embeds: [embed] }).catch(() => {});
@@ -228,8 +131,6 @@ async function log(guild, color, emoji, title, fields = []) {
 // ═══════════════════════════════════════════════════════════════
 // UTILITAIRES
 // ═══════════════════════════════════════════════════════════════
-
-// Trouver un canal par nom (insensible aux emojis et majuscules)
 function getCh(guild, ...names) {
   for (const name of names) {
     const clean = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -241,90 +142,62 @@ function getCh(guild, ...names) {
   return null;
 }
 
-// Mention Le Concepteur + Le Fléau
 function getMention(guild) {
-  const found = guild.roles.cache.filter(r =>
-    ['Concepteur', 'Fléau', 'Fondateur'].some(n => r.name.includes(n))
+  return guild.roles.cache
+    .filter(r => ['Concepteur', 'Fléau', 'Fondateur'].some(n => r.name.includes(n)))
+    .map(r => `<@&${r.id}>`).join(' ') || '';
+}
+
+function daysSince(d) { return !d ? 999 : Math.floor((Date.now() - new Date(d).getTime()) / 86400000); }
+function fmtLong(d)  { return !d ? '—' : new Date(d).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }); }
+function fmtShort(d) { return !d ? '—' : new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
+
+function isDirection(member) {
+  return member?.roles.cache.some(r =>
+    ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier', 'Instructeur', 'Secrétaire'].some(n => r.name.includes(n))
   );
-  return found.map(r => `<@&${r.id}>`).join(' ') || '';
-}
-
-// Jours depuis une date
-function daysSince(d) {
-  if (!d) return 999;
-  return Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
-}
-
-// Format date longue
-function fmtLong(d) {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('fr-FR', {
-    weekday: 'long', day: '2-digit', month: 'long', year: 'numeric'
-  });
-}
-
-// Format date courte
-function fmtShort(d) {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('fr-FR', {
-    day: '2-digit', month: '2-digit', year: 'numeric'
-  });
 }
 
 // ═══════════════════════════════════════════════════════════════
-// DASHBOARD — mis à jour automatiquement
+// DASHBOARD
 // ═══════════════════════════════════════════════════════════════
 async function updateDashboard(guild) {
   const db = loadDB();
   const ch = getCh(guild, 'dashboard');
   if (!ch) return;
 
-  const members   = Object.values(db.members);
-  const actifs    = members.filter(m => m.status === 'actif').length;
-  const absents   = members.filter(m => m.status === 'absent').length;
-  const inactifs  = members.filter(m => m.status === 'inactif').length;
-  const enCours   = db.operations.filter(o => o.status === 'en_cours').length;
-  const enPrepa   = db.operations.filter(o => o.status === 'preparation').length;
-  const terminees = db.operations.filter(o => o.status === 'terminee').length;
-  const candAttn  = db.candidatures.filter(c => ['reçue', 'examen'].includes(c.status)).length;
-  const candAcc   = db.candidatures.filter(c => c.status === 'acceptee').length;
-  const nextSess  = db.sessions
+  const members  = Object.values(db.members);
+  const contrats = db.contrats || [];
+  const alertes  = members.filter(m => m.status === 'actif' && daysSince(m.lastActivity) > 7);
+  const nextSess = db.sessions
     .filter(s => s.status === 'planifiee' && new Date(s.date) > new Date())
     .sort((a, b) => new Date(a.date) - new Date(b.date))[0];
-  const alertes   = members.filter(m => m.status === 'actif' && daysSince(m.lastActivity) > 7);
 
   const embed = new EmbedBuilder()
     .setColor(0x8B1A1A)
     .setTitle('🐺 IRON WOLF COMPANY — TABLEAU DE BORD')
     .setDescription('*Mise à jour automatique toutes les heures*')
     .addFields(
-      {
-        name: '👥 MEMBRES',
-        value: `✅ Actifs : **${actifs}**\n⚠️ Absents : **${absents}**\n❌ Inactifs : **${inactifs}**\n👁️ Total : **${members.filter(m => m.status !== 'parti').length}**`,
-        inline: true
-      },
-      {
-        name: '🎯 OPÉRATIONS',
-        value: `🟢 En cours : **${enCours}**\n🟡 Préparation : **${enPrepa}**\n✅ Terminées : **${terminees}**`,
-        inline: true
-      },
-      {
-        name: '📝 RECRUTEMENT',
-        value: `📥 En attente : **${candAttn}**\n✅ Acceptés : **${candAcc}**`,
-        inline: true
-      },
-      {
-        name: '📅 PROCHAINE SESSION',
-        value: nextSess
-          ? `**${nextSess.name}**\n📍 ${nextSess.lieu || '—'}\n🗓️ ${fmtShort(nextSess.date)}`
-          : '*Aucune session planifiée*'
-      },
-      {
-        name: alertes.length > 0 ? '⚠️ ALERTES INACTIVITÉ' : '✅ AUCUNE ALERTE',
+      { name: '👥 MEMBRES',
+        value: `✅ Actifs : **${members.filter(m => m.status === 'actif').length}**\n⚠️ Absents : **${members.filter(m => m.status === 'absent').length}**\n❌ Inactifs : **${members.filter(m => m.status === 'inactif').length}**\n👁️ Total : **${members.filter(m => m.status !== 'parti').length}**`,
+        inline: true },
+      { name: '🎯 OPÉRATIONS',
+        value: `🟢 En cours : **${db.operations.filter(o => o.status === 'en_cours').length}**\n🟡 Préparation : **${db.operations.filter(o => o.status === 'preparation').length}**\n✅ Terminées : **${db.operations.filter(o => o.status === 'terminee').length}**`,
+        inline: true },
+      { name: '📝 RECRUTEMENT',
+        value: `📥 En attente : **${db.candidatures.filter(c => ['reçue', 'examen'].includes(c.status)).length}**\n✅ Acceptés : **${db.candidatures.filter(c => c.status === 'acceptee').length}**`,
+        inline: true },
+      { name: '📜 CONTRATS',
+        value: `🟡 En attente : **${contrats.filter(c => c.status === 'en_attente').length}**\n✅ Signés : **${contrats.filter(c => c.status === 'signe').length}**\n❌ Refusés : **${contrats.filter(c => c.status === 'refuse').length}**`,
+        inline: true },
+      { name: '📅 PROCHAINE SESSION',
+        value: nextSess ? `**${nextSess.name}**\n📍 ${nextSess.lieu || '—'}\n🗓️ ${fmtShort(nextSess.date)}` : '*Aucune session planifiée*',
+        inline: true },
+      { name: alertes.length > 0 ? '⚠️ ALERTES INACTIVITÉ' : '✅ AUCUNE ALERTE',
         value: alertes.length > 0
-          ? alertes.map(m => `→ **${m.name}** — ${daysSince(m.lastActivity)} jours sans activité`).join('\n')
-          : '*Tous les membres sont actifs*'
-      }
+          ? alertes.map(m => `→ **${m.name}** — ${daysSince(m.lastActivity)}j`).join('\n')
+          : '*Tous les membres sont actifs*',
+        inline: true }
     )
     .setFooter({ text: `Dernière MàJ : ${new Date().toLocaleString('fr-FR')} • IWC 1895` });
 
@@ -336,22 +209,18 @@ async function updateDashboard(guild) {
     const sent = await ch.send({ embeds: [embed] });
     db.dashboardMsgId = sent.id;
     saveDB(db);
-  } catch (e) {
-    console.log('Dashboard error:', e.message);
-  }
+  } catch (e) { console.log('Dashboard error:', e.message); }
 }
 
 // ═══════════════════════════════════════════════════════════════
-// AUTO-SETUP — messages postés au démarrage si absents
+// AUTO-SETUP
 // ═══════════════════════════════════════════════════════════════
 async function autoSetup(guild) {
   const db = loadDB();
   console.log('🔧 Auto-setup en cours...');
-
-  // ── Dashboard ──
   await updateDashboard(guild);
 
-  // ── Message règlement ──
+  // ── Règlement ──
   const reglCh = getCh(guild, 'reglement', 'règlement');
   if (reglCh) {
     const msgs = await reglCh.messages.fetch({ limit: 20 });
@@ -360,27 +229,23 @@ async function autoSetup(guild) {
       db.reglementMsgId = existing.id;
     } else if (!db.reglementMsgId) {
       const sent = await reglCh.send(
-        '```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
-        '✅ VALIDATION DU RÈGLEMENT\n' +
-        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```\n' +
+        '```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n✅ VALIDATION DU RÈGLEMENT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```\n' +
         'Si vous avez lu et accepté le règlement dans son intégralité, réagissez avec ✅\n\n' +
-        '*En réagissant, vous confirmez avoir compris et accepté chaque article du code de la Compagnie.*\n' +
-        '— La Direction, Iron Wolf Company'
+        '*En réagissant, vous confirmez avoir compris et accepté chaque article du code de la Compagnie.*\n— La Direction'
       );
       await sent.react('✅');
       db.reglementMsgId = sent.id;
-      console.log('  ✅ Message règlement posté');
+      console.log('  ✅ Règlement posté');
     }
     saveDB(db);
   }
 
-  // ── Message recrutement avec bouton ──
-  const recrutCh = guild.channels.cache.get('1508756414779232277'); // #recrutement GÉNÉRAL
+  // ── Recrutement ──
+  const recrutCh = guild.channels.cache.get(CH.RECRUTEMENT);
   if (recrutCh) {
     const msgs = await recrutCh.messages.fetch({ limit: 20 });
     const existing = msgs.find(m =>
       m.author.id === client.user.id &&
-      m.embeds.length > 0 &&
       m.embeds[0]?.title?.includes('RECRUTEMENT') &&
       m.components.length > 0 &&
       m.components[0]?.components?.length >= 2
@@ -388,98 +253,129 @@ async function autoSetup(guild) {
     if (existing) {
       db.recrutementMsgId = existing.id;
     } else {
-      // Supprimer l'ancien message s'il existe
       if (db.recrutementMsgId) {
         const old = await recrutCh.messages.fetch(db.recrutementMsgId).catch(() => null);
         if (old) await old.delete().catch(() => {});
         db.recrutementMsgId = null;
       }
-    }
-    if (!db.recrutementMsgId) {
       const embed = new EmbedBuilder()
         .setColor(0x8B1A1A)
         .setTitle('📋 IRON WOLF COMPANY — RECRUTEMENT')
-        .setDescription(
-          '*On ne demande pas à rejoindre la Compagnie. On y est invité.*\n' +
-          '*Si vous êtes ici — vous avez été jugé digne de frapper à la porte.*'
-        )
+        .setDescription('*On ne demande pas à rejoindre la Compagnie. On y est invité.*\n*Si vous êtes ici — vous avez été jugé digne de frapper à la porte.*')
         .addFields(
-          {
-            name: '⚖️ Recrutement Légal',
-            value:
-              '→ Tu exerces un métier légal au sein de la Compagnie\n' +
-              '→ Protection, escorte en tout genre etc...\n' +
-              '→ Clique sur **⚖️ Candidature Légale**'
-          },
-          {
-            name: '🔪 Recrutement Illégal',
-            value:
-              '→ Tu opères dans l\'ombre pour une organisation\n' +
-              '→ Contrebande, sécurité, assassinat etc...\n' +
-              '→ Clique sur **🔪 Candidature Illégale**'
-          },
-          {
-            name: '⚠️ Important',
-            value:
-              '→ Réponse en DM sous 48h\n' +
-              '→ Aucune justification en cas de refus\n' +
-              '→ *La porte est ouverte une fois. Une seule.*'
-          }
+          { name: '⚖️ Recrutement Légal',   value: '→ Tu exerces un métier légal au sein de la Compagnie\n→ Protection, escorte, commerce...\n→ Clique sur **⚖️ Candidature Légale**' },
+          { name: '🔪 Recrutement Illégal', value: '→ Tu opères dans l\'ombre pour l\'organisation\n→ Contrebande, sécurité, assassinat...\n→ Clique sur **🔪 Candidature Illégale**' },
+          { name: '⚠️ Important',           value: '→ Réponse en DM sous 48h\n→ Aucune justification en cas de refus\n→ *La porte est ouverte une fois. Une seule.*' }
         )
-        .setFooter({ text: 'Iron Wolf Company • Recrutement officiel • Organisation Hors la loi' });
+        .setFooter({ text: 'Iron Wolf Company • Recrutement officiel' });
 
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId('open_candidature_legal')
-          .setLabel('⚖️ Candidature Légale')
-          .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-          .setCustomId('open_candidature_illegal')
-          .setLabel('🔪 Candidature Illégale')
-          .setStyle(ButtonStyle.Danger)
+        new ButtonBuilder().setCustomId('open_candidature_legal').setLabel('⚖️ Candidature Légale').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('open_candidature_illegal').setLabel('🔪 Candidature Illégale').setStyle(ButtonStyle.Danger)
       );
-
       const sent = await recrutCh.send({ embeds: [embed], components: [row] });
       db.recrutementMsgId = sent.id;
-      console.log('  ✅ Message recrutement + bouton posté');
+      console.log('  ✅ Recrutement posté');
     }
     saveDB(db);
   }
 
-  // ── Message contrats avec bouton pour June ──
-  const contratsCh = guild.channels.cache.get('1508756442730074222');
+  // ── Contrats ──
+  const contratsCh = guild.channels.cache.get(CH.CONTRATS);
   if (contratsCh) {
     const msgs = await contratsCh.messages.fetch({ limit: 20 });
-    const existing = msgs.find(m =>
-      m.author.id === client.user.id &&
-      m.embeds.length > 0 &&
-      m.embeds[0]?.title?.includes('CONTRATS')
-    );
+    const existing = msgs.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('CONTRATS'));
     if (!existing) {
       const embed = new EmbedBuilder()
         .setColor(0x2C3E50)
         .setTitle('📜 IRON WOLF COMPANY — CONTRATS')
-        .setDescription(
-          '*Tout accord entre la Compagnie et ses partenaires doit être formalisé.*\n' +
-          '*Un contrat signé engage les deux parties sans exception.*'
-        )
+        .setDescription('*Tout accord entre la Compagnie et ses partenaires doit être formalisé.*\n*Un contrat signé engage les deux parties sans exception.*')
         .addFields(
           { name: '📤 Envoyer nos conditions', value: '→ Tu envoies tes tarifs & conditions à un client\n→ Le client signe → tu reçois la notification' },
           { name: '📥 Signer un contrat employeur', value: '→ Une entreprise vous engage\n→ Tu rentres ses infos & ses conditions\n→ Tu signes → ils reçoivent la notification' }
         )
         .setFooter({ text: 'Iron Wolf Company • Secrétariat officiel' });
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId('open_contrat_offre')
-          .setLabel('📤 Envoyer nos conditions')
-          .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-          .setCustomId('open_contrat_emploi')
-          .setLabel('📥 Signer un contrat employeur')
-          .setStyle(ButtonStyle.Success)
+        new ButtonBuilder().setCustomId('open_contrat_offre').setLabel('📤 Envoyer nos conditions').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('open_contrat_emploi').setLabel('📥 Signer un contrat employeur').setStyle(ButtonStyle.Success)
       );
       await contratsCh.send({ embeds: [embed], components: [row] });
-      console.log('  ✅ Message contrats posté');
+      console.log('  ✅ Contrats posté');
+    }
+  }
+
+  // ── Grade ──
+  const gradeCh = getCh(guild, 'grade');
+  if (gradeCh) {
+    const msgs = await gradeCh.messages.fetch({ limit: 10 });
+    const existing = msgs.find(m => m.author.id === client.user.id);
+    if (!existing) {
+      await gradeCh.send(
+        '```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🎖️ GRADE — PRÉSENTE TON RANG IC\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```\n' +
+        'Postez votre grade/rang **In Character** dans ce canal.\n\n**Format :**\n```\nNOM : \nRANG IC : \nSURNOM : \nSPÉCIALITÉ : \n```\n*Un seul message par membre. Mettez à jour si votre rang évolue.*'
+      );
+      console.log('  ✅ Grade posté');
+    }
+  }
+
+  // ── Surnom/Pseudo ──
+  const surnomCh = getCh(guild, 'surnom-pseudo', 'surnom', 'pseudo');
+  if (surnomCh) {
+    const msgs = await surnomCh.messages.fetch({ limit: 10 });
+    const existing = msgs.find(m => m.author.id === client.user.id);
+    if (!existing) {
+      await surnomCh.send(
+        '```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🎭 SURNOM / PSEUDO — IDENTITÉ IC\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```\n' +
+        'Renseignez votre identité **In Character** pour faciliter les interactions RP.\n\n**Format :**\n```\nPSEUDO DISCORD : \nNOM IC : \nSURNOM IC : \nAPPARTENANCE : Légal / Illégal\n```\n*Un seul message par membre.*'
+      );
+      console.log('  ✅ Surnom/Pseudo posté');
+    }
+  }
+
+  // ── Informateurs ──
+  const infoCh = getCh(guild, 'informateurs');
+  if (infoCh) {
+    const msgs = await infoCh.messages.fetch({ limit: 10 });
+    const existing = msgs.find(m => m.author.id === client.user.id);
+    if (!existing) {
+      await infoCh.send(
+        '```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🕵️ INFORMATEURS — CANAL CONFIDENTIEL\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```\n' +
+        '*Ce canal est réservé aux informations collectées sur le terrain.*\n*Discrétion absolue. Ce qui est posté ici ne sort pas de ces murs.*\n\n**Format de rapport :**\n```\nSOURCE : \nCIBLE / LIEU : \nINFORMATION : \nFIABILITÉ : Confirmée / Non confirmée\nDATE : \n```'
+      );
+      console.log('  ✅ Informateurs posté');
+    }
+  }
+
+  // ── Coffre entreprise ──
+  const coffreCh = getCh(guild, 'coffre-entreprise', 'coffre');
+  if (coffreCh) {
+    const msgs = await coffreCh.messages.fetch({ limit: 10 });
+    const existing = msgs.find(m => m.author.id === client.user.id && m.content.includes('COFFRE'));
+    if (!existing) {
+      await coffreCh.send(
+        '```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+        '💰 COFFRE ENTREPRISE — SUIVI DES FINANCES\n' +
+        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```\n' +
+        'Enregistrez chaque mouvement financier de la Compagnie.\n\n**Format :**\n```\nTYPE      : Entrée / Sortie\nMONTANT   : $000\nOBJET     : description\nRESPONSABLE: \nSOLDE     : $000 (après opération)\n```\n' +
+        '*Toute transaction doit être enregistrée. Aucune exception.*'
+      );
+      console.log('  ✅ Coffre entreprise posté');
+    }
+  }
+
+  // ── Coffre illégal ──
+  const coffreIllegCh = getCh(guild, 'coffre-illegal', 'coffreilleg');
+  if (coffreIllegCh) {
+    const msgs = await coffreIllegCh.messages.fetch({ limit: 10 });
+    const existing = msgs.find(m => m.author.id === client.user.id && m.content.includes('COFFRE'));
+    if (!existing) {
+      await coffreIllegCh.send(
+        '```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+        '🔒 COFFRE — FINANCES ILLÉGALES\n' +
+        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```\n' +
+        '*Ce canal est strictement confidentiel.*\n\n**Format :**\n```\nTYPE      : Entrée / Sortie\nMONTANT   : $000\nOBJET     : \nRESPONSABLE: \nSOLDE     : $000\n```'
+      );
+      console.log('  ✅ Coffre illégal posté');
     }
   }
 
@@ -487,132 +383,69 @@ async function autoSetup(guild) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// NOTION AGENDA (optionnel)
+// NOTION AGENDA
 // ═══════════════════════════════════════════════════════════════
 async function notionQuery() {
   if (!process.env.NOTION_TOKEN || !process.env.NOTION_AGENDA_DB_ID) return [];
   try {
-    const res = await fetch(
-      `https://api.notion.com/v1/databases/${process.env.NOTION_AGENDA_DB_ID}/query`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.NOTION_TOKEN}`,
-          'Notion-Version': '2022-06-28',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          filter: { and: [
-            { property: 'Date', date: { on_or_after: new Date().toISOString() } },
-            { property: 'Statut', select: { does_not_equal: 'Annulé' } }
-          ]},
-          sorts: [{ property: 'Date', direction: 'ascending' }]
-        })
-      }
-    );
+    const res = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_AGENDA_DB_ID}/query`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filter: { and: [{ property: 'Date', date: { on_or_after: new Date().toISOString() } }, { property: 'Statut', select: { does_not_equal: 'Annulé' } }] }, sorts: [{ property: 'Date', direction: 'ascending' }] })
+    });
     const data = await res.json();
     return (data.results || []).map(p => ({
-      id: p.id,
-      titre: p.properties.Titre?.title?.[0]?.plain_text || '—',
-      date: p.properties.Date?.date?.start,
-      heure: p.properties.Heure?.rich_text?.[0]?.plain_text,
+      id: p.id, titre: p.properties.Titre?.title?.[0]?.plain_text || '—',
+      date: p.properties.Date?.date?.start, heure: p.properties.Heure?.rich_text?.[0]?.plain_text,
       type: p.properties.Type?.select?.name || 'Réunion',
       participants: p.properties.Participants?.multi_select?.map(x => x.name).join(', ') || '—',
       lieu: p.properties.Lieu?.rich_text?.[0]?.plain_text || '—',
       notes: p.properties.Notes?.rich_text?.[0]?.plain_text,
-      notif24: p.properties['Notif 24h']?.checkbox,
-      notif1h: p.properties['Notif 1h']?.checkbox,
-      notif15: p.properties['Notif 15min']?.checkbox,
+      notif24: p.properties['Notif 24h']?.checkbox, notif1h: p.properties['Notif 1h']?.checkbox, notif15: p.properties['Notif 15min']?.checkbox,
       url: p.url,
     }));
-  } catch (e) { return []; }
+  } catch(e) { return []; }
 }
 
 async function notionPatch(pageId, props) {
   if (!process.env.NOTION_TOKEN) return;
   await fetch(`https://api.notion.com/v1/pages/${pageId}`, {
     method: 'PATCH',
-    headers: {
-      'Authorization': `Bearer ${process.env.NOTION_TOKEN}`,
-      'Notion-Version': '2022-06-28',
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
     body: JSON.stringify({ properties: props })
   }).catch(() => {});
 }
 
 async function checkAgenda(guild) {
   const appts = await notionQuery();
-  const ch    = getCh(guild, 'agenda', 'planning-sessions', 'planning');
+  const ch = getCh(guild, 'agenda', 'planning-sessions', 'planning');
   if (!ch || !appts.length) return;
-
   const mention = getMention(guild);
-
   for (const a of appts) {
     if (!a.date) continue;
-    const dt   = a.heure ? new Date(`${a.date}T${a.heure}`) : new Date(a.date);
+    const dt = a.heure ? new Date(`${a.date}T${a.heure}`) : new Date(a.date);
     const mins = Math.floor((dt.getTime() - Date.now()) / 60000);
-
-    const mkEmbed = (title, color) => new EmbedBuilder()
-      .setColor(color)
-      .setTitle(title)
+    const mkEmbed = (title, color) => new EmbedBuilder().setColor(color).setTitle(title)
       .setDescription(`## 📅 ${a.titre}`)
-      .addFields(
-        { name: 'Quand',        value: `${fmtLong(a.date)}${a.heure ? ` à **${a.heure}**` : ''}`, inline: true },
-        { name: 'Lieu',         value: a.lieu, inline: true },
-        { name: 'Participants', value: a.participants },
-        ...(a.notes ? [{ name: 'Notes', value: a.notes }] : []),
-        { name: 'Modifier',     value: `[Ouvrir dans Notion](${a.url})` }
-      )
+      .addFields({ name: 'Quand', value: `${fmtLong(a.date)}${a.heure ? ` à **${a.heure}**` : ''}`, inline: true }, { name: 'Lieu', value: a.lieu, inline: true }, { name: 'Participants', value: a.participants }, ...(a.notes ? [{ name: 'Notes', value: a.notes }] : []), { name: 'Modifier', value: `[Notion](${a.url})` })
       .setFooter({ text: 'IWC • Secrétariat automatique' });
-
-    if (!a.notif24 && mins <= 1440 && mins > 60) {
-      await ch.send({ content: `${mention} — RDV dans 24h`, embeds: [mkEmbed('📅 Rappel — Dans 24 heures', 0x5865F2)] });
-      await notionPatch(a.id, { 'Notif 24h': { checkbox: true } });
-    }
-    if (!a.notif1h && mins <= 60 && mins > 15) {
-      await ch.send({ content: `${mention} — RDV dans 1 heure`, embeds: [mkEmbed('⏰ Rappel — Dans 1 heure', 0xFFA500)] });
-      await notionPatch(a.id, { 'Notif 1h': { checkbox: true } });
-    }
-    if (!a.notif15 && mins <= 15 && mins > 0) {
-      await ch.send({ content: `${mention} — 🚨 RDV dans 15 minutes`, embeds: [mkEmbed('🚨 URGENT — Dans 15 min', 0xED4245)] });
-      await notionPatch(a.id, { 'Notif 15min': { checkbox: true } });
-    }
+    if (!a.notif24 && mins <= 1440 && mins > 60)  { await ch.send({ content: `${mention} — RDV dans 24h`, embeds: [mkEmbed('📅 Rappel — 24 heures', 0x5865F2)] }); await notionPatch(a.id, { 'Notif 24h': { checkbox: true } }); }
+    if (!a.notif1h && mins <= 60 && mins > 15)    { await ch.send({ content: `${mention} — RDV dans 1 heure`, embeds: [mkEmbed('⏰ Rappel — 1 heure', 0xFFA500)] }); await notionPatch(a.id, { 'Notif 1h': { checkbox: true } }); }
+    if (!a.notif15 && mins <= 15 && mins > 0)     { await ch.send({ content: `${mention} — 🚨 15 minutes`, embeds: [mkEmbed('🚨 URGENT — 15 min', 0xED4245)] }); await notionPatch(a.id, { 'Notif 15min': { checkbox: true } }); }
   }
 }
 
 async function postDailyAgenda(guild) {
   const ch = getCh(guild, 'agenda', 'planning-sessions', 'planning');
   if (!ch) return;
-
   const appts = await notionQuery();
   const today = new Date().toISOString().split('T')[0];
-  const todayAppts = appts.filter(a => a.date?.startsWith(today));
-  const weekAppts  = appts.filter(a => {
-    if (!a.date) return false;
-    const d = new Date(a.date);
-    return d >= new Date() && d <= new Date(Date.now() + 7 * 86400000);
-  });
-
-  const embed = new EmbedBuilder()
-    .setColor(0x8B5A2A)
-    .setTitle(`📅 Agenda — ${fmtLong(new Date())}`)
-    .setDescription(
-      todayAppts.length === 0
-        ? '*Aucun rendez-vous aujourd\'hui.*'
-        : todayAppts.map(a =>
-            `📅 **${a.titre}**\n🕐 ${a.heure || '—'} · 📍 ${a.lieu} · 👥 ${a.participants}`
-          ).join('\n\n')
-    );
-
-  const upcoming = weekAppts.filter(a => !a.date?.startsWith(today)).slice(0, 5);
-  if (upcoming.length > 0) {
-    embed.addFields({
-      name: '📆 Cette semaine',
-      value: upcoming.map(a => `📅 **${a.titre}** — ${fmtShort(a.date)} ${a.heure || ''}`).join('\n')
-    });
-  }
-
+  const todayA = appts.filter(a => a.date?.startsWith(today));
+  const weekA  = appts.filter(a => { if (!a.date) return false; const d = new Date(a.date); return d >= new Date() && d <= new Date(Date.now() + 7*86400000); });
+  const embed = new EmbedBuilder().setColor(0x8B5A2A).setTitle(`📅 Agenda — ${fmtLong(new Date())}`)
+    .setDescription(todayA.length === 0 ? '*Aucun rendez-vous aujourd\'hui.*' : todayA.map(a => `📅 **${a.titre}**\n🕐 ${a.heure || '—'} · 📍 ${a.lieu} · 👥 ${a.participants}`).join('\n\n'));
+  const nw = weekA.filter(a => !a.date?.startsWith(today)).slice(0, 5);
+  if (nw.length) embed.addFields({ name: '📆 Cette semaine', value: nw.map(a => `📅 **${a.titre}** — ${fmtShort(a.date)} ${a.heure || ''}`).join('\n') });
   embed.setFooter({ text: 'IWC • Secrétariat automatique' });
   await ch.send({ embeds: [embed] });
 }
@@ -621,78 +454,36 @@ async function postDailyAgenda(guild) {
 // NOUVEAU MEMBRE
 // ═══════════════════════════════════════════════════════════════
 client.on('guildMemberAdd', async member => {
-  const db    = loadDB();
-  const guild = member.guild;
-
-  // Rôle Visiteur automatique
+  const db = loadDB(); const guild = member.guild;
   const visiteurRole = guild.roles.cache.find(r => r.name.includes('Visiteur'));
   if (visiteurRole) await member.roles.add(visiteurRole).catch(() => {});
-
-  // Enregistrement
-  db.members[member.id] = {
-    id: member.id,
-    name: member.user.username,
-    status: 'visiteur',
-    rang: 'Visiteur',
-    joinedAt: new Date().toISOString(),
-    lastActivity: new Date().toISOString(),
-  };
+  db.members[member.id] = { id: member.id, name: member.user.username, status: 'visiteur', rang: 'Visiteur', joinedAt: new Date().toISOString(), lastActivity: new Date().toISOString() };
   saveDB(db);
-
-  // Notification #arrivées
   const arriveesCh = getCh(guild, 'arrivees', 'arrivée');
   if (arriveesCh) {
-    await arriveesCh.send({
-      embeds: [new EmbedBuilder()
-        .setColor(0x8B5A2A)
-        .setTitle('👁️ Nouveau visiteur')
-        .setDescription(`**${member.user.username}** a rejoint le serveur.\nDirigé vers **#règlement** pour validation.`)
-        .addFields(
-          { name: 'Compte créé le', value: fmtShort(member.user.createdAt), inline: true },
-          { name: 'Âge du compte',  value: `${daysSince(member.user.createdAt)} jours`, inline: true }
-        )
-        .setThumbnail(member.user.displayAvatarURL())
-        .setFooter({ text: 'IWC • Automatique' })]
-    });
+    await arriveesCh.send({ embeds: [new EmbedBuilder().setColor(0x8B5A2A).setTitle('👁️ Nouveau visiteur')
+      .setDescription(`**${member.user.username}** a rejoint le serveur.\nDirigé vers **#règlement** pour validation.`)
+      .addFields({ name: 'Compte créé le', value: fmtShort(member.user.createdAt), inline: true }, { name: 'Âge du compte', value: `${daysSince(member.user.createdAt)} jours`, inline: true })
+      .setThumbnail(member.user.displayAvatarURL()).setFooter({ text: 'IWC • Automatique' })] });
   }
   await sendLog(guild, 'ARRIVEE', { userId: member.id, username: member.user.username, accountAge: daysSince(member.user.createdAt) });
-
-  // Alerte compte suspect
   if (daysSince(member.user.createdAt) < 7) {
     await sendLog(guild, 'COMPTE_SUSPECT', { userId: member.id, username: member.user.username, accountAge: daysSince(member.user.createdAt) });
-    const logsCh = getCh(guild, 'logs-moderation', 'logs');
+    const logsCh = await getLogsCh(guild);
     if (logsCh) await logsCh.send({ content: `${getMention(guild)} — ⚠️ Compte suspect (<@${member.id}> — ${daysSince(member.user.createdAt)} jours)` });
   }
-
-  // DM de bienvenue
-  member.send({
-    embeds: [new EmbedBuilder()
-      .setColor(0x8B1A1A)
-      .setTitle('🐺 Iron Wolf Company')
-      .setDescription(
-        'Bienvenue sur le serveur.\n\n' +
-        'Lis le **#règlement** intégralement et réagis avec ✅ pour accéder au recrutement.\n\n' +
-        '*La porte est ouverte une fois. Une seule.*'
-      )
-      .setFooter({ text: '— La Direction, IWC' })]
-  }).catch(() => {});
+  member.send({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle('🐺 Iron Wolf Company')
+    .setDescription('Bienvenue sur le serveur.\n\nLis le **#règlement** et réagis avec ✅ pour accéder au recrutement.\n\n*La porte est ouverte une fois. Une seule.*')
+    .setFooter({ text: '— La Direction, IWC' })] }).catch(() => {});
 });
 
 // ═══════════════════════════════════════════════════════════════
 // MEMBRE QUI QUITTE
 // ═══════════════════════════════════════════════════════════════
 client.on('guildMemberRemove', async member => {
-  const db = loadDB();
-  const m  = db.members[member.id];
-  const ch = getCh(member.guild, 'logs-moderation', 'logs');
-
+  const db = loadDB(); const m = db.members[member.id];
   await sendLog(member.guild, 'DEPART', { username: member.user.username, rang: m?.rang, duree: m ? daysSince(m.joinedAt) + ' jours' : '—' });
-
-  if (db.members[member.id]) {
-    db.members[member.id].status = 'parti';
-    db.members[member.id].leftAt = new Date().toISOString();
-    saveDB(db);
-  }
+  if (db.members[member.id]) { db.members[member.id].status = 'parti'; db.members[member.id].leftAt = new Date().toISOString(); saveDB(db); }
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -701,653 +492,425 @@ client.on('guildMemberRemove', async member => {
 client.on('messageReactionAdd', async (reaction, user) => {
   if (user.bot) return;
   if (reaction.partial) await reaction.fetch().catch(() => {});
-
-  const db    = loadDB();
-  const guild = reaction.message.guild;
+  const db = loadDB(); const guild = reaction.message.guild;
   if (!guild) return;
 
-  // Validation règlement ✅
+  // Règlement ✅
   if (reaction.message.id === db.reglementMsgId && reaction.emoji.name === '✅') {
     await sendLog(guild, 'REGLEMENT_VALIDE', { userId: user.id, username: user.username });
-    const mention = getMention(guild);
-    if (mention) {
-      const logsCh = getCh(guild, 'logs-moderation', 'logs');
-      if (logsCh) await logsCh.send({ content: mention + ' — ' + user.username + ' a validé le règlement.' });
-    }
+    const logsCh = await getLogsCh(guild);
+    if (logsCh) await logsCh.send({ content: `${getMention(guild)} — **${user.username}** a validé le règlement.` });
     return;
   }
 
-  // Vote dossier ✅ → ACCEPTER
+  // Vote dossier ✅ ACCEPTER
   if (reaction.emoji.name === '✅') {
-    const msg   = reaction.message;
-    const title = msg.embeds[0]?.title || '';
+    const title = reaction.message.embeds[0]?.title || '';
     if (!title.includes('DOSSIER')) return;
-
     const isIllegal = title.includes('ILLÉGAL');
-    const nom  = title
-      .replace('📁 [IRON WOLF COMPANY] DOSSIER LÉGAL — ', '')
-      .replace('📁 [LA CONFRÉRIE] DOSSIER ILLÉGAL — ', '')
-      .replace('📁 DOSSIER LÉGAL — ', '')
-      .replace('📁 DOSSIER ILLÉGAL — ', '')
-      .replace('✅ ACCEPTÉ — ', '')
-      .trim();
+    const nom = title.replace(/📁 \[.*?\] DOSSIER (LÉGAL|ILLÉGAL) — /, '').replace(/✅ ACCEPTÉ — /, '').trim();
     const cand = db.candidatures.find(c => c.nomPerso === nom && c.status === 'reçue');
     if (!cand) return;
+
+    // Vérifier minimum 2 votes ✅
+    const reactUsers = await reaction.users.fetch();
+    const voteCount = reactUsers.filter(u => !u.bot).size;
+    if (voteCount < 2) {
+      const msg = await reaction.message.channel.send({ content: `⏳ **${voteCount}/2 votes** pour accepter **${cand.nomPerso}**. Il manque **${2 - voteCount} vote(s)**.` });
+      setTimeout(() => msg.delete().catch(() => {}), 10000);
+      return;
+    }
 
     const member = await guild.members.fetch(cand.userId).catch(() => null);
     if (!member) return;
 
-    // Vérifier minimum 4 votes ✅
-    const reactUsers = await reaction.users.fetch();
-    const voteCount = reactUsers.filter(u => !u.bot).size;
-    if (voteCount < 2) {
-      await reaction.message.channel.send({
-        content: `⏳ **${voteCount}/2 votes** pour accepter **${cand.nomPerso}**. Il manque encore **${2 - voteCount} vote(s)**.`
-      }).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
-      return;
-    }
-
-    // Rôle selon type
     if (isIllegal) {
       const role = guild.roles.cache.find(r => r.name.includes('Maudit') || r.name.includes('Ombre'));
       if (role) await member.roles.add(role).catch(() => {});
+      member.send({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle('🔪 Bienvenue dans l\'ombre — La Confrérie').setDescription('Tu as été **accepté** au sein de la Confrérie.\n\nDiscrétion absolue.\n\n*Ne fais confiance qu\'à ceux que la Direction te désignera.*\n— La Direction').setFooter({ text: 'La Confrérie • Confidentiel' })] }).catch(() => {});
+      const annCh = guild.channels.cache.get(CH.DOSSIER_ILLEG);
+      if (annCh) await annCh.send({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle('🔪 La Confrérie — Nouveau visage dans l\'ombre').setDescription(`**${cand.nomPerso}** a intégré la Confrérie.\n*Certains chemins ne se montrent pas à la lumière.*`).setThumbnail(member.user.displayAvatarURL()).setFooter({ text: `La Confrérie • ${fmtShort(new Date())}` })] });
     } else {
       const role = guild.roles.cache.find(r => r.name.includes('Recrue') || r.name.includes('Employé'));
       if (role) await member.roles.add(role).catch(() => {});
+      member.send({ embeds: [new EmbedBuilder().setColor(0x3B82F6).setTitle('⚖️ Candidature acceptée — Iron Wolf Company').setDescription('Ta candidature a été **acceptée**.\n\nLa période d\'observation commence maintenant.\n\n*Tu connais les règles. Tu connais les attentes.*\n— La Direction').setFooter({ text: 'Iron Wolf Company • Légal' })] }).catch(() => {});
+      const annCh = guild.channels.cache.get(CH.DOSSIER_LEGAL);
+      if (annCh) await annCh.send({ embeds: [new EmbedBuilder().setColor(0x3B82F6).setTitle('⚖️ Nouveau membre — Iron Wolf Company').setDescription(`**${cand.nomPerso}** rejoint la Compagnie.\n*Bienvenue dans la meute.*`).setThumbnail(member.user.displayAvatarURL()).setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` })] });
     }
 
-    cand.status = 'acceptee';
-    saveDB(db);
+    cand.status = 'acceptee'; saveDB(db);
     await sendLog(guild, 'CANDIDATURE_ACCEPTEE', { userId: cand.userId, nomPerso: cand.nomPerso, type: isIllegal ? '🔪 Illégal' : '⚖️ Légal', validePar: user.username });
-
-    // DM selon type
-    if (isIllegal) {
-      member.send({
-        embeds: [new EmbedBuilder()
-          .setColor(0x8B1A1A)
-          .setTitle('🔪 Bienvenue dans l\'ombre — La Confrérie')
-          .setDescription(
-            'Tu as été **accepté** au sein de la Confrérie.\n\n' +
-            'Tu opères désormais dans l\'ombre. Discrétion absolue.\n\n' +
-            '*Ne fais confiance qu\'à ceux que la Direction te désignera.*\n' +
-            '*Un faux pas et tu disparais.*\n— La Direction'
-          )
-          .setFooter({ text: 'La Confrérie • Confidentiel' })]
-      }).catch(() => {});
-    } else {
-      member.send({
-        embeds: [new EmbedBuilder()
-          .setColor(0x3B82F6)
-          .setTitle('⚖️ Candidature acceptée — Iron Wolf Company')
-          .setDescription(
-            'Ta candidature a été **acceptée**.\n\n' +
-            'Tu rejoins la Compagnie dans le cadre légal. La période d\'observation commence maintenant.\n\n' +
-            '*Tu connais les règles. Tu connais les attentes.*\n— La Direction'
-          )
-          .setFooter({ text: 'Iron Wolf Company • Recrutement Légal' })]
-      }).catch(() => {});
-    }
-
-    // Annonce dans le bon -dossier-recrutement selon type
-    const dossierFinalCh = isIllegal
-      ? guild.channels.cache.get('1509252295127466096')  // -dossier-recrutement ILLÉGAL
-      : guild.channels.cache.get('1509254295717941278'); // -dossier-recrutement LÉGAL
-    if (dossierFinalCh) {
-      if (isIllegal) {
-        await dossierFinalCh.send({
-          embeds: [new EmbedBuilder()
-            .setColor(0x8B1A1A)
-            .setTitle('🔪 La Confrérie — Un nouveau visage dans l\'ombre')
-            .setDescription(`**${cand.nomPerso}** a intégré la Confrérie.\n*Certains chemins ne se montrent pas à la lumière.*`)
-            .setThumbnail(member.user.displayAvatarURL())
-            .setFooter({ text: `La Confrérie • ${fmtShort(new Date())}` })]
-        });
-      } else {
-        await dossierFinalCh.send({
-          embeds: [new EmbedBuilder()
-            .setColor(0x3B82F6)
-            .setTitle('⚖️ Nouveau membre — Iron Wolf Company')
-            .setDescription(`**${cand.nomPerso}** rejoint la Compagnie.\n*Bienvenue dans la meute.*`)
-            .setThumbnail(member.user.displayAvatarURL())
-            .setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` })]
-        });
-      }
-    }
-
-    try {
-      const updated = EmbedBuilder.from(msg.embeds[0])
-        .setColor(isIllegal ? 0x8B1A1A : 0x3B82F6)
-        .setTitle(`✅ ACCEPTÉ — ${cand.nomPerso}`);
-      await msg.edit({ embeds: [updated] });
-    } catch (e) {}
+    try { await reaction.message.edit({ embeds: [EmbedBuilder.from(reaction.message.embeds[0]).setColor(isIllegal ? 0x8B1A1A : 0x3B82F6).setTitle(`✅ ACCEPTÉ — ${cand.nomPerso}`)] }); } catch(e) {}
     return;
   }
 
-  // Vote dossier ❌ → REFUSER
+  // Vote dossier ❌ REFUSER
   if (reaction.emoji.name === '❌') {
-    const msg   = reaction.message;
-    const title = msg.embeds[0]?.title || '';
+    const title = reaction.message.embeds[0]?.title || '';
     if (!title.includes('DOSSIER')) return;
-
     const isIllegal = title.includes('ILLÉGAL');
-    const nom  = title
-      .replace('📁 [IRON WOLF COMPANY] DOSSIER LÉGAL — ', '')
-      .replace('📁 [LA CONFRÉRIE] DOSSIER ILLÉGAL — ', '')
-      .replace('📁 DOSSIER LÉGAL — ', '')
-      .replace('📁 DOSSIER ILLÉGAL — ', '')
-      .trim();
+    const nom = title.replace(/📁 \[.*?\] DOSSIER (LÉGAL|ILLÉGAL) — /, '').trim();
     const cand = db.candidatures.find(c => c.nomPerso === nom && c.status === 'reçue');
     if (!cand) return;
 
-    // Vérifier minimum 4 votes ❌
     const refuseUsers = await reaction.users.fetch();
     const refuseCount = refuseUsers.filter(u => !u.bot).size;
     if (refuseCount < 2) {
-      await reaction.message.channel.send({
-        content: `⏳ **${refuseCount}/2 votes** pour refuser **${cand.nomPerso}**. Il manque encore **${2 - refuseCount} vote(s)**.`
-      }).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+      const msg = await reaction.message.channel.send({ content: `⏳ **${refuseCount}/2 votes** pour refuser **${cand.nomPerso}**. Il manque **${2 - refuseCount} vote(s)**.` });
+      setTimeout(() => msg.delete().catch(() => {}), 10000);
       return;
     }
 
-    cand.status = 'refusee';
-    saveDB(db);
+    cand.status = 'refusee'; saveDB(db);
     await sendLog(guild, 'CANDIDATURE_REFUSEE', { userId: cand.userId, nomPerso: cand.nomPerso, type: isIllegal ? '🔪 Illégal' : '⚖️ Légal' });
-
     const member = await guild.members.fetch(cand.userId).catch(() => null);
     if (member) {
-      if (isIllegal) {
-        member.send({
-          embeds: [new EmbedBuilder()
-            .setColor(0x555555)
-            .setTitle('La Confrérie')
-            .setDescription(
-              'Ta demande n\'a pas été retenue.\n\n' +
-              '*On ne donne pas d\'explication. On ne discute pas.*\n— La Direction'
-            )
-            .setFooter({ text: 'La Confrérie • Confidentiel' })]
-        }).catch(() => {});
-      } else {
-        member.send({
-          embeds: [new EmbedBuilder()
-            .setColor(0xED4245)
-            .setTitle('Iron Wolf Company')
-            .setDescription(
-              'Ta candidature n\'a pas été retenue.\n\n' +
-              '*La Direction se réserve le droit de refuser sans justification.*\n— La Direction'
-            )
-            .setFooter({ text: 'Iron Wolf Company • Recrutement Légal' })]
-        }).catch(() => {});
-      }
+      const msg = isIllegal
+        ? new EmbedBuilder().setColor(0x555555).setTitle('La Confrérie').setDescription('Ta demande n\'a pas été retenue.\n\n*On ne donne pas d\'explication.*\n— La Direction').setFooter({ text: 'La Confrérie • Confidentiel' })
+        : new EmbedBuilder().setColor(0xED4245).setTitle('Iron Wolf Company').setDescription('Ta candidature n\'a pas été retenue.\n\n*La Direction se réserve le droit de refuser sans justification.*\n— La Direction').setFooter({ text: 'Iron Wolf Company • Légal' });
+      member.send({ embeds: [msg] }).catch(() => {});
     }
-
-    try {
-      const updated = EmbedBuilder.from(msg.embeds[0])
-        .setColor(0xED4245)
-        .setTitle(`❌ REFUSÉ — ${cand.nomPerso}`);
-      await msg.edit({ embeds: [updated] });
-    } catch (e) {}
+    try { await reaction.message.edit({ embeds: [EmbedBuilder.from(reaction.message.embeds[0]).setColor(0xED4245).setTitle(`❌ REFUSÉ — ${cand.nomPerso}`)] }); } catch(e) {}
   }
 });
 
 // ═══════════════════════════════════════════════════════════════
-// INTERACTIONS (boutons + modals)
-// ═══════════════════════════════════════════════════════════════
-client.on('interactionCreate', async interaction => {
-
-  // ── Bouton Candidature LÉGALE ──
-  if (interaction.isButton() && interaction.customId === 'open_candidature_legal') {
-    const modal = new ModalBuilder()
-      .setCustomId('candidature_modal_legal')
-      .setTitle('⚖️ Iron Wolf Company — Légal');
-
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('nom_perso')
-          .setLabel('Nom du personnage')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setPlaceholder('Ex: Jonas Caverly')
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('age_perso')
-          .setLabel('Âge du personnage')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setPlaceholder('Ex: 34 ans')
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('metier')
-          .setLabel('Métier / Compétences légales')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setPlaceholder('Ex: Médecin, Avocat, Marchand, Forgeron...')
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('background')
-          .setLabel('Background du personnage')
-          .setStyle(TextInputStyle.Paragraph)
-          .setRequired(true)
-          .setMaxLength(1000)
-          .setPlaceholder('Qui est ton personnage ? Décris son passé...')
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('dispos')
-          .setLabel('Disponibilités & Expérience RP')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setPlaceholder('Ex: Soir semaine, week-end / Expérience confirmée')
-      ),
-    );
-
-    await interaction.showModal(modal);
-    return;
-  }
-
-  // ── Bouton Candidature ILLÉGALE ──
-  if (interaction.isButton() && interaction.customId === 'open_candidature_illegal') {
-    const modal = new ModalBuilder()
-      .setCustomId('candidature_modal_illegal')
-      .setTitle('🔪 Organisation Hors la Loi — Illégal');
-
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('nom_perso')
-          .setLabel('Nom du personnage')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setPlaceholder('Ex: Viktor Crane')
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('age_perso')
-          .setLabel('Âge du personnage')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setPlaceholder('Ex: 29 ans')
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('specialite')
-          .setLabel('Spécialité / Activités')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setPlaceholder('Ex: Contrebande, Sécurité, Bras droit...')
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('background')
-          .setLabel('Background du personnage')
-          .setStyle(TextInputStyle.Paragraph)
-          .setRequired(true)
-          .setMaxLength(1000)
-          .setPlaceholder('Qui est ton personnage ? Ce qui l’a amené dans l’ombre...')
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('dispos')
-          .setLabel('Disponibilités & Expérience RP')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setPlaceholder('Ex: Soir semaine, week-end / Expérience confirmée')
-      ),
-    );
-
-    await interaction.showModal(modal);
-    return;
-  }
-
-  // ── Soumission formulaire LÉGAL ──
-  if (interaction.isModalSubmit() && interaction.customId === 'candidature_modal_legal') {
-    await interaction.deferReply({ ephemeral: true });
-    const db    = loadDB();
-    const guild = interaction.guild;
-
-    const cand = {
-      id: Date.now().toString(),
-      userId: interaction.user.id,
-      username: interaction.user.username,
-      nomPerso: interaction.fields.getTextInputValue('nom_perso'),
-      agePerso: interaction.fields.getTextInputValue('age_perso'),
-      metier: interaction.fields.getTextInputValue('metier'),
-      background: interaction.fields.getTextInputValue('background'),
-      dispos: interaction.fields.getTextInputValue('dispos'),
-      type: 'legal',
-      status: 'reçue',
-      receivedAt: new Date().toISOString(),
-    };
-    db.candidatures.push(cand);
-    saveDB(db);
-
-    await interaction.editReply({
-      content:
-        '✅ **Candidature légale transmise à la Direction**\n\n' +
-        'Ta demande a été enregistrée. Tu recevras une réponse en DM sous 48h.\n' +
-        '*La Compagnie ne recrute pas au hasard.*'
-    });
-    await sendLog(interaction.guild, 'CANDIDATURE_RECUE', { userId: cand.userId, nomPerso: cand.nomPerso, type: '⚖️ Légal' });
-
-    interaction.user.send({
-      embeds: [new EmbedBuilder()
-        .setColor(0x3B82F6)
-        .setTitle('📥 Candidature légale reçue — IWC')
-        .setDescription(
-          'Ta candidature a bien été transmise à la Direction.\n\n' +
-          'Une réponse en DM sous 48h.\n\n' +
-          '*La Compagnie choisit ses membres avec soin.*\n— La Direction, Iron Wolf Company'
-        )
-        .setFooter({ text: 'Iron Wolf Company • Recrutement Légal' })]
-    }).catch(() => {});
-
-    const dossierCh = guild.channels.cache.get('1509254315712188438'); // recrutement-interne LÉGAL
-    if (dossierCh) {
-      const mention = getMention(guild);
-      const embed = new EmbedBuilder()
-        .setColor(0x3B82F6)
-        .setTitle(`📁 [IRON WOLF COMPANY] DOSSIER LÉGAL — ${cand.nomPerso}`)
-        .setDescription(
-          `> *"Chaque talent a sa place au sein de la Compagnie."*\n\n` +
-          `Candidature de <@${cand.userId}> (**${cand.username}**)\n` +
-          `**⚖️ TYPE : RECRUTEMENT LÉGAL**`
-        )
-        .addFields(
-          { name: '👤 Personnage',       value: `**${cand.nomPerso}**, ${cand.agePerso}`, inline: true },
-          { name: '📅 Reçue le',         value: fmtShort(new Date()), inline: true },
-          { name: '🆔 ID',               value: `\`${cand.id}\``, inline: true },
-          { name: '💼 Métier / Compétences', value: cand.metier },
-          { name: '📖 Background',       value: cand.background.slice(0, 1000) },
-          { name: '🕐 Disponibilités',   value: cand.dispos, inline: true },
-          { name: '📋 Statut',           value: '🟡 En attente d\'examen', inline: true },
-          { name: '\u200b', value: '**Réagissez pour voter :** ✅ Accepter · ❌ Refuser · 🤔 À revoir' }
-        )
-        .setThumbnail(interaction.user.displayAvatarURL())
-        .setFooter({ text: `Iron Wolf Company • Dossier Légal • ${fmtShort(new Date())}` });
-
-      const dossierMsg = await dossierCh.send({
-        content: `${mention} — 📋 Nouveau dossier **LÉGAL**`,
-        embeds: [embed]
-      });
-      await dossierMsg.react('✅');
-      await dossierMsg.react('❌');
-      await dossierMsg.react('🤔');
-
-      try {
-        const thread = await dossierMsg.startThread({
-          name: `[LÉGAL] Discussion — ${cand.nomPerso}`,
-          autoArchiveDuration: 10080,
-        });
-        await thread.send(
-          `**Discussion interne — ${cand.nomPerso}** ⚖️ Recrutement Légal\n\n` +
-          `Échangez ici avant de voter.\n` +
-          `Réagissez sur le message principal avec ✅ ❌ 🤔`
-        );
-      } catch (e) {}
-    }
-    return;
-  }
-
-  // ── Soumission formulaire ILLÉGAL ──
-  if (interaction.isModalSubmit() && interaction.customId === 'candidature_modal_illegal') {
-    await interaction.deferReply({ ephemeral: true });
-    const db    = loadDB();
-    const guild = interaction.guild;
-
-    const cand = {
-      id: Date.now().toString(),
-      userId: interaction.user.id,
-      username: interaction.user.username,
-      nomPerso: interaction.fields.getTextInputValue('nom_perso'),
-      agePerso: interaction.fields.getTextInputValue('age_perso'),
-      specialite: interaction.fields.getTextInputValue('specialite'),
-      background: interaction.fields.getTextInputValue('background'),
-      dispos: interaction.fields.getTextInputValue('dispos'),
-      type: 'illegal',
-      status: 'reçue',
-      receivedAt: new Date().toISOString(),
-    };
-    db.candidatures.push(cand);
-    saveDB(db);
-
-    await interaction.editReply({
-      content:
-        '🔒 **Demande transmise**\n\n' +
-        'Ton dossier a été acheminé. Reste discret.\n' +
-        '*On te contactera si tu es jugé digne.*'
-    });
-    await sendLog(interaction.guild, 'CANDIDATURE_RECUE', { userId: cand.userId, nomPerso: cand.nomPerso, type: '🔪 Illégal' });
-
-    interaction.user.send({
-      embeds: [new EmbedBuilder()
-        .setColor(0x8B1A1A)
-        .setTitle('🔒 Dossier transmis — IWC')
-        .setDescription(
-          'Ton dossier a été acheminé aux bonnes personnes.\n\n' +
-          'Une réponse en DM sous 48h.\n\n' +
-          '*Ne parle de cela à personne.*\n— La Direction, Iron Wolf Company'
-        )
-        .setFooter({ text: 'Iron Wolf Company • Confidentiel' })]
-    }).catch(() => {});
-
-    const dossierCh = guild.channels.cache.get('1508756516830842960'); // recrutement-interne ILLÉGAL
-    if (dossierCh) {
-      const mention = getMention(guild);
-      const embed = new EmbedBuilder()
-        .setColor(0x8B1A1A)
-        .setTitle(`📁 [LA CONFRÉRIE] DOSSIER ILLÉGAL — ${cand.nomPerso}`)
-        .setDescription(
-          `> *"L'ombre protège ceux qui savent s'y fondre."*\n\n` +
-          `Candidature de <@${cand.userId}> (**${cand.username}**)\n` +
-          `**🔪 TYPE : RECRUTEMENT ILLÉGAL**`
-        )
-        .addFields(
-          { name: '👤 Personnage',       value: `**${cand.nomPerso}**, ${cand.agePerso}`, inline: true },
-          { name: '📅 Reçue le',         value: fmtShort(new Date()), inline: true },
-          { name: '🆔 ID',               value: `\`${cand.id}\``, inline: true },
-          { name: '🔪 Spécialité',       value: cand.specialite },
-          { name: '📖 Background',       value: cand.background.slice(0, 1000) },
-          { name: '🕐 Disponibilités',   value: cand.dispos, inline: true },
-          { name: '📋 Statut',           value: '🟡 En attente d\'examen', inline: true },
-          { name: '\u200b', value: '**Réagissez pour voter :** ✅ Accepter · ❌ Refuser · 🤔 À revoir' }
-        )
-        .setThumbnail(interaction.user.displayAvatarURL())
-        .setFooter({ text: `La Confrérie • Dossier Illégal — CONFIDENTIEL • ${fmtShort(new Date())}` });
-
-      const dossierMsg = await dossierCh.send({
-        content: `${mention} — 🔪 Nouveau dossier **ILLÉGAL**`,
-        embeds: [embed]
-      });
-      await dossierMsg.react('✅');
-      await dossierMsg.react('❌');
-      await dossierMsg.react('🤔');
-
-      try {
-        const thread = await dossierMsg.startThread({
-          name: `[ILLÉGAL] Discussion — ${cand.nomPerso}`,
-          autoArchiveDuration: 10080,
-        });
-        await thread.send(
-          `**Discussion interne — ${cand.nomPerso}** 🔪 Recrutement Illégal\n\n` +
-          `Échangez ici avant de voter.\n` +
-          `Réagissez sur le message principal avec ✅ ❌ 🤔`
-        );
-      } catch (e) {}
-    }
-    return;
-  }
-
-    // ── Boutons statut opérations ──
-  if (interaction.isButton()) {
-    const parts = interaction.customId.split('_');
-    if (parts[0] !== 'op') return;
-
-    const [, status, opId] = parts;
-    const db = loadDB();
-    const op = db.operations.find(o => o.id === opId);
-    if (!op) return interaction.reply({ content: '❌ Opération introuvable.', ephemeral: true });
-
-    const labels = {
-      encours: '🟢 En cours',
-      terminee: '✅ Terminée',
-      annulee: '❌ Annulée',
-    };
-
-    op.status = status === 'encours' ? 'en_cours' : status;
-    if (status === 'terminee') op.endedAt = new Date().toISOString();
-    saveDB(db);
-
-    const colors = { encours: 0x00AA00, terminee: 0x57F287, annulee: 0xED4245 };
-    const updated = EmbedBuilder.from(interaction.message.embeds[0])
-      .setColor(colors[status] || 0x8B5A2A)
-      .spliceFields(0, 1, { name: 'Statut', value: labels[status] || status, inline: true });
-
-    await interaction.update({
-      embeds: [updated],
-      components: ['terminee', 'annulee'].includes(status) ? [] : interaction.message.components
-    });
-  }
-});
-
-// ═══════════════════════════════════════════════════════════════
-// MESSAGES — détection automatique (opérations + sessions + absences)
+// MESSAGES
 // ═══════════════════════════════════════════════════════════════
 client.on('messageCreate', async message => {
   if (message.author.bot || !message.guild) return;
+  const db = loadDB(); const guild = message.guild;
+  if (db.members[message.author.id]) { db.members[message.author.id].lastActivity = new Date().toISOString(); saveDB(db); }
 
-  const db    = loadDB();
-  const guild = message.guild;
-
-  // Suivi activité
-  if (db.members[message.author.id]) {
-    db.members[message.author.id].lastActivity = new Date().toISOString();
-    saveDB(db);
-  }
-
-  const isDir = message.member?.roles.cache.some(r =>
-    ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier'].some(n => r.name.includes(n))
-  );
-
-  // ── Absence dans #absences ──
+  // Absence
   const absCh = getCh(guild, 'absences');
   if (absCh && message.channel.id === absCh.id) {
-    if (db.members[message.author.id]) {
-      db.members[message.author.id].status = 'absent';
-      saveDB(db);
-      await message.react('✅');
-      await sendLog(guild, 'ABSENCE', { userId: message.author.id, username: message.author.username });
-    }
+    if (db.members[message.author.id]) { db.members[message.author.id].status = 'absent'; saveDB(db); await message.react('✅'); }
+    await sendLog(guild, 'ABSENCE', { userId: message.author.id, username: message.author.username });
     return;
   }
 
-  // ── Opération dans #opérations ──
+  // Suggestions — auto-react ✅ ❌
+  const suggCh = getCh(guild, 'suggestion-idee', 'suggestions', 'suggestion');
+  if (suggCh && message.channel.id === suggCh.id) {
+    await message.react('✅').catch(() => {});
+    await message.react('❌').catch(() => {});
+    return;
+  }
+
+  // Clips — auto-react 🔥
+  const clipCh = getCh(guild, 'clips-temps-fort', 'clips-highlights', 'clips');
+  if (clipCh && message.channel.id === clipCh.id && message.attachments.size > 0) {
+    await message.react('🔥').catch(() => {});
+    await message.react('❤️').catch(() => {});
+    return;
+  }
+
+  // Opération
   const opsCh = getCh(guild, 'operations-en-cours', 'operations');
-  if (opsCh && message.channel.id === opsCh.id && isDir) {
+  if (opsCh && message.channel.id === opsCh.id && isDirection(message.member)) {
     if (message.content.toUpperCase().includes('OPÉRATION') || message.content.toUpperCase().includes('OPERATION')) {
       const lines = message.content.split('\n');
-      const get   = k => {
-        const l = lines.find(l => l.toUpperCase().includes(k.toUpperCase()));
-        return l ? l.split(':').slice(1).join(':').trim() || '—' : '—';
-      };
-
-      const op = {
-        id: Date.now().toString(),
-        name: get('NOM'),
-        lieu: get('LIEU'),
-        objectif: get('OBJECTIF'),
-        equipe: get('ÉQUIPE') || get('EQUIPE'),
-        status: 'preparation',
-        createdAt: new Date().toISOString(),
-      };
-      db.operations.push(op);
-      saveDB(db);
+      const get = k => { const l = lines.find(l => l.toUpperCase().includes(k.toUpperCase())); return l ? l.split(':').slice(1).join(':').trim() || '—' : '—'; };
+      const op = { id: Date.now().toString(), name: get('NOM'), lieu: get('LIEU'), objectif: get('OBJECTIF'), equipe: get('ÉQUIPE') || get('EQUIPE'), status: 'preparation', createdAt: new Date().toISOString() };
+      db.operations.push(op); saveDB(db);
       await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: '🟡 En préparation' });
-
-      const embed = new EmbedBuilder()
-        .setColor(0xFFA500)
-        .setTitle(`🎯 OPÉRATION — ${op.name}`)
-        .addFields(
-          { name: 'Statut',   value: '🟡 En préparation', inline: true },
-          { name: 'Lieu',     value: op.lieu, inline: true },
-          { name: 'Équipe',   value: op.equipe },
-          { name: 'Objectif', value: op.objectif }
-        )
+      const embed = new EmbedBuilder().setColor(0xFFA500).setTitle(`🎯 OPÉRATION — ${op.name}`)
+        .addFields({ name: 'Statut', value: '🟡 En préparation', inline: true }, { name: 'Lieu', value: op.lieu, inline: true }, { name: 'Équipe', value: op.equipe }, { name: 'Objectif', value: op.objectif })
         .setFooter({ text: `ID: ${op.id} • ${fmtShort(new Date())}` });
-
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`op_encours_${op.id}`).setLabel('🟢 Lancer').setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId(`op_terminee_${op.id}`).setLabel('✅ Terminer').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(`op_annulee_${op.id}`).setLabel('❌ Annuler').setStyle(ButtonStyle.Danger),
       );
-
       await opsCh.send({ embeds: [embed], components: [row] });
       await message.react('✅');
     }
     return;
   }
 
-  // ── Session dans #planning-sessions ──
+  // Session
   const planCh = getCh(guild, 'planning-sessions', 'planning');
-  if (planCh && message.channel.id === planCh.id && isDir) {
+  if (planCh && message.channel.id === planCh.id && isDirection(message.member)) {
     if (message.content.toUpperCase().includes('SESSION') && message.content.toUpperCase().includes('DATE')) {
       const lines = message.content.split('\n');
-      const get   = k => {
-        const l = lines.find(l => l.toUpperCase().includes(k.toUpperCase()));
-        return l ? l.split(':').slice(1).join(':').trim() || '—' : '—';
-      };
-
-      const session = {
-        id: Date.now().toString(),
-        name: get('NOM') || get('SESSION'),
-        date: get('DATE'),
-        heure: get('HEURE'),
-        lieu: get('LIEU'),
-        type: get('TYPE') || 'RP Principal',
-        status: 'planifiee',
-      };
-      db.sessions.push(session);
-      saveDB(db);
-
-      const embed = new EmbedBuilder()
-        .setColor(0x5865F2)
-        .setTitle(`📅 SESSION — ${session.name}`)
-        .addFields(
-          { name: 'Date & Heure', value: `${session.date} à ${session.heure}`, inline: true },
-          { name: 'Lieu IC',      value: session.lieu, inline: true },
-          { name: 'Type',         value: session.type, inline: true }
-        )
-        .setDescription('Confirmez votre présence :')
-        .setFooter({ text: 'IWC • Rappel automatique 1h avant' });
-
+      const get = k => { const l = lines.find(l => l.toUpperCase().includes(k.toUpperCase())); return l ? l.split(':').slice(1).join(':').trim() || '—' : '—'; };
+      const session = { id: Date.now().toString(), name: get('NOM') || get('SESSION'), date: get('DATE'), heure: get('HEURE'), lieu: get('LIEU'), type: get('TYPE') || 'RP Principal', status: 'planifiee' };
+      db.sessions.push(session); saveDB(db);
+      const embed = new EmbedBuilder().setColor(0x5865F2).setTitle(`📅 SESSION — ${session.name}`)
+        .addFields({ name: 'Date & Heure', value: `${session.date} à ${session.heure}`, inline: true }, { name: 'Lieu IC', value: session.lieu, inline: true }, { name: 'Type', value: session.type, inline: true })
+        .setDescription('Confirmez votre présence :').setFooter({ text: 'IWC • Rappel automatique 1h avant' });
       const sent = await planCh.send({ embeds: [embed] });
-      await sent.react('✅');
-      await sent.react('❌');
-
-      // Rappel automatique 1h avant
+      await sent.react('✅'); await sent.react('❌');
       try {
-        const dt    = new Date(`${session.date.split('/').reverse().join('-')}T${session.heure}`);
+        const dt = new Date(`${session.date.split('/').reverse().join('-')}T${session.heure}`);
         const delay = dt.getTime() - Date.now() - 3600000;
-        if (delay > 0) {
-          setTimeout(async () => {
-            const mention = getMention(guild);
-            await planCh.send({
-              content: mention,
-              embeds: [new EmbedBuilder()
-                .setColor(0xFF6B35)
-                .setTitle(`⏰ RAPPEL — ${session.name} dans 1 heure`)
-                .setDescription(`📍 ${session.lieu} · 🕐 ${session.heure}`)
-                .setFooter({ text: 'IWC • Rappel automatique' })]
-            });
-          }, delay);
-        }
-      } catch (e) {}
-
+        if (delay > 0) setTimeout(async () => { await planCh.send({ content: getMention(guild), embeds: [new EmbedBuilder().setColor(0xFF6B35).setTitle(`⏰ RAPPEL — ${session.name} dans 1 heure`).setDescription(`📍 ${session.lieu} · 🕐 ${session.heure}`).setFooter({ text: 'IWC • Rappel automatique' })] }); }, delay);
+      } catch(e) {}
       await message.react('✅');
     }
   }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// INTERACTIONS — UN SEUL LISTENER (CRITIQUE)
+// ═══════════════════════════════════════════════════════════════
+client.on('interactionCreate', async interaction => {
+  const guild = interaction.guild;
+  const db = loadDB();
+
+  // ── Modals candidature ──
+  if (interaction.isButton() && interaction.customId === 'open_candidature_legal') {
+    const modal = new ModalBuilder().setCustomId('candidature_modal_legal').setTitle('⚖️ Iron Wolf Company — Légal');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom_perso').setLabel('Nom du personnage').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Jonas Caverly')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('age_perso').setLabel('Âge du personnage').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 34 ans')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('metier').setLabel('Métier / Compétences légales').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Médecin, Avocat, Marchand...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('background').setLabel('Background du personnage').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000).setPlaceholder('Qui est ton personnage ? Son passé...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('dispos').setLabel('Disponibilités & Expérience RP').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Soir semaine, week-end / Confirmé')),
+    );
+    await interaction.showModal(modal); return;
+  }
+
+  if (interaction.isButton() && interaction.customId === 'open_candidature_illegal') {
+    const modal = new ModalBuilder().setCustomId('candidature_modal_illegal').setTitle('🔪 Organisation Hors la Loi — Illégal');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom_perso').setLabel('Nom du personnage').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Viktor Crane')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('age_perso').setLabel('Âge du personnage').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 29 ans')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('specialite').setLabel('Spécialité / Activités').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Contrebande, Sécurité, Bras droit...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('background').setLabel('Background du personnage').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000).setPlaceholder('Qui est ton personnage ? Ce qui l\'a amené dans l\'ombre...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('dispos').setLabel('Disponibilités & Expérience RP').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Soir semaine, week-end / Confirmé')),
+    );
+    await interaction.showModal(modal); return;
+  }
+
+  // ── Submit candidature légale ──
+  if (interaction.isModalSubmit() && interaction.customId === 'candidature_modal_legal') {
+    await interaction.deferReply({ ephemeral: true });
+    const cand = { id: Date.now().toString(), userId: interaction.user.id, username: interaction.user.username, nomPerso: interaction.fields.getTextInputValue('nom_perso'), agePerso: interaction.fields.getTextInputValue('age_perso'), metier: interaction.fields.getTextInputValue('metier'), background: interaction.fields.getTextInputValue('background'), dispos: interaction.fields.getTextInputValue('dispos'), type: 'legal', status: 'reçue', receivedAt: new Date().toISOString() };
+    db.candidatures.push(cand); saveDB(db);
+    await interaction.editReply({ content: '✅ **Candidature légale transmise.**\nRéponse en DM sous 48h.\n*La Compagnie ne recrute pas au hasard.*' });
+    await sendLog(guild, 'CANDIDATURE_RECUE', { userId: cand.userId, nomPerso: cand.nomPerso, type: '⚖️ Légal' });
+    interaction.user.send({ embeds: [new EmbedBuilder().setColor(0x3B82F6).setTitle('📥 Candidature légale reçue — IWC').setDescription('Ta candidature a bien été transmise à la Direction.\n\nUne réponse en DM sous 48h.\n\n*La Compagnie choisit ses membres avec soin.*\n— La Direction').setFooter({ text: 'Iron Wolf Company • Recrutement Légal' })] }).catch(() => {});
+    const dossierCh = guild.channels.cache.get(CH.RECRUTEMENT_INT_LEGAL);
+    if (dossierCh) {
+      const embed = new EmbedBuilder().setColor(0x3B82F6).setTitle(`📁 [IRON WOLF COMPANY] DOSSIER LÉGAL — ${cand.nomPerso}`)
+        .setDescription(`> *"Chaque talent a sa place au sein de la Compagnie."*\n\nCandidature de <@${cand.userId}> (**${cand.username}**)\n**⚖️ TYPE : RECRUTEMENT LÉGAL**`)
+        .addFields({ name: '👤 Personnage', value: `**${cand.nomPerso}**, ${cand.agePerso}`, inline: true }, { name: '📅 Reçue le', value: fmtShort(new Date()), inline: true }, { name: '🆔 ID', value: `\`${cand.id}\``, inline: true }, { name: '💼 Métier', value: cand.metier }, { name: '📖 Background', value: cand.background.slice(0, 1000) }, { name: '🕐 Disponibilités', value: cand.dispos, inline: true }, { name: '📋 Statut', value: '🟡 En attente', inline: true }, { name: '\u200b', value: '**Réagissez :** ✅ Accepter · ❌ Refuser · 🤔 À revoir' })
+        .setThumbnail(interaction.user.displayAvatarURL()).setFooter({ text: `IWC • Légal • ${fmtShort(new Date())}` });
+      const dossierMsg = await dossierCh.send({ content: `${getMention(guild)} — 📋 Nouveau dossier **LÉGAL**`, embeds: [embed] });
+      await dossierMsg.react('✅'); await dossierMsg.react('❌'); await dossierMsg.react('🤔');
+      try { const t = await dossierMsg.startThread({ name: `[LÉGAL] Discussion — ${cand.nomPerso}`, autoArchiveDuration: 10080 }); await t.send(`**Discussion interne — ${cand.nomPerso}** ⚖️\n\nÉchangez ici avant de voter. Réagissez sur le message principal avec ✅ ❌ 🤔`); } catch(e) {}
+    }
+    return;
+  }
+
+  // ── Submit candidature illégale ──
+  if (interaction.isModalSubmit() && interaction.customId === 'candidature_modal_illegal') {
+    await interaction.deferReply({ ephemeral: true });
+    const cand = { id: Date.now().toString(), userId: interaction.user.id, username: interaction.user.username, nomPerso: interaction.fields.getTextInputValue('nom_perso'), agePerso: interaction.fields.getTextInputValue('age_perso'), specialite: interaction.fields.getTextInputValue('specialite'), background: interaction.fields.getTextInputValue('background'), dispos: interaction.fields.getTextInputValue('dispos'), type: 'illegal', status: 'reçue', receivedAt: new Date().toISOString() };
+    db.candidatures.push(cand); saveDB(db);
+    await interaction.editReply({ content: '🔒 **Dossier transmis.**\nReste discret.\n*On te contactera si tu es jugé digne.*' });
+    await sendLog(guild, 'CANDIDATURE_RECUE', { userId: cand.userId, nomPerso: cand.nomPerso, type: '🔪 Illégal' });
+    interaction.user.send({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle('🔒 Dossier transmis — IWC').setDescription('Ton dossier a été acheminé aux bonnes personnes.\n\nUne réponse en DM sous 48h.\n\n*Ne parle de cela à personne.*\n— La Direction').setFooter({ text: 'Iron Wolf Company • Confidentiel' })] }).catch(() => {});
+    const dossierCh = guild.channels.cache.get(CH.RECRUTEMENT_INT_ILLEG);
+    if (dossierCh) {
+      const embed = new EmbedBuilder().setColor(0x8B1A1A).setTitle(`📁 [LA CONFRÉRIE] DOSSIER ILLÉGAL — ${cand.nomPerso}`)
+        .setDescription(`> *"L'ombre protège ceux qui savent s'y fondre."*\n\nCandidature de <@${cand.userId}> (**${cand.username}**)\n**🔪 TYPE : RECRUTEMENT ILLÉGAL**`)
+        .addFields({ name: '👤 Personnage', value: `**${cand.nomPerso}**, ${cand.agePerso}`, inline: true }, { name: '📅 Reçue le', value: fmtShort(new Date()), inline: true }, { name: '🆔 ID', value: `\`${cand.id}\``, inline: true }, { name: '🔪 Spécialité', value: cand.specialite }, { name: '📖 Background', value: cand.background.slice(0, 1000) }, { name: '🕐 Disponibilités', value: cand.dispos, inline: true }, { name: '📋 Statut', value: '🟡 En attente', inline: true }, { name: '\u200b', value: '**Réagissez :** ✅ Accepter · ❌ Refuser · 🤔 À revoir' })
+        .setThumbnail(interaction.user.displayAvatarURL()).setFooter({ text: `La Confrérie • CONFIDENTIEL • ${fmtShort(new Date())}` });
+      const dossierMsg = await dossierCh.send({ content: `${getMention(guild)} — 🔪 Nouveau dossier **ILLÉGAL**`, embeds: [embed] });
+      await dossierMsg.react('✅'); await dossierMsg.react('❌'); await dossierMsg.react('🤔');
+      try { const t = await dossierMsg.startThread({ name: `[ILLÉGAL] Discussion — ${cand.nomPerso}`, autoArchiveDuration: 10080 }); await t.send(`**Discussion interne — ${cand.nomPerso}** 🔪\n\nÉchangez ici avant de voter. Réagissez sur le message principal avec ✅ ❌ 🤔`); } catch(e) {}
+    }
+    return;
+  }
+
+  // ── Boutons opérations ──
+  if (interaction.isButton() && interaction.customId.startsWith('op_')) {
+    const [, status, opId] = interaction.customId.split('_');
+    const op = db.operations.find(o => o.id === opId);
+    if (!op) return interaction.reply({ content: '❌ Opération introuvable.', ephemeral: true });
+    const labels = { encours: '🟢 En cours', terminee: '✅ Terminée', annulee: '❌ Annulée' };
+    const colors = { encours: 0x00AA00, terminee: 0x57F287, annulee: 0xED4245 };
+    op.status = status === 'encours' ? 'en_cours' : status;
+    if (status === 'terminee') op.endedAt = new Date().toISOString();
+    saveDB(db);
+    await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: labels[status] || status });
+    const updated = EmbedBuilder.from(interaction.message.embeds[0]).setColor(colors[status] || 0x8B5A2A).spliceFields(0, 1, { name: 'Statut', value: labels[status] || status, inline: true });
+    await interaction.update({ embeds: [updated], components: ['terminee', 'annulee'].includes(status) ? [] : interaction.message.components });
+    return;
+  }
+
+  // ── Contrats — Offre ──
+  if (interaction.isButton() && interaction.customId === 'open_contrat_offre') {
+    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true }); return; }
+    const modal = new ModalBuilder().setCustomId('contrat_offre_modal').setTitle('📤 Nos conditions — Contrat client');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('client_nom').setLabel('Nom / Entreprise du client').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Famille Moreau...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objet').setLabel('Objet de la mission').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Protection rapprochée...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nos_conditions').setLabel('Nos conditions & ce qu\'on exige').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(600).setPlaceholder('Nos règles, limites...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('remuneration').setLabel('Notre rémunération souhaitée').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 1500$ + 500$/jour')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('user_id').setLabel('ID Discord du client').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Clic droit → Copier l\'identifiant')),
+    );
+    await interaction.showModal(modal); return;
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId === 'contrat_offre_modal') {
+    await interaction.deferReply({ ephemeral: true });
+    if (!db.contrats) db.contrats = [];
+    const contratId = 'IWC-OF-' + Date.now().toString().slice(-5);
+    const contrat = { id: contratId, type: 'offre', clientNom: interaction.fields.getTextInputValue('client_nom'), objet: interaction.fields.getTextInputValue('objet'), nosConditions: interaction.fields.getTextInputValue('nos_conditions'), remuneration: interaction.fields.getTextInputValue('remuneration'), userId: interaction.fields.getTextInputValue('user_id').trim(), emetteurId: interaction.user.id, emetteurNom: interaction.user.username, status: 'en_attente', createdAt: new Date().toISOString() };
+    db.contrats.push(contrat); saveDB(db);
+    await interaction.editReply({ content: '✅ Contrat **' + contratId + '** envoyé au client.' });
+
+    const embed = new EmbedBuilder().setColor(0x2C3E50).setTitle('📤 CONTRAT DE PRESTATION — ' + contratId)
+      .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   IRON WOLF COMPANY — OFFRE DE PRESTATION\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
+      .addFields({ name: '🆔 Référence', value: '`' + contratId + '`', inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: '📋 Objet', value: contrat.objet }, { name: '🏢 Nos conditions', value: contrat.nosConditions }, { name: '💰 Rémunération souhaitée', value: contrat.remuneration }, { name: '📌 Statut', value: '🟡 En attente de signature', inline: true })
+      .setFooter({ text: 'Iron Wolf Company • ' + fmtShort(new Date()) });
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('signer_offre_' + contratId).setLabel('✍️ J\'accepte les termes').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('refuser_offre_' + contratId).setLabel('❌ Refuser').setStyle(ButtonStyle.Danger)
+    );
+    const ch = guild.channels.cache.get(CH.CONTRATS);
+    if (ch) await ch.send({ content: `<@${contrat.userId}> — Iron Wolf Company vous soumet un contrat.`, embeds: [embed], components: [row] });
+    try { const m = await guild.members.fetch(contrat.userId).catch(() => null); if (m) await m.send({ embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📤 Contrat — IWC').setDescription(`L\'IWC vous soumet le contrat **${contratId}**.\n\n**Mission :** ${contrat.objet}\n**Rémunération :** ${contrat.remuneration}\n\nRépondez dans **#contrats**.`).setFooter({ text: 'Iron Wolf Company' })] }); } catch(e) {}
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId.startsWith('signer_offre_')) {
+    const contratId = interaction.customId.replace('signer_offre_', '');
+    if (!db.contrats) db.contrats = [];
+    const contrat = db.contrats.find(c => c.id === contratId);
+    if (!contrat) { await interaction.reply({ content: '❌ Contrat introuvable.', ephemeral: true }); return; }
+    if (contrat.userId !== interaction.user.id) { await interaction.reply({ content: '❌ Ce contrat ne vous est pas destiné.', ephemeral: true }); return; }
+    if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', ephemeral: true }); return; }
+    contrat.status = 'signe'; contrat.signedAt = new Date().toISOString(); saveDB(db);
+    await sendLog(guild, 'CONTRAT_SIGNE', { contratId, objet: contrat.objet, signe: interaction.user.username + ' (' + contrat.clientNom + ')' });
+    await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287).spliceFields(5, 1, { name: '📌 Statut', value: '✅ Signé le ' + fmtShort(new Date()) + ' par ' + interaction.user.username, inline: true })], components: [] });
+    await sendToThread(guild, CH.FIL_CONTRATS_SIGNE, { embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ CONTRAT ACCEPTÉ — ' + contratId).addFields({ name: '🆔 Réf', value: '`' + contratId + '`', inline: true }, { name: '📅 Signé', value: fmtShort(new Date()), inline: true }, { name: '✍️ Client', value: interaction.user.username + ' (' + contrat.clientNom + ')', inline: true }, { name: '📋 Mission', value: contrat.objet }, { name: '💰 Rémunération', value: contrat.remuneration }).setFooter({ text: 'IWC • ' + fmtShort(new Date()) })] });
+    try { const emetteur = await guild.members.fetch(contrat.emetteurId).catch(() => null); if (emetteur) await emetteur.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ Contrat signé — ' + contratId).setDescription(`**${contrat.clientNom}** a accepté le contrat.\n\n**Mission :** ${contrat.objet}\n**Rémunération :** ${contrat.remuneration}`).setFooter({ text: 'IWC • Notification contrat' })] }); } catch(e) {}
+    interaction.user.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ Contrat signé — IWC').setDescription(`Vous avez accepté le contrat **${contratId}**.\n\n**Mission :** ${contrat.objet}\n**Rémunération :** ${contrat.remuneration}\n\n*Iron Wolf Company a été notifié.*`).setFooter({ text: 'IWC • Document Officiel' })] }).catch(() => {});
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId.startsWith('refuser_offre_')) {
+    const contratId = interaction.customId.replace('refuser_offre_', '');
+    if (!db.contrats) db.contrats = [];
+    const contrat = db.contrats.find(c => c.id === contratId);
+    if (!contrat) { await interaction.reply({ content: '❌ Contrat introuvable.', ephemeral: true }); return; }
+    if (contrat.userId !== interaction.user.id) { await interaction.reply({ content: '❌ Ce contrat ne vous est pas destiné.', ephemeral: true }); return; }
+    if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', ephemeral: true }); return; }
+    contrat.status = 'refuse'; contrat.refusedAt = new Date().toISOString(); saveDB(db);
+    await sendLog(guild, 'CONTRAT_REFUSE', { contratId, objet: contrat.objet });
+    await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0xED4245).spliceFields(5, 1, { name: '📌 Statut', value: '❌ Refusé le ' + fmtShort(new Date()), inline: true })], components: [] });
+    await sendToThread(guild, CH.FIL_CONTRATS_REFUSE, { embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('❌ CONTRAT REFUSÉ — ' + contratId).addFields({ name: '🆔 Réf', value: '`' + contratId + '`', inline: true }, { name: '👤 Refusé par', value: interaction.user.username, inline: true }, { name: '📋 Mission', value: contrat.objet }).setFooter({ text: 'IWC • ' + fmtShort(new Date()) })] });
+    try { const emetteur = await guild.members.fetch(contrat.emetteurId).catch(() => null); if (emetteur) await emetteur.send({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('❌ Contrat refusé — ' + contratId).setDescription(`**${contrat.clientNom}** a refusé le contrat pour **${contrat.objet}**.`).setFooter({ text: 'IWC • Notification' })] }); } catch(e) {}
+    return;
+  }
+
+  // ── Contrats — Emploi ──
+  if (interaction.isButton() && interaction.customId === 'open_contrat_emploi') {
+    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true }); return; }
+    const modal = new ModalBuilder().setCustomId('contrat_emploi_modal').setTitle('📥 Contrat employeur — À signer');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('employeur_nom').setLabel('Nom de l\'employeur').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Société Moreau...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objet').setLabel('Objet de la mission').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Protection du convoi...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('leurs_conditions').setLabel('Conditions de l\'employeur').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(600).setPlaceholder('Ce qu\'ils exigent...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('remuneration').setLabel('Rémunération proposée').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 2000$ à la livraison')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('user_id').setLabel('ID Discord de l\'employeur').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Clic droit → Copier l\'identifiant')),
+    );
+    await interaction.showModal(modal); return;
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId === 'contrat_emploi_modal') {
+    await interaction.deferReply({ ephemeral: true });
+    if (!db.contrats) db.contrats = [];
+    const contratId = 'IWC-EM-' + Date.now().toString().slice(-5);
+    const contrat = { id: contratId, type: 'emploi', employeurNom: interaction.fields.getTextInputValue('employeur_nom'), objet: interaction.fields.getTextInputValue('objet'), leursConditions: interaction.fields.getTextInputValue('leurs_conditions'), remuneration: interaction.fields.getTextInputValue('remuneration'), userId: interaction.fields.getTextInputValue('user_id').trim(), signataire: interaction.user.username, signataireId: interaction.user.id, status: 'en_attente', createdAt: new Date().toISOString() };
+    db.contrats.push(contrat); saveDB(db);
+    await interaction.editReply({ content: '📋 Contrat **' + contratId + '** créé. Lisez les termes dans **#contrats**.' });
+
+    const embed = new EmbedBuilder().setColor(0x8B5A2A).setTitle('📥 CONTRAT EMPLOYEUR — ' + contratId)
+      .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n  CONTRAT PROPOSÉ À IRON WOLF COMPANY\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
+      .addFields({ name: '🆔 Référence', value: '`' + contratId + '`', inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: '🏭 Employeur — ' + contrat.employeurNom, value: contrat.leursConditions }, { name: '💰 Rémunération', value: contrat.remuneration }, { name: '📋 Objet', value: contrat.objet }, { name: '📌 Statut', value: '🟡 En attente de notre signature', inline: true })
+      .setFooter({ text: 'IWC • Contrat Employeur • ' + fmtShort(new Date()) });
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('signer_emploi_' + contratId).setLabel('✍️ Signer & Accepter').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('refuser_emploi_' + contratId).setLabel('❌ Décliner').setStyle(ButtonStyle.Danger)
+    );
+    const ch = guild.channels.cache.get(CH.CONTRATS);
+    if (ch) await ch.send({ content: `${getMention(guild)} — Nouveau contrat employeur à examiner.`, embeds: [embed], components: [row] });
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId.startsWith('signer_emploi_')) {
+    const contratId = interaction.customId.replace('signer_emploi_', '');
+    if (!db.contrats) db.contrats = [];
+    const contrat = db.contrats.find(c => c.id === contratId);
+    if (!contrat) { await interaction.reply({ content: '❌ Contrat introuvable.', ephemeral: true }); return; }
+    if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', ephemeral: true }); return; }
+    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Seule la Direction peut signer.', ephemeral: true }); return; }
+    contrat.status = 'signe'; contrat.signedAt = new Date().toISOString(); contrat.signedBy = interaction.user.username; saveDB(db);
+    await sendLog(guild, 'CONTRAT_SIGNE', { contratId, objet: contrat.objet, signe: interaction.user.username + ' — IWC' });
+    await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287).spliceFields(5, 1, { name: '📌 Statut', value: '✅ Signé le ' + fmtShort(new Date()) + ' par ' + interaction.user.username, inline: true })], components: [] });
+    await sendToThread(guild, CH.FIL_CONTRATS_SIGNE, { embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ MISSION ACCEPTÉE — ' + contratId).setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n     IRON WOLF COMPANY — SIGNATURE VALIDÉE\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```').addFields({ name: '🆔 Réf', value: '`' + contratId + '`', inline: true }, { name: '✍️ Signé par', value: interaction.user.username + ' — IWC', inline: true }, { name: '🏭 Employeur', value: contrat.employeurNom }, { name: '📋 Mission', value: contrat.objet }, { name: '💰 Rémunération', value: contrat.remuneration }).setFooter({ text: 'IWC • ' + fmtShort(new Date()) })] });
+    try { const employeur = await guild.members.fetch(contrat.userId).catch(() => null); if (employeur) await employeur.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ IWC a signé votre contrat').setDescription(`L'IWC a accepté le contrat **${contratId}**.\n\n**Mission :** ${contrat.objet}\n**Rémunération :** ${contrat.remuneration}`).setFooter({ text: 'IWC • Document Officiel' })] }); } catch(e) {}
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId.startsWith('refuser_emploi_')) {
+    const contratId = interaction.customId.replace('refuser_emploi_', '');
+    if (!db.contrats) db.contrats = [];
+    const contrat = db.contrats.find(c => c.id === contratId);
+    if (!contrat) { await interaction.reply({ content: '❌ Contrat introuvable.', ephemeral: true }); return; }
+    if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', ephemeral: true }); return; }
+    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Seule la Direction peut décliner.', ephemeral: true }); return; }
+    contrat.status = 'refuse'; contrat.refusedAt = new Date().toISOString(); saveDB(db);
+    await sendLog(guild, 'CONTRAT_REFUSE', { contratId, objet: contrat.objet });
+    await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0xED4245).spliceFields(5, 1, { name: '📌 Statut', value: '❌ Décliné le ' + fmtShort(new Date()), inline: true })], components: [] });
+    await sendToThread(guild, CH.FIL_CONTRATS_REFUSE, { embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('❌ MISSION DÉCLINÉE — ' + contratId).addFields({ name: '🆔 Réf', value: '`' + contratId + '`', inline: true }, { name: '🏭 Employeur', value: contrat.employeurNom }, { name: '📋 Mission', value: contrat.objet }).setFooter({ text: 'IWC • ' + fmtShort(new Date()) })] });
+    try { const employeur = await guild.members.fetch(contrat.userId).catch(() => null); if (employeur) await employeur.send({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('❌ IWC a décliné votre contrat').setDescription(`L'IWC a décliné le contrat **${contratId}** pour **${contrat.objet}**.\n\n*Aucune justification ne sera fournie.*`).setFooter({ text: 'IWC • Document Officiel' })] }); } catch(e) {}
+    return;
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// LOGS AUTOMATIQUES SERVEUR
+// ═══════════════════════════════════════════════════════════════
+client.on('messageDelete', async message => {
+  if (!message.guild || message.author?.bot) return;
+  await log(message.guild, 0xED4245, '🗑️', 'Message supprimé', [{ name: '👤 Auteur', value: message.author ? `<@${message.author.id}> (${message.author.username})` : 'Inconnu', inline: true }, { name: '📍 Salon', value: `<#${message.channel.id}>`, inline: true }, { name: '📝 Contenu', value: message.content?.slice(0, 500) || '*[vide ou média]*' }]);
+});
+
+client.on('messageUpdate', async (oldMsg, newMsg) => {
+  if (!newMsg.guild || newMsg.author?.bot || oldMsg.content === newMsg.content) return;
+  await log(newMsg.guild, 0xFFA500, '✏️', 'Message modifié', [{ name: '👤 Auteur', value: `<@${newMsg.author.id}> (${newMsg.author.username})`, inline: true }, { name: '📍 Salon', value: `<#${newMsg.channel.id}>`, inline: true }, { name: '📝 Avant', value: oldMsg.content?.slice(0, 400) || '*[vide]*' }, { name: '📝 Après', value: newMsg.content?.slice(0, 400) || '*[vide]*' }]);
+});
+
+client.on('guildMemberUpdate', async (oldMember, newMember) => {
+  const guild = newMember.guild;
+  const added   = newMember.roles.cache.filter(r => !oldMember.roles.cache.has(r.id));
+  const removed = oldMember.roles.cache.filter(r => !newMember.roles.cache.has(r.id));
+  if (added.size > 0)   await log(guild, 0x57F287, '🎖️', 'Rôle ajouté — '   + newMember.user.username, [{ name: '👤 Membre', value: `<@${newMember.id}>`, inline: true }, { name: '➕ Rôle', value: added.map(r => r.name).join(', '), inline: true }]);
+  if (removed.size > 0) await log(guild, 0xED4245, '🎖️', 'Rôle retiré — '   + newMember.user.username, [{ name: '👤 Membre', value: `<@${newMember.id}>`, inline: true }, { name: '➖ Rôle', value: removed.map(r => r.name).join(', '), inline: true }]);
+  if (oldMember.nickname !== newMember.nickname) await log(guild, 0x3B82F6, '📝', 'Pseudo modifié — ' + newMember.user.username, [{ name: '👤 Membre', value: `<@${newMember.id}>`, inline: true }, { name: '📝 Avant', value: oldMember.nickname || oldMember.user.username, inline: true }, { name: '📝 Après', value: newMember.nickname || newMember.user.username, inline: true }]);
+});
+
+client.on('guildBanAdd',    async ban => await log(ban.guild, 0x8B0000, '🔨', 'Membre banni — '   + ban.user.username, [{ name: '👤 Membre', value: `<@${ban.user.id}>`, inline: true }, { name: '📋 Raison', value: ban.reason || 'Aucune raison', inline: true }]));
+client.on('guildBanRemove', async ban => await log(ban.guild, 0x57F287, '🔓', 'Membre débanni — ' + ban.user.username, [{ name: '👤 Membre', value: `<@${ban.user.id}>`, inline: true }]));
+client.on('channelCreate',  async ch  => { if (ch.guild) await log(ch.guild, 0x57F287, '📢', 'Salon créé — '     + ch.name, [{ name: '📍 Nom', value: ch.name, inline: true }]); });
+client.on('channelDelete',  async ch  => { if (ch.guild) await log(ch.guild, 0xED4245, '🗑️', 'Salon supprimé — ' + ch.name, [{ name: '📍 Nom', value: ch.name, inline: true }]); });
+client.on('roleCreate',     async role => await log(role.guild, 0x57F287, '🎭', 'Rôle créé — '     + role.name, [{ name: '🎭 Rôle', value: role.name, inline: true }]));
+client.on('roleDelete',     async role => await log(role.guild, 0xED4245, '🎭', 'Rôle supprimé — ' + role.name, [{ name: '🎭 Rôle', value: role.name, inline: true }]));
+client.on('inviteCreate',   async inv  => { if (inv.guild) await log(inv.guild, 0x3B82F6, '🔗', 'Invitation créée', [{ name: '👤 Créée par', value: inv.inviter?.username || 'Inconnu', inline: true }, { name: '🔗 Code', value: inv.code, inline: true }, { name: '⏱️ Expire', value: inv.maxAge ? inv.maxAge / 3600 + 'h' : 'Jamais', inline: true }]); });
+
+client.on('voiceStateUpdate', async (oldState, newState) => {
+  const guild = newState.guild; const member = newState.member;
+  if (!member || member.user.bot) return;
+  if (!oldState.channel && newState.channel)                                     await log(guild, 0x57F287, '🔊', 'Rejoint vocal — '    + member.user.username, [{ name: '👤', value: `<@${member.id}>`, inline: true }, { name: '🔊 Salon', value: newState.channel.name, inline: true }]);
+  else if (oldState.channel && !newState.channel)                                await log(guild, 0x555555, '🔇', 'Quitté vocal — '     + member.user.username, [{ name: '👤', value: `<@${member.id}>`, inline: true }, { name: '🔊 Salon', value: oldState.channel.name, inline: true }]);
+  else if (oldState.channel?.id !== newState.channel?.id && newState.channel)    await log(guild, 0x3B82F6, '🔀', 'Changé de vocal — '  + member.user.username, [{ name: '👤', value: `<@${member.id}>`, inline: true }, { name: '📤 De', value: oldState.channel?.name || '—', inline: true }, { name: '📥 Vers', value: newState.channel.name, inline: true }]);
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -1355,629 +918,55 @@ client.on('messageCreate', async message => {
 // ═══════════════════════════════════════════════════════════════
 client.once('ready', async () => {
   console.log(`\n🐺 IWC Bot — ${client.user.tag}`);
-  console.log('MODE FULL AUTO — Zéro commande requise\n');
+  console.log('MODE FULL AUTO — Zéro commande requise');
   console.log('⚠️  Aucune permission existante modifiée\n');
 
   client.user.setActivity('Iron Wolf Company', { type: ActivityType.Watching });
-
   const guild = client.guilds.cache.first();
-  if (!guild) {
-    console.log('❌ Serveur introuvable. Vérifiez GUILD_ID dans .env');
-    return;
-  }
+  if (!guild) { console.log('❌ Serveur introuvable.'); return; }
 
   await sleep(2000);
   await autoSetup(guild);
 
-  // ── Toutes les heures → dashboard ──
-  cron.schedule('0 * * * *', () => updateDashboard(guild));
+  cron.schedule('0 * * * *',    () => updateDashboard(guild));
+  cron.schedule('*/5 * * * *',  () => checkAgenda(guild));
+  cron.schedule('0 8 * * *',    () => postDailyAgenda(guild));
 
-  // ── Toutes les 5 min → agenda Notion ──
-  cron.schedule('*/5 * * * *', () => checkAgenda(guild));
-
-  // ── 8h00 → agenda du jour ──
-  cron.schedule('0 8 * * *', () => postDailyAgenda(guild));
-
-  // ── 9h30 quotidien → inactivité + retours absences ──
   cron.schedule('30 9 * * *', async () => {
-    const db     = loadDB();
-    const logsCh = getCh(guild, 'logs-moderation', 'logs');
-    let changed  = false;
-
+    const db = loadDB(); const logsCh = await getLogsCh(guild); let changed = false;
     for (const m of Object.values(db.members)) {
-      // Passage inactif après 14 jours
-      if (m.status === 'actif' && daysSince(m.lastActivity) >= 14) {
-        db.members[m.id].status = 'inactif';
-        changed = true;
-      }
-      // Retour automatique après fin d'absence
-      if (m.status === 'absent' && m.absentUntil) {
-        const retour = new Date(m.absentUntil.split('/').reverse().join('-'));
-        if (retour <= new Date()) {
-          db.members[m.id].status = 'actif';
-          db.members[m.id].absentUntil = null;
-          changed = true;
-        }
-      }
+      if (m.status === 'actif'   && daysSince(m.lastActivity) >= 14) { db.members[m.id].status = 'inactif'; changed = true; await sendLog(guild, 'INACTIVITE', { username: m.name, jours: daysSince(m.lastActivity) }); }
+      if (m.status === 'absent'  && m.absentUntil) { const r = new Date(m.absentUntil.split('/').reverse().join('-')); if (r <= new Date()) { db.members[m.id].status = 'actif'; db.members[m.id].absentUntil = null; changed = true; } }
     }
     if (changed) saveDB(db);
-
-    // Rapport inactivité (7+ jours)
-    const inactifs = Object.values(db.members).filter(m =>
-      m.status === 'actif' && daysSince(m.lastActivity) >= 7
-    );
+    const inactifs = Object.values(db.members).filter(m => m.status === 'actif' && daysSince(m.lastActivity) >= 7);
     if (inactifs.length > 0 && logsCh) {
-      await logsCh.send({
-        content: getMention(guild),
-        embeds: [new EmbedBuilder()
-          .setColor(0xFFA500)
-          .setTitle('⚠️ Rapport inactivité')
-          .setDescription(inactifs.map(m => `→ **${m.name}** — ${daysSince(m.lastActivity)} jours`).join('\n'))
-          .setFooter({ text: `${fmtShort(new Date())} • IWC Automatique` })]
-      });
+      await logsCh.send({ content: getMention(guild), embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('⚠️ Rapport inactivité').setDescription(inactifs.map(m => `→ **${m.name}** — ${daysSince(m.lastActivity)} jours`).join('\n')).setFooter({ text: fmtShort(new Date()) + ' • IWC' })] });
     }
   });
 
-  // ── Lundi 9h00 → rapport hebdomadaire ──
   cron.schedule('0 9 * * 1', async () => {
-    const db  = loadDB();
-    const ch  = getCh(guild, 'logs-moderation', 'logs');
-    if (!ch) return;
-
-    const members = Object.values(db.members);
-
-    await ch.send({
-      content: getMention(guild),
-      embeds: [new EmbedBuilder()
-        .setColor(0x8B5A2A)
-        .setTitle('📊 Rapport hebdomadaire — IWC')
-        .setDescription(`Semaine du ${fmtShort(new Date(Date.now() - 7 * 86400000))} au ${fmtShort(new Date())}`)
-        .addFields(
-          {
-            name: '👥 Membres',
-            value: `Actifs : **${members.filter(m => m.status === 'actif').length}** · Absents : **${members.filter(m => m.status === 'absent').length}** · Inactifs : **${members.filter(m => m.status === 'inactif').length}**`
-          },
-          {
-            name: '🎯 Opérations',
-            value: `**${db.operations.filter(o => o.status === 'terminee').length}** terminées au total`
-          },
-          {
-            name: '📝 Recrutement',
-            value: `**${db.candidatures.filter(c => daysSince(c.receivedAt) <= 7).length}** candidatures cette semaine`
-          }
-        )
-        .setFooter({ text: `Rapport automatique • ${fmtShort(new Date())}` })]
-    });
+    const db = loadDB(); const ch = await getLogsCh(guild); if (!ch) return;
+    const contrats = db.contrats || [];
+    const members  = Object.values(db.members);
+    await ch.send({ content: getMention(guild), embeds: [new EmbedBuilder().setColor(0x8B5A2A).setTitle('📊 Rapport hebdomadaire — IWC')
+      .setDescription(`Semaine du ${fmtShort(new Date(Date.now() - 7*86400000))} au ${fmtShort(new Date())}`)
+      .addFields(
+        { name: '👥 Membres',      value: `Actifs : **${members.filter(m => m.status === 'actif').length}** · Absents : **${members.filter(m => m.status === 'absent').length}** · Inactifs : **${members.filter(m => m.status === 'inactif').length}**` },
+        { name: '🎯 Opérations',   value: `**${db.operations.filter(o => o.status === 'terminee').length}** terminées au total` },
+        { name: '📝 Recrutement',  value: `**${db.candidatures.filter(c => daysSince(c.receivedAt) <= 7).length}** candidatures · **${db.candidatures.filter(c => c.status === 'acceptee' && daysSince(c.receivedAt) <= 7).length}** acceptées cette semaine` },
+        { name: '📜 Contrats',     value: `**${contrats.filter(c => daysSince(c.createdAt) <= 7).length}** créés · **${contrats.filter(c => c.status === 'signe' && daysSince(c.signedAt) <= 7).length}** signés cette semaine` },
+      ).setFooter({ text: `Rapport automatique • ${fmtShort(new Date())}` })] });
   });
 
   console.log('✅ Automatismes actifs :');
-  console.log('   → Dashboard           : toutes les heures');
-  console.log('   → Agenda Notion       : toutes les 5 minutes');
-  console.log('   → Agenda du jour      : 8h00 chaque matin');
-  console.log('   → Rapport inactivité  : 9h30 chaque jour');
-  console.log('   → Rapport hebdo       : lundi 9h00');
-  console.log('\n📣 Notifications → Le Concepteur + Le Fléau\n');
-  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('Bot opérationnel. Rien à faire sur Discord.');
+  console.log('   → Dashboard        : toutes les heures');
+  console.log('   → Agenda Notion    : toutes les 5 min');
+  console.log('   → Agenda du jour   : 8h00');
+  console.log('   → Rapport inactivité : 9h30 quotidien');
+  console.log('   → Rapport hebdo    : lundi 9h00');
+  console.log('\n📣 Notifications → Le Concepteur + Le Fléau');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-});
-
-// ═══════════════════════════════════════════════════════════════
-// SYSTÈME DE CONTRATS
-// ═══════════════════════════════════════════════════════════════
-client.on('interactionCreate', async interaction => {
-
-  const isDir = () => interaction.member?.roles.cache.some(r =>
-    ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier', 'Instructeur', 'Secrétaire'].some(n => r.name.includes(n))
-  );
-
-  // ═══════════════════════════════════════
-  // TYPE 1 — On envoie NOS conditions au client
-  // ═══════════════════════════════════════
-
-  if (interaction.isButton() && interaction.customId === 'open_contrat_offre') {
-    if (!isDir()) { await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true }); return; }
-    const modal = new ModalBuilder().setCustomId('contrat_offre_modal').setTitle('📤 Nos conditions — Contrat client');
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('client_nom').setLabel('Nom / Entreprise du client').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Famille Moreau, Entreprise Rhodes...')
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('objet').setLabel('Objet de la mission').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Protection rapprochée, Escorte de convoi...')
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('nos_conditions').setLabel("Nos conditions & ce qu'on exige").setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(600).setPlaceholder("Nos règles, ce qu'on n'accepte pas, nos limites...")
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('remuneration').setLabel('Notre rémunération souhaitée').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 1500$ à la signature + 500$/jour')
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('user_id').setLabel('ID Discord du client').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Clic droit sur le membre → Copier l'identifiant")
-      ),
-    );
-    await interaction.showModal(modal);
-    return;
-  }
-
-  if (interaction.isModalSubmit() && interaction.customId === 'contrat_offre_modal') {
-    await interaction.deferReply({ ephemeral: true });
-    const db = loadDB(); const guild = interaction.guild;
-    if (!db.contrats) db.contrats = [];
-
-    const contratId = 'IWC-OF-' + Date.now().toString().slice(-5);
-    const contrat = {
-      id: contratId, type: 'offre',
-      clientNom: interaction.fields.getTextInputValue('client_nom'),
-      objet: interaction.fields.getTextInputValue('objet'),
-      nosConditions: interaction.fields.getTextInputValue('nos_conditions'),
-      remuneration: interaction.fields.getTextInputValue('remuneration'),
-      userId: interaction.fields.getTextInputValue('user_id').trim(),
-      emetteurId: interaction.user.id,
-      emetteurNom: interaction.user.username,
-      status: 'en_attente',
-      createdAt: new Date().toISOString(),
-    };
-    db.contrats.push(contrat); saveDB(db);
-    await interaction.editReply({ content: '✅ Contrat **' + contratId + '** envoyé au client.' });
-
-    const embed = new EmbedBuilder()
-      .setColor(0x2C3E50)
-      .setTitle('📤 CONTRAT DE PRESTATION — ' + contratId)
-      .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   IRON WOLF COMPANY — OFFRE DE PRESTATION\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
-      .addFields(
-        { name: '🆔 Référence',               value: '`' + contratId + '`', inline: true },
-        { name: "📅 Date d\'émission",        value: fmtShort(new Date()), inline: true },
-        { name: '📋 Objet de la mission',      value: contrat.objet },
-        { name: '🏢 PRESTATAIRE — Iron Wolf Company', value: contrat.nosConditions },
-        { name: '💰 Rémunération souhaitée',   value: contrat.remuneration },
-        { name: '👤 CLIENT — ' + contrat.clientNom, value: 'En acceptant ce contrat, le client reconnaît et accepte les conditions de prestation ci-dessus.' },
-        { name: '📌 Statut',                  value: '🟡 En attente de signature du client', inline: true },
-        { name: '\u200b',                    value: '*La signature de ce contrat vaut acceptation des termes par le client. Iron Wolf Company se réserve le droit d\'interrompre la mission en cas de non-respect.*' }
-      )
-      .setFooter({ text: 'Iron Wolf Company • Prestation Officielle • ' + fmtShort(new Date()) });
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('signer_offre_' + contratId).setLabel('✍️ J\'accepte les termes').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('refuser_offre_' + contratId).setLabel('❌ Refuser').setStyle(ButtonStyle.Danger)
-    );
-
-    const ch = guild.channels.cache.get('1508756442730074222');
-    if (ch) await ch.send({ content: '<@' + contrat.userId + '> — Iron Wolf Company vous soumet un contrat de prestation.', embeds: [embed], components: [row] });
-
-    try {
-      const member = await guild.members.fetch(contrat.userId).catch(() => null);
-      if (member) await member.send({
-        embeds: [new EmbedBuilder().setColor(0x2C3E50)
-          .setTitle('📤 Contrat de prestation — Iron Wolf Company')
-          .setDescription(
-            'L\'**Iron Wolf Company** vous soumet un contrat de prestation.\n\n' +
-            '**Référence :** `' + contratId + '`\n' +
-            '**Mission :** ' + contrat.objet + '\n' +
-            '**Rémunération :** ' + contrat.remuneration + '\n\n' +
-            'Rendez-vous dans **#contrats** pour lire et signer.'
-          ).setFooter({ text: 'Iron Wolf Company • Document Officiel' })]
-      });
-    } catch(e) {}
-    return;
-  }
-
-  // Signer offre (client signe)
-  if (interaction.isButton() && interaction.customId.startsWith('signer_offre_')) {
-    const contratId = interaction.customId.replace('signer_offre_', '');
-    const db = loadDB(); if (!db.contrats) db.contrats = [];
-    const contrat = db.contrats.find(c => c.id === contratId);
-    if (!contrat) { await interaction.reply({ content: '❌ Contrat introuvable.', ephemeral: true }); return; }
-    if (contrat.userId !== interaction.user.id) { await interaction.reply({ content: '❌ Ce contrat ne vous est pas destiné.', ephemeral: true }); return; }
-    if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', ephemeral: true }); return; }
-
-    contrat.status = 'signe'; contrat.signedAt = new Date().toISOString(); saveDB(db);
-
-    const updatedEmbed = EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287)
-      .spliceFields(6, 1, { name: '📌 Statut', value: '✅ Signé le ' + fmtShort(new Date()) + ' par ' + interaction.user.username, inline: true });
-    await interaction.update({ embeds: [updatedEmbed], components: [] });
-
-    // Notif dans #contrats
-    await sendToThread(interaction.guild, '1509340729808388208', { embeds: [new EmbedBuilder().setColor(0x57F287)
-      .setTitle('✅ CONTRAT ACCEPTÉ — ' + contratId)
-      .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n       SIGNATURE CLIENT ENREGISTRÉE\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
-      .addFields(
-        { name: '🆔 Référence',   value: '`' + contratId + '`', inline: true },
-        { name: '📅 Signé le',    value: fmtShort(new Date()), inline: true },
-        { name: '✍️ Client',      value: interaction.user.username + ' (' + contrat.clientNom + ')', inline: true },
-        { name: '📋 Mission',     value: contrat.objet },
-        { name: '💰 Rémunération confirmée', value: contrat.remuneration }
-      ).setFooter({ text: 'Iron Wolf Company • Contrat validé • ' + fmtShort(new Date()) })]
-    });
-
-    // DM à l'émetteur IWC
-    try {
-      const emetteur = await interaction.guild.members.fetch(contrat.emetteurId).catch(() => null);
-      if (emetteur) await emetteur.send({ embeds: [new EmbedBuilder().setColor(0x57F287)
-        .setTitle('✅ Contrat signé — ' + contratId)
-        .setDescription(
-          '**' + contrat.clientNom + '** a accepté et signé votre contrat.\n\n' +
-          '**Mission :** ' + contrat.objet + '\n' +
-          '**Rémunération :** ' + contrat.remuneration + '\n' +
-          '**Signé le :** ' + fmtShort(new Date())
-        ).setFooter({ text: 'Iron Wolf Company • Notification contrat' })]
-      });
-    } catch(e) {}
-
-    // DM de confirmation au client
-    interaction.user.send({ embeds: [new EmbedBuilder().setColor(0x57F287)
-      .setTitle('✅ Contrat signé — Iron Wolf Company')
-      .setDescription(
-        'Vous avez accepté le contrat **' + contratId + '**.\n\n' +
-        '**Mission :** ' + contrat.objet + '\n' +
-        '**Rémunération :** ' + contrat.remuneration + '\n\n' +
-        '*Iron Wolf Company a été notifié de votre signature.*'
-      ).setFooter({ text: 'Iron Wolf Company • Document Officiel' })]
-    }).catch(() => {});
-    return;
-  }
-
-  // Refuser offre
-  if (interaction.isButton() && interaction.customId.startsWith('refuser_offre_')) {
-    const contratId = interaction.customId.replace('refuser_offre_', '');
-    const db = loadDB(); if (!db.contrats) db.contrats = [];
-    const contrat = db.contrats.find(c => c.id === contratId);
-    if (!contrat) { await interaction.reply({ content: '❌ Contrat introuvable.', ephemeral: true }); return; }
-    if (contrat.userId !== interaction.user.id) { await interaction.reply({ content: '❌ Ce contrat ne vous est pas destiné.', ephemeral: true }); return; }
-    if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', ephemeral: true }); return; }
-
-    contrat.status = 'refuse'; contrat.refusedAt = new Date().toISOString(); saveDB(db);
-    const updatedEmbed = EmbedBuilder.from(interaction.message.embeds[0]).setColor(0xED4245)
-      .spliceFields(6, 1, { name: '📌 Statut', value: '❌ Refusé le ' + fmtShort(new Date()), inline: true });
-    await interaction.update({ embeds: [updatedEmbed], components: [] });
-
-    await sendToThread(interaction.guild, '1509340853808664627', { embeds: [new EmbedBuilder().setColor(0xED4245)
-      .setTitle('❌ CONTRAT REFUSÉ — ' + contratId)
-      .addFields(
-        { name: '🆔 Référence', value: '`' + contratId + '`', inline: true },
-        { name: '👤 Refusé par', value: interaction.user.username + ' (' + contrat.clientNom + ')', inline: true },
-        { name: '📋 Mission', value: contrat.objet }
-      ).setFooter({ text: 'Iron Wolf Company • ' + fmtShort(new Date()) })]
-    });
-
-    try {
-      const emetteur = await interaction.guild.members.fetch(contrat.emetteurId).catch(() => null);
-      if (emetteur) await emetteur.send({ embeds: [new EmbedBuilder().setColor(0xED4245)
-        .setTitle('❌ Contrat refusé — ' + contratId)
-        .setDescription('**' + contrat.clientNom + '** a refusé le contrat pour **' + contrat.objet + '**.')
-        .setFooter({ text: 'Iron Wolf Company • Notification contrat' })]
-      });
-    } catch(e) {}
-    return;
-  }
-
-  // ═══════════════════════════════════════
-  // TYPE 2 — On signe un contrat employeur
-  // ═══════════════════════════════════════
-
-  if (interaction.isButton() && interaction.customId === 'open_contrat_emploi') {
-    if (!isDir()) { await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true }); return; }
-    const modal = new ModalBuilder().setCustomId('contrat_emploi_modal').setTitle('📥 Contrat employeur — À signer');
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('employeur_nom').setLabel('Nom de l\'entreprise / employeur').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Société Moreau, Clan Rhodes...')
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('objet').setLabel('Objet de la mission').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Protection du convoi pendant 7 jours...')
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('leurs_conditions').setLabel("Conditions de l'employeur").setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(600).setPlaceholder("Ce qu'ils exigent, les règles qu'ils imposent...")
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('remuneration').setLabel('Rémunération proposée').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 2000$ à la livraison + équipement fourni')
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('user_id').setLabel('ID Discord de l\'employeur').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Clic droit sur le membre → Copier l'identifiant")
-      ),
-    );
-    await interaction.showModal(modal);
-    return;
-  }
-
-  if (interaction.isModalSubmit() && interaction.customId === 'contrat_emploi_modal') {
-    await interaction.deferReply({ ephemeral: true });
-    const db = loadDB(); const guild = interaction.guild;
-    if (!db.contrats) db.contrats = [];
-
-    const contratId = 'IWC-EM-' + Date.now().toString().slice(-5);
-    const contrat = {
-      id: contratId, type: 'emploi',
-      employeurNom: interaction.fields.getTextInputValue('employeur_nom'),
-      objet: interaction.fields.getTextInputValue('objet'),
-      leursConditions: interaction.fields.getTextInputValue('leurs_conditions'),
-      remuneration: interaction.fields.getTextInputValue('remuneration'),
-      userId: interaction.fields.getTextInputValue('user_id').trim(),
-      signataire: interaction.user.username,
-      signataireId: interaction.user.id,
-      status: 'en_attente',
-      createdAt: new Date().toISOString(),
-    };
-    db.contrats.push(contrat); saveDB(db);
-    await interaction.editReply({ content: '📋 Contrat **' + contratId + '** créé. Lisez les termes et signez dans **#contrats**.' });
-
-    const embed = new EmbedBuilder()
-      .setColor(0x8B5A2A)
-      .setTitle('📥 CONTRAT EMPLOYEUR — ' + contratId)
-      .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n  CONTRAT PROPOSÉ À IRON WOLF COMPANY\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
-      .addFields(
-        { name: '🆔 Référence',                   value: '`' + contratId + '`', inline: true },
-        { name: "📅 Date d\'émission",            value: fmtShort(new Date()), inline: true },
-        { name: '🏭 EMPLOYEUR — ' + contrat.employeurNom, value: contrat.leursConditions },
-        { name: '💰 Rémunération proposée',        value: contrat.remuneration },
-        { name: '📋 Objet de la mission',          value: contrat.objet },
-        { name: '🐺 IRON WOLF COMPANY',            value: 'En signant, Iron Wolf Company s\'engage à respecter les conditions ci-dessus pour la durée de la mission.' },
-        { name: '📌 Statut',                       value: '🟡 En attente de notre signature', inline: true },
-        { name: '\u200b',                         value: '*Notre signature vaut engagement officiel envers l\'employeur. L\'employeur sera notifié automatiquement.*' }
-      )
-      .setFooter({ text: 'Iron Wolf Company • Contrat Employeur • ' + fmtShort(new Date()) });
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('signer_emploi_' + contratId).setLabel('✍️ Signer & Accepter la mission').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('refuser_emploi_' + contratId).setLabel('❌ Décliner la mission').setStyle(ButtonStyle.Danger)
-    );
-
-    const ch = guild.channels.cache.get('1508756442730074222');
-    if (ch) await ch.send({ content: getMention(guild) + ' — Nouveau contrat employeur à examiner.', embeds: [embed], components: [row] });
-    return;
-  }
-
-  // Signer emploi (IWC signe)
-  if (interaction.isButton() && interaction.customId.startsWith('signer_emploi_')) {
-    const contratId = interaction.customId.replace('signer_emploi_', '');
-    const db = loadDB(); if (!db.contrats) db.contrats = [];
-    const contrat = db.contrats.find(c => c.id === contratId);
-    if (!contrat) { await interaction.reply({ content: '❌ Contrat introuvable.', ephemeral: true }); return; }
-    if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', ephemeral: true }); return; }
-
-    const isDir2 = interaction.member?.roles.cache.some(r =>
-      ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier'].some(n => r.name.includes(n))
-    );
-    if (!isDir2) { await interaction.reply({ content: '❌ Seule la Direction peut signer.', ephemeral: true }); return; }
-
-    contrat.status = 'signe'; contrat.signedAt = new Date().toISOString(); contrat.signedBy = interaction.user.username; saveDB(db);
-
-    const updatedEmbed = EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287)
-      .spliceFields(6, 1, { name: '📌 Statut', value: '✅ Signé le ' + fmtShort(new Date()) + ' par ' + interaction.user.username, inline: true });
-    await interaction.update({ embeds: [updatedEmbed], components: [] });
-
-    await sendToThread(interaction.guild, '1509340729808388208', { embeds: [new EmbedBuilder().setColor(0x57F287)
-      .setTitle('✅ MISSION ACCEPTÉE — ' + contratId)
-      .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n     IRON WOLF COMPANY — SIGNATURE VALIDÉE\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
-      .addFields(
-        { name: '🆔 Référence',       value: '`' + contratId + '`', inline: true },
-        { name: '📅 Signé le',        value: fmtShort(new Date()), inline: true },
-        { name: '✍️ Signé par',       value: interaction.user.username + ' — Iron Wolf Company', inline: true },
-        { name: '🏭 Employeur',        value: contrat.employeurNom },
-        { name: '📋 Mission',          value: contrat.objet },
-        { name: '💰 Rémunération',     value: contrat.remuneration }
-      ).setFooter({ text: 'Iron Wolf Company • Mission confirmée • ' + fmtShort(new Date()) })]
-    });
-
-    // DM à l'employeur
-    try {
-      const employeur = await interaction.guild.members.fetch(contrat.userId).catch(() => null);
-      if (employeur) await employeur.send({ embeds: [new EmbedBuilder().setColor(0x57F287)
-        .setTitle('✅ Iron Wolf Company a signé votre contrat')
-        .setDescription(
-          'L\'**Iron Wolf Company** a accepté et signé le contrat **' + contratId + '**.\n\n' +
-          '**Mission :** ' + contrat.objet + '\n' +
-          '**Rémunération :** ' + contrat.remuneration + '\n' +
-          '**Signé le :** ' + fmtShort(new Date()) + '\n\n' +
-          '*Iron Wolf Company s\'engage à honorer les termes de ce contrat.*'
-        ).setFooter({ text: 'Iron Wolf Company • Document Officiel' })]
-      });
-    } catch(e) {}
-    return;
-  }
-
-  // Décliner emploi
-  if (interaction.isButton() && interaction.customId.startsWith('refuser_emploi_')) {
-    const contratId = interaction.customId.replace('refuser_emploi_', '');
-    const db = loadDB(); if (!db.contrats) db.contrats = [];
-    const contrat = db.contrats.find(c => c.id === contratId);
-    if (!contrat) { await interaction.reply({ content: '❌ Contrat introuvable.', ephemeral: true }); return; }
-    if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', ephemeral: true }); return; }
-
-    const isDir2 = interaction.member?.roles.cache.some(r =>
-      ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier'].some(n => r.name.includes(n))
-    );
-    if (!isDir2) { await interaction.reply({ content: '❌ Seule la Direction peut décliner.', ephemeral: true }); return; }
-
-    contrat.status = 'refuse'; contrat.refusedAt = new Date().toISOString(); saveDB(db);
-    const updatedEmbed = EmbedBuilder.from(interaction.message.embeds[0]).setColor(0xED4245)
-      .spliceFields(6, 1, { name: '📌 Statut', value: '❌ Décliné le ' + fmtShort(new Date()), inline: true });
-    await interaction.update({ embeds: [updatedEmbed], components: [] });
-
-    await sendToThread(interaction.guild, '1509340853808664627', { embeds: [new EmbedBuilder().setColor(0xED4245)
-      .setTitle('❌ MISSION DÉCLINÉE — ' + contratId)
-      .addFields(
-        { name: '🆔 Référence',  value: '`' + contratId + '`', inline: true },
-        { name: '📅 Décliné le', value: fmtShort(new Date()), inline: true },
-        { name: '🏭 Employeur',  value: contrat.employeurNom },
-        { name: '📋 Mission',    value: contrat.objet }
-      ).setFooter({ text: 'Iron Wolf Company • ' + fmtShort(new Date()) })]
-    });
-
-    try {
-      const employeur = await interaction.guild.members.fetch(contrat.userId).catch(() => null);
-      if (employeur) await employeur.send({ embeds: [new EmbedBuilder().setColor(0xED4245)
-        .setTitle('❌ Iron Wolf Company a décliné votre contrat')
-        .setDescription(
-          'L\'**Iron Wolf Company** a décliné le contrat **' + contratId + '** pour **' + contrat.objet + '**.\n\n' +
-          '*Aucune justification ne sera fournie.*'
-        ).setFooter({ text: 'Iron Wolf Company • Document Officiel' })]
-      });
-    } catch(e) {}
-    return;
-  }
-
-});
-
-// ═══════════════════════════════════════════════════════════════
-// LOGS AUTOMATIQUES — Tous les événements du serveur
-// ═══════════════════════════════════════════════════════════════
-
-// ── Message supprimé ──
-client.on('messageDelete', async message => {
-  if (!message.guild || message.author?.bot) return;
-  const guild = message.guild;
-  await log(guild, 0xED4245, '🗑️', 'Message supprimé',
-    [
-      { name: '👤 Auteur',  value: message.author ? `<@${message.author.id}> (${message.author.username})` : 'Inconnu', inline: true },
-      { name: '📍 Salon',   value: `<#${message.channel.id}>`, inline: true },
-      { name: '📝 Contenu', value: message.content?.slice(0, 500) || '*[vide ou média]*' },
-    ]
-  );
-});
-
-// ── Message modifié ──
-client.on('messageUpdate', async (oldMsg, newMsg) => {
-  if (!newMsg.guild || newMsg.author?.bot) return;
-  if (oldMsg.content === newMsg.content) return;
-  await log(newMsg.guild, 0xFFA500, '✏️', 'Message modifié',
-    [
-      { name: '👤 Auteur',   value: `<@${newMsg.author.id}> (${newMsg.author.username})`, inline: true },
-      { name: '📍 Salon',    value: `<#${newMsg.channel.id}>`, inline: true },
-      { name: '📝 Avant',    value: oldMsg.content?.slice(0, 400) || '*[vide]*' },
-      { name: '📝 Après',    value: newMsg.content?.slice(0, 400) || '*[vide]*' },
-    ]
-  );
-});
-
-// ── Rôle ajouté à un membre ──
-client.on('guildMemberUpdate', async (oldMember, newMember) => {
-  const guild = newMember.guild;
-  const addedRoles = newMember.roles.cache.filter(r => !oldMember.roles.cache.has(r.id));
-  const removedRoles = oldMember.roles.cache.filter(r => !newMember.roles.cache.has(r.id));
-
-  if (addedRoles.size > 0) {
-    await log(guild, 0x57F287, '🎖️', 'Rôle ajouté — ' + newMember.user.username,
-      [
-        { name: '👤 Membre', value: `<@${newMember.id}>`, inline: true },
-        { name: '➕ Rôle',   value: addedRoles.map(r => r.name).join(', '), inline: true },
-      ]
-    );
-  }
-  if (removedRoles.size > 0) {
-    await log(guild, 0xED4245, '🎖️', 'Rôle retiré — ' + newMember.user.username,
-      [
-        { name: '👤 Membre', value: `<@${newMember.id}>`, inline: true },
-        { name: '➖ Rôle',   value: removedRoles.map(r => r.name).join(', '), inline: true },
-      ]
-    );
-  }
-
-  // Pseudo changé
-  if (oldMember.nickname !== newMember.nickname) {
-    await log(guild, 0x3B82F6, '📝', 'Pseudo modifié — ' + newMember.user.username,
-      [
-        { name: '👤 Membre', value: `<@${newMember.id}>`, inline: true },
-        { name: '📝 Avant',  value: oldMember.nickname || oldMember.user.username, inline: true },
-        { name: '📝 Après',  value: newMember.nickname || newMember.user.username, inline: true },
-      ]
-    );
-  }
-});
-
-// ── Membre banni ──
-client.on('guildBanAdd', async ban => {
-  await log(ban.guild, 0x8B0000, '🔨', 'Membre banni — ' + ban.user.username,
-    [
-      { name: '👤 Membre', value: `<@${ban.user.id}> (${ban.user.username})`, inline: true },
-      { name: '📋 Raison', value: ban.reason || 'Aucune raison fournie', inline: true },
-    ]
-  );
-});
-
-// ── Membre débanni ──
-client.on('guildBanRemove', async ban => {
-  await log(ban.guild, 0x57F287, '🔓', 'Membre débanni — ' + ban.user.username,
-    [
-      { name: '👤 Membre', value: `<@${ban.user.id}> (${ban.user.username})`, inline: true },
-    ]
-  );
-});
-
-// ── Salon créé ──
-client.on('channelCreate', async channel => {
-  if (!channel.guild) return;
-  await log(channel.guild, 0x57F287, '📢', 'Salon créé — ' + channel.name,
-    [
-      { name: '📍 Nom',  value: channel.name, inline: true },
-      { name: '📂 Type', value: channel.type.toString(), inline: true },
-    ]
-  );
-});
-
-// ── Salon supprimé ──
-client.on('channelDelete', async channel => {
-  if (!channel.guild) return;
-  await log(channel.guild, 0xED4245, '🗑️', 'Salon supprimé — ' + channel.name,
-    [
-      { name: '📍 Nom', value: channel.name, inline: true },
-    ]
-  );
-});
-
-// ── Rôle créé ──
-client.on('roleCreate', async role => {
-  await log(role.guild, 0x57F287, '🎭', 'Rôle créé — ' + role.name,
-    [{ name: '🎭 Rôle', value: role.name, inline: true }]
-  );
-});
-
-// ── Rôle supprimé ──
-client.on('roleDelete', async role => {
-  await log(role.guild, 0xED4245, '🎭', 'Rôle supprimé — ' + role.name,
-    [{ name: '🎭 Rôle', value: role.name, inline: true }]
-  );
-});
-
-// ── Invitation créée ──
-client.on('inviteCreate', async invite => {
-  if (!invite.guild) return;
-  await log(invite.guild, 0x3B82F6, '🔗', 'Invitation créée',
-    [
-      { name: '👤 Créée par', value: invite.inviter ? invite.inviter.username : 'Inconnu', inline: true },
-      { name: '🔗 Code',      value: invite.code, inline: true },
-      { name: '⏱️ Expire',    value: invite.maxAge ? invite.maxAge / 3600 + 'h' : 'Jamais', inline: true },
-    ]
-  );
-});
-
-// ── Membre en vocal ──
-client.on('voiceStateUpdate', async (oldState, newState) => {
-  const guild = newState.guild;
-  const member = newState.member;
-  if (!member || member.user.bot) return;
-
-  if (!oldState.channel && newState.channel) {
-    await log(guild, 0x57F287, '🔊', 'Rejoint vocal — ' + member.user.username,
-      [
-        { name: '👤 Membre', value: `<@${member.id}>`, inline: true },
-        { name: '🔊 Salon',  value: newState.channel.name, inline: true },
-      ]
-    );
-  } else if (oldState.channel && !newState.channel) {
-    await log(guild, 0x555555, '🔇', 'Quitté vocal — ' + member.user.username,
-      [
-        { name: '👤 Membre', value: `<@${member.id}>`, inline: true },
-        { name: '🔊 Salon',  value: oldState.channel.name, inline: true },
-      ]
-    );
-  } else if (oldState.channel && newState.channel && oldState.channel.id !== newState.channel.id) {
-    await log(guild, 0x3B82F6, '🔀', 'Changé de vocal — ' + member.user.username,
-      [
-        { name: '👤 Membre', value: `<@${member.id}>`, inline: true },
-        { name: '📤 De',     value: oldState.channel.name, inline: true },
-        { name: '📥 Vers',   value: newState.channel.name, inline: true },
-      ]
-    );
-  }
 });
 
 client.login(process.env.BOT_TOKEN);
