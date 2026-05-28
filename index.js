@@ -386,6 +386,7 @@ async function autoSetup(guild) {
 // NOTION AGENDA
 // ═══════════════════════════════════════════════════════════════
 async function notionQuery() {
+  console.log('🔍 ENV CHECK:', !!process.env.NOTION_TOKEN, !!process.env.NOTION_AGENDA_DB_ID);
   if (!process.env.NOTION_TOKEN || !process.env.NOTION_AGENDA_DB_ID) {
     console.log('❌ NOTION: Token ou DB_ID manquant');
     return [];
