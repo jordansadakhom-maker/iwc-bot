@@ -415,8 +415,9 @@ async function notionQuery() {
     return [];
   }
 }
+  async function notionPatch(pageId, props) {
   if (!process.env.NOTION_TOKEN) return;
-  await fetch(`https://api.notion.com/v1/pages/${pageId}`, {
+  await fetch(`https://api.notion.com/v1/pages/${pageId}`, {(`https://api.notion.com/v1/pages/${pageId}`, {
     method: 'PATCH',
     headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
     body: JSON.stringify({ properties: props })
