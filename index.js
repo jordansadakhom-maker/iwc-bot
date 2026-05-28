@@ -858,4 +858,43 @@ client.on('interactionCreate', async interaction => {
     if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', ephemeral: true }); return; }
     if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Seule la Direction peut signer.', ephemeral: true }); return; }
     contrat.status = 'signe'; contrat.signedAt = new Date().toISOString(); contrat.signedBy = interaction.user.username; saveDB(db);
-    await sendLog(guild, 'CONTRAT_SIGNE', { contratId, objet: contrat.objet, signe: interaction.user.username + ' — IWC' 
+    await sendLog(guild, 'CONTRAT_SIGNE', { contratId, objet: contrat.objet, signe: interaction.user.username + ' — IWC' });
+    await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287).spliceFields(5, 1, { name: '📌 Statut', value: '✅ Signé le ' + fmtShort(new Date()) + ' par ' + interaction.user.username, inline: true })], components: [] });
+    await sendToThread(guild, CH.FIL_CONTRATS_SIGNE, { embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ CONTRAT EMPLOYEUR SIGNÉ — ' + contratId).addFields({ name: '🆔 Réf', value: '`' + contratId + '`', inline: true }, { name: '📅 Signé', value: fmtShort(new Date()), inline: true }, { name: '✍️ Signé par', value: interaction.user.username, inline: true }, { name: '🏭 Employeur', value: contrat.employeurNom }, { name: '📋 Mission', value: contrat.objet }, { name: '💰 Rémunération', value: contrat.remuneration }).setFooter({ text: 'IWC • ' + fmtShort(new Date()) })] });
+    try { const m = await guild.members.fetch(contrat.userId).catch(() => null); if (m) await m.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ Contrat signé — IWC').setDescription(`Iron Wolf Company a **signé** le contrat **${contratId}**.\n\n**Mission :** ${contrat.objet}\n**Rémunération :** ${contrat.remuneration}`).setFooter({ text: 'IWC • Notification' })] }); } catch(e) {}
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId.startsWith('refuser_emploi_')) {
+    const contratId = interaction.customId.replace('refuser_emploi_', '');
+    if (!db.contrats) db.contrats = [];
+    const contrat = db.contrats.find(c => c.id === contratId);
+    if (!contrat) { await interaction.reply({ content: '❌ Contrat introuvable.', ephemeral: true }); return; }
+    if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', ephemeral: true }); return; }
+    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Seule la Direction peut décliner.', ephemeral: true }); return; }
+    contrat.status = 'refuse'; contrat.refusedAt = new Date().toISOString(); saveDB(db);
+    await sendLog(guild, 'CONTRAT_REFUSE', { contratId, objet: contrat.objet });
+    await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0xED4245).spliceFields(5, 1, { name: '📌 Statut', value: '❌ Décliné le ' + fmtShort(new Date()), inline: true })], components: [] });
+    await sendToThread(guild, CH.FIL_CONTRATS_REFUSE, { embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('❌ CONTRAT EMPLOYEUR DÉCLINÉ — ' + contratId).addFields({ name: '🆔 Réf', value: '`' + contratId + '`', inline: true }, { name: '👤 Décliné par', value: interaction.user.username, inline: true }, { name: '🏭 Employeur', value: contrat.employeurNom }, { name: '📋 Mission', value: contrat.objet }).setFooter({ text: 'IWC • ' + fmtShort(new Date()) })] });
+    return;
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// READY + CRON
+// ═══════════════════════════════════════════════════════════════
+client.once('ready', async () => {
+  console.log(`✅ Connecté : ${client.user.tag}`);
+  client.user.setActivity('la meute • IWC 1895', { type: ActivityType.Watching });
+
+  for (const guild of client.guilds.cache.values()) {
+    await autoSetup(guild).catch(e => console.log('autoSetup error:', e.message));
+  }
+
+  cron.schedule('*/5 * * * *',  async () => { for (const g of client.guilds.cache.values()) await checkAgenda(g).catch(() => {}); });        // agenda
+  cron.schedule('0 * * * *',    async () => { for (const g of client.guilds.cache.values()) await updateDashboard(g).catch(() => {}); });   // dashboard horaire
+  cron.schedule('*/15 * * * *', async () => { for (const g of client.guilds.cache.values()) await syncRegistreNotion(g).catch(() => {}); });// sync Notion 15min
+  cron.schedule('0 9 * * *',    async () => { for (const g of client.guilds.cache.values()) await postDailyAgenda(g).catch(() => {}); }, { timezone: 'Europe/Paris' }); // agenda du jour
+});
+
+client.login(process.env.TOKEN || process.env.DISCORD_TOKEN);
