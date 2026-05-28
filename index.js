@@ -386,14 +386,20 @@ async function autoSetup(guild) {
 // NOTION AGENDA
 // ═══════════════════════════════════════════════════════════════
 async function notionQuery() {
-  if (!process.env.NOTION_TOKEN || !process.env.NOTION_AGENDA_DB_ID) return [];
+  if (!process.env.NOTION_TOKEN || !process.env.NOTION_AGENDA_DB_ID) {
+    console.log('❌ NOTION: Token ou DB_ID manquant');
+    return [];
+  }
   try {
+    console.log('🔍 NOTION: Requête en cours...');
+    console.log('🔍 DB_ID:', process.env.NOTION_AGENDA_DB_ID);
     const res = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_AGENDA_DB_ID}/query`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
       body: JSON.stringify({ filter: { and: [{ property: 'Date', date: { on_or_after: new Date().toISOString() } }, { property: 'Statut', select: { does_not_equal: 'Annulé' } }] }, sorts: [{ property: 'Date', direction: 'ascending' }] })
     });
     const data = await res.json();
+    console.log('🔍 NOTION résultat:', JSON.stringify(data).slice(0, 500));
     return (data.results || []).map(p => ({
       id: p.id, titre: p.properties.Titre?.title?.[0]?.plain_text || '—',
       date: p.properties.Date?.date?.start, heure: p.properties.Heure?.rich_text?.[0]?.plain_text,
@@ -404,10 +410,11 @@ async function notionQuery() {
       notif24: p.properties['Notif 24h']?.checkbox, notif1h: p.properties['Notif 1h']?.checkbox, notif15: p.properties['Notif 15min']?.checkbox,
       url: p.url,
     }));
-  } catch(e) { return []; }
+  } catch(e) {
+    console.log('❌ NOTION erreur:', e.message);
+    return [];
+  }
 }
-
-async function notionPatch(pageId, props) {
   if (!process.env.NOTION_TOKEN) return;
   await fetch(`https://api.notion.com/v1/pages/${pageId}`, {
     method: 'PATCH',
