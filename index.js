@@ -8,6 +8,14 @@ const {
 const cron = require('node-cron');
 const fs   = require('fs');
 
+// ═══════════════════════════════════════════════════════════════
+// MODULE EXTENSIONS NOTION (fiches, stats, trésorerie, contrats, opérations)
+// Si le fichier casse, le bot continue de tourner (try/catch).
+// ═══════════════════════════════════════════════════════════════
+let notionExtra = {};
+try { notionExtra = require('./notion-extra'); console.log('✅ Module notion-extra chargé'); }
+catch (e) { console.log('⚠️ notion-extra non chargé:', e.message); }
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -569,10 +577,11 @@ client.on('messageReactionAdd', async (reaction, user) => {
       const annCh = guild.channels.cache.get(CH.DOSSIER_LEGAL);
       if (annCh) await annCh.send({ embeds: [new EmbedBuilder().setColor(0x3B82F6).setTitle('⚖️ Nouveau membre — Iron Wolf Company').setDescription(`**${cand.nomPerso}** rejoint la Compagnie.\n*Bienvenue dans la meute.*`).setThumbnail(member.user.displayAvatarURL()).setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` })] });
     }
-    cand.status = 'acceptee'; saveDB(db);
-    // ✅ ARCHIVAGE + AJOUT AU REGISTRE NOTION
+    cand.status = 'acceptee'; cand.acceptedAt = new Date().toISOString(); saveDB(db);
+    // ✅ ARCHIVAGE + AJOUT AU REGISTRE NOTION + FICHE PERSONNAGE
     await archiverCandidatureNotion(cand, 'acceptee', user.username);
     await ajouterMembreNotion(cand, cand.type);
+    await notionExtra.creerFichePersonnageNotion?.(cand);
     await sendLog(guild, 'CANDIDATURE_ACCEPTEE', { userId: cand.userId, nomPerso: cand.nomPerso, type: isIllegal ? '🔪 Illégal' : '⚖️ Légal', validePar: user.username });
     try { await reaction.message.edit({ embeds: [EmbedBuilder.from(reaction.message.embeds[0]).setColor(isIllegal ? 0x8B1A1A : 0x3B82F6).setTitle(`✅ ACCEPTÉ — ${cand.nomPerso}`)] }); } catch(e) {}
     return;
@@ -625,13 +634,43 @@ client.on('messageCreate', async message => {
   const clipCh = getCh(guild, 'clips-temps-fort', 'clips-highlights', 'clips');
   if (clipCh && message.channel.id === clipCh.id && message.attachments.size > 0) { await message.react('🔥').catch(() => {}); await message.react('❤️').catch(() => {}); return; }
 
+  // 💰 COFFRES — suivi financier automatique → Notion Trésorerie
+  const coffreCh      = getCh(guild, 'coffre-entreprise', 'coffre');
+  const coffreIllegCh = getCh(guild, 'coffre-illegal', 'coffreilleg');
+  const coffreType = (coffreCh && message.channel.id === coffreCh.id) ? 'legal'
+                   : (coffreIllegCh && message.channel.id === coffreIllegCh.id) ? 'illegal' : null;
+  if (coffreType) {
+    const up = message.content.toUpperCase();
+    if (up.includes('TYPE') && up.includes('MONTANT')) {
+      const lines = message.content.split('\n');
+      const get = k => { const l = lines.find(l => l.toUpperCase().includes(k.toUpperCase())); return l ? l.split(':').slice(1).join(':').trim() : ''; };
+      const type = get('TYPE').toLowerCase().includes('sort') ? 'Sortie' : 'Entrée';
+      const montant = (() => { const n = parseInt((get('MONTANT') || '').replace(/[^0-9]/g, ''), 10); return isNaN(n) ? 0 : n; })();
+      const objet = get('OBJET') || '—';
+      const responsable = get('RESPONSABLE') || message.author.username;
+      db.coffres = db.coffres || { legal: 0, illegal: 0 };
+      db.coffres[coffreType] += (type === 'Sortie' ? -montant : montant);
+      const solde = db.coffres[coffreType];
+      saveDB(db);
+      await notionExtra.enregistrerTransactionNotion?.({ type, coffre: coffreType === 'illegal' ? '🔒 Illégal' : '💰 Légal', montant, objet, responsable, solde });
+      await message.react('✅').catch(() => {});
+      await message.channel.send({ embeds: [new EmbedBuilder().setColor(type === 'Sortie' ? 0xED4245 : 0x57F287)
+        .setTitle(`${type === 'Sortie' ? '📤 Sortie' : '📥 Entrée'} — $${montant.toLocaleString('fr-FR')}`)
+        .addFields({ name: 'Objet', value: objet, inline: true }, { name: 'Responsable', value: responsable, inline: true }, { name: '💰 Solde', value: `**$${solde.toLocaleString('fr-FR')}**`, inline: true })
+        .setFooter({ text: 'IWC • Trésorerie automatique' })] });
+    }
+    return;
+  }
+
   const opsCh = getCh(guild, 'operations-en-cours', 'operations');
   if (opsCh && message.channel.id === opsCh.id && isDirection(message.member)) {
     if (message.content.toUpperCase().includes('OPÉRATION') || message.content.toUpperCase().includes('OPERATION')) {
       const lines = message.content.split('\n');
       const get = k => { const l = lines.find(l => l.toUpperCase().includes(k.toUpperCase())); return l ? l.split(':').slice(1).join(':').trim() || '—' : '—'; };
       const op = { id: Date.now().toString(), name: get('NOM'), lieu: get('LIEU'), objectif: get('OBJECTIF'), equipe: get('ÉQUIPE') || get('EQUIPE'), status: 'preparation', createdAt: new Date().toISOString() };
-      db.operations.push(op); saveDB(db);
+      db.operations.push(op);
+      op.notionPageId = await notionExtra.creerOperationNotion?.(op);
+      saveDB(db);
       await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: '🟡 En préparation' });
       const embed = new EmbedBuilder().setColor(0xFFA500).setTitle(`🎯 OPÉRATION — ${op.name}`)
         .addFields({ name: 'Statut', value: '🟡 En préparation', inline: true }, { name: 'Lieu', value: op.lieu, inline: true }, { name: 'Équipe', value: op.equipe }, { name: 'Objectif', value: op.objectif })
@@ -746,6 +785,7 @@ client.on('interactionCreate', async interaction => {
     op.status = status === 'encours' ? 'en_cours' : status;
     if (status === 'terminee') op.endedAt = new Date().toISOString();
     saveDB(db);
+    await notionExtra.majOperationNotion?.(op);
     await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: labels[status] || status });
     const updated = EmbedBuilder.from(interaction.message.embeds[0]).setColor(colors[status] || 0x8B5A2A).spliceFields(0, 1, { name: 'Statut', value: labels[status] || status, inline: true });
     await interaction.update({ embeds: [updated], components: ['terminee', 'annulee'].includes(status) ? [] : interaction.message.components });
@@ -794,6 +834,7 @@ client.on('interactionCreate', async interaction => {
     if (contrat.userId !== interaction.user.id) { await interaction.reply({ content: '❌ Ce contrat ne vous est pas destiné.', ephemeral: true }); return; }
     if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', ephemeral: true }); return; }
     contrat.status = 'signe'; contrat.signedAt = new Date().toISOString(); saveDB(db);
+    await notionExtra.ajouterContratNotion?.(contrat);
     await sendLog(guild, 'CONTRAT_SIGNE', { contratId, objet: contrat.objet, signe: interaction.user.username + ' (' + contrat.clientNom + ')' });
     await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287).spliceFields(5, 1, { name: '📌 Statut', value: '✅ Signé le ' + fmtShort(new Date()) + ' par ' + interaction.user.username, inline: true })], components: [] });
     await sendToThread(guild, CH.FIL_CONTRATS_SIGNE, { embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ CONTRAT ACCEPTÉ — ' + contratId).addFields({ name: '🆔 Réf', value: '`' + contratId + '`', inline: true }, { name: '📅 Signé', value: fmtShort(new Date()), inline: true }, { name: '✍️ Client', value: interaction.user.username + ' (' + contrat.clientNom + ')', inline: true }, { name: '📋 Mission', value: contrat.objet }, { name: '💰 Rémunération', value: contrat.remuneration }).setFooter({ text: 'IWC • ' + fmtShort(new Date()) })] });
@@ -858,6 +899,7 @@ client.on('interactionCreate', async interaction => {
     if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', ephemeral: true }); return; }
     if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Seule la Direction peut signer.', ephemeral: true }); return; }
     contrat.status = 'signe'; contrat.signedAt = new Date().toISOString(); contrat.signedBy = interaction.user.username; saveDB(db);
+    await notionExtra.ajouterContratNotion?.(contrat);
     await sendLog(guild, 'CONTRAT_SIGNE', { contratId, objet: contrat.objet, signe: interaction.user.username + ' — IWC' });
     await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287).spliceFields(5, 1, { name: '📌 Statut', value: '✅ Signé le ' + fmtShort(new Date()) + ' par ' + interaction.user.username, inline: true })], components: [] });
     await sendToThread(guild, CH.FIL_CONTRATS_SIGNE, { embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ CONTRAT EMPLOYEUR SIGNÉ — ' + contratId).addFields({ name: '🆔 Réf', value: '`' + contratId + '`', inline: true }, { name: '📅 Signé', value: fmtShort(new Date()), inline: true }, { name: '✍️ Signé par', value: interaction.user.username, inline: true }, { name: '🏭 Employeur', value: contrat.employeurNom }, { name: '📋 Mission', value: contrat.objet }, { name: '💰 Rémunération', value: contrat.remuneration }).setFooter({ text: 'IWC • ' + fmtShort(new Date()) })] });
@@ -895,6 +937,8 @@ client.once('ready', async () => {
   cron.schedule('0 * * * *',    async () => { for (const g of client.guilds.cache.values()) await updateDashboard(g).catch(() => {}); });   // dashboard horaire
   cron.schedule('*/15 * * * *', async () => { for (const g of client.guilds.cache.values()) await syncRegistreNotion(g).catch(() => {}); });// sync Notion 15min
   cron.schedule('0 9 * * *',    async () => { for (const g of client.guilds.cache.values()) await postDailyAgenda(g).catch(() => {}); }, { timezone: 'Europe/Paris' }); // agenda du jour
+  cron.schedule('0 20 * * 0',   async () => { for (const g of client.guilds.cache.values()) { try { await notionExtra.postStatsHebdo?.(g); } catch (e) { console.log(e.message); } } }, { timezone: 'Europe/Paris' }); // stats hebdo dimanche 20h
 });
 
 client.login(process.env.TOKEN || process.env.DISCORD_TOKEN);
+
