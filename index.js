@@ -397,7 +397,7 @@ async function notionQuery() {
     const res = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_AGENDA_DB_ID}/query`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filter: { and: [{ property: 'Date', date: { on_or_after: new Date().toISOString() } }, { property: 'Statut', select: { does_not_equal: 'Annulé' } }] }, sorts: [{ property: 'Date', direction: 'ascending' }] })
+      body: JSON.stringify({ filter: { and: [{ property: 'Date', date: { on_or_after: new Date().toISOString() } }, { property: 'Statut', select: { does_not_equal: '❌ Annulé' } }] }, sorts: [{ property: 'Date', direction: 'ascending' }] })
     });
     const data = await res.json();
     console.log('🔍 NOTION résultat:', JSON.stringify(data).slice(0, 500));
