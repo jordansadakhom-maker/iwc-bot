@@ -18,8 +18,12 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildMessageReactions,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildModeration,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildPresences,
+    GatewayIntentBits.GuildInvites,
   ],
-  partials: [Partials.Message, Partials.Reaction, Partials.User, Partials.Channel]
+  partials: [Partials.Message, Partials.Reaction, Partials.User, Partials.Channel, Partials.GuildMember]
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -205,6 +209,19 @@ async function sendLog(guild, type, data) {
     .addFields(...cfg.fields)
     .setFooter({ text: 'IWC • Logs • ' + new Date().toLocaleString('fr-FR') });
 
+  await ch.send({ embeds: [embed] }).catch(e => console.log('Log error:', e.message));
+}
+
+// Log silencieux rapide
+async function log(guild, color, emoji, title, fields = []) {
+  let ch = guild.channels.cache.get(LOGS_ID);
+  if (!ch) ch = await guild.channels.fetch(LOGS_ID).catch(() => null);
+  if (!ch) return;
+  const embed = new EmbedBuilder()
+    .setColor(color)
+    .setTitle(emoji + ' ' + title)
+    .setFooter({ text: new Date().toLocaleString('fr-FR') });
+  if (fields.length) embed.addFields(...fields);
   await ch.send({ embeds: [embed] }).catch(() => {});
 }
 
@@ -1798,6 +1815,169 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
+});
+
+// ═══════════════════════════════════════════════════════════════
+// LOGS AUTOMATIQUES — Tous les événements du serveur
+// ═══════════════════════════════════════════════════════════════
+
+// ── Message supprimé ──
+client.on('messageDelete', async message => {
+  if (!message.guild || message.author?.bot) return;
+  const guild = message.guild;
+  await log(guild, 0xED4245, '🗑️', 'Message supprimé',
+    [
+      { name: '👤 Auteur',  value: message.author ? `<@${message.author.id}> (${message.author.username})` : 'Inconnu', inline: true },
+      { name: '📍 Salon',   value: `<#${message.channel.id}>`, inline: true },
+      { name: '📝 Contenu', value: message.content?.slice(0, 500) || '*[vide ou média]*' },
+    ]
+  );
+});
+
+// ── Message modifié ──
+client.on('messageUpdate', async (oldMsg, newMsg) => {
+  if (!newMsg.guild || newMsg.author?.bot) return;
+  if (oldMsg.content === newMsg.content) return;
+  await log(newMsg.guild, 0xFFA500, '✏️', 'Message modifié',
+    [
+      { name: '👤 Auteur',   value: `<@${newMsg.author.id}> (${newMsg.author.username})`, inline: true },
+      { name: '📍 Salon',    value: `<#${newMsg.channel.id}>`, inline: true },
+      { name: '📝 Avant',    value: oldMsg.content?.slice(0, 400) || '*[vide]*' },
+      { name: '📝 Après',    value: newMsg.content?.slice(0, 400) || '*[vide]*' },
+    ]
+  );
+});
+
+// ── Rôle ajouté à un membre ──
+client.on('guildMemberUpdate', async (oldMember, newMember) => {
+  const guild = newMember.guild;
+  const addedRoles = newMember.roles.cache.filter(r => !oldMember.roles.cache.has(r.id));
+  const removedRoles = oldMember.roles.cache.filter(r => !newMember.roles.cache.has(r.id));
+
+  if (addedRoles.size > 0) {
+    await log(guild, 0x57F287, '🎖️', 'Rôle ajouté — ' + newMember.user.username,
+      [
+        { name: '👤 Membre', value: `<@${newMember.id}>`, inline: true },
+        { name: '➕ Rôle',   value: addedRoles.map(r => r.name).join(', '), inline: true },
+      ]
+    );
+  }
+  if (removedRoles.size > 0) {
+    await log(guild, 0xED4245, '🎖️', 'Rôle retiré — ' + newMember.user.username,
+      [
+        { name: '👤 Membre', value: `<@${newMember.id}>`, inline: true },
+        { name: '➖ Rôle',   value: removedRoles.map(r => r.name).join(', '), inline: true },
+      ]
+    );
+  }
+
+  // Pseudo changé
+  if (oldMember.nickname !== newMember.nickname) {
+    await log(guild, 0x3B82F6, '📝', 'Pseudo modifié — ' + newMember.user.username,
+      [
+        { name: '👤 Membre', value: `<@${newMember.id}>`, inline: true },
+        { name: '📝 Avant',  value: oldMember.nickname || oldMember.user.username, inline: true },
+        { name: '📝 Après',  value: newMember.nickname || newMember.user.username, inline: true },
+      ]
+    );
+  }
+});
+
+// ── Membre banni ──
+client.on('guildBanAdd', async ban => {
+  await log(ban.guild, 0x8B0000, '🔨', 'Membre banni — ' + ban.user.username,
+    [
+      { name: '👤 Membre', value: `<@${ban.user.id}> (${ban.user.username})`, inline: true },
+      { name: '📋 Raison', value: ban.reason || 'Aucune raison fournie', inline: true },
+    ]
+  );
+});
+
+// ── Membre débanni ──
+client.on('guildBanRemove', async ban => {
+  await log(ban.guild, 0x57F287, '🔓', 'Membre débanni — ' + ban.user.username,
+    [
+      { name: '👤 Membre', value: `<@${ban.user.id}> (${ban.user.username})`, inline: true },
+    ]
+  );
+});
+
+// ── Salon créé ──
+client.on('channelCreate', async channel => {
+  if (!channel.guild) return;
+  await log(channel.guild, 0x57F287, '📢', 'Salon créé — ' + channel.name,
+    [
+      { name: '📍 Nom',  value: channel.name, inline: true },
+      { name: '📂 Type', value: channel.type.toString(), inline: true },
+    ]
+  );
+});
+
+// ── Salon supprimé ──
+client.on('channelDelete', async channel => {
+  if (!channel.guild) return;
+  await log(channel.guild, 0xED4245, '🗑️', 'Salon supprimé — ' + channel.name,
+    [
+      { name: '📍 Nom', value: channel.name, inline: true },
+    ]
+  );
+});
+
+// ── Rôle créé ──
+client.on('roleCreate', async role => {
+  await log(role.guild, 0x57F287, '🎭', 'Rôle créé — ' + role.name,
+    [{ name: '🎭 Rôle', value: role.name, inline: true }]
+  );
+});
+
+// ── Rôle supprimé ──
+client.on('roleDelete', async role => {
+  await log(role.guild, 0xED4245, '🎭', 'Rôle supprimé — ' + role.name,
+    [{ name: '🎭 Rôle', value: role.name, inline: true }]
+  );
+});
+
+// ── Invitation créée ──
+client.on('inviteCreate', async invite => {
+  if (!invite.guild) return;
+  await log(invite.guild, 0x3B82F6, '🔗', 'Invitation créée',
+    [
+      { name: '👤 Créée par', value: invite.inviter ? invite.inviter.username : 'Inconnu', inline: true },
+      { name: '🔗 Code',      value: invite.code, inline: true },
+      { name: '⏱️ Expire',    value: invite.maxAge ? invite.maxAge / 3600 + 'h' : 'Jamais', inline: true },
+    ]
+  );
+});
+
+// ── Membre en vocal ──
+client.on('voiceStateUpdate', async (oldState, newState) => {
+  const guild = newState.guild;
+  const member = newState.member;
+  if (!member || member.user.bot) return;
+
+  if (!oldState.channel && newState.channel) {
+    await log(guild, 0x57F287, '🔊', 'Rejoint vocal — ' + member.user.username,
+      [
+        { name: '👤 Membre', value: `<@${member.id}>`, inline: true },
+        { name: '🔊 Salon',  value: newState.channel.name, inline: true },
+      ]
+    );
+  } else if (oldState.channel && !newState.channel) {
+    await log(guild, 0x555555, '🔇', 'Quitté vocal — ' + member.user.username,
+      [
+        { name: '👤 Membre', value: `<@${member.id}>`, inline: true },
+        { name: '🔊 Salon',  value: oldState.channel.name, inline: true },
+      ]
+    );
+  } else if (oldState.channel && newState.channel && oldState.channel.id !== newState.channel.id) {
+    await log(guild, 0x3B82F6, '🔀', 'Changé de vocal — ' + member.user.username,
+      [
+        { name: '👤 Membre', value: `<@${member.id}>`, inline: true },
+        { name: '📤 De',     value: oldState.channel.name, inline: true },
+        { name: '📥 Vers',   value: newState.channel.name, inline: true },
+      ]
+    );
+  }
 });
 
 client.login(process.env.BOT_TOKEN);
