@@ -64,10 +64,8 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 // ═══════════════════════════════════════════════════════════════
 async function sendToThread(guild, threadId, payload) {
   try {
-    // Méthode directe d'abord
     const direct = await guild.channels.fetch(threadId).catch(() => null);
     if (direct) { await direct.send(payload); return true; }
-    // Fallback: chercher dans tous les canaux texte
     for (const channel of guild.channels.cache.values()) {
       if (!channel.isTextBased?.()) continue;
       try {
@@ -386,20 +384,14 @@ async function autoSetup(guild) {
 // NOTION AGENDA
 // ═══════════════════════════════════════════════════════════════
 async function notionQuery() {
-  console.log('🔍 ENV CHECK:', !!process.env.NOTION_TOKEN, !!process.env.NOTION_AGENDA_DB_ID);
-  if (!process.env.NOTION_TOKEN || !process.env.NOTION_AGENDA_DB_ID) {
-    console.log('❌ NOTION: Token ou DB_ID manquant');
-    return [];
-  }
+  if (!process.env.NOTION_TOKEN || !process.env.NOTION_AGENDA_DB_ID) return [];
   try {
-    console.log('🔍 NOTION: Requête en cours...');
-    console.log('🔍 DB_ID:', process.env.NOTION_AGENDA_DB_ID);
     const res = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_AGENDA_DB_ID}/query`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
       body: JSON.stringify({ filter: { property: 'Date', date: { on_or_after: new Date().toISOString() } }, sorts: [{ property: 'Date', direction: 'ascending' }] })
+    });
     const data = await res.json();
-    console.log('🔍 NOTION résultat:', JSON.stringify(data).slice(0, 500));
     return (data.results || []).map(p => ({
       id: p.id, titre: p.properties.Titre?.title?.[0]?.plain_text || '—',
       date: p.properties.Date?.date?.start, heure: p.properties.Heure?.rich_text?.[0]?.plain_text,
@@ -410,12 +402,10 @@ async function notionQuery() {
       notif24: p.properties['Notif 24h']?.checkbox, notif1h: p.properties['Notif 1h']?.checkbox, notif15: p.properties['Notif 15min']?.checkbox,
       url: p.url,
     }));
-  } catch(e) {
-    console.log('❌ NOTION erreur:', e.message);
-    return [];
-  }
+  } catch(e) { return []; }
 }
-  async function notionPatch(pageId, props) {
+
+async function notionPatch(pageId, props) {
   if (!process.env.NOTION_TOKEN) return;
   await fetch(`https://api.notion.com/v1/pages/${pageId}`, {
     method: 'PATCH',
@@ -503,7 +493,6 @@ client.on('messageReactionAdd', async (reaction, user) => {
   const db = loadDB(); const guild = reaction.message.guild;
   if (!guild) return;
 
-  // Règlement ✅
   if (reaction.message.id === db.reglementMsgId && reaction.emoji.name === '✅') {
     await sendLog(guild, 'REGLEMENT_VALIDE', { userId: user.id, username: user.username });
     const logsCh = await getLogsCh(guild);
@@ -511,7 +500,6 @@ client.on('messageReactionAdd', async (reaction, user) => {
     return;
   }
 
-  // Vote dossier ✅ ACCEPTER
   if (reaction.emoji.name === '✅') {
     const title = reaction.message.embeds[0]?.title || '';
     if (!title.includes('DOSSIER')) return;
@@ -520,7 +508,6 @@ client.on('messageReactionAdd', async (reaction, user) => {
     const cand = db.candidatures.find(c => c.nomPerso === nom && c.status === 'reçue');
     if (!cand) return;
 
-    // Vérifier minimum 2 votes ✅
     const reactUsers = await reaction.users.fetch();
     const voteCount = reactUsers.filter(u => !u.bot).size;
     if (voteCount < 2) {
@@ -552,7 +539,6 @@ client.on('messageReactionAdd', async (reaction, user) => {
     return;
   }
 
-  // Vote dossier ❌ REFUSER
   if (reaction.emoji.name === '❌') {
     const title = reaction.message.embeds[0]?.title || '';
     if (!title.includes('DOSSIER')) return;
@@ -590,7 +576,6 @@ client.on('messageCreate', async message => {
   const db = loadDB(); const guild = message.guild;
   if (db.members[message.author.id]) { db.members[message.author.id].lastActivity = new Date().toISOString(); saveDB(db); }
 
-  // Absence
   const absCh = getCh(guild, 'absences');
   if (absCh && message.channel.id === absCh.id) {
     if (db.members[message.author.id]) { db.members[message.author.id].status = 'absent'; saveDB(db); await message.react('✅'); }
@@ -598,7 +583,6 @@ client.on('messageCreate', async message => {
     return;
   }
 
-  // Suggestions — auto-react ✅ ❌
   const suggCh = getCh(guild, 'suggestion-idee', 'suggestions', 'suggestion');
   if (suggCh && message.channel.id === suggCh.id) {
     await message.react('✅').catch(() => {});
@@ -606,7 +590,6 @@ client.on('messageCreate', async message => {
     return;
   }
 
-  // Clips — auto-react 🔥
   const clipCh = getCh(guild, 'clips-temps-fort', 'clips-highlights', 'clips');
   if (clipCh && message.channel.id === clipCh.id && message.attachments.size > 0) {
     await message.react('🔥').catch(() => {});
@@ -614,7 +597,6 @@ client.on('messageCreate', async message => {
     return;
   }
 
-  // Opération
   const opsCh = getCh(guild, 'operations-en-cours', 'operations');
   if (opsCh && message.channel.id === opsCh.id && isDirection(message.member)) {
     if (message.content.toUpperCase().includes('OPÉRATION') || message.content.toUpperCase().includes('OPERATION')) {
@@ -637,7 +619,6 @@ client.on('messageCreate', async message => {
     return;
   }
 
-  // Session
   const planCh = getCh(guild, 'planning-sessions', 'planning');
   if (planCh && message.channel.id === planCh.id && isDirection(message.member)) {
     if (message.content.toUpperCase().includes('SESSION') && message.content.toUpperCase().includes('DATE')) {
@@ -661,13 +642,12 @@ client.on('messageCreate', async message => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// INTERACTIONS — UN SEUL LISTENER (CRITIQUE)
+// INTERACTIONS
 // ═══════════════════════════════════════════════════════════════
 client.on('interactionCreate', async interaction => {
   const guild = interaction.guild;
   const db = loadDB();
 
-  // ── Modals candidature ──
   if (interaction.isButton() && interaction.customId === 'open_candidature_legal') {
     const modal = new ModalBuilder().setCustomId('candidature_modal_legal').setTitle('⚖️ Iron Wolf Company — Légal');
     modal.addComponents(
@@ -692,7 +672,6 @@ client.on('interactionCreate', async interaction => {
     await interaction.showModal(modal); return;
   }
 
-  // ── Submit candidature légale ──
   if (interaction.isModalSubmit() && interaction.customId === 'candidature_modal_legal') {
     await interaction.deferReply({ ephemeral: true });
     const cand = { id: Date.now().toString(), userId: interaction.user.id, username: interaction.user.username, nomPerso: interaction.fields.getTextInputValue('nom_perso'), agePerso: interaction.fields.getTextInputValue('age_perso'), metier: interaction.fields.getTextInputValue('metier'), background: interaction.fields.getTextInputValue('background'), dispos: interaction.fields.getTextInputValue('dispos'), type: 'legal', status: 'reçue', receivedAt: new Date().toISOString() };
@@ -713,7 +692,6 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  // ── Submit candidature illégale ──
   if (interaction.isModalSubmit() && interaction.customId === 'candidature_modal_illegal') {
     await interaction.deferReply({ ephemeral: true });
     const cand = { id: Date.now().toString(), userId: interaction.user.id, username: interaction.user.username, nomPerso: interaction.fields.getTextInputValue('nom_perso'), agePerso: interaction.fields.getTextInputValue('age_perso'), specialite: interaction.fields.getTextInputValue('specialite'), background: interaction.fields.getTextInputValue('background'), dispos: interaction.fields.getTextInputValue('dispos'), type: 'illegal', status: 'reçue', receivedAt: new Date().toISOString() };
@@ -734,7 +712,6 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  // ── Boutons opérations ──
   if (interaction.isButton() && interaction.customId.startsWith('op_')) {
     const [, status, opId] = interaction.customId.split('_');
     const op = db.operations.find(o => o.id === opId);
@@ -750,7 +727,6 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  // ── Contrats — Offre ──
   if (interaction.isButton() && interaction.customId === 'open_contrat_offre') {
     if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true }); return; }
     const modal = new ModalBuilder().setCustomId('contrat_offre_modal').setTitle('📤 Nos conditions — Contrat client');
@@ -771,7 +747,6 @@ client.on('interactionCreate', async interaction => {
     const contrat = { id: contratId, type: 'offre', clientNom: interaction.fields.getTextInputValue('client_nom'), objet: interaction.fields.getTextInputValue('objet'), nosConditions: interaction.fields.getTextInputValue('nos_conditions'), remuneration: interaction.fields.getTextInputValue('remuneration'), userId: interaction.fields.getTextInputValue('user_id').trim(), emetteurId: interaction.user.id, emetteurNom: interaction.user.username, status: 'en_attente', createdAt: new Date().toISOString() };
     db.contrats.push(contrat); saveDB(db);
     await interaction.editReply({ content: '✅ Contrat **' + contratId + '** envoyé au client.' });
-
     const embed = new EmbedBuilder().setColor(0x2C3E50).setTitle('📤 CONTRAT DE PRESTATION — ' + contratId)
       .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   IRON WOLF COMPANY — OFFRE DE PRESTATION\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
       .addFields({ name: '🆔 Référence', value: '`' + contratId + '`', inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: '📋 Objet', value: contrat.objet }, { name: '🏢 Nos conditions', value: contrat.nosConditions }, { name: '💰 Rémunération souhaitée', value: contrat.remuneration }, { name: '📌 Statut', value: '🟡 En attente de signature', inline: true })
@@ -817,7 +792,6 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  // ── Contrats — Emploi ──
   if (interaction.isButton() && interaction.customId === 'open_contrat_emploi') {
     if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true }); return; }
     const modal = new ModalBuilder().setCustomId('contrat_emploi_modal').setTitle('📥 Contrat employeur — À signer');
@@ -838,7 +812,6 @@ client.on('interactionCreate', async interaction => {
     const contrat = { id: contratId, type: 'emploi', employeurNom: interaction.fields.getTextInputValue('employeur_nom'), objet: interaction.fields.getTextInputValue('objet'), leursConditions: interaction.fields.getTextInputValue('leurs_conditions'), remuneration: interaction.fields.getTextInputValue('remuneration'), userId: interaction.fields.getTextInputValue('user_id').trim(), signataire: interaction.user.username, signataireId: interaction.user.id, status: 'en_attente', createdAt: new Date().toISOString() };
     db.contrats.push(contrat); saveDB(db);
     await interaction.editReply({ content: '📋 Contrat **' + contratId + '** créé. Lisez les termes dans **#contrats**.' });
-
     const embed = new EmbedBuilder().setColor(0x8B5A2A).setTitle('📥 CONTRAT EMPLOYEUR — ' + contratId)
       .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n  CONTRAT PROPOSÉ À IRON WOLF COMPANY\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
       .addFields({ name: '🆔 Référence', value: '`' + contratId + '`', inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: '🏭 Employeur — ' + contrat.employeurNom, value: contrat.leursConditions }, { name: '💰 Rémunération', value: contrat.remuneration }, { name: '📋 Objet', value: contrat.objet }, { name: '📌 Statut', value: '🟡 En attente de notre signature', inline: true })
