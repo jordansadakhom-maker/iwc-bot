@@ -82,8 +82,9 @@ async function sendToThread(guild, threadId, payload) {
 const LOGS_ID = '1509337860724228137';
 
 async function sendLog(guild, type, data) {
-  const ch = guild.channels.cache.get(LOGS_ID);
-  if (!ch) return;
+  let ch = guild.channels.cache.get(LOGS_ID);
+  if (!ch) ch = await guild.channels.fetch(LOGS_ID).catch(() => null);
+  if (!ch) { console.log('⚠️ LOGS channel introuvable — ID:', LOGS_ID); return; }
 
   const configs = {
     ARRIVEE: {
