@@ -498,13 +498,19 @@ async function postDailyAgenda(guild) {
   const appts = await notionQuery();
   const today = new Date().toISOString().split('T')[0];
   const todayA = appts.filter(a => a.date?.startsWith(today));
-  const weekA  = appts.filter(a => { if (!a.date) return false; const d = new Date(a.date); return d >= new Date() && d <= new Date(Date.now() + 7*86400000); });
+
+  // Pas de rendez-vous aujourd'hui → on n'envoie RIEN (aucun ping, aucun message)
+  if (todayA.length === 0) return;
+
+  const weekA = appts.filter(a => { if (!a.date) return false; const d = new Date(a.date); return d >= new Date() && d <= new Date(Date.now() + 7*86400000); });
   const embed = new EmbedBuilder().setColor(0x8B5A2A).setTitle(`📅 Agenda — ${fmtLong(new Date())}`)
-    .setDescription(todayA.length === 0 ? '*Aucun rendez-vous aujourd\'hui.*' : todayA.map(a => `📅 **${a.titre}**\n🕐 ${a.heure || '—'} · 📍 ${a.lieu} · 👥 ${a.participants.join(', ') || '—'}`).join('\n\n'));
+    .setDescription(todayA.map(a => `📅 **${a.titre}**\n🕐 ${a.heure || '—'} · 📍 ${a.lieu} · 👥 ${a.participants.join(', ') || '—'}`).join('\n\n'));
   const nw = weekA.filter(a => !a.date?.startsWith(today)).slice(0, 5);
   if (nw.length) embed.addFields({ name: '📆 Cette semaine', value: nw.map(a => `📅 **${a.titre}** — ${fmtShort(a.date)} ${a.heure || ''}`).join('\n') });
   embed.setFooter({ text: 'IWC • Secrétariat automatique' });
-  await ch.send({ embeds: [embed] });
+
+  // Il y a au moins un rendez-vous → on ping la Direction
+  await ch.send({ content: getMention(guild) || undefined, embeds: [embed] });
 }
 
 client.on('guildMemberAdd', async member => {
