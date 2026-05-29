@@ -89,11 +89,13 @@ function loadDB() {
   if (!fs.existsSync(DB_PATH)) {
     fs.writeFileSync(DB_PATH, JSON.stringify({
       members: {}, operations: [], sessions: [],
-      candidatures: [], contrats: [],
+      candidatures: [], contrats: [], sentReminders: {},
       dashboardMsgId: null, reglementMsgId: null, recrutementMsgId: null,
     }, null, 2));
   }
-  return JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
+  const d = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
+  if (!d.sentReminders) d.sentReminders = {}; // sécurité si ancienne db
+  return d;
 }
 function saveDB(d) { fs.writeFileSync(DB_PATH, JSON.stringify(d, null, 2)); }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -462,45 +464,92 @@ function buildParticipantMentions(participants) {
   }).filter(Boolean).join(' ');
 }
 
+// Décalage Europe/Paris en heures pour une date donnée (gère été/hiver automatiquement)
+function parisOffsetHours(date) {
+  // On compare l'heure locale "Europe/Paris" à l'heure UTC pour déduire le décalage réel
+  const tzStr = date.toLocaleString('en-US', { timeZone: 'Europe/Paris' });
+  const utcStr = date.toLocaleString('en-US', { timeZone: 'UTC' });
+  return Math.round((new Date(tzStr).getTime() - new Date(utcStr).getTime()) / 3600000);
+}
+
+// Construit l'instant correct d'un RDV saisi en heure de Paris (date + "HH:MM")
+function buildRdvDate(dateStr, heureStr) {
+  if (!dateStr) return null;
+  // On récupère le jour (la partie date), heure issue du champ "Heure" sinon de la date ISO
+  const jour = dateStr.split('T')[0]; // ex "2026-05-29"
+  let hh = 0, mm = 0;
+  if (heureStr && /\d{1,2}[:hH]\d{2}/.test(heureStr)) {
+    const m = heureStr.match(/(\d{1,2})[:hH](\d{2})/);
+    hh = parseInt(m[1], 10); mm = parseInt(m[2], 10);
+  } else if (dateStr.includes('T')) {
+    const t = dateStr.split('T')[1];
+    hh = parseInt(t.slice(0, 2), 10); mm = parseInt(t.slice(3, 5), 10);
+  }
+  // Instant provisoire en UTC, puis on retire le décalage Paris pour obtenir le vrai instant
+  const provisoire = new Date(`${jour}T${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:00Z`);
+  const offset = parisOffsetHours(provisoire);
+  return new Date(provisoire.getTime() - offset * 3600000);
+}
+
 async function checkAgenda(guild) {
   const appts = await notionQuery();
   const ch = getCh(guild, 'agenda', 'planning-sessions', 'planning');
   if (!ch || !appts.length) return;
   const mention = getMention(guild);
+  const db = loadDB();
+  let changed = false;
 
   for (const a of appts) {
     if (!a.date) continue;
-    const dt = a.heure ? new Date(`${a.date}T${a.heure}`) : new Date(a.date);
+    const dt = buildRdvDate(a.date, a.heure);
+    if (!dt) continue;
     const mins = Math.floor((dt.getTime() - Date.now()) / 60000);
     const participantMentions = buildParticipantMentions(a.participants);
     const pingContent = participantMentions || mention;
+    const heureAffichee = buildRdvDate(a.date, a.heure)?.toLocaleTimeString('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit' });
 
     const mkEmbed = (title, color) => new EmbedBuilder().setColor(color).setTitle(title)
       .setDescription(`## 📅 ${a.titre}`)
       .addFields(
-        { name: 'Quand', value: `${fmtLong(a.date)}${a.heure ? ` à **${a.heure}**` : ''}`, inline: true },
+        { name: 'Quand', value: `${fmtLong(a.date)}${heureAffichee ? ` à **${heureAffichee}**` : ''}`, inline: true },
         { name: 'Lieu', value: a.lieu, inline: true },
         { name: 'Participants', value: a.participants.length > 0 ? a.participants.join(', ') : '—' },
         ...(a.notes ? [{ name: 'Notes', value: a.notes }] : []),
         { name: 'Modifier', value: `[Notion](${a.url})` }
       ).setFooter({ text: 'IWC • Secrétariat automatique' });
 
-    if (!a.notif24 && mins <= 1440 && mins > 60) {
-      await ch.send({ content: `${pingContent} — 📅 RDV dans 24h`, embeds: [mkEmbed('📅 Rappel — 24 heures', 0x5865F2)] });
-      await sendParticipantDMs(guild, a, '📅 Rappel — RDV dans 24h', 0x5865F2);
-      await notionPatch(a.id, { 'Notif 24h': { checkbox: true } });
+    // Helper : un rappel n'est envoyé qu'UNE fois. Mémorisé dans db.sentReminders.
+    const dejaEnvoye = (key) => db.sentReminders[`${a.id}_${key}`];
+    const marquer = (key) => { db.sentReminders[`${a.id}_${key}`] = true; changed = true; };
+
+    if (mins > 0) {
+      // Les rappels ne partent QUE si la case correspondante est cochée dans Notion (= demandée).
+      if (a.notif24 && !dejaEnvoye('24h') && mins <= 1440 && mins > 60) {
+        await ch.send({ content: `${pingContent} — 📅 RDV dans 24h`, embeds: [mkEmbed('📅 Rappel — 24 heures', 0x5865F2)] });
+        await sendParticipantDMs(guild, a, '📅 Rappel — RDV dans 24h', 0x5865F2);
+        marquer('24h');
+        console.log(`🔔 Rappel 24h envoyé : ${a.titre}`);
+      }
+      if (a.notif1h && !dejaEnvoye('1h') && mins <= 60 && mins > 15) {
+        await ch.send({ content: `${pingContent} — ⏰ RDV dans 1 heure`, embeds: [mkEmbed('⏰ Rappel — 1 heure', 0xFFA500)] });
+        await sendParticipantDMs(guild, a, '⏰ Rappel — RDV dans 1 heure', 0xFFA500);
+        marquer('1h');
+        console.log(`🔔 Rappel 1h envoyé : ${a.titre}`);
+      }
+      if (a.notif15 && !dejaEnvoye('15min') && mins <= 15) {
+        await ch.send({ content: `${pingContent} — 🚨 15 minutes !`, embeds: [mkEmbed('🚨 URGENT — 15 min', 0xED4245)] });
+        await sendParticipantDMs(guild, a, '🚨 URGENT — RDV dans 15 minutes !', 0xED4245);
+        marquer('15min');
+        console.log(`🔔 Rappel 15min envoyé : ${a.titre}`);
+      }
     }
-    if (!a.notif1h && mins <= 60 && mins > 15) {
-      await ch.send({ content: `${pingContent} — ⏰ RDV dans 1 heure`, embeds: [mkEmbed('⏰ Rappel — 1 heure', 0xFFA500)] });
-      await sendParticipantDMs(guild, a, '⏰ Rappel — RDV dans 1 heure', 0xFFA500);
-      await notionPatch(a.id, { 'Notif 1h': { checkbox: true } });
-    }
-    if (!a.notif15 && mins <= 15 && mins > 0) {
-      await ch.send({ content: `${pingContent} — 🚨 15 minutes !`, embeds: [mkEmbed('🚨 URGENT — 15 min', 0xED4245)] });
-      await sendParticipantDMs(guild, a, '🚨 URGENT — RDV dans 15 minutes !', 0xED4245);
-      await notionPatch(a.id, { 'Notif 15min': { checkbox: true } });
+
+    // Nettoyage : on oublie les rappels d'un RDV passé depuis plus de 2h (évite que db.sentReminders gonfle)
+    if (mins < -120) {
+      ['24h', '1h', '15min'].forEach(k => { if (db.sentReminders[`${a.id}_${k}`]) { delete db.sentReminders[`${a.id}_${k}`]; changed = true; } });
     }
   }
+  if (changed) saveDB(db);
 }
 
 async function postDailyAgenda(guild) {
