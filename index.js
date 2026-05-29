@@ -49,7 +49,6 @@ const PARTICIPANTS_MAP = {
   'Cyrus Hollow':      '324627678143578112',
   'June McCall':       '998581854791798835',
   'Colt Kane':         '696325126047662081',
-  'Toute la Confrérie':'<@&1508756479274913903>',
   'Pôle Légal':        '<@&1508756436082102303>',
   'Pôle Illégal':      '<@&1508756479274913903>',
 };
