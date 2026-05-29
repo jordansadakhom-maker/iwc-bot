@@ -173,11 +173,13 @@ const OP_STATUT = { preparation: '🟡 Préparation', en_cours: '🟢 En cours',
 async function creerOperationNotion(op) {
   try {
     const j = await notionCreate(DBS.OPERATIONS, {
-      'Nom':      { title: [{ text: { content: op.name || '—' } }] },
-      'Lieu IC':  { rich_text: [{ text: { content: op.lieu || '—' } }] },
-      'Objectif': { rich_text: [{ text: { content: op.objectif || '—' } }] },
-      'Notes':    { rich_text: [{ text: { content: op.equipe ? `Équipe : ${op.equipe}` : '—' } }] },
-      'Statut':   { select: { name: OP_STATUT[op.status] || '🟡 Préparation' } },
+      'Nom':          { title: [{ text: { content: op.name || '—' } }] },
+      'Lieu IC':      { rich_text: [{ text: { content: op.lieu || '—' } }] },
+      'Objectif':     { rich_text: [{ text: { content: op.objectif || '—' } }] },
+      'Pôle':         { select: { name: op.pole === 'legal' ? '⚖️ Légal' : '🔪 Illégal' } },
+      'Participants': { rich_text: [{ text: { content: (op.participants || []).join(', ') || '—' } }] },
+      'Notes':        { rich_text: [{ text: { content: op.equipe ? `Équipe : ${op.equipe}` : '—' } }] },
+      'Statut':       { select: { name: OP_STATUT[op.status] || '🟡 Préparation' } },
     });
     if (j) { console.log(`✅ Opération "${op.name}" ajoutée à Notion`); return j.id; }
     return null;
@@ -187,8 +189,15 @@ async function creerOperationNotion(op) {
 async function majOperationNotion(op) {
   try {
     if (!op.notionPageId) return;
-    const props = { 'Statut': { select: { name: OP_STATUT[op.status] || op.status } } };
+    const props = {
+      'Statut':       { select: { name: OP_STATUT[op.status] || op.status } },
+      'Participants': { rich_text: [{ text: { content: (op.participants || []).join(', ') || '—' } }] },
+    };
     if (op.endedAt) props['Date fin'] = { date: { start: new Date(op.endedAt).toISOString().split('T')[0] } };
+    if (op.resultat) {
+      const resTxt = [op.resultat, op.butin && op.butin !== '—' ? `Butin : ${op.butin}` : null, op.debrief && op.debrief !== '—' ? `Débrief : ${op.debrief}` : null].filter(Boolean).join(' · ');
+      props['Résultat'] = { rich_text: [{ text: { content: resTxt.slice(0, 2000) } }] };
+    }
     await notionPatch(op.notionPageId, props);
     console.log(`✅ Opération "${op.name}" mise à jour (${op.status})`);
   } catch (e) { console.log('❌ MAJ opération error:', e.message); }
