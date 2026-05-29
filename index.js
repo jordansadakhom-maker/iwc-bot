@@ -61,6 +61,10 @@ const CONTRAT_ROLES = [
 ];
 const JUNE_MCCALL_ID = '998581854791798835';
 
+// Rôles des pôles (pour le ping des opérations)
+const ROLE_POLE_LEGAL   = '1508756436082102303';
+const ROLE_POLE_ILLEGAL = '1508756479274913903';
+
 const NOTION_RECRUTEMENT_DB = '36ef4436a86c81de9f1acf55c5ad4076';
 const NOTION_MEMBRES_DB     = '36ef4436a86c818d99a4dd875efec4e3';
 
@@ -72,6 +76,13 @@ const MEMBRES_DISCORD_MAP = {
   'Jonas Caverly':  '944208797084311583',
   'Thomas Galagan': '982201491773354035',
 };
+
+// Map inverse : ID Discord → Nom IC (pour répertorier les participants aux opérations)
+const DISCORD_TO_IC = Object.fromEntries(Object.entries(MEMBRES_DISCORD_MAP).map(([nom, id]) => [id, nom]));
+function nomParticipant(member) {
+  // Renvoie le nom IC si connu, sinon le pseudo Discord en repli
+  return DISCORD_TO_IC[member.id] || member.user?.username || member.displayName || 'Inconnu';
+}
 
 const DB_PATH = './data.json';
 function loadDB() {
@@ -673,20 +684,37 @@ client.on('messageCreate', async message => {
     if (message.content.toUpperCase().includes('OPÉRATION') || message.content.toUpperCase().includes('OPERATION')) {
       const lines = message.content.split('\n');
       const get = k => { const l = lines.find(l => l.toUpperCase().includes(k.toUpperCase())); return l ? l.split(':').slice(1).join(':').trim() || '—' : '—'; };
-      const op = { id: Date.now().toString(), name: get('NOM'), lieu: get('LIEU'), objectif: get('OBJECTIF'), equipe: get('ÉQUIPE') || get('EQUIPE'), status: 'preparation', createdAt: new Date().toISOString() };
+      // Détection du pôle (défaut : Illégal, car ce salon est côté ombre)
+      const poleRaw = get('PÔLE') !== '—' ? get('PÔLE') : get('POLE');
+      const pole = poleRaw.toLowerCase().includes('lég') || poleRaw.toLowerCase().includes('leg') ? 'legal' : 'illegal';
+      const op = { id: Date.now().toString(), name: get('NOM'), lieu: get('LIEU'), objectif: get('OBJECTIF'), equipe: get('ÉQUIPE') || get('EQUIPE'), pole, participants: [], status: 'preparation', createdAt: new Date().toISOString() };
       db.operations.push(op);
       op.notionPageId = await notionExtra.creerOperationNotion?.(op);
       saveDB(db);
       await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: '🟡 En préparation' });
+      const poleLabel = pole === 'legal' ? '⚖️ Pôle Légal' : '🔪 Pôle Illégal';
       const embed = new EmbedBuilder().setColor(0xFFA500).setTitle(`🎯 OPÉRATION — ${op.name}`)
-        .addFields({ name: 'Statut', value: '🟡 En préparation', inline: true }, { name: 'Lieu', value: op.lieu, inline: true }, { name: 'Équipe', value: op.equipe }, { name: 'Objectif', value: op.objectif })
+        .addFields(
+          { name: 'Statut', value: '🟡 En préparation', inline: true },
+          { name: 'Pôle', value: poleLabel, inline: true },
+          { name: 'Lieu', value: op.lieu, inline: true },
+          { name: 'Objectif', value: op.objectif },
+          { name: 'Équipe', value: op.equipe },
+          { name: '👥 Participants (0)', value: '*Personne pour l\'instant. Clique « ✋ Je participe » ci-dessous.*' }
+        )
         .setFooter({ text: `ID: ${op.id} • ${fmtShort(new Date())}` });
-      const row = new ActionRowBuilder().addComponents(
+      const rowParticip = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`op_participer_${op.id}`).setLabel('✋ Je participe').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`op_retrait_${op.id}`).setLabel('🚪 Me retirer').setStyle(ButtonStyle.Secondary),
+      );
+      const rowGestion = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`op_encours_${op.id}`).setLabel('🟢 Lancer').setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId(`op_terminee_${op.id}`).setLabel('✅ Terminer').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(`op_annulee_${op.id}`).setLabel('❌ Annuler').setStyle(ButtonStyle.Danger),
       );
-      await opsCh.send({ embeds: [embed], components: [row] });
+      // Ping du pôle concerné à l'annonce de l'opération
+      const roleId = pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL;
+      await opsCh.send({ content: `<@&${roleId}> — 🎯 Nouvelle opération **${op.name}**. Inscrivez-vous via « ✋ Je participe ».`, embeds: [embed], components: [rowParticip, rowGestion] });
       await message.react('✅');
     }
     return;
@@ -782,19 +810,91 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  if (interaction.isButton() && interaction.customId.startsWith('op_')) {
-    const [, status, opId] = interaction.customId.split('_');
+  // ── Participation à une opération ──
+  if (interaction.isButton() && (interaction.customId.startsWith('op_participer_') || interaction.customId.startsWith('op_retrait_'))) {
+    const retrait = interaction.customId.startsWith('op_retrait_');
+    const opId = interaction.customId.replace(retrait ? 'op_retrait_' : 'op_participer_', '');
     const op = db.operations.find(o => o.id === opId);
-    if (!op) return interaction.reply({ content: '❌ Opération introuvable.', ephemeral: true });
-    const labels = { encours: '🟢 En cours', terminee: '✅ Terminée', annulee: '❌ Annulée' };
-    const colors = { encours: 0x00AA00, terminee: 0x57F287, annulee: 0xED4245 };
-    op.status = status === 'encours' ? 'en_cours' : status;
-    if (status === 'terminee') op.endedAt = new Date().toISOString();
+    if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', ephemeral: true }); return; }
+    if (['terminee', 'annulee'].includes(op.status)) { await interaction.reply({ content: '❌ Cette opération est clôturée.', ephemeral: true }); return; }
+    op.participants = op.participants || [];
+    const nom = nomParticipant(interaction.member);
+    if (retrait) {
+      op.participants = op.participants.filter(p => p !== nom);
+    } else if (!op.participants.includes(nom)) {
+      op.participants.push(nom);
+    }
     saveDB(db);
     await notionExtra.majOperationNotion?.(op);
-    await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: labels[status] || status });
-    const updated = EmbedBuilder.from(interaction.message.embeds[0]).setColor(colors[status] || 0x8B5A2A).spliceFields(0, 1, { name: 'Statut', value: labels[status] || status, inline: true });
-    await interaction.update({ embeds: [updated], components: ['terminee', 'annulee'].includes(status) ? [] : interaction.message.components });
+    const liste = op.participants.length ? op.participants.join(', ') : '*Personne pour l\'instant. Clique « ✋ Je participe » ci-dessous.*';
+    const embeds = interaction.message.embeds;
+    const idx = embeds[0].fields.findIndex(f => f.name.startsWith('👥 Participants'));
+    const updated = EmbedBuilder.from(embeds[0]);
+    if (idx >= 0) updated.spliceFields(idx, 1, { name: `👥 Participants (${op.participants.length})`, value: liste });
+    await interaction.update({ embeds: [updated] });
+    return;
+  }
+
+  // ── Terminer une opération → modal pour saisir le résultat ──
+  if (interaction.isButton() && interaction.customId.startsWith('op_terminee_')) {
+    const opId = interaction.customId.replace('op_terminee_', '');
+    const op = db.operations.find(o => o.id === opId);
+    if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', ephemeral: true }); return; }
+    const modal = new ModalBuilder().setCustomId(`op_resultat_modal_${opId}`).setTitle('✅ Clôture de l\'opération');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('resultat').setLabel('Résultat').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Réussite / Échec / Mitigé')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('butin').setLabel('Butin / Gains').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: 5000$, matériel récupéré...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('debrief').setLabel('Débrief / Notes').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setPlaceholder('Comment ça s\'est passé...')),
+    );
+    await interaction.showModal(modal);
+    return;
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('op_resultat_modal_')) {
+    const opId = interaction.customId.replace('op_resultat_modal_', '');
+    const op = db.operations.find(o => o.id === opId);
+    if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', ephemeral: true }); return; }
+    await interaction.deferUpdate();
+    op.status = 'terminee';
+    op.endedAt = new Date().toISOString();
+    op.resultat = interaction.fields.getTextInputValue('resultat');
+    op.butin = interaction.fields.getTextInputValue('butin') || '—';
+    op.debrief = interaction.fields.getTextInputValue('debrief') || '—';
+    saveDB(db);
+    await notionExtra.majOperationNotion?.(op);
+    await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: '✅ Terminée — ' + op.resultat });
+    const updated = EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287)
+      .spliceFields(0, 1, { name: 'Statut', value: '✅ Terminée', inline: true })
+      .addFields({ name: '🏁 Résultat', value: op.resultat, inline: true }, { name: '💰 Butin', value: op.butin, inline: true }, { name: '📝 Débrief', value: op.debrief });
+    await interaction.editReply({ embeds: [updated], components: [] });
+    return;
+  }
+
+  // ── Lancer / Annuler une opération ──
+  if (interaction.isButton() && (interaction.customId.startsWith('op_encours_') || interaction.customId.startsWith('op_annulee_'))) {
+    const isLancer = interaction.customId.startsWith('op_encours_');
+    const opId = interaction.customId.replace(isLancer ? 'op_encours_' : 'op_annulee_', '');
+    const op = db.operations.find(o => o.id === opId);
+    if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', ephemeral: true }); return; }
+    op.status = isLancer ? 'en_cours' : 'annulee';
+    saveDB(db);
+    await notionExtra.majOperationNotion?.(op);
+    const label = isLancer ? '🟢 En cours' : '❌ Annulée';
+    await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: label });
+    const updated = EmbedBuilder.from(interaction.message.embeds[0]).setColor(isLancer ? 0x00AA00 : 0xED4245).spliceFields(0, 1, { name: 'Statut', value: label, inline: true });
+    // Au lancement : on ping les participants inscrits (ou le pôle si personne)
+    if (isLancer) {
+      const mentions = (op.participants || []).map(nom => {
+        const id = MEMBRES_DISCORD_MAP[nom];
+        return id ? `<@${id}>` : null;
+      }).filter(Boolean).join(' ');
+      const roleId = op.pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL;
+      const ping = mentions || `<@&${roleId}>`;
+      await interaction.update({ embeds: [updated] });
+      await interaction.followUp({ content: `${ping} — 🟢 L'opération **${op.name}** est **LANCÉE**. À vos postes.` });
+    } else {
+      await interaction.update({ embeds: [updated], components: [] });
+    }
     return;
   }
 
