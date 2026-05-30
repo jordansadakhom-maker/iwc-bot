@@ -901,17 +901,208 @@ async function handleAffairesResumeButton(interaction) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 5. INFORMATEURS — Archivage auto + alerte Direction
+// 5. INFORMATEURS — Panel + Formulaire modal + Archivage auto + Alerte Direction
 // ═══════════════════════════════════════════════════════════════
-//
-// Quand un message est posté dans #informateurs :
-//   await notionV3.handleInformateurMessage(message);
-//
-// Le bot parse automatiquement le format SOURCE/CIBLE/INFORMATION/FIABILITE/DATE
-// Archive dans Notion + alerte la Direction si fiabilité = Confirmée
 
 const NOTION_INFOS_DB = process.env.NOTION_INFOS_DB || null;
 
+/**
+ * Poste le panel épinglé dans #informateurs au démarrage
+ * Appelé dans autoSetup : await notionV3.setupInformateursPanel(guild);
+ */
+async function setupInformateursPanel(guild) {
+  try {
+    const db = loadDB();
+    const infosCh = getCh(guild, 'informateurs');
+    if (!infosCh) return;
+
+    if (db.informeursPanelMsgId) {
+      try { await infosCh.messages.fetch(db.informeursPanelMsgId); return; } catch {}
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0x2C2F33)
+      .setTitle('🕵️ INFORMATEURS — Réseau de Renseignement')
+      .setDescription([
+        '*Ce canal est réservé aux informations collectées sur le terrain.*',
+        '*Discrétion absolue. Ce qui est posté ici ne sort pas de ces murs.*',
+        '',
+        '**Deux façons de soumettre un rapport :**',
+        '→ Via le bouton **📋 Soumettre un rapport** ci-dessous',
+        '→ Via le format texte directement dans le salon',
+        '',
+        '**Format texte :**',
+        '```',
+        'SOURCE : ',
+        'CIBLE / LIEU : ',
+        'INFORMATION : ',
+        'FIABILITÉ : Confirmée / Non confirmée',
+        'DATE : ',
+        '```',
+        '',
+        '*Toute information confirmée alerte automatiquement la Direction.*',
+      ].join('\n'))
+      .setFooter({ text: 'IWC • Réseau d\'informateurs — Confidentiel' });
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('btn_informateur_rapport')
+        .setLabel('📋 Soumettre un rapport')
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId('btn_informateur_historique')
+        .setLabel('📂 Historique')
+        .setStyle(ButtonStyle.Secondary),
+    );
+
+    const sent = await infosCh.send({ embeds: [embed], components: [row] });
+    await sent.pin().catch(() => {});
+    db.informeursPanelMsgId = sent.id;
+    saveDB(db);
+    console.log('✅ Panel informateurs configuré');
+  } catch (e) { console.log('❌ setupInformateursPanel error:', e.message); }
+}
+
+/**
+ * Bouton 📋 Soumettre un rapport → ouvre le modal
+ */
+async function handleInformateurRapportButton(interaction) {
+  const modal = new ModalBuilder()
+    .setCustomId('modal_informateur')
+    .setTitle('🕵️ Rapport — Réseau Informateurs');
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('source')
+        .setLabel('Source (nom / pseudo / anonyme)')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('Ex: Contact dans la police, Anonyme...')
+        .setRequired(true)
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('cible')
+        .setLabel('Cible / Lieu')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('Ex: Commissariat de Paleto Bay, Famille Moreau...')
+        .setRequired(true)
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('information')
+        .setLabel('Information collectée')
+        .setStyle(TextInputStyle.Paragraph)
+        .setPlaceholder('Décris ce que tu as vu / entendu / appris...')
+        .setRequired(true)
+        .setMaxLength(1000)
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('fiabilite')
+        .setLabel('Fiabilité (Confirmée / Non confirmée)')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('Confirmée  ou  Non confirmée')
+        .setRequired(true)
+    ),
+  );
+
+  await interaction.showModal(modal);
+}
+
+/**
+ * Soumission du modal informateur
+ */
+async function handleInformateurModal(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+
+  const source      = interaction.fields.getTextInputValue('source');
+  const cible       = interaction.fields.getTextInputValue('cible');
+  const information = interaction.fields.getTextInputValue('information');
+  const fiabiliteRaw = interaction.fields.getTextInputValue('fiabilite').toLowerCase();
+  const estConfirmee = fiabiliteRaw.includes('confirm') && !fiabiliteRaw.includes('non');
+  const fiabilite   = estConfirmee ? 'Confirmée' : 'Non confirmée';
+
+  const db = loadDB();
+  if (!db.informateurs) db.informateurs = [];
+
+  const rapport = {
+    id:           `INFO-${Date.now().toString().slice(-5)}`,
+    source,
+    cible,
+    info:         information,
+    fiabilite,
+    rapporteurId: interaction.user.id,
+    rapporteur:   interaction.user.username,
+    createdAt:    new Date().toISOString(),
+  };
+  db.informateurs.push(rapport);
+  saveDB(db);
+
+  // Archivage Notion
+  await _archiverRapportNotion(rapport);
+
+  // Post dans #informateurs
+  const infosCh = getCh(interaction.guild, 'informateurs');
+  if (infosCh) {
+    await infosCh.send({
+      embeds: [new EmbedBuilder()
+        .setColor(estConfirmee ? 0xED4245 : 0xFFA500)
+        .setTitle(`${estConfirmee ? '🔴' : '🟡'} Rapport \`${rapport.id}\` — ${estConfirmee ? 'Information Confirmée' : 'Non confirmée'}`)
+        .addFields(
+          { name: '🕵️ Source',      value: source,      inline: true },
+          { name: '🎯 Cible / Lieu', value: cible,       inline: true },
+          { name: '📋 Fiabilité',    value: `${estConfirmee ? '✅' : '⚠️'} ${fiabilite}`, inline: true },
+          { name: '📝 Information',  value: information.slice(0, 800) },
+          { name: '👤 Rapporteur',   value: `<@${interaction.user.id}>`, inline: true },
+          { name: '📅 Date',         value: fmtShort(new Date()),        inline: true },
+        )
+        .setFooter({ text: 'IWC • Réseau Informateurs — Confidentiel' })
+        .setTimestamp()
+      ]
+    }).catch(() => {});
+  }
+
+  // Alerte Direction dans #logs si confirmée
+  if (estConfirmee) {
+    await _alerterDirection(interaction.guild, rapport);
+  }
+
+  await interaction.editReply({
+    content: `✅ Rapport \`${rapport.id}\` soumis.${estConfirmee ? '\n⚠️ **La Direction a été alertée.**' : ''}`,
+  });
+}
+
+/**
+ * Historique des rapports
+ */
+async function handleInformateurHistorique(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+  const db = loadDB();
+  const rapports = (db.informateurs || []).slice(-10).reverse();
+
+  if (!rapports.length) {
+    return interaction.editReply({ content: '📭 Aucun rapport dans l\'historique.' });
+  }
+
+  const lines = rapports.map(r => {
+    const emoji = r.fiabilite === 'Confirmée' ? '🔴' : '🟡';
+    return `${emoji} \`${r.id}\` **${r.cible}** — ${r.info.slice(0, 60)}... *(${fmtShort(r.createdAt)})*`;
+  }).join('\n');
+
+  await interaction.editReply({
+    embeds: [new EmbedBuilder()
+      .setColor(0x2C2F33)
+      .setTitle('📂 Historique — 10 derniers rapports')
+      .setDescription(lines)
+      .setFooter({ text: 'IWC • Réseau Informateurs — Confidentiel' })
+    ]
+  });
+}
+
+/**
+ * Parse les messages texte dans #informateurs (format libre)
+ */
 async function handleInformateurMessage(message) {
   if (message.author.bot || !message.guild) return;
 
@@ -922,102 +1113,102 @@ async function handleInformateurMessage(message) {
     return l ? l.split(':').slice(1).join(':').trim() : null;
   };
 
-  const source     = get('SOURCE');
-  const cible      = get('CIBLE') || get('CIBLE / LIEU') || get('CIBLE/LIEU');
-  const info       = get('INFORMATION') || get('INFO');
-  const fiabilite  = get('FIABILITÉ') || get('FIABILITE');
-  const date       = get('DATE') || fmtShort(new Date());
+  const source    = get('SOURCE');
+  const cible     = get('CIBLE') || get('CIBLE / LIEU') || get('CIBLE/LIEU');
+  const info      = get('INFORMATION') || get('INFO');
+  const fiabilite = get('FIABILITÉ') || get('FIABILITE');
 
-  // Si le message n'a pas le format attendu, on réagit juste
   if (!source && !info) {
     await message.react('👁️').catch(() => {});
     return;
   }
 
-  // Réaction de confirmation
   await message.react('✅').catch(() => {});
 
-  const estConfirmee = fiabilite?.toLowerCase().includes('confirm');
+  const estConfirmee = fiabilite?.toLowerCase().includes('confirm') && !fiabilite?.toLowerCase().includes('non');
   const db = loadDB();
   if (!db.informateurs) db.informateurs = [];
 
   const rapport = {
-    id: Date.now().toString(),
-    source:    source    || '—',
-    cible:     cible     || '—',
-    info:      info      || content.slice(0, 500),
-    fiabilite: fiabilite || '—',
-    date:      date,
-    rapporteurId:  message.author.id,
-    rapporteur:    message.author.username,
-    createdAt: new Date().toISOString(),
+    id:           `INFO-${Date.now().toString().slice(-5)}`,
+    source:       source    || '—',
+    cible:        cible     || '—',
+    info:         info      || content.slice(0, 500),
+    fiabilite:    fiabilite || '—',
+    rapporteurId: message.author.id,
+    rapporteur:   message.author.username,
+    createdAt:    new Date().toISOString(),
   };
   db.informateurs.push(rapport);
   saveDB(db);
 
-  // Archivage Notion si DB configurée
-  if (process.env.NOTION_TOKEN && NOTION_INFOS_DB) {
-    try {
-      await fetch('https://api.notion.com/v1/pages', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.NOTION_TOKEN}`,
-          'Notion-Version': '2022-06-28',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          parent: { database_id: NOTION_INFOS_DB },
-          properties: {
-            'Source':     { title: [{ text: { content: rapport.source } }] },
-            'Cible':      { rich_text: [{ text: { content: rapport.cible } }] },
-            'Information':{ rich_text: [{ text: { content: rapport.info.slice(0, 2000) } }] },
-            'Fiabilité':  { select: { name: estConfirmee ? '✅ Confirmée' : '⚠️ Non confirmée' } },
-            'Date':       { date: { start: new Date().toISOString().split('T')[0] } },
-            'Rapporteur': { rich_text: [{ text: { content: rapport.rapporteur } }] },
-          }
-        })
-      });
-      console.log(`✅ Rapport informateur archivé dans Notion`);
-    } catch (e) { console.log('❌ Informateur Notion error:', e.message); }
-  }
+  await _archiverRapportNotion(rapport);
 
-  // Alerte Direction si info confirmée
   if (estConfirmee) {
-    const logsCh = getCh(message.guild, 'logs');
-    if (logsCh) {
-      const mention = message.guild.roles.cache
-        .filter(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur'].some(n => r.name.includes(n)))
-        .map(r => `<@&${r.id}>`).join(' ');
-
-      await logsCh.send({
-        content: `${mention} — 🚨 **Information confirmée reçue**`,
-        embeds: [new EmbedBuilder()
-          .setColor(0xED4245)
-          .setTitle('🔴 ALERTE — Information Confirmée')
-          .addFields(
-            { name: '🕵️ Source',      value: rapport.source,   inline: true },
-            { name: '🎯 Cible / Lieu', value: rapport.cible,    inline: true },
-            { name: '📋 Fiabilité',    value: `✅ ${fiabilite}`, inline: true },
-            { name: '📝 Information',  value: rapport.info.slice(0, 500) },
-            { name: '👤 Rapporteur',   value: `<@${message.author.id}>`, inline: true },
-          )
-          .setFooter({ text: 'IWC • Réseau d\'informateurs — Confidentiel' })
-          .setTimestamp()
-        ]
-      }).catch(() => {});
-    }
+    await _alerterDirection(message.guild, rapport, message.author.id);
   }
 
-  // Embed de confirmation discret dans #informateurs
   await message.reply({
     embeds: [new EmbedBuilder()
       .setColor(estConfirmee ? 0xED4245 : 0xFFA500)
-      .setTitle(`${estConfirmee ? '🔴 Info Confirmée' : '🟡 Info Reçue'} — Archivée`)
-      .setDescription(`Rapport \`${rapport.id}\` enregistré.${estConfirmee ? '\n⚠️ **La Direction a été alertée.**' : ''}`)
+      .setTitle(`${estConfirmee ? '🔴 Info Confirmée' : '🟡 Info Reçue'} — \`${rapport.id}\` Archivée`)
+      .setDescription(`Rapport enregistré.${estConfirmee ? '\n⚠️ **La Direction a été alertée dans #logs.**' : ''}`)
       .setFooter({ text: 'IWC • Informateurs — Confidentiel' })
     ],
     allowedMentions: { repliedUser: false },
   }).then(m => setTimeout(() => m.delete().catch(() => {}), 8000)).catch(() => {});
+}
+
+// ── Helpers internes informateurs ──
+async function _archiverRapportNotion(rapport) {
+  if (!process.env.NOTION_TOKEN || !NOTION_INFOS_DB) return;
+  try {
+    await fetch('https://api.notion.com/v1/pages', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.NOTION_TOKEN}`,
+        'Notion-Version': '2022-06-28',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        parent: { database_id: NOTION_INFOS_DB },
+        properties: {
+          'Source':      { title: [{ text: { content: rapport.source } }] },
+          'Cible':       { rich_text: [{ text: { content: rapport.cible } }] },
+          'Information': { rich_text: [{ text: { content: rapport.info.slice(0, 2000) } }] },
+          'Fiabilité':   { select: { name: rapport.fiabilite === 'Confirmée' ? '✅ Confirmée' : '⚠️ Non confirmée' } },
+          'Date':        { date: { start: new Date().toISOString().split('T')[0] } },
+          'Rapporteur':  { rich_text: [{ text: { content: rapport.rapporteur } }] },
+        }
+      })
+    });
+    console.log(`✅ Rapport ${rapport.id} archivé dans Notion`);
+  } catch (e) { console.log('❌ Informateur Notion error:', e.message); }
+}
+
+async function _alerterDirection(guild, rapport, rapporteurId) {
+  const logsCh = getCh(guild, 'logs');
+  if (!logsCh) return;
+
+  const mention = guild.roles.cache
+    .filter(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Conseil'].some(n => r.name.includes(n)))
+    .map(r => `<@&${r.id}>`).join(' ');
+
+  await logsCh.send({
+    content: `${mention} — 🚨 **Information confirmée reçue**`,
+    embeds: [new EmbedBuilder()
+      .setColor(0xED4245)
+      .setTitle(`🔴 ALERTE — Information Confirmée \`${rapport.id}\``)
+      .addFields(
+        { name: '🕵️ Source',      value: rapport.source,                          inline: true },
+        { name: '🎯 Cible / Lieu', value: rapport.cible,                           inline: true },
+        { name: '👤 Rapporteur',   value: rapporteurId ? `<@${rapporteurId}>` : rapport.rapporteur, inline: true },
+        { name: '📝 Information',  value: rapport.info.slice(0, 500) },
+      )
+      .setFooter({ text: 'IWC • Réseau d\'informateurs — Confidentiel' })
+      .setTimestamp()
+    ]
+  }).catch(() => {});
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1056,6 +1247,225 @@ async function updateNotionStatutPole(userId, pole) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// 7. SCREENSHOTS PLANNING — Détection image dans #planning
+//    → insertion automatique dans la page Notion du RDV le plus proche
+// ═══════════════════════════════════════════════════════════════
+//
+// Dans messageCreate (index.js), dans le bloc #planning :
+//   await notionV3.handlePlanningScreenshot(message);
+
+const NOTION_VERSION = '2022-06-28';
+const NOTION_BASE_URL = 'https://api.notion.com/v1';
+
+async function notionAddImageBlock(pageId, imageUrl, caption) {
+  if (!process.env.NOTION_TOKEN || !pageId) return;
+  try {
+    await fetch(`${NOTION_BASE_URL}/blocks/${pageId}/children`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${process.env.NOTION_TOKEN}`,
+        'Notion-Version': NOTION_VERSION,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        children: [
+          {
+            object: 'block',
+            type: 'image',
+            image: {
+              type: 'external',
+              external: { url: imageUrl },
+              caption: caption ? [{ type: 'text', text: { content: caption } }] : [],
+            },
+          },
+          // Séparateur visuel
+          {
+            object: 'block',
+            type: 'paragraph',
+            paragraph: {
+              rich_text: [{ type: 'text', text: { content: `📸 Ajouté le ${fmtShort(new Date())} via Discord` } }],
+            },
+          },
+        ],
+      }),
+    });
+    console.log(`✅ Image ajoutée dans Notion page ${pageId}`);
+    return true;
+  } catch (e) {
+    console.log('❌ notionAddImageBlock error:', e.message);
+    return false;
+  }
+}
+
+/**
+ * Récupère les RDV Notion à venir et retourne le plus proche
+ */
+async function getProchainRdvNotion() {
+  if (!process.env.NOTION_TOKEN || !process.env.NOTION_AGENDA_DB_ID) return null;
+  try {
+    const res = await fetch(`${NOTION_BASE_URL}/databases/${process.env.NOTION_AGENDA_DB_ID}/query`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.NOTION_TOKEN}`,
+        'Notion-Version': NOTION_VERSION,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        filter: {
+          property: 'Date',
+          date: { on_or_after: new Date().toISOString() },
+        },
+        sorts: [{ property: 'Date', direction: 'ascending' }],
+        page_size: 5,
+      }),
+    });
+    const data = await res.json();
+    const results = data.results || [];
+    if (!results.length) return null;
+
+    // Retourne le premier (le plus proche dans le temps)
+    const p = results[0];
+    return {
+      id:    p.id,
+      titre: p.properties.Titre?.title?.[0]?.plain_text || '—',
+      date:  p.properties.Date?.date?.start,
+      lieu:  p.properties.Lieu?.rich_text?.[0]?.plain_text || '—',
+    };
+  } catch (e) {
+    console.log('❌ getProchainRdvNotion error:', e.message);
+    return null;
+  }
+}
+
+/**
+ * Cherche un RDV par mot-clé dans le titre ou le lieu
+ */
+async function rechercherRdvNotion(motCle) {
+  if (!process.env.NOTION_TOKEN || !process.env.NOTION_AGENDA_DB_ID) return null;
+  try {
+    const res = await fetch(`${NOTION_BASE_URL}/databases/${process.env.NOTION_AGENDA_DB_ID}/query`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.NOTION_TOKEN}`,
+        'Notion-Version': NOTION_VERSION,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        filter: {
+          or: [
+            { property: 'Titre', rich_text: { contains: motCle } },
+            { property: 'Lieu',  rich_text: { contains: motCle } },
+            { property: 'Notes', rich_text: { contains: motCle } },
+          ],
+        },
+        sorts: [{ property: 'Date', direction: 'ascending' }],
+        page_size: 3,
+      }),
+    });
+    const data = await res.json();
+    const results = data.results || [];
+    if (!results.length) return null;
+
+    const p = results[0];
+    return {
+      id:    p.id,
+      titre: p.properties.Titre?.title?.[0]?.plain_text || '—',
+      date:  p.properties.Date?.date?.start,
+      lieu:  p.properties.Lieu?.rich_text?.[0]?.plain_text || '—',
+    };
+  } catch (e) {
+    console.log('❌ rechercherRdvNotion error:', e.message);
+    return null;
+  }
+}
+
+/**
+ * Handler principal — détecte image dans #planning et l'ajoute dans Notion
+ *
+ * Formats acceptés dans le message :
+ *   [image] "screen paleto bay"         → cherche RDV avec "paleto bay"
+ *   [image] "screen rdv"                → prend le prochain RDV
+ *   [image] sans texte                  → prend le prochain RDV
+ *   [image] "lieu sandy shores 19h"     → cherche "sandy shores"
+ */
+async function handlePlanningScreenshot(message) {
+  if (message.author.bot || !message.guild) return false;
+
+  // Doit contenir au moins une image/attachment
+  const images = message.attachments.filter(a =>
+    a.contentType?.startsWith('image/') ||
+    /\.(png|jpg|jpeg|gif|webp)$/i.test(a.url)
+  );
+  if (!images.size) return false;
+
+  const texte = message.content.toLowerCase().trim();
+
+  // Extraire un mot-clé de lieu depuis le message
+  // Supprime les mots génériques pour garder le lieu IC
+  const motsCles = texte
+    .replace(/screen|rdv|lieu|repérage|reperage|capture|screenshot|planning|photo|image/gi, '')
+    .trim();
+
+  let rdv = null;
+
+  // Si un mot-clé de lieu est fourni → cherche ce RDV spécifiquement
+  if (motsCles.length > 2) {
+    rdv = await rechercherRdvNotion(motsCles);
+  }
+
+  // Fallback : prochain RDV à venir
+  if (!rdv) {
+    rdv = await getProchainRdvNotion();
+  }
+
+  if (!rdv) {
+    // Pas de RDV trouvé — on réagit quand même pour indiquer que c'est reçu
+    await message.react('📸').catch(() => {});
+    await message.reply({
+      embeds: [new EmbedBuilder()
+        .setColor(0xFFA500)
+        .setTitle('📸 Image reçue')
+        .setDescription('Aucun RDV trouvé dans l\'agenda Notion pour associer cette image.\nElle reste disponible ici sur Discord.')
+        .setFooter({ text: 'IWC • Planning' })
+      ],
+      allowedMentions: { repliedUser: false },
+    }).then(m => setTimeout(() => m.delete().catch(() => {}), 10000)).catch(() => {});
+    return true;
+  }
+
+  // Insérer chaque image dans la page Notion du RDV
+  let succes = 0;
+  const caption = `${message.author.username} — ${texte || 'Screenshot planning'}`;
+
+  for (const [, attachment] of images) {
+    const ok = await notionAddImageBlock(rdv.id, attachment.url, caption);
+    if (ok) succes++;
+  }
+
+  if (succes > 0) {
+    await message.react('✅').catch(() => {});
+    await message.reply({
+      embeds: [new EmbedBuilder()
+        .setColor(0x57F287)
+        .setTitle(`📸 ${succes} image(s) ajoutée(s) dans Notion`)
+        .addFields(
+          { name: '📅 RDV associé', value: `**${rdv.titre}**`, inline: true },
+          { name: '📍 Lieu',        value: rdv.lieu,            inline: true },
+          { name: '🗓️ Date',        value: fmtShort(rdv.date),  inline: true },
+        )
+        .setDescription('Les captures sont maintenant visibles dans la page Notion du RDV.')
+        .setFooter({ text: 'IWC • Planning automatique' })
+      ],
+      allowedMentions: { repliedUser: false },
+    }).then(m => setTimeout(() => m.delete().catch(() => {}), 15000)).catch(() => {});
+  } else {
+    await message.react('❌').catch(() => {});
+  }
+
+  return true;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // EXPORTS
 // ═══════════════════════════════════════════════════════════════
 module.exports = {
@@ -1082,7 +1492,13 @@ module.exports = {
   postResumeAffaires,
   handleAffairesResumeButton,
   // Informateurs
+  setupInformateursPanel,
+  handleInformateurRapportButton,
+  handleInformateurModal,
+  handleInformateurHistorique,
   handleInformateurMessage,
+  // Planning screenshots
+  handlePlanningScreenshot,
   // Pings
   getMentionPole,
   updateNotionStatutPole,
