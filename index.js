@@ -3,7 +3,8 @@ const {
   Client, GatewayIntentBits, Partials,
   EmbedBuilder, ChannelType, ActivityType,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  ModalBuilder, TextInputBuilder, TextInputStyle
+  ModalBuilder, TextInputBuilder, TextInputStyle,
+  SlashCommandBuilder,
 } = require('discord.js');
 const cron = require('node-cron');
 
@@ -14,6 +15,10 @@ const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub 
 let notionExtra = {};
 try { notionExtra = require('./notion-extra'); console.log('✅ Module notion-extra chargé'); }
 catch (e) { console.log('⚠️ notion-extra non chargé:', e.message); }
+
+// ── Filets de sécurité globaux (évite que le bot crash sur une erreur non gérée) ──
+process.on('unhandledRejection', reason => console.log('⚠️ Unhandled Rejection:', reason?.message || reason));
+process.on('uncaughtException',  err    => console.log('⚠️ Uncaught Exception:', err?.message || err));
 
 // ── Graceful shutdown ──
 process.on('SIGTERM', () => { saveDBSync(); process.exit(0); });
@@ -73,6 +78,33 @@ const MEMBRES_DISCORD_MAP = {
   'Thomas Galagan': '982201491773354035',
 };
 const DISCORD_TO_IC = Object.fromEntries(Object.entries(MEMBRES_DISCORD_MAP).map(([n, id]) => [id, n]));
+
+// ── Définition des slash commands ──
+const SLASH_COMMANDS = [
+  new SlashCommandBuilder().setName('stats').setDescription('Affiche les statistiques de la Compagnie'),
+  new SlashCommandBuilder().setName('solde').setDescription('Affiche les soldes des coffres'),
+  new SlashCommandBuilder().setName('fiche').setDescription("Affiche la fiche d'un membre")
+    .addStringOption(o => o.setName('nom').setDescription('Nom du personnage').setRequired(true)),
+  new SlashCommandBuilder().setName('ops').setDescription('Liste les opérations actives'),
+  new SlashCommandBuilder().setName('absent').setDescription('Déclare une absence')
+    .addStringOption(o => o.setName('duree').setDescription("Durée de l'absence (ex: 3 jours)").setRequired(true))
+    .addStringOption(o => o.setName('raison').setDescription('Raison (optionnel)').setRequired(false)),
+  new SlashCommandBuilder().setName('rapport').setDescription('Envoie le rapport quotidien en DM (Direction)'),
+  new SlashCommandBuilder().setName('promo').setDescription('Promeut un membre (Direction)')
+    .addUserOption(o => o.setName('membre').setDescription('Membre à promouvoir').setRequired(true))
+    .addStringOption(o => o.setName('rang').setDescription('Nouveau rang').setRequired(true)),
+  new SlashCommandBuilder().setName('retro').setDescription('Rétrograde un membre (Direction)')
+    .addUserOption(o => o.setName('membre').setDescription('Membre à rétrograder').setRequired(true))
+    .addStringOption(o => o.setName('rang').setDescription('Nouveau rang').setRequired(true))
+    .addStringOption(o => o.setName('raison').setDescription('Raison (optionnel)').setRequired(false)),
+].map(c => c.toJSON());
+
+async function registerSlashCommands(guild) {
+  try {
+    await guild.commands.set(SLASH_COMMANDS);
+    console.log(`✅ Slash commands enregistrées sur ${guild.name}`);
+  } catch (e) { console.log('❌ Enregistrement slash commands error:', e.message); }
+}
 
 // ── Helpers ──
 function nomParticipant(member) {
@@ -305,21 +337,11 @@ async function autoKickVisiteurs(guild) {
 
       try {
         const member = await guild.members.fetch(id).catch(() => null);
-        if (!member) {
-          // Déjà parti — nettoyer la DB
-          delete db.members[id];
-          continue;
-        }
+        if (!member) { delete db.members[id]; continue; }
 
-        // Vérifier qu'il a toujours le rôle Visiteur (pas encore validé)
         const estVisiteur = member.roles.cache.some(r => r.name.includes('Visiteur'));
-        if (!estVisiteur) {
-          // A changé de statut manuellement — mettre à jour la DB
-          db.members[id].status = 'actif';
-          continue;
-        }
+        if (!estVisiteur) { db.members[id].status = 'actif'; continue; }
 
-        // Envoyer un DM avant le kick
         await member.send({ embeds: [new EmbedBuilder()
           .setColor(0xED4245)
           .setTitle('🚪 Iron Wolf Company')
@@ -353,6 +375,31 @@ async function autoKickVisiteurs(guild) {
   } catch (e) { console.log('❌ autoKickVisiteurs error:', e.message); }
 }
 
+// ── Rappels de sessions persistants (survivent aux redémarrages) ──
+async function checkSessionReminders(guild) {
+  const db = loadDB();
+  if (!db.sessionReminders) return;
+  const now = Date.now();
+  let changed = false;
+  for (const [id, r] of Object.entries(db.sessionReminders)) {
+    // Nettoyage : on supprime les rappels périmés (session passée depuis +3h)
+    if ((r.remindAt + 3600000 + 10800000) < now) { delete db.sessionReminders[id]; changed = true; continue; }
+    // On envoie le rappel s'il est dû, pas encore envoyé, et pas trop tardif (fenêtre de 90 min)
+    if (!r.sent && r.remindAt <= now && now < r.remindAt + 5400000) {
+      const ch = guild.channels.cache.get(r.channelId) || getCh(guild, 'planning-sessions', 'planning');
+      if (ch) await ch.send({ content: getMention(guild) || undefined, embeds: [new EmbedBuilder()
+        .setColor(0xFF6B35)
+        .setTitle(`⏰ RAPPEL — ${r.name} dans 1 heure`)
+        .setDescription(`📍 ${r.lieu || '—'} · 🕐 ${r.heure || '—'}`)
+        .setFooter({ text: 'IWC • Rappel automatique' })
+      ] }).catch(() => {});
+      r.sent = true;
+      changed = true;
+    }
+  }
+  if (changed) saveDB(db);
+}
+
 // ── Rapport quotidien Direction ──
 async function envoyerRapportDirection(guild) {
   try {
@@ -360,7 +407,6 @@ async function envoyerRapportDirection(guild) {
     const hier = Date.now() - 86400000;
     const depuisHier = d => d && new Date(d).getTime() >= hier;
 
-    // Données de la veille
     const nouveaux    = Object.values(db.members || {}).filter(m => depuisHier(m.joinedAt));
     const departs     = Object.values(db.members || {}).filter(m => m.status === 'parti' && depuisHier(m.leftAt));
     const candsRecues = (db.candidatures || []).filter(c => depuisHier(c.receivedAt));
@@ -379,47 +425,26 @@ async function envoyerRapportDirection(guild) {
       .setTitle(`📋 Rapport quotidien — ${new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' })}`)
       .setDescription('*Résumé des dernières 24 heures — Iron Wolf Company*')
       .addFields(
-        {
-          name: '👥 MEMBRES',
-          value: [
+        { name: '👥 MEMBRES', value: [
             `🆕 Arrivées : **${nouveaux.length}**`,
             `🚪 Départs : **${departs.length}**`,
             `👁️ Visiteurs en attente : **${visiteurs.length}**`,
             alertes.length > 0 ? `⚠️ Inactifs : **${alertes.length}** — ${alertes.slice(0,3).map(m => m.name).join(', ')}${alertes.length > 3 ? '...' : ''}` : '✅ Aucune inactivité',
-          ].join('\n'),
-          inline: false,
-        },
-        {
-          name: '📋 RECRUTEMENT',
-          value: candsRecues.length > 0
+          ].join('\n'), inline: false },
+        { name: '📋 RECRUTEMENT', value: candsRecues.length > 0
             ? [`📥 Reçues : **${candsRecues.length}**`, `✅ Acceptées : **${candsAccept.length}**`, `❌ Refusées : **${candsRefus.length}**`].join('\n')
-            : '*Aucune candidature hier*',
-          inline: true,
-        },
-        {
-          name: '📜 CONTRATS',
-          value: contratsSign.length > 0
+            : '*Aucune candidature hier*', inline: true },
+        { name: '📜 CONTRATS', value: contratsSign.length > 0
             ? contratsSign.map(c => `→ \`${c.id}\` — ${c.objet}`).join('\n')
-            : '*Aucun contrat signé hier*',
-          inline: true,
-        },
-        {
-          name: `🎯 OPÉRATIONS`,
-          value: [
+            : '*Aucun contrat signé hier*', inline: true },
+        { name: `🎯 OPÉRATIONS`, value: [
             opsEnCours.length  > 0 ? `🟢 En cours : **${opsEnCours.length}** — ${opsEnCours.map(o => o.name).join(', ')}` : '🟢 Aucune en cours',
             opsTermHier.length > 0 ? `✅ Terminées hier : **${opsTermHier.length}** — ${opsTermHier.map(o => `${o.name} (${o.resultat || '—'})`).join(', ')}` : '',
-          ].filter(Boolean).join('\n') || '*Aucune activité opérationnelle*',
-          inline: false,
-        },
-        {
-          name: '💰 TRÉSORERIE',
-          value: [`⚖️ Légal : **$${soldeLegal.toLocaleString('fr-FR')}**`, `🔒 Illégal : **$${soldeIlleg.toLocaleString('fr-FR')}**`, `💎 Total : **$${(soldeLegal + soldeIlleg).toLocaleString('fr-FR')}**`].join('\n'),
-          inline: false,
-        },
+          ].filter(Boolean).join('\n') || '*Aucune activité opérationnelle*', inline: false },
+        { name: '💰 TRÉSORERIE', value: [`⚖️ Légal : **$${soldeLegal.toLocaleString('fr-FR')}**`, `🔒 Illégal : **$${soldeIlleg.toLocaleString('fr-FR')}**`, `💎 Total : **$${(soldeLegal + soldeIlleg).toLocaleString('fr-FR')}**`].join('\n'), inline: false },
       )
       .setFooter({ text: `IWC • Rapport automatique • ${new Date().toLocaleString('fr-FR')}` });
 
-    // Envoyer en DM à tous les membres Direction
     const directionIds = Object.values(MEMBRES_DISCORD_MAP);
     let envoyes = 0;
     for (const discordId of directionIds) {
@@ -439,7 +464,6 @@ async function handleSlashCommand(interaction) {
   const { commandName, guild } = interaction;
   const db = loadDB();
 
-  // /stats
   if (commandName === 'stats') {
     const members   = Object.values(db.members || {});
     const contrats  = db.contrats  || [];
@@ -460,7 +484,6 @@ async function handleSlashCommand(interaction) {
     return;
   }
 
-  // /solde
   if (commandName === 'solde') {
     const soldeLegal  = db.coffres?.legal   || 0;
     const soldeIlleg  = db.coffres?.illegal || 0;
@@ -477,12 +500,9 @@ async function handleSlashCommand(interaction) {
     return;
   }
 
-  // /fiche
   if (commandName === 'fiche') {
     const nom   = interaction.options.getString('nom').toLowerCase();
-    // Chercher dans les candidatures acceptées
     const cand  = (db.candidatures || []).find(c => c.status === 'acceptee' && c.nomPerso?.toLowerCase().includes(nom));
-    // Fallback : chercher dans MEMBRES_DISCORD_MAP pour les fondateurs
     if (!cand) {
       const nomIC = Object.keys(MEMBRES_DISCORD_MAP).find(n => n.toLowerCase().includes(nom));
       if (nomIC) {
@@ -521,7 +541,6 @@ async function handleSlashCommand(interaction) {
     return;
   }
 
-  // /ops
   if (commandName === 'ops') {
     const opsActives = (db.operations || []).filter(o => ['preparation', 'en_cours'].includes(o.status));
     if (!opsActives.length) {
@@ -540,7 +559,6 @@ async function handleSlashCommand(interaction) {
     return;
   }
 
-  // /absent
   if (commandName === 'absent') {
     const duree  = interaction.options.getString('duree');
     const raison = interaction.options.getString('raison') || '—';
@@ -553,7 +571,6 @@ async function handleSlashCommand(interaction) {
     await sendLog(guild, 'ABSENCE', { userId: interaction.user.id, username: interaction.user.username });
     await interaction.reply({ content: `✅ Ton absence a été enregistrée.\n**Durée :** ${duree}\n**Raison :** ${raison}`, ephemeral: true });
 
-    // Annonce dans #absences
     const absCh = getCh(guild, 'absences');
     if (absCh) await absCh.send({ embeds: [new EmbedBuilder()
       .setColor(0xFFA500)
@@ -568,23 +585,15 @@ async function handleSlashCommand(interaction) {
     return;
   }
 
-  // /rapport
   if (commandName === 'rapport') {
-    if (!isDirection(interaction.member)) {
-      await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
-      return;
-    }
+    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true }); return; }
     await interaction.reply({ content: '📋 Rapport en cours d\'envoi en DM...', ephemeral: true });
     await envoyerRapportDirection(guild);
     return;
   }
 
-  // /promo
   if (commandName === 'promo') {
-    if (!isDirection(interaction.member)) {
-      await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
-      return;
-    }
+    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true }); return; }
     const cible      = interaction.options.getUser('membre');
     const nouveauRang = interaction.options.getString('rang');
     const membre     = await guild.members.fetch(cible.id).catch(() => null);
@@ -593,17 +602,9 @@ async function handleSlashCommand(interaction) {
     const ancienRang = db.members[cible.id]?.rang || '—';
     if (db.members[cible.id]) { db.members[cible.id].rang = nouveauRang; saveDB(db); }
 
-    // Log Discord
     await sendLog(guild, 'PROMOTION', { userId: cible.id, username: cible.username, ancienRang, nouveauRang, validePar: interaction.user.username });
+    await notionExtra.logPromotionNotion?.(guild, { userId: cible.id, username: cible.username, nomPerso: db.members[cible.id]?.name || cible.username, ancienRang, nouveauRang, type: 'promotion', validePar: interaction.user.username });
 
-    // Notion
-    await notionExtra.logPromotionNotion?.(guild, {
-      userId: cible.id, username: cible.username,
-      nomPerso: db.members[cible.id]?.name || cible.username,
-      ancienRang, nouveauRang, type: 'promotion', validePar: interaction.user.username,
-    });
-
-    // DM au membre
     await membre.send({ embeds: [new EmbedBuilder()
       .setColor(0x57F287)
       .setTitle('⬆️ Promotion — Iron Wolf Company')
@@ -626,12 +627,8 @@ async function handleSlashCommand(interaction) {
     return;
   }
 
-  // /retro
   if (commandName === 'retro') {
-    if (!isDirection(interaction.member)) {
-      await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
-      return;
-    }
+    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true }); return; }
     const cible       = interaction.options.getUser('membre');
     const nouveauRang = interaction.options.getString('rang');
     const raison      = interaction.options.getString('raison') || '—';
@@ -641,17 +638,9 @@ async function handleSlashCommand(interaction) {
     const ancienRang = db.members[cible.id]?.rang || '—';
     if (db.members[cible.id]) { db.members[cible.id].rang = nouveauRang; saveDB(db); }
 
-    // Log Discord
     await sendLog(guild, 'RETROGRADATION', { userId: cible.id, username: cible.username, ancienRang, nouveauRang, raison, validePar: interaction.user.username });
+    await notionExtra.logPromotionNotion?.(guild, { userId: cible.id, username: cible.username, nomPerso: db.members[cible.id]?.name || cible.username, ancienRang, nouveauRang, type: 'retrogradation', validePar: interaction.user.username });
 
-    // Notion
-    await notionExtra.logPromotionNotion?.(guild, {
-      userId: cible.id, username: cible.username,
-      nomPerso: db.members[cible.id]?.name || cible.username,
-      ancienRang, nouveauRang, type: 'retrogradation', validePar: interaction.user.username,
-    });
-
-    // DM au membre
     await membre.send({ embeds: [new EmbedBuilder()
       .setColor(0xED4245)
       .setTitle('⬇️ Rétrogradation — Iron Wolf Company')
@@ -682,7 +671,6 @@ async function autoSetup(guild) {
   console.log('🔧 Auto-setup en cours...');
   await updateDashboard(guild);
 
-  // Règlement
   const reglCh = getCh(guild, 'reglement', 'règlement');
   if (reglCh) {
     const msgs = await reglCh.messages.fetch({ limit: 20 });
@@ -696,7 +684,6 @@ async function autoSetup(guild) {
     saveDB(db);
   }
 
-  // Recrutement
   const recrutCh = guild.channels.cache.get(CH.RECRUTEMENT);
   if (recrutCh) {
     const msgs = await recrutCh.messages.fetch({ limit: 20 });
@@ -721,7 +708,6 @@ async function autoSetup(guild) {
     saveDB(db);
   }
 
-  // Contrats
   const contratsCh = guild.channels.cache.get(CH.CONTRATS);
   if (contratsCh) {
     const msgs = await contratsCh.messages.fetch({ limit: 20 });
@@ -740,7 +726,6 @@ async function autoSetup(guild) {
     }
   }
 
-  // Salons informatifs
   const salons = [
     { key: 'grade',      content: '```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🎖️ GRADE — PRÉSENTE TON RANG IC\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```\nPostez votre grade/rang **In Character** dans ce canal.\n\n**Format :**\n```\nNOM : \nRANG IC : \nSURNOM : \nSPÉCIALITÉ : \n```\n*Un seul message par membre. Mettez à jour si votre rang évolue.*' },
     { key: 'surnom',     content: '```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🎭 SURNOM / PSEUDO — IDENTITÉ IC\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```\nRenseignez votre identité **In Character** pour faciliter les interactions RP.\n\n**Format :**\n```\nPSEUDO DISCORD : \nNOM IC : \nSURNOM IC : \nAPPARTENANCE : Légal / Illégal\n```\n*Un seul message par membre.*' },
@@ -754,7 +739,6 @@ async function autoSetup(guild) {
     }
   }
 
-  // Coffres
   const coffreLegal  = getChExact(guild, 'coffre-entreprise') || getCh(guild, 'coffre-entreprise');
   const coffreIlleg  = getChExact(guild, 'coffre-illegal');
   if (coffreLegal) { const msgs = await coffreLegal.messages.fetch({ limit: 10 }); if (!msgs.find(m => m.author.id === client.user.id && m.content.includes('COFFRE'))) await coffreLegal.send('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n💰 COFFRE ENTREPRISE — SUIVI DES FINANCES\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```\nEnregistrez chaque mouvement financier de la Compagnie.\n\n**Format :**\n```\nTYPE      : Entrée / Sortie\nMONTANT   : $000\nOBJET     : description\nRESPONSABLE: \nSOLDE     : $000 (après opération)\n```\n*Toute transaction doit être enregistrée. Aucune exception.*'); }
@@ -911,8 +895,6 @@ client.on('guildMemberAdd', async member => {
     .setThumbnail(member.user.displayAvatarURL()).setFooter({ text: 'IWC • Automatique' })] });
 
   await sendLog(guild, 'ARRIVEE', { userId: member.id, username: member.user.username, accountAge: daysSince(member.user.createdAt) });
-
-  // Alerte compte suspect améliorée
   await notionExtra.alerteCompteSuspect?.(guild, member);
 
   member.send({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle('🐺 Iron Wolf Company')
@@ -932,7 +914,6 @@ client.on('messageReactionAdd', async (reaction, user) => {
   const db = loadDB(); const guild = reaction.message.guild;
   if (!guild) return;
 
-  // Validation règlement
   if (reaction.message.id === db.reglementMsgId && reaction.emoji.name === '✅') {
     await sendLog(guild, 'REGLEMENT_VALIDE', { userId: user.id, username: user.username });
     const logsCh = await getLogsCh(guild);
@@ -940,14 +921,13 @@ client.on('messageReactionAdd', async (reaction, user) => {
     return;
   }
 
-  // Votes candidatures
   if (reaction.emoji.name === '✅' || reaction.emoji.name === '❌') {
     const title = reaction.message.embeds[0]?.title || '';
     if (!title.includes('DOSSIER')) return;
     const isIllegal = title.includes('ILLÉGAL');
     const isAccept  = reaction.emoji.name === '✅';
     const nom = title.replace(/📁 \[.*?\] DOSSIER (LÉGAL|ILLÉGAL) — /, '').replace(/✅ ACCEPTÉ — /, '').trim();
-    const cand = db.candidatures.find(c => c.nomPerso === nom && c.status === 'reçue');
+    const cand = (db.candidatures || []).find(c => c.nomPerso === nom && c.status === 'reçue');
     if (!cand) return;
 
     const reactUsers = await reaction.users.fetch();
@@ -1005,7 +985,6 @@ client.on('messageCreate', async message => {
   if (message.author.bot || !message.guild) return;
   const db = loadDB(); const guild = message.guild;
 
-  // Mise à jour lastActivity + retour d'absence
   if (db.members[message.author.id]) {
     const wasAbsent = db.members[message.author.id].status === 'absent';
     db.members[message.author.id].lastActivity = new Date().toISOString();
@@ -1016,7 +995,6 @@ client.on('messageCreate', async message => {
     saveDB(db);
   }
 
-  // Absences
   const absCh = getCh(guild, 'absences');
   if (absCh && message.channel.id === absCh.id) {
     if (db.members[message.author.id]) {
@@ -1029,15 +1007,12 @@ client.on('messageCreate', async message => {
     return;
   }
 
-  // Suggestions
   const suggCh = getCh(guild, 'suggestion-idee', 'suggestions', 'suggestion');
   if (suggCh && message.channel.id === suggCh.id) { await message.react('✅').catch(() => {}); await message.react('❌').catch(() => {}); return; }
 
-  // Clips
   const clipCh = getCh(guild, 'clips-temps-fort', 'clips-highlights', 'clips');
   if (clipCh && message.channel.id === clipCh.id && message.attachments.size > 0) { await message.react('🔥').catch(() => {}); await message.react('❤️').catch(() => {}); return; }
 
-  // Coffres — utilise getChExact pour éviter les collisions
   const coffreLegalCh = getChExact(guild, 'coffre-entreprise');
   const coffreIllegCh = getChExact(guild, 'coffre-illegal');
   const coffreType = coffreLegalCh && message.channel.id === coffreLegalCh.id ? 'legal'
@@ -1052,7 +1027,6 @@ client.on('messageCreate', async message => {
       const montant = (() => { const n = parseInt((get('MONTANT') || '').replace(/[^0-9]/g, ''), 10); return isNaN(n) ? 0 : n; })();
       const objet = get('OBJET') || '—';
       const responsable = get('RESPONSABLE') || message.author.username;
-      // Recharger le DB au moment de la mise à jour pour éviter les race conditions
       const dbFresh = loadDB();
       if (!dbFresh.coffres) dbFresh.coffres = { legal: 0, illegal: 0 };
       dbFresh.coffres[coffreType] += (type === 'Sortie' ? -montant : montant);
@@ -1068,7 +1042,6 @@ client.on('messageCreate', async message => {
     return;
   }
 
-  // Opérations
   const opsCh = getCh(guild, 'operations-en-cours', 'operations');
   if (opsCh && message.channel.id === opsCh.id && isDirection(message.member)) {
     if (message.content.toUpperCase().includes('OPÉRATION') || message.content.toUpperCase().includes('OPERATION')) {
@@ -1105,24 +1078,34 @@ client.on('messageCreate', async message => {
     return;
   }
 
-  // Planning sessions
   const planCh = getCh(guild, 'planning-sessions', 'planning');
   if (planCh && message.channel.id === planCh.id && isDirection(message.member)) {
     if (message.content.toUpperCase().includes('SESSION') && message.content.toUpperCase().includes('DATE')) {
       const lines = message.content.split('\n');
       const get = k => { const l = lines.find(l => l.toUpperCase().includes(k.toUpperCase())); return l ? l.split(':').slice(1).join(':').trim() || '—' : '—'; };
       const session = { id: Date.now().toString(), name: get('NOM') || get('SESSION'), date: get('DATE'), heure: get('HEURE'), lieu: get('LIEU'), type: get('TYPE') || 'RP Principal', status: 'planifiee' };
-      db.sessions.push(session); saveDB(db);
+      db.sessions.push(session);
+
+      // Rappel 1h avant — PERSISTANT (survit aux redémarrages, traité par le cron checkSessionReminders)
+      try {
+        const heureClean = (session.heure || '').replace(/h/i, ':').match(/\d{1,2}:\d{2}/)?.[0] || '00:00';
+        const dt = new Date(`${session.date.split('/').reverse().join('-')}T${heureClean}`);
+        if (!isNaN(dt.getTime())) {
+          if (!db.sessionReminders) db.sessionReminders = {};
+          db.sessionReminders[session.id] = {
+            sessionId: session.id, name: session.name, lieu: session.lieu,
+            heure: session.heure, channelId: planCh.id,
+            remindAt: dt.getTime() - 3600000, sent: false,
+          };
+        }
+      } catch {}
+      saveDB(db);
+
       const embed = new EmbedBuilder().setColor(0x5865F2).setTitle(`📅 SESSION — ${session.name}`)
         .addFields({ name: 'Date & Heure', value: `${session.date} à ${session.heure}`, inline: true }, { name: 'Lieu IC', value: session.lieu, inline: true }, { name: 'Type', value: session.type, inline: true })
         .setDescription('Confirmez votre présence :').setFooter({ text: 'IWC • Rappel automatique 1h avant' });
       const sent = await planCh.send({ embeds: [embed] });
       await sent.react('✅'); await sent.react('❌');
-      try {
-        const dt    = new Date(`${session.date.split('/').reverse().join('-')}T${session.heure}`);
-        const delay = dt.getTime() - Date.now() - 3600000;
-        if (delay > 0) setTimeout(async () => { await planCh.send({ content: getMention(guild), embeds: [new EmbedBuilder().setColor(0xFF6B35).setTitle(`⏰ RAPPEL — ${session.name} dans 1 heure`).setDescription(`📍 ${session.lieu} · 🕐 ${session.heure}`).setFooter({ text: 'IWC • Rappel automatique' })] }); }, delay);
-      } catch {}
       await message.react('✅');
     }
   }
@@ -1133,7 +1116,6 @@ client.on('interactionCreate', async interaction => {
   const guild = interaction.guild;
   const db    = loadDB();
 
-  // Slash commands
   if (interaction.isChatInputCommand()) {
     await handleSlashCommand(interaction).catch(e => {
       console.log('❌ Slash command error:', e.message);
@@ -1142,7 +1124,6 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  // Candidature légale — bouton
   if (interaction.isButton() && interaction.customId === 'open_candidature_legal') {
     const modal = new ModalBuilder().setCustomId('candidature_modal_legal').setTitle('⚖️ Iron Wolf Company — Légal');
     modal.addComponents(
@@ -1155,7 +1136,6 @@ client.on('interactionCreate', async interaction => {
     await interaction.showModal(modal); return;
   }
 
-  // Candidature illégale — bouton
   if (interaction.isButton() && interaction.customId === 'open_candidature_illegal') {
     const modal = new ModalBuilder().setCustomId('candidature_modal_illegal').setTitle('🔪 Organisation Hors la Loi — Illégal');
     modal.addComponents(
@@ -1168,7 +1148,6 @@ client.on('interactionCreate', async interaction => {
     await interaction.showModal(modal); return;
   }
 
-  // Modal candidature légale
   if (interaction.isModalSubmit() && interaction.customId === 'candidature_modal_legal') {
     await interaction.deferReply({ ephemeral: true });
     const cand = { id: Date.now().toString(), userId: interaction.user.id, username: interaction.user.username, nomPerso: interaction.fields.getTextInputValue('nom_perso'), agePerso: interaction.fields.getTextInputValue('age_perso'), metier: interaction.fields.getTextInputValue('metier'), background: interaction.fields.getTextInputValue('background'), dispos: interaction.fields.getTextInputValue('dispos'), type: 'legal', status: 'reçue', receivedAt: new Date().toISOString() };
@@ -1189,7 +1168,6 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  // Modal candidature illégale
   if (interaction.isModalSubmit() && interaction.customId === 'candidature_modal_illegal') {
     await interaction.deferReply({ ephemeral: true });
     const cand = { id: Date.now().toString(), userId: interaction.user.id, username: interaction.user.username, nomPerso: interaction.fields.getTextInputValue('nom_perso'), agePerso: interaction.fields.getTextInputValue('age_perso'), specialite: interaction.fields.getTextInputValue('specialite'), background: interaction.fields.getTextInputValue('background'), dispos: interaction.fields.getTextInputValue('dispos'), type: 'illegal', status: 'reçue', receivedAt: new Date().toISOString() };
@@ -1210,7 +1188,6 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  // Participation opération
   if (interaction.isButton() && (interaction.customId.startsWith('op_participer_') || interaction.customId.startsWith('op_retrait_'))) {
     const retrait = interaction.customId.startsWith('op_retrait_');
     const opId    = interaction.customId.replace(retrait ? 'op_retrait_' : 'op_participer_', '');
@@ -1232,7 +1209,6 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  // Terminer opération — modal résultat
   if (interaction.isButton() && interaction.customId.startsWith('op_terminee_')) {
     const opId = interaction.customId.replace('op_terminee_', '');
     const op   = db.operations.find(o => o.id === opId);
@@ -1246,7 +1222,6 @@ client.on('interactionCreate', async interaction => {
     await interaction.showModal(modal); return;
   }
 
-  // Modal résultat opération
   if (interaction.isModalSubmit() && interaction.customId.startsWith('op_resultat_modal_')) {
     const opId = interaction.customId.replace('op_resultat_modal_', '');
     const op   = db.operations.find(o => o.id === opId);
@@ -1266,7 +1241,6 @@ client.on('interactionCreate', async interaction => {
     await interaction.editReply({ embeds: [updated], components: [] }); return;
   }
 
-  // Lancer / annuler opération
   if (interaction.isButton() && (interaction.customId.startsWith('op_encours_') || interaction.customId.startsWith('op_annulee_'))) {
     const isLancer = interaction.customId.startsWith('op_encours_');
     const opId     = interaction.customId.replace(isLancer ? 'op_encours_' : 'op_annulee_', '');
@@ -1287,7 +1261,6 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  // Contrat offre — bouton
   if (interaction.isButton() && interaction.customId === 'open_contrat_offre') {
     if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true }); return; }
     const modal = new ModalBuilder().setCustomId('contrat_offre_modal').setTitle('📤 Nos conditions — Contrat client');
@@ -1301,7 +1274,6 @@ client.on('interactionCreate', async interaction => {
     await interaction.showModal(modal); return;
   }
 
-  // Modal contrat offre
   if (interaction.isModalSubmit() && interaction.customId === 'contrat_offre_modal') {
     await interaction.deferReply({ ephemeral: true });
     if (!db.contrats) db.contrats = [];
@@ -1311,7 +1283,7 @@ client.on('interactionCreate', async interaction => {
     await interaction.editReply({ content: `✅ Contrat **${contratId}** envoyé au client.` });
     const embed = new EmbedBuilder().setColor(0x2C3E50).setTitle(`📤 CONTRAT DE PRESTATION — ${contratId}`)
       .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   IRON WOLF COMPANY — OFFRE DE PRESTATION\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
-      .addFields({ name: '🆔 Référence', value: `\`${contratId}\``, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: '📋 Objet', value: contrat.objet }, { name: '🏢 Nos conditions', value: contrat.nosConditions || '—' }, { name: '💰 Rémunération souhaitée', value: contrat.remuneration }, { name: '📌 Statut', value: '🟡 En attente de signature', inline: true })
+      .addFields({ name: '🆔 Référence', value: `\`${contratId}\``, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: '📋 Objet', value: contrat.objet }, { name: '📅 Échéance', value: contrat.dateEcheance ? fmtShort(contrat.dateEcheance) : 'Aucune', inline: true }, { name: '💰 Rémunération souhaitée', value: contrat.remuneration }, { name: '📌 Statut', value: '🟡 En attente de signature', inline: true })
       .setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` });
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`signer_offre_${contratId}`).setLabel("✍️ J'accepte les termes").setStyle(ButtonStyle.Success),
@@ -1323,7 +1295,6 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  // Signer offre
   if (interaction.isButton() && interaction.customId.startsWith('signer_offre_')) {
     const contratId = interaction.customId.replace('signer_offre_', '');
     const contrat   = (db.contrats || []).find(c => c.id === contratId);
@@ -1340,7 +1311,6 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  // Refuser offre
   if (interaction.isButton() && interaction.customId.startsWith('refuser_offre_')) {
     const contratId = interaction.customId.replace('refuser_offre_', '');
     const contrat   = (db.contrats || []).find(c => c.id === contratId);
@@ -1355,7 +1325,6 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  // Contrat emploi — bouton
   if (interaction.isButton() && interaction.customId === 'open_contrat_emploi') {
     if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true }); return; }
     const modal = new ModalBuilder().setCustomId('contrat_emploi_modal').setTitle('📥 Contrat employeur — À signer');
@@ -1369,7 +1338,6 @@ client.on('interactionCreate', async interaction => {
     await interaction.showModal(modal); return;
   }
 
-  // Modal contrat emploi
   if (interaction.isModalSubmit() && interaction.customId === 'contrat_emploi_modal') {
     await interaction.deferReply({ ephemeral: true });
     if (!db.contrats) db.contrats = [];
@@ -1379,7 +1347,7 @@ client.on('interactionCreate', async interaction => {
     await interaction.editReply({ content: `📋 Contrat **${contratId}** créé. La Direction va examiner ce contrat.` });
     const embed = new EmbedBuilder().setColor(0x8B5A2A).setTitle(`📥 CONTRAT EMPLOYEUR — ${contratId}`)
       .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n  CONTRAT PROPOSÉ À IRON WOLF COMPANY\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
-      .addFields({ name: '🆔 Référence', value: `\`${contratId}\``, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: `🏭 Employeur — ${contrat.employeurNom}`, value: contrat.leursConditions || '—' }, { name: '💰 Rémunération', value: contrat.remuneration }, { name: '📋 Objet', value: contrat.objet }, { name: '📌 Statut', value: '🟡 En attente de notre signature', inline: true })
+      .addFields({ name: '🆔 Référence', value: `\`${contratId}\``, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: `🏭 Employeur — ${contrat.employeurNom}`, value: contrat.dateEcheance ? `📅 Échéance : ${fmtShort(contrat.dateEcheance)}` : '—' }, { name: '💰 Rémunération', value: contrat.remuneration }, { name: '📋 Objet', value: contrat.objet }, { name: '📌 Statut', value: '🟡 En attente de notre signature', inline: true })
       .setFooter({ text: `IWC • Contrat Employeur • ${fmtShort(new Date())}` });
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`signer_emploi_${contratId}`).setLabel('✍️ Signer & Accepter').setStyle(ButtonStyle.Success),
@@ -1390,7 +1358,6 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  // Signer emploi
   if (interaction.isButton() && interaction.customId.startsWith('signer_emploi_')) {
     const contratId = interaction.customId.replace('signer_emploi_', '');
     const contrat   = (db.contrats || []).find(c => c.id === contratId);
@@ -1406,7 +1373,6 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  // Refuser emploi
   if (interaction.isButton() && interaction.customId.startsWith('refuser_emploi_')) {
     const contratId = interaction.customId.replace('refuser_emploi_', '');
     const contrat   = (db.contrats || []).find(c => c.id === contratId);
@@ -1432,16 +1398,19 @@ client.once('clientReady', async () => {
   await restaurerDepuisGitHub();
 
   for (const guild of client.guilds.cache.values()) {
+    await registerSlashCommands(guild).catch(e => console.log('registerSlashCommands error:', e.message));
     await autoSetup(guild).catch(e => console.log('autoSetup error:', e.message));
   }
 
-  // Vérifier les rappels de fiches en attente au démarrage
+  // Vérifier les rappels en attente au démarrage (fiches + sessions)
   for (const guild of client.guilds.cache.values()) {
     await notionExtra.envoyerRappelsFiches?.(guild).catch(() => {});
+    await checkSessionReminders(guild).catch(() => {});
   }
 
   // ── Crons ──
   cron.schedule('*/5 * * * *',  async () => { for (const g of client.guilds.cache.values()) await checkAgenda(g).catch(() => {}); });
+  cron.schedule('*/5 * * * *',  async () => { for (const g of client.guilds.cache.values()) await checkSessionReminders(g).catch(() => {}); });            // rappels sessions
   cron.schedule('*/30 * * * *', async () => { for (const g of client.guilds.cache.values()) await notionExtra.envoyerRappelsFiches?.(g).catch(() => {}); }); // rappels fiches
   cron.schedule('0 * * * *',    async () => { for (const g of client.guilds.cache.values()) await updateDashboard(g).catch(() => {}); });                    // dashboard
   cron.schedule('0 * * * *',    async () => { for (const g of client.guilds.cache.values()) await notionExtra.checkFichesCompletees?.(g).catch(() => {}); }); // fiches complètes
@@ -1450,7 +1419,7 @@ client.once('clientReady', async () => {
   cron.schedule('0 9 * * *',    async () => { for (const g of client.guilds.cache.values()) await postDailyAgenda(g).catch(() => {}); },    { timezone: 'Europe/Paris' }); // agenda
   cron.schedule('0 20 * * 0',   async () => { for (const g of client.guilds.cache.values()) await notionExtra.postStatsHebdo?.(g).catch(e => console.log(e.message)); }, { timezone: 'Europe/Paris' }); // stats
   cron.schedule('0 12 * * *',   async () => { for (const g of client.guilds.cache.values()) await autoKickVisiteurs(g).catch(() => {}); }, { timezone: 'Europe/Paris' }); // auto-kick visiteurs
-  cron.schedule('0 * * * *',    async () => { for (const g of client.guilds.cache.values()) await notionExtra.checkEchéancesContrats?.(g).catch(() => {}); }, { timezone: 'Europe/Paris' }); // échéances contrats
+  cron.schedule('0 * * * *',    async () => { for (const g of client.guilds.cache.values()) await notionExtra.checkEcheancesContrats?.(g).catch(() => {}); }, { timezone: 'Europe/Paris' }); // échéances contrats
   cron.schedule('0 8 * * *',    async () => { for (const g of client.guilds.cache.values()) await envoyerRapportDirection(g).catch(() => {}); }, { timezone: 'Europe/Paris' }); // rapport quotidien 8h
 });
 
