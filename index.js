@@ -1353,6 +1353,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId === 'btn_informateur_historique') return notionV3.handleInformateurHistorique?.(interaction);
     if (interaction.customId.startsWith('affaire_oui_'))   return notionV3.handleAffaireVote?.(interaction, 'oui');
     if (interaction.customId.startsWith('affaire_non_'))   return notionV3.handleAffaireVote?.(interaction, 'non');
+    if (interaction.customId.startsWith('affaire_detail_')) return notionV3.handleAffaireDetail?.(interaction);
   }
 
   // ── SELECT MENUS v3 ──
