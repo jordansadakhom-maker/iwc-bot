@@ -239,7 +239,10 @@ async function syncRegistreNotion(guild) {
       if (!member) continue;
       if (derniereActivite && logsCh) {
         const jours = Math.floor((today - new Date(derniereActivite)) / 86400000);
-        if (jours >= 7 && statut === '✅ Actif') {
+        const db2 = loadDB();
+        if (!db2.alertesInactivite) db2.alertesInactivite = {};
+        const keyAlerte = `inactif_${discordId}_${Math.floor(jours / 7)}`;
+        if (jours >= 7 && statut === '✅ Actif' && !db2.alertesInactivite[keyAlerte]) {
           await logsCh.send({ content: getMention(guild), embeds: [new EmbedBuilder()
             .setColor(0xFFA500)
             .setTitle(`⚠️ Inactivité Notion — ${nomIC}`)
@@ -247,6 +250,8 @@ async function syncRegistreNotion(guild) {
             .addFields({ name: '📅 Dernière activité', value: fmtShort(derniereActivite), inline: true }, { name: '📋 Statut', value: statut, inline: true })
             .setFooter({ text: 'IWC • Sync Registre Notion' })
           ] });
+          db2.alertesInactivite[keyAlerte] = true;
+          saveDB(db2);
         }
       }
     }
@@ -476,7 +481,25 @@ async function handleSlashCommand(interaction) {
     const nom   = interaction.options.getString('nom').toLowerCase();
     // Chercher dans les candidatures acceptées
     const cand  = (db.candidatures || []).find(c => c.status === 'acceptee' && c.nomPerso?.toLowerCase().includes(nom));
+    // Fallback : chercher dans MEMBRES_DISCORD_MAP pour les fondateurs
     if (!cand) {
+      const nomIC = Object.keys(MEMBRES_DISCORD_MAP).find(n => n.toLowerCase().includes(nom));
+      if (nomIC) {
+        const discordId = MEMBRES_DISCORD_MAP[nomIC];
+        const membre = db.members[discordId];
+        await interaction.reply({ embeds: [new EmbedBuilder()
+          .setColor(0x8B1A1A)
+          .setTitle(`👤 Fiche — ${nomIC}`)
+          .setDescription('*Membre fondateur — fiche à compléter dans Notion*')
+          .addFields(
+            { name: '🎭 Personnage', value: nomIC, inline: true },
+            { name: '📋 Statut',     value: membre?.status === 'absent' ? '⚠️ Absent' : '✅ Actif', inline: true },
+            { name: '🎖️ Rang',      value: membre?.rang || '—', inline: true },
+          )
+          .setFooter({ text: 'IWC • Fiche personnage' })
+        ], ephemeral: true });
+        return;
+      }
       await interaction.reply({ content: `❌ Aucune fiche trouvée pour **${interaction.options.getString('nom')}**.`, ephemeral: true });
       return;
     }
@@ -524,8 +547,8 @@ async function handleSlashCommand(interaction) {
       db.members[interaction.user.id].status      = 'absent';
       db.members[interaction.user.id].lastActivity = new Date().toISOString();
       saveDB(db);
-      await notionExtra.majStatutActiviteNotion?.(interaction.user.id, 'absent');
     }
+    await notionExtra.majStatutActiviteNotion?.(interaction.user.id, 'absent');
     await sendLog(guild, 'ABSENCE', { userId: interaction.user.id, username: interaction.user.username });
     await interaction.reply({ content: `✅ Ton absence a été enregistrée.\n**Durée :** ${duree}\n**Raison :** ${raison}`, ephemeral: true });
 
