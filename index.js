@@ -281,6 +281,70 @@ async function updateDashboard(guild) {
   } catch (e) { console.log('Dashboard error:', e.message); }
 }
 
+// ── Auto-kick visiteurs ──
+const JOURS_AVANT_KICK = 5;
+
+async function autoKickVisiteurs(guild) {
+  try {
+    const db      = loadDB();
+    const logsCh  = await getLogsCh(guild);
+    const maintenant = Date.now();
+    let kicked = 0;
+
+    for (const [id, membre] of Object.entries(db.members || {})) {
+      if (membre.status !== 'visiteur') continue;
+      const joursDepuis = Math.floor((maintenant - new Date(membre.joinedAt).getTime()) / 86400000);
+      if (joursDepuis < JOURS_AVANT_KICK) continue;
+
+      try {
+        const member = await guild.members.fetch(id).catch(() => null);
+        if (!member) {
+          // Déjà parti — nettoyer la DB
+          delete db.members[id];
+          continue;
+        }
+
+        // Vérifier qu'il a toujours le rôle Visiteur (pas encore validé)
+        const estVisiteur = member.roles.cache.some(r => r.name.includes('Visiteur'));
+        if (!estVisiteur) {
+          // A changé de statut manuellement — mettre à jour la DB
+          db.members[id].status = 'actif';
+          continue;
+        }
+
+        // Envoyer un DM avant le kick
+        await member.send({ embeds: [new EmbedBuilder()
+          .setColor(0xED4245)
+          .setTitle('🚪 Iron Wolf Company')
+          .setDescription(`Tu as été retiré du serveur **Iron Wolf Company** car tu n'as pas validé le règlement dans les **${JOURS_AVANT_KICK} jours** suivant ton arrivée.\n\n*La porte est ouverte une fois. Une seule.*\n— La Direction`)
+          .setFooter({ text: 'IWC • Système automatique' })
+        ] }).catch(() => {});
+
+        await member.kick(`Visiteur inactif depuis ${joursDepuis} jours — règlement non validé`).catch(() => {});
+
+        delete db.members[id];
+        kicked++;
+
+        if (logsCh) await logsCh.send({ embeds: [new EmbedBuilder()
+          .setColor(0xED4245)
+          .setTitle(`🚪 AUTO-KICK — ${member.user.username}`)
+          .addFields(
+            { name: '👤 Membre', value: `${member.user.username}`, inline: true },
+            { name: '⏱️ Arrivé il y a', value: `${joursDepuis} jours`, inline: true },
+            { name: '📋 Raison', value: 'Règlement non validé', inline: true },
+          )
+          .setFooter({ text: `IWC • Auto-kick • ${fmtShort(new Date())}` })
+        ] });
+
+        console.log(`🚪 Auto-kick : ${member.user.username} (${joursDepuis}j sans valider le règlement)`);
+      } catch (e) { console.log(`❌ Auto-kick error pour ${id}:`, e.message); }
+    }
+
+    if (kicked > 0) saveDB(db);
+    console.log(`✅ Auto-kick : ${kicked} visiteur(s) kické(s)`);
+  } catch (e) { console.log('❌ autoKickVisiteurs error:', e.message); }
+}
+
 // ── Auto-setup ──
 async function autoSetup(guild) {
   const db = loadDB();
@@ -1043,6 +1107,7 @@ client.once('clientReady', async () => {
   cron.schedule('0 * * * *',    async () => { await sauvegarderSurGitHub().catch(() => {}); },                         { timezone: 'Europe/Paris' });          // sauvegarde GitHub
   cron.schedule('0 9 * * *',    async () => { for (const g of client.guilds.cache.values()) await postDailyAgenda(g).catch(() => {}); },    { timezone: 'Europe/Paris' }); // agenda
   cron.schedule('0 20 * * 0',   async () => { for (const g of client.guilds.cache.values()) await notionExtra.postStatsHebdo?.(g).catch(e => console.log(e.message)); }, { timezone: 'Europe/Paris' }); // stats
+  cron.schedule('0 12 * * *',   async () => { for (const g of client.guilds.cache.values()) await autoKickVisiteurs(g).catch(() => {}); }, { timezone: 'Europe/Paris' }); // auto-kick visiteurs
 });
 
 client.login(process.env.TOKEN || process.env.DISCORD_TOKEN);
