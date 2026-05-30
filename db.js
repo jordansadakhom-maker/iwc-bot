@@ -88,8 +88,18 @@ async function sauvegarderSurGitHub() {
 // ── Restauration depuis GitHub au démarrage ──
 async function restaurerDepuisGitHub() {
   if (!process.env.GITHUB_TOKEN || !process.env.GITHUB_GIST_ID) return false;
-  // Ne restaure que si data.json est absent ou vide
-  if (fs.existsSync(DB_PATH) && fs.statSync(DB_PATH).size > 100) return false;
+  // Ne restaure que si data.json est absent, vide, ou sans données membres
+  if (fs.existsSync(DB_PATH)) {
+    try {
+      const existing = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
+      const hasData = Object.keys(existing.members || {}).length > 0 ||
+                      (existing.candidatures || []).length > 0 ||
+                      (existing.contrats || []).length > 0 ||
+                      (existing.coffres?.legal || 0) > 0 ||
+                      (existing.coffres?.illegal || 0) > 0;
+      if (hasData) return false; // Des données existent déjà → pas besoin de restaurer
+    } catch { } // JSON invalide → on restaure
+  }
   try {
     const res = await fetch(`https://api.github.com/gists/${process.env.GITHUB_GIST_ID}`, {
       headers: { 'Authorization': `Bearer ${process.env.GITHUB_TOKEN}` }
