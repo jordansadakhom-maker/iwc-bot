@@ -1018,7 +1018,7 @@ client.on('interactionCreate', async interaction => {
 // ════════════════════════════════════════════════
 // READY + CRON
 // ════════════════════════════════════════════════
-client.once('ready', async () => {
+client.once('clientReady', async () => {
   console.log(`✅ Connecté : ${client.user.tag}`);
   client.user.setActivity('la meute • IWC 1895', { type: ActivityType.Watching });
 
