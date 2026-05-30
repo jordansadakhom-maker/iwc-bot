@@ -60,14 +60,13 @@ const CONTRAT_ROLES = [
 ];
 const JUNE_MCCALL_ID = '998581854791798835';
 
-// Rôles des pôles (pour le ping des opérations)
 const ROLE_POLE_LEGAL   = '1508756436082102303';
 const ROLE_POLE_ILLEGAL = '1508756479274913903';
 
-const NOTION_RECRUTEMENT_DB = '36ef4436a86c81de9f1acf55c5ad4076';
-const NOTION_MEMBRES_DB     = '36ef4436a86c818d99a4dd875efec4e3';
+// ✅ CORRIGÉ — utilise les variables d'env en priorité
+const NOTION_RECRUTEMENT_DB = process.env.NOTION_RECRUTEMENT_DB || '36ef4436a86c81de9f1acf55c5ad4076';
+const NOTION_MEMBRES_DB     = process.env.NOTION_MEMBRES_DB     || '36ef4436a86c818d99a4dd875efec4e3';
 
-// Correspondance Nom IC → ID Discord pour le Registre
 const MEMBRES_DISCORD_MAP = {
   'Colt Kane':      '696325126047662081',
   'June McCall':    '998581854791798835',
@@ -76,10 +75,8 @@ const MEMBRES_DISCORD_MAP = {
   'Thomas Galagan': '982201491773354035',
 };
 
-// Map inverse : ID Discord → Nom IC (pour répertorier les participants aux opérations)
 const DISCORD_TO_IC = Object.fromEntries(Object.entries(MEMBRES_DISCORD_MAP).map(([nom, id]) => [id, nom]));
 function nomParticipant(member) {
-  // Renvoie le nom IC si connu, sinon le pseudo Discord en repli
   return DISCORD_TO_IC[member.id] || member.user?.username || member.displayName || 'Inconnu';
 }
 
@@ -93,7 +90,7 @@ function loadDB() {
     }, null, 2));
   }
   const d = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
-  if (!d.sentReminders) d.sentReminders = {}; // sécurité si ancienne db
+  if (!d.sentReminders) d.sentReminders = {};
   return d;
 }
 function saveDB(d) { fs.writeFileSync(DB_PATH, JSON.stringify(d, null, 2)); }
@@ -183,9 +180,6 @@ function isDirection(member) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════
-// NOTION — ARCHIVER CANDIDATURE
-// ═══════════════════════════════════════════════════════════════
 async function archiverCandidatureNotion(cand, statut, validePar) {
   if (!process.env.NOTION_TOKEN) return;
   try {
@@ -213,9 +207,6 @@ async function archiverCandidatureNotion(cand, statut, validePar) {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// NOTION — AJOUTER MEMBRE AU REGISTRE
-// ═══════════════════════════════════════════════════════════════
 async function ajouterMembreNotion(cand, type) {
   if (!process.env.NOTION_TOKEN) return;
   try {
@@ -243,9 +234,6 @@ async function ajouterMembreNotion(cand, type) {
   } catch(e) { console.log('❌ Notion registre error:', e.message); }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// NOTION — SYNC REGISTRE → DISCORD (toutes les 15 min)
-// ═══════════════════════════════════════════════════════════════
 async function syncRegistreNotion(guild) {
   if (!process.env.NOTION_TOKEN) return;
   try {
@@ -267,11 +255,9 @@ async function syncRegistreNotion(guild) {
       const discordId = MEMBRES_DISCORD_MAP[nomIC];
       if (!discordId) continue;
 
-      // Sync statut Notion → rôle Discord
       const member = await guild.members.fetch(discordId).catch(() => null);
       if (!member) continue;
 
-      // Alerte inactivité +7 jours
       if (derniereActivite) {
         const jours = Math.floor((today - new Date(derniereActivite)) / 86400000);
         if (jours >= 7 && statut === '✅ Actif' && logsCh) {
@@ -392,9 +378,6 @@ async function autoSetup(guild) {
   console.log('✅ Auto-setup terminé\n');
 }
 
-// ═══════════════════════════════════════════════════════════════
-// NOTION AGENDA
-// ═══════════════════════════════════════════════════════════════
 async function notionQuery() {
   if (!process.env.NOTION_TOKEN || !process.env.NOTION_AGENDA_DB_ID) return [];
   try {
@@ -463,19 +446,15 @@ function buildParticipantMentions(participants) {
   }).filter(Boolean).join(' ');
 }
 
-// Décalage Europe/Paris en heures pour une date donnée (gère été/hiver automatiquement)
 function parisOffsetHours(date) {
-  // On compare l'heure locale "Europe/Paris" à l'heure UTC pour déduire le décalage réel
   const tzStr = date.toLocaleString('en-US', { timeZone: 'Europe/Paris' });
   const utcStr = date.toLocaleString('en-US', { timeZone: 'UTC' });
   return Math.round((new Date(tzStr).getTime() - new Date(utcStr).getTime()) / 3600000);
 }
 
-// Construit l'instant correct d'un RDV saisi en heure de Paris (date + "HH:MM")
 function buildRdvDate(dateStr, heureStr) {
   if (!dateStr) return null;
-  // On récupère le jour (la partie date), heure issue du champ "Heure" sinon de la date ISO
-  const jour = dateStr.split('T')[0]; // ex "2026-05-29"
+  const jour = dateStr.split('T')[0];
   let hh = 0, mm = 0;
   if (heureStr && /\d{1,2}[:hH]\d{2}/.test(heureStr)) {
     const m = heureStr.match(/(\d{1,2})[:hH](\d{2})/);
@@ -484,7 +463,6 @@ function buildRdvDate(dateStr, heureStr) {
     const t = dateStr.split('T')[1];
     hh = parseInt(t.slice(0, 2), 10); mm = parseInt(t.slice(3, 5), 10);
   }
-  // Instant provisoire en UTC, puis on retire le décalage Paris pour obtenir le vrai instant
   const provisoire = new Date(`${jour}T${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:00Z`);
   const offset = parisOffsetHours(provisoire);
   return new Date(provisoire.getTime() - offset * 3600000);
@@ -517,12 +495,10 @@ async function checkAgenda(guild) {
         { name: 'Modifier', value: `[Notion](${a.url})` }
       ).setFooter({ text: 'IWC • Secrétariat automatique' });
 
-    // Helper : un rappel n'est envoyé qu'UNE fois. Mémorisé dans db.sentReminders.
     const dejaEnvoye = (key) => db.sentReminders[`${a.id}_${key}`];
     const marquer = (key) => { db.sentReminders[`${a.id}_${key}`] = true; changed = true; };
 
     if (mins > 0) {
-      // Les rappels ne partent QUE si la case correspondante est cochée dans Notion (= demandée).
       if (a.notif24 && !dejaEnvoye('24h') && mins <= 1440 && mins > 60) {
         await ch.send({ content: `${pingContent} — 📅 RDV dans 24h`, embeds: [mkEmbed('📅 Rappel — 24 heures', 0x5865F2)] });
         await sendParticipantDMs(guild, a, '📅 Rappel — RDV dans 24h', 0x5865F2);
@@ -543,7 +519,6 @@ async function checkAgenda(guild) {
       }
     }
 
-    // Nettoyage : on oublie les rappels d'un RDV passé depuis plus de 2h (évite que db.sentReminders gonfle)
     if (mins < -120) {
       ['24h', '1h', '15min'].forEach(k => { if (db.sentReminders[`${a.id}_${k}`]) { delete db.sentReminders[`${a.id}_${k}`]; changed = true; } });
     }
@@ -557,8 +532,6 @@ async function postDailyAgenda(guild) {
   const appts = await notionQuery();
   const today = new Date().toISOString().split('T')[0];
   const todayA = appts.filter(a => a.date?.startsWith(today));
-
-  // Pas de rendez-vous aujourd'hui → on n'envoie RIEN (aucun ping, aucun message)
   if (todayA.length === 0) return;
 
   const weekA = appts.filter(a => { if (!a.date) return false; const d = new Date(a.date); return d >= new Date() && d <= new Date(Date.now() + 7*86400000); });
@@ -567,8 +540,6 @@ async function postDailyAgenda(guild) {
   const nw = weekA.filter(a => !a.date?.startsWith(today)).slice(0, 5);
   if (nw.length) embed.addFields({ name: '📆 Cette semaine', value: nw.map(a => `📅 **${a.titre}** — ${fmtShort(a.date)} ${a.heure || ''}`).join('\n') });
   embed.setFooter({ text: 'IWC • Secrétariat automatique' });
-
-  // Il y a au moins un rendez-vous → on ping la Direction
   await ch.send({ content: getMention(guild) || undefined, embeds: [embed] });
 }
 
@@ -643,7 +614,6 @@ client.on('messageReactionAdd', async (reaction, user) => {
       if (annCh) await annCh.send({ embeds: [new EmbedBuilder().setColor(0x3B82F6).setTitle('⚖️ Nouveau membre — Iron Wolf Company').setDescription(`**${cand.nomPerso}** rejoint la Compagnie.\n*Bienvenue dans la meute.*`).setThumbnail(member.user.displayAvatarURL()).setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` })] });
     }
     cand.status = 'acceptee'; cand.acceptedAt = new Date().toISOString(); saveDB(db);
-    // ✅ ARCHIVAGE + AJOUT AU REGISTRE NOTION + FICHE PERSONNAGE
     await archiverCandidatureNotion(cand, 'acceptee', user.username);
     await ajouterMembreNotion(cand, cand.type);
     await notionExtra.creerFichePersonnageNotion?.(cand);
@@ -667,7 +637,6 @@ client.on('messageReactionAdd', async (reaction, user) => {
       return;
     }
     cand.status = 'refusee'; saveDB(db);
-    // ✅ ARCHIVAGE AUTOMATIQUE NOTION
     await archiverCandidatureNotion(cand, 'refusee', user.username);
     await sendLog(guild, 'CANDIDATURE_REFUSEE', { userId: cand.userId, nomPerso: cand.nomPerso, type: isIllegal ? '🔪 Illégal' : '⚖️ Légal' });
     const member = await guild.members.fetch(cand.userId).catch(() => null);
@@ -699,7 +668,6 @@ client.on('messageCreate', async message => {
   const clipCh = getCh(guild, 'clips-temps-fort', 'clips-highlights', 'clips');
   if (clipCh && message.channel.id === clipCh.id && message.attachments.size > 0) { await message.react('🔥').catch(() => {}); await message.react('❤️').catch(() => {}); return; }
 
-  // 💰 COFFRES — suivi financier automatique → Notion Trésorerie
   const coffreCh      = getCh(guild, 'coffre-entreprise', 'coffre');
   const coffreIllegCh = getCh(guild, 'coffre-illegal', 'coffreilleg');
   const coffreType = (coffreCh && message.channel.id === coffreCh.id) ? 'legal'
@@ -732,7 +700,6 @@ client.on('messageCreate', async message => {
     if (message.content.toUpperCase().includes('OPÉRATION') || message.content.toUpperCase().includes('OPERATION')) {
       const lines = message.content.split('\n');
       const get = k => { const l = lines.find(l => l.toUpperCase().includes(k.toUpperCase())); return l ? l.split(':').slice(1).join(':').trim() || '—' : '—'; };
-      // Détection du pôle (défaut : Illégal, car ce salon est côté ombre)
       const poleRaw = get('PÔLE') !== '—' ? get('PÔLE') : get('POLE');
       const pole = poleRaw.toLowerCase().includes('lég') || poleRaw.toLowerCase().includes('leg') ? 'legal' : 'illegal';
       const op = { id: Date.now().toString(), name: get('NOM'), lieu: get('LIEU'), objectif: get('OBJECTIF'), equipe: get('ÉQUIPE') || get('EQUIPE'), pole, participants: [], status: 'preparation', createdAt: new Date().toISOString() };
@@ -760,7 +727,6 @@ client.on('messageCreate', async message => {
         new ButtonBuilder().setCustomId(`op_terminee_${op.id}`).setLabel('✅ Terminer').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(`op_annulee_${op.id}`).setLabel('❌ Annuler').setStyle(ButtonStyle.Danger),
       );
-      // Ping du pôle concerné à l'annonce de l'opération
       const roleId = pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL;
       await opsCh.send({ content: `<@&${roleId}> — 🎯 Nouvelle opération **${op.name}**. Inscrivez-vous via « ✋ Je participe ».`, embeds: [embed], components: [rowParticip, rowGestion] });
       await message.react('✅');
@@ -858,7 +824,6 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  // ── Participation à une opération ──
   if (interaction.isButton() && (interaction.customId.startsWith('op_participer_') || interaction.customId.startsWith('op_retrait_'))) {
     const retrait = interaction.customId.startsWith('op_retrait_');
     const opId = interaction.customId.replace(retrait ? 'op_retrait_' : 'op_participer_', '');
@@ -883,7 +848,6 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  // ── Terminer une opération → modal pour saisir le résultat ──
   if (interaction.isButton() && interaction.customId.startsWith('op_terminee_')) {
     const opId = interaction.customId.replace('op_terminee_', '');
     const op = db.operations.find(o => o.id === opId);
@@ -918,7 +882,6 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  // ── Lancer / Annuler une opération ──
   if (interaction.isButton() && (interaction.customId.startsWith('op_encours_') || interaction.customId.startsWith('op_annulee_'))) {
     const isLancer = interaction.customId.startsWith('op_encours_');
     const opId = interaction.customId.replace(isLancer ? 'op_encours_' : 'op_annulee_', '');
@@ -930,7 +893,6 @@ client.on('interactionCreate', async interaction => {
     const label = isLancer ? '🟢 En cours' : '❌ Annulée';
     await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: label });
     const updated = EmbedBuilder.from(interaction.message.embeds[0]).setColor(isLancer ? 0x00AA00 : 0xED4245).spliceFields(0, 1, { name: 'Statut', value: label, inline: true });
-    // Au lancement : on ping les participants inscrits (ou le pôle si personne)
     if (isLancer) {
       const mentions = (op.participants || []).map(nom => {
         const id = MEMBRES_DISCORD_MAP[nom];
@@ -1087,11 +1049,11 @@ client.once('ready', async () => {
     await autoSetup(guild).catch(e => console.log('autoSetup error:', e.message));
   }
 
-  cron.schedule('*/5 * * * *',  async () => { for (const g of client.guilds.cache.values()) await checkAgenda(g).catch(() => {}); });        // agenda
-  cron.schedule('0 * * * *',    async () => { for (const g of client.guilds.cache.values()) await updateDashboard(g).catch(() => {}); });   // dashboard horaire
-  cron.schedule('*/15 * * * *', async () => { for (const g of client.guilds.cache.values()) await syncRegistreNotion(g).catch(() => {}); });// sync Notion 15min
-  cron.schedule('0 9 * * *',    async () => { for (const g of client.guilds.cache.values()) await postDailyAgenda(g).catch(() => {}); }, { timezone: 'Europe/Paris' }); // agenda du jour
-  cron.schedule('0 20 * * 0',   async () => { for (const g of client.guilds.cache.values()) { try { await notionExtra.postStatsHebdo?.(g); } catch (e) { console.log(e.message); } } }, { timezone: 'Europe/Paris' }); // stats hebdo dimanche 20h
+  cron.schedule('*/5 * * * *',  async () => { for (const g of client.guilds.cache.values()) await checkAgenda(g).catch(() => {}); });
+  cron.schedule('0 * * * *',    async () => { for (const g of client.guilds.cache.values()) await updateDashboard(g).catch(() => {}); });
+  cron.schedule('*/15 * * * *', async () => { for (const g of client.guilds.cache.values()) await syncRegistreNotion(g).catch(() => {}); });
+  cron.schedule('0 9 * * *',    async () => { for (const g of client.guilds.cache.values()) await postDailyAgenda(g).catch(() => {}); }, { timezone: 'Europe/Paris' });
+  cron.schedule('0 20 * * 0',   async () => { for (const g of client.guilds.cache.values()) { try { await notionExtra.postStatsHebdo?.(g); } catch (e) { console.log(e.message); } } }, { timezone: 'Europe/Paris' });
 });
 
 client.login(process.env.TOKEN || process.env.DISCORD_TOKEN);
