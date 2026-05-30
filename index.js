@@ -4,7 +4,7 @@ const {
   EmbedBuilder, ChannelType, ActivityType,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   ModalBuilder, TextInputBuilder, TextInputStyle,
-  SlashCommandBuilder,
+  SlashCommandBuilder, MessageFlags,
 } = require('discord.js');
 const cron = require('node-cron');
 
@@ -496,7 +496,7 @@ async function handleSlashCommand(interaction) {
         { name: '💎 Total',          value: `**$${(soldeLegal + soldeIlleg).toLocaleString('fr-FR')}**`, inline: true },
       )
       .setFooter({ text: `IWC • ${fmtShort(new Date())}` });
-    await interaction.reply({ embeds: [embed], ephemeral: isDirection(interaction.member) ? false : true });
+    await interaction.reply({ embeds: [embed], flags: isDirection(interaction.member) ? undefined : MessageFlags.Ephemeral });
     return;
   }
 
@@ -518,10 +518,10 @@ async function handleSlashCommand(interaction) {
             { name: '🎖️ Rang',      value: membre?.rang || '—', inline: true },
           )
           .setFooter({ text: 'IWC • Fiche personnage' })
-        ], ephemeral: true });
+        ], flags: MessageFlags.Ephemeral });
         return;
       }
-      await interaction.reply({ content: `❌ Aucune fiche trouvée pour **${interaction.options.getString('nom')}**.`, ephemeral: true });
+      await interaction.reply({ content: `❌ Aucune fiche trouvée pour **${interaction.options.getString('nom')}**.`, flags: MessageFlags.Ephemeral });
       return;
     }
     const embed = new EmbedBuilder()
@@ -537,14 +537,14 @@ async function handleSlashCommand(interaction) {
         { name: '📖 Background',     value: (cand.background || '—').slice(0, 500) + ((cand.background?.length || 0) > 500 ? '...' : '') },
       )
       .setFooter({ text: 'IWC • Fiche personnage' });
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     return;
   }
 
   if (commandName === 'ops') {
     const opsActives = (db.operations || []).filter(o => ['preparation', 'en_cours'].includes(o.status));
     if (!opsActives.length) {
-      await interaction.reply({ content: '*Aucune opération en cours ou en préparation.*', ephemeral: true });
+      await interaction.reply({ content: '*Aucune opération en cours ou en préparation.*', flags: MessageFlags.Ephemeral });
       return;
     }
     const embed = new EmbedBuilder()
@@ -569,7 +569,7 @@ async function handleSlashCommand(interaction) {
     }
     await notionExtra.majStatutActiviteNotion?.(interaction.user.id, 'absent');
     await sendLog(guild, 'ABSENCE', { userId: interaction.user.id, username: interaction.user.username });
-    await interaction.reply({ content: `✅ Ton absence a été enregistrée.\n**Durée :** ${duree}\n**Raison :** ${raison}`, ephemeral: true });
+    await interaction.reply({ content: `✅ Ton absence a été enregistrée.\n**Durée :** ${duree}\n**Raison :** ${raison}`, flags: MessageFlags.Ephemeral });
 
     const absCh = getCh(guild, 'absences');
     if (absCh) await absCh.send({ embeds: [new EmbedBuilder()
@@ -586,18 +586,18 @@ async function handleSlashCommand(interaction) {
   }
 
   if (commandName === 'rapport') {
-    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true }); return; }
-    await interaction.reply({ content: '📋 Rapport en cours d\'envoi en DM...', ephemeral: true });
+    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return; }
+    await interaction.reply({ content: '📋 Rapport en cours d\'envoi en DM...', flags: MessageFlags.Ephemeral });
     await envoyerRapportDirection(guild);
     return;
   }
 
   if (commandName === 'promo') {
-    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true }); return; }
+    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return; }
     const cible      = interaction.options.getUser('membre');
     const nouveauRang = interaction.options.getString('rang');
     const membre     = await guild.members.fetch(cible.id).catch(() => null);
-    if (!membre) { await interaction.reply({ content: '❌ Membre introuvable.', ephemeral: true }); return; }
+    if (!membre) { await interaction.reply({ content: '❌ Membre introuvable.', flags: MessageFlags.Ephemeral }); return; }
 
     const ancienRang = db.members[cible.id]?.rang || '—';
     if (db.members[cible.id]) { db.members[cible.id].rang = nouveauRang; saveDB(db); }
@@ -628,12 +628,12 @@ async function handleSlashCommand(interaction) {
   }
 
   if (commandName === 'retro') {
-    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true }); return; }
+    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return; }
     const cible       = interaction.options.getUser('membre');
     const nouveauRang = interaction.options.getString('rang');
     const raison      = interaction.options.getString('raison') || '—';
     const membre      = await guild.members.fetch(cible.id).catch(() => null);
-    if (!membre) { await interaction.reply({ content: '❌ Membre introuvable.', ephemeral: true }); return; }
+    if (!membre) { await interaction.reply({ content: '❌ Membre introuvable.', flags: MessageFlags.Ephemeral }); return; }
 
     const ancienRang = db.members[cible.id]?.rang || '—';
     if (db.members[cible.id]) { db.members[cible.id].rang = nouveauRang; saveDB(db); }
@@ -1119,7 +1119,7 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isChatInputCommand()) {
     await handleSlashCommand(interaction).catch(e => {
       console.log('❌ Slash command error:', e.message);
-      interaction.reply({ content: '❌ Une erreur est survenue.', ephemeral: true }).catch(() => {});
+      interaction.reply({ content: '❌ Une erreur est survenue.', flags: MessageFlags.Ephemeral }).catch(() => {});
     });
     return;
   }
@@ -1149,7 +1149,7 @@ client.on('interactionCreate', async interaction => {
   }
 
   if (interaction.isModalSubmit() && interaction.customId === 'candidature_modal_legal') {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const cand = { id: Date.now().toString(), userId: interaction.user.id, username: interaction.user.username, nomPerso: interaction.fields.getTextInputValue('nom_perso'), agePerso: interaction.fields.getTextInputValue('age_perso'), metier: interaction.fields.getTextInputValue('metier'), background: interaction.fields.getTextInputValue('background'), dispos: interaction.fields.getTextInputValue('dispos'), type: 'legal', status: 'reçue', receivedAt: new Date().toISOString() };
     db.candidatures.push(cand); saveDB(db);
     await interaction.editReply({ content: '✅ **Candidature légale transmise.**\nRéponse en DM sous 48h.\n*La Compagnie ne recrute pas au hasard.*' });
@@ -1169,7 +1169,7 @@ client.on('interactionCreate', async interaction => {
   }
 
   if (interaction.isModalSubmit() && interaction.customId === 'candidature_modal_illegal') {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const cand = { id: Date.now().toString(), userId: interaction.user.id, username: interaction.user.username, nomPerso: interaction.fields.getTextInputValue('nom_perso'), agePerso: interaction.fields.getTextInputValue('age_perso'), specialite: interaction.fields.getTextInputValue('specialite'), background: interaction.fields.getTextInputValue('background'), dispos: interaction.fields.getTextInputValue('dispos'), type: 'illegal', status: 'reçue', receivedAt: new Date().toISOString() };
     db.candidatures.push(cand); saveDB(db);
     await interaction.editReply({ content: '🔒 **Dossier transmis.**\nReste discret.\n*On te contactera si tu es jugé digne.*' });
@@ -1192,8 +1192,8 @@ client.on('interactionCreate', async interaction => {
     const retrait = interaction.customId.startsWith('op_retrait_');
     const opId    = interaction.customId.replace(retrait ? 'op_retrait_' : 'op_participer_', '');
     const op      = db.operations.find(o => o.id === opId);
-    if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', ephemeral: true }); return; }
-    if (['terminee', 'annulee'].includes(op.status)) { await interaction.reply({ content: '❌ Cette opération est clôturée.', ephemeral: true }); return; }
+    if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }); return; }
+    if (['terminee', 'annulee'].includes(op.status)) { await interaction.reply({ content: '❌ Cette opération est clôturée.', flags: MessageFlags.Ephemeral }); return; }
     op.participants = op.participants || [];
     const nom = nomParticipant(interaction.member);
     if (retrait) { op.participants = op.participants.filter(p => p !== nom); }
@@ -1212,7 +1212,7 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isButton() && interaction.customId.startsWith('op_terminee_')) {
     const opId = interaction.customId.replace('op_terminee_', '');
     const op   = db.operations.find(o => o.id === opId);
-    if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', ephemeral: true }); return; }
+    if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }); return; }
     const modal = new ModalBuilder().setCustomId(`op_resultat_modal_${opId}`).setTitle("✅ Clôture de l'opération");
     modal.addComponents(
       new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('resultat').setLabel('Résultat').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Réussite / Échec / Mitigé')),
@@ -1225,7 +1225,7 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isModalSubmit() && interaction.customId.startsWith('op_resultat_modal_')) {
     const opId = interaction.customId.replace('op_resultat_modal_', '');
     const op   = db.operations.find(o => o.id === opId);
-    if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', ephemeral: true }); return; }
+    if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }); return; }
     await interaction.deferUpdate();
     op.status   = 'terminee';
     op.endedAt  = new Date().toISOString();
@@ -1245,7 +1245,7 @@ client.on('interactionCreate', async interaction => {
     const isLancer = interaction.customId.startsWith('op_encours_');
     const opId     = interaction.customId.replace(isLancer ? 'op_encours_' : 'op_annulee_', '');
     const op       = db.operations.find(o => o.id === opId);
-    if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', ephemeral: true }); return; }
+    if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }); return; }
     op.status = isLancer ? 'en_cours' : 'annulee';
     saveDB(db);
     await notionExtra.majOperationNotion?.(op);
@@ -1262,7 +1262,7 @@ client.on('interactionCreate', async interaction => {
   }
 
   if (interaction.isButton() && interaction.customId === 'open_contrat_offre') {
-    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true }); return; }
+    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return; }
     const modal = new ModalBuilder().setCustomId('contrat_offre_modal').setTitle('📤 Nos conditions — Contrat client');
     modal.addComponents(
       new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('client_nom').setLabel('Nom / Entreprise du client').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Famille Moreau...')),
@@ -1275,7 +1275,7 @@ client.on('interactionCreate', async interaction => {
   }
 
   if (interaction.isModalSubmit() && interaction.customId === 'contrat_offre_modal') {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     if (!db.contrats) db.contrats = [];
     const contratId = 'IWC-OF-' + Date.now().toString().slice(-5);
     const contrat = { id: contratId, type: 'offre', clientNom: interaction.fields.getTextInputValue('client_nom'), objet: interaction.fields.getTextInputValue('objet'), remuneration: interaction.fields.getTextInputValue('remuneration'), userId: interaction.fields.getTextInputValue('user_id').trim(), dateEcheance: interaction.fields.getTextInputValue('date_echeance') || null, emetteurId: interaction.user.id, emetteurNom: interaction.user.username, status: 'en_attente', createdAt: new Date().toISOString() };
@@ -1298,9 +1298,9 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isButton() && interaction.customId.startsWith('signer_offre_')) {
     const contratId = interaction.customId.replace('signer_offre_', '');
     const contrat   = (db.contrats || []).find(c => c.id === contratId);
-    if (!contrat) { await interaction.reply({ content: '❌ Contrat introuvable.', ephemeral: true }); return; }
-    if (contrat.userId !== interaction.user.id) { await interaction.reply({ content: '❌ Ce contrat ne vous est pas destiné.', ephemeral: true }); return; }
-    if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', ephemeral: true }); return; }
+    if (!contrat) { await interaction.reply({ content: '❌ Contrat introuvable.', flags: MessageFlags.Ephemeral }); return; }
+    if (contrat.userId !== interaction.user.id) { await interaction.reply({ content: '❌ Ce contrat ne vous est pas destiné.', flags: MessageFlags.Ephemeral }); return; }
+    if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', flags: MessageFlags.Ephemeral }); return; }
     contrat.status = 'signe'; contrat.signedAt = new Date().toISOString(); saveDB(db);
     await notionExtra.ajouterContratNotion?.(contrat);
     await sendLog(guild, 'CONTRAT_SIGNE', { contratId, objet: contrat.objet, signe: `${interaction.user.username} (${contrat.clientNom})` });
@@ -1314,9 +1314,9 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isButton() && interaction.customId.startsWith('refuser_offre_')) {
     const contratId = interaction.customId.replace('refuser_offre_', '');
     const contrat   = (db.contrats || []).find(c => c.id === contratId);
-    if (!contrat) { await interaction.reply({ content: '❌ Contrat introuvable.', ephemeral: true }); return; }
-    if (contrat.userId !== interaction.user.id) { await interaction.reply({ content: '❌ Ce contrat ne vous est pas destiné.', ephemeral: true }); return; }
-    if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', ephemeral: true }); return; }
+    if (!contrat) { await interaction.reply({ content: '❌ Contrat introuvable.', flags: MessageFlags.Ephemeral }); return; }
+    if (contrat.userId !== interaction.user.id) { await interaction.reply({ content: '❌ Ce contrat ne vous est pas destiné.', flags: MessageFlags.Ephemeral }); return; }
+    if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', flags: MessageFlags.Ephemeral }); return; }
     contrat.status = 'refuse'; contrat.refusedAt = new Date().toISOString(); saveDB(db);
     await sendLog(guild, 'CONTRAT_REFUSE', { contratId, objet: contrat.objet });
     await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0xED4245).spliceFields(5, 1, { name: '📌 Statut', value: `❌ Refusé le ${fmtShort(new Date())}`, inline: true })], components: [] });
@@ -1326,7 +1326,7 @@ client.on('interactionCreate', async interaction => {
   }
 
   if (interaction.isButton() && interaction.customId === 'open_contrat_emploi') {
-    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true }); return; }
+    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return; }
     const modal = new ModalBuilder().setCustomId('contrat_emploi_modal').setTitle('📥 Contrat employeur — À signer');
     modal.addComponents(
       new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('employeur_nom').setLabel("Nom de l'employeur").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Société Moreau...')),
@@ -1339,7 +1339,7 @@ client.on('interactionCreate', async interaction => {
   }
 
   if (interaction.isModalSubmit() && interaction.customId === 'contrat_emploi_modal') {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     if (!db.contrats) db.contrats = [];
     const contratId = 'IWC-EM-' + Date.now().toString().slice(-5);
     const contrat = { id: contratId, type: 'emploi', employeurNom: interaction.fields.getTextInputValue('employeur_nom'), objet: interaction.fields.getTextInputValue('objet'), remuneration: interaction.fields.getTextInputValue('remuneration'), userId: interaction.fields.getTextInputValue('user_id').trim(), dateEcheance: interaction.fields.getTextInputValue('date_echeance') || null, signataire: interaction.user.username, signataireId: interaction.user.id, status: 'en_attente', createdAt: new Date().toISOString() };
@@ -1361,9 +1361,9 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isButton() && interaction.customId.startsWith('signer_emploi_')) {
     const contratId = interaction.customId.replace('signer_emploi_', '');
     const contrat   = (db.contrats || []).find(c => c.id === contratId);
-    if (!contrat) { await interaction.reply({ content: '❌ Contrat introuvable.', ephemeral: true }); return; }
-    if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', ephemeral: true }); return; }
-    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Seule la Direction peut signer.', ephemeral: true }); return; }
+    if (!contrat) { await interaction.reply({ content: '❌ Contrat introuvable.', flags: MessageFlags.Ephemeral }); return; }
+    if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', flags: MessageFlags.Ephemeral }); return; }
+    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Seule la Direction peut signer.', flags: MessageFlags.Ephemeral }); return; }
     contrat.status = 'signe'; contrat.signedAt = new Date().toISOString(); contrat.signedBy = interaction.user.username; saveDB(db);
     await notionExtra.ajouterContratNotion?.(contrat);
     await sendLog(guild, 'CONTRAT_SIGNE', { contratId, objet: contrat.objet, signe: `${interaction.user.username} — IWC` });
@@ -1376,9 +1376,9 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isButton() && interaction.customId.startsWith('refuser_emploi_')) {
     const contratId = interaction.customId.replace('refuser_emploi_', '');
     const contrat   = (db.contrats || []).find(c => c.id === contratId);
-    if (!contrat) { await interaction.reply({ content: '❌ Contrat introuvable.', ephemeral: true }); return; }
-    if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', ephemeral: true }); return; }
-    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Seule la Direction peut décliner.', ephemeral: true }); return; }
+    if (!contrat) { await interaction.reply({ content: '❌ Contrat introuvable.', flags: MessageFlags.Ephemeral }); return; }
+    if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', flags: MessageFlags.Ephemeral }); return; }
+    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Seule la Direction peut décliner.', flags: MessageFlags.Ephemeral }); return; }
     contrat.status = 'refuse'; contrat.refusedAt = new Date().toISOString(); saveDB(db);
     await sendLog(guild, 'CONTRAT_REFUSE', { contratId, objet: contrat.objet });
     await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0xED4245).spliceFields(5, 1, { name: '📌 Statut', value: `❌ Décliné le ${fmtShort(new Date())}`, inline: true })], components: [] });
