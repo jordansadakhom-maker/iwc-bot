@@ -32,6 +32,11 @@ function getCh(guild, ...names) {
   }
   return null;
 }
+function getMention(guild) {
+  return guild.roles.cache
+    .filter(r => ['Concepteur', 'Fléau', 'Fondateur'].some(n => r.name.includes(n)))
+    .map(r => `<@&${r.id}>`).join(' ') || '';
+}
 
 function checkNotionReady(fnName, dbKey) {
   if (!process.env.NOTION_TOKEN) { console.log(`⚠️ [${fnName}] NOTION_TOKEN manquant`); return false; }
@@ -64,6 +69,21 @@ async function notionPatch(pageId, properties) {
   const j = await res.json();
   if (!res.ok) { console.log('❌ Notion PATCH échec:', JSON.stringify(j)); return null; }
   return j;
+}
+
+async function notionQuery(dbId, filter = {}, sorts = []) {
+  if (!process.env.NOTION_TOKEN || !dbId) return [];
+  try {
+    const body = { sorts };
+    if (Object.keys(filter).length) body.filter = filter;
+    const res = await fetch(`https://api.notion.com/v1/databases/${dbId}/query`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const j = await res.json();
+    return j.results || [];
+  } catch { return []; }
 }
 
 async function notionFindByText(dbId, propName, value) {
@@ -147,8 +167,7 @@ async function postStatsHebdo(guild) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 2. FICHE PERSONNAGE — améliorée
-// Champs ajoutés : Relations, Statut activité, Opérations participées, Objectifs IC
+// 2. FICHE PERSONNAGE — complète avec tous les nouveaux champs
 // ═══════════════════════════════════════════════════════════════
 async function creerFichePersonnageNotion(cand) {
   if (!checkNotionReady('creerFichePersonnageNotion', 'FICHES')) return;
@@ -156,21 +175,20 @@ async function creerFichePersonnageNotion(cand) {
     const metierSpe = cand.type === 'illegal' ? (cand.specialite || '—') : (cand.metier || '—');
     const pole = cand.type === 'illegal' ? '🔪 Illégal' : '⚖️ Légal';
 
-    await notionCreate(DBS.FICHES, {
-      'Personnage':            { title: [{ text: { content: cand.nomPerso || '—' } }] },
-      'Âge':                   { rich_text: [{ text: { content: cand.agePerso || '—' } }] },
-      'Pôle':                  { select: { name: pole } },
-      'Métier / Spécialité':   { rich_text: [{ text: { content: metierSpe } }] },
-      'Disponibilités':        { rich_text: [{ text: { content: cand.dispos || '—' } }] },
-      "Date d'entrée":         { date: { start: new Date().toISOString().split('T')[0] } },
-      'Discord ID':            { rich_text: [{ text: { content: cand.userId || '—' } }] },
-      'Discord Username':      { rich_text: [{ text: { content: cand.username || '—' } }] },
-      'Statut fiche':          { select: { name: '🟡 À compléter' } },
-      // ✅ Nouveaux champs
-      'Statut activité':       { select: { name: '✅ Actif' } },
-      'Relations':             { rich_text: [{ text: { content: '' } }] },
-      'Opérations participées':{ rich_text: [{ text: { content: '' } }] },
-      'Objectifs IC':          { rich_text: [{ text: { content: '' } }] },
+    const page = await notionCreate(DBS.FICHES, {
+      'Personnage':             { title: [{ text: { content: cand.nomPerso || '—' } }] },
+      'Âge':                    { rich_text: [{ text: { content: cand.agePerso || '—' } }] },
+      'Pôle':                   { select: { name: pole } },
+      'Métier / Spécialité':    { rich_text: [{ text: { content: metierSpe } }] },
+      'Disponibilités':         { rich_text: [{ text: { content: cand.dispos || '—' } }] },
+      "Date d'entrée":          { date: { start: new Date().toISOString().split('T')[0] } },
+      'Discord ID':             { rich_text: [{ text: { content: cand.userId || '—' } }] },
+      'Discord Username':       { rich_text: [{ text: { content: cand.username || '—' } }] },
+      'Statut fiche':           { select: { name: '🟡 À compléter' } },
+      'Statut activité':        { select: { name: '✅ Actif' } },
+      'Relations':              { rich_text: [{ text: { content: '' } }] },
+      'Opérations participées': { rich_text: [{ text: { content: '' } }] },
+      'Objectifs IC':           { rich_text: [{ text: { content: '' } }] },
     }, [
       { object: 'block', type: 'heading_2', heading_2: { rich_text: [{ text: { content: '📖 Background' } }] } },
       { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: (cand.background || '—').slice(0, 2000) } }] } },
@@ -180,12 +198,152 @@ async function creerFichePersonnageNotion(cand) {
       { object: 'block', type: 'bulleted_list_item', bulleted_list_item: { rich_text: [{ text: { content: 'Objectifs personnels IC' } }] } },
       { object: 'block', type: 'bulleted_list_item', bulleted_list_item: { rich_text: [{ text: { content: 'Opérations marquantes' } }] } },
     ]);
+
+    // Stocker l'ID de la page Notion dans data.json pour les mises à jour futures
+    if (page?.id && cand.userId) {
+      const db = loadDB();
+      if (db.members[cand.userId]) {
+        db.members[cand.userId].notionFicheId = page.id;
+        fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
+      }
+    }
+
     console.log(`✅ Fiche personnage créée : ${cand.nomPerso}`);
-  } catch (e) { console.log('❌ Fiche perso error:', e.message); }
+    return page?.id || null;
+  } catch (e) { console.log('❌ Fiche perso error:', e.message); return null; }
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 3. TRÉSORERIE
+// 3. STATUT ACTIVITÉ — mise à jour automatique
+// Appelé depuis index.js quand absence/retour détecté
+// ═══════════════════════════════════════════════════════════════
+async function majStatutActiviteNotion(userId, statut) {
+  if (!checkNotionReady('majStatutActiviteNotion', 'FICHES')) return;
+  try {
+    // Retrouver la page via Discord ID
+    let pageId = null;
+    const db = loadDB();
+    if (db.members[userId]?.notionFicheId) {
+      pageId = db.members[userId].notionFicheId;
+    } else {
+      pageId = await notionFindByText(DBS.FICHES, 'Discord ID', userId);
+      if (pageId && db.members[userId]) {
+        db.members[userId].notionFicheId = pageId;
+        fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
+      }
+    }
+    if (!pageId) return;
+
+    const statutLabel = statut === 'absent' ? '⚠️ Absent' : statut === 'inactif' ? '💤 Inactif' : '✅ Actif';
+    await notionPatch(pageId, { 'Statut activité': { select: { name: statutLabel } } });
+    console.log(`✅ Statut activité mis à jour : ${userId} → ${statutLabel}`);
+  } catch (e) { console.log('❌ majStatutActivite error:', e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 4. OPÉRATIONS PARTICIPÉES — mise à jour automatique
+// Appelé quand une opération est terminée
+// ═══════════════════════════════════════════════════════════════
+async function majOperationsParticipees(op) {
+  if (!checkNotionReady('majOperationsParticipees', 'FICHES')) return;
+  if (!op.participants || op.participants.length === 0) return;
+
+  // Map Nom IC → Discord ID
+  const MEMBRES_MAP = {
+    'Colt Kane':      '696325126047662081',
+    'June McCall':    '998581854791798835',
+    'Cyrus Hollow':   '324627678143578112',
+    'Jonas Caverly':  '944208797084311583',
+    'Thomas Galagan': '982201491773354035',
+  };
+
+  try {
+    for (const nomParticipant of op.participants) {
+      const discordId = MEMBRES_MAP[nomParticipant];
+      if (!discordId) continue;
+
+      // Retrouver la page Notion du membre
+      const db = loadDB();
+      let pageId = db.members[discordId]?.notionFicheId;
+      if (!pageId) {
+        pageId = await notionFindByText(DBS.FICHES, 'Discord ID', discordId);
+        if (pageId && db.members[discordId]) {
+          db.members[discordId].notionFicheId = pageId;
+          fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
+        }
+      }
+      if (!pageId) continue;
+
+      // Récupérer les opérations existantes et ajouter la nouvelle
+      const pages = await notionQuery(DBS.FICHES, { property: 'Discord ID', rich_text: { equals: discordId } });
+      const existant = pages[0]?.properties['Opérations participées']?.rich_text?.[0]?.plain_text || '';
+      const nouveau = existant ? `${existant}\n→ ${op.name} (${fmtShort(new Date())}) — ${op.resultat || '—'}` : `→ ${op.name} (${fmtShort(new Date())}) — ${op.resultat || '—'}`;
+
+      await notionPatch(pageId, {
+        'Opérations participées': { rich_text: [{ text: { content: nouveau.slice(0, 2000) } }] }
+      });
+      console.log(`✅ Opérations participées MàJ : ${nomParticipant}`);
+    }
+  } catch (e) { console.log('❌ majOperationsParticipees error:', e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 5. RAPPEL DM — 48h après acceptation
+// Appelé depuis index.js avec un setTimeout
+// ═══════════════════════════════════════════════════════════════
+async function envoyerRappelFiche(guild, cand) {
+  try {
+    await new Promise(r => setTimeout(r, 48 * 3600000)); // 48h
+    const member = await guild.members.fetch(cand.userId).catch(() => null);
+    if (!member) return;
+    await member.send({ embeds: [new EmbedBuilder()
+      .setColor(0x8B1A1A)
+      .setTitle('📋 Rappel — Ta fiche personnage')
+      .setDescription(`Bienvenue dans la Compagnie, **${cand.nomPerso}** !\n\nTa fiche personnage a été créée dans Notion. Il te reste à compléter :\n\n→ **Apparence physique**\n→ **Relations / contacts**\n→ **Objectifs IC**\n\n*Contacte la Direction pour obtenir le lien.*\n— La Direction`)
+      .setFooter({ text: 'IWC • Rappel automatique 48h' })
+    ] });
+    console.log(`✅ Rappel fiche envoyé à ${cand.nomPerso}`);
+  } catch (e) { console.log('❌ Rappel fiche error:', e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 6. ALERTE FICHE COMPLÉTÉE — check toutes les heures
+// Vérifie si des fiches sont passées de "À compléter" à "Complète"
+// ═══════════════════════════════════════════════════════════════
+async function checkFichesCompletees(guild) {
+  if (!checkNotionReady('checkFichesCompletees', 'FICHES')) return;
+  try {
+    const pages = await notionQuery(DBS.FICHES, {
+      property: 'Statut fiche',
+      select: { equals: '✅ Complète' }
+    });
+
+    const db = loadDB();
+    if (!db.fichesCompleteesNotifiees) db.fichesCompleteesNotifiees = [];
+
+    const nouvelles = pages.filter(p => !db.fichesCompleteesNotifiees.includes(p.id));
+    if (nouvelles.length === 0) return;
+
+    const logsCh = await guild.channels.cache.find(c => c.name?.includes('logs') || c.name?.includes('direction'));
+    if (!logsCh) return;
+
+    for (const page of nouvelles) {
+      const nom = page.properties['Personnage']?.title?.[0]?.plain_text || '—';
+      const discordId = page.properties['Discord ID']?.rich_text?.[0]?.plain_text;
+      await logsCh.send({ embeds: [new EmbedBuilder()
+        .setColor(0x57F287)
+        .setTitle('✅ Fiche complétée — ' + nom)
+        .setDescription(`**${nom}** vient de compléter sa fiche personnage dans Notion.${discordId ? `\n\n<@${discordId}>` : ''}`)
+        .setFooter({ text: 'IWC • Notification automatique' })
+      ] });
+      db.fichesCompleteesNotifiees.push(page.id);
+    }
+    fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
+  } catch (e) { console.log('❌ checkFichesCompletees error:', e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 7. TRÉSORERIE
 // ═══════════════════════════════════════════════════════════════
 async function enregistrerTransactionNotion(tx) {
   if (!checkNotionReady('enregistrerTransactionNotion', 'TRESORERIE')) return;
@@ -203,7 +361,7 @@ async function enregistrerTransactionNotion(tx) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 4. CONTRATS
+// 8. CONTRATS
 // ═══════════════════════════════════════════════════════════════
 async function ajouterContratNotion(contrat) {
   if (!checkNotionReady('ajouterContratNotion', 'CONTRATS')) return;
@@ -224,7 +382,7 @@ async function ajouterContratNotion(contrat) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 5. OPÉRATIONS
+// 9. OPÉRATIONS
 // ═══════════════════════════════════════════════════════════════
 const OP_STATUT = {
   preparation: '🟡 Préparation',
@@ -268,6 +426,12 @@ async function majOperationNotion(op) {
       props['Résultat'] = { rich_text: [{ text: { content: resTxt.slice(0, 2000) } }] };
     }
     await notionPatch(op.notionPageId, props);
+
+    // Si opération terminée → mettre à jour les fiches des participants
+    if (op.status === 'terminee') {
+      await majOperationsParticipees(op);
+    }
+
     console.log(`✅ Opération "${op.name}" mise à jour (${op.status})`);
   } catch (e) { console.log('❌ MAJ opération error:', e.message); }
 }
@@ -279,5 +443,9 @@ module.exports = {
   ajouterContratNotion,
   creerOperationNotion,
   majOperationNotion,
+  majStatutActiviteNotion,
+  majOperationsParticipees,
+  envoyerRappelFiche,
+  checkFichesCompletees,
 };
 
