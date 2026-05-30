@@ -16,7 +16,17 @@ let notionExtra = {};
 try { notionExtra = require('./notion-extra'); console.log('✅ Module notion-extra chargé'); }
 catch (e) { console.log('⚠️ notion-extra non chargé:', e.message); }
 
-// ── Filets de sécurité globaux (évite que le bot crash sur une erreur non gérée) ──
+// ── Module Notion v2 (Trésorerie Modal, Journal IC, Dashboard, Archives) ──
+let notionModules = {};
+try { notionModules = require('./notion-modules-v2'); console.log('✅ Module notion-modules-v2 chargé'); }
+catch (e) { console.log('⚠️ notion-modules-v2 non chargé:', e.message); }
+
+// ── Module Notion v3 (Grades, Inactivité, Affaires, Absences, Informateurs) ──
+let notionV3 = {};
+try { notionV3 = require('./notion-modules-v3'); console.log('✅ Module notion-modules-v3 chargé'); }
+catch (e) { console.log('⚠️ notion-modules-v3 non chargé:', e.message); }
+
+// ── Filets de sécurité globaux ──
 process.on('unhandledRejection', reason => console.log('⚠️ Unhandled Rejection:', reason?.message || reason));
 process.on('uncaughtException',  err    => console.log('⚠️ Uncaught Exception:', err?.message || err));
 
@@ -97,6 +107,33 @@ const SLASH_COMMANDS = [
     .addUserOption(o => o.setName('membre').setDescription('Membre à rétrograder').setRequired(true))
     .addStringOption(o => o.setName('rang').setDescription('Nouveau rang').setRequired(true))
     .addStringOption(o => o.setName('raison').setDescription('Raison (optionnel)').setRequired(false)),
+  // ── NOUVELLES COMMANDES v2 ──
+  new SlashCommandBuilder().setName('tresor').setDescription('💰 Enregistrer une transaction (ouvre un formulaire)'),
+  new SlashCommandBuilder().setName('dashboard').setDescription('🐺 Tableau de bord complet de la faction'),
+  // ── NOUVELLES COMMANDES v3 ──
+  new SlashCommandBuilder().setName('grade-set').setDescription('🎖️ Attribuer un grade à un membre (Direction)'),
+  new SlashCommandBuilder().setName('hierarchie').setDescription('⚔️ Afficher le tableau hiérarchique de la faction'),
+  new SlashCommandBuilder().setName('affaire').setDescription('📋 Soumettre une affaire à la Direction'),
+  new SlashCommandBuilder().setName('journal').setDescription('📖 Journal IC de la Compagnie')
+    .addStringOption(o => o.setName('type').setDescription('Filtrer par type').setRequired(false)
+      .addChoices(
+        { name: 'Tous',        value: 'all'         },
+        { name: 'Opérations',  value: 'operation'   },
+        { name: 'Contrats',    value: 'contrat'     },
+        { name: 'Recrutement', value: 'recrutement' },
+        { name: 'Trésorerie',  value: 'tresorerie'  },
+        { name: 'Promotions',  value: 'promotion'   },
+      ))
+    .addIntegerOption(o => o.setName('page').setDescription('Numéro de page').setRequired(false)),
+  new SlashCommandBuilder().setName('contrats-archives').setDescription('📜 Archives de tous les contrats')
+    .addStringOption(o => o.setName('statut').setDescription('Filtrer par statut').setRequired(false)
+      .addChoices(
+        { name: 'Tous',    value: 'tous'   },
+        { name: 'Actifs',  value: 'actif'  },
+        { name: 'Refusés', value: 'refuse' },
+        { name: 'Expirés', value: 'expire' },
+      ))
+    .addIntegerOption(o => o.setName('page').setDescription('Numéro de page').setRequired(false)),
 ].map(c => c.toJSON());
 
 async function registerSlashCommands(guild) {
@@ -126,7 +163,6 @@ function getCh(guild, ...names) {
   return null;
 }
 
-// getCh strict — évite les correspondances partielles ambiguës
 function getChExact(guild, name) {
   const clean = s => s.toLowerCase().replace(/[^a-z0-9-]/g, '');
   return guild.channels.cache.find(c =>
@@ -375,16 +411,14 @@ async function autoKickVisiteurs(guild) {
   } catch (e) { console.log('❌ autoKickVisiteurs error:', e.message); }
 }
 
-// ── Rappels de sessions persistants (survivent aux redémarrages) ──
+// ── Rappels de sessions persistants ──
 async function checkSessionReminders(guild) {
   const db = loadDB();
   if (!db.sessionReminders) return;
   const now = Date.now();
   let changed = false;
   for (const [id, r] of Object.entries(db.sessionReminders)) {
-    // Nettoyage : on supprime les rappels périmés (session passée depuis +3h)
     if ((r.remindAt + 3600000 + 10800000) < now) { delete db.sessionReminders[id]; changed = true; continue; }
-    // On envoie le rappel s'il est dû, pas encore envoyé, et pas trop tardif (fenêtre de 90 min)
     if (!r.sent && r.remindAt <= now && now < r.remindAt + 5400000) {
       const ch = guild.channels.cache.get(r.channelId) || getCh(guild, 'planning-sessions', 'planning');
       if (ch) await ch.send({ content: getMention(guild) || undefined, embeds: [new EmbedBuilder()
@@ -437,7 +471,7 @@ async function envoyerRapportDirection(guild) {
         { name: '📜 CONTRATS', value: contratsSign.length > 0
             ? contratsSign.map(c => `→ \`${c.id}\` — ${c.objet}`).join('\n')
             : '*Aucun contrat signé hier*', inline: true },
-        { name: `🎯 OPÉRATIONS`, value: [
+        { name: '🎯 OPÉRATIONS', value: [
             opsEnCours.length  > 0 ? `🟢 En cours : **${opsEnCours.length}** — ${opsEnCours.map(o => o.name).join(', ')}` : '🟢 Aucune en cours',
             opsTermHier.length > 0 ? `✅ Terminées hier : **${opsTermHier.length}** — ${opsTermHier.map(o => `${o.name} (${o.resultat || '—'})`).join(', ')}` : '',
           ].filter(Boolean).join('\n') || '*Aucune activité opérationnelle*', inline: false },
@@ -464,6 +498,29 @@ async function handleSlashCommand(interaction) {
   const { commandName, guild } = interaction;
   const db = loadDB();
 
+  // ── NOUVELLES COMMANDES v3 ──
+  if (commandName === 'grade-set')  return notionV3.handleGradeSetCommand?.(interaction);
+  if (commandName === 'hierarchie') return notionV3.handleHierarchieCommand?.(interaction);
+  if (commandName === 'affaire')    return notionV3.handleAffaireNouvelleButton?.(interaction);
+
+  // ── NOUVELLES COMMANDES v2 ──
+  if (commandName === 'tresor') {
+    return notionModules.handleTresorCommand?.(interaction);
+  }
+
+  if (commandName === 'dashboard') {
+    return notionModules.handleDashboard?.(interaction);
+  }
+
+  if (commandName === 'journal') {
+    return notionModules.handleJournalCommand?.(interaction);
+  }
+
+  if (commandName === 'contrats-archives') {
+    return notionModules.handleContratsArchives?.(interaction);
+  }
+
+  // ── COMMANDES EXISTANTES ──
   if (commandName === 'stats') {
     const members   = Object.values(db.members || {});
     const contrats  = db.contrats  || [];
@@ -605,6 +662,14 @@ async function handleSlashCommand(interaction) {
     await sendLog(guild, 'PROMOTION', { userId: cible.id, username: cible.username, ancienRang, nouveauRang, validePar: interaction.user.username });
     await notionExtra.logPromotionNotion?.(guild, { userId: cible.id, username: cible.username, nomPerso: db.members[cible.id]?.name || cible.username, ancienRang, nouveauRang, type: 'promotion', validePar: interaction.user.username });
 
+    // Journal IC automatique
+    await notionModules.ajouterJournalIC?.(guild, {
+      type: 'promotion', emoji: '⬆️',
+      titre: `Promotion — ${cible.username}`,
+      description: `${ancienRang} → **${nouveauRang}** · Décidé par ${interaction.user.username}`,
+      auteur: interaction.user.username,
+    });
+
     await membre.send({ embeds: [new EmbedBuilder()
       .setColor(0x57F287)
       .setTitle('⬆️ Promotion — Iron Wolf Company')
@@ -641,6 +706,14 @@ async function handleSlashCommand(interaction) {
     await sendLog(guild, 'RETROGRADATION', { userId: cible.id, username: cible.username, ancienRang, nouveauRang, raison, validePar: interaction.user.username });
     await notionExtra.logPromotionNotion?.(guild, { userId: cible.id, username: cible.username, nomPerso: db.members[cible.id]?.name || cible.username, ancienRang, nouveauRang, type: 'retrogradation', validePar: interaction.user.username });
 
+    // Journal IC automatique
+    await notionModules.ajouterJournalIC?.(guild, {
+      type: 'promotion', emoji: '⬇️',
+      titre: `Rétrogradation — ${cible.username}`,
+      description: `${ancienRang} → **${nouveauRang}** · Raison : ${raison}`,
+      auteur: interaction.user.username,
+    });
+
     await membre.send({ embeds: [new EmbedBuilder()
       .setColor(0xED4245)
       .setTitle('⬇️ Rétrogradation — Iron Wolf Company')
@@ -670,6 +743,15 @@ async function autoSetup(guild) {
   const db = loadDB();
   console.log('🔧 Auto-setup en cours...');
   await updateDashboard(guild);
+
+  // ── Bouton trésorerie persistant ──
+  await notionModules.setupTresorButton?.(guild);
+
+  // ── Panneau affaires Direction ──
+  await notionV3.setupAffairesPanel?.(guild);
+
+  // ── Tableau hiérarchique ──
+  await notionV3.updateHierarchieEmbed?.(guild);
 
   const reglCh = getCh(guild, 'reglement', 'règlement');
   if (reglCh) {
@@ -739,10 +821,10 @@ async function autoSetup(guild) {
     }
   }
 
-  const coffreLegal  = getChExact(guild, 'coffre-entreprise') || getCh(guild, 'coffre-entreprise');
+  // NOTE : Le bouton trésorerie est géré par setupTresorButton() ci-dessus
+  // On supprime l'ancien message texte brut si le bouton est déjà en place
   const coffreIlleg  = getChExact(guild, 'coffre-illegal');
-  if (coffreLegal) { const msgs = await coffreLegal.messages.fetch({ limit: 10 }); if (!msgs.find(m => m.author.id === client.user.id && m.content.includes('COFFRE'))) await coffreLegal.send('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n💰 COFFRE ENTREPRISE — SUIVI DES FINANCES\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```\nEnregistrez chaque mouvement financier de la Compagnie.\n\n**Format :**\n```\nTYPE      : Entrée / Sortie\nMONTANT   : $000\nOBJET     : description\nRESPONSABLE: \nSOLDE     : $000 (après opération)\n```\n*Toute transaction doit être enregistrée. Aucune exception.*'); }
-  if (coffreIlleg)  { const msgs = await coffreIlleg.messages.fetch({ limit: 10 }); if (!msgs.find(m => m.author.id === client.user.id && m.content.includes('COFFRE'))) await coffreIlleg.send('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🔒 COFFRE — FINANCES ILLÉGALES\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```\n*Ce canal est strictement confidentiel.*\n\n**Format :**\n```\nTYPE      : Entrée / Sortie\nMONTANT   : $000\nOBJET     : \nRESPONSABLE: \nSOLDE     : $000\n```'); }
+  if (coffreIlleg) { const msgs = await coffreIlleg.messages.fetch({ limit: 10 }); if (!msgs.find(m => m.author.id === client.user.id && m.content.includes('COFFRE'))) await coffreIlleg.send('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🔒 COFFRE — FINANCES ILLÉGALES\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```\n*Ce canal est strictement confidentiel.*\n\n**Format :**\n```\nTYPE      : Entrée / Sortie\nMONTANT   : $000\nOBJET     : \nRESPONSABLE: \nSOLDE     : $000\n```'); }
 
   console.log('✅ Auto-setup terminé\n');
 }
@@ -769,6 +851,7 @@ async function notionQueryAgenda() {
       notif24:      p.properties['Notif 24h']?.checkbox,
       notif1h:      p.properties['Notif 1h']?.checkbox,
       notif15:      p.properties['Notif 15min']?.checkbox,
+      statut:       p.properties['Statut']?.select?.name || '',
       url:          p.url,
     }));
   } catch { return []; }
@@ -831,6 +914,8 @@ async function checkAgenda(guild) {
   let changed = false;
 
   for (const a of appts) {
+    // Ignorer les RDV annulés
+    if (a.statut === 'Annulé') continue;
     if (!a.date) continue;
     const dt = buildRdvDate(a.date, a.heure);
     if (!dt) continue;
@@ -866,9 +951,9 @@ async function postDailyAgenda(guild) {
   if (!ch) return;
   const appts = await notionQueryAgenda();
   const today = new Date().toISOString().split('T')[0];
-  const todayA = appts.filter(a => a.date?.startsWith(today));
+  const todayA = appts.filter(a => a.date?.startsWith(today) && a.statut !== 'Annulé');
   if (!todayA.length) return;
-  const weekA = appts.filter(a => { if (!a.date) return false; const d = new Date(a.date); return d >= new Date() && d <= new Date(Date.now() + 7*86400000); });
+  const weekA = appts.filter(a => { if (!a.date || a.statut === 'Annulé') return false; const d = new Date(a.date); return d >= new Date() && d <= new Date(Date.now() + 7*86400000); });
   const embed = new EmbedBuilder().setColor(0x8B5A2A).setTitle(`📅 Agenda — ${fmtLong(new Date())}`)
     .setDescription(todayA.map(a => `📅 **${a.titre}**\n🕐 ${a.heure || '—'} · 📍 ${a.lieu} · 👥 ${a.participants.join(', ') || '—'}`).join('\n\n'));
   const nw = weekA.filter(a => !a.date?.startsWith(today)).slice(0, 5);
@@ -906,6 +991,14 @@ client.on('guildMemberRemove', async member => {
   const db = loadDB(); const m = db.members[member.id];
   await sendLog(member.guild, 'DEPART', { username: member.user.username, rang: m?.rang, duree: m ? daysSince(m.joinedAt) + ' jours' : '—' });
   if (db.members[member.id]) { db.members[member.id].status = 'parti'; db.members[member.id].leftAt = new Date().toISOString(); saveDB(db); }
+
+  // Journal IC automatique
+  await notionModules.ajouterJournalIC?.(member.guild, {
+    type: 'autre', emoji: '🚪',
+    titre: `Départ — ${member.user.username}`,
+    description: `${member.user.username} a quitté la Compagnie.`,
+    auteur: 'Système',
+  });
 });
 
 client.on('messageReactionAdd', async (reaction, user) => {
@@ -965,6 +1058,15 @@ client.on('messageReactionAdd', async (reaction, user) => {
       await notionExtra.creerFichePersonnageNotion?.(cand);
       notionExtra.planifierRappelFiche?.(guild, cand);
       await sendLog(guild, 'CANDIDATURE_ACCEPTEE', { userId: cand.userId, nomPerso: cand.nomPerso, type: isIllegal ? '🔪 Illégal' : '⚖️ Légal', validePar: user.username });
+
+      // Journal IC automatique
+      await notionModules.ajouterJournalIC?.(guild, {
+        type: 'recrutement', emoji: '🐺',
+        titre: `Nouveau membre — ${cand.nomPerso}`,
+        description: `${cand.nomPerso} rejoint la Compagnie · Pôle : ${isIllegal ? '🔪 Illégal' : '⚖️ Légal'} · Accepté par ${user.username}`,
+        auteur: user.username,
+      });
+
       try { await reaction.message.edit({ embeds: [EmbedBuilder.from(reaction.message.embeds[0]).setColor(isIllegal ? 0x8B1A1A : 0x3B82F6).setTitle(`✅ ACCEPTÉ — ${cand.nomPerso}`)] }); } catch {}
     } else {
       cand.status = 'refusee'; cand.refusedAt = new Date().toISOString(); saveDB(db);
@@ -983,18 +1085,36 @@ client.on('messageReactionAdd', async (reaction, user) => {
 
 client.on('messageCreate', async message => {
   if (message.author.bot || !message.guild) return;
+
+  // ── Détection absence dans n'importe quel salon → transfert vers #absences ──
+  const absenceHandled = await notionV3.handleAbsenceDetection?.(message);
+  if (absenceHandled) return;
+
   const db = loadDB(); const guild = message.guild;
 
+  // ── Mise à jour activité + retour statut actif (absent ET inactif) ──
   if (db.members[message.author.id]) {
-    const wasAbsent = db.members[message.author.id].status === 'absent';
+    const wasAbsent  = db.members[message.author.id].status === 'absent';
+    const wasInactif = db.members[message.author.id].status === 'inactif';
     db.members[message.author.id].lastActivity = new Date().toISOString();
-    if (wasAbsent) {
+    if (wasAbsent || wasInactif) {
       db.members[message.author.id].status = 'actif';
       await notionExtra.majStatutActiviteNotion?.(message.author.id, 'actif');
+      if (wasInactif) {
+        const logsCh = await getLogsCh(guild);
+        if (logsCh) await logsCh.send({ embeds: [new EmbedBuilder()
+          .setColor(0x57F287)
+          .setTitle(`✅ Retour activité — ${message.author.username}`)
+          .setDescription(`**${message.author.username}** est de retour après une période d'inactivité.`)
+          .addFields({ name: '📅 Date retour', value: fmtShort(new Date()), inline: true })
+          .setFooter({ text: 'IWC • Activité automatique' })
+        ] }).catch(() => {});
+      }
     }
     saveDB(db);
   }
 
+  // ── #absences — messages directs dans le salon (format /absent) ──
   const absCh = getCh(guild, 'absences');
   if (absCh && message.channel.id === absCh.id) {
     if (db.members[message.author.id]) {
@@ -1007,18 +1127,22 @@ client.on('messageCreate', async message => {
     return;
   }
 
+  // ── #informateurs — parsing + archivage automatique ──
+  const infosCh = getCh(guild, 'informateurs');
+  if (infosCh && message.channel.id === infosCh.id) {
+    await notionV3.handleInformateurMessage?.(message);
+    return;
+  }
+
   const suggCh = getCh(guild, 'suggestion-idee', 'suggestions', 'suggestion');
   if (suggCh && message.channel.id === suggCh.id) { await message.react('✅').catch(() => {}); await message.react('❌').catch(() => {}); return; }
 
   const clipCh = getCh(guild, 'clips-temps-fort', 'clips-highlights', 'clips');
   if (clipCh && message.channel.id === clipCh.id && message.attachments.size > 0) { await message.react('🔥').catch(() => {}); await message.react('❤️').catch(() => {}); return; }
 
-  const coffreLegalCh = getChExact(guild, 'coffre-entreprise');
+  // ── Trésorerie : parsing du coffre illégal (messages manuels conservés en fallback) ──
   const coffreIllegCh = getChExact(guild, 'coffre-illegal');
-  const coffreType = coffreLegalCh && message.channel.id === coffreLegalCh.id ? 'legal'
-                   : coffreIllegCh && message.channel.id === coffreIllegCh.id ? 'illegal' : null;
-
-  if (coffreType) {
+  if (coffreIllegCh && message.channel.id === coffreIllegCh.id) {
     const up = message.content.toUpperCase();
     if (up.includes('TYPE') && up.includes('MONTANT')) {
       const lines = message.content.split('\n');
@@ -1029,10 +1153,19 @@ client.on('messageCreate', async message => {
       const responsable = get('RESPONSABLE') || message.author.username;
       const dbFresh = loadDB();
       if (!dbFresh.coffres) dbFresh.coffres = { legal: 0, illegal: 0 };
-      dbFresh.coffres[coffreType] += (type === 'Sortie' ? -montant : montant);
-      const solde = dbFresh.coffres[coffreType];
+      dbFresh.coffres['illegal'] += (type === 'Sortie' ? -montant : montant);
+      const solde = dbFresh.coffres['illegal'];
       saveDB(dbFresh);
-      await notionExtra.enregistrerTransactionNotion?.({ type, coffre: coffreType === 'illegal' ? '🔒 Illégal' : '💰 Légal', montant, objet, responsable, solde });
+      await notionExtra.enregistrerTransactionNotion?.({ type, coffre: '🔒 Illégal', montant, objet, responsable, solde });
+
+      // Journal IC automatique
+      await notionModules.ajouterJournalIC?.(guild, {
+        type: 'tresorerie', emoji: type === 'Entrée' ? '💵' : '💸',
+        titre: `${type} — Coffre Illégal`,
+        description: `**${objet}** · $${montant.toLocaleString('fr-FR')} · par ${responsable}`,
+        auteur: responsable,
+      });
+
       await message.react('✅').catch(() => {});
       await message.channel.send({ embeds: [new EmbedBuilder().setColor(type === 'Sortie' ? 0xED4245 : 0x57F287)
         .setTitle(`${type === 'Sortie' ? '📤 Sortie' : '📥 Entrée'} — $${montant.toLocaleString('fr-FR')}`)
@@ -1054,6 +1187,15 @@ client.on('messageCreate', async message => {
       op.notionPageId = await notionExtra.creerOperationNotion?.(op);
       saveDB(db);
       await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: '🟡 En préparation' });
+
+      // Journal IC automatique
+      await notionModules.ajouterJournalIC?.(guild, {
+        type: 'operation', emoji: '🎯',
+        titre: `Nouvelle opération — ${op.name}`,
+        description: `📍 ${op.lieu} · Objectif : ${op.objectif} · Pôle : ${pole === 'legal' ? '⚖️ Légal' : '🔪 Illégal'}`,
+        auteur: message.author.username,
+      });
+
       const embed = new EmbedBuilder().setColor(0xFFA500).setTitle(`🎯 OPÉRATION — ${op.name}`)
         .addFields(
           { name: 'Statut', value: '🟡 En préparation', inline: true },
@@ -1086,11 +1228,9 @@ client.on('messageCreate', async message => {
       const session = { id: Date.now().toString(), name: get('NOM') || get('SESSION'), date: get('DATE'), heure: get('HEURE'), lieu: get('LIEU'), type: get('TYPE') || 'RP Principal', status: 'planifiee' };
       db.sessions.push(session);
 
-      // Rappel 1h avant — PERSISTANT (survit aux redémarrages, traité par le cron checkSessionReminders)
-      // Date interprétée en fuseau Europe/Paris (le serveur Render tourne en UTC) — même logique que l'agenda Notion
       try {
         const heureClean = (session.heure || '').replace(/h/i, ':').match(/\d{1,2}:\d{2}/)?.[0] || '00:00';
-        const jourISO = session.date.split('/').reverse().join('-'); // DD/MM/YYYY -> YYYY-MM-DD
+        const jourISO = session.date.split('/').reverse().join('-');
         const provisoire = new Date(`${jourISO}T${heureClean}:00Z`);
         const dt = isNaN(provisoire.getTime()) ? provisoire : new Date(provisoire.getTime() - parisOffsetHours(provisoire) * 3600000);
         if (!isNaN(dt.getTime())) {
@@ -1127,6 +1267,44 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
+  // ── MODAUX v3 ──
+  if (interaction.isModalSubmit() && interaction.customId === 'modal_affaire') {
+    return notionV3.handleAffaireModal?.(interaction);
+  }
+
+  // ── MODAUX v2 ──
+  if (interaction.isModalSubmit() && interaction.customId === 'modal_tresor') {
+    return notionModules.handleTresorModal?.(interaction);
+  }
+
+  // ── BOUTONS v3 ──
+  if (interaction.isButton()) {
+    if (interaction.customId === 'btn_grade_panel')        return notionV3.handleGradePanelButton?.(interaction);
+    if (interaction.customId === 'btn_hierarchie_refresh') {
+      await notionV3.updateHierarchieEmbed?.(interaction.guild);
+      return interaction.reply({ content: '✅ Hiérarchie mise à jour.', ephemeral: true });
+    }
+    if (interaction.customId === 'btn_affaire_nouvelle')   return notionV3.handleAffaireNouvelleButton?.(interaction);
+    if (interaction.customId === 'btn_affaires_resume')    return notionV3.handleAffairesResumeButton?.(interaction);
+    if (interaction.customId.startsWith('affaire_oui_'))   return notionV3.handleAffaireVote?.(interaction, 'oui');
+    if (interaction.customId.startsWith('affaire_non_'))   return notionV3.handleAffaireVote?.(interaction, 'non');
+  }
+
+  // ── SELECT MENUS v3 ──
+  if (interaction.isStringSelectMenu()) {
+    if (interaction.customId === 'grade_select_membre') return notionV3.handleGradeMembreSelect?.(interaction);
+    if (interaction.customId === 'grade_select_grade')  return notionV3.handleGradeGradeSelect?.(interaction);
+  }
+
+  // ── BOUTONS v2 ──
+  if (interaction.isButton()) {
+    if (interaction.customId === 'btn_nouvelle_transaction') return notionModules.handleTresorCommand?.(interaction);
+    if (interaction.customId === 'btn_solde')               return notionModules.handleSoldeButton?.(interaction);
+    if (interaction.customId === 'btn_dashboard_refresh')   return notionModules.handleDashboard?.(interaction);
+    if (interaction.customId.startsWith('journal_'))        return notionModules.handleJournalPagination?.(interaction);
+  }
+
+  // ── CANDIDATURES ──
   if (interaction.isButton() && interaction.customId === 'open_candidature_legal') {
     const modal = new ModalBuilder().setCustomId('candidature_modal_legal').setTitle('⚖️ Iron Wolf Company — Légal');
     modal.addComponents(
@@ -1238,6 +1416,15 @@ client.on('interactionCreate', async interaction => {
     saveDB(db);
     await notionExtra.majOperationNotion?.(op);
     await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: '✅ Terminée — ' + op.resultat });
+
+    // Journal IC automatique
+    await notionModules.ajouterJournalIC?.(guild, {
+      type: 'operation', emoji: '✅',
+      titre: `Opération terminée — ${op.name}`,
+      description: `Résultat : **${op.resultat}** · Butin : ${op.butin} · Participants : ${(op.participants || []).join(', ') || '—'}`,
+      auteur: interaction.user.username,
+    });
+
     const updated = EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287)
       .spliceFields(0, 1, { name: 'Statut', value: '✅ Terminée', inline: true })
       .addFields({ name: '🏁 Résultat', value: op.resultat, inline: true }, { name: '💰 Butin', value: op.butin, inline: true }, { name: '📝 Débrief', value: op.debrief });
@@ -1307,6 +1494,15 @@ client.on('interactionCreate', async interaction => {
     contrat.status = 'signe'; contrat.signedAt = new Date().toISOString(); saveDB(db);
     await notionExtra.ajouterContratNotion?.(contrat);
     await sendLog(guild, 'CONTRAT_SIGNE', { contratId, objet: contrat.objet, signe: `${interaction.user.username} (${contrat.clientNom})` });
+
+    // Journal IC automatique
+    await notionModules.ajouterJournalIC?.(guild, {
+      type: 'contrat', emoji: '📜',
+      titre: `Contrat signé — ${contratId}`,
+      description: `Client : **${contrat.clientNom}** · Mission : ${contrat.objet} · Rémunération : ${contrat.remuneration}`,
+      auteur: interaction.user.username,
+    });
+
     await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287).spliceFields(5, 1, { name: '📌 Statut', value: `✅ Signé le ${fmtShort(new Date())} par ${interaction.user.username}`, inline: true })], components: [] });
     await sendToThread(guild, CH.FIL_CONTRATS_SIGNE, { embeds: [new EmbedBuilder().setColor(0x57F287).setTitle(`✅ CONTRAT ACCEPTÉ — ${contratId}`).addFields({ name: '🆔 Réf', value: `\`${contratId}\``, inline: true }, { name: '📅 Signé', value: fmtShort(new Date()), inline: true }, { name: '✍️ Client', value: `${interaction.user.username} (${contrat.clientNom})`, inline: true }, { name: '📋 Mission', value: contrat.objet }, { name: '💰 Rémunération', value: contrat.remuneration }).setFooter({ text: `IWC • ${fmtShort(new Date())}` })] });
     try { const em = await guild.members.fetch(contrat.emetteurId).catch(() => null); if (em) await em.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle(`✅ Contrat signé — ${contratId}`).setDescription(`**${contrat.clientNom}** a accepté le contrat.\n\n**Mission :** ${contrat.objet}\n**Rémunération :** ${contrat.remuneration}`).setFooter({ text: 'IWC • Notification contrat' })] }); } catch {}
@@ -1370,6 +1566,15 @@ client.on('interactionCreate', async interaction => {
     contrat.status = 'signe'; contrat.signedAt = new Date().toISOString(); contrat.signedBy = interaction.user.username; saveDB(db);
     await notionExtra.ajouterContratNotion?.(contrat);
     await sendLog(guild, 'CONTRAT_SIGNE', { contratId, objet: contrat.objet, signe: `${interaction.user.username} — IWC` });
+
+    // Journal IC automatique
+    await notionModules.ajouterJournalIC?.(guild, {
+      type: 'contrat', emoji: '📥',
+      titre: `Contrat employeur signé — ${contratId}`,
+      description: `Employeur : **${contrat.employeurNom}** · Mission : ${contrat.objet} · Signé par ${interaction.user.username}`,
+      auteur: interaction.user.username,
+    });
+
     await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287).spliceFields(5, 1, { name: '📌 Statut', value: `✅ Signé le ${fmtShort(new Date())} par ${interaction.user.username}`, inline: true })], components: [] });
     await sendToThread(guild, CH.FIL_CONTRATS_SIGNE, { embeds: [new EmbedBuilder().setColor(0x57F287).setTitle(`✅ CONTRAT EMPLOYEUR SIGNÉ — ${contratId}`).addFields({ name: '🆔 Réf', value: `\`${contratId}\``, inline: true }, { name: '📅 Signé', value: fmtShort(new Date()), inline: true }, { name: '✍️ Signé par', value: interaction.user.username, inline: true }, { name: '🏭 Employeur', value: contrat.employeurNom }, { name: '📋 Mission', value: contrat.objet }, { name: '💰 Rémunération', value: contrat.remuneration }).setFooter({ text: `IWC • ${fmtShort(new Date())}` })] });
     try { const m = await guild.members.fetch(contrat.userId).catch(() => null); if (m) await m.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle(`✅ Contrat signé — IWC`).setDescription(`Iron Wolf Company a **signé** le contrat **${contratId}**.\n\n**Mission :** ${contrat.objet}\n**Rémunération :** ${contrat.remuneration}`).setFooter({ text: 'IWC • Notification' })] }); } catch {}
@@ -1397,7 +1602,6 @@ client.once('clientReady', async () => {
   console.log(`✅ Connecté : ${client.user.tag}`);
   client.user.setActivity('la meute • IWC 1895', { type: ActivityType.Watching });
 
-  // Restauration des données depuis GitHub si data.json est vide
   await restaurerDepuisGitHub();
 
   for (const guild of client.guilds.cache.values()) {
@@ -1405,7 +1609,6 @@ client.once('clientReady', async () => {
     await autoSetup(guild).catch(e => console.log('autoSetup error:', e.message));
   }
 
-  // Vérifier les rappels en attente au démarrage (fiches + sessions)
   for (const guild of client.guilds.cache.values()) {
     await notionExtra.envoyerRappelsFiches?.(guild).catch(() => {});
     await checkSessionReminders(guild).catch(() => {});
@@ -1413,22 +1616,24 @@ client.once('clientReady', async () => {
 
   // ── Crons ──
   cron.schedule('*/5 * * * *',  async () => { for (const g of client.guilds.cache.values()) await checkAgenda(g).catch(() => {}); });
-  cron.schedule('*/5 * * * *',  async () => { for (const g of client.guilds.cache.values()) await checkSessionReminders(g).catch(() => {}); });            // rappels sessions
-  cron.schedule('*/30 * * * *', async () => { for (const g of client.guilds.cache.values()) await notionExtra.envoyerRappelsFiches?.(g).catch(() => {}); }); // rappels fiches
-  cron.schedule('0 * * * *',    async () => { for (const g of client.guilds.cache.values()) await updateDashboard(g).catch(() => {}); });                    // dashboard
-  cron.schedule('0 * * * *',    async () => { for (const g of client.guilds.cache.values()) await notionExtra.checkFichesCompletees?.(g).catch(() => {}); }); // fiches complètes
-  cron.schedule('*/15 * * * *', async () => { for (const g of client.guilds.cache.values()) await syncRegistreNotion(g).catch(() => {}); });                  // sync registre
-  cron.schedule('0 * * * *',    async () => { await sauvegarderSurGitHub().catch(() => {}); },                         { timezone: 'Europe/Paris' });          // sauvegarde GitHub
-  cron.schedule('0 9 * * *',    async () => { for (const g of client.guilds.cache.values()) await postDailyAgenda(g).catch(() => {}); },    { timezone: 'Europe/Paris' }); // agenda
-  cron.schedule('0 20 * * 0',   async () => { for (const g of client.guilds.cache.values()) await notionExtra.postStatsHebdo?.(g).catch(e => console.log(e.message)); }, { timezone: 'Europe/Paris' }); // stats
-  cron.schedule('0 12 * * *',   async () => { for (const g of client.guilds.cache.values()) await autoKickVisiteurs(g).catch(() => {}); }, { timezone: 'Europe/Paris' }); // auto-kick visiteurs
-  cron.schedule('0 * * * *',    async () => { for (const g of client.guilds.cache.values()) await notionExtra.checkEcheancesContrats?.(g).catch(() => {}); }, { timezone: 'Europe/Paris' }); // échéances contrats
-  cron.schedule('0 8 * * *',    async () => { for (const g of client.guilds.cache.values()) await envoyerRapportDirection(g).catch(() => {}); }, { timezone: 'Europe/Paris' }); // rapport quotidien 8h
+  cron.schedule('*/5 * * * *',  async () => { for (const g of client.guilds.cache.values()) await checkSessionReminders(g).catch(() => {}); });
+  cron.schedule('*/30 * * * *', async () => { for (const g of client.guilds.cache.values()) await notionExtra.envoyerRappelsFiches?.(g).catch(() => {}); });
+  cron.schedule('0 * * * *',    async () => { for (const g of client.guilds.cache.values()) await updateDashboard(g).catch(() => {}); });
+  cron.schedule('0 * * * *',    async () => { for (const g of client.guilds.cache.values()) await notionExtra.checkFichesCompletees?.(g).catch(() => {}); });
+  cron.schedule('*/15 * * * *', async () => { for (const g of client.guilds.cache.values()) await syncRegistreNotion(g).catch(() => {}); });
+  cron.schedule('0 * * * *',    async () => { await sauvegarderSurGitHub().catch(() => {}); },                         { timezone: 'Europe/Paris' });
+  cron.schedule('0 9 * * *',    async () => { for (const g of client.guilds.cache.values()) await postDailyAgenda(g).catch(() => {}); },    { timezone: 'Europe/Paris' });
+  cron.schedule('0 20 * * 0',   async () => { for (const g of client.guilds.cache.values()) await notionExtra.postStatsHebdo?.(g).catch(e => console.log(e.message)); }, { timezone: 'Europe/Paris' });
+  cron.schedule('0 12 * * *',   async () => { for (const g of client.guilds.cache.values()) await autoKickVisiteurs(g).catch(() => {}); }, { timezone: 'Europe/Paris' });
+  cron.schedule('0 * * * *',    async () => { for (const g of client.guilds.cache.values()) await notionExtra.checkEcheancesContrats?.(g).catch(() => {}); }, { timezone: 'Europe/Paris' });
+  cron.schedule('0 8 * * *',    async () => { for (const g of client.guilds.cache.values()) await envoyerRapportDirection(g).catch(() => {}); }, { timezone: 'Europe/Paris' });
+  // ── Crons v3 ──
+  cron.schedule('0 * * * *',   async () => { for (const g of client.guilds.cache.values()) await notionV3.checkInactivite?.(g).catch(() => {}); });
+  cron.schedule('0 * * * *',   async () => { for (const g of client.guilds.cache.values()) await notionV3.updateHierarchieEmbed?.(g).catch(() => {}); });
+  cron.schedule('0 8 * * 1',   async () => { for (const g of client.guilds.cache.values()) await notionV3.postResumeAffaires?.(g).catch(() => {}); }, { timezone: 'Europe/Paris' });
 });
 
-// ── Serveur HTTP keepalive (Render Web Service) ──
-// Render attend qu'un port HTTP réponde ; sinon il considère le service "unhealthy" et le redémarre en boucle.
-// Le module 'http' est natif (aucune dépendance à installer). Inoffensif si lancé en Background Worker.
+// ── Serveur HTTP keepalive (Render) ──
 const http = require('http');
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('IWC Bot OK'); })
