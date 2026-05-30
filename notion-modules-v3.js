@@ -76,6 +76,13 @@ function isDirection(member) {
   );
 }
 
+// Seuls Le Fléau et Le Concepteur peuvent modifier les grades
+function canManageGrades(member) {
+  return member?.roles?.cache?.some(r =>
+    ['Concepteur', 'Fléau', 'Fondateur'].some(n => r.name.includes(n))
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════
 // 1. ABSENCES — Détection dans n'importe quel salon + transfert
 // ═══════════════════════════════════════════════════════════════
@@ -338,8 +345,8 @@ async function handleHierarchieCommand(interaction) {
  * /grade-set — Panneau de sélection membre + grade
  */
 async function handleGradeSetCommand(interaction) {
-  if (!isDirection(interaction.member)) {
-    return interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
+  if (!canManageGrades(interaction.member)) {
+    return interaction.reply({ content: '❌ Réservé au Concepteur et au Fléau.', ephemeral: true });
   }
   await _showGradePanel(interaction);
 }
@@ -348,8 +355,8 @@ async function handleGradeSetCommand(interaction) {
  * Bouton btn_grade_panel → même panneau
  */
 async function handleGradePanelButton(interaction) {
-  if (!isDirection(interaction.member)) {
-    return interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
+  if (!canManageGrades(interaction.member)) {
+    return interaction.reply({ content: '❌ Réservé au Concepteur et au Fléau.', ephemeral: true });
   }
   await _showGradePanel(interaction);
 }
@@ -494,7 +501,7 @@ async function handleGradeGradeSelect(interaction) {
     }
   } catch (e) { console.log('❌ Grade Discord role error:', e.message); }
 
-  // MàJ Notion fiche personnage
+  // MàJ Notion fiche personnage + historique des grades
   await notionExtra.logPromotionNotion?.(interaction.guild, {
     userId,
     username: nomMembre,
@@ -504,6 +511,24 @@ async function handleGradeGradeSelect(interaction) {
     type: 'promotion',
     validePar: interaction.user.username,
   });
+
+  // Archivage Notion base Grades si configurée
+  if (process.env.NOTION_TOKEN && process.env.NOTION_FICHES_DB) {
+    try {
+      // Cherche la fiche du membre et met à jour son rang + historique
+      const pageId = await notionExtra.getFicheId?.(userId);
+      if (pageId) {
+        const typeChangement = ancienGrade === '—' ? 'Attribution' :
+          GRADES_LEGAL.findIndex(g => g.nom === nouveauGrade) < GRADES_LEGAL.findIndex(g => g.nom === ancienGrade) ||
+          GRADES_ILLEGAL.findIndex(g => g.nom === nouveauGrade) < GRADES_ILLEGAL.findIndex(g => g.nom === ancienGrade)
+          ? 'Promotion' : 'Rétrogradation';
+        await notionExtra.notionPatch?.(pageId, {
+          'Rang': { rich_text: [{ text: { content: nouveauGrade } }] },
+        });
+        console.log(`✅ Fiche Notion MàJ grade : ${nomMembre} → ${nouveauGrade}`);
+      }
+    } catch (e) { console.log('❌ Archive grade Notion error:', e.message); }
+  }
 
   // Journal IC
   let notionModules = {};
@@ -549,7 +574,12 @@ async function handleGradeGradeSelect(interaction) {
     components: [],
   });
 
-  // Rafraîchir le tableau hiérarchique
+  // Supprimer le message de confirmation après 5 secondes pour garder le salon propre
+  setTimeout(async () => {
+    await interaction.deleteReply().catch(() => {});
+  }, 5000);
+
+  // Rafraîchir le tableau hiérarchique silencieusement
   await updateHierarchieEmbed(interaction.guild);
 }
 
@@ -576,8 +606,19 @@ async function setupAffairesPanel(guild) {
     if (db.affairesPanelMsgId) {
       try {
         await affairesCh.messages.fetch(db.affairesPanelMsgId);
-        return; // existe déjà
+        // Nettoyer les anciens messages de confirmation (éphémères déjà disparus, mais au cas où)
+        return;
       } catch {}
+    }
+
+    // Supprimer les anciens messages du bot dans ce salon avant de poster
+    const msgs = await affairesCh.messages.fetch({ limit: 20 }).catch(() => null);
+    if (msgs) {
+      for (const [, msg] of msgs) {
+        if (msg.author.id === guild.members.me?.id && !msg.pinned) {
+          await msg.delete().catch(() => {});
+        }
+      }
     }
 
     const embed = new EmbedBuilder()
@@ -736,7 +777,46 @@ async function handleAffaireModal(interaction) {
     saveDB(db);
   }
 
-  await interaction.editReply({ content: `✅ Affaire **${affaireId}** soumise au vote de la Direction.` });
+  // Supprimer la réponse après 3s pour garder le salon propre
+  await interaction.editReply({ content: `✅ Affaire **${affaireId}** soumise.` });
+  setTimeout(() => interaction.deleteReply().catch(() => {}), 3000);
+}
+
+/**
+ * Bouton Détails d'une affaire
+ */
+async function handleAffaireDetail(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+  const affaireId = interaction.customId.replace('affaire_detail_', '');
+  const db = loadDB();
+  const affaire = (db.affaires || []).find(a => a.id === affaireId);
+
+  if (!affaire) return interaction.editReply({ content: '❌ Affaire introuvable.' });
+
+  const urgenceEmoji = affaire.urgence === 'critique' ? '🔴' : affaire.urgence === 'haute' ? '🟠' : '🟡';
+  const statusEmoji  = affaire.status === 'approuvee' ? '✅' : affaire.status === 'rejetee' ? '❌' : '⏳';
+
+  const votantsOui = (affaire.votesOui || []).map(id => `<@${id}>`).join(', ') || '*Aucun*';
+  const votantsNon = (affaire.votesNon || []).map(id => `<@${id}>`).join(', ') || '*Aucun*';
+
+  await interaction.editReply({
+    embeds: [new EmbedBuilder()
+      .setColor(affaire.status === 'approuvee' ? 0x57F287 : affaire.status === 'rejetee' ? 0xED4245 : 0xFFA500)
+      .setTitle(`📋 Détails — ${affaire.titre}`)
+      .addFields(
+        { name: '🆔 Référence',  value: `\`${affaire.id}\``,                inline: true },
+        { name: '📁 Catégorie',  value: affaire.categorie,                  inline: true },
+        { name: '🚨 Urgence',    value: `${urgenceEmoji} ${affaire.urgence}`, inline: true },
+        { name: '📊 Statut',     value: `${statusEmoji} ${affaire.status}`, inline: true },
+        { name: '👤 Soumis par', value: affaire.soumisePar,                 inline: true },
+        { name: '📅 Date',       value: fmtShort(affaire.createdAt),        inline: true },
+        { name: '📝 Description', value: affaire.description },
+        { name: '✅ Votes pour',  value: votantsOui, inline: true },
+        { name: '❌ Votes contre', value: votantsNon, inline: true },
+      )
+      .setFooter({ text: 'IWC • Affaires Direction — Confidentiel' })
+    ]
+  });
 }
 
 /**
@@ -1489,6 +1569,7 @@ module.exports = {
   handleAffaireNouvelleButton,
   handleAffaireModal,
   handleAffaireVote,
+  handleAffaireDetail,
   postResumeAffaires,
   handleAffairesResumeButton,
   // Informateurs
