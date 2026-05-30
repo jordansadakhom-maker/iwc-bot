@@ -352,9 +352,7 @@ async function alerteCompteSuspect(guild, member) {
   try {
     const age = daysSince(member.user.createdAt);
     if (age >= 30) return; // Pas d'alerte pour les comptes de plus de 30 jours
-    const logsCh = guild.channels.cache.get(
-      guild.channels.cache.find(c => c.name?.includes('logs'))?.id
-    ) || guild.channels.cache.find(c => c.name?.includes('logs'));
+    const logsCh = guild.channels.cache.find(c => c.name?.includes('logs'));
     if (!logsCh) return;
 
     let niveau, color, action;
@@ -473,23 +471,6 @@ async function majOperationNotion(op) {
   } catch (e) { console.log('❌ MAJ opération error:', e.message); }
 }
 
-module.exports = {
-  postStatsHebdo,
-  creerFichePersonnageNotion,
-  enregistrerTransactionNotion,
-  ajouterContratNotion,
-  creerOperationNotion,
-  majOperationNotion,
-  majStatutActiviteNotion,
-  majOperationsParticipees,
-  planifierRappelFiche,
-  envoyerRappelsFiches,
-  checkFichesCompletees,
-  alerteCompteSuspect,
-  logPromotionNotion,
-  checkEchéancesContrats,
-};
-
 // ═══════════════════════════════════════════════════════════════
 // PROMOTION / RÉTROGRADATION — log dans Notion
 // ═══════════════════════════════════════════════════════════════
@@ -518,10 +499,9 @@ async function logPromotionNotion(guild, data) {
 // ALERTES ÉCHÉANCES CONTRATS
 // Vérifie toutes les heures les contrats actifs
 // ═══════════════════════════════════════════════════════════════
-async function checkEchéancesContrats(guild) {
-  if (!checkReady('checkEchéancesContrats', 'CONTRATS')) return;
+async function checkEcheancesContrats(guild) {
+  if (!checkReady('checkEcheancesContrats', 'CONTRATS')) return;
   try {
-    const { loadDB } = require('./db');
     const db = loadDB();
     const contrats = (db.contrats || []).filter(c => c.status === 'signe' && c.dateEcheance);
     if (!contrats.length) return;
@@ -530,11 +510,13 @@ async function checkEchéancesContrats(guild) {
     if (!logsCh) return;
 
     const maintenant = Date.now();
+    if (!db.alertesEnvoyees) db.alertesEnvoyees = {};
+    let changed = false;
+
     for (const contrat of contrats) {
       const echeance = new Date(contrat.dateEcheance).getTime();
       const joursRestants = Math.floor((echeance - maintenant) / 86400000);
       const key = `echeance_${contrat.id}`;
-      if (!db.alertesEnvoyees) db.alertesEnvoyees = {};
 
       // Alerte 7 jours avant
       if (joursRestants <= 7 && joursRestants > 0 && !db.alertesEnvoyees[`${key}_7j`]) {
@@ -550,6 +532,7 @@ async function checkEchéancesContrats(guild) {
           .setFooter({ text: 'IWC • Alerte échéance automatique' })
         ] });
         db.alertesEnvoyees[`${key}_7j`] = true;
+        changed = true;
         console.log(`⏰ Alerte échéance 7j : ${contrat.id}`);
       }
 
@@ -566,13 +549,31 @@ async function checkEchéancesContrats(guild) {
           .setFooter({ text: 'IWC • Alerte échéance automatique' })
         ] });
         db.alertesEnvoyees[`${key}_0j`] = true;
+        changed = true;
         console.log(`🚨 Contrat expiré : ${contrat.id}`);
       }
     }
-    const { saveDB } = require('./db');
-    saveDB(db);
-  } catch (e) { console.log('❌ checkEchéancesContrats error:', e.message); }
+    if (changed) saveDB(db);
+  } catch (e) { console.log('❌ checkEcheancesContrats error:', e.message); }
 }
 
-
+// ═══════════════════════════════════════════════════════════════
+// EXPORTS — placés en fin de fichier (toutes les fonctions définies)
+// ═══════════════════════════════════════════════════════════════
+module.exports = {
+  postStatsHebdo,
+  creerFichePersonnageNotion,
+  enregistrerTransactionNotion,
+  ajouterContratNotion,
+  creerOperationNotion,
+  majOperationNotion,
+  majStatutActiviteNotion,
+  majOperationsParticipees,
+  planifierRappelFiche,
+  envoyerRappelsFiches,
+  checkFichesCompletees,
+  alerteCompteSuspect,
+  logPromotionNotion,
+  checkEcheancesContrats,
+};
 
