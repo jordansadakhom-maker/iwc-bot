@@ -747,6 +747,9 @@ async function autoSetup(guild) {
   // ── Bouton trésorerie persistant ──
   await notionModules.setupTresorButton?.(guild);
 
+  // ── Panneau informateurs ──
+  await notionV3.setupInformateursPanel?.(guild);
+
   // ── Panneau affaires Direction ──
   await notionV3.setupAffairesPanel?.(guild);
 
@@ -1278,6 +1281,9 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isModalSubmit() && interaction.customId === 'modal_affaire') {
     return notionV3.handleAffaireModal?.(interaction);
   }
+  if (interaction.isModalSubmit() && interaction.customId === 'modal_informateur') {
+    return notionV3.handleInformateurModal?.(interaction);
+  }
 
   // ── MODAUX v2 ──
   if (interaction.isModalSubmit() && interaction.customId === 'modal_tresor') {
@@ -1294,6 +1300,8 @@ client.on('interactionCreate', async interaction => {
     }
     if (interaction.customId === 'btn_affaire_nouvelle')   return notionV3.handleAffaireNouvelleButton?.(interaction);
     if (interaction.customId === 'btn_affaires_resume')    return notionV3.handleAffairesResumeButton?.(interaction);
+    if (interaction.customId === 'btn_informateur_rapport')    return notionV3.handleInformateurRapportButton?.(interaction);
+    if (interaction.customId === 'btn_informateur_historique') return notionV3.handleInformateurHistorique?.(interaction);
     if (interaction.customId.startsWith('affaire_oui_'))   return notionV3.handleAffaireVote?.(interaction, 'oui');
     if (interaction.customId.startsWith('affaire_non_'))   return notionV3.handleAffaireVote?.(interaction, 'non');
   }
