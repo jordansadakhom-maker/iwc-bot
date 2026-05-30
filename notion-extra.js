@@ -486,6 +486,8 @@ module.exports = {
   envoyerRappelsFiches,
   checkFichesCompletees,
   alerteCompteSuspect,
+  logPromotionNotion,
+  checkEchéancesContrats,
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -572,9 +574,5 @@ async function checkEchéancesContrats(guild) {
   } catch (e) { console.log('❌ checkEchéancesContrats error:', e.message); }
 }
 
-module.exports = {
-  ...module.exports,
-  logPromotionNotion,
-  checkEchéancesContrats,
-};
+
 
