@@ -738,6 +738,55 @@ async function handleSlashCommand(interaction) {
   }
 }
 
+// ── Planning — Message épinglé ──
+async function setupPlanningPanel(guild) {
+  try {
+    const db = loadDB();
+    const planCh = getCh(guild, 'planning-sessions', 'planning');
+    if (!planCh) return;
+
+    if (db.planningPanelMsgId) {
+      try { await planCh.messages.fetch(db.planningPanelMsgId); return; } catch {}
+    }
+
+    const sent = await planCh.send({ embeds: [new EmbedBuilder()
+      .setColor(0x8B1A1A)
+      .setTitle('📍 PLANNING — Comment ça marche')
+      .addFields(
+        {
+          name: '📸 Poster un screen de lieu',
+          value: [
+            '→ Glisse ton image ici avec le nom du lieu',
+            '→ Ex : `[image] paleto bay`',
+            '→ Le bot l\'ajoute automatiquement dans la page Notion du RDV correspondant',
+            '→ Sans texte = ajouté au prochain RDV prévu',
+          ].join('\n'),
+        },
+        {
+          name: '📅 Planifier une session (Direction uniquement)',
+          value: [
+            '→ Poste un message avec ce format :',
+            '```',
+            'SESSION',
+            'NOM : Nom de la session',
+            'DATE : DD/MM/YYYY',
+            'HEURE : 20h00',
+            'LIEU : Lieu IC',
+            'TYPE : RP Principal',
+            '```',
+            '→ Le bot crée la session + rappel automatique 1h avant',
+          ].join('\n'),
+        },
+      )
+      .setFooter({ text: 'IWC • Planning — Lié à Notion automatiquement' })
+    ] });
+
+    await sent.pin().catch(() => {});
+    db.planningPanelMsgId = sent.id;
+    saveDB(db);
+  } catch (e) { console.log('❌ setupPlanningPanel error:', e.message); }
+}
+
 // ── Auto-setup ──
 async function autoSetup(guild) {
   const db = loadDB();
@@ -747,8 +796,8 @@ async function autoSetup(guild) {
   // ── Bouton trésorerie persistant ──
   await notionModules.setupTresorButton?.(guild);
 
-  // ── Panneau informateurs ──
-  await notionV3.setupInformateursPanel?.(guild);
+  // ── Message épinglé #planning ──
+  await setupPlanningPanel(guild);
 
   // ── Panneau affaires Direction ──
   await notionV3.setupAffairesPanel?.(guild);
