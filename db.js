@@ -7,7 +7,14 @@ const fs = require('fs');
 const DB_PATH = './data.json';
 
 const DEFAULT_DB = {
-  members: {}, operations: [], sessions: [],
+  members: {
+    "696325126047662081": { "id": "696325126047662081", "name": "Colt Kane",      "status": "actif", "rang": "Le Conseil — Directeur", "pole": "legal",   "joinedAt": "2026-05-01T00:00:00.000Z", "lastActivity": "2026-05-31T00:00:00.000Z" },
+    "998581854791798835": { "id": "998581854791798835", "name": "June McCall",    "status": "actif", "rang": "Officier de Terrain",    "pole": "legal",   "joinedAt": "2026-05-01T00:00:00.000Z", "lastActivity": "2026-05-31T00:00:00.000Z" },
+    "324627678143578112": { "id": "324627678143578112", "name": "Cyrus Hollow",   "status": "actif", "rang": "Le Concepteur",           "pole": "illegal", "joinedAt": "2026-05-01T00:00:00.000Z", "lastActivity": "2026-05-31T00:00:00.000Z" },
+    "944208797084311583": { "id": "944208797084311583", "name": "Jonas Caverly",  "status": "actif", "rang": "Le Fléau",                "pole": "illegal", "joinedAt": "2026-05-01T00:00:00.000Z", "lastActivity": "2026-05-31T00:00:00.000Z" },
+    "982201491773354035": { "id": "982201491773354035", "name": "Thomas Galagan", "status": "actif", "rang": "Officier de Terrain",    "pole": "legal",   "joinedAt": "2026-05-01T00:00:00.000Z", "lastActivity": "2026-05-31T00:00:00.000Z" },
+  },
+  operations: [], sessions: [],
   candidatures: [], contrats: [], sentReminders: {},
   dashboardMsgId: null, reglementMsgId: null, recrutementMsgId: null,
   coffres: { legal: 0, illegal: 0 },
@@ -17,6 +24,11 @@ const DEFAULT_DB = {
   sessionReminders: {},
   alertesEnvoyees: {},
   alertesInactivite: {},
+  affaires: [],
+  informateurs: [],
+  tresorButtonMsgId: null,
+  hierarchieMsgId: null,
+  affairesPanelMsgId: null,
 };
 
 // ── Cache en mémoire (évite les lectures disque répétées) ──
@@ -43,7 +55,7 @@ function loadDB() {
       return _cache;
     }
     const raw = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
-    // Fusion PROFONDE avec les defaults (récupère les clés imbriquées manquantes)
+    // Fusion PROFONDE avec les defaults — les membres fondateurs sont toujours présents
     _cache = deepMerge(JSON.parse(JSON.stringify(DEFAULT_DB)), raw);
     return _cache;
   } catch (e) {
@@ -78,11 +90,9 @@ function saveDBSync() {
 function invalidateCache() { _cache = null; }
 
 // ── Sauvegarde automatique vers GitHub ──
-// Sauvegarde data.json dans un Gist GitHub toutes les heures
 async function sauvegarderSurGitHub() {
   if (!process.env.GITHUB_TOKEN || !process.env.GITHUB_GIST_ID) return;
   try {
-    // On flush d'abord le cache en attente pour ne jamais sauvegarder de données périmées
     saveDBSync();
     const contenu = _cache
       ? JSON.stringify(_cache, null, 2)
@@ -94,9 +104,7 @@ async function sauvegarderSurGitHub() {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        files: {
-          'iwc-data.json': { content: contenu }
-        }
+        files: { 'iwc-data.json': { content: contenu } }
       }),
     });
     console.log(`✅ Sauvegarde GitHub effectuée — ${new Date().toLocaleString('fr-FR')}`);
@@ -108,17 +116,17 @@ async function sauvegarderSurGitHub() {
 // ── Restauration depuis GitHub au démarrage ──
 async function restaurerDepuisGitHub() {
   if (!process.env.GITHUB_TOKEN || !process.env.GITHUB_GIST_ID) return false;
-  // Ne restaure que si data.json est absent, vide, ou sans données membres
+  // Ne restaure que si data.json est absent ou sans données réelles
   if (fs.existsSync(DB_PATH)) {
     try {
       const existing = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
-      const hasData = Object.keys(existing.members || {}).length > 0 ||
-                      (existing.candidatures || []).length > 0 ||
+      const hasData = (existing.candidatures || []).length > 0 ||
                       (existing.contrats || []).length > 0 ||
                       (existing.coffres?.legal || 0) > 0 ||
-                      (existing.coffres?.illegal || 0) > 0;
-      if (hasData) return false; // Des données existent déjà → pas besoin de restaurer
-    } catch { } // JSON invalide → on restaure
+                      (existing.coffres?.illegal || 0) > 0 ||
+                      (existing.operations || []).length > 0;
+      if (hasData) return false; // Des données réelles existent → pas besoin de restaurer
+    } catch {}
   }
   try {
     const res = await fetch(`https://api.github.com/gists/${process.env.GITHUB_GIST_ID}`, {
@@ -127,8 +135,11 @@ async function restaurerDepuisGitHub() {
     const gist = await res.json();
     const contenu = gist.files?.['iwc-data.json']?.content;
     if (!contenu) return false;
-    fs.writeFileSync(DB_PATH, contenu);
-    _cache = null; // Invalide le cache pour forcer la relecture
+    // Merger le Gist avec les membres fondateurs pour ne jamais les perdre
+    const gistData = JSON.parse(contenu);
+    const merged = deepMerge(JSON.parse(JSON.stringify(DEFAULT_DB)), gistData);
+    fs.writeFileSync(DB_PATH, JSON.stringify(merged, null, 2));
+    _cache = null;
     console.log('✅ Données restaurées depuis GitHub Gist');
     return true;
   } catch (e) {
