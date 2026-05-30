@@ -1229,8 +1229,7 @@ client.on('messageCreate', async message => {
       return;
     }
 
-    if (isDirection(message.member)) {
-    if (message.content.toUpperCase().includes('SESSION') && message.content.toUpperCase().includes('DATE')) {
+    if (isDirection(message.member) && message.content.toUpperCase().includes('SESSION') && message.content.toUpperCase().includes('DATE')) {
       const lines = message.content.split('\n');
       const get = k => { const l = lines.find(l => l.toUpperCase().includes(k.toUpperCase())); return l ? l.split(':').slice(1).join(':').trim() || '—' : '—'; };
       const session = { id: Date.now().toString(), name: get('NOM') || get('SESSION'), date: get('DATE'), heure: get('HEURE'), lieu: get('LIEU'), type: get('TYPE') || 'RP Principal', status: 'planifiee' };
