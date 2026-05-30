@@ -406,7 +406,7 @@ async function ajouterContratNotion(contrat) {
   if (!checkReady('ajouterContratNotion', 'CONTRATS')) return;
   try {
     const partenaire = contrat.type === 'emploi' ? (contrat.employeurNom || '—') : (contrat.clientNom || '—');
-    await notionCreate(DBS.CONTRATS, {
+    const props = {
       'Référence':    { title: [{ text: { content: contrat.id } }] },
       'Objet':        { rich_text: [{ text: { content: contrat.objet || '—' } }] },
       'Type':         { select: { name: contrat.type === 'emploi' ? '📥 Employeur' : '📤 Prestation' } },
@@ -415,7 +415,9 @@ async function ajouterContratNotion(contrat) {
       'Statut':       { select: { name: '✅ Actif' } },
       'Date début':   { date: { start: today() } },
       'Signé par':    { rich_text: [{ text: { content: contrat.signedBy || contrat.signataire || '—' } }] },
-    });
+    };
+    if (contrat.dateEcheance) props["Date d'échéance"] = { date: { start: contrat.dateEcheance } };
+    await notionCreate(DBS.CONTRATS, props);
     console.log(`✅ Contrat ${contrat.id} ajouté à Notion`);
   } catch (e) { console.log('❌ Contrat Notion error:', e.message); }
 }
