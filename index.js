@@ -617,6 +617,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
     await archiverCandidatureNotion(cand, 'acceptee', user.username);
     await ajouterMembreNotion(cand, cand.type);
     await notionExtra.creerFichePersonnageNotion?.(cand);
+    notionExtra.envoyerRappelFiche?.(guild, cand).catch(() => {});
     await sendLog(guild, 'CANDIDATURE_ACCEPTEE', { userId: cand.userId, nomPerso: cand.nomPerso, type: isIllegal ? '🔪 Illégal' : '⚖️ Légal', validePar: user.username });
     try { await reaction.message.edit({ embeds: [EmbedBuilder.from(reaction.message.embeds[0]).setColor(isIllegal ? 0x8B1A1A : 0x3B82F6).setTitle(`✅ ACCEPTÉ — ${cand.nomPerso}`)] }); } catch(e) {}
     return;
@@ -659,6 +660,7 @@ client.on('messageCreate', async message => {
   if (absCh && message.channel.id === absCh.id) {
     if (db.members[message.author.id]) { db.members[message.author.id].status = 'absent'; saveDB(db); await message.react('✅'); }
     await sendLog(guild, 'ABSENCE', { userId: message.author.id, username: message.author.username });
+  await notionExtra.majStatutActiviteNotion?.(message.author.id, 'absent');
     return;
   }
 
@@ -1050,6 +1052,7 @@ client.once('ready', async () => {
   }
 
   cron.schedule('*/5 * * * *',  async () => { for (const g of client.guilds.cache.values()) await checkAgenda(g).catch(() => {}); });
+  cron.schedule('0 * * * *', async () => { for (const g of client.guilds.cache.values()) await notionExtra.checkFichesCompletees?.(g).catch(() => {}); });
   cron.schedule('0 * * * *',    async () => { for (const g of client.guilds.cache.values()) await updateDashboard(g).catch(() => {}); });
   cron.schedule('*/15 * * * *', async () => { for (const g of client.guilds.cache.values()) await syncRegistreNotion(g).catch(() => {}); });
   cron.schedule('0 9 * * *',    async () => { for (const g of client.guilds.cache.values()) await postDailyAgenda(g).catch(() => {}); }, { timezone: 'Europe/Paris' });
