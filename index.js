@@ -345,6 +345,215 @@ async function autoKickVisiteurs(guild) {
   } catch (e) { console.log('❌ autoKickVisiteurs error:', e.message); }
 }
 
+// ── Rapport quotidien Direction ──
+async function envoyerRapportDirection(guild) {
+  try {
+    const db = loadDB();
+    const hier = Date.now() - 86400000;
+    const depuisHier = d => d && new Date(d).getTime() >= hier;
+
+    // Données de la veille
+    const nouveaux    = Object.values(db.members || {}).filter(m => depuisHier(m.joinedAt));
+    const departs     = Object.values(db.members || {}).filter(m => m.status === 'parti' && depuisHier(m.leftAt));
+    const candsRecues = (db.candidatures || []).filter(c => depuisHier(c.receivedAt));
+    const candsAccept = (db.candidatures || []).filter(c => c.status === 'acceptee' && depuisHier(c.acceptedAt));
+    const candsRefus  = (db.candidatures || []).filter(c => c.status === 'refusee'  && depuisHier(c.updatedAt || c.receivedAt));
+    const contratsSign= (db.contrats || []).filter(c => c.status === 'signe'        && depuisHier(c.signedAt));
+    const opsEnCours  = (db.operations || []).filter(o => o.status === 'en_cours');
+    const opsTermHier = (db.operations || []).filter(o => o.status === 'terminee'   && depuisHier(o.endedAt));
+    const alertes     = Object.values(db.members || {}).filter(m => m.status !== 'parti' && daysSince(m.lastActivity) > 7);
+    const visiteurs   = Object.values(db.members || {}).filter(m => m.status === 'visiteur');
+    const soldeLegal  = db.coffres?.legal   || 0;
+    const soldeIlleg  = db.coffres?.illegal || 0;
+
+    const embed = new EmbedBuilder()
+      .setColor(0x8B1A1A)
+      .setTitle(`📋 Rapport quotidien — ${new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' })}`)
+      .setDescription('*Résumé des dernières 24 heures — Iron Wolf Company*')
+      .addFields(
+        {
+          name: '👥 MEMBRES',
+          value: [
+            `🆕 Arrivées : **${nouveaux.length}**`,
+            `🚪 Départs : **${departs.length}**`,
+            `👁️ Visiteurs en attente : **${visiteurs.length}**`,
+            alertes.length > 0 ? `⚠️ Inactifs : **${alertes.length}** — ${alertes.slice(0,3).map(m => m.name).join(', ')}${alertes.length > 3 ? '...' : ''}` : '✅ Aucune inactivité',
+          ].join('\n'),
+          inline: false,
+        },
+        {
+          name: '📋 RECRUTEMENT',
+          value: candsRecues.length > 0
+            ? [`📥 Reçues : **${candsRecues.length}**`, `✅ Acceptées : **${candsAccept.length}**`, `❌ Refusées : **${candsRefus.length}**`].join('\n')
+            : '*Aucune candidature hier*',
+          inline: true,
+        },
+        {
+          name: '📜 CONTRATS',
+          value: contratsSign.length > 0
+            ? contratsSign.map(c => `→ \`${c.id}\` — ${c.objet}`).join('\n')
+            : '*Aucun contrat signé hier*',
+          inline: true,
+        },
+        {
+          name: `🎯 OPÉRATIONS`,
+          value: [
+            opsEnCours.length  > 0 ? `🟢 En cours : **${opsEnCours.length}** — ${opsEnCours.map(o => o.name).join(', ')}` : '🟢 Aucune en cours',
+            opsTermHier.length > 0 ? `✅ Terminées hier : **${opsTermHier.length}** — ${opsTermHier.map(o => `${o.name} (${o.resultat || '—'})`).join(', ')}` : '',
+          ].filter(Boolean).join('\n') || '*Aucune activité opérationnelle*',
+          inline: false,
+        },
+        {
+          name: '💰 TRÉSORERIE',
+          value: [`⚖️ Légal : **$${soldeLegal.toLocaleString('fr-FR')}**`, `🔒 Illégal : **$${soldeIlleg.toLocaleString('fr-FR')}**`, `💎 Total : **$${(soldeLegal + soldeIlleg).toLocaleString('fr-FR')}**`].join('\n'),
+          inline: false,
+        },
+      )
+      .setFooter({ text: `IWC • Rapport automatique • ${new Date().toLocaleString('fr-FR')}` });
+
+    // Envoyer en DM à tous les membres Direction
+    const directionIds = Object.values(MEMBRES_DISCORD_MAP);
+    let envoyes = 0;
+    for (const discordId of directionIds) {
+      try {
+        const member = await guild.members.fetch(discordId).catch(() => null);
+        if (!member || !isDirection(member)) continue;
+        await member.send({ embeds: [embed] });
+        envoyes++;
+      } catch {}
+    }
+    console.log(`✅ Rapport quotidien envoyé à ${envoyes} membre(s) Direction`);
+  } catch (e) { console.log('❌ Rapport quotidien error:', e.message); }
+}
+
+// ── Slash commands ──
+async function handleSlashCommand(interaction) {
+  const { commandName, guild } = interaction;
+  const db = loadDB();
+
+  // /stats
+  if (commandName === 'stats') {
+    const members   = Object.values(db.members || {});
+    const contrats  = db.contrats  || [];
+    const ops       = db.operations || [];
+    const cands     = db.candidatures || [];
+    const embed = new EmbedBuilder()
+      .setColor(0x8B1A1A)
+      .setTitle('📊 Statistiques — Iron Wolf Company')
+      .addFields(
+        { name: '👥 Membres',     value: [`✅ Actifs : **${members.filter(m => m.status === 'actif').length}**`, `⚠️ Absents : **${members.filter(m => m.status === 'absent').length}**`, `👁️ Total : **${members.filter(m => m.status !== 'parti').length}**`].join('\n'), inline: true },
+        { name: '🎯 Opérations',  value: [`🟢 En cours : **${ops.filter(o => o.status === 'en_cours').length}**`, `🟡 Prépa : **${ops.filter(o => o.status === 'preparation').length}**`, `✅ Terminées : **${ops.filter(o => o.status === 'terminee').length}**`].join('\n'), inline: true },
+        { name: '📋 Recrutement', value: [`📥 En attente : **${cands.filter(c => c.status === 'reçue').length}**`, `✅ Acceptés : **${cands.filter(c => c.status === 'acceptee').length}**`].join('\n'), inline: true },
+        { name: '📜 Contrats',    value: [`✅ Signés : **${contrats.filter(c => c.status === 'signe').length}**`, `🟡 En attente : **${contrats.filter(c => c.status === 'en_attente').length}**`].join('\n'), inline: true },
+        { name: '💰 Trésorerie',  value: [`⚖️ Légal : **$${(db.coffres?.legal || 0).toLocaleString('fr-FR')}**`, `🔒 Illégal : **$${(db.coffres?.illegal || 0).toLocaleString('fr-FR')}**`].join('\n'), inline: true },
+      )
+      .setFooter({ text: `IWC • ${new Date().toLocaleString('fr-FR')}` });
+    await interaction.reply({ embeds: [embed], ephemeral: false });
+    return;
+  }
+
+  // /solde
+  if (commandName === 'solde') {
+    const soldeLegal  = db.coffres?.legal   || 0;
+    const soldeIlleg  = db.coffres?.illegal || 0;
+    const embed = new EmbedBuilder()
+      .setColor(0x57F287)
+      .setTitle('💰 Soldes des coffres — IWC')
+      .addFields(
+        { name: '⚖️ Coffre Légal',   value: `**$${soldeLegal.toLocaleString('fr-FR')}**`,  inline: true },
+        { name: '🔒 Coffre Illégal', value: `**$${soldeIlleg.toLocaleString('fr-FR')}**`,  inline: true },
+        { name: '💎 Total',          value: `**$${(soldeLegal + soldeIlleg).toLocaleString('fr-FR')}**`, inline: true },
+      )
+      .setFooter({ text: `IWC • ${fmtShort(new Date())}` });
+    await interaction.reply({ embeds: [embed], ephemeral: isDirection(interaction.member) ? false : true });
+    return;
+  }
+
+  // /fiche
+  if (commandName === 'fiche') {
+    const nom   = interaction.options.getString('nom').toLowerCase();
+    // Chercher dans les candidatures acceptées
+    const cand  = (db.candidatures || []).find(c => c.status === 'acceptee' && c.nomPerso?.toLowerCase().includes(nom));
+    if (!cand) {
+      await interaction.reply({ content: `❌ Aucune fiche trouvée pour **${interaction.options.getString('nom')}**.`, ephemeral: true });
+      return;
+    }
+    const embed = new EmbedBuilder()
+      .setColor(cand.type === 'illegal' ? 0x8B1A1A : 0x3B82F6)
+      .setTitle(`👤 Fiche — ${cand.nomPerso}`)
+      .addFields(
+        { name: '🎭 Personnage',      value: cand.nomPerso,                               inline: true },
+        { name: '🎂 Âge',            value: cand.agePerso || '—',                        inline: true },
+        { name: '⚖️ Pôle',           value: cand.type === 'illegal' ? '🔪 Illégal' : '⚖️ Légal', inline: true },
+        { name: '💼 Métier',         value: cand.metier || cand.specialite || '—',       inline: true },
+        { name: '🕐 Disponibilités', value: cand.dispos || '—',                          inline: true },
+        { name: '📅 Entrée',         value: fmtShort(cand.acceptedAt),                   inline: true },
+        { name: '📖 Background',     value: (cand.background || '—').slice(0, 500) + ((cand.background?.length || 0) > 500 ? '...' : '') },
+      )
+      .setFooter({ text: 'IWC • Fiche personnage' });
+    await interaction.reply({ embeds: [embed], ephemeral: true });
+    return;
+  }
+
+  // /ops
+  if (commandName === 'ops') {
+    const opsActives = (db.operations || []).filter(o => ['preparation', 'en_cours'].includes(o.status));
+    if (!opsActives.length) {
+      await interaction.reply({ content: '*Aucune opération en cours ou en préparation.*', ephemeral: true });
+      return;
+    }
+    const embed = new EmbedBuilder()
+      .setColor(0xFFA500)
+      .setTitle('🎯 Opérations actives — IWC')
+      .setDescription(opsActives.map(o => [
+        `**${o.name}** — ${o.status === 'en_cours' ? '🟢 En cours' : '🟡 Préparation'}`,
+        `📍 ${o.lieu || '—'} · 👥 ${(o.participants || []).join(', ') || 'Aucun participant'}`,
+      ].join('\n')).join('\n\n'))
+      .setFooter({ text: `IWC • ${fmtShort(new Date())}` });
+    await interaction.reply({ embeds: [embed], ephemeral: false });
+    return;
+  }
+
+  // /absent
+  if (commandName === 'absent') {
+    const duree  = interaction.options.getString('duree');
+    const raison = interaction.options.getString('raison') || '—';
+    if (db.members[interaction.user.id]) {
+      db.members[interaction.user.id].status      = 'absent';
+      db.members[interaction.user.id].lastActivity = new Date().toISOString();
+      saveDB(db);
+      await notionExtra.majStatutActiviteNotion?.(interaction.user.id, 'absent');
+    }
+    await sendLog(guild, 'ABSENCE', { userId: interaction.user.id, username: interaction.user.username });
+    await interaction.reply({ content: `✅ Ton absence a été enregistrée.\n**Durée :** ${duree}\n**Raison :** ${raison}`, ephemeral: true });
+
+    // Annonce dans #absences
+    const absCh = getCh(guild, 'absences');
+    if (absCh) await absCh.send({ embeds: [new EmbedBuilder()
+      .setColor(0xFFA500)
+      .setTitle(`🟡 Absence — ${interaction.user.username}`)
+      .addFields(
+        { name: '👤 Membre',  value: `<@${interaction.user.id}>`, inline: true },
+        { name: '⏱️ Durée',  value: duree,                        inline: true },
+        { name: '📝 Raison', value: raison,                       inline: true },
+      )
+      .setFooter({ text: `IWC • ${fmtShort(new Date())}` })
+    ] });
+    return;
+  }
+
+  // /rapport
+  if (commandName === 'rapport') {
+    if (!isDirection(interaction.member)) {
+      await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
+      return;
+    }
+    await interaction.reply({ content: '📋 Rapport en cours d\'envoi en DM...', ephemeral: true });
+    await envoyerRapportDirection(guild);
+    return;
+  }
+}
+
 // ── Auto-setup ──
 async function autoSetup(guild) {
   const db = loadDB();
@@ -800,6 +1009,15 @@ client.on('interactionCreate', async interaction => {
   const guild = interaction.guild;
   const db    = loadDB();
 
+  // Slash commands
+  if (interaction.isChatInputCommand()) {
+    await handleSlashCommand(interaction).catch(e => {
+      console.log('❌ Slash command error:', e.message);
+      interaction.reply({ content: '❌ Une erreur est survenue.', ephemeral: true }).catch(() => {});
+    });
+    return;
+  }
+
   // Candidature légale — bouton
   if (interaction.isButton() && interaction.customId === 'open_candidature_legal') {
     const modal = new ModalBuilder().setCustomId('candidature_modal_legal').setTitle('⚖️ Iron Wolf Company — Légal');
@@ -1108,6 +1326,7 @@ client.once('clientReady', async () => {
   cron.schedule('0 9 * * *',    async () => { for (const g of client.guilds.cache.values()) await postDailyAgenda(g).catch(() => {}); },    { timezone: 'Europe/Paris' }); // agenda
   cron.schedule('0 20 * * 0',   async () => { for (const g of client.guilds.cache.values()) await notionExtra.postStatsHebdo?.(g).catch(e => console.log(e.message)); }, { timezone: 'Europe/Paris' }); // stats
   cron.schedule('0 12 * * *',   async () => { for (const g of client.guilds.cache.values()) await autoKickVisiteurs(g).catch(() => {}); }, { timezone: 'Europe/Paris' }); // auto-kick visiteurs
+  cron.schedule('0 8 * * *',    async () => { for (const g of client.guilds.cache.values()) await envoyerRapportDirection(g).catch(() => {}); }, { timezone: 'Europe/Paris' }); // rapport quotidien 8h
 });
 
 client.login(process.env.TOKEN || process.env.DISCORD_TOKEN);
