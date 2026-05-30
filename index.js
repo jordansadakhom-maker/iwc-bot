@@ -156,6 +156,8 @@ async function sendLog(guild, type, data) {
     CONTRAT_SIGNE:        { color: 0x57F287, emoji: '📜', title: 'CONTRAT SIGNÉ — '        + data.contratId, fields: [{ name: '🆔 Réf', value: '`' + data.contratId + '`', inline: true }, { name: '📋 Objet', value: data.objet, inline: true }, { name: '✍️ Signé par', value: data.signe, inline: true }] },
     CONTRAT_REFUSE:       { color: 0xED4245, emoji: '📜', title: 'CONTRAT REFUSÉ — '       + data.contratId, fields: [{ name: '🆔 Réf', value: '`' + data.contratId + '`', inline: true }, { name: '📋 Objet', value: data.objet, inline: true }] },
     OPERATION:            { color: 0xFFA500, emoji: '🎯', title: 'OPÉRATION — '            + data.nom,       fields: [{ name: '🎯 Nom', value: data.nom, inline: true }, { name: '📍 Lieu', value: data.lieu || '—', inline: true }, { name: '📋 Statut', value: data.statut || '—', inline: true }] },
+    PROMOTION:            { color: 0x57F287, emoji: '⬆️', title: 'PROMOTION — '            + data.username,  fields: [{ name: '👤 Membre', value: `<@${data.userId}>`, inline: true }, { name: '📉 Ancien rang', value: data.ancienRang || '—', inline: true }, { name: '📈 Nouveau rang', value: data.nouveauRang || '—', inline: true }, { name: '✅ Décidé par', value: data.validePar || '—', inline: true }] },
+    RETROGRADATION:       { color: 0xED4245, emoji: '⬇️', title: 'RÉTROGRADATION — '       + data.username,  fields: [{ name: '👤 Membre', value: `<@${data.userId}>`, inline: true }, { name: '📉 Ancien rang', value: data.ancienRang || '—', inline: true }, { name: '📈 Nouveau rang', value: data.nouveauRang || '—', inline: true }, { name: '📝 Raison', value: data.raison || '—', inline: true }] },
   };
   const cfg = cfgs[type];
   if (!cfg) return;
@@ -550,6 +552,102 @@ async function handleSlashCommand(interaction) {
     }
     await interaction.reply({ content: '📋 Rapport en cours d\'envoi en DM...', ephemeral: true });
     await envoyerRapportDirection(guild);
+    return;
+  }
+
+  // /promo
+  if (commandName === 'promo') {
+    if (!isDirection(interaction.member)) {
+      await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
+      return;
+    }
+    const cible      = interaction.options.getUser('membre');
+    const nouveauRang = interaction.options.getString('rang');
+    const membre     = await guild.members.fetch(cible.id).catch(() => null);
+    if (!membre) { await interaction.reply({ content: '❌ Membre introuvable.', ephemeral: true }); return; }
+
+    const ancienRang = db.members[cible.id]?.rang || '—';
+    if (db.members[cible.id]) { db.members[cible.id].rang = nouveauRang; saveDB(db); }
+
+    // Log Discord
+    await sendLog(guild, 'PROMOTION', { userId: cible.id, username: cible.username, ancienRang, nouveauRang, validePar: interaction.user.username });
+
+    // Notion
+    await notionExtra.logPromotionNotion?.(guild, {
+      userId: cible.id, username: cible.username,
+      nomPerso: db.members[cible.id]?.name || cible.username,
+      ancienRang, nouveauRang, type: 'promotion', validePar: interaction.user.username,
+    });
+
+    // DM au membre
+    await membre.send({ embeds: [new EmbedBuilder()
+      .setColor(0x57F287)
+      .setTitle('⬆️ Promotion — Iron Wolf Company')
+      .setDescription(`Tu as été **promu** au rang de **${nouveauRang}**.\n\n*La Compagnie reconnaît ta valeur.*\n— La Direction`)
+      .addFields({ name: '📉 Ancien rang', value: ancienRang, inline: true }, { name: '📈 Nouveau rang', value: nouveauRang, inline: true })
+      .setFooter({ text: `IWC • ${fmtShort(new Date())}` })
+    ] }).catch(() => {});
+
+    await interaction.reply({ embeds: [new EmbedBuilder()
+      .setColor(0x57F287)
+      .setTitle(`⬆️ Promotion — ${cible.username}`)
+      .addFields(
+        { name: '👤 Membre',      value: `<@${cible.id}>`,  inline: true },
+        { name: '📉 Ancien rang', value: ancienRang,         inline: true },
+        { name: '📈 Nouveau rang', value: nouveauRang,       inline: true },
+        { name: '✅ Décidé par',  value: interaction.user.username, inline: true },
+      )
+      .setFooter({ text: `IWC • ${fmtShort(new Date())}` })
+    ] });
+    return;
+  }
+
+  // /retro
+  if (commandName === 'retro') {
+    if (!isDirection(interaction.member)) {
+      await interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
+      return;
+    }
+    const cible       = interaction.options.getUser('membre');
+    const nouveauRang = interaction.options.getString('rang');
+    const raison      = interaction.options.getString('raison') || '—';
+    const membre      = await guild.members.fetch(cible.id).catch(() => null);
+    if (!membre) { await interaction.reply({ content: '❌ Membre introuvable.', ephemeral: true }); return; }
+
+    const ancienRang = db.members[cible.id]?.rang || '—';
+    if (db.members[cible.id]) { db.members[cible.id].rang = nouveauRang; saveDB(db); }
+
+    // Log Discord
+    await sendLog(guild, 'RETROGRADATION', { userId: cible.id, username: cible.username, ancienRang, nouveauRang, raison, validePar: interaction.user.username });
+
+    // Notion
+    await notionExtra.logPromotionNotion?.(guild, {
+      userId: cible.id, username: cible.username,
+      nomPerso: db.members[cible.id]?.name || cible.username,
+      ancienRang, nouveauRang, type: 'retrogradation', validePar: interaction.user.username,
+    });
+
+    // DM au membre
+    await membre.send({ embeds: [new EmbedBuilder()
+      .setColor(0xED4245)
+      .setTitle('⬇️ Rétrogradation — Iron Wolf Company')
+      .setDescription(`Tu as été **rétrogradé** au rang de **${nouveauRang}**.\n\n*La Direction a pris cette décision.*\n— La Direction`)
+      .addFields({ name: '📉 Ancien rang', value: ancienRang, inline: true }, { name: '📈 Nouveau rang', value: nouveauRang, inline: true }, { name: '📝 Raison', value: raison })
+      .setFooter({ text: `IWC • ${fmtShort(new Date())}` })
+    ] }).catch(() => {});
+
+    await interaction.reply({ embeds: [new EmbedBuilder()
+      .setColor(0xED4245)
+      .setTitle(`⬇️ Rétrogradation — ${cible.username}`)
+      .addFields(
+        { name: '👤 Membre',      value: `<@${cible.id}>`,  inline: true },
+        { name: '📉 Ancien rang', value: ancienRang,         inline: true },
+        { name: '📈 Nouveau rang', value: nouveauRang,       inline: true },
+        { name: '📝 Raison',      value: raison,             inline: true },
+        { name: '✅ Décidé par',  value: interaction.user.username, inline: true },
+      )
+      .setFooter({ text: `IWC • ${fmtShort(new Date())}` })
+    ] });
     return;
   }
 }
@@ -1326,6 +1424,7 @@ client.once('clientReady', async () => {
   cron.schedule('0 9 * * *',    async () => { for (const g of client.guilds.cache.values()) await postDailyAgenda(g).catch(() => {}); },    { timezone: 'Europe/Paris' }); // agenda
   cron.schedule('0 20 * * 0',   async () => { for (const g of client.guilds.cache.values()) await notionExtra.postStatsHebdo?.(g).catch(e => console.log(e.message)); }, { timezone: 'Europe/Paris' }); // stats
   cron.schedule('0 12 * * *',   async () => { for (const g of client.guilds.cache.values()) await autoKickVisiteurs(g).catch(() => {}); }, { timezone: 'Europe/Paris' }); // auto-kick visiteurs
+  cron.schedule('0 * * * *',    async () => { for (const g of client.guilds.cache.values()) await notionExtra.checkEchéancesContrats?.(g).catch(() => {}); }, { timezone: 'Europe/Paris' }); // échéances contrats
   cron.schedule('0 8 * * *',    async () => { for (const g of client.guilds.cache.values()) await envoyerRapportDirection(g).catch(() => {}); }, { timezone: 'Europe/Paris' }); // rapport quotidien 8h
 });
 
