@@ -486,3 +486,93 @@ module.exports = {
   alerteCompteSuspect,
 };
 
+// ═══════════════════════════════════════════════════════════════
+// PROMOTION / RÉTROGRADATION — log dans Notion
+// ═══════════════════════════════════════════════════════════════
+async function logPromotionNotion(guild, data) {
+  try {
+    // Mettre à jour la fiche personnage
+    if (checkReady('logPromotionNotion', 'FICHES')) {
+      const pageId = await getFicheId(data.userId);
+      if (pageId) {
+        // Ajouter à l'historique
+        const pages = await notionQueryDB(DBS.FICHES, { property: 'Discord ID', rich_text: { equals: data.userId } });
+        const historique = pages[0]?.properties['Historique']?.rich_text?.[0]?.plain_text || '';
+        const type = data.type === 'promotion' ? '⬆️ Promotion' : '⬇️ Rétrogradation';
+        const ligne = `${fmtShort(new Date())} — ${type} : ${data.ancienRang} → ${data.nouveauRang} (par ${data.validePar})`;
+        const nouvelHistorique = historique ? `${historique}\n${ligne}` : ligne;
+        await notionPatch(pageId, {
+          'Historique': { rich_text: [{ text: { content: nouvelHistorique.slice(0, 2000) } }] },
+        });
+        console.log(`✅ Historique MàJ : ${data.nomPerso} — ${type}`);
+      }
+    }
+  } catch (e) { console.log('❌ logPromotionNotion error:', e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ALERTES ÉCHÉANCES CONTRATS
+// Vérifie toutes les heures les contrats actifs
+// ═══════════════════════════════════════════════════════════════
+async function checkEchéancesContrats(guild) {
+  if (!checkReady('checkEchéancesContrats', 'CONTRATS')) return;
+  try {
+    const { loadDB } = require('./db');
+    const db = loadDB();
+    const contrats = (db.contrats || []).filter(c => c.status === 'signe' && c.dateEcheance);
+    if (!contrats.length) return;
+
+    const logsCh = guild.channels.cache.find(c => c.name?.includes('logs'));
+    if (!logsCh) return;
+
+    const maintenant = Date.now();
+    for (const contrat of contrats) {
+      const echeance = new Date(contrat.dateEcheance).getTime();
+      const joursRestants = Math.floor((echeance - maintenant) / 86400000);
+      const key = `echeance_${contrat.id}`;
+      if (!db.alertesEnvoyees) db.alertesEnvoyees = {};
+
+      // Alerte 7 jours avant
+      if (joursRestants <= 7 && joursRestants > 0 && !db.alertesEnvoyees[`${key}_7j`]) {
+        await logsCh.send({ embeds: [new EmbedBuilder()
+          .setColor(0xFFA500)
+          .setTitle(`⏰ Échéance contrat — ${contrat.id}`)
+          .setDescription(`Le contrat **${contrat.id}** expire dans **${joursRestants} jour(s)**.`)
+          .addFields(
+            { name: '📋 Objet',      value: contrat.objet || '—',       inline: true },
+            { name: '🏢 Partenaire', value: contrat.clientNom || contrat.employeurNom || '—', inline: true },
+            { name: '📅 Échéance',   value: fmtShort(contrat.dateEcheance), inline: true },
+          )
+          .setFooter({ text: 'IWC • Alerte échéance automatique' })
+        ] });
+        db.alertesEnvoyees[`${key}_7j`] = true;
+        console.log(`⏰ Alerte échéance 7j : ${contrat.id}`);
+      }
+
+      // Alerte jour J
+      if (joursRestants <= 0 && !db.alertesEnvoyees[`${key}_0j`]) {
+        await logsCh.send({ embeds: [new EmbedBuilder()
+          .setColor(0xED4245)
+          .setTitle(`🚨 Contrat expiré — ${contrat.id}`)
+          .setDescription(`Le contrat **${contrat.id}** est **expiré** aujourd'hui.`)
+          .addFields(
+            { name: '📋 Objet',      value: contrat.objet || '—',       inline: true },
+            { name: '🏢 Partenaire', value: contrat.clientNom || contrat.employeurNom || '—', inline: true },
+          )
+          .setFooter({ text: 'IWC • Alerte échéance automatique' })
+        ] });
+        db.alertesEnvoyees[`${key}_0j`] = true;
+        console.log(`🚨 Contrat expiré : ${contrat.id}`);
+      }
+    }
+    const { saveDB } = require('./db');
+    saveDB(db);
+  } catch (e) { console.log('❌ checkEchéancesContrats error:', e.message); }
+}
+
+module.exports = {
+  ...module.exports,
+  logPromotionNotion,
+  checkEchéancesContrats,
+};
+
