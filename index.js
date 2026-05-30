@@ -1221,7 +1221,15 @@ client.on('messageCreate', async message => {
   }
 
   const planCh = getCh(guild, 'planning-sessions', 'planning');
-  if (planCh && message.channel.id === planCh.id && isDirection(message.member)) {
+  if (planCh && message.channel.id === planCh.id) {
+
+    // ── Screenshots → Notion ──
+    if (message.attachments.size > 0) {
+      await notionV3.handlePlanningScreenshot?.(message);
+      return;
+    }
+
+    if (isDirection(message.member)) {
     if (message.content.toUpperCase().includes('SESSION') && message.content.toUpperCase().includes('DATE')) {
       const lines = message.content.split('\n');
       const get = k => { const l = lines.find(l => l.toUpperCase().includes(k.toUpperCase())); return l ? l.split(':').slice(1).join(':').trim() || '—' : '—'; };
