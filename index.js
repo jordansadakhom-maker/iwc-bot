@@ -1087,9 +1087,12 @@ client.on('messageCreate', async message => {
       db.sessions.push(session);
 
       // Rappel 1h avant — PERSISTANT (survit aux redémarrages, traité par le cron checkSessionReminders)
+      // Date interprétée en fuseau Europe/Paris (le serveur Render tourne en UTC) — même logique que l'agenda Notion
       try {
         const heureClean = (session.heure || '').replace(/h/i, ':').match(/\d{1,2}:\d{2}/)?.[0] || '00:00';
-        const dt = new Date(`${session.date.split('/').reverse().join('-')}T${heureClean}`);
+        const jourISO = session.date.split('/').reverse().join('-'); // DD/MM/YYYY -> YYYY-MM-DD
+        const provisoire = new Date(`${jourISO}T${heureClean}:00Z`);
+        const dt = isNaN(provisoire.getTime()) ? provisoire : new Date(provisoire.getTime() - parisOffsetHours(provisoire) * 3600000);
         if (!isNaN(dt.getTime())) {
           if (!db.sessionReminders) db.sessionReminders = {};
           db.sessionReminders[session.id] = {
@@ -1422,6 +1425,14 @@ client.once('clientReady', async () => {
   cron.schedule('0 * * * *',    async () => { for (const g of client.guilds.cache.values()) await notionExtra.checkEcheancesContrats?.(g).catch(() => {}); }, { timezone: 'Europe/Paris' }); // échéances contrats
   cron.schedule('0 8 * * *',    async () => { for (const g of client.guilds.cache.values()) await envoyerRapportDirection(g).catch(() => {}); }, { timezone: 'Europe/Paris' }); // rapport quotidien 8h
 });
+
+// ── Serveur HTTP keepalive (Render Web Service) ──
+// Render attend qu'un port HTTP réponde ; sinon il considère le service "unhealthy" et le redémarre en boucle.
+// Le module 'http' est natif (aucune dépendance à installer). Inoffensif si lancé en Background Worker.
+const http = require('http');
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('IWC Bot OK'); })
+  .listen(PORT, () => console.log(`🌐 Serveur keepalive en écoute sur le port ${PORT}`));
 
 client.login(process.env.TOKEN || process.env.DISCORD_TOKEN);
 
