@@ -1,7 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
 // notion-extra.js — Extensions Notion pour iwc-bot
-// Module 100% autonome. Aucune fonction ne fait planter le bot :
-// si un token / ID de base manque, la fonction log et s'arrête.
+// Module 100% autonome. Aucune fonction ne fait planter le bot.
 // ═══════════════════════════════════════════════════════════════
 
 const { EmbedBuilder, ChannelType } = require('discord.js');
@@ -10,7 +9,6 @@ const fs = require('fs');
 const DB_PATH = './data.json';
 const NOTION_VERSION = '2022-06-28';
 
-// IDs des bases Notion (depuis les variables d'environnement)
 const DBS = {
   STATS:      process.env.NOTION_STATS_DB,
   FICHES:     process.env.NOTION_FICHES_DB,
@@ -19,7 +17,6 @@ const DBS = {
   OPERATIONS: process.env.NOTION_OPERATIONS_DB,
 };
 
-// ── Helpers internes ─────────────────────────────────────────────
 function fmtShort(d) {
   return !d ? '—' : new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
@@ -36,22 +33,15 @@ function getCh(guild, ...names) {
   return null;
 }
 
-// Vérifie token + ID de base, log clairement si manquant
 function checkNotionReady(fnName, dbKey) {
-  if (!process.env.NOTION_TOKEN) {
-    console.log(`⚠️ [${fnName}] NOTION_TOKEN manquant`);
-    return false;
-  }
-  if (!DBS[dbKey]) {
-    console.log(`⚠️ [${fnName}] Variable d'env NOTION_${dbKey}_DB manquante`);
-    return false;
-  }
+  if (!process.env.NOTION_TOKEN) { console.log(`⚠️ [${fnName}] NOTION_TOKEN manquant`); return false; }
+  if (!DBS[dbKey]) { console.log(`⚠️ [${fnName}] Variable d'env NOTION_${dbKey}_DB manquante`); return false; }
   return true;
 }
 
 async function notionCreate(databaseId, properties, children) {
   if (!process.env.NOTION_TOKEN) { console.log('⚠️ NOTION_TOKEN manquant'); return null; }
-  if (!databaseId) { console.log('⚠️ ID de base Notion manquant (vérifie tes variables d\'env)'); return null; }
+  if (!databaseId) { console.log('⚠️ ID de base Notion manquant'); return null; }
   const body = { parent: { database_id: databaseId }, properties };
   if (children) body.children = children;
   const res = await fetch('https://api.notion.com/v1/pages', {
@@ -76,7 +66,6 @@ async function notionPatch(pageId, properties) {
   return j;
 }
 
-// Retrouve une page Notion par une propriété rich_text (fallback si notionPageId absent)
 async function notionFindByText(dbId, propName, value) {
   if (!process.env.NOTION_TOKEN || !dbId) return null;
   try {
@@ -92,7 +81,6 @@ async function notionFindByText(dbId, propName, value) {
 
 // ═══════════════════════════════════════════════════════════════
 // 1. STATS HEBDO
-// Lit data.json → écrit Notion + annonce Discord (dimanche 20h)
 // ═══════════════════════════════════════════════════════════════
 async function postStatsHebdo(guild) {
   try {
@@ -101,23 +89,21 @@ async function postStatsHebdo(guild) {
     const inWeek = d => d && new Date(d).getTime() >= weekAgo;
 
     const stats = {
-      recrues:        (db.candidatures || []).filter(c => c.status === 'acceptee' && inWeek(c.acceptedAt)).length,
-      candidatures:   (db.candidatures || []).filter(c => inWeek(c.receivedAt)).length,
-      contrats:       (db.contrats || []).filter(c => c.status === 'signe' && inWeek(c.signedAt)).length,
-      operations:     (db.operations || []).filter(o => o.status === 'terminee' && inWeek(o.endedAt)).length,
-      nouveaux:       Object.values(db.members || {}).filter(m => inWeek(m.joinedAt)).length,
-      departs:        Object.values(db.members || {}).filter(m => m.status === 'parti' && inWeek(m.leftAt)).length,
-      soldeLegal:     db.coffres?.legal   || 0,
-      soldeIlleg:     db.coffres?.illegal || 0,
+      recrues:      (db.candidatures || []).filter(c => c.status === 'acceptee' && inWeek(c.acceptedAt)).length,
+      candidatures: (db.candidatures || []).filter(c => inWeek(c.receivedAt)).length,
+      contrats:     (db.contrats || []).filter(c => c.status === 'signe' && inWeek(c.signedAt)).length,
+      operations:   (db.operations || []).filter(o => o.status === 'terminee' && inWeek(o.endedAt)).length,
+      nouveaux:     Object.values(db.members || {}).filter(m => inWeek(m.joinedAt)).length,
+      departs:      Object.values(db.members || {}).filter(m => m.status === 'parti' && inWeek(m.leftAt)).length,
+      soldeLegal:   db.coffres?.legal   || 0,
+      soldeIlleg:   db.coffres?.illegal || 0,
     };
 
-    // Détail des opérations terminées cette semaine
     const opsDetail = (db.operations || [])
       .filter(o => o.status === 'terminee' && inWeek(o.endedAt))
       .map(o => `→ *${o.name}* — ${o.resultat || '—'}`)
       .join('\n') || '*Aucune*';
 
-    // Détail des contrats signés cette semaine
     const contratsDetail = (db.contrats || [])
       .filter(c => c.status === 'signe' && inWeek(c.signedAt))
       .map(c => `→ \`${c.id}\` — ${c.objet}`)
@@ -125,7 +111,6 @@ async function postStatsHebdo(guild) {
 
     const semaine = `${fmtShort(new Date(weekAgo))} → ${fmtShort(new Date())}`;
 
-    // Archivage Notion
     if (checkNotionReady('postStatsHebdo', 'STATS')) {
       await notionCreate(DBS.STATS, {
         'Semaine':            { title: [{ text: { content: semaine } }] },
@@ -141,12 +126,11 @@ async function postStatsHebdo(guild) {
       });
     }
 
-    // Annonce Discord — salon planning/agenda/annonces (dans cet ordre)
     const ch = getCh(guild, 'planning-sessions', 'agenda', 'planning', 'annonces-generales', 'annonces', 'dashboard', 'logs');
     if (ch) {
       await ch.send({ embeds: [new EmbedBuilder()
         .setColor(0x8B1A1A)
-        .setTitle(`📊 Bilan de la semaine — Iron Wolf Company`)
+        .setTitle('📊 Bilan de la semaine — Iron Wolf Company')
         .setDescription(`*${semaine}*\n*La meute avance. Voici le bilan de la semaine.*`)
         .addFields(
           { name: '👥 MEMBRES',       value: [`🆕 Arrivants : **${stats.nouveaux}**`, `🚪 Départs : **${stats.departs}**`].join('\n'), inline: true },
@@ -163,31 +147,38 @@ async function postStatsHebdo(guild) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 2. FICHE PERSONNAGE
-// Appelée à l'acceptation d'une candidature
+// 2. FICHE PERSONNAGE — améliorée
+// Champs ajoutés : Relations, Statut activité, Opérations participées, Objectifs IC
 // ═══════════════════════════════════════════════════════════════
 async function creerFichePersonnageNotion(cand) {
   if (!checkNotionReady('creerFichePersonnageNotion', 'FICHES')) return;
   try {
     const metierSpe = cand.type === 'illegal' ? (cand.specialite || '—') : (cand.metier || '—');
+    const pole = cand.type === 'illegal' ? '🔪 Illégal' : '⚖️ Légal';
+
     await notionCreate(DBS.FICHES, {
-      'Personnage':          { title: [{ text: { content: cand.nomPerso || '—' } }] },
-      'Âge':                 { rich_text: [{ text: { content: cand.agePerso || '—' } }] },
-      'Pôle':                { select: { name: cand.type === 'illegal' ? '🔪 Illégal' : '⚖️ Légal' } },
-      'Métier / Spécialité': { rich_text: [{ text: { content: metierSpe } }] },
-      'Disponibilités':      { rich_text: [{ text: { content: cand.dispos || '—' } }] },
-      // Champs supplémentaires utiles pour le suivi
-      "Date d'entrée":       { date: { start: new Date().toISOString().split('T')[0] } },
-      'Discord ID':          { rich_text: [{ text: { content: cand.userId || '—' } }] },
-      'Discord Username':    { rich_text: [{ text: { content: cand.username || '—' } }] },
-      'Statut fiche':        { select: { name: '🟡 À compléter' } },
+      'Personnage':            { title: [{ text: { content: cand.nomPerso || '—' } }] },
+      'Âge':                   { rich_text: [{ text: { content: cand.agePerso || '—' } }] },
+      'Pôle':                  { select: { name: pole } },
+      'Métier / Spécialité':   { rich_text: [{ text: { content: metierSpe } }] },
+      'Disponibilités':        { rich_text: [{ text: { content: cand.dispos || '—' } }] },
+      "Date d'entrée":         { date: { start: new Date().toISOString().split('T')[0] } },
+      'Discord ID':            { rich_text: [{ text: { content: cand.userId || '—' } }] },
+      'Discord Username':      { rich_text: [{ text: { content: cand.username || '—' } }] },
+      'Statut fiche':          { select: { name: '🟡 À compléter' } },
+      // ✅ Nouveaux champs
+      'Statut activité':       { select: { name: '✅ Actif' } },
+      'Relations':             { rich_text: [{ text: { content: '' } }] },
+      'Opérations participées':{ rich_text: [{ text: { content: '' } }] },
+      'Objectifs IC':          { rich_text: [{ text: { content: '' } }] },
     }, [
       { object: 'block', type: 'heading_2', heading_2: { rich_text: [{ text: { content: '📖 Background' } }] } },
       { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: (cand.background || '—').slice(0, 2000) } }] } },
       { object: 'block', type: 'heading_2', heading_2: { rich_text: [{ text: { content: '✍️ À compléter par le membre' } }] } },
       { object: 'block', type: 'bulleted_list_item', bulleted_list_item: { rich_text: [{ text: { content: 'Apparence physique' } }] } },
-      { object: 'block', type: 'bulleted_list_item', bulleted_list_item: { rich_text: [{ text: { content: 'Relations / contacts' } }] } },
-      { object: 'block', type: 'bulleted_list_item', bulleted_list_item: { rich_text: [{ text: { content: 'Objectifs personnels' } }] } },
+      { object: 'block', type: 'bulleted_list_item', bulleted_list_item: { rich_text: [{ text: { content: 'Relations / contacts dans la Compagnie' } }] } },
+      { object: 'block', type: 'bulleted_list_item', bulleted_list_item: { rich_text: [{ text: { content: 'Objectifs personnels IC' } }] } },
+      { object: 'block', type: 'bulleted_list_item', bulleted_list_item: { rich_text: [{ text: { content: 'Opérations marquantes' } }] } },
     ]);
     console.log(`✅ Fiche personnage créée : ${cand.nomPerso}`);
   } catch (e) { console.log('❌ Fiche perso error:', e.message); }
@@ -195,7 +186,6 @@ async function creerFichePersonnageNotion(cand) {
 
 // ═══════════════════════════════════════════════════════════════
 // 3. TRÉSORERIE
-// Reçoit une transaction déjà calculée par index.js
 // ═══════════════════════════════════════════════════════════════
 async function enregistrerTransactionNotion(tx) {
   if (!checkNotionReady('enregistrerTransactionNotion', 'TRESORERIE')) return;
@@ -213,8 +203,7 @@ async function enregistrerTransactionNotion(tx) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 4. CALENDRIER CONTRATS
-// Appelée à la signature d'un contrat
+// 4. CONTRATS
 // ═══════════════════════════════════════════════════════════════
 async function ajouterContratNotion(contrat) {
   if (!checkNotionReady('ajouterContratNotion', 'CONTRATS')) return;
@@ -228,7 +217,6 @@ async function ajouterContratNotion(contrat) {
       'Rémunération': { rich_text: [{ text: { content: contrat.remuneration || '—' } }] },
       'Statut':       { select: { name: '✅ Actif' } },
       'Date début':   { date: { start: new Date().toISOString().split('T')[0] } },
-      // Signataire côté IWC
       'Signé par':    { rich_text: [{ text: { content: contrat.signedBy || contrat.signataire || '—' } }] },
     });
     console.log(`✅ Contrat ${contrat.id} ajouté au calendrier Notion`);
@@ -237,9 +225,6 @@ async function ajouterContratNotion(contrat) {
 
 // ═══════════════════════════════════════════════════════════════
 // 5. OPÉRATIONS
-// creerOperationNotion → renvoie l'ID de page Notion
-// majOperationNotion   → met à jour statut, participants, résultat
-//                        avec fallback si notionPageId manquant
 // ═══════════════════════════════════════════════════════════════
 const OP_STATUT = {
   preparation: '🟡 Préparation',
@@ -259,7 +244,6 @@ async function creerOperationNotion(op) {
       'Participants': { rich_text: [{ text: { content: (op.participants || []).join(', ') || '—' } }] },
       'Notes':        { rich_text: [{ text: { content: op.equipe ? `Équipe : ${op.equipe}` : '—' } }] },
       'Statut':       { select: { name: OP_STATUT[op.status] || '🟡 Préparation' } },
-      // ID Discord stocké pour le fallback de majOperationNotion
       'ID Discord':   { rich_text: [{ text: { content: op.id || '—' } }] },
     });
     if (j) { console.log(`✅ Opération "${op.name}" ajoutée à Notion`); return j.id; }
@@ -270,13 +254,9 @@ async function creerOperationNotion(op) {
 async function majOperationNotion(op) {
   if (!checkNotionReady('majOperationNotion', 'OPERATIONS')) return;
   try {
-    // Fallback : si le pageId n'est pas en mémoire, on le retrouve via l'ID Discord
     if (!op.notionPageId && op.id) {
       op.notionPageId = await notionFindByText(DBS.OPERATIONS, 'ID Discord', op.id);
-      if (!op.notionPageId) {
-        console.log(`⚠️ majOperationNotion : page Notion introuvable pour l'op ${op.id}`);
-        return;
-      }
+      if (!op.notionPageId) { console.log(`⚠️ majOperationNotion : page introuvable pour ${op.id}`); return; }
     }
     const props = {
       'Statut':       { select: { name: OP_STATUT[op.status] || op.status } },
@@ -284,11 +264,7 @@ async function majOperationNotion(op) {
     };
     if (op.endedAt)  props['Date fin']  = { date: { start: new Date(op.endedAt).toISOString().split('T')[0] } };
     if (op.resultat) {
-      const resTxt = [
-        op.resultat,
-        op.butin   && op.butin   !== '—' ? `Butin : ${op.butin}`     : null,
-        op.debrief && op.debrief !== '—' ? `Débrief : ${op.debrief}` : null,
-      ].filter(Boolean).join(' · ');
+      const resTxt = [op.resultat, op.butin && op.butin !== '—' ? `Butin : ${op.butin}` : null, op.debrief && op.debrief !== '—' ? `Débrief : ${op.debrief}` : null].filter(Boolean).join(' · ');
       props['Résultat'] = { rich_text: [{ text: { content: resTxt.slice(0, 2000) } }] };
     }
     await notionPatch(op.notionPageId, props);
