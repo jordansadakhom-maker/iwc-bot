@@ -327,7 +327,8 @@ async function autoKickVisiteurs(guild) {
           .setFooter({ text: 'IWC • Système automatique' })
         ] }).catch(() => {});
 
-        await member.kick(`Visiteur inactif depuis ${joursDepuis} jours — règlement non validé`).catch(() => {});
+        const kicked_ok = await member.kick(`Visiteur inactif depuis ${joursDepuis} jours — règlement non validé`).then(() => true).catch(() => false);
+        if (!kicked_ok) { console.log(`⚠️ Impossible de kicker ${member.user.username} — permissions insuffisantes`); continue; }
 
         delete db.members[id];
         kicked++;
@@ -364,7 +365,7 @@ async function envoyerRapportDirection(guild) {
     const departs     = Object.values(db.members || {}).filter(m => m.status === 'parti' && depuisHier(m.leftAt));
     const candsRecues = (db.candidatures || []).filter(c => depuisHier(c.receivedAt));
     const candsAccept = (db.candidatures || []).filter(c => c.status === 'acceptee' && depuisHier(c.acceptedAt));
-    const candsRefus  = (db.candidatures || []).filter(c => c.status === 'refusee'  && depuisHier(c.updatedAt || c.receivedAt));
+    const candsRefus  = (db.candidatures || []).filter(c => c.status === 'refusee'  && depuisHier(c.refusedAt || c.receivedAt));
     const contratsSign= (db.contrats || []).filter(c => c.status === 'signe'        && depuisHier(c.signedAt));
     const opsEnCours  = (db.operations || []).filter(o => o.status === 'en_cours');
     const opsTermHier = (db.operations || []).filter(o => o.status === 'terminee'   && depuisHier(o.endedAt));
@@ -986,7 +987,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
       await sendLog(guild, 'CANDIDATURE_ACCEPTEE', { userId: cand.userId, nomPerso: cand.nomPerso, type: isIllegal ? '🔪 Illégal' : '⚖️ Légal', validePar: user.username });
       try { await reaction.message.edit({ embeds: [EmbedBuilder.from(reaction.message.embeds[0]).setColor(isIllegal ? 0x8B1A1A : 0x3B82F6).setTitle(`✅ ACCEPTÉ — ${cand.nomPerso}`)] }); } catch {}
     } else {
-      cand.status = 'refusee'; saveDB(db);
+      cand.status = 'refusee'; cand.refusedAt = new Date().toISOString(); saveDB(db);
       await archiverCandidatureNotion(cand, 'refusee', user.username);
       await sendLog(guild, 'CANDIDATURE_REFUSEE', { userId: cand.userId, nomPerso: cand.nomPerso, type: isIllegal ? '🔪 Illégal' : '⚖️ Légal' });
       if (member) {
@@ -1051,10 +1052,12 @@ client.on('messageCreate', async message => {
       const montant = (() => { const n = parseInt((get('MONTANT') || '').replace(/[^0-9]/g, ''), 10); return isNaN(n) ? 0 : n; })();
       const objet = get('OBJET') || '—';
       const responsable = get('RESPONSABLE') || message.author.username;
-      if (!db.coffres) db.coffres = { legal: 0, illegal: 0 };
-      db.coffres[coffreType] += (type === 'Sortie' ? -montant : montant);
-      const solde = db.coffres[coffreType];
-      saveDB(db);
+      // Recharger le DB au moment de la mise à jour pour éviter les race conditions
+      const dbFresh = loadDB();
+      if (!dbFresh.coffres) dbFresh.coffres = { legal: 0, illegal: 0 };
+      dbFresh.coffres[coffreType] += (type === 'Sortie' ? -montant : montant);
+      const solde = dbFresh.coffres[coffreType];
+      saveDB(dbFresh);
       await notionExtra.enregistrerTransactionNotion?.({ type, coffre: coffreType === 'illegal' ? '🔒 Illégal' : '💰 Légal', montant, objet, responsable, solde });
       await message.react('✅').catch(() => {});
       await message.channel.send({ embeds: [new EmbedBuilder().setColor(type === 'Sortie' ? 0xED4245 : 0x57F287)
