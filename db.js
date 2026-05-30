@@ -13,11 +13,26 @@ const DEFAULT_DB = {
   coffres: { legal: 0, illegal: 0 },
   fichesCompleteesNotifiees: [],
   anniversairesEnvoyes: {},
+  rappelsFiches: {},
+  sessionReminders: {},
+  alertesEnvoyees: {},
+  alertesInactivite: {},
 };
 
 // ── Cache en mémoire (évite les lectures disque répétées) ──
 let _cache = null;
 let _saveTimeout = null;
+
+// ── Deep-merge : conserve les clés par défaut manquantes même imbriquées ──
+function isPlainObject(v) { return v && typeof v === 'object' && !Array.isArray(v); }
+function deepMerge(base, over) {
+  const out = Array.isArray(base) ? [...base] : { ...base };
+  for (const k of Object.keys(over || {})) {
+    if (isPlainObject(base?.[k]) && isPlainObject(over[k])) out[k] = deepMerge(base[k], over[k]);
+    else out[k] = over[k];
+  }
+  return out;
+}
 
 function loadDB() {
   if (_cache) return _cache;
@@ -28,8 +43,8 @@ function loadDB() {
       return _cache;
     }
     const raw = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
-    // Fusion avec les defaults pour les clés manquantes
-    _cache = { ...JSON.parse(JSON.stringify(DEFAULT_DB)), ...raw };
+    // Fusion PROFONDE avec les defaults (récupère les clés imbriquées manquantes)
+    _cache = deepMerge(JSON.parse(JSON.stringify(DEFAULT_DB)), raw);
     return _cache;
   } catch (e) {
     console.log('❌ loadDB error:', e.message);
@@ -51,9 +66,10 @@ function saveDB(data) {
   }, 500);
 }
 
-// Sauvegarde forcée immédiate (utilisée avant shutdown)
+// Sauvegarde forcée immédiate (utilisée avant shutdown ou backup GitHub)
 function saveDBSync() {
   if (!_cache) return;
+  if (_saveTimeout) { clearTimeout(_saveTimeout); _saveTimeout = null; }
   try { fs.writeFileSync(DB_PATH, JSON.stringify(_cache, null, 2)); }
   catch (e) { console.log('❌ saveDBSync error:', e.message); }
 }
@@ -66,7 +82,11 @@ function invalidateCache() { _cache = null; }
 async function sauvegarderSurGitHub() {
   if (!process.env.GITHUB_TOKEN || !process.env.GITHUB_GIST_ID) return;
   try {
-    const contenu = fs.existsSync(DB_PATH) ? fs.readFileSync(DB_PATH, 'utf8') : '{}';
+    // On flush d'abord le cache en attente pour ne jamais sauvegarder de données périmées
+    saveDBSync();
+    const contenu = _cache
+      ? JSON.stringify(_cache, null, 2)
+      : (fs.existsSync(DB_PATH) ? fs.readFileSync(DB_PATH, 'utf8') : '{}');
     await fetch(`https://api.github.com/gists/${process.env.GITHUB_GIST_ID}`, {
       method: 'PATCH',
       headers: {
