@@ -345,18 +345,18 @@ async function envoyerRapportDirection(guild) {
 
 async function handleSlashCommand(interaction) {
   const { commandName, guild } = interaction; const db = loadDB();
-  if (commandName === 'grade-set')         return notionV3.handleGradeSetCommand?.(interaction);
+  if (commandName === 'grade-set')         await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleGradeSetCommand?.(interaction);
   if (commandName === 'hierarchie')        return notionV3.handleHierarchieCommand?.(interaction);
-  if (commandName === 'affaire')           return notionV3.handleAffaireNouvelleButton?.(interaction);
+  if (commandName === 'affaire')           await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleAffaireNouvelleButton?.(interaction);
   if (commandName === 'tresor')            return notionModules.handleTresorCommand?.(interaction);
-  if (commandName === 'dashboard')         return notionModules.handleDashboard?.(interaction);
+  if (commandName === 'dashboard')         await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleDashboard?.(interaction);
   if (commandName === 'journal')           return notionModules.handleJournalCommand?.(interaction);
-  if (commandName === 'contrats-archives') return notionModules.handleContratsArchives?.(interaction);
+  if (commandName === 'contrats-archives') await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleContratsArchives?.(interaction);
   if (commandName === 'contrats')          return _handleMesContrats(interaction);
   if (commandName === 'registre')         return _handleRegistre(interaction);
   if (commandName === 'op')               return _handleOpDetail(interaction);
   if (commandName === 'profil')            return handleProfilEnhanced(interaction);
-  if (commandName === 'bilan')             return notionModules.handleBilanCommand?.(interaction);
+  if (commandName === 'bilan')             await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleBilanCommand?.(interaction);
   if (commandName === 'agenda')            return notionV3.handleAgendaCommand?.(interaction);
   if (commandName === 'op-programmer')     return _ouvrirModalOpProgrammee(interaction);
   if (commandName === 'aide')              return _handleAide(interaction);
@@ -368,7 +368,7 @@ async function handleSlashCommand(interaction) {
   if (commandName === 'annuler-absence')   return _handleAnnulerAbsence(interaction);
   if (commandName === 'purge')             return _handlePurge(interaction);
 
-  if (commandName === 'stats') return notionV5.handleStatsAvancees?.(interaction);
+  if (commandName === 'stats') await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV5.handleStatsAvancees?.(interaction);
   if (commandName === '_stats_old') {
     const members = Object.values(db.members || {}); const contrats = db.contrats || []; const ops = db.operations || []; const cands = db.candidatures || [];
     await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle('📊 Statistiques — Iron Wolf Company').addFields({ name: '👥 Membres', value: [`✅ Actifs : **${members.filter(m => m.status === 'actif').length}**`, `⚠️ Absents : **${members.filter(m => m.status === 'absent').length}**`, `👁️ Total : **${members.filter(m => m.status !== 'parti').length}**`].join('\n'), inline: true }, { name: '🎯 Opérations', value: [`🟢 En cours : **${ops.filter(o => o.status === 'en_cours').length}**`, `🟡 Prépa : **${ops.filter(o => o.status === 'preparation').length}**`, `✅ Terminées : **${ops.filter(o => o.status === 'terminee').length}**`].join('\n'), inline: true }, { name: '📋 Recrutement', value: [`📥 En attente : **${cands.filter(c => c.status === 'reçue').length}**`, `✅ Acceptés : **${cands.filter(c => c.status === 'acceptee').length}**`].join('\n'), inline: true }, { name: '📜 Contrats', value: [`✅ Signés : **${contrats.filter(c => c.status === 'signe').length}**`, `🟡 En attente : **${contrats.filter(c => c.status === 'en_attente').length}**`].join('\n'), inline: true }, { name: '💰 Trésorerie', value: [`⚖️ Légal : **$${(db.coffres?.legal || 0).toLocaleString('fr-FR')}**`, `🔒 Illégal : **$${(db.coffres?.illegal || 0).toLocaleString('fr-FR')}**`].join('\n'), inline: true }).setFooter({ text: `IWC • ${new Date().toLocaleString('fr-FR')}` })], ephemeral: false });
@@ -864,8 +864,11 @@ client.on('messageCreate', async message => {
   // ── Détection RDV — tout salon où le membre peut écrire ──
   const estSalonTexte = message.channel.isTextBased?.() && !message.channel.isVoiceBased?.();
   const peutEcrire    = message.channel.permissionsFor?.(message.member)?.has('SendMessages');
+  // Triple vérification anti-boucle : pas un bot, pas une réponse au bot, pas un message système
+  const estBotOuSys   = message.author.bot || message.system || message.webhookId;
+  const estReplyAuBot = message.reference && (await message.fetchReference().catch(() => null))?.author?.id === message.guild?.members?.me?.id;
 
-  if (estSalonTexte && peutEcrire) {
+  if (estSalonTexte && peutEcrire && !estBotOuSys && !estReplyAuBot) {
     const contenu = message.content.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
     // Toutes les façons de dire rendez-vous
@@ -1011,15 +1014,15 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId === 'btn_grade_panel')            return notionV3.handleGradePanelButton?.(interaction);
     if (interaction.customId === 'btn_agenda_nouveau')         return notionV3.handleAgendaNouveauButton?.(interaction);
     if (interaction.customId === 'btn_hierarchie_refresh')     { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); await notionV3.updateHierarchieEmbed?.(interaction.guild); return interaction.editReply({ content: '✅ Hiérarchie mise à jour.' }); }
-    if (interaction.customId === 'btn_affaire_nouvelle')        return notionV3.handleAffaireNouvelleButton?.(interaction);
-    if (interaction.customId === 'btn_affaires_resume')         return notionV3.handleAffairesResumeButton?.(interaction);
+    if (interaction.customId === 'btn_affaire_nouvelle')        await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleAffaireNouvelleButton?.(interaction);
+    if (interaction.customId === 'btn_affaires_resume')         await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleAffairesResumeButton?.(interaction);
     if (interaction.customId === 'btn_informateur_rapport')     return notionV3.handleInformateurRapportButton?.(interaction);
-    if (interaction.customId === 'btn_informateur_historique')  return notionV3.handleInformateurHistorique?.(interaction);
+    if (interaction.customId === 'btn_informateur_historique')  await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleInformateurHistorique?.(interaction);
     if (interaction.customId.startsWith('info_confirmer_'))      return notionV3.handleInformateurConfirmer?.(interaction);
     if (interaction.customId === 'btn_surnom_ouvrir')           return _ouvrirModalSurnom(interaction);
     if (interaction.customId === 'dir_btn_candidatures')       return interaction.reply({ flags: MessageFlags.Ephemeral, content: _buildCandidaturesResume(db) });
     if (interaction.customId === 'dir_btn_ops')                return notionV5.handleStatsAvancees?.(interaction) || interaction.reply({ flags: MessageFlags.Ephemeral, content: '`/stats` pour plus de détails.' });
-    if (interaction.customId === 'dir_btn_bilan')              return notionModules.handleBilanCommand?.(interaction);
+    if (interaction.customId === 'dir_btn_bilan')              await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleBilanCommand?.(interaction);
     if (interaction.customId === 'dir_btn_registre')           return _handleRegistre(interaction);
     if (interaction.customId === 'dir_btn_refresh')            { await updateDirectionPanel(interaction.guild).catch(() => {}); return interaction.reply({ flags: MessageFlags.Ephemeral, content: '✅ Panel mis à jour.' }); }
     if (interaction.customId.startsWith('purge_confirm_'))      return _executerPurge(interaction);
@@ -1030,13 +1033,13 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId.startsWith('info_infirmer_'))       return notionV3.handleInformateurInfirmer?.(interaction);
     if (interaction.customId.startsWith('affaire_oui_'))        return notionV3.handleAffaireVote?.(interaction, 'oui');
     if (interaction.customId.startsWith('affaire_non_'))        return notionV3.handleAffaireVote?.(interaction, 'non');
-    if (interaction.customId.startsWith('affaire_detail_'))     return notionV3.handleAffaireDetail?.(interaction);
+    if (interaction.customId.startsWith('affaire_detail_'))     await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleAffaireDetail?.(interaction);
     if (interaction.customId === 'btn_nouvelle_transaction')    return notionModules.handleTresorCommand?.(interaction);
     if (interaction.customId === 'btn_tresor_config')           return notionModules.handleTresorConfigButton?.(interaction);
     if (interaction.customId.startsWith('tresor_valider_'))     return notionModules.handleTresorValidation?.(interaction, 'valider');
     if (interaction.customId.startsWith('op_stop_'))            return notionV5.handleOpStop?.(interaction);
     if (interaction.customId.startsWith('op_lancer_force_'))    return notionV5.handleOpLancerForce?.(interaction);
-    if (interaction.customId === 'btn_stats_refresh')           return notionV5.handleStatsAvancees?.(interaction);
+    if (interaction.customId === 'btn_stats_refresh')           await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV5.handleStatsAvancees?.(interaction);
     if (interaction.customId.startsWith('op_annulee_confirm_')) {
       const opId = interaction.customId.replace('op_annulee_confirm_', '');
       const op   = db.operations.find(o => o.id === opId);
@@ -1052,7 +1055,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId.startsWith('tresor_refuser_'))     return notionModules.handleTresorValidation?.(interaction, 'refuser');
     if (interaction.customId.startsWith('tresor_'))             return notionModules.handleTresorFlow?.(interaction);
     if (interaction.customId === 'btn_solde')                   return notionModules.handleSoldeButton?.(interaction);
-    if (interaction.customId === 'btn_dashboard_refresh')       return notionModules.handleDashboard?.(interaction);
+    if (interaction.customId === 'btn_dashboard_refresh')       await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleDashboard?.(interaction);
     if (interaction.customId.startsWith('journal_'))            return notionModules.handleJournalPagination?.(interaction);
   }
 
@@ -2486,6 +2489,11 @@ function _buildDirectionPanelEmbed(guild, db) {
       { name: '📋 RECRUTEMENT', value: [
         ligne('📥', 'Candidatures en attente', cands.length, true),
       ].join('\n'), inline: true },
+      { name: '📅 AGENDA', value: (() => {
+        const today = new Date().toISOString().split('T')[0];
+        const rdvsAujourd = (db.agenda || []).filter(a => a.date === today).length;
+        return rdvsAujourd > 0 ? `🟢 **${rdvsAujourd}** RDV aujourd\'hui` : '⚪ Aucun RDV aujourd\'hui';
+      })(), inline: true },
       { name: '🎯 OPÉRATIONS', value: [
         ligne('🟢', 'En cours', opsEnCours.length, false),
         ligne('🕐', 'Programmées', opsProg.length, false),
