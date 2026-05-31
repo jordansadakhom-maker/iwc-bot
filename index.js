@@ -51,7 +51,7 @@ const {
   ROLE_POLE_LEGAL, ROLE_POLE_ILLEGAL, ROLE_ABSENT,
   MEMBRES_DISCORD_MAP, DISCORD_TO_IC,
   NOTION_RECRUTEMENT_DB, NOTION_MEMBRES_DB_ID: NOTION_MEMBRES_DB,
-  SALON_IDS,
+  SALON_IDS, _getPole,
 } = require('./config');
 
 // ── getCh amélioré — utilise l'ID si configuré dans SALON_IDS ──
@@ -556,6 +556,7 @@ async function autoSetup(guild) {
   await setupPlanningFormat(guild);
   await setupSurnomFormat(guild);
   await setupCommandesSlash(guild);
+  await setupPanelDirection(guild);
 
   const reglCh = getCh(guild, 'reglement', 'règlement');
   if (reglCh) {
@@ -973,6 +974,11 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId === 'btn_informateur_historique')  return notionV3.handleInformateurHistorique?.(interaction);
     if (interaction.customId.startsWith('info_confirmer_'))      return notionV3.handleInformateurConfirmer?.(interaction);
     if (interaction.customId === 'btn_surnom_ouvrir')           return _ouvrirModalSurnom(interaction);
+    if (interaction.customId === 'dir_btn_candidatures')       return interaction.reply({ ephemeral: true, content: _buildCandidaturesResume(db) });
+    if (interaction.customId === 'dir_btn_ops')                return notionV5.handleStatsAvancees?.(interaction) || interaction.reply({ ephemeral: true, content: '`/stats` pour plus de détails.' });
+    if (interaction.customId === 'dir_btn_bilan')              return notionModules.handleBilanCommand?.(interaction);
+    if (interaction.customId === 'dir_btn_registre')           return _handleRegistre(interaction);
+    if (interaction.customId === 'dir_btn_refresh')            { await updateDirectionPanel(interaction.guild).catch(() => {}); return interaction.reply({ ephemeral: true, content: '✅ Panel mis à jour.' }); }
     if (interaction.customId.startsWith('purge_confirm_'))      return _executerPurge(interaction);
     if (interaction.customId === 'purge_annuler')               return interaction.update({ content: '↩️ Suppression annulée.', embeds: [], components: [] });
     if (interaction.customId.startsWith('btn_rdv_creer_'))     return _ouvrirMenuRdv(interaction);
@@ -1302,6 +1308,7 @@ client.once('clientReady', async () => {
       await notionV3.updateHierarchieEmbed?.(g).catch(() => {});
       await notionV3.checkAffairesTimeout?.(g).catch(() => {});
       await _checkRetoursAbsence(g).catch(() => {});
+      await updateDirectionPanel(g).catch(() => {});
       await notionV4.checkRecrutementSuivi?.(g).catch(() => {});
       await notionV4.checkEcheancesContrats?.(g).catch(() => {});
       await notionV4.checkOperationsTimeout?.(g).catch(() => {});
@@ -1460,8 +1467,12 @@ async function _syncSurnomNotion(message) {
     const surnomIC = get('SURNOM IC');
     const appart   = get('APPARTENANCE');
 
-    const page = await _notionFindByDiscordId(process.env.NOTION_MEMBRES_DB, message.author.id);
-    if (!page) { await message.react('⚠️').catch(() => {}); return; }
+    // Compatibilité modal (message.author peut être { id, username })
+    const userId = message.author?.id;
+    if (!userId) return;
+
+    const page = await _notionFindByDiscordId(process.env.NOTION_MEMBRES_DB, userId);
+    if (!page) { if (typeof message.react === 'function') await message.react('⚠️').catch(() => {}); return; }
 
     const props = {};
     if (nomIC)    props['Personnage'] = { rich_text: [{ text: { content: nomIC } }] };
@@ -1470,8 +1481,8 @@ async function _syncSurnomNotion(message) {
     props['Dernière activité'] = { date: { start: new Date().toISOString().split('T')[0] } };
 
     await _notionPatch(page.id, props);
-    await message.react('✅').catch(() => {});
-    console.log(`✅ Identité IC synced : ${nomIC} (${message.author.username})`);
+    if (typeof message.react === 'function') await message.react('✅').catch(() => {});
+    console.log(`✅ Identité IC synced : ${nomIC} (${message.author?.username || userId})`);
   } catch (e) { console.log('❌ _syncSurnomNotion error:', e.message); }
 }
 
@@ -1797,6 +1808,17 @@ async function _handleOpDetail(interaction) {
   }
 
   await interaction.editReply({ embeds: [embed] });
+}
+
+// ── Résumé rapide des candidatures pour le panel Direction ──
+function _buildCandidaturesResume(db) {
+  const cands = (db.candidatures || []).filter(c => c.status === 'reçue');
+  if (!cands.length) return '✅ Aucune candidature en attente.';
+  return cands.map((c, i) => {
+    const h = Math.floor((Date.now() - new Date(c.receivedAt).getTime()) / 3600000);
+    const urgent = h >= 48 ? ' 🔴' : h >= 24 ? ' ⚠️' : '';
+    return `**${i+1}.** ${c.nomPerso} — ${c.type === 'legal' ? '⚖️' : '🔒'} — ${h}h${urgent}`;
+  }).join('\n');
 }
 
 // ── MEMBRES_DISCORD_MAP automatique ──
@@ -2334,6 +2356,101 @@ async function _handleAide(interaction) {
 
   embedBase.setFooter({ text: 'IWC Bot • /aide pour revoir ce guide' }).setTimestamp();
   await interaction.reply({ embeds: [embedBase], ephemeral: true });
+}
+
+// ── Panel Direction — embed permanent + boutons ──
+async function setupPanelDirection(guild) {
+  try {
+    const clean = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const ch = guild.channels.cache.find(c => c.isTextBased?.() &&
+      (clean(c.name).includes('direction') && (clean(c.name).includes('5') || clean(c.name).includes('nous')))
+    ) || guild.channels.cache.find(c => c.isTextBased?.() && clean(c.name).includes('direction-nous'));
+    if (!ch) return;
+
+    const db = loadDB();
+
+    // Supprimer l'ancien panel bot si existant
+    const msgs = await ch.messages.fetch({ limit: 20 });
+    for (const [, m] of msgs) {
+      if (m.author.id === guild.members.me?.id && m.components?.length > 0) {
+        await m.delete().catch(() => {});
+      }
+    }
+
+    const embed = _buildDirectionPanelEmbed(guild, db);
+    const row   = _buildDirectionPanelRow();
+
+    const sent = await ch.send({ embeds: [embed], components: [row] });
+    db.directionPanelMsgId  = sent.id;
+    db.directionPanelChanId = ch.id;
+    saveDB(db);
+    console.log('✅ Panel Direction posté');
+  } catch(e) { console.log('❌ setupPanelDirection error:', e.message); }
+}
+
+function _buildDirectionPanelEmbed(guild, db) {
+  const membres     = Object.values(db.members || {});
+  const cands       = (db.candidatures || []).filter(c => c.status === 'reçue');
+  const opsEnCours  = (db.operations   || []).filter(o => o.status === 'en_cours');
+  const opsProg     = (db.operations   || []).filter(o => o.status === 'programmee');
+  const absents     = membres.filter(m => m.status === 'absent');
+  const contrats3j  = (db.contrats     || []).filter(c => {
+    if (c.status !== 'signe' || !c.dateEcheance) return false;
+    const j = Math.floor((new Date(c.dateEcheance) - new Date()) / 86400000);
+    return j >= 0 && j <= 3;
+  });
+  const legal  = db.coffres?.legal   || 0;
+  const illeg  = db.coffres?.illegal || 0;
+
+  const ligne = (emoji, label, val, urgent) =>
+    `${urgent && val > 0 ? '🔴' : '🟢'} ${emoji} **${label}** — ${val}`;
+
+  return new EmbedBuilder()
+    .setColor(0x8B1A1A)
+    .setAuthor({ name: 'IWC Setup • Panel Direction', iconURL: guild.iconURL() || undefined })
+    .setTitle('🐺 Tableau de bord — Iron Wolf Company')
+    .addFields(
+      { name: '📋 RECRUTEMENT', value: [
+        ligne('📥', 'Candidatures en attente', cands.length, true),
+      ].join('\n'), inline: true },
+      { name: '🎯 OPÉRATIONS', value: [
+        ligne('🟢', 'En cours', opsEnCours.length, false),
+        ligne('🕐', 'Programmées', opsProg.length, false),
+      ].join('\n'), inline: true },
+      { name: '​', value: '​', inline: true },
+      { name: '💰 TRÉSORERIE', value: [
+        `⚖️ Légal : **$${legal.toLocaleString('fr-FR')}**`,
+        `🔒 Illégal : **$${illeg.toLocaleString('fr-FR')}**`,
+      ].join('\n'), inline: true },
+      { name: '👥 MEMBRES', value: [
+        ligne('⚠️', 'Absents', absents.length, false),
+        ligne('📜', 'Contrats expirent ≤3j', contrats3j.length, true),
+      ].join('\n'), inline: true },
+      { name: '​', value: '​', inline: true },
+    )
+    .setFooter({ text: `IWC • Panel Direction • MàJ ${new Date().toLocaleString('fr-FR')}` })
+    .setTimestamp();
+}
+
+function _buildDirectionPanelRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('dir_btn_candidatures').setLabel('📋 Candidatures').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('dir_btn_ops').setLabel('🎯 Opérations').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('dir_btn_bilan').setLabel('💰 Bilan').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dir_btn_registre').setLabel('👥 Membres').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dir_btn_refresh').setLabel('🔄').setStyle(ButtonStyle.Secondary),
+  );
+}
+
+async function updateDirectionPanel(guild) {
+  try {
+    const db = loadDB();
+    if (!db.directionPanelMsgId || !db.directionPanelChanId) { await setupPanelDirection(guild); return; }
+    const ch  = guild.channels.cache.get(db.directionPanelChanId);
+    const msg = await ch?.messages.fetch(db.directionPanelMsgId).catch(() => null);
+    if (!msg) { await setupPanelDirection(guild); return; }
+    await msg.edit({ embeds: [_buildDirectionPanelEmbed(guild, db)], components: [_buildDirectionPanelRow()] });
+  } catch(e) { console.log('❌ updateDirectionPanel:', e.message); }
 }
 
 // ── Setup #commandes-slash — liste complète ──
