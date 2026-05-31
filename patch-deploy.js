@@ -105,3 +105,4 @@ client.once('ready', async () => {
 });
 
 client.login(process.env.TOKEN || process.env.DISCORD_TOKEN);
+
