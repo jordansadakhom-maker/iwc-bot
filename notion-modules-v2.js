@@ -617,8 +617,23 @@ async function _ajouterJournalIC(guild, entry) {
   db[JOURNAL_DB_KEY].unshift({ id: Date.now().toString(), date: new Date().toISOString(), type: entry.type || 'autre', emoji: entry.emoji || '📝', titre: entry.titre || '—', description: entry.description || '—', auteur: entry.auteur || '—' });
   db[JOURNAL_DB_KEY] = db[JOURNAL_DB_KEY].slice(0, 200);
   saveDB(db);
-  const ch = guild?.channels?.cache?.find(c => c.name?.includes('histoire') || c.name?.includes('journal'));
-  if (ch) await ch.send({ embeds: [new EmbedBuilder().setColor(_journalColor(entry.type)).setTitle(`${entry.emoji} ${entry.titre}`).setDescription(entry.description).setFooter({ text: `IWC Journal • ${entry.auteur}` }).setTimestamp()] }).catch(() => {});
+
+  const embed = new EmbedBuilder()
+    .setColor(_journalColor(entry.type))
+    .setTitle(`${entry.emoji} ${entry.titre}`)
+    .setDescription(entry.description)
+    .addFields({ name: '👤 Auteur', value: entry.auteur || '—', inline: true })
+    .setFooter({ text: `IWC Journal • ${entry.auteur}` })
+    .setTimestamp();
+
+  // Poster dans #histoire-iwc
+  const histCh = guild?.channels?.cache?.find(c => c.name?.includes('histoire'));
+  if (histCh) await histCh.send({ embeds: [embed] }).catch(() => {});
+
+  // Poster aussi dans #journal-de-bord
+  const clean = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const journalCh = guild?.channels?.cache?.find(c => c.isTextBased?.() && clean(c.name).includes(clean('journal-de-bord')));
+  if (journalCh) await journalCh.send({ embeds: [embed] }).catch(() => {});
 }
 
 function _journalColor(type) {
@@ -1245,6 +1260,36 @@ async function handleBilanCommand(interaction) {
     embed.addFields({ name: `📋 Dernières transactions (${transactions.length})`, value: lignes, inline: false });
   } else {
     embed.addFields({ name: '📋 Transactions', value: '*Aucune transaction sur les 7 derniers jours.*\n*Configure `NOTION_TRESORERIE_DB` dans `.env` pour voir l\'historique.*', inline: false });
+  }
+
+  // Graphique ASCII
+  if (transactions.length > 0) {
+    const data = {};
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 86400000).toISOString().split('T')[0];
+      data[d] = { entrees: 0, sorties: 0 };
+    }
+    for (const t of transactions) {
+      const d = t.date?.split('T')[0];
+      if (data[d]) {
+        if (t.type?.includes('Entrée')) data[d].entrees += t.montant;
+        else data[d].sorties += t.montant;
+      }
+    }
+    const jrs = Object.entries(data);
+    const maxVal = Math.max(...jrs.map(([, v]) => Math.max(v.entrees, v.sorties)), 1);
+    const H = 4;
+    let g = '\`\`\`\n';
+    for (let h = H; h >= 1; h--) {
+      g += jrs.map(([, v]) => {
+        const eH = Math.round((v.entrees / maxVal) * H);
+        const sH = Math.round((v.sorties / maxVal) * H);
+        return (eH >= h ? '█' : ' ') + (sH >= h ? '▓' : ' ');
+      }).join(' ') + '\n';
+    }
+    g += jrs.map(([d]) => new Date(d).getDate().toString().padStart(2,'0')).join('  ') + '\n';
+    g += '█ Entrées  ▓ Sorties\`\`\`';
+    embed.addFields({ name: '📊 Graphique 7 jours', value: g, inline: false });
   }
 
   embed.setFooter({ text: `IWC • Bilan automatique • ${new Date().toLocaleString('fr-FR')}` }).setTimestamp();
