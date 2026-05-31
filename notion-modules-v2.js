@@ -174,19 +174,41 @@ async function setupTresorButton(guild) {
   if (!ch) return;
   const db = loadDB();
 
+  // Récupérer tous les messages bot dans le salon
+  let allBotMsgs = [];
+  try {
+    const msgs = await ch.messages.fetch({ limit: 100 });
+    allBotMsgs = [...msgs.values()]
+      .filter(m => m.author.id === guild.members.me?.id)
+      .sort((a, b) => b.createdTimestamp - a.createdTimestamp);
+  } catch {}
+
+  // Séparer panels (avec boutons) des messages de transaction (sans boutons)
+  const panels    = allBotMsgs.filter(m => m.components?.length > 0 && m.embeds?.length > 0);
+  const nonPanels = allBotMsgs.filter(m => !(m.components?.length > 0));
+
+  // Supprimer les messages de transaction orphelins qui ne se sont pas auto-supprimés
+  for (const m of nonPanels) await m.delete().catch(() => {});
+
+  // Supprimer les doublons de panels
+  for (let i = 1; i < panels.length; i++) await panels[i].delete().catch(() => {});
+
+  // Réutiliser ou recréer
+  if (panels.length > 0) {
+    try {
+      await panels[0].edit({ embeds: [_tresorEmbed()], components: [_tresorRow()] });
+      db.tresorButtonMsgId = panels[0].id;
+      saveDB(db);
+      return;
+    } catch { await panels[0].delete().catch(() => {}); }
+  }
+
   if (db.tresorButtonMsgId) {
     try {
       const existing = await ch.messages.fetch(db.tresorButtonMsgId);
       if (existing) { await existing.edit({ embeds: [_tresorEmbed()], components: [_tresorRow()] }); return; }
     } catch {}
   }
-
-  try {
-    const msgs    = await ch.messages.fetch({ limit: 20 });
-    const botMsgs = [...msgs.values()].filter(m => m.author.id === guild.members.me?.id && m.embeds?.length > 0).sort((a, b) => b.createdTimestamp - a.createdTimestamp);
-    for (let i = 1; i < botMsgs.length; i++) await botMsgs[i].delete().catch(() => {});
-    if (botMsgs.length > 0) { await botMsgs[0].edit({ embeds: [_tresorEmbed()], components: [_tresorRow()] }); db.tresorButtonMsgId = botMsgs[0].id; saveDB(db); return; }
-  } catch {}
 
   const msg = await ch.send({ embeds: [_tresorEmbed()], components: [_tresorRow()] });
   db.tresorButtonMsgId = msg.id;
