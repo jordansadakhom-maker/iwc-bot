@@ -16,6 +16,22 @@ const NOTION_VERSION = '2022-06-28';
 // 1. TRÉSORERIE — FLOW 3 ÉTAPES
 // ═══════════════════════════════════════════════════════════════
 
+// Détecter le pôle du membre pour sécuriser l'accès aux coffres
+function _getPole(member) {
+  if (!member) return 'both';
+  const roles = member.roles?.cache;
+  if (!roles) return 'both';
+  // Rôles illégaux connus
+  const illegalRoleNames = ['Concepteur', 'Fléau', 'Exécuteur', 'Condamné', 'Maudit', 'Confrérie', 'Ombre'];
+  // Rôles légaux connus
+  const legalRoleNames   = ['Conseil', 'Directeur', 'Officier', 'Agent', 'Opérateur', 'Recrue', 'Iron Wolf', 'Fondateur'];
+  const hasIllegal = roles.some(r => illegalRoleNames.some(n => r.name.includes(n)));
+  const hasLegal   = roles.some(r => legalRoleNames.some(n => r.name.includes(n)));
+  if (hasIllegal && !hasLegal) return 'illegal';
+  if (hasLegal   && !hasIllegal) return 'legal';
+  return 'both'; // fondateur ou double rôle
+}
+
 async function handleTresorCommand(interaction) {
   await interaction.reply({
     ephemeral: true,
@@ -38,6 +54,20 @@ async function handleTresorFlow(interaction) {
   if (id === 'tresor_type_entree' || id === 'tresor_type_sortie') {
     const type      = id === 'tresor_type_entree' ? 'entree' : 'sortie';
     const typeLabel = type === 'entree' ? '📈 Entrée' : '📉 Sortie';
+    const pole      = _getPole(interaction.member);
+
+    // Sécurité stricte : un membre légal ne voit PAS le coffre illégal
+    const buttons = [];
+    if (pole === 'legal' || pole === 'both') {
+      buttons.push(new ButtonBuilder().setCustomId(`tresor_coffre_legal_${type}`).setLabel('⚖️ Coffre Légal').setStyle(ButtonStyle.Primary));
+    }
+    if (pole === 'illegal' || pole === 'both') {
+      buttons.push(new ButtonBuilder().setCustomId(`tresor_coffre_illegal_${type}`).setLabel('🔒 Coffre Illégal').setStyle(ButtonStyle.Secondary));
+    }
+    if (buttons.length === 0) {
+      return interaction.update({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('❌ Accès refusé').setDescription("Tu n'as pas accès à un coffre.")], components: [] });
+    }
+
     return interaction.update({
       embeds: [new EmbedBuilder()
         .setColor(type === 'entree' ? 0x57F287 : 0xED4245)
@@ -45,10 +75,7 @@ async function handleTresorFlow(interaction) {
         .setDescription('**Étape 2/3** — Quel coffre ?')
         .setFooter({ text: 'IWC • Trésorerie' })
       ],
-      components: [new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`tresor_coffre_legal_${type}`).setLabel('⚖️ Coffre Légal').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId(`tresor_coffre_illegal_${type}`).setLabel('🔒 Coffre Illégal').setStyle(ButtonStyle.Secondary),
-      )],
+      components: [new ActionRowBuilder().addComponents(...buttons)],
     });
   }
 
@@ -96,11 +123,13 @@ async function handleTresorModal(interaction) {
   const nouveauSolde = db.coffres[key];
   saveDB(db);
 
-  // Notion + Journal en arrière-plan
-  notionExtra.enregistrerTransactionNotion?.({ objet, type, coffre, montant, solde: nouveauSolde, responsable: interaction.user.username }).catch(() => {});
+  // Archive Notion directe (sans passer par notion-extra qui peut ne pas avoir la config)
+  _archiverTransactionNotion({ objet, type, coffre, montant, solde: nouveauSolde, responsable: interaction.user.username, date: new Date().toISOString() }).catch(() => {});
+
+  // Journal IC
   _ajouterJournalIC(interaction.guild, {
     type: 'tresorerie', emoji: type === 'Entrée' ? '💵' : '💸',
-    titre: `${type} — ${coffre}`,
+    titre: `${type} — Coffre ${coffre}`,
     description: `**${objet}** · $${montant.toLocaleString('fr-FR')} · par ${interaction.user.username}`,
     auteur: interaction.user.username,
   }).catch(() => {});
@@ -117,7 +146,7 @@ async function handleTresorModal(interaction) {
     const arrow    = isEntree ? '📈' : '📉';
     const line     = '─────────────────────────────────';
 
-    await coffreCh.send({ embeds: [new EmbedBuilder()
+    const sentMsg = await coffreCh.send({ embeds: [new EmbedBuilder()
       .setColor(color)
       .setAuthor({ name: `${coffre === 'Légal' ? '⚖️ Iron Wolf Company' : '🔒 La Confrérie'} • Trésorerie`, iconURL: interaction.guild.iconURL() || undefined })
       .setTitle(`${arrow} ${type.toUpperCase()} — $${montant.toLocaleString('fr-FR')}`)
@@ -132,7 +161,9 @@ async function handleTresorModal(interaction) {
       )
       .setFooter({ text: `IWC • ${new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}` })
       .setTimestamp()
-    ] }).catch(() => {});
+    ] }).catch(() => null);
+    // Auto-suppression après 45 secondes — le salon reste propre
+    if (sentMsg) setTimeout(() => sentMsg.delete().catch(() => {}), 45000);
   }
 
   await interaction.followUp({ content: `✅ Transaction enregistrée — Solde **${coffre}** : **$${nouveauSolde.toLocaleString('fr-FR')}**`, ephemeral: true });
@@ -184,6 +215,41 @@ async function handleSoldeButton(interaction) {
       { name: '💼 Total',          value: `**$${(legal + illegal).toLocaleString('fr-FR')}**`, inline: true },
     ).setFooter({ text: 'IWC • Données en temps réel' }).setTimestamp()
   ] });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// NOTION — Archive transaction directe
+// ═══════════════════════════════════════════════════════════════
+async function _archiverTransactionNotion({ objet, type, coffre, montant, solde, responsable, date }) {
+  if (!process.env.NOTION_TOKEN || !process.env.NOTION_TRESORERIE_DB) {
+    console.log('⚠️ NOTION_TRESORERIE_DB non configuré — transaction non archivée dans Notion');
+    return;
+  }
+  try {
+    const res = await fetch('https://api.notion.com/v1/pages', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.NOTION_TOKEN}`,
+        'Notion-Version': '2022-06-28',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        parent: { database_id: process.env.NOTION_TRESORERIE_DB },
+        properties: {
+          'Objet':        { title:     [{ text: { content: objet || '—' } }] },
+          'Type':         { select:    { name: type === 'Entrée' ? '📥 Entrée' : '📤 Sortie' } },
+          'Coffre':       { select:    { name: coffre === 'Illégal' ? '🔒 Illégal' : '⚖️ Légal' } },
+          'Montant':      { number:    montant },
+          'Solde':        { number:    solde },
+          'Responsable':  { rich_text: [{ text: { content: responsable || '—' } }] },
+          'Date':         { date:      { start: date ? new Date(date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0] } },
+        },
+      }),
+    });
+    const data = await res.json();
+    if (data.object === 'error') { console.log('❌ Notion trésorerie error:', data.message); return; }
+    console.log(`✅ Transaction archivée dans Notion : ${objet} — ${type} $${montant}`);
+  } catch (e) { console.log('❌ _archiverTransactionNotion error:', e.message); }
 }
 
 // ═══════════════════════════════════════════════════════════════
