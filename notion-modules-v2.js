@@ -34,7 +34,7 @@ function _getPole(member) {
 
 async function handleTresorCommand(interaction) {
   await interaction.reply({
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
     embeds: [new EmbedBuilder()
       .setColor(0x8B1A1A)
       .setTitle('💰 Nouvelle Transaction')
@@ -114,7 +114,7 @@ async function handleTresorModal(interaction) {
   const objet   = interaction.fields.getTextInputValue('objet').trim();
 
   if (isNaN(montant) || montant <= 0) {
-    return interaction.followUp({ content: '❌ Montant invalide. Entre un nombre positif.', ephemeral: true });
+    return interaction.followUp({ content: '❌ Montant invalide. Entre un nombre positif.', flags: MessageFlags.Ephemeral });
   }
 
   const type   = typeRaw   === 'entree'  ? 'Entrée'  : 'Sortie';
@@ -137,13 +137,13 @@ async function handleTresorModal(interaction) {
     // Sortie > limite → quand même soumis à validation pour traçabilité
     if (type === 'Sortie' && montant > limiteDb2) {
       await _soumettreValidationDirection(interaction.guild, txDirect, null);
-      return interaction.followUp({ ephemeral: true, embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('📨 Sortie importante soumise').setDescription(`Sortie de **$${montant.toLocaleString('fr-FR')}** soumise à validation Direction (traçabilité).
+      return interaction.followUp({ flags: MessageFlags.Ephemeral, embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('📨 Sortie importante soumise').setDescription(`Sortie de **$${montant.toLocaleString('fr-FR')}** soumise à validation Direction (traçabilité).
 
 *En tant que Direction, la preuve photo n'est pas requise.*`).setFooter({ text: `IWC • Réf. ${txId}` })] });
     }
     await _validerTransaction(interaction.guild, txDirect, null);
     const soldeFinal2 = loadDB().coffres?.[key] || 0;
-    return interaction.followUp({ ephemeral: true, embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ Transaction validée').addFields({ name: '🆔 Réf.', value: `\`${txId}\``, inline: true }, { name: `${type === 'Entrée' ? '📥' : '📤'} ${type}`, value: `$${montant.toLocaleString('fr-FR')}`, inline: true }, { name: '💰 Solde', value: `**$${soldeFinal2.toLocaleString('fr-FR')}**`, inline: true }).setFooter({ text: `IWC • Direction — Sans preuve photo` })] });
+    return interaction.followUp({ flags: MessageFlags.Ephemeral, embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ Transaction validée').addFields({ name: '🆔 Réf.', value: `\`${txId}\``, inline: true }, { name: `${type === 'Entrée' ? '📥' : '📤'} ${type}`, value: `$${montant.toLocaleString('fr-FR')}`, inline: true }, { name: '💰 Solde', value: `**$${soldeFinal2.toLocaleString('fr-FR')}**`, inline: true }).setFooter({ text: `IWC • Direction — Sans preuve photo` })] });
   }
 
   // ── Stocker la transaction en attente de preuve ──
@@ -181,7 +181,7 @@ async function handleTresorModal(interaction) {
     ].join('\n'))
     .setFooter({ text: `IWC • Réf. ${txId}` });
 
-  await interaction.followUp({ embeds: [embedPhoto], ephemeral: true });
+  await interaction.followUp({ embeds: [embedPhoto], flags: MessageFlags.Ephemeral });
 
   // ── Attendre la photo (collecteur de messages) ──
   const clean    = s => s.toLowerCase().replace(/[^a-z0-9-]/g, '');
@@ -203,7 +203,7 @@ async function handleTresorModal(interaction) {
     saveDB(db);
     await interaction.followUp({
       embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('⏰ Délai dépassé — Transaction annulée').setDescription(`La transaction **\`${txId}\`** a été annulée.\n\n**Raison :** Aucune photo reçue en 5 minutes.\n*Recommence depuis le bouton 💰 Nouvelle Transaction.*`).setFooter({ text: `IWC • Réf. ${txId} — Annulée` })],
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     }).catch(() => {});
     return;
   }
@@ -217,7 +217,7 @@ async function handleTresorModal(interaction) {
 
   // ── ÉTAPE 4 : Double saisie — vérification du montant visible sur la photo ──
   await interaction.followUp({
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
     embeds: [new EmbedBuilder()
       .setColor(0x5865F2)
       .setTitle('🔢 Vérification du montant')
@@ -244,7 +244,7 @@ async function handleTresorModal(interaction) {
   } catch {
     delete db.transactionsPendantes[txId];
     saveDB(db);
-    await interaction.followUp({ ephemeral: true, embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('⏰ Délai dépassé — Transaction annulée').setDescription(`La transaction **\`${txId}\`** a été annulée.\n\n**Raison :** Aucune confirmation du montant en 2 minutes.\n*Recommence depuis le bouton 💰 Nouvelle Transaction.*`).setFooter({ text: `IWC • Réf. ${txId} — Annulée` })] }).catch(() => {});
+    await interaction.followUp({ flags: MessageFlags.Ephemeral, embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('⏰ Délai dépassé — Transaction annulée').setDescription(`La transaction **\`${txId}\`** a été annulée.\n\n**Raison :** Aucune confirmation du montant en 2 minutes.\n*Recommence depuis le bouton 💰 Nouvelle Transaction.*`).setFooter({ text: `IWC • Réf. ${txId} — Annulée` })] }).catch(() => {});
     return;
   }
 
@@ -258,7 +258,7 @@ async function handleTresorModal(interaction) {
     delete db.transactionsPendantes[txId];
     saveDB(db);
     await interaction.followUp({
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
       embeds: [new EmbedBuilder()
         .setColor(0xED4245)
         .setTitle('❌ Montant incorrect — Transaction annulée')
@@ -282,7 +282,7 @@ async function handleTresorModal(interaction) {
   if (type === 'Sortie' && montant > limite) {
     await _soumettreValidationDirection(interaction.guild, db.transactionsPendantes[txId], photoUrl);
     await interaction.followUp({
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
       embeds: [new EmbedBuilder()
         .setColor(0xFFA500)
         .setTitle('📨 En attente de validation')
@@ -307,7 +307,7 @@ async function handleTresorModal(interaction) {
 
   const soldeFinal = (loadDB().coffres?.[key] || 0);
   await interaction.followUp({
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
     embeds: [new EmbedBuilder()
       .setColor(0x57F287)
       .setTitle('✅ Transaction validée')
@@ -414,7 +414,7 @@ async function _validerTransaction(guild, tx, photoUrl) {
 // ── Boutons Approuver / Refuser (Direction) ──
 async function handleTresorValidation(interaction, decision) {
   if (!_isDirection(interaction.member)) {
-    return interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
+    return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
   }
 
   const txId = interaction.customId.replace(decision === 'valider' ? 'tresor_valider_' : 'tresor_refuser_', '');
@@ -564,7 +564,7 @@ async function handleSoldeButton(interaction) {
   }
   // Confirmer à l'utilisateur (éphémère discret)
   await interaction.reply({
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
     content: `💰 **Soldes mis à jour dans le salon**
 ⚖️ Légal : **$${legal.toLocaleString('fr-FR')}** · 🔒 Illégal : **$${illega.toLocaleString('fr-FR')}** · Total : **$${(legal + illega).toLocaleString('fr-FR')}**`,
   });
@@ -666,7 +666,7 @@ async function handleJournalPagination(interaction) {
 // ═══════════════════════════════════════════════════════════════
 
 async function handleContratsArchives(interaction) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const db = loadDB(); const statut = interaction.options?.getString('statut') || 'tous'; const page = Math.max(1, interaction.options?.getInteger('page') || 1); const perPage = 6;
   const contrats = db.contrats || [];
   const filtered = statut === 'tous' ? contrats : contrats.filter(c => { if (statut === 'actif') return c.status === 'signe'; if (statut === 'refuse') return c.status === 'refuse'; if (statut === 'expire') return c.status === 'expire' || (c.dateEcheance && new Date(c.dateEcheance) < new Date()); return true; });
@@ -1004,7 +1004,7 @@ function _isFleau(member) {
 // Panel config — posté en éphémère, invisible aux autres
 async function handleTresorConfigButton(interaction) {
   if (!_isFleau(interaction.member)) {
-    return interaction.reply({ content: '❌ Accès réservé au Fléau et au Concepteur.', ephemeral: true });
+    return interaction.reply({ content: '❌ Accès réservé au Fléau et au Concepteur.', flags: MessageFlags.Ephemeral });
   }
 
   const db     = loadDB();
@@ -1028,7 +1028,7 @@ async function handleTresorConfigButton(interaction) {
   }));
 
   await interaction.reply({
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
     embeds: [new EmbedBuilder()
       .setColor(0x8B1A1A)
       .setTitle('⚙️ Configuration Trésorerie — Direction')
@@ -1061,7 +1061,7 @@ async function handleTresorConfigButton(interaction) {
 
 async function handleTresorConfigSelect(interaction) {
   if (!_isFleau(interaction.member)) {
-    return interaction.reply({ content: '❌ Accès réservé au Fléau et au Concepteur.', ephemeral: true });
+    return interaction.reply({ content: '❌ Accès réservé au Fléau et au Concepteur.', flags: MessageFlags.Ephemeral });
   }
 
   const val      = interaction.values[0];
