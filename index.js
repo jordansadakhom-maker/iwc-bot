@@ -861,14 +861,18 @@ client.on('messageCreate', async message => {
   // ── Détection RDV dans #discussion-hrp et #discussion-rp ──
   const cleanCh = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
   // Détecter tous les salons de discussion (hrp, rp, direction)
-  // ── Détection RDV — tout salon où le membre peut écrire ──
-  const estSalonTexte = message.channel.isTextBased?.() && !message.channel.isVoiceBased?.();
-  const peutEcrire    = message.channel.permissionsFor?.(message.member)?.has('SendMessages');
-  // Triple vérification anti-boucle : pas un bot, pas une réponse au bot, pas un message système
+  // ── Détection RDV — salons autorisés par ID ──
+  const SALONS_RDV = new Set([
+    '1508756466847191143', // #parlote (légal)
+    '1508756470672523405', // #parlote-hrp (légal)
+    '1508756497906270248', // #parlote-ombre (illégal)
+    '1508791151677931551', // #parlote-hrp (illégal)
+    '1510712255514153101', // #conversation-direction-hrp
+  ]);
   const estBotOuSys   = message.author.bot || message.system || message.webhookId;
   const estReplyAuBot = message.reference && (await message.fetchReference().catch(() => null))?.author?.id === message.guild?.members?.me?.id;
 
-  if (estSalonTexte && peutEcrire && !estBotOuSys && !estReplyAuBot) {
+  if (SALONS_RDV.has(message.channel.id) && !estBotOuSys && !estReplyAuBot) {
     const contenu = message.content.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
     // Toutes les façons de dire rendez-vous
@@ -3183,12 +3187,28 @@ async function setupPlansFormat(guild) {
 // ── Setup message explicatif dans #planning ──
 async function setupPlanningFormat(guild) {
   try {
-    const clean = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const ch = guild.channels.cache.find(c => c.isTextBased?.() && clean(c.name) === clean('planning'));
+    // Ciblage par ID direct pour éviter le mauvais salon planning
+    const ch = guild.channels.cache.get('1509719218654941315') || getChById(guild, 'PLANNING', 'planning');
     if (!ch) { console.log('⚠️ Salon planning introuvable'); return; }
 
+    // Nettoyer tous les salons planning (supprimer les messages bot dans le mauvais)
+    const allPlannings = guild.channels.cache.filter(c => {
+      const cl = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return c.isTextBased?.() && cl(c.name).includes('planning') && c.id !== ch.id;
+    });
+    for (const [, wrongCh] of allPlannings) {
+      const wrongMsgs = await wrongCh.messages.fetch({ limit: 20 }).catch(() => null);
+      if (wrongMsgs) {
+        for (const [, m] of wrongMsgs) {
+          if (m.author.id === guild.members.me?.id && m.content?.includes('PLANNING')) {
+            await m.delete().catch(() => {});
+          }
+        }
+      }
+    }
+    // Vérifier si déjà posté dans le bon salon
     const msgs = await ch.messages.fetch({ limit: 20 });
-    const existing = msgs.find(m => m.author.id === guild.members.me?.id && m.content.includes('PLANNING'));
+    const existing = msgs.find(m => m.author.id === guild.members.me?.id && m.content?.includes('PLANNING'));
     if (existing) return;
 
     const MSG = [
@@ -3227,3 +3247,4 @@ async function setupPlanningFormat(guild) {
     console.log('❌ setupPlanningFormat error:', e.message);
   }
 }
+
