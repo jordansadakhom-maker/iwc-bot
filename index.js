@@ -2527,40 +2527,41 @@ async function setupCommandesSlash(guild) {
     const msgs = await ch.messages.fetch({ limit: 20 });
     for (const [, m] of msgs) { if (m.author.id === guild.members.me?.id) await m.delete().catch(() => {}); }
 
-    const e1 = new EmbedBuilder().setColor(0x3B82F6).setTitle('📖 COMMANDES — Membres').setDescription('*Commandes accessibles à tous les membres.*')
+    const e1 = new EmbedBuilder().setColor(0x3B82F6).setTitle('📖 COMMANDES — Membres').setDescription('*Commandes accessibles à tous les membres IWC.*')
       .addFields(
-        { name: '👤 Profil & Identité', value: '/profil · /fiche [nom] · /hierarchie · /registre', inline: false },
-        { name: '🎯 Opérations', value: '/ops · /op [id]', inline: false },
-        { name: '📅 Agenda', value: '/agenda voir · /agenda creer', inline: false },
-        { name: '📜 Contrats', value: '/contrats', inline: false },
-        { name: '🟡 Absences', value: '/absent [durée] · /retour · /avertissements', inline: false },
-        { name: '📊 Stats & Info', value: '/stats · /solde · /journal · /aide', inline: false },
+        { name: '👤 Profil & Identité', value: '`/profil` · `/profil @membre` · `/fiche [nom]` · `/hierarchie` · `/registre`', inline: false },
+        { name: '🎯 Opérations', value: '`/ops` — En cours · `/op [id]` — Détail', inline: false },
+        { name: '📅 Agenda & RDV', value: '`/agenda voir` · `/agenda creer`\nÉcrire "rdv", "on se retrouve"... → bouton 📅 auto', inline: false },
+        { name: '📜 Contrats', value: '`/contrats` — Tes contrats en cours', inline: false },
+        { name: '🟡 Absences', value: '`/absent [durée]` · `/retour` · `/avertissements`', inline: false },
+        { name: '📊 Stats & Info', value: '`/stats` · `/solde` · `/journal` · `/aide`', inline: false },
       ).setFooter({ text: 'IWC Bot • Commandes membres' });
 
-    const e2 = new EmbedBuilder().setColor(0x8B1A1A).setTitle('🎖️ COMMANDES — Direction').setDescription('*Réservées à la Direction.*')
+    const e2 = new EmbedBuilder().setColor(0x8B1A1A).setTitle('🎖️ COMMANDES — Direction').setDescription('*Réservées à la Direction, Officiers et Conseil.*')
       .addFields(
-        { name: '⚙️ Membres', value: '/promo · /retro · /grade-set · /avertir · /annuler-absence · /registre', inline: false },
-        { name: '💰 Trésorerie', value: '/bilan · /contrats-archives · ⚙️ dans coffre-entreprise', inline: false },
-        { name: '🎯 Opérations', value: '/op-programmer', inline: false },
-        { name: '📊 Dashboard', value: '/dashboard · /rapport · /stats', inline: false },
-        { name: '🛠️ Admin', value: '/purge · /sync · /version', inline: false },
+        { name: '⚙️ Gestion membres', value: '`/promo` · `/retro` · `/grade-set` · `/avertir` · `/annuler-absence` · `/registre`', inline: false },
+        { name: '💰 Trésorerie', value: '`/bilan [coffre]` · `/contrats-archives` · ⚙️ dans coffre-entreprise', inline: false },
+        { name: '🎯 Opérations', value: '`/op-programmer` — Lancement automatique à heure fixée', inline: false },
+        { name: '📊 Rapports & Dashboard', value: '`/dashboard` · `/rapport` · `/stats`', inline: false },
+        { name: '🛠️ Administration', value: '`/purge [nombre]` · `/sync` · `/version`', inline: false },
       ).setFooter({ text: 'IWC Bot • Commandes Direction' });
 
     const e3 = new EmbedBuilder().setColor(0xED4245).setTitle('💀 COMMANDES — Fléau & Concepteur').setDescription('*Accès exclusif.*')
       .addFields(
-        { name: '⚙️ Config', value: '/op-programmer · /rapport · ⚙️ limites coffre', inline: false },
+        { name: '⚙️ Configuration', value: '`/op-programmer` · `/rapport` (auto vendredi 20h) · ⚙️ limites coffre', inline: false },
       ).setFooter({ text: 'IWC Bot • Fléau & Concepteur' });
 
-    const e4 = new EmbedBuilder().setColor(0x555555).setTitle('🤖 AUTOMATISMES — Sans commande').setDescription('*Le bot fait ça tout seul.*')
+    const e4 = new EmbedBuilder().setColor(0x555555).setTitle('🤖 AUTOMATISMES — Le bot fait ça tout seul').setDescription('*Aucune commande nécessaire.*')
       .addFields(
-        { name: '💰 Trésorerie', value: 'Bouton Nouvelle Transaction → photo → double saisie → validation Direction si > limite', inline: false },
-        { name: '📋 Fiches personnages', value: 'Poster dans #fiches-personnages → embed + thread + Notion auto', inline: false },
-        { name: '🎭 Identité IC', value: 'Bouton dans #surnom-pseudo → Notion auto', inline: false },
-        { name: '🗺️ Plans & Planning', value: 'Photo dans plans → Notion · Photo dans planning → RDV Notion', inline: false },
-        { name: '📅 RDV détecté', value: 'Ecrire "rdv", "booker"... dans discussion-hrp → bouton 📅 proposé', inline: false },
-        { name: '⏰ Rappels', value: 'Rappel 24h + 1h avant RDV Notion · Rappel 30min avant op programmée', inline: false },
-        { name: '🟡 Absences', value: 'Rôle Absent auto · Permissions suspendues · Levée auto à la date de fin', inline: false },
-        { name: '🐺 Recrutement', value: 'Candidature → thread discussion · Rappel 24h/72h · Archivage auto', inline: false },
+        { name: '💰 Trésorerie sécurisée', value: 'Bouton 💰 → photo → double saisie → validation Direction si > limite\n*Direction : exempte de photo*', inline: false },
+        { name: '📋 Fiches personnages', value: 'Poster dans #fiches-personnages → embed + thread + Notion', inline: false },
+        { name: '🎭 Identité IC', value: 'Bouton ✏️ dans #surnom-pseudo → Discord ID + Pseudo + Nom IC → Notion', inline: false },
+        { name: '📅 RDV détecté partout', value: '"rdv", "on se retrouve", "booker", "rdv armadillo 21h"... → bouton 📅 dans tous les salons', inline: false },
+        { name: '⏰ Rappels automatiques', value: 'Rappel 24h + 1h avant RDV Notion · Rappel 30min avant op', inline: false },
+        { name: '🟡 Absences', value: 'Rôle Absent → permissions suspendues → levée auto + DM', inline: false },
+        { name: '🐺 Recrutement', value: 'Candidature → thread → rappel 24h/72h → archivage auto', inline: false },
+        { name: '⚠️ Informateurs', value: 'Rapport → boutons ✅/❌ Direction → alerte seulement si confirmé', inline: false },
+        { name: '🗑️ Journal de bord', value: 'Ops, contrats, promos, recrutements → #journal-de-bord auto', inline: false },
       ).setFooter({ text: 'IWC Bot • Automatismes' });
 
     await ch.send({ embeds: [e1] });
