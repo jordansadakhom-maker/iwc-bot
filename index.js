@@ -854,9 +854,31 @@ client.on('messageCreate', async message => {
   // Détecter tous les salons de discussion (hrp, rp, direction)
   const isDiscussionCh = ['discussion-hrp','discussion-rp','conversation-direction','conversation-hrp','conversation-rp','parlote-hrp','parlote-rp'].some(n => cleanCh(message.channel.name).includes(cleanCh(n)));
   if (isDiscussionCh) {
-    const mots = ['booker','rdv','rendez-vous','rendez vous','rendezvous','réunion','reunion','session','ce soir','demain','planifier','organiser','on se retrouve','meeting','on se voit'];
+    // Mots clés qui déclenchent seuls
+    const motsExacts  = ['booker','rdv','rendez-vous','rendez vous','rendezvous','réunion','reunion','on se retrouve','meeting','on se voit','planifier'];
+    // Mots clés qui nécessitent un contexte RDV (trop génériques seuls)
+    const motsContext = ['demain','ce soir','session'];
+    const motsCombines = ['rdv demain','rdv ce soir','rendez-vous demain','rendez-vous ce soir','session demain','réunion demain','reunion demain','meeting demain'];
+
     const contenu = message.content.toLowerCase();
-    if (mots.some(m => contenu.includes(m))) {
+    const matchExact   = motsExacts.some(m => contenu.includes(m));
+    const matchContext = motsCombines.some(m => contenu.includes(m));
+
+    if (matchExact || matchContext) {
+      // Anti-doublon : pas de réponse si le bot a déjà répondu à ce membre dans ce salon dans les 2 dernières minutes
+      const db = loadDB();
+      if (!db._rdvCooldown) db._rdvCooldown = {};
+      const cooldownKey = `${message.channel.id}_${message.author.id}`;
+      const lastReply   = db._rdvCooldown[cooldownKey] || 0;
+      if (Date.now() - lastReply < 2 * 60 * 1000) return; // Cooldown 2 min
+
+      db._rdvCooldown[cooldownKey] = Date.now();
+      // Nettoyer les vieilles entrées
+      for (const k of Object.keys(db._rdvCooldown)) {
+        if (Date.now() - db._rdvCooldown[k] > 10 * 60 * 1000) delete db._rdvCooldown[k];
+      }
+      saveDB(db);
+
       await message.reply({
         content: `📅 <@${message.author.id}> Tu veux créer un RDV ?`,
         components: [new ActionRowBuilder().addComponents(
