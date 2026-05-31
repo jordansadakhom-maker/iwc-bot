@@ -852,33 +852,45 @@ client.on('messageCreate', async message => {
   // ── Détection RDV dans #discussion-hrp et #discussion-rp ──
   const cleanCh = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
   // Détecter tous les salons de discussion (hrp, rp, direction)
-  const isDiscussionCh = ['discussion-hrp','discussion-rp','conversation-direction','conversation-hrp','conversation-rp','parlote-hrp','parlote-rp'].some(n => cleanCh(message.channel.name).includes(cleanCh(n)));
-  if (isDiscussionCh) {
-    // Mots clés qui déclenchent seuls
-    const motsExacts  = ['booker','rdv','rendez-vous','rendez vous','rendezvous','réunion','reunion','on se retrouve','meeting','on se voit','planifier'];
-    // Mots clés qui nécessitent un contexte RDV (trop génériques seuls)
-    const motsContext = ['demain','ce soir','session'];
-    const motsCombines = ['rdv demain','rdv ce soir','rendez-vous demain','rendez-vous ce soir','session demain','réunion demain','reunion demain','meeting demain'];
+  // ── Détection RDV — tous les salons texte sauf les salons système ──
+  const salonsSystème = ['logs','annonces','règlement','reglement','patch-note','patch','recrutement','dossier','backgrounds','fiches-personnages','journal-de-bord','commandes-slash','surnom-pseudo','plans','planning','coffre','agenda','informateurs','affaires','absences','histoire','hiérarchie','hierarchie','grade'];
+  const estSalonSystème = salonsSystème.some(n => cleanCh(message.channel.name).includes(cleanCh(n)));
+  const estSalonTexte   = message.channel.isTextBased?.() && !message.channel.isVoiceBased?.();
 
-    const contenu = message.content.toLowerCase();
-    const matchExact   = motsExacts.some(m => contenu.includes(m));
-    const matchContext = motsCombines.some(m => contenu.includes(m));
+  if (estSalonTexte && !estSalonSystème) {
+    const contenu = message.content.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
-    if (matchExact || matchContext) {
-      // Anti-doublon : pas de réponse si le bot a déjà répondu à ce membre dans ce salon dans les 2 dernières minutes
-      const db = loadDB();
-      if (!db._rdvCooldown) db._rdvCooldown = {};
-      const cooldownKey = `${message.channel.id}_${message.author.id}`;
-      const lastReply   = db._rdvCooldown[cooldownKey] || 0;
-      if (Date.now() - lastReply < 2 * 60 * 1000) return; // Cooldown 2 min
+    // Toutes les façons de dire rendez-vous
+    const motsRdv = [
+      // Formes directes
+      'rdv', 'rendez-vous', 'rendez vous', 'rendezvous', 'randez-vous', 'randez vous',
+      // Booker / fixer
+      'booker', 'booké', 'booke', 'on se capte', 'on se catch', 'on se croise',
+      'on se retrouve', 'on se voit', 'on se pose', 'rejoins-moi', 'rejoins moi',
+      'passe chez', 'fixer un truc', 'fixer un rdv', 'fixer ca', 'fixer ça',
+      // Avec préposition (rdv à, rdv au, rdv chez)
+      'rdv a ', 'rdv au ', 'rdv chez ', 'rdv ce ', 'rdv demain',
+      'rendez-vous a ', 'rendez-vous au ', 'rendez-vous chez ',
+      'rendez vous a ', 'rendez vous au ', 'rendez vous chez ',
+      // Heure en chiffres après rdv
+      'rdv 0h','rdv 1h','rdv 2h','rdv 3h','rdv 4h','rdv 5h','rdv 6h','rdv 7h','rdv 8h','rdv 9h',
+      'rdv 10h','rdv 11h','rdv 12h','rdv 13h','rdv 14h','rdv 15h','rdv 16h','rdv 17h','rdv 18h',
+      'rdv 19h','rdv 20h','rdv 21h','rdv 22h','rdv 23h',
+      // Heure en lettres
+      'rdv ce soir', 'rdv demain soir', 'rdv ce matin', 'rdv demain matin',
+      'retrouve-toi', 'retrouve toi', 'retrouvons-nous', 'retrouvons nous',
+      // Style RP
+      'on se capte a', 'on se voit a', 'rejoins moi a', 'viens a ',
+    ];
 
-      db._rdvCooldown[cooldownKey] = Date.now();
-      // Nettoyer les vieilles entrées
-      for (const k of Object.keys(db._rdvCooldown)) {
-        if (Date.now() - db._rdvCooldown[k] > 10 * 60 * 1000) delete db._rdvCooldown[k];
-      }
-      saveDB(db);
+    // Regex pour détecter heure après rdv/rendez-vous (ex: "rdv armadillo 21h", "rdv a valentine")
+    const rdvAvecContexte = /(rdv|rendez.?vous|randez.?vous).{0,30}(\d{1,2}h\d{0,2}|armadillo|valentine|paleto|sandy|grapeseed|chumash|vinewood|rockford|downtown|davis|strawberry|la mesa|bien?la|mission row|burton|morningwood)/i;
 
+    const contenuOriginal = message.content;
+    const matchMot   = motsRdv.some(m => contenu.includes(m));
+    const matchRegex = rdvAvecContexte.test(contenuOriginal);
+
+    if (matchMot || matchRegex) {
       await message.reply({
         content: `📅 <@${message.author.id}> Tu veux créer un RDV ?`,
         components: [new ActionRowBuilder().addComponents(
