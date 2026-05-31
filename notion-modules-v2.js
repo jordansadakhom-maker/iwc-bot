@@ -360,16 +360,27 @@ async function handleDashboard(interaction) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 5. FICHES PERSONNAGES — Embed propre + Synchro Notion
+// 5. FICHES PERSONNAGES — Embed + Thread Discord + Synchro Notion
 // ═══════════════════════════════════════════════════════════════
-// Appelé dans messageCreate quand message dans #fiches-personnages
-// Format libre : NOM COMPLET : ..., ÂGE : ..., etc.
+//
+// Flux complet :
+//   1. Parse le message (format libre)
+//   2. Réagit ✅
+//   3. Crée un embed propre en réponse
+//   4. Crée (ou retrouve) un THREAD dédié au personnage
+//   5. Poste l'embed complet dans le thread
+//   6. Synchronise dans Notion (Fiches_personnages + Registre Membres)
+//
+// Variables .env nécessaires :
+//   NOTION_FICHES_DB   — ID base Notion "Fiches_personnages"
+//   NOTION_MEMBRES_DB  — ID base Notion "Registre des Membres" (optionnel, pour le lien)
 
 async function handleFichePersonnage(message) {
   if (message.author.bot || !message.guild) return;
 
   const lines = message.content.split('\n');
 
+  // ── Parse champs clé:valeur ──
   const get = (...keys) => {
     for (const key of keys) {
       const line = lines.find(l => l.toUpperCase().includes(key.toUpperCase()) && l.includes(':'));
@@ -389,7 +400,7 @@ async function handleFichePersonnage(message) {
   const profession  = get('PROFESSION', 'MÉTIER', 'METIER');
   const reputation  = get('RÉPUTATION', 'REPUTATION');
 
-  // Extraire blocs multi-lignes
+  // ── Parse blocs multi-lignes ──
   const extractBloc = (marker) => {
     const idx = lines.findIndex(l => l.replace(/[—\-\s]/g, '').toUpperCase().includes(marker.toUpperCase().replace(/\s/g, '')));
     if (idx < 0) return null;
@@ -400,96 +411,232 @@ async function handleFichePersonnage(message) {
       if (/^—{2,}/.test(l) || /^={2,}/.test(l)) break;
       bloc.push(l);
     }
-    return bloc.length ? bloc.join('\n').slice(0, 500) : null;
+    return bloc.length ? bloc.join('\n').slice(0, 1000) : null;
   };
 
   const histoire     = extractBloc('HISTOIRE');
   const personnalite = extractBloc('PERSONNALITÉ');
   const competences  = extractBloc('COMPÉTENCES');
   const faiblesses   = extractBloc('FAIBLESSES');
+  const liens        = extractBloc('LIENS');
   const objectif     = extractBloc('OBJECTIF');
 
   const citation = lines.find(l => /^[""]/.test(l.trim()) || /^\*"/.test(l.trim()));
 
+  // ── Couleur selon pôle ──
   const db      = loadDB();
   const membre  = db.members[message.author.id];
-  const isIlleg = membre?.pole === 'illegal';
+  const pole    = membre?.pole || _getPole(message.member);
+  const isIlleg = pole === 'illegal';
   const color   = isIlleg ? 0x8B1A1A : 0x3B82F6;
+  const nomPerso = nom !== '—' ? nom : message.author.username;
 
   await message.react('✅').catch(() => {});
 
-  const embed = new EmbedBuilder()
+  // ── Build embed compact (réponse dans le salon) ──
+  const embedCompact = new EmbedBuilder()
     .setColor(color)
-    .setTitle(`👤 ${nom !== '—' ? nom : message.author.username}`)
-    .setThumbnail(message.author.displayAvatarURL({ size: 128 }));
+    .setAuthor({ name: isIlleg ? '🔒 La Confrérie — Fiche Personnage' : '⚖️ Iron Wolf Company — Fiche Personnage', iconURL: message.guild.iconURL() || undefined })
+    .setTitle(`👤 ${nomPerso}`)
+    .setThumbnail(message.author.displayAvatarURL({ size: 256 }));
 
-  if (citation) embed.setDescription(`*${citation.replace(/^[\*""\s]+|[\*""\s]+$/g, '')}*`);
+  if (citation) embedCompact.setDescription(`> *${citation.replace(/^[\*""\s]+|[\*""\s]+$/g, '')}*`);
 
-  embed.addFields(
-    { name: '🎭 Identité', value: [`**Surnom :** ${surnom}`, `**Âge :** ${age}`, `**Nationalité :** ${nationalite}`, `**Né(e) à :** ${naissance}`].join('\n'), inline: true },
-    { name: '🔍 Physique', value: [`**Taille :** ${taille}`, `**Yeux/Cheveux :** ${yeux}`, `**Signes :** ${signes}`].join('\n'), inline: true },
+  embedCompact.addFields(
+    { name: '🎭 Identité',  value: [`**Surnom :** ${surnom}`, `**Âge :** ${age}`, `**Nationalité :** ${nationalite}`, `**Né(e) à :** ${naissance}`].join('\n'), inline: true },
+    { name: '🔍 Physique',  value: [`**Taille :** ${taille}`, `**Yeux / Cheveux :** ${yeux}`, `**Signes :** ${signes}`].join('\n'), inline: true },
   );
+  if (profession !== '—') embedCompact.addFields({ name: '💼 Profession',  value: profession, inline: false });
+  if (reputation !== '—') embedCompact.addFields({ name: '⭐ Réputation',  value: reputation, inline: false });
+  if (histoire)            embedCompact.addFields({ name: '📖 Histoire (extrait)', value: histoire.slice(0, 300) + (histoire.length > 300 ? '...' : ''), inline: false });
 
-  if (profession  !== '—') embed.addFields({ name: '💼 Profession',    value: profession,             inline: false });
-  if (reputation  !== '—') embed.addFields({ name: '⭐ Réputation',    value: reputation,             inline: false });
-  if (histoire)             embed.addFields({ name: '📖 Histoire',      value: histoire.slice(0, 500), inline: false });
-  if (personnalite)         embed.addFields({ name: '🧠 Personnalité',  value: personnalite.slice(0, 300), inline: false });
-  if (competences)          embed.addFields({ name: '⚔️ Compétences',   value: competences.slice(0, 300), inline: true });
-  if (faiblesses)           embed.addFields({ name: '💔 Faiblesses',    value: faiblesses.slice(0, 300),  inline: true });
-  if (objectif)             embed.addFields({ name: '🎯 Objectif',      value: objectif.slice(0, 200),    inline: false });
+  embedCompact
+    .addFields(
+      { name: '👤 Joueur', value: `<@${message.author.id}>`, inline: true },
+      { name: '📂 Pôle',   value: isIlleg ? '🔒 Illégal' : '⚖️ Légal', inline: true },
+    )
+    .setFooter({ text: `IWC • Fiche personnage • ${new Date().toLocaleDateString('fr-FR')}` })
+    .setTimestamp();
 
-  embed.addFields({ name: '👤 Joueur Discord', value: `<@${message.author.id}>`, inline: true });
-  embed.setFooter({ text: `IWC • Fiche personnage • ${new Date().toLocaleDateString('fr-FR')}` }).setTimestamp();
+  // ── Réponse dans le salon ──
+  const reponse = await message.reply({ embeds: [embedCompact] }).catch(() => null);
 
-  await message.reply({ embeds: [embed] }).catch(() => {});
+  // ── Créer ou retrouver le thread du personnage ──
+  let thread = null;
+  try {
+    // Chercher un thread existant avec le nom du perso
+    const threads = await message.channel.threads.fetchArchived().catch(() => null);
+    const activeT = await message.channel.threads.fetchActive().catch(() => null);
+    const allT = [...(activeT?.threads?.values() || []), ...(threads?.threads?.values() || [])];
+    thread = allT.find(t => t.name.toLowerCase().includes(nomPerso.toLowerCase()));
 
-  // Synchro Notion en arrière-plan
+    if (!thread) {
+      thread = await message.startThread({
+        name: `📋 ${nomPerso}`,
+        autoArchiveDuration: 10080, // 7 jours
+        reason: `Fiche personnage — ${nomPerso}`,
+      });
+    } else {
+      // Réouvrir si archivé
+      if (thread.archived) await thread.setArchived(false).catch(() => {});
+    }
+  } catch (e) { console.log('❌ Thread fiche error:', e.message); }
+
+  // ── Build embed complet pour le thread ──
+  if (thread) {
+    const embedFull = new EmbedBuilder()
+      .setColor(color)
+      .setAuthor({ name: isIlleg ? '🔒 La Confrérie — Fiche Officielle' : '⚖️ Iron Wolf Company — Fiche Officielle', iconURL: message.guild.iconURL() || undefined })
+      .setTitle(`👤 ${nomPerso}`)
+      .setThumbnail(message.author.displayAvatarURL({ size: 256 }));
+
+    if (citation) embedFull.setDescription(`> *${citation.replace(/^[\*""\s]+|[\*""\s]+$/g, '')}*\n\u200b`);
+
+    embedFull.addFields(
+      { name: '🎭 Identité',  value: [`**Nom complet :** ${nom}`, `**Surnom(s) :** ${surnom}`, `**Âge :** ${age}`, `**Nationalité :** ${nationalite}`, `**Né(e) à :** ${naissance}`].join('\n'), inline: true },
+      { name: '🔍 Physique',  value: [`**Taille :** ${taille}`, `**Yeux / Cheveux :** ${yeux}`, `**Signes :** ${signes}`].join('\n'), inline: true },
+    );
+    if (profession !== '—') embedFull.addFields({ name: '💼 Profession',    value: profession,                       inline: false });
+    if (reputation !== '—') embedFull.addFields({ name: '⭐ Réputation',    value: reputation,                       inline: false });
+    if (histoire)            embedFull.addFields({ name: '📖 Histoire',      value: histoire.slice(0, 1000),          inline: false });
+    if (personnalite)        embedFull.addFields({ name: '🧠 Personnalité',  value: personnalite.slice(0, 500),        inline: false });
+    if (competences)         embedFull.addFields({ name: '⚔️ Compétences',   value: competences.slice(0, 500),         inline: true  });
+    if (faiblesses)          embedFull.addFields({ name: '💔 Faiblesses',    value: faiblesses.slice(0, 500),          inline: true  });
+    if (liens)               embedFull.addFields({ name: '🔗 Liens importants', value: liens.slice(0, 500),           inline: false });
+    if (objectif)            embedFull.addFields({ name: '🎯 Objectif',      value: objectif.slice(0, 300),            inline: false });
+
+    embedFull.addFields(
+      { name: '\u200b', value: '\u200b', inline: false },
+      { name: '👤 Joueur Discord',   value: `<@${message.author.id}>`,                                                          inline: true },
+      { name: '📂 Pôle',             value: isIlleg ? '🔒 La Confrérie' : '⚖️ Iron Wolf Company',                               inline: true },
+      { name: '📅 Créée le',         value: new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }), inline: true },
+    );
+    embedFull
+      .setFooter({ text: `IWC • Fiche complète • Ce thread est dédié aux évolutions du personnage` })
+      .setTimestamp();
+
+    await thread.send({
+      content: `📋 **Fiche officielle de ${nomPerso}** — mise à jour automatiquement à chaque modification.`,
+      embeds: [embedFull],
+    }).catch(() => {});
+
+    await thread.send({
+      content: [
+        `## 📝 Historique des évolutions`,
+        `*Ce thread enregistre toutes les mises à jour de la fiche de **${nomPerso}**.*`,
+        `*Pour mettre à jour ta fiche, reposte-la dans <#${message.channel.id}>.*`,
+        '```',
+        `📅 ${new Date().toLocaleDateString('fr-FR')} — Fiche créée / mise à jour par <@${message.author.id}>`,
+        '```',
+      ].join('\n'),
+    }).catch(() => {});
+  }
+
+  // ── Synchro Notion ──
   _syncFicheNotion(message.author.id, {
-    nom: nom !== '—' ? nom : message.author.username,
-    surnom, age, naissance, nationalite, taille, yeux, signes, profession, reputation,
-    histoire: histoire || '—', discordId: message.author.id, discordUsername: message.author.username,
+    nom: nomPerso, surnom, age, naissance, nationalite, taille, yeux, signes,
+    profession, reputation,
+    histoire:     histoire     || '—',
+    personnalite: personnalite || '—',
+    competences:  competences  || '—',
+    faiblesses:   faiblesses   || '—',
+    objectif:     objectif     || '—',
+    citation:     citation     ? citation.replace(/^[\*""\s]+|[\*""\s]+$/g, '') : '—',
+    pole:         isIlleg ? 'Illégal' : 'Légal',
+    threadId:     thread?.id   || '—',
+    discordId:    message.author.id,
+    discordUsername: message.author.username,
   }).catch(() => {});
 }
 
 async function _syncFicheNotion(discordId, data) {
-  if (!process.env.NOTION_TOKEN || !process.env.NOTION_MEMBRES_DB) return;
-  try {
-    const DB = process.env.NOTION_MEMBRES_DB;
-    const search = await fetch(`https://api.notion.com/v1/databases/${DB}/query`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filter: { property: 'Discord ID', rich_text: { equals: discordId } }, page_size: 1 }),
-    });
-    const { results } = await search.json();
-    const existing = results?.[0];
+  if (!process.env.NOTION_TOKEN) return;
 
-    const props = {
-      'Nom':               { title: [{ text: { content: data.nom } }] },
-      'Personnage':        { rich_text: [{ text: { content: data.nom } }] },
-      'Profession':        { rich_text: [{ text: { content: data.profession } }] },
-      'Réputation':        { rich_text: [{ text: { content: data.reputation } }] },
-      'Histoire':          { rich_text: [{ text: { content: (data.histoire || '').slice(0, 2000) } }] },
-      'Discord ID':        { rich_text: [{ text: { content: discordId } }] },
-      'Discord Username':  { rich_text: [{ text: { content: data.discordUsername } }] },
-      'Dernière activité': { date: { start: new Date().toISOString().split('T')[0] } },
-    };
-
-    if (existing) {
-      await fetch(`https://api.notion.com/v1/pages/${existing.id}`, {
-        method: 'PATCH',
-        headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ properties: props }),
-      });
-      console.log(`✅ Fiche Notion MàJ : ${data.nom}`);
-    } else {
-      await fetch('https://api.notion.com/v1/pages', {
+  // ── 1. Base Fiches_personnages ──
+  const FICHES_DB = process.env.NOTION_FICHES_DB;
+  if (FICHES_DB) {
+    try {
+      // Chercher fiche existante par Discord ID
+      const search = await fetch(`https://api.notion.com/v1/databases/${FICHES_DB}/query`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parent: { database_id: DB }, properties: { ...props, "Date d'entrée": { date: { start: new Date().toISOString().split('T')[0] } }, 'Statut': { select: { name: '✅ Actif' } } } }),
+        body: JSON.stringify({ filter: { property: 'Discord ID', rich_text: { equals: discordId } }, page_size: 1 }),
       });
-      console.log(`✅ Fiche Notion créée : ${data.nom}`);
-    }
-  } catch (e) { console.log('❌ Sync fiche Notion error:', e.message); }
+      const { results } = await search.json();
+      const existing = results?.[0];
+
+      const ficheProps = {
+        'Nom du personnage': { title:     [{ text: { content: data.nom } }] },
+        'Surnom':            { rich_text: [{ text: { content: data.surnom } }] },
+        'Âge':               { rich_text: [{ text: { content: data.age } }] },
+        'Nationalité':       { rich_text: [{ text: { content: data.nationalite } }] },
+        'Lieu de naissance': { rich_text: [{ text: { content: data.naissance } }] },
+        'Taille / Corpulence':{ rich_text: [{ text: { content: data.taille } }] },
+        'Yeux / Cheveux':    { rich_text: [{ text: { content: data.yeux } }] },
+        'Signes particuliers':{ rich_text: [{ text: { content: data.signes } }] },
+        'Profession':        { rich_text: [{ text: { content: data.profession } }] },
+        'Réputation':        { rich_text: [{ text: { content: data.reputation } }] },
+        'Histoire':          { rich_text: [{ text: { content: (data.histoire || '').slice(0, 2000) } }] },
+        'Personnalité':      { rich_text: [{ text: { content: (data.personnalite || '').slice(0, 2000) } }] },
+        'Compétences':       { rich_text: [{ text: { content: (data.competences || '').slice(0, 2000) } }] },
+        'Faiblesses':        { rich_text: [{ text: { content: (data.faiblesses || '').slice(0, 2000) } }] },
+        'Objectif':          { rich_text: [{ text: { content: (data.objectif || '').slice(0, 2000) } }] },
+        'Citation':          { rich_text: [{ text: { content: data.citation || '—' } }] },
+        'Pôle':              { select:    { name: data.pole === 'Illégal' ? '🔒 Illégal' : '⚖️ Légal' } },
+        'Discord ID':        { rich_text: [{ text: { content: discordId } }] },
+        'Discord Username':  { rich_text: [{ text: { content: data.discordUsername } }] },
+        'Thread Discord':    { rich_text: [{ text: { content: data.threadId !== '—' ? `https://discord.com/channels/${data.threadId}` : '—' } }] },
+        'Dernière MàJ':      { date:      { start: new Date().toISOString().split('T')[0] } },
+      };
+
+      if (existing) {
+        await fetch(`https://api.notion.com/v1/pages/${existing.id}`, {
+          method: 'PATCH',
+          headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ properties: ficheProps }),
+        });
+        console.log(`✅ Fiche Notion MàJ : ${data.nom} (Fiches_personnages)`);
+      } else {
+        await fetch('https://api.notion.com/v1/pages', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            parent: { database_id: FICHES_DB },
+            properties: { ...ficheProps, 'Date de création': { date: { start: new Date().toISOString().split('T')[0] } } },
+          }),
+        });
+        console.log(`✅ Fiche Notion créée : ${data.nom} (Fiches_personnages)`);
+      }
+    } catch (e) { console.log('❌ Sync Fiches_personnages error:', e.message); }
+  } else {
+    console.log('⚠️ NOTION_FICHES_DB non configuré — fiche non archivée dans Fiches_personnages');
+  }
+
+  // ── 2. Registre des Membres (mise à jour légère — nom perso + dernière activité) ──
+  const MEMBRES_DB = process.env.NOTION_MEMBRES_DB;
+  if (MEMBRES_DB) {
+    try {
+      const search = await fetch(`https://api.notion.com/v1/databases/${MEMBRES_DB}/query`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filter: { property: 'Discord ID', rich_text: { equals: discordId } }, page_size: 1 }),
+      });
+      const { results } = await search.json();
+      const existing = results?.[0];
+      if (existing) {
+        await fetch(`https://api.notion.com/v1/pages/${existing.id}`, {
+          method: 'PATCH',
+          headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ properties: {
+            'Personnage':        { rich_text: [{ text: { content: data.nom } }] },
+            'Profession':        { rich_text: [{ text: { content: data.profession } }] },
+            'Dernière activité': { date:      { start: new Date().toISOString().split('T')[0] } },
+          } }),
+        });
+        console.log(`✅ Registre Membres MàJ : ${data.nom}`);
+      }
+    } catch (e) { console.log('❌ Sync Registre Membres error:', e.message); }
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
