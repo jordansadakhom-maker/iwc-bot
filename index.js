@@ -228,7 +228,7 @@ async function syncRegistreNotion(guild) {
 }
 
 async function updateDashboard(guild) {
-  const db = loadDB(); const ch = getCh(guild, 'dashboard'); if (!ch) return;
+  const db = loadDB(); const ch = getChById(guild, 'DASHBOARD', 'dashboard'); if (!ch) return;
   const members = Object.values(db.members); const contrats = db.contrats || [];
   const alertes = members.filter(m => m.status !== 'parti' && daysSince(m.lastActivity) > 7);
   const nextSess = (db.sessions || []).filter(s => s.status === 'planifiee' && new Date(s.date) > new Date()).sort((a, b) => new Date(a.date) - new Date(b.date))[0];
@@ -296,7 +296,7 @@ async function checkSessionReminders(guild) {
   for (const [id, r] of Object.entries(db.sessionReminders)) {
     if ((r.remindAt + 3600000 + 10800000) < now) { delete db.sessionReminders[id]; changed = true; continue; }
     if (!r.sent && r.remindAt <= now && now < r.remindAt + 5400000) {
-      const ch = guild.channels.cache.get(r.channelId) || getCh(guild, 'planning');
+      const ch = guild.channels.cache.get(r.channelId) || getChById(guild, 'PLANNING', 'planning');
       if (ch) await ch.send({ content: getMention(guild) || undefined, embeds: [new EmbedBuilder().setColor(0xFF6B35).setTitle(`⏰ RAPPEL — ${r.name} dans 1 heure`).setDescription(`📍 ${r.lieu || '—'} · 🕐 ${r.heure || '—'}`).setFooter({ text: 'IWC • Rappel automatique' })] }).catch(() => {});
       r.sent = true; changed = true;
     }
@@ -425,7 +425,7 @@ async function handleSlashCommand(interaction) {
       : 'Indéterminé — utilise /retour quand tu reviendras';
 
     await interaction.reply({
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
       embeds: [new EmbedBuilder()
         .setColor(0xFFA500)
         .setTitle('🟡 Absence enregistrée')
@@ -440,7 +440,7 @@ async function handleSlashCommand(interaction) {
     });
 
     // Post dans #absences
-    const absCh = getCh(guild, 'absences');
+    const absCh = getChById(guild, 'ABSENCES', 'absences');
     if (absCh) await absCh.send({ embeds: [new EmbedBuilder()
       .setColor(0xFFA500)
       .setAuthor({ name: `${interaction.member?.displayName || interaction.user.username} — Absence`, iconURL: interaction.user.displayAvatarURL() })
@@ -508,7 +508,7 @@ async function cleanBotPinnedMessages(guild, ...channelNames) {
     try {
       const ch = getCh(guild, name); if (!ch) continue;
       // 1. Dépingler tous les messages épinglés du bot
-      const pinned = await ch.messages.fetchPinned().catch(() => null);
+      const pinned = await ch.messages.fetchPins().catch(() => null);
       if (pinned) { for (const [, msg] of pinned) { if (msg.author.id !== botId) continue; await msg.unpin().catch(() => {}); await msg.delete().catch(() => {}); console.log(`🧹 Pin supprimé #${ch.name}`); } }
       // 2. Supprimer notifications "X a épinglé" (type 6) + doublons embeds bot
       const msgs = await ch.messages.fetch({ limit: 50 }).catch(() => null);
@@ -558,7 +558,7 @@ async function autoSetup(guild) {
   await setupCommandesSlash(guild);
   await setupPanelDirection(guild);
 
-  const reglCh = getCh(guild, 'reglement', 'règlement');
+  const reglCh = getChById(guild, 'REGLEMENT', 'reglement', 'règlement');
   if (reglCh) {
     const msgs = await reglCh.messages.fetch({ limit: 20 });
     const existing = msgs.find(m => m.author.id === client.user.id && m.content.includes('VALIDATION'));
@@ -591,7 +591,7 @@ async function autoSetup(guild) {
     }
   }
 
-  const surnomCh = getCh(guild, 'surnom-pseudo', 'surnom');
+  const surnomCh = getChById(guild, 'SURNOM_PSEUDO', 'surnom-pseudo', 'surnom');
   if (surnomCh) { const msgs = await surnomCh.messages.fetch({ limit: 10 }); if (!msgs.find(m => m.author.id === client.user.id)) await surnomCh.send('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🎭 SURNOM / PSEUDO — IDENTITÉ IC\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```\nRenseignez votre identité **In Character** pour faciliter les interactions RP.\n\n**Format :**\n```\nPSEUDO DISCORD : \nNOM IC : \nSURNOM IC : \nAPPARTENANCE : Légal / Illégal\n```\n*Un seul message par membre. Mettez à jour si votre personnage change.*'); }
 
   // Coffre illégal — getChExact trouve 🔒・coffre-illegal par nettoyage des emojis
@@ -733,7 +733,7 @@ client.on('guildMemberAdd', async member => {
   if (visiteurRole) await member.roles.add(visiteurRole).catch(() => {});
   db.members[member.id] = { id: member.id, name: member.user.username, status: 'visiteur', rang: 'Visiteur', joinedAt: new Date().toISOString(), lastActivity: new Date().toISOString() };
   saveDB(db);
-  const arriveesCh = getCh(guild, 'arrivees', 'arrivée');
+  const arriveesCh = getChById(guild, 'ARRIVEES', 'arrivees', 'arrivée');
   if (arriveesCh) await arriveesCh.send({ embeds: [new EmbedBuilder().setColor(0x8B5A2A).setTitle('👁️ Nouveau visiteur').setDescription(`**${member.user.username}** a rejoint le serveur.\nDirigé vers **#règlement** pour validation.`).addFields({ name: 'Compte créé le', value: fmtShort(member.user.createdAt), inline: true }, { name: 'Âge du compte', value: `${daysSince(member.user.createdAt)} jours`, inline: true }).setThumbnail(member.user.displayAvatarURL()).setFooter({ text: 'IWC • Automatique' })] });
   await sendLog(guild, 'ARRIVEE', { userId: member.id, username: member.user.username, accountAge: daysSince(member.user.createdAt) });
   await notionExtra.alerteCompteSuspect?.(guild, member);
@@ -812,7 +812,7 @@ client.on('messageCreate', async message => {
       db.members[message.author.id].status = 'actif';
       _syncMembreNotion(message.author.id, { status: 'actif', lastActivity: new Date().toISOString() }).catch(() => {});
       // Notification de retour dans #absences
-      const absCh2 = getCh(guild, 'absences');
+      const absCh2 = getChById(guild, 'ABSENCES', 'absences');
       if (absCh2 && wasAbsent) {
         const mData = db.members[message.author.id];
         absCh2.send({ embeds: [new EmbedBuilder()
@@ -834,7 +834,7 @@ client.on('messageCreate', async message => {
     saveDB(db);
   }
 
-  const absCh = getCh(guild, 'absences');
+  const absCh = getChById(guild, 'ABSENCES', 'absences');
   if (absCh && message.channel.id === absCh.id) {
     if (db.members[message.author.id]) { db.members[message.author.id].status = 'absent'; saveDB(db); await message.react('✅'); await notionExtra.majStatutActiviteNotion?.(message.author.id, 'absent'); }
     await notionV3.syncAbsenceNotion?.(message.author.id, 'absent').catch(() => {});
@@ -842,18 +842,19 @@ client.on('messageCreate', async message => {
     await sendLog(guild, 'ABSENCE', { userId: message.author.id, username: message.author.username }); return;
   }
 
-  const infosCh = getCh(guild, 'informateurs');
+  const infosCh = getChById(guild, 'INFORMATEURS', 'informateurs');
   if (infosCh && message.channel.id === infosCh.id) { await notionV3.handleInformateurMessage?.(message); return; }
 
   // ── #fiches-personnages — embed propre + synchro Notion ──
-  const ficheCh = getCh(guild, 'fiches-personnages', 'fiches-perso', 'fiches');
+  const ficheCh = getChById(guild, 'FICHES_PERSONNAGES', 'fiches-personnages', 'fiches-perso', 'fiches');
   if (ficheCh && message.channel.id === ficheCh.id) { await notionModules.handleFichePersonnage?.(message); return; }
 
   // ── Détection RDV dans #discussion-hrp et #discussion-rp ──
   const cleanCh = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const isDiscussionCh = ['discussion-hrp','discussion-rp'].some(n => cleanCh(message.channel.name).includes(cleanCh(n)));
+  // Détecter tous les salons de discussion (hrp, rp, direction)
+  const isDiscussionCh = ['discussion-hrp','discussion-rp','conversation-direction','conversation-hrp','conversation-rp','parlote-hrp','parlote-rp'].some(n => cleanCh(message.channel.name).includes(cleanCh(n)));
   if (isDiscussionCh) {
-    const mots = ['booker','rdv','rendez-vous','rendez vous','réunion','reunion','session','ce soir','demain','planifier','organiser','on se retrouve'];
+    const mots = ['booker','rdv','rendez-vous','rendez vous','rendezvous','réunion','reunion','session','ce soir','demain','planifier','organiser','on se retrouve','meeting','on se voit'];
     const contenu = message.content.toLowerCase();
     if (mots.some(m => contenu.includes(m))) {
       await message.reply({
@@ -868,10 +869,10 @@ client.on('messageCreate', async message => {
 
   // #surnom-pseudo — géré via bouton + modal (btn_surnom_ouvrir)
 
-  const suggCh = getCh(guild, 'suggestion-idee', 'suggestions', 'suggestion');
+  const suggCh = getChById(guild, 'SUGGESTION_IDEE', 'suggestion-idee', 'suggestions', 'suggestion');
   if (suggCh && message.channel.id === suggCh.id) { await message.react('✅').catch(() => {}); await message.react('❌').catch(() => {}); return; }
 
-  const clipCh = getCh(guild, 'clips-temps-fort', 'clips-highlights', 'clips');
+  const clipCh = getChById(guild, 'CLIPS_TEMPS_FORT', 'clips-temps-fort', 'clips-highlights', 'clips');
   if (clipCh && message.channel.id === clipCh.id && message.attachments.size > 0) { await message.react('🔥').catch(() => {}); await message.react('❤️').catch(() => {}); return; }
 
   // ── 🔒・coffre-illegal — parsing format texte, solde illégal uniquement ──
@@ -911,7 +912,7 @@ client.on('messageCreate', async message => {
     return;
   }
 
-  const opsCh = getCh(guild, 'operations-en-cours', 'operations');
+  const opsCh = getChById(guild, 'OPERATIONS', 'operations-en-cours', 'operations');
   if (opsCh && message.channel.id === opsCh.id && isDirection(message.member)) {
     if (message.content.toUpperCase().includes('OPÉRATION') || message.content.toUpperCase().includes('OPERATION')) {
       const lines = message.content.split('\n'); const get = k => { const l = lines.find(l => l.toUpperCase().includes(k.toUpperCase())); return l ? l.split(':').slice(1).join(':').trim() || '—' : '—'; };
@@ -930,14 +931,14 @@ client.on('messageCreate', async message => {
   }
 
   // ── #planning — image → Notion uniquement (texte seul ignoré) ──
-  const planCh = getCh(guild, 'planning');
+  const planCh = getChById(guild, 'PLANNING', 'planning');
   if (planCh && message.channel.id === planCh.id) {
     if (message.attachments.size > 0) await notionV3.handlePlanningScreenshot?.(message);
     return;
   }
 
   // ── 🗺️・plans — archive photos de lieux tactiques dans Notion ──
-  const plansTactCh = getCh(guild, 'plans');
+  const plansTactCh = getChById(guild, 'PLANS', 'plans');
   if (plansTactCh && message.channel.id === plansTactCh.id) {
     await notionV3.handlePlansMessage?.(message);
     return;
@@ -967,21 +968,22 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isButton()) {
     if (interaction.customId === 'btn_grade_panel')            return notionV3.handleGradePanelButton?.(interaction);
     if (interaction.customId === 'btn_agenda_nouveau')         return notionV3.handleAgendaNouveauButton?.(interaction);
-    if (interaction.customId === 'btn_hierarchie_refresh')     { await interaction.deferReply({ ephemeral: true }); await notionV3.updateHierarchieEmbed?.(interaction.guild); return interaction.editReply({ content: '✅ Hiérarchie mise à jour.' }); }
+    if (interaction.customId === 'btn_hierarchie_refresh')     { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); await notionV3.updateHierarchieEmbed?.(interaction.guild); return interaction.editReply({ content: '✅ Hiérarchie mise à jour.' }); }
     if (interaction.customId === 'btn_affaire_nouvelle')        return notionV3.handleAffaireNouvelleButton?.(interaction);
     if (interaction.customId === 'btn_affaires_resume')         return notionV3.handleAffairesResumeButton?.(interaction);
     if (interaction.customId === 'btn_informateur_rapport')     return notionV3.handleInformateurRapportButton?.(interaction);
     if (interaction.customId === 'btn_informateur_historique')  return notionV3.handleInformateurHistorique?.(interaction);
     if (interaction.customId.startsWith('info_confirmer_'))      return notionV3.handleInformateurConfirmer?.(interaction);
     if (interaction.customId === 'btn_surnom_ouvrir')           return _ouvrirModalSurnom(interaction);
-    if (interaction.customId === 'dir_btn_candidatures')       return interaction.reply({ ephemeral: true, content: _buildCandidaturesResume(db) });
-    if (interaction.customId === 'dir_btn_ops')                return notionV5.handleStatsAvancees?.(interaction) || interaction.reply({ ephemeral: true, content: '`/stats` pour plus de détails.' });
+    if (interaction.customId === 'dir_btn_candidatures')       return interaction.reply({ flags: MessageFlags.Ephemeral, content: _buildCandidaturesResume(db) });
+    if (interaction.customId === 'dir_btn_ops')                return notionV5.handleStatsAvancees?.(interaction) || interaction.reply({ flags: MessageFlags.Ephemeral, content: '`/stats` pour plus de détails.' });
     if (interaction.customId === 'dir_btn_bilan')              return notionModules.handleBilanCommand?.(interaction);
     if (interaction.customId === 'dir_btn_registre')           return _handleRegistre(interaction);
-    if (interaction.customId === 'dir_btn_refresh')            { await updateDirectionPanel(interaction.guild).catch(() => {}); return interaction.reply({ ephemeral: true, content: '✅ Panel mis à jour.' }); }
+    if (interaction.customId === 'dir_btn_refresh')            { await updateDirectionPanel(interaction.guild).catch(() => {}); return interaction.reply({ flags: MessageFlags.Ephemeral, content: '✅ Panel mis à jour.' }); }
     if (interaction.customId.startsWith('purge_confirm_'))      return _executerPurge(interaction);
     if (interaction.customId === 'purge_annuler')               return interaction.update({ content: '↩️ Suppression annulée.', embeds: [], components: [] });
     if (interaction.customId.startsWith('btn_rdv_creer_'))     return _ouvrirMenuRdv(interaction);
+    if (interaction.customId.startsWith('rdv_type_select_'))    return _handleRdvTypeSelect(interaction);
     if (interaction.customId.startsWith('btn_grade_maj_'))      return notionV3.handleGradeMajButton?.(interaction);
     if (interaction.customId.startsWith('info_infirmer_'))       return notionV3.handleInformateurInfirmer?.(interaction);
     if (interaction.customId.startsWith('affaire_oui_'))        return notionV3.handleAffaireVote?.(interaction, 'oui');
@@ -1000,7 +1002,7 @@ client.on('interactionCreate', async interaction => {
       op.status = 'annulee'; op.updatedAt = new Date().toISOString();
       saveDB(db);
       await interaction.update({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle(`❌ Opération annulée — ${op.name}`).setDescription(`Annulée par **${interaction.user.username}**.`).setTimestamp()], components: [] });
-      const opsCh = getCh(guild, 'operations-en-cours', 'operations');
+      const opsCh = getChById(guild, 'OPERATIONS', 'operations-en-cours', 'operations');
       if (opsCh) await opsCh.send({ content: `❌ L'opération **${op.name}** a été annulée par ${interaction.user.username}.` }).catch(() => {});
       return;
     }
@@ -1134,7 +1136,7 @@ client.on('interactionCreate', async interaction => {
     if (!isLancer) {
       const op = db.operations.find(o => o.id === opId);
       if (!op) return;
-      return interaction.reply({ ephemeral: true, embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('❌ Confirmer l\'annulation').setDescription(`Vous allez annuler l'opération **${op.name}**.
+      return interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('❌ Confirmer l\'annulation').setDescription(`Vous allez annuler l'opération **${op.name}**.
 
 Cette action est **irréversible**. Les participants seront notifiés.`)], components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`op_annulee_confirm_${opId}`).setLabel('✅ Confirmer l\'annulation').setStyle(ButtonStyle.Danger), new ButtonBuilder().setCustomId('op_annulee_cancel').setLabel('↩️ Retour').setStyle(ButtonStyle.Secondary))] });
     }
@@ -1165,11 +1167,13 @@ Cette action est **irréversible**. Les participants seront notifiés.`)], compo
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     if (!db.contrats) db.contrats = [];
     const contratId = 'IWC-OF-' + Date.now().toString().slice(-5);
-    const contrat = { id: contratId, type: 'offre', clientNom: interaction.fields.getTextInputValue('client_nom'), objet: interaction.fields.getTextInputValue('objet'), remuneration: interaction.fields.getTextInputValue('remuneration'), userId: interaction.fields.getTextInputValue('user_id').trim(), dateEcheance: interaction.fields.getTextInputValue('date_echeance') || null, emetteurId: interaction.user.id, emetteurNom: interaction.user.username, status: 'en_attente', createdAt: new Date().toISOString() };
+    const emetteurICOffre2 = db.members[interaction.user.id]?.name || interaction.user.username;
+    const contrat = { id: contratId, type: 'offre', clientNom: interaction.fields.getTextInputValue('client_nom'), emetteurIC: emetteurICOffre2, objet: interaction.fields.getTextInputValue('objet'), remuneration: interaction.fields.getTextInputValue('remuneration'), userId: interaction.fields.getTextInputValue('user_id').trim(), dateEcheance: interaction.fields.getTextInputValue('date_echeance') || null, emetteurId: interaction.user.id, emetteurNom: interaction.user.username, status: 'en_attente', createdAt: new Date().toISOString() };
     db.contrats.push(contrat); saveDB(db);
     _syncContratNotion(contrat, 'en_attente').catch(() => {});
     await interaction.editReply({ content: `✅ Contrat **${contratId}** envoyé au client.` });
-    const embed = new EmbedBuilder().setColor(0x2C3E50).setTitle(`📤 CONTRAT DE PRESTATION — ${contratId}`).setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   IRON WOLF COMPANY — OFFRE DE PRESTATION\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```').addFields({ name: '🆔 Référence', value: `\`${contratId}\``, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: '📋 Objet', value: contrat.objet }, { name: '📅 Échéance', value: contrat.dateEcheance ? fmtShort(contrat.dateEcheance) : 'Aucune', inline: true }, { name: '💰 Rémunération souhaitée', value: contrat.remuneration }, { name: '📌 Statut', value: '🟡 En attente de signature', inline: true }).setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` });
+    const emetteurICOffre = db.members[interaction.user.id]?.name || interaction.user.username;
+    const embed = new EmbedBuilder().setColor(0x2C3E50).setTitle(`📤 CONTRAT DE PRESTATION — ${contratId}`).setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   IRON WOLF COMPANY — OFFRE DE PRESTATION\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```').addFields({ name: '🆔 Référence', value: `\`${contratId}\``, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: '✍️ Émis par', value: emetteurICOffre, inline: true }, { name: '📋 Objet', value: contrat.objet }, { name: '📅 Échéance', value: contrat.dateEcheance ? fmtShort(contrat.dateEcheance) : 'Aucune', inline: true }, { name: '💰 Rémunération souhaitée', value: contrat.remuneration }, { name: '📌 Statut', value: '🟡 En attente de signature', inline: true }).setFooter({ text: `Iron Wolf Company • Secrétariat officiel • ${fmtShort(new Date())}` });
     const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`signer_offre_${contratId}`).setLabel("✍️ J'accepte les termes").setStyle(ButtonStyle.Success), new ButtonBuilder().setCustomId(`refuser_offre_${contratId}`).setLabel('❌ Refuser').setStyle(ButtonStyle.Danger));
     const ch = guild.channels.cache.get(CH.CONTRATS); if (ch) await ch.send({ content: `<@${contrat.userId}> — Iron Wolf Company vous soumet un contrat.`, embeds: [embed], components: [row] });
     try { const m = await guild.members.fetch(contrat.userId).catch(() => null); if (m) await m.send({ embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📤 Contrat — IWC').setDescription(`L'IWC vous soumet le contrat **${contratId}**.\n\n**Mission :** ${contrat.objet}\n**Rémunération :** ${contrat.remuneration}\n\nRépondez dans **#contrats**.`).setFooter({ text: 'Iron Wolf Company' })] }); } catch {}
@@ -1183,11 +1187,12 @@ Cette action est **irréversible**. Les participants seront notifiés.`)], compo
     if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', flags: MessageFlags.Ephemeral }); return; }
     contrat.status = 'signe'; contrat.signedAt = new Date().toISOString(); saveDB(db);
     await notionExtra.ajouterContratNotion?.(contrat);
-    _syncContratNotion(contrat, 'signe', interaction.user.username).catch(() => {});
-    await sendLog(guild, 'CONTRAT_SIGNE', { contratId, objet: contrat.objet, signe: `${interaction.user.username} (${contrat.clientNom})` });
+    const clientIC = db.members[interaction.user.id]?.name || interaction.user.username;
+    _syncContratNotion(contrat, 'signe', clientIC).catch(() => {});
+    await sendLog(guild, 'CONTRAT_SIGNE', { contratId, objet: contrat.objet, signe: `${clientIC} (${contrat.clientNom})` });
     await notionModules.ajouterJournalIC?.(guild, { type: 'contrat', emoji: '📜', titre: `Contrat signé — ${contratId}`, description: `Client : **${contrat.clientNom}** · Mission : ${contrat.objet}`, auteur: interaction.user.username });
     await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287).spliceFields(5, 1, { name: '📌 Statut', value: `✅ Signé le ${fmtShort(new Date())} par ${interaction.user.username}`, inline: true })], components: [] });
-    await sendToThread(guild, CH.FIL_CONTRATS_SIGNE, { embeds: [new EmbedBuilder().setColor(0x57F287).setTitle(`✅ CONTRAT ACCEPTÉ — ${contratId}`).addFields({ name: '🆔 Réf', value: `\`${contratId}\``, inline: true }, { name: '📅 Signé', value: fmtShort(new Date()), inline: true }, { name: '✍️ Client', value: `${interaction.user.username} (${contrat.clientNom})`, inline: true }, { name: '📋 Mission', value: contrat.objet }, { name: '💰 Rémunération', value: contrat.remuneration }).setFooter({ text: `IWC • ${fmtShort(new Date())}` })] });
+    await sendToThread(guild, CH.FIL_CONTRATS_SIGNE, { embeds: [new EmbedBuilder().setColor(0x57F287).setTitle(`✅ CONTRAT ACCEPTÉ — ${contratId}`).setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   IRON WOLF COMPANY — CONTRAT ACCEPTÉ\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```').addFields({ name: '🆔 Réf', value: `\`${contratId}\``, inline: true }, { name: '📅 Signé le', value: fmtShort(new Date()), inline: true }, { name: '✍️ Client', value: `${contrat.clientNom || interaction.user.username}`, inline: true }, { name: '🏢 IWC représentée par', value: db.members[contrat.emetteurId]?.name || contrat.emetteurNom || '—', inline: true }, { name: '📋 Mission', value: contrat.objet }, { name: '💰 Rémunération', value: contrat.remuneration }).setFooter({ text: `Iron Wolf Company • Secrétariat officiel • ${fmtShort(new Date())}` })] });
     try { const em = await guild.members.fetch(contrat.emetteurId).catch(() => null); if (em) await em.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle(`✅ Contrat signé — ${contratId}`).setDescription(`**${contrat.clientNom}** a accepté le contrat.\n\n**Mission :** ${contrat.objet}`).setFooter({ text: 'IWC • Notification contrat' })] }); } catch {}
     interaction.user.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ Contrat signé — IWC').setDescription(`Vous avez accepté le contrat **${contratId}**.\n\n**Mission :** ${contrat.objet}\n**Rémunération :** ${contrat.remuneration}`).setFooter({ text: 'IWC • Document Officiel' })] }).catch(() => {});
     return;
@@ -1197,7 +1202,8 @@ Cette action est **irréversible**. Les participants seront notifiés.`)], compo
     const contratId = interaction.customId.replace('refuser_offre_', ''); const contrat = (db.contrats || []).find(c => c.id === contratId);
     if (!contrat || contrat.userId !== interaction.user.id || contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Action impossible.', flags: MessageFlags.Ephemeral }); return; }
     contrat.status = 'refuse'; contrat.refusedAt = new Date().toISOString(); saveDB(db);
-    _syncContratNotion(contrat, 'refuse', interaction.user.username).catch(() => {});
+    const refuseurIC = db.members[interaction.user.id]?.name || interaction.user.username;
+    _syncContratNotion(contrat, 'refuse', refuseurIC).catch(() => {});
     await sendLog(guild, 'CONTRAT_REFUSE', { contratId, objet: contrat.objet });
     await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0xED4245).spliceFields(5, 1, { name: '📌 Statut', value: `❌ Refusé le ${fmtShort(new Date())}`, inline: true })], components: [] });
     await sendToThread(guild, CH.FIL_CONTRATS_REFUSE, { embeds: [new EmbedBuilder().setColor(0xED4245).setTitle(`❌ CONTRAT REFUSÉ — ${contratId}`).addFields({ name: '🆔 Réf', value: `\`${contratId}\``, inline: true }, { name: '👤 Refusé par', value: interaction.user.username, inline: true }, { name: '📋 Mission', value: contrat.objet }).setFooter({ text: `IWC • ${fmtShort(new Date())}` })] });
@@ -1216,11 +1222,13 @@ Cette action est **irréversible**. Les participants seront notifiés.`)], compo
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     if (!db.contrats) db.contrats = [];
     const contratId = 'IWC-EM-' + Date.now().toString().slice(-5);
-    const contrat = { id: contratId, type: 'emploi', employeurNom: interaction.fields.getTextInputValue('employeur_nom'), objet: interaction.fields.getTextInputValue('objet'), remuneration: interaction.fields.getTextInputValue('remuneration'), userId: interaction.fields.getTextInputValue('user_id').trim(), dateEcheance: interaction.fields.getTextInputValue('date_echeance') || null, signataire: interaction.user.username, signataireId: interaction.user.id, status: 'en_attente', createdAt: new Date().toISOString() };
+    const signataireICEmploi2 = db.members[interaction.user.id]?.name || interaction.user.username;
+    const contrat = { id: contratId, type: 'emploi', employeurNom: interaction.fields.getTextInputValue('employeur_nom'), emetteurIC: signataireICEmploi2, objet: interaction.fields.getTextInputValue('objet'), remuneration: interaction.fields.getTextInputValue('remuneration'), userId: interaction.fields.getTextInputValue('user_id').trim(), dateEcheance: interaction.fields.getTextInputValue('date_echeance') || null, signataire: interaction.user.username, signataireId: interaction.user.id, status: 'en_attente', createdAt: new Date().toISOString() };
     db.contrats.push(contrat); saveDB(db);
     _syncContratNotion(contrat, 'en_attente').catch(() => {});
     await interaction.editReply({ content: `📋 Contrat **${contratId}** créé.` });
-    const embed = new EmbedBuilder().setColor(0x8B5A2A).setTitle(`📥 CONTRAT EMPLOYEUR — ${contratId}`).setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n  CONTRAT PROPOSÉ À IRON WOLF COMPANY\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```').addFields({ name: '🆔 Référence', value: `\`${contratId}\``, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: `🏭 Employeur — ${contrat.employeurNom}`, value: contrat.dateEcheance ? `📅 Échéance : ${fmtShort(contrat.dateEcheance)}` : '—' }, { name: '💰 Rémunération', value: contrat.remuneration }, { name: '📋 Objet', value: contrat.objet }, { name: '📌 Statut', value: '🟡 En attente de notre signature', inline: true }).setFooter({ text: `IWC • Contrat Employeur • ${fmtShort(new Date())}` });
+    const signataireICEmploi = db.members[interaction.user.id]?.name || interaction.user.username;
+    const embed = new EmbedBuilder().setColor(0x8B5A2A).setTitle(`📥 CONTRAT EMPLOYEUR — ${contratId}`).setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n  CONTRAT PROPOSÉ À IRON WOLF COMPANY\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```').addFields({ name: '🆔 Référence', value: `\`${contratId}\``, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: '✍️ Soumis par', value: signataireICEmploi, inline: true }, { name: `🏭 Employeur — ${contrat.employeurNom}`, value: contrat.dateEcheance ? `📅 Échéance : ${fmtShort(contrat.dateEcheance)}` : '—' }, { name: '💰 Rémunération', value: contrat.remuneration }, { name: '📋 Objet', value: contrat.objet }, { name: '📌 Statut', value: '🟡 En attente de notre signature', inline: true }).setFooter({ text: `Iron Wolf Company • Secrétariat officiel • ${fmtShort(new Date())}` });
     const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`signer_emploi_${contratId}`).setLabel('✍️ Signer & Accepter').setStyle(ButtonStyle.Success), new ButtonBuilder().setCustomId(`refuser_emploi_${contratId}`).setLabel('❌ Décliner').setStyle(ButtonStyle.Danger));
     const ch = guild.channels.cache.get(CH.CONTRATS); if (ch) await ch.send({ content: `${getContratMention(guild)} — 📥 Nouveau contrat employeur à examiner.`, embeds: [embed], components: [row] });
     return;
@@ -1232,11 +1240,13 @@ Cette action est **irréversible**. Les participants seront notifiés.`)], compo
     if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Seule la Direction peut signer.', flags: MessageFlags.Ephemeral }); return; }
     contrat.status = 'signe'; contrat.signedAt = new Date().toISOString(); contrat.signedBy = interaction.user.username; saveDB(db);
     await notionExtra.ajouterContratNotion?.(contrat);
-    _syncContratNotion(contrat, 'signe', interaction.user.username).catch(() => {});
-    await sendLog(guild, 'CONTRAT_SIGNE', { contratId, objet: contrat.objet, signe: `${interaction.user.username} — IWC` });
+    const signataireDirIC2 = db.members[interaction.user.id]?.name || interaction.user.username;
+    _syncContratNotion(contrat, 'signe', signataireDirIC2).catch(() => {});
+    await sendLog(guild, 'CONTRAT_SIGNE', { contratId, objet: contrat.objet, signe: `${signataireDirIC2} — IWC` });
     await notionModules.ajouterJournalIC?.(guild, { type: 'contrat', emoji: '📥', titre: `Contrat employeur signé — ${contratId}`, description: `Employeur : **${contrat.employeurNom}** · Mission : ${contrat.objet}`, auteur: interaction.user.username });
     await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287).spliceFields(5, 1, { name: '📌 Statut', value: `✅ Signé le ${fmtShort(new Date())} par ${interaction.user.username}`, inline: true })], components: [] });
-    await sendToThread(guild, CH.FIL_CONTRATS_SIGNE, { embeds: [new EmbedBuilder().setColor(0x57F287).setTitle(`✅ CONTRAT EMPLOYEUR SIGNÉ — ${contratId}`).addFields({ name: '🆔 Réf', value: `\`${contratId}\``, inline: true }, { name: '✍️ Signé par', value: interaction.user.username, inline: true }, { name: '🏭 Employeur', value: contrat.employeurNom }, { name: '📋 Mission', value: contrat.objet }, { name: '💰 Rémunération', value: contrat.remuneration }).setFooter({ text: `IWC • ${fmtShort(new Date())}` })] });
+    const signataireDirIC = db.members[interaction.user.id]?.name || interaction.user.username;
+    await sendToThread(guild, CH.FIL_CONTRATS_SIGNE, { embeds: [new EmbedBuilder().setColor(0x57F287).setTitle(`✅ CONTRAT EMPLOYEUR SIGNÉ — ${contratId}`).setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   IRON WOLF COMPANY — CONTRAT ACCEPTÉ\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```').addFields({ name: '🆔 Réf', value: `\`${contratId}\``, inline: true }, { name: '📅 Signé le', value: fmtShort(new Date()), inline: true }, { name: '✍️ Signé par', value: signataireDirIC, inline: true }, { name: '🏭 Employeur', value: contrat.employeurNom }, { name: '📋 Mission', value: contrat.objet }, { name: '💰 Rémunération', value: contrat.remuneration }).setFooter({ text: `Iron Wolf Company • Secrétariat officiel • ${fmtShort(new Date())}` })] });
     try { const m = await guild.members.fetch(contrat.userId).catch(() => null); if (m) await m.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ Contrat signé — IWC').setDescription(`Iron Wolf Company a **signé** le contrat **${contratId}**.\n\n**Mission :** ${contrat.objet}\n**Rémunération :** ${contrat.remuneration}`).setFooter({ text: 'IWC • Notification' })] }); } catch {}
     return;
   }
@@ -1246,7 +1256,8 @@ Cette action est **irréversible**. Les participants seront notifiés.`)], compo
     if (!contrat || contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Contrat introuvable ou déjà traité.', flags: MessageFlags.Ephemeral }); return; }
     if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Seule la Direction peut décliner.', flags: MessageFlags.Ephemeral }); return; }
     contrat.status = 'refuse'; contrat.refusedAt = new Date().toISOString(); saveDB(db);
-    _syncContratNotion(contrat, 'refuse', interaction.user.username).catch(() => {});
+    const refuseurDirIC = db.members[interaction.user.id]?.name || interaction.user.username;
+    _syncContratNotion(contrat, 'refuse', refuseurDirIC).catch(() => {});
     await sendLog(guild, 'CONTRAT_REFUSE', { contratId, objet: contrat.objet });
     await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0xED4245).spliceFields(5, 1, { name: '📌 Statut', value: `❌ Décliné le ${fmtShort(new Date())}`, inline: true })], components: [] });
     await sendToThread(guild, CH.FIL_CONTRATS_REFUSE, { embeds: [new EmbedBuilder().setColor(0xED4245).setTitle(`❌ CONTRAT EMPLOYEUR DÉCLINÉ — ${contratId}`).addFields({ name: '🆔 Réf', value: `\`${contratId}\``, inline: true }, { name: '👤 Décliné par', value: interaction.user.username, inline: true }, { name: '🏭 Employeur', value: contrat.employeurNom }, { name: '📋 Mission', value: contrat.objet }).setFooter({ text: `IWC • ${fmtShort(new Date())}` })] });
@@ -1408,7 +1419,7 @@ async function handleProfilEnhanced(interaction) {
 // ── Modal /op-programmer ──
 async function _ouvrirModalOpProgrammee(interaction) {
   if (!interaction.member?.roles.cache.some(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier'].some(n => r.name.includes(n)))) {
-    return interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
+    return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
   }
   const modal = new ModalBuilder().setCustomId('modal_op_programmee').setTitle('🕐 Programmer une opération');
   modal.addComponents(
@@ -1557,7 +1568,7 @@ async function _syncContratNotion(contrat, statut, signePar) {
     'Statut':       { select:    { name: statutMap[statut] || statut } },
     'Rémunération': { rich_text: [{ text: { content: contrat.remuneration || '—' } }] },
     'Partenaire':   { rich_text: [{ text: { content: contrat.clientNom || contrat.employeurNom || '—' } }] },
-    'Émetteur':     { rich_text: [{ text: { content: contrat.emetteurNom || contrat.signataire || '—' } }] },
+    'Émetteur':     { rich_text: [{ text: { content: contrat.emetteurIC || contrat.emetteurNom || contrat.signataire || '—' } }] },
     'Date création':{ date:      { start: new Date(contrat.createdAt || Date.now()).toISOString().split('T')[0] } },
   };
   if (statut === 'signe' && signePar) {
@@ -1690,9 +1701,9 @@ function _graphiqueBarres(transactions, jours = 7) {
 // ── /registre — Liste paginée des membres ──
 async function _handleRegistre(interaction) {
   if (!isDirection(interaction.member)) {
-    return interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
+    return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
   }
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const db      = loadDB();
   const pole    = interaction.options?.getString('pole') || 'tous';
@@ -1851,7 +1862,7 @@ async function buildMembresDiscordMap(guild) {
 
 // ── /version — Statut du bot ──
 async function _handleVersion(interaction) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const BOT_VERSION = '4.0';
   const uptime = Math.floor(process.uptime());
   const h = Math.floor(uptime / 3600);
@@ -1888,8 +1899,8 @@ async function _handleVersion(interaction) {
 
 // ── /sync — Forcer une synchronisation ──
 async function _handleSync(interaction) {
-  if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
-  await interaction.deferReply({ ephemeral: true });
+  if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const guild = interaction.guild;
   const start = Date.now();
 
@@ -1914,7 +1925,7 @@ async function _handleSync(interaction) {
 
 // ── /avertir — Système de sanctions ──
 async function _handleAvertir(interaction) {
-  if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
+  if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
   await interaction.deferReply({ ephemeral: false });
 
   const cible  = interaction.options.getUser('membre');
@@ -2015,7 +2026,7 @@ async function _handleAvertissements(interaction) {
   }
 
   embed.setFooter({ text: 'IWC • Historique des sanctions' }).setTimestamp();
-  await interaction.reply({ embeds: [embed], ephemeral: true });
+  await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
 
 // ── Exécution de la purge ──
@@ -2075,7 +2086,7 @@ async function _executerPurge(interaction) {
   // Confirmation finale (éphémère dans le salon ou DM)
   try {
     await interaction.followUp({
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
       embeds: [new EmbedBuilder()
         .setColor(0x57F287)
         .setTitle('✅ Purge terminée')
@@ -2096,7 +2107,7 @@ async function _executerPurge(interaction) {
 // ── /purge — Effacer les messages d'un salon ──
 async function _handlePurge(interaction) {
   if (!isDirection(interaction.member)) {
-    return interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
+    return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
   }
 
   const nombre = interaction.options?.getInteger('nombre') || null;
@@ -2106,7 +2117,7 @@ async function _handlePurge(interaction) {
   // Confirmation
   const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
   await interaction.reply({
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
     embeds: [new EmbedBuilder()
       .setColor(0xED4245)
       .setTitle('🗑️ Confirmer la suppression')
@@ -2132,8 +2143,8 @@ async function _handlePurge(interaction) {
 
 // ── /annuler-absence — Direction lève une absence ──
 async function _handleAnnulerAbsence(interaction) {
-  if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
-  await interaction.deferReply({ ephemeral: true });
+  if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const cible   = interaction.options.getUser('membre');
   const db      = loadDB();
@@ -2186,7 +2197,7 @@ Tes permissions sont rétablies.`)
 
 // ── /retour — Déclarer son retour d'absence ──
 async function _handleRetour(interaction) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const db = loadDB();
   const m  = db.members[interaction.user.id];
@@ -2237,7 +2248,7 @@ Ancien statut : **${ancienStatut}** → **Actif**`)
 
 // ── /contrats — Voir ses propres contrats ──
 async function _handleMesContrats(interaction) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const db = loadDB();
   const uid = interaction.user.id;
 
@@ -2355,7 +2366,7 @@ async function _handleAide(interaction) {
   });
 
   embedBase.setFooter({ text: 'IWC Bot • /aide pour revoir ce guide' }).setTimestamp();
-  await interaction.reply({ embeds: [embedBase], ephemeral: true });
+  await interaction.reply({ embeds: [embedBase], flags: MessageFlags.Ephemeral });
 }
 
 // ── Panel Direction — embed permanent + boutons ──
@@ -2542,56 +2553,134 @@ async function setupSurnomFormat(guild) {
 
 // ── Flow RDV détecté dans #discussion ──
 
+// ── ÉTAPE 1 : Choisir le type de RDV ──
 async function _ouvrirMenuRdv(interaction) {
-  // Éphémère — seulement visible par l'auteur
+  const msgId = interaction.customId.replace('btn_rdv_creer_', '');
   await interaction.reply({
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
     embeds: [new EmbedBuilder()
-      .setColor(0x5865F2)
-      .setTitle('📅 Créer un RDV')
-      .setDescription('Qui doit être pingé à la création du RDV ?')
+      .setColor(0x2C3E50)
+      .setTitle('📅 Nouveau Rendez-vous — IWC')
+      .setDescription('**Étape 1/2** — Sélectionne le type de rendez-vous.')
     ],
     components: [new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
-        .setCustomId(`rdv_pole_select_${interaction.customId.replace('btn_rdv_creer_', '')}`)
-        .setPlaceholder('Choisir qui pinguer...')
+        .setCustomId(`rdv_type_select_${msgId}`)
+        .setPlaceholder('Type de rendez-vous...')
         .addOptions([
-          { label: '⚖️ Pôle Légal',     value: 'legal',   description: 'Ping le rôle Pôle Légal' },
-          { label: '🔒 Pôle Illégal',   value: 'illegal', description: 'Ping le rôle La Confrérie' },
-          { label: '👥 Tout le monde',  value: 'tous',    description: 'Ping les deux pôles' },
+          { label: '👑 Réunion Direction',      value: 'reunion_direction',  description: 'Réunion interne Direction & Conseil', emoji: '👑' },
+          { label: '🤝 Rendez-vous Client',     value: 'rdv_client',         description: 'Rencontre avec un partenaire ou client', emoji: '🤝' },
+          { label: '🎯 Briefing Opération',     value: 'briefing_op',        description: 'Préparation avant une opération', emoji: '🎯' },
+          { label: '📊 Débrief Opération',      value: 'debrief_op',         description: 'Bilan après une opération', emoji: '📊' },
+          { label: '🔍 Entretien Recrutement',  value: 'entretien_recru',    description: 'Entretien avec un candidat', emoji: '🔍' },
+          { label: '📋 Réunion Pôle Légal',     value: 'reunion_legal',      description: 'Réunion interne pôle légal', emoji: '📋' },
+          { label: '🔒 Réunion Confrérie',      value: 'reunion_confrerie',  description: 'Réunion interne La Confrérie', emoji: '🔒' },
+          { label: '🎓 Formation Membres',      value: 'formation',          description: 'Session de formation nouveaux membres', emoji: '🎓' },
+          { label: '⚖️ Négociation',            value: 'negociation',        description: 'Négociation avec une faction ou partenaire', emoji: '⚖️' },
+          { label: '🏥 Rendez-vous Médical',    value: 'rdv_medical',        description: 'Consultation médicale RP', emoji: '🏥' },
+          { label: '⚖️ Rendez-vous Juridique',  value: 'rdv_juridique',      description: 'Consultation juridique / avocats RP', emoji: '⚖️' },
+          { label: '📝 Autre',                  value: 'autre',              description: 'Autre type de rendez-vous', emoji: '📝' },
         ])
     )],
   });
 }
 
-async function _handleRdvPoleSelect(interaction) {
-  const pole   = interaction.values[0];
-  const msgId  = interaction.customId.replace('rdv_pole_select_', '');
+async function _handleRdvTypeSelect(interaction) {
+  const typeRdv = interaction.values[0];
+  const msgId   = interaction.customId.replace('rdv_type_select_', '');
 
-  // Ouvrir le modal RDV
+  // Étape 2 : Choisir qui pinguer
+  await interaction.update({
+    embeds: [new EmbedBuilder()
+      .setColor(0x2C3E50)
+      .setTitle('📅 Nouveau Rendez-vous — IWC')
+      .setDescription('**Étape 2/2** — Qui doit être convoqué ?')
+    ],
+    components: [new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`rdv_pole_select_${typeRdv}_${msgId}`)
+        .setPlaceholder('Choisir les convoqués...')
+        .addOptions([
+          { label: '⚖️ Pôle Légal',       value: 'legal',   description: 'Ping le rôle Pôle Légal',       emoji: '⚖️' },
+          { label: '🔒 La Confrérie',      value: 'illegal', description: 'Ping le rôle La Confrérie',      emoji: '🔒' },
+          { label: '👥 Tout le monde',     value: 'tous',    description: 'Ping les deux pôles',             emoji: '👥' },
+          { label: '👑 Direction seule',   value: 'direction', description: 'Ping la Direction uniquement', emoji: '👑' },
+        ])
+    )],
+  });
+}
+
+// ── ÉTAPE 3 : Modal avec les détails ──
+async function _handleRdvPoleSelect(interaction) {
+  const parts   = interaction.customId.replace('rdv_pole_select_', '').split('_');
+  // Format : rdv_pole_select_{type}_{msgId} — le type peut contenir des _
+  // On prend le dernier segment comme msgId (timestamp)
+  const allParts = interaction.customId.replace('rdv_pole_select_', '').split('_');
+  const pole    = interaction.values[0];
+  // Reconstruire le type (tout sauf le dernier segment)
+  const typeRdv = allParts.slice(0, -1).join('_');
+
+  const typeLabels = {
+    reunion_direction: 'Réunion Direction',
+    rdv_client:        'Rendez-vous Client',
+    briefing_op:       'Briefing Opération',
+    debrief_op:        'Débrief Opération',
+    entretien_recru:   'Entretien Recrutement',
+    reunion_legal:     'Réunion Pôle Légal',
+    reunion_confrerie: 'Réunion Confrérie',
+    formation:         'Formation Membres',
+    negociation:       'Négociation',
+    rdv_medical:       'Rendez-vous Médical',
+    rdv_juridique:     'Rendez-vous Juridique',
+    autre:             'Autre',
+  };
+  const typeLabel = typeLabels[typeRdv] || 'Rendez-vous';
+
   const modal = new ModalBuilder()
-    .setCustomId(`modal_rdv_${pole}_${msgId}`)
-    .setTitle('📅 Nouveau RDV');
+    .setCustomId(`modal_rdv_${pole}_${typeRdv}`)
+    .setTitle(`📅 ${typeLabel}`);
 
   modal.addComponents(
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('titre').setLabel('Titre du RDV').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Réunion Direction, Mission Paleto Bay...')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('date').setLabel('Date (JJ/MM/AAAA)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 05/06/2026')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('heure').setLabel('Heure').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 21h00')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('lieu').setLabel('Lieu').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: Paleto Bay, Discord vocal...')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('notes').setLabel('Notes').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setPlaceholder('Détails supplémentaires...')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('titre').setLabel('Titre / Objet du RDV')
+        .setStyle(TextInputStyle.Short).setRequired(true)
+        .setValue(typeLabel)
+        .setPlaceholder('Ex: Réunion stratégique S1, Négociation famille Wellington...')
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('date').setLabel('Date (JJ/MM/AAAA)')
+        .setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('Ex: 05/06/2026')
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('heure').setLabel('Heure de convocation')
+        .setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('Ex: 21h00')
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('lieu').setLabel('Lieu de rendez-vous')
+        .setStyle(TextInputStyle.Short).setRequired(false)
+        .setPlaceholder('Ex: Mairie de Saint Denis, Discord vocal Conseil...')
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('notes').setLabel('Ordre du jour / Notes')
+        .setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(400)
+        .setPlaceholder('Points à aborder, informations importantes...')
+    ),
   );
 
   await interaction.update({ components: [] });
-  await interaction.followUp({ ephemeral: true, content: '📝 Remplis les détails du RDV...' });
   await interaction.showModal(modal).catch(() => {});
 }
 
 async function _validerModalRdv(interaction) {
   await interaction.deferReply({ ephemeral: false });
 
-  // Extraire pole et msgId du customId : modal_rdv_{pole}_{msgId}
-  const parts  = interaction.customId.replace('modal_rdv_', '').split('_');
-  const pole   = parts[0]; // legal / illegal / tous
+  // Format : modal_rdv_{pole}_{typeRdv}
+  const withoutPrefix = interaction.customId.replace('modal_rdv_', '');
+  const firstUnderscore = withoutPrefix.indexOf('_');
+  const pole    = withoutPrefix.substring(0, firstUnderscore); // legal/illegal/tous/direction
+  const typeRdv = withoutPrefix.substring(firstUnderscore + 1); // type rdv
 
   const titre  = interaction.fields.getTextInputValue('titre');
   const dateRaw= interaction.fields.getTextInputValue('date');
@@ -2631,30 +2720,83 @@ async function _validerModalRdv(interaction) {
     } catch (e) { console.log('❌ RDV Notion error:', e.message); }
   }
 
-  // Construire le ping selon le pôle
-  const pingMap = {
-    legal:   `<@&${ROLE_POLE_LEGAL}>`,
-    illegal: `<@&${ROLE_POLE_ILLEGAL}>`,
-    tous:    `<@&${ROLE_POLE_LEGAL}> <@&${ROLE_POLE_ILLEGAL}>`,
+  // pingMap défini plus bas
+  // Récupérer le nom IC de l'émetteur
+  const db         = loadDB();
+  const emetteurIC = db.members[interaction.user.id]?.name || interaction.user.username;
+  const rdvId      = `RDV-${Date.now().toString().slice(-5)}`;
+
+  const typeLabels = {
+    reunion_direction: 'Réunion Direction',   rdv_client: 'Rendez-vous Client',
+    briefing_op: 'Briefing Opération',        debrief_op: 'Débrief Opération',
+    entretien_recru: 'Entretien Recrutement', reunion_legal: 'Réunion Pôle Légal',
+    reunion_confrerie: 'Réunion Confrérie',   formation: 'Formation Membres',
+    negociation: 'Négociation',               rdv_medical: 'Rendez-vous Médical',
+    rdv_juridique: 'Rendez-vous Juridique',   autre: 'Autre',
   };
-  const ping      = pingMap[pole] || '';
-  const poleLabel = pole === 'legal' ? '⚖️ Pôle Légal' : pole === 'illegal' ? '🔒 Confrérie' : '👥 Tout le monde';
+  const typeLabel = typeLabels[typeRdv] || typeRdv || 'Rendez-vous';
+
+  const pingMap = {
+    legal:     `<@&${ROLE_POLE_LEGAL}>`,
+    illegal:   `<@&${ROLE_POLE_ILLEGAL}>`,
+    tous:      `<@&${ROLE_POLE_LEGAL}> <@&${ROLE_POLE_ILLEGAL}>`,
+    direction: interaction.guild.roles.cache.filter(r => ['Conseil','Directeur','Fléau','Concepteur','Fondateur'].some(n => r.name.includes(n))).map(r => `<@&${r.id}>`).join(' '),
+  };
+  const ping = pingMap[pole] || '';
+
+  const poleLabel = { legal: '⚖️ Pôle Légal', illegal: '🔒 La Confrérie', tous: '👥 Tous les membres', direction: '👑 Direction' }[pole] || pole;
+  const poleColor = pole === 'illegal' ? 0x8B1A1A : pole === 'direction' ? 0xFFD700 : 0x2C3E50;
 
   const dateAffiche = new Date(dateISO).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+  const dateCapital = dateAffiche.charAt(0).toUpperCase() + dateAffiche.slice(1);
+
+  const isConfrerie = pole === 'illegal' || typeRdv === 'reunion_confrerie';
+  const header = isConfrerie
+    ? '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   LA CONFRÉRIE — CONVOCATION OFFICIELLE\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+    : '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   IRON WOLF COMPANY — AVIS DE RENDEZ-VOUS\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
 
   const embed = new EmbedBuilder()
-    .setColor(pole === 'illegal' ? 0x8B1A1A : pole === 'legal' ? 0x3B82F6 : 0x5865F2)
-    .setTitle(`📅 ${titre}`)
+    .setColor(poleColor)
+    .setTitle(`📅 ${titre.toUpperCase()}`)
+    .setDescription('```\n' + header + '\n```')
     .addFields(
-      { name: '📅 Date',      value: dateAffiche,      inline: true },
-      { name: '🕐 Heure',    value: heure,             inline: true },
-      { name: '📍 Lieu',     value: lieu,              inline: true },
-      { name: '👥 Pingué',   value: poleLabel,         inline: true },
-      { name: '📝 Créé par', value: `<@${interaction.user.id}>`, inline: true },
+      { name: '🆔 Référence',    value: '`' + rdvId + '`',   inline: true },
+      { name: '🗂️ Type',         value: typeLabel,             inline: true },
+      { name: '📌 Statut',       value: '🟡 Planifié',         inline: true },
+      { name: '📅 Date',         value: dateCapital,            inline: true },
+      { name: '🕐 Heure',        value: `**${heure}**`,        inline: true },
+      { name: '📍 Lieu',         value: lieu || '—',           inline: true },
+      { name: '👥 Convoqués',    value: poleLabel,              inline: true },
+      { name: '✍️ Convoqué par', value: `${emetteurIC}`,       inline: true },
     );
 
-  if (notes) embed.addFields({ name: '📋 Notes', value: notes, inline: false });
-  embed.setFooter({ text: 'IWC • Agenda — Ajouté dans Notion' }).setTimestamp();
+  if (notes) embed.addFields({ name: '📋 Ordre du jour', value: notes, inline: false });
+
+  embed.setFooter({ text: `Iron Wolf Company • Secrétariat officiel • ${fmtShort(new Date())}` }).setTimestamp();
+
+  // Archivage Notion
+  if (process.env.NOTION_TOKEN && process.env.NOTION_AGENDA_DB_ID) {
+    fetch('https://api.notion.com/v1/pages', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        parent: { database_id: process.env.NOTION_AGENDA_DB_ID },
+        properties: {
+          'Titre':     { title:     [{ text: { content: titre } }] },
+          'Date':      { date:      { start: dateISO } },
+          'Heure':     { rich_text: [{ text: { content: heure } }] },
+          'Lieu':      { rich_text: [{ text: { content: lieu || '—' } }] },
+          'Notes':     { rich_text: [{ text: { content: notes?.slice(0, 2000) || '' } }] },
+          'Type':      { select:    { name: typeLabel } },
+          'Statut':    { select:    { name: 'Planifié' } },
+          'Référence': { rich_text: [{ text: { content: rdvId } }] },
+          'Émetteur':  { rich_text: [{ text: { content: emetteurIC } }] },
+          'Convoqués': { rich_text: [{ text: { content: poleLabel } }] },
+        },
+      }),
+    }).catch(e => console.log('❌ RDV Notion error:', e.message));
+    console.log(`✅ RDV Notion archivé : ${rdvId} — ${titre}`);
+  }
 
   await interaction.editReply({ content: ping, embeds: [embed] });
 }
@@ -2711,7 +2853,7 @@ async function _ouvrirModalSurnom(interaction) {
 }
 
 async function _validerModalSurnom(interaction) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const pseudo     = interaction.fields.getTextInputValue('pseudo_discord').trim();
   const nomIC      = interaction.fields.getTextInputValue('nom_ic').trim();
@@ -2785,7 +2927,7 @@ async function _checkRetoursAbsence(guild) {
     _syncMembreNotion(userId, { status: 'actif', lastActivity: new Date().toISOString() }).catch(() => {});
 
     // Post dans #absences
-    const absCh = getCh(guild, 'absences');
+    const absCh = getChById(guild, 'ABSENCES', 'absences');
     if (absCh) {
       const discordMembre = await guild.members.fetch(userId).catch(() => null);
       await absCh.send({ embeds: [new EmbedBuilder()
