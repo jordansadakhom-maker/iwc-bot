@@ -967,66 +967,94 @@ client.login(process.env.TOKEN || process.env.DISCORD_TOKEN);
 // Appelé dans autoSetup
 async function setupFicheFormat(guild) {
   try {
-    const ch = guild.channels.cache.find(c => {
-      const clean = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-      return c.isTextBased?.() && clean(c.name).includes('fichespersonnages') || clean(c.name).includes('fichesperso') || clean(c.name).includes('fiches');
-    });
-    if (!ch) return;
+    const cleanN = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const ch = guild.channels.cache.find(c => c.isTextBased?.() && cleanN(c.name).includes('fichespersonnages'));
+    if (!ch) { console.log('⚠️ Salon fiches-personnages introuvable'); return; }
 
-    // Vérifier si le message existe déjà
-    const msgs = await ch.messages.fetch({ limit: 20 });
-    const existing = msgs.find(m => m.author.id === guild.members.me?.id && m.content.includes('FORMAT FICHE'));
-    if (existing) return; // déjà en place
+    // Supprimer l'ancien message de format s'il existe (texte brut ou ancien embed)
+    const msgs = await ch.messages.fetch({ limit: 30 });
+    for (const [, m] of msgs) {
+      if (m.author.id === guild.members.me?.id && (m.content.includes('FORMAT FICHE') || m.content.includes('NOM COMPLET'))) {
+        await m.delete().catch(() => {});
+      }
+    }
 
-    const FORMAT = [
-      '```',
-      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-      '  — FORMAT FICHE PERSONNELLE — IWC —',
-      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-      '```',
-      '',
-      '**NOM COMPLET :**',
-      '**SURNOM(S) :**',
-      '**ÂGE :**',
-      '**LIEU DE NAISSANCE :**',
-      '**NATIONALITÉ :**',
-      '**TAILLE / CORPULENCE :**',
-      '**YEUX / CHEVEUX :**',
-      '**SIGNES PARTICULIERS :**',
-      '**PROFESSION :**',
-      '**RÉPUTATION :**',
-      '',
-      '> *"Citation du personnage."*',
-      '',
-      '**—— HISTOIRE ——**',
-      '[5 à 15 lignes minimum]',
-      '',
-      '**—— PERSONNALITÉ ——**',
-      '→ Trait 1',
-      '→ Trait 2',
-      '→ Trait 3',
-      '',
-      '**—— COMPÉTENCES ——**',
-      '⚔️ Compétence : ●●●●○',
-      '🎯 Compétence : ●●●●●',
-      '',
-      '**—— FAIBLESSES ——**',
-      '→ Faiblesse 1',
-      '→ Faiblesse 2',
-      '',
-      '**—— LIENS IMPORTANTS ——**',
-      '[Nom] — [Relation] — [Description courte]',
-      '',
-      '**—— OBJECTIF ——**',
-      '[Ce que le personnage cherche à accomplir]',
-      '',
-      '```',
-      '— IWC • 1895 —',
-      '```',
-    ].join('\n');
+    // Ne pas recréer si un embed propre existe déjà
+    const msgsAfter = await ch.messages.fetch({ limit: 10 });
+    const alreadyEmbed = [...msgsAfter.values()].find(m => m.author.id === guild.members.me?.id && m.embeds?.length > 0 && m.embeds[0]?.title?.includes('FICHE'));
+    if (alreadyEmbed) return;
 
-    await ch.send(FORMAT);
-    console.log('✅ Message format fiche posté dans #fiches-personnages');
+    const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+
+    // Embed 1 — Présentation
+    const embedIntro = new EmbedBuilder()
+      .setColor(0x8B1A1A)
+      .setTitle('📋 FICHES PERSONNAGES — Iron Wolf Company')
+      .setDescription([
+        '*Ce salon est dédié aux fiches officielles de vos personnages IWC.*',
+        '*Une fiche par membre. Mettez à jour après chaque évolution majeure.*',
+        '',
+        '**Comment faire :**',
+        '> **1.** Copiez le format ci-dessous',
+        '> **2.** Remplissez chaque champ',
+        '> **3.** Envoyez votre message dans ce salon',
+        '> **4.** Le bot génère automatiquement votre fiche et un thread dédié ✅',
+      ].join('\n'))
+      .setFooter({ text: 'IWC • Fiches personnages • Un thread par personnage' });
+
+    // Embed 2 — Format à copier
+    const embedFormat = new EmbedBuilder()
+      .setColor(0x3B82F6)
+      .setTitle('📝 FORMAT — À copier/coller')
+      .setDescription([
+        '```',
+        'NOM COMPLET :',
+        'SURNOM(S) :',
+        'ÂGE :',
+        'LIEU DE NAISSANCE :',
+        'NATIONALITÉ :',
+        'TAILLE / CORPULENCE :',
+        'YEUX / CHEVEUX :',
+        'SIGNES PARTICULIERS :',
+        'PROFESSION :',
+        'RÉPUTATION :',
+        '',
+        '"Citation du personnage."',
+        '',
+        '---- HISTOIRE ----',
+        '[5 à 15 lignes minimum]',
+        '',
+        '---- PERSONNALITÉ ----',
+        '→ Trait 1',
+        '→ Trait 2',
+        '→ Trait 3',
+        '',
+        '---- COMPÉTENCES ----',
+        '⚔️ Compétence : ●●●●○',
+        '🎯 Compétence : ●●●●●',
+        '',
+        '---- FAIBLESSES ----',
+        '→ Faiblesse 1',
+        '→ Faiblesse 2',
+        '',
+        '---- LIENS IMPORTANTS ----',
+        '[Nom] — [Relation] — [Description courte]',
+        '',
+        '---- OBJECTIF ----',
+        '[Ce que le personnage cherche à accomplir]',
+        '',
+        '— IWC • 1895 —',
+        '```',
+      ].join('\n'))
+      .addFields(
+        { name: '⚠️ Important', value: 'Tous les champs sont libres — écrivez ce qui correspond à votre personnage.\nSeul **NOM COMPLET** est obligatoire pour que le bot reconnaisse votre fiche.', inline: false },
+        { name: '🔄 Mise à jour', value: 'Pour modifier votre fiche, repostez-la complète dans ce salon.\nLe thread existant sera réouvert et Notion mis à jour automatiquement.', inline: false },
+      )
+      .setFooter({ text: 'IWC • Copie le format, remplis les champs, envoie dans ce salon' });
+
+    await ch.send({ embeds: [embedIntro] });
+    await ch.send({ embeds: [embedFormat] });
+    console.log('✅ Format fiche personnage posté dans #fiches-personnages');
   } catch (e) {
     console.log('❌ setupFicheFormat error:', e.message);
   }
