@@ -95,6 +95,20 @@ const SALON_IDS = {
   OPERATIONS:          '', // #operations
 };
 
+// ── Détection du pôle d'un membre depuis ses rôles Discord ──
+function _getPole(member) {
+  if (!member) return 'both';
+  const roles = member.roles?.cache;
+  if (!roles) return 'both';
+  const illegalRoleNames = ['Concepteur', 'Fléau', 'Exécuteur', 'Condamné', 'Maudit', 'Confrérie', 'Ombre'];
+  const legalRoleNames   = ['Conseil', 'Directeur', 'Officier', 'Agent', 'Opérateur', 'Recrue', 'Iron Wolf', 'Fondateur'];
+  const hasIllegal = roles.some(r => illegalRoleNames.some(n => r.name.includes(n)));
+  const hasLegal   = roles.some(r => legalRoleNames.some(n => r.name.includes(n)));
+  if (hasIllegal && !hasLegal) return 'illegal';
+  if (hasLegal   && !hasIllegal) return 'legal';
+  return 'both';
+}
+
 module.exports = {
   MEMBRES_DISCORD_MAP, DISCORD_TO_IC,
   CH, PARTICIPANTS_MAP,
