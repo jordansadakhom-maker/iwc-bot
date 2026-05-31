@@ -628,22 +628,85 @@ async function sendParticipantDMs(guild, appt, title, color) {
 }
 
 async function checkAgenda(guild) {
-  const appts = await notionQueryAgenda(); const ch = getChById(guild, 'AGENDA', 'agenda') || getChById(guild, 'PLANNING', 'planning'); if (!ch || !appts.length) return;
-  const mention = getMention(guild); const db = loadDB(); let changed = false;
+  const appts = await notionQueryAgenda();
+  const ch = getChById(guild, 'AGENDA', 'agenda') || getChById(guild, 'PLANNING', 'planning');
+  if (!ch || !appts.length) return;
+
+  const mention = getMention(guild);
+  const db = loadDB();
+  if (!db.sentReminders) db.sentReminders = {};
+  if (!db.reminderMsgIds) db.reminderMsgIds = {};
+  let changed = false;
+
   for (const a of appts) {
     if (a.statut === 'Annulé' || !a.date) continue;
     const dt = buildRdvDate(a.date, a.heure); if (!dt) continue;
-    const mins = Math.floor((dt.getTime() - Date.now()) / 60000); const ping = buildParticipantMentions(a.participants) || mention;
+    const mins     = Math.floor((dt.getTime() - Date.now()) / 60000);
+    const ping     = buildParticipantMentions(a.participants) || mention;
     const heureAff = dt.toLocaleTimeString('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit' });
-    const mkEmbed = (t, c) => new EmbedBuilder().setColor(c).setTitle(t).setDescription(`## 📅 ${a.titre}`).addFields({ name: 'Quand', value: `${fmtLong(a.date)}${heureAff ? ` à **${heureAff}**` : ''}`, inline: true }, { name: 'Lieu', value: a.lieu, inline: true }, { name: 'Participants', value: a.participants.length > 0 ? a.participants.join(', ') : '—' }, ...(a.notes ? [{ name: 'Notes', value: a.notes }] : []), { name: 'Modifier', value: `[Notion](${a.url})` }).setFooter({ text: 'IWC • Secrétariat automatique' });
-    const sent = k => db.sentReminders?.[`${a.id}_${k}`]; const mark = k => { if (!db.sentReminders) db.sentReminders = {}; db.sentReminders[`${a.id}_${k}`] = true; changed = true; };
+
+    const mkEmbed = (t, c) => new EmbedBuilder()
+      .setColor(c).setTitle(t)
+      .setDescription(`## 📅 ${a.titre}`)
+      .addFields(
+        { name: 'Quand',        value: `${fmtLong(a.date)}${heureAff ? ` à **${heureAff}**` : ''}`, inline: true },
+        { name: 'Lieu',         value: a.lieu || '—', inline: true },
+        { name: 'Participants', value: a.participants?.length > 0 ? a.participants.join(', ') : '—' },
+        ...(a.notes ? [{ name: 'Notes', value: a.notes }] : []),
+        { name: 'Modifier', value: `[Notion](${a.url})` },
+      )
+      .setFooter({ text: 'IWC • Secrétariat automatique' });
+
+    const sent    = k => db.sentReminders[`${a.id}_${k}`];
+    const getMsgId = k => db.reminderMsgIds[`${a.id}_${k}`];
+
+    // Fonction pour envoyer un rappel et supprimer le précédent
+    const envoyerRappel = async (key, prevKey, pingText, embed, dmTitle, dmColor) => {
+      if (sent(key)) return;
+
+      // Supprimer le message du rappel précédent
+      if (prevKey && getMsgId(prevKey)) {
+        const prevMsg = await ch.messages.fetch(getMsgId(prevKey)).catch(() => null);
+        if (prevMsg) await prevMsg.delete().catch(() => {});
+        delete db.reminderMsgIds[`${a.id}_${prevKey}`];
+      }
+
+      // Envoyer le nouveau rappel
+      const msg = await ch.send({ content: pingText, embeds: [embed] }).catch(() => null);
+      if (msg) {
+        db.reminderMsgIds[`${a.id}_${key}`] = msg.id;
+      }
+
+      await sendParticipantDMs(guild, a, dmTitle, dmColor);
+      db.sentReminders[`${a.id}_${key}`] = true;
+      changed = true;
+    };
+
     if (mins > 0) {
-      if (a.notif24 && !sent('24h') && mins <= 1440 && mins > 60) { await ch.send({ content: `${ping} — 📅 RDV dans 24h`, embeds: [mkEmbed('📅 Rappel — 24 heures', 0x5865F2)] }); await sendParticipantDMs(guild, a, '📅 Rappel — RDV dans 24h', 0x5865F2); mark('24h'); }
-      if (a.notif1h && !sent('1h') && mins <= 60 && mins > 15) { await ch.send({ content: `${ping} — ⏰ RDV dans 1 heure`, embeds: [mkEmbed('⏰ Rappel — 1 heure', 0xFFA500)] }); await sendParticipantDMs(guild, a, '⏰ Rappel — RDV dans 1 heure', 0xFFA500); mark('1h'); }
-      if (a.notif15 && !sent('15min') && mins <= 15) { await ch.send({ content: `${ping} — 🚨 15 minutes !`, embeds: [mkEmbed('🚨 URGENT — 15 min', 0xED4245)] }); await sendParticipantDMs(guild, a, '🚨 URGENT — RDV dans 15 minutes !', 0xED4245); mark('15min'); }
+      // Rappel 24h
+      if (a.notif24 && !sent('24h') && mins <= 1440 && mins > 60) {
+        await envoyerRappel('24h', null, `${ping} — 📅 RDV dans 24h`, mkEmbed('📅 Rappel — 24 heures', 0x5865F2), '📅 Rappel — RDV dans 24h', 0x5865F2);
+      }
+      // Rappel 1h — supprime le 24h
+      if (a.notif1h && !sent('1h') && mins <= 60 && mins > 15) {
+        await envoyerRappel('1h', '24h', `${ping} — ⏰ RDV dans 1 heure`, mkEmbed('⏰ Rappel — 1 heure', 0xFFA500), '⏰ Rappel — RDV dans 1 heure', 0xFFA500);
+      }
+      // Rappel 15min — supprime le 1h
+      if (a.notif15 && !sent('15min') && mins <= 15) {
+        await envoyerRappel('15min', '1h', `${ping} — 🚨 15 minutes !`, mkEmbed('🚨 URGENT — 15 min', 0xED4245), '🚨 URGENT — RDV dans 15 minutes !', 0xED4245);
+      }
     }
-    if (mins < -120) { ['24h','1h','15min'].forEach(k => { if (db.sentReminders?.[`${a.id}_${k}`]) { delete db.sentReminders[`${a.id}_${k}`]; changed = true; } }); }
+
+    // Nettoyer après le RDV (> 2h passé)
+    if (mins < -120) {
+      ['24h','1h','15min'].forEach(k => {
+        delete db.sentReminders[`${a.id}_${k}`];
+        delete db.reminderMsgIds[`${a.id}_${k}`];
+      });
+      changed = true;
+    }
   }
+
   if (changed) saveDB(db);
 }
 
