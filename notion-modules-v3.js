@@ -1,19 +1,18 @@
 // ═══════════════════════════════════════════════════════════════
 // notion-modules-v3.js — Grades · Inactivité · Affaires · Absences · Informateurs · Planning
-// IWC Bot v3.3
+// IWC Bot v3.4
 // ═══════════════════════════════════════════════════════════════
 
 const {
   EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
+  StringSelectMenuBuilder,
 } = require('discord.js');
 const { loadDB, saveDB } = require('./db');
 
 let notionExtra = {};
 try { notionExtra = require('./notion-extra'); } catch {}
 
-// ── Constantes ──
 const JOURS_INACTIF = 5;
 
 const ROLES = {
@@ -40,11 +39,11 @@ const GRADES_LEGAL = [
 ];
 
 const GRADES_ILLEGAL = [
-  { nom: 'Le Concepteur',    emoji: '💀', roleKey: 'LE_CONCEPTEUR', couleur: 0x8B1A1A },
-  { nom: 'Le Fléau',         emoji: '⚔️', roleKey: 'LE_FLEAU',      couleur: 0xED4245 },
-  { nom: "L'Exécuteur",      emoji: '🗡️', roleKey: 'EXECUTEUR',     couleur: 0xFF6B35 },
-  { nom: 'Le Condamné',      emoji: '🔴', roleKey: 'CONDAMNE',      couleur: 0xFFA500 },
-  { nom: 'Le Maudit',        emoji: '🟤', roleKey: 'MAUDIT',        couleur: 0x8B5A2A },
+  { nom: 'Le Concepteur',  emoji: '💀', roleKey: 'LE_CONCEPTEUR', couleur: 0x8B1A1A },
+  { nom: 'Le Fléau',       emoji: '⚔️', roleKey: 'LE_FLEAU',      couleur: 0xED4245 },
+  { nom: "L'Exécuteur",    emoji: '🗡️', roleKey: 'EXECUTEUR',     couleur: 0xFF6B35 },
+  { nom: 'Le Condamné',    emoji: '🔴', roleKey: 'CONDAMNE',      couleur: 0xFFA500 },
+  { nom: 'Le Maudit',      emoji: '🟤', roleKey: 'MAUDIT',        couleur: 0x8B5A2A },
 ];
 
 const MEMBRES_DISCORD_MAP = {
@@ -74,52 +73,41 @@ function isDirection(member) {
 }
 
 function canManageGrades(member) {
-  return member?.roles?.cache?.some(r =>
-    ['Concepteur', 'Fléau', 'Fondateur'].some(n => r.name.includes(n))
-  );
+  return member?.roles?.cache?.some(r => ['Concepteur', 'Fléau', 'Fondateur'].some(n => r.name.includes(n)));
 }
 
 // ═══════════════════════════════════════════════════════════════
-// HELPER INTERNE — Mise à jour ou création d'un message bot sans doublon
+// HELPER — Upsert message bot sans doublon, sans pin
 // ═══════════════════════════════════════════════════════════════
-/**
- * Cherche un message bot existant dans le salon (via msgId en DB ou scan),
- * le met à jour si trouvé, en crée un nouveau sinon.
- * Ne pin JAMAIS sauf si pin=true explicitement.
- * Retourne l'ID du message final.
- */
-async function _upsertBotMessage(guild, ch, dbKey, payload, { pin = false } = {}) {
+async function _upsertBotMessage(guild, ch, dbKey, payload) {
   const db = loadDB();
 
-  // 1. Essayer via l'ID stocké en DB
   if (db[dbKey]) {
     try {
       const msg = await ch.messages.fetch(db[dbKey]);
-      if (msg) {
-        await msg.edit(payload);
-        return db[dbKey];
-      }
-    } catch { /* supprimé, on continue */ }
+      if (msg) { await msg.edit(payload); return db[dbKey]; }
+    } catch {}
   }
 
-  // 2. Scanner les 30 derniers messages du bot dans le salon
   try {
-    const msgs = await ch.messages.fetch({ limit: 30 });
-    const botMsg = msgs.find(m =>
-      m.author.id === guild.members.me?.id &&
-      m.embeds?.length > 0
-    );
-    if (botMsg) {
-      await botMsg.edit(payload);
-      db[dbKey] = botMsg.id;
+    const msgs   = await ch.messages.fetch({ limit: 30 });
+    const botMsg = [...msgs.values()]
+      .filter(m => m.author.id === guild.members.me?.id && m.embeds?.length > 0)
+      .sort((a, b) => b.createdTimestamp - a.createdTimestamp);
+
+    // Supprimer les doublons (garder le plus récent)
+    for (let i = 1; i < botMsg.length; i++) await botMsg[i].delete().catch(() => {});
+
+    if (botMsg.length > 0) {
+      await botMsg[0].edit(payload);
+      db[dbKey] = botMsg[0].id;
       saveDB(db);
-      return botMsg.id;
+      return botMsg[0].id;
     }
   } catch {}
 
-  // 3. Aucun message existant → créer
   const sent = await ch.send(payload);
-  if (pin) await sent.pin().catch(() => {});
+  // PAS de pin
   db[dbKey] = sent.id;
   saveDB(db);
   return sent.id;
@@ -129,55 +117,22 @@ async function _upsertBotMessage(guild, ch, dbKey, payload, { pin = false } = {}
 // 1. ABSENCES
 // ═══════════════════════════════════════════════════════════════
 
-const ABSENCE_KEYWORDS = [
-  'absent', 'absence', 'absente', 'serai pas là', 'serai pas dispo',
-  'pas disponible', 'pas là', 'dispo pas', 'en pause', 'pause de',
-  'reviens dans', 'retour dans', 'indisponible',
-];
+const ABSENCE_KEYWORDS = ['absent', 'absence', 'absente', 'serai pas là', 'serai pas dispo', 'pas disponible', 'pas là', 'dispo pas', 'en pause', 'pause de', 'reviens dans', 'retour dans', 'indisponible'];
 
 async function handleAbsenceDetection(message) {
   if (message.author.bot || !message.guild) return false;
-
   const absCh = getCh(message.guild, 'absences');
-  if (!absCh) return false;
-  if (message.channel.id === absCh.id) return false;
-
-  const content = message.content.toLowerCase();
-  if (!ABSENCE_KEYWORDS.some(kw => content.includes(kw))) return false;
+  if (!absCh || message.channel.id === absCh.id) return false;
+  if (!ABSENCE_KEYWORDS.some(kw => message.content.toLowerCase().includes(kw))) return false;
 
   await message.delete().catch(() => {});
-  await message.author.send({
-    embeds: [new EmbedBuilder()
-      .setColor(0xFFA500)
-      .setTitle('📋 Absence détectée — IWC')
-      .setDescription(`Ton message a été déplacé dans **#absences** automatiquement.\n\n> *${message.content.slice(0, 300)}*`)
-      .setFooter({ text: 'IWC • Système automatique' })
-    ]
-  }).catch(() => {});
+  await message.author.send({ embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('📋 Absence détectée — IWC').setDescription(`Ton message a été déplacé dans **#absences** automatiquement.\n\n> *${message.content.slice(0, 300)}*`).setFooter({ text: 'IWC • Système automatique' })] }).catch(() => {});
 
   const db = loadDB();
-  if (db.members[message.author.id]) {
-    db.members[message.author.id].status = 'absent';
-    db.members[message.author.id].lastActivity = new Date().toISOString();
-    saveDB(db);
-  }
+  if (db.members[message.author.id]) { db.members[message.author.id].status = 'absent'; db.members[message.author.id].lastActivity = new Date().toISOString(); saveDB(db); }
   await notionExtra.majStatutActiviteNotion?.(message.author.id, 'absent');
 
-  await absCh.send({
-    embeds: [new EmbedBuilder()
-      .setColor(0xFFA500)
-      .setTitle(`🟡 Absence — ${message.author.username}`)
-      .setDescription(`> *${message.content.slice(0, 500)}*`)
-      .addFields(
-        { name: '👤 Membre',  value: `<@${message.author.id}>`, inline: true },
-        { name: '📅 Date',    value: fmtShort(new Date()),       inline: true },
-        { name: '📍 Origine', value: `#${message.channel.name}`, inline: true },
-      )
-      .setFooter({ text: 'IWC • Absence automatique' })
-      .setTimestamp()
-    ]
-  });
-
+  await absCh.send({ embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle(`🟡 Absence — ${message.author.username}`).setDescription(`> *${message.content.slice(0, 500)}*`).addFields({ name: '👤 Membre', value: `<@${message.author.id}>`, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: '📍 Origine', value: `#${message.channel.name}`, inline: true }).setFooter({ text: 'IWC • Absence automatique' }).setTimestamp()] });
   return true;
 }
 
@@ -187,40 +142,14 @@ async function handleAbsenceDetection(message) {
 
 async function checkInactivite(guild) {
   try {
-    const db = loadDB();
-    const logsCh = getCh(guild, 'logs');
-    let changed = false;
-
+    const db = loadDB(); const logsCh = getCh(guild, 'logs'); let changed = false;
     for (const [userId, membre] of Object.entries(db.members || {})) {
       if (membre.status === 'parti' || membre.status === 'visiteur') continue;
-      const jours = daysSince(membre.lastActivity);
-      if (jours >= JOURS_INACTIF && membre.status !== 'inactif') {
-        const ancienStatut = membre.status;
-        db.members[userId].status = 'inactif';
-        changed = true;
+      if (daysSince(membre.lastActivity) >= JOURS_INACTIF && membre.status !== 'inactif') {
+        const ancienStatut = membre.status; db.members[userId].status = 'inactif'; changed = true;
         await notionExtra.majStatutActiviteNotion?.(userId, 'inactif');
-        if (logsCh) {
-          await logsCh.send({ embeds: [new EmbedBuilder()
-            .setColor(0x555555)
-            .setTitle(`💤 Inactivité automatique — ${membre.name}`)
-            .setDescription(`**${membre.name}** est passé **inactif** après **${jours} jours** sans message.`)
-            .addFields(
-              { name: '👤 Membre',           value: `<@${userId}>`,               inline: true },
-              { name: '📅 Dernière activité', value: fmtShort(membre.lastActivity), inline: true },
-              { name: '📋 Ancien statut',     value: ancienStatut,                 inline: true },
-            )
-            .setFooter({ text: `IWC • Inactivité auto • ${JOURS_INACTIF}j` })
-          ] }).catch(() => {});
-        }
-        try {
-          const member = await guild.members.fetch(userId).catch(() => null);
-          if (member) await member.send({ embeds: [new EmbedBuilder()
-            .setColor(0x555555)
-            .setTitle('💤 Statut — Iron Wolf Company')
-            .setDescription(`Tu as été marqué **inactif** suite à **${jours} jours** sans activité.\n\nReviens poster un message pour retrouver ton statut actif.\n\n*La Compagnie n'oublie pas ses membres — mais elle a besoin de les voir.*\n— La Direction`)
-            .setFooter({ text: 'IWC • Système automatique' })
-          ] }).catch(() => {});
-        } catch {}
+        if (logsCh) await logsCh.send({ embeds: [new EmbedBuilder().setColor(0x555555).setTitle(`💤 Inactivité automatique — ${membre.name}`).setDescription(`**${membre.name}** est passé **inactif** après **${daysSince(membre.lastActivity)} jours** sans message.`).addFields({ name: '👤 Membre', value: `<@${userId}>`, inline: true }, { name: '📅 Dernière activité', value: fmtShort(membre.lastActivity), inline: true }, { name: '📋 Ancien statut', value: ancienStatut, inline: true }).setFooter({ text: `IWC • Inactivité auto • ${JOURS_INACTIF}j` })] }).catch(() => {});
+        try { const m = await guild.members.fetch(userId).catch(() => null); if (m) await m.send({ embeds: [new EmbedBuilder().setColor(0x555555).setTitle('💤 Statut — Iron Wolf Company').setDescription(`Tu as été marqué **inactif** suite à **${daysSince(membre.lastActivity)} jours** sans activité.\n\nReviens poster un message pour retrouver ton statut actif.\n\n*La Compagnie n'oublie pas ses membres — mais elle a besoin de les voir.*\n— La Direction`).setFooter({ text: 'IWC • Système automatique' })] }).catch(() => {}); } catch {}
       }
     }
     if (changed) saveDB(db);
@@ -228,32 +157,27 @@ async function checkInactivite(guild) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 3. GRADES — Tableau hiérarchique (sans doublon, sans pin inutile)
+// 3. GRADES — Tableau hiérarchique (sans doublon, sans pin)
 // ═══════════════════════════════════════════════════════════════
 
 async function updateHierarchieEmbed(guild) {
   try {
-    const gradeCh = getCh(guild, 'grade');
+    // FIX : chercher aussi 'hierarchie' car le salon peut s'appeler différemment
+    const gradeCh = getCh(guild, 'grade', 'hierarchie-iron-wolf', 'hierarchie-ombre');
     if (!gradeCh) return;
 
-    const db = loadDB();
+    const db      = loadDB();
     const membres = Object.values(db.members || {}).filter(m => m.status !== 'parti' && m.status !== 'visiteur');
 
     const grouper = (grades) => grades.map(g => {
-      const liste = membres.filter(m =>
-        m.rang === g.nom || m.rang?.toLowerCase().includes(g.nom.toLowerCase().split(' ')[0])
-      );
+      const liste = membres.filter(m => m.rang === g.nom || m.rang?.toLowerCase().includes(g.nom.toLowerCase().split(' ')[0]));
       return { ...g, membres: liste };
     }).filter(g => g.membres.length > 0);
 
     const buildSection = (grades) => {
       const grouped = grouper(grades);
       if (!grouped.length) return '*Aucun membre*';
-      return grouped.map(g =>
-        `${g.emoji} **${g.nom}**\n${g.membres.map(m =>
-          `┗ ${m.name}${m.status === 'absent' ? ' *(absent)*' : m.status === 'inactif' ? ' *(inactif)*' : ''}`
-        ).join('\n')}`
-      ).join('\n\n');
+      return grouped.map(g => `${g.emoji} **${g.nom}**\n${g.membres.map(m => `┗ ${m.name}${m.status === 'absent' ? ' *(absent)*' : m.status === 'inactif' ? ' *(inactif)*' : ''}`).join('\n')}`).join('\n\n');
     };
 
     const embed = new EmbedBuilder()
@@ -261,17 +185,9 @@ async function updateHierarchieEmbed(guild) {
       .setTitle('⚔️ IRON WOLF COMPANY — Tableau Hiérarchique')
       .setDescription('*Structure interne de la Compagnie. Mis à jour automatiquement.*')
       .addFields(
-        { name: '⚖️ ═══ PÔLE LÉGAL ═══',   value: buildSection(GRADES_LEGAL),   inline: false },
-        { name: '🔪 ═══ LA CONFRÉRIE ═══',  value: buildSection(GRADES_ILLEGAL), inline: false },
-        {
-          name: '📊 Effectifs',
-          value: [
-            `✅ Actifs : **${membres.filter(m => m.status === 'actif').length}**`,
-            `⚠️ Absents : **${membres.filter(m => m.status === 'absent').length}**`,
-            `💤 Inactifs : **${membres.filter(m => m.status === 'inactif').length}**`,
-          ].join(' · '),
-          inline: false,
-        }
+        { name: '⚖️ ═══ PÔLE LÉGAL ═══',  value: buildSection(GRADES_LEGAL),   inline: false },
+        { name: '🔪 ═══ LA CONFRÉRIE ═══', value: buildSection(GRADES_ILLEGAL), inline: false },
+        { name: '📊 Effectifs', value: [`✅ Actifs : **${membres.filter(m => m.status === 'actif').length}**`, `⚠️ Absents : **${membres.filter(m => m.status === 'absent').length}**`, `💤 Inactifs : **${membres.filter(m => m.status === 'inactif').length}**`].join(' · '), inline: false },
       )
       .setFooter({ text: `IWC • Hiérarchie • MàJ ${new Date().toLocaleString('fr-FR')}` });
 
@@ -280,253 +196,124 @@ async function updateHierarchieEmbed(guild) {
       new ButtonBuilder().setCustomId('btn_hierarchie_refresh').setLabel('🔄 Actualiser').setStyle(ButtonStyle.Secondary),
     );
 
-    // Upsert sans créer de doublon — PAS de pin
     await _upsertBotMessage(guild, gradeCh, 'hierarchieMsgId', { embeds: [embed], components: [row] });
   } catch (e) { console.log('❌ updateHierarchieEmbed error:', e.message); }
 }
 
 async function handleHierarchieCommand(interaction) {
   await interaction.deferReply({ ephemeral: false });
-  const db = loadDB();
-  const membres = Object.values(db.members || {}).filter(m => m.status !== 'parti' && m.status !== 'visiteur');
-
-  const buildSection = (grades) => grades.map(g => {
-    const liste = membres.filter(m => m.rang === g.nom || m.rang?.toLowerCase().includes(g.nom.toLowerCase().split(' ')[0]));
-    if (!liste.length) return null;
-    return `${g.emoji} **${g.nom}**\n${liste.map(m => {
-      const id = Object.entries(MEMBRES_DISCORD_MAP).find(([n]) => n === m.name)?.[1] || m.id;
-      return `┗ <@${id}>${m.status !== 'actif' ? ` *(${m.status})*` : ''}`;
-    }).join('\n')}`;
-  }).filter(Boolean).join('\n\n') || '*Aucun membre*';
-
-  const embed = new EmbedBuilder()
-    .setColor(0x8B1A1A)
-    .setTitle('⚔️ Hiérarchie — Iron Wolf Company')
-    .addFields(
-      { name: '⚖️ PÔLE LÉGAL',   value: buildSection(GRADES_LEGAL),   inline: false },
-      { name: '🔪 LA CONFRÉRIE', value: buildSection(GRADES_ILLEGAL),  inline: false },
-    )
-    .setFooter({ text: `IWC • ${new Date().toLocaleString('fr-FR')}` });
-
-  await interaction.editReply({ embeds: [embed] });
+  const db = loadDB(); const membres = Object.values(db.members || {}).filter(m => m.status !== 'parti' && m.status !== 'visiteur');
+  const buildSection = (grades) => grades.map(g => { const liste = membres.filter(m => m.rang === g.nom || m.rang?.toLowerCase().includes(g.nom.toLowerCase().split(' ')[0])); if (!liste.length) return null; return `${g.emoji} **${g.nom}**\n${liste.map(m => { const id = Object.entries(MEMBRES_DISCORD_MAP).find(([n]) => n === m.name)?.[1] || m.id; return `┗ <@${id}>${m.status !== 'actif' ? ` *(${m.status})*` : ''}`; }).join('\n')}`; }).filter(Boolean).join('\n\n') || '*Aucun membre*';
+  await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle('⚔️ Hiérarchie — Iron Wolf Company').addFields({ name: '⚖️ PÔLE LÉGAL', value: buildSection(GRADES_LEGAL), inline: false }, { name: '🔪 LA CONFRÉRIE', value: buildSection(GRADES_ILLEGAL), inline: false }).setFooter({ text: `IWC • ${new Date().toLocaleString('fr-FR')}` })] });
 }
 
 async function handleGradeSetCommand(interaction) {
-  if (!canManageGrades(interaction.member)) {
-    return interaction.reply({ content: '❌ Réservé au Concepteur et au Fléau.', ephemeral: true });
-  }
+  if (!canManageGrades(interaction.member)) return interaction.reply({ content: '❌ Réservé au Concepteur et au Fléau.', ephemeral: true });
   await _showGradePanel(interaction);
 }
 
 async function handleGradePanelButton(interaction) {
-  if (!canManageGrades(interaction.member)) {
-    return interaction.reply({ content: '❌ Réservé au Concepteur et au Fléau.', ephemeral: true });
-  }
+  if (!canManageGrades(interaction.member)) return interaction.reply({ content: '❌ Réservé au Concepteur et au Fléau.', ephemeral: true });
   await _showGradePanel(interaction);
 }
 
 async function _showGradePanel(interaction) {
-  const db = loadDB();
-  const membres = Object.values(db.members || {}).filter(m => m.status !== 'parti' && m.status !== 'visiteur');
+  const db = loadDB(); const membres = Object.values(db.members || {}).filter(m => m.status !== 'parti' && m.status !== 'visiteur');
   if (!membres.length) return interaction.reply({ content: '❌ Aucun membre dans la base.', ephemeral: true });
-
-  const options = membres.slice(0, 25).map(m => ({
-    label:       m.name,
-    value:       m.id || Object.entries(MEMBRES_DISCORD_MAP).find(([n]) => n === m.name)?.[1] || m.name,
-    description: `Rang : ${m.rang || '—'} · Statut : ${m.status}`,
-    emoji:       m.status === 'actif' ? '✅' : m.status === 'absent' ? '⚠️' : '💤',
-  }));
-
-  const memberSelect = new StringSelectMenuBuilder()
-    .setCustomId('grade_select_membre')
-    .setPlaceholder('Sélectionner un membre...')
-    .addOptions(options);
-
-  const embed = new EmbedBuilder()
-    .setColor(0x8B1A1A)
-    .setTitle('🎖️ Gestion des Grades — IWC')
-    .setDescription('**Étape 1/2** — Sélectionnez le membre.')
-    .addFields(
-      { name: '⚖️ Grades Légal',   value: GRADES_LEGAL.map(g => `${g.emoji} ${g.nom}`).join('\n'),   inline: true },
-      { name: '🔪 Grades Illégal', value: GRADES_ILLEGAL.map(g => `${g.emoji} ${g.nom}`).join('\n'), inline: true },
-    )
-    .setFooter({ text: 'IWC • Panneau de gestion' });
-
-  await interaction.reply({
-    embeds: [embed],
-    components: [new ActionRowBuilder().addComponents(memberSelect)],
-    ephemeral: true,
-  });
+  const options = membres.slice(0, 25).map(m => ({ label: m.name, value: m.id || Object.entries(MEMBRES_DISCORD_MAP).find(([n]) => n === m.name)?.[1] || m.name, description: `Rang : ${m.rang || '—'} · Statut : ${m.status}`, emoji: m.status === 'actif' ? '✅' : m.status === 'absent' ? '⚠️' : '💤' }));
+  await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle('🎖️ Gestion des Grades — IWC').setDescription('**Étape 1/2** — Sélectionnez le membre.').addFields({ name: '⚖️ Grades Légal', value: GRADES_LEGAL.map(g => `${g.emoji} ${g.nom}`).join('\n'), inline: true }, { name: '🔪 Grades Illégal', value: GRADES_ILLEGAL.map(g => `${g.emoji} ${g.nom}`).join('\n'), inline: true }).setFooter({ text: 'IWC • Panneau de gestion' })], components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('grade_select_membre').setPlaceholder('Sélectionner un membre...').addOptions(options))], ephemeral: true });
 }
 
 async function handleGradeMembreSelect(interaction) {
-  const userId = interaction.values[0];
-  const db = loadDB();
-  const membre = db.members[userId] || Object.values(db.members).find(m =>
-    Object.entries(MEMBRES_DISCORD_MAP).find(([n, id]) => id === userId && n === m.name)
-  );
-
-  const nomMembre  = membre?.name || userId;
-  const rangActuel = membre?.rang || '—';
-
+  const userId = interaction.values[0]; const db = loadDB();
+  const membre = db.members[userId] || Object.values(db.members).find(m => Object.entries(MEMBRES_DISCORD_MAP).find(([n, id]) => id === userId && n === m.name));
+  const nomMembre = membre?.name || userId; const rangActuel = membre?.rang || '—';
   const allGrades = [...GRADES_LEGAL, ...GRADES_ILLEGAL];
-  const gradeOptions = allGrades.map(g => ({
-    label:       g.nom,
-    value:       `${userId}||${g.nom}`,
-    description: GRADES_LEGAL.includes(g) ? '⚖️ Légal' : '🔪 Illégal',
-    emoji:       g.emoji,
-  }));
-
-  const gradeSelect = new StringSelectMenuBuilder()
-    .setCustomId('grade_select_grade')
-    .setPlaceholder(`Actuel : ${rangActuel} — Choisir le nouveau...`)
-    .addOptions(gradeOptions.slice(0, 25));
-
-  const embed = new EmbedBuilder()
-    .setColor(0x8B1A1A)
-    .setTitle(`🎖️ Attribution de grade — ${nomMembre}`)
-    .setDescription(`**Étape 2/2** — Sélectionnez le nouveau grade.\n\nGrade actuel : **${rangActuel}**`)
-    .setFooter({ text: 'IWC • Panneau de gestion' });
-
-  await interaction.update({
-    embeds: [embed],
-    components: [new ActionRowBuilder().addComponents(gradeSelect)],
-  });
+  await interaction.update({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle(`🎖️ Attribution de grade — ${nomMembre}`).setDescription(`**Étape 2/2** — Sélectionnez le nouveau grade.\n\nGrade actuel : **${rangActuel}**`).setFooter({ text: 'IWC • Panneau de gestion' })], components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('grade_select_grade').setPlaceholder(`Actuel : ${rangActuel} — Choisir le nouveau...`).addOptions(allGrades.map(g => ({ label: g.nom, value: `${userId}||${g.nom}`, description: GRADES_LEGAL.includes(g) ? '⚖️ Légal' : '🔪 Illégal', emoji: g.emoji })).slice(0, 25)))] });
 }
 
 async function handleGradeGradeSelect(interaction) {
   const [userId, nouveauGrade] = interaction.values[0].split('||');
-  const db = loadDB();
-  const membre     = db.members[userId];
-  const nomMembre  = membre?.name || userId;
-  const ancienGrade = membre?.rang || '—';
-  const gradeInfo  = [...GRADES_LEGAL, ...GRADES_ILLEGAL].find(g => g.nom === nouveauGrade);
+  const db = loadDB(); const membre = db.members[userId]; const nomMembre = membre?.name || userId; const ancienGrade = membre?.rang || '—';
+  const gradeInfo = [...GRADES_LEGAL, ...GRADES_ILLEGAL].find(g => g.nom === nouveauGrade);
 
-  if (db.members[userId]) {
-    db.members[userId].rang = nouveauGrade;
-    db.members[userId].pole = GRADES_ILLEGAL.some(g => g.nom === nouveauGrade) ? 'illegal' : 'legal';
-    saveDB(db);
-  }
+  if (db.members[userId]) { db.members[userId].rang = nouveauGrade; db.members[userId].pole = GRADES_ILLEGAL.some(g => g.nom === nouveauGrade) ? 'illegal' : 'legal'; saveDB(db); }
 
-  // Mise à jour rôle Discord
   try {
     const guildMember = await interaction.guild.members.fetch(userId).catch(() => null);
     if (guildMember && gradeInfo?.roleKey && ROLES[gradeInfo.roleKey]) {
       const allGradeRoleIds = [...GRADES_LEGAL, ...GRADES_ILLEGAL].map(g => ROLES[g.roleKey]).filter(Boolean);
-      for (const roleId of allGradeRoleIds) {
-        const role = interaction.guild.roles.cache.get(roleId);
-        if (role && guildMember.roles.cache.has(roleId)) await guildMember.roles.remove(role).catch(() => {});
-      }
+      for (const roleId of allGradeRoleIds) { const role = interaction.guild.roles.cache.get(roleId); if (role && guildMember.roles.cache.has(roleId)) await guildMember.roles.remove(role).catch(() => {}); }
       const newRole = interaction.guild.roles.cache.get(ROLES[gradeInfo.roleKey]);
       if (newRole) await guildMember.roles.add(newRole).catch(() => {});
     }
-
     if (guildMember) {
-      const typeChangement = ancienGrade === '—' ? 'Attribution'
+      const isIlleg  = GRADES_ILLEGAL.some(g => g.nom === nouveauGrade);
+      const typeC    = ancienGrade === '—' ? 'Attribution'
         : (GRADES_LEGAL.findIndex(g => g.nom === nouveauGrade) < GRADES_LEGAL.findIndex(g => g.nom === ancienGrade) ||
            GRADES_ILLEGAL.findIndex(g => g.nom === nouveauGrade) < GRADES_ILLEGAL.findIndex(g => g.nom === ancienGrade))
         ? 'Promotion' : 'Rétrogradation';
 
+      const orgNom    = isIlleg ? 'La Confrérie'              : 'Iron Wolf Company';
+      const orgFooter = isIlleg ? 'La Confrérie • Confidentiel' : 'Iron Wolf Company • Légal';
+      const typeEmoji = typeC === 'Promotion' ? '⬆️' : typeC === 'Attribution' ? '🎖️' : '⬇️';
+      const typeColor = typeC === 'Promotion' ? 0x57F287 : typeC === 'Attribution' ? 0x5865F2 : 0xED4245;
+      const sousTitre = typeC === 'Rétrogradation'
+        ? '*La Direction a pris cette décision.*'
+        : typeC === 'Promotion'
+        ? (isIlleg ? '*Tu as prouvé ta valeur dans l\'ombre.*' : '*La Compagnie reconnaît ta valeur.*')
+        : (isIlleg ? '*Tu entres dans les rangs de la Confrérie.*' : '*La Direction t\'a attribué ce grade.*');
+
+      const desc = [
+        `Ton grade au sein de **${orgNom}** a été mis à jour.`,
+        '',
+        ancienGrade !== '—' ? `**Ancien rang :** ${ancienGrade}` : null,
+        `**Nouveau rang :** ${nouveauGrade}`,
+        '',
+        sousTitre,
+        '— La Direction',
+      ].filter(l => l !== null).join('\n');
+
       await guildMember.send({ embeds: [new EmbedBuilder()
-        .setColor(typeChangement === 'Promotion' ? 0x57F287 : typeChangement === 'Attribution' ? 0x5865F2 : 0xED4245)
-        .setTitle(`${typeChangement === 'Promotion' ? '⬆️' : typeChangement === 'Attribution' ? '🎖️' : '⬇️'} ${typeChangement} — Iron Wolf Company`)
-        .setDescription(`Ton grade a été mis à jour.\n\n${ancienGrade !== '—' ? `**Ancien :** ${ancienGrade}\n` : ''}**Nouveau :** ${nouveauGrade}\n\n— La Direction`)
-        .setFooter({ text: 'IWC • Système automatique' })
+        .setColor(typeColor)
+        .setTitle(`${typeEmoji} ${typeC} — ${orgNom}`)
+        .setDescription(desc)
+        .setFooter({ text: orgFooter })
       ] }).catch(() => {});
     }
   } catch (e) { console.log('❌ Grade Discord role error:', e.message); }
 
-  await notionExtra.logPromotionNotion?.(interaction.guild, {
-    userId, username: nomMembre, nomPerso: nomMembre,
-    ancienRang: ancienGrade, nouveauRang: nouveauGrade,
-    type: 'promotion', validePar: interaction.user.username,
-  });
+  await notionExtra.logPromotionNotion?.(interaction.guild, { userId, username: nomMembre, nomPerso: nomMembre, ancienRang: ancienGrade, nouveauRang: nouveauGrade, type: 'promotion', validePar: interaction.user.username });
 
-  let notionModules = {};
-  try { notionModules = require('./notion-modules-v2'); } catch {}
-  await notionModules.ajouterJournalIC?.(interaction.guild, {
-    type: 'promotion', emoji: '🎖️',
-    titre: `Grade attribué — ${nomMembre}`,
-    description: `${ancienGrade} → **${nouveauGrade}** · Décidé par ${interaction.user.username}`,
-    auteur: interaction.user.username,
-  });
+  let notionModules = {}; try { notionModules = require('./notion-modules-v2'); } catch {}
+  await notionModules.ajouterJournalIC?.(interaction.guild, { type: 'promotion', emoji: '🎖️', titre: `Grade attribué — ${nomMembre}`, description: `${ancienGrade} → **${nouveauGrade}** · Décidé par ${interaction.user.username}`, auteur: interaction.user.username });
 
   const logsCh = getCh(interaction.guild, 'logs');
-  if (logsCh) {
-    await logsCh.send({ embeds: [new EmbedBuilder()
-      .setColor(gradeInfo?.couleur || 0x8B1A1A)
-      .setTitle(`🎖️ Grade modifié — ${nomMembre}`)
-      .addFields(
-        { name: '👤 Membre',     value: `<@${userId}>`,            inline: true },
-        { name: '📉 Ancien',     value: ancienGrade,               inline: true },
-        { name: '📈 Nouveau',    value: nouveauGrade,              inline: true },
-        { name: '✅ Décidé par', value: interaction.user.username, inline: true },
-      )
-      .setFooter({ text: `IWC • ${fmtShort(new Date())}` })
-    ] }).catch(() => {});
-  }
+  if (logsCh) await logsCh.send({ embeds: [new EmbedBuilder().setColor(gradeInfo?.couleur || 0x8B1A1A).setTitle(`🎖️ Grade modifié — ${nomMembre}`).addFields({ name: '👤 Membre', value: `<@${userId}>`, inline: true }, { name: '📉 Ancien', value: ancienGrade, inline: true }, { name: '📈 Nouveau', value: nouveauGrade, inline: true }, { name: '✅ Décidé par', value: interaction.user.username, inline: true }).setFooter({ text: `IWC • ${fmtShort(new Date())}` })] }).catch(() => {});
 
-  const embed = new EmbedBuilder()
-    .setColor(gradeInfo?.couleur || 0x57F287)
-    .setTitle(`✅ Grade appliqué — ${nomMembre}`)
-    .addFields(
-      { name: '📉 Ancien grade',  value: ancienGrade,               inline: true },
-      { name: '📈 Nouveau grade', value: nouveauGrade,              inline: true },
-      { name: '✅ Appliqué par',  value: interaction.user.username, inline: true },
-    )
-    .setDescription('Discord, Notion et le Journal IC ont été mis à jour.')
-    .setFooter({ text: 'IWC • Panneau de gestion' });
+  await interaction.update({ embeds: [new EmbedBuilder().setColor(gradeInfo?.couleur || 0x57F287).setTitle(`✅ Grade appliqué — ${nomMembre}`).addFields({ name: '📉 Ancien grade', value: ancienGrade, inline: true }, { name: '📈 Nouveau grade', value: nouveauGrade, inline: true }, { name: '✅ Appliqué par', value: interaction.user.username, inline: true }).setDescription('Discord, Notion et le Journal IC ont été mis à jour.').setFooter({ text: 'IWC • Panneau de gestion' })], components: [] });
 
-  await interaction.update({ embeds: [embed], components: [] });
-
-  // Supprime la réponse éphémère après 5s pour garder le salon propre
   setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
-
-  // Rafraîchit le tableau hiérarchique sans créer de doublon
   await updateHierarchieEmbed(interaction.guild);
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 4. AFFAIRES — Panel sans doublon + Détails propres
+// 4. AFFAIRES — Panel sans doublon + Détails propres (FIX defer)
 // ═══════════════════════════════════════════════════════════════
 
 async function setupAffairesPanel(guild) {
   try {
     const affairesCh = getCh(guild, 'affaires');
     if (!affairesCh) return;
-
-    const embed = new EmbedBuilder()
-      .setColor(0x8B1A1A)
-      .setTitle('⚔️ AFFAIRES — Direction Iron Wolf Company')
-      .setDescription([
-        '*Ce salon est réservé aux décisions stratégiques de la Direction.*',
-        '',
-        '**Fonctionnement :**',
-        '→ Soumettre une proposition via le bouton ci-dessous',
-        '→ La Direction vote ✅ / ❌ sur chaque proposition',
-        '→ Décision validée après **2 votes ✅** de membres Direction',
-        '→ Résumé hebdomadaire automatique chaque lundi',
-        '',
-        '*Confidentialité absolue. Ce salon n\'existe pas.*',
-      ].join('\n'))
-      .setFooter({ text: 'IWC • Direction — Affaires internes' });
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('btn_affaire_nouvelle').setLabel('📋 Nouvelle proposition').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('btn_affaires_resume').setLabel('📊 Résumé des décisions').setStyle(ButtonStyle.Secondary),
-    );
-
-    // Upsert sans doublon, pas de pin
+    const embed = new EmbedBuilder().setColor(0x8B1A1A).setTitle('⚔️ AFFAIRES — Direction Iron Wolf Company').setDescription(['*Ce salon est réservé aux décisions stratégiques de la Direction.*', '', '**Fonctionnement :**', '→ Soumettre une proposition via le bouton ci-dessous', '→ La Direction vote ✅ / ❌ sur chaque proposition', '→ Décision validée après **2 votes ✅** de membres Direction', '→ Résumé hebdomadaire automatique chaque lundi', '', '*Confidentialité absolue. Ce salon n\'existe pas.*'].join('\n')).setFooter({ text: 'IWC • Direction — Affaires internes' });
+    const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_affaire_nouvelle').setLabel('📋 Nouvelle proposition').setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId('btn_affaires_resume').setLabel('📊 Résumé des décisions').setStyle(ButtonStyle.Secondary));
     await _upsertBotMessage(guild, affairesCh, 'affairesPanelMsgId', { embeds: [embed], components: [row] });
     console.log('✅ Panel affaires configuré');
   } catch (e) { console.log('❌ setupAffairesPanel error:', e.message); }
 }
 
 async function handleAffaireNouvelleButton(interaction) {
-  if (!isDirection(interaction.member)) {
-    return interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
-  }
-
+  if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
   const modal = new ModalBuilder().setCustomId('modal_affaire').setTitle('📋 Nouvelle Affaire — Direction');
   modal.addComponents(
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('titre').setLabel('Titre de la proposition').setStyle(TextInputStyle.Short).setPlaceholder('Ex: Recrutement Officier Terrain').setRequired(true)),
@@ -539,68 +326,36 @@ async function handleAffaireNouvelleButton(interaction) {
 
 async function handleAffaireModal(interaction) {
   await interaction.deferReply({ ephemeral: true });
-
-  const titre       = interaction.fields.getTextInputValue('titre');
-  const description = interaction.fields.getTextInputValue('description');
-  const categorie   = interaction.fields.getTextInputValue('categorie');
-  const urgenceRaw  = (interaction.fields.getTextInputValue('urgence') || 'normale').toLowerCase();
-  const urgence     = urgenceRaw.includes('crit') ? 'critique' : urgenceRaw.includes('haut') ? 'haute' : 'normale';
+  const titre = interaction.fields.getTextInputValue('titre'); const description = interaction.fields.getTextInputValue('description'); const categorie = interaction.fields.getTextInputValue('categorie');
+  const urgenceRaw = (interaction.fields.getTextInputValue('urgence') || 'normale').toLowerCase();
+  const urgence = urgenceRaw.includes('crit') ? 'critique' : urgenceRaw.includes('haut') ? 'haute' : 'normale';
   const urgenceEmoji = urgence === 'critique' ? '🔴' : urgence === 'haute' ? '🟠' : '🟡';
   const urgenceCouleur = urgence === 'critique' ? 0xED4245 : urgence === 'haute' ? 0xFF6B35 : 0xFFA500;
-
-  const db = loadDB();
-  if (!db.affaires) db.affaires = [];
-
+  const db = loadDB(); if (!db.affaires) db.affaires = [];
   const affaireId = `AFF-${Date.now().toString().slice(-5)}`;
-  const affaire = {
-    id: affaireId, titre, description, categorie, urgence,
-    soumisePar: interaction.user.username, soumiseParId: interaction.user.id,
-    status: 'en_vote', votesOui: [], votesNon: [],
-    createdAt: new Date().toISOString(),
-  };
-  db.affaires.push(affaire);
-  saveDB(db);
-
+  const affaire = { id: affaireId, titre, description, categorie, urgence, soumisePar: interaction.user.username, soumiseParId: interaction.user.id, status: 'en_vote', votesOui: [], votesNon: [], createdAt: new Date().toISOString() };
+  db.affaires.push(affaire); saveDB(db);
   const affairesCh = getCh(interaction.guild, 'affaires');
   if (affairesCh) {
-    const embed = new EmbedBuilder()
-      .setColor(urgenceCouleur)
-      .setTitle(`${urgenceEmoji} AFFAIRE — ${titre}`)
-      .setDescription(`> *${description}*`)
-      .addFields(
-        { name: '🆔 Référence',  value: `\`${affaireId}\``,          inline: true },
-        { name: '📁 Catégorie',  value: categorie,                    inline: true },
-        { name: '🚨 Urgence',    value: `${urgenceEmoji} ${urgence}`, inline: true },
-        { name: '👤 Soumis par', value: interaction.user.username,    inline: true },
-        { name: '📅 Date',       value: fmtShort(new Date()),         inline: true },
-        { name: '📊 Votes',      value: '✅ 0 / ❌ 0 — En attente de 2 votes ✅', inline: false },
-      )
-      .setFooter({ text: 'IWC • Affaires Direction — Confidentiel' });
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`affaire_oui_${affaireId}`).setLabel('✅ Approuver').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`affaire_non_${affaireId}`).setLabel('❌ Rejeter').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId(`affaire_detail_${affaireId}`).setLabel('🔍 Détails').setStyle(ButtonStyle.Secondary),
-    );
-
+    const embed = new EmbedBuilder().setColor(urgenceCouleur).setTitle(`${urgenceEmoji} AFFAIRE — ${titre}`).setDescription(`> *${description}*`).addFields({ name: '🆔 Référence', value: `\`${affaireId}\``, inline: true }, { name: '📁 Catégorie', value: categorie, inline: true }, { name: '🚨 Urgence', value: `${urgenceEmoji} ${urgence}`, inline: true }, { name: '👤 Soumis par', value: interaction.user.username, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: '📊 Votes', value: '✅ 0 / ❌ 0 — En attente de 2 votes ✅', inline: false }).setFooter({ text: 'IWC • Affaires Direction — Confidentiel' });
+    const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`affaire_oui_${affaireId}`).setLabel('✅ Approuver').setStyle(ButtonStyle.Success), new ButtonBuilder().setCustomId(`affaire_non_${affaireId}`).setLabel('❌ Rejeter').setStyle(ButtonStyle.Danger), new ButtonBuilder().setCustomId(`affaire_detail_${affaireId}`).setLabel('🔍 Détails').setStyle(ButtonStyle.Secondary));
     const msg = await affairesCh.send({ embeds: [embed], components: [row] });
-    affaire.msgId = msg.id;
-    saveDB(db);
+    affaire.msgId = msg.id; saveDB(db);
   }
-
   await interaction.editReply({ content: `✅ Affaire **${affaireId}** soumise.` });
   setTimeout(() => interaction.deleteReply().catch(() => {}), 3000);
 }
 
 /**
- * Bouton Détails — embed propre et lisible
+ * FIX DOUBLON : utiliser reply({ ephemeral: true }) directement au lieu de deferReply + editReply
+ * deferReply crée un message visible puis editReply le modifie → doublon visible
  */
 async function handleAffaireDetail(interaction) {
-  await interaction.deferReply({ ephemeral: true });
   const affaireId = interaction.customId.replace('affaire_detail_', '');
   const db = loadDB();
   const affaire = (db.affaires || []).find(a => a.id === affaireId);
-  if (!affaire) return interaction.editReply({ content: '❌ Affaire introuvable.' });
+
+  if (!affaire) return interaction.reply({ content: '❌ Affaire introuvable.', ephemeral: true });
 
   const urgenceEmoji = affaire.urgence === 'critique' ? '🔴' : affaire.urgence === 'haute' ? '🟠' : '🟡';
   const statusEmoji  = affaire.status === 'approuvee' ? '✅' : affaire.status === 'rejetee' ? '❌' : '⏳';
@@ -610,136 +365,73 @@ async function handleAffaireDetail(interaction) {
   const votantsOui = (affaire.votesOui || []).map(id => `<@${id}>`).join(', ') || '*Aucun*';
   const votantsNon = (affaire.votesNon || []).map(id => `<@${id}>`).join(', ') || '*Aucun*';
 
-  const embed = new EmbedBuilder()
-    .setColor(statusColor)
-    .setTitle(`📋 ${affaire.titre}`)
-    .setDescription(`> *${affaire.description}*`)
-    .addFields(
-      { name: '🆔 Référence',   value: `\`${affaire.id}\``,                     inline: true },
-      { name: '📁 Catégorie',   value: affaire.categorie,                        inline: true },
-      { name: '🚨 Urgence',     value: `${urgenceEmoji} ${affaire.urgence}`,     inline: true },
-      { name: '📊 Statut',      value: `${statusEmoji} ${statusLabel}`,          inline: true },
-      { name: '👤 Soumis par',  value: affaire.soumisePar,                       inline: true },
-      { name: '📅 Date',        value: fmtShort(affaire.createdAt),              inline: true },
-      { name: `✅ Pour (${(affaire.votesOui||[]).length})`,  value: votantsOui,  inline: true },
-      { name: `❌ Contre (${(affaire.votesNon||[]).length})`, value: votantsNon, inline: true },
-    )
-    .setFooter({ text: 'IWC • Affaires Direction — Confidentiel' });
-
-  await interaction.editReply({ embeds: [embed] });
+  await interaction.reply({
+    ephemeral: true,
+    embeds: [new EmbedBuilder()
+      .setColor(statusColor)
+      .setTitle(`📋 ${affaire.titre}`)
+      .setDescription(`> *${affaire.description}*`)
+      .addFields(
+        { name: '🆔 Référence',   value: `\`${affaire.id}\``,                 inline: true },
+        { name: '📁 Catégorie',   value: affaire.categorie,                    inline: true },
+        { name: '🚨 Urgence',     value: `${urgenceEmoji} ${affaire.urgence}`, inline: true },
+        { name: '📊 Statut',      value: `${statusEmoji} ${statusLabel}`,      inline: true },
+        { name: '👤 Soumis par',  value: affaire.soumisePar,                   inline: true },
+        { name: '📅 Date',        value: fmtShort(affaire.createdAt),          inline: true },
+        { name: `✅ Pour (${(affaire.votesOui||[]).length})`,  value: votantsOui, inline: true },
+        { name: `❌ Contre (${(affaire.votesNon||[]).length})`, value: votantsNon, inline: true },
+      )
+      .setFooter({ text: 'IWC • Affaires Direction — Confidentiel' })
+    ],
+  });
 }
 
 async function handleAffaireVote(interaction, vote) {
-  if (!isDirection(interaction.member)) {
-    return interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
-  }
-
+  if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
   const affaireId = interaction.customId.replace(vote === 'oui' ? 'affaire_oui_' : 'affaire_non_', '');
-  const db = loadDB();
-  const affaire = (db.affaires || []).find(a => a.id === affaireId);
+  const db = loadDB(); const affaire = (db.affaires || []).find(a => a.id === affaireId);
   if (!affaire) return interaction.reply({ content: '❌ Affaire introuvable.', ephemeral: true });
   if (affaire.status !== 'en_vote') return interaction.reply({ content: '❌ Cette affaire est déjà clôturée.', ephemeral: true });
 
   affaire.votesOui = (affaire.votesOui || []).filter(id => id !== interaction.user.id);
   affaire.votesNon = (affaire.votesNon || []).filter(id => id !== interaction.user.id);
-  if (vote === 'oui') affaire.votesOui.push(interaction.user.id);
-  else                affaire.votesNon.push(interaction.user.id);
+  if (vote === 'oui') affaire.votesOui.push(interaction.user.id); else affaire.votesNon.push(interaction.user.id);
 
-  const oui = affaire.votesOui.length;
-  const non = affaire.votesNon.length;
-  const VOTES_REQUIS = 2;
+  const oui = affaire.votesOui.length; const non = affaire.votesNon.length; const VOTES_REQUIS = 2;
+  let statusText = `✅ ${oui} / ❌ ${non} — Il faut **${VOTES_REQUIS} ✅** pour valider`;
+  let decisionPrise = false; let couleur = 0xFFA500;
 
-  let statusText  = `✅ ${oui} / ❌ ${non} — Il faut **${VOTES_REQUIS} ✅** pour valider`;
-  let decisionPrise = false;
-  let couleur = 0xFFA500;
-
-  if (oui >= VOTES_REQUIS) {
-    affaire.status = 'approuvee'; affaire.decideeAt = new Date().toISOString();
-    statusText = `✅ **APPROUVÉE** — ${oui} votes pour`;
-    couleur = 0x57F287; decisionPrise = true;
-  } else if (non >= VOTES_REQUIS) {
-    affaire.status = 'rejetee'; affaire.decideeAt = new Date().toISOString();
-    statusText = `❌ **REJETÉE** — ${non} votes contre`;
-    couleur = 0xED4245; decisionPrise = true;
-  }
+  if (oui >= VOTES_REQUIS) { affaire.status = 'approuvee'; affaire.decideeAt = new Date().toISOString(); statusText = `✅ **APPROUVÉE** — ${oui} votes pour`; couleur = 0x57F287; decisionPrise = true; }
+  else if (non >= VOTES_REQUIS) { affaire.status = 'rejetee'; affaire.decideeAt = new Date().toISOString(); statusText = `❌ **REJETÉE** — ${non} votes contre`; couleur = 0xED4245; decisionPrise = true; }
   saveDB(db);
 
-  const embed = EmbedBuilder.from(interaction.message.embeds[0])
-    .setColor(couleur)
-    .spliceFields(5, 1, { name: '📊 Votes', value: statusText, inline: false });
-
+  const embed = EmbedBuilder.from(interaction.message.embeds[0]).setColor(couleur).spliceFields(5, 1, { name: '📊 Votes', value: statusText, inline: false });
   await interaction.update({ embeds: [embed], components: decisionPrise ? [] : interaction.message.components });
 
   if (decisionPrise) {
-    await interaction.followUp({
-      content: `${affaire.status === 'approuvee' ? '✅' : '❌'} L'affaire **${affaireId}** a été **${affaire.status === 'approuvee' ? 'APPROUVÉE' : 'REJETÉE'}**.`,
-      ephemeral: false,
-    });
+    await interaction.followUp({ content: `${affaire.status === 'approuvee' ? '✅' : '❌'} L'affaire **${affaireId}** a été **${affaire.status === 'approuvee' ? 'APPROUVÉE' : 'REJETÉE'}**.`, ephemeral: false });
     const logsCh = getCh(interaction.guild, 'logs');
-    if (logsCh) {
-      await logsCh.send({ embeds: [new EmbedBuilder()
-        .setColor(couleur)
-        .setTitle(`${affaire.status === 'approuvee' ? '✅' : '❌'} Affaire ${affaire.status === 'approuvee' ? 'approuvée' : 'rejetée'} — ${affaire.titre}`)
-        .addFields(
-          { name: '🆔 Référence', value: `\`${affaireId}\``,      inline: true },
-          { name: '📁 Catégorie', value: affaire.categorie,       inline: true },
-          { name: '📊 Score',     value: `✅ ${oui} / ❌ ${non}`, inline: true },
-        )
-        .setFooter({ text: `IWC • Affaires Direction • ${fmtShort(new Date())}` })
-      ] }).catch(() => {});
-    }
+    if (logsCh) await logsCh.send({ embeds: [new EmbedBuilder().setColor(couleur).setTitle(`${affaire.status === 'approuvee' ? '✅' : '❌'} Affaire ${affaire.status === 'approuvee' ? 'approuvée' : 'rejetée'} — ${affaire.titre}`).addFields({ name: '🆔 Référence', value: `\`${affaireId}\``, inline: true }, { name: '📁 Catégorie', value: affaire.categorie, inline: true }, { name: '📊 Score', value: `✅ ${oui} / ❌ ${non}`, inline: true }).setFooter({ text: `IWC • Affaires Direction • ${fmtShort(new Date())}` })] }).catch(() => {});
   }
 }
 
 async function postResumeAffaires(guild) {
   try {
-    const db = loadDB();
-    const affairesCh = getCh(guild, 'affaires');
-    if (!affairesCh) return;
-
+    const db = loadDB(); const affairesCh = getCh(guild, 'affaires'); if (!affairesCh) return;
     const semaineDerniere = Date.now() - 7 * 86400000;
-    const affaires  = (db.affaires || []).filter(a => new Date(a.createdAt).getTime() >= semaineDerniere);
+    const affaires = (db.affaires || []).filter(a => new Date(a.createdAt).getTime() >= semaineDerniere);
     if (!affaires.length) return;
-
-    const approuvees = affaires.filter(a => a.status === 'approuvee');
-    const rejetees   = affaires.filter(a => a.status === 'rejetee');
-    const enVote     = affaires.filter(a => a.status === 'en_vote');
-
-    const embed = new EmbedBuilder()
-      .setColor(0x8B1A1A)
-      .setTitle('📊 Résumé hebdomadaire — Affaires Direction')
-      .setDescription(`*Semaine du ${fmtShort(new Date(semaineDerniere))} au ${fmtShort(new Date())}*`)
-      .addFields(
-        { name: `✅ APPROUVÉES (${approuvees.length})`, value: approuvees.length > 0 ? approuvees.map(a => `→ \`${a.id}\` **${a.titre}** — ${a.categorie}`).join('\n') : '*Aucune*', inline: false },
-        { name: `❌ REJETÉES (${rejetees.length})`,     value: rejetees.length > 0   ? rejetees.map(a => `→ \`${a.id}\` **${a.titre}**`).join('\n')                  : '*Aucune*', inline: false },
-        { name: `⏳ EN ATTENTE (${enVote.length})`,     value: enVote.length > 0     ? enVote.map(a => `→ \`${a.id}\` **${a.titre}** — ✅ ${(a.votesOui||[]).length} / ❌ ${(a.votesNon||[]).length}`).join('\n') : '*Aucune*', inline: false },
-      )
-      .setFooter({ text: 'IWC • Résumé automatique hebdomadaire' })
-      .setTimestamp();
-
-    await affairesCh.send({ embeds: [embed] });
+    const approuvees = affaires.filter(a => a.status === 'approuvee'); const rejetees = affaires.filter(a => a.status === 'rejetee'); const enVote = affaires.filter(a => a.status === 'en_vote');
+    await affairesCh.send({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle('📊 Résumé hebdomadaire — Affaires Direction').setDescription(`*Semaine du ${fmtShort(new Date(semaineDerniere))} au ${fmtShort(new Date())}*`).addFields({ name: `✅ APPROUVÉES (${approuvees.length})`, value: approuvees.length > 0 ? approuvees.map(a => `→ \`${a.id}\` **${a.titre}** — ${a.categorie}`).join('\n') : '*Aucune*', inline: false }, { name: `❌ REJETÉES (${rejetees.length})`, value: rejetees.length > 0 ? rejetees.map(a => `→ \`${a.id}\` **${a.titre}**`).join('\n') : '*Aucune*', inline: false }, { name: `⏳ EN ATTENTE (${enVote.length})`, value: enVote.length > 0 ? enVote.map(a => `→ \`${a.id}\` **${a.titre}** — ✅ ${(a.votesOui||[]).length} / ❌ ${(a.votesNon||[]).length}`).join('\n') : '*Aucune*', inline: false }).setFooter({ text: 'IWC • Résumé automatique hebdomadaire' }).setTimestamp()] });
   } catch (e) { console.log('❌ postResumeAffaires error:', e.message); }
 }
 
 async function handleAffairesResumeButton(interaction) {
   if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
   await interaction.deferReply({ ephemeral: true });
-  const db = loadDB();
-  const affaires   = db.affaires || [];
-  const approuvees = affaires.filter(a => a.status === 'approuvee').slice(-10);
-  const rejetees   = affaires.filter(a => a.status === 'rejetee').slice(-5);
-  const enVote     = affaires.filter(a => a.status === 'en_vote');
-
-  await interaction.editReply({ embeds: [new EmbedBuilder()
-    .setColor(0x8B1A1A)
-    .setTitle('📊 Décisions de la Direction — IWC')
-    .addFields(
-      { name: `✅ Dernières approuvées (${approuvees.length})`, value: approuvees.length > 0 ? approuvees.map(a => `→ \`${a.id}\` **${a.titre}**`).join('\n') : '*Aucune*', inline: false },
-      { name: `❌ Dernières rejetées (${rejetees.length})`,     value: rejetees.length > 0   ? rejetees.map(a => `→ \`${a.id}\` **${a.titre}**`).join('\n')   : '*Aucune*', inline: false },
-      { name: `⏳ En attente (${enVote.length})`,              value: enVote.length > 0      ? enVote.map(a => `→ \`${a.id}\` **${a.titre}** — ✅ ${(a.votesOui||[]).length}`).join('\n') : '*Aucune*', inline: false },
-    )
-    .setFooter({ text: `IWC • ${new Date().toLocaleString('fr-FR')}` })
-  ] });
+  const db = loadDB(); const affaires = db.affaires || [];
+  const approuvees = affaires.filter(a => a.status === 'approuvee').slice(-10); const rejetees = affaires.filter(a => a.status === 'rejetee').slice(-5); const enVote = affaires.filter(a => a.status === 'en_vote');
+  await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle('📊 Décisions de la Direction — IWC').addFields({ name: `✅ Dernières approuvées (${approuvees.length})`, value: approuvees.length > 0 ? approuvees.map(a => `→ \`${a.id}\` **${a.titre}**`).join('\n') : '*Aucune*', inline: false }, { name: `❌ Dernières rejetées (${rejetees.length})`, value: rejetees.length > 0 ? rejetees.map(a => `→ \`${a.id}\` **${a.titre}**`).join('\n') : '*Aucune*', inline: false }, { name: `⏳ En attente (${enVote.length})`, value: enVote.length > 0 ? enVote.map(a => `→ \`${a.id}\` **${a.titre}** — ✅ ${(a.votesOui||[]).length}`).join('\n') : '*Aucune*', inline: false }).setFooter({ text: `IWC • ${new Date().toLocaleString('fr-FR')}` })] });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -750,37 +442,9 @@ const NOTION_INFOS_DB = process.env.NOTION_INFOS_DB || null;
 
 async function setupInformateursPanel(guild) {
   try {
-    const infosCh = getCh(guild, 'informateurs');
-    if (!infosCh) return;
-
-    const embed = new EmbedBuilder()
-      .setColor(0x2C2F33)
-      .setTitle('🕵️ INFORMATEURS — Réseau de Renseignement')
-      .setDescription([
-        '*Ce canal est réservé aux informations collectées sur le terrain.*',
-        '*Discrétion absolue. Ce qui est posté ici ne sort pas de ces murs.*',
-        '',
-        '**Deux façons de soumettre un rapport :**',
-        '→ Via le bouton **📋 Soumettre un rapport** ci-dessous',
-        '→ Via le format texte directement dans le salon',
-        '',
-        '**Format texte :**',
-        '```',
-        'SOURCE : ',
-        'CIBLE / LIEU : ',
-        'INFORMATION : ',
-        'FIABILITÉ : Confirmée / Non confirmée',
-        'DATE : ',
-        '```',
-      ].join('\n'))
-      .setFooter({ text: 'IWC • Réseau d\'informateurs — Confidentiel' });
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('btn_informateur_rapport').setLabel('📋 Soumettre un rapport').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('btn_informateur_historique').setLabel('📂 Historique').setStyle(ButtonStyle.Secondary),
-    );
-
-    // Upsert sans doublon, pas de pin
+    const infosCh = getCh(guild, 'informateurs'); if (!infosCh) return;
+    const embed = new EmbedBuilder().setColor(0x2C2F33).setTitle('🕵️ INFORMATEURS — Réseau de Renseignement').setDescription(['*Ce canal est réservé aux informations collectées sur le terrain.*', '*Discrétion absolue. Ce qui est posté ici ne sort pas de ces murs.*', '', '**Deux façons de soumettre un rapport :**', '→ Via le bouton **📋 Soumettre un rapport** ci-dessous', '→ Via le format texte directement dans le salon', '', '**Format texte :**', '```', 'SOURCE : ', 'CIBLE / LIEU : ', 'INFORMATION : ', 'FIABILITÉ : Confirmée / Non confirmée', 'DATE : ', '```'].join('\n')).setFooter({ text: 'IWC • Réseau d\'informateurs — Confidentiel' });
+    const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_informateur_rapport').setLabel('📋 Soumettre un rapport').setStyle(ButtonStyle.Danger), new ButtonBuilder().setCustomId('btn_informateur_historique').setLabel('📂 Historique').setStyle(ButtonStyle.Secondary));
     await _upsertBotMessage(guild, infosCh, 'informeursPanelMsgId', { embeds: [embed], components: [row] });
     console.log('✅ Panel informateurs configuré');
   } catch (e) { console.log('❌ setupInformateursPanel error:', e.message); }
@@ -799,182 +463,65 @@ async function handleInformateurRapportButton(interaction) {
 
 async function handleInformateurModal(interaction) {
   await interaction.deferReply({ ephemeral: true });
-
-  const source       = interaction.fields.getTextInputValue('source');
-  const cible        = interaction.fields.getTextInputValue('cible');
-  const information  = interaction.fields.getTextInputValue('information');
-  const fiabiliteRaw = interaction.fields.getTextInputValue('fiabilite').toLowerCase();
-  const estConfirmee = fiabiliteRaw.includes('confirm') && !fiabiliteRaw.includes('non');
-  const fiabilite    = estConfirmee ? 'Confirmée' : 'Non confirmée';
-
-  const db = loadDB();
-  if (!db.informateurs) db.informateurs = [];
-
-  const rapport = {
-    id: `INFO-${Date.now().toString().slice(-5)}`,
-    source, cible, info: information, fiabilite,
-    rapporteurId: interaction.user.id, rapporteur: interaction.user.username,
-    createdAt: new Date().toISOString(),
-  };
-  db.informateurs.push(rapport);
-  saveDB(db);
-
+  const source = interaction.fields.getTextInputValue('source'); const cible = interaction.fields.getTextInputValue('cible'); const information = interaction.fields.getTextInputValue('information');
+  const fiabiliteRaw = interaction.fields.getTextInputValue('fiabilite').toLowerCase(); const estConfirmee = fiabiliteRaw.includes('confirm') && !fiabiliteRaw.includes('non'); const fiabilite = estConfirmee ? 'Confirmée' : 'Non confirmée';
+  const db = loadDB(); if (!db.informateurs) db.informateurs = [];
+  const rapport = { id: `INFO-${Date.now().toString().slice(-5)}`, source, cible, info: information, fiabilite, rapporteurId: interaction.user.id, rapporteur: interaction.user.username, createdAt: new Date().toISOString() };
+  db.informateurs.push(rapport); saveDB(db);
   await _archiverRapportNotion(rapport);
-
   const infosCh = getCh(interaction.guild, 'informateurs');
-  if (infosCh) {
-    await infosCh.send({ embeds: [new EmbedBuilder()
-      .setColor(estConfirmee ? 0xED4245 : 0xFFA500)
-      .setTitle(`${estConfirmee ? '🔴' : '🟡'} Rapport \`${rapport.id}\` — ${estConfirmee ? 'Confirmée' : 'Non confirmée'}`)
-      .addFields(
-        { name: '🕵️ Source',      value: source,      inline: true },
-        { name: '🎯 Cible / Lieu', value: cible,       inline: true },
-        { name: '📋 Fiabilité',    value: `${estConfirmee ? '✅' : '⚠️'} ${fiabilite}`, inline: true },
-        { name: '📝 Information',  value: information.slice(0, 800) },
-        { name: '👤 Rapporteur',   value: `<@${interaction.user.id}>`, inline: true },
-        { name: '📅 Date',         value: fmtShort(new Date()),        inline: true },
-      )
-      .setFooter({ text: 'IWC • Réseau Informateurs — Confidentiel' })
-      .setTimestamp()
-    ] }).catch(() => {});
-  }
-
+  if (infosCh) await infosCh.send({ embeds: [new EmbedBuilder().setColor(estConfirmee ? 0xED4245 : 0xFFA500).setTitle(`${estConfirmee ? '🔴' : '🟡'} Rapport \`${rapport.id}\` — ${estConfirmee ? 'Confirmée' : 'Non confirmée'}`).addFields({ name: '🕵️ Source', value: source, inline: true }, { name: '🎯 Cible / Lieu', value: cible, inline: true }, { name: '📋 Fiabilité', value: `${estConfirmee ? '✅' : '⚠️'} ${fiabilite}`, inline: true }, { name: '📝 Information', value: information.slice(0, 800) }, { name: '👤 Rapporteur', value: `<@${interaction.user.id}>`, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }).setFooter({ text: 'IWC • Réseau Informateurs — Confidentiel' }).setTimestamp()] }).catch(() => {});
   if (estConfirmee) await _alerterDirection(interaction.guild, rapport);
-
-  await interaction.editReply({
-    content: `✅ Rapport \`${rapport.id}\` soumis.${estConfirmee ? '\n⚠️ **La Direction a été alertée.**' : ''}`,
-  });
+  await interaction.editReply({ content: `✅ Rapport \`${rapport.id}\` soumis.${estConfirmee ? '\n⚠️ **La Direction a été alertée.**' : ''}` });
 }
 
 async function handleInformateurHistorique(interaction) {
   await interaction.deferReply({ ephemeral: true });
-  const db = loadDB();
-  const rapports = (db.informateurs || []).slice(-10).reverse();
+  const db = loadDB(); const rapports = (db.informateurs || []).slice(-10).reverse();
   if (!rapports.length) return interaction.editReply({ content: '📭 Aucun rapport dans l\'historique.' });
-
-  const lines = rapports.map(r => {
-    const emoji = r.fiabilite === 'Confirmée' ? '🔴' : '🟡';
-    return `${emoji} \`${r.id}\` **${r.cible}** — ${r.info.slice(0, 60)}... *(${fmtShort(r.createdAt)})*`;
-  }).join('\n');
-
-  await interaction.editReply({ embeds: [new EmbedBuilder()
-    .setColor(0x2C2F33)
-    .setTitle('📂 Historique — 10 derniers rapports')
-    .setDescription(lines)
-    .setFooter({ text: 'IWC • Réseau Informateurs — Confidentiel' })
-  ] });
+  await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x2C2F33).setTitle('📂 Historique — 10 derniers rapports').setDescription(rapports.map(r => `${r.fiabilite === 'Confirmée' ? '🔴' : '🟡'} \`${r.id}\` **${r.cible}** — ${r.info.slice(0, 60)}... *(${fmtShort(r.createdAt)})*`).join('\n')).setFooter({ text: 'IWC • Réseau Informateurs — Confidentiel' })] });
 }
 
 async function handleInformateurMessage(message) {
   if (message.author.bot || !message.guild) return;
   const lines = message.content.split('\n');
   const get = k => { const l = lines.find(l => l.toUpperCase().startsWith(k.toUpperCase())); return l ? l.split(':').slice(1).join(':').trim() : null; };
-
-  const source    = get('SOURCE');
-  const cible     = get('CIBLE') || get('CIBLE / LIEU') || get('CIBLE/LIEU');
-  const info      = get('INFORMATION') || get('INFO');
-  const fiabilite = get('FIABILITÉ') || get('FIABILITE');
-
+  const source = get('SOURCE'); const cible = get('CIBLE') || get('CIBLE / LIEU') || get('CIBLE/LIEU'); const info = get('INFORMATION') || get('INFO'); const fiabilite = get('FIABILITÉ') || get('FIABILITE');
   if (!source && !info) { await message.react('👁️').catch(() => {}); return; }
-
   await message.react('✅').catch(() => {});
-
   const estConfirmee = fiabilite?.toLowerCase().includes('confirm') && !fiabilite?.toLowerCase().includes('non');
-  const db = loadDB();
-  if (!db.informateurs) db.informateurs = [];
-
-  const rapport = {
-    id: `INFO-${Date.now().toString().slice(-5)}`,
-    source: source || '—', cible: cible || '—',
-    info: info || message.content.slice(0, 500),
-    fiabilite: fiabilite || '—',
-    rapporteurId: message.author.id, rapporteur: message.author.username,
-    createdAt: new Date().toISOString(),
-  };
-  db.informateurs.push(rapport);
-  saveDB(db);
-
+  const db = loadDB(); if (!db.informateurs) db.informateurs = [];
+  const rapport = { id: `INFO-${Date.now().toString().slice(-5)}`, source: source || '—', cible: cible || '—', info: info || message.content.slice(0, 500), fiabilite: fiabilite || '—', rapporteurId: message.author.id, rapporteur: message.author.username, createdAt: new Date().toISOString() };
+  db.informateurs.push(rapport); saveDB(db);
   await _archiverRapportNotion(rapport);
   if (estConfirmee) await _alerterDirection(message.guild, rapport, message.author.id);
-
-  await message.reply({
-    embeds: [new EmbedBuilder()
-      .setColor(estConfirmee ? 0xED4245 : 0xFFA500)
-      .setTitle(`${estConfirmee ? '🔴 Confirmée' : '🟡 Reçue'} — \`${rapport.id}\` archivé`)
-      .setDescription(`Rapport enregistré.${estConfirmee ? '\n⚠️ **La Direction a été alertée.**' : ''}`)
-      .setFooter({ text: 'IWC • Informateurs — Confidentiel' })
-    ],
-    allowedMentions: { repliedUser: false },
-  }).then(m => setTimeout(() => m.delete().catch(() => {}), 8000)).catch(() => {});
+  await message.reply({ embeds: [new EmbedBuilder().setColor(estConfirmee ? 0xED4245 : 0xFFA500).setTitle(`${estConfirmee ? '🔴 Confirmée' : '🟡 Reçue'} — \`${rapport.id}\` archivé`).setDescription(`Rapport enregistré.${estConfirmee ? '\n⚠️ **La Direction a été alertée.**' : ''}`).setFooter({ text: 'IWC • Informateurs — Confidentiel' })], allowedMentions: { repliedUser: false } }).then(m => setTimeout(() => m.delete().catch(() => {}), 8000)).catch(() => {});
 }
 
 async function _archiverRapportNotion(rapport) {
   if (!process.env.NOTION_TOKEN || !NOTION_INFOS_DB) return;
   try {
-    await fetch('https://api.notion.com/v1/pages', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        parent: { database_id: NOTION_INFOS_DB },
-        properties: {
-          'Source':      { title: [{ text: { content: rapport.source } }] },
-          'Cible':       { rich_text: [{ text: { content: rapport.cible } }] },
-          'Information': { rich_text: [{ text: { content: rapport.info.slice(0, 2000) } }] },
-          'Fiabilité':   { select: { name: rapport.fiabilite === 'Confirmée' ? '✅ Confirmée' : '⚠️ Non confirmée' } },
-          'Date':        { date: { start: new Date().toISOString().split('T')[0] } },
-          'Rapporteur':  { rich_text: [{ text: { content: rapport.rapporteur } }] },
-        }
-      })
-    });
+    await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: NOTION_INFOS_DB }, properties: { 'Source': { title: [{ text: { content: rapport.source } }] }, 'Cible': { rich_text: [{ text: { content: rapport.cible } }] }, 'Information': { rich_text: [{ text: { content: rapport.info.slice(0, 2000) } }] }, 'Fiabilité': { select: { name: rapport.fiabilite === 'Confirmée' ? '✅ Confirmée' : '⚠️ Non confirmée' } }, 'Date': { date: { start: new Date().toISOString().split('T')[0] } }, 'Rapporteur': { rich_text: [{ text: { content: rapport.rapporteur } }] } } }) });
   } catch (e) { console.log('❌ Informateur Notion error:', e.message); }
 }
 
 async function _alerterDirection(guild, rapport, rapporteurId) {
-  const logsCh = getCh(guild, 'logs');
-  if (!logsCh) return;
-  const mention = guild.roles.cache
-    .filter(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Conseil'].some(n => r.name.includes(n)))
-    .map(r => `<@&${r.id}>`).join(' ');
-  await logsCh.send({
-    content: `${mention} — 🚨 **Information confirmée reçue**`,
-    embeds: [new EmbedBuilder()
-      .setColor(0xED4245)
-      .setTitle(`🔴 ALERTE — Information Confirmée \`${rapport.id}\``)
-      .addFields(
-        { name: '🕵️ Source',      value: rapport.source, inline: true },
-        { name: '🎯 Cible / Lieu', value: rapport.cible,  inline: true },
-        { name: '👤 Rapporteur',   value: rapporteurId ? `<@${rapporteurId}>` : rapport.rapporteur, inline: true },
-        { name: '📝 Information',  value: rapport.info.slice(0, 500) },
-      )
-      .setFooter({ text: 'IWC • Réseau d\'informateurs — Confidentiel' })
-      .setTimestamp()
-    ]
-  }).catch(() => {});
+  const logsCh = getCh(guild, 'logs'); if (!logsCh) return;
+  const mention = guild.roles.cache.filter(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Conseil'].some(n => r.name.includes(n))).map(r => `<@&${r.id}>`).join(' ');
+  await logsCh.send({ content: `${mention} — 🚨 **Information confirmée reçue**`, embeds: [new EmbedBuilder().setColor(0xED4245).setTitle(`🔴 ALERTE — Information Confirmée \`${rapport.id}\``).addFields({ name: '🕵️ Source', value: rapport.source, inline: true }, { name: '🎯 Cible / Lieu', value: rapport.cible, inline: true }, { name: '👤 Rapporteur', value: rapporteurId ? `<@${rapporteurId}>` : rapport.rapporteur, inline: true }, { name: '📝 Information', value: rapport.info.slice(0, 500) }).setFooter({ text: 'IWC • Réseau d\'informateurs — Confidentiel' }).setTimestamp()] }).catch(() => {});
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 6. PLANNING — Image → Notion (simplifié, sans panneau épinglé)
+// 6. PLANNING — Image → Notion (sans panneau, sans SESSION)
 // ═══════════════════════════════════════════════════════════════
-// Plus de panneau épinglé, plus de format SESSION.
-// Comportement : poster une image (+ texte lieu optionnel) → synchro Notion.
-// Si message texte seul dans #planning → ignoré silencieusement.
 
-const NOTION_VERSION  = '2022-06-28';
 const NOTION_BASE_URL = 'https://api.notion.com/v1';
+const NOTION_VERSION  = '2022-06-28';
 
 async function notionAddImageBlock(pageId, imageUrl, caption) {
   if (!process.env.NOTION_TOKEN || !pageId) return false;
   try {
-    await fetch(`${NOTION_BASE_URL}/blocks/${pageId}/children`, {
-      method: 'PATCH',
-      headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        children: [
-          { object: 'block', type: 'image', image: { type: 'external', external: { url: imageUrl }, caption: caption ? [{ type: 'text', text: { content: caption } }] : [] } },
-          { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ type: 'text', text: { content: `📸 Ajouté le ${fmtShort(new Date())} via Discord` } }] } },
-        ],
-      }),
-    });
+    await fetch(`${NOTION_BASE_URL}/blocks/${pageId}/children`, { method: 'PATCH', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' }, body: JSON.stringify({ children: [{ object: 'block', type: 'image', image: { type: 'external', external: { url: imageUrl }, caption: caption ? [{ type: 'text', text: { content: caption } }] : [] } }, { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ type: 'text', text: { content: `📸 Ajouté le ${fmtShort(new Date())} via Discord` } }] } }] }) });
     return true;
   } catch (e) { console.log('❌ notionAddImageBlock error:', e.message); return false; }
 }
@@ -982,14 +529,8 @@ async function notionAddImageBlock(pageId, imageUrl, caption) {
 async function getProchainRdvNotion() {
   if (!process.env.NOTION_TOKEN || !process.env.NOTION_AGENDA_DB_ID) return null;
   try {
-    const res  = await fetch(`${NOTION_BASE_URL}/databases/${process.env.NOTION_AGENDA_DB_ID}/query`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filter: { property: 'Date', date: { on_or_after: new Date().toISOString() } }, sorts: [{ property: 'Date', direction: 'ascending' }], page_size: 5 }),
-    });
-    const data = await res.json();
-    const p    = (data.results || [])[0];
-    if (!p) return null;
+    const res = await fetch(`${NOTION_BASE_URL}/databases/${process.env.NOTION_AGENDA_DB_ID}/query`, { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' }, body: JSON.stringify({ filter: { property: 'Date', date: { on_or_after: new Date().toISOString() } }, sorts: [{ property: 'Date', direction: 'ascending' }], page_size: 5 }) });
+    const data = await res.json(); const p = (data.results || [])[0]; if (!p) return null;
     return { id: p.id, titre: p.properties.Titre?.title?.[0]?.plain_text || '—', date: p.properties.Date?.date?.start, lieu: p.properties.Lieu?.rich_text?.[0]?.plain_text || '—' };
   } catch { return null; }
 }
@@ -997,32 +538,16 @@ async function getProchainRdvNotion() {
 async function rechercherRdvNotion(motCle) {
   if (!process.env.NOTION_TOKEN || !process.env.NOTION_AGENDA_DB_ID) return null;
   try {
-    const res  = await fetch(`${NOTION_BASE_URL}/databases/${process.env.NOTION_AGENDA_DB_ID}/query`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        filter: { or: [{ property: 'Titre', rich_text: { contains: motCle } }, { property: 'Lieu', rich_text: { contains: motCle } }, { property: 'Notes', rich_text: { contains: motCle } }] },
-        sorts: [{ property: 'Date', direction: 'ascending' }], page_size: 3,
-      }),
-    });
-    const data = await res.json();
-    const p    = (data.results || [])[0];
-    if (!p) return null;
+    const res = await fetch(`${NOTION_BASE_URL}/databases/${process.env.NOTION_AGENDA_DB_ID}/query`, { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' }, body: JSON.stringify({ filter: { or: [{ property: 'Titre', rich_text: { contains: motCle } }, { property: 'Lieu', rich_text: { contains: motCle } }, { property: 'Notes', rich_text: { contains: motCle } }] }, sorts: [{ property: 'Date', direction: 'ascending' }], page_size: 3 }) });
+    const data = await res.json(); const p = (data.results || [])[0]; if (!p) return null;
     return { id: p.id, titre: p.properties.Titre?.title?.[0]?.plain_text || '—', date: p.properties.Date?.date?.start, lieu: p.properties.Lieu?.rich_text?.[0]?.plain_text || '—' };
   } catch { return null; }
 }
 
-/**
- * Handler principal #planning — image + texte lieu optionnel → Notion
- * Plus de panneau, plus de SESSION. Juste : image → synchro.
- */
 async function handlePlanningScreenshot(message) {
   if (message.author.bot || !message.guild) return false;
-
-  const images = message.attachments.filter(a =>
-    a.contentType?.startsWith('image/') || /\.(png|jpg|jpeg|gif|webp)$/i.test(a.url)
-  );
-  if (!images.size) return false; // message texte seul → ignoré
+  const images = message.attachments.filter(a => a.contentType?.startsWith('image/') || /\.(png|jpg|jpeg|gif|webp)$/i.test(a.url));
+  if (!images.size) return false;
 
   const texte    = message.content.toLowerCase().trim();
   const motsCles = texte.replace(/screen|rdv|lieu|repérage|reperage|capture|screenshot|planning|photo|image/gi, '').trim();
@@ -1033,106 +558,46 @@ async function handlePlanningScreenshot(message) {
 
   if (!rdv) {
     await message.react('📸').catch(() => {});
-    const reply = await message.reply({
-      embeds: [new EmbedBuilder()
-        .setColor(0xFFA500)
-        .setTitle('📸 Image reçue')
-        .setDescription('Aucun RDV trouvé dans Notion pour associer cette image.\nElle reste disponible ici sur Discord.')
-        .setFooter({ text: 'IWC • Planning' })
-      ],
-      allowedMentions: { repliedUser: false },
-    }).catch(() => null);
+    const reply = await message.reply({ embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('📸 Image reçue').setDescription('Aucun RDV trouvé dans Notion pour associer cette image.\nElle reste disponible ici sur Discord.').setFooter({ text: 'IWC • Planning' })], allowedMentions: { repliedUser: false } }).catch(() => null);
     if (reply) setTimeout(() => reply.delete().catch(() => {}), 10000);
     return true;
   }
 
   let succes = 0;
   const caption = texte ? `${message.author.username} — ${texte}` : `${message.author.username} — Repérage`;
-  for (const [, attachment] of images) {
-    if (await notionAddImageBlock(rdv.id, attachment.url, caption)) succes++;
-  }
+  for (const [, attachment] of images) { if (await notionAddImageBlock(rdv.id, attachment.url, caption)) succes++; }
 
   if (succes > 0) {
     await message.react('✅').catch(() => {});
-    const reply = await message.reply({
-      embeds: [new EmbedBuilder()
-        .setColor(0x57F287)
-        .setTitle(`📸 ${succes} image(s) ajoutée(s) dans Notion`)
-        .addFields(
-          { name: '📅 RDV', value: `**${rdv.titre}**`,    inline: true },
-          { name: '📍 Lieu', value: rdv.lieu,              inline: true },
-          { name: '🗓️ Date', value: fmtShort(rdv.date),   inline: true },
-        )
-        .setFooter({ text: 'IWC • Planning automatique' })
-      ],
-      allowedMentions: { repliedUser: false },
-    }).catch(() => null);
+    const reply = await message.reply({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle(`📸 ${succes} image(s) ajoutée(s) dans Notion`).addFields({ name: '📅 RDV', value: `**${rdv.titre}**`, inline: true }, { name: '📍 Lieu', value: rdv.lieu, inline: true }, { name: '🗓️ Date', value: fmtShort(rdv.date), inline: true }).setFooter({ text: 'IWC • Planning automatique' })], allowedMentions: { repliedUser: false } }).catch(() => null);
     if (reply) setTimeout(() => reply.delete().catch(() => {}), 12000);
-  } else {
-    await message.react('❌').catch(() => {});
-  }
-
+  } else { await message.react('❌').catch(() => {}); }
   return true;
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 7. PLANS — Archive photos de lieux/zones dans Notion
+// 7. PLANS — Archive photos de lieux dans Notion
 // ═══════════════════════════════════════════════════════════════
-// Dans #plans, poster une image → archivée dans Notion avec tag "Plan"
-// Format optionnel : image + texte "nom du lieu"
 
 const NOTION_PLANS_DB = process.env.NOTION_PLANS_DB || process.env.NOTION_AGENDA_DB_ID || null;
 
 async function handlePlansMessage(message) {
   if (message.author.bot || !message.guild) return false;
-
-  const images = message.attachments.filter(a =>
-    a.contentType?.startsWith('image/') || /\.(png|jpg|jpeg|gif|webp)$/i.test(a.url)
-  );
+  const images = message.attachments.filter(a => a.contentType?.startsWith('image/') || /\.(png|jpg|jpeg|gif|webp)$/i.test(a.url));
   if (!images.size) return false;
-
   const lieu = message.content.trim() || 'Lieu non précisé';
 
-  // Archivage dans Notion si DB plans configurée
   if (process.env.NOTION_TOKEN && NOTION_PLANS_DB) {
     try {
       for (const [, attachment] of images) {
-        await fetch('https://api.notion.com/v1/pages', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            parent: { database_id: NOTION_PLANS_DB },
-            properties: {
-              'Titre':       { title: [{ text: { content: `Plan — ${lieu}` } }] },
-              'Lieu':        { rich_text: [{ text: { content: lieu } }] },
-              'Date':        { date: { start: new Date().toISOString().split('T')[0] } },
-              'Auteur':      { rich_text: [{ text: { content: message.author.username } }] },
-              'Type':        { select: { name: '🗺️ Plan tactique' } },
-              'URL Image':   { url: attachment.url },
-            }
-          })
-        });
+        await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: NOTION_PLANS_DB }, properties: { 'Titre': { title: [{ text: { content: `Plan — ${lieu}` } }] }, 'Lieu': { rich_text: [{ text: { content: lieu } }] }, 'Date': { date: { start: new Date().toISOString().split('T')[0] } }, 'Auteur': { rich_text: [{ text: { content: message.author.username } }] }, 'Type': { select: { name: '🗺️ Plan tactique' } }, 'URL Image': { url: attachment.url } } }) });
       }
     } catch (e) { console.log('❌ Plans Notion error:', e.message); }
   }
 
   await message.react('🗺️').catch(() => {});
-  const reply = await message.reply({
-    embeds: [new EmbedBuilder()
-      .setColor(0x5865F2)
-      .setTitle(`🗺️ Plan archivé — ${lieu}`)
-      .addFields(
-        { name: '📍 Lieu',      value: lieu,                       inline: true },
-        { name: '👤 Ajouté par', value: message.author.username,   inline: true },
-        { name: '📅 Date',      value: fmtShort(new Date()),       inline: true },
-      )
-      .setDescription(`${images.size} image(s) archivée(s) dans Notion.`)
-      .setFooter({ text: 'IWC • Plans tactiques' })
-    ],
-    allowedMentions: { repliedUser: false },
-  }).catch(() => null);
+  const reply = await message.reply({ embeds: [new EmbedBuilder().setColor(0x5865F2).setTitle(`🗺️ Plan archivé — ${lieu}`).addFields({ name: '📍 Lieu', value: lieu, inline: true }, { name: '👤 Ajouté par', value: message.author.username, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }).setDescription(`${images.size} image(s) archivée(s) dans Notion.`).setFooter({ text: 'IWC • Plans tactiques' })], allowedMentions: { repliedUser: false } }).catch(() => null);
   if (reply) setTimeout(() => reply.delete().catch(() => {}), 12000);
-
   return true;
 }
 
@@ -1152,52 +617,18 @@ function getMentionPole(guild, pole = 'all') {
 
 async function updateNotionStatutPole(userId, pole) {
   if (!process.env.NOTION_TOKEN || !process.env.NOTION_FICHES_DB) return;
-  try {
-    const pageId = await notionExtra.getFicheId?.(userId);
-    if (!pageId) return;
-    await notionExtra.notionPatch?.(pageId, { 'Pôle': { select: { name: pole === 'illegal' ? '🔪 Illégal' : '⚖️ Légal' } } });
-  } catch {}
+  try { const pageId = await notionExtra.getFicheId?.(userId); if (!pageId) return; await notionExtra.notionPatch?.(pageId, { 'Pôle': { select: { name: pole === 'illegal' ? '🔪 Illégal' : '⚖️ Légal' } } }); } catch {}
 }
 
 // ═══════════════════════════════════════════════════════════════
 // EXPORTS
 // ═══════════════════════════════════════════════════════════════
 module.exports = {
-  // Absences
-  handleAbsenceDetection,
-  ABSENCE_KEYWORDS,
-  // Inactivité
-  checkInactivite,
-  JOURS_INACTIF,
-  // Grades
-  updateHierarchieEmbed,
-  handleHierarchieCommand,
-  handleGradeSetCommand,
-  handleGradePanelButton,
-  handleGradeMembreSelect,
-  handleGradeGradeSelect,
-  GRADES_LEGAL,
-  GRADES_ILLEGAL,
-  // Affaires
-  setupAffairesPanel,
-  handleAffaireNouvelleButton,
-  handleAffaireModal,
-  handleAffaireVote,
-  handleAffaireDetail,
-  postResumeAffaires,
-  handleAffairesResumeButton,
-  // Informateurs
-  setupInformateursPanel,
-  handleInformateurRapportButton,
-  handleInformateurModal,
-  handleInformateurHistorique,
-  handleInformateurMessage,
-  // Planning
-  handlePlanningScreenshot,
-  // Plans
-  handlePlansMessage,
-  // Pings
-  getMentionPole,
-  updateNotionStatutPole,
+  handleAbsenceDetection, ABSENCE_KEYWORDS,
+  checkInactivite, JOURS_INACTIF,
+  updateHierarchieEmbed, handleHierarchieCommand, handleGradeSetCommand, handleGradePanelButton, handleGradeMembreSelect, handleGradeGradeSelect, GRADES_LEGAL, GRADES_ILLEGAL,
+  setupAffairesPanel, handleAffaireNouvelleButton, handleAffaireModal, handleAffaireVote, handleAffaireDetail, postResumeAffaires, handleAffairesResumeButton,
+  setupInformateursPanel, handleInformateurRapportButton, handleInformateurModal, handleInformateurHistorique, handleInformateurMessage,
+  handlePlanningScreenshot, handlePlansMessage,
+  getMentionPole, updateNotionStatutPole,
 };
-
