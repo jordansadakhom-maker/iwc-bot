@@ -116,6 +116,8 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('avertissements').setDescription('📋 Voir les avertissements d\'un membre')
     .addUserOption(o => o.setName('membre').setDescription('Membre (optionnel, défaut: toi)').setRequired(false)),
   new SlashCommandBuilder().setName('retour').setDescription('✅ Déclarer son retour d\'absence'),
+  new SlashCommandBuilder().setName('purge').setDescription('🗑️ Effacer les messages d\'un salon (Direction)')
+    .addIntegerOption(o => o.setName('nombre').setDescription('Nombre de messages à supprimer (1-100, défaut: tous)').setRequired(false).setMinValue(1).setMaxValue(100)),
   new SlashCommandBuilder().setName('annuler-absence').setDescription('🔓 Lever l\'absence d\'un membre (Direction)')
     .addUserOption(o => o.setName('membre').setDescription('Membre dont lever l\'absence').setRequired(true)),
   new SlashCommandBuilder().setName('contrats').setDescription('📜 Voir mes contrats en cours'),
@@ -364,6 +366,7 @@ async function handleSlashCommand(interaction) {
   if (commandName === 'avertissements')    return _handleAvertissements(interaction);
   if (commandName === 'retour')            return _handleRetour(interaction);
   if (commandName === 'annuler-absence')   return _handleAnnulerAbsence(interaction);
+  if (commandName === 'purge')             return _handlePurge(interaction);
 
   if (commandName === 'stats') return notionV5.handleStatsAvancees?.(interaction);
   if (commandName === '_stats_old') {
@@ -906,6 +909,8 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId === 'btn_informateur_historique')  return notionV3.handleInformateurHistorique?.(interaction);
     if (interaction.customId.startsWith('info_confirmer_'))      return notionV3.handleInformateurConfirmer?.(interaction);
     if (interaction.customId === 'btn_surnom_ouvrir')           return _ouvrirModalSurnom(interaction);
+    if (interaction.customId.startsWith('purge_confirm_'))      return _executerPurge(interaction);
+    if (interaction.customId === 'purge_annuler')               return interaction.update({ content: '↩️ Suppression annulée.', embeds: [], components: [] });
     if (interaction.customId.startsWith('btn_rdv_creer_'))     return _ouvrirMenuRdv(interaction);
     if (interaction.customId.startsWith('btn_grade_maj_'))      return notionV3.handleGradeMajButton?.(interaction);
     if (interaction.customId.startsWith('info_infirmer_'))       return notionV3.handleInformateurInfirmer?.(interaction);
@@ -1925,6 +1930,118 @@ async function _handleAvertissements(interaction) {
 
   embed.setFooter({ text: 'IWC • Historique des sanctions' }).setTimestamp();
   await interaction.reply({ embeds: [embed], ephemeral: true });
+}
+
+// ── Exécution de la purge ──
+async function _executerPurge(interaction) {
+  if (!isDirection(interaction.member)) return interaction.update({ content: '❌ Accès refusé.', embeds: [], components: [] });
+
+  const parts   = interaction.customId.replace('purge_confirm_', '').split('_');
+  const salonId = parts[0];
+  const nbRaw   = parts[1];
+  const nombre  = nbRaw === 'all' ? null : parseInt(nbRaw);
+
+  const salon = interaction.guild.channels.cache.get(salonId);
+  if (!salon) return interaction.update({ content: '❌ Salon introuvable.', embeds: [], components: [] });
+
+  await interaction.update({
+    embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('🗑️ Suppression en cours...').setDescription('Patience, le bot supprime les messages.')],
+    components: [],
+  });
+
+  let total = 0;
+  let continuer = true;
+
+  while (continuer) {
+    // Récupérer jusqu'à 100 messages
+    const limit = nombre ? Math.min(nombre - total, 100) : 100;
+    const msgs  = await salon.messages.fetch({ limit }).catch(() => null);
+    if (!msgs || msgs.size === 0) break;
+
+    // Séparer récents (< 14j) et anciens
+    const maintenant  = Date.now();
+    const limite14j   = maintenant - 13 * 24 * 60 * 60 * 1000;
+    const recents     = msgs.filter(m => m.createdTimestamp > limite14j);
+    const anciens     = msgs.filter(m => m.createdTimestamp <= limite14j);
+
+    // Supprimer les récents en masse
+    if (recents.size >= 2) {
+      await salon.bulkDelete(recents).catch(() => {});
+      total += recents.size;
+    } else if (recents.size === 1) {
+      await recents.first().delete().catch(() => {});
+      total += 1;
+    }
+
+    // Supprimer les anciens un par un
+    for (const [, m] of anciens) {
+      await m.delete().catch(() => {});
+      total++;
+      await new Promise(r => setTimeout(r, 300)); // Rate limit
+      if (nombre && total >= nombre) { continuer = false; break; }
+    }
+
+    if (nombre && total >= nombre) break;
+    if (msgs.size < 100) break; // Plus de messages
+    if (recents.size === 0 && anciens.size === 0) break;
+  }
+
+  // Confirmation finale (éphémère dans le salon ou DM)
+  try {
+    await interaction.followUp({
+      ephemeral: true,
+      embeds: [new EmbedBuilder()
+        .setColor(0x57F287)
+        .setTitle('✅ Purge terminée')
+        .addFields(
+          { name: '🗑️ Messages supprimés', value: `**${total}**`,         inline: true },
+          { name: '📋 Salon',              value: `#${salon.name}`,        inline: true },
+          { name: '👤 Exécuté par',        value: interaction.user.username, inline: true },
+        )
+        .setFooter({ text: 'IWC • Purge automatique' })
+        .setTimestamp()
+      ],
+    });
+  } catch {}
+
+  console.log(`✅ Purge : ${total} messages supprimés dans #${salon.name} par ${interaction.user.username}`);
+}
+
+// ── /purge — Effacer les messages d'un salon ──
+async function _handlePurge(interaction) {
+  if (!isDirection(interaction.member)) {
+    return interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
+  }
+
+  const nombre = interaction.options?.getInteger('nombre') || null;
+  const salon  = interaction.channel;
+  const label  = nombre ? `les **${nombre} derniers messages**` : `**tous les messages récents**`;
+
+  // Confirmation
+  const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+  await interaction.reply({
+    ephemeral: true,
+    embeds: [new EmbedBuilder()
+      .setColor(0xED4245)
+      .setTitle('🗑️ Confirmer la suppression')
+      .setDescription([
+        `Tu vas supprimer ${label} dans **#${salon.name}**.`,
+        '',
+        '⚠️ **Cette action est irréversible.**',
+        '*Note : seuls les messages de moins de 14 jours peuvent être supprimés en masse.*',
+      ].join('\n'))
+    ],
+    components: [new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`purge_confirm_${salon.id}_${nombre || 'all'}`)
+        .setLabel('🗑️ Confirmer la suppression')
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId('purge_annuler')
+        .setLabel('↩️ Annuler')
+        .setStyle(ButtonStyle.Secondary),
+    )],
+  });
 }
 
 // ── /annuler-absence — Direction lève une absence ──
