@@ -417,6 +417,8 @@ async function autoSetup(guild) {
   await notionV3.updateHierarchieEmbed?.(guild);
   await notionV3.setupInformateursPanel?.(guild);
   await setupFicheFormat(guild);
+  await setupPlansFormat(guild);
+  await setupPlanningFormat(guild);
 
   const reglCh = getCh(guild, 'reglement', 'règlement');
   if (reglCh) {
@@ -1029,3 +1031,98 @@ async function setupFicheFormat(guild) {
     console.log('❌ setupFicheFormat error:', e.message);
   }
 }
+
+// ── Setup message explicatif dans 🗺️・plans ──
+async function setupPlansFormat(guild) {
+  try {
+    const clean = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const ch = guild.channels.cache.find(c => c.isTextBased?.() && clean(c.name) === clean('plans'));
+    if (!ch) { console.log('⚠️ Salon plans introuvable'); return; }
+
+    const msgs = await ch.messages.fetch({ limit: 20 });
+    const existing = msgs.find(m => m.author.id === guild.members.me?.id && m.content.includes('PLANS TACTIQUES'));
+    if (existing) return;
+
+    const MSG = [
+      '```',
+      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+      '  🗺️  PLANS TACTIQUES — IWC',
+      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+      '```',
+      '',
+      '**Comment archiver un lieu dans Notion :**',
+      '',
+      '> **1.** Prends un screen du lieu en jeu',
+      '> **2.** Envoie la photo dans ce salon',
+      '> **3.** Ajoute le nom du lieu en texte avec ta photo',
+      '> **4.** Le bot archive tout automatiquement dans Notion 🗺️',
+      '',
+      '**Exemple :**',
+      '```',
+      'Entrepôt Paleto Bay — entrée principale',
+      '+ [ta photo jointe]',
+      '```',
+      '',
+      '*Le nom du lieu sera enregistré comme titre dans Notion.*',
+      '*Sans texte → archivé sous "Lieu non précisé".*',
+      '',
+      '```',
+      '— IWC • Confidentialité absolue —',
+      '```',
+    ].join('\n');
+
+    await ch.send(MSG);
+    console.log('✅ Message plans tactiques posté');
+  } catch (e) {
+    console.log('❌ setupPlansFormat error:', e.message);
+  }
+}
+
+// ── Setup message explicatif dans #planning ──
+async function setupPlanningFormat(guild) {
+  try {
+    const clean = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const ch = guild.channels.cache.find(c => c.isTextBased?.() && clean(c.name) === clean('planning'));
+    if (!ch) { console.log('⚠️ Salon planning introuvable'); return; }
+
+    const msgs = await ch.messages.fetch({ limit: 20 });
+    const existing = msgs.find(m => m.author.id === guild.members.me?.id && m.content.includes('PLANNING'));
+    if (existing) return;
+
+    const MSG = [
+      '```',
+      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+      '  📅  PLANNING — IWC',
+      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+      '```',
+      '',
+      '**Ce salon est lié au calendrier Notion.**',
+      '',
+      '**Comment ajouter une capture à un RDV :**',
+      '',
+      '> **1.** Prends un screen lié à la session ou au repérage',
+      '> **2.** Envoie la photo dans ce salon',
+      '> **3.** Ajoute le nom du lieu ou de l\'opération en texte',
+      '> **4.** Le bot attache automatiquement la photo au RDV Notion le plus proche 📅',
+      '',
+      '**Exemple :**',
+      '```',
+      'Repérage avant la mission de samedi',
+      '+ [ta photo jointe]',
+      '```',
+      '',
+      '*Les textes seuls sont ignorés — images uniquement.*',
+      '*Sans texte → attaché au prochain RDV Notion sans titre.*',
+      '',
+      '```',
+      '— IWC • Secrétariat automatique —',
+      '```',
+    ].join('\n');
+
+    await ch.send(MSG);
+    console.log('✅ Message planning posté');
+  } catch (e) {
+    console.log('❌ setupPlanningFormat error:', e.message);
+  }
+}
+
