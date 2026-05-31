@@ -555,6 +555,7 @@ async function autoSetup(guild) {
   await setupPlansFormat(guild);
   await setupPlanningFormat(guild);
   await setupSurnomFormat(guild);
+  await setupCommandesSlash(guild);
 
   const reglCh = getCh(guild, 'reglement', 'règlement');
   if (reglCh) {
@@ -2230,7 +2231,7 @@ async function _handleAide(interaction) {
         '`/grade-set` — Attribuer un grade via panneau',
         '`/dashboard` — Tableau de bord complet',
         '`/bilan [coffre]` — Résumé trésorerie 7j',
-        '`/contrats-archives` — Archives de tous les contrats',
+        "`/contrats-archives` — Archives de tous les contrats",
         '`/agenda creer` — Créer un RDV dans Notion',
         '`/rapport` — Envoyer le rapport hebdo en DM',
       ].join('\n'),
@@ -2270,6 +2271,59 @@ async function _handleAide(interaction) {
 
   embedBase.setFooter({ text: 'IWC Bot • /aide pour revoir ce guide' }).setTimestamp();
   await interaction.reply({ embeds: [embedBase], ephemeral: true });
+}
+
+// ── Setup #commandes-slash — liste complète ──
+async function setupCommandesSlash(guild) {
+  try {
+    const clean = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const ch = guild.channels.cache.find(c => c.isTextBased?.() && clean(c.name).includes(clean('commandes-slash')));
+    if (!ch) return;
+    const msgs = await ch.messages.fetch({ limit: 20 });
+    for (const [, m] of msgs) { if (m.author.id === guild.members.me?.id) await m.delete().catch(() => {}); }
+
+    const e1 = new EmbedBuilder().setColor(0x3B82F6).setTitle('📖 COMMANDES — Membres').setDescription('*Commandes accessibles à tous les membres.*')
+      .addFields(
+        { name: '👤 Profil & Identité', value: '/profil · /fiche [nom] · /hierarchie · /registre', inline: false },
+        { name: '🎯 Opérations', value: '/ops · /op [id]', inline: false },
+        { name: '📅 Agenda', value: '/agenda voir · /agenda creer', inline: false },
+        { name: '📜 Contrats', value: '/contrats', inline: false },
+        { name: '🟡 Absences', value: '/absent [durée] · /retour · /avertissements', inline: false },
+        { name: '📊 Stats & Info', value: '/stats · /solde · /journal · /aide', inline: false },
+      ).setFooter({ text: 'IWC Bot • Commandes membres' });
+
+    const e2 = new EmbedBuilder().setColor(0x8B1A1A).setTitle('🎖️ COMMANDES — Direction').setDescription('*Réservées à la Direction.*')
+      .addFields(
+        { name: '⚙️ Membres', value: '/promo · /retro · /grade-set · /avertir · /annuler-absence · /registre', inline: false },
+        { name: '💰 Trésorerie', value: '/bilan · /contrats-archives · ⚙️ dans coffre-entreprise', inline: false },
+        { name: '🎯 Opérations', value: '/op-programmer', inline: false },
+        { name: '📊 Dashboard', value: '/dashboard · /rapport · /stats', inline: false },
+        { name: '🛠️ Admin', value: '/purge · /sync · /version', inline: false },
+      ).setFooter({ text: 'IWC Bot • Commandes Direction' });
+
+    const e3 = new EmbedBuilder().setColor(0xED4245).setTitle('💀 COMMANDES — Fléau & Concepteur').setDescription('*Accès exclusif.*')
+      .addFields(
+        { name: '⚙️ Config', value: '/op-programmer · /rapport · ⚙️ limites coffre', inline: false },
+      ).setFooter({ text: 'IWC Bot • Fléau & Concepteur' });
+
+    const e4 = new EmbedBuilder().setColor(0x555555).setTitle('🤖 AUTOMATISMES — Sans commande').setDescription('*Le bot fait ça tout seul.*')
+      .addFields(
+        { name: '💰 Trésorerie', value: 'Bouton Nouvelle Transaction → photo → double saisie → validation Direction si > limite', inline: false },
+        { name: '📋 Fiches personnages', value: 'Poster dans #fiches-personnages → embed + thread + Notion auto', inline: false },
+        { name: '🎭 Identité IC', value: 'Bouton dans #surnom-pseudo → Notion auto', inline: false },
+        { name: '🗺️ Plans & Planning', value: 'Photo dans plans → Notion · Photo dans planning → RDV Notion', inline: false },
+        { name: '📅 RDV détecté', value: 'Ecrire "rdv", "booker"... dans discussion-hrp → bouton 📅 proposé', inline: false },
+        { name: '⏰ Rappels', value: 'Rappel 24h + 1h avant RDV Notion · Rappel 30min avant op programmée', inline: false },
+        { name: '🟡 Absences', value: 'Rôle Absent auto · Permissions suspendues · Levée auto à la date de fin', inline: false },
+        { name: '🐺 Recrutement', value: 'Candidature → thread discussion · Rappel 24h/72h · Archivage auto', inline: false },
+      ).setFooter({ text: 'IWC Bot • Automatismes' });
+
+    await ch.send({ embeds: [e1] });
+    await ch.send({ embeds: [e2] });
+    await ch.send({ embeds: [e3] });
+    await ch.send({ embeds: [e4] });
+    console.log('✅ Commandes slash postées');
+  } catch(e) { console.log('❌ setupCommandesSlash error:', e.message); }
 }
 
 // ── Setup message #surnom-pseudo — embed + bouton ──
