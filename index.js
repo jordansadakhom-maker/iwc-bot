@@ -416,6 +416,7 @@ async function autoSetup(guild) {
   await notionV3.setupAffairesPanel?.(guild);
   await notionV3.updateHierarchieEmbed?.(guild);
   await notionV3.setupInformateursPanel?.(guild);
+  await setupFicheFormat(guild);
 
   const reglCh = getCh(guild, 'reglement', 'règlement');
   if (reglCh) {
@@ -959,3 +960,72 @@ const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('IWC Bot OK'); }).listen(PORT, () => console.log(`🌐 Serveur keepalive en écoute sur le port ${PORT}`));
 
 client.login(process.env.TOKEN || process.env.DISCORD_TOKEN);
+
+// ── PATCH : Setup message format fiche dans #fiches-personnages ──
+// Appelé dans autoSetup
+async function setupFicheFormat(guild) {
+  try {
+    const ch = guild.channels.cache.find(c => {
+      const clean = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return c.isTextBased?.() && clean(c.name).includes('fichespersonnages') || clean(c.name).includes('fichesperso') || clean(c.name).includes('fiches');
+    });
+    if (!ch) return;
+
+    // Vérifier si le message existe déjà
+    const msgs = await ch.messages.fetch({ limit: 20 });
+    const existing = msgs.find(m => m.author.id === guild.members.me?.id && m.content.includes('FORMAT FICHE'));
+    if (existing) return; // déjà en place
+
+    const FORMAT = [
+      '```',
+      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+      '  — FORMAT FICHE PERSONNELLE — IWC —',
+      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+      '```',
+      '',
+      '**NOM COMPLET :**',
+      '**SURNOM(S) :**',
+      '**ÂGE :**',
+      '**LIEU DE NAISSANCE :**',
+      '**NATIONALITÉ :**',
+      '**TAILLE / CORPULENCE :**',
+      '**YEUX / CHEVEUX :**',
+      '**SIGNES PARTICULIERS :**',
+      '**PROFESSION :**',
+      '**RÉPUTATION :**',
+      '',
+      '> *"Citation du personnage."*',
+      '',
+      '**—— HISTOIRE ——**',
+      '[5 à 15 lignes minimum]',
+      '',
+      '**—— PERSONNALITÉ ——**',
+      '→ Trait 1',
+      '→ Trait 2',
+      '→ Trait 3',
+      '',
+      '**—— COMPÉTENCES ——**',
+      '⚔️ Compétence : ●●●●○',
+      '🎯 Compétence : ●●●●●',
+      '',
+      '**—— FAIBLESSES ——**',
+      '→ Faiblesse 1',
+      '→ Faiblesse 2',
+      '',
+      '**—— LIENS IMPORTANTS ——**',
+      '[Nom] — [Relation] — [Description courte]',
+      '',
+      '**—— OBJECTIF ——**',
+      '[Ce que le personnage cherche à accomplir]',
+      '',
+      '```',
+      '— IWC • 1895 —',
+      '```',
+    ].join('\n');
+
+    await ch.send(FORMAT);
+    console.log('✅ Message format fiche posté dans #fiches-personnages');
+  } catch (e) {
+    console.log('❌ setupFicheFormat error:', e.message);
+  }
+}
