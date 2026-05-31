@@ -66,33 +66,33 @@ const NOTION_MEMBRES_DB_ID  = process.env.NOTION_MEMBRES_DB     || '36ef4436a86c
 // Remplis ces IDs depuis Discord : clic droit sur le salon → Copier l'identifiant
 const SALON_IDS = {
   // Légal
-  AGENDA:              '', // #-agenda
-  PLANNING:            '', // #planning (le bon, pas le vide)
-  COFFRE_ENTREPRISE:   '', // #coffre-entreprise
-  HIERARCHIE_LEGAL:    '', // #hierarchie-iron-wolf-company
-  CONTRATS:            '', // #contrats
-  HISTOIRE_IWC:        '', // #histoire-iwc
-  ABSENCES:            '', // #absences
-  AFFAIRES:            '', // #affaires
-  INFORMATEURS:        '', // #informateurs
-  PLANS:               '', // #plans
-  FICHES_PERSONNAGES:  '', // #fiches-personnages
-  SURNOM_PSEUDO:       '', // #surnom-pseudo
-  GRADE:               '', // #grade (légal)
-  PATCH_NOTE:          '', // #patch-note
+  AGENDA:              '1509638226132996178', // #-agenda
+  PLANNING:            '1509719218654941315', // #planning (le bon, pas le vide)
+  COFFRE_ENTREPRISE:   '1509719218654941315', // #coffre-entreprise
+  HIERARCHIE_LEGAL:    '1508756453354373202', // #hierarchie-iron-wolf-company
+  CONTRATS:            '1508756439206985809', // #contrats
+  HISTOIRE_IWC:        '1508756442730074222', // #histoire-iwc
+  ABSENCES:            '1508756459444502661', // #absences
+  AFFAIRES:            '1509718164760563743', // #affaires
+  INFORMATEURS:        '1508756508362674337', // #informateurs
+  PLANS:               '1509255294184853524', // #plans
+  FICHES_PERSONNAGES:  '1508756493845925960', // #fiches-personnages
+  SURNOM_PSEUDO:       '1508756528277225512', // #surnom-pseudo
+  GRADE:               '1508915628315115581', // #grade (légal)
+  PATCH_NOTE:          '1508788467008667819', // #patch-note
 
   // Direction
-  LOGS:                '', // #logs
-  DOSSIER_RECRUTEMENT: '', // #dossier-recrutement
-  RECRUTEMENT_INTERNE: '', // #recrutement-interne
-  DASHBOARD:           '', // salon dashboard
+  LOGS:                '1509695000441786608', // #logs
+  DOSSIER_RECRUTEMENT: '1509337860724228137', // #dossier-recrutement
+  RECRUTEMENT_INTERNE: '1509254295717941278', // #recrutement-interne
+  DASHBOARD:           '1509252295127466096', // salon dashboard
 
   // Illégal
-  COFFRE_ILLEGAL:      '', // #coffre-illegal
-  GRADE_ILLEGAL:       '', // #grade (illégal)
-  HIERARCHIE_OMBRE:    '', // #hierarchie-ombre
-  AGENDA_ILLEGAL:      '', // #agenda-illégal
-  OPERATIONS:          '', // #operations
+  COFFRE_ILLEGAL:      '1508756516830842960', // #coffre-illegal
+  GRADE_ILLEGAL:       '1509254315712188438', // #grade (illégal)
+  HIERARCHIE_OMBRE:    '1508756490432024636', // #hierarchie-ombre
+  AGENDA_ILLEGAL:      '1508788467008667819', // #agenda-illégal
+  OPERATIONS:          '1508756483246919690', // #operations
 };
 
 // ── Détection du pôle d'un membre depuis ses rôles Discord ──
@@ -118,5 +118,6 @@ module.exports = {
   LIMITE_SORTIE_LEGAL, LIMITE_SORTIE_ILLEGAL,
   SEUIL_COFFRE_LEGAL, SEUIL_COFFRE_ILLEGAL,
   NOTION_RECRUTEMENT_DB, NOTION_MEMBRES_DB_ID,
+  _getPole,
 };
 
