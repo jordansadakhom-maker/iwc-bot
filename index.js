@@ -1500,22 +1500,42 @@ async function _syncSurnomNotion(message) {
     const surnomIC = get('SURNOM IC');
     const appart   = get('APPARTENANCE');
 
-    // Compatibilité modal (message.author peut être { id, username })
-    const userId = message.author?.id;
+    // Compatibilité modal — ID et pseudo peuvent venir directement
+    const userId        = message.discordId || message.author?.id;
+    const pseudoDiscord = message.pseudoDiscord || message.author?.username || '';
     if (!userId) return;
 
-    const page = await _notionFindByDiscordId(process.env.NOTION_MEMBRES_DB, userId);
-    if (!page) { if (typeof message.react === 'function') await message.react('⚠️').catch(() => {}); return; }
+    // Chercher la page Notion par Discord ID
+    let page = await _notionFindByDiscordId(process.env.NOTION_MEMBRES_DB, userId);
 
+    // Si pas trouvé → créer la page
+    if (!page && process.env.NOTION_TOKEN && process.env.NOTION_MEMBRES_DB) {
+      const created = await _notionCreate(process.env.NOTION_MEMBRES_DB, {
+        'Nom':        { title:     [{ text: { content: nomIC || pseudoDiscord } }] },
+        'Discord ID': { rich_text: [{ text: { content: userId } }] },
+        'Pseudo':     { rich_text: [{ text: { content: pseudoDiscord } }] },
+      });
+      page = created;
+      console.log(`✅ Nouveau membre créé dans Notion : ${nomIC}`);
+    }
+
+    if (!page) {
+      if (typeof message.react === 'function') await message.react('⚠️').catch(() => {});
+      return;
+    }
+
+    // Mettre à jour les champs
     const props = {};
-    if (nomIC)    props['Personnage'] = { rich_text: [{ text: { content: nomIC } }] };
-    if (surnomIC) props['Surnom']     = { rich_text: [{ text: { content: surnomIC } }] };
-    if (appart)   props['Pôle']       = { select: { name: appart.toLowerCase().includes('ill') ? '🔒 Illégal' : '⚖️ Légal' } };
+    if (nomIC)         props['Personnage']        = { rich_text: [{ text: { content: nomIC } }] };
+    if (surnomIC)      props['Surnom']             = { rich_text: [{ text: { content: surnomIC } }] };
+    if (pseudoDiscord) props['Pseudo']             = { rich_text: [{ text: { content: pseudoDiscord } }] };
+    if (userId)        props['Discord ID']         = { rich_text: [{ text: { content: userId } }] };
+    if (appart)        props['Pôle']               = { select: { name: appart.toLowerCase().includes('ill') ? '🔒 Illégal' : '⚖️ Légal' } };
     props['Dernière activité'] = { date: { start: new Date().toISOString().split('T')[0] } };
 
     await _notionPatch(page.id, props);
     if (typeof message.react === 'function') await message.react('✅').catch(() => {});
-    console.log(`✅ Identité IC synced : ${nomIC} (${message.author?.username || userId})`);
+    console.log(`✅ Identité IC synced : ${nomIC} — ID: ${userId} — Pseudo: ${pseudoDiscord}`);
   } catch (e) { console.log('❌ _syncSurnomNotion error:', e.message); }
 }
 
@@ -2835,15 +2855,6 @@ async function _ouvrirModalSurnom(interaction) {
   modal.addComponents(
     new ActionRowBuilder().addComponents(
       new TextInputBuilder()
-        .setCustomId('pseudo_discord')
-        .setLabel('Pseudo Discord')
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true)
-        .setValue(interaction.user.username)
-        .setPlaceholder('Ex: storm__as')
-    ),
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
         .setCustomId('nom_ic')
         .setLabel('Nom IC (In Character)')
         .setStyle(TextInputStyle.Short)
@@ -2877,28 +2888,34 @@ async function _ouvrirModalSurnom(interaction) {
 async function _validerModalSurnom(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const pseudo     = interaction.fields.getTextInputValue('pseudo_discord').trim();
-  const nomIC      = interaction.fields.getTextInputValue('nom_ic').trim();
-  const surnomIC   = interaction.fields.getTextInputValue('surnom_ic').trim();
-  const appartRaw  = interaction.fields.getTextInputValue('appartenance').trim().toLowerCase();
-  const isIlleg    = appartRaw.includes('ill');
-  const pole       = isIlleg ? 'illegal' : 'legal';
+  // ID et pseudo récupérés automatiquement — pas besoin de les saisir
+  const discordId   = interaction.user.id;
+  const pseudoDiscord = interaction.user.username;
+  const nomIC       = interaction.fields.getTextInputValue('nom_ic').trim();
+  const surnomIC    = interaction.fields.getTextInputValue('surnom_ic').trim();
+  const appartRaw   = interaction.fields.getTextInputValue('appartenance').trim().toLowerCase();
+  const isIlleg     = appartRaw.includes('ill');
+  const pole        = isIlleg ? 'illegal' : 'legal';
 
   // Mettre à jour la DB locale
   const db = loadDB();
-  if (!db.members[interaction.user.id]) db.members[interaction.user.id] = {};
-  db.members[interaction.user.id].name   = nomIC;
-  db.members[interaction.user.id].surnom = surnomIC;
-  db.members[interaction.user.id].pole   = pole;
-  db.members[interaction.user.id].lastActivity = new Date().toISOString();
+  if (!db.members[discordId]) db.members[discordId] = {};
+  db.members[discordId].discordId     = discordId;
+  db.members[discordId].username      = pseudoDiscord;
+  db.members[discordId].name          = nomIC;
+  db.members[discordId].surnom        = surnomIC;
+  db.members[discordId].pole          = pole;
+  db.members[discordId].lastActivity  = new Date().toISOString();
   saveDB(db);
 
-  // Sync Notion
+  // Sync Notion avec ID + pseudo automatiques
   await _syncSurnomNotion({
-    author: { id: interaction.user.id, username: pseudo },
+    author:  { id: discordId, username: pseudoDiscord },
     content: `NOM IC : ${nomIC}\nSURNOM IC : ${surnomIC}\nAPPARTENANCE : ${isIlleg ? 'Illégal' : 'Légal'}`,
-    guild: interaction.guild,
-    react: () => {},
+    guild:   interaction.guild,
+    react:   () => {},
+    discordId,
+    pseudoDiscord,
   });
 
   // Confirmation éphémère
@@ -2906,12 +2923,13 @@ async function _validerModalSurnom(interaction) {
     .setColor(isIlleg ? 0x8B1A1A : 0x3B82F6)
     .setTitle('✅ Identité IC enregistrée')
     .addFields(
-      { name: '👤 Pseudo Discord', value: pseudo,   inline: true },
-      { name: '🎭 Nom IC',         value: nomIC,    inline: true },
-      { name: '🏷️ Surnom IC',     value: surnomIC || '—', inline: true },
+      { name: '🆔 Discord ID',     value: `\`${discordId}\``,          inline: true },
+      { name: '👤 Pseudo Discord', value: pseudoDiscord,               inline: true },
+      { name: '🎭 Nom IC',         value: nomIC,                       inline: true },
+      { name: '🏷️ Surnom IC',     value: surnomIC || '—',             inline: true },
       { name: '📂 Appartenance',   value: isIlleg ? '🔒 Illégal' : '⚖️ Légal', inline: true },
     )
-    .setDescription('*Ton identité a été enregistrée dans le Registre Membres Notion.*')
+    .setDescription('*Ton identité et ton ID Discord ont été enregistrés dans le Registre Membres Notion.*')
     .setFooter({ text: 'IWC • Identité IC' })
   ] });
 }
