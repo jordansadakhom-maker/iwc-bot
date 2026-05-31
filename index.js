@@ -861,12 +861,11 @@ client.on('messageCreate', async message => {
   // ── Détection RDV dans #discussion-hrp et #discussion-rp ──
   const cleanCh = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
   // Détecter tous les salons de discussion (hrp, rp, direction)
-  // ── Détection RDV — tous les salons texte sauf les salons système ──
-  const salonsSystème = ['logs','annonces','règlement','reglement','patch-note','patch','recrutement','dossier','backgrounds','fiches-personnages','journal-de-bord','commandes-slash','surnom-pseudo','plans','planning','coffre','agenda','informateurs','affaires','absences','histoire','hiérarchie','hierarchie','grade'];
-  const estSalonSystème = salonsSystème.some(n => cleanCh(message.channel.name).includes(cleanCh(n)));
-  const estSalonTexte   = message.channel.isTextBased?.() && !message.channel.isVoiceBased?.();
+  // ── Détection RDV — tout salon où le membre peut écrire ──
+  const estSalonTexte = message.channel.isTextBased?.() && !message.channel.isVoiceBased?.();
+  const peutEcrire    = message.channel.permissionsFor?.(message.member)?.has('SendMessages');
 
-  if (estSalonTexte && !estSalonSystème) {
+  if (estSalonTexte && peutEcrire) {
     const contenu = message.content.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
     // Toutes les façons de dire rendez-vous
@@ -880,7 +879,7 @@ client.on('messageCreate', async message => {
       // Avec préposition (rdv à, rdv au, rdv chez)
       'rdv a ', 'rdv au ', 'rdv chez ', 'rdv ce ', 'rdv demain',
       'rendez-vous a ', 'rendez-vous au ', 'rendez-vous chez ',
-      'rendez vous a ', 'rendez vous au ', 'rendez vous chez ',
+      'rendez vous a ', 'rendez vous au ', 'rendez vous chez ', 'rendez vous demain', 'rendez vous ce soir', 'rendez vous ce', 'rendez vous a',
       // Heure en chiffres après rdv
       'rdv 0h','rdv 1h','rdv 2h','rdv 3h','rdv 4h','rdv 5h','rdv 6h','rdv 7h','rdv 8h','rdv 9h',
       'rdv 10h','rdv 11h','rdv 12h','rdv 13h','rdv 14h','rdv 15h','rdv 16h','rdv 17h','rdv 18h',
