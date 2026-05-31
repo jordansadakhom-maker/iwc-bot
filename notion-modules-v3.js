@@ -46,13 +46,7 @@ const GRADES_ILLEGAL = [
   { nom: 'Le Maudit',      emoji: '🟤', roleKey: 'MAUDIT',        couleur: 0x8B5A2A },
 ];
 
-const MEMBRES_DISCORD_MAP = {
-  'Colt Kane':      '696325126047662081',
-  'June McCall':    '998581854791798835',
-  'Cyrus Hollow':   '324627678143578112',
-  'Jonas Caverly':  '944208797084311583',
-  'Thomas Galagan': '982201491773354035',
-};
+const { MEMBRES_DISCORD_MAP, NOTION_VERSION: NOTION_VERSION_V3 } = require('./config');
 
 function fmtShort(d) { return !d ? '—' : new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
 function daysSince(d) { return !d ? 999 : Math.floor((Date.now() - new Date(d).getTime()) / 86400000); }
@@ -162,32 +156,61 @@ async function checkInactivite(guild) {
 
 async function updateHierarchieEmbed(guild) {
   try {
-    // FIX : chercher aussi 'hierarchie' car le salon peut s'appeler différemment
     const gradeCh = getCh(guild, 'grade', 'hierarchie-iron-wolf', 'hierarchie-ombre');
     if (!gradeCh) return;
 
-    const db      = loadDB();
-    const membres = Object.values(db.members || {}).filter(m => m.status !== 'parti' && m.status !== 'visiteur');
+    const db = loadDB();
 
-    const grouper = (grades) => grades.map(g => {
-      const liste = membres.filter(m => m.rang === g.nom || m.rang?.toLowerCase().includes(g.nom.toLowerCase().split(' ')[0]));
-      return { ...g, membres: liste };
-    }).filter(g => g.membres.length > 0);
+    // ── Source de vérité = les vrais rôles Discord des membres ──
+    const allMembers = await guild.members.fetch().catch(() => null);
+    if (!allMembers) return;
 
+    // Construire une map roleId → liste de membres Discord
+    const roleMembers = {};
+    const allGrades   = [...GRADES_LEGAL, ...GRADES_ILLEGAL];
+    for (const g of allGrades) {
+      const roleId = ROLES[g.roleKey];
+      if (!roleId) continue;
+      roleMembers[roleId] = [...allMembers.values()].filter(m =>
+        !m.user.bot && m.roles.cache.has(roleId)
+      );
+    }
+
+    // Construire une section à partir des vrais rôles
     const buildSection = (grades) => {
-      const grouped = grouper(grades);
-      if (!grouped.length) return '*Aucun membre*';
-      return grouped.map(g => `${g.emoji} **${g.nom}**\n${g.membres.map(m => `┗ ${m.name}${m.status === 'absent' ? ' *(absent)*' : m.status === 'inactif' ? ' *(inactif)*' : ''}`).join('\n')}`).join('\n\n');
+      const lignes = [];
+      for (const g of grades) {
+        const roleId  = ROLES[g.roleKey];
+        const members = roleMembers[roleId] || [];
+        if (!members.length) continue;
+        const lines = members.map(m => {
+          const dbData = db.members[m.id];
+          const statut = dbData?.status;
+          const suffix = statut === 'absent' ? ' *(absent)*' : statut === 'inactif' ? ' *(inactif)*' : '';
+          return `┗ ${m.displayName}${suffix}`;
+        }).join('\n');
+        lignes.push(`${g.emoji} **${g.nom}**\n${lines}`);
+      }
+      return lignes.join('\n\n') || '*Aucun membre*';
     };
+
+    // Compter les membres actifs depuis les rôles Discord
+    const allRoleIds  = allGrades.map(g => ROLES[g.roleKey]).filter(Boolean);
+    const membresRole = [...allMembers.values()].filter(m =>
+      !m.user.bot && m.roles.cache.some(r => allRoleIds.includes(r.id))
+    );
+    const actifs  = membresRole.filter(m => db.members[m.id]?.status !== 'absent' && db.members[m.id]?.status !== 'inactif').length;
+    const absents = membresRole.filter(m => db.members[m.id]?.status === 'absent').length;
+    const inactifs= membresRole.filter(m => db.members[m.id]?.status === 'inactif').length;
 
     const embed = new EmbedBuilder()
       .setColor(0x8B1A1A)
       .setTitle('⚔️ IRON WOLF COMPANY — Tableau Hiérarchique')
-      .setDescription('*Structure interne de la Compagnie. Mis à jour automatiquement.*')
+      .setDescription('*Structure interne de la Compagnie. Basée sur les vrais rôles Discord.*')
       .addFields(
         { name: '⚖️ ═══ PÔLE LÉGAL ═══',  value: buildSection(GRADES_LEGAL),   inline: false },
         { name: '🔪 ═══ LA CONFRÉRIE ═══', value: buildSection(GRADES_ILLEGAL), inline: false },
-        { name: '📊 Effectifs', value: [`✅ Actifs : **${membres.filter(m => m.status === 'actif').length}**`, `⚠️ Absents : **${membres.filter(m => m.status === 'absent').length}**`, `💤 Inactifs : **${membres.filter(m => m.status === 'inactif').length}**`].join(' · '), inline: false },
+        { name: '📊 Effectifs', value: [`✅ Actifs : **${actifs}**`, `⚠️ Absents : **${absents}**`, `💤 Inactifs : **${inactifs}**`].join(' · '), inline: false },
       )
       .setFooter({ text: `IWC • Hiérarchie • MàJ ${new Date().toLocaleString('fr-FR')}` });
 
@@ -291,10 +314,47 @@ async function handleGradeGradeSelect(interaction) {
   const logsCh = getCh(interaction.guild, 'logs');
   if (logsCh) await logsCh.send({ embeds: [new EmbedBuilder().setColor(gradeInfo?.couleur || 0x8B1A1A).setTitle(`🎖️ Grade modifié — ${nomMembre}`).addFields({ name: '👤 Membre', value: `<@${userId}>`, inline: true }, { name: '📉 Ancien', value: ancienGrade, inline: true }, { name: '📈 Nouveau', value: nouveauGrade, inline: true }, { name: '✅ Décidé par', value: interaction.user.username, inline: true }).setFooter({ text: `IWC • ${fmtShort(new Date())}` })] }).catch(() => {});
 
-  await interaction.update({ embeds: [new EmbedBuilder().setColor(gradeInfo?.couleur || 0x57F287).setTitle(`✅ Grade appliqué — ${nomMembre}`).addFields({ name: '📉 Ancien grade', value: ancienGrade, inline: true }, { name: '📈 Nouveau grade', value: nouveauGrade, inline: true }, { name: '✅ Appliqué par', value: interaction.user.username, inline: true }).setDescription('Discord, Notion et le Journal IC ont été mis à jour.').setFooter({ text: 'IWC • Panneau de gestion' })], components: [] });
+  await interaction.update({ embeds: [new EmbedBuilder().setColor(gradeInfo?.couleur || 0x57F287).setTitle(`✅ Grade appliqué — ${nomMembre}`).addFields({ name: '📉 Ancien grade', value: ancienGrade, inline: true }, { name: '📈 Nouveau grade', value: nouveauGrade, inline: true }, { name: '✅ Appliqué par', value: interaction.user.username, inline: true }).setDescription('Discord, Notion et le Journal IC ont été mis à jour.').setFooter({ text: 'IWC • Panneau de gestion' })], components: [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`btn_grade_maj_${userId}`).setLabel('🔄 Modifier à nouveau').setStyle(ButtonStyle.Secondary),
+    )
+  ] });
 
-  setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+  setTimeout(() => interaction.deleteReply().catch(() => {}), 10000);
   await updateHierarchieEmbed(interaction.guild);
+}
+
+// ── Bouton "Modifier à nouveau" — relance directement le menu de grade pour ce membre ──
+async function handleGradeMajButton(interaction) {
+  const userId = interaction.customId.replace('btn_grade_maj_', '');
+  const db     = loadDB();
+  const membre = db.members[userId];
+  if (!membre) return interaction.reply({ content: '❌ Membre introuvable.', ephemeral: true });
+
+  const rangActuel = membre.rang || '—';
+  const allGrades  = [...GRADES_LEGAL, ...GRADES_ILLEGAL];
+
+  await interaction.update({
+    embeds: [new EmbedBuilder()
+      .setColor(0x8B1A1A)
+      .setTitle(`🔄 Mise à jour grade — ${membre.name || userId}`)
+      .setDescription(`Grade actuel : **${rangActuel}**
+
+Sélectionnez le nouveau grade.`)
+      .setFooter({ text: 'IWC • Mise à jour rapide' })
+    ],
+    components: [new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('grade_select_grade')
+        .setPlaceholder(`Actuel : ${rangActuel} — Choisir le nouveau...`)
+        .addOptions(allGrades.map(g => ({
+          label: g.nom,
+          value: `${userId}||${g.nom}`,
+          description: GRADES_LEGAL.includes(g) ? '⚖️ Légal' : '🔪 Illégal',
+          emoji: g.emoji,
+        })).slice(0, 25))
+    )],
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -466,13 +526,18 @@ async function handleInformateurModal(interaction) {
   const source = interaction.fields.getTextInputValue('source'); const cible = interaction.fields.getTextInputValue('cible'); const information = interaction.fields.getTextInputValue('information');
   const fiabiliteRaw = interaction.fields.getTextInputValue('fiabilite').toLowerCase(); const estConfirmee = fiabiliteRaw.includes('confirm') && !fiabiliteRaw.includes('non'); const fiabilite = estConfirmee ? 'Confirmée' : 'Non confirmée';
   const db = loadDB(); if (!db.informateurs) db.informateurs = [];
-  const rapport = { id: `INFO-${Date.now().toString().slice(-5)}`, source, cible, info: information, fiabilite, rapporteurId: interaction.user.id, rapporteur: interaction.user.username, createdAt: new Date().toISOString() };
+  const rapport = { id: `INFO-${Date.now().toString().slice(-5)}`, source, cible, info: information, fiabilite, statut: 'nouveau', rapporteurId: interaction.user.id, rapporteur: interaction.user.username, createdAt: new Date().toISOString() };
   db.informateurs.push(rapport); saveDB(db);
   await _archiverRapportNotion(rapport);
   const infosCh = getCh(interaction.guild, 'informateurs');
-  if (infosCh) await infosCh.send({ embeds: [new EmbedBuilder().setColor(estConfirmee ? 0xED4245 : 0xFFA500).setTitle(`${estConfirmee ? '🔴' : '🟡'} Rapport \`${rapport.id}\` — ${estConfirmee ? 'Confirmée' : 'Non confirmée'}`).addFields({ name: '🕵️ Source', value: source, inline: true }, { name: '🎯 Cible / Lieu', value: cible, inline: true }, { name: '📋 Fiabilité', value: `${estConfirmee ? '✅' : '⚠️'} ${fiabilite}`, inline: true }, { name: '📝 Information', value: information.slice(0, 800) }, { name: '👤 Rapporteur', value: `<@${interaction.user.id}>`, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }).setFooter({ text: 'IWC • Réseau Informateurs — Confidentiel' }).setTimestamp()] }).catch(() => {});
-  if (estConfirmee) await _alerterDirection(interaction.guild, rapport);
-  await interaction.editReply({ content: `✅ Rapport \`${rapport.id}\` soumis.${estConfirmee ? '\n⚠️ **La Direction a été alertée.**' : ''}` });
+  if (infosCh) await infosCh.send({
+    embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle(`🆕 Rapport \`${rapport.id}\` — À vérifier`).addFields({ name: '🕵️ Source', value: source, inline: true }, { name: '🎯 Cible / Lieu', value: cible, inline: true }, { name: '📋 Fiabilité déclarée', value: `${estConfirmee ? '✅' : '⚠️'} ${fiabilite}`, inline: true }, { name: '📝 Information', value: information.slice(0, 800) }, { name: '👤 Rapporteur', value: `<@${interaction.user.id}>`, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: '📌 Statut', value: '🆕 En attente de validation Direction', inline: false }).setFooter({ text: 'IWC • Réseau Informateurs — Confidentiel' }).setTimestamp()],
+    components: [new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`info_confirmer_${rapport.id}`).setLabel('✅ Confirmer').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`info_infirmer_${rapport.id}`).setLabel('❌ Infirmer').setStyle(ButtonStyle.Danger),
+    )],
+  }).catch(() => {});
+  await interaction.editReply({ content: `✅ Rapport \`${rapport.id}\` soumis.\nLa Direction va le vérifier avant toute action.` });
 }
 
 async function handleInformateurHistorique(interaction) {
@@ -491,18 +556,66 @@ async function handleInformateurMessage(message) {
   await message.react('✅').catch(() => {});
   const estConfirmee = fiabilite?.toLowerCase().includes('confirm') && !fiabilite?.toLowerCase().includes('non');
   const db = loadDB(); if (!db.informateurs) db.informateurs = [];
-  const rapport = { id: `INFO-${Date.now().toString().slice(-5)}`, source: source || '—', cible: cible || '—', info: info || message.content.slice(0, 500), fiabilite: fiabilite || '—', rapporteurId: message.author.id, rapporteur: message.author.username, createdAt: new Date().toISOString() };
+  const rapport = { id: `INFO-${Date.now().toString().slice(-5)}`, source: source || '—', cible: cible || '—', info: info || message.content.slice(0, 500), fiabilite: fiabilite || '—', statut: 'nouveau', rapporteurId: message.author.id, rapporteur: message.author.username, createdAt: new Date().toISOString() };
   db.informateurs.push(rapport); saveDB(db);
   await _archiverRapportNotion(rapport);
-  if (estConfirmee) await _alerterDirection(message.guild, rapport, message.author.id);
-  await message.reply({ embeds: [new EmbedBuilder().setColor(estConfirmee ? 0xED4245 : 0xFFA500).setTitle(`${estConfirmee ? '🔴 Confirmée' : '🟡 Reçue'} — \`${rapport.id}\` archivé`).setDescription(`Rapport enregistré.${estConfirmee ? '\n⚠️ **La Direction a été alertée.**' : ''}`).setFooter({ text: 'IWC • Informateurs — Confidentiel' })], allowedMentions: { repliedUser: false } }).then(m => setTimeout(() => m.delete().catch(() => {}), 8000)).catch(() => {});
+  // Poster avec boutons de validation Direction
+  const infosCh2 = getCh(message.guild, 'informateurs');
+  if (infosCh2) await infosCh2.send({
+    embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle(`🆕 Rapport \`${rapport.id}\` — À vérifier`).addFields({ name: '🕵️ Source', value: rapport.source, inline: true }, { name: '🎯 Cible / Lieu', value: rapport.cible, inline: true }, { name: '📋 Fiabilité déclarée', value: rapport.fiabilite, inline: true }, { name: '📝 Information', value: rapport.info.slice(0, 800) }, { name: '👤 Rapporteur', value: `<@${message.author.id}>`, inline: true }, { name: '📌 Statut', value: '🆕 En attente de validation', inline: true }).setFooter({ text: 'IWC • Réseau Informateurs — Confidentiel' }).setTimestamp()],
+    components: [new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`info_confirmer_${rapport.id}`).setLabel('✅ Confirmer').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`info_infirmer_${rapport.id}`).setLabel('❌ Infirmer').setStyle(ButtonStyle.Danger),
+    )],
+  }).catch(() => {});
+  await message.reply({ embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle(`🆕 \`${rapport.id}\` enregistré`).setDescription('Rapport soumis. La Direction va le vérifier.').setFooter({ text: 'IWC • Informateurs — Confidentiel' })], allowedMentions: { repliedUser: false } }).then(m => setTimeout(() => m.delete().catch(() => {}), 8000)).catch(() => {});
 }
 
 async function _archiverRapportNotion(rapport) {
   if (!process.env.NOTION_TOKEN || !NOTION_INFOS_DB) return;
   try {
-    await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: NOTION_INFOS_DB }, properties: { 'Source': { title: [{ text: { content: rapport.source } }] }, 'Cible': { rich_text: [{ text: { content: rapport.cible } }] }, 'Information': { rich_text: [{ text: { content: rapport.info.slice(0, 2000) } }] }, 'Fiabilité': { select: { name: rapport.fiabilite === 'Confirmée' ? '✅ Confirmée' : '⚠️ Non confirmée' } }, 'Date': { date: { start: new Date().toISOString().split('T')[0] } }, 'Rapporteur': { rich_text: [{ text: { content: rapport.rapporteur } }] } } }) });
+    await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: NOTION_INFOS_DB }, properties: { 'Source': { title: [{ text: { content: rapport.source } }] }, 'Cible': { rich_text: [{ text: { content: rapport.cible } }] }, 'Information': { rich_text: [{ text: { content: rapport.info.slice(0, 2000) } }] }, 'Fiabilité': { select: { name: rapport.fiabilite === 'Confirmée' ? '✅ Confirmée' : '⚠️ Non confirmée' } }, 'Statut': { select: { name: '🆕 Nouveau' } }, 'Date': { date: { start: new Date().toISOString().split('T')[0] } }, 'Rapporteur': { rich_text: [{ text: { content: rapport.rapporteur } }] } } }) });
   } catch (e) { console.log('❌ Informateur Notion error:', e.message); }
+}
+
+// ── Validation Direction : Confirmer / Infirmer un rapport ──
+async function handleInformateurConfirmer(interaction) {
+  return _traiterValidationInfo(interaction, 'confirme');
+}
+async function handleInformateurInfirmer(interaction) {
+  return _traiterValidationInfo(interaction, 'infirme');
+}
+
+async function _traiterValidationInfo(interaction, decision) {
+  const estDir = interaction.member?.roles?.cache?.some(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'].some(n => r.name.includes(n)));
+  if (!estDir) return interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
+
+  const rapId = interaction.customId.replace(decision === 'confirme' ? 'info_confirmer_' : 'info_infirmer_', '');
+  const db = loadDB();
+  const rapport = (db.informateurs || []).find(r => r.id === rapId);
+  if (!rapport) return interaction.reply({ content: '❌ Rapport introuvable.', ephemeral: true });
+  if (rapport.statut && rapport.statut !== 'nouveau') {
+    return interaction.reply({ content: `❌ Rapport déjà traité (${rapport.statut}).`, ephemeral: true });
+  }
+
+  rapport.statut = decision;
+  rapport.valideePar = interaction.user.username;
+  rapport.valideeAt = new Date().toISOString();
+  saveDB(db);
+
+  // Sync Notion
+  if (global._syncInformateurNotion) global._syncInformateurNotion(rapport, decision, interaction.user.username).catch(() => {});
+
+  const confirme = decision === 'confirme';
+  const embed = EmbedBuilder.from(interaction.message.embeds[0])
+    .setColor(confirme ? 0xED4245 : 0x555555)
+    .setTitle(`${confirme ? '🔴 Confirmé' : '⬛ Infirmé'} — Rapport ${rapId}`)
+    .spliceFields(-1, 1, { name: '📌 Statut', value: confirme ? `🔴 Confirmé par ${interaction.user.username}` : `⬛ Infirmé par ${interaction.user.username}`, inline: false });
+
+  await interaction.update({ embeds: [embed], components: [] });
+
+  // Si confirmé → alerter la Direction
+  if (confirme) await _alerterDirection(interaction.guild, rapport, rapport.rapporteurId);
 }
 
 async function _alerterDirection(guild, rapport, rapporteurId) {
@@ -516,12 +629,12 @@ async function _alerterDirection(guild, rapport, rapporteurId) {
 // ═══════════════════════════════════════════════════════════════
 
 const NOTION_BASE_URL = 'https://api.notion.com/v1';
-const NOTION_VERSION  = '2022-06-28';
+// NOTION_VERSION importée depuis config.js (alias NOTION_VERSION_V3)
 
 async function notionAddImageBlock(pageId, imageUrl, caption) {
   if (!process.env.NOTION_TOKEN || !pageId) return false;
   try {
-    await fetch(`${NOTION_BASE_URL}/blocks/${pageId}/children`, { method: 'PATCH', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' }, body: JSON.stringify({ children: [{ object: 'block', type: 'image', image: { type: 'external', external: { url: imageUrl }, caption: caption ? [{ type: 'text', text: { content: caption } }] : [] } }, { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ type: 'text', text: { content: `📸 Ajouté le ${fmtShort(new Date())} via Discord` } }] } }] }) });
+    await fetch(`${NOTION_BASE_URL}/blocks/${pageId}/children`, { method: 'PATCH', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION_V3, 'Content-Type': 'application/json' }, body: JSON.stringify({ children: [{ object: 'block', type: 'image', image: { type: 'external', external: { url: imageUrl }, caption: caption ? [{ type: 'text', text: { content: caption } }] : [] } }, { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ type: 'text', text: { content: `📸 Ajouté le ${fmtShort(new Date())} via Discord` } }] } }] }) });
     return true;
   } catch (e) { console.log('❌ notionAddImageBlock error:', e.message); return false; }
 }
@@ -529,7 +642,7 @@ async function notionAddImageBlock(pageId, imageUrl, caption) {
 async function getProchainRdvNotion() {
   if (!process.env.NOTION_TOKEN || !process.env.NOTION_AGENDA_DB_ID) return null;
   try {
-    const res = await fetch(`${NOTION_BASE_URL}/databases/${process.env.NOTION_AGENDA_DB_ID}/query`, { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' }, body: JSON.stringify({ filter: { property: 'Date', date: { on_or_after: new Date().toISOString() } }, sorts: [{ property: 'Date', direction: 'ascending' }], page_size: 5 }) });
+    const res = await fetch(`${NOTION_BASE_URL}/databases/${process.env.NOTION_AGENDA_DB_ID}/query`, { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION_V3, 'Content-Type': 'application/json' }, body: JSON.stringify({ filter: { property: 'Date', date: { on_or_after: new Date().toISOString() } }, sorts: [{ property: 'Date', direction: 'ascending' }], page_size: 5 }) });
     const data = await res.json(); const p = (data.results || [])[0]; if (!p) return null;
     return { id: p.id, titre: p.properties.Titre?.title?.[0]?.plain_text || '—', date: p.properties.Date?.date?.start, lieu: p.properties.Lieu?.rich_text?.[0]?.plain_text || '—' };
   } catch { return null; }
@@ -538,7 +651,7 @@ async function getProchainRdvNotion() {
 async function rechercherRdvNotion(motCle) {
   if (!process.env.NOTION_TOKEN || !process.env.NOTION_AGENDA_DB_ID) return null;
   try {
-    const res = await fetch(`${NOTION_BASE_URL}/databases/${process.env.NOTION_AGENDA_DB_ID}/query`, { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' }, body: JSON.stringify({ filter: { or: [{ property: 'Titre', rich_text: { contains: motCle } }, { property: 'Lieu', rich_text: { contains: motCle } }, { property: 'Notes', rich_text: { contains: motCle } }] }, sorts: [{ property: 'Date', direction: 'ascending' }], page_size: 3 }) });
+    const res = await fetch(`${NOTION_BASE_URL}/databases/${process.env.NOTION_AGENDA_DB_ID}/query`, { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION_V3, 'Content-Type': 'application/json' }, body: JSON.stringify({ filter: { or: [{ property: 'Titre', rich_text: { contains: motCle } }, { property: 'Lieu', rich_text: { contains: motCle } }, { property: 'Notes', rich_text: { contains: motCle } }] }, sorts: [{ property: 'Date', direction: 'ascending' }], page_size: 3 }) });
     const data = await res.json(); const p = (data.results || [])[0]; if (!p) return null;
     return { id: p.id, titre: p.properties.Titre?.title?.[0]?.plain_text || '—', date: p.properties.Date?.date?.start, lieu: p.properties.Lieu?.rich_text?.[0]?.plain_text || '—' };
   } catch { return null; }
@@ -590,7 +703,7 @@ async function handlePlansMessage(message) {
   if (process.env.NOTION_TOKEN && NOTION_PLANS_DB) {
     try {
       for (const [, attachment] of images) {
-        await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: NOTION_PLANS_DB }, properties: { 'Titre': { title: [{ text: { content: `Plan — ${lieu}` } }] }, 'Lieu': { rich_text: [{ text: { content: lieu } }] }, 'Date': { date: { start: new Date().toISOString().split('T')[0] } }, 'Auteur': { rich_text: [{ text: { content: message.author.username } }] }, 'Type': { select: { name: '🗺️ Plan tactique' } }, 'URL Image': { url: attachment.url } } }) });
+        await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION_V3, 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: NOTION_PLANS_DB }, properties: { 'Titre': { title: [{ text: { content: `Plan — ${lieu}` } }] }, 'Lieu': { rich_text: [{ text: { content: lieu } }] }, 'Date': { date: { start: new Date().toISOString().split('T')[0] } }, 'Auteur': { rich_text: [{ text: { content: message.author.username } }] }, 'Type': { select: { name: '🗺️ Plan tactique' } }, 'URL Image': { url: attachment.url } } }) });
       }
     } catch (e) { console.log('❌ Plans Notion error:', e.message); }
   }
@@ -626,9 +739,236 @@ async function updateNotionStatutPole(userId, pole) {
 module.exports = {
   handleAbsenceDetection, ABSENCE_KEYWORDS,
   checkInactivite, JOURS_INACTIF,
-  updateHierarchieEmbed, handleHierarchieCommand, handleGradeSetCommand, handleGradePanelButton, handleGradeMembreSelect, handleGradeGradeSelect, GRADES_LEGAL, GRADES_ILLEGAL,
+  updateHierarchieEmbed, handleHierarchieCommand, handleGradeSetCommand, handleGradePanelButton, handleGradeMembreSelect, handleGradeGradeSelect, handleGradeMajButton, GRADES_LEGAL, GRADES_ILLEGAL,
   setupAffairesPanel, handleAffaireNouvelleButton, handleAffaireModal, handleAffaireVote, handleAffaireDetail, postResumeAffaires, handleAffairesResumeButton,
-  setupInformateursPanel, handleInformateurRapportButton, handleInformateurModal, handleInformateurHistorique, handleInformateurMessage,
+  setupInformateursPanel, handleInformateurRapportButton, handleInformateurModal, handleInformateurHistorique, handleInformateurMessage, handleInformateurConfirmer, handleInformateurInfirmer,
   handlePlanningScreenshot, handlePlansMessage,
   getMentionPole, updateNotionStatutPole,
+  syncOperationTermineeNotion, syncAbsenceNotion,
+  handleAgendaCommand, handleAgendaNouveauButton, handleAgendaModal,
+  _getPole,
 };
+
+// ═══════════════════════════════════════════════════════════════
+// 9. SYNC NOTION — Opérations terminées
+// ═══════════════════════════════════════════════════════════════
+
+async function syncOperationTermineeNotion(op) {
+  if (!process.env.NOTION_TOKEN || !process.env.NOTION_OPS_DB) return;
+  try {
+    const props = {
+      'Nom':         { title:     [{ text: { content: op.name || '—' } }] },
+      'Lieu':        { rich_text: [{ text: { content: op.lieu || '—' } }] },
+      'Objectif':    { rich_text: [{ text: { content: op.objectif || '—' } }] },
+      'Résultat':    { rich_text: [{ text: { content: op.resultat || '—' } }] },
+      'Butin':       { rich_text: [{ text: { content: op.butin || '—' } }] },
+      'Débrief':     { rich_text: [{ text: { content: op.debrief || '—' } }] },
+      'Pôle':        { select:    { name: op.pole === 'illegal' ? '🔒 Illégal' : '⚖️ Légal' } },
+      'Statut':      { select:    { name: '✅ Terminée' } },
+      'Participants':{ rich_text: [{ text: { content: (op.participants || []).join(', ') } }] },
+      'Date fin':    { date:      { start: op.endedAt ? new Date(op.endedAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0] } },
+    };
+
+    if (op.notionPageId) {
+      await fetch(`https://api.notion.com/v1/pages/${op.notionPageId}`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ properties: props }),
+      });
+    } else {
+      await fetch('https://api.notion.com/v1/pages', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parent: { database_id: process.env.NOTION_OPS_DB }, properties: props }),
+      });
+    }
+    console.log(`✅ Opération archivée dans Notion : ${op.name}`);
+  } catch (e) { console.log('❌ syncOperationTermineeNotion error:', e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 10. SYNC NOTION — Absences
+// ═══════════════════════════════════════════════════════════════
+
+async function syncAbsenceNotion(userId, statut) {
+  if (!process.env.NOTION_TOKEN || !process.env.NOTION_MEMBRES_DB) return;
+  try {
+    const res = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_MEMBRES_DB}/query`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filter: { property: 'Discord ID', rich_text: { equals: userId } }, page_size: 1 }),
+    });
+    const data = await res.json();
+    const page = data.results?.[0];
+    if (!page) return;
+
+    const statutNotion = statut === 'absent' ? '⚠️ Absent' : statut === 'inactif' ? '💤 Inactif' : '✅ Actif';
+    await fetch(`https://api.notion.com/v1/pages/${page.id}`, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ properties: {
+        'Statut':            { select:    { name: statutNotion } },
+        'Dernière activité': { date:      { start: new Date().toISOString().split('T')[0] } },
+      } }),
+    });
+    console.log(`✅ Statut Notion MàJ : ${userId} → ${statutNotion}`);
+  } catch (e) { console.log('❌ syncAbsenceNotion error:', e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 11. AGENDA INTERACTIF — Créer un RDV depuis Discord
+// ═══════════════════════════════════════════════════════════════
+
+async function handleAgendaCommand(interaction) {
+  const sub = interaction.options?.getSubcommand?.() || 'voir';
+
+  if (sub === 'voir') {
+    await interaction.deferReply({ ephemeral: false });
+    let rdvs = [];
+    if (process.env.NOTION_TOKEN && process.env.NOTION_AGENDA_DB_ID) {
+      try {
+        const res = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_AGENDA_DB_ID}/query`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filter: { property: 'Date', date: { on_or_after: new Date().toISOString() } }, sorts: [{ property: 'Date', direction: 'ascending' }], page_size: 8 }),
+        });
+        const data = await res.json();
+        rdvs = (data.results || []).map(p => ({
+          titre: p.properties.Titre?.title?.[0]?.plain_text || '—',
+          date:  p.properties.Date?.date?.start,
+          heure: p.properties.Heure?.rich_text?.[0]?.plain_text || '',
+          lieu:  p.properties.Lieu?.rich_text?.[0]?.plain_text || '—',
+          type:  p.properties.Type?.select?.name || '—',
+          statut: p.properties.Statut?.select?.name || '—',
+        }));
+      } catch (e) { console.log('❌ Agenda voir error:', e.message); }
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0x8B5A2A)
+      .setTitle('📅 Agenda — Iron Wolf Company')
+      .setDescription(rdvs.length > 0
+        ? rdvs.map(r => {
+            const d = r.date ? new Date(r.date).toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: 'short' }) : '—';
+            return `**${r.titre}**\n📅 ${d}${r.heure ? ` à **${r.heure}**` : ''} · 📍 ${r.lieu} · *(${r.type})*`;
+          }).join('\n\n')
+        : '*Aucun RDV à venir dans Notion.*'
+      )
+      .setFooter({ text: `IWC • Agenda • ${new Date().toLocaleDateString('fr-FR')}` })
+      .setTimestamp();
+
+    const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+    await interaction.editReply({
+      embeds: [embed],
+      components: [new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('btn_agenda_nouveau').setLabel('➕ Nouveau RDV').setStyle(ButtonStyle.Primary),
+      )],
+    });
+    return;
+  }
+
+  if (sub === 'creer') {
+    const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
+    const modal = new ModalBuilder().setCustomId('modal_agenda_rdv').setTitle('📅 Nouveau RDV — Agenda IWC');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('titre').setLabel('Titre du RDV').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Réunion Direction, Mission Paleto Bay...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('date').setLabel('Date (JJ/MM/AAAA)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 05/06/2026')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('heure').setLabel('Heure').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: 21h00')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('lieu').setLabel('Lieu').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: Paleto Bay, Discord vocal...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('notes').setLabel('Notes / Description').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500)),
+    );
+    await interaction.showModal(modal);
+  }
+}
+
+async function handleAgendaNouveauButton(interaction) {
+  const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
+  const modal = new ModalBuilder().setCustomId('modal_agenda_rdv').setTitle('📅 Nouveau RDV — Agenda IWC');
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('titre').setLabel('Titre du RDV').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Réunion Direction, Mission Paleto Bay...')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('date').setLabel('Date (JJ/MM/AAAA)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 05/06/2026')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('heure').setLabel('Heure').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: 21h00')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('lieu').setLabel('Lieu').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: Paleto Bay, Discord vocal...')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('notes').setLabel('Notes / Description').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500)),
+  );
+  await interaction.showModal(modal);
+}
+
+async function handleAgendaModal(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+
+  const titre = interaction.fields.getTextInputValue('titre');
+  const dateRaw = interaction.fields.getTextInputValue('date');
+  const heure = interaction.fields.getTextInputValue('heure') || '';
+  const lieu  = interaction.fields.getTextInputValue('lieu')  || '—';
+  const notes = interaction.fields.getTextInputValue('notes') || '';
+
+  // Parser la date JJ/MM/AAAA
+  let dateISO = null;
+  try {
+    const parts = dateRaw.split('/');
+    if (parts.length === 3) {
+      dateISO = `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
+    }
+  } catch {}
+
+  if (!dateISO) {
+    return interaction.editReply({ content: '❌ Format de date invalide. Utilisez JJ/MM/AAAA.' });
+  }
+
+  // Créer dans Notion
+  if (process.env.NOTION_TOKEN && process.env.NOTION_AGENDA_DB_ID) {
+    try {
+      await fetch('https://api.notion.com/v1/pages', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          parent: { database_id: process.env.NOTION_AGENDA_DB_ID },
+          properties: {
+            'Titre':  { title:     [{ text: { content: titre } }] },
+            'Date':   { date:      { start: dateISO } },
+            'Heure':  { rich_text: [{ text: { content: heure } }] },
+            'Lieu':   { rich_text: [{ text: { content: lieu } }] },
+            'Notes':  { rich_text: [{ text: { content: notes.slice(0, 2000) } }] },
+            'Type':   { select:    { name: 'Réunion' } },
+            'Statut': { select:    { name: 'Planifié' } },
+            'Notif 24h':   { checkbox: true },
+            'Notif 1h':    { checkbox: true },
+            'Notif 15min': { checkbox: true },
+          },
+        }),
+      });
+      console.log(`✅ RDV Notion créé : ${titre}`);
+    } catch (e) {
+      console.log('❌ Agenda modal error:', e.message);
+      return interaction.editReply({ content: '❌ Erreur lors de la création dans Notion.' });
+    }
+  }
+
+  // Confirmer + annoncer dans le salon planning
+  const { EmbedBuilder } = require('discord.js');
+  const embedConfirm = new EmbedBuilder()
+    .setColor(0x8B5A2A)
+    .setTitle(`📅 RDV créé — ${titre}`)
+    .addFields(
+      { name: '📅 Date',  value: new Date(dateISO).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }), inline: true },
+      { name: '🕐 Heure', value: heure || '—', inline: true },
+      { name: '📍 Lieu',  value: lieu,          inline: true },
+    );
+  if (notes) embedConfirm.addFields({ name: '📝 Notes', value: notes.slice(0, 300) });
+  embedConfirm
+    .addFields({ name: '🔔 Rappels', value: '24h · 1h · 15min activés automatiquement' })
+    .setFooter({ text: `Créé par ${interaction.user.username} • IWC Agenda` })
+    .setTimestamp();
+
+  await interaction.editReply({ embeds: [embedConfirm] });
+
+  // Annoncer dans #planning
+  const planCh = interaction.guild.channels.cache.find(c => {
+    const cl = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return c.isTextBased?.() && cl(c.name) === cl('planning');
+  });
+  if (planCh) await planCh.send({ embeds: [embedConfirm] }).catch(() => {});
+}
+
+
