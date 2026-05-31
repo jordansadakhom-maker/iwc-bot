@@ -261,7 +261,7 @@ async function envoyerRapportDirection(guild) {
     const visiteurs = Object.values(db.members || {}).filter(m => m.status === 'visiteur');
     const soldeLegal = db.coffres?.legal || 0; const soldeIlleg = db.coffres?.illegal || 0;
     const embed = new EmbedBuilder().setColor(0x8B1A1A)
-      .setTitle(`📋 Rapport quotidien — ${new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' })}`)
+      .setTitle(`📋 Rapport hebdomadaire — Semaine du ${new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}`)
       .setDescription('*Résumé des dernières 24 heures — Iron Wolf Company*')
       .addFields(
         { name: '👥 MEMBRES', value: [`🆕 Arrivées : **${nouveaux.length}**`, `🚪 Départs : **${departs.length}**`, `👁️ Visiteurs : **${visiteurs.length}**`, alertes.length > 0 ? `⚠️ Inactifs : **${alertes.length}**` : '✅ Aucune inactivité'].join('\n'), inline: false },
@@ -270,11 +270,18 @@ async function envoyerRapportDirection(guild) {
         { name: '🎯 OPÉRATIONS', value: [opsEnCours.length > 0 ? `🟢 En cours : **${opsEnCours.length}**` : '🟢 Aucune', opsTermHier.length > 0 ? `✅ Terminées hier : **${opsTermHier.length}**` : ''].filter(Boolean).join('\n') || '*Aucune activité*', inline: false },
         { name: '💰 TRÉSORERIE', value: [`⚖️ Légal : **$${soldeLegal.toLocaleString('fr-FR')}**`, `🔒 Illégal : **$${soldeIlleg.toLocaleString('fr-FR')}**`, `💎 Total : **$${(soldeLegal + soldeIlleg).toLocaleString('fr-FR')}**`].join('\n'), inline: false },
       ).setFooter({ text: `IWC • Rapport automatique • ${new Date().toLocaleString('fr-FR')}` });
+    // Uniquement au Fléau et Concepteur
+    const rolesCibles = ['Fléau', 'Concepteur'];
     let envoyes = 0;
-    for (const discordId of Object.values(MEMBRES_DISCORD_MAP)) {
-      try { const member = await guild.members.fetch(discordId).catch(() => null); if (!member || !isDirection(member)) continue; await member.send({ embeds: [embed] }); envoyes++; } catch {}
+    const membres = await guild.members.fetch().catch(() => null);
+    if (membres) {
+      for (const [, member] of membres) {
+        const estCible = member.roles.cache.some(r => rolesCibles.some(n => r.name.includes(n)));
+        if (!estCible) continue;
+        try { await member.send({ embeds: [embed] }); envoyes++; } catch {}
+      }
     }
-    console.log(`✅ Rapport quotidien envoyé à ${envoyes} membre(s)`);
+    console.log(`✅ Rapport hebdo envoyé à ${envoyes} membre(s) (Fléau/Concepteur)`);
   } catch (e) { console.log('❌ Rapport quotidien error:', e.message); }
 }
 
@@ -920,7 +927,8 @@ client.once('clientReady', async () => {
   cron.schedule('0 20 * * 0',   async () => { for (const g of client.guilds.cache.values()) await notionExtra.postStatsHebdo?.(g).catch(e => console.log(e.message)); }, { timezone: 'Europe/Paris' });
   cron.schedule('0 12 * * *',   async () => { for (const g of client.guilds.cache.values()) await autoKickVisiteurs(g).catch(() => {}); }, { timezone: 'Europe/Paris' });
   cron.schedule('0 * * * *',    async () => { for (const g of client.guilds.cache.values()) await notionExtra.checkEcheancesContrats?.(g).catch(() => {}); }, { timezone: 'Europe/Paris' });
-  cron.schedule('0 8 * * *',    async () => { for (const g of client.guilds.cache.values()) await envoyerRapportDirection(g).catch(() => {}); }, { timezone: 'Europe/Paris' });
+  // Rapport HEBDOMADAIRE — vendredi 20h — Fléau & Concepteur uniquement
+  cron.schedule('0 20 * * 5',    async () => { for (const g of client.guilds.cache.values()) await envoyerRapportDirection(g).catch(() => {}); }, { timezone: 'Europe/Paris' });
   cron.schedule('0 * * * *',    async () => { for (const g of client.guilds.cache.values()) await notionV3.checkInactivite?.(g).catch(() => {}); });
   cron.schedule('0 * * * *',    async () => { for (const g of client.guilds.cache.values()) await notionV3.updateHierarchieEmbed?.(g).catch(() => {}); });
   cron.schedule('0 8 * * 1',    async () => { for (const g of client.guilds.cache.values()) await notionV3.postResumeAffaires?.(g).catch(() => {}); }, { timezone: 'Europe/Paris' });
@@ -931,4 +939,3 @@ const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('IWC Bot OK'); }).listen(PORT, () => console.log(`🌐 Serveur keepalive en écoute sur le port ${PORT}`));
 
 client.login(process.env.TOKEN || process.env.DISCORD_TOKEN);
-
