@@ -103,6 +103,8 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('avertissements').setDescription('📋 Voir les avertissements d\'un membre')
     .addUserOption(o => o.setName('membre').setDescription('Membre (optionnel, défaut: toi)').setRequired(false)),
   new SlashCommandBuilder().setName('retour').setDescription('✅ Déclarer son retour d\'absence'),
+  new SlashCommandBuilder().setName('annuler-absence').setDescription('🔓 Lever l\'absence d\'un membre (Direction)')
+    .addUserOption(o => o.setName('membre').setDescription('Membre dont lever l\'absence').setRequired(true)),
   new SlashCommandBuilder().setName('contrats').setDescription('📜 Voir mes contrats en cours'),
   new SlashCommandBuilder().setName('registre').setDescription('📋 Liste des membres actifs (Direction)')
     .addStringOption(o => o.setName('pole').setDescription('Filtrer par pôle').setRequired(false)
@@ -348,6 +350,7 @@ async function handleSlashCommand(interaction) {
   if (commandName === 'avertir')           return _handleAvertir(interaction);
   if (commandName === 'avertissements')    return _handleAvertissements(interaction);
   if (commandName === 'retour')            return _handleRetour(interaction);
+  if (commandName === 'annuler-absence')   return _handleAnnulerAbsence(interaction);
 
   if (commandName === 'stats') return notionV5.handleStatsAvancees?.(interaction);
   if (commandName === '_stats_old') {
@@ -931,19 +934,35 @@ client.on('interactionCreate', async interaction => {
 
   if (interaction.isButton() && interaction.customId === 'open_candidature_legal') {
     const modal = new ModalBuilder().setCustomId('candidature_modal_legal').setTitle('⚖️ Iron Wolf Company — Légal');
-    modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom_perso').setLabel('Nom du personnage').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Jonas Caverly')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('age_perso').setLabel('Âge du personnage').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 34 ans')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('metier').setLabel('Métier / Compétences légales').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Médecin, Avocat, Marchand...')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('background').setLabel('Background du personnage').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000).setPlaceholder('Qui est ton personnage ? Son passé...')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('dispos').setLabel('Disponibilités & Expérience RP').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Soir semaine, week-end / Confirmé')));
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom_perso').setLabel('Nom IC · Âge (Ex: Jonas Caverly, 34 ans)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Jonas Caverly, 34 ans')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('metier').setLabel('Métier / Compétences').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Médecin, Avocat, Ingénieur...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('background').setLabel('Background du personnage').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(800).setPlaceholder('Qui est ton personnage ? Son histoire, ce qui l\'amène ici...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('motivation').setLabel('Pourquoi rejoindre IWC ?').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500).setPlaceholder('Qu\'est-ce que tu apportes à la Compagnie ? Tes objectifs IC...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('dispos').setLabel('Disponibilités · Niveau RP').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Soir semaine + week-end · Confirmé 2 ans')),
+    );
     await interaction.showModal(modal); return;
   }
 
   if (interaction.isButton() && interaction.customId === 'open_candidature_illegal') {
-    const modal = new ModalBuilder().setCustomId('candidature_modal_illegal').setTitle('🔪 Organisation Hors la Loi — Illégal');
-    modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom_perso').setLabel('Nom du personnage').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Viktor Crane')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('age_perso').setLabel('Âge du personnage').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 29 ans')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('specialite').setLabel('Spécialité / Activités').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Contrebande, Sécurité, Bras droit...')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('background').setLabel('Background du personnage').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000).setPlaceholder("Qui est ton personnage ? Ce qui l'a amené dans l'ombre...")), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('dispos').setLabel('Disponibilités & Expérience RP').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Soir semaine, week-end / Confirmé')));
+    const modal = new ModalBuilder().setCustomId('candidature_modal_illegal').setTitle('🔪 La Confrérie — Illégal');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom_perso').setLabel('Nom IC · Âge (Ex: Viktor Crane, 29 ans)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Viktor Crane, 29 ans')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('specialite').setLabel('Spécialité / Activités').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Contrebande, Sécurité, Renseignement...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('background').setLabel('Background du personnage').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(800).setPlaceholder("Ce qui t'a amené dans l'ombre... Ton passé, tes actes...")),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('motivation').setLabel('Pourquoi rejoindre la Confrérie ?').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500).setPlaceholder('Ce que tu apportes, tes intentions IC...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('dispos').setLabel('Disponibilités · Niveau RP').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Soir semaine + week-end · Confirmé 2 ans')),
+    );
     await interaction.showModal(modal); return;
   }
 
   if (interaction.isModalSubmit() && interaction.customId === 'candidature_modal_legal') {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const cand = { id: Date.now().toString(), userId: interaction.user.id, username: interaction.user.username, nomPerso: interaction.fields.getTextInputValue('nom_perso'), agePerso: interaction.fields.getTextInputValue('age_perso'), metier: interaction.fields.getTextInputValue('metier'), background: interaction.fields.getTextInputValue('background'), dispos: interaction.fields.getTextInputValue('dispos'), type: 'legal', status: 'reçue', receivedAt: new Date().toISOString() };
+    // Parser nom + âge depuis le champ combiné
+    const nomAgeL  = interaction.fields.getTextInputValue('nom_perso').split(',');
+    const nomPersoL = nomAgeL[0]?.trim() || '—';
+    const agePersoL = nomAgeL[1]?.trim() || '—';
+    const cand = { id: Date.now().toString(), userId: interaction.user.id, username: interaction.user.username, nomPerso: nomPersoL, agePerso: agePersoL, metier: interaction.fields.getTextInputValue('metier'), background: interaction.fields.getTextInputValue('background'), motivation: interaction.fields.getTextInputValue('motivation'), dispos: interaction.fields.getTextInputValue('dispos'), type: 'legal', status: 'reçue', receivedAt: new Date().toISOString() };
     db.candidatures.push(cand); saveDB(db);
     _syncCandidatureNotion(cand, 'reçue').catch(() => {});
     await interaction.editReply({ content: '✅ **Candidature légale transmise.**\nRéponse en DM sous 48h.\n*La Compagnie ne recrute pas au hasard.*' });
@@ -951,7 +970,7 @@ client.on('interactionCreate', async interaction => {
     interaction.user.send({ embeds: [new EmbedBuilder().setColor(0x3B82F6).setTitle('📥 Candidature légale reçue — IWC').setDescription("Ta candidature a bien été transmise à la Direction.\n\nUne réponse en DM sous 48h.\n\n*La Compagnie choisit ses membres avec soin.*\n— La Direction").setFooter({ text: 'Iron Wolf Company • Recrutement Légal' })] }).catch(() => {});
     const dossierCh = guild.channels.cache.get(CH.RECRUTEMENT_INT_LEGAL);
     if (dossierCh) {
-      const embed = new EmbedBuilder().setColor(0x3B82F6).setTitle(`📁 [IRON WOLF COMPANY] DOSSIER LÉGAL — ${cand.nomPerso}`).setDescription(`> *"Chaque talent a sa place au sein de la Compagnie."*\n\nCandidature de <@${cand.userId}> (**${cand.username}**)\n**⚖️ TYPE : RECRUTEMENT LÉGAL**`).addFields({ name: '👤 Personnage', value: `**${cand.nomPerso}**, ${cand.agePerso}`, inline: true }, { name: '📅 Reçue le', value: fmtShort(new Date()), inline: true }, { name: '🆔 ID', value: `\`${cand.id}\``, inline: true }, { name: '💼 Métier', value: cand.metier }, { name: '📖 Background', value: cand.background.slice(0, 1000) }, { name: '🕐 Disponibilités', value: cand.dispos, inline: true }, { name: '📋 Statut', value: '🟡 En attente', inline: true }, { name: '\u200b', value: '**Réagissez :** ✅ Accepter · ❌ Refuser · 🤔 À revoir' }).setThumbnail(interaction.user.displayAvatarURL()).setFooter({ text: `IWC • Légal • ${fmtShort(new Date())}` });
+      const embed = new EmbedBuilder().setColor(0x3B82F6).setTitle(`📁 [IRON WOLF COMPANY] DOSSIER LÉGAL — ${cand.nomPerso}`).setDescription(`> *"Chaque talent a sa place au sein de la Compagnie."*\n\nCandidature de <@${cand.userId}> (**${cand.username}**)\n**⚖️ TYPE : RECRUTEMENT LÉGAL**`).addFields({ name: '👤 Personnage', value: `**${cand.nomPerso}**, ${cand.agePerso}`, inline: true }, { name: '📅 Reçue le', value: fmtShort(new Date()), inline: true }, { name: '🆔 ID', value: `\`${cand.id}\``, inline: true }, { name: '💼 Métier', value: cand.metier }, { name: '📖 Background', value: cand.background.slice(0, 800) }, { name: '💡 Motivation', value: (cand.motivation || '—').slice(0, 500) }, { name: '🕐 Disponibilités', value: cand.dispos, inline: true }, { name: '📋 Statut', value: '🟡 En attente', inline: true }, { name: '\u200b', value: '**Réagissez :** ✅ Accepter · ❌ Refuser · 🤔 À revoir' }).setThumbnail(interaction.user.displayAvatarURL()).setFooter({ text: `IWC • Légal • ${fmtShort(new Date())}` });
       const dossierMsg = await dossierCh.send({ content: `${getMention(guild)} — 📋 Nouveau dossier **LÉGAL**`, embeds: [embed] });
       await dossierMsg.react('✅'); await dossierMsg.react('❌'); await dossierMsg.react('🤔');
       try { const t = await dossierMsg.startThread({ name: `[LÉGAL] Discussion — ${cand.nomPerso}`, autoArchiveDuration: 10080 }); await t.send(`**Discussion interne — ${cand.nomPerso}** ⚖️\n\nÉchangez ici avant de voter.`); } catch {}
@@ -961,7 +980,10 @@ client.on('interactionCreate', async interaction => {
 
   if (interaction.isModalSubmit() && interaction.customId === 'candidature_modal_illegal') {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const cand = { id: Date.now().toString(), userId: interaction.user.id, username: interaction.user.username, nomPerso: interaction.fields.getTextInputValue('nom_perso'), agePerso: interaction.fields.getTextInputValue('age_perso'), specialite: interaction.fields.getTextInputValue('specialite'), background: interaction.fields.getTextInputValue('background'), dispos: interaction.fields.getTextInputValue('dispos'), type: 'illegal', status: 'reçue', receivedAt: new Date().toISOString() };
+    const nomAgeI   = interaction.fields.getTextInputValue('nom_perso').split(',');
+    const nomPersoI  = nomAgeI[0]?.trim() || '—';
+    const agePersoI  = nomAgeI[1]?.trim() || '—';
+    const cand = { id: Date.now().toString(), userId: interaction.user.id, username: interaction.user.username, nomPerso: nomPersoI, agePerso: agePersoI, specialite: interaction.fields.getTextInputValue('specialite'), background: interaction.fields.getTextInputValue('background'), motivation: interaction.fields.getTextInputValue('motivation'), dispos: interaction.fields.getTextInputValue('dispos'), type: 'illegal', status: 'reçue', receivedAt: new Date().toISOString() };
     db.candidatures.push(cand); saveDB(db);
     _syncCandidatureNotion(cand, 'reçue').catch(() => {});
     await interaction.editReply({ content: '🔒 **Dossier transmis.**\nReste discret.\n*On te contactera si tu es jugé digne.*' });
@@ -969,7 +991,7 @@ client.on('interactionCreate', async interaction => {
     interaction.user.send({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle('🔒 Dossier transmis — IWC').setDescription("Ton dossier a été acheminé aux bonnes personnes.\n\nUne réponse en DM sous 48h.\n\n*Ne parle de cela à personne.*\n— La Direction").setFooter({ text: 'Iron Wolf Company • Confidentiel' })] }).catch(() => {});
     const dossierCh = guild.channels.cache.get(CH.RECRUTEMENT_INT_ILLEG);
     if (dossierCh) {
-      const embed = new EmbedBuilder().setColor(0x8B1A1A).setTitle(`📁 [LA CONFRÉRIE] DOSSIER ILLÉGAL — ${cand.nomPerso}`).setDescription(`> *"L'ombre protège ceux qui savent s'y fondre."*\n\nCandidature de <@${cand.userId}> (**${cand.username}**)\n**🔪 TYPE : RECRUTEMENT ILLÉGAL**`).addFields({ name: '👤 Personnage', value: `**${cand.nomPerso}**, ${cand.agePerso}`, inline: true }, { name: '📅 Reçue le', value: fmtShort(new Date()), inline: true }, { name: '🆔 ID', value: `\`${cand.id}\``, inline: true }, { name: '🔪 Spécialité', value: cand.specialite }, { name: '📖 Background', value: cand.background.slice(0, 1000) }, { name: '🕐 Disponibilités', value: cand.dispos, inline: true }, { name: '📋 Statut', value: '🟡 En attente', inline: true }, { name: '\u200b', value: '**Réagissez :** ✅ Accepter · ❌ Refuser · 🤔 À revoir' }).setThumbnail(interaction.user.displayAvatarURL()).setFooter({ text: `La Confrérie • CONFIDENTIEL • ${fmtShort(new Date())}` });
+      const embed = new EmbedBuilder().setColor(0x8B1A1A).setTitle(`📁 [LA CONFRÉRIE] DOSSIER ILLÉGAL — ${cand.nomPerso}`).setDescription(`> *"L'ombre protège ceux qui savent s'y fondre."*\n\nCandidature de <@${cand.userId}> (**${cand.username}**)\n**🔪 TYPE : RECRUTEMENT ILLÉGAL**`).addFields({ name: '👤 Personnage', value: `**${cand.nomPerso}**, ${cand.agePerso}`, inline: true }, { name: '📅 Reçue le', value: fmtShort(new Date()), inline: true }, { name: '🆔 ID', value: `\`${cand.id}\``, inline: true }, { name: '🔪 Spécialité', value: cand.specialite }, { name: '📖 Background', value: cand.background.slice(0, 800) }, { name: '💡 Motivation', value: (cand.motivation || '—').slice(0, 500) }, { name: '🕐 Disponibilités', value: cand.dispos, inline: true }, { name: '📋 Statut', value: '🟡 En attente', inline: true }, { name: '\u200b', value: '**Réagissez :** ✅ Accepter · ❌ Refuser · 🤔 À revoir' }).setThumbnail(interaction.user.displayAvatarURL()).setFooter({ text: `La Confrérie • CONFIDENTIEL • ${fmtShort(new Date())}` });
       const dossierMsg = await dossierCh.send({ content: `${getMention(guild)} — 🔪 Nouveau dossier **ILLÉGAL**`, embeds: [embed] });
       await dossierMsg.react('✅'); await dossierMsg.react('❌'); await dossierMsg.react('🤔');
       try { const t = await dossierMsg.startThread({ name: `[ILLÉGAL] Discussion — ${cand.nomPerso}`, autoArchiveDuration: 10080 }); await t.send(`**Discussion interne — ${cand.nomPerso}** 🔪\n\nÉchangez ici avant de voter.`); } catch {}
@@ -1196,6 +1218,7 @@ client.once('clientReady', async () => {
       await notionExtra.checkEcheancesContrats?.(g).catch(() => {});
       await notionV3.checkInactivite?.(g).catch(() => {});
       await notionV3.updateHierarchieEmbed?.(g).catch(() => {});
+      await notionV3.checkAffairesTimeout?.(g).catch(() => {});
       await _checkRetoursAbsence(g).catch(() => {});
       await notionV4.checkRecrutementSuivi?.(g).catch(() => {});
       await notionV4.checkEcheancesContrats?.(g).catch(() => {});
@@ -1537,6 +1560,40 @@ async function handleAutocompleteGrades(interaction) {
   await interaction.respond(filtered).catch(() => {});
 }
 
+// ── /bilan enrichi avec graphique ASCII ──
+function _graphiqueBarres(transactions, jours = 7) {
+  // Créer un graphique entrées/sorties par jour
+  const data = {};
+  for (let i = 0; i < jours; i++) {
+    const d = new Date(Date.now() - i * 86400000).toISOString().split('T')[0];
+    data[d] = { entrees: 0, sorties: 0 };
+  }
+  for (const t of transactions) {
+    const d = t.date?.split('T')[0];
+    if (data[d]) {
+      if (t.type?.includes('Entrée')) data[d].entrees += t.montant;
+      else data[d].sorties += t.montant;
+    }
+  }
+  const jrs = Object.entries(data).sort((a, b) => a[0].localeCompare(b[0]));
+  const maxVal = Math.max(...jrs.map(([, v]) => Math.max(v.entrees, v.sorties)), 1);
+  const hauteur = 5;
+  let graphique = '\`\`\`\n';
+  for (let h = hauteur; h >= 0; h--) {
+    graphique += jrs.map(([, v]) => {
+      const eH = Math.round((v.entrees / maxVal) * hauteur);
+      const sH = Math.round((v.sorties / maxVal) * hauteur);
+      if (h === 0) return '──';
+      const e = eH >= h ? '█' : ' ';
+      const s = sH >= h ? '▓' : ' ';
+      return e + s;
+    }).join(' ') + '\n';
+  }
+  graphique += jrs.map(([d]) => new Date(d).getDate().toString().padStart(2, '0')).join('  ') + '\n';
+  graphique += '█ Entrées  ▓ Sorties\`\`\`';
+  return graphique;
+}
+
 // ── /registre — Liste paginée des membres ──
 async function _handleRegistre(interaction) {
   if (!isDirection(interaction.member)) {
@@ -1855,6 +1912,60 @@ async function _handleAvertissements(interaction) {
 
   embed.setFooter({ text: 'IWC • Historique des sanctions' }).setTimestamp();
   await interaction.reply({ embeds: [embed], ephemeral: true });
+}
+
+// ── /annuler-absence — Direction lève une absence ──
+async function _handleAnnulerAbsence(interaction) {
+  if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
+  await interaction.deferReply({ ephemeral: true });
+
+  const cible   = interaction.options.getUser('membre');
+  const db      = loadDB();
+  const m       = db.members[cible.id];
+
+  if (!m || m.status !== 'absent') return interaction.editReply({ content: `❌ <@${cible.id}> n'est pas marqué absent.` });
+
+  m.status       = 'actif';
+  m.lastActivity = new Date().toISOString();
+  m.absentJusqu  = null;
+  m.absentRaison = null;
+  saveDB(db);
+
+  // Retirer le rôle Absent
+  const membreD = await interaction.guild.members.fetch(cible.id).catch(() => null);
+  if (membreD) {
+    const roleAbsent = interaction.guild.roles.cache.get(ROLE_ABSENT);
+    if (roleAbsent) await membreD.roles.remove(roleAbsent).catch(() => {});
+  }
+
+  _syncMembreNotion(cible.id, { status: 'actif', lastActivity: new Date().toISOString() }).catch(() => {});
+
+  // Post dans #absences
+  const absCh = getCh(interaction.guild, 'absences');
+  if (absCh) await absCh.send({ embeds: [new EmbedBuilder()
+    .setColor(0x57F287)
+    .setTitle('✅ Absence levée par la Direction')
+    .addFields(
+      { name: '👤 Membre',   value: `<@${cible.id}>`,                inline: true },
+      { name: '✅ Levé par', value: interaction.user.username,        inline: true },
+      { name: '📅 Date',     value: new Date().toLocaleDateString('fr-FR'), inline: true },
+    )
+    .setFooter({ text: 'IWC • Absence annulée par la Direction' })
+    .setTimestamp()
+  ] }).catch(() => {});
+
+  // DM au membre
+  try {
+    await membreD?.send({ embeds: [new EmbedBuilder()
+      .setColor(0x57F287)
+      .setTitle('✅ Absence levée')
+      .setDescription(`Ton absence a été levée par **${interaction.user.username}**.
+Tes permissions sont rétablies.`)
+      .setFooter({ text: 'IWC' })
+    ] });
+  } catch {}
+
+  await interaction.editReply({ content: `✅ Absence de <@${cible.id}> levée.` });
 }
 
 // ── /retour — Déclarer son retour d'absence ──
