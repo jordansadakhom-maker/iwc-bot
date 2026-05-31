@@ -508,8 +508,17 @@ async function cleanBotPinnedMessages(guild, ...channelNames) {
     try {
       const ch = getCh(guild, name); if (!ch) continue;
       // 1. Dépingler tous les messages épinglés du bot
-      const pinned = await ch.messages.fetchPins().catch(() => null);
-      if (pinned) { for (const [, msg] of pinned) { if (msg.author.id !== botId) continue; await msg.unpin().catch(() => {}); await msg.delete().catch(() => {}); console.log(`🧹 Pin supprimé #${ch.name}`); } }
+      const pinnedRaw = await ch.messages.fetchPins().catch(() => null);
+      if (pinnedRaw) {
+        // fetchPins() peut retourner une Collection ou un Array selon la version
+        const pinnedList = pinnedRaw.values ? [...pinnedRaw.values()] : (Array.isArray(pinnedRaw) ? pinnedRaw : []);
+        for (const msg of pinnedList) {
+          if (msg.author.id !== botId) continue;
+          await msg.unpin().catch(() => {});
+          await msg.delete().catch(() => {});
+          console.log(`🧹 Pin supprimé #${ch.name}`);
+        }
+      }
       // 2. Supprimer notifications "X a épinglé" (type 6) + doublons embeds bot
       const msgs = await ch.messages.fetch({ limit: 50 }).catch(() => null);
       if (!msgs) continue;
