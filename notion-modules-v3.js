@@ -475,6 +475,75 @@ async function handleAffaireVote(interaction, vote) {
   }
 }
 
+// ── Timeout affaires (48h sans décision) + archivage ──
+async function checkAffairesTimeout(guild) {
+  try {
+    const db  = loadDB();
+    const now = Date.now();
+    if (!db.affaires?.length) return;
+
+    const affairesCh = getCh(guild, 'affaires');
+    const logsCh     = getCh(guild, 'logs');
+    let changed = false;
+
+    for (const affaire of db.affaires) {
+      if (affaire.status !== 'en_vote') continue;
+
+      const heures = Math.floor((now - new Date(affaire.createdAt).getTime()) / 3600000);
+
+      // Rappel à 24h
+      if (heures >= 24 && !affaire.rappel24h) {
+        if (logsCh) await logsCh.send({ embeds: [new EmbedBuilder()
+          .setColor(0xFFA500)
+          .setTitle(`⏰ Affaire en attente — ${affaire.titre}`)
+          .setDescription(`L'affaire **${affaire.id}** est en vote depuis **${heures}h** sans décision.`)
+          .addFields({ name: '📊 Score actuel', value: `✅ ${(affaire.votesOui || []).length} · ❌ ${(affaire.votesNon || []).length}`, inline: true })
+          .setFooter({ text: 'IWC • Affaires Direction' })
+        ] }).catch(() => {});
+        affaire.rappel24h = true;
+        changed = true;
+      }
+
+      // Clôture automatique à 48h
+      if (heures >= 48 && !affaire.rappel48h) {
+        const oui = (affaire.votesOui || []).length;
+        const non = (affaire.votesNon || []).length;
+        const decision = oui > non ? 'approuvee' : non > oui ? 'rejetee' : 'expiree';
+
+        affaire.status    = decision;
+        affaire.decideeAt = new Date().toISOString();
+        affaire.rappel48h = true;
+        changed = true;
+
+        const color = decision === 'approuvee' ? 0x57F287 : decision === 'rejetee' ? 0xED4245 : 0x555555;
+        const label = decision === 'approuvee' ? '✅ APPROUVÉE' : decision === 'rejetee' ? '❌ REJETÉE' : '⏰ EXPIRÉE (égalité)';
+
+        if (logsCh) await logsCh.send({ embeds: [new EmbedBuilder()
+          .setColor(color)
+          .setTitle(`${label} (auto) — ${affaire.titre}`)
+          .setDescription(`Clôture automatique après **48h**. Score final : ✅ ${oui} / ❌ ${non}`)
+          .setFooter({ text: 'IWC • Clôture automatique' })
+        ] }).catch(() => {});
+
+        if (global._syncAffaireNotion) global._syncAffaireNotion(affaire, decision).catch(() => {});
+      }
+    }
+
+    // Archivage : déplacer les affaires terminées dans db.affairesArchives
+    const actives  = db.affaires.filter(a => a.status === 'en_vote');
+    const terminees = db.affaires.filter(a => a.status !== 'en_vote');
+    if (terminees.length > 0) {
+      if (!db.affairesArchives) db.affairesArchives = [];
+      db.affairesArchives.push(...terminees.filter(a => !db.affairesArchives.find(x => x.id === a.id)));
+      db.affaires = actives;
+      changed = true;
+      console.log(`✅ ${terminees.length} affaire(s) archivée(s)`);
+    }
+
+    if (changed) saveDB(db);
+  } catch (e) { console.log('❌ checkAffairesTimeout error:', e.message); }
+}
+
 async function postResumeAffaires(guild) {
   try {
     const db = loadDB(); const affairesCh = getCh(guild, 'affaires'); if (!affairesCh) return;
@@ -740,7 +809,7 @@ module.exports = {
   handleAbsenceDetection, ABSENCE_KEYWORDS,
   checkInactivite, JOURS_INACTIF,
   updateHierarchieEmbed, handleHierarchieCommand, handleGradeSetCommand, handleGradePanelButton, handleGradeMembreSelect, handleGradeGradeSelect, handleGradeMajButton, GRADES_LEGAL, GRADES_ILLEGAL,
-  setupAffairesPanel, handleAffaireNouvelleButton, handleAffaireModal, handleAffaireVote, handleAffaireDetail, postResumeAffaires, handleAffairesResumeButton,
+  setupAffairesPanel, handleAffaireNouvelleButton, handleAffaireModal, handleAffaireVote, handleAffaireDetail, postResumeAffaires, handleAffairesResumeButton, checkAffairesTimeout,
   setupInformateursPanel, handleInformateurRapportButton, handleInformateurModal, handleInformateurHistorique, handleInformateurMessage, handleInformateurConfirmer, handleInformateurInfirmer,
   handlePlanningScreenshot, handlePlansMessage,
   getMentionPole, updateNotionStatutPole,
