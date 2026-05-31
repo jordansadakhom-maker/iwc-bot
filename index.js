@@ -51,7 +51,20 @@ const {
   ROLE_POLE_LEGAL, ROLE_POLE_ILLEGAL, ROLE_ABSENT,
   MEMBRES_DISCORD_MAP, DISCORD_TO_IC,
   NOTION_RECRUTEMENT_DB, NOTION_MEMBRES_DB_ID: NOTION_MEMBRES_DB,
+  SALON_IDS,
 } = require('./config');
+
+// ── getCh amélioré — utilise l'ID si configuré dans SALON_IDS ──
+function getChById(guild, salonKey, ...fallbackNames) {
+  const id = SALON_IDS?.[salonKey];
+  if (id) { const ch = guild.channels.cache.get(id); if (ch) return ch; }
+  for (const name of fallbackNames) {
+    const clean = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const ch = guild.channels.cache.find(c => c.isTextBased?.() && clean(c.name).includes(clean(name)));
+    if (ch) return ch;
+  }
+  return null;
+}
 
 const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('stats').setDescription('Affiche les statistiques de la Compagnie'),
@@ -611,7 +624,7 @@ async function sendParticipantDMs(guild, appt, title, color) {
 }
 
 async function checkAgenda(guild) {
-  const appts = await notionQueryAgenda(); const ch = getCh(guild, 'agenda', 'planning'); if (!ch || !appts.length) return;
+  const appts = await notionQueryAgenda(); const ch = getChById(guild, 'AGENDA', 'agenda') || getChById(guild, 'PLANNING', 'planning'); if (!ch || !appts.length) return;
   const mention = getMention(guild); const db = loadDB(); let changed = false;
   for (const a of appts) {
     if (a.statut === 'Annulé' || !a.date) continue;
@@ -631,7 +644,7 @@ async function checkAgenda(guild) {
 }
 
 async function postDailyAgenda(guild) {
-  const ch = getCh(guild, 'agenda', 'planning'); if (!ch) return;
+  const ch = getChById(guild, 'AGENDA', 'agenda') || getChById(guild, 'PLANNING', 'planning'); if (!ch) return;
   const appts = await notionQueryAgenda(); const today = new Date().toISOString().split('T')[0];
   const todayA = appts.filter(a => a.date?.startsWith(today) && a.statut !== 'Annulé'); if (!todayA.length) return;
   const weekA = appts.filter(a => { if (!a.date || a.statut === 'Annulé') return false; const d = new Date(a.date); return d >= new Date() && d <= new Date(Date.now() + 7*86400000); });
@@ -1180,7 +1193,7 @@ client.once('clientReady', async () => {
   }
   for (const guild of client.guilds.cache.values()) {
     await notionExtra.envoyerRappelsFiches?.(guild).catch(() => {});
-    await checkSessionReminders(guild).catch(() => {});
+    // checkSessionReminders désactivé (doublon checkAgenda)
   }
   // ── CRONS REGROUPÉS ──
 
@@ -1193,7 +1206,7 @@ client.once('clientReady', async () => {
   cron.schedule('*/5 * * * *', async () => {
     for (const g of client.guilds.cache.values()) {
       await checkAgenda(g).catch(() => {});
-      await checkSessionReminders(g).catch(() => {});
+      // checkSessionReminders désactivé — doublon de checkAgenda (Notion)
     }
   });
 
