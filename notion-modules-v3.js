@@ -1,15 +1,19 @@
 // ═══════════════════════════════════════════════════════════════
-// notion-modules-v4.js — Opérations briefing · Dashboard alertes
-//                         Recrutement suivi · Contrats rappels
-// IWC Bot v4.0
+// notion-modules-v5.js — Opérations programmées · Stats avancées
+//                         Threads candidatures · Journal IC hebdo
+// IWC Bot v5.0
 // ═══════════════════════════════════════════════════════════════
 
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const {
+  EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
+  ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType,
+} = require('discord.js');
 const { loadDB, saveDB } = require('./db');
 
-const { MEMBRES_DISCORD_MAP, _getPole } = require('./config');
+const { MEMBRES_DISCORD_MAP, ROLE_POLE_LEGAL, ROLE_POLE_ILLEGAL } = require('./config');
 
 function fmtShort(d) { return !d ? '—' : new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
+function fmtLong(d)  { return !d ? '—' : new Date(d).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }); }
 function daysSince(d) { return !d ? 999 : Math.floor((Date.now() - new Date(d).getTime()) / 86400000); }
 function getCh(guild, ...names) {
   for (const name of names) {
@@ -21,484 +25,571 @@ function getCh(guild, ...names) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 1. BRIEFING OPÉRATION — DM automatique aux participants
+// 1. OPÉRATIONS PROGRAMMÉES
+//    - Créée avec date/heure de début
+//    - Inscription jusqu'au lancement automatique
+//    - Bouton STOP pour arrêt d'urgence
+//    - Cron vérifie toutes les minutes si une op doit se lancer
 // ═══════════════════════════════════════════════════════════════
 
-async function envoyerBriefingOp(guild, op) {
-  if (!op.participants?.length) return;
+async function handleOpProgrammeeModal(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const isIlleg = op.pole === 'illegal';
-  const color   = isIlleg ? 0x8B1A1A : 0x3B82F6;
-  const org     = isIlleg ? 'La Confrérie' : 'Iron Wolf Company';
-  const footer  = isIlleg ? 'La Confrérie • Confidentiel' : 'Iron Wolf Company • Légal';
+  const lines = interaction.fields.getTextInputValue('details').split('\n');
+  const get   = k => { const l = lines.find(l => l.toUpperCase().includes(k.toUpperCase()) && l.includes(':')); return l ? l.split(':').slice(1).join(':').trim() : ''; };
+
+  const nom        = interaction.fields.getTextInputValue('nom').trim();
+  const dateHeure  = interaction.fields.getTextInputValue('date_heure').trim();
+  const lieu       = get('LIEU')     || interaction.fields.getTextInputValue('lieu')?.trim() || '—';
+  const objectif   = get('OBJECTIF') || '—';
+  const poleRaw    = get('PÔLE') || get('POLE') || 'legal';
+  const pole       = poleRaw.toLowerCase().includes('ill') ? 'illegal' : 'legal';
+
+  // Parser la date/heure — formats : "05/06/2026 21h00", "05/06 21h00", "21h00" (aujourd'hui)
+  let lancementAt = null;
+  try {
+    const match = dateHeure.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?\s*[àa]?\s*(\d{1,2})[hH:](\d{2})/);
+    if (match) {
+      const [, jour, mois, annee, hh, mm] = match;
+      const year = annee || new Date().getFullYear();
+      // Heure Paris → UTC (offset -1 ou -2 selon saison)
+      const iso  = `${year}-${mois.padStart(2,'0')}-${jour.padStart(2,'0')}T${hh.padStart(2,'0')}:${mm}:00`;
+      lancementAt = new Date(iso).getTime();
+    } else {
+      // Juste une heure → aujourd'hui
+      const matchH = dateHeure.match(/(\d{1,2})[hH:](\d{2})/);
+      if (matchH) {
+        const now = new Date();
+        now.setHours(parseInt(matchH[1]), parseInt(matchH[2]), 0, 0);
+        lancementAt = now.getTime();
+      }
+    }
+  } catch {}
+
+  if (!lancementAt) {
+    return interaction.editReply({ content: '❌ Format de date invalide.\nExemples : `05/06/2026 21h00` · `21h30` (ce soir)' });
+  }
+
+  const db = loadDB();
+  const opId = Date.now().toString();
+  const op = {
+    id: opId, name: nom, lieu, objectif, pole,
+    participants: [], status: 'programmee',
+    lancementAt, equipe: '—',
+    createdAt:  new Date().toISOString(),
+    createdBy:  interaction.user.username,
+  };
+
+  if (!db.operations) db.operations = [];
+  db.operations.push(op);
+  saveDB(db);
+
+  const color = pole === 'illegal' ? 0x8B1A1A : 0x3B82F6;
+  // ROLE_POLE_LEGAL/ILLEGAL importés depuis config.js
 
   const embed = new EmbedBuilder()
     .setColor(color)
-    .setAuthor({ name: `${org} — Briefing Opération`, iconURL: guild.iconURL() || undefined })
-    .setTitle(`🎯 BRIEFING — ${op.name}`)
-    .setDescription([
-      '```',
-      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-      `  OPÉRATION : ${op.name.toUpperCase()}`,
-      `  STATUT    : 🟢 LANCÉE`,
-      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-      '```',
-    ].join('\n'))
+    .setTitle(`🕐 OPÉRATION PROGRAMMÉE — ${nom}`)
+    .setDescription('*Inscrivez-vous avant le lancement. L\'opération démarre automatiquement à l\'heure prévue.*')
     .addFields(
-      { name: '📍 Lieu',       value: op.lieu      || '—', inline: true },
-      { name: '🎯 Objectif',   value: op.objectif  || '—', inline: true },
-      { name: '👥 Équipe',     value: op.equipe    || op.participants.join(', ') || '—', inline: false },
-      { name: '👤 Participants', value: op.participants.map(n => {
-          const id = MEMBRES_DISCORD_MAP[n];
-          return id ? `<@${id}>` : n;
-        }).join(', '), inline: false },
-    );
-
-  if (op.objectifs) embed.addFields({ name: '📋 Détails', value: op.objectifs.slice(0, 500), inline: false });
-
-  embed
-    .addFields({ name: '⚠️ Rappel', value: '*Discrétion absolue. Ce message se réfère à une opération IC.*', inline: false })
-    .setFooter({ text: `${footer} • Briefing automatique` })
+      { name: '📅 Lancement',   value: `**${new Date(lancementAt).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' })} à ${new Date(lancementAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}**`, inline: false },
+      { name: '📍 Lieu',        value: lieu,     inline: true },
+      { name: '🎯 Objectif',    value: objectif, inline: true },
+      { name: '📂 Pôle',        value: pole === 'illegal' ? '🔪 Illégal' : '⚖️ Légal', inline: true },
+      { name: '👥 Participants (0)', value: '*Aucune inscription pour l\'instant.*', inline: false },
+    )
+    .setFooter({ text: `ID: ${opId} • Créée par ${interaction.user.username}` })
     .setTimestamp();
 
-  let envoyes = 0;
-  const dejaEnvoyes = new Set();
+  const rowP = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`op_participer_${opId}`).setLabel('✋ Je participe').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`op_retrait_${opId}`).setLabel('🚪 Me retirer').setStyle(ButtonStyle.Secondary),
+  );
+  const rowG = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`op_lancer_force_${opId}`).setLabel('🟢 Lancer maintenant').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`op_stop_${opId}`).setLabel('🛑 STOP d\'urgence').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`op_annulee_${opId}`).setLabel('❌ Annuler').setStyle(ButtonStyle.Secondary),
+  );
 
-  for (const nomParticipant of op.participants) {
-    // Chercher d'abord dans MEMBRES_DISCORD_MAP
-    let discordId = MEMBRES_DISCORD_MAP[nomParticipant];
+  const opsCh = getCh(interaction.guild, 'operations-en-cours', 'operations');
+  if (opsCh) {
+    const msg = await opsCh.send({
+      content: `<@&${pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL}> — 🕐 Opération programmée **${nom}** — Inscriptions ouvertes !`,
+      embeds: [embed],
+      components: [rowP, rowG],
+    });
+    op.msgId  = msg.id;
+    op.chanId = msg.channel.id;
+    saveDB(db);
+  }
 
-    // Sinon chercher dans les membres Discord par displayName ou username
-    if (!discordId) {
-      const allMembers = await guild.members.fetch().catch(() => null);
-      if (allMembers) {
-        const found = [...allMembers.values()].find(m =>
-          m.displayName.toLowerCase() === nomParticipant.toLowerCase() ||
-          m.user.username.toLowerCase() === nomParticipant.toLowerCase()
-        );
-        if (found) discordId = found.id;
-      }
+  await interaction.editReply({ content: `✅ Opération **${nom}** programmée pour le **${new Date(lancementAt).toLocaleString('fr-FR')}**.\nLancement automatique à l'heure prévue.` });
+}
+
+// ── Cron : vérifier et lancer les opérations programmées ──
+async function checkOpsProgrammees(guild) {
+  const db  = loadDB();
+  const now = Date.now();
+
+  // ── Rappel 30 min avant le lancement ──
+  const opsBientot = (db.operations || []).filter(o =>
+    o.status === 'programmee' && o.lancementAt &&
+    o.lancementAt > now && o.lancementAt - now <= 30 * 60 * 1000 && !o.rappel30Sent
+  );
+  for (const op of opsBientot) {
+    const minutesRestantes = Math.round((op.lancementAt - now) / 60000);
+    // ROLE_POLE_LEGAL/ILLEGAL importés depuis config.js
+
+    // Ping participants + rôle pôle dans le salon
+    const mentions = (op.participants || [])
+      .map(n => { const id = MEMBRES_DISCORD_MAP[n]; return id ? `<@${id}>` : null; })
+      .filter(Boolean).join(' ');
+    const ping = mentions || `<@&${op.pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL}>`;
+
+    const opsCh = getChById(guild, 'OPERATIONS', 'operations-en-cours', 'operations');
+    if (opsCh) {
+      await opsCh.send({
+        content: `${ping}`,
+        embeds: [new EmbedBuilder()
+          .setColor(0xFFA500)
+          .setTitle(`⏰ Rappel — ${op.name} dans ${minutesRestantes} min`)
+          .setDescription([
+            `L'opération **${op.name}** démarre dans **${minutesRestantes} minutes**.`,
+            '',
+            `📍 **Lieu :** ${op.lieu || '—'}`,
+            `🎯 **Objectif :** ${op.objectif || '—'}`,
+            `👥 **Inscrits :** ${(op.participants || []).length}`,
+            '',
+            (op.participants || []).length === 0
+              ? '⚠️ *Aucun inscrit pour l\'instant — inscrivez-vous vite !*'
+              : '*Préparez-vous. Dernière chance pour s\'inscrire.*',
+          ].join('\n'))
+          .setFooter({ text: `IWC • Rappel automatique` })
+        ],
+      }).catch(() => {});
     }
 
-    if (!discordId || dejaEnvoyes.has(discordId)) continue;
-    dejaEnvoyes.add(discordId);
+    // DM aux participants déjà inscrits
+    for (const nomP of (op.participants || [])) {
+      const id = MEMBRES_DISCORD_MAP[nomP]; if (!id) continue;
+      try {
+        const m = await guild.members.fetch(id).catch(() => null);
+        if (m) await m.send({ embeds: [new EmbedBuilder()
+          .setColor(0xFFA500)
+          .setTitle(`⏰ ${op.name} — dans ${minutesRestantes} min`)
+          .setDescription(`L'opération à laquelle tu participes démarre bientôt.\n\n📍 ${op.lieu || '—'} · 🎯 ${op.objectif || '—'}`)
+          .setFooter({ text: op.pole === 'illegal' ? 'La Confrérie • Confidentiel' : 'Iron Wolf Company • Légal' })
+        ] }).catch(() => {});
+      } catch {}
+    }
 
+    op.rappel30Sent = true;
+    saveDB(db);
+    console.log(`✅ Rappel 30 min envoyé — ${op.name}`);
+  }
+
+  // ── Lancement automatique ──
+  const opsALancer = (db.operations || []).filter(o =>
+    o.status === 'programmee' && o.lancementAt && o.lancementAt <= now
+  );
+
+  for (const op of opsALancer) {
+    // ── Bloquer si 0 participant + alerter la Direction ──
+    if (!op.participants || op.participants.length === 0) {
+      const logsCh = getChById(guild, 'LOGS', 'logs');
+      const mention = guild.roles.cache
+        .filter(r => ['Concepteur', 'Fléau', 'Fondateur'].some(n => r.name.includes(n)))
+        .map(r => `<@&${r.id}>`).join(' ');
+
+      if (logsCh) await logsCh.send({
+        content: `${mention} — ⚠️ Opération sans participants`,
+        embeds: [new EmbedBuilder()
+          .setColor(0xFFA500)
+          .setTitle(`⚠️ Opération non lancée — ${op.name}`)
+          .setDescription([
+            `L'opération **${op.name}** était prévue maintenant mais **aucun membre ne s'est inscrit**.`,
+            '',
+            '**Options disponibles :**',
+            '> 🟢 Lancer quand même — cliquez le bouton dans le salon',
+            "'> ❌ Annuler — si l\'opération n\'a plus lieu',"
+          ].join('\n'))
+          .addFields({ name: '📅 Heure prévue', value: new Date(op.lancementAt).toLocaleString('fr-FR'), inline: true })
+          .setFooter({ text: 'IWC • Opération en attente de décision' })
+        ],
+      }).catch(() => {});
+
+      // Mettre en "en_attente_direction" pour ne plus retrigger le cron
+      op.status    = 'attente_direction';
+      op.updatedAt = new Date().toISOString();
+      saveDB(db);
+      continue;
+    }
+    await _lancerOpProgrammee(guild, op, db);
+  }
+}
+
+async function _lancerOpProgrammee(guild, op, db) {
+  op.status    = 'en_cours';
+  op.updatedAt = new Date().toISOString();
+  saveDB(db);
+
+  // ROLE_POLE_LEGAL/ILLEGAL importés depuis config.js
+
+  const mentions = (op.participants || [])
+    .map(n => { const id = MEMBRES_DISCORD_MAP[n]; return id ? `<@${id}>` : null; })
+    .filter(Boolean).join(' ');
+  const ping = mentions || `<@&${op.pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL}>`;
+
+  const color = op.pole === 'illegal' ? 0x8B1A1A : 0x3B82F6;
+
+  const embedLance = new EmbedBuilder()
+    .setColor(0x00AA00)
+    .setTitle(`🟢 OPÉRATION LANCÉE — ${op.name}`)
+    .setDescription(`*L'heure est venue. L'opération démarre maintenant.*`)
+    .addFields(
+      { name: '📍 Lieu',        value: op.lieu    || '—', inline: true },
+      { name: '🎯 Objectif',    value: op.objectif || '—', inline: true },
+      { name: '👥 Participants', value: (op.participants || []).map(n => {
+          const id = MEMBRES_DISCORD_MAP[n]; return id ? `<@${id}>` : n;
+        }).join(', ') || '*Aucun inscrit*', inline: false },
+    )
+    .setFooter({ text: `ID: ${op.id} • Lancée automatiquement` })
+    .setTimestamp();
+
+  const rowStop = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`op_stop_${op.id}`).setLabel('🛑 STOP d\'urgence').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`op_terminee_${op.id}`).setLabel('✅ Clôturer').setStyle(ButtonStyle.Primary),
+  );
+
+  // Mettre à jour le message existant
+  if (op.msgId && op.chanId) {
     try {
-      const member = await guild.members.fetch(discordId).catch(() => null);
-      if (!member) continue;
-      await member.send({ embeds: [embed] });
-      envoyes++;
+      const ch  = guild.channels.cache.get(op.chanId);
+      const msg = await ch?.messages?.fetch(op.msgId).catch(() => null);
+      if (msg) await msg.edit({ embeds: [embedLance], components: [rowStop] });
     } catch {}
   }
 
-  console.log(`✅ Briefing envoyé à ${envoyes} participant(s) — ${op.name}`);
-  return envoyes;
+  // Ping dans le salon + briefing DM
+  const opsCh = getChById(guild, 'OPERATIONS', 'operations-en-cours', 'operations');
+  if (opsCh) {
+    await opsCh.send({ content: `${ping} — 🟢 **${op.name}** est maintenant **LANCÉE**. Bonne opération.` }).catch(() => {});
+  }
+
+  // Envoyer le briefing DM
+  let notionV4 = {};
+  try { notionV4 = require('./notion-modules-v4'); } catch {}
+  await notionV4.envoyerBriefingOp?.(guild, op).catch(() => {});
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 2. DASHBOARD — Alertes push quand quelque chose change
-// ═══════════════════════════════════════════════════════════════
+// ── Bouton STOP d'urgence ──
+async function handleOpStop(interaction) {
+  const opId = interaction.customId.replace('op_stop_', '');
+  const db   = loadDB();
+  const op   = db.operations.find(o => o.id === opId);
+  if (!op) return interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral });
 
-async function checkDashboardAlertes(guild) {
-  try {
-    const db  = loadDB();
-    const now = Date.now();
+  const wasRunning = op.status === 'en_cours';
+  op.status    = 'annulee';
+  op.updatedAt = new Date().toISOString();
+  op.stopBy    = interaction.user.username;
+  saveDB(db);
 
-    if (!db.dashAlertes) db.dashAlertes = {};
-    let changed = false;
-    const alertes = [];
+  const embed = EmbedBuilder.from(interaction.message.embeds[0])
+    .setColor(0xED4245)
+    .setTitle(`🛑 OPÉRATION STOPPÉE — ${op.name}`)
+    .setDescription(`Arrêtée par **${interaction.user.username}**${wasRunning ? ' en cours d\'opération' : ' avant le lancement'}.`);
 
-    // ── Candidatures en attente > 48h ──
-    const candsEnAttente = (db.candidatures || []).filter(c => c.status === 'reçue');
-    for (const c of candsEnAttente) {
-      const heures = Math.floor((now - new Date(c.receivedAt).getTime()) / 3600000);
-      const key    = `cand_${c.id}_48h`;
-      if (heures >= 48 && !db.dashAlertes[key]) {
-        alertes.push({
-          emoji: '⏰', couleur: 0xFFA500,
-          titre: `Candidature sans réponse — ${c.nomPerso}`,
-          desc:  `La candidature de **${c.nomPerso}** est en attente depuis **${heures}h** sans décision.`,
-          action: `Type : ${c.type === 'legal' ? '⚖️ Légal' : '🔪 Illégal'}`,
-        });
-        db.dashAlertes[key] = true;
-        changed = true;
-      }
-    }
+  await interaction.update({ embeds: [embed], components: [] });
 
-    // ── Opération en cours depuis > 6h sans clôture ──
-    const opsEnCours = (db.operations || []).filter(o => o.status === 'en_cours');
-    for (const op of opsEnCours) {
-      const heures = Math.floor((now - new Date(op.updatedAt || op.createdAt).getTime()) / 3600000);
-      const key    = `op_${op.id}_6h`;
-      if (heures >= 6 && !db.dashAlertes[key]) {
-        alertes.push({
-          emoji: '🎯', couleur: 0xFFA500,
-          titre: `Opération non clôturée — ${op.name}`,
-          desc:  `L'opération **${op.name}** est en cours depuis **${heures}h**. Pensez à la clôturer.`,
-          action: `Participants : ${(op.participants || []).join(', ') || '—'}`,
-        });
-        db.dashAlertes[key] = true;
-        changed = true;
-      }
-    }
+  // Notifier les participants
+  // ROLE_POLE_LEGAL/ILLEGAL importés depuis config.js
+  const mentions = (op.participants || []).map(n => { const id = MEMBRES_DISCORD_MAP[n]; return id ? `<@${id}>` : null; }).filter(Boolean).join(' ');
+  const ping = mentions || `<@&${op.pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL}>`;
 
-    // ── Membres inactifs depuis > 10 jours (plus agressif que 7) ──
-    const inactifs = Object.values(db.members || {}).filter(m =>
-      m.status !== 'parti' && m.status !== 'absent' && m.status !== 'visiteur' && daysSince(m.lastActivity) > 10
-    );
-    const keyInactifs = `inactifs_${inactifs.length}_${Math.floor(now / 86400000)}`;
-    if (inactifs.length > 0 && !db.dashAlertes[keyInactifs]) {
-      alertes.push({
-        emoji: '💤', couleur: 0x555555,
-        titre: `${inactifs.length} membre(s) inactif(s) > 10 jours`,
-        desc:  inactifs.slice(0, 5).map(m => `→ **${m.name}** — ${daysSince(m.lastActivity)}j`).join('\n'),
-        action: inactifs.length > 5 ? `... et ${inactifs.length - 5} autre(s)` : null,
-      });
-      db.dashAlertes[keyInactifs] = true;
-      changed = true;
-    }
+  const opsCh = getCh(interaction.guild, 'operations-en-cours', 'operations');
+  if (opsCh && wasRunning) {
+    await opsCh.send({ content: `${ping} — 🛑 L'opération **${op.name}** a été **STOPPÉE** par ${interaction.user.username}. Repli immédiat.` }).catch(() => {});
+  }
 
-    // ── Contrats qui expirent dans 3 jours ──
-    const contratsProches = (db.contrats || []).filter(c => {
-      if (c.status !== 'signe' || !c.dateEcheance) return false;
-      const jours = Math.floor((new Date(c.dateEcheance) - new Date()) / 86400000);
-      return jours >= 0 && jours <= 3;
-    });
-    for (const c of contratsProches) {
-      const jours = Math.floor((new Date(c.dateEcheance) - new Date()) / 86400000);
-      const key   = `contrat_${c.id}_3j`;
-      if (!db.dashAlertes[key]) {
-        alertes.push({
-          emoji: '📜', couleur: 0xED4245,
-          titre: `Contrat expire bientôt — ${c.id}`,
-          desc:  `Le contrat **${c.id}** (${c.objet}) expire dans **${jours === 0 ? 'aujourd\'hui' : jours + ' jour(s)'}**.`,
-          action: `Client/Employeur : ${c.clientNom || c.employeurNom || '—'}`,
-        });
-        db.dashAlertes[key] = true;
-        changed = true;
-      }
-    }
-
-    if (changed) saveDB(db);
-
-    // ── Envoyer les alertes en DM à la Direction ──
-    if (alertes.length > 0) {
-      const directionIds = Object.values(MEMBRES_DISCORD_MAP);
-      for (const discordId of directionIds) {
-        try {
-          const member = await guild.members.fetch(discordId).catch(() => null);
-          if (!member) continue;
-          const estDirection = member.roles.cache.some(r =>
-            ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier'].some(n => r.name.includes(n))
-          );
-          if (!estDirection) continue;
-
-          for (const alerte of alertes) {
-            const embed = new EmbedBuilder()
-              .setColor(alerte.couleur)
-              .setTitle(`${alerte.emoji} Alerte — ${alerte.titre}`)
-              .setDescription(alerte.desc);
-            if (alerte.action) embed.addFields({ name: '📋 Détail', value: alerte.action, inline: false });
-            embed.setFooter({ text: 'IWC • Dashboard automatique' }).setTimestamp();
-            await member.send({ embeds: [embed] }).catch(() => {});
-          }
-        } catch {}
-      }
-      console.log(`✅ ${alertes.length} alerte(s) dashboard envoyée(s)`);
-    }
-  } catch (e) { console.log('❌ checkDashboardAlertes error:', e.message); }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// 3. RECRUTEMENT — Suivi automatique
-// ═══════════════════════════════════════════════════════════════
-
-async function checkRecrutementSuivi(guild) {
-  try {
-    const db  = loadDB();
-    const now = Date.now();
-    if (!db.recrutSuivi) db.recrutSuivi = {};
-
-    const logsCh = getChById(guild, 'LOGS', 'logs');
-
-    // ── Rappel Direction : candidature en attente > 24h ──
-    const enAttente = (db.candidatures || []).filter(c => c.status === 'reçue');
-    for (const c of enAttente) {
-      const heures = Math.floor((now - new Date(c.receivedAt).getTime()) / 3600000);
-      const key24  = `rappel_24h_${c.id}`;
-      const key72  = `rappel_72h_${c.id}`;
-
-      if (heures >= 24 && !db.recrutSuivi[key24]) {
-        if (logsCh) await logsCh.send({ embeds: [new EmbedBuilder()
-          .setColor(0xFFA500)
-          .setTitle(`⏰ Rappel recrutement — ${c.nomPerso}`)
-          .setDescription(`La candidature de **${c.nomPerso}** attend une décision depuis **${heures}h**.`)
-          .addFields(
-            { name: '⚖️ Type', value: c.type === 'legal' ? '⚖️ Légal' : '🔪 Illégal', inline: true },
-            { name: '📅 Reçue le', value: fmtShort(c.receivedAt), inline: true },
-          )
-          .setFooter({ text: 'IWC • Suivi recrutement automatique' })
+  // DM participants si op était en cours
+  if (wasRunning) {
+    for (const nomP of (op.participants || [])) {
+      const id = MEMBRES_DISCORD_MAP[nomP]; if (!id) continue;
+      try {
+        const m = await interaction.guild.members.fetch(id).catch(() => null);
+        if (m) await m.send({ embeds: [new EmbedBuilder()
+          .setColor(0xED4245)
+          .setTitle(`🛑 STOP — ${op.name}`)
+          .setDescription(`L'opération a été stoppée d'urgence par **${interaction.user.username}**.\n*Repli immédiat.*`)
+          .setFooter({ text: op.pole === 'illegal' ? 'La Confrérie • Confidentiel' : 'Iron Wolf Company • Légal' })
         ] }).catch(() => {});
-        db.recrutSuivi[key24] = true;
-      }
-
-      // 72h — rappel urgent + mention Direction
-      if (heures >= 72 && !db.recrutSuivi[key72]) {
-        const mention = guild.roles.cache
-          .filter(r => ['Concepteur', 'Fléau', 'Fondateur'].some(n => r.name.includes(n)))
-          .map(r => `<@&${r.id}>`).join(' ');
-
-        if (logsCh) await logsCh.send({
-          content: `${mention} — ⚠️ Candidature sans réponse depuis 72h`,
-          embeds: [new EmbedBuilder()
-            .setColor(0xED4245)
-            .setTitle(`🚨 URGENT — Candidature ${c.nomPerso} sans réponse`)
-            .setDescription(`**${c.nomPerso}** attend une décision depuis **${heures}h**.\nUne réponse avait été promise sous 48h.`)
-            .addFields({ name: '⚖️ Type', value: c.type === 'legal' ? '⚖️ Légal' : '🔪 Illégal', inline: true })
-            .setFooter({ text: 'IWC • Suivi recrutement' })
-          ],
-        }).catch(() => {});
-        db.recrutSuivi[key72] = true;
-      }
+      } catch {}
     }
+  }
+}
 
-    // ── Stats recrutement hebdo — résumé le lundi ──
-    const acceptees = (db.candidatures || []).filter(c => c.status === 'acceptee');
-    const refusees  = (db.candidatures || []).filter(c => c.status === 'refusee');
-    const semDernier = now - 7 * 86400000;
-    const accept7j  = acceptees.filter(c => new Date(c.acceptedAt || c.receivedAt).getTime() >= semDernier).length;
-    const refus7j   = refusees.filter(c => new Date(c.refusedAt   || c.receivedAt).getTime() >= semDernier).length;
-    const attente7j = enAttente.length;
+// ── Bouton lancer maintenant (forcer avant l'heure) ──
+async function handleOpLancerForce(interaction) {
+  const opId = interaction.customId.replace('op_lancer_force_', '');
+  const db   = loadDB();
+  const op   = db.operations.find(o => o.id === opId);
+  if (!op) return interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral });
+  if (op.status !== 'programmee') return interaction.reply({ content: '❌ Cette opération ne peut pas être lancée manuellement.', flags: MessageFlags.Ephemeral });
 
-    const keyStats = `stats_semaine_${Math.floor(now / (7 * 86400000))}`;
-    if (!db.recrutSuivi[keyStats] && (accept7j + refus7j > 0)) {
-      const recrutCh = getChById(guild, 'RECRUTEMENT_INTERNE', 'recrutement-interne', 'dossier-recrutement', 'logs');
-      if (recrutCh) await recrutCh.send({ embeds: [new EmbedBuilder()
-        .setColor(0x8B1A1A)
-        .setTitle('📊 Bilan recrutement — Semaine')
-        .addFields(
-          { name: '✅ Acceptées', value: `**${accept7j}**`, inline: true },
-          { name: '❌ Refusées',  value: `**${refus7j}**`,  inline: true },
-          { name: '⏳ En attente',value: `**${attente7j}**`, inline: true },
-        )
-        .setFooter({ text: 'IWC • Bilan recrutement automatique' })
-        .setTimestamp()
-      ] }).catch(() => {});
-      db.recrutSuivi[keyStats] = true;
-    }
-
-    saveDB(db);
-  } catch (e) { console.log('❌ checkRecrutementSuivi error:', e.message); }
+  await interaction.deferUpdate();
+  await _lancerOpProgrammee(interaction.guild, op, db);
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 4. CONTRATS — Rappels d'échéance automatiques
+// 2. STATS AVANCÉES — /stats amélioré avec tendances
 // ═══════════════════════════════════════════════════════════════
 
-async function checkEcheancesContrats(guild) {
-  try {
-    const db  = loadDB();
-    const now = new Date();
-    if (!db.contratsRappels) db.contratsRappels = {};
-    let changed = false;
+async function handleStatsAvancees(interaction) {
+  await interaction.deferReply({ ephemeral: false });
 
-    const contratsActifs = (db.contrats || []).filter(c => c.status === 'signe' && c.dateEcheance);
+  const db  = loadDB();
+  const now = Date.now();
+  const s7j = now - 7  * 86400000;
+  const s30j= now - 30 * 86400000;
 
-    for (const c of contratsActifs) {
-      const echeance = new Date(c.dateEcheance);
-      const joursRestants = Math.floor((echeance - now) / 86400000);
+  // ── Membres ──
+  const membres      = Object.values(db.members || {});
+  const actifs       = membres.filter(m => m.status === 'actif').length;
+  const absents      = membres.filter(m => m.status === 'absent').length;
+  const inactifs     = membres.filter(m => m.status === 'inactif').length;
+  const arrivees7j   = membres.filter(m => m.joinedAt && new Date(m.joinedAt).getTime() >= s7j).length;
+  const departs7j    = membres.filter(m => m.status === 'parti' && m.leftAt && new Date(m.leftAt).getTime() >= s7j).length;
+  const tauxActivite = actifs > 0 ? Math.round((actifs / (actifs + absents + inactifs)) * 100) : 0;
 
-      // Rappel 3 jours avant
-      const key3j = `${c.id}_3j`;
-      if (joursRestants <= 3 && joursRestants > 0 && !db.contratsRappels[key3j]) {
-        await _envoyerRappelContrat(guild, c, joursRestants, 'rappel');
-        db.contratsRappels[key3j] = true;
-        changed = true;
-      }
+  // ── Recrutement ──
+  const cands        = db.candidatures || [];
+  const accept7j     = cands.filter(c => c.status === 'acceptee' && c.acceptedAt && new Date(c.acceptedAt).getTime() >= s7j).length;
+  const accept30j    = cands.filter(c => c.status === 'acceptee' && c.acceptedAt && new Date(c.acceptedAt).getTime() >= s30j).length;
+  const refus7j      = cands.filter(c => c.status === 'refusee'  && new Date(c.refusedAt || c.receivedAt || 0).getTime() >= s7j).length;
+  const enAttente    = cands.filter(c => c.status === 'reçue').length;
+  const tauxAccept   = (accept30j + refus7j) > 0 ? Math.round(accept30j / (accept30j + cands.filter(c => c.status === 'refusee' && new Date(c.refusedAt || 0).getTime() >= s30j).length) * 100) : 0;
 
-      // Rappel le jour même
-      const keyJ = `${c.id}_0j`;
-      if (joursRestants === 0 && !db.contratsRappels[keyJ]) {
-        await _envoyerRappelContrat(guild, c, 0, 'urgent');
-        db.contratsRappels[keyJ] = true;
-        changed = true;
-      }
+  // ── Opérations ──
+  const ops           = db.operations || [];
+  const opsTotal      = ops.length;
+  const ops7j         = ops.filter(o => o.createdAt && new Date(o.createdAt).getTime() >= s7j).length;
+  const opsTerminees  = ops.filter(o => o.status === 'terminee').length;
+  const opsReussies   = ops.filter(o => o.status === 'terminee' && o.resultat && (o.resultat.toLowerCase().includes('réuss') || o.resultat.toLowerCase().includes('succes') || o.resultat.toLowerCase().includes('succès'))).length;
+  const tauxReussite  = opsTerminees > 0 ? Math.round(opsReussies / opsTerminees * 100) : 0;
 
-      // Contrat expiré — marquer et notifier
-      const keyExp = `${c.id}_expire`;
-      if (joursRestants < 0 && !db.contratsRappels[keyExp]) {
-        c.status = 'expire';
-        await _envoyerRappelContrat(guild, c, joursRestants, 'expire');
-        db.contratsRappels[keyExp] = true;
-        changed = true;
-      }
-    }
+  // ── Trésorerie ──
+  const legal    = db.coffres?.legal   || 0;
+  const illegal  = db.coffres?.illegal || 0;
 
-    if (changed) saveDB(db);
-  } catch (e) { console.log('❌ checkEcheancesContrats error:', e.message); }
-}
+  // ── Activité par pôle ──
+  const membresLegal   = membres.filter(m => m.pole === 'legal'   && m.status !== 'parti').length;
+  const membresIlleg   = membres.filter(m => m.pole === 'illegal' && m.status !== 'parti').length;
 
-async function _envoyerRappelContrat(guild, contrat, joursRestants, type) {
-  const configs = {
-    rappel: { color: 0xFFA500, emoji: '⏰', titre: `Contrat expire dans ${joursRestants} jour(s)`, urgent: false },
-    urgent: { color: 0xED4245, emoji: '🚨', titre: 'Contrat expire AUJOURD\'HUI',                  urgent: true  },
-    expire: { color: 0x555555, emoji: '📁', titre: 'Contrat expiré',                               urgent: false },
+  // ── Barre de progression ──
+  const bar = (val, max = 100) => {
+    const pct = Math.min(val, max);
+    const fill = Math.round(pct / 10);
+    return '█'.repeat(fill) + '░'.repeat(10 - fill) + ` ${pct}%`;
   };
-  const cfg = configs[type];
 
   const embed = new EmbedBuilder()
-    .setColor(cfg.color)
-    .setTitle(`${cfg.emoji} ${cfg.titre} — ${contrat.id}`)
+    .setColor(0x8B1A1A)
+    .setTitle('📊 Statistiques avancées — Iron Wolf Company')
+    .setDescription(`*Snapshot au ${fmtLong(new Date())}*`)
     .addFields(
-      { name: '🆔 Référence', value: `\`${contrat.id}\``,                           inline: true },
-      { name: '📋 Objet',     value: contrat.objet,                                  inline: true },
-      { name: '📅 Échéance',  value: fmtShort(contrat.dateEcheance),                inline: true },
-      { name: '🤝 Partenaire',value: contrat.clientNom || contrat.employeurNom || '—', inline: true },
+      {
+        name: '👥 EFFECTIFS',
+        value: [
+          `✅ Actifs : **${actifs}** · ⚠️ Absents : **${absents}** · 💤 Inactifs : **${inactifs}**`,
+          `⚖️ Pôle Légal : **${membresLegal}** · 🔒 Confrérie : **${membresIlleg}**`,
+          `📈 Taux d'activité : \`${bar(tauxActivite)}\``,
+          `🆕 Arrivées 7j : **+${arrivees7j}** · 🚪 Départs : **-${departs7j}**`,
+        ].join('\n'),
+        inline: false,
+      },
+      {
+        name: '📋 RECRUTEMENT',
+        value: [
+          `✅ Acceptés (7j) : **${accept7j}** · ❌ Refusés : **${refus7j}** · ⏳ En attente : **${enAttente}**`,
+          `📊 Taux d'acceptation (30j) : \`${bar(tauxAccept)}\``,
+        ].join('\n'),
+        inline: false,
+      },
+      {
+        name: '🎯 OPÉRATIONS',
+        value: [
+          `📋 Total : **${opsTotal}** · 🆕 Cette semaine : **${ops7j}** · ✅ Terminées : **${opsTerminees}**`,
+          `🏆 Taux de réussite : \`${bar(tauxReussite)}\``,
+          ops.filter(o => o.status === 'programmee').length > 0 ? `🕐 Programmées : **${ops.filter(o => o.status === 'programmee').length}**` : '',
+        ].filter(Boolean).join('\n'),
+        inline: false,
+      },
+      {
+        name: '💰 TRÉSORERIE',
+        value: [
+          `⚖️ Légal : **$${legal.toLocaleString('fr-FR')}** · 🔒 Illégal : **$${illegal.toLocaleString('fr-FR')}**`,
+          `💎 Total : **$${(legal + illegal).toLocaleString('fr-FR')}**`,
+        ].join('\n'),
+        inline: false,
+      },
     )
-    .setFooter({ text: 'IWC • Rappel contrat automatique' })
     .setTimestamp();
 
-  // Notifier la Direction
-  const logsCh = getChById(guild, 'LOGS', 'logs');
-  const mention = cfg.urgent ? guild.roles.cache
-    .filter(r => ['Concepteur', 'Fléau', 'Fondateur'].some(n => r.name.includes(n)))
-    .map(r => `<@&${r.id}>`).join(' ') : '';
+  // ── Tendances semaine vs semaine précédente ──
+  const s14j = now - 14 * 86400000;
+  const arriveesPrev = membres.filter(m => m.joinedAt && new Date(m.joinedAt).getTime() >= s14j && new Date(m.joinedAt).getTime() < s7j).length;
+  const accept7jPrev = cands.filter(c => c.status === 'acceptee' && c.acceptedAt && new Date(c.acceptedAt).getTime() >= s14j && new Date(c.acceptedAt).getTime() < s7j).length;
+  const ops14j       = ops.filter(o => o.createdAt && new Date(o.createdAt).getTime() >= s14j && new Date(o.createdAt).getTime() < s7j).length;
+  const tendArr = arrivees7j > arriveesPrev ? '📈' : arrivees7j < arriveesPrev ? '📉' : '➡️';
+  const tendRec = accept7j   > accept7jPrev  ? '📈' : accept7j   < accept7jPrev  ? '📉' : '➡️';
+  const tendOps = ops7j      > ops14j        ? '📈' : ops7j      < ops14j        ? '📉' : '➡️';
 
-  if (logsCh) await logsCh.send({ content: mention || undefined, embeds: [embed] }).catch(() => {});
+  embed
+    .addFields({
+      name: '📈 TENDANCES vs semaine précédente',
+      value: [
+        `${tendArr} Arrivées : **${arrivees7j}** (sem. passée : ${arriveesPrev})`,
+        `${tendRec} Recrutement : **${accept7j}** accepté(s) (sem. passée : ${accept7jPrev})`,
+        `${tendOps} Opérations : **${ops7j}** (sem. passée : ${ops14j})`,
+      ].join('\n'),
+      inline: false,
+    })
+    .setFooter({ text: `IWC Stats • ${new Date().toLocaleString('fr-FR')}` });
 
-  // Notifier le signataire
-  try {
-    const sigId = contrat.emetteurId || contrat.signataireId;
-    if (sigId) {
-      const member = await guild.members.fetch(sigId).catch(() => null);
-      if (member) await member.send({ embeds: [embed] }).catch(() => {});
-    }
-  } catch {}
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('btn_stats_refresh').setLabel('🔄 Rafraîchir').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('btn_dashboard_refresh').setLabel('📊 Dashboard').setStyle(ButtonStyle.Primary),
+  );
 
-  // Notifier le client/partenaire si Discord ID connu
-  try {
-    if (contrat.userId) {
-      const member = await guild.members.fetch(contrat.userId).catch(() => null);
-      if (member) await member.send({ embeds: [embed] }).catch(() => {});
-    }
-  } catch {}
+  await interaction.editReply({ embeds: [embed], components: [row] });
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 5. OPÉRATIONS — Timeout auto + stats
+// 3. THREADS CANDIDATURES — archivage propre à la décision
 // ═══════════════════════════════════════════════════════════════
 
-async function checkOperationsTimeout(guild) {
+async function archiverThreadCandidature(guild, cand, decision, validePar) {
   try {
-    const db = loadDB();
-    const now = Date.now();
-    if (!db.opTimeouts) db.opTimeouts = {};
+    // Retrouver le thread de discussion de la candidature
+    const intCh = guild.channels.cache.get(
+      cand.type === 'illegal' ? '1508756516830842960' : '1509254315712188438'
+    );
+    if (!intCh) return;
 
-    const opsEnCours = (db.operations || []).filter(o => o.status === 'en_cours');
+    const threads = await intCh.threads.fetch().catch(() => null);
+    const archivedT = await intCh.threads.fetchArchived().catch(() => null);
+    const allT = [
+      ...(threads?.threads?.values() || []),
+      ...(archivedT?.threads?.values() || []),
+    ];
 
-    for (const op of opsEnCours) {
-      const heures = Math.floor((now - new Date(op.updatedAt || op.createdAt).getTime()) / 3600000);
-      const key12h = `${op.id}_12h`;
-      const key24h = `${op.id}_24h`;
+    const thread = allT.find(t => t.name.toLowerCase().includes(cand.nomPerso.toLowerCase()));
+    if (!thread) return;
 
-      if (heures >= 12 && !db.opTimeouts[key12h]) {
-        const opsCh = getChById(guild, 'OPERATIONS', 'operations-en-cours', 'operations');
-        const logsCh = getChById(guild, 'LOGS', 'logs');
-        if (logsCh) await logsCh.send({ embeds: [new EmbedBuilder()
-          .setColor(0xFFA500)
-          .setTitle(`⏰ Opération toujours en cours — ${op.name}`)
-          .setDescription(`L'opération **${op.name}** est en cours depuis **${heures}h**.\nPensez à la clôturer si elle est terminée.`)
-          .addFields({ name: '👥 Participants', value: (op.participants || []).join(', ') || '—', inline: false })
-          .setFooter({ text: 'IWC • Timeout opération automatique' })
-        ] }).catch(() => {});
-        db.opTimeouts[key12h] = true;
-      }
+    const color   = decision === 'acceptee' ? 0x57F287 : 0xED4245;
+    const emoji   = decision === 'acceptee' ? '✅' : '❌';
+    const statut  = decision === 'acceptee' ? 'ACCEPTÉE' : 'REFUSÉE';
 
-      // 24h → clôture automatique avec résultat "Non renseigné"
-      if (heures >= 24 && !db.opTimeouts[key24h]) {
-        op.status   = 'terminee';
-        op.endedAt  = new Date().toISOString();
-        op.resultat = 'Non clôturé automatiquement (24h dépassées)';
-        op.butin    = '—';
-        op.debrief  = 'Clôture automatique — aucun résultat renseigné.';
+    // Post de clôture dans le thread
+    await thread.send({ embeds: [new EmbedBuilder()
+      .setColor(color)
+      .setTitle(`${emoji} Candidature ${statut} — ${cand.nomPerso}`)
+      .addFields(
+        { name: '📋 Décision',    value: `**${statut}**`, inline: true },
+        { name: '👤 Décidé par',  value: validePar,       inline: true },
+        { name: '📅 Date',        value: fmtShort(new Date()), inline: true },
+      )
+      .setDescription(decision === 'acceptee'
+        ? '*Le candidat intègre la Compagnie. Ce thread est archivé.*'
+        : '*La candidature a été refusée. Ce thread est archivé.*')
+      .setFooter({ text: 'IWC • Clôture automatique du dossier' })
+    ] }).catch(() => {});
 
-        const logsCh = getChById(guild, 'LOGS', 'logs');
-        if (logsCh) await logsCh.send({ embeds: [new EmbedBuilder()
-          .setColor(0xED4245)
-          .setTitle(`🔒 Clôture automatique — ${op.name}`)
-          .setDescription(`L'opération **${op.name}** a été clôturée automatiquement après **24h** sans action.`)
-          .setFooter({ text: 'IWC • Timeout opération' })
-        ] }).catch(() => {});
+    // Renommer et archiver
+    const newName = `${emoji} [${statut}] ${cand.nomPerso}`;
+    await thread.setName(newName).catch(() => {});
+    await thread.setArchived(true).catch(() => {});
 
-        db.opTimeouts[key24h] = true;
-      }
-    }
-    saveDB(db);
-  } catch (e) { console.log('❌ checkOperationsTimeout error:', e.message); }
+    console.log(`✅ Thread candidature archivé : ${newName}`);
+  } catch (e) { console.log('❌ archiverThreadCandidature error:', e.message); }
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 6. ABSENCES — Post propre dans #absences
+// 4. JOURNAL IC — Résumé hebdomadaire automatique
 // ═══════════════════════════════════════════════════════════════
 
-async function posterAbsencePropre(guild, membre, contenu, source) {
+async function posterResumeJournalIC(guild) {
   try {
-    const absCh = getChById(guild, 'ABSENCES', 'absences');
-    if (!absCh) return;
+    const db      = loadDB();
+    const journal = db.journalIC || [];
+    const since   = Date.now() - 7 * 86400000;
 
-    const db = loadDB();
-    const m  = db.members[membre.id];
+    const entriesSemaine = journal.filter(e => new Date(e.date).getTime() >= since);
+    if (!entriesSemaine.length) return;
+
+    // Grouper par type
+    const byType = {};
+    for (const e of entriesSemaine) {
+      if (!byType[e.type]) byType[e.type] = [];
+      byType[e.type].push(e);
+    }
+
+    const typeConfig = {
+      operation:   { emoji: '🎯', label: 'Opérations' },
+      contrat:     { emoji: '📜', label: 'Contrats' },
+      recrutement: { emoji: '🐺', label: 'Recrutement' },
+      tresorerie:  { emoji: '💰', label: 'Trésorerie' },
+      promotion:   { emoji: '🎖️', label: 'Grades' },
+      autre:       { emoji: '📝', label: 'Divers' },
+    };
+
+    const fields = [];
+    for (const [type, entries] of Object.entries(byType)) {
+      const cfg = typeConfig[type] || { emoji: '📌', label: type };
+      const lignes = entries.slice(0, 5).map(e => `→ ${e.description}`).join('\n');
+      const suite  = entries.length > 5 ? `\n*...et ${entries.length - 5} autre(s)*` : '';
+      fields.push({ name: `${cfg.emoji} ${cfg.label} (${entries.length})`, value: lignes + suite, inline: false });
+    }
 
     const embed = new EmbedBuilder()
-      .setColor(0xFFA500)
-      .setAuthor({ name: `${membre.displayName} — Absence`, iconURL: membre.user.displayAvatarURL() })
-      .setTitle('🟡 Déclaration d\'absence')
-      .setDescription(`> *${contenu.slice(0, 500)}*`)
-      .addFields(
-        { name: '👤 Membre',   value: `<@${membre.id}>`,                                     inline: true },
-        { name: '🎖️ Rang',    value: m?.rang || '—',                                         inline: true },
-        { name: '📍 Origine',  value: source || 'Déclaration directe',                       inline: true },
-        { name: '📅 Date',     value: new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' }), inline: true },
-      )
-      .setFooter({ text: 'IWC • Absence automatique' })
+      .setColor(0x8B1A1A)
+      .setTitle('📖 Résumé hebdomadaire — Journal IC')
+      .setDescription([
+        `*Semaine du ${fmtShort(new Date(since))} au ${fmtShort(new Date())}*`,
+        `*${entriesSemaine.length} événement(s) enregistré(s) cette semaine.*`,
+      ].join('\n'))
+      .addFields(...fields)
+      .addFields({
+        name: '📊 En chiffres',
+        value: [
+          `🎯 Opérations : **${byType.operation?.length || 0}**`,
+          `📜 Contrats : **${byType.contrat?.length || 0}**`,
+          `🐺 Recrues : **${byType.recrutement?.length || 0}**`,
+          `💰 Transactions : **${byType.tresorerie?.length || 0}**`,
+        ].join(' · '),
+        inline: false,
+      })
+      .setFooter({ text: 'IWC • Journal IC • Résumé automatique du lundi' })
       .setTimestamp();
 
-    await absCh.send({ embeds: [embed] });
-  } catch (e) { console.log('❌ posterAbsencePropre error:', e.message); }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// 7. AMÉLIORATION /profil — Ajouter historique opérations
-// ═══════════════════════════════════════════════════════════════
-
-async function getHistoriqueOpsProfilMembre(userId, username) {
-  const db  = loadDB();
-  const nom = Object.entries(MEMBRES_DISCORD_MAP).find(([, id]) => id === userId)?.[0] || username;
-
-  const ops = (db.operations || [])
-    .filter(o => o.status === 'terminee' && (o.participants || []).includes(nom))
-    .sort((a, b) => new Date(b.endedAt) - new Date(a.endedAt))
-    .slice(0, 5);
-
-  if (!ops.length) return null;
-
-  return ops.map(o => {
-    const result = o.resultat || '—';
-    const emoji  = result.toLowerCase().includes('réuss') ? '✅'
-                 : result.toLowerCase().includes('échec') ? '❌' : '⚡';
-    return `${emoji} **${o.name}** · ${fmtShort(o.endedAt)} · ${result}`;
-  }).join('\n');
+    const histCh = getChById(guild, 'HISTOIRE_IWC', 'histoire-iwc', 'histoire', 'journal');
+    if (histCh) {
+      await histCh.send({ embeds: [embed] });
+      console.log('✅ Résumé journal IC posté');
+    }
+  } catch (e) { console.log('❌ posterResumeJournalIC error:', e.message); }
 }
 
 // ═══════════════════════════════════════════════════════════════
 // EXPORTS
 // ═══════════════════════════════════════════════════════════════
 module.exports = {
-  envoyerBriefingOp,
-  checkDashboardAlertes,
-  checkRecrutementSuivi,
-  checkEcheancesContrats,
-  checkOperationsTimeout,
-  posterAbsencePropre,
-  getHistoriqueOpsProfilMembre,
+  handleOpProgrammeeModal,
+  checkOpsProgrammees,
+  handleOpStop,
+  handleOpLancerForce,
+  handleStatsAvancees,
+  archiverThreadCandidature,
+  posterResumeJournalIC,
 };
