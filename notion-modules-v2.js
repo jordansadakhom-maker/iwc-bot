@@ -10,7 +10,7 @@ const {
 const { loadDB, saveDB } = require('./db');
 const notionExtra = require('./notion-extra');
 
-const NOTION_VERSION = '2022-06-28';
+const { NOTION_VERSION, LIMITE_SORTIE_LEGAL, LIMITE_SORTIE_ILLEGAL, SEUIL_COFFRE_LEGAL: SEUIL_LEGAL, SEUIL_COFFRE_ILLEGAL: SEUIL_ILLEGAL } = require('./config');
 
 // ═══════════════════════════════════════════════════════════════
 // 1. TRÉSORERIE — FLOW 3 ÉTAPES
@@ -94,14 +94,19 @@ async function handleTresorFlow(interaction) {
   }
 }
 
+// LIMITE_SORTIE_LEGAL/ILLEGAL importées depuis config.js
+
 /**
- * FIX TIMEOUT : utiliser deferUpdate() + followUp() au lieu de deferReply()
- * deferReply() sur un modal crée un conflit avec l'interaction originale → timeout
+ * Étape 3 — Modal soumis
+ * Nouveau flow :
+ *   - Sortie > limite → mise en attente de validation Direction
+ *   - Photo obligatoire → bot demande le screen en DM ou dans le salon
+ *   - Transaction pendante stockée en DB jusqu'à validation ou refus
  */
 async function handleTresorModal(interaction) {
   await interaction.deferUpdate().catch(() => {});
 
-  const parts    = interaction.customId.split('_');
+  const parts     = interaction.customId.split('_');
   const typeRaw   = parts[2];
   const coffreRaw = parts[3];
 
@@ -109,64 +114,371 @@ async function handleTresorModal(interaction) {
   const objet   = interaction.fields.getTextInputValue('objet').trim();
 
   if (isNaN(montant) || montant <= 0) {
-    return interaction.followUp({ content: '❌ Montant invalide.', ephemeral: true });
+    return interaction.followUp({ content: '❌ Montant invalide. Entre un nombre positif.', ephemeral: true });
   }
 
   const type   = typeRaw   === 'entree'  ? 'Entrée'  : 'Sortie';
   const coffre = coffreRaw === 'illegal' ? 'Illégal' : 'Légal';
   const key    = coffreRaw === 'illegal' ? 'illegal' : 'legal';
+  // Limite dynamique — configurable par le Fléau/Concepteur
+  const limiteDb = key === 'illegal' ? (db.limiteSortieIllegal || LIMITE_SORTIE_ILLEGAL) : (db.limiteSortieLegal || LIMITE_SORTIE_LEGAL);
+  const limite = limiteDb;
 
+  // ── Générer un ID de transaction ──
+  const txId = `TX-${Date.now().toString().slice(-6)}`;
+
+  // ── Direction : pas de photo ni double saisie ──
   const db = loadDB();
-  if (!db.coffres) db.coffres = { legal: 0, illegal: 0 };
-  if (type === 'Entrée') db.coffres[key] += montant;
-  else                   db.coffres[key] = Math.max(0, db.coffres[key] - montant);
-  const nouveauSolde = db.coffres[key];
+  if (_isDirection(interaction.member)) {
+    // Valider directement sans preuve
+    if (!db.coffres) db.coffres = { legal: 0, illegal: 0 };
+    const limiteDb2 = key === 'illegal' ? (db.limiteSortieIllegal || LIMITE_SORTIE_ILLEGAL) : (db.limiteSortieLegal || LIMITE_SORTIE_LEGAL);
+    const txDirect = { txId, type, coffre, key, montant, objet, userId: interaction.user.id, username: interaction.user.username, guildId: interaction.guild.id, createdAt: new Date().toISOString(), photoOk: true, approved: true };
+    // Sortie > limite → quand même soumis à validation pour traçabilité
+    if (type === 'Sortie' && montant > limiteDb2) {
+      await _soumettreValidationDirection(interaction.guild, txDirect, null);
+      return interaction.followUp({ ephemeral: true, embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('📨 Sortie importante soumise').setDescription(`Sortie de **$${montant.toLocaleString('fr-FR')}** soumise à validation Direction (traçabilité).
+
+*En tant que Direction, la preuve photo n'est pas requise.*`).setFooter({ text: `IWC • Réf. ${txId}` })] });
+    }
+    await _validerTransaction(interaction.guild, txDirect, null);
+    const soldeFinal2 = loadDB().coffres?.[key] || 0;
+    return interaction.followUp({ ephemeral: true, embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ Transaction validée').addFields({ name: '🆔 Réf.', value: `\`${txId}\``, inline: true }, { name: `${type === 'Entrée' ? '📥' : '📤'} ${type}`, value: `$${montant.toLocaleString('fr-FR')}`, inline: true }, { name: '💰 Solde', value: `**$${soldeFinal2.toLocaleString('fr-FR')}**`, inline: true }).setFooter({ text: `IWC • Direction — Sans preuve photo` })] });
+  }
+
+  // ── Stocker la transaction en attente de preuve ──
+  if (!db.transactionsPendantes) db.transactionsPendantes = {};
+  db.transactionsPendantes[txId] = {
+    txId, type, coffre, key, montant, objet,
+    userId:   interaction.user.id,
+    username: interaction.user.username,
+    guildId:  interaction.guild.id,
+    createdAt: new Date().toISOString(),
+    needsApproval: type === 'Sortie' && montant > limite,
+    approved: false,
+    photoOk: false,
+  };
   saveDB(db);
 
-  // Archive Notion directe (sans passer par notion-extra qui peut ne pas avoir la config)
-  _archiverTransactionNotion({ objet, type, coffre, montant, solde: nouveauSolde, responsable: interaction.user.username, date: new Date().toISOString() }).catch(() => {});
+  // ── Demander la photo de preuve ──
+  const embedPhoto = new EmbedBuilder()
+    .setColor(0xFFA500)
+    .setTitle('📸 Preuve requise — Transaction en attente')
+    .setDescription([
+      `Transaction **\`${txId}\`** enregistrée.`,
+      '',
+      "**Envoie maintenant une capture d'écran du jeu** confirmant cette transaction.",
+      '',
+      `> ${type === 'Entrée' ? '📥' : '📤'} **${type}** — $${montant.toLocaleString('fr-FR')}`,
+      `> 📋 **Objet :** ${objet}`,
+      `> 🏦 **Coffre :** ${coffre}`,
+      '',
+      type === 'Sortie' && montant > limite
+        ? `⚠️ **Cette sortie dépasse $${limite.toLocaleString('fr-FR')}** — elle sera soumise à validation de la Direction après la photo.`
+        : '✅ Transaction validée automatiquement après réception de la photo.',
+      '',
+      '*Envoie ta photo dans ce salon. Tu as **5 minutes**.*',
+    ].join('\n'))
+    .setFooter({ text: `IWC • Réf. ${txId}` });
 
-  // Journal IC
-  _ajouterJournalIC(interaction.guild, {
-    type: 'tresorerie', emoji: type === 'Entrée' ? '💵' : '💸',
-    titre: `${type} — Coffre ${coffre}`,
-    description: `**${objet}** · $${montant.toLocaleString('fr-FR')} · par ${interaction.user.username}`,
-    auteur: interaction.user.username,
-  }).catch(() => {});
+  await interaction.followUp({ embeds: [embedPhoto], ephemeral: true });
 
-  // Post public dans le salon coffre correspondant
-  // Noms exacts Discord : coffre-entreprise (légal) et coffre-illegal (illégal)
+  // ── Attendre la photo (collecteur de messages) ──
   const clean    = s => s.toLowerCase().replace(/[^a-z0-9-]/g, '');
   const cibleNom = coffre === 'Légal' ? 'coffre-entreprise' : 'coffre-illegal';
   const coffreCh = interaction.guild.channels.cache.find(c => clean(c.name || '').includes(clean(cibleNom)));
+  if (!coffreCh) return;
 
-  if (coffreCh) {
-    const isEntree = type === 'Entrée';
-    const color    = isEntree ? 0x57F287 : 0xED4245;
-    const arrow    = isEntree ? '📈' : '📉';
-    const line     = '─────────────────────────────────';
+  const filter = m =>
+    m.author.id === interaction.user.id &&
+    m.attachments.some(a => a.contentType?.startsWith('image/') || /\.(png|jpg|jpeg|gif|webp)$/i.test(a.url));
 
-    const sentMsg = await coffreCh.send({ embeds: [new EmbedBuilder()
-      .setColor(color)
-      .setAuthor({ name: `${coffre === 'Légal' ? '⚖️ Iron Wolf Company' : '🔒 La Confrérie'} • Trésorerie`, iconURL: interaction.guild.iconURL() || undefined })
-      .setTitle(`${arrow} ${type.toUpperCase()} — $${montant.toLocaleString('fr-FR')}`)
-      .setDescription(`\`\`\`\n${line}\n  ${coffre === 'Légal' ? '⚖️ COFFRE LÉGAL' : '🔒 COFFRE ILLÉGAL'}\n${line}\n\`\`\``)
-      .addFields(
-        { name: '📋 Objet',          value: objet,                                               inline: true },
-        { name: '👤 Responsable',    value: interaction.user.username,                           inline: true },
-        { name: '\u200b',            value: '\u200b',                                            inline: true },
-        { name: `${isEntree ? '📥' : '📤'} Mouvement`, value: `**${isEntree ? '+' : '-'}$${montant.toLocaleString('fr-FR')}**`, inline: true },
-        { name: '💰 Solde actuel',   value: `**$${nouveauSolde.toLocaleString('fr-FR')}**`,      inline: true },
-        { name: '\u200b',            value: '\u200b',                                            inline: true },
-      )
-      .setFooter({ text: `IWC • ${new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}` })
-      .setTimestamp()
-    ] }).catch(() => null);
-    // Auto-suppression après 45 secondes — le salon reste propre
-    if (sentMsg) setTimeout(() => sentMsg.delete().catch(() => {}), 45000);
+  let photoMsg = null;
+  try {
+    const collected = await coffreCh.awaitMessages({ filter, max: 1, time: 5 * 60 * 1000, errors: ['time'] });
+    photoMsg = collected.first();
+  } catch {
+    // Timeout — annuler la transaction
+    delete db.transactionsPendantes[txId];
+    saveDB(db);
+    await interaction.followUp({
+      embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('⏰ Délai dépassé — Transaction annulée').setDescription(`La transaction **\`${txId}\`** a été annulée.\n\n**Raison :** Aucune photo reçue en 5 minutes.\n*Recommence depuis le bouton 💰 Nouvelle Transaction.*`).setFooter({ text: `IWC • Réf. ${txId} — Annulée` })],
+      ephemeral: true,
+    }).catch(() => {});
+    return;
   }
 
-  await interaction.followUp({ content: `✅ Transaction enregistrée — Solde **${coffre}** : **$${nouveauSolde.toLocaleString('fr-FR')}**`, ephemeral: true });
+  // Photo reçue — supprimer du salon (discrétion)
+  const photoUrl = photoMsg.attachments.first()?.url;
+  await photoMsg.delete().catch(() => {});
+
+  db.transactionsPendantes[txId].photoUrl = photoUrl;
+  saveDB(db);
+
+  // ── ÉTAPE 4 : Double saisie — vérification du montant visible sur la photo ──
+  await interaction.followUp({
+    ephemeral: true,
+    embeds: [new EmbedBuilder()
+      .setColor(0x5865F2)
+      .setTitle('🔢 Vérification du montant')
+      .setDescription([
+        '📸 Photo reçue.',
+        '',
+        "**Retape maintenant le montant exact visible sur ta capture d'écran.**",
+        '',
+        `> Tu as déclaré : **$${montant.toLocaleString('fr-FR')}**`,
+        '',
+        '*Si le montant ne correspond pas exactement → transaction annulée.*',
+        '*Tu as **2 minutes**.*',
+      ].join('\n'))
+      .setFooter({ text: `IWC • Réf. ${txId}` })
+    ],
+  });
+
+  // Attendre la réponse texte du membre (montant en chiffres)
+  const filterTxt = m => m.author.id === interaction.user.id && /^[0-9\s.,]+$/.test(m.content.trim());
+  let confirmMsg = null;
+  try {
+    const collectedTxt = await coffreCh.awaitMessages({ filter: filterTxt, max: 1, time: 2 * 60 * 1000, errors: ['time'] });
+    confirmMsg = collectedTxt.first();
+  } catch {
+    delete db.transactionsPendantes[txId];
+    saveDB(db);
+    await interaction.followUp({ ephemeral: true, embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('⏰ Délai dépassé — Transaction annulée').setDescription(`La transaction **\`${txId}\`** a été annulée.\n\n**Raison :** Aucune confirmation du montant en 2 minutes.\n*Recommence depuis le bouton 💰 Nouvelle Transaction.*`).setFooter({ text: `IWC • Réf. ${txId} — Annulée` })] }).catch(() => {});
+    return;
+  }
+
+  // Supprimer le message de confirmation du salon
+  await confirmMsg.delete().catch(() => {});
+
+  // Parser le montant saisi
+  const montantConfirme = parseInt(confirmMsg.content.trim().replace(/[^0-9]/g, ''), 10);
+
+  if (isNaN(montantConfirme) || montantConfirme !== montant) {
+    delete db.transactionsPendantes[txId];
+    saveDB(db);
+    await interaction.followUp({
+      ephemeral: true,
+      embeds: [new EmbedBuilder()
+        .setColor(0xED4245)
+        .setTitle('❌ Montant incorrect — Transaction annulée')
+        .setDescription([
+          `Tu as saisi **$${montantConfirme ? montantConfirme.toLocaleString('fr-FR') : '?'}** mais la transaction déclarée était **$${montant.toLocaleString('fr-FR')}**.`,
+          '',
+          '*Les deux montants doivent être identiques.*',
+          '*Recommence avec le bon montant visible sur ton écran.*',
+        ].join('\n'))
+        .setFooter({ text: `IWC • Réf. ${txId} — Annulée` })
+      ],
+    }).catch(() => {});
+    return;
+  }
+
+  // ✅ Montant confirmé
+  db.transactionsPendantes[txId].photoOk = true;
+  saveDB(db);
+
+  // ── Cas 1 : Sortie > limite → soumise à validation Direction ──
+  if (type === 'Sortie' && montant > limite) {
+    await _soumettreValidationDirection(interaction.guild, db.transactionsPendantes[txId], photoUrl);
+    await interaction.followUp({
+      ephemeral: true,
+      embeds: [new EmbedBuilder()
+        .setColor(0xFFA500)
+        .setTitle('📨 En attente de validation')
+        .setDescription([
+          `✅ Montant **$${montant.toLocaleString('fr-FR')}** confirmé.`,
+          '',
+          `Ta sortie dépasse le seuil autorisé de **$${limite.toLocaleString('fr-FR')}**.`,
+          'La Direction va examiner ta demande.',
+          '',
+          '*Tu seras notifié(e) par DM dès la décision.*',
+        ].join('\n'))
+        .setFooter({ text: `IWC • Réf. ${txId}` })
+      ],
+    }).catch(() => {});
+    return;
+  }
+
+  // ── Cas 2 : Transaction normale → valider directement ──
+  await _validerTransaction(interaction.guild, db.transactionsPendantes[txId], photoUrl);
+  delete db.transactionsPendantes[txId];
+  saveDB(db);
+
+  const soldeFinal = (loadDB().coffres?.[key] || 0);
+  await interaction.followUp({
+    ephemeral: true,
+    embeds: [new EmbedBuilder()
+      .setColor(0x57F287)
+      .setTitle('✅ Transaction validée')
+      .addFields(
+        { name: '🆔 Réf.',            value: `\`${txId}\``,                               inline: true },
+        { name: `${type === 'Entrée' ? '📥' : '📤'} ${type}`, value: `$${montant.toLocaleString('fr-FR')}`, inline: true },
+        { name: '💰 Nouveau solde',   value: `**$${soldeFinal.toLocaleString('fr-FR')}**`,  inline: true },
+      )
+      .setFooter({ text: `IWC • ${coffre} • Photo vérifiée ✅` })
+    ],
+  }).catch(() => {});
+}
+
+// ── Soumettre une sortie importante à la Direction ──
+async function _soumettreValidationDirection(guild, tx, photoUrl) {
+  const logsCh = guild.channels.cache.find(c => {
+    const cl = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return c.isTextBased?.() && cl(c.name).includes('logs');
+  });
+  if (!logsCh) return;
+
+  const embed = new EmbedBuilder()
+    .setColor(0xFFA500)
+    .setTitle(`⚠️ Validation requise — Sortie importante`)
+    .setDescription(`**<@${tx.userId}>** souhaite effectuer une sortie qui dépasse le seuil autorisé.`)
+    .addFields(
+      { name: '🆔 Réf.',         value: `\`${tx.txId}\``,                               inline: true },
+      { name: '📤 Montant',      value: `**$${tx.montant.toLocaleString('fr-FR')}**`,   inline: true },
+      { name: '🏦 Coffre',       value: tx.coffre,                                       inline: true },
+      { name: '📋 Objet',        value: tx.objet,                                        inline: false },
+      { name: '👤 Demandé par',  value: `<@${tx.userId}> (${tx.username})`,             inline: true },
+      { name: '📅 Date',         value: new Date(tx.createdAt).toLocaleString('fr-FR'), inline: true },
+    )
+    .setImage(photoUrl || null)
+    .setFooter({ text: 'IWC • Validation trésorerie' })
+    .setTimestamp();
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`tresor_valider_${tx.txId}`).setLabel('✅ Approuver').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`tresor_refuser_${tx.txId}`).setLabel('❌ Refuser').setStyle(ButtonStyle.Danger),
+  );
+
+  await logsCh.send({ content: `💰 Validation requise — sortie $${tx.montant.toLocaleString('fr-FR')}`, embeds: [embed], components: [row] });
+}
+
+// ── Valider une transaction (débit/crédit réel) ──
+async function _validerTransaction(guild, tx, photoUrl) {
+  const db = loadDB();
+  if (!db.coffres) db.coffres = { legal: 0, illegal: 0 };
+  if (tx.type === 'Entrée') db.coffres[tx.key] += tx.montant;
+  else                      db.coffres[tx.key] = Math.max(0, db.coffres[tx.key] - tx.montant);
+  const nouveauSolde = db.coffres[tx.key];
+  saveDB(db);
+
+  // Archive Notion
+  _archiverTransactionNotion({
+    objet: tx.objet, type: tx.type, coffre: tx.coffre,
+    montant: tx.montant, solde: nouveauSolde,
+    responsable: tx.username, date: tx.createdAt,
+    photoUrl: photoUrl || '—',
+  }).catch(() => {});
+
+  // Journal IC
+  _ajouterJournalIC(guild, {
+    type: 'tresorerie', emoji: tx.type === 'Entrée' ? '💵' : '💸',
+    titre: `${tx.type} — Coffre ${tx.coffre}`,
+    description: `**${tx.objet}** · $${tx.montant.toLocaleString('fr-FR')} · par ${tx.username}`,
+    auteur: tx.username,
+  }).catch(() => {});
+
+  // Post dans le salon coffre avec la photo
+  const clean    = s => s.toLowerCase().replace(/[^a-z0-9-]/g, '');
+  const cibleNom = tx.coffre === 'Légal' ? 'coffre-entreprise' : 'coffre-illegal';
+  const coffreCh = guild.channels.cache.find(c => clean(c.name || '').includes(clean(cibleNom)));
+
+  if (coffreCh) {
+    const isEntree = tx.type === 'Entrée';
+    const line     = '─────────────────────────────────';
+
+    const embed = new EmbedBuilder()
+      .setColor(isEntree ? 0x57F287 : 0xED4245)
+      .setAuthor({ name: `${tx.coffre === 'Légal' ? '⚖️ Iron Wolf Company' : '🔒 La Confrérie'} • Trésorerie`, iconURL: guild.iconURL() || undefined })
+      .setTitle(`${isEntree ? '📈' : '📉'} ${tx.type.toUpperCase()} — $${tx.montant.toLocaleString('fr-FR')}`)
+      .setDescription(`\`\`\`\n${line}\n  ${tx.coffre === 'Légal' ? '⚖️ COFFRE LÉGAL' : '🔒 COFFRE ILLÉGAL'}\n${line}\n\`\`\``)
+      .addFields(
+        { name: '📋 Objet',       value: tx.objet,                                             inline: true },
+        { name: '👤 Responsable', value: tx.username,                                          inline: true },
+        { name: '🆔 Réf.',        value: `\`${tx.txId}\``,                                    inline: true },
+        { name: `${isEntree ? '📥' : '📤'} Mouvement`, value: `**${isEntree ? '+' : '-'}$${tx.montant.toLocaleString('fr-FR')}**`, inline: true },
+        { name: '💰 Solde actuel',value: `**$${nouveauSolde.toLocaleString('fr-FR')}**`,      inline: true },
+        { name: '📸 Preuve',      value: '✅ Photo vérifiée',                                  inline: true },
+      );
+
+    if (photoUrl) embed.setImage(photoUrl);
+    embed.setFooter({ text: `IWC • ${new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}` }).setTimestamp();
+
+    const sentMsg = await coffreCh.send({ embeds: [embed] }).catch(() => null);
+    if (sentMsg) setTimeout(() => sentMsg.delete().catch(() => {}), 60000);
+  }
+
+  return nouveauSolde;
+}
+
+// ── Boutons Approuver / Refuser (Direction) ──
+async function handleTresorValidation(interaction, decision) {
+  if (!_isDirection(interaction.member)) {
+    return interaction.reply({ content: '❌ Réservé à la Direction.', ephemeral: true });
+  }
+
+  const txId = interaction.customId.replace(decision === 'valider' ? 'tresor_valider_' : 'tresor_refuser_', '');
+  const db   = loadDB();
+  const tx   = db.transactionsPendantes?.[txId];
+
+  if (!tx) {
+    return interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x555555).setDescription('*Transaction déjà traitée ou expirée.*')], components: [] });
+  }
+
+  if (decision === 'valider') {
+    await _validerTransaction(interaction.guild, tx, tx.photoUrl);
+    delete db.transactionsPendantes[txId];
+    saveDB(db);
+
+    await interaction.update({
+      embeds: [EmbedBuilder.from(interaction.message.embeds[0])
+        .setColor(0x57F287)
+        .setTitle(`✅ Approuvée — ${txId}`)
+        .addFields({ name: '✅ Approuvé par', value: interaction.user.username, inline: true })
+      ],
+      components: [],
+    });
+
+    // Notifier le membre
+    try {
+      const member = await interaction.guild.members.fetch(tx.userId).catch(() => null);
+      if (member) await member.send({ embeds: [new EmbedBuilder()
+        .setColor(0x57F287)
+        .setTitle('✅ Transaction approuvée — IWC')
+        .setDescription(`Ta sortie de **$${tx.montant.toLocaleString('fr-FR')}** a été **approuvée** par la Direction.`)
+        .addFields({ name: '📋 Objet', value: tx.objet, inline: true }, { name: '🆔 Réf.', value: `\`${txId}\``, inline: true })
+        .setFooter({ text: tx.coffre === 'Illégal' ? 'La Confrérie • Confidentiel' : 'Iron Wolf Company • Légal' })
+      ] }).catch(() => {});
+    } catch {}
+  } else {
+    delete db.transactionsPendantes[txId];
+    saveDB(db);
+
+    await interaction.update({
+      embeds: [EmbedBuilder.from(interaction.message.embeds[0])
+        .setColor(0xED4245)
+        .setTitle(`❌ Refusée — ${txId}`)
+        .addFields({ name: '❌ Refusé par', value: interaction.user.username, inline: true })
+      ],
+      components: [],
+    });
+
+    // Notifier le membre
+    try {
+      const member = await interaction.guild.members.fetch(tx.userId).catch(() => null);
+      if (member) await member.send({ embeds: [new EmbedBuilder()
+        .setColor(0xED4245)
+        .setTitle('❌ Transaction refusée — IWC')
+        .setDescription(`Ta sortie de **$${tx.montant.toLocaleString('fr-FR')}** a été **refusée** par la Direction.`)
+        .addFields({ name: '📋 Objet', value: tx.objet, inline: true }, { name: '🆔 Réf.', value: `\`${txId}\``, inline: true })
+        .setFooter({ text: tx.coffre === 'Illégal' ? 'La Confrérie • Confidentiel' : 'Iron Wolf Company • Légal' })
+      ] }).catch(() => {});
+    } catch {}
+  }
+}
+
+function _isDirection(member) {
+  return member?.roles?.cache?.some(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier'].some(n => r.name.includes(n)));
 }
 
 async function setupTresorButton(guild) {
@@ -216,27 +528,46 @@ async function setupTresorButton(guild) {
 }
 
 function _tresorEmbed() {
-  return new EmbedBuilder().setColor(0x8B1A1A).setTitle('💰 Trésorerie — Iron Wolf Company')
+  const db     = loadDB();
+  const legal  = db.coffres?.legal   || 0;
+  const illega = db.coffres?.illegal || 0;
+  return new EmbedBuilder()
+    .setColor(0x8B1A1A)
+    .setTitle('💰 Trésorerie — Iron Wolf Company')
     .setDescription('Enregistrez chaque mouvement financier via le bouton ci-dessous.\nToute transaction est archivée automatiquement dans Notion.')
-    .setFooter({ text: 'IWC • Trésorerie automatique' });
+    .addFields(
+      { name: '⚖️ Coffre Légal',   value: `**$${legal.toLocaleString('fr-FR')}**`,             inline: true },
+      { name: '🔒 Coffre Illégal', value: `**$${illega.toLocaleString('fr-FR')}**`,            inline: true },
+      { name: '💼 Total',          value: `**$${(legal + illega).toLocaleString('fr-FR')}**`,  inline: true },
+    )
+    .setFooter({ text: `IWC • Trésorerie automatique • Mis à jour le ${new Date().toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` })
+    .setTimestamp();
 }
 function _tresorRow() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('btn_nouvelle_transaction').setLabel('💰 Nouvelle Transaction').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('btn_solde').setLabel('📊 Voir les soldes').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('btn_tresor_config').setLabel('⚙️').setStyle(ButtonStyle.Secondary),
   );
 }
 
 async function handleSoldeButton(interaction) {
-  const db = loadDB(); const legal = db.coffres?.legal || 0; const illegal = db.coffres?.illegal || 0;
-  await interaction.reply({ ephemeral: true, embeds: [new EmbedBuilder()
-    .setColor(0x8B1A1A).setTitle('📊 Soldes actuels — IWC')
-    .addFields(
-      { name: '⚖️ Coffre Légal',   value: `**$${legal.toLocaleString('fr-FR')}**`,            inline: true },
-      { name: '🔒 Coffre Illégal', value: `**$${illegal.toLocaleString('fr-FR')}**`,           inline: true },
-      { name: '💼 Total',          value: `**$${(legal + illegal).toLocaleString('fr-FR')}**`, inline: true },
-    ).setFooter({ text: 'IWC • Données en temps réel' }).setTimestamp()
-  ] });
+  // Réponse éphémère → mise à jour du panel permanent à la place
+  const db     = loadDB();
+  const legal  = db.coffres?.legal   || 0;
+  const illega = db.coffres?.illegal || 0;
+  // Mettre à jour le panel trésorerie avec les soldes actuels
+  const ch = interaction.guild.channels.cache.find(c => c.name?.includes('coffre-entreprise'));
+  if (ch && db.tresorButtonMsgId) {
+    const msg = await ch.messages.fetch(db.tresorButtonMsgId).catch(() => null);
+    if (msg) await msg.edit({ embeds: [_tresorEmbed()], components: [_tresorRow()] }).catch(() => {});
+  }
+  // Confirmer à l'utilisateur (éphémère discret)
+  await interaction.reply({
+    ephemeral: true,
+    content: `💰 **Soldes mis à jour dans le salon**
+⚖️ Légal : **$${legal.toLocaleString('fr-FR')}** · 🔒 Illégal : **$${illega.toLocaleString('fr-FR')}** · Total : **$${(legal + illega).toLocaleString('fr-FR')}**`,
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -646,11 +977,326 @@ function _fmtDate(d) {
   return !d ? '—' : new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
+// ═══════════════════════════════════════════════════════════════
+// CONFIG TRÉSORERIE — Fléau & Concepteur uniquement
+// Bouton ⚙️ visible seulement par eux dans coffre-entreprise
+// ═══════════════════════════════════════════════════════════════
+
+function _isFleau(member) {
+  return member?.roles?.cache?.some(r => ['Fléau', 'Concepteur', 'Fondateur'].some(n => r.name.includes(n)));
+}
+
+// Panel config — posté en éphémère, invisible aux autres
+async function handleTresorConfigButton(interaction) {
+  if (!_isFleau(interaction.member)) {
+    return interaction.reply({ content: '❌ Accès réservé au Fléau et au Concepteur.', ephemeral: true });
+  }
+
+  const db     = loadDB();
+  const limL   = db.limiteSortieLegal   || LIMITE_SORTIE_LEGAL;
+  const limI   = db.limiteSortieIllegal || LIMITE_SORTIE_ILLEGAL;
+
+  const { StringSelectMenuBuilder } = require('discord.js');
+
+  const optionsLegal = [500, 1000, 2000, 3000, 5000, 7500, 10000, 15000, 20000].map(v => ({
+    label: `$${v.toLocaleString('fr-FR')}`,
+    value: `legal_${v}`,
+    description: `Limite sortie coffre légal`,
+    default: v === limL,
+  }));
+
+  const optionsIllegal = [500, 1000, 2000, 3000, 5000, 7500, 10000, 15000, 20000].map(v => ({
+    label: `$${v.toLocaleString('fr-FR')}`,
+    value: `illegal_${v}`,
+    description: `Limite sortie coffre illégal`,
+    default: v === limI,
+  }));
+
+  await interaction.reply({
+    ephemeral: true,
+    embeds: [new EmbedBuilder()
+      .setColor(0x8B1A1A)
+      .setTitle('⚙️ Configuration Trésorerie — Direction')
+      .setDescription([
+        '*Ce panneau est visible uniquement par le Fléau et le Concepteur.*',
+        '',
+        '**Limite de sortie** — Au-delà de ce montant, une sortie nécessite une validation de la Direction.',
+        '',
+        `⚖️ Coffre Légal actuel : **$${limL.toLocaleString('fr-FR')}**`,
+        `🔒 Coffre Illégal actuel : **$${limI.toLocaleString('fr-FR')}**`,
+      ].join('\n'))
+      .setFooter({ text: 'IWC • Configuration trésorerie • Fléau & Concepteur' })
+    ],
+    components: [
+      new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('tresor_config_limite_legal')
+          .setPlaceholder(`⚖️ Limite sortie légal — actuellement $${limL.toLocaleString('fr-FR')}`)
+          .addOptions(optionsLegal)
+      ),
+      new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('tresor_config_limite_illegal')
+          .setPlaceholder(`🔒 Limite sortie illégal — actuellement $${limI.toLocaleString('fr-FR')}`)
+          .addOptions(optionsIllegal)
+      ),
+    ],
+  });
+}
+
+async function handleTresorConfigSelect(interaction) {
+  if (!_isFleau(interaction.member)) {
+    return interaction.reply({ content: '❌ Accès réservé au Fléau et au Concepteur.', ephemeral: true });
+  }
+
+  const val      = interaction.values[0];
+  const [type, montantStr] = val.split('_');
+  const montant  = parseInt(montantStr, 10);
+  const isLegal  = type === 'legal';
+
+  const db = loadDB();
+  if (isLegal) db.limiteSortieLegal   = montant;
+  else         db.limiteSortieIllegal = montant;
+  saveDB(db);
+
+  const label = isLegal ? '⚖️ Coffre Légal' : '🔒 Coffre Illégal';
+  await interaction.update({
+    embeds: [new EmbedBuilder()
+      .setColor(0x57F287)
+      .setTitle('✅ Limite mise à jour')
+      .setDescription([
+        `${label} — nouvelle limite de sortie :`,
+        `# $${montant.toLocaleString('fr-FR')}`,
+        '',
+        `*Au-delà de ce montant, toute sortie nécessite ton approbation.*`,
+      ].join('\n'))
+      .setFooter({ text: `Modifié par ${interaction.user.username} • IWC` })
+      .setTimestamp()
+    ],
+    components: [],
+  });
+
+  console.log(`✅ Limite sortie ${isLegal ? 'légal' : 'illégal'} mise à jour : $${montant} par ${interaction.user.username}`);
+}
+
+// ── Nettoyage transactions pendantes expirées (appelé au boot) ──
+function nettoyerTransactionsFantôomes() {
+  const db  = loadDB();
+  if (!db.transactionsPendantes) return;
+  const now    = Date.now();
+  const limite = 10 * 60 * 1000; // 10 minutes
+  let changed  = false;
+  for (const [txId, tx] of Object.entries(db.transactionsPendantes)) {
+    if (now - new Date(tx.createdAt).getTime() > limite) {
+      delete db.transactionsPendantes[txId];
+      changed = true;
+      console.log(`🧹 Transaction fantôme supprimée : ${txId}`);
+    }
+  }
+  if (changed) saveDB(db);
+}
+
 module.exports = {
   handleTresorCommand, handleTresorFlow, handleTresorModal, handleSoldeButton, setupTresorButton,
+  handleTresorValidation, handleTresorConfigButton, handleTresorConfigSelect,
+  nettoyerTransactionsFantôomes,
   ajouterJournalIC: _ajouterJournalIC,
   handleJournalCommand, handleJournalPagination,
   handleContratsArchives,
   handleDashboard,
   handleFichePersonnage,
+  handleProfilCommand,
+  handleBilanCommand,
+  checkAlerteCoffre,
 };
+
+// ═══════════════════════════════════════════════════════════════
+// 6. COMMANDE /profil — Fiche + grade + statut + activité
+// ═══════════════════════════════════════════════════════════════
+
+async function handleProfilCommand(interaction) {
+  await interaction.deferReply({ ephemeral: false });
+
+  const cible = interaction.options?.getUser('membre') || interaction.user;
+  const membre = await interaction.guild.members.fetch(cible.id).catch(() => null);
+  const db = loadDB();
+  const data = db.members[cible.id];
+
+  // Chercher la fiche dans Notion
+  let ficheNotion = null;
+  if (process.env.NOTION_TOKEN && process.env.NOTION_FICHES_DB) {
+    try {
+      const res = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_FICHES_DB}/query`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filter: { property: 'Discord ID', rich_text: { equals: cible.id } }, page_size: 1 }),
+      });
+      const d = await res.json();
+      ficheNotion = d.results?.[0];
+    } catch {}
+  }
+
+  const nomPerso    = ficheNotion?.properties?.['Nom du personnage']?.title?.[0]?.plain_text || data?.name || cible.username;
+  const profession  = ficheNotion?.properties?.['Profession']?.rich_text?.[0]?.plain_text || '—';
+  const reputation  = ficheNotion?.properties?.['Réputation']?.rich_text?.[0]?.plain_text || '—';
+  const pole        = ficheNotion?.properties?.['Pôle']?.select?.name || (data?.pole === 'illegal' ? '🔒 Illégal' : '⚖️ Légal');
+  const rang        = data?.rang || membre?.roles.cache.filter(r => !r.managed && r.name !== '@everyone').sort((a, b) => b.position - a.position).first()?.name || '—';
+  const statut      = data?.status || 'actif';
+  const derniereAct = data?.lastActivity;
+  const statutEmoji = { actif: '✅', absent: '⚠️', inactif: '💤', parti: '🚪', visiteur: '👁️' }[statut] || '❓';
+  const color       = pole.includes('Illégal') ? 0x8B1A1A : 0x3B82F6;
+
+  const embed = new EmbedBuilder()
+    .setColor(color)
+    .setAuthor({ name: pole.includes('Illégal') ? '🔒 La Confrérie' : '⚖️ Iron Wolf Company', iconURL: interaction.guild.iconURL() || undefined })
+    .setTitle(`👤 ${nomPerso}`)
+    .setThumbnail(cible.displayAvatarURL({ size: 256 }))
+    .addFields(
+      { name: '🎖️ Grade',           value: rang,                                               inline: true },
+      { name: '📂 Pôle',            value: pole,                                               inline: true },
+      { name: `${statutEmoji} Statut`, value: statut.charAt(0).toUpperCase() + statut.slice(1), inline: true },
+    );
+
+  if (profession !== '—') embed.addFields({ name: '💼 Profession',    value: profession, inline: true });
+  if (reputation !== '—') embed.addFields({ name: '⭐ Réputation',    value: reputation, inline: true });
+
+  embed.addFields(
+    { name: '📅 Dernière activité', value: derniereAct ? _fmtDate(derniereAct) + ` *(${daysSince(derniereAct)}j)*` : '—', inline: true },
+    { name: '👤 Discord',           value: `<@${cible.id}>`,                                   inline: true },
+  );
+
+  if (ficheNotion?.properties?.['Thread Discord']?.rich_text?.[0]?.plain_text?.startsWith('http')) {
+    embed.addFields({ name: '📋 Fiche complète', value: `[Voir le thread](${ficheNotion.properties['Thread Discord'].rich_text[0].plain_text})`, inline: true });
+  }
+
+  embed.setFooter({ text: `IWC • Profil • ${new Date().toLocaleDateString('fr-FR')}` }).setTimestamp();
+  await interaction.editReply({ embeds: [embed] });
+}
+
+function daysSince(d) { return !d ? 999 : Math.floor((Date.now() - new Date(d).getTime()) / 86400000); }
+
+// ═══════════════════════════════════════════════════════════════
+// 7. COMMANDE /bilan — Résumé trésorerie 7 derniers jours
+// ═══════════════════════════════════════════════════════════════
+
+async function handleBilanCommand(interaction) {
+  await interaction.deferReply({ ephemeral: false });
+
+  const db = loadDB();
+  const coffre = interaction.options?.getString('coffre') || 'legal';
+
+  // Récupérer les transactions Notion des 7 derniers jours
+  let transactions = [];
+  if (process.env.NOTION_TOKEN && process.env.NOTION_TRESORERIE_DB) {
+    try {
+      const depuis = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+      const res = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_TRESORERIE_DB}/query`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filter: {
+            and: [
+              { property: 'Date', date: { on_or_after: depuis } },
+              { property: 'Coffre', select: { equals: coffre === 'illegal' ? '🔒 Illégal' : '⚖️ Légal' } },
+            ],
+          },
+          sorts: [{ property: 'Date', direction: 'descending' }],
+          page_size: 20,
+        }),
+      });
+      const data = await res.json();
+      transactions = (data.results || []).map(p => ({
+        objet:       p.properties['Objet']?.title?.[0]?.plain_text || '—',
+        type:        p.properties['Type']?.select?.name || '—',
+        montant:     p.properties['Montant']?.number || 0,
+        solde:       p.properties['Solde']?.number || 0,
+        responsable: p.properties['Responsable']?.rich_text?.[0]?.plain_text || '—',
+        date:        p.properties['Date']?.date?.start || '—',
+      }));
+    } catch (e) { console.log('❌ Notion bilan error:', e.message); }
+  }
+
+  const key        = coffre === 'illegal' ? 'illegal' : 'legal';
+  const soldeActuel = db.coffres?.[key] || 0;
+  const label      = coffre === 'illegal' ? '🔒 Coffre Illégal' : '⚖️ Coffre Légal';
+  const color      = coffre === 'illegal' ? 0x8B1A1A : 0x3B82F6;
+
+  const entrees = transactions.filter(t => t.type.includes('Entrée'));
+  const sorties = transactions.filter(t => t.type.includes('Sortie'));
+  const totalEntrees = entrees.reduce((s, t) => s + t.montant, 0);
+  const totalSorties = sorties.reduce((s, t) => s + t.montant, 0);
+
+  const embed = new EmbedBuilder()
+    .setColor(color)
+    .setTitle(`📊 Bilan — ${label}`)
+    .setDescription(`*7 derniers jours — ${new Date(Date.now() - 7 * 86400000).toLocaleDateString('fr-FR')} → ${new Date().toLocaleDateString('fr-FR')}*`)
+    .addFields(
+      { name: '💰 Solde actuel',   value: `**$${soldeActuel.toLocaleString('fr-FR')}**`,   inline: true },
+      { name: '📥 Total entrées',  value: `**+$${totalEntrees.toLocaleString('fr-FR')}**`, inline: true },
+      { name: '📤 Total sorties',  value: `**-$${totalSorties.toLocaleString('fr-FR')}**`, inline: true },
+    );
+
+  if (transactions.length > 0) {
+    const lignes = transactions.slice(0, 8).map(t => {
+      const emoji = t.type.includes('Entrée') ? '📥' : '📤';
+      const signe = t.type.includes('Entrée') ? '+' : '-';
+      return `${emoji} \`${_fmtDate(t.date)}\` **${t.objet}** — ${signe}$${t.montant.toLocaleString('fr-FR')} · *${t.responsable}*`;
+    }).join('\n');
+    embed.addFields({ name: `📋 Dernières transactions (${transactions.length})`, value: lignes, inline: false });
+  } else {
+    embed.addFields({ name: '📋 Transactions', value: '*Aucune transaction sur les 7 derniers jours.*\n*Configure `NOTION_TRESORERIE_DB` dans `.env` pour voir l\'historique.*', inline: false });
+  }
+
+  embed.setFooter({ text: `IWC • Bilan automatique • ${new Date().toLocaleString('fr-FR')}` }).setTimestamp();
+  await interaction.editReply({ embeds: [embed] });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 8. ALERTE COFFRE SOUS SEUIL
+// ═══════════════════════════════════════════════════════════════
+
+// SEUIL_LEGAL/ILLEGAL importés depuis config.js
+
+async function checkAlerteCoffre(guild) {
+  try {
+    const db = loadDB();
+    const legal   = db.coffres?.legal   || 0;
+    const illegal = db.coffres?.illegal || 0;
+    const logsCh  = guild.channels.cache.find(c => { const cl = s => s.toLowerCase().replace(/[^a-z0-9]/g, ''); return c.isTextBased?.() && cl(c.name).includes('logs'); });
+    if (!logsCh) return;
+
+    if (!db.alertesCoffre) db.alertesCoffre = {};
+
+    if (legal < SEUIL_LEGAL && !db.alertesCoffre.legal) {
+      await logsCh.send({ embeds: [new EmbedBuilder()
+        .setColor(0xED4245)
+        .setTitle('⚠️ Alerte — Coffre Légal bas')
+        .setDescription(`Le **Coffre Légal** est passé sous le seuil d'alerte.`)
+        .addFields({ name: '💰 Solde actuel', value: `**$${legal.toLocaleString('fr-FR')}**`, inline: true }, { name: '⚠️ Seuil', value: `$${SEUIL_LEGAL.toLocaleString('fr-FR')}`, inline: true })
+        .setFooter({ text: 'IWC • Alerte automatique' }).setTimestamp()
+      ] });
+      db.alertesCoffre.legal = true;
+      saveDB(db);
+    } else if (legal >= SEUIL_LEGAL && db.alertesCoffre.legal) {
+      db.alertesCoffre.legal = false;
+      saveDB(db);
+    }
+
+    if (illegal < SEUIL_ILLEGAL && !db.alertesCoffre.illegal) {
+      await logsCh.send({ embeds: [new EmbedBuilder()
+        .setColor(0xED4245)
+        .setTitle('⚠️ Alerte — Coffre Illégal bas')
+        .setDescription(`Le **Coffre Illégal** est passé sous le seuil d'alerte.`)
+        .addFields({ name: '💰 Solde actuel', value: `**$${illegal.toLocaleString('fr-FR')}**`, inline: true }, { name: '⚠️ Seuil', value: `$${SEUIL_ILLEGAL.toLocaleString('fr-FR')}`, inline: true })
+        .setFooter({ text: 'IWC • Alerte automatique' }).setTimestamp()
+      ] });
+      db.alertesCoffre.illegal = true;
+      saveDB(db);
+    } else if (illegal >= SEUIL_ILLEGAL && db.alertesCoffre.illegal) {
+      db.alertesCoffre.illegal = false;
+      saveDB(db);
+    }
+  } catch (e) { console.log('❌ checkAlerteCoffre error:', e.message); }
+}
+
+
