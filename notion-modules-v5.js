@@ -434,8 +434,28 @@ async function handleStatsAvancees(interaction) {
         inline: false,
       },
     )
-    .setFooter({ text: `IWC Stats • ${new Date().toLocaleString('fr-FR')}` })
     .setTimestamp();
+
+  // ── Tendances semaine vs semaine précédente ──
+  const s14j = now - 14 * 86400000;
+  const arriveesPrev = membres.filter(m => m.joinedAt && new Date(m.joinedAt).getTime() >= s14j && new Date(m.joinedAt).getTime() < s7j).length;
+  const accept7jPrev = cands.filter(c => c.status === 'acceptee' && c.acceptedAt && new Date(c.acceptedAt).getTime() >= s14j && new Date(c.acceptedAt).getTime() < s7j).length;
+  const ops14j       = ops.filter(o => o.createdAt && new Date(o.createdAt).getTime() >= s14j && new Date(o.createdAt).getTime() < s7j).length;
+  const tendArr = arrivees7j > arriveesPrev ? '📈' : arrivees7j < arriveesPrev ? '📉' : '➡️';
+  const tendRec = accept7j   > accept7jPrev  ? '📈' : accept7j   < accept7jPrev  ? '📉' : '➡️';
+  const tendOps = ops7j      > ops14j        ? '📈' : ops7j      < ops14j        ? '📉' : '➡️';
+
+  embed
+    .addFields({
+      name: '📈 TENDANCES vs semaine précédente',
+      value: [
+        `${tendArr} Arrivées : **${arrivees7j}** (sem. passée : ${arriveesPrev})`,
+        `${tendRec} Recrutement : **${accept7j}** accepté(s) (sem. passée : ${accept7jPrev})`,
+        `${tendOps} Opérations : **${ops7j}** (sem. passée : ${ops14j})`,
+      ].join('\n'),
+      inline: false,
+    })
+    .setFooter({ text: `IWC Stats • ${new Date().toLocaleString('fr-FR')}` });
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('btn_stats_refresh').setLabel('🔄 Rafraîchir').setStyle(ButtonStyle.Secondary),
