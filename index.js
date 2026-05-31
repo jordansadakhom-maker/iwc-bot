@@ -386,11 +386,31 @@ async function cleanBotPinnedMessages(guild, ...channelNames) {
   }
 }
 
+// ── Nettoyage messages de transaction orphelins (sans boutons = expirés) ──
+async function _cleanTransactionMessages(guild, channelName) {
+  try {
+    const ch = getCh(guild, channelName); if (!ch) return;
+    const botId = guild.members.me?.id; if (!botId) return;
+    const msgs = await ch.messages.fetch({ limit: 100 }).catch(() => null); if (!msgs) return;
+    const orphelins = [...msgs.values()].filter(m =>
+      m.author.id === botId &&
+      m.embeds?.length > 0 &&
+      !(m.components?.length > 0) && // pas de boutons = message de transaction, pas le panel
+      m.type === 0 // message normal
+    );
+    for (const m of orphelins) await m.delete().catch(() => {});
+    if (orphelins.length > 0) console.log(`🧹 ${orphelins.length} transaction(s) orpheline(s) supprimée(s) dans #${ch.name}`);
+  } catch (e) { console.log('❌ _cleanTransactionMessages error:', e.message); }
+}
+
 // ── Auto-setup ──
 async function autoSetup(guild) {
   const db = loadDB(); console.log('🔧 Auto-setup en cours...');
   // Nettoyage EN PREMIER
-  await cleanBotPinnedMessages(guild, 'planning', 'grade', 'coffre-entreprise', 'informateurs', 'affaires');
+  await cleanBotPinnedMessages(guild, 'planning', 'grade', 'coffre-entreprise', 'coffre-illegal', 'informateurs', 'affaires');
+  // Nettoyer aussi les messages de transaction orphelins dans les coffres (sans boutons = transactions expirées)
+  await _cleanTransactionMessages(guild, 'coffre-entreprise');
+  await _cleanTransactionMessages(guild, 'coffre-illegal');
   await updateDashboard(guild);
   await notionModules.setupTresorButton?.(guild);
   await notionV3.setupAffairesPanel?.(guild);
