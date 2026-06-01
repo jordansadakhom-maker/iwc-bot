@@ -326,7 +326,7 @@ async function handleGradeGradeSelect(interaction) {
   await notionExtra.logPromotionNotion?.(interaction.guild, { userId, username: nomMembre, nomPerso: nomMembre, ancienRang: ancienGrade, nouveauRang: nouveauGrade, type: 'promotion', validePar: interaction.user.username });
 
   let notionModules = {}; try { notionModules = require('./notion-modules-v2'); } catch {}
-  await notionModules.ajouterJournalIC?.(interaction.guild, { type: 'promotion', emoji: '🎖️', titre: `Grade attribué — ${nomMembre}`, description: `${ancienGrade} → **${nouveauGrade}** · Décidé par ${interaction.user.username}`, auteur: interaction.user.username });
+  // Journal géré par /promo ou /retro — pas de doublon ici
 
   const logsCh = getCh(interaction.guild, 'logs');
   if (logsCh) await logsCh.send({ embeds: [new EmbedBuilder().setColor(gradeInfo?.couleur || 0x8B1A1A).setTitle(`🎖️ Grade modifié — ${nomMembre}`).addFields({ name: '👤 Membre', value: `<@${userId}>`, inline: true }, { name: '📉 Ancien', value: ancienGrade, inline: true }, { name: '📈 Nouveau', value: nouveauGrade, inline: true }, { name: '✅ Décidé par', value: interaction.user.username, inline: true }).setFooter({ text: `IWC • ${fmtShort(new Date())}` })] }).catch(() => {});
@@ -953,18 +953,8 @@ async function handleAgendaCommand(interaction) {
     return;
   }
 
-  if (sub === 'creer') {
-    const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
-    const modal = new ModalBuilder().setCustomId('modal_agenda_rdv').setTitle('📅 Nouveau RDV — Agenda IWC');
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('titre').setLabel('Titre du RDV').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Réunion Direction, Mission Paleto Bay...')),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('date').setLabel('Date (JJ/MM/AAAA)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 05/06/2026')),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('heure').setLabel('Heure').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: 21h00')),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('lieu').setLabel('Lieu').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: Paleto Bay, Discord vocal...')),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('notes').setLabel('Notes / Description').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500)),
-    );
-    await interaction.showModal(modal);
-  }
+  // /agenda creer → géré dans index.js par _ouvrirModalAgendaSimple
+  if (sub === 'creer') return; // handled in index.js
 }
 
 async function handleAgendaNouveauButton(interaction) {
