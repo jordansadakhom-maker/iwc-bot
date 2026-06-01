@@ -12,6 +12,21 @@ const { loadDB, saveDB } = require('./db');
 
 const { MEMBRES_DISCORD_MAP, ROLE_POLE_LEGAL, ROLE_POLE_ILLEGAL } = require('./config');
 
+function getChById(guild, salonKey, ...fallbackNames) {
+  try {
+    const { SALON_IDS } = require('./config');
+    const id = SALON_IDS?.[salonKey];
+    if (id) { const ch = guild.channels.cache.get(id); if (ch) return ch; }
+  } catch {}
+  for (const name of fallbackNames) {
+    const clean = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const ch = guild.channels.cache.find(c => c.isTextBased?.() && clean(c.name).includes(clean(name)));
+    if (ch) return ch;
+  }
+  return null;
+}
+
+
 function fmtShort(d) { return !d ? '—' : new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
 function fmtLong(d)  { return !d ? '—' : new Date(d).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }); }
 function daysSince(d) { return !d ? 999 : Math.floor((Date.now() - new Date(d).getTime()) / 86400000); }
