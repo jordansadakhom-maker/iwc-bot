@@ -28,7 +28,7 @@ const CH = {
   CONTRATS:             '1508756442730074222',
   FIL_CONTRATS_SIGNE:   '1509340729808388208',
   FIL_CONTRATS_REFUSE:  '1509340853808664627',
-  LOGS:                 '1509337860724228137',
+  LOGS:                 '1509695000441786608', // #logs
 };
 
 // ── IDs des rôles Discord ──
