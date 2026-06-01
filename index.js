@@ -593,9 +593,21 @@ async function autoSetup(guild) {
   const contratsCh = guild.channels.cache.get(CH.CONTRATS);
   if (contratsCh) {
     const msgs = await contratsCh.messages.fetch({ limit: 20 });
-    if (!msgs.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('CONTRATS'))) {
+    // Supprimer l'ancien panel sans le bouton RDV pour forcer le repost
+    for (const [, m] of msgs) {
+      if (m.author.id === client.user.id && m.embeds[0]?.title?.includes('CONTRATS')) {
+        const hasRdvBtn = m.components?.[0]?.components?.some(c => c.customId === 'btn_rdv_creer_contrat_panel');
+        if (!hasRdvBtn) await m.delete().catch(() => {});
+      }
+    }
+    const msgs2 = await contratsCh.messages.fetch({ limit: 10 });
+    if (!msgs2.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('CONTRATS'))) {
       const embed = new EmbedBuilder().setColor(0x2C3E50).setTitle('📜 IRON WOLF COMPANY — CONTRATS').setDescription('*Tout accord entre la Compagnie et ses partenaires doit être formalisé.*\n*Un contrat signé engage les deux parties sans exception.*').addFields({ name: '📤 Envoyer nos conditions', value: '→ Tu envoies tes tarifs & conditions à un client\n→ Le client signe → tu reçois la notification' }, { name: '📥 Signer un contrat employeur', value: '→ Une entreprise vous engage\n→ Tu rentres ses infos & ses conditions\n→ Tu signes → ils reçoivent la notification' }).setFooter({ text: 'Iron Wolf Company • Secrétariat officiel' });
-      const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('open_contrat_offre').setLabel('📤 Envoyer nos conditions').setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId('open_contrat_emploi').setLabel('📥 Signer un contrat employeur').setStyle(ButtonStyle.Success));
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('open_contrat_offre').setLabel('📤 Envoyer nos conditions').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('open_contrat_emploi').setLabel('📥 Signer un contrat employeur').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('btn_rdv_creer_contrat_panel').setLabel('📅 Planifier un RDV').setStyle(ButtonStyle.Secondary),
+      );
       await contratsCh.send({ embeds: [embed], components: [row] });
     }
   }
@@ -2587,6 +2599,38 @@ async function setupSurnomFormat(guild) {
 // ── Flow RDV détecté dans #discussion ──
 
 // ── ÉTAPE 1 : Choisir le type de RDV ──
+// ── Version slash command (pas de customId) ──
+async function _ouvrirMenuRdvSlash(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const msgId = interaction.id;
+  await interaction.editReply({
+    embeds: [new EmbedBuilder()
+      .setColor(0x2C3E50)
+      .setTitle('📅 Nouveau Rendez-vous — IWC')
+      .setDescription('**Étape 1/2** — Sélectionne le type de rendez-vous.')
+    ],
+    components: [new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`rdv_type_select_${msgId}`)
+        .setPlaceholder('Type de rendez-vous...')
+        .addOptions([
+          { label: '👑 Réunion Direction',      value: 'reunion_direction',  description: 'Réunion interne Direction & Conseil', emoji: '👑' },
+          { label: '🤝 Rendez-vous Client',     value: 'rdv_client',         description: 'Rencontre avec un partenaire ou client', emoji: '🤝' },
+          { label: '🎯 Briefing Opération',     value: 'briefing_op',        description: 'Préparation avant une opération', emoji: '🎯' },
+          { label: '📊 Débrief Opération',      value: 'debrief_op',         description: 'Bilan après une opération', emoji: '📊' },
+          { label: '🔍 Entretien Recrutement',  value: 'entretien_recru',    description: 'Entretien avec un candidat', emoji: '🔍' },
+          { label: '📋 Réunion Pôle Légal',     value: 'reunion_legal',      description: 'Réunion interne pôle légal', emoji: '📋' },
+          { label: '🔒 Réunion Confrérie',      value: 'reunion_confrerie',  description: 'Réunion interne La Confrérie', emoji: '🔒' },
+          { label: '🎓 Formation Membres',      value: 'formation',          description: 'Session de formation nouveaux membres', emoji: '🎓' },
+          { label: '⚖️ Négociation',            value: 'negociation',        description: 'Négociation avec une faction ou partenaire', emoji: '⚖️' },
+          { label: '🏥 Rendez-vous Médical',    value: 'rdv_medical',        description: 'Consultation médicale RP', emoji: '🏥' },
+          { label: '⚖️ Rendez-vous Juridique',  value: 'rdv_juridique',      description: 'Consultation juridique / avocats RP', emoji: '⚖️' },
+          { label: '📝 Autre',                  value: 'autre',              description: 'Autre type de rendez-vous', emoji: '📝' },
+        ])
+    )],
+  });
+}
+
 async function _ouvrirMenuRdv(interaction) {
   // Fonctionne depuis /rdv (slash) ou bouton btn_rdv_creer_
   const msgId = interaction.customId ? interaction.customId.replace('btn_rdv_creer_', '') : interaction.id;
