@@ -3,6 +3,7 @@ const {
   Client, GatewayIntentBits, Partials,
   EmbedBuilder, ChannelType, ActivityType,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
+  StringSelectMenuBuilder,
   ModalBuilder, TextInputBuilder, TextInputStyle,
   SlashCommandBuilder, MessageFlags,
 } = require('discord.js');
@@ -1007,8 +1008,6 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId === 'btn_rdv_creer_contrat_panel') return _ouvrirMenuRdvSlash(interaction);
     if (interaction.customId.startsWith('btn_rdv_creer_'))     return _ouvrirMenuRdv(interaction);
     if (interaction.customId.startsWith('rdv_type_select_'))       return _handleRdvTypeSelect(interaction);
-    if (interaction.customId.startsWith('rdv_mode_select_'))       return _handleRdvModeSelect(interaction);
-    if (interaction.customId.startsWith('rdv_individuel_select_')) return _handleRdvIndividuelSelect(interaction);
     if (interaction.customId.startsWith('btn_grade_maj_'))      return notionV3.handleGradeMajButton?.(interaction);
     if (interaction.customId.startsWith('info_infirmer_'))       return notionV3.handleInformateurInfirmer?.(interaction);
     if (interaction.customId.startsWith('affaire_oui_'))        return notionV3.handleAffaireVote?.(interaction, 'oui');
@@ -1041,7 +1040,10 @@ client.on('interactionCreate', async interaction => {
 
   if (interaction.isStringSelectMenu()) {
     if (interaction.customId === 'tresor_config_limite_legal')   return notionModules.handleTresorConfigSelect?.(interaction);
-    if (interaction.customId.startsWith('rdv_pole_select_'))    return _handleRdvPoleSelect(interaction);
+    if (interaction.customId.startsWith('rdv_type_select_'))     return _handleRdvTypeSelect(interaction);
+    if (interaction.customId.startsWith('rdv_mode_select_'))     return _handleRdvModeSelect(interaction);
+    if (interaction.customId.startsWith('rdv_individuel_select_')) return _handleRdvIndividuelSelect(interaction);
+    if (interaction.customId.startsWith('rdv_pole_select_'))     return _handleRdvPoleSelect(interaction);
     if (interaction.customId === 'tresor_config_limite_illegal') return notionModules.handleTresorConfigSelect?.(interaction);
     if (interaction.customId === 'grade_select_membre') return notionV3.handleGradeMembreSelect?.(interaction);
     if (interaction.customId === 'grade_select_grade')  return notionV3.handleGradeGradeSelect?.(interaction);
