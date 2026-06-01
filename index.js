@@ -178,6 +178,10 @@ function getChExact(guild, name) {
   return guild.channels.cache.find(c => [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(c.type) && clean(c.name) === clean(name)) || null;
 }
 function getMention(guild) { return guild.roles.cache.filter(r => ['Concepteur', 'Fléau', 'Fondateur'].some(n => r.name.includes(n))).map(r => `<@&${r.id}>`).join(' ') || ''; }
+// Retourne les options allowedMentions sécurisées (jamais @everyone/@here)
+function safeMentions(roleIds = [], userIds = []) {
+  return { parse: [], roles: roleIds.filter(Boolean), users: userIds.filter(Boolean) };
+}
 function getContratMention(guild) { const roles = CONTRAT_ROLES.map(id => guild.roles.cache.get(id)).filter(Boolean).map(r => `<@&${r.id}>`); return [...roles, `<@${JUNE_MCCALL_ID}>`].join(' '); }
 function isDirection(member) { return member?.roles.cache.some(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier', 'Instructeur', 'Secrétaire'].some(n => r.name.includes(n))); }
 // #logs technique (arrivées, règlement...)
@@ -689,7 +693,8 @@ async function postDailyAgenda(guild) {
   const nw = weekA.filter(a => !a.date?.startsWith(today)).slice(0, 5);
   if (nw.length) embed.addFields({ name: '📆 Cette semaine', value: nw.map(a => `📅 **${a.titre}** — ${fmtShort(a.date)} ${a.heure || ''}`).join('\n') });
   embed.setFooter({ text: 'IWC • Secrétariat automatique' });
-  await ch.send({ content: getMention(guild) || undefined, embeds: [embed] });
+  const _mentionIds = guild.roles.cache.filter(r => ['Concepteur', 'Fléau', 'Fondateur'].some(n => r.name.includes(n))).map(r => r.id);
+  await ch.send({ content: getMention(guild) || undefined, embeds: [embed], allowedMentions: { parse: [], roles: _mentionIds } });
 }
 
 client.on('guildMemberAdd', async member => {
@@ -739,7 +744,11 @@ client.on('messageReactionAdd', async (reaction, user) => {
   const db = loadDB(); const guild = reaction.message.guild; if (!guild) return;
   if (reaction.message.id === db.reglementMsgId && reaction.emoji.name === '✅') {
     await sendLog(guild, 'REGLEMENT_VALIDE', { userId: user.id, username: user.username });
-    const logsCh = await getLogsCh(guild); if (logsCh) await logsCh.send({ content: `${getMention(guild)} — **${user.username}** a validé le règlement.` });
+    const logsCh = await getLogsCh(guild);
+      if (logsCh) {
+        const _reglMentionIds = guild.roles.cache.filter(r => ['Concepteur', 'Fléau', 'Fondateur'].some(n => r.name.includes(n))).map(r => r.id);
+        await logsCh.send({ content: `${getMention(guild)} — **${user.username}** a validé le règlement.`, allowedMentions: { parse: [], roles: _reglMentionIds } });
+      }
     return;
   }
   if (reaction.emoji.name === '✅' || reaction.emoji.name === '❌') {
@@ -873,7 +882,7 @@ client.on('messageCreate', async message => {
       const embed = new EmbedBuilder().setColor(0xFFA500).setTitle(`🎯 OPÉRATION — ${op.name}`).addFields({ name: 'Statut', value: '🟡 En préparation', inline: true }, { name: 'Pôle', value: pole === 'legal' ? '⚖️ Pôle Légal' : '🔪 Pôle Illégal', inline: true }, { name: 'Lieu', value: op.lieu, inline: true }, { name: 'Objectif', value: op.objectif }, { name: 'Équipe', value: op.equipe }, { name: '👥 Participants (0)', value: '*Personne pour l\'instant. Clique « ✋ Je participe » ci-dessous.*' }).setFooter({ text: `ID: ${op.id} • ${fmtShort(new Date())}` });
       const rowP = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`op_participer_${op.id}`).setLabel('✋ Je participe').setStyle(ButtonStyle.Secondary), new ButtonBuilder().setCustomId(`op_retrait_${op.id}`).setLabel('🚪 Me retirer').setStyle(ButtonStyle.Secondary));
       const rowG = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`op_encours_${op.id}`).setLabel('🟢 Lancer').setStyle(ButtonStyle.Success), new ButtonBuilder().setCustomId(`op_terminee_${op.id}`).setLabel('✅ Terminer').setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId(`op_annulee_${op.id}`).setLabel('❌ Annuler').setStyle(ButtonStyle.Danger));
-      await opsCh.send({ content: `<@&${pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL}> — 🎯 Nouvelle opération **${op.name}**. Inscrivez-vous via « ✋ Je participe ».`, embeds: [embed], components: [rowP, rowG] });
+      await opsCh.send({ content: `<@&${pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL}> — 🎯 Nouvelle opération **${op.name}**. Inscrivez-vous via « ✋ Je participe ».`, embeds: [embed], components: [rowP, rowG], allowedMentions: { parse: [], roles: [pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL] } });
       await message.react('✅');
     }
     return;
@@ -1116,7 +1125,7 @@ client.on('interactionCreate', async interaction => {
     if (isLancer) {
       const mentions = (op.participants || []).map(n => { const id = MEMBRES_DISCORD_MAP[n]; return id ? `<@${id}>` : null; }).filter(Boolean).join(' ');
       await interaction.update({ embeds: [updated] });
-      await interaction.followUp({ content: `${mentions || `<@&${op.pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL}>`} — 🟢 L'opération **${op.name}** est **LANCÉE**. À vos postes.` });
+      await interaction.followUp({ content: `${mentions || `<@&${op.pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL}>`} — 🟢 L'opération **${op.name}** est **LANCÉE**. À vos postes.`, allowedMentions: { parse: [], roles: [op.pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL], users: (op.participants || []).map(n => MEMBRES_DISCORD_MAP[n]).filter(Boolean) } });
       notionV4.envoyerBriefingOp?.(guild, op).catch(() => {});
     } else { await interaction.update({ embeds: [updated], components: [] }); }
     return;
@@ -1503,7 +1512,7 @@ async function _validerModalOpCreer(interaction) {
   const opsCh = guild.channels.cache.get(SALON_IDS.OPERATIONS) || getChById(guild, 'OPERATIONS', 'operations');
   if (opsCh) {
     const mention = `<@&${pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL}>`;
-    await opsCh.send({ content: `${mention} — 🎯 Nouvelle opération **${nom}** · Inscrivez-vous ci-dessous.`, embeds: [embed], components: [rowP, rowG] });
+    await opsCh.send({ content: `${mention} — 🎯 Nouvelle opération **${nom}** · Inscrivez-vous ci-dessous.`, embeds: [embed], components: [rowP, rowG], allowedMentions: { parse: [], roles: [pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL] } });
   }
   await interaction.editReply({ content: `✅ Opération **${nom}** créée${notionPageId ? ' et synchronisée avec Notion' : ''}.` });
 }
