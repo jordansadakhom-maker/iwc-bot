@@ -626,11 +626,7 @@ async function _ajouterJournalIC(guild, entry) {
     .setFooter({ text: `IWC Journal • ${entry.auteur}` })
     .setTimestamp();
 
-  // Poster dans #histoire-iwc
-  const histCh = guild?.channels?.cache?.find(c => c.name?.includes('histoire'));
-  if (histCh) await histCh.send({ embeds: [embed] }).catch(() => {});
-
-  // Poster aussi dans #journal-de-bord
+  // Poster UNIQUEMENT dans #journal-de-bord
   const clean = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
   const journalCh = guild?.channels?.cache?.find(c => c.isTextBased?.() && clean(c.name).includes(clean('journal-de-bord')));
   if (journalCh) await journalCh.send({ embeds: [embed] }).catch(() => {});
