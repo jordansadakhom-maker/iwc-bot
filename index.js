@@ -3247,4 +3247,3 @@ async function setupPlanningFormat(guild) {
     console.log('❌ setupPlanningFormat error:', e.message);
   }
 }
-
