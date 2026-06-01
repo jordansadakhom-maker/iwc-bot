@@ -2783,7 +2783,6 @@ async function setupSurnomFormat(guild) {
 // ── /agenda creer — Étape 1 : Sélection du lieu ──
 async function _ouvrirModalAgendaSimple(interaction) {
   await interaction.reply({
-    flags: MessageFlags.Ephemeral,
     embeds: [new EmbedBuilder()
       .setColor(0x2C3E50)
       .setTitle('📅 Nouveau RDV — IWC')
@@ -2856,8 +2855,8 @@ async function _handleAgendaLieuSelect(interaction) {
     ),
   );
 
-  await interaction.update({ components: [] });
-  await interaction.showModal(modal).catch(() => {});
+  // Sur un SelectMenu, showModal doit être le PREMIER appel — pas d'update avant
+  await interaction.showModal(modal);
 }
 
 // ── Validation du modal agenda simple ──
@@ -2933,7 +2932,6 @@ async function _validerModalAgendaSimple(interaction) {
 // ── /rdv et /agenda creer — Étape 1 : Sélection du lieu RDR2 ──
 async function _ouvrirMenuRdvSlash(interaction) {
   await interaction.reply({
-    flags: MessageFlags.Ephemeral,
     embeds: [new EmbedBuilder()
       .setColor(0x2C3E50)
       .setTitle('📅 Nouveau RDV — Iron Wolf Company')
@@ -3120,8 +3118,8 @@ async function _handleRdvIndividuelSelect(interaction) {
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('notes').setLabel('Ordre du jour / Notes').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(400).setPlaceholder('Points à aborder...')),
   );
 
-  await interaction.update({ components: [] });
-  await interaction.showModal(modal).catch(() => {});
+  // Sur un SelectMenu, showModal doit être le PREMIER appel — pas d'update avant
+  await interaction.showModal(modal);
 }
 
 // ── ÉTAPE 3 : Modal avec les détails ──
@@ -3183,8 +3181,8 @@ async function _handleRdvPoleSelect(interaction) {
     ),
   );
 
-  await interaction.update({ components: [] });
-  await interaction.showModal(modal).catch(() => {});
+  // Sur un SelectMenu, showModal doit être le PREMIER appel — pas d'update avant
+  await interaction.showModal(modal);
 }
 
 // ── Validation RDV individuel ──
