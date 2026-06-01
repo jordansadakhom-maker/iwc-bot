@@ -998,7 +998,7 @@ function _fmtDate(d) {
 // ═══════════════════════════════════════════════════════════════
 
 function _isFleau(member) {
-  return member?.roles?.cache?.some(r => ['Fléau', 'Concepteur', 'Fondateur'].some(n => r.name.includes(n)));
+  return member?.roles?.cache?.some(r => ['Fléau', 'Fleau', 'Concepteur', 'Fondateur'].some(n => r.name.toLowerCase().includes(n.toLowerCase())));
 }
 
 // Panel config — posté en éphémère, invisible aux autres
