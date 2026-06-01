@@ -2785,7 +2785,16 @@ async function _handleRdvModeSelect(interaction) {
       ]))],
     });
   } else {
-    const db = loadDB(); const membres = Object.entries(db.members || {}).filter(([, m]) => m.name && m.status !== 'parti').map(([id, m]) => ({ label: m.name, value: id, description: m.username || '' })).slice(0, 25);
+    const db = loadDB();
+    const membres = Object.entries(db.members || {})
+      .filter(([, m]) => m.name && m.status !== 'parti')
+      .map(([id, m]) => ({
+        label: String(m.name || m.username || id).slice(0, 100),
+        value: String(id).slice(0, 100),
+        description: m.username ? String(m.username).slice(0, 100) : undefined,
+      }))
+      .filter(o => o.label.length > 0 && o.value.length > 0)
+      .slice(0, 25);
     if (!membres.length) { await interaction.update({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('❌ Aucun membre IC enregistré')], components: [] }); return; }
     await interaction.update({
       embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📅 Nouveau Rendez-vous — IWC').setDescription('**Étape 3/3** — Sélectionne les participants (max 25)')],
