@@ -517,3 +517,4 @@ module.exports = {
   posterAbsencePropre,
   getHistoriqueOpsProfilMembre,
 };
+
