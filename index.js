@@ -2285,224 +2285,196 @@ async function _handleSetupServeur(interaction) {
   if (!isFondateurOuFleau(interaction.member)) {
     return interaction.reply({ content: '❌ Réservé au Fondateur uniquement.', flags: MessageFlags.Ephemeral });
   }
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const guild = interaction.guild;
-  const sub = interaction.options?.getString('action') || 'preview';
+  const me = guild.members.me;
+  await interaction.editReply({ content: '⏳ Réorganisation en cours... (~60 secondes)' });
 
-  // ── Définition des permissions par salon ──
-  const everyone  = guild.roles.everyone.id;
-  const rLegal    = ROLE_POLE_LEGAL;
-  const rIlleg    = ROLE_POLE_ILLEGAL;
-  const rAbs      = ROLE_ABSENT;
-  const rDir      = guild.roles.cache.filter(r =>
-    ['Concepteur','Fléau','Fondateur','Directeur','Officier','Co-Directeur'].some(n => r.name.includes(n))
-  ).map(r => r.id);
-  const rFonda    = guild.roles.cache.filter(r => r.name.includes('Fondateur')).map(r => r.id);
-  const rVisit    = guild.roles.cache.filter(r => r.name.toLowerCase().includes('visiteur')).map(r => r.id);
+  // ── IDs des rôles ──
+  const EVERYONE  = guild.roles.everyone.id;
+  const VISITEUR  = '1508756369258578070';
+  const R_LEGAL   = '1509251285264761053';
+  const R_ILLEG   = '1508898841993281658';
+  const R_ABSENT  = '1511134028474876035';
+  const BOT_ROLE  = me.roles.cache.find(r => r.managed)?.id;
+  const DIR_ROLES = guild.roles.cache
+    .filter(r => ['Concepteur','Fléau','Fondateur','Directeur','Officier','Co-Directeur'].some(n => r.name.includes(n)))
+    .map(r => r.id);
 
-  // Rôle géré du bot (IWC Setup) — doit avoir accès partout
-  const botMember = guild.members.me;
-  const botRole = botMember?.roles?.botRole?.id || botMember?.roles?.cache
-    ?.find(r => r.managed && r.name.toLowerCase().includes('iwc'))?.id
-    || botMember?.roles?.highest?.id;
-  // Permission bot : ViewChannel + SendMessages + ManageMessages + EmbedLinks + ReadHistory
-  const botPerms = botRole ? [{ id: botRole, allow: ['ViewChannel','SendMessages','ManageMessages','EmbedLinks','ReadMessageHistory','AttachFiles'] }] : [];
+  // Permission bot
+  const bot = BOT_ROLE ? [{ id: BOT_ROLE, allow: ['ViewChannel','SendMessages','ManageMessages','EmbedLinks','ReadMessageHistory','AttachFiles','ManageThreads'] }] : [];
+  const dir = [...DIR_ROLES.map(id => ({ id, allow: ['ViewChannel','SendMessages','ManageMessages','EmbedLinks','ReadMessageHistory'] })), ...bot];
 
-  // Helper : ajouter les perms bot à chaque type
-  const withBot = (arr) => botPerms.length ? [...arr, ...botPerms] : arr;
-
+  // ── Helpers permissions ──
   const p = {
-    public:       withBot([{ id: everyone, allow: ['ViewChannel'], deny: ['SendMessages'] }]),
-    visiteurs:    withBot([{ id: everyone, deny: ['ViewChannel','SendMessages'] }, ...rVisit.map(id => ({ id, allow: ['ViewChannel','SendMessages'] }))]),
-    membres:      withBot([{ id: everyone, deny: ['ViewChannel'] }, { id: rLegal, allow: ['ViewChannel','SendMessages'] }, { id: rIlleg, allow: ['ViewChannel','SendMessages'] }, ...rDir.map(id => ({ id, allow: ['ViewChannel','SendMessages'] }))]),
-    legal:        withBot([{ id: everyone, deny: ['ViewChannel'] }, { id: rLegal, allow: ['ViewChannel','SendMessages'] }, ...rDir.map(id => ({ id, allow: ['ViewChannel','SendMessages'] }))]),
-    illeg:        withBot([{ id: everyone, deny: ['ViewChannel'] }, { id: rIlleg, allow: ['ViewChannel','SendMessages'] }, ...rDir.map(id => ({ id, allow: ['ViewChannel','SendMessages'] }))]),
-    dir:          withBot([{ id: everyone, deny: ['ViewChannel'] }, ...rDir.map(id => ({ id, allow: ['ViewChannel','SendMessages'] }))]),
-    fonda:        withBot([{ id: everyone, deny: ['ViewChannel'] }, ...rFonda.map(id => ({ id, allow: ['ViewChannel','SendMessages'] }))]),
-    absLegal:     withBot([{ id: everyone, deny: ['ViewChannel'] }, { id: rLegal, allow: ['ViewChannel','SendMessages'] }, ...(rAbs ? [{ id: rAbs, allow: ['ViewChannel','SendMessages'] }] : []), ...rDir.map(id => ({ id, allow: ['ViewChannel','SendMessages'] }))]),
-    absIlleg:     withBot([{ id: everyone, deny: ['ViewChannel'] }, { id: rIlleg, allow: ['ViewChannel','SendMessages'] }, ...(rAbs ? [{ id: rAbs, allow: ['ViewChannel','SendMessages'] }] : []), ...rDir.map(id => ({ id, allow: ['ViewChannel','SendMessages'] }))]),
-    legalRO:      withBot([{ id: everyone, deny: ['ViewChannel','SendMessages'] }, { id: rLegal, allow: ['ViewChannel'] }, ...rDir.map(id => ({ id, allow: ['ViewChannel','SendMessages'] }))]),
-    illegRO:      withBot([{ id: everyone, deny: ['ViewChannel','SendMessages'] }, { id: rIlleg, allow: ['ViewChannel'] }, ...rDir.map(id => ({ id, allow: ['ViewChannel','SendMessages'] }))]),
-    membresRO:    withBot([{ id: everyone, deny: ['ViewChannel','SendMessages'] }, { id: rLegal, allow: ['ViewChannel'] }, { id: rIlleg, allow: ['ViewChannel'] }, ...rDir.map(id => ({ id, allow: ['ViewChannel'] }))]),
+    public:    [{ id: EVERYONE, allow: ['ViewChannel'], deny: ['SendMessages'] }, ...bot],
+    visiteurs: [{ id: EVERYONE, deny: ['ViewChannel','SendMessages'] }, { id: VISITEUR, allow: ['ViewChannel','SendMessages'] }, ...bot],
+    membres:   [{ id: EVERYONE, deny: ['ViewChannel'] }, { id: R_LEGAL, allow: ['ViewChannel','SendMessages'] }, { id: R_ILLEG, allow: ['ViewChannel','SendMessages'] }, ...dir],
+    legal:     [{ id: EVERYONE, deny: ['ViewChannel'] }, { id: R_LEGAL, allow: ['ViewChannel','SendMessages'] }, ...dir],
+    illeg:     [{ id: EVERYONE, deny: ['ViewChannel'] }, { id: R_ILLEG, allow: ['ViewChannel','SendMessages'] }, ...dir],
+    dir:       [{ id: EVERYONE, deny: ['ViewChannel'] }, ...dir],
+    absLegal:  [{ id: EVERYONE, deny: ['ViewChannel'] }, { id: R_LEGAL, allow: ['ViewChannel','SendMessages'] }, { id: R_ABSENT, allow: ['ViewChannel','SendMessages'] }, ...dir],
+    absIlleg:  [{ id: EVERYONE, deny: ['ViewChannel'] }, { id: R_ILLEG, allow: ['ViewChannel','SendMessages'] }, { id: R_ABSENT, allow: ['ViewChannel','SendMessages'] }, ...dir],
+    legalRO:   [{ id: EVERYONE, deny: ['ViewChannel'] }, { id: R_LEGAL, allow: ['ViewChannel'], deny: ['SendMessages'] }, ...dir],
+    illegRO:   [{ id: EVERYONE, deny: ['ViewChannel'] }, { id: R_ILLEG, allow: ['ViewChannel'], deny: ['SendMessages'] }, ...dir],
+    membresRO: [{ id: EVERYONE, deny: ['ViewChannel'] }, { id: R_LEGAL, allow: ['ViewChannel'], deny: ['SendMessages'] }, { id: R_ILLEG, allow: ['ViewChannel'], deny: ['SendMessages'] }, ...dir],
+    catPublic: [{ id: EVERYONE, allow: ['ViewChannel'] }],
+    catVisit:  [{ id: EVERYONE, deny: ['ViewChannel'] }, { id: VISITEUR, allow: ['ViewChannel'] }],
+    catMembres:[{ id: EVERYONE, deny: ['ViewChannel'] }, { id: R_LEGAL, allow: ['ViewChannel'] }, { id: R_ILLEG, allow: ['ViewChannel'] }, ...DIR_ROLES.map(id => ({ id, allow: ['ViewChannel'] }))],
+    catLegal:  [{ id: EVERYONE, deny: ['ViewChannel'] }, { id: R_LEGAL, allow: ['ViewChannel'] }, ...DIR_ROLES.map(id => ({ id, allow: ['ViewChannel'] }))],
+    catIlleg:  [{ id: EVERYONE, deny: ['ViewChannel'] }, { id: R_ILLEG, allow: ['ViewChannel'] }, ...DIR_ROLES.map(id => ({ id, allow: ['ViewChannel'] }))],
+    catDir:    [{ id: EVERYONE, deny: ['ViewChannel'] }, ...DIR_ROLES.map(id => ({ id, allow: ['ViewChannel'] }))],
   };
 
-  // ── Table : salon → permissions cibles ──
-  // Identifié par nom partiel (insensible casse, sans accents)
-  const clean = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]/g,'');
-  const PERMS_TABLE = [
-    // GÉNÉRAL
-    { nom: 'annonces',           perm: 'public',    label: '📣 annonces — lecture seule tous' },
-    { nom: 'reglement',          perm: 'public',    label: '📜 règlement — lecture seule tous',    exclure: ['illegal','ombre'] },
-    { nom: 'arrivee',            perm: 'membresRO', label: '👋 arrivée — lecture membres' },
-    { nom: 'evenements',         perm: 'public',    label: '📅 événements — lecture seule tous',   exclure: ['illegal'] },
-    // VISITEURS
-    { nom: 'discussionhrp',      perm: 'visiteurs', label: '💬 discussion-hrp visiteurs',          cat: 'visiteurs' },
-    { nom: 'attentevocal',       perm: 'visiteurs', label: '🔊 attente-vocal visiteurs' },
-    // COMMUNAUTÉ
-    { nom: 'discussionhrp',      perm: 'membres',   label: '💬 discussion-hrp membres',            cat: 'communaute' },
-    { nom: 'discussionrp',       perm: 'membres',   label: '💬 discussion-rp membres' },
-    { nom: 'suggestionidee',     perm: 'membres',   label: '💡 suggestion-idée membres' },
-    { nom: 'screenshots',        perm: 'membres',   label: '📸 screenshots membres' },
-    { nom: 'clipstempsfort',     perm: 'membres',   label: '🎬 clips membres' },
-    { nom: 'planning',           perm: 'membres',   label: '📋 planning commun membres',           exclure: ['illegal','agenda'] },
-    // PÔLE LÉGAL
-    { nom: 'hierarchieironwolf', perm: 'legalRO',   label: '🏛️ hierarchie-iwc — légal lecture' },
-    { nom: 'contrats',           perm: 'legal',     label: '📜 contrats — pôle légal',             exclure: ['reponse','archive','illegal'] },
-    { nom: 'contratsreponses',   perm: 'dir',       label: '📁 contrats-reponses — Direction' },
-    { nom: 'coffreentreprise',   perm: 'dir',       label: '💰 coffre-entreprise — Direction' },
-    { nom: 'agenda',             perm: 'legal',     label: '📅 agenda — pôle légal',               exclure: ['illegal'] },
-    { nom: 'histoireiwc',        perm: 'legalRO',   label: '📖 histoire-iwc — légal lecture' },
-    { id: '1510636619873517648', perm: 'absLegal',  label: '🟡 absences légal' },
-    { nom: 'parlote',            perm: 'legal',     label: '💬 parlote — pôle légal',              exclure: ['hrp','ombre'] },
-    { nom: 'parlotehrp',         perm: 'legal',     label: '💬 parlote-hrp — pôle légal',          exclure: ['ombre'] },
-    { nom: 'formation',          perm: 'legal',     label: '🎓 formation — pôle légal' },
-    // PÔLE ILLÉGAL
-    { nom: 'hierarchieombre',    perm: 'illegRO',   label: '💀 hierarchie-ombre — illégal lecture' },
-    { nom: 'annoncesillegal',    perm: 'illegRO',   label: '📣 annonces-illégal — illégal lecture' },
-    { nom: 'reglementillegal',   perm: 'illegRO',   label: '📜 règlement-illégal — illégal lecture' },
-    { nom: 'grade',              perm: 'illegRO',   label: '🎖️ grade — illégal lecture' },
-    { nom: 'surnompseudo',       perm: 'illeg',     label: '✏️ surnom-pseudo — pôle illégal' },
-    { nom: 'coffreillegal',      perm: 'dir',       label: '🔒 coffre-illegal — Direction' },
-    { nom: 'agendaillegal',      perm: 'illeg',     label: '📅 agenda-illégal — pôle illégal' },
-    { nom: 'histoiredelaconfr',  perm: 'illegRO',   label: '📖 histoire confrérie — illégal lecture' },
-    { nom: 'operations',         perm: 'illeg',     label: '🎯 operations — pôle illégal',         exclure: ['vocal'] },
-    { nom: 'informateurs',       perm: 'dir',       label: '🕵️ informateurs — Direction' },
-    { nom: 'plans',              perm: 'illeg',     label: '🗺️ plans — pôle illégal' },
-    { id: '1509718164760563743', perm: 'absIlleg',  label: '🟡 absences illégal' },
-    { nom: 'parloteombre',       perm: 'illeg',     label: '💬 parlote-ombre — pôle illégal',      exclure: ['hrp'] },
-    { nom: 'parlotehrpombre',    perm: 'illeg',     label: '💬 parlote-hrp-ombre — pôle illégal' },
-    // DIRECTION LÉGAL/ILLÉGAL
-    { nom: 'affaires',           perm: 'dir',       label: '⚔️ affaires — Direction' },
-    { nom: 'backgroundsmembres', perm: 'dir',       label: '👥 backgrounds-membres — Direction' },
-    { nom: 'dossierrecrutement', perm: 'dir',       label: '📁 dossier-recrutement — Direction' },
-    { nom: 'recrutementinterne', perm: 'dir',       label: '📋 recrutement-interne — Direction' },
-    // ROLEPLAY HRP
-    { nom: 'fichespersonnages',  perm: 'membres',   label: '🧑 fiches-personnages — membres' },
-    { nom: 'journaldebord',      perm: 'dir',       label: '📖 journal-de-bord — Direction' },
-    { nom: 'loreetunivrs',       perm: 'membresRO', label: '🌍 lore-et-univers — lecture membres' },
-    { nom: 'commandesslash',     perm: 'membres',   label: '⌨️ commandes-slash — membres' },
-    { nom: 'conversationdirection', perm: 'dir',    label: '💬 conversation-direction-hrp — Direction' },
-    // BOT
-    { nom: 'patchnote',          perm: 'dir',       label: '🔇 patch-note — Direction uniquement' },
-    { nom: 'logs',               perm: 'dir',       label: '📊 logs — Direction uniquement' },
+  // ── Structure complète ──
+  const STRUCTURE = [
+    { name: '📢 GÉNÉRAL', catPerms: p.catPublic, channels: [
+      { name: '📣・annonces',    type: 0, perms: p.public,    id: null },
+      { name: '📜・règlement',   type: 0, perms: p.public,    id: null },
+      { name: '👋・arrivée',     type: 0, perms: p.membresRO, id: null },
+      { name: '📅・événements',  type: 0, perms: p.public,    id: null },
+    ]},
+    { name: '👁️ VISITEURS', catPerms: p.catVisit, channels: [
+      { name: '💬・discussion-hrp', type: 0, perms: p.visiteurs, id: null },
+      { name: '🔊・attente-vocal',  type: 2, perms: p.visiteurs, id: null },
+    ]},
+    { name: '💬 COMMUNAUTÉ', catPerms: p.catMembres, channels: [
+      { name: '💬・discussion-hrp',   type: 0, perms: p.membres, id: null },
+      { name: '💬・discussion-rp',    type: 0, perms: p.membres, id: null },
+      { name: '💡・suggestion-idée',  type: 0, perms: p.membres, id: null },
+      { name: '📸・screenshots',      type: 0, perms: p.membres, id: null },
+      { name: '🎬・clips-temps-fort', type: 0, perms: p.membres, id: null },
+      { name: '📋・planning',         type: 0, perms: p.membres, id: null },
+    ]},
+    { name: '⚖️ PÔLE LÉGAL', catPerms: p.catLegal, channels: [
+      { name: '🏛️・hierarchie-iron-wolf-company', type: 0, perms: p.legalRO,  id: null },
+      { name: '📜・contrats',                      type: 0, perms: p.legal,    id: null },
+      { name: '📁・contrats-reponses',             type: 0, perms: p.dir,      id: null },
+      { name: '💰・coffre-entreprise',             type: 0, perms: p.dir,      id: null },
+      { name: '📅・agenda',                        type: 0, perms: p.legal,    id: null },
+      { name: '📖・histoire-iwc',                  type: 0, perms: p.legalRO,  id: null },
+      { name: '🟡・absences',                      type: 0, perms: p.absLegal, id: SALON_HARDCODED.ABSENCES_LEGAL },
+      { name: '💬・parlote',                       type: 0, perms: p.legal,    id: null },
+      { name: '💬・parlote-hrp',                   type: 0, perms: p.legal,    id: null },
+      { name: '🎓・formation',                     type: 0, perms: p.legal,    id: null },
+      { name: '🔊・Salon vocal — Légal',            type: 2, perms: p.legal,    id: null },
+    ]},
+    { name: '🔪 PÔLE ILLÉGAL', catPerms: p.catIlleg, channels: [
+      { name: '💀・hierarchie-ombre',        type: 0, perms: p.illegRO,  id: null },
+      { name: '📣・annonces-illégal',        type: 0, perms: p.illegRO,  id: null },
+      { name: '📜・règlement-illégal',       type: 0, perms: p.illegRO,  id: null },
+      { name: '🎖️・grade',                   type: 0, perms: p.illegRO,  id: null },
+      { name: '✏️・surnom-pseudo',            type: 0, perms: p.illeg,    id: null },
+      { name: '🔒・coffre-illegal',          type: 0, perms: p.dir,      id: null },
+      { name: '📅・agenda-illégal',          type: 0, perms: p.illeg,    id: null },
+      { name: '📖・histoire-de-la-confrérie',type: 0, perms: p.illegRO,  id: null },
+      { name: '🎯・operations',              type: 0, perms: p.illeg,    id: null },
+      { name: '🕵️・informateurs',            type: 0, perms: p.dir,      id: null },
+      { name: '🗺️・plans',                   type: 0, perms: p.illeg,    id: null },
+      { name: '🟡・absences',               type: 0, perms: p.absIlleg, id: SALON_HARDCODED.ABSENCES_ILLEGAL },
+      { name: '💬・parlote-ombre',           type: 0, perms: p.illeg,    id: null },
+      { name: '💬・parlote-hrp-ombre',       type: 0, perms: p.illeg,    id: null },
+      { name: '🔊・Opérations — vocal',      type: 2, perms: p.illeg,    id: null },
+    ]},
+    { name: '🔒 DIRECTION LÉGAL', catPerms: p.catDir, channels: [
+      { name: '⚔️・affaires',            type: 0, perms: p.dir, id: null },
+      { name: '👥・backgrounds-membres', type: 0, perms: p.dir, id: null },
+      { name: '📁・dossier-recrutement', type: 0, perms: p.dir, id: null },
+      { name: '📋・recrutement-interne', type: 0, perms: p.dir, id: null },
+      { name: '🔊・Conseil vocal Légal', type: 2, perms: p.dir, id: null },
+    ]},
+    { name: '🔒 DIRECTION ILLÉGAL', catPerms: p.catDir, channels: [
+      { name: '⚔️・affaires',              type: 0, perms: p.dir, id: null },
+      { name: '👥・backgrounds-membres',   type: 0, perms: p.dir, id: null },
+      { name: '📁・dossier-recrutement',   type: 0, perms: p.dir, id: null },
+      { name: '📋・recrutement-interne',   type: 0, perms: p.dir, id: null },
+      { name: '🔊・Conseil vocal Illégal', type: 2, perms: p.dir, id: null },
+    ]},
+    { name: '🎭 ROLEPLAY HRP', catPerms: p.catMembres, channels: [
+      { name: '🧑・fiches-personnages',         type: 0, perms: p.membres,   id: null },
+      { name: '📖・journal-de-bord',            type: 0, perms: p.dir,       id: SALON_HARDCODED.JOURNAL_DE_BORD },
+      { name: '🌍・lore-et-univers',            type: 0, perms: p.membresRO, id: null },
+      { name: '⌨️・commandes-slash',            type: 0, perms: p.membres,   id: null },
+      { name: '💬・conversation-direction-hrp', type: 0, perms: p.dir,       id: null },
+    ]},
+    { name: '🔧 BOT', catPerms: p.catDir, channels: [
+      { name: '🔇・patch-note', type: 0, perms: p.dir, id: null },
+      { name: '📊・logs',       type: 0, perms: p.dir, id: null },
+    ]},
   ];
 
-  // ── Résoudre les salons ──
-  const findSalon = (rule) => {
-    if (rule.id) return guild.channels.cache.get(rule.id);
-    return guild.channels.cache.find(c => {
-      if (c.type === 4) return false;
-      const cn = clean(c.name);
-      if (!cn.includes(rule.nom)) return false;
-      if (rule.exclure?.some(ex => cn.includes(clean(ex)))) return false;
-      if (rule.cat) {
-        const catKw = { visiteurs: 'visiteur', communaute: 'communaut' };
-        const kw = catKw[rule.cat];
-        if (kw && !clean(c.parent?.name || '').includes(kw)) return false;
-      }
-      return true;
-    });
-  };
+  const clean = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
+  let created = 0, moved = 0, permsOk = 0, errors = 0;
 
-  const permLabel = (perm) => ({
-    public: '🌐 Lecture seule — tout le monde',
-    visiteurs: '👁️ Visiteurs uniquement',
-    membres: '🐺 Membres IWC (légal + illégal)',
-    legal: '⚖️ Pôle Légal + Direction',
-    illeg: '🔪 Pôle Illégal + Direction',
-    dir: '🔒 Direction uniquement',
-    fonda: '👑 Fondateur uniquement',
-    absLegal: '🟡 Légal + Absent + Direction',
-    absIlleg: '🟡 Illégal + Absent + Direction',
-    legalRO: '📖 Légal lecture seule + Direction écriture',
-    illegRO: '📖 Illégal lecture seule + Direction écriture',
-    membresRO: '📖 Membres lecture seule',
-  })[perm] || perm;
-
-  // ── PREVIEW ──
-  if (sub !== 'appliquer') {
-    await interaction.reply({ flags: MessageFlags.Ephemeral, content: '⏳ Analyse en cours...' });
-    const preview = [];
-    for (const rule of PERMS_TABLE) {
-      const salon = findSalon(rule);
-      if (!salon) continue;
-      preview.push(`**${rule.label}**
-→ ${permLabel(rule.perm)}`);
-    }
-    // Découper en blocs de 10 pour éviter la limite Discord
-    const blocs = [];
-    for (let i = 0; i < preview.length; i += 10) blocs.push(preview.slice(i, i+10));
-    const msg = blocs.map((b, i) => '**Permissions prévues (' + (i*10+1) + '-' + Math.min((i+1)*10, preview.length) + ') :**\n' + b.join('\n\n')).join('\n\n').slice(0, 1900);
-
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('setup_appliquer').setLabel('✅ Tout appliquer').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('setup_annuler').setLabel('❌ Annuler').setStyle(ButtonStyle.Danger),
-    );
-    await interaction.editReply({ content: `📋 **Prévisualisation — ${preview.length} salons concernés**
-
-Vérifie la liste puis clique **Tout appliquer** pour confirmer.
-
-${msg}`, components: [row] });
-    return;
-  }
-
-  // ── APPLIQUER (appelé depuis le bouton) ──
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  let ok = 0, skip = 0, err = 0;
-  for (const rule of PERMS_TABLE) {
-    const salon = findSalon(rule);
-    if (!salon) { skip++; continue; }
+  for (const catDef of STRUCTURE) {
     try {
-      await salon.permissionOverwrites.set(p[rule.perm]);
-      ok++;
-      await new Promise(r => setTimeout(r, 350));
-    } catch(e) { err++; console.log(`❌ perms ${rule.label}:`, e.message); }
+      // Trouver ou créer la catégorie
+      const catClean = clean(catDef.name.replace(/[^a-z\s]/gi,'').trim());
+      let category = guild.channels.cache.find(c =>
+        c.type === 4 && clean(c.name).includes(catClean.slice(2))
+      );
+      if (!category) {
+        category = await guild.channels.create({
+          name: catDef.name, type: 4,
+          permissionOverwrites: catDef.catPerms,
+        });
+        created++;
+      } else {
+        await category.permissionOverwrites.set(catDef.catPerms).catch(() => {});
+        permsOk++;
+      }
+
+      for (const chDef of catDef.channels) {
+        await new Promise(r => setTimeout(r, 300));
+        try {
+          // Trouver le salon : par ID hardcodé en priorité, sinon par nom
+          let salon = null;
+          if (chDef.id) {
+            salon = guild.channels.cache.get(chDef.id);
+          }
+          if (!salon) {
+            const chClean = clean(chDef.name.replace(/[^a-z0-9\s]/gi,'').trim());
+            salon = guild.channels.cache.find(c =>
+              c.type !== 4 &&
+              clean(c.name).includes(chClean.slice(0, Math.min(chClean.length, 12))) &&
+              !chDef.name.toLowerCase().includes('illegal') === !c.name.toLowerCase().includes('illegal')
+            );
+          }
+
+          if (salon) {
+            // Déplacer + appliquer permissions
+            if (salon.parentId !== category.id) {
+              await salon.setParent(category.id, { lockPermissions: false }).catch(() => {});
+              moved++;
+            }
+            await salon.permissionOverwrites.set(chDef.perms).catch(() => {});
+            permsOk++;
+          } else {
+            // Créer le salon
+            await guild.channels.create({
+              name: chDef.name,
+              type: chDef.type,
+              parent: category.id,
+              permissionOverwrites: chDef.perms,
+            });
+            created++;
+          }
+        } catch(e) { errors++; console.log(`❌ Salon ${chDef.name}:`, e.message); }
+      }
+    } catch(e) { errors++; console.log(`❌ Catégorie ${catDef.name}:`, e.message); }
   }
-  await interaction.editReply({ content: `✅ Permissions appliquées
-→ ${ok} salons mis à jour
-→ ${skip} non trouvés
-→ ${err} erreurs` });
+
+  const result = `✅ Réorganisation terminée\n\n→ **${created}** créés\n→ **${moved}** déplacés\n→ **${permsOk}** permissions appliquées\n→ **${errors}** erreurs`;
+  await interaction.editReply({ content: result });
+
   const jCh = guild.channels.cache.get(SALON_HARDCODED.JOURNAL_DE_BORD);
-  if (jCh) await jCh.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('🔒 Permissions serveur mises à jour').setDescription(`Par **${interaction.user.username}** · ${ok} salons · ${err} erreurs`).setTimestamp()] }).catch(() => {});
+  if (jCh) await jCh.send({ embeds: [new EmbedBuilder()
+    .setColor(0x57F287)
+    .setTitle('🔧 Réorganisation serveur effectuée')
+    .setDescription(`Par **${interaction.user.username}** · ${created} créés · ${moved} déplacés · ${permsOk} permissions · ${errors} erreurs`)
+    .setTimestamp()] }).catch(() => {});
 }
 
-async function setupOperationsGuide(guild) {
-  try {
-    const opsCh = guild.channels.cache.get(SALON_IDS.OPERATIONS) || getChById(guild, 'OPERATIONS', 'operations');
-    if (!opsCh) return;
-    // Vérifier si le guide est déjà posté
-    const msgs = await opsCh.messages.fetch({ limit: 20 }).catch(() => null);
-    if (msgs?.find(m => m.author.id === guild.members.me?.id && m.embeds?.[0]?.title?.includes('OPÉRATIONS — Iron Wolf'))) {
-      console.log('✅ Guide opérations déjà présent — skip');
-      return;
-    }
-    // Supprimer les anciens messages texte "OPÉRATION (Modèle à suivre)"
-    if (msgs) {
-      for (const [, m] of msgs) {
-        if (m.author.id !== guild.members.me?.id && m.content?.includes('OPÉRATION (Modèle')) {
-          await m.delete().catch(() => {});
-        }
-        if (m.author.id === guild.members.me?.id && m.content?.includes('OPÉRATION')) {
-          await m.delete().catch(() => {});
-        }
-      }
-    }
-    const embed = new EmbedBuilder()
-      .setColor(0x8B1A1A)
-      .setTitle('🎯 OPÉRATIONS — Iron Wolf Company')
-      .setDescription("*Ce salon est réservé à la planification et au suivi des opérations de terrain.*\n*Discrétion absolue. Ce qui est posté ici ne sort pas de ces murs.*")
-      .addFields(
-        { name: "📋 Créer une opération", value: "Utilise **`/op-creer`** — réservé à la Direction.\n\n**Étape 1** — Menu déroulant avec toutes les zones disponibles\n*(Saint Denis · Valentine · Armadillo · Banque · Train · ...)*\n\n**Étape 2** — Formulaire avec nom de code, objectif, pôle, équipe", inline: false },
-        { name: "✋ Participer", value: "Clique **✋ Je participe** sous la fiche\nTon nom est ajouté en temps réel\n**🚪 Me retirer** pour annuler", inline: true },
-        { name: "📊 Statuts", value: "🟡 En préparation\n🟢 En cours\n✅ Terminée\n❌ Annulée", inline: true },
-        { name: "🔗 Notion", value: "Chaque opération est automatiquement synchronisée — création, participants, statut, résultat", inline: false },
-      )
-      .setFooter({ text: 'IWC — La Confrérie · Lancer · Terminer · Annuler réservés à la Direction' })
-      .setTimestamp();
-    await opsCh.send({ embeds: [embed] });
-    console.log('✅ Guide opérations posté');
-  } catch(e) { console.log('❌ setupOperationsGuide:', e.message); }
-}
 
 async function setupPanelDirection(guild) {
   try {
