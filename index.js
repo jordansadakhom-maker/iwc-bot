@@ -623,7 +623,7 @@ async function autoSetup(guild) {
   await setupSurnomFormat(guild);
   await setupCommandesSlash(guild);
   await setupPanelDirection(guild);
-  await setupOperationsGuide(guild);
+  if (typeof setupOperationsGuide === 'function') await setupOperationsGuide(guild);
   // Sync statut + pôle de tous les membres dans Fiches_personnages au démarrage
   _syncTousMembresNotion(guild).catch(() => {});
 
@@ -2661,9 +2661,8 @@ async function _validerModalAgendaSimple(interaction) {
     fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: process.env.NOTION_AGENDA_DB_ID }, properties: {
       'Titre':    { title:     [{ text: { content: titre } }] },
       'Date':     { date:      { start: dateISO } },
-      'Heure':    { rich_text: [{ text: { content: heure } }] },
       'Lieu':     { rich_text: [{ text: { content: lieu !== '—' ? lieu : '' } }] },
-      'Notes':    { rich_text: [{ text: { content: notes.slice(0, 2000) } }] },
+      'Notes':    { rich_text: [{ text: { content: (`${heure ? `Heure : ${heure}\n` : ''}${notes}`).slice(0, 2000) } }] },
       'Statut':   { select:    { name: 'Planifié' } },
       'Type':     { select:    { name: 'RDV' } },
       'Pôle':     { select:    { name: poleLabel } },
@@ -2799,9 +2798,8 @@ async function _validerModalRdvIndividuel(interaction) {
     fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: process.env.NOTION_AGENDA_DB_ID }, properties: {
       'Titre':        { title:        [{ text: { content: titre } }] },
       'Date':         { date:         { start: dateISO } },
-      'Heure':        { rich_text:    [{ text: { content: heure } }] },
       'Lieu':         { rich_text:    [{ text: { content: lieu !== '—' ? lieu : '' } }] },
-      'Notes':        { rich_text:    [{ text: { content: notes.slice(0, 2000) } }] },
+      'Notes':        { rich_text:    [{ text: { content: (`${heure ? `Heure : ${heure}\n` : ''}${notes}`).slice(0, 2000) } }] },
       'Statut':       { select:       { name: 'Planifié' } },
       'Type':         { select:       { name: 'Convocation individuelle' } },
       'Pôle':         { select:       { name: emetteurPole === 'illegal' ? '🔒 Illégal' : '⚖️ Légal' } },
@@ -2851,9 +2849,8 @@ async function _validerModalRdv(interaction) {
     fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: process.env.NOTION_AGENDA_DB_ID }, properties: {
       'Titre':    { title:     [{ text: { content: titre } }] },
       'Date':     { date:      { start: dateISO } },
-      'Heure':    { rich_text: [{ text: { content: heure } }] },
       'Lieu':     { rich_text: [{ text: { content: lieu !== '—' ? lieu : '' } }] },
-      'Notes':    { rich_text: [{ text: { content: notes.slice(0, 2000) } }] },
+      'Notes':    { rich_text: [{ text: { content: (`${heure ? `Heure : ${heure}\n` : ''}${notes}`).slice(0, 2000) } }] },
       'Statut':   { select:    { name: 'Planifié' } },
       'Type':     { select:    { name: typeRdv.replace(/_/g, ' ') } },
       'Pôle':     { select:    { name: pole === 'illegal' ? '🔒 Illégal' : pole === 'direction' ? '👑 Direction' : pole === 'tous' ? '👥 Tous' : '⚖️ Légal' } },
