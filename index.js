@@ -3035,28 +3035,30 @@ async function _validerModalRdv(interaction) {
   // 1. Envoyer la réponse avec ping
   await interaction.editReply({ content: ping || null, embeds: [embed] });
 
-  // 2. Archivage Notion (asynchrone, ne bloque pas)
+  // 2. Archivage Notion
   if (process.env.NOTION_TOKEN && process.env.NOTION_AGENDA_DB_ID) {
+    const notionProps = {
+      'Titre':  { title:     [{ text: { content: titre } }] },
+      'Date':   { date:      { start: dateISO } },
+      'Heure':  { rich_text: [{ text: { content: heure } }] },
+      'Lieu':   { rich_text: [{ text: { content: lieu || '—' } }] },
+      'Notes':  { rich_text: [{ text: { content: notes.slice(0, 2000) } }] },
+      'Statut': { select:    { name: 'Confirmé' } },
+      'Type':   { select:    { name: typeLabel } },
+    };
+    // Participants — relation ou multi-select selon la base
+    // On ajoute en rich_text pour compatibilité
+    if (poleLabel) notionProps['Participants'] = { rich_text: [{ text: { content: `${poleLabel} — convoqué par ${emetteurIC}` } }] };
+
     fetch('https://api.notion.com/v1/pages', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        parent: { database_id: process.env.NOTION_AGENDA_DB_ID },
-        properties: {
-          'Titre':     { title:     [{ text: { content: titre } }] },
-          'Date':      { date:      { start: dateISO } },
-          'Heure':     { rich_text: [{ text: { content: heure } }] },
-          'Lieu':      { rich_text: [{ text: { content: lieu || '—' } }] },
-          'Notes':     { rich_text: [{ text: { content: notes.slice(0, 2000) } }] },
-          'Type':      { select:    { name: typeLabel } },
-          'Statut':    { select:    { name: 'Planifié' } },
-          'Référence': { rich_text: [{ text: { content: rdvId } }] },
-          'Émetteur':  { rich_text: [{ text: { content: emetteurIC } }] },
-          'Convoqués': { rich_text: [{ text: { content: poleLabel } }] },
-        },
-      }),
-    }).then(() => console.log(`✅ RDV archivé Notion : ${rdvId}`))
-      .catch(e => console.log('❌ RDV Notion error:', e.message));
+      body: JSON.stringify({ parent: { database_id: process.env.NOTION_AGENDA_DB_ID }, properties: notionProps }),
+    }).then(async res => {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) { console.log(`✅ RDV archivé Notion : ${titre} (${dateISO})`); }
+      else { console.log(`❌ Notion RDV erreur: ${data?.message || JSON.stringify(data).slice(0,100)}`); }
+    }).catch(e => console.log('❌ RDV Notion error:', e.message));
   }
 
   // 3. DM de convocation
