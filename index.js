@@ -111,6 +111,7 @@ const SLASH_COMMANDS = [
     .addSubcommand(s => s.setName('creer').setDescription('Créer un nouveau RDV dans Notion')),
   new SlashCommandBuilder().setName('op-programmer').setDescription('🕐 Programmer une opération avec lancement automatique (Direction)'),
   new SlashCommandBuilder().setName('aide').setDescription('📖 Guide des commandes disponibles'),
+  new SlashCommandBuilder().setName('patch').setDescription('Deployer le patch note'),
   new SlashCommandBuilder().setName('version').setDescription('🔢 Version du bot et statut des connexions'),
   new SlashCommandBuilder().setName('sync').setDescription('🔄 Forcer une synchronisation manuelle (Direction)'),
   new SlashCommandBuilder().setName('avertir').setDescription('⚠️ Avertir un membre (Direction)')
@@ -369,6 +370,7 @@ async function handleSlashCommand(interaction) {
   }
   if (commandName === 'op-programmer')     return _ouvrirModalOpProgrammee(interaction);
   if (commandName === 'aide')              return _handleAide(interaction);
+  if (commandName === 'patch')             return _handlePatchDeploy(interaction);
   if (commandName === 'version')           return _handleVersion(interaction);
   if (commandName === 'patch')             return _handlePatchDeploy(interaction);
   if (commandName === 'sync')              return _handleSync(interaction);
@@ -1410,6 +1412,18 @@ client.once('clientReady', async () => {
       } catch {}
       await notionV4.checkRecrutementSuivi?.(g).catch(() => {});
       await notionV4.checkEcheancesContrats?.(g).catch(() => {});
+      try {
+        const db = loadDB(); const demain = new Date(); demain.setDate(demain.getDate() + 1);
+        const ds = demain.toISOString().split('T')[0];
+        for (const ct of (db.contrats || [])) {
+          if (ct.status !== 'signe' || !ct.dateEcheance || ct.notifExpirDemain) continue;
+          if (ct.dateEcheance.startsWith(ds)) {
+            ct.notifExpirDemain = true;
+            if (ct.userId) await envoyerDMRecap(g, ct.userId, 'contrat', { id: ct.id, objet: 'Expire demain: ' + (ct.objet||'') }).catch(() => {});
+          }
+        }
+        saveDB(db);
+      } catch(e) { console.log('notifExpirDemain error:', e.message); }
       await notionV4.checkOperationsTimeout?.(g).catch(() => {});
     }
     await sauvegarderSurGitHub().catch(() => {});
@@ -2697,7 +2711,10 @@ async function setupCommandesSlash(guild) {
     const ch = guild.channels.cache.find(c => c.isTextBased?.() && clean(c.name).includes(clean('commandes-slash')));
     if (!ch) return;
     const msgs = await ch.messages.fetch({ limit: 20 });
-    for (const [, m] of msgs) { if (m.author.id === guild.members.me?.id) await m.delete().catch(() => {}); }
+    // Ne supprimer que si on a moins de 4 embeds (changement de contenu)
+    const botMsgs = msgs.filter(m => m.author.id === guild.members.me?.id && m.embeds.length > 0);
+    if (botMsgs.size >= 4) { console.log('✅ #commandes-slash déjà à jour — skip'); return; }
+    for (const [, m] of botMsgs) { await m.delete().catch(() => {}); }
 
     const e1 = new EmbedBuilder().setColor(0x3B82F6).setTitle('📖 COMMANDES — Membres').setDescription('*Commandes accessibles à tous les membres IWC.*')
       .addFields(
@@ -2751,8 +2768,15 @@ async function setupSurnomFormat(guild) {
     const ch = guild.channels.cache.find(c => c.isTextBased?.() && (clean(c.name).includes('surnompseudo') || clean(c.name).includes('surnom')));
     if (!ch) return;
 
-    // Supprimer les anciens messages texte ou embeds sans bouton
     const msgs = await ch.messages.fetch({ limit: 20 });
+    // Skip si le panel avec bouton existe déjà
+    const existing = msgs.find(m =>
+      m.author.id === guild.members.me?.id &&
+      m.components?.length > 0 &&
+      m.embeds[0]?.title?.includes('IDENTITÉ')
+    );
+    if (existing) { console.log('✅ Panel surnom-pseudo déjà présent — skip'); return; }
+    // Supprimer les anciens messages sans bouton
     for (const [, m] of msgs) {
       if (m.author.id === guild.members.me?.id) await m.delete().catch(() => {});
     }
@@ -2918,15 +2942,56 @@ async function _validerModalAgendaSimple(interaction) {
   if (notes) embed.addFields({ name: '📋 Notes', value: notes });
   embed.setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` }).setTimestamp();
 
-  // Ping selon le salon où la commande est tapée
+  // Demander une photo de reperage avec bouton skip
+  const rdvPhotoMsgId = `rdv_photo_${interaction.id}`;
+  await interaction.editReply({
+    embeds: [new EmbedBuilder()
+      .setColor(0x2C3E50)
+      .setTitle('📸 Photo de reperage — optionnel')
+      .setDescription('Envoie une capture de l\'endroit precis dans ce salon.\nOu clique **Ignorer** pour poster le RDV sans photo.')
+    ],
+    components: [new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(rdvPhotoMsgId).setLabel('Ignorer la photo').setStyle(ButtonStyle.Secondary).setEmoji('⏭️')
+    )],
+  });
+
+  // Attendre photo OU bouton skip (2 minutes)
+  let photoUrl = null;
+  try {
+    const photoFilter = m => m.author.id === interaction.user.id && m.attachments.size > 0;
+    const btnFilter   = i => i.user.id === interaction.user.id && i.customId === rdvPhotoMsgId;
+
+    const result = await Promise.race([
+      interaction.channel.awaitMessages({ filter: photoFilter, max: 1, time: 120000 }).then(c => ({ type: 'photo', data: c })),
+      interaction.channel.createMessageComponentCollector({ filter: btnFilter, max: 1, time: 120000 }).on('collect', () => {}).next?.() ??
+        new Promise(res => {
+          const col = interaction.channel.createMessageComponentCollector({ filter: btnFilter, max: 1, time: 120000 });
+          col.on('collect', i => { i.deferUpdate().catch(() => {}); res({ type: 'skip' }); });
+          col.on('end', (_, reason) => { if (reason === 'time') res({ type: 'skip' }); });
+        }),
+    ]);
+
+    if (result?.type === 'photo' && result.data?.size > 0) {
+      const msg = result.data.first();
+      photoUrl = msg.attachments.first().url;
+      await msg.delete().catch(() => {});
+    }
+  } catch {}
+
+  if (photoUrl) embed.setImage(photoUrl);
+
+  // Poster dans #agenda avec ping
   const agendaCh = getChById(interaction.guild, 'AGENDA', 'agenda');
   if (agendaCh) {
-    // Déterminer le pôle de l'émetteur pour le ping
     const isIlleg = interaction.member?.roles?.cache?.has(ROLE_POLE_ILLEGAL);
     const pingRole = isIlleg ? `<@&${ROLE_POLE_ILLEGAL}>` : `<@&${ROLE_POLE_LEGAL}>`;
-    await agendaCh.send({ content: `${pingRole} 📅 Nouveau RDV : **${titre}** — ${heure} à ${lieu}`, embeds: [embed] }).catch(() => {});
+    await agendaCh.send({ content: `${pingRole} RDV: **${titre}** — ${heure} a ${lieu}`, embeds: [embed] }).catch(() => {});
   }
-  await interaction.editReply({ content: '✅ RDV créé et posté dans #agenda !', embeds: [] });
+  await interaction.editReply({
+    content: photoUrl ? 'RDV cree avec photo de reperage !' : 'RDV cree et poste dans #agenda !',
+    embeds: [embed],
+    components: [],
+  });
 
   // Archivage Notion
   if (process.env.NOTION_TOKEN && process.env.NOTION_AGENDA_DB_ID) {
@@ -2941,6 +3006,7 @@ async function _validerModalAgendaSimple(interaction) {
           'Heure': { rich_text: [{ text: { content: heure } }] },
           'Lieu':  { rich_text: [{ text: { content: lieu !== '—' ? lieu : '' } }] },
           'Notes': { rich_text: [{ text: { content: notes.slice(0, 2000) } }] },
+          ...(photoUrl ? { 'Photo': { files: [{ name: 'reperage.jpg', type: 'external', external: { url: photoUrl } }] } } : {}),
         },
       }),
     }).then(async res => {
