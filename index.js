@@ -624,6 +624,8 @@ async function autoSetup(guild) {
   await setupCommandesSlash(guild);
   await setupPanelDirection(guild);
   await setupOperationsGuide(guild);
+  // Sync statut + pôle de tous les membres dans Fiches_personnages au démarrage
+  _syncTousMembresNotion(guild).catch(() => {});
 
   const reglCh = getChById(guild, 'REGLEMENT', 'reglement', 'règlement');
   if (reglCh) {
@@ -759,15 +761,68 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
   const db = loadDB();
   const gradeRoleIds = Object.values(require('./notion-modules-v3').ROLES || {});
   const gradeChange = gradeRoleIds.some(id => oldMember.roles.cache.has(id) !== newMember.roles.cache.has(id));
-  if (gradeChange) {
+
+  // Détecter changement de pôle (légal ↔ illégal)
+  const illegalRoleNames = ['Concepteur', 'Fléau', "L'Exécuteur", 'Le Condamné', 'Le Maudit', 'La Confrérie'];
+  const legalRoleNames   = ['Le Conseil', 'Directeur', 'Co-Directeur', 'Officier', 'Agent Confirmé', 'Opérateur', 'Recrue', 'Probatoire', 'Instructeur', 'Le Penseur'];
+  const wasIlleg = oldMember.roles.cache.some(r => illegalRoleNames.some(n => r.name.includes(n)));
+  const isIlleg  = newMember.roles.cache.some(r => illegalRoleNames.some(n => r.name.includes(n)));
+  const wasLegal = oldMember.roles.cache.some(r => legalRoleNames.some(n => r.name.includes(n)));
+  const isLegal  = newMember.roles.cache.some(r => legalRoleNames.some(n => r.name.includes(n)));
+  const poleChange = wasIlleg !== isIlleg || wasLegal !== isLegal;
+
+  if (gradeChange || poleChange) {
     if (global._hierUpdating) return;
     global._hierUpdating = true;
     setTimeout(async () => {
       global._hierUpdating = false;
-      await require('./notion-modules-v3').updateHierarchieEmbed?.(newMember.guild).catch(() => {});
-      console.log(`✅ Hiérarchie mise à jour suite au changement de rôle de ${newMember.displayName}`);
+      if (gradeChange) {
+        await require('./notion-modules-v3').updateHierarchieEmbed?.(newMember.guild).catch(() => {});
+        console.log(`✅ Hiérarchie mise à jour suite au changement de rôle de ${newMember.displayName}`);
+      }
       const nouveauGrade = newMember.roles.cache.filter(r => gradeRoleIds.includes(r.id)).map(r => r.name).join(', ') || 'Visiteur';
-      _syncMembreNotion(newMember.id, { rang: nouveauGrade }).catch(() => {});
+      // Calculer le nouveau pôle
+      const nouveauPole = isIlleg && !isLegal ? 'illegal' : 'legal';
+      const poleLabel   = nouveauPole === 'illegal' ? '🔒 Illégal' : '⚖️ Légal';
+      // Sync Registre des Membres
+      _syncMembreNotion(newMember.id, { rang: nouveauGrade, pole: nouveauPole }).catch(() => {});
+      // Sync Fiches_personnages si changement de pôle
+      if (poleChange) {
+        console.log(`🔄 Changement de pôle pour ${newMember.displayName} → ${poleLabel}`);
+        _syncStatutFicheNotion(newMember.id, null, { pole: poleLabel }).catch(() => {});
+      }
+      // Mettre à jour la DB locale
+      const dbFresh = loadDB();
+      if (!dbFresh.members[newMember.id]) {
+        // Nouveau membre qui vient de recevoir son premier rôle de pôle → l'enregistrer
+        dbFresh.members[newMember.id] = {
+          id: newMember.id,
+          name: newMember.user.username,
+          status: 'actif',
+          rang: nouveauGrade,
+          pole: nouveauPole,
+          joinedAt: new Date().toISOString(),
+          lastActivity: new Date().toISOString(),
+        };
+      } else {
+        dbFresh.members[newMember.id].pole = nouveauPole;
+        dbFresh.members[newMember.id].rang = nouveauGrade;
+        if (dbFresh.members[newMember.id].status === 'visiteur') {
+          dbFresh.members[newMember.id].status = 'actif';
+        }
+      }
+      saveDB(dbFresh);
+      // Sync immédiate dans Notion Fiches_personnages
+      const statutNotion = dbFresh.members[newMember.id].status === 'absent' ? 'Absent' : 'Actif';
+      _syncStatutFicheNotion(newMember.id, statutNotion, { pole: poleLabel }).catch(() => {});
+      // Sync Registre des Membres
+      _syncMembreNotion(newMember.id, {
+        rang: nouveauGrade,
+        pole: nouveauPole,
+        status: dbFresh.members[newMember.id].status,
+        lastActivity: new Date().toISOString(),
+      }).catch(() => {});
+      console.log(`✅ Membre ${newMember.user.username} → pôle ${poleLabel} · grade ${nouveauGrade}`);
     }, 2000);
   }
 });
@@ -2951,7 +3006,34 @@ const _origGetLogsCh = getLogsCh;
 global.getInformateurCh = (guild) => getJournalCh(guild) || guild.channels.cache.get(SALON_HARDCODED.JOURNAL_DE_BORD);
 
 // Mettre à jour le statut activité dans Fiches_personnages
-async function _syncStatutFicheNotion(discordId, statut) {
+async function _syncTousMembresNotion(guild) {
+  if (!process.env.NOTION_TOKEN || !process.env.NOTION_FICHES_DB) return;
+  try {
+    const illegalRoleNames = ['Concepteur', 'Fléau', "L'Exécuteur", 'Le Condamné', 'Le Maudit', 'La Confrérie'];
+    const legalRoleNames   = ['Le Conseil', 'Directeur', 'Co-Directeur', 'Officier', 'Agent Confirmé', 'Opérateur', 'Recrue', 'Probatoire', 'Instructeur', 'Le Penseur', 'Fondateur'];
+    const db = loadDB();
+    const membres = Object.entries(db.members || {});
+    if (!membres.length) return;
+    console.log(`🔄 Sync Notion — ${membres.length} membres...`);
+    let synced = 0;
+    for (const [discordId, m] of membres) {
+      try {
+        const member = await guild.members.fetch(discordId).catch(() => null);
+        if (!member) continue;
+        const isIlleg = member.roles.cache.some(r => illegalRoleNames.some(n => r.name.includes(n)));
+        const isLegal = member.roles.cache.some(r => legalRoleNames.some(n => r.name.includes(n)));
+        const pole    = isIlleg && !isLegal ? '🔒 Illégal' : '⚖️ Légal';
+        const statut  = m.status === 'absent' ? 'Absent' : m.status === 'inactif' ? 'Inactif' : 'Actif';
+        await _syncStatutFicheNotion(discordId, statut, { pole });
+        synced++;
+        await new Promise(r => setTimeout(r, 400)); // pause anti rate-limit Notion
+      } catch(e) { console.log(`❌ Sync membre ${discordId}:`, e.message); }
+    }
+    console.log(`✅ Sync Notion terminée — ${synced}/${membres.length} membres mis à jour`);
+  } catch(e) { console.log('❌ _syncTousMembresNotion:', e.message); }
+}
+
+async function _syncStatutFicheNotion(discordId, statut, extras = {}) {
   if (!process.env.NOTION_TOKEN || !process.env.NOTION_FICHES_DB) return;
   try {
     const search = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_FICHES_DB}/query`, {
@@ -2962,15 +3044,16 @@ async function _syncStatutFicheNotion(discordId, statut) {
     const data = await search.json();
     const page = data.results?.[0];
     if (!page) return;
+    const props = { 'Dernière MàJ': { date: { start: new Date().toISOString().split('T')[0] } } };
+    if (statut) props['Statut activité'] = { select: { name: statut } };
+    if (extras.pole) props['Pôle'] = { select: { name: extras.pole } };
     await fetch(`https://api.notion.com/v1/pages/${page.id}`, {
       method: 'PATCH',
       headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ properties: {
-        'Statut activité': { select: { name: statut } },
-        'Dernière MàJ':    { date:   { start: new Date().toISOString().split('T')[0] } },
-      } }),
+      body: JSON.stringify({ properties: props }),
     });
-    console.log(`✅ Fiches_personnages statut MàJ : ${discordId} → ${statut}`);
+    const changes = [statut && `statut → ${statut}`, extras.pole && `pôle → ${extras.pole}`].filter(Boolean).join(', ');
+    console.log(`✅ Fiches_personnages MàJ : ${discordId} — ${changes}`);
   } catch(e) { console.log('❌ _syncStatutFicheNotion:', e.message); }
 }
 
