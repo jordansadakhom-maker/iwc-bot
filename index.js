@@ -2879,6 +2879,62 @@ async function _validerModalRdv(interaction) {
   }
 
   await interaction.editReply({ content: ping, embeds: [embed] });
+
+  // ── Envoi DM à tous les membres convoqués ──
+  const membresAConvoquer = [];
+
+  // Récupérer les membres selon le pôle
+  try {
+    const allMembers = await interaction.guild.members.fetch().catch(() => null);
+    if (allMembers) {
+      if (pole === 'legal' || pole === 'tous') {
+        allMembers.filter(m => !m.user.bot && m.roles.cache.has(ROLE_POLE_LEGAL)).forEach(m => membresAConvoquer.push(m));
+      }
+      if (pole === 'illegal' || pole === 'tous') {
+        allMembers.filter(m => !m.user.bot && m.roles.cache.has(ROLE_POLE_ILLEGAL)).forEach(m => membresAConvoquer.push(m));
+      }
+      if (pole === 'direction') {
+        allMembers.filter(m => !m.user.bot && ['Conseil','Directeur','Fléau','Concepteur','Fondateur'].some(n => m.roles.cache.some(r => r.name.includes(n)))).forEach(m => membresAConvoquer.push(m));
+      }
+    }
+  } catch {}
+
+  // DM de convocation — style télégramme IWC
+  const dmEmbed = new EmbedBuilder()
+    .setColor(poleColor)
+    .setTitle(`📅 CONVOCATION — ${titre.toUpperCase()}`)
+    .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   IRON WOLF COMPANY — AVIS OFFICIEL\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
+    .addFields(
+      { name: '🆔 Référence',    value: '`' + rdvId + '`',   inline: true },
+      { name: '🗂️ Type',         value: typeLabel,             inline: true },
+      { name: '📅 Date',         value: dateCapital,            inline: true },
+      { name: '🕐 Heure',        value: `**${heure}**`,        inline: true },
+      { name: '📍 Lieu',         value: lieu || '—',           inline: true },
+      { name: '✍️ Convoqué par', value: emetteurIC,            inline: true },
+    );
+
+  if (notes) dmEmbed.addFields({ name: '📋 Ordre du jour', value: notes });
+  dmEmbed.setFooter({ text: 'Iron Wolf Company • Présence attendue' }).setTimestamp();
+
+  let dmEnvoyes = 0;
+  const dmErrors = [];
+  for (const membre of membresAConvoquer) {
+    if (membre.id === interaction.user.id) continue; // Pas de DM à soi-même
+    try {
+      await membre.send({ embeds: [dmEmbed] });
+      dmEnvoyes++;
+    } catch {
+      dmErrors.push(membre.displayName);
+    }
+    await new Promise(r => setTimeout(r, 200)); // Anti rate-limit
+  }
+
+  if (dmEnvoyes > 0) {
+    console.log(`✅ Convocations DM envoyées : ${dmEnvoyes} membre(s) pour ${rdvId}`);
+  }
+  if (dmErrors.length > 0) {
+    console.log(`⚠️  DM échoués (DM fermés) : ${dmErrors.join(', ')}`);
+  }
 }
 
 // ── Surnom-pseudo : modal d'identité IC ──
