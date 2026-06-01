@@ -605,7 +605,9 @@ async function handleFichePersonnage(message) {
   await message.react('✅').catch(() => {});
   const embedCompact = new EmbedBuilder().setColor(color).setAuthor({ name: isIlleg ? '🔒 La Confrérie — Fiche Personnage' : '⚖️ Iron Wolf Company — Fiche Personnage', iconURL: message.guild.iconURL() || undefined }).setTitle(`👤 ${nomPerso}`).setThumbnail(message.author.displayAvatarURL({ size: 256 }));
   if (citation) embedCompact.setDescription(`> *${citation.replace(/^[\*""\s]+|[\*""\s]+$/g, '')}*`);
-  embedCompact.addFields({ name: '🎭 Identité', value: [`**Surnom :** ${surnom}`, `**Âge :** ${age}`, `**Nationalité :** ${nationalite}`, `**Né(e) à :** ${naissance}`].join('\n'), inline: true }, { name: '🔍 Physique', value: [`**Taille :** ${taille}`, `**Yeux / Cheveux :** ${yeux}`, `**Signes :** ${signes}`].join('\n'), inline: true });
+  const identiteLines = [`**Surnom :** ${surnom}`, `**Âge :** ${age}`, `**Nationalité :** ${nationalite}`, `**Né(e) à :** ${naissance}`];
+  if (telegramme !== '—') identiteLines.push(`**📨 Télégramme :** ${telegramme}`);
+  embedCompact.addFields({ name: '🎭 Identité', value: identiteLines.join('\n'), inline: true }, { name: '🔍 Physique', value: [`**Taille :** ${taille}`, `**Yeux / Cheveux :** ${yeux}`, `**Signes :** ${signes}`].join('\n'), inline: true });
   if (profession !== '—') embedCompact.addFields({ name: '💼 Profession', value: profession, inline: false });
   if (reputation !== '—') embedCompact.addFields({ name: '⭐ Réputation', value: reputation, inline: false });
   if (histoire) embedCompact.addFields({ name: '📖 Histoire (extrait)', value: histoire.slice(0, 300) + (histoire.length > 300 ? '...' : ''), inline: false });
@@ -621,7 +623,9 @@ async function handleFichePersonnage(message) {
   if (thread) {
     const embedFull = new EmbedBuilder().setColor(color).setAuthor({ name: isIlleg ? '🔒 La Confrérie — Fiche Officielle' : '⚖️ Iron Wolf Company — Fiche Officielle', iconURL: message.guild.iconURL() || undefined }).setTitle(`👤 ${nomPerso}`).setThumbnail(message.author.displayAvatarURL({ size: 256 }));
     if (citation) embedFull.setDescription(`> *${citation.replace(/^[\*""\s]+|[\*""\s]+$/g, '')}*\n\u200b`);
-    embedFull.addFields({ name: '🎭 Identité', value: [`**Nom complet :** ${nom}`, `**Surnom(s) :** ${surnom}`, `**Âge :** ${age}`, `**Nationalité :** ${nationalite}`, `**Né(e) à :** ${naissance}`].join('\n'), inline: true }, { name: '🔍 Physique', value: [`**Taille :** ${taille}`, `**Yeux / Cheveux :** ${yeux}`, `**Signes :** ${signes}`].join('\n'), inline: true });
+    const identiteLinesFull = [`**Nom complet :** ${nom}`, `**Surnom(s) :** ${surnom}`, `**Âge :** ${age}`, `**Nationalité :** ${nationalite}`, `**Né(e) à :** ${naissance}`];
+    if (telegramme !== '—') identiteLinesFull.push(`**📨 Télégramme :** ${telegramme}`);
+    embedFull.addFields({ name: '🎭 Identité', value: identiteLinesFull.join('\n'), inline: true }, { name: '🔍 Physique', value: [`**Taille :** ${taille}`, `**Yeux / Cheveux :** ${yeux}`, `**Signes :** ${signes}`].join('\n'), inline: true });
     if (profession !== '—') embedFull.addFields({ name: '💼 Profession', value: profession, inline: false });
     if (reputation !== '—') embedFull.addFields({ name: '⭐ Réputation', value: reputation, inline: false });
     if (histoire) embedFull.addFields({ name: '📖 Histoire', value: histoire.slice(0, 1000), inline: false });
@@ -634,7 +638,7 @@ async function handleFichePersonnage(message) {
     await thread.send({ content: `📋 **Fiche officielle de ${nomPerso}** — mise à jour automatiquement à chaque modification.`, embeds: [embedFull] }).catch(() => {});
     await thread.send({ content: [`## 📝 Historique des évolutions`, `*Ce thread enregistre toutes les mises à jour de la fiche de **${nomPerso}**.*`, `*Pour mettre à jour ta fiche, reposte-la dans <#${message.channel.id}>.*`, '```', `📅 ${new Date().toLocaleDateString('fr-FR')} — Fiche créée / mise à jour par <@${message.author.id}>`, '```'].join('\n') }).catch(() => {});
   }
-  _syncFicheNotion(message.author.id, { nom: nomPerso, surnom, age, naissance, nationalite, taille, yeux, signes, profession, reputation, histoire: histoire || '—', personnalite: personnalite || '—', competences: competences || '—', faiblesses: faiblesses || '—', objectif: objectif || '—', citation: citation ? citation.replace(/^[\*""\s]+|[\*""\s]+$/g, '') : '—', pole: isIlleg ? 'Illégal' : 'Légal', threadId: thread?.id || '—', discordId: message.author.id, discordUsername: message.author.username }).catch(() => {});
+  _syncFicheNotion(message.author.id, { nom: nomPerso, surnom, age, naissance, nationalite, taille, yeux, signes, profession, reputation, telegramme, histoire: histoire || '—', personnalite: personnalite || '—', competences: competences || '—', faiblesses: faiblesses || '—', objectif: objectif || '—', citation: citation ? citation.replace(/^[\*""\s]+|[\*""\s]+$/g, '') : '—', pole: isIlleg ? 'Illégal' : 'Légal', threadId: thread?.id || '—', discordId: message.author.id, discordUsername: message.author.username }).catch(() => {});
 }
 
 async function _syncFicheNotion(discordId, data) {
