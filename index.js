@@ -3030,16 +3030,27 @@ async function setupFicheFormat(guild) {
   try {
     const ch = getChById(guild, 'FICHES_PERSONNAGES', 'fiches-personnages', 'fiches-perso', 'fiches'); if (!ch) return;
     const msgs = await ch.messages.fetch({ limit: 20 });
-    // Supprimer l'ancien format et toujours recréer si le contenu a changé
-    const existing = msgs.find(m => m.author.id === guild.members.me?.id && m.embeds[0]?.title?.includes('FORMAT'));
+    // Chercher si le format est déjà posté (vérifier plusieurs titres possibles)
+    const existing = msgs.find(m =>
+      m.author.id === guild.members.me?.id &&
+      (m.embeds[0]?.title?.includes('FORMAT') ||
+       m.embeds[0]?.title?.includes('FORMULAIRE') ||
+       m.embeds[0]?.title?.includes('DOSSIERS') ||
+       m.embeds[0]?.title?.includes('FICHES'))
+    );
     if (existing) {
-      // Vérifier si le télégramme est déjà dans le format
-      const desc = existing.embeds[0]?.description || '';
-      if (desc.includes('TÉLÉGRAMME IC')) { console.log('✅ Format fiches déjà à jour — skip'); return; }
-      await existing.delete().catch(() => {});
+      // Vérifier si le TÉLÉGRAMME IC est déjà présent dans n'importe quel embed du message
+      const allDescs = existing.embeds.map(e => e.description || '').join('');
+      if (allDescs.includes('TÉLÉGRAMME IC')) {
+        console.log('✅ Format fiches déjà à jour — skip');
+        return;
+      }
+      // Format obsolète → supprimer tous les messages bot et recréer
+      for (const [, m] of msgs) { if (m.author.id === guild.members.me?.id) await m.delete().catch(() => {}); }
+    } else {
+      // Pas de format trouvé → supprimer les éventuels anciens messages bot orphelins
+      for (const [, m] of msgs) { if (m.author.id === guild.members.me?.id) await m.delete().catch(() => {}); }
     }
-    // Supprimer les anciens messages bot
-    for (const [, m] of msgs) { if (m.author.id === guild.members.me?.id) await m.delete().catch(() => {}); }
 
     const format = [
       '✦ NOM COMPLET :',
