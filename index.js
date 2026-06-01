@@ -1724,25 +1724,25 @@ async function handleProfilEnhanced(interaction) {
 
 // Villes RDR2 pour le menu opérations
 const VILLES_RDR2 = [
-  { label: '🏛️ Saint Denis', value: 'Saint Denis', description: 'Grande ville du sud — Lemoyne' },
-  { label: '🤠 Valentine', value: 'Valentine', description: 'Ville du nord — New Hanover' },
-  { label: '🌵 Armadillo', value: 'Armadillo', description: 'Ville désertique — New Austin' },
-  { label: '⛏️ Annesburg', value: 'Annesburg', description: 'Ville minière du nord-est' },
-  { label: '🏔️ Strawberry', value: 'Strawberry', description: 'Ville des montagnes — West Elizabeth' },
-  { label: '🌾 Emerald Ranch', value: 'Emerald Ranch', description: 'Ranch à l\'est — Heartlands' },
-  { label: '🏜️ Tumbleweed', value: 'Tumbleweed', description: 'Ville fantôme — Gaptooth Ridge' },
-  { label: '🌊 Lagras', value: 'Lagras', description: 'Village des marais — Bluewater Marsh' },
-  { label: '🏕️ Flatneck Station', value: 'Flatneck Station', description: 'Station ferroviaire' },
-  { label: '🏞️ Roanoke Ridge', value: 'Roanoke Ridge', description: 'Région sauvage du nord-est' },
-  { label: '🗻 Tall Trees', value: 'Tall Trees', description: 'Forêt dense — West Elizabeth' },
-  { label: '🏘️ Rhodes', value: 'Rhodes', description: 'Ville du comté de Lemoyne' },
-  { label: '🌁 Blackwater', value: 'Blackwater', description: 'Ville moderne — West Elizabeth' },
-  { label: '⛪ Thieves Landing', value: 'Thieves Landing', description: 'Port des hors-la-loi' },
-  { label: '🏦 Banque Saint Denis', value: 'Banque Saint Denis', description: 'Cible principale — Saint Denis' },
-  { label: '🏦 Banque Valentine', value: 'Banque Valentine', description: 'Cible principale — Valentine' },
-  { label: '🚂 Train (en mouvement)', value: 'Train en mouvement', description: 'Attaque / Braquage de train' },
-  { label: '🚢 Bateau / Port', value: 'Port fluvial', description: 'Port ou convoi maritime' },
-  { label: '📍 Autre (préciser)', value: 'Autre', description: 'Lieu personnalisé à préciser' },
+  { label: 'Saint Denis', value: 'Saint Denis', description: 'Grande ville du sud — Lemoyne' },
+  { label: 'Valentine', value: 'Valentine', description: 'Ville du nord — New Hanover' },
+  { label: 'Armadillo', value: 'Armadillo', description: 'Ville désertique — New Austin' },
+  { label: 'Annesburg', value: 'Annesburg', description: 'Ville minière du nord-est' },
+  { label: 'Strawberry', value: 'Strawberry', description: 'Ville des montagnes — West Elizabeth' },
+  { label: 'Emerald Ranch', value: 'Emerald Ranch', description: 'Ranch à l\'est — Heartlands' },
+  { label: 'Tumbleweed', value: 'Tumbleweed', description: 'Ville fantôme — Gaptooth Ridge' },
+  { label: 'Lagras', value: 'Lagras', description: 'Village des marais — Bluewater Marsh' },
+  { label: 'Flatneck Station', value: 'Flatneck Station', description: 'Station ferroviaire' },
+  { label: 'Roanoke Ridge', value: 'Roanoke Ridge', description: 'Région sauvage du nord-est' },
+  { label: 'Tall Trees', value: 'Tall Trees', description: 'Forêt dense — West Elizabeth' },
+  { label: 'Rhodes', value: 'Rhodes', description: 'Ville du comté de Lemoyne' },
+  { label: 'Blackwater', value: 'Blackwater', description: 'Ville moderne — West Elizabeth' },
+  { label: 'Thieves Landing', value: 'Thieves Landing', description: 'Port des hors-la-loi' },
+  { label: 'Banque Saint Denis', value: 'Banque Saint Denis', description: 'Cible principale — Saint Denis' },
+  { label: 'Banque Valentine', value: 'Banque Valentine', description: 'Cible principale — Valentine' },
+  { label: 'Train en mouvement', value: 'Train en mouvement', description: 'Attaque / Braquage de train' },
+  { label: 'Port fluvial', value: 'Port fluvial', description: 'Port ou convoi maritime' },
+  { label: 'Autre lieu', value: 'Autre', description: 'Lieu personnalisé à préciser' },
 ];
 
 async function _ouvrirModalOpCreer(interaction) {
@@ -2588,21 +2588,21 @@ async function _ouvrirModalAgendaSimple(interaction) {
   await interaction.reply({
     embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📅 Nouveau RDV — IWC').setDescription('**Étape 1/2** — Choisis le lieu du rendez-vous')],
     components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('agenda_lieu_select').setPlaceholder('Choisir un lieu...').addOptions([
-      { label: '🏛️ Saint Denis', value: 'Saint Denis', description: 'La grande ville du sud' },
-      { label: '🤠 Valentine', value: 'Valentine', description: 'Ville du nord-ouest' },
-      { label: '🌵 Armadillo', value: 'Armadillo', description: 'Ville désertique du sud' },
-      { label: '⛏️ Annesburg', value: 'Annesburg', description: 'Ville minière du nord-est' },
-      { label: '🏔️ Strawberry', value: 'Strawberry', description: 'Ville des montagnes' },
-      { label: '🌾 Emerald Ranch', value: 'Emerald Ranch', description: 'Ranch a l\'est' },
-      { label: '🏜️ Tumbleweed', value: 'Tumbleweed', description: 'Ville fantôme du désert' },
-      { label: '🌊 Lagras', value: 'Lagras', description: 'Village des marais' },
-      { label: '🏕️ Flatneck Station', value: 'Flatneck Station', description: 'Station ferroviaire' },
-      { label: '🏞️ Roanoke Ridge', value: 'Roanoke Ridge', description: 'Région sauvage du nord' },
-      { label: '🗻 Tall Trees', value: 'Tall Trees', description: 'Foret de l\'ouest' },
-      { label: '🏘️ Rhodes', value: 'Rhodes', description: 'Ville du comté de Lemoyne' },
-      { label: '🌁 Blackwater', value: 'Blackwater', description: 'Ville moderne de West Elizabeth' },
-      { label: '⛪ Thieves Landing', value: 'Thieves Landing', description: 'Port des hors-la-loi' },
-      { label: '📍 Autre / Personnalisé', value: 'Autre', description: 'Lieu personnalisé à préciser' },
+      { label: 'Saint Denis', value: 'Saint Denis', description: 'La grande ville du sud' },
+      { label: 'Valentine', value: 'Valentine', description: 'Ville du nord-ouest' },
+      { label: 'Armadillo', value: 'Armadillo', description: 'Ville désertique du sud' },
+      { label: 'Annesburg', value: 'Annesburg', description: 'Ville minière du nord-est' },
+      { label: 'Strawberry', value: 'Strawberry', description: 'Ville des montagnes' },
+      { label: 'Emerald Ranch', value: 'Emerald Ranch', description: 'Ranch a l\'est' },
+      { label: 'Tumbleweed', value: 'Tumbleweed', description: 'Ville fantôme du désert' },
+      { label: 'Lagras', value: 'Lagras', description: 'Village des marais' },
+      { label: 'Flatneck Station', value: 'Flatneck Station', description: 'Station ferroviaire' },
+      { label: 'Roanoke Ridge', value: 'Roanoke Ridge', description: 'Région sauvage du nord' },
+      { label: 'Tall Trees', value: 'Tall Trees', description: 'Foret de l\'ouest' },
+      { label: 'Rhodes', value: 'Rhodes', description: 'Ville du comté de Lemoyne' },
+      { label: 'Blackwater', value: 'Blackwater', description: 'Ville moderne de West Elizabeth' },
+      { label: 'Thieves Landing', value: 'Thieves Landing', description: 'Port des hors-la-loi' },
+      { label: '/', value: 'Autre', description: 'Lieu personnalisé à préciser' },
     ]))],
   });
 }
@@ -2715,14 +2715,21 @@ async function _ouvrirMenuRdvSlash(interaction) {
   await interaction.reply({
     embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📅 Nouveau RDV — Iron Wolf Company').setDescription('**Étape 1/2** — Choisis le lieu du rendez-vous')],
     components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('agenda_lieu_select').setPlaceholder('📍 Choisir un lieu RDR2...').addOptions([
-      { label: '🏛️ Saint Denis', value: 'Saint Denis' }, { label: '🤠 Valentine', value: 'Valentine' },
-      { label: '🌵 Armadillo', value: 'Armadillo' }, { label: '⛏️ Annesburg', value: 'Annesburg' },
-      { label: '🏔️ Strawberry', value: 'Strawberry' }, { label: '🌾 Emerald Ranch', value: 'Emerald Ranch' },
-      { label: '🏜️ Tumbleweed', value: 'Tumbleweed' }, { label: '🌊 Lagras', value: 'Lagras' },
-      { label: '🏕️ Flatneck Station', value: 'Flatneck Station' }, { label: '🏞️ Roanoke Ridge', value: 'Roanoke Ridge' },
-      { label: '🗻 Tall Trees', value: 'Tall Trees' }, { label: '🏘️ Rhodes', value: 'Rhodes' },
-      { label: '🌁 Blackwater', value: 'Blackwater' }, { label: '⛪ Thieves Landing', value: 'Thieves Landing' },
-      { label: '📍 Autre lieu', value: 'Autre' },
+      { label: 'Saint Denis', value: 'Saint Denis', description: 'La grande ville du Sud' },
+      { label: 'Valentine', value: 'Valentine', description: 'Ville du Nord' },
+      { label: 'Armadillo', value: 'Armadillo', description: 'Village du désert' },
+      { label: 'Annesburg', value: 'Annesburg', description: 'Ville minière du Nord-Est' },
+      { label: 'Strawberry', value: 'Strawberry', description: 'Ville de montagne' },
+      { label: 'Emerald Ranch', value: 'Emerald Ranch', description: 'Ranch du Heartlands' },
+      { label: 'Tumbleweed', value: 'Tumbleweed', description: 'Ville fantôme de Gaptooth' },
+      { label: 'Lagras', value: 'Lagras', description: 'Village des marais' },
+      { label: 'Flatneck Station', value: 'Flatneck Station', description: 'Station du Heartlands' },
+      { label: 'Roanoke Ridge', value: 'Roanoke Ridge', description: 'Region sauvage du Nord' },
+      { label: 'Tall Trees', value: 'Tall Trees', description: 'Foret de West Elizabeth' },
+      { label: 'Rhodes', value: 'Rhodes', description: 'Ville du Lemoyne' },
+      { label: 'Blackwater', value: 'Blackwater', description: 'Ville moderne du Sud' },
+      { label: 'Thieves Landing', value: 'Thieves Landing', description: 'Port du Flat Iron Lake' },
+      { label: 'Autre', value: 'Autre', description: 'Preciser le lieu manuellement' },
     ]))],
   });
 }
@@ -2733,12 +2740,18 @@ async function _ouvrirMenuRdv(interaction) {
     flags: MessageFlags.Ephemeral,
     embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📅 Nouveau Rendez-vous — IWC').setDescription('**Étape 1/2** — Sélectionne le type de rendez-vous.')],
     components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`rdv_type_select_${msgId}`).setPlaceholder('Type de rendez-vous...').addOptions([
-      { label: '👑 Réunion Direction', value: 'reunion_direction' }, { label: '🤝 Rendez-vous Client', value: 'rdv_client' },
-      { label: '🎯 Briefing Opération', value: 'briefing_op' }, { label: '📊 Débrief Opération', value: 'debrief_op' },
-      { label: '🔍 Entretien Recrutement', value: 'entretien_recru' }, { label: '📋 Réunion Pôle Légal', value: 'reunion_legal' },
-      { label: '🔒 Réunion Confrérie', value: 'reunion_confrerie' }, { label: '🎓 Formation Membres', value: 'formation' },
-      { label: '⚖️ Négociation', value: 'negociation' }, { label: '🏥 Rendez-vous Médical', value: 'rdv_medical' },
-      { label: '⚖️ Rendez-vous Juridique', value: 'rdv_juridique' }, { label: '📝 Autre', value: 'autre' },
+      { label: 'reunion_direction', value: 'reunion_direction', description: 'Réunion interne Direction' },
+      { label: '-', value: 'rdv_client', description: 'RDV avec un client externe' },
+      { label: 'briefing_op', value: 'briefing_op', description: 'Brief avant une opération' },
+      { label: 'debrief_op', value: 'debrief_op', description: 'Retour après opération' },
+      { label: 'entretien_recru', value: 'entretien_recru', description: 'Entretien candidat' },
+      { label: 'reunion_legal', value: 'reunion_legal', description: 'Réunion Iron Wolf Company' },
+      { label: 'reunion_confrerie', value: 'reunion_confrerie', description: 'Réunion La Confrérie' },
+      { label: 'formation', value: 'formation', description: 'Session de formation' },
+      { label: 'negociation', value: 'negociation', description: 'Négociation commerciale' },
+      { label: '-', value: 'rdv_medical', description: 'Consultation médicale IC' },
+      { label: '-', value: 'rdv_juridique', description: 'Consultation juridique IC' },
+      { label: 'autre', value: 'autre', description: 'Autre type de rendez-vous' },
     ]))],
   });
 }
@@ -2752,8 +2765,8 @@ async function _handleRdvTypeSelect(interaction) {
         .setCustomId(`rdv_mode_select_${typeRdv}_${msgId}`)
         .setPlaceholder('Mode de convocation...')
         .addOptions([
-          { label: 'Par rôle — tout le pôle', value: 'role', description: 'Convoque tout le pôle légal ou illégal' },
-          { label: 'Par nom IC individuel', value: 'individuel', description: 'Sélectionne des membres spécifiques' },
+          { label: '—', value: 'role', description: 'Convoque tout le pôle légal ou illégal' },
+          { label: 'individuel', value: 'individuel', description: 'Sélectionne des membres spécifiques' },
         ])
     )],
   });
@@ -2765,8 +2778,10 @@ async function _handleRdvModeSelect(interaction) {
     await interaction.update({
       embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📅 Nouveau Rendez-vous — IWC').setDescription('**Étape 3/3** — Quel groupe convoquer ?')],
       components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`rdv_pole_select_${typeRdv}_${msgId}`).setPlaceholder('Choisir le groupe...').addOptions([
-        { label: '⚖️ Pôle Légal', value: 'legal' }, { label: '🔒 La Confrérie', value: 'illegal' },
-        { label: '👥 Tout le monde', value: 'tous' }, { label: '👑 Direction seule', value: 'direction' },
+        { label: '—', value: 'legal', description: 'Convoque tout le pole legal' },
+        { label: 'illegal', value: 'illegal', description: 'Convoque tout le pole illegal' },
+        { label: 'tous', value: 'tous', description: 'Convoque les deux poles' },
+        { label: 'direction', value: 'direction', description: 'Convoque la Direction uniquement' },
       ]))],
     });
   } else {
@@ -2877,7 +2892,7 @@ async function _validerModalRdv(interaction) {
   const db = loadDB(); const emetteurIC = db.members[interaction.user.id]?.name || interaction.user.username;
   const dateAffiche = new Date(dateISO).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
   const dateCapital = dateAffiche.charAt(0).toUpperCase() + dateAffiche.slice(1);
-  const poleMap = { legal: { label: '⚖️ Pôle Légal', roleId: ROLE_POLE_LEGAL, color: 0x3B82F6 }, illegal: { label: '🔒 La Confrérie', roleId: ROLE_POLE_ILLEGAL, color: 0x8B1A1A }, tous: { label: '👥 Tous les membres', roleId: null, color: 0x2C3E50 }, direction: { label: '👑 Direction', roleId: null, color: 0xFFD700 } };
+  const poleMap = { legal: { label: 'Pole Legal', roleId: ROLE_POLE_LEGAL, color: 0x3B82F6 }, illegal: { label: 'La Confrerie', roleId: ROLE_POLE_ILLEGAL, color: 0x8B1A1A }, tous: { label: 'Tous les membres', roleId: null, color: 0x2C3E50 }, direction: { label: 'Direction', roleId: null, color: 0xFFD700 } };
   const poleCfg = poleMap[pole] || poleMap.tous;
   const embed = new EmbedBuilder().setColor(poleCfg.color).setTitle(`📅 ${titre.toUpperCase()}`).setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   IRON WOLF COMPANY — CONVOCATION\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
     .addFields({ name: '🆔 Référence', value: '`' + rdvId + '`', inline: true }, { name: '📅 Date', value: dateCapital, inline: true }, { name: '🕐 Heure', value: `**${heure}**`, inline: true }, { name: '📍 Lieu', value: lieu, inline: true }, { name: '👥 Destinataires', value: poleCfg.label, inline: true }, { name: '✍️ Convoqué par', value: emetteurIC, inline: true })
