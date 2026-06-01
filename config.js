@@ -28,7 +28,7 @@ const CH = {
   CONTRATS:             '1508756442730074222',
   FIL_CONTRATS_SIGNE:   '1509340729808388208',
   FIL_CONTRATS_REFUSE:  '1509340853808664627',
-  LOGS:                 '1509695000441786608', // #logs
+  LOGS:                 '1509695000441786608',
 };
 
 // ── IDs des rôles Discord ──
@@ -62,37 +62,35 @@ const SEUIL_COFFRE_ILLEGAL  = process.env.SEUIL_COFFRE_ILLEGAL  ? parseInt(proce
 const NOTION_RECRUTEMENT_DB = process.env.NOTION_RECRUTEMENT_DB || '36ef4436a86c81de9f1acf55c5ad4076';
 const NOTION_MEMBRES_DB_ID  = process.env.NOTION_MEMBRES_DB     || '36ef4436a86c818d99a4dd875efec4e3';
 
-// ── IDs des salons Discord (évite les ambiguïtés de recherche par nom) ──
-// Remplis ces IDs depuis Discord : clic droit sur le salon → Copier l'identifiant
+// ── IDs des salons Discord ──
 const SALON_IDS = {
   // Légal
-  AGENDA:              '1509638226132996178', // #-agenda
-  PLANNING:            '1509719218654941315', // #planning (le bon, pas le vide)
-  COFFRE_ENTREPRISE:   '1509719218654941315', // #coffre-entreprise
-  HIERARCHIE_LEGAL:    '1508756453354373202', // #hierarchie-iron-wolf-company
-  CONTRATS:            '1508756439206985809', // #contrats
-  HISTOIRE_IWC:        '1508756442730074222', // #histoire-iwc
-  ABSENCES:            '1508756459444502661', // #absences
-  AFFAIRES:            '1509718164760563743', // #affaires
-  INFORMATEURS:        '1508756508362674337', // #informateurs
-  PLANS:               '1509255294184853524', // #plans
-  FICHES_PERSONNAGES:  '1508756493845925960', // #fiches-personnages
-  SURNOM_PSEUDO:       '1508756528277225512', // #surnom-pseudo
-  GRADE:               '1508915628315115581', // #grade (légal)
-  PATCH_NOTE:          '1508788467008667819', // #patch-note
+  AGENDA:              '1509638226132996178', // #agenda
+  PLANNING:            '1509719218654941315', // #planning
+  COFFRE_ENTREPRISE:   '1508756453354373202', // #coffre-entreprise
+  HIERARCHIE_LEGAL:    '1508756439206985809', // #hierarchie-légal
+  CONTRATS:            '1508756442730074222', // #contrats
+  HISTOIRE_IWC:        '1508756459444502661', // #histoire-iwc
+  ABSENCES:            '1509718164760563743', // #absences
+  AFFAIRES:            '1508756508362674337', // #affaires
+  INFORMATEURS:        '1509255294184853524', // #informateurs (= #plans, même salon)
+  PLANS:               '1509255294184853524', // #plans (= #informateurs, même salon)
+  FICHES_PERSONNAGES:  '1508756528277225512', // #fiches-personnages
+  SURNOM_PSEUDO:       '1508915628315115581', // #surnom-pseudo
+  PATCH_NOTE:          '1509695000441786608', // #patch-note (= #logs)
 
   // Direction
   LOGS:                '1509695000441786608', // #logs
   DOSSIER_RECRUTEMENT: '1509337860724228137', // #dossier-recrutement
-  RECRUTEMENT_INTERNE: '1509254295717941278', // #recrutement-interne
-  DASHBOARD:           '1509252295127466096', // salon dashboard
+  RECRUTEMENT_INTERNE: '1509254315712188438', // #recrutement-interne
+  DASHBOARD:           '1508756535407542372', // #dashboard
 
   // Illégal
-  COFFRE_ILLEGAL:      '1508756516830842960', // #coffre-illegal
-  GRADE_ILLEGAL:       '1509254315712188438', // #grade (illégal)
-  HIERARCHIE_OMBRE:    '1508756490432024636', // #hierarchie-ombre
-  AGENDA_ILLEGAL:      '1508788467008667819', // #agenda-illégal
-  OPERATIONS:          '1508756483246919690', // #operations
+  COFFRE_ILLEGAL:      '1508756490432024636', // #coffre-illegal
+  GRADE_ILLEGAL:       '1508788467008667819', // #grade-illegal
+  HIERARCHIE_OMBRE:    '1508756483246919690', // #hierarchie-ombre
+  AGENDA_ILLEGAL:      '1510956171958161528', // #agenda-illégal
+  OPERATIONS:          '1508756486892027904', // #operations
 };
 
 // ── Détection du pôle d'un membre depuis ses rôles Discord ──
