@@ -33,7 +33,7 @@ function getCh(guild, ...names) {
 // ═══════════════════════════════════════════════════════════════
 
 async function handleOpProgrammeeModal(interaction) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const lines = interaction.fields.getTextInputValue('details').split('\n');
   const get   = k => { const l = lines.find(l => l.toUpperCase().includes(k.toUpperCase()) && l.includes(':')); return l ? l.split(':').slice(1).join(':').trim() : ''; };
@@ -146,7 +146,7 @@ async function checkOpsProgrammees(guild) {
       .filter(Boolean).join(' ');
     const ping = mentions || `<@&${op.pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL}>`;
 
-    const opsCh = getCh(guild, 'operations-en-cours', 'operations');
+    const opsCh = getChById(guild, 'OPERATIONS', 'operations-en-cours', 'operations');
     if (opsCh) {
       await opsCh.send({
         content: `${ping}`,
@@ -196,7 +196,7 @@ async function checkOpsProgrammees(guild) {
   for (const op of opsALancer) {
     // ── Bloquer si 0 participant + alerter la Direction ──
     if (!op.participants || op.participants.length === 0) {
-      const logsCh = getCh(guild, 'logs');
+      const logsCh = getChById(guild, 'LOGS', 'logs');
       const mention = guild.roles.cache
         .filter(r => ['Concepteur', 'Fléau', 'Fondateur'].some(n => r.name.includes(n)))
         .map(r => `<@&${r.id}>`).join(' ');
@@ -271,7 +271,7 @@ async function _lancerOpProgrammee(guild, op, db) {
   }
 
   // Ping dans le salon + briefing DM
-  const opsCh = getCh(guild, 'operations-en-cours', 'operations');
+  const opsCh = getChById(guild, 'OPERATIONS', 'operations-en-cours', 'operations');
   if (opsCh) {
     await opsCh.send({ content: `${ping} — 🟢 **${op.name}** est maintenant **LANCÉE**. Bonne opération.` }).catch(() => {});
   }
@@ -287,7 +287,7 @@ async function handleOpStop(interaction) {
   const opId = interaction.customId.replace('op_stop_', '');
   const db   = loadDB();
   const op   = db.operations.find(o => o.id === opId);
-  if (!op) return interaction.reply({ content: '❌ Opération introuvable.', ephemeral: true });
+  if (!op) return interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral });
 
   const wasRunning = op.status === 'en_cours';
   op.status    = 'annulee';
@@ -334,8 +334,8 @@ async function handleOpLancerForce(interaction) {
   const opId = interaction.customId.replace('op_lancer_force_', '');
   const db   = loadDB();
   const op   = db.operations.find(o => o.id === opId);
-  if (!op) return interaction.reply({ content: '❌ Opération introuvable.', ephemeral: true });
-  if (op.status !== 'programmee') return interaction.reply({ content: '❌ Cette opération ne peut pas être lancée manuellement.', ephemeral: true });
+  if (!op) return interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral });
+  if (op.status !== 'programmee') return interaction.reply({ content: '❌ Cette opération ne peut pas être lancée manuellement.', flags: MessageFlags.Ephemeral });
 
   await interaction.deferUpdate();
   await _lancerOpProgrammee(interaction.guild, op, db);
@@ -573,7 +573,7 @@ async function posterResumeJournalIC(guild) {
       .setFooter({ text: 'IWC • Journal IC • Résumé automatique du lundi' })
       .setTimestamp();
 
-    const histCh = getCh(guild, 'histoire-iwc', 'histoire', 'journal');
+    const histCh = getChById(guild, 'HISTOIRE_IWC', 'histoire-iwc', 'histoire', 'journal');
     if (histCh) {
       await histCh.send({ embeds: [embed] });
       console.log('✅ Résumé journal IC posté');
@@ -593,4 +593,3 @@ module.exports = {
   archiverThreadCandidature,
   posterResumeJournalIC,
 };
-
