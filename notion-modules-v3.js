@@ -190,13 +190,16 @@ async function updateHierarchieEmbed(guild) {
       );
     }
 
-    // Construire une section à partir des vrais rôles
+    // Construire une section — chaque membre n'apparaît qu'une seule fois
+    // dans son grade le plus élevé (premier grade dans la liste)
     const buildSection = (grades) => {
+      const dejaVus = new Set(); // éviter les doublons
       const lignes = [];
       for (const g of grades) {
         const roleId  = ROLES[g.roleKey];
-        const members = roleMembers[roleId] || [];
+        const members = (roleMembers[roleId] || []).filter(m => !dejaVus.has(m.id));
         if (!members.length) continue;
+        members.forEach(m => dejaVus.add(m.id));
         const lines = members.map(m => {
           const dbData = db.members[m.id];
           const statut = dbData?.status;
