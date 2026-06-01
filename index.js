@@ -2643,15 +2643,33 @@ async function _validerModalAgendaSimple(interaction) {
   if (notes) embed.addFields({ name: '📋 Notes', value: notes });
   if (photoUrl) embed.setImage(photoUrl);
   embed.setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` }).setTimestamp();
-  const agendaCh = getChById(interaction.guild, 'AGENDA', 'agenda');
-  if (agendaCh) {
-    const isIlleg = interaction.member?.roles?.cache?.has(ROLE_POLE_ILLEGAL);
-    const pingRole = isIlleg ? `<@&${ROLE_POLE_ILLEGAL}>` : `<@&${ROLE_POLE_LEGAL}>`;
-    await agendaCh.send({ content: `${pingRole} — 📅 **${titre}** · ${heure} à ${lieu}`, embeds: [embed] }).catch(() => {});
+  // Poster dans le bon salon selon le pôle du membre
+  const isIlleg = interaction.member?.roles?.cache?.has(ROLE_POLE_ILLEGAL);
+  const poleLabel = isIlleg ? '🔒 Illégal' : '⚖️ Légal';
+  const pingRole  = isIlleg ? `<@&${ROLE_POLE_ILLEGAL}>` : `<@&${ROLE_POLE_LEGAL}>`;
+  let agendaCh;
+  if (isIlleg) {
+    agendaCh = interaction.guild.channels.cache.get(SALON_HARDCODED.AGENDA_ILLEGAL)
+      || getChById(interaction.guild, 'AGENDA_ILLEGAL', 'agenda-illegal', 'agenda-illégal');
+  } else {
+    agendaCh = getChById(interaction.guild, 'AGENDA', 'agenda');
   }
-  await interaction.editReply({ content: photoUrl ? '✅ RDV créé avec photo de repérage !' : '✅ RDV créé et posté dans #agenda !', embeds: [embed], components: [] });
+  if (agendaCh) await agendaCh.send({ content: `${pingRole} — 📅 **${titre}** · ${heure} à ${lieu}`, embeds: [embed], allowedMentions: { parse: [], roles: [isIlleg ? ROLE_POLE_ILLEGAL : ROLE_POLE_LEGAL] } }).catch(() => {});
+  const salonLabel = isIlleg ? '#agenda-illégal' : '#agenda';
+  await interaction.editReply({ content: photoUrl ? '✅ RDV créé avec photo de repérage !' : `✅ RDV créé et posté dans ${salonLabel} !`, embeds: [embed], components: [] });
   if (process.env.NOTION_TOKEN && process.env.NOTION_AGENDA_DB_ID) {
-    fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: process.env.NOTION_AGENDA_DB_ID }, properties: { 'Titre': { title: [{ text: { content: titre } }] }, 'Date': { date: { start: dateISO } }, 'Heure': { rich_text: [{ text: { content: heure } }] }, 'Lieu': { rich_text: [{ text: { content: lieu !== '—' ? lieu : '' } }] }, 'Notes': { rich_text: [{ text: { content: notes.slice(0, 2000) } }] }, 'Statut': { select: { name: 'Planifié' } }, 'Type': { select: { name: 'RDV' } }, 'Émetteur': { rich_text: [{ text: { content: emetteurIC } }] }, ...(photoUrl ? { 'Photo': { files: [{ name: 'reperage.jpg', type: 'external', external: { url: photoUrl } }] } } : {}) } }) }).then(async res => { const data = await res.json().catch(() => ({})); if (res.ok) console.log(`✅ RDV archivé Notion : ${titre}`); else console.log(`❌ Notion RDV erreur: ${data?.message}`); }).catch(e => console.log('❌ Notion RDV error:', e.message));
+    fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: process.env.NOTION_AGENDA_DB_ID }, properties: {
+      'Titre':    { title:     [{ text: { content: titre } }] },
+      'Date':     { date:      { start: dateISO } },
+      'Heure':    { rich_text: [{ text: { content: heure } }] },
+      'Lieu':     { rich_text: [{ text: { content: lieu !== '—' ? lieu : '' } }] },
+      'Notes':    { rich_text: [{ text: { content: notes.slice(0, 2000) } }] },
+      'Statut':   { select:    { name: 'Planifié' } },
+      'Type':     { select:    { name: 'RDV' } },
+      'Pôle':     { select:    { name: poleLabel } },
+      'Créé par': { rich_text: [{ text: { content: emetteurIC } }] },
+      ...(photoUrl ? { 'Photo': { files: [{ name: 'reperage.jpg', type: 'external', external: { url: photoUrl } }] } } : {}),
+    } }) }).then(async res => { const data = await res.json().catch(() => ({})); if (res.ok) console.log(`✅ RDV archivé Notion : ${titre}`); else console.log(`❌ Notion RDV erreur: ${data?.message}`); }).catch(e => console.log('❌ Notion RDV error:', e.message));
   }
 }
 
