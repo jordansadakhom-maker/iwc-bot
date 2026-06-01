@@ -417,9 +417,22 @@ async function handleSlashCommand(interaction) {
     // Ouvrir un modal pour saisie libre de la durée + options
     const modal = new ModalBuilder().setCustomId('modal_absent').setTitle('🟡 Déclarer une absence');
     modal.addComponents(
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duree').setLabel('Durée (ex: 3 jours, 1 semaine, jusqu\'au 10 juin...)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 2 jours / 1 semaine / jusqu\'au 15 juin / Indéterminé')),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('raison').setLabel('Raison (optionnel)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: Vacances, travail, IRL...')),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('mode').setLabel('Mode absence (écrire: lecture-seule OU absent-total)').setStyle(TextInputStyle.Short).setRequired(false).setValue('lecture-seule').setPlaceholder('lecture-seule = tu peux lire | absent-total = accès réduit')),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('duree')
+          .setLabel('Durée')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setPlaceholder('Ex: 2 jours · 1 semaine · jusqu\'au 10 juin · ce soir 22h · Indéterminé')
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('raison')
+          .setLabel('Raison (optionnel)')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false)
+          .setPlaceholder('Ex: vacances, travail, IRL...')
+      ),
     );
     await interaction.showModal(modal);
     return;
@@ -2180,8 +2193,8 @@ async function _validerModalAbsent(interaction) {
   const guild = interaction.guild;
   const dureeRaw = interaction.fields.getTextInputValue('duree').trim();
   const raison   = interaction.fields.getTextInputValue('raison').trim() || '—';
-  const modeRaw  = (interaction.fields.getTextInputValue('mode') || 'lecture-seule').trim().toLowerCase();
-  const modeLectureSeule = !modeRaw.includes('total'); // par défaut lecture-seule
+  // Mode lecture-seule par défaut : la personne peut lire mais pas écrire
+  const modeLectureSeule = true;
 
   // Calculer la date de retour depuis la durée saisie
   let finAbsence = null;
@@ -2232,21 +2245,14 @@ async function _validerModalAbsent(interaction) {
     ? new Date(finAbsence).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' })
     : 'Indéterminé';
 
-  const modeLabel = modeLectureSeule
-    ? '👁️ Lecture seule (tu peux lire mais pas écrire)'
-    : '🔕 Absent total (accès réduit)';
-
   await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('🟡 Absence enregistrée')
     .addFields(
       { name: '⏱️ Durée', value: dureeRaw, inline: true },
       { name: '📅 Retour prévu', value: retourStr, inline: true },
       { name: '📝 Raison', value: raison, inline: false },
-      { name: '👁️ Mode', value: modeLabel, inline: false },
     )
-    .setDescription(modeLectureSeule
-      ? "*Tu peux encore lire les salons. Seule l'écriture est limitée selon le rôle Absent.*"
-      : "*Accès réduit activé. Utilise /retour pour lever l'absence.*")
-    .setFooter({ text: 'IWC • /retour pour revenir' })] });
+    .setDescription("*Tu peux encore lire les salons. L'écriture sera bloquée selon les permissions du rôle Absent.*")
+    .setFooter({ text: 'IWC • /retour pour revenir à tout moment' })] });
 
   // Poster dans #absences
   const absCh = guild.channels.cache.get(SALON_HARDCODED.ABSENCES) || getChById(guild, 'ABSENCES', 'absences');
@@ -2258,7 +2264,6 @@ async function _validerModalAbsent(interaction) {
       { name: '⏱️ Durée', value: dureeRaw, inline: true },
       { name: '📅 Retour prévu', value: retourStr, inline: true },
       { name: '📝 Raison', value: raison, inline: false },
-      { name: '👁️ Mode', value: modeLectureSeule ? 'Lecture seule' : 'Absent total', inline: true },
     )
     .setFooter({ text: `IWC • ${fmtShort(new Date())}` }).setTimestamp()] }).catch(() => {});
 
