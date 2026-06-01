@@ -2736,35 +2736,39 @@ async function _ouvrirMenuRdvSlash(interaction) {
 }
 
 async function _ouvrirMenuRdv(interaction) {
-  try {
   console.log('🔵 RDV STEP 1 - _ouvrirMenuRdv appelé');
   const msgId = interaction.customId ? interaction.customId.replace('btn_rdv_creer_', '') : interaction.id;
-  await interaction.reply({
+  const options = [
+    { label: '👑 Reunion Direction', value: 'reunion_direction', description: 'Réunion interne Direction' },
+    { label: '🤝 Rendez-vous Client', value: 'rdv_client', description: 'RDV avec un client externe' },
+    { label: '🎯 Briefing Operation', value: 'briefing_op', description: 'Brief avant une opération' },
+    { label: '📊 Debrief Operation', value: 'debrief_op', description: 'Retour après opération' },
+    { label: '🔍 Entretien Recrutement', value: 'entretien_recru', description: 'Entretien candidat' },
+    { label: '⚖ Reunion Pole Legal', value: 'reunion_legal', description: 'Réunion Iron Wolf Company' },
+    { label: '🔒 Reunion Confrerie', value: 'reunion_confrerie', description: 'Réunion La Confrérie' },
+    { label: '🎓 Formation Membres', value: 'formation', description: 'Session de formation' },
+    { label: '🤝 Negociation', value: 'negociation', description: 'Négociation commerciale' },
+    { label: '🏥 Rendez-vous Medical', value: 'rdv_medical', description: 'Consultation médicale IC' },
+    { label: '📋 Rendez-vous Juridique', value: 'rdv_juridique', description: 'Consultation juridique IC' },
+    { label: '📝 Autre', value: 'autre', description: 'Autre type de rendez-vous' },
+  ];
+  return interaction.reply({
     flags: MessageFlags.Ephemeral,
     embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📅 Nouveau Rendez-vous — IWC').setDescription('**Étape 1/2** — Sélectionne le type de rendez-vous.')],
-    components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`rdv_type_select_${msgId}`).setPlaceholder('Type de rendez-vous...').addOptions([
-      { label: '👑 Reunion Direction', value: 'reunion_direction', description: 'Réunion interne Direction' },
-      { label: '🤝 Rendez-vous Client', value: 'rdv_client', description: 'RDV avec un client externe' },
-      { label: '🎯 Briefing Operation', value: 'briefing_op', description: 'Brief avant une opération' },
-      { label: '📊 Debrief Operation', value: 'debrief_op', description: 'Retour après opération' },
-      { label: '🔍 Entretien Recrutement', value: 'entretien_recru', description: 'Entretien candidat' },
-      { label: '⚖ Reunion Pole Legal', value: 'reunion_legal', description: 'Réunion Iron Wolf Company' },
-      { label: '🔒 Reunion Confrerie', value: 'reunion_confrerie', description: 'Réunion La Confrérie' },
-      { label: '🎓 Formation Membres', value: 'formation', description: 'Session de formation' },
-      { label: '🤝 Negociation', value: 'negociation', description: 'Négociation commerciale' },
-      { label: '🏥 Rendez-vous Medical', value: 'rdv_medical', description: 'Consultation médicale IC' },
-      { label: '📋 Rendez-vous Juridique', value: 'rdv_juridique', description: 'Consultation juridique IC' },
-      { label: '📝 Autre', value: 'autre', description: 'Autre type de rendez-vous' },
-    ]))],
+    components: [new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`rdv_type_select_${msgId}`)
+        .setPlaceholder('Type de rendez-vous...')
+        .addOptions(options)
+    )],
   });
-  } catch(e) { console.log('❌ _ouvrirMenuRdv:', e.message); interaction.reply({ content: '❌ Erreur menu RDV.', flags: MessageFlags.Ephemeral }).catch(() => {}); }
 }
 
 async function _handleRdvTypeSelect(interaction) {
-  try {
   console.log('🔵 RDV STEP 2 - _handleRdvTypeSelect, typeRdv:', interaction.values[0]);
-  const typeRdv = interaction.values[0]; const msgId = interaction.customId.replace('rdv_type_select_', '');
-  await interaction.update({
+  const typeRdv = interaction.values[0];
+  const msgId = interaction.customId.replace('rdv_type_select_', '');
+  return interaction.update({
     embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📅 Nouveau Rendez-vous — IWC').setDescription('**Étape 2/3** — Comment convoquer ?')],
     components: [new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
@@ -2776,11 +2780,9 @@ async function _handleRdvTypeSelect(interaction) {
         ])
     )],
   });
-  } catch(e) { console.log('❌ _handleRdvTypeSelect:', e.message); interaction.reply({ content: '❌ Erreur étape 2.', flags: MessageFlags.Ephemeral }).catch(() => {}); }
 }
 
 async function _handleRdvModeSelect(interaction) {
-  try {
   console.log('🔵 RDV STEP 3 - _handleRdvModeSelect, mode:', interaction.values[0]);
   const mode = interaction.values[0]; const allParts = interaction.customId.replace('rdv_mode_select_', '').split('_'); const typeRdv = allParts.slice(0, -1).join('_'); const msgId = allParts[allParts.length - 1];
   if (mode === 'role') {
@@ -2810,7 +2812,6 @@ async function _handleRdvModeSelect(interaction) {
       components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`rdv_individuel_select_${typeRdv}_${msgId}`).setPlaceholder('Choisir les participants...').setMinValues(1).setMaxValues(Math.min(membres.length, 25)).addOptions(membres))],
     });
   }
-  } catch(e) { console.log('❌ _handleRdvModeSelect:', e.message); interaction.reply({ content: '❌ Erreur étape 3.', flags: MessageFlags.Ephemeral }).catch(() => {}); }
 }
 
 async function _handleRdvIndividuelSelect(interaction) {
