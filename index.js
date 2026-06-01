@@ -1091,6 +1091,7 @@ client.on('interactionCreate', async interaction => {
 
   if (interaction.isStringSelectMenu()) {
     if (interaction.customId === 'agenda_lieu_select')         return _handleAgendaLieuSelect(interaction);
+    if (interaction.customId.startsWith('btn_rdv_modal_'))    return _handleRdvModalBtn(interaction);
     if (interaction.customId === 'tresor_config_limite_legal')   return notionModules.handleTresorConfigSelect?.(interaction);
     if (interaction.customId.startsWith('rdv_type_select_'))     return _handleRdvTypeSelect(interaction);
     if (interaction.customId.startsWith('rdv_mode_select_'))     return _handleRdvModeSelect(interaction);
@@ -2817,16 +2818,38 @@ async function _ouvrirModalAgendaSimple(interaction) {
 async function _handleAgendaLieuSelect(interaction) {
   const lieu = interaction.values[0];
 
+  // Discord ne permet pas showModal sur un StringSelectMenu
+  // Solution : update le message avec le lieu stocké + bouton pour ouvrir le modal
+  const lieuEnc = encodeURIComponent(lieu);
+  await interaction.update({
+    embeds: [new EmbedBuilder()
+      .setColor(0x2C3E50)
+      .setTitle('📅 Nouveau RDV — IWC')
+      .setDescription(`**📍 Lieu sélectionné : ${lieu}**\n\nClique sur le bouton ci-dessous pour remplir les détails du RDV.`)
+    ],
+    components: [new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`btn_rdv_modal_${lieuEnc}`)
+        .setLabel('📝 Remplir les détails du RDV')
+        .setStyle(ButtonStyle.Primary)
+    )],
+  });
+}
+
+// ── Bouton qui ouvre le modal RDV avec le lieu pré-rempli ──
+async function _handleRdvModalBtn(interaction) {
+  const lieu = decodeURIComponent(interaction.customId.replace('btn_rdv_modal_', ''));
+
   const modal = new ModalBuilder()
     .setCustomId(`modal_agenda_simple_${encodeURIComponent(lieu)}`)
-    .setTitle(`📅 RDV à ${lieu === 'Autre' ? '...' : lieu}`);
+    .setTitle(`📅 RDV — ${lieu === 'Autre' ? 'Lieu personnalisé' : lieu}`);
 
   modal.addComponents(
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('titre')
         .setLabel('Titre du RDV')
         .setStyle(TextInputStyle.Short).setRequired(true)
-        .setPlaceholder('Ex: Réunion Direction, Entretien Wellington...')
+        .setPlaceholder('Ex: Réunion Direction, Entretien...')
     ),
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('date')
@@ -2842,20 +2865,19 @@ async function _handleAgendaLieuSelect(interaction) {
     ),
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('lieu_detail')
-        .setLabel(lieu === 'Autre' ? 'Lieu précis' : `Lieu précis à ${lieu} (optionnel)`)
+        .setLabel(lieu === 'Autre' ? 'Lieu précis' : `Détail du lieu (optionnel)`)
         .setStyle(TextInputStyle.Short).setRequired(lieu === 'Autre')
         .setValue(lieu !== 'Autre' ? lieu : '')
-        .setPlaceholder(`Ex: Mairie de ${lieu}, Journal de ${lieu}...`)
+        .setPlaceholder(`Ex: Mairie de ${lieu}...`)
     ),
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('notes')
-        .setLabel('Notes (optionnel)')
+        .setLabel('Notes / Ordre du jour (optionnel)')
         .setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(400)
-        .setPlaceholder('Ordre du jour, informations importantes...')
+        .setPlaceholder('Points à aborder, informations importantes...')
     ),
   );
 
-  // Sur un SelectMenu, showModal doit être le PREMIER appel — pas d'update avant
   await interaction.showModal(modal);
 }
 
