@@ -1864,8 +1864,11 @@ async function _handleRetour(interaction) {
 async function _handleAnnulerAbsence(interaction) {
   if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const cible = interaction.options.getUser('membre'); const db = loadDB(); const m = db.members[cible.id];
-  if (!m || m.status !== 'absent') return interaction.editReply({ content: `❌ <@${cible.id}> n'est pas marqué absent.` });
+  const cible = interaction.options.getUser('membre');
+  if (!cible) return interaction.editReply({ content: '❌ Membre introuvable. Utilise l\'option @membre.' });
+  const db = loadDB(); const m = db.members[cible.id];
+  if (!m) return interaction.editReply({ content: `❌ <@${cible.id}> n'est pas enregistré dans le système. Vérifie que le membre a bien utilisé /absent.` });
+  if (m.status !== 'absent') return interaction.editReply({ content: `❌ <@${cible.id}> n'est pas marqué absent (statut actuel : ${m.status}).` });
   m.status = 'actif'; m.lastActivity = new Date().toISOString(); m.absentJusqu = null; m.absentRaison = null; saveDB(db);
   const membreD = await interaction.guild.members.fetch(cible.id).catch(() => null);
   if (membreD) {
