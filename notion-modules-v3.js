@@ -60,6 +60,20 @@ function getCh(guild, ...names) {
   return null;
 }
 
+function getChById(guild, salonKey, ...fallbackNames) {
+  try {
+    const { SALON_IDS } = require('./config');
+    const id = SALON_IDS?.[salonKey];
+    if (id) { const ch = guild.channels.cache.get(id); if (ch) return ch; }
+  } catch {}
+  for (const name of fallbackNames) {
+    const clean = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const ch = guild.channels.cache.find(c => c.isTextBased?.() && clean(c.name).includes(clean(name)));
+    if (ch) return ch;
+  }
+  return null;
+}
+
 function isDirection(member) {
   return member?.roles?.cache?.some(r =>
     ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier', 'Instructeur', 'Secrétaire', 'Conseil'].some(n => r.name.includes(n))
