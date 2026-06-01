@@ -26,6 +26,19 @@ function _getPole(member) {
 }
 
 async function handleTresorCommand(interaction) {
+  // Bloquer si une transaction est déjà en cours pour cet utilisateur
+  const dbCheck = loadDB();
+  const txEnCours = Object.values(dbCheck.transactionsPendantes || {}).find(
+    tx => tx.userId === interaction.user.id && !tx.photoOk && !tx.approved &&
+    (Date.now() - new Date(tx.createdAt).getTime()) < 8 * 60 * 1000
+  );
+  if (txEnCours) {
+    return interaction.reply({
+      flags: MessageFlags.Ephemeral,
+      content: `⏳ Tu as déjà une transaction en cours (**Réf. \`${txEnCours.txId}\`**).
+*Envoie ta photo ou attends qu'elle expire (8 min) avant d'en créer une nouvelle.*`,
+    });
+  }
   await interaction.reply({
     flags: MessageFlags.Ephemeral,
     embeds: [new EmbedBuilder()
@@ -93,7 +106,7 @@ async function handleTresorModal(interaction) {
   const typeRaw   = parts[2];
   const coffreRaw = parts[3];
 
-  const montant = parseInt(interaction.fields.getTextInputValue('montant').replace(/[^0-9]/g, ''), 10);
+  const montant = parseInt(interaction.fields.getTextInputValue('montant').replace(/[^0-9.,]/g, '').replace(',', '.'), 10);
   const objet   = interaction.fields.getTextInputValue('objet').trim();
 
   if (isNaN(montant) || montant <= 0) {
@@ -384,6 +397,18 @@ async function _validerTransaction(guild, tx, photoUrl) {
     if (sentMsg) setTimeout(() => sentMsg.delete().catch(() => {}), 60000);
   }
 
+  // Rafraîchir le panel trésorerie
+  try {
+    const coffrePanel = guild.channels.cache.find(c => c.name?.includes('coffre-entreprise'));
+    if (coffrePanel) {
+      const dbRefresh = loadDB();
+      if (dbRefresh.tresorButtonMsgId) {
+        const panelMsg = await coffrePanel.messages.fetch(dbRefresh.tresorButtonMsgId).catch(() => null);
+        if (panelMsg) await panelMsg.edit({ embeds: [_tresorEmbed()], components: [_tresorRow()] }).catch(() => {});
+      }
+    }
+  } catch {}
+
   return nouveauSolde;
 }
 
@@ -426,6 +451,7 @@ async function setupTresorButton(guild) {
   try { const msgs = await ch.messages.fetch({ limit: 100 }); allBotMsgs = [...msgs.values()].filter(m => m.author.id === guild.members.me?.id).sort((a, b) => b.createdTimestamp - a.createdTimestamp); } catch {}
   const panels    = allBotMsgs.filter(m => m.components?.length > 0 && m.embeds?.length > 0);
   const nonPanels = allBotMsgs.filter(m => !(m.components?.length > 0));
+  // Supprimer tous les messages sans boutons (transactions, messages orphelins)
   for (const m of nonPanels) await m.delete().catch(() => {});
   for (let i = 1; i < panels.length; i++) await panels[i].delete().catch(() => {});
   if (panels.length > 0) {
