@@ -872,49 +872,7 @@ client.on('messageCreate', async message => {
   const estBotOuSys   = message.author.bot || message.system || message.webhookId;
   const estReplyAuBot = message.reference && (await message.fetchReference().catch(() => null))?.author?.id === message.guild?.members?.me?.id;
 
-  if (SALONS_RDV.has(message.channel.id) && !estBotOuSys && !estReplyAuBot) {
-    const contenu = message.content.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-
-    // Toutes les façons de dire rendez-vous
-    const motsRdv = [
-      // Formes directes
-      'rdv', 'rendez-vous', 'rendez vous', 'rendezvous', 'randez-vous', 'randez vous',
-      // Booker / fixer
-      'booker', 'booké', 'booke', 'on se capte', 'on se catch', 'on se croise',
-      'on se retrouve', 'on se voit', 'on se pose', 'rejoins-moi', 'rejoins moi',
-      'passe chez', 'fixer un truc', 'fixer un rdv', 'fixer ca', 'fixer ça',
-      // Avec préposition (rdv à, rdv au, rdv chez)
-      'rdv a ', 'rdv au ', 'rdv chez ', 'rdv ce ', 'rdv demain',
-      'rendez-vous a ', 'rendez-vous au ', 'rendez-vous chez ',
-      'rendez vous a ', 'rendez vous au ', 'rendez vous chez ', 'rendez vous demain', 'rendez vous ce soir', 'rendez vous ce', 'rendez vous a',
-      // Heure en chiffres après rdv
-      'rdv 0h','rdv 1h','rdv 2h','rdv 3h','rdv 4h','rdv 5h','rdv 6h','rdv 7h','rdv 8h','rdv 9h',
-      'rdv 10h','rdv 11h','rdv 12h','rdv 13h','rdv 14h','rdv 15h','rdv 16h','rdv 17h','rdv 18h',
-      'rdv 19h','rdv 20h','rdv 21h','rdv 22h','rdv 23h',
-      // Heure en lettres
-      'rdv ce soir', 'rdv demain soir', 'rdv ce matin', 'rdv demain matin',
-      'retrouve-toi', 'retrouve toi', 'retrouvons-nous', 'retrouvons nous',
-      // Style RP
-      'on se capte a', 'on se voit a', 'rejoins moi a', 'viens a ',
-    ];
-
-    // Regex pour détecter heure après rdv/rendez-vous (ex: "rdv armadillo 21h", "rdv a valentine")
-    const rdvAvecContexte = /(rdv|rendez.?vous|randez.?vous).{0,30}(\d{1,2}h\d{0,2}|armadillo|valentine|paleto|sandy|grapeseed|chumash|vinewood|rockford|downtown|davis|strawberry|la mesa|bien?la|mission row|burton|morningwood)/i;
-
-    const contenuOriginal = message.content;
-    const matchMot   = motsRdv.some(m => contenu.includes(m));
-    const matchRegex = rdvAvecContexte.test(contenuOriginal);
-
-    if (matchMot || matchRegex) {
-      await message.reply({
-        content: `📅 <@${message.author.id}> Tu veux créer un RDV ?`,
-        components: [new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId(`btn_rdv_creer_${message.id}`).setLabel('📅 Créer ce RDV').setStyle(ButtonStyle.Primary),
-        )],
-        allowedMentions: { users: [message.author.id] },
-      }).then(m => setTimeout(() => m.delete().catch(() => {}), 60000)).catch(() => {});
-    }
-  }
+  // Bouton RDV retiré — utiliser /rdv directement
 
   // #surnom-pseudo — géré via bouton + modal (btn_surnom_ouvrir)
 
@@ -1278,7 +1236,7 @@ Cette action est **irréversible**. Les participants seront notifiés.`)], compo
     await interaction.editReply({ content: `📋 Contrat **${contratId}** créé.` });
     const signataireICEmploi = db.members[interaction.user.id]?.name || interaction.user.username;
     const embed = new EmbedBuilder().setColor(0x8B5A2A).setTitle(`📥 CONTRAT EMPLOYEUR — ${contratId}`).setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n  CONTRAT PROPOSÉ À IRON WOLF COMPANY\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```').addFields({ name: '🆔 Référence', value: `\`${contratId}\``, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: '✍️ Soumis par', value: signataireICEmploi, inline: true }, { name: `🏭 Employeur — ${contrat.employeurNom}`, value: contrat.dateEcheance ? `📅 Échéance : ${fmtShort(contrat.dateEcheance)}` : '—' }, { name: '💰 Rémunération', value: contrat.remuneration }, { name: '📋 Objet', value: contrat.objet }, { name: '📌 Statut', value: '🟡 En attente de notre signature', inline: true }).setFooter({ text: `Iron Wolf Company • Secrétariat officiel • ${fmtShort(new Date())}` });
-    const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`signer_emploi_${contratId}`).setLabel('✍️ Signer & Accepter').setStyle(ButtonStyle.Success), new ButtonBuilder().setCustomId(`refuser_emploi_${contratId}`).setLabel('❌ Décliner').setStyle(ButtonStyle.Danger));
+    const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`signer_emploi_${contratId}`).setLabel('✍️ Signer & Accepter').setStyle(ButtonStyle.Success), new ButtonBuilder().setCustomId(`refuser_emploi_${contratId}`).setLabel('❌ Décliner').setStyle(ButtonStyle.Danger), new ButtonBuilder().setCustomId(`btn_rdv_creer_contrat_${contratId}`).setLabel('📅 Planifier un RDV').setStyle(ButtonStyle.Secondary));
     const ch = guild.channels.cache.get(CH.CONTRATS); if (ch) await ch.send({ content: `${getContratMention(guild)} — 📥 Nouveau contrat employeur à examiner.`, embeds: [embed], components: [row] });
     return;
   }
@@ -2630,8 +2588,10 @@ async function setupSurnomFormat(guild) {
 
 // ── ÉTAPE 1 : Choisir le type de RDV ──
 async function _ouvrirMenuRdv(interaction) {
-  const msgId = interaction.customId.replace('btn_rdv_creer_', '');
-  await interaction.reply({
+  // Fonctionne depuis /rdv (slash) ou bouton btn_rdv_creer_
+  const msgId = interaction.customId ? interaction.customId.replace('btn_rdv_creer_', '') : interaction.id;
+  const replyFn = interaction.isChatInputCommand?.() ? 'reply' : 'reply';
+  await interaction[replyFn]({
     flags: MessageFlags.Ephemeral,
     embeds: [new EmbedBuilder()
       .setColor(0x2C3E50)
