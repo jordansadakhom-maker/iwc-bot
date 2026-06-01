@@ -1083,7 +1083,6 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId.startsWith('btn_rdv_creer_'))     return _ouvrirMenuRdv(interaction);
     // [CORRECTION] btn_rdv_modal_ est un bouton, pas un select menu
     if (interaction.customId.startsWith('btn_rdv_modal_'))     return _handleRdvModalBtn(interaction);
-    if (interaction.customId.startsWith('rdv_type_select_'))   return _handleRdvTypeSelect(interaction);
     if (interaction.customId.startsWith('btn_grade_maj_'))     return notionV3.handleGradeMajButton?.(interaction);
     if (interaction.customId.startsWith('info_infirmer_'))     return notionV3.handleInformateurInfirmer?.(interaction);
     if (interaction.customId.startsWith('affaire_oui_'))       return notionV3.handleAffaireVote?.(interaction, 'oui');
