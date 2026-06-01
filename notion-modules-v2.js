@@ -1343,3 +1343,5 @@ async function checkAlerteCoffre(guild) {
     }
   } catch (e) { console.log('❌ checkAlerteCoffre error:', e.message); }
 }
+
+
