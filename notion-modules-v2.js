@@ -5,7 +5,7 @@
 
 const {
   EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle,
-  ActionRowBuilder, ButtonBuilder, ButtonStyle,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags,
 } = require('discord.js');
 const { loadDB, saveDB } = require('./db');
 const notionExtra = require('./notion-extra');
