@@ -2144,7 +2144,7 @@ ${msg}`, components: [row] });
   if (jCh) await jCh.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('🔒 Permissions serveur mises à jour').setDescription(`Par **${interaction.user.username}** · ${ok} salons · ${err} erreurs`).setTimestamp()] }).catch(() => {});
 }
 
-async function setupPanelDirection(guild) {async function setupPanelDirection(guild) {
+async function setupPanelDirection(guild) {
   try {
     const clean = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
     const ch = guild.channels.cache.find(c => c.isTextBased?.() && (clean(c.name).includes('direction') && (clean(c.name).includes('5') || clean(c.name).includes('nous')))) || guild.channels.cache.find(c => c.isTextBased?.() && clean(c.name).includes('directionnous'));
@@ -2838,5 +2838,4 @@ global.getInformateurCh = (guild) => getJournalCh(guild) || guild.channels.cache
 client.login(process.env.DISCORD_TOKEN)
   .then(() => console.log('🔑 Login OK'))
   .catch(e => { console.error('❌ Login failed:', e.message); process.exit(1); });
-}
 
