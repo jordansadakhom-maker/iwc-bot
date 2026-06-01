@@ -249,18 +249,18 @@ async function sendLog(guild, type, data) {
   const ch = await getLogsCh(guild);
   if (!ch) return;
   const cfgs = {
-    ARRIVEE: { color: 0x57F287, emoji: '👋', title: 'ARRIVÉE — ' + data.username, fields: [{ name: '👤 Membre', value: `<@${data.userId}> (${data.username})`, inline: true }, { name: '🔢 Âge du compte', value: data.accountAge + ' jours', inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }] },
-    DEPART: { color: 0x555555, emoji: '🚪', title: 'DÉPART — ' + data.username, fields: [{ name: '👤 Membre', value: data.username, inline: true }, { name: '🎖️ Rang', value: data.rang || '—', inline: true }, { name: '⏱️ Durée', value: data.duree || '—', inline: true }] },
-    REGLEMENT_VALIDE: { color: 0x3B82F6, emoji: '📜', title: 'RÈGLEMENT VALIDÉ — ' + data.username, fields: [{ name: '👤 Membre', value: `<@${data.userId}> (${data.username})`, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }] },
-    CANDIDATURE_RECUE: { color: 0xFFA500, emoji: '📥', title: 'CANDIDATURE REÇUE — ' + data.nomPerso, fields: [{ name: '👤 Joueur', value: `<@${data.userId}>`, inline: true }, { name: '⚖️ Type', value: data.type || '—', inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }] },
-    CANDIDATURE_ACCEPTEE: { color: 0x57F287, emoji: '✅', title: 'CANDIDATURE ACCEPTÉE — ' + data.nomPerso, fields: [{ name: '👤 Joueur', value: `<@${data.userId}>`, inline: true }, { name: '⚖️ Type', value: data.type || '—', inline: true }, { name: '✅ Par', value: data.validePar || '—', inline: true }] },
-    CANDIDATURE_REFUSEE: { color: 0xED4245, emoji: '❌', title: 'CANDIDATURE REFUSÉE — ' + data.nomPerso, fields: [{ name: '👤 Joueur', value: `<@${data.userId}>`, inline: true }, { name: '⚖️ Type', value: data.type || '—', inline: true }] },
-    ABSENCE: { color: 0xFFA500, emoji: '🟡', title: 'ABSENCE — ' + data.username, fields: [{ name: '👤 Membre', value: `<@${data.userId}>`, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }] },
-    CONTRAT_SIGNE: { color: 0x57F287, emoji: '📜', title: 'CONTRAT SIGNÉ — ' + data.contratId, fields: [{ name: '🆔 Réf', value: '`' + data.contratId + '`', inline: true }, { name: '📋 Objet', value: data.objet, inline: true }, { name: '✍️ Signé par', value: data.signe, inline: true }] },
-    CONTRAT_REFUSE: { color: 0xED4245, emoji: '📜', title: 'CONTRAT REFUSÉ — ' + data.contratId, fields: [{ name: '🆔 Réf', value: '`' + data.contratId + '`', inline: true }, { name: '📋 Objet', value: data.objet, inline: true }] },
-    OPERATION: { color: 0xFFA500, emoji: '🎯', title: 'OPÉRATION — ' + data.nom, fields: [{ name: '🎯 Nom', value: data.nom, inline: true }, { name: '📍 Lieu', value: data.lieu || '—', inline: true }, { name: '📋 Statut', value: data.statut || '—', inline: true }] },
-    PROMOTION: { color: 0x57F287, emoji: '⬆️', title: 'PROMOTION — ' + data.username, fields: [{ name: '👤 Membre', value: `<@${data.userId}>`, inline: true }, { name: '📉 Ancien rang', value: data.ancienRang || '—', inline: true }, { name: '📈 Nouveau rang', value: data.nouveauRang || '—', inline: true }, { name: '✅ Décidé par', value: data.validePar || '—', inline: true }] },
-    RETROGRADATION: { color: 0xED4245, emoji: '⬇️', title: 'RÉTROGRADATION — ' + data.username, fields: [{ name: '👤 Membre', value: `<@${data.userId}>`, inline: true }, { name: '📉 Ancien rang', value: data.ancienRang || '—', inline: true }, { name: '📈 Nouveau rang', value: data.nouveauRang || '—', inline: true }, { name: '📝 Raison', value: data.raison || '—', inline: true }] },
+    ARRIVEE: { color: 0x57F287, title: 'ARRIVÉE — ' + data.username, fields: [{ name: '👤 Membre', value: `<@${data.userId}> (${data.username})`, inline: true }, { name: '🔢 Âge du compte', value: data.accountAge + ' jours', inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }] },
+    DEPART: { color: 0x555555, title: 'DÉPART — ' + data.username, fields: [{ name: '👤 Membre', value: data.username, inline: true }, { name: '🎖️ Rang', value: data.rang || '—', inline: true }, { name: '⏱️ Durée', value: data.duree || '—', inline: true }] },
+    REGLEMENT_VALIDE: { color: 0x3B82F6, title: 'RÈGLEMENT VALIDÉ — ' + data.username, fields: [{ name: '👤 Membre', value: `<@${data.userId}> (${data.username})`, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }] },
+    CANDIDATURE_RECUE: { color: 0xFFA500, title: 'CANDIDATURE REÇUE — ' + data.nomPerso, fields: [{ name: '👤 Joueur', value: `<@${data.userId}>`, inline: true }, { name: '⚖️ Type', value: data.type || '—', inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }] },
+    CANDIDATURE_ACCEPTEE: { color: 0x57F287, title: 'CANDIDATURE ACCEPTÉE — ' + data.nomPerso, fields: [{ name: '👤 Joueur', value: `<@${data.userId}>`, inline: true }, { name: '⚖️ Type', value: data.type || '—', inline: true }, { name: '✅ Par', value: data.validePar || '—', inline: true }] },
+    CANDIDATURE_REFUSEE: { color: 0xED4245, title: 'CANDIDATURE REFUSÉE — ' + data.nomPerso, fields: [{ name: '👤 Joueur', value: `<@${data.userId}>`, inline: true }, { name: '⚖️ Type', value: data.type || '—', inline: true }] },
+    ABSENCE: { color: 0xFFA500, title: 'ABSENCE — ' + data.username, fields: [{ name: '👤 Membre', value: `<@${data.userId}>`, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }] },
+    CONTRAT_SIGNE: { color: 0x57F287, title: 'CONTRAT SIGNÉ — ' + data.contratId, fields: [{ name: '🆔 Réf', value: '`' + data.contratId + '`', inline: true }, { name: '📋 Objet', value: data.objet, inline: true }, { name: '✍️ Signé par', value: data.signe, inline: true }] },
+    CONTRAT_REFUSE: { color: 0xED4245, title: 'CONTRAT REFUSÉ — ' + data.contratId, fields: [{ name: '🆔 Réf', value: '`' + data.contratId + '`', inline: true }, { name: '📋 Objet', value: data.objet, inline: true }] },
+    OPERATION: { color: 0xFFA500, title: 'OPÉRATION — ' + data.nom, fields: [{ name: '🎯 Nom', value: data.nom, inline: true }, { name: '📍 Lieu', value: data.lieu || '—', inline: true }, { name: '📋 Statut', value: data.statut || '—', inline: true }] },
+    PROMOTION: { color: 0x57F287, title: 'PROMOTION — ' + data.username, fields: [{ name: '👤 Membre', value: `<@${data.userId}>`, inline: true }, { name: '📉 Ancien rang', value: data.ancienRang || '—', inline: true }, { name: '📈 Nouveau rang', value: data.nouveauRang || '—', inline: true }, { name: '✅ Décidé par', value: data.validePar || '—', inline: true }] },
+    RETROGRADATION: { color: 0xED4245, title: 'RÉTROGRADATION — ' + data.username, fields: [{ name: '👤 Membre', value: `<@${data.userId}>`, inline: true }, { name: '📉 Ancien rang', value: data.ancienRang || '—', inline: true }, { name: '📈 Nouveau rang', value: data.nouveauRang || '—', inline: true }, { name: '📝 Raison', value: data.raison || '—', inline: true }] },
   };
   const cfg = cfgs[type]; if (!cfg) return;
   await ch.send({ embeds: [new EmbedBuilder().setColor(cfg.color).setTitle(cfg.emoji + ' ' + cfg.title).addFields(...cfg.fields).setFooter({ text: 'IWC • Logs • ' + new Date().toLocaleString('fr-FR') })] }).catch(e => console.log('Log error:', e.message));
@@ -515,7 +515,7 @@ async function handleSlashCommand(interaction) {
     _syncMembreNotion(cible.id, { rang: nouveauRang, lastActivity: new Date().toISOString() }).catch(() => {});
     await sendLog(guild, 'PROMOTION', { userId: cible.id, username: cible.username, ancienRang, nouveauRang, validePar: interaction.user.username });
     await notionExtra.logPromotionNotion?.(guild, { userId: cible.id, username: cible.username, nomPerso: db.members[cible.id]?.name || cible.username, ancienRang, nouveauRang, type: 'promotion', validePar: interaction.user.username });
-    await ajouterJournalIC(guild, { type: 'promotion', emoji: '⬆️', titre: `Promotion — ${cible.username}`, description: `${ancienRang} → **${nouveauRang}** · Décidé par ${interaction.user.username}`, auteur: interaction.user.username });
+    await ajouterJournalIC(guild, { type: 'promotion', titre: `Promotion — ${cible.username}`, description: `${ancienRang} → **${nouveauRang}** · Décidé par ${interaction.user.username}`, auteur: interaction.user.username });
     await envoyerDMRecap(interaction.guild, membre.id, 'grade', { ancien: ancienRang, nouveau: nouveauRang }).catch(() => {});
     await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle(`⬆️ Promotion — ${cible.username}`).addFields({ name: '👤 Membre', value: `<@${cible.id}>`, inline: true }, { name: '📉 Ancien rang', value: ancienRang, inline: true }, { name: '📈 Nouveau rang', value: nouveauRang, inline: true }, { name: '✅ Décidé par', value: interaction.user.username, inline: true }).setFooter({ text: `IWC • ${fmtShort(new Date())}` })] });
     return;
@@ -530,7 +530,7 @@ async function handleSlashCommand(interaction) {
     _syncMembreNotion(cible.id, { rang: nouveauRang, lastActivity: new Date().toISOString() }).catch(() => {});
     await sendLog(guild, 'RETROGRADATION', { userId: cible.id, username: cible.username, ancienRang, nouveauRang, raison, validePar: interaction.user.username });
     await notionExtra.logPromotionNotion?.(guild, { userId: cible.id, username: cible.username, nomPerso: db.members[cible.id]?.name || cible.username, ancienRang, nouveauRang, type: 'retrogradation', validePar: interaction.user.username });
-    await ajouterJournalIC(guild, { type: 'promotion', emoji: '⬇️', titre: `Rétrogradation — ${cible.username}`, description: `${ancienRang} → **${nouveauRang}** · Raison : ${raison}`, auteur: interaction.user.username });
+    await ajouterJournalIC(guild, { type: 'promotion', titre: `Rétrogradation — ${cible.username}`, description: `${ancienRang} → **${nouveauRang}** · Raison : ${raison}`, auteur: interaction.user.username });
     await envoyerDMRecap(interaction.guild, membre.id, 'grade', { ancien: ancienRang, nouveau: nouveauRang }).catch(() => {});
     await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle(`⬇️ Rétrogradation — ${cible.username}`).addFields({ name: '👤 Membre', value: `<@${cible.id}>`, inline: true }, { name: '📉 Ancien rang', value: ancienRang, inline: true }, { name: '📈 Nouveau rang', value: nouveauRang, inline: true }, { name: '📝 Raison', value: raison, inline: true }, { name: '✅ Décidé par', value: interaction.user.username, inline: true }).setFooter({ text: `IWC • ${fmtShort(new Date())}` })] });
     return;
@@ -832,7 +832,7 @@ client.on('guildMemberRemove', async member => {
   await sendLog(member.guild, 'DEPART', { username: member.user.username, rang: m?.rang, duree: m ? daysSince(m.joinedAt) + ' jours' : '—' });
   if (db.members[member.id]) { db.members[member.id].status = 'parti'; db.members[member.id].leftAt = new Date().toISOString(); saveDB(db); }
   _syncMembreNotion(member.id, { status: 'parti', leftAt: new Date().toISOString() }).catch(() => {});
-  await ajouterJournalIC(member.guild, { type: 'autre', emoji: '🚪', titre: `Départ — ${member.user.username}`, description: `${member.user.username} a quitté la Compagnie.`, auteur: 'Système' });
+  await ajouterJournalIC(member.guild, { type: 'autre', titre: `Départ — ${member.user.username}`, description: `${member.user.username} a quitté la Compagnie.`, auteur: 'Système' });
 });
 
 client.on('messageReactionAdd', async (reaction, user) => {
@@ -874,7 +874,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
       notionV5.archiverThreadCandidature?.(guild, cand, 'acceptee', user.username).catch(() => {});
       await notionExtra.creerFichePersonnageNotion?.(cand); notionExtra.planifierRappelFiche?.(guild, cand);
       await sendLog(guild, 'CANDIDATURE_ACCEPTEE', { userId: cand.userId, nomPerso: cand.nomPerso, type: isIllegal ? '🔪 Illégal' : '⚖️ Légal', validePar: user.username });
-      await ajouterJournalIC(guild, { type: 'recrutement', emoji: '🐺', titre: `Nouveau membre — ${cand.nomPerso}`, description: `${cand.nomPerso} rejoint la Compagnie · Pôle : ${isIllegal ? '🔪 Illégal' : '⚖️ Légal'} · Accepté par ${user.username}`, auteur: user.username });
+      await ajouterJournalIC(guild, { type: 'recrutement', titre: `Nouveau membre — ${cand.nomPerso}`, description: `${cand.nomPerso} rejoint la Compagnie · Pôle : ${isIllegal ? '🔪 Illégal' : '⚖️ Légal'} · Accepté par ${user.username}`, auteur: user.username });
       try { await reaction.message.edit({ embeds: [EmbedBuilder.from(reaction.message.embeds[0]).setColor(isIllegal ? 0x8B1A1A : 0x3B82F6).setTitle(`✅ ACCEPTÉ — ${cand.nomPerso}`)] }); } catch {}
     } else {
       cand.status = 'refusee'; cand.refusedAt = new Date().toISOString(); saveDB(db);
@@ -978,7 +978,7 @@ client.on('messageCreate', async message => {
       const op = { id: Date.now().toString(), name: get('NOM'), lieu: get('LIEU'), objectif: get('OBJECTIF'), equipe: get('ÉQUIPE') || get('EQUIPE'), pole, participants: [], status: 'preparation', createdAt: new Date().toISOString() };
       db.operations.push(op); op.notionPageId = await notionExtra.creerOperationNotion?.(op); saveDB(db);
       await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: '🟡 En préparation' });
-      await ajouterJournalIC(guild, { type: 'operation', emoji: '🎯', titre: `Nouvelle opération — ${op.name}`, description: `📍 ${op.lieu} · Objectif : ${op.objectif} · Pôle : ${pole === 'legal' ? '⚖️ Légal' : '🔪 Illégal'}`, auteur: message.author.username });
+      await ajouterJournalIC(guild, { type: 'operation', titre: `Nouvelle opération — ${op.name}`, description: `📍 ${op.lieu} · Objectif : ${op.objectif} · Pôle : ${pole === 'legal' ? '⚖️ Légal' : '🔪 Illégal'}`, auteur: message.author.username });
       const embed = new EmbedBuilder().setColor(0xFFA500).setTitle(`🎯 OPÉRATION — ${op.name}`).addFields({ name: 'Statut', value: '🟡 En préparation', inline: true }, { name: 'Pôle', value: pole === 'legal' ? '⚖️ Pôle Légal' : '🔪 Pôle Illégal', inline: true }, { name: 'Lieu', value: op.lieu, inline: true }, { name: 'Objectif', value: op.objectif }, { name: 'Équipe', value: op.equipe }, { name: '👥 Participants (0)', value: '*Personne pour l\'instant. Clique « ✋ Je participe » ci-dessous.*' }).setFooter({ text: `ID: ${op.id} • ${fmtShort(new Date())}` });
       const rowP = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`op_participer_${op.id}`).setLabel('✋ Je participe').setStyle(ButtonStyle.Secondary), new ButtonBuilder().setCustomId(`op_retrait_${op.id}`).setLabel('🚪 Me retirer').setStyle(ButtonStyle.Secondary));
       const rowG = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`op_encours_${op.id}`).setLabel('🟢 Lancer').setStyle(ButtonStyle.Success), new ButtonBuilder().setCustomId(`op_terminee_${op.id}`).setLabel('✅ Terminer').setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId(`op_annulee_${op.id}`).setLabel('❌ Annuler').setStyle(ButtonStyle.Danger));
@@ -1427,7 +1427,7 @@ client.on('interactionCreate', async interaction => {
       }).catch(() => {});
     }
     await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: '✅ Terminée — ' + op.resultat });
-    await ajouterJournalIC(guild, { type: 'operation', emoji: '✅', titre: `Opération terminée — ${op.name}`, description: `Résultat : **${op.resultat}** · Butin : ${op.butin}`, auteur: interaction.user.username });
+    await ajouterJournalIC(guild, { type: 'operation', titre: `Opération terminée — ${op.name}`, description: `Résultat : **${op.resultat}** · Butin : ${op.butin}`, auteur: interaction.user.username });
     const updated = EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287).spliceFields(0, 1, { name: 'Statut', value: '✅ Terminée', inline: true }).addFields({ name: '🏁 Résultat', value: op.resultat, inline: true }, { name: '💰 Butin', value: op.butin, inline: true }, { name: '⚠️ Pertes', value: op.pertes, inline: true }, { name: '📝 Débrief', value: op.debrief });
     await interaction.editReply({ embeds: [updated], components: [] }); return;
   }
@@ -1521,7 +1521,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const clientIC = db.members[interaction.user.id]?.name || interaction.user.username;
     _syncContratNotion(contrat, 'signe', clientIC).catch(() => {});
     await sendLog(guild, 'CONTRAT_SIGNE', { contratId, objet: contrat.objet, signe: `${clientIC} (${contrat.clientNom})` });
-    await ajouterJournalIC(guild, { type: 'contrat', emoji: '📜', titre: `Contrat signé — ${contratId}`, description: `Client : **${contrat.clientNom}** · Mission : ${contrat.objet}`, auteur: interaction.user.username });
+    await ajouterJournalIC(guild, { type: 'contrat', titre: `Contrat signé — ${contratId}`, description: `Client : **${contrat.clientNom}** · Mission : ${contrat.objet}`, auteur: interaction.user.username });
     await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287).spliceFields(5, 1, { name: '📌 Statut', value: `✅ Signé le ${fmtShort(new Date())} par ${interaction.user.username}`, inline: true })], components: [] });
     const _embedContratSigne = new EmbedBuilder().setColor(0x57F287).setTitle(`✅ CONTRAT ACCEPTÉ — ${contratId}`).addFields({ name: '🆔 Réf', value: `\`${contratId}\``, inline: true }, { name: '📅 Signé le', value: fmtShort(new Date()), inline: true }, { name: '✍️ Client', value: contrat.clientNom || interaction.user.username, inline: true }, { name: '📋 Mission', value: contrat.objet }, { name: '💰 Rémunération', value: contrat.remuneration }).setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` });
     await archiverContratReponses(guild, contrat, 'signe', _embedContratSigne);
@@ -1575,7 +1575,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const signataireDirIC = db.members[interaction.user.id]?.name || interaction.user.username;
     _syncContratNotion(contrat, 'signe', signataireDirIC).catch(() => {});
     await sendLog(guild, 'CONTRAT_SIGNE', { contratId, objet: contrat.objet, signe: `${signataireDirIC} — IWC` });
-    await ajouterJournalIC(guild, { type: 'contrat', emoji: '📥', titre: `Contrat employeur signé — ${contratId}`, description: `Employeur : **${contrat.employeurNom}** · Mission : ${contrat.objet}`, auteur: interaction.user.username });
+    await ajouterJournalIC(guild, { type: 'contrat', titre: `Contrat employeur signé — ${contratId}`, description: `Employeur : **${contrat.employeurNom}** · Mission : ${contrat.objet}`, auteur: interaction.user.username });
     await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287).spliceFields(5, 1, { name: '📌 Statut', value: `✅ Signé le ${fmtShort(new Date())} par ${interaction.user.username}`, inline: true })], components: [] });
     const _embedEmploiSigne = new EmbedBuilder().setColor(0x57F287).setTitle(`✅ CONTRAT EMPLOYEUR SIGNÉ — ${contratId}`).addFields({ name: '🆔 Réf', value: `\`${contratId}\``, inline: true }, { name: '📅 Signé le', value: fmtShort(new Date()), inline: true }, { name: '✍️ Signé par', value: signataireDirIC, inline: true }, { name: '🏭 Employeur', value: contrat.employeurNom }, { name: '📋 Mission', value: contrat.objet }, { name: '💰 Rémunération', value: contrat.remuneration }).setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` });
     await archiverContratReponses(guild, contrat, 'signe', _embedEmploiSigne);
@@ -1837,7 +1837,7 @@ async function _validerModalOpCreer(interaction) {
   saveDB(db);
 
   await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: '🟡 En préparation' });
-  await ajouterJournalIC(guild, { type: 'operation', emoji: '🎯', titre: `Nouvelle opération — ${nom}`, description: `📍 ${lieu} · ${objectif} · Pôle : ${pole === 'legal' ? '⚖️ Légal' : '🔪 Illégal'}`, auteur: createur });
+  await ajouterJournalIC(guild, { type: 'operation', titre: `Nouvelle opération — ${nom}`, description: `📍 ${lieu} · ${objectif} · Pôle : ${pole === 'legal' ? '⚖️ Légal' : '🔪 Illégal'}`, auteur: createur });
 
   const embed = new EmbedBuilder().setColor(0xFFA500)
     .setTitle(`🎯 OPÉRATION — ${nom}`)
@@ -2588,21 +2588,21 @@ async function _ouvrirModalAgendaSimple(interaction) {
   await interaction.reply({
     embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📅 Nouveau RDV — IWC').setDescription('**Étape 1/2** — Choisis le lieu du rendez-vous')],
     components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('agenda_lieu_select').setPlaceholder('Choisir un lieu...').addOptions([
-      { label: '🏛️ Saint Denis', value: 'Saint Denis', description: 'La grande ville du sud', emoji: '🏛️' },
-      { label: '🤠 Valentine', value: 'Valentine', description: 'Ville du nord-ouest', emoji: '🤠' },
-      { label: '🌵 Armadillo', value: 'Armadillo', description: 'Ville désertique du sud', emoji: '🌵' },
-      { label: '⛏️ Annesburg', value: 'Annesburg', description: 'Ville minière du nord-est', emoji: '⛏️' },
-      { label: '🏔️ Strawberry', value: 'Strawberry', description: 'Ville des montagnes', emoji: '🏔️' },
-      { label: '🌾 Emerald Ranch', value: 'Emerald Ranch', description: 'Ranch a l\'est', emoji: '🌾' },
-      { label: '🏜️ Tumbleweed', value: 'Tumbleweed', description: 'Ville fantôme du désert', emoji: '🏜️' },
-      { label: '🌊 Lagras', value: 'Lagras', description: 'Village des marais', emoji: '🌊' },
-      { label: '🏕️ Flatneck Station', value: 'Flatneck Station', description: 'Station ferroviaire', emoji: '🏕️' },
-      { label: '🏞️ Roanoke Ridge', value: 'Roanoke Ridge', description: 'Région sauvage du nord', emoji: '🏞️' },
-      { label: '🗻 Tall Trees', value: 'Tall Trees', description: 'Foret de l\'ouest', emoji: '🗻' },
-      { label: '🏘️ Rhodes', value: 'Rhodes', description: 'Ville du comté de Lemoyne', emoji: '🏘️' },
-      { label: '🌁 Blackwater', value: 'Blackwater', description: 'Ville moderne de West Elizabeth', emoji: '🌁' },
-      { label: '⛪ Thieves Landing', value: 'Thieves Landing', description: 'Port des hors-la-loi', emoji: '⛪' },
-      { label: '📍 Autre / Personnalisé', value: 'Autre', description: 'Lieu personnalisé à préciser', emoji: '📍' },
+      { label: '🏛️ Saint Denis', value: 'Saint Denis', description: 'La grande ville du sud' },
+      { label: '🤠 Valentine', value: 'Valentine', description: 'Ville du nord-ouest' },
+      { label: '🌵 Armadillo', value: 'Armadillo', description: 'Ville désertique du sud' },
+      { label: '⛏️ Annesburg', value: 'Annesburg', description: 'Ville minière du nord-est' },
+      { label: '🏔️ Strawberry', value: 'Strawberry', description: 'Ville des montagnes' },
+      { label: '🌾 Emerald Ranch', value: 'Emerald Ranch', description: 'Ranch a l\'est' },
+      { label: '🏜️ Tumbleweed', value: 'Tumbleweed', description: 'Ville fantôme du désert' },
+      { label: '🌊 Lagras', value: 'Lagras', description: 'Village des marais' },
+      { label: '🏕️ Flatneck Station', value: 'Flatneck Station', description: 'Station ferroviaire' },
+      { label: '🏞️ Roanoke Ridge', value: 'Roanoke Ridge', description: 'Région sauvage du nord' },
+      { label: '🗻 Tall Trees', value: 'Tall Trees', description: 'Foret de l\'ouest' },
+      { label: '🏘️ Rhodes', value: 'Rhodes', description: 'Ville du comté de Lemoyne' },
+      { label: '🌁 Blackwater', value: 'Blackwater', description: 'Ville moderne de West Elizabeth' },
+      { label: '⛪ Thieves Landing', value: 'Thieves Landing', description: 'Port des hors-la-loi' },
+      { label: '📍 Autre / Personnalisé', value: 'Autre', description: 'Lieu personnalisé à préciser' },
     ]))],
   });
 }
@@ -2715,14 +2715,14 @@ async function _ouvrirMenuRdvSlash(interaction) {
   await interaction.reply({
     embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📅 Nouveau RDV — Iron Wolf Company').setDescription('**Étape 1/2** — Choisis le lieu du rendez-vous')],
     components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('agenda_lieu_select').setPlaceholder('📍 Choisir un lieu RDR2...').addOptions([
-      { label: '🏛️ Saint Denis', value: 'Saint Denis', emoji: '🏛️' }, { label: '🤠 Valentine', value: 'Valentine', emoji: '🤠' },
-      { label: '🌵 Armadillo', value: 'Armadillo', emoji: '🌵' }, { label: '⛏️ Annesburg', value: 'Annesburg', emoji: '⛏️' },
-      { label: '🏔️ Strawberry', value: 'Strawberry', emoji: '🏔️' }, { label: '🌾 Emerald Ranch', value: 'Emerald Ranch', emoji: '🌾' },
-      { label: '🏜️ Tumbleweed', value: 'Tumbleweed', emoji: '🏜️' }, { label: '🌊 Lagras', value: 'Lagras', emoji: '🌊' },
-      { label: '🏕️ Flatneck Station', value: 'Flatneck Station', emoji: '🏕️' }, { label: '🏞️ Roanoke Ridge', value: 'Roanoke Ridge', emoji: '🏞️' },
-      { label: '🗻 Tall Trees', value: 'Tall Trees', emoji: '🗻' }, { label: '🏘️ Rhodes', value: 'Rhodes', emoji: '🏘️' },
-      { label: '🌁 Blackwater', value: 'Blackwater', emoji: '🌁' }, { label: '⛪ Thieves Landing', value: 'Thieves Landing', emoji: '⛪' },
-      { label: '📍 Autre lieu', value: 'Autre', emoji: '📍' },
+      { label: '🏛️ Saint Denis', value: 'Saint Denis' }, { label: '🤠 Valentine', value: 'Valentine' },
+      { label: '🌵 Armadillo', value: 'Armadillo' }, { label: '⛏️ Annesburg', value: 'Annesburg' },
+      { label: '🏔️ Strawberry', value: 'Strawberry' }, { label: '🌾 Emerald Ranch', value: 'Emerald Ranch' },
+      { label: '🏜️ Tumbleweed', value: 'Tumbleweed' }, { label: '🌊 Lagras', value: 'Lagras' },
+      { label: '🏕️ Flatneck Station', value: 'Flatneck Station' }, { label: '🏞️ Roanoke Ridge', value: 'Roanoke Ridge' },
+      { label: '🗻 Tall Trees', value: 'Tall Trees' }, { label: '🏘️ Rhodes', value: 'Rhodes' },
+      { label: '🌁 Blackwater', value: 'Blackwater' }, { label: '⛪ Thieves Landing', value: 'Thieves Landing' },
+      { label: '📍 Autre lieu', value: 'Autre' },
     ]))],
   });
 }
@@ -2733,12 +2733,12 @@ async function _ouvrirMenuRdv(interaction) {
     flags: MessageFlags.Ephemeral,
     embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📅 Nouveau Rendez-vous — IWC').setDescription('**Étape 1/2** — Sélectionne le type de rendez-vous.')],
     components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`rdv_type_select_${msgId}`).setPlaceholder('Type de rendez-vous...').addOptions([
-      { label: '👑 Réunion Direction', value: 'reunion_direction', emoji: '👑' }, { label: '🤝 Rendez-vous Client', value: 'rdv_client', emoji: '🤝' },
-      { label: '🎯 Briefing Opération', value: 'briefing_op', emoji: '🎯' }, { label: '📊 Débrief Opération', value: 'debrief_op', emoji: '📊' },
-      { label: '🔍 Entretien Recrutement', value: 'entretien_recru', emoji: '🔍' }, { label: '📋 Réunion Pôle Légal', value: 'reunion_legal', emoji: '📋' },
-      { label: '🔒 Réunion Confrérie', value: 'reunion_confrerie', emoji: '🔒' }, { label: '🎓 Formation Membres', value: 'formation', emoji: '🎓' },
-      { label: '⚖️ Négociation', value: 'negociation', emoji: '⚖️' }, { label: '🏥 Rendez-vous Médical', value: 'rdv_medical', emoji: '🏥' },
-      { label: '⚖️ Rendez-vous Juridique', value: 'rdv_juridique', emoji: '⚖️' }, { label: '📝 Autre', value: 'autre', emoji: '📝' },
+      { label: '👑 Réunion Direction', value: 'reunion_direction' }, { label: '🤝 Rendez-vous Client', value: 'rdv_client' },
+      { label: '🎯 Briefing Opération', value: 'briefing_op' }, { label: '📊 Débrief Opération', value: 'debrief_op' },
+      { label: '🔍 Entretien Recrutement', value: 'entretien_recru' }, { label: '📋 Réunion Pôle Légal', value: 'reunion_legal' },
+      { label: '🔒 Réunion Confrérie', value: 'reunion_confrerie' }, { label: '🎓 Formation Membres', value: 'formation' },
+      { label: '⚖️ Négociation', value: 'negociation' }, { label: '🏥 Rendez-vous Médical', value: 'rdv_medical' },
+      { label: '⚖️ Rendez-vous Juridique', value: 'rdv_juridique' }, { label: '📝 Autre', value: 'autre' },
     ]))],
   });
 }
@@ -2747,9 +2747,15 @@ async function _handleRdvTypeSelect(interaction) {
   const typeRdv = interaction.values[0]; const msgId = interaction.customId.replace('rdv_type_select_', '');
   await interaction.update({
     embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📅 Nouveau Rendez-vous — IWC').setDescription('**Étape 2/3** — Comment convoquer ?')],
-    components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`rdv_mode_select_${typeRdv}_${msgId}`).setPlaceholder('Mode de convocation...').addOptions([
-      { label: '📢 Par rôle (pôle)', value: 'role', emoji: '📢' }, { label: '👤 Par nom IC individuel', value: 'individuel', emoji: '👤' },
-    ]))],
+    components: [new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`rdv_mode_select_${typeRdv}_${msgId}`)
+        .setPlaceholder('Mode de convocation...')
+        .addOptions([
+          { label: 'Par rôle — tout le pôle', value: 'role', description: 'Convoque tout le pôle légal ou illégal' },
+          { label: 'Par nom IC individuel', value: 'individuel', description: 'Sélectionne des membres spécifiques' },
+        ])
+    )],
   });
 }
 
@@ -2759,8 +2765,8 @@ async function _handleRdvModeSelect(interaction) {
     await interaction.update({
       embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📅 Nouveau Rendez-vous — IWC').setDescription('**Étape 3/3** — Quel groupe convoquer ?')],
       components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`rdv_pole_select_${typeRdv}_${msgId}`).setPlaceholder('Choisir le groupe...').addOptions([
-        { label: '⚖️ Pôle Légal', value: 'legal', emoji: '⚖️' }, { label: '🔒 La Confrérie', value: 'illegal', emoji: '🔒' },
-        { label: '👥 Tout le monde', value: 'tous', emoji: '👥' }, { label: '👑 Direction seule', value: 'direction', emoji: '👑' },
+        { label: '⚖️ Pôle Légal', value: 'legal' }, { label: '🔒 La Confrérie', value: 'illegal' },
+        { label: '👥 Tout le monde', value: 'tous' }, { label: '👑 Direction seule', value: 'direction' },
       ]))],
     });
   } else {
@@ -3328,7 +3334,7 @@ async function _initDBInformateursNotion(guild) {
       headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
       body: JSON.stringify({
         parent: { type: 'page_id', page_id: parentPageId },
-        icon: { type: 'emoji', emoji: '🕵️' },
+        icon: { type: 'emoji' },
         title: [{ type: 'text', text: { content: 'Informateurs' } }],
         properties: {
           'Source':               { title: {} },
