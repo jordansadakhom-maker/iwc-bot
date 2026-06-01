@@ -31,8 +31,14 @@ let notionV5 = {};
 try { notionV5 = require('./notion-modules-v5'); console.log('✅ Module notion-modules-v5 chargé'); }
 catch (e) { console.log('⚠️ notion-modules-v5 non chargé:', e.message); }
 
-process.on('unhandledRejection', reason => console.log('⚠️ Unhandled Rejection:', reason?.message || reason));
-process.on('uncaughtException',  err    => console.log('⚠️ Uncaught Exception:', err?.message || err));
+process.on('unhandledRejection', (reason, promise) => {
+  console.log('⚠️ Unhandled Rejection:', reason?.message || reason);
+  if (reason?.stack) console.log(reason.stack.split('\n').slice(0,5).join('\n'));
+});
+process.on('uncaughtException', err => {
+  console.log('⚠️ Uncaught Exception:', err?.message || err);
+  if (err?.stack) console.log(err.stack.split('\n').slice(0,8).join('\n'));
+});
 process.on('SIGTERM', () => { saveDBSync(); process.exit(0); });
 process.on('SIGINT',  () => { saveDBSync(); process.exit(0); });
 
