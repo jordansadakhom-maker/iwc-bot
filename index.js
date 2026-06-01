@@ -1079,7 +1079,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId === 'dir_btn_refresh')            { await updateDirectionPanel(interaction.guild).catch(() => {}); return interaction.reply({ flags: MessageFlags.Ephemeral, content: '✅ Panel mis à jour.' }); }
     if (interaction.customId.startsWith('purge_confirm_'))     return _executerPurge(interaction);
     if (interaction.customId === 'purge_annuler')              return interaction.update({ content: '↩️ Suppression annulée.', embeds: [], components: [] });
-    if (interaction.customId === 'btn_rdv_creer_contrat_panel') return _ouvrirMenuRdvSlash(interaction);
+    if (interaction.customId === 'btn_rdv_creer_contrat_panel') return _ouvrirMenuRdv(interaction);
     if (interaction.customId.startsWith('btn_rdv_creer_'))     return _ouvrirMenuRdv(interaction);
     // [CORRECTION] btn_rdv_modal_ est un bouton, pas un select menu
     if (interaction.customId.startsWith('btn_rdv_modal_'))     return _handleRdvModalBtn(interaction);
