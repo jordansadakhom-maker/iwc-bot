@@ -115,14 +115,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('solde').setDescription('Affiche les soldes des coffres'),
   new SlashCommandBuilder().setName('fiche').setDescription("Affiche la fiche d'un membre").addStringOption(o => o.setName('nom').setDescription('Nom du personnage').setRequired(true)),
   new SlashCommandBuilder().setName('ops').setDescription('Liste les opérations actives'),
-  new SlashCommandBuilder().setName('absent').setDescription('Déclarer une absence')
-    .addStringOption(o => o.setName('duree').setDescription('Durée de l\'absence').setRequired(true)
-      .addChoices(
-        { name: '1 jour', value: '1 jour' }, { name: '2 jours', value: '2 jours' },
-        { name: '3 jours', value: '3 jours' }, { name: '1 semaine', value: '1 semaine' },
-        { name: '2 semaines', value: '2 semaines' }, { name: 'Indéterminé', value: 'Indéterminé' },
-      ))
-    .addStringOption(o => o.setName('raison').setDescription('Raison (optionnel)').setRequired(false)),
+  new SlashCommandBuilder().setName('absent').setDescription('🟡 Déclarer une absence'),
   new SlashCommandBuilder().setName('rapport').setDescription('Envoie le rapport quotidien en DM (Direction)'),
   new SlashCommandBuilder().setName('promo').setDescription('Promeut un membre (Direction)').addUserOption(o => o.setName('membre').setDescription('Membre').setRequired(true)).addStringOption(o => o.setName('rang').setDescription('Nouveau rang').setRequired(true).setAutocomplete(true)),
   new SlashCommandBuilder().setName('retro').setDescription('Rétrograde un membre (Direction)').addUserOption(o => o.setName('membre').setDescription('Membre').setRequired(true)).addStringOption(o => o.setName('rang').setDescription('Nouveau rang').setRequired(true).setAutocomplete(true)).addStringOption(o => o.setName('raison').setDescription('Raison (optionnel)').setRequired(false)),
@@ -146,6 +139,7 @@ const SLASH_COMMANDS = [
     .addSubcommand(s => s.setName('voir').setDescription('Voir les prochains RDV'))
     .addSubcommand(s => s.setName('creer').setDescription('Créer un nouveau RDV dans Notion')),
   new SlashCommandBuilder().setName('op-programmer').setDescription('🕐 Programmer une opération avec lancement automatique (Direction)'),
+  new SlashCommandBuilder().setName('op-creer').setDescription('🎯 Créer une nouvelle opération (Direction)'),
   new SlashCommandBuilder().setName('aide').setDescription('📖 Guide des commandes disponibles'),
   new SlashCommandBuilder().setName('patch').setDescription('Deployer le patch note'),
   new SlashCommandBuilder().setName('version').setDescription('🔢 Version du bot et statut des connexions'),
@@ -388,6 +382,7 @@ async function handleSlashCommand(interaction) {
     return notionV3.handleAgendaCommand?.(interaction);
   }
   if (commandName === 'op-programmer')     return _ouvrirModalOpProgrammee(interaction);
+  if (commandName === 'op-creer')          return _ouvrirModalOpCreer(interaction);
   if (commandName === 'aide')              return _handleAide(interaction);
   if (commandName === 'patch')             return _handlePatchDeploy(interaction);
   if (commandName === 'version')           return _handleVersion(interaction);
@@ -419,41 +414,14 @@ async function handleSlashCommand(interaction) {
   }
 
   if (commandName === 'absent') {
-    const duree  = interaction.options.getString('duree');
-    const raison = interaction.options.getString('raison') || '—';
-    const dureeJours = { '1 jour': 1, '2 jours': 2, '3 jours': 3, '1 semaine': 7, '2 semaines': 14 };
-    const joursAbsence = dureeJours[duree] || null;
-    const finAbsence   = joursAbsence ? new Date(Date.now() + joursAbsence * 86400000).toISOString() : null;
-    if (!db.members[interaction.user.id]) db.members[interaction.user.id] = {};
-    db.members[interaction.user.id].status      = 'absent';
-    db.members[interaction.user.id].absentJusqu = finAbsence;
-    db.members[interaction.user.id].absentRaison= raison;
-    db.members[interaction.user.id].lastActivity= new Date().toISOString();
-    saveDB(db);
-    // [CORRECTION] Attribuer le rôle Absent + bloquer écriture
-    const membreDiscord = await guild.members.fetch(interaction.user.id).catch(() => null);
-    if (membreDiscord) {
-      const roleAbsent = guild.roles.cache.get(ROLE_ABSENT);
-      if (roleAbsent) await membreDiscord.roles.add(roleAbsent).catch(e => console.log('❌ Rôle absent:', e.message));
-      await _bloquerEcritureAbsent(guild, membreDiscord);
-    }
-    await notionExtra.majStatutActiviteNotion?.(interaction.user.id, 'absent');
-    _syncMembreNotion(interaction.user.id, { status: 'absent', lastActivity: new Date().toISOString() }).catch(() => {});
-    await sendLog(guild, 'ABSENCE', { userId: interaction.user.id, username: interaction.user.username });
-    const retourStr = finAbsence ? new Date(finAbsence).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' }) : 'Indéterminé — utilise /retour quand tu reviendras';
-    await interaction.reply({
-      flags: MessageFlags.Ephemeral,
-      embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('🟡 Absence enregistrée')
-        .addFields({ name: '⏱️ Durée', value: duree, inline: true }, { name: '📅 Retour prévu', value: retourStr, inline: true }, { name: '📝 Raison', value: raison, inline: false })
-        .setDescription('*Tes permissions d\'écriture sont suspendues jusqu\'à ton retour.*')
-        .setFooter({ text: 'IWC • Utilise /retour pour lever ton absence manuellement' })],
-    });
-    const absCh = guild.channels.cache.get(SALON_HARDCODED.ABSENCES) || guild.channels.cache.get(SALON_HARDCODED.ABSENCES) || getChById(guild, 'ABSENCES', 'absences');
-    if (absCh) await absCh.send({ embeds: [new EmbedBuilder().setColor(0xFFA500)
-      .setAuthor({ name: `${interaction.member?.displayName || interaction.user.username} — Absence`, iconURL: interaction.user.displayAvatarURL() })
-      .setTitle('🟡 Déclaration d\'absence')
-      .addFields({ name: '👤 Membre', value: `<@${interaction.user.id}>`, inline: true }, { name: '⏱️ Durée', value: duree, inline: true }, { name: '📅 Retour prévu', value: retourStr, inline: true }, { name: '📝 Raison', value: raison, inline: false })
-      .setFooter({ text: `IWC • ${fmtShort(new Date())}` }).setTimestamp()] });
+    // Ouvrir un modal pour saisie libre de la durée + options
+    const modal = new ModalBuilder().setCustomId('modal_absent').setTitle('🟡 Déclarer une absence');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duree').setLabel('Durée (ex: 3 jours, 1 semaine, jusqu\'au 10 juin...)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 2 jours / 1 semaine / jusqu\'au 15 juin / Indéterminé')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('raison').setLabel('Raison (optionnel)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: Vacances, travail, IRL...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('mode').setLabel('Mode absence (écrire: lecture-seule OU absent-total)').setStyle(TextInputStyle.Short).setRequired(false).setValue('lecture-seule').setPlaceholder('lecture-seule = tu peux lire | absent-total = accès réduit')),
+    );
+    await interaction.showModal(modal);
     return;
   }
 
@@ -842,7 +810,7 @@ client.on('messageCreate', async message => {
       const solde = dbFresh.coffres.illegal; saveDB(dbFresh);
       // Sync Notion DB transactions
       await notionExtra.enregistrerTransactionNotion?.({ type, coffre: '🔒 Illégal', montant, objet, responsable, solde });
-      _syncTransactionNotion({ type, coffre: 'illegal', montant, objet, responsable, solde, date: new Date().toISOString() }).catch(() => {});
+      _syncTransactionNotion({ type, coffre: 'illegal', montant, objet, responsable, solde, date: new Date().toISOString(), discordId: message.author.id, userId: message.author.id }).catch(() => {});
       await ajouterJournalIC(guild, { type: 'tresorerie', emoji: type === 'Entrée' ? '💵' : '💸', titre: `${type} — Coffre Illégal`, description: `**${objet}** · $${montant.toLocaleString('fr-FR')} · par ${responsable}`, auteur: responsable });
       await message.react('✅').catch(() => {});
       const isEntree = type === 'Entrée';
@@ -889,8 +857,10 @@ client.on('interactionCreate', async interaction => {
   }
 
   if (interaction.isModalSubmit() && interaction.customId === 'modal_affaire')          return notionV3.handleAffaireModal?.(interaction);
+  if (interaction.isModalSubmit() && interaction.customId === 'modal_absent')           return _validerModalAbsent(interaction);
   if (interaction.isModalSubmit() && interaction.customId === 'modal_agenda_rdv')        return notionV3.handleAgendaModal?.(interaction);
   if (interaction.isModalSubmit() && interaction.customId === 'modal_op_programmee')     return notionV5.handleOpProgrammeeModal?.(interaction);
+  if (interaction.isModalSubmit() && interaction.customId === 'modal_op_creer')          return _validerModalOpCreer(interaction);
   if (interaction.isModalSubmit() && interaction.customId === 'modal_surnom_identite')   return _validerModalSurnom(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_agenda_simple')) return _validerModalAgendaSimple(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_rdv_individuel_')) return _validerModalRdvIndividuel(interaction);
@@ -1034,6 +1004,10 @@ client.on('interactionCreate', async interaction => {
     if (retrait) { op.participants = op.participants.filter(p => p !== nom); }
     else if (!op.participants.includes(nom)) { op.participants.push(nom); }
     saveDB(db); await notionExtra.majOperationNotion?.(op);
+    // Sync participants Notion
+    if (op.notionPageId && process.env.NOTION_TOKEN) {
+      _notionPatch(op.notionPageId, { 'Participants': { multi_select: (op.participants || []).map(n => ({ name: n })) } }).catch(() => {});
+    }
     const liste = op.participants.length ? op.participants.join(', ') : '*Personne pour l\'instant.*';
     const updated = EmbedBuilder.from(interaction.message.embeds[0]); const idx = interaction.message.embeds[0].fields.findIndex(f => f.name.startsWith('👥 Participants'));
     if (idx >= 0) updated.spliceFields(idx, 1, { name: `👥 Participants (${op.participants.length})`, value: liste });
@@ -1060,6 +1034,16 @@ client.on('interactionCreate', async interaction => {
     op.status = 'terminee'; op.endedAt = new Date().toISOString(); op.resultat = interaction.fields.getTextInputValue('resultat'); op.butin = interaction.fields.getTextInputValue('butin') || '—'; op.pertes = interaction.fields.getTextInputValue('pertes') || '—'; op.debrief = interaction.fields.getTextInputValue('debrief') || '—'; saveDB(db);
     await notionExtra.majOperationNotion?.(op);
     await notionV3.syncOperationTermineeNotion?.(op).catch(() => {});
+    // Sync directe Notion si notionPageId existe
+    if (op.notionPageId && process.env.NOTION_TOKEN) {
+      _notionPatch(op.notionPageId, {
+        'Statut': { select: { name: '✅ Terminée' } },
+        'Résultat': { rich_text: [{ text: { content: op.resultat || '—' } }] },
+        'Butin': { rich_text: [{ text: { content: op.butin || '—' } }] },
+        'Débrief': { rich_text: [{ text: { content: (op.debrief || '—').slice(0, 2000) } }] },
+        'Date fin': { date: { start: new Date().toISOString().split('T')[0] } },
+      }).catch(() => {});
+    }
     await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: '✅ Terminée — ' + op.resultat });
     await ajouterJournalIC(guild, { type: 'operation', emoji: '✅', titre: `Opération terminée — ${op.name}`, description: `Résultat : **${op.resultat}** · Butin : ${op.butin}`, auteur: interaction.user.username });
     const updated = EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287).spliceFields(0, 1, { name: 'Statut', value: '✅ Terminée', inline: true }).addFields({ name: '🏁 Résultat', value: op.resultat, inline: true }, { name: '💰 Butin', value: op.butin, inline: true }, { name: '⚠️ Pertes', value: op.pertes, inline: true }, { name: '📝 Débrief', value: op.debrief });
@@ -1075,6 +1059,13 @@ client.on('interactionCreate', async interaction => {
     const op = db.operations.find(o => o.id === opId);
     if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }); return; }
     op.status = isLancer ? 'en_cours' : 'annulee'; saveDB(db); await notionExtra.majOperationNotion?.(op);
+    // Sync Notion direct
+    if (op.notionPageId && process.env.NOTION_TOKEN) {
+      _notionPatch(op.notionPageId, {
+        'Statut': { select: { name: isLancer ? '🟢 En cours' : '❌ Annulée' } },
+        'Participants': { multi_select: (op.participants || []).map(n => ({ name: n })) },
+      }).catch(() => {});
+    }
     const label = isLancer ? '🟢 En cours' : '❌ Annulée';
     await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: label });
     const updated = EmbedBuilder.from(interaction.message.embeds[0]).setColor(isLancer ? 0x00AA00 : 0xED4245).spliceFields(0, 1, { name: 'Statut', value: label, inline: true });
@@ -1319,6 +1310,106 @@ async function handleProfilEnhanced(interaction) {
   if (threadUrl?.startsWith('http')) embed.addFields({ name: '📋 Fiche complète', value: `[Voir le thread](${threadUrl})`, inline: true });
   embed.setFooter({ text: `IWC • Profil • ${new Date().toLocaleDateString('fr-FR')}` }).setTimestamp();
   await interaction.editReply({ embeds: [embed] });
+}
+
+async function _ouvrirModalOpCreer(interaction) {
+  if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+  const modal = new ModalBuilder().setCustomId('modal_op_creer').setTitle('🎯 Créer une opération');
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom').setLabel("Nom de l'opération").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Opération Lumière Noire')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('lieu').setLabel('Lieu').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Banque Saint Denis, Fleeca Valentine...')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objectif').setLabel('Objectif').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Sécuriser le convoi, Neutraliser les gardes...')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('pole').setLabel('Pôle (légal ou illégal)').setStyle(TextInputStyle.Short).setRequired(true).setValue('illégal').setPlaceholder('légal ou illégal')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Équipe / Détails supplémentaires').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500).setPlaceholder('Membres impliqués, matériel, notes...')),
+  );
+  await interaction.showModal(modal);
+}
+
+async function _validerModalOpCreer(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const guild = interaction.guild; const db = loadDB();
+  const nom      = interaction.fields.getTextInputValue('nom').trim();
+  const lieu     = interaction.fields.getTextInputValue('lieu').trim();
+  const objectif = interaction.fields.getTextInputValue('objectif').trim();
+  const poleRaw  = interaction.fields.getTextInputValue('pole').trim().toLowerCase();
+  const details  = interaction.fields.getTextInputValue('details').trim() || '—';
+  const pole     = poleRaw.includes('lég') || poleRaw.includes('leg') ? 'legal' : 'illegal';
+  const createur = db.members[interaction.user.id]?.name || interaction.user.username;
+
+  const op = {
+    id: Date.now().toString(),
+    name: nom, lieu, objectif,
+    equipe: details, pole,
+    createdBy: createur,
+    createdById: interaction.user.id,
+    participants: [], status: 'preparation',
+    createdAt: new Date().toISOString(),
+  };
+  if (!db.operations) db.operations = [];
+  db.operations.push(op);
+
+  // Sync Notion
+  let notionPageId = null;
+  if (process.env.NOTION_TOKEN && process.env.NOTION_OPERATIONS_DB) {
+    try {
+      const res = await fetch('https://api.notion.com/v1/pages', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parent: { database_id: process.env.NOTION_OPERATIONS_DB }, properties: {
+          'Nom': { title: [{ text: { content: nom } }] },
+          'Lieu': { rich_text: [{ text: { content: lieu } }] },
+          'Objectif': { rich_text: [{ text: { content: objectif } }] },
+          'Pôle': { select: { name: pole === 'legal' ? '⚖️ Légal' : '🔪 Illégal' } },
+          'Statut': { select: { name: '🟡 Préparation' } },
+          'Équipe': { rich_text: [{ text: { content: details.slice(0, 2000) } }] },
+          'Créé par': { rich_text: [{ text: { content: createur } }] },
+          'Discord ID créateur': { rich_text: [{ text: { content: interaction.user.id } }] },
+          'Date création': { date: { start: new Date().toISOString().split('T')[0] } },
+        }})
+      });
+      const data = await res.json();
+      notionPageId = data.id;
+      console.log(`✅ Opération Notion créée: ${nom}`);
+    } catch(e) { console.log('❌ Notion op créer:', e.message); }
+  }
+  op.notionPageId = notionPageId;
+  saveDB(db);
+
+  await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: '🟡 En préparation' });
+  await ajouterJournalIC(guild, { type: 'operation', emoji: '🎯', titre: `Nouvelle opération — ${nom}`, description: `📍 ${lieu} · ${objectif} · Pôle : ${pole === 'legal' ? '⚖️ Légal' : '🔪 Illégal'}`, auteur: createur });
+
+  const embed = new EmbedBuilder().setColor(0xFFA500)
+    .setTitle(`🎯 OPÉRATION — ${nom}`)
+    .setDescription(`*Créée par **${createur}** · ${fmtShort(new Date())}*`)
+    .addFields(
+      { name: '📌 Statut', value: '🟡 En préparation', inline: true },
+      { name: '🗂️ Pôle', value: pole === 'legal' ? '⚖️ Légal' : '🔪 Illégal', inline: true },
+      { name: '🆔 ID', value: `\`${op.id}\``, inline: true },
+      { name: '📍 Lieu', value: lieu, inline: true },
+      { name: '🎯 Objectif', value: objectif, inline: true },
+      { name: '👥 Participants (0)', value: '*Clique ✋ pour rejoindre*', inline: false },
+      { name: '📋 Détails', value: details, inline: false },
+      ...(notionPageId ? [{ name: '🔗 Notion', value: `[Voir la fiche](https://notion.so/${notionPageId.replace(/-/g, '')})`, inline: true }] : []),
+    )
+    .setFooter({ text: `IWC • Opération • ${fmtShort(new Date())}` })
+    .setTimestamp();
+
+  const rowP = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`op_participer_${op.id}`).setLabel('✋ Je participe').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`op_retrait_${op.id}`).setLabel('🚪 Me retirer').setStyle(ButtonStyle.Secondary),
+  );
+  const rowG = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`op_encours_${op.id}`).setLabel('🟢 Lancer').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`op_terminee_${op.id}`).setLabel('✅ Terminer').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`op_annulee_${op.id}`).setLabel('❌ Annuler').setStyle(ButtonStyle.Danger),
+  );
+
+  const opsCh = guild.channels.cache.get(SALON_IDS.OPERATIONS) || getChById(guild, 'OPERATIONS', 'operations');
+  if (opsCh) {
+    const mention = `<@&${pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL}>`;
+    await opsCh.send({ content: `${mention} — 🎯 Nouvelle opération **${nom}** · Inscrivez-vous ci-dessous.`, embeds: [embed], components: [rowP, rowG] });
+  }
+  await interaction.editReply({ content: `✅ Opération **${nom}** créée${notionPageId ? ' et synchronisée avec Notion' : ''}.` });
 }
 
 async function _ouvrirModalOpProgrammee(interaction) {
@@ -2083,6 +2174,103 @@ async function _validerModalSurnom(interaction) {
   console.log(`✅ Identité IC : ${nomIC} (${interaction.user.username})`);
 }
 
+// ── Validation modal absence ──
+async function _validerModalAbsent(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const guild = interaction.guild;
+  const dureeRaw = interaction.fields.getTextInputValue('duree').trim();
+  const raison   = interaction.fields.getTextInputValue('raison').trim() || '—';
+  const modeRaw  = (interaction.fields.getTextInputValue('mode') || 'lecture-seule').trim().toLowerCase();
+  const modeLectureSeule = !modeRaw.includes('total'); // par défaut lecture-seule
+
+  // Calculer la date de retour depuis la durée saisie
+  let finAbsence = null;
+  const d = dureeRaw.toLowerCase();
+  if (d.includes('indét') || d.includes('indeter')) finAbsence = null;
+  else if (d.match(/(\d+)\s*jour/)) finAbsence = new Date(Date.now() + parseInt(d.match(/(\d+)/)[1]) * 86400000).toISOString();
+  else if (d.match(/(\d+)\s*semaine/)) finAbsence = new Date(Date.now() + parseInt(d.match(/(\d+)/)[1]) * 7 * 86400000).toISOString();
+  else if (d.match(/(\d+)\s*mois/)) finAbsence = new Date(Date.now() + parseInt(d.match(/(\d+)/)[1]) * 30 * 86400000).toISOString();
+  else if (d.includes('jusqu')) {
+    // "jusqu'au 15 juin" → chercher une date
+    const dateMatch = dureeRaw.match(/(\d{1,2})[\/\s]([a-zéûôàèù]+|\d{1,2})(?:[\/\s](\d{4}))?/i);
+    if (dateMatch) {
+      const months = { jan: 0, fév: 1, fev: 1, mar: 2, avr: 3, mai: 4, juin: 5, jul: 6, aoû: 7, aou: 7, sep: 8, oct: 9, nov: 10, déc: 11, dec: 11 };
+      const day = parseInt(dateMatch[1]);
+      const monthRaw = dateMatch[2].toLowerCase().slice(0, 3);
+      const month = months[monthRaw] ?? (parseInt(dateMatch[2]) - 1);
+      const year = dateMatch[3] ? parseInt(dateMatch[3]) : new Date().getFullYear();
+      finAbsence = new Date(year, isNaN(month) ? 0 : month, day).toISOString();
+    }
+  }
+
+  const db = loadDB();
+  if (!db.members[interaction.user.id]) db.members[interaction.user.id] = {};
+  db.members[interaction.user.id].status       = 'absent';
+  db.members[interaction.user.id].absentJusqu  = finAbsence;
+  db.members[interaction.user.id].absentRaison = raison;
+  db.members[interaction.user.id].absentMode   = modeLectureSeule ? 'lecture-seule' : 'absent-total';
+  db.members[interaction.user.id].lastActivity = new Date().toISOString();
+  saveDB(db);
+
+  const membreDiscord = await guild.members.fetch(interaction.user.id).catch(() => null);
+  if (membreDiscord) {
+    const roleAbsent = guild.roles.cache.get(ROLE_ABSENT);
+    if (roleAbsent) await membreDiscord.roles.add(roleAbsent).catch(() => {});
+    if (!modeLectureSeule) {
+      // Mode absent-total : bloquer aussi la lecture
+      await _bloquerEcritureAbsent(guild, membreDiscord);
+    }
+    // Mode lecture-seule (défaut) : le rôle Absent gère les perms d'écriture via les permissions du rôle
+    // La personne peut encore lire tous les salons
+  }
+
+  await notionExtra.majStatutActiviteNotion?.(interaction.user.id, 'absent');
+  _syncMembreNotion(interaction.user.id, { status: 'absent', lastActivity: new Date().toISOString() }).catch(() => {});
+  await sendLog(guild, 'ABSENCE', { userId: interaction.user.id, username: interaction.user.username });
+
+  const retourStr = finAbsence
+    ? new Date(finAbsence).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' })
+    : 'Indéterminé';
+
+  const modeLabel = modeLectureSeule
+    ? '👁️ Lecture seule (tu peux lire mais pas écrire)'
+    : '🔕 Absent total (accès réduit)';
+
+  await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('🟡 Absence enregistrée')
+    .addFields(
+      { name: '⏱️ Durée', value: dureeRaw, inline: true },
+      { name: '📅 Retour prévu', value: retourStr, inline: true },
+      { name: '📝 Raison', value: raison, inline: false },
+      { name: '👁️ Mode', value: modeLabel, inline: false },
+    )
+    .setDescription(modeLectureSeule
+      ? "*Tu peux encore lire les salons. Seule l'écriture est limitée selon le rôle Absent.*"
+      : "*Accès réduit activé. Utilise /retour pour lever l'absence.*")
+    .setFooter({ text: 'IWC • /retour pour revenir' })] });
+
+  // Poster dans #absences
+  const absCh = guild.channels.cache.get(SALON_HARDCODED.ABSENCES) || getChById(guild, 'ABSENCES', 'absences');
+  if (absCh) await absCh.send({ embeds: [new EmbedBuilder().setColor(0xFFA500)
+    .setAuthor({ name: `${interaction.member?.displayName || interaction.user.username} — Absence`, iconURL: interaction.user.displayAvatarURL() })
+    .setTitle('🟡 Déclaration d\'absence')
+    .addFields(
+      { name: '👤 Membre', value: `<@${interaction.user.id}>`, inline: true },
+      { name: '⏱️ Durée', value: dureeRaw, inline: true },
+      { name: '📅 Retour prévu', value: retourStr, inline: true },
+      { name: '📝 Raison', value: raison, inline: false },
+      { name: '👁️ Mode', value: modeLectureSeule ? 'Lecture seule' : 'Absent total', inline: true },
+    )
+    .setFooter({ text: `IWC • ${fmtShort(new Date())}` }).setTimestamp()] }).catch(() => {});
+
+  // Sync Notion absences
+  if (process.env.NOTION_TOKEN && process.env.NOTION_MEMBRES_DB) {
+    _syncMembreNotion(interaction.user.id, {
+      status: 'absent',
+      lastActivity: new Date().toISOString(),
+    }).catch(() => {});
+  }
+}
+
 // [CORRECTION] _checkRetoursAbsence — avec _debloquerEcritureAbsent
 async function _checkRetoursAbsence(guild) {
   const db = loadDB(); const maintenant = new Date(); let changed = false;
@@ -2190,22 +2378,25 @@ async function setupPlanningFormat(guild) {
 
 // Sync transactions dans la DB Notion IWC
 async function _syncTransactionNotion(t) {
-  if (!process.env.NOTION_TOKEN || !NOTION_TRANSACTIONS_DB) return;
+  if (!process.env.NOTION_TOKEN) return;
+  const dbId = process.env.NOTION_TRESORERIE_DB || NOTION_TRANSACTIONS_DB;
+  if (!dbId) return;
   try {
     await fetch('https://api.notion.com/v1/pages', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ parent: { database_id: NOTION_TRANSACTIONS_DB }, properties: {
-        'Type': { title: [{ text: { content: t.type || '—' } }] },
+      body: JSON.stringify({ parent: { database_id: dbId }, properties: {
+        'Objet': { title: [{ text: { content: t.objet || '—' } }] },
+        'Type': { select: { name: t.type || 'Entrée' } },
         'Coffre': { select: { name: t.coffre === 'illegal' ? '🔒 Illégal' : '⚖️ Légal' } },
         'Montant': { number: t.montant || 0 },
-        'Objet': { rich_text: [{ text: { content: t.objet || '—' } }] },
         'Responsable': { rich_text: [{ text: { content: t.responsable || '—' } }] },
+        'Discord ID': { rich_text: [{ text: { content: t.discordId || t.userId || '—' } }] },
         'Solde après': { number: t.solde || 0 },
         'Date': { date: { start: (t.date || new Date().toISOString()).split('T')[0] } },
       }})
     });
-    console.log(`✅ Transaction Notion sync: ${t.type} ${t.coffre} $${t.montant}`);
+    console.log(`✅ Transaction Notion: ${t.type} ${t.coffre} $${t.montant} par ${t.responsable}`);
   } catch (e) { console.log('❌ _syncTransactionNotion error:', e.message); }
 }
 
@@ -2215,6 +2406,22 @@ global.NOTION_TRANSACTIONS_DB = NOTION_TRANSACTIONS_DB;
 global._syncTransactionNotion = _syncTransactionNotion;
 global.archiverContratReponses = archiverContratReponses;
 global.getChHard = getChHard;
+// Surcharge enregistrerTransactionNotion pour ajouter Discord ID et sync DB transactions
+const _origEnregistrerTransaction = notionExtra.enregistrerTransactionNotion;
+notionExtra.enregistrerTransactionNotion = async (data) => {
+  // Ajouter sync dans la DB transactions IWC
+  _syncTransactionNotion({
+    type: data.type || '—',
+    coffre: data.coffre?.includes('llé') ? 'illegal' : 'legal',
+    montant: data.montant || 0,
+    objet: data.objet || '—',
+    responsable: data.responsable || '—',
+    discordId: data.discordId || data.userId || '—',
+    solde: data.solde || 0,
+    date: new Date().toISOString(),
+  }).catch(() => {});
+  if (_origEnregistrerTransaction) return _origEnregistrerTransaction(data);
+};
 global._syncInformateurNotion = _syncInformateurNotion;
 global._syncAvertissementNotion = _syncAvertissementNotion;
 global._syncMembreNotion = _syncMembreNotion;
