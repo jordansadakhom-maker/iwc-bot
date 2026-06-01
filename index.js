@@ -617,6 +617,7 @@ async function autoSetup(guild) {
   await setupSurnomFormat(guild);
   await setupCommandesSlash(guild);
   await setupPanelDirection(guild);
+  await setupOperationsGuide(guild);
 
   const reglCh = getChById(guild, 'REGLEMENT', 'reglement', 'règlement');
   if (reglCh) {
@@ -2142,6 +2143,44 @@ ${msg}`, components: [row] });
 → ${err} erreurs` });
   const jCh = guild.channels.cache.get(SALON_HARDCODED.JOURNAL_DE_BORD);
   if (jCh) await jCh.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('🔒 Permissions serveur mises à jour').setDescription(`Par **${interaction.user.username}** · ${ok} salons · ${err} erreurs`).setTimestamp()] }).catch(() => {});
+}
+
+async function setupOperationsGuide(guild) {
+  try {
+    const opsCh = guild.channels.cache.get(SALON_IDS.OPERATIONS) || getChById(guild, 'OPERATIONS', 'operations');
+    if (!opsCh) return;
+    // Vérifier si le guide est déjà posté
+    const msgs = await opsCh.messages.fetch({ limit: 20 }).catch(() => null);
+    if (msgs?.find(m => m.author.id === guild.members.me?.id && m.embeds?.[0]?.title?.includes('OPÉRATIONS — Iron Wolf'))) {
+      console.log('✅ Guide opérations déjà présent — skip');
+      return;
+    }
+    // Supprimer les anciens messages texte "OPÉRATION (Modèle à suivre)"
+    if (msgs) {
+      for (const [, m] of msgs) {
+        if (m.author.id !== guild.members.me?.id && m.content?.includes('OPÉRATION (Modèle')) {
+          await m.delete().catch(() => {});
+        }
+        if (m.author.id === guild.members.me?.id && m.content?.includes('OPÉRATION')) {
+          await m.delete().catch(() => {});
+        }
+      }
+    }
+    const embed = new EmbedBuilder()
+      .setColor(0x8B1A1A)
+      .setTitle('🎯 OPÉRATIONS — Iron Wolf Company')
+      .setDescription("*Ce salon est réservé à la planification et au suivi des opérations de terrain.*\n*Discrétion absolue. Ce qui est posté ici ne sort pas de ces murs.*")
+      .addFields(
+        { name: "📋 Créer une opération", value: "Utilise **`/op-creer`** — réservé à la Direction.\n\n**Étape 1** — Menu déroulant avec toutes les zones disponibles\n*(Saint Denis · Valentine · Armadillo · Banque · Train · ...)*\n\n**Étape 2** — Formulaire avec nom de code, objectif, pôle, équipe", inline: false },
+        { name: "✋ Participer", value: "Clique **✋ Je participe** sous la fiche\nTon nom est ajouté en temps réel\n**🚪 Me retirer** pour annuler", inline: true },
+        { name: "📊 Statuts", value: "🟡 En préparation\n🟢 En cours\n✅ Terminée\n❌ Annulée", inline: true },
+        { name: "🔗 Notion", value: "Chaque opération est automatiquement synchronisée — création, participants, statut, résultat", inline: false },
+      )
+      .setFooter({ text: 'IWC — La Confrérie · Lancer · Terminer · Annuler réservés à la Direction' })
+      .setTimestamp();
+    await opsCh.send({ embeds: [embed] });
+    console.log('✅ Guide opérations posté');
+  } catch(e) { console.log('❌ setupOperationsGuide:', e.message); }
 }
 
 async function setupPanelDirection(guild) {
