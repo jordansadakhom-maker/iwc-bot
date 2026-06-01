@@ -2765,9 +2765,10 @@ async function _ouvrirMenuRdv(interaction) {
 
 async function _handleRdvTypeSelect(interaction) {
   console.log('🔵 RDV STEP 2 - _handleRdvTypeSelect, typeRdv:', interaction.values[0]);
+  await interaction.deferUpdate();
   const typeRdv = interaction.values[0];
   const msgId = interaction.customId.replace('rdv_type_select_', '');
-  return interaction.update({
+  return interaction.editReply({
     embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📅 Nouveau Rendez-vous — IWC').setDescription('**Étape 2/3** — Comment convoquer ?')],
     components: [new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
@@ -2783,9 +2784,10 @@ async function _handleRdvTypeSelect(interaction) {
 
 async function _handleRdvModeSelect(interaction) {
   console.log('🔵 RDV STEP 3 - _handleRdvModeSelect, mode:', interaction.values[0]);
+  await interaction.deferUpdate();
   const mode = interaction.values[0]; const allParts = interaction.customId.replace('rdv_mode_select_', '').split('_'); const typeRdv = allParts.slice(0, -1).join('_'); const msgId = allParts[allParts.length - 1];
   if (mode === 'role') {
-    await interaction.update({
+    await interaction.editReply({
       embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📅 Nouveau Rendez-vous — IWC').setDescription('**Étape 3/3** — Quel groupe convoquer ?')],
       components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`rdv_pole_select_${typeRdv}_${msgId}`).setPlaceholder('Choisir le groupe...').addOptions([
         { label: '⚖ Pole Legal Iron Wolf', value: 'legal', description: 'Convoque tout le pôle légal' },
@@ -2806,7 +2808,7 @@ async function _handleRdvModeSelect(interaction) {
       .filter(o => o.label.length > 0 && o.value.length > 0)
       .slice(0, 25);
     if (!membres.length) { await interaction.update({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('❌ Aucun membre IC enregistré')], components: [] }); return; }
-    await interaction.update({
+    await interaction.editReply({
       embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📅 Nouveau Rendez-vous — IWC').setDescription('**Étape 3/3** — Sélectionne les participants (max 25)')],
       components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`rdv_individuel_select_${typeRdv}_${msgId}`).setPlaceholder('Choisir les participants...').setMinValues(1).setMaxValues(Math.min(membres.length, 25)).addOptions(membres))],
     });
@@ -2814,6 +2816,7 @@ async function _handleRdvModeSelect(interaction) {
 }
 
 async function _handleRdvIndividuelSelect(interaction) {
+  console.log('🔵 RDV STEP 3b - _handleRdvIndividuelSelect');
   const selectedIds = interaction.values; const allParts = interaction.customId.replace('rdv_individuel_select_', '').split('_'); const typeRdv = allParts.slice(0, -1).join('_');
   const db = loadDB(); if (!db._rdvPending) db._rdvPending = {}; db._rdvPending[interaction.id] = { type: 'individuel', ids: selectedIds }; saveDB(db);
   const typeLabels = { reunion_direction: 'Réunion Direction', rdv_client: 'Rendez-vous Client', briefing_op: 'Briefing Opération', debrief_op: 'Débrief Opération', entretien_recru: 'Entretien Recrutement', reunion_legal: 'Réunion Pôle Légal', reunion_confrerie: 'Réunion Confrérie', formation: 'Formation Membres', negociation: 'Négociation', rdv_medical: 'Rendez-vous Médical', rdv_juridique: 'Rendez-vous Juridique', autre: 'Autre' };
