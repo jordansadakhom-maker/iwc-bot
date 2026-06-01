@@ -595,14 +595,41 @@ async function handleDashboard(interaction) {
 
 async function handleFichePersonnage(message) {
   if (message.author.bot || !message.guild) return;
+
+  const db      = loadDB();
+  const isDir   = message.member?.roles?.cache?.some(r =>
+    ['Concepteur','Fléau','Fondateur','Directeur','Officier','Co-Directeur'].some(n => r.name.includes(n))
+  );
+
   const lines = message.content.split('\n');
   const get = (...keys) => { for (const key of keys) { const line = lines.find(l => l.toUpperCase().includes(key.toUpperCase()) && l.includes(':')); if (line) { const val = line.split(':').slice(1).join(':').trim(); if (val) return val; } } return '—'; };
   const nom = get('NOM COMPLET', 'NOM'); const surnom = get('SURNOM'); const age = get('ÂGE', 'AGE'); const naissance = get('LIEU DE NAISSANCE', 'NAISSANCE'); const nationalite = get('NATIONALITÉ', 'NATIONALITE'); const taille = get('TAILLE', 'CORPULENCE'); const yeux = get('YEUX', 'CHEVEUX'); const signes = get('SIGNES PARTICULIERS', 'SIGNES'); const profession = get('PROFESSION', 'MÉTIER', 'METIER'); const reputation = get('RÉPUTATION', 'REPUTATION');
   const extractBloc = (marker) => { const idx = lines.findIndex(l => l.replace(/[—\-\s]/g, '').toUpperCase().includes(marker.toUpperCase().replace(/\s/g, ''))); if (idx < 0) return null; const bloc = []; for (let i = idx + 1; i < lines.length; i++) { const l = lines[i].trim(); if (!l) continue; if (/^—{2,}/.test(l) || /^={2,}/.test(l)) break; bloc.push(l); } return bloc.length ? bloc.join('\n').slice(0, 1000) : null; };
   const histoire = extractBloc('HISTOIRE'); const personnalite = extractBloc('PERSONNALITÉ'); const competences = extractBloc('COMPÉTENCES'); const faiblesses = extractBloc('FAIBLESSES'); const liens = extractBloc('LIENS'); const objectif = extractBloc('OBJECTIF');
   const citation = lines.find(l => /^[""]/.test(l.trim()) || /^\*"/.test(l.trim()));
-  const db = loadDB(); const membre = db.members[message.author.id]; const pole = membre?.pole || _getPole(message.member); const isIlleg = pole === 'illegal'; const color = isIlleg ? 0x8B1A1A : 0x3B82F6; const nomPerso = nom !== '—' ? nom : message.author.username;
+  const membre = db.members[message.author.id]; const pole = membre?.pole || _getPole(message.member); const isIlleg = pole === 'illegal'; const color = isIlleg ? 0x8B1A1A : 0x3B82F6; const nomPerso = nom !== '—' ? nom : message.author.username;
+  // ── Vérifier si la fiche existe déjà et si l'auteur est autorisé ──
+  if (!db.fiches) db.fiches = {};
+  const ficheExistante = db.fiches[nomPerso.toLowerCase()];
+
+  if (ficheExistante && ficheExistante.discordId !== message.author.id && !isDir) {
+    await message.react('❌').catch(() => {});
+    const rejet = await message.reply({
+      content: `❌ **Fiche protégée** — La fiche de **${nomPerso}** appartient à <@${ficheExistante.discordId}>.
+*Seul son auteur ou la Direction peut la modifier.*`,
+    }).catch(() => null);
+    if (rejet) setTimeout(() => rejet.delete().catch(() => {}), 10000);
+    setTimeout(() => message.delete().catch(() => {}), 10000);
+    return;
+  }
+
+  // Enregistrer/mettre à jour le propriétaire de la fiche
+  db.fiches[nomPerso.toLowerCase()] = { discordId: message.author.id, username: message.author.username, nomPerso, updatedAt: new Date().toISOString() };
+  saveDB(db);
+
   await message.react('✅').catch(() => {});
+  // Supprimer le message original après 5 secondes pour garder le salon propre
+  setTimeout(() => message.delete().catch(() => {}), 5000);
   const embedCompact = new EmbedBuilder().setColor(color).setAuthor({ name: isIlleg ? '🔒 La Confrérie — Fiche Personnage' : '⚖️ Iron Wolf Company — Fiche Personnage', iconURL: message.guild.iconURL() || undefined }).setTitle(`👤 ${nomPerso}`).setThumbnail(message.author.displayAvatarURL({ size: 256 }));
   if (citation) embedCompact.setDescription(`> *${citation.replace(/^[\*""\s]+|[\*""\s]+$/g, '')}*`);
   const identiteLines = [`**Surnom :** ${surnom}`, `**Âge :** ${age}`, `**Nationalité :** ${nationalite}`, `**Né(e) à :** ${naissance}`];
