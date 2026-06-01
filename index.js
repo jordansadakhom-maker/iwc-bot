@@ -982,7 +982,8 @@ client.on('messageCreate', async message => {
       const embed = new EmbedBuilder().setColor(0xFFA500).setTitle(`🎯 OPÉRATION — ${op.name}`).addFields({ name: 'Statut', value: '🟡 En préparation', inline: true }, { name: 'Pôle', value: pole === 'legal' ? '⚖️ Pôle Légal' : '🔪 Pôle Illégal', inline: true }, { name: 'Lieu', value: op.lieu, inline: true }, { name: 'Objectif', value: op.objectif }, { name: 'Équipe', value: op.equipe }, { name: '👥 Participants (0)', value: '*Personne pour l\'instant. Clique « ✋ Je participe » ci-dessous.*' }).setFooter({ text: `ID: ${op.id} • ${fmtShort(new Date())}` });
       const rowP = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`op_participer_${op.id}`).setLabel('✋ Je participe').setStyle(ButtonStyle.Secondary), new ButtonBuilder().setCustomId(`op_retrait_${op.id}`).setLabel('🚪 Me retirer').setStyle(ButtonStyle.Secondary));
       const rowG = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`op_encours_${op.id}`).setLabel('🟢 Lancer').setStyle(ButtonStyle.Success), new ButtonBuilder().setCustomId(`op_terminee_${op.id}`).setLabel('✅ Terminer').setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId(`op_annulee_${op.id}`).setLabel('❌ Annuler').setStyle(ButtonStyle.Danger));
-      await opsCh.send({ content: `<@&${pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL}> — 🎯 Nouvelle opération **${op.name}**. Inscrivez-vous via « ✋ Je participe ».`, embeds: [embed], components: [rowP, rowG], allowedMentions: { parse: [], roles: [pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL] } });
+      const rowModif2 = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`op_modifier_${op.id}`).setLabel('✏️ Modifier').setStyle(ButtonStyle.Secondary));
+      await opsCh.send({ content: `<@&${pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL}> — 🎯 Nouvelle opération **${op.name}**. Inscrivez-vous via « ✋ Je participe ».`, embeds: [embed], components: [rowP, rowG, rowModif2], allowedMentions: { parse: [], roles: [pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL] } });
       await message.react('✅');
     }
     return;
@@ -1013,6 +1014,45 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isModalSubmit() && interaction.customId === 'modal_agenda_rdv')        return notionV3.handleAgendaModal?.(interaction);
   if (interaction.isModalSubmit() && interaction.customId === 'modal_op_programmee')     return notionV5.handleOpProgrammeeModal?.(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_op_creer'))   return _validerModalOpCreer(interaction);
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_op_modifier_')) {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const parts2 = interaction.customId.replace('modal_op_modifier_', '').split('_');
+    const lieuVal2 = parts2.pop();
+    const opIdMod = parts2.join('_');
+    const opMod = db.operations.find(o => o.id === opIdMod);
+    if (!opMod) return interaction.editReply({ content: '❌ Opération introuvable.' });
+    const lieuVille2 = VILLES_RDR2.find(v => v.value === lieuVal2);
+    opMod.lieu      = lieuVille2 ? `${lieuVille2.emoji || ''} ${lieuVille2.label}`.trim() : lieuVal2;
+    opMod.lieuId    = lieuVal2;
+    opMod.objectif  = interaction.fields.getTextInputValue('objectif').trim();
+    const newDetails = interaction.fields.getTextInputValue('details')?.trim();
+    if (newDetails) opMod.equipe = newDetails;
+    opMod.updatedAt = new Date().toISOString();
+    saveDB(db);
+    // Sync Notion
+    if (opMod.notionPageId && process.env.NOTION_TOKEN) {
+      _notionPatch(opMod.notionPageId, {
+        'Lieu IC':   { rich_text: [{ text: { content: opMod.lieu } }] },
+        'Objectif':  { rich_text: [{ text: { content: opMod.objectif } }] },
+        'Notes':     { rich_text: [{ text: { content: opMod.equipe || '—' } }] },
+      }).catch(() => {});
+    }
+    // Mettre à jour l'embed dans #operations
+    const opsCh3 = getChById(interaction.guild, 'OPERATIONS', 'operations');
+    if (opsCh3) {
+      const msgs3 = await opsCh3.messages.fetch({ limit: 50 }).catch(() => null);
+      const msgOp = msgs3?.find(m => m.embeds[0]?.footer?.text?.includes(opIdMod));
+      if (msgOp) {
+        const newEmbed = EmbedBuilder.from(msgOp.embeds[0])
+          .spliceFields(2, 1, { name: 'Lieu', value: opMod.lieu, inline: true })
+          .spliceFields(3, 1, { name: 'Objectif', value: opMod.objectif, inline: false });
+        await msgOp.edit({ embeds: [newEmbed] }).catch(() => {});
+      }
+    }
+    await interaction.editReply({ content: `✅ Opération **${opMod.name}** modifiée — Lieu: ${opMod.lieu} · Objectif: ${opMod.objectif}` });
+    return;
+  }
   if (interaction.isModalSubmit() && interaction.customId === 'modal_surnom_identite')   return _validerModalSurnom(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_agenda_simple')) return _validerModalAgendaSimple(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_rdv_individuel_')) return _validerModalRdvIndividuel(interaction);
@@ -1092,6 +1132,59 @@ client.on('interactionCreate', async interaction => {
       return;
     }
     if (interaction.customId === 'op_annulee_cancel')         return interaction.update({ content: '↩️ Annulation annulée.', embeds: [], components: [] });
+
+    // ── Handler ✏️ Modifier opération ──
+    if (interaction.customId.startsWith('op_modifier_')) {
+      if (!isDirection(interaction.member)) {
+        return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+      }
+      const opIdM = interaction.customId.replace('op_modifier_', '');
+      const opM   = db.operations.find(o => o.id === opIdM);
+      if (!opM) return interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral });
+      if (opM.status === 'en_cours') {
+        return interaction.reply({ content: '❌ Impossible de modifier une opération en cours.', flags: MessageFlags.Ephemeral });
+      }
+      if (opM.status === 'terminee' || opM.status === 'annulee') {
+        return interaction.reply({ content: '❌ Impossible de modifier une opération terminée ou annulée.', flags: MessageFlags.Ephemeral });
+      }
+      // Ouvrir le menu de sélection de lieu
+      const { StringSelectMenuBuilder } = require('discord.js');
+      const villesOptions = VILLES_RDR2.map(v => ({ label: v.label, value: v.value, emoji: v.emoji || undefined, default: v.value === opM.lieuId }));
+      await interaction.reply({
+        flags: MessageFlags.Ephemeral,
+        embeds: [new EmbedBuilder()
+          .setColor(0xFFA500)
+          .setTitle(`✏️ Modifier — ${opM.name}`)
+          .setDescription('Choisis le nouveau lieu. Le formulaire de détails s\'ouvrira ensuite.')
+          .addFields(
+            { name: '📍 Lieu actuel',     value: opM.lieu    || '—', inline: true },
+            { name: '🎯 Objectif actuel', value: opM.objectif || '—', inline: true },
+          )
+        ],
+        components: [new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId(`op_modifier_lieu_${opIdM}`)
+            .setPlaceholder('Choisir un nouveau lieu...')
+            .addOptions(villesOptions.slice(0, 25))
+        )],
+      });
+      return;
+    }
+
+    // ── Handler sélection lieu modification ──
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('op_modifier_lieu_')) {
+      const opIdML = interaction.customId.replace('op_modifier_lieu_', '');
+      const lieuVal = interaction.values[0];
+      const lieuVille = VILLES_RDR2.find(v => v.value === lieuVal);
+      const modal = new ModalBuilder()
+        .setCustomId(`modal_op_modifier_${opIdML}_${lieuVal}`)
+        .setTitle(`✏️ Modifier opération`);
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objectif').setLabel('Objectif').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Neutraliser les gardes...')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Équipe / Notes').setStyle(TextInputStyle.Paragraph).setRequired(false).setPlaceholder('Membres impliqués, matériel, heure...')),
+      );
+      return interaction.showModal(modal);
+    }
 
     // ── Handler présence ✋ ──
     if (interaction.customId.startsWith('op_present_')) {
@@ -1771,11 +1864,14 @@ async function _validerModalOpCreer(interaction) {
     new ButtonBuilder().setCustomId(`op_terminee_${op.id}`).setLabel('✅ Terminer').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(`op_annulee_${op.id}`).setLabel('❌ Annuler').setStyle(ButtonStyle.Danger),
   );
+  const rowModif = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`op_modifier_${op.id}`).setLabel('✏️ Modifier').setStyle(ButtonStyle.Secondary),
+  );
 
   const opsCh = guild.channels.cache.get(SALON_IDS.OPERATIONS) || getChById(guild, 'OPERATIONS', 'operations');
   if (opsCh) {
     const mention = `<@&${pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL}>`;
-    await opsCh.send({ content: `${mention} — 🎯 Nouvelle opération **${nom}** · Inscrivez-vous ci-dessous.`, embeds: [embed], components: [rowP, rowG], allowedMentions: { parse: [], roles: [pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL] } });
+    await opsCh.send({ content: `${mention} — 🎯 Nouvelle opération **${nom}** · Inscrivez-vous ci-dessous.`, embeds: [embed], components: [rowP, rowG, rowModif], allowedMentions: { parse: [], roles: [pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL] } });
   }
   await interaction.editReply({ content: `✅ Opération **${nom}** créée${notionPageId ? ' et synchronisée avec Notion' : ''}.` });
 }
