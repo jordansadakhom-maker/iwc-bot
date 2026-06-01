@@ -95,6 +95,21 @@ function getChHard(guild, key) {
   return guild.channels.cache.get(id) || null;
 }
 
+// Retourne le salon #absences selon le pôle du membre
+function getAbsencesCh(guild, member) {
+  const roles = member?.roles?.cache;
+  if (!roles) return guild.channels.cache.get(SALON_HARDCODED.ABSENCES_ILLEGAL);
+  // Détecter le pôle : noms de rôles légaux
+  const legalRoles = ['Conseil', 'Directeur', 'Co-Directeur', 'Officier', 'Agent Confirmé', 'Opérateur', 'Recrue', 'Probatoire', 'Instructeur', 'Le Penseur', 'Fondateur'];
+  const illegalRoles = ['Concepteur', 'Fléau', "L'Exécuteur", 'Le Condamné', 'Le Maudit', 'La Confrérie', 'Instructeur'];
+  const isLegal = roles.some(r => legalRoles.some(n => r.name.includes(n)));
+  const isIllegal = roles.some(r => illegalRoles.some(n => r.name.includes(n)));
+  if (isIllegal && !isLegal) return guild.channels.cache.get(SALON_HARDCODED.ABSENCES_ILLEGAL);
+  if (isLegal && !isIllegal) return guild.channels.cache.get(SALON_HARDCODED.ABSENCES_LEGAL);
+  // Direction (les deux pôles) → légal par défaut
+  return guild.channels.cache.get(SALON_HARDCODED.ABSENCES_LEGAL);
+}
+
 // Archive un contrat signé/refusé dans #contrats-reponses avec un thread par contrat
 async function archiverContratReponses(guild, contrat, statut, embed) {
   try {
@@ -142,6 +157,7 @@ const SLASH_COMMANDS = [
     .addSubcommand(s => s.setName('creer').setDescription('Créer un nouveau RDV dans Notion')),
   new SlashCommandBuilder().setName('op-programmer').setDescription('🕐 Programmer une opération avec lancement automatique (Direction)'),
   new SlashCommandBuilder().setName('op-creer').setDescription('🎯 Créer une nouvelle opération (Direction)'),
+  new SlashCommandBuilder().setName('setup-serveur').setDescription('🔧 Réorganiser la structure du serveur Discord (Fondateur uniquement)'),
   new SlashCommandBuilder().setName('aide').setDescription('📖 Guide des commandes disponibles'),
   new SlashCommandBuilder().setName('patch').setDescription('Deployer le patch note'),
   new SlashCommandBuilder().setName('version').setDescription('🔢 Version du bot et statut des connexions'),
@@ -184,6 +200,18 @@ function safeMentions(roleIds = [], userIds = []) {
 }
 function getContratMention(guild) { const roles = CONTRAT_ROLES.map(id => guild.roles.cache.get(id)).filter(Boolean).map(r => `<@&${r.id}>`); return [...roles, `<@${JUNE_MCCALL_ID}>`].join(' '); }
 function isDirection(member) { return member?.roles.cache.some(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier', 'Instructeur', 'Secrétaire'].some(n => r.name.includes(n))); }
+function isMembre(member) {
+  if (!member) return false;
+  return member.roles?.cache?.some(r => r.name !== '@everyone' && !r.name.toLowerCase().includes('visiteur')) || false;
+}
+function isFondateurOuFleau(member) {
+  if (!member) return false;
+  return member.roles?.cache?.some(r => ['Fondateur', 'Fléau'].some(n => r.name.includes(n))) || false;
+}
+function isOfficierOuDirection(member) {
+  if (!member) return false;
+  return member.roles?.cache?.some(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier', 'Co-Directeur'].some(n => r.name.includes(n))) || false;
+}
 // #logs technique (arrivées, règlement...)
 async function getLogsCh(guild) { let ch = guild.channels.cache.get(CH.LOGS); if (!ch) ch = await guild.channels.fetch(CH.LOGS).catch(() => null); return ch; }
 // #journal-de-bord = destination pour TOUS les logs IC
@@ -384,27 +412,30 @@ async function handleSlashCommand(interaction) {
   const { commandName, guild } = interaction; const db = loadDB();
   if (commandName === 'grade-set')         { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleGradeSetCommand?.(interaction); }
   if (commandName === 'hierarchie')        return notionV3.handleHierarchieCommand?.(interaction);
-  if (commandName === 'affaire')           { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleAffaireNouvelleButton?.(interaction); }
-  if (commandName === 'tresor')            return notionModules.handleTresorCommand?.(interaction);
-  if (commandName === 'dashboard')         { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleDashboard?.(interaction); }
-  if (commandName === 'journal')           return notionModules.handleJournalCommand?.(interaction);
-  if (commandName === 'contrats-archives') { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleContratsArchives?.(interaction); }
+  if (commandName === 'affaire')           { if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral }); await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleAffaireNouvelleButton?.(interaction); }
+  if (commandName === 'tresor')            { if (!isOfficierOuDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction et aux Officiers de Terrain.', flags: MessageFlags.Ephemeral }); return notionModules.handleTresorCommand?.(interaction); }
+  if (commandName === 'dashboard')         { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleDashboard?.(interaction); }
+  if (commandName === 'journal')           { if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral }); return notionModules.handleJournalCommand?.(interaction); }
+  if (commandName === 'contrats-archives') { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleContratsArchives?.(interaction); }
   if (commandName === 'contrats')          return _handleMesContrats(interaction);
+  if (commandName === 'registre') { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); }
   if (commandName === 'registre')         return _handleRegistre(interaction);
   if (commandName === 'op')               return _handleOpDetail(interaction);
   if (commandName === 'profil')            return handleProfilEnhanced(interaction);
-  if (commandName === 'bilan')             { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleBilanCommand?.(interaction); }
-  if (commandName === 'rdv')               return _ouvrirMenuRdvSlash(interaction);
+  if (commandName === 'bilan')             { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleBilanCommand?.(interaction); }
+  if (commandName === 'rdv')               { if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral }); return _ouvrirMenuRdvSlash(interaction); }
+  if (commandName === 'agenda') { if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral }); }
   if (commandName === 'agenda') {
     const subCmd = interaction.options?.getSubcommand(false);
     if (subCmd === 'creer') return _ouvrirModalAgendaSimple(interaction);
     if (subCmd === 'rdv') return _ouvrirMenuRdvSlash(interaction);
     return notionV3.handleAgendaCommand?.(interaction);
   }
-  if (commandName === 'op-programmer')     return _ouvrirModalOpProgrammee(interaction);
+  if (commandName === 'op-programmer')     { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return _ouvrirModalOpProgrammee(interaction); }
   if (commandName === 'op-creer')          return _ouvrirModalOpCreer(interaction);
+  if (commandName === 'setup-serveur')     return _handleSetupServeur(interaction);
   if (commandName === 'aide')              return _handleAide(interaction);
-  if (commandName === 'patch')             return _handlePatchDeploy(interaction);
+  if (commandName === 'patch')             { if (!isFondateurOuFleau(interaction.member)) return interaction.reply({ content: '❌ Réservé au Fondateur et au Fléau.', flags: MessageFlags.Ephemeral }); return _handlePatchDeploy(interaction); }
   if (commandName === 'version')           return _handleVersion(interaction);
   if (commandName === 'sync')              return _handleSync(interaction);
   if (commandName === 'avertir')           return _handleAvertir(interaction);
@@ -413,13 +444,16 @@ async function handleSlashCommand(interaction) {
   if (commandName === 'annuler-absence')   return _handleAnnulerAbsence(interaction);
   if (commandName === 'purge')             return _handlePurge(interaction);
 
-  if (commandName === 'stats') { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV5.handleStatsAvancees?.(interaction); }
+  if (commandName === 'stats') {
+    if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral }); await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV5.handleStatsAvancees?.(interaction); }
   if (commandName === 'solde') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
     const soldeLegal = db.coffres?.legal || 0; const soldeIlleg = db.coffres?.illegal || 0;
     await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('💰 Soldes des coffres — IWC').addFields({ name: '⚖️ Coffre Légal', value: `**$${soldeLegal.toLocaleString('fr-FR')}**`, inline: true }, { name: '🔒 Coffre Illégal', value: `**$${soldeIlleg.toLocaleString('fr-FR')}**`, inline: true }, { name: '💎 Total', value: `**$${(soldeLegal + soldeIlleg).toLocaleString('fr-FR')}**`, inline: true }).setFooter({ text: `IWC • ${fmtShort(new Date())}` })], flags: isDirection(interaction.member) ? undefined : MessageFlags.Ephemeral });
     return;
   }
   if (commandName === 'fiche') {
+    if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral });
     const nom = interaction.options.getString('nom').toLowerCase();
     const cand = (db.candidatures || []).find(c => c.status === 'acceptee' && c.nomPerso?.toLowerCase().includes(nom));
     if (!cand) { const nomIC = Object.keys(MEMBRES_DISCORD_MAP).find(n => n.toLowerCase().includes(nom)); if (nomIC) { const discordId = MEMBRES_DISCORD_MAP[nomIC]; const membre = db.members[discordId]; await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle(`👤 Fiche — ${nomIC}`).setDescription('*Membre fondateur — fiche à compléter dans Notion*').addFields({ name: '🎭 Personnage', value: nomIC, inline: true }, { name: '📋 Statut', value: membre?.status === 'absent' ? '⚠️ Absent' : '✅ Actif', inline: true }, { name: '🎖️ Rang', value: membre?.rang || '—', inline: true }).setFooter({ text: 'IWC • Fiche personnage' })], flags: MessageFlags.Ephemeral }); return; } await interaction.reply({ content: `❌ Aucune fiche trouvée pour **${interaction.options.getString('nom')}**.`, flags: MessageFlags.Ephemeral }); return; }
@@ -427,6 +461,7 @@ async function handleSlashCommand(interaction) {
     return;
   }
   if (commandName === 'ops') {
+    if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral });
     const opsActives = (db.operations || []).filter(o => ['preparation', 'en_cours'].includes(o.status));
     if (!opsActives.length) { await interaction.reply({ content: '*Aucune opération en cours ou en préparation.*', flags: MessageFlags.Ephemeral }); return; }
     await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('🎯 Opérations actives — IWC').setDescription(opsActives.map(o => [`**${o.name}** — ${o.status === 'en_cours' ? '🟢 En cours' : '🟡 Préparation'}`, `📍 ${o.lieu || '—'} · 👥 ${(o.participants || []).join(', ') || 'Aucun'}`].join('\n')).join('\n\n')).setFooter({ text: `IWC • ${fmtShort(new Date())}` })], ephemeral: false });
@@ -434,6 +469,7 @@ async function handleSlashCommand(interaction) {
   }
 
   if (commandName === 'absent') {
+    if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral });
     // Ouvrir un modal pour saisie libre de la durée + options
     const modal = new ModalBuilder().setCustomId('modal_absent').setTitle('🟡 Déclarer une absence');
     modal.addComponents(
@@ -559,14 +595,13 @@ async function autoSetup(guild) {
   await notionModules.setupTresorButton?.(guild);
   // Nettoyer les mauvais messages dans #absences (le panel affaires ne doit pas être là)
   try {
-    const absCh = guild.channels.cache.get(SALON_HARDCODED.ABSENCES);
-    if (absCh) {
+    // Nettoyer les deux salons absences (légal + illégal)
+    for (const absId of [SALON_HARDCODED.ABSENCES_LEGAL, SALON_HARDCODED.ABSENCES_ILLEGAL]) {
+      const absCh = guild.channels.cache.get(absId);
+      if (!absCh) continue;
       const msgs = await absCh.messages.fetch({ limit: 50 }).catch(() => null);
       if (msgs) for (const [, m] of msgs) {
         if (m.author.id === guild.members.me?.id && m.embeds?.[0]?.title?.includes('AFFAIRES')) {
-          await m.delete().catch(() => {});
-        }
-        if (m.author.id === guild.members.me?.id && m.components?.length > 0 && m.embeds?.[0]?.title?.includes('AFFAIRES')) {
           await m.delete().catch(() => {});
         }
       }
@@ -811,7 +846,7 @@ client.on('messageCreate', async message => {
           await _debloquerEcritureAbsent(guild, membreRetourMsg);
         }
       }
-      const absCh2 = guild.channels.cache.get(SALON_HARDCODED.ABSENCES) || getChById(guild, 'ABSENCES', 'absences');
+      const absCh2 = getAbsencesCh(guild, message.member);
       if (absCh2 && wasAbsent) {
         const mData = db.members[message.author.id];
         absCh2.send({ embeds: [new EmbedBuilder().setColor(0x57F287)
@@ -826,8 +861,11 @@ client.on('messageCreate', async message => {
     saveDB(db);
   }
 
-  const absCh = guild.channels.cache.get(SALON_HARDCODED.ABSENCES) || getChById(guild, 'ABSENCES', 'absences');
-  if (absCh && message.channel.id === absCh.id) {
+  // Détecter si le message est dans l'un des deux salons absences
+  const _absLegal = guild.channels.cache.get(SALON_HARDCODED.ABSENCES_LEGAL);
+  const _absIlleg = guild.channels.cache.get(SALON_HARDCODED.ABSENCES_ILLEGAL);
+  const _isInAbsSalon = (message.channel.id === _absLegal?.id || message.channel.id === _absIlleg?.id);
+  if (_isInAbsSalon) {
     if (db.members[message.author.id]) { db.members[message.author.id].status = 'absent'; saveDB(db); await message.react('✅'); await notionExtra.majStatutActiviteNotion?.(message.author.id, 'absent'); }
     await notionV3.syncAbsenceNotion?.(message.author.id, 'absent').catch(() => {});
     await notionV4.posterAbsencePropre?.(guild, message.member, message.content, `#${message.channel.name}`).catch(() => {});
@@ -927,6 +965,8 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId === 'btn_affaire_nouvelle')       { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleAffaireNouvelleButton?.(interaction); }
     if (interaction.customId === 'btn_affaires_resume')        { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleAffairesResumeButton?.(interaction); }
     if (interaction.customId === 'btn_informateur_rapport')    return notionV3.handleInformateurRapportButton?.(interaction);
+    if (interaction.customId === 'setup_appliquer')             return _handleSetupServeur({ ...interaction, options: { getString: () => 'appliquer' } });
+    if (interaction.customId === 'setup_annuler')               return interaction.update({ content: '❌ Annulé — aucune modification effectuée.', components: [] });
     if (interaction.customId === 'btn_informateur_historique') { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleInformateurHistorique?.(interaction); }
     if (interaction.customId.startsWith('info_confirmer_'))    return notionV3.handleInformateurConfirmer?.(interaction);
     if (interaction.customId === 'btn_surnom_ouvrir')          return _ouvrirModalSurnom(interaction);
@@ -1803,7 +1843,7 @@ async function _handleRetour(interaction) {
     await _debloquerEcritureAbsent(guild, membreRetour);
   }
   _syncMembreNotion(targetId, { status: 'actif', lastActivity: new Date().toISOString() }).catch(() => {});
-  const absCh = guild.channels.cache.get(SALON_HARDCODED.ABSENCES) || guild.channels.cache.get(SALON_HARDCODED.ABSENCES) || getChById(guild, 'ABSENCES', 'absences');
+  const absCh = getAbsencesCh(guild, membreRetour);
   if (absCh) await absCh.send({ embeds: [new EmbedBuilder().setColor(0x57F287)
     .setAuthor({ name: `${membreRetour?.displayName || targetUser.username} — Retour`, iconURL: targetUser.displayAvatarURL?.() || undefined })
     .setTitle('✅ Retour déclaré')
@@ -1834,7 +1874,7 @@ async function _handleAnnulerAbsence(interaction) {
     await _debloquerEcritureAbsent(interaction.guild, membreD);
   }
   _syncMembreNotion(cible.id, { status: 'actif', lastActivity: new Date().toISOString() }).catch(() => {});
-  const absCh = interaction.guild.channels.cache.get(SALON_HARDCODED.ABSENCES) || getChById(interaction.guild, 'ABSENCES', 'absences');
+  const absCh = getAbsencesCh(interaction.guild, membreD);
   if (absCh) await absCh.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ Absence levée par la Direction').addFields({ name: '👤 Membre', value: `<@${cible.id}>`, inline: true }, { name: '✅ Levé par', value: interaction.user.username, inline: true }, { name: '📅 Date', value: new Date().toLocaleDateString('fr-FR'), inline: true }).setFooter({ text: 'IWC • Absence annulée par la Direction' }).setTimestamp()] }).catch(() => {});
   try { await membreD?.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ Absence levée').setDescription(`Ton absence a été levée par **${interaction.user.username}**.\nTes permissions d'écriture sont rétablies.`).setFooter({ text: 'IWC' })] }); } catch {}
   await interaction.editReply({ content: `✅ Absence de <@${cible.id}> levée.` });
@@ -1916,7 +1956,192 @@ async function _handleAide(interaction) {
   return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
 
-async function setupPanelDirection(guild) {
+async function _handleSetupServeur(interaction) {
+  if (!isFondateurOuFleau(interaction.member)) {
+    return interaction.reply({ content: '❌ Réservé au Fondateur uniquement.', flags: MessageFlags.Ephemeral });
+  }
+  const guild = interaction.guild;
+  const sub = interaction.options?.getString('action') || 'preview';
+
+  // ── Définition des permissions par salon ──
+  const everyone  = guild.roles.everyone.id;
+  const rLegal    = ROLE_POLE_LEGAL;
+  const rIlleg    = ROLE_POLE_ILLEGAL;
+  const rAbs      = ROLE_ABSENT;
+  const rDir      = guild.roles.cache.filter(r =>
+    ['Concepteur','Fléau','Fondateur','Directeur','Officier','Co-Directeur'].some(n => r.name.includes(n))
+  ).map(r => r.id);
+  const rFonda    = guild.roles.cache.filter(r => r.name.includes('Fondateur')).map(r => r.id);
+  const rVisit    = guild.roles.cache.filter(r => r.name.toLowerCase().includes('visiteur')).map(r => r.id);
+
+  // Rôle géré du bot (IWC Setup) — doit avoir accès partout
+  const botMember = guild.members.me;
+  const botRole = botMember?.roles?.botRole?.id || botMember?.roles?.cache
+    ?.find(r => r.managed && r.name.toLowerCase().includes('iwc'))?.id
+    || botMember?.roles?.highest?.id;
+  // Permission bot : ViewChannel + SendMessages + ManageMessages + EmbedLinks + ReadHistory
+  const botPerms = botRole ? [{ id: botRole, allow: ['ViewChannel','SendMessages','ManageMessages','EmbedLinks','ReadMessageHistory','AttachFiles'] }] : [];
+
+  // Helper : ajouter les perms bot à chaque type
+  const withBot = (arr) => botPerms.length ? [...arr, ...botPerms] : arr;
+
+  const p = {
+    public:       withBot([{ id: everyone, allow: ['ViewChannel'], deny: ['SendMessages'] }]),
+    visiteurs:    withBot([{ id: everyone, deny: ['ViewChannel','SendMessages'] }, ...rVisit.map(id => ({ id, allow: ['ViewChannel','SendMessages'] }))]),
+    membres:      withBot([{ id: everyone, deny: ['ViewChannel'] }, { id: rLegal, allow: ['ViewChannel','SendMessages'] }, { id: rIlleg, allow: ['ViewChannel','SendMessages'] }, ...rDir.map(id => ({ id, allow: ['ViewChannel','SendMessages'] }))]),
+    legal:        withBot([{ id: everyone, deny: ['ViewChannel'] }, { id: rLegal, allow: ['ViewChannel','SendMessages'] }, ...rDir.map(id => ({ id, allow: ['ViewChannel','SendMessages'] }))]),
+    illeg:        withBot([{ id: everyone, deny: ['ViewChannel'] }, { id: rIlleg, allow: ['ViewChannel','SendMessages'] }, ...rDir.map(id => ({ id, allow: ['ViewChannel','SendMessages'] }))]),
+    dir:          withBot([{ id: everyone, deny: ['ViewChannel'] }, ...rDir.map(id => ({ id, allow: ['ViewChannel','SendMessages'] }))]),
+    fonda:        withBot([{ id: everyone, deny: ['ViewChannel'] }, ...rFonda.map(id => ({ id, allow: ['ViewChannel','SendMessages'] }))]),
+    absLegal:     withBot([{ id: everyone, deny: ['ViewChannel'] }, { id: rLegal, allow: ['ViewChannel','SendMessages'] }, ...(rAbs ? [{ id: rAbs, allow: ['ViewChannel','SendMessages'] }] : []), ...rDir.map(id => ({ id, allow: ['ViewChannel','SendMessages'] }))]),
+    absIlleg:     withBot([{ id: everyone, deny: ['ViewChannel'] }, { id: rIlleg, allow: ['ViewChannel','SendMessages'] }, ...(rAbs ? [{ id: rAbs, allow: ['ViewChannel','SendMessages'] }] : []), ...rDir.map(id => ({ id, allow: ['ViewChannel','SendMessages'] }))]),
+    legalRO:      withBot([{ id: everyone, deny: ['ViewChannel','SendMessages'] }, { id: rLegal, allow: ['ViewChannel'] }, ...rDir.map(id => ({ id, allow: ['ViewChannel','SendMessages'] }))]),
+    illegRO:      withBot([{ id: everyone, deny: ['ViewChannel','SendMessages'] }, { id: rIlleg, allow: ['ViewChannel'] }, ...rDir.map(id => ({ id, allow: ['ViewChannel','SendMessages'] }))]),
+    membresRO:    withBot([{ id: everyone, deny: ['ViewChannel','SendMessages'] }, { id: rLegal, allow: ['ViewChannel'] }, { id: rIlleg, allow: ['ViewChannel'] }, ...rDir.map(id => ({ id, allow: ['ViewChannel'] }))]),
+  };
+
+  // ── Table : salon → permissions cibles ──
+  // Identifié par nom partiel (insensible casse, sans accents)
+  const clean = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]/g,'');
+  const PERMS_TABLE = [
+    // GÉNÉRAL
+    { nom: 'annonces',           perm: 'public',    label: '📣 annonces — lecture seule tous' },
+    { nom: 'reglement',          perm: 'public',    label: '📜 règlement — lecture seule tous',    exclure: ['illegal','ombre'] },
+    { nom: 'arrivee',            perm: 'membresRO', label: '👋 arrivée — lecture membres' },
+    { nom: 'evenements',         perm: 'public',    label: '📅 événements — lecture seule tous',   exclure: ['illegal'] },
+    // VISITEURS
+    { nom: 'discussionhrp',      perm: 'visiteurs', label: '💬 discussion-hrp visiteurs',          cat: 'visiteurs' },
+    { nom: 'attentevocal',       perm: 'visiteurs', label: '🔊 attente-vocal visiteurs' },
+    // COMMUNAUTÉ
+    { nom: 'discussionhrp',      perm: 'membres',   label: '💬 discussion-hrp membres',            cat: 'communaute' },
+    { nom: 'discussionrp',       perm: 'membres',   label: '💬 discussion-rp membres' },
+    { nom: 'suggestionidee',     perm: 'membres',   label: '💡 suggestion-idée membres' },
+    { nom: 'screenshots',        perm: 'membres',   label: '📸 screenshots membres' },
+    { nom: 'clipstempsfort',     perm: 'membres',   label: '🎬 clips membres' },
+    { nom: 'planning',           perm: 'membres',   label: '📋 planning commun membres',           exclure: ['illegal','agenda'] },
+    // PÔLE LÉGAL
+    { nom: 'hierarchieironwolf', perm: 'legalRO',   label: '🏛️ hierarchie-iwc — légal lecture' },
+    { nom: 'contrats',           perm: 'legal',     label: '📜 contrats — pôle légal',             exclure: ['reponse','archive','illegal'] },
+    { nom: 'contratsreponses',   perm: 'dir',       label: '📁 contrats-reponses — Direction' },
+    { nom: 'coffreentreprise',   perm: 'dir',       label: '💰 coffre-entreprise — Direction' },
+    { nom: 'agenda',             perm: 'legal',     label: '📅 agenda — pôle légal',               exclure: ['illegal'] },
+    { nom: 'histoireiwc',        perm: 'legalRO',   label: '📖 histoire-iwc — légal lecture' },
+    { id: '1510636619873517648', perm: 'absLegal',  label: '🟡 absences légal' },
+    { nom: 'parlote',            perm: 'legal',     label: '💬 parlote — pôle légal',              exclure: ['hrp','ombre'] },
+    { nom: 'parlotehrp',         perm: 'legal',     label: '💬 parlote-hrp — pôle légal',          exclure: ['ombre'] },
+    { nom: 'formation',          perm: 'legal',     label: '🎓 formation — pôle légal' },
+    // PÔLE ILLÉGAL
+    { nom: 'hierarchieombre',    perm: 'illegRO',   label: '💀 hierarchie-ombre — illégal lecture' },
+    { nom: 'annoncesillegal',    perm: 'illegRO',   label: '📣 annonces-illégal — illégal lecture' },
+    { nom: 'reglementillegal',   perm: 'illegRO',   label: '📜 règlement-illégal — illégal lecture' },
+    { nom: 'grade',              perm: 'illegRO',   label: '🎖️ grade — illégal lecture' },
+    { nom: 'surnompseudo',       perm: 'illeg',     label: '✏️ surnom-pseudo — pôle illégal' },
+    { nom: 'coffreillegal',      perm: 'dir',       label: '🔒 coffre-illegal — Direction' },
+    { nom: 'agendaillegal',      perm: 'illeg',     label: '📅 agenda-illégal — pôle illégal' },
+    { nom: 'histoiredelaconfr',  perm: 'illegRO',   label: '📖 histoire confrérie — illégal lecture' },
+    { nom: 'operations',         perm: 'illeg',     label: '🎯 operations — pôle illégal',         exclure: ['vocal'] },
+    { nom: 'informateurs',       perm: 'dir',       label: '🕵️ informateurs — Direction' },
+    { nom: 'plans',              perm: 'illeg',     label: '🗺️ plans — pôle illégal' },
+    { id: '1509718164760563743', perm: 'absIlleg',  label: '🟡 absences illégal' },
+    { nom: 'parloteombre',       perm: 'illeg',     label: '💬 parlote-ombre — pôle illégal',      exclure: ['hrp'] },
+    { nom: 'parlotehrpombre',    perm: 'illeg',     label: '💬 parlote-hrp-ombre — pôle illégal' },
+    // DIRECTION LÉGAL/ILLÉGAL
+    { nom: 'affaires',           perm: 'dir',       label: '⚔️ affaires — Direction' },
+    { nom: 'backgroundsmembres', perm: 'dir',       label: '👥 backgrounds-membres — Direction' },
+    { nom: 'dossierrecrutement', perm: 'dir',       label: '📁 dossier-recrutement — Direction' },
+    { nom: 'recrutementinterne', perm: 'dir',       label: '📋 recrutement-interne — Direction' },
+    // ROLEPLAY HRP
+    { nom: 'fichespersonnages',  perm: 'membres',   label: '🧑 fiches-personnages — membres' },
+    { nom: 'journaldebord',      perm: 'dir',       label: '📖 journal-de-bord — Direction' },
+    { nom: 'loreetunivrs',       perm: 'membresRO', label: '🌍 lore-et-univers — lecture membres' },
+    { nom: 'commandesslash',     perm: 'membres',   label: '⌨️ commandes-slash — membres' },
+    { nom: 'conversationdirection', perm: 'dir',    label: '💬 conversation-direction-hrp — Direction' },
+    // BOT
+    { nom: 'patchnote',          perm: 'dir',       label: '🔇 patch-note — Direction uniquement' },
+    { nom: 'logs',               perm: 'dir',       label: '📊 logs — Direction uniquement' },
+  ];
+
+  // ── Résoudre les salons ──
+  const findSalon = (rule) => {
+    if (rule.id) return guild.channels.cache.get(rule.id);
+    return guild.channels.cache.find(c => {
+      if (c.type === 4) return false;
+      const cn = clean(c.name);
+      if (!cn.includes(rule.nom)) return false;
+      if (rule.exclure?.some(ex => cn.includes(clean(ex)))) return false;
+      if (rule.cat) {
+        const catKw = { visiteurs: 'visiteur', communaute: 'communaut' };
+        const kw = catKw[rule.cat];
+        if (kw && !clean(c.parent?.name || '').includes(kw)) return false;
+      }
+      return true;
+    });
+  };
+
+  const permLabel = (perm) => ({
+    public: '🌐 Lecture seule — tout le monde',
+    visiteurs: '👁️ Visiteurs uniquement',
+    membres: '🐺 Membres IWC (légal + illégal)',
+    legal: '⚖️ Pôle Légal + Direction',
+    illeg: '🔪 Pôle Illégal + Direction',
+    dir: '🔒 Direction uniquement',
+    fonda: '👑 Fondateur uniquement',
+    absLegal: '🟡 Légal + Absent + Direction',
+    absIlleg: '🟡 Illégal + Absent + Direction',
+    legalRO: '📖 Légal lecture seule + Direction écriture',
+    illegRO: '📖 Illégal lecture seule + Direction écriture',
+    membresRO: '📖 Membres lecture seule',
+  })[perm] || perm;
+
+  // ── PREVIEW ──
+  if (sub !== 'appliquer') {
+    await interaction.reply({ flags: MessageFlags.Ephemeral, content: '⏳ Analyse en cours...' });
+    const preview = [];
+    for (const rule of PERMS_TABLE) {
+      const salon = findSalon(rule);
+      if (!salon) continue;
+      preview.push(`**${rule.label}**
+→ ${permLabel(rule.perm)}`);
+    }
+    // Découper en blocs de 10 pour éviter la limite Discord
+    const blocs = [];
+    for (let i = 0; i < preview.length; i += 10) blocs.push(preview.slice(i, i+10));
+    const msg = blocs.map((b, i) => '**Permissions prévues (' + (i*10+1) + '-' + Math.min((i+1)*10, preview.length) + ') :**\n' + b.join('\n\n')).join('\n\n').slice(0, 1900);
+
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('setup_appliquer').setLabel('✅ Tout appliquer').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('setup_annuler').setLabel('❌ Annuler').setStyle(ButtonStyle.Danger),
+    );
+    await interaction.editReply({ content: `📋 **Prévisualisation — ${preview.length} salons concernés**
+
+Vérifie la liste puis clique **Tout appliquer** pour confirmer.
+
+${msg}`, components: [row] });
+    return;
+  }
+
+  // ── APPLIQUER (appelé depuis le bouton) ──
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  let ok = 0, skip = 0, err = 0;
+  for (const rule of PERMS_TABLE) {
+    const salon = findSalon(rule);
+    if (!salon) { skip++; continue; }
+    try {
+      await salon.permissionOverwrites.set(p[rule.perm]);
+      ok++;
+      await new Promise(r => setTimeout(r, 350));
+    } catch(e) { err++; console.log(`❌ perms ${rule.label}:`, e.message); }
+  }
+  await interaction.editReply({ content: `✅ Permissions appliquées
+→ ${ok} salons mis à jour
+→ ${skip} non trouvés
+→ ${err} erreurs` });
+  const jCh = guild.channels.cache.get(SALON_HARDCODED.JOURNAL_DE_BORD);
+  if (jCh) await jCh.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('🔒 Permissions serveur mises à jour').setDescription(`Par **${interaction.user.username}** · ${ok} salons · ${err} erreurs`).setTimestamp()] }).catch(() => {});
+}
+
+async function setupPanelDirection(guild) {async function setupPanelDirection(guild) {
   try {
     const clean = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
     const ch = guild.channels.cache.find(c => c.isTextBased?.() && (clean(c.name).includes('direction') && (clean(c.name).includes('5') || clean(c.name).includes('nous')))) || guild.channels.cache.find(c => c.isTextBased?.() && clean(c.name).includes('directionnous'));
@@ -2347,7 +2572,7 @@ async function _validerModalAbsent(interaction) {
     .setFooter({ text: 'IWC • /retour pour revenir à tout moment' })] });
 
   // Poster dans #absences
-  const absCh = guild.channels.cache.get(SALON_HARDCODED.ABSENCES) || getChById(guild, 'ABSENCES', 'absences');
+  const absCh = getAbsencesCh(guild, interaction.member);
   if (absCh) await absCh.send({ embeds: [new EmbedBuilder().setColor(0xFFA500)
     .setAuthor({ name: `${interaction.member?.displayName || interaction.user.username} — Absence`, iconURL: interaction.user.displayAvatarURL() })
     .setTitle('🟡 Déclaration d\'absence')
@@ -2382,7 +2607,8 @@ async function _checkRetoursAbsence(guild) {
       await _debloquerEcritureAbsent(guild, membreD);
     }
     _syncMembreNotion(uid, { status: 'actif', lastActivity: new Date().toISOString() }).catch(() => {});
-    const absCh = guild.channels.cache.get(SALON_HARDCODED.ABSENCES) || getChById(guild, 'ABSENCES', 'absences');
+    const membreAbsent3 = await guild.members.fetch(uid).catch(() => null);
+    const absCh = getAbsencesCh(guild, membreAbsent3);
     if (absCh) await absCh.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ Retour automatique').setDescription(`<@${uid}> est revenu automatiquement d'absence.`).addFields({ name: '📅 Date de retour', value: new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' }), inline: true }, { name: '🎖️ Grade', value: m.rang || '—', inline: true }).setFooter({ text: 'IWC • Retour automatique' }).setTimestamp()] }).catch(() => {});
     const membre2 = await guild.members.fetch(uid).catch(() => null);
     if (membre2) { await envoyerDMRecap(guild, uid, 'absence', { message: '✅ Ton absence est terminée. Tu es de retour !\n\nTes permissions d\'écriture sont rétablies.' }).catch(() => {}); }
@@ -2409,7 +2635,7 @@ async function _bloquerEcritureAbsent(guild, member) {
       // Fallback : bloquer par membre directement
       for (const [, ch] of guild.channels.cache) {
         if (!ch.isTextBased?.() || ch.type === 4) continue;
-        if (ch.id === SALON_HARDCODED.ABSENCES) continue; // laisser écrire dans #absences
+        if (ch.id === SALON_HARDCODED.ABSENCES_LEGAL || ch.id === SALON_HARDCODED.ABSENCES_ILLEGAL) continue; // laisser écrire dans #absences
         await ch.permissionOverwrites.edit(member, { SendMessages: false }).catch(() => {});
       }
       console.log(`🔒 Écriture bloquée (membre) pour ${member.user?.username || member.id}`);
@@ -2609,4 +2835,5 @@ global.getInformateurCh = (guild) => getJournalCh(guild) || guild.channels.cache
 client.login(process.env.DISCORD_TOKEN)
   .then(() => console.log('🔑 Login OK'))
   .catch(e => { console.error('❌ Login failed:', e.message); process.exit(1); });
+}
 
