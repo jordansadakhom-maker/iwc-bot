@@ -107,7 +107,7 @@ function getAbsencesCh(guild, member) {
   if (!roles) return guild.channels.cache.get(SALON_HARDCODED.ABSENCES_ILLEGAL);
   // Détecter le pôle : noms de rôles légaux
   const legalRoles = ['Conseil', 'Directeur', 'Co-Directeur', 'Officier', 'Agent Confirmé', 'Opérateur', 'Recrue', 'Probatoire', 'Instructeur', 'Le Penseur', 'Fondateur'];
-  const illegalRoles = ['Concepteur', 'Fléau', "L'Exécuteur", 'Le Condamné', 'Le Maudit', 'La Confrérie', 'Instructeur'];
+  const illegalRoles = ['Concepteur', 'Fléau', "L'Exécuteur", 'Le Condamné', 'Le Maudit', 'La Confrérie', 'Instructeur', 'Le Concepteur'];
   const isLegal = roles.some(r => legalRoles.some(n => r.name.includes(n)));
   const isIllegal = roles.some(r => illegalRoles.some(n => r.name.includes(n)));
   if (isIllegal && !isLegal) return guild.channels.cache.get(SALON_HARDCODED.ABSENCES_ILLEGAL);
@@ -763,8 +763,8 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
   const gradeChange = gradeRoleIds.some(id => oldMember.roles.cache.has(id) !== newMember.roles.cache.has(id));
 
   // Détecter changement de pôle (légal ↔ illégal)
-  const illegalRoleNames = ['Concepteur', 'Fléau', "L'Exécuteur", 'Le Condamné', 'Le Maudit', 'La Confrérie'];
-  const legalRoleNames   = ['Le Conseil', 'Directeur', 'Co-Directeur', 'Officier', 'Agent Confirmé', 'Opérateur', 'Recrue', 'Probatoire', 'Instructeur', 'Le Penseur'];
+  const illegalRoleNames = ['Concepteur', 'Fléau', "L'Exécuteur", 'Le Condamné', 'Le Maudit', 'La Confrérie', 'Instructeur', 'Le Concepteur'];
+  const legalRoleNames   = ['Le Conseil', 'Directeur', 'Co-Directeur', 'Officier', 'Agent Confirmé', 'Opérateur', 'Recrue', 'Probatoire', 'Le Penseur'];
   const wasIlleg = oldMember.roles.cache.some(r => illegalRoleNames.some(n => r.name.includes(n)));
   const isIlleg  = newMember.roles.cache.some(r => illegalRoleNames.some(n => r.name.includes(n)));
   const wasLegal = oldMember.roles.cache.some(r => legalRoleNames.some(n => r.name.includes(n)));
@@ -782,7 +782,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
       }
       const nouveauGrade = newMember.roles.cache.filter(r => gradeRoleIds.includes(r.id)).map(r => r.name).join(', ') || 'Visiteur';
       // Calculer le nouveau pôle
-      const nouveauPole = isIlleg && !isLegal ? 'illegal' : 'legal';
+      const nouveauPole = isIlleg ? 'illegal' : 'legal'; // illégal prioritaire
       const poleLabel   = nouveauPole === 'illegal' ? '🔒 Illégal' : '⚖️ Légal';
       // Sync Registre des Membres
       _syncMembreNotion(newMember.id, { rang: nouveauGrade, pole: nouveauPole }).catch(() => {});
@@ -3316,8 +3316,8 @@ global.getInformateurCh = (guild) => getJournalCh(guild) || guild.channels.cache
 async function _syncTousMembresNotion(guild) {
   if (!process.env.NOTION_TOKEN || !process.env.NOTION_FICHES_DB) return;
   try {
-    const illegalRoleNames = ['Concepteur', 'Fléau', "L'Exécuteur", 'Le Condamné', 'Le Maudit', 'La Confrérie'];
-    const legalRoleNames   = ['Le Conseil', 'Directeur', 'Co-Directeur', 'Officier', 'Agent Confirmé', 'Opérateur', 'Recrue', 'Probatoire', 'Instructeur', 'Le Penseur', 'Fondateur'];
+    const illegalRoleNames = ['Concepteur', 'Fléau', "L'Exécuteur", 'Le Condamné', 'Le Maudit', 'La Confrérie', 'Instructeur', 'Le Concepteur'];
+    const legalRoleNames   = ['Le Conseil', 'Directeur', 'Co-Directeur', 'Officier', 'Agent Confirmé', 'Opérateur', 'Recrue', 'Probatoire', 'Le Penseur', 'Fondateur'];
     const db = loadDB();
     const membres = Object.entries(db.members || {});
     if (!membres.length) return;
@@ -3329,7 +3329,7 @@ async function _syncTousMembresNotion(guild) {
         if (!member) continue;
         const isIlleg = member.roles.cache.some(r => illegalRoleNames.some(n => r.name.includes(n)));
         const isLegal = member.roles.cache.some(r => legalRoleNames.some(n => r.name.includes(n)));
-        const pole    = isIlleg && !isLegal ? '🔒 Illégal' : '⚖️ Légal';
+        const pole    = isIlleg ? '🔒 Illégal' : '⚖️ Légal'; // illégal prioritaire
         const statut  = m.status === 'absent' ? 'Absent' : m.status === 'inactif' ? 'Inactif' : 'Actif';
         await _syncStatutFicheNotion(discordId, statut, { pole });
         synced++;
