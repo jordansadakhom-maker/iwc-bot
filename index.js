@@ -360,7 +360,11 @@ async function handleSlashCommand(interaction) {
   if (commandName === 'profil')            return handleProfilEnhanced(interaction);
   if (commandName === 'bilan')             await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleBilanCommand?.(interaction);
   if (commandName === 'rdv')               return _ouvrirMenuRdvSlash(interaction);
-  if (commandName === 'agenda')            return notionV3.handleAgendaCommand?.(interaction);
+  if (commandName === 'agenda') {
+    const subCmd = interaction.options?.getSubcommand(false);
+    if (subCmd === 'creer' || !subCmd) return _ouvrirMenuRdvSlash(interaction);
+    return notionV3.handleAgendaCommand?.(interaction);
+  }
   if (commandName === 'op-programmer')     return _ouvrirModalOpProgrammee(interaction);
   if (commandName === 'aide')              return _handleAide(interaction);
   if (commandName === 'version')           return _handleVersion(interaction);
@@ -2961,11 +2965,10 @@ async function _validerModalRdvIndividuel(interaction) {
 async function _validerModalRdv(interaction) {
   await interaction.deferReply({ ephemeral: false });
 
-  // Format : modal_rdv_{pole}_{typeRdv}
-  const withoutPrefix = interaction.customId.replace('modal_rdv_', '');
+  const withoutPrefix   = interaction.customId.replace('modal_rdv_', '');
   const firstUnderscore = withoutPrefix.indexOf('_');
-  const pole    = withoutPrefix.substring(0, firstUnderscore); // legal/illegal/tous/direction
-  const typeRdv = withoutPrefix.substring(firstUnderscore + 1); // type rdv
+  const pole    = withoutPrefix.substring(0, firstUnderscore);
+  const typeRdv = withoutPrefix.substring(firstUnderscore + 1);
 
   const titre  = interaction.fields.getTextInputValue('titre');
   const dateRaw= interaction.fields.getTextInputValue('date');
@@ -2973,68 +2976,40 @@ async function _validerModalRdv(interaction) {
   const lieu   = interaction.fields.getTextInputValue('lieu')  || '—';
   const notes  = interaction.fields.getTextInputValue('notes') || '';
 
-  // Parser la date
   let dateISO = null;
-  try {
-    const p = dateRaw.split('/');
-    if (p.length === 3) dateISO = `${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`;
-  } catch {}
-
+  try { const p = dateRaw.split('/'); if (p.length === 3) dateISO = `${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`; } catch {}
   if (!dateISO) return interaction.editReply({ content: '❌ Format de date invalide. Utilise JJ/MM/AAAA.' });
 
-  // Créer dans Notion
-  if (process.env.NOTION_TOKEN && process.env.NOTION_AGENDA_DB_ID) {
-    try {
-      await fetch('https://api.notion.com/v1/pages', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          parent: { database_id: process.env.NOTION_AGENDA_DB_ID },
-          properties: {
-            'Titre': { title:     [{ text: { content: titre } }] },
-            'Date':  { date:      { start: dateISO } },
-            'Heure': { rich_text: [{ text: { content: heure } }] },
-            'Lieu':  { rich_text: [{ text: { content: lieu } }] },
-            'Notes': { rich_text: [{ text: { content: notes.slice(0, 2000) } }] },
-            'Type':  { select:    { name: 'Réunion' } },
-            'Statut':{ select:    { name: 'Planifié' } },
-          },
-        }),
-      });
-      console.log(`✅ RDV Notion créé : ${titre}`);
-    } catch (e) { console.log('❌ RDV Notion error:', e.message); }
-  }
-
-  // pingMap défini plus bas
-  // Récupérer le nom IC de l'émetteur
   const db         = loadDB();
   const emetteurIC = db.members[interaction.user.id]?.name || interaction.user.username;
   const rdvId      = `RDV-${Date.now().toString().slice(-5)}`;
 
   const typeLabels = {
-    reunion_direction: 'Réunion Direction',   rdv_client: 'Rendez-vous Client',
-    briefing_op: 'Briefing Opération',        debrief_op: 'Débrief Opération',
+    reunion_direction: 'Réunion Direction', rdv_client: 'Rendez-vous Client',
+    briefing_op: 'Briefing Opération',      debrief_op: 'Débrief Opération',
     entretien_recru: 'Entretien Recrutement', reunion_legal: 'Réunion Pôle Légal',
-    reunion_confrerie: 'Réunion Confrérie',   formation: 'Formation Membres',
-    negociation: 'Négociation',               rdv_medical: 'Rendez-vous Médical',
-    rdv_juridique: 'Rendez-vous Juridique',   autre: 'Autre',
+    reunion_confrerie: 'Réunion Confrérie', formation: 'Formation Membres',
+    negociation: 'Négociation',             rdv_medical: 'Rendez-vous Médical',
+    rdv_juridique: 'Rendez-vous Juridique', autre: 'Autre',
   };
   const typeLabel = typeLabels[typeRdv] || typeRdv || 'Rendez-vous';
-
-  const pingMap = {
-    legal:     `<@&${ROLE_POLE_LEGAL}>`,
-    illegal:   `<@&${ROLE_POLE_ILLEGAL}>`,
-    tous:      `<@&${ROLE_POLE_LEGAL}> <@&${ROLE_POLE_ILLEGAL}>`,
-    direction: interaction.guild.roles.cache.filter(r => ['Conseil','Directeur','Fléau','Concepteur','Fondateur'].some(n => r.name.includes(n))).map(r => `<@&${r.id}>`).join(' '),
-  };
-  const ping = pingMap[pole] || '';
 
   const poleLabel = { legal: '⚖️ Pôle Légal', illegal: '🔒 La Confrérie', tous: '👥 Tous les membres', direction: '👑 Direction' }[pole] || pole;
   const poleColor = pole === 'illegal' ? 0x8B1A1A : pole === 'direction' ? 0xFFD700 : 0x2C3E50;
 
+  // Ping par rôle
+  const pingMap = {
+    legal:     `<@&${ROLE_POLE_LEGAL}>`,
+    illegal:   `<@&${ROLE_POLE_ILLEGAL}>`,
+    tous:      `<@&${ROLE_POLE_LEGAL}> <@&${ROLE_POLE_ILLEGAL}>`,
+    direction: interaction.guild.roles.cache
+      .filter(r => ['Conseil','Directeur','Fléau','Concepteur','Fondateur'].some(n => r.name.includes(n)))
+      .map(r => `<@&${r.id}>`).join(' '),
+  };
+  const ping = pingMap[pole] || '';
+
   const dateAffiche = new Date(dateISO).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
   const dateCapital = dateAffiche.charAt(0).toUpperCase() + dateAffiche.slice(1);
-
   const isConfrerie = pole === 'illegal' || typeRdv === 'reunion_confrerie';
   const header = isConfrerie
     ? '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   LA CONFRÉRIE — CONVOCATION OFFICIELLE\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
@@ -3045,21 +3020,22 @@ async function _validerModalRdv(interaction) {
     .setTitle(`📅 ${titre.toUpperCase()}`)
     .setDescription('```\n' + header + '\n```')
     .addFields(
-      { name: '🆔 Référence',    value: '`' + rdvId + '`',   inline: true },
-      { name: '🗂️ Type',         value: typeLabel,             inline: true },
-      { name: '📌 Statut',       value: '🟡 Planifié',         inline: true },
-      { name: '📅 Date',         value: dateCapital,            inline: true },
-      { name: '🕐 Heure',        value: `**${heure}**`,        inline: true },
-      { name: '📍 Lieu',         value: lieu || '—',           inline: true },
-      { name: '👥 Convoqués',    value: poleLabel,              inline: true },
-      { name: '✍️ Convoqué par', value: `${emetteurIC}`,       inline: true },
+      { name: '🆔 Référence',    value: '`' + rdvId + '`', inline: true },
+      { name: '🗂️ Type',         value: typeLabel,           inline: true },
+      { name: '📌 Statut',       value: '🟡 Planifié',       inline: true },
+      { name: '📅 Date',         value: dateCapital,          inline: true },
+      { name: '🕐 Heure',        value: `**${heure}**`,      inline: true },
+      { name: '📍 Lieu',         value: lieu || '—',         inline: true },
+      { name: '👥 Convoqués',    value: poleLabel,            inline: true },
+      { name: '✍️ Convoqué par', value: emetteurIC,          inline: true },
     );
-
-  if (notes) embed.addFields({ name: '📋 Ordre du jour', value: notes, inline: false });
-
+  if (notes) embed.addFields({ name: '📋 Ordre du jour', value: notes });
   embed.setFooter({ text: `Iron Wolf Company • Secrétariat officiel • ${fmtShort(new Date())}` }).setTimestamp();
 
-  // Archivage Notion
+  // 1. Envoyer la réponse avec ping
+  await interaction.editReply({ content: ping || null, embeds: [embed] });
+
+  // 2. Archivage Notion (asynchrone, ne bloque pas)
   if (process.env.NOTION_TOKEN && process.env.NOTION_AGENDA_DB_ID) {
     fetch('https://api.notion.com/v1/pages', {
       method: 'POST',
@@ -3071,7 +3047,7 @@ async function _validerModalRdv(interaction) {
           'Date':      { date:      { start: dateISO } },
           'Heure':     { rich_text: [{ text: { content: heure } }] },
           'Lieu':      { rich_text: [{ text: { content: lieu || '—' } }] },
-          'Notes':     { rich_text: [{ text: { content: notes?.slice(0, 2000) || '' } }] },
+          'Notes':     { rich_text: [{ text: { content: notes.slice(0, 2000) } }] },
           'Type':      { select:    { name: typeLabel } },
           'Statut':    { select:    { name: 'Planifié' } },
           'Référence': { rich_text: [{ text: { content: rdvId } }] },
@@ -3079,68 +3055,47 @@ async function _validerModalRdv(interaction) {
           'Convoqués': { rich_text: [{ text: { content: poleLabel } }] },
         },
       }),
-    }).catch(e => console.log('❌ RDV Notion error:', e.message));
-    console.log(`✅ RDV Notion archivé : ${rdvId} — ${titre}`);
+    }).then(() => console.log(`✅ RDV archivé Notion : ${rdvId}`))
+      .catch(e => console.log('❌ RDV Notion error:', e.message));
   }
 
-  await interaction.editReply({ content: ping, embeds: [embed] });
-
-  // ── Envoi DM à tous les membres convoqués ──
-  const membresAConvoquer = [];
-
-  // Récupérer les membres selon le pôle
-  try {
-    const allMembers = await interaction.guild.members.fetch().catch(() => null);
-    if (allMembers) {
-      if (pole === 'legal' || pole === 'tous') {
-        allMembers.filter(m => !m.user.bot && m.roles.cache.has(ROLE_POLE_LEGAL)).forEach(m => membresAConvoquer.push(m));
-      }
-      if (pole === 'illegal' || pole === 'tous') {
-        allMembers.filter(m => !m.user.bot && m.roles.cache.has(ROLE_POLE_ILLEGAL)).forEach(m => membresAConvoquer.push(m));
-      }
-      if (pole === 'direction') {
-        allMembers.filter(m => !m.user.bot && ['Conseil','Directeur','Fléau','Concepteur','Fondateur'].some(n => m.roles.cache.some(r => r.name.includes(n)))).forEach(m => membresAConvoquer.push(m));
-      }
-    }
-  } catch {}
-
-  // DM de convocation — style télégramme IWC
+  // 3. DM de convocation
   const dmEmbed = new EmbedBuilder()
     .setColor(poleColor)
     .setTitle(`📅 CONVOCATION — ${titre.toUpperCase()}`)
     .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   IRON WOLF COMPANY — AVIS OFFICIEL\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
     .addFields(
-      { name: '🆔 Référence',    value: '`' + rdvId + '`',   inline: true },
-      { name: '🗂️ Type',         value: typeLabel,             inline: true },
-      { name: '📅 Date',         value: dateCapital,            inline: true },
-      { name: '🕐 Heure',        value: `**${heure}**`,        inline: true },
-      { name: '📍 Lieu',         value: lieu || '—',           inline: true },
-      { name: '✍️ Convoqué par', value: emetteurIC,            inline: true },
+      { name: '🆔 Référence',    value: '`' + rdvId + '`', inline: true },
+      { name: '🗂️ Type',         value: typeLabel,           inline: true },
+      { name: '📅 Date',         value: dateCapital,          inline: true },
+      { name: '🕐 Heure',        value: `**${heure}**`,      inline: true },
+      { name: '📍 Lieu',         value: lieu || '—',         inline: true },
+      { name: '✍️ Convoqué par', value: emetteurIC,          inline: true },
     );
-
   if (notes) dmEmbed.addFields({ name: '📋 Ordre du jour', value: notes });
   dmEmbed.setFooter({ text: 'Iron Wolf Company • Présence attendue' }).setTimestamp();
 
-  let dmEnvoyes = 0;
-  const dmErrors = [];
-  for (const membre of membresAConvoquer) {
-    if (membre.id === interaction.user.id) continue; // Pas de DM à soi-même
-    try {
-      await membre.send({ embeds: [dmEmbed] });
-      dmEnvoyes++;
-    } catch {
-      dmErrors.push(membre.displayName);
+  try {
+    const allMembers = await interaction.guild.members.fetch().catch(() => null);
+    if (allMembers) {
+      const cibles = allMembers.filter(m => {
+        if (m.user.bot || m.id === interaction.user.id) return false;
+        if (pole === 'legal')     return m.roles.cache.has(ROLE_POLE_LEGAL);
+        if (pole === 'illegal')   return m.roles.cache.has(ROLE_POLE_ILLEGAL);
+        if (pole === 'tous')      return m.roles.cache.has(ROLE_POLE_LEGAL) || m.roles.cache.has(ROLE_POLE_ILLEGAL);
+        if (pole === 'direction') return ['Conseil','Directeur','Fléau','Concepteur','Fondateur'].some(n => m.roles.cache.some(r => r.name.includes(n)));
+        return false;
+      });
+      let dmEnvoyes = 0;
+      for (const [, membre] of cibles) {
+        try { await membre.send({ embeds: [dmEmbed] }); dmEnvoyes++; } catch {}
+        await new Promise(r => setTimeout(r, 200));
+      }
+      if (dmEnvoyes > 0) console.log(`✅ ${dmEnvoyes} DM de convocation envoyés pour ${rdvId}`);
     }
-    await new Promise(r => setTimeout(r, 200)); // Anti rate-limit
-  }
-
-  if (dmEnvoyes > 0) {
-    console.log(`✅ Convocations DM envoyées : ${dmEnvoyes} membre(s) pour ${rdvId}`);
-  }
-  if (dmErrors.length > 0) {
-    console.log(`⚠️  DM échoués (DM fermés) : ${dmErrors.join(', ')}`);
-  }
+  } catch(e) { console.log('❌ DM convocation error:', e.message); }
 }
+
 
 // ── Surnom-pseudo : modal d'identité IC ──
 async function _ouvrirModalSurnom(interaction) {
