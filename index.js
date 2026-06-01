@@ -2632,6 +2632,7 @@ async function _handleRdvModalBtn(interaction) {
 
 // [CORRECTION] _validerModalAgendaSimple — collecteurs corrects + photo optionnelle
 async function _validerModalAgendaSimple(interaction) {
+  console.log('🔵 RDV STEP 5b - _validerModalAgendaSimple appelé');
   await interaction.deferReply({ ephemeral: false });
   const titre      = interaction.fields.getTextInputValue('titre');
   const dateRaw    = interaction.fields.getTextInputValue('date');
@@ -2735,6 +2736,8 @@ async function _ouvrirMenuRdvSlash(interaction) {
 }
 
 async function _ouvrirMenuRdv(interaction) {
+  try {
+  console.log('🔵 RDV STEP 1 - _ouvrirMenuRdv appelé');
   const msgId = interaction.customId ? interaction.customId.replace('btn_rdv_creer_', '') : interaction.id;
   await interaction.reply({
     flags: MessageFlags.Ephemeral,
@@ -2754,9 +2757,12 @@ async function _ouvrirMenuRdv(interaction) {
       { label: '📝 Autre', value: 'autre', description: 'Autre type de rendez-vous' },
     ]))],
   });
+  } catch(e) { console.log('❌ _ouvrirMenuRdv:', e.message); interaction.reply({ content: '❌ Erreur menu RDV.', flags: MessageFlags.Ephemeral }).catch(() => {}); }
 }
 
 async function _handleRdvTypeSelect(interaction) {
+  try {
+  console.log('🔵 RDV STEP 2 - _handleRdvTypeSelect, typeRdv:', interaction.values[0]);
   const typeRdv = interaction.values[0]; const msgId = interaction.customId.replace('rdv_type_select_', '');
   await interaction.update({
     embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📅 Nouveau Rendez-vous — IWC').setDescription('**Étape 2/3** — Comment convoquer ?')],
@@ -2770,9 +2776,12 @@ async function _handleRdvTypeSelect(interaction) {
         ])
     )],
   });
+  } catch(e) { console.log('❌ _handleRdvTypeSelect:', e.message); interaction.reply({ content: '❌ Erreur étape 2.', flags: MessageFlags.Ephemeral }).catch(() => {}); }
 }
 
 async function _handleRdvModeSelect(interaction) {
+  try {
+  console.log('🔵 RDV STEP 3 - _handleRdvModeSelect, mode:', interaction.values[0]);
   const mode = interaction.values[0]; const allParts = interaction.customId.replace('rdv_mode_select_', '').split('_'); const typeRdv = allParts.slice(0, -1).join('_'); const msgId = allParts[allParts.length - 1];
   if (mode === 'role') {
     await interaction.update({
@@ -2801,6 +2810,7 @@ async function _handleRdvModeSelect(interaction) {
       components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`rdv_individuel_select_${typeRdv}_${msgId}`).setPlaceholder('Choisir les participants...').setMinValues(1).setMaxValues(Math.min(membres.length, 25)).addOptions(membres))],
     });
   }
+  } catch(e) { console.log('❌ _handleRdvModeSelect:', e.message); interaction.reply({ content: '❌ Erreur étape 3.', flags: MessageFlags.Ephemeral }).catch(() => {}); }
 }
 
 async function _handleRdvIndividuelSelect(interaction) {
@@ -2820,6 +2830,7 @@ async function _handleRdvIndividuelSelect(interaction) {
 }
 
 async function _handleRdvPoleSelect(interaction) {
+  console.log('🔵 RDV STEP 4 - _handleRdvPoleSelect, pole:', interaction.values[0]);
   const pole = interaction.values[0]; const allParts = interaction.customId.replace('rdv_pole_select_', '').split('_'); const typeRdv = allParts.slice(0, -1).join('_');
   const typeLabels = { reunion_direction: 'Réunion Direction', rdv_client: 'Rendez-vous Client', briefing_op: 'Briefing Opération', debrief_op: 'Débrief Opération', entretien_recru: 'Entretien Recrutement', reunion_legal: 'Réunion Pôle Légal', reunion_confrerie: 'Réunion Confrérie', formation: 'Formation Membres', negociation: 'Négociation', rdv_medical: 'Rendez-vous Médical', rdv_juridique: 'Rendez-vous Juridique', autre: 'Autre' };
   const typeLabel = typeLabels[typeRdv] || 'Rendez-vous';
@@ -2892,6 +2903,7 @@ async function _validerModalRdvIndividuel(interaction) {
 }
 
 async function _validerModalRdv(interaction) {
+  console.log('🔵 RDV STEP 5 - _validerModalRdv appelé, customId:', interaction.customId);
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const parts = interaction.customId.replace('modal_rdv_', '').split('_'); const pole = parts[0]; const typeRdv = parts.slice(1).join('_');
   const titre = interaction.fields.getTextInputValue('titre'); const dateRaw = interaction.fields.getTextInputValue('date'); const heure = interaction.fields.getTextInputValue('heure'); const lieu = interaction.fields.getTextInputValue('lieu') || '—'; const notes = interaction.fields.getTextInputValue('notes') || '';
