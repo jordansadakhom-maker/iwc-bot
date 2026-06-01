@@ -1053,7 +1053,34 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId === 'btn_tresor_config')          return notionModules.handleTresorConfigButton?.(interaction);
     if (interaction.customId.startsWith('tresor_valider_'))    return notionModules.handleTresorValidation?.(interaction, 'valider');
     if (interaction.customId.startsWith('op_stop_'))           return notionV5.handleOpStop?.(interaction);
-    if (interaction.customId.startsWith('op_lancer_force_'))   return notionV5.handleOpLancerForce?.(interaction);
+    if (interaction.customId.startsWith('op_lancer_force_')) {
+      const opId4 = interaction.customId.replace('op_lancer_force_', '');
+      const op4   = db.operations.find(o => o.id === opId4);
+      if (!op4) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }); return; }
+      if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return; }
+      const presentsText = (op4.presents || []).length > 0 ? (op4.presents || []).join(', ') : '*Aucune présence enregistrée*';
+      // Afficher confirmation finale avec mode ping
+      const roleLabel4 = op4.pole === 'legal' ? '⚖️ Pôle Légal' : '🔪 Pôle Illégal';
+      await interaction.reply({
+        flags: MessageFlags.Ephemeral,
+        embeds: [new EmbedBuilder()
+          .setColor(0x00AA00)
+          .setTitle(`🚀 Lancer — ${op4.name}`)
+          .setDescription('Tout le monde est là. Choisis le mode de notification pour le lancement.')
+          .addFields(
+            { name: '✋ Présents', value: presentsText, inline: true },
+            { name: '❌ Absents', value: (op4.absents || []).length > 0 ? (op4.absents || []).join(', ') : '*—*', inline: true },
+          )
+          .setFooter({ text: 'IWC • Lancement imminent' })
+        ],
+        components: [new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId(`op_lancer_ping_pole_${opId4}`).setLabel(`📢 Ping ${roleLabel4}`).setStyle(ButtonStyle.Success),
+          new ButtonBuilder().setCustomId(`op_lancer_ping_participants_${opId4}`).setLabel('📢 Ping Participants').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId(`op_lancer_silencieux_${opId4}`).setLabel('🔇 Sans ping').setStyle(ButtonStyle.Secondary),
+        )],
+      });
+      return;
+    }
     if (interaction.customId === 'btn_stats_refresh')          { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV5.handleStatsAvancees?.(interaction); }
     if (interaction.customId.startsWith('op_annulee_confirm_')) {
       const opId = interaction.customId.replace('op_annulee_confirm_', '');
@@ -1065,6 +1092,113 @@ client.on('interactionCreate', async interaction => {
       return;
     }
     if (interaction.customId === 'op_annulee_cancel')         return interaction.update({ content: '↩️ Annulation annulée.', embeds: [], components: [] });
+
+    // ── Handler présence ✋ ──
+    if (interaction.customId.startsWith('op_present_')) {
+      const opId3 = interaction.customId.replace('op_present_', '');
+      const op3   = db.operations.find(o => o.id === opId3);
+      if (!op3) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }); return; }
+      if (!op3.presents) op3.presents = [];
+      const username = interaction.member?.displayName || interaction.user.username;
+      if (!op3.presents.includes(username)) {
+        op3.presents.push(username);
+        saveDB(db);
+      }
+      // Retirer de la liste absents si présent
+      if (!op3.absents) op3.absents = [];
+      op3.absents = op3.absents.filter(p => p !== username);
+      saveDB(db);
+      // Mettre à jour l'embed
+      const presentsText = op3.presents.map(p => `✅ ${p}`).join('\n') || '*En attente...*';
+      const absentsText  = op3.absents.map(p => `❌ ${p}`).join('\n') || '*—*';
+      const nbPresents = op3.presents.length;
+      const nbAbsents  = op3.absents.length;
+      const nbInscrits = (op3.participants || []).length;
+      const allPresent = nbInscrits > 0 && nbPresents >= nbInscrits;
+      try {
+        const newEmbed = EmbedBuilder.from(interaction.message.embeds[0])
+          .spliceFields(4, 2,
+            { name: `✋ Présents (${nbPresents}${nbInscrits > 0 ? `/${nbInscrits}` : ''})${allPresent ? ' ✅' : ''}`, value: presentsText, inline: true },
+            { name: `❌ Absents (${nbAbsents})`, value: absentsText, inline: true },
+          );
+        await interaction.update({ embeds: [newEmbed] });
+      } catch { await interaction.reply({ content: `✅ **${username}** est enregistré présent !`, flags: MessageFlags.Ephemeral }); }
+      return;
+    }
+
+    // ── Handler absent ❌ ──
+    if (interaction.customId.startsWith('op_absent_op_')) {
+      const opId5  = interaction.customId.replace('op_absent_op_', '');
+      const op5    = db.operations.find(o => o.id === opId5);
+      if (!op5) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }); return; }
+      if (!op5.absents)  op5.absents  = [];
+      if (!op5.presents) op5.presents = [];
+      const username5 = interaction.member?.displayName || interaction.user.username;
+      if (!op5.absents.includes(username5)) {
+        op5.absents.push(username5);
+        op5.presents = op5.presents.filter(p => p !== username5);
+        saveDB(db);
+      }
+      const presentsText5 = op5.presents.map(p => `✅ ${p}`).join('\n') || '*En attente...*';
+      const absentsText5  = op5.absents.map(p => `❌ ${p}`).join('\n') || '*—*';
+      const nbPresents5 = op5.presents.length;
+      const nbAbsents5  = op5.absents.length;
+      const nbInscrits5 = (op5.participants || []).length;
+      try {
+        const newEmbed5 = EmbedBuilder.from(interaction.message.embeds[0])
+          .spliceFields(4, 2,
+            { name: `✋ Présents (${nbPresents5}${nbInscrits5 > 0 ? `/${nbInscrits5}` : ''})`, value: presentsText5, inline: true },
+            { name: `❌ Absents (${nbAbsents5})`, value: absentsText5, inline: true },
+          );
+        await interaction.update({ embeds: [newEmbed5] });
+      } catch { await interaction.reply({ content: `❌ **${username5}** enregistré absent.`, flags: MessageFlags.Ephemeral }); }
+      return;
+    }
+
+    // ── Handlers lancement avec/sans ping ──
+    if (interaction.customId.startsWith('op_lancer_ping_pole_') ||
+        interaction.customId.startsWith('op_lancer_ping_participants_') ||
+        interaction.customId.startsWith('op_lancer_silencieux_')) {
+      const parts   = interaction.customId.split('_');
+      const opId2   = parts[parts.length - 1];
+      const pingMode = interaction.customId.includes('ping_pole') ? 'pole'
+                     : interaction.customId.includes('ping_participants') ? 'participants'
+                     : 'silencieux';
+      const op2 = db.operations.find(o => o.id === opId2);
+      if (!op2) { await interaction.update({ content: '❌ Opération introuvable.', embeds: [], components: [] }); return; }
+
+      op2.status = 'en_cours'; saveDB(db);
+      await notionExtra.majOperationNotion?.(op2);
+      if (op2.notionPageId && process.env.NOTION_TOKEN) {
+        _notionPatch(op2.notionPageId, {
+          'Statut': { select: { name: '🟢 En cours' } },
+          'Participants': { multi_select: (op2.participants || []).map(n => ({ name: n })) },
+        }).catch(() => {});
+      }
+      await sendLog(guild, 'OPERATION', { nom: op2.name, lieu: op2.lieu, equipe: op2.equipe, statut: '🟢 En cours' });
+
+      // Mettre à jour l'embed de confirmation
+      await interaction.update({ content: `✅ Opération **${op2.name}** lancée.`, embeds: [], components: [] });
+
+      // Poster dans le salon opérations
+      const opsCh = getChById(guild, 'OPERATIONS', 'operations');
+      if (opsCh) {
+        let pingContent = '';
+        if (pingMode === 'pole') {
+          const roleId = op2.pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL;
+          pingContent = `<@&${roleId}> — 🟢 L'opération **${op2.name}** est **LANCÉE**. À vos postes.`;
+          await opsCh.send({ content: pingContent, allowedMentions: { parse: [], roles: [roleId] } });
+        } else if (pingMode === 'participants' && (op2.participants || []).length > 0) {
+          const mentions = op2.participants.map(n => { const id = MEMBRES_DISCORD_MAP?.[n]; return id ? `<@${id}>` : `**${n}**`; }).join(' ');
+          pingContent = `${mentions} — 🟢 L'opération **${op2.name}** est **LANCÉE**. À vos postes.`;
+          await opsCh.send({ content: pingContent, allowedMentions: { parse: ['users'] } });
+        } else if (pingMode === 'silencieux') {
+          await opsCh.send({ content: `🟢 L'opération **${op2.name}** est **LANCÉE**.` });
+        }
+      }
+      notionV4.envoyerBriefingOp?.(guild, op2).catch(() => {});
+      return;
+    }
     if (interaction.customId.startsWith('tresor_refuser_'))   return notionModules.handleTresorValidation?.(interaction, 'refuser');
     if (interaction.customId.startsWith('tresor_'))           return notionModules.handleTresorFlow?.(interaction);
     if (interaction.customId === 'btn_solde')                 return notionModules.handleSoldeButton?.(interaction);
@@ -1213,23 +1347,51 @@ client.on('interactionCreate', async interaction => {
     }
     const op = db.operations.find(o => o.id === opId);
     if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }); return; }
-    op.status = isLancer ? 'en_cours' : 'annulee'; saveDB(db); await notionExtra.majOperationNotion?.(op);
-    // Sync Notion direct
-    if (op.notionPageId && process.env.NOTION_TOKEN) {
-      _notionPatch(op.notionPageId, {
-        'Statut': { select: { name: isLancer ? '🟢 En cours' : '❌ Annulée' } },
-        'Participants': { multi_select: (op.participants || []).map(n => ({ name: n })) },
-      }).catch(() => {});
-    }
-    const label = isLancer ? '🟢 En cours' : '❌ Annulée';
-    await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: label });
-    const updated = EmbedBuilder.from(interaction.message.embeds[0]).setColor(isLancer ? 0x00AA00 : 0xED4245).spliceFields(0, 1, { name: 'Statut', value: label, inline: true });
-    if (isLancer) {
-      const mentions = (op.participants || []).map(n => { const id = MEMBRES_DISCORD_MAP[n]; return id ? `<@${id}>` : null; }).filter(Boolean).join(' ');
-      await interaction.update({ embeds: [updated] });
-      await interaction.followUp({ content: `${mentions || `<@&${op.pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL}>`} — 🟢 L'opération **${op.name}** est **LANCÉE**. À vos postes.`, allowedMentions: { parse: [], roles: [op.pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL], users: (op.participants || []).map(n => MEMBRES_DISCORD_MAP[n]).filter(Boolean) } });
-      notionV4.envoyerBriefingOp?.(guild, op).catch(() => {});
-    } else { await interaction.update({ embeds: [updated], components: [] }); }
+
+    // ── Étape 1 : Rassemblement — avertir les membres avant de lancer ──
+    const roleId  = op.pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL;
+    const roleLabel = op.pole === 'legal' ? '⚖️ Pôle Légal' : '🔪 Pôle Illégal';
+    const participantsText = (op.participants || []).length > 0
+      ? op.participants.join(', ')
+      : '*Aucun inscrit*';
+
+    // Poster le message de rassemblement dans le salon opérations
+    const opsCh2 = getChById(guild, 'OPERATIONS', 'operations');
+    if (!opsCh2) { await interaction.reply({ content: '❌ Salon #operations introuvable.', flags: MessageFlags.Ephemeral }); return; }
+
+    const embedRassemblement = new EmbedBuilder()
+      .setColor(0xFFA500)
+      .setTitle(`⚠️ RASSEMBLEMENT — ${op.name}`)
+      .setDescription(`L'opération **${op.name}** est sur le point de commencer.
+
+**Cliquez sur ✋ Je suis là** pour signaler votre présence.
+
+La Direction lancera l'opération quand tout le monde sera prêt.`)
+      .addFields(
+        { name: '📍 Lieu',         value: op.lieu || '—',    inline: true },
+        { name: '🎯 Objectif',     value: op.objectif || '—', inline: true },
+        { name: '📂 Pôle',         value: roleLabel,           inline: true },
+        { name: '👥 Participants inscrits', value: participantsText, inline: false },
+        { name: '✋ Présents (0)', value: '*En attente...*', inline: true },
+        { name: '❌ Absents (0)', value: '*—*', inline: true },
+      )
+      .setFooter({ text: `IWC • Opérations • Rassemblement en cours` })
+      .setTimestamp();
+
+    const rowRassemblement = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`op_present_${opId}`).setLabel('✋ Je suis là').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`op_absent_op_${opId}`).setLabel('❌ Pas disponible').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId(`op_lancer_force_${opId}`).setLabel('🚀 Lancer').setStyle(ButtonStyle.Primary),
+    );
+
+    // Pinger le pôle pour le rassemblement
+    await opsCh2.send({
+      content: `<@&${roleId}> ⚠️ Rassemblement pour **${op.name}** — Cliquez ✋ pour confirmer votre présence !`,
+      allowedMentions: { parse: [], roles: [roleId] },
+    });
+    await opsCh2.send({ embeds: [embedRassemblement], components: [rowRassemblement] });
+
+    await interaction.reply({ content: `✅ Message de rassemblement posté dans #operations.`, flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -1564,14 +1726,13 @@ async function _validerModalOpCreer(interaction) {
         headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
         body: JSON.stringify({ parent: { database_id: process.env.NOTION_OPERATIONS_DB }, properties: {
           'Nom': { title: [{ text: { content: nom } }] },
-          'Lieu': { rich_text: [{ text: { content: lieu } }] },
+          'Lieu IC': { rich_text: [{ text: { content: lieu } }] },
           'Objectif': { rich_text: [{ text: { content: objectif } }] },
           'Pôle': { select: { name: pole === 'legal' ? '⚖️ Légal' : '🔪 Illégal' } },
-          'Statut': { select: { name: '🟡 Préparation' } },
-          'Équipe': { rich_text: [{ text: { content: details.slice(0, 2000) } }] },
-          'Créé par': { rich_text: [{ text: { content: createur } }] },
-          'Discord ID créateur': { rich_text: [{ text: { content: interaction.user.id } }] },
-          'Date création': { date: { start: new Date().toISOString().split('T')[0] } },
+          'Statut': { select: { name: '🟡 En préparation' } },
+          'Notes': { rich_text: [{ text: { content: details.slice(0, 2000) } }] },
+          'Type': { select: { name: pole === 'legal' ? 'Légal' : 'Illégal' } },
+          'Date prévue': { date: { start: new Date().toISOString().split('T')[0] } },
         }})
       });
       const data = await res.json();
