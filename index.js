@@ -180,9 +180,19 @@ function getChExact(guild, name) {
 function getMention(guild) { return guild.roles.cache.filter(r => ['Concepteur', 'Fléau', 'Fondateur'].some(n => r.name.includes(n))).map(r => `<@&${r.id}>`).join(' ') || ''; }
 function getContratMention(guild) { const roles = CONTRAT_ROLES.map(id => guild.roles.cache.get(id)).filter(Boolean).map(r => `<@&${r.id}>`); return [...roles, `<@${JUNE_MCCALL_ID}>`].join(' '); }
 function isDirection(member) { return member?.roles.cache.some(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier', 'Instructeur', 'Secrétaire'].some(n => r.name.includes(n))); }
+// #logs technique (arrivées, règlement...)
 async function getLogsCh(guild) { let ch = guild.channels.cache.get(CH.LOGS); if (!ch) ch = await guild.channels.fetch(CH.LOGS).catch(() => null); return ch; }
-// Salon pour les alertes IC (informateurs, opérations confirmées) → #journal-de-bord
-function getJournalCh(guild) { return guild.channels.cache.get(SALON_HARDCODED.JOURNAL_DE_BORD) || null; }
+// #journal-de-bord = destination pour TOUS les logs IC
+// notionV3 utilise getLogsCh → on la redirige vers journal-de-bord
+async function getLogsCh(guild) {
+  const journalCh = guild.channels.cache.get('1508756535407542372');
+  if (journalCh) return journalCh;
+  // fallback : #logs technique
+  let ch = guild.channels.cache.get(CH.LOGS);
+  if (!ch) ch = await guild.channels.fetch(CH.LOGS).catch(() => null);
+  return ch;
+}
+function getJournalCh(guild) { return guild.channels.cache.get('1508756535407542372') || null; }
 
 async function sendToThread(guild, threadId, payload) {
   try {
@@ -197,18 +207,8 @@ async function sendToThread(guild, threadId, payload) {
 }
 
 async function sendLog(guild, type, data) {
-  // Logs IC (visibles dans #journal-de-bord) vs logs techniques (#logs/#patch-note)
-  const IC_TYPES = ['ABSENCE', 'OPERATION', 'CONTRAT_SIGNE', 'CONTRAT_REFUSE', 'PROMOTION', 'RETROGRADATION', 'CANDIDATURE_ACCEPTEE', 'CANDIDATURE_REFUSEE'];
-  const isIC = IC_TYPES.includes(type);
-  let ch;
-  if (isIC) {
-    // Logs IC → #journal-de-bord
-    ch = guild.channels.cache.get(SALON_HARDCODED.JOURNAL_DE_BORD);
-    if (!ch) ch = await getLogsCh(guild); // fallback
-  } else {
-    // Logs techniques → #logs
-    ch = await getLogsCh(guild);
-  }
+  // Tout va dans #journal-de-bord
+  const ch = await getLogsCh(guild);
   if (!ch) return;
   const cfgs = {
     ARRIVEE: { color: 0x57F287, emoji: '👋', title: 'ARRIVÉE — ' + data.username, fields: [{ name: '👤 Membre', value: `<@${data.userId}> (${data.username})`, inline: true }, { name: '🔢 Âge du compte', value: data.accountAge + ' jours', inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }] },
@@ -2527,6 +2527,69 @@ global.envoyerDMRecap = envoyerDMRecap;
 global.getChById = getChById;
 global.sendLog = sendLog;
 global.isDirection = isDirection;
+
+// Créer la DB Informateurs dans Notion si elle n'existe pas
+async function _initDBInformateursNotion(guild) {
+  if (!process.env.NOTION_TOKEN) return;
+  if (process.env.NOTION_INFOS_DB) return; // déjà configurée
+  
+  // Trouver la page parent IWC depuis une DB existante
+  const parentId = process.env.NOTION_MEMBRES_DB || process.env.NOTION_RECRUTEMENT_DB;
+  if (!parentId) return;
+  
+  try {
+    // Récupérer l'ID de la page parent depuis une DB existante
+    const res = await fetch(`https://api.notion.com/v1/databases/${parentId}`, {
+      headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28' }
+    }).catch(() => null);
+    if (!res?.ok) return;
+    const dbData = await res.json().catch(() => null);
+    const parentPageId = dbData?.parent?.page_id;
+    if (!parentPageId) return;
+    
+    // Créer la DB Informateurs
+    const createRes = await fetch('https://api.notion.com/v1/databases', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        parent: { type: 'page_id', page_id: parentPageId },
+        icon: { type: 'emoji', emoji: '🕵️' },
+        title: [{ type: 'text', text: { content: 'Informateurs' } }],
+        properties: {
+          'Source':               { title: {} },
+          'Cible / Lieu':         { rich_text: {} },
+          'Information':          { rich_text: {} },
+          'Fiabilité':            { select: { options: [{ name: '✅ Confirmée', color: 'green' }, { name: '❌ Non confirmée', color: 'red' }] } },
+          'Statut':               { select: { options: [{ name: '🆕 Nouveau', color: 'yellow' }, { name: '✅ Confirmé', color: 'green' }, { name: '❌ Infirmé', color: 'red' }] } },
+          'Validé par':           { rich_text: {} },
+          'Rapporteur Discord ID':{ rich_text: {} },
+          'Date décision':        { date: {} },
+          'Date rapport':         { date: {} },
+        }
+      })
+    });
+    
+    if (createRes.ok) {
+      const dbCreated = await createRes.json();
+      const newId = dbCreated.id;
+      console.log(`✅ DB Informateurs Notion créée automatiquement : ${newId}`);
+      console.log(`⚠️  IMPORTANT : Ajoute dans Render → NOTION_INFOS_DB = ${newId}`);
+      // Poster l'ID dans le salon logs pour que l'admin puisse le récupérer
+      const logsCh = await getLogsCh(guild).catch(() => null);
+      if (logsCh) await logsCh.send({ embeds: [new EmbedBuilder().setColor(0x57F287)
+        .setTitle('✅ Base Notion "Informateurs" créée automatiquement')
+        .setDescription(`**Ajoute cette variable dans Render :**
+\`\`\`
+NOTION_INFOS_DB = ${newId}
+\`\`\`
+Ensuite redémarre le bot.`)
+        .setFooter({ text: 'IWC • Configuration Notion' })] }).catch(() => {});
+    } else {
+      const errData = await createRes.json().catch(() => ({}));
+      console.log('❌ Création DB Informateurs échouée:', errData?.message || createRes.status);
+    }
+  } catch(e) { console.log('❌ _initDBInformateursNotion:', e.message); }
+}
 global.getLogsCh = getLogsCh;
 global.getJournalCh = getJournalCh;
 // notionV3 utilise global.getLogsCh — on le surcharge pour rediriger vers journal-de-bord
