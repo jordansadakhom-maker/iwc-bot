@@ -2718,11 +2718,77 @@ async function setupFicheFormat(guild) {
   try {
     const ch = getChById(guild, 'FICHES_PERSONNAGES', 'fiches-personnages', 'fiches-perso', 'fiches'); if (!ch) return;
     const msgs = await ch.messages.fetch({ limit: 20 });
-    const existing = msgs.find(m => m.author.id === guild.members.me?.id && m.embeds[0]?.title?.includes('FICHES'));
-    if (existing) return;
+    // Supprimer l'ancien format et toujours recréer si le contenu a changé
+    const existing = msgs.find(m => m.author.id === guild.members.me?.id && m.embeds[0]?.title?.includes('FORMAT'));
+    if (existing) {
+      // Vérifier si le télégramme est déjà dans le format
+      const desc = existing.embeds[0]?.description || '';
+      if (desc.includes('TÉLÉGRAMME IC')) { console.log('✅ Format fiches déjà à jour — skip'); return; }
+      await existing.delete().catch(() => {});
+    }
+    // Supprimer les anciens messages bot
     for (const [, m] of msgs) { if (m.author.id === guild.members.me?.id) await m.delete().catch(() => {}); }
-    await ch.send({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle('📋 FICHES PERSONNAGES — IWC').setDescription(['*Postez votre fiche personnage en respectant le format ci-dessous.*', '', '```', '━━━━━━━━━━━━━━━━━━━━━━━━', 'FICHE PERSONNAGE', '━━━━━━━━━━━━━━━━━━━━━━━━', 'NOM: ', 'PRÉNOM: ', 'ÂGE: ', 'ORIGINE: ', 'MÉTIER IC: ', 'APPARTENANCE: ', 'BACKGROUND: ', '━━━━━━━━━━━━━━━━━━━━━━━━', '```'].join('\n')).setFooter({ text: 'IWC • Fiches personnages' })] });
-    console.log('✅ Format fiches posté');
+
+    const format = [
+      'NOM COMPLET :',
+      'SURNOM(S) :',
+      'ÂGE :',
+      'LIEU DE NAISSANCE :',
+      'NATIONALITÉ :',
+      'TAILLE / CORPULENCE :',
+      'YEUX / CHEVEUX :',
+      'SIGNES PARTICULIERS :',
+      'TÉLÉGRAMME IC :',
+      'PROFESSION :',
+      'RÉPUTATION :',
+      '',
+      '"Citation du personnage."',
+      '',
+      '---- HISTOIRE ----',
+      '[5 à 15 lignes minimum]',
+      '',
+      '---- PERSONNALITÉ ----',
+      '+ Trait 1',
+      '+ Trait 2',
+      '+ Trait 3',
+      '',
+      '---- COMPÉTENCES ----',
+      '✗ Compétence : ●●●●○',
+      '● Compétence : ●●●●●',
+      '',
+      '---- FAIBLESSES ----',
+      '+ Faiblesse 1',
+      '+ Faiblesse 2',
+      '',
+      '---- LIENS IMPORTANTS ----',
+      '[Nom] — [Relation] — [Description courte]',
+      '',
+      '---- OBJECTIF ----',
+      '[Ce que le personnage cherche à accomplir]',
+      '',
+      '— IWC — 1895 —',
+    ].join('\n');
+
+    await ch.send({ embeds: [
+      new EmbedBuilder()
+        .setColor(0x8B1A1A)
+        .setTitle('📋 FICHES PERSONNAGES — Iron Wolf Company')
+        .setDescription('*Fiches officielles des personnages IWC. Un thread par personnage. Mettez à jour après chaque évolution majeure.*')
+        .addFields(
+          { name: '📝 Comment faire :', value: ['1. Copiez le format ci-dessous', '2. Remplissez chaque champ', '3. Envoyez votre message dans ce salon', '4. Le bot génère automatiquement votre fiche et un thread dédié ✅'].join('\n') },
+        )
+        .setFooter({ text: 'IWC • Fiches personnages • Un thread par personnage' }),
+      new EmbedBuilder()
+        .setColor(0x2C2F33)
+        .setTitle('📄 FORMAT — À copier/coller')
+        .setDescription('```\n' + format + '\n```')
+        .addFields(
+          { name: '⚠️ Important', value: 'Tous les champs sont libres — écrivez ce qui correspond à votre personnage.\nSeul **NOM COMPLET** est obligatoire pour que le bot reconnaisse votre fiche.' },
+          { name: '🔄 Mise à jour', value: 'Pour modifier votre fiche, repostez-la complète dans ce salon.\nLe thread existant sera réouvert et Notion mis à jour automatiquement.' },
+        )
+        .setFooter({ text: 'IWC • Copie le format, remplis les champs, envoie dans ce salon' }),
+    ] });
+    console.log('✅ Format fiches posté (avec TÉLÉGRAMME IC)');
   } catch (e) { console.log('❌ setupFicheFormat:', e.message); }
 }
 
