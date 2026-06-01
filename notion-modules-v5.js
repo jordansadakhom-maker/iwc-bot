@@ -6,7 +6,7 @@
 
 const {
   EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType,
+  ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, MessageFlags,
 } = require('discord.js');
 const { loadDB, saveDB } = require('./db');
 
@@ -608,3 +608,4 @@ module.exports = {
   archiverThreadCandidature,
   posterResumeJournalIC,
 };
+
