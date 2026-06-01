@@ -588,10 +588,10 @@ async function posterResumeJournalIC(guild) {
       .setFooter({ text: 'IWC • Journal IC • Résumé automatique du lundi' })
       .setTimestamp();
 
-    const histCh = getChById(guild, 'HISTOIRE_IWC', 'histoire-iwc', 'histoire', 'journal');
-    if (histCh) {
-      await histCh.send({ embeds: [embed] });
-      console.log('✅ Résumé journal IC posté');
+    const journalCh = getChById(guild, 'JOURNAL_DE_BORD', 'journal-de-bord', 'journal');
+    if (journalCh) {
+      await journalCh.send({ embeds: [embed] });
+      console.log('✅ Résumé journal IC posté dans #journal-de-bord');
     }
   } catch (e) { console.log('❌ posterResumeJournalIC error:', e.message); }
 }
