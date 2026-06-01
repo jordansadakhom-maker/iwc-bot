@@ -2656,7 +2656,18 @@ async function _validerModalAgendaSimple(interaction) {
   }
   if (agendaCh) await agendaCh.send({ content: `${pingRole} — 📅 **${titre}** · ${heure} à ${lieu}`, embeds: [embed], allowedMentions: { parse: [], roles: [isIlleg ? ROLE_POLE_ILLEGAL : ROLE_POLE_LEGAL] } }).catch(() => {});
   const salonLabel = isIlleg ? '#agenda-illégal' : '#agenda';
-  await interaction.editReply({ content: photoUrl ? '✅ RDV créé avec photo de repérage !' : `✅ RDV créé et posté dans ${salonLabel} !`, embeds: [embed], components: [] });
+  const confirmMsg = await interaction.editReply({ content: photoUrl ? '✅ RDV créé avec photo de repérage !' : `✅ RDV créé et posté dans ${salonLabel} !`, embeds: [], components: [] });
+  // Supprimer le message intermédiaire "Nouveau RDV — Étape 1/2" dans #contrats
+  try {
+    const ch = interaction.channel;
+    const msgs = await ch.messages.fetch({ limit: 10 });
+    for (const [, m] of msgs) {
+      if (m.author.id === interaction.client.user.id &&
+          (m.embeds[0]?.title?.includes('Nouveau RDV') || m.embeds[0]?.description?.includes('Étape'))) {
+        await m.delete().catch(() => {});
+      }
+    }
+  } catch {}
   if (process.env.NOTION_TOKEN && process.env.NOTION_AGENDA_DB_ID) {
     fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: process.env.NOTION_AGENDA_DB_ID }, properties: {
       'Titre':    { title:     [{ text: { content: titre } }] },
@@ -2809,7 +2820,17 @@ async function _validerModalRdvIndividuel(interaction) {
       'Notif 15min':  { checkbox: true },
     } }) }).catch(e => console.log('❌ Notion RDV individuel:', e.message));
   }
-  await interaction.editReply({ content: `✅ Convocation envoyée à ${participants.join(', ')} !`, embeds: [embed] });
+  await interaction.editReply({ content: `✅ Convocation envoyée à ${participants.join(', ')} !`, embeds: [], components: [] });
+  try {
+    const ch = interaction.channel;
+    const msgs = await ch.messages.fetch({ limit: 10 });
+    for (const [, m] of msgs) {
+      if (m.author.id === interaction.client.user.id &&
+          (m.embeds[0]?.title?.includes('Nouveau Rendez-vous') || m.embeds[0]?.description?.includes('Étape'))) {
+        await m.delete().catch(() => {});
+      }
+    }
+  } catch {}
 }
 
 async function _validerModalRdv(interaction) {
@@ -2861,7 +2882,18 @@ async function _validerModalRdv(interaction) {
     } }) }).catch(e => console.log('❌ Notion RDV pôle:', e.message));
   }
   const salonLabel = pole === 'illegal' ? '#agenda-illégal' : '#agenda';
-  await interaction.editReply({ content: `✅ RDV **${titre}** planifié et posté dans ${salonLabel} !`, embeds: [embed] });
+  await interaction.editReply({ content: `✅ RDV **${titre}** planifié et posté dans ${salonLabel} !`, embeds: [], components: [] });
+  // Nettoyer les messages intermédiaires dans le salon
+  try {
+    const ch = interaction.channel;
+    const msgs = await ch.messages.fetch({ limit: 10 });
+    for (const [, m] of msgs) {
+      if (m.author.id === interaction.client.user.id &&
+          (m.embeds[0]?.title?.includes('Nouveau Rendez-vous') || m.embeds[0]?.description?.includes('Étape'))) {
+        await m.delete().catch(() => {});
+      }
+    }
+  } catch {}
 }
 
 async function _ouvrirModalSurnom(interaction) {
