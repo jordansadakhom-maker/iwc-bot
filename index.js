@@ -2227,20 +2227,48 @@ async function _executerPurge(interaction) {
 
 async function _handlePatchDeploy(interaction) {
   const isFondateur = interaction.member.roles.cache.some(r => r.name.includes('Fondateur'));
-  const isFleau = interaction.member.roles.cache.some(r => r.name.includes('Fléau') || r.name.includes('Fleau'));
-  if (!isFondateur && !isFleau) return interaction.reply({ flags: MessageFlags.Ephemeral, content: '❌ Réservé au Fondateur et au Fléau.' });
+  const isFleau = interaction.member.roles.cache.some(r => r.name.includes('Fl\u00e9au') || r.name.includes('Fleau'));
+  if (!isFondateur && !isFleau) return interaction.reply({ flags: MessageFlags.Ephemeral, content: '\u274c R\u00e9serv\u00e9 au Fondateur et au Fl\u00e9au.' });
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const patchCh = getChById(interaction.guild, 'PATCH_NOTE', 'patch-note', 'patch');
-  if (!patchCh) return interaction.editReply({ content: '❌ Salon #patch-note introuvable.' });
-  const embed = new EmbedBuilder().setColor(0x5865F2).setAuthor({ name: 'Iron Wolf Company · IWC Setup', iconURL: interaction.guild.iconURL() || undefined }).setTitle('🔧 Patch v4.1 — Correctifs & Améliorations — IWC Bot').setDescription(`*Déployé le **${new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}***`)
-    .addFields(
-      { name: '✅ Corrections', value: ['→ **Journal de bord** — Résumés hebdo et journaux IC maintenant dans #journal-de-bord', '→ **Bouton RDV** — "Remplir les détails" fonctionne correctement (fix routing bouton→modal)', '→ **Absences** — Permissions d\'écriture bloquées/débloquées automatiquement', '→ **Retour d\'absence** — Rôle retiré + permissions rétablies via /retour et auto-retour'].join('\n'), inline: false },
-      { name: '✨ Nouveautés', value: ['→ **#journal-de-bord** — Toutes les entrées IC (ops, contrats, promos, recrutements) centralisées', '→ **Résumé hebdomadaire** — Posté automatiquement chaque lundi dans #journal-de-bord'].join('\n'), inline: false },
-    ).setFooter({ text: 'IWC Bot v4.1 • Déployé automatiquement' }).setTimestamp();
-  await patchCh.send({ embeds: [embed] });
-  await interaction.editReply({ content: `✅ Patch note posté dans ${patchCh}.` });
-}
+  if (!patchCh) return interaction.editReply({ content: '\u274c Salon #patch-note introuvable.' });
+  const dateStr = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
 
+  const embed1 = new EmbedBuilder()
+    .setColor(0x8B4513)
+    .setAuthor({ name: 'Iron Wolf Company \u00b7 IWC Setup', iconURL: interaction.guild.iconURL() || undefined })
+    .setTitle('\uD83D\uDC3A IWC Bot \u2014 Mise \u00e0 jour majeure \u00b7 02/06/2026')
+    .setDescription('*D\u00e9ploy\u00e9 le **' + dateStr + '** \u2014 Version 5.0*')
+    .addFields(
+      { name: '\uD83D\uDCB0 TR\u00c9SORERIE', value: '\u2192 Sync Notion corrig\u00e9e \u2014 colonnes Entr\u00e9e/Sortie et L\u00e9gal/Ill\u00e9gal\n\u2192 Panel mis \u00e0 jour automatiquement apr\u00e8s chaque transaction\n\u2192 Blocage double transaction si un flow est d\u00e9j\u00e0 en cours\n\u2192 Nettoyage automatique des messages orphelins au d\u00e9marrage\n\u2192 Colonne Mouvement + vues Coffre L\u00e9gal et Coffre Ill\u00e9gal dans Notion', inline: false },
+      { name: '\uD83E\uDDD1 FICHES PERSONNAGES', value: '\u2192 Nouveau format Far West \u2014 style authentique 1895\n\u2192 Champ TELEGRAPHE IC ajout\u00e9 dans le formulaire et les embeds\n\u2192 Protection propri\u00e9taire \u2014 seul auteur ou Direction peut modifier\n\u2192 Textes longs \u2192 multi-embeds automatiques dans le thread\n\u2192 Message original du membre conserv\u00e9', inline: false },
+    )
+    .setFooter({ text: 'IWC Bot v5.0 \u00b7 1/3' });
+
+  const embed2 = new EmbedBuilder()
+    .setColor(0x8B1A1A)
+    .addFields(
+      { name: '\uD83C\uDFAF OP\u00c9RATIONS', value: '\u2192 Sync Notion corrig\u00e9e \u2014 colonnes Lieu IC, Notes, Date pr\u00e9vue\n\u2192 Bouton Modifier \u2014 lieu, objectif, notes modifiables avant lancement\n\u2192 Syst\u00e8me Rassemblement \u2014 ping p\u00f4le + boutons pr\u00e9sents/absents\n\u2192 Embed pr\u00e9sents/absents mis \u00e0 jour en temps r\u00e9el\n\u2192 Confirmation avant lancement : Ping P\u00f4le / Ping Participants / Sans ping\n\u2192 Blocage modification si op\u00e9ration lanc\u00e9e ou termin\u00e9e', inline: false },
+      { name: '\uD83D\uDCC5 AGENDA & RDV', value: '\u2192 Choix l\u00e9gal/ill\u00e9gal \u2014 RDV post\u00e9 dans #agenda ou #agenda-ill\u00e9gal\n\u2192 Sync Notion avec colonne P\u00f4le : L\u00e9gal / Ill\u00e9gal / Direction / Tous\n\u2192 Bouton RDV depuis #contrats \u2014 flow complet avec choix p\u00f4le\n\u2192 Nettoyage automatique des messages interm\u00e9diaires apr\u00e8s cr\u00e9ation', inline: false },
+      { name: '\uD83D\uDC65 MEMBRES & SYNCHRONISATION', value: '\u2192 Sync automatique au d\u00e9marrage \u2014 statut + p\u00f4le de tous les membres\n\u2192 Changement de r\u00f4le Discord \u2192 Notion mis \u00e0 jour en temps r\u00e9el\n\u2192 /absent et /retour sync Fiches_personnages automatiquement\n\u2192 Nouveau membre avec r\u00f4le de p\u00f4le \u2192 cr\u00e9\u00e9 dans Notion\n\u2192 D\u00e9tection p\u00f4le corrig\u00e9e \u2014 ill\u00e9gal prioritaire sur l\u00e9gal', inline: false },
+    )
+    .setFooter({ text: 'IWC Bot v5.0 \u00b7 2/3' });
+
+  const embed3 = new EmbedBuilder()
+    .setColor(0x2C3E50)
+    .addFields(
+      { name: '\uD83D\uDD27 SERVEUR & PERMISSIONS', value: '\u2192 /setup-serveur \u2014 9 cat\u00e9gories, 53 salons, permissions compl\u00e8tes\n\u2192 Permissions par r\u00f4le selon document officiel IWC\n\u2192 Bot IWC pr\u00e9sent automatiquement sur tous les salons\n\u2192 Cat\u00e9gorie BOT CACH\u00c9 \u2014 #patch-note et #logs Direction uniquement', inline: false },
+      { name: '\uD83D\uDC1B CORRECTIONS', value: '\u2192 @r\u00f4le inconnu corrig\u00e9 \u2014 La Confr\u00e9rie ping\u00e9e correctement\n\u2192 Format fiches ne se reposte plus en boucle\n\u2192 Erreurs Notion Heure et Emetteur corrig\u00e9es\n\u2192 setupOperationsGuide \u2014 crash d\u00e9marrage corrig\u00e9\n\u2192 Double transaction \u2014 blocage si flow en cours', inline: false },
+      { name: '\uD83D\uDD2E PROCHAINES MISES \u00c0 JOUR', value: '\u2192 Script push-to-talk \u2014 F9 pour dicter un rapport vocal vers #informateurs\n\u2192 Dashboard hebdomadaire \u2014 stats visuelles par p\u00f4le\n\u2192 Rappels RDV automatiques \u2014 notification 1h et 15min avant\n\u2192 Archivage automatique des op\u00e9rations termin\u00e9es dans Notion', inline: false },
+    )
+    .setFooter({ text: 'IWC Bot v5.0 \u00b7 3/3 \u00b7 La force est dans l\'ombre. \u2014 La Compagnie' })
+    .setTimestamp();
+
+  await patchCh.send({ embeds: [embed1] });
+  await patchCh.send({ embeds: [embed2] });
+  await patchCh.send({ embeds: [embed3] });
+  await interaction.editReply({ content: '\u2705 Patch note v5.0 post\u00e9 dans ' + patchCh + ' (3 embeds).' });
+}
 async function _handlePurge(interaction) {
   if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
   const nombre = interaction.options?.getInteger('nombre') || null; const salon = interaction.channel;
