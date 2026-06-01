@@ -2764,13 +2764,34 @@ async function _validerModalRdvIndividuel(interaction) {
     .addFields({ name: '🆔 Référence', value: '`' + rdvId + '`', inline: true }, { name: '📅 Date', value: dateCapital, inline: true }, { name: '🕐 Heure', value: `**${heure}**`, inline: true }, { name: '📍 Lieu', value: lieu, inline: true }, { name: '✍️ Convoqué par', value: emetteurIC, inline: true }, { name: `👥 Participants (${participants.length})`, value: participants.join(', ') || '—' })
     .setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` }).setTimestamp();
   if (notes) embed.addFields({ name: '📋 Ordre du jour', value: notes });
-  const agendaCh = getChById(interaction.guild, 'AGENDA', 'agenda');
+  // Détecter le pôle de l'émetteur pour poster dans le bon salon
+  const emetteurPole = db.members[interaction.user.id]?.pole || 'legal';
+  let agendaCh;
+  if (emetteurPole === 'illegal') {
+    agendaCh = interaction.guild.channels.cache.get(SALON_HARDCODED.AGENDA_ILLEGAL)
+      || getChById(interaction.guild, 'AGENDA_ILLEGAL', 'agenda-illegal', 'agenda-illégal');
+  } else {
+    agendaCh = getChById(interaction.guild, 'AGENDA', 'agenda');
+  }
   const mentionsMembres = pending.ids.map(id => `<@${id}>`).join(' ');
   if (agendaCh) await agendaCh.send({ content: `${mentionsMembres} — 📅 Convocation : **${titre}** · ${heure} à ${lieu}`, embeds: [embed] }).catch(() => {});
   for (const uid of pending.ids) { await envoyerDMRecap(interaction.guild, uid, 'rdv', { titre, date: dateCapital, heure, lieu, notes }).catch(() => {}); }
   delete db._rdvPending[pendingId]; saveDB(db);
   if (process.env.NOTION_TOKEN && process.env.NOTION_AGENDA_DB_ID) {
-    fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: process.env.NOTION_AGENDA_DB_ID }, properties: { 'Titre': { title: [{ text: { content: titre } }] }, 'Date': { date: { start: dateISO } }, 'Heure': { rich_text: [{ text: { content: heure } }] }, 'Lieu': { rich_text: [{ text: { content: lieu !== '—' ? lieu : '' } }] }, 'Notes': { rich_text: [{ text: { content: notes.slice(0, 2000) } }] }, 'Statut': { select: { name: 'Planifié' } }, 'Type': { select: { name: 'Convocation individuelle' } }, 'Participants': { multi_select: participants.map(n => ({ name: n })) }, 'Notif 1h': { checkbox: true }, 'Notif 15min': { checkbox: true } } }) }).catch(e => console.log('❌ Notion RDV individuel:', e.message));
+    fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: process.env.NOTION_AGENDA_DB_ID }, properties: {
+      'Titre':        { title:        [{ text: { content: titre } }] },
+      'Date':         { date:         { start: dateISO } },
+      'Heure':        { rich_text:    [{ text: { content: heure } }] },
+      'Lieu':         { rich_text:    [{ text: { content: lieu !== '—' ? lieu : '' } }] },
+      'Notes':        { rich_text:    [{ text: { content: notes.slice(0, 2000) } }] },
+      'Statut':       { select:       { name: 'Planifié' } },
+      'Type':         { select:       { name: 'Convocation individuelle' } },
+      'Pôle':         { select:       { name: emetteurPole === 'illegal' ? '🔒 Illégal' : '⚖️ Légal' } },
+      'Créé par':     { rich_text:    [{ text: { content: emetteurIC } }] },
+      'Participants': { multi_select: participants.map(n => ({ name: n })) },
+      'Notif 1h':     { checkbox: true },
+      'Notif 15min':  { checkbox: true },
+    } }) }).catch(e => console.log('❌ Notion RDV individuel:', e.message));
   }
   await interaction.editReply({ content: `✅ Convocation envoyée à ${participants.join(', ')} !`, embeds: [embed] });
 }
@@ -2791,7 +2812,14 @@ async function _validerModalRdv(interaction) {
     .addFields({ name: '🆔 Référence', value: '`' + rdvId + '`', inline: true }, { name: '📅 Date', value: dateCapital, inline: true }, { name: '🕐 Heure', value: `**${heure}**`, inline: true }, { name: '📍 Lieu', value: lieu, inline: true }, { name: '👥 Destinataires', value: poleCfg.label, inline: true }, { name: '✍️ Convoqué par', value: emetteurIC, inline: true })
     .setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` }).setTimestamp();
   if (notes) embed.addFields({ name: '📋 Ordre du jour', value: notes });
-  const agendaCh = getChById(interaction.guild, 'AGENDA', 'agenda');
+  // Poster dans le bon salon selon le pôle
+  let agendaCh;
+  if (pole === 'illegal') {
+    agendaCh = interaction.guild.channels.cache.get(SALON_HARDCODED.AGENDA_ILLEGAL)
+      || getChById(interaction.guild, 'AGENDA_ILLEGAL', 'agenda-illegal', 'agenda-illégal');
+  } else {
+    agendaCh = getChById(interaction.guild, 'AGENDA', 'agenda');
+  }
   let mention = ''; if (poleCfg.roleId) mention = `<@&${poleCfg.roleId}>`; else if (pole === 'direction') mention = getMention(interaction.guild); else mention = `<@&${ROLE_POLE_LEGAL}> <@&${ROLE_POLE_ILLEGAL}>`;
   if (agendaCh) await agendaCh.send({ content: `${mention} — 📅 **${titre}** · ${heure} à ${lieu}`, embeds: [embed] }).catch(() => {});
   if (poleCfg.roleId) {
@@ -2802,9 +2830,23 @@ async function _validerModalRdv(interaction) {
     for (const [uid] of dirs) { await envoyerDMRecap(interaction.guild, uid, 'rdv', { titre, date: dateCapital, heure, lieu }).catch(() => {}); }
   }
   if (process.env.NOTION_TOKEN && process.env.NOTION_AGENDA_DB_ID) {
-    fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: process.env.NOTION_AGENDA_DB_ID }, properties: { 'Titre': { title: [{ text: { content: titre } }] }, 'Date': { date: { start: dateISO } }, 'Heure': { rich_text: [{ text: { content: heure } }] }, 'Lieu': { rich_text: [{ text: { content: lieu !== '—' ? lieu : '' } }] }, 'Notes': { rich_text: [{ text: { content: notes.slice(0, 2000) } }] }, 'Statut': { select: { name: 'Planifié' } }, 'Type': { select: { name: typeRdv.replace(/_/g, ' ') } }, 'Notif 24h': { checkbox: true }, 'Notif 1h': { checkbox: true }, 'Notif 15min': { checkbox: true } } }) }).catch(e => console.log('❌ Notion RDV pôle:', e.message));
+    fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: process.env.NOTION_AGENDA_DB_ID }, properties: {
+      'Titre':    { title:     [{ text: { content: titre } }] },
+      'Date':     { date:      { start: dateISO } },
+      'Heure':    { rich_text: [{ text: { content: heure } }] },
+      'Lieu':     { rich_text: [{ text: { content: lieu !== '—' ? lieu : '' } }] },
+      'Notes':    { rich_text: [{ text: { content: notes.slice(0, 2000) } }] },
+      'Statut':   { select:    { name: 'Planifié' } },
+      'Type':     { select:    { name: typeRdv.replace(/_/g, ' ') } },
+      'Pôle':     { select:    { name: pole === 'illegal' ? '🔒 Illégal' : pole === 'direction' ? '👑 Direction' : pole === 'tous' ? '👥 Tous' : '⚖️ Légal' } },
+      'Créé par': { rich_text: [{ text: { content: emetteurIC } }] },
+      'Notif 24h':  { checkbox: true },
+      'Notif 1h':   { checkbox: true },
+      'Notif 15min':{ checkbox: true },
+    } }) }).catch(e => console.log('❌ Notion RDV pôle:', e.message));
   }
-  await interaction.editReply({ content: `✅ RDV **${titre}** planifié et posté dans #agenda !`, embeds: [embed] });
+  const salonLabel = pole === 'illegal' ? '#agenda-illégal' : '#agenda';
+  await interaction.editReply({ content: `✅ RDV **${titre}** planifié et posté dans ${salonLabel} !`, embeds: [embed] });
 }
 
 async function _ouvrirModalSurnom(interaction) {
