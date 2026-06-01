@@ -394,7 +394,7 @@ async function _validerTransaction(guild, tx, photoUrl) {
     embed.setFooter({ text: `IWC • ${new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}` }).setTimestamp();
 
     const sentMsg = await coffreCh.send({ embeds: [embed] }).catch(() => null);
-    if (sentMsg) setTimeout(() => sentMsg.delete().catch(() => {}), 60000);
+    if (sentMsg) setTimeout(() => sentMsg.delete().catch(() => {}), 30000);
   }
 
   // Rafraîchir le panel trésorerie
@@ -447,19 +447,54 @@ async function setupTresorButton(guild) {
   const ch = guild.channels.cache.find(c => c.name?.includes('coffre-entreprise'));
   if (!ch) return;
   const db = loadDB();
-  let allBotMsgs = [];
-  try { const msgs = await ch.messages.fetch({ limit: 100 }); allBotMsgs = [...msgs.values()].filter(m => m.author.id === guild.members.me?.id).sort((a, b) => b.createdTimestamp - a.createdTimestamp); } catch {}
-  const panels    = allBotMsgs.filter(m => m.components?.length > 0 && m.embeds?.length > 0);
-  const nonPanels = allBotMsgs.filter(m => !(m.components?.length > 0));
-  // Supprimer tous les messages sans boutons (transactions, messages orphelins)
-  for (const m of nonPanels) await m.delete().catch(() => {});
+
+  // Récupérer tous les messages du salon (pas seulement les messages bot)
+  let allMsgs = [];
+  try {
+    let lastId = null;
+    for (let i = 0; i < 3; i++) {
+      const opts = { limit: 100 };
+      if (lastId) opts.before = lastId;
+      const batch = await ch.messages.fetch(opts);
+      if (!batch.size) break;
+      allMsgs = allMsgs.concat([...batch.values()]);
+      lastId = batch.last()?.id;
+      if (batch.size < 100) break;
+    }
+  } catch {}
+
+  // Séparer : panel bot (avec boutons) vs tout le reste
+  const botMsgs = allMsgs.filter(m => m.author.id === guild.members.me?.id);
+  const panels  = botMsgs.filter(m => m.components?.length > 0 && m.embeds?.[0]?.title?.includes('Trésorerie'));
+  const autres  = botMsgs.filter(m => !panels.find(p => p.id === m.id));
+
+  // Supprimer TOUS les messages bot qui ne sont pas le panel principal
+  for (const m of autres) await m.delete().catch(() => {});
+  // Supprimer les doublons de panels
   for (let i = 1; i < panels.length; i++) await panels[i].delete().catch(() => {});
+
+  // Mettre à jour ou créer le panel
   if (panels.length > 0) {
-    try { await panels[0].edit({ embeds: [_tresorEmbed()], components: [_tresorRow()] }); db.tresorButtonMsgId = panels[0].id; saveDB(db); return; } catch { await panels[0].delete().catch(() => {}); }
+    try {
+      await panels[0].edit({ embeds: [_tresorEmbed()], components: [_tresorRow()] });
+      db.tresorButtonMsgId = panels[0].id;
+      saveDB(db);
+      return;
+    } catch { await panels[0].delete().catch(() => {}); }
   }
+
+  // Chercher par ID sauvegardé
   if (db.tresorButtonMsgId) {
-    try { const existing = await ch.messages.fetch(db.tresorButtonMsgId); if (existing) { await existing.edit({ embeds: [_tresorEmbed()], components: [_tresorRow()] }); return; } } catch {}
+    try {
+      const existing = await ch.messages.fetch(db.tresorButtonMsgId);
+      if (existing) {
+        await existing.edit({ embeds: [_tresorEmbed()], components: [_tresorRow()] });
+        return;
+      }
+    } catch {}
   }
+
+  // Créer un nouveau panel
   const msg = await ch.send({ embeds: [_tresorEmbed()], components: [_tresorRow()] });
   db.tresorButtonMsgId = msg.id;
   saveDB(db);
