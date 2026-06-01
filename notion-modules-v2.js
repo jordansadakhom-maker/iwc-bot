@@ -628,8 +628,7 @@ async function handleFichePersonnage(message) {
   saveDB(db);
 
   await message.react('✅').catch(() => {});
-  // Supprimer le message original après 5 secondes pour garder le salon propre
-  setTimeout(() => message.delete().catch(() => {}), 5000);
+  // Le message du membre reste visible dans le salon
   const embedCompact = new EmbedBuilder().setColor(color).setAuthor({ name: isIlleg ? '🔒 La Confrérie — Fiche Personnage' : '⚖️ Iron Wolf Company — Fiche Personnage', iconURL: message.guild.iconURL() || undefined }).setTitle(`👤 ${nomPerso}`).setThumbnail(message.author.displayAvatarURL({ size: 256 }));
   if (citation) embedCompact.setDescription(`> *${citation.replace(/^[\*""\s]+|[\*""\s]+$/g, '')}*`);
   const identiteLines = [`**Surnom :** ${surnom}`, `**Âge :** ${age}`, `**Nationalité :** ${nationalite}`, `**Né(e) à :** ${naissance}`];
