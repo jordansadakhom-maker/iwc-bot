@@ -1850,6 +1850,8 @@ async function _handleRetour(interaction) {
     await _debloquerEcritureAbsent(guild, membreRetour);
   }
   _syncMembreNotion(targetId, { status: 'actif', lastActivity: new Date().toISOString() }).catch(() => {});
+  // Mettre à jour Fiches_personnages aussi
+  _syncStatutFicheNotion(targetId, 'Actif').catch(() => {});
   const absCh = getAbsencesCh(guild, membreRetour);
   if (absCh) await absCh.send({ embeds: [new EmbedBuilder().setColor(0x57F287)
     .setAuthor({ name: `${membreRetour?.displayName || targetUser.username} — Retour`, iconURL: targetUser.displayAvatarURL?.() || undefined })
@@ -1884,6 +1886,7 @@ async function _handleAnnulerAbsence(interaction) {
     await _debloquerEcritureAbsent(interaction.guild, membreD);
   }
   _syncMembreNotion(cible.id, { status: 'actif', lastActivity: new Date().toISOString() }).catch(() => {});
+  _syncStatutFicheNotion(cible.id, 'Actif').catch(() => {});
   const absCh = getAbsencesCh(interaction.guild, membreD);
   if (absCh) await absCh.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ Absence levée par la Direction').addFields({ name: '👤 Membre', value: `<@${cible.id}>`, inline: true }, { name: '✅ Levé par', value: interaction.user.username, inline: true }, { name: '📅 Date', value: new Date().toLocaleDateString('fr-FR'), inline: true }).setFooter({ text: 'IWC • Absence annulée par la Direction' }).setTimestamp()] }).catch(() => {});
   try { await membreD?.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ Absence levée').setDescription(`Ton absence a été levée par **${interaction.user.username}**.\nTes permissions d'écriture sont rétablies.`).setFooter({ text: 'IWC' })] }); } catch {}
@@ -2604,6 +2607,7 @@ async function _validerModalAbsent(interaction) {
 
   await notionExtra.majStatutActiviteNotion?.(interaction.user.id, 'absent');
   _syncMembreNotion(interaction.user.id, { status: 'absent', lastActivity: new Date().toISOString() }).catch(() => {});
+  _syncStatutFicheNotion(interaction.user.id, 'Absent').catch(() => {});
   await sendLog(guild, 'ABSENCE', { userId: interaction.user.id, username: interaction.user.username });
 
   const retourStr = finAbsence
@@ -2879,6 +2883,30 @@ global.getJournalCh = getJournalCh;
 // pour les alertes informateurs et affaires
 const _origGetLogsCh = getLogsCh;
 global.getInformateurCh = (guild) => getJournalCh(guild) || guild.channels.cache.get(SALON_HARDCODED.JOURNAL_DE_BORD);
+
+// Mettre à jour le statut activité dans Fiches_personnages
+async function _syncStatutFicheNotion(discordId, statut) {
+  if (!process.env.NOTION_TOKEN || !process.env.NOTION_FICHES_DB) return;
+  try {
+    const search = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_FICHES_DB}/query`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filter: { property: 'Discord ID', rich_text: { equals: discordId } }, page_size: 1 }),
+    });
+    const data = await search.json();
+    const page = data.results?.[0];
+    if (!page) return;
+    await fetch(`https://api.notion.com/v1/pages/${page.id}`, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ properties: {
+        'Statut activité': { select: { name: statut } },
+        'Dernière MàJ':    { date:   { start: new Date().toISOString().split('T')[0] } },
+      } }),
+    });
+    console.log(`✅ Fiches_personnages statut MàJ : ${discordId} → ${statut}`);
+  } catch(e) { console.log('❌ _syncStatutFicheNotion:', e.message); }
+}
 
 client.login(process.env.DISCORD_TOKEN)
   .then(() => console.log('🔑 Login OK'))
