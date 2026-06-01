@@ -484,7 +484,7 @@ async function handleSlashCommand(interaction) {
     // DM légal — Iron Wolf Company
     const _isIllegP = db.members[cible.id]?.pole === 'illegal';
     const _orgP = _isIllegP ? 'La Confrérie' : 'Iron Wolf Company';
-    await membre.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle(`⬆️ Promotion — ${_orgP}`).setDescription(`Ton grade au sein de **${_orgP}** a été mis à jour.\n\n**Nouveau rang :** ${nouveauRang}\n\n${_isIllegP ? "*Tu as prouvé ta valeur dans l'ombre.*" : '*La Compagnie reconnaît ta valeur.*'}\n— La Direction`).setFooter({ text: _isIllegP ? 'La Confrérie • Confidentiel' : 'Iron Wolf Company • Légal' })] }).catch(() => {});
+    await envoyerDMRecap(interaction.guild, membre.id, 'grade', { ancien: ancienRang, nouveau: nouveauRang }).catch(() => {});
     await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle(`⬆️ Promotion — ${cible.username}`).addFields({ name: '👤 Membre', value: `<@${cible.id}>`, inline: true }, { name: '📉 Ancien rang', value: ancienRang, inline: true }, { name: '📈 Nouveau rang', value: nouveauRang, inline: true }, { name: '✅ Décidé par', value: interaction.user.username, inline: true }).setFooter({ text: `IWC • ${fmtShort(new Date())}` })] });
     return;
   }
@@ -502,7 +502,7 @@ async function handleSlashCommand(interaction) {
     // DM légal — Iron Wolf Company
     const _isIllegR = db.members[cible.id]?.pole === 'illegal';
     const _orgR = _isIllegR ? 'La Confrérie' : 'Iron Wolf Company';
-    await membre.send({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle(`⬇️ Rétrogradation — ${_orgR}`).setDescription(`Ton grade au sein de **${_orgR}** a été mis à jour.\n\n**Nouveau rang :** ${nouveauRang}\n**Raison :** ${raison}\n\n*La Direction a pris cette décision.*\n— La Direction`).setFooter({ text: _isIllegR ? 'La Confrérie • Confidentiel' : 'Iron Wolf Company • Légal' })] }).catch(() => {});
+    await envoyerDMRecap(interaction.guild, membre.id, 'grade', { ancien: ancienRang, nouveau: nouveauRang }).catch(() => {});
     await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle(`⬇️ Rétrogradation — ${cible.username}`).addFields({ name: '👤 Membre', value: `<@${cible.id}>`, inline: true }, { name: '📉 Ancien rang', value: ancienRang, inline: true }, { name: '📈 Nouveau rang', value: nouveauRang, inline: true }, { name: '📝 Raison', value: raison, inline: true }, { name: '✅ Décidé par', value: interaction.user.username, inline: true }).setFooter({ text: `IWC • ${fmtShort(new Date())}` })] });
     return;
   }
@@ -1885,6 +1885,72 @@ function _buildCandidaturesResume(db) {
     const urgent = h >= 48 ? ' 🔴' : h >= 24 ? ' ⚠️' : '';
     return `**${i+1}.** ${c.nomPerso} — ${c.type === 'legal' ? '⚖️' : '🔒'} — ${h}h${urgent}`;
   }).join('\n');
+}
+
+// ── DM Récapitulatif — un seul message par membre, mis à jour ──
+async function envoyerDMRecap(guild, userId, type, data) {
+  try {
+    const db = loadDB();
+    if (!db._dmRecap) db._dmRecap = {};
+    if (!db._dmRecap[userId]) db._dmRecap[userId] = {};
+
+    const membre = await guild.members.fetch(userId).catch(() => null);
+    if (!membre) return;
+
+    // Récupérer tous les événements récents pour ce membre
+    const events = db._dmRecap[userId].events || [];
+    // Ajouter le nouvel événement
+    events.unshift({ type, data, date: new Date().toISOString() });
+    // Garder seulement les 5 derniers
+    db._dmRecap[userId].events = events.slice(0, 5);
+
+    // Construire l'embed récap
+    const embed = new EmbedBuilder()
+      .setColor(0x8B1A1A)
+      .setTitle('🐺 Iron Wolf Company — Vos notifications')
+      .setDescription('*Récapitulatif de vos dernières notifications IWC.*')
+      .setTimestamp();
+
+    for (const ev of db._dmRecap[userId].events) {
+      const date = new Date(ev.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      if (ev.type === 'grade') {
+        embed.addFields({ name: `🎖️ Grade — ${date}`, value: `**${ev.data.ancien}** → **${ev.data.nouveau}**`, inline: false });
+      } else if (ev.type === 'rdv') {
+        embed.addFields({ name: `📅 Convocation — ${date}`, value: `**${ev.data.titre}** — ${ev.data.date} à ${ev.data.heure}
+📍 ${ev.data.lieu}`, inline: false });
+      } else if (ev.type === 'contrat') {
+        embed.addFields({ name: `📜 Contrat — ${date}`, value: `**${ev.data.id}** — ${ev.data.objet}`, inline: false });
+      } else if (ev.type === 'candidature') {
+        embed.addFields({ name: `🐺 Candidature — ${date}`, value: ev.data.message, inline: false });
+      } else if (ev.type === 'rappel') {
+        embed.addFields({ name: `⏰ Rappel RDV — ${date}`, value: `**${ev.data.titre}** dans ${ev.data.dans}`, inline: false });
+      } else if (ev.type === 'absence') {
+        embed.addFields({ name: `🟡 Absence — ${date}`, value: ev.data.message, inline: false });
+      }
+    }
+    embed.setFooter({ text: 'IWC • Secrétariat automatique • Ce message est mis à jour automatiquement' });
+
+    // Tenter de modifier le message existant
+    const dmChannel = await membre.createDM().catch(() => null);
+    if (!dmChannel) return;
+
+    const lastMsgId = db._dmRecap[userId].msgId;
+    if (lastMsgId) {
+      const lastMsg = await dmChannel.messages.fetch(lastMsgId).catch(() => null);
+      if (lastMsg) {
+        await lastMsg.edit({ embeds: [embed] });
+        saveDB(db);
+        return;
+      }
+    }
+
+    // Sinon envoyer un nouveau message
+    const sent = await dmChannel.send({ embeds: [embed] }).catch(() => null);
+    if (sent) {
+      db._dmRecap[userId].msgId = sent.id;
+      saveDB(db);
+    }
+  } catch(e) { console.log('❌ envoyerDMRecap error:', e.message); }
 }
 
 // ── MEMBRES_DISCORD_MAP automatique ──
