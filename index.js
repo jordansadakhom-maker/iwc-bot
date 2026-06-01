@@ -2930,33 +2930,35 @@ async function _validerModalAgendaSimple(interaction) {
   }
 }
 
-// ── Version slash command (pas de customId) ──
+// ── /rdv et /agenda creer — Étape 1 : Sélection du lieu RDR2 ──
 async function _ouvrirMenuRdvSlash(interaction) {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const msgId = interaction.id;
-  await interaction.editReply({
+  await interaction.reply({
+    flags: MessageFlags.Ephemeral,
     embeds: [new EmbedBuilder()
       .setColor(0x2C3E50)
-      .setTitle('📅 Nouveau Rendez-vous — IWC')
-      .setDescription('**Étape 1/2** — Sélectionne le type de rendez-vous.')
+      .setTitle('📅 Nouveau RDV — Iron Wolf Company')
+      .setDescription('**Étape 1/2** — Choisis le lieu du rendez-vous')
     ],
     components: [new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
-        .setCustomId(`rdv_type_select_${msgId}`)
-        .setPlaceholder('Type de rendez-vous...')
+        .setCustomId('agenda_lieu_select')
+        .setPlaceholder('📍 Choisir un lieu RDR2...')
         .addOptions([
-          { label: '👑 Réunion Direction',      value: 'reunion_direction',  description: 'Réunion interne Direction & Conseil', emoji: '👑' },
-          { label: '🤝 Rendez-vous Client',     value: 'rdv_client',         description: 'Rencontre avec un partenaire ou client', emoji: '🤝' },
-          { label: '🎯 Briefing Opération',     value: 'briefing_op',        description: 'Préparation avant une opération', emoji: '🎯' },
-          { label: '📊 Débrief Opération',      value: 'debrief_op',         description: 'Bilan après une opération', emoji: '📊' },
-          { label: '🔍 Entretien Recrutement',  value: 'entretien_recru',    description: 'Entretien avec un candidat', emoji: '🔍' },
-          { label: '📋 Réunion Pôle Légal',     value: 'reunion_legal',      description: 'Réunion interne pôle légal', emoji: '📋' },
-          { label: '🔒 Réunion Confrérie',      value: 'reunion_confrerie',  description: 'Réunion interne La Confrérie', emoji: '🔒' },
-          { label: '🎓 Formation Membres',      value: 'formation',          description: 'Session de formation nouveaux membres', emoji: '🎓' },
-          { label: '⚖️ Négociation',            value: 'negociation',        description: 'Négociation avec une faction ou partenaire', emoji: '⚖️' },
-          { label: '🏥 Rendez-vous Médical',    value: 'rdv_medical',        description: 'Consultation médicale RP', emoji: '🏥' },
-          { label: '⚖️ Rendez-vous Juridique',  value: 'rdv_juridique',      description: 'Consultation juridique / avocats RP', emoji: '⚖️' },
-          { label: '📝 Autre',                  value: 'autre',              description: 'Autre type de rendez-vous', emoji: '📝' },
+          { label: '🏛️ Saint Denis',        value: 'Saint Denis',      description: 'La grande ville du sud',           emoji: '🏛️' },
+          { label: '🤠 Valentine',           value: 'Valentine',        description: 'Ville du nord-ouest',              emoji: '🤠' },
+          { label: '🌵 Armadillo',           value: 'Armadillo',        description: 'Ville désertique du sud',          emoji: '🌵' },
+          { label: '⛏️ Annesburg',           value: 'Annesburg',        description: 'Ville minière du nord-est',        emoji: '⛏️' },
+          { label: '🏔️ Strawberry',         value: 'Strawberry',       description: 'Ville des montagnes',              emoji: '🏔️' },
+          { label: '🌾 Emerald Ranch',       value: 'Emerald Ranch',    description: 'Ranch a l\'est',                  emoji: '🌾' },
+          { label: '🏜️ Tumbleweed',         value: 'Tumbleweed',       description: 'Ville fantôme du désert',          emoji: '🏜️' },
+          { label: '🌊 Lagras',             value: 'Lagras',            description: 'Village des marais',               emoji: '🌊' },
+          { label: '🏕️ Flatneck Station',   value: 'Flatneck Station', description: 'Station ferroviaire',              emoji: '🏕️' },
+          { label: '🏞️ Roanoke Ridge',      value: 'Roanoke Ridge',    description: 'Région sauvage du nord',           emoji: '🏞️' },
+          { label: '🗻 Tall Trees',          value: 'Tall Trees',       description: 'Foret de l\'ouest',               emoji: '🗻' },
+          { label: '🏘️ Rhodes',             value: 'Rhodes',            description: 'Ville du comté de Lemoyne',        emoji: '🏘️' },
+          { label: '🌁 Blackwater',          value: 'Blackwater',       description: 'Ville moderne de West Elizabeth',  emoji: '🌁' },
+          { label: '⛪ Thieves Landing',     value: 'Thieves Landing',  description: 'Port des hors-la-loi',             emoji: '⛪' },
+          { label: '📍 Autre lieu',          value: 'Autre',            description: 'Lieu personnalisé à préciser',     emoji: '📍' },
         ])
     )],
   });
