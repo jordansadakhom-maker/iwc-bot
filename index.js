@@ -507,7 +507,19 @@ async function _cleanTransactionMessages(guild, channelName) {
 
 async function autoSetup(guild) {
   const db = loadDB(); console.log('🔧 Auto-setup en cours...');
-  await cleanBotPinnedMessages(guild, 'planning', 'grade', 'coffre-entreprise', 'coffre-illegal', 'informateurs', 'affaires');
+  await cleanBotPinnedMessages(guild, 'planning', 'grade', 'coffre-entreprise', 'coffre-illegal', 'affaires');
+  // Nettoyer le format "PLANS TACTIQUES" s'il a été posté par erreur dans #informateurs
+  try {
+    const infosCh2 = getChById(guild, 'INFORMATEURS', 'informateurs');
+    if (infosCh2) {
+      const msgs = await infosCh2.messages.fetch({ limit: 20 }).catch(() => null);
+      if (msgs) for (const [, m] of msgs) {
+        if (m.author.id === guild.members.me?.id && m.embeds?.[0]?.title?.includes('PLANS TACTIQUES')) {
+          await m.delete().catch(() => {});
+        }
+      }
+    }
+  } catch {}
   // Nettoyer le dashboard des salons dossier-recrutement
   try {
     const dossCh = guild.channels.cache.get(SALON_HARDCODED.DOSSIER_RECRUTEMENT);
@@ -853,7 +865,11 @@ client.on('messageCreate', async message => {
   const planCh = getChById(guild, 'PLANNING', 'planning');
   if (planCh && message.channel.id === planCh.id) { if (message.attachments.size > 0) await notionV3.handlePlanningScreenshot?.(message); return; }
 
-  const plansTactCh = getChById(guild, 'PLANS', 'plans');
+  // #plans : chercher le salon exact nommé "plans" (pas informateurs)
+  const plansTactCh = guild.channels.cache.find(c => {
+    const n = c.name?.toLowerCase().replace(/[^a-z0-9]/g,'');
+    return c.isTextBased?.() && n === 'plans';
+  });
   if (plansTactCh && message.channel.id === plansTactCh.id) { await notionV3.handlePlansMessage?.(message); return; }
 });
 
@@ -873,7 +889,7 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isModalSubmit() && interaction.customId === 'modal_absent')           return _validerModalAbsent(interaction);
   if (interaction.isModalSubmit() && interaction.customId === 'modal_agenda_rdv')        return notionV3.handleAgendaModal?.(interaction);
   if (interaction.isModalSubmit() && interaction.customId === 'modal_op_programmee')     return notionV5.handleOpProgrammeeModal?.(interaction);
-  if (interaction.isModalSubmit() && interaction.customId === 'modal_op_creer')          return _validerModalOpCreer(interaction);
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_op_creer'))   return _validerModalOpCreer(interaction);
   if (interaction.isModalSubmit() && interaction.customId === 'modal_surnom_identite')   return _validerModalSurnom(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_agenda_simple')) return _validerModalAgendaSimple(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_rdv_individuel_')) return _validerModalRdvIndividuel(interaction);
@@ -932,6 +948,7 @@ client.on('interactionCreate', async interaction => {
   }
 
   if (interaction.isStringSelectMenu()) {
+    if (interaction.customId === 'op_lieu_select')               return _handleOpLieuSelect(interaction);
     if (interaction.customId === 'agenda_lieu_select')           return _handleAgendaLieuSelect(interaction);
     // [CORRECTION] btn_rdv_modal_ retiré d'ici — c'est un bouton pas un select
     if (interaction.customId === 'tresor_config_limite_legal')   return notionModules.handleTresorConfigSelect?.(interaction);
@@ -1325,15 +1342,64 @@ async function handleProfilEnhanced(interaction) {
   await interaction.editReply({ embeds: [embed] });
 }
 
+// Villes RDR2 pour le menu opérations
+const VILLES_RDR2 = [
+  { label: '🏛️ Saint Denis', value: 'Saint Denis', description: 'Grande ville du sud — Lemoyne' },
+  { label: '🤠 Valentine', value: 'Valentine', description: 'Ville du nord — New Hanover' },
+  { label: '🌵 Armadillo', value: 'Armadillo', description: 'Ville désertique — New Austin' },
+  { label: '⛏️ Annesburg', value: 'Annesburg', description: 'Ville minière du nord-est' },
+  { label: '🏔️ Strawberry', value: 'Strawberry', description: 'Ville des montagnes — West Elizabeth' },
+  { label: '🌾 Emerald Ranch', value: 'Emerald Ranch', description: 'Ranch à l\'est — Heartlands' },
+  { label: '🏜️ Tumbleweed', value: 'Tumbleweed', description: 'Ville fantôme — Gaptooth Ridge' },
+  { label: '🌊 Lagras', value: 'Lagras', description: 'Village des marais — Bluewater Marsh' },
+  { label: '🏕️ Flatneck Station', value: 'Flatneck Station', description: 'Station ferroviaire' },
+  { label: '🏞️ Roanoke Ridge', value: 'Roanoke Ridge', description: 'Région sauvage du nord-est' },
+  { label: '🗻 Tall Trees', value: 'Tall Trees', description: 'Forêt dense — West Elizabeth' },
+  { label: '🏘️ Rhodes', value: 'Rhodes', description: 'Ville du comté de Lemoyne' },
+  { label: '🌁 Blackwater', value: 'Blackwater', description: 'Ville moderne — West Elizabeth' },
+  { label: '⛪ Thieves Landing', value: 'Thieves Landing', description: 'Port des hors-la-loi' },
+  { label: '🏦 Banque Saint Denis', value: 'Banque Saint Denis', description: 'Cible principale — Saint Denis' },
+  { label: '🏦 Banque Valentine', value: 'Banque Valentine', description: 'Cible principale — Valentine' },
+  { label: '🚂 Train (en mouvement)', value: 'Train en mouvement', description: 'Attaque / Braquage de train' },
+  { label: '🚢 Bateau / Port', value: 'Port fluvial', description: 'Port ou convoi maritime' },
+  { label: '📍 Autre (préciser)', value: 'Autre', description: 'Lieu personnalisé à préciser' },
+];
+
 async function _ouvrirModalOpCreer(interaction) {
   if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
-  const modal = new ModalBuilder().setCustomId('modal_op_creer').setTitle('🎯 Créer une opération');
+  // Étape 1 : choisir la ville
+  await interaction.reply({
+    flags: MessageFlags.Ephemeral,
+    embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('🎯 Nouvelle Opération — Étape 1/2').setDescription('**Choisissez le lieu de l\'opération**')],
+    components: [new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('op_lieu_select')
+        .setPlaceholder('📍 Sélectionner un lieu RDR2...')
+        .addOptions(VILLES_RDR2)
+    )],
+  });
+}
+
+async function _handleOpLieuSelect(interaction) {
+  const lieu = interaction.values[0];
+  const lieuEnc = encodeURIComponent(lieu);
+  const modal = new ModalBuilder().setCustomId(`modal_op_creer_${lieuEnc}`).setTitle(`🎯 Opération — ${lieu === 'Autre' ? 'Lieu à préciser' : lieu}`);
   modal.addComponents(
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom').setLabel("Nom de l'opération").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Opération Lumière Noire')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('lieu').setLabel('Lieu').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Banque Saint Denis, Fleeca Valentine...')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objectif').setLabel('Objectif').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Sécuriser le convoi, Neutraliser les gardes...')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('pole').setLabel('Pôle (légal ou illégal)').setStyle(TextInputStyle.Short).setRequired(true).setValue('illégal').setPlaceholder('légal ou illégal')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Équipe / Détails supplémentaires').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500).setPlaceholder('Membres impliqués, matériel, notes...')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('nom').setLabel("Nom de l'opération").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Opération Lumière Noire, Braquage Fleeca...')
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('lieu_detail').setLabel(lieu === 'Autre' ? 'Lieu précis' : `Détail du lieu (optionnel)`).setStyle(TextInputStyle.Short).setRequired(lieu === 'Autre').setValue(lieu !== 'Autre' ? lieu : '').setPlaceholder(`Ex: Entrepôt nord de ${lieu}...`)
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('objectif').setLabel('Objectif').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Neutraliser les gardes, Récupérer le butin...')
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('pole').setLabel('Pôle : légal ou illégal').setStyle(TextInputStyle.Short).setRequired(true).setValue('illégal').setPlaceholder('légal ou illégal')
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('details').setLabel('Équipe / Notes (optionnel)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500).setPlaceholder('Membres impliqués, matériel nécessaire, heure prévue...')
+    ),
   );
   await interaction.showModal(modal);
 }
@@ -1341,11 +1407,14 @@ async function _ouvrirModalOpCreer(interaction) {
 async function _validerModalOpCreer(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const guild = interaction.guild; const db = loadDB();
-  const nom      = interaction.fields.getTextInputValue('nom').trim();
-  const lieu     = interaction.fields.getTextInputValue('lieu').trim();
-  const objectif = interaction.fields.getTextInputValue('objectif').trim();
-  const poleRaw  = interaction.fields.getTextInputValue('pole').trim().toLowerCase();
-  const details  = interaction.fields.getTextInputValue('details').trim() || '—';
+  const nom        = interaction.fields.getTextInputValue('nom').trim();
+  const lieuDetail = interaction.fields.getTextInputValue('lieu_detail').trim();
+  // Récupérer la ville depuis le customId (modal_op_creer_VILLE_ENCODEE)
+  const lieuVille  = decodeURIComponent(interaction.customId.replace('modal_op_creer_', ''));
+  const lieu       = lieuDetail || lieuVille || '—';
+  const objectif   = interaction.fields.getTextInputValue('objectif').trim();
+  const poleRaw    = interaction.fields.getTextInputValue('pole').trim().toLowerCase();
+  const details    = interaction.fields.getTextInputValue('details').trim() || '—';
   const pole     = poleRaw.includes('lég') || poleRaw.includes('leg') ? 'legal' : 'illegal';
   const createur = db.members[interaction.user.id]?.name || interaction.user.username;
 
@@ -2358,7 +2427,15 @@ async function setupFicheFormat(guild) {
 
 async function setupPlansFormat(guild) {
   try {
-    const ch = getChById(guild, 'PLANS', 'plans-tactiques', 'plans'); if (!ch) return;
+    // Chercher #plans en excluant explicitement #informateurs
+    let ch = guild.channels.cache.find(c => {
+      const n = c.name?.toLowerCase().replace(/[^a-z0-9]/g,'');
+      return c.isTextBased?.() && n === 'plans';
+    });
+    if (!ch) ch = getChById(guild, 'PLANS', 'plans-tactiques');
+    if (!ch) return;
+    // Sécurité : ne jamais poster dans #informateurs
+    if (ch.name?.toLowerCase().includes('informateur')) return;
     const msgs = await ch.messages.fetch({ limit: 20 });
     const existing = msgs.find(m => m.author.id === guild.members.me?.id && m.embeds[0]?.title?.includes('PLANS'));
     if (existing) return;
