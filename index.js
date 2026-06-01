@@ -709,7 +709,16 @@ async function checkAgenda(guild) {
         db.reminderMsgIds[`${a.id}_${key}`] = msg.id;
       }
 
-      await sendParticipantDMs(guild, a, dmTitle, dmColor);
+      // DM récap aux participants via envoyerDMRecap
+      for (const name of (a.participants || [])) {
+        const uid = PARTICIPANTS_MAP[name];
+        if (uid && !uid.startsWith('<@&')) {
+          await envoyerDMRecap(guild, uid, 'rappel', {
+            titre: a.titre, dans: dmTitle, date: fmtLong(a.date),
+            heure: a.heure || '', lieu: a.lieu || '—'
+          }).catch(() => {});
+        }
+      }
       db.sentReminders[`${a.id}_${key}`] = true;
       changed = true;
     };
@@ -768,7 +777,9 @@ client.on('guildMemberAdd', async member => {
   if (arriveesCh) await arriveesCh.send({ embeds: [new EmbedBuilder().setColor(0x8B5A2A).setTitle('👁️ Nouveau visiteur').setDescription(`**${member.user.username}** a rejoint le serveur.\nDirigé vers **#règlement** pour validation.`).addFields({ name: 'Compte créé le', value: fmtShort(member.user.createdAt), inline: true }, { name: 'Âge du compte', value: `${daysSince(member.user.createdAt)} jours`, inline: true }).setThumbnail(member.user.displayAvatarURL()).setFooter({ text: 'IWC • Automatique' })] });
   await sendLog(guild, 'ARRIVEE', { userId: member.id, username: member.user.username, accountAge: daysSince(member.user.createdAt) });
   await notionExtra.alerteCompteSuspect?.(guild, member);
-  member.send({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle('🐺 Iron Wolf Company').setDescription('Bienvenue sur le serveur.\n\nLis le **#règlement** et réagis avec ✅ pour accéder au recrutement.\n\n*La porte est ouverte une fois. Une seule.*').setFooter({ text: '— La Direction, IWC' })] }).catch(() => {});
+  await envoyerDMRecap(guild, member.id, 'candidature', {
+    message: '🐺 Bienvenue sur **Iron Wolf Company** !\n\nLis le **#règlement** et postule dans **#recrutement**.\n\n*La porte est ouverte une fois. Une seule.*\n— La Direction'
+  }).catch(() => {});
 });
 
 // ── Mise à jour automatique hiérarchie + Notion quand un rôle change ──
@@ -786,8 +797,11 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
   );
 
   if (gradeChange) {
-    // Mettre à jour la hiérarchie automatiquement
+    // Anti-doublon : attendre 5s pour grouper les changements multiples
+    if (global._hierUpdating) return;
+    global._hierUpdating = true;
     setTimeout(async () => {
+      global._hierUpdating = false;
       await require('./notion-modules-v3').updateHierarchieEmbed?.(newMember.guild).catch(() => {});
       console.log(`✅ Hiérarchie mise à jour suite au changement de rôle de ${newMember.displayName}`);
 
@@ -1385,6 +1399,14 @@ client.once('clientReady', async () => {
       await notionV3.checkAffairesTimeout?.(g).catch(() => {});
       await _checkRetoursAbsence(g).catch(() => {});
       await updateDirectionPanel(g).catch(() => {});
+      // Purge transactions > 90 jours
+      try {
+        const db = loadDB();
+        const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000;
+        const before = (db.transactions || []).length;
+        db.transactions = (db.transactions || []).filter(t => new Date(t.date || t.createdAt || 0).getTime() > cutoff);
+        if (db.transactions.length < before) { saveDB(db); console.log(`🧹 Purge: ${before - db.transactions.length} transactions > 90j supprimées`); }
+      } catch {}
       await notionV4.checkRecrutementSuivi?.(g).catch(() => {});
       await notionV4.checkEcheancesContrats?.(g).catch(() => {});
       await notionV4.checkOperationsTimeout?.(g).catch(() => {});
@@ -1983,9 +2005,50 @@ async function envoyerDMRecap(guild, userId, type, data) {
   } catch(e) { console.log('❌ envoyerDMRecap error:', e.message); }
 }
 
+// ── Log centralisé des erreurs importantes ──
+async function logError(guild, context, error) {
+  try {
+    const msg = error?.message || String(error);
+    // Ignorer les erreurs mineures
+    const ignore = ['Unknown Message', 'Missing Permissions', 'Cannot send messages', 'Unknown Channel', '10008', '50013'];
+    if (ignore.some(i => msg.includes(i))) return;
+    console.log(`❌ [${context}] ${msg}`);
+    const logsCh = guild ? getChById(guild, 'LOGS', 'logs') : null;
+    if (logsCh) {
+      await logsCh.send({
+        embeds: [new EmbedBuilder()
+          .setColor(0xED4245)
+          .setTitle(`⚠️ Erreur — ${context}`)
+          .setDescription(`\`\`\`${msg.slice(0, 1000)}\`\`\``)
+          .setFooter({ text: `IWC Bot • ${new Date().toLocaleTimeString('fr-FR')}` })
+        ]
+      }).catch(() => {});
+    }
+  } catch {}
+}
+
 // ── MEMBRES_DISCORD_MAP automatique ──
 // Reconstruit depuis les vrais membres Discord à chaque démarrage
 async function buildMembresDiscordMap(guild) {
+  // Auto-refresh : scanner tous les membres Discord et les ajouter à la map si absents
+  try {
+    const allMembers = await guild.members.fetch().catch(() => null);
+    if (allMembers) {
+      const db = loadDB();
+      let changed = false;
+      for (const [id, m] of allMembers) {
+        if (m.user.bot) continue;
+        if (!db.members[id]) {
+          db.members[id] = { discordId: id, username: m.user.username, status: 'visiteur', joinedAt: new Date().toISOString(), lastActivity: new Date().toISOString() };
+          changed = true;
+        } else if (!db.members[id].username) {
+          db.members[id].username = m.user.username;
+          changed = true;
+        }
+      }
+      if (changed) { saveDB(db); console.log('✅ MEMBRES_DISCORD_MAP auto-refresh'); }
+    }
+  } catch(e) { console.log('❌ buildMembresDiscordMap refresh:', e.message); }
   try {
     const { ROLES } = require('./notion-modules-v3');
     const allRoleIds = Object.values(ROLES || {});
@@ -2491,83 +2554,39 @@ async function _handleMesContrats(interaction) {
 
 // ── /aide — Guide complet selon le rôle ──
 async function _handleAide(interaction) {
-  const isDir = isDirection(interaction.member);
-  const isFleau = interaction.member?.roles?.cache?.some(r => ['Fléau','Concepteur','Fondateur'].some(n => r.name.includes(n)));
+  const member = interaction.member;
+  const isDir  = isDirection(member);
+  const isIll  = member.roles.cache.has(ROLE_POLE_ILLEGAL);
+  const isLeg  = member.roles.cache.has(ROLE_POLE_LEGAL);
+  const isFleau = member.roles.cache.some(r => ['Fléau','Fleau','Concepteur','Fondateur'].some(n => r.name.toLowerCase().includes(n.toLowerCase())));
 
-  const embedBase = new EmbedBuilder()
-    .setColor(0x8B1A1A)
-    .setTitle('📖 Guide des commandes — IWC Bot')
-    .setDescription('*Voici toutes les commandes disponibles selon ton rôle.*');
+  const embed = new EmbedBuilder().setColor(0x2C3E50).setTitle('📖 Guide des commandes — IWC');
 
-  // Commandes pour tous
-  embedBase.addFields({
-    name: '👥 Commandes générales',
-    value: [
-      "`/profil [@membre]` — Voir le profil et la fiche d'un membre",
-      '`/stats` — Statistiques de la faction',
-      '`/hierarchie` — Voir la hiérarchie',
-      '`/absent [durée] [raison]` — Déclarer une absence',
-      '`/journal` — Consulter le journal IC',
-      '`/fiche [nom]` — Chercher une fiche personnage',
-      '`/ops` — Voir les opérations en cours',
-      '`/agenda voir` — Voir les prochains RDV',
-      '`/contrats` — Voir mes contrats en cours',
-      '`/op [id]` — Détail d\'une opération',
-      '`/retour` — Déclarer son retour d\'absence',
-      '`/avertissements` — Voir ses avertissements',
-    ].join('\n'),
-    inline: false,
-  });
+  embed.addFields({ name: '📋 Commandes disponibles pour toi', value: '\u200b', inline: false });
 
+  // Commandes communes
+  embed.addFields({ name: '👤 Profil & Info', value: '`/profil` · `/hierarchie` · `/registre` · `/fiche`', inline: false });
+  embed.addFields({ name: '📅 RDV & Agenda', value: '`/rdv` — Créer un RDV\n`/agenda creer` — RDV rapide avec ville RDR2\n`/agenda voir` — Prochains RDV', inline: false });
+  embed.addFields({ name: '🟡 Absences', value: '`/absent [durée]` · `/retour` · `/avertissements`', inline: false });
+  embed.addFields({ name: '📜 Contrats', value: '`/contrats` — Tes contrats en cours', inline: false });
+
+  if (isLeg || isDir) {
+    embed.addFields({ name: '⚖️ Pôle Légal', value: '`/solde` · `/stats` · `/ops` · `/op`', inline: false });
+  }
+  if (isIll || isDir) {
+    embed.addFields({ name: '🔒 Confrérie', value: '`/solde` · `/stats` · `/ops`', inline: false });
+  }
   if (isDir) {
-    embedBase.addFields({
-      name: '🎖️ Commandes Direction',
-      value: [
-        '`/promo @membre rang` — Promouvoir un membre',
-        '`/retro @membre rang [raison]` — Rétrograder un membre',
-        '`/grade-set` — Attribuer un grade via panneau',
-        '`/dashboard` — Tableau de bord complet',
-        '`/bilan [coffre]` — Résumé trésorerie 7j',
-        "`/contrats-archives` — Archives de tous les contrats",
-        '`/agenda creer` — Créer un RDV dans Notion',
-        '`/rapport` — Envoyer le rapport hebdo en DM',
-      ].join('\n'),
-      inline: false,
-    });
+    embed.addFields({ name: '🎖️ Direction', value: '`/promo` · `/retro` · `/grade-set` · `/avertir` · `/annuler-absence`\n`/dashboard` · `/bilan` · `/contrats-archives` · `/rapport`\n`/purge` · `/sync` · `/version`', inline: false });
   }
-
   if (isFleau) {
-    embedBase.addFields({
-      name: '⚙️ Commandes Fléau & Concepteur',
-      value: [
-        '`/op-programmer` — Programmer une opération avec lancement auto',
-        '`⚙️ dans coffre-entreprise` — Modifier les limites de sortie',
-        '`/bilan` — Accès aux deux coffres',
-      ].join('\n'),
-      inline: false,
-    });
+    embed.addFields({ name: '💀 Fléau & Concepteur', value: '`/op-programmer` · `/patch` · ⚙️ config coffre', inline: false });
   }
 
-  embedBase.addFields({
-    name: '🏦 Trésorerie',
-    value: [
-      '**Bouton 💰 Nouvelle Transaction** dans `#coffre-entreprise`',
-      '→ Entrée ou Sortie → Choisir le coffre → Remplir montant + objet',
-      '→ Envoyer une photo de preuve → Confirmer le montant visible',
-      '',
-      '⚠️ *Sortie > limite → validation Direction requise*',
-    ].join('\n'),
-    inline: false,
-  });
+  embed.addFields({ name: '🤖 Automatismes', value: 'Trésorerie · Fiches · Identité IC · Plans · Rappels RDV · Absences auto', inline: false });
+  embed.setFooter({ text: 'IWC Bot • Commandes adaptées à ton rôle' });
 
-  embedBase.addFields({
-    name: '📋 Fiches personnages',
-    value: 'Poste ta fiche dans `#fiches-personnages` → embed + thread créés automatiquement + synchro Notion',
-    inline: false,
-  });
-
-  embedBase.setFooter({ text: 'IWC Bot • /aide pour revoir ce guide' }).setTimestamp();
-  await interaction.reply({ embeds: [embedBase], flags: MessageFlags.Ephemeral });
+  return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
 
 // ── Panel Direction — embed permanent + boutons ──
@@ -2878,7 +2897,15 @@ async function _validerModalAgendaSimple(interaction) {
   if (notes) embed.addFields({ name: '📋 Notes', value: notes });
   embed.setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` }).setTimestamp();
 
-  await interaction.editReply({ embeds: [embed] });
+  // Ping selon le salon où la commande est tapée
+  const agendaCh = getChById(interaction.guild, 'AGENDA', 'agenda');
+  if (agendaCh) {
+    // Déterminer le pôle de l'émetteur pour le ping
+    const isIlleg = interaction.member?.roles?.cache?.has(ROLE_POLE_ILLEGAL);
+    const pingRole = isIlleg ? `<@&${ROLE_POLE_ILLEGAL}>` : `<@&${ROLE_POLE_LEGAL}>`;
+    await agendaCh.send({ content: `${pingRole} 📅 Nouveau RDV : **${titre}** — ${heure} à ${lieu}`, embeds: [embed] }).catch(() => {});
+  }
+  await interaction.editReply({ content: '✅ RDV créé et posté dans #agenda !', embeds: [] });
 
   // Archivage Notion
   if (process.env.NOTION_TOKEN && process.env.NOTION_AGENDA_DB_ID) {
