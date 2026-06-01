@@ -990,15 +990,15 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId === 'btn_grade_panel')            return notionV3.handleGradePanelButton?.(interaction);
     if (interaction.customId === 'btn_agenda_nouveau')         return notionV3.handleAgendaNouveauButton?.(interaction);
     if (interaction.customId === 'btn_hierarchie_refresh')     { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); await notionV3.updateHierarchieEmbed?.(interaction.guild); return interaction.editReply({ content: '✅ Hiérarchie mise à jour.' }); }
-    if (interaction.customId === 'btn_affaire_nouvelle')        await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleAffaireNouvelleButton?.(interaction);
-    if (interaction.customId === 'btn_affaires_resume')         await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleAffairesResumeButton?.(interaction);
+    if (interaction.customId === 'btn_affaire_nouvelle')        { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleAffaireNouvelleButton?.(interaction); }
+    if (interaction.customId === 'btn_affaires_resume')         { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleAffairesResumeButton?.(interaction); }
     if (interaction.customId === 'btn_informateur_rapport')     return notionV3.handleInformateurRapportButton?.(interaction);
-    if (interaction.customId === 'btn_informateur_historique')  await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleInformateurHistorique?.(interaction);
+    if (interaction.customId === 'btn_informateur_historique')  { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleInformateurHistorique?.(interaction); }
     if (interaction.customId.startsWith('info_confirmer_'))      return notionV3.handleInformateurConfirmer?.(interaction);
     if (interaction.customId === 'btn_surnom_ouvrir')           return _ouvrirModalSurnom(interaction);
     if (interaction.customId === 'dir_btn_candidatures')       return interaction.reply({ flags: MessageFlags.Ephemeral, content: _buildCandidaturesResume(db) });
     if (interaction.customId === 'dir_btn_ops')                return notionV5.handleStatsAvancees?.(interaction) || interaction.reply({ flags: MessageFlags.Ephemeral, content: '`/stats` pour plus de détails.' });
-    if (interaction.customId === 'dir_btn_bilan')              await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleBilanCommand?.(interaction);
+    if (interaction.customId === 'dir_btn_bilan')              { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleBilanCommand?.(interaction); }
     if (interaction.customId === 'dir_btn_registre')           return _handleRegistre(interaction);
     if (interaction.customId === 'dir_btn_refresh')            { await updateDirectionPanel(interaction.guild).catch(() => {}); return interaction.reply({ flags: MessageFlags.Ephemeral, content: '✅ Panel mis à jour.' }); }
     if (interaction.customId.startsWith('purge_confirm_'))      return _executerPurge(interaction);
@@ -1016,7 +1016,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId.startsWith('tresor_valider_'))     return notionModules.handleTresorValidation?.(interaction, 'valider');
     if (interaction.customId.startsWith('op_stop_'))            return notionV5.handleOpStop?.(interaction);
     if (interaction.customId.startsWith('op_lancer_force_'))    return notionV5.handleOpLancerForce?.(interaction);
-    if (interaction.customId === 'btn_stats_refresh')           await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV5.handleStatsAvancees?.(interaction);
+    if (interaction.customId === 'btn_stats_refresh')           { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV5.handleStatsAvancees?.(interaction); }
     if (interaction.customId.startsWith('op_annulee_confirm_')) {
       const opId = interaction.customId.replace('op_annulee_confirm_', '');
       const op   = db.operations.find(o => o.id === opId);
@@ -1032,7 +1032,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId.startsWith('tresor_refuser_'))     return notionModules.handleTresorValidation?.(interaction, 'refuser');
     if (interaction.customId.startsWith('tresor_'))             return notionModules.handleTresorFlow?.(interaction);
     if (interaction.customId === 'btn_solde')                   return notionModules.handleSoldeButton?.(interaction);
-    if (interaction.customId === 'btn_dashboard_refresh')       await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleDashboard?.(interaction);
+    if (interaction.customId === 'btn_dashboard_refresh')       { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleDashboard?.(interaction); }
     if (interaction.customId.startsWith('journal_'))            return notionModules.handleJournalPagination?.(interaction);
   }
 
