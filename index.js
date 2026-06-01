@@ -39,6 +39,7 @@ process.on('SIGINT',  () => { saveDBSync(); process.exit(0); });
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessageReactions, GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildModeration, GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildPresences, GatewayIntentBits.GuildInvites,
@@ -768,6 +769,35 @@ client.on('guildMemberAdd', async member => {
   await sendLog(guild, 'ARRIVEE', { userId: member.id, username: member.user.username, accountAge: daysSince(member.user.createdAt) });
   await notionExtra.alerteCompteSuspect?.(guild, member);
   member.send({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle('🐺 Iron Wolf Company').setDescription('Bienvenue sur le serveur.\n\nLis le **#règlement** et réagis avec ✅ pour accéder au recrutement.\n\n*La porte est ouverte une fois. Une seule.*').setFooter({ text: '— La Direction, IWC' })] }).catch(() => {});
+});
+
+// ── Mise à jour automatique hiérarchie + Notion quand un rôle change ──
+client.on('guildMemberUpdate', async (oldMember, newMember) => {
+  const oldRoles = oldMember.roles.cache.map(r => r.id).sort().join(',');
+  const newRoles = newMember.roles.cache.map(r => r.id).sort().join(',');
+  if (oldRoles === newRoles) return; // Pas de changement de rôles
+
+  const db = loadDB();
+  const gradeRoleIds = Object.values(require('./notion-modules-v3').ROLES || {});
+
+  // Vérifier si un rôle de grade a changé
+  const gradeChange = gradeRoleIds.some(id =>
+    oldMember.roles.cache.has(id) !== newMember.roles.cache.has(id)
+  );
+
+  if (gradeChange) {
+    // Mettre à jour la hiérarchie automatiquement
+    setTimeout(async () => {
+      await require('./notion-modules-v3').updateHierarchieEmbed?.(newMember.guild).catch(() => {});
+      console.log(`✅ Hiérarchie mise à jour suite au changement de rôle de ${newMember.displayName}`);
+
+      // Sync Notion registre
+      const nouveauGrade = newMember.roles.cache
+        .filter(r => gradeRoleIds.includes(r.id))
+        .map(r => r.name).join(', ') || 'Visiteur';
+      _syncMembreNotion(newMember.id, { rang: nouveauGrade }).catch(() => {});
+    }, 2000); // Attendre 2s pour que Discord soit à jour
+  }
 });
 
 client.on('guildMemberRemove', async member => {
