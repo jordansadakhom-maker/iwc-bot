@@ -219,7 +219,7 @@ async function checkRecrutementSuivi(guild) {
     const now = Date.now();
     if (!db.recrutSuivi) db.recrutSuivi = {};
 
-    const logsCh = getCh(guild, 'logs');
+    const logsCh = getChById(guild, 'LOGS', 'logs');
 
     // ── Rappel Direction : candidature en attente > 24h ──
     const enAttente = (db.candidatures || []).filter(c => c.status === 'reçue');
@@ -272,7 +272,7 @@ async function checkRecrutementSuivi(guild) {
 
     const keyStats = `stats_semaine_${Math.floor(now / (7 * 86400000))}`;
     if (!db.recrutSuivi[keyStats] && (accept7j + refus7j > 0)) {
-      const recrutCh = getCh(guild, 'recrutement-interne', 'dossier-recrutement', 'logs');
+      const recrutCh = getChById(guild, 'RECRUTEMENT_INTERNE', 'recrutement-interne', 'dossier-recrutement', 'logs');
       if (recrutCh) await recrutCh.send({ embeds: [new EmbedBuilder()
         .setColor(0x8B1A1A)
         .setTitle('📊 Bilan recrutement — Semaine')
@@ -359,7 +359,7 @@ async function _envoyerRappelContrat(guild, contrat, joursRestants, type) {
     .setTimestamp();
 
   // Notifier la Direction
-  const logsCh = getCh(guild, 'logs');
+  const logsCh = getChById(guild, 'LOGS', 'logs');
   const mention = cfg.urgent ? guild.roles.cache
     .filter(r => ['Concepteur', 'Fléau', 'Fondateur'].some(n => r.name.includes(n)))
     .map(r => `<@&${r.id}>`).join(' ') : '';
@@ -402,8 +402,8 @@ async function checkOperationsTimeout(guild) {
       const key24h = `${op.id}_24h`;
 
       if (heures >= 12 && !db.opTimeouts[key12h]) {
-        const opsCh = getCh(guild, 'operations-en-cours', 'operations');
-        const logsCh = getCh(guild, 'logs');
+        const opsCh = getChById(guild, 'OPERATIONS', 'operations-en-cours', 'operations');
+        const logsCh = getChById(guild, 'LOGS', 'logs');
         if (logsCh) await logsCh.send({ embeds: [new EmbedBuilder()
           .setColor(0xFFA500)
           .setTitle(`⏰ Opération toujours en cours — ${op.name}`)
@@ -422,7 +422,7 @@ async function checkOperationsTimeout(guild) {
         op.butin    = '—';
         op.debrief  = 'Clôture automatique — aucun résultat renseigné.';
 
-        const logsCh = getCh(guild, 'logs');
+        const logsCh = getChById(guild, 'LOGS', 'logs');
         if (logsCh) await logsCh.send({ embeds: [new EmbedBuilder()
           .setColor(0xED4245)
           .setTitle(`🔒 Clôture automatique — ${op.name}`)
@@ -443,7 +443,7 @@ async function checkOperationsTimeout(guild) {
 
 async function posterAbsencePropre(guild, membre, contenu, source) {
   try {
-    const absCh = getCh(guild, 'absences');
+    const absCh = getChById(guild, 'ABSENCES', 'absences');
     if (!absCh) return;
 
     const db = loadDB();
@@ -502,4 +502,3 @@ module.exports = {
   posterAbsencePropre,
   getHistoriqueOpsProfilMembre,
 };
-
