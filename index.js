@@ -2946,63 +2946,73 @@ async function setupFicheFormat(guild) {
     for (const [, m] of msgs) { if (m.author.id === guild.members.me?.id) await m.delete().catch(() => {}); }
 
     const format = [
-      'NOM COMPLET :',
-      'SURNOM(S) :',
-      'ÂGE :',
-      'LIEU DE NAISSANCE :',
-      'NATIONALITÉ :',
-      'TAILLE / CORPULENCE :',
-      'YEUX / CHEVEUX :',
-      'SIGNES PARTICULIERS :',
-      'TÉLÉGRAMME IC :',
-      'PROFESSION :',
-      'RÉPUTATION :',
+      '✦ NOM COMPLET :',
+      '✦ SURNOM(S) :',
+      '✦ ÂGE :',
+      '✦ LIEU DE NAISSANCE :',
+      '✦ NATIONALITÉ :',
+      '✦ TAILLE / CORPULENCE :',
+      '✦ YEUX / CHEVEUX :',
+      '✦ SIGNES PARTICULIERS :',
+      '✦ TÉLÉGRAMME IC :',
+      '✦ PROFESSION :',
+      '✦ RÉPUTATION :',
       '',
       '"Citation du personnage."',
       '',
-      '---- HISTOIRE ----',
+      '─ ─ ─ HISTOIRE ─ ─ ─',
       '[5 à 15 lignes minimum]',
       '',
-      '---- PERSONNALITÉ ----',
-      '+ Trait 1',
-      '+ Trait 2',
-      '+ Trait 3',
+      '─ ─ ─ PERSONNALITÉ ─ ─ ─',
+      '› Trait 1',
+      '› Trait 2',
+      '› Trait 3',
       '',
-      '---- COMPÉTENCES ----',
-      '✗ Compétence : ●●●●○',
-      '● Compétence : ●●●●●',
+      '─ ─ ─ COMPÉTENCES ─ ─ ─',
+      '⬡ Compétence : ◆◆◆◆◇',
+      '⬡ Compétence : ◆◆◆◆◆',
       '',
-      '---- FAIBLESSES ----',
-      '+ Faiblesse 1',
-      '+ Faiblesse 2',
+      '─ ─ ─ FAIBLESSES ─ ─ ─',
+      '› Faiblesse 1',
+      '› Faiblesse 2',
       '',
-      '---- LIENS IMPORTANTS ----',
+      '─ ─ ─ LIENS IMPORTANTS ─ ─ ─',
       '[Nom] — [Relation] — [Description courte]',
       '',
-      '---- OBJECTIF ----',
+      '─ ─ ─ OBJECTIF ─ ─ ─',
       '[Ce que le personnage cherche à accomplir]',
       '',
-      '— IWC — 1895 —',
+      '⋆ ─────────────────── ⋆',
+      '     I W C  ·  1 8 9 5',
+      '⋆ ─────────────────── ⋆',
     ].join('\n');
 
     await ch.send({ embeds: [
       new EmbedBuilder()
-        .setColor(0x8B1A1A)
-        .setTitle('📋 FICHES PERSONNAGES — Iron Wolf Company')
-        .setDescription('*Fiches officielles des personnages IWC. Un thread par personnage. Mettez à jour après chaque évolution majeure.*')
+        .setColor(0x8B4513)
+        .setTitle('🤠 DOSSIERS — Iron Wolf Company')
+        .setDescription([
+          '```',
+          '╔═══════════════════════════════════╗',
+          '║   FICHES OFFICIELLES DES AGENTS   ║',
+          '║       Iron Wolf Company · 1895    ║',
+          '╚═══════════════════════════════════╝',
+          '```',
+          '*Un dossier par agent. Rédigez le vôtre ci-dessous.*',
+        ].join('\n'))
         .addFields(
-          { name: '📝 Comment faire :', value: ['1. Copiez le format ci-dessous', '2. Remplissez chaque champ', '3. Envoyez votre message dans ce salon', '4. Le bot génère automatiquement votre fiche et un thread dédié ✅'].join('\n') },
+          { name: '📜 Procédure', value: ['**1.** Copiez le formulaire ci-dessous', '**2.** Remplissez chaque rubrique', '**3.** Envoyez dans ce salon', '**4.** Le bureau génère automatiquement votre dossier ✅'].join('\n'), inline: false },
         )
-        .setFooter({ text: 'IWC • Fiches personnages • Un thread par personnage' }),
+        .setFooter({ text: 'Iron Wolf Company · Bureau des Archives · 1895' }),
       new EmbedBuilder()
-        .setColor(0x2C2F33)
-        .setTitle('📄 FORMAT — À copier/coller')
+        .setColor(0x5C3317)
+        .setTitle('📋 FORMULAIRE — À copier/coller')
         .setDescription('```\n' + format + '\n```')
         .addFields(
-          { name: '⚠️ Important', value: 'Tous les champs sont libres — écrivez ce qui correspond à votre personnage.\nSeul **NOM COMPLET** est obligatoire pour que le bot reconnaisse votre fiche.' },
-          { name: '🔄 Mise à jour', value: 'Pour modifier votre fiche, repostez-la complète dans ce salon.\nLe thread existant sera réouvert et Notion mis à jour automatiquement.' },
+          { name: '⚠️ Règlement', value: 'Tous les champs sont libres.\nSeul **NOM COMPLET** est obligatoire pour que le bureau reconnaisse votre dossier.\nChaque agent ne peut déposer **qu\'un seul dossier**.' },
+          { name: '🔄 Mise à jour', value: 'Pour modifier votre dossier, repostez-le complet dans ce salon.\nL\'ancien sera archivé et Notion mis à jour automatiquement.' },
         )
-        .setFooter({ text: 'IWC • Copie le format, remplis les champs, envoie dans ce salon' }),
+        .setFooter({ text: '« La vérité a un prix. Nous le faisons payer aux autres. » — La Compagnie' }),
     ] });
     console.log('✅ Format fiches posté (avec TÉLÉGRAMME IC)');
   } catch (e) { console.log('❌ setupFicheFormat:', e.message); }
