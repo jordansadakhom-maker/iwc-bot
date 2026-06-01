@@ -347,7 +347,7 @@ async function envoyerRapportDirection(guild) {
 
 async function handleSlashCommand(interaction) {
   const { commandName, guild } = interaction; const db = loadDB();
-  if (commandName === 'grade-set')         await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleGradeSetCommand?.(interaction);
+  if (commandName === 'grade-set')         { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleGradeSetCommand?.(interaction); }
   if (commandName === 'hierarchie')        return notionV3.handleHierarchieCommand?.(interaction);
   if (commandName === 'affaire')           await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleAffaireNouvelleButton?.(interaction);
   if (commandName === 'tresor')            return notionModules.handleTresorCommand?.(interaction);
@@ -368,6 +368,7 @@ async function handleSlashCommand(interaction) {
   if (commandName === 'op-programmer')     return _ouvrirModalOpProgrammee(interaction);
   if (commandName === 'aide')              return _handleAide(interaction);
   if (commandName === 'version')           return _handleVersion(interaction);
+  if (commandName === 'patch')             return _handlePatchDeploy(interaction);
   if (commandName === 'sync')              return _handleSync(interaction);
   if (commandName === 'avertir')           return _handleAvertir(interaction);
   if (commandName === 'avertissements')    return _handleAvertissements(interaction);
@@ -2153,6 +2154,56 @@ async function _executerPurge(interaction) {
   } catch {}
 
   console.log(`✅ Purge : ${total} messages supprimés dans #${salon.name} par ${interaction.user.username}`);
+}
+
+// ── /patch — Déployer le patch note depuis Discord ──
+async function _handlePatchDeploy(interaction) {
+  // Réservé Fondateur et Fléau uniquement
+  const isFondateur = interaction.member.roles.cache.some(r => r.name.includes('Fondateur'));
+  const isFleau     = interaction.member.roles.cache.some(r => r.name.includes('Fléau') || r.name.includes('Fleau'));
+  if (!isFondateur && !isFleau) {
+    return interaction.reply({ flags: MessageFlags.Ephemeral, content: '❌ Réservé au Fondateur et au Fléau.' });
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const guild = interaction.guild;
+  const patchCh = getChById(guild, 'PATCH_NOTE', 'patch-note', 'patch');
+  if (!patchCh) return interaction.editReply({ content: '❌ Salon #patch-note introuvable.' });
+
+  // Lire la version depuis config
+  const { NOTION_VERSION: ver } = require('./config');
+
+  const embed = new EmbedBuilder()
+    .setColor(0x5865F2)
+    .setAuthor({ name: 'Iron Wolf Company · IWC Setup', iconURL: interaction.guild.iconURL() || undefined })
+    .setTitle(`🔧 Patch ${ver || 'latest'} — Correctifs & Améliorations — IWC Bot`)
+    .setDescription(`*Déployé le **${new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}***
+
+*Mise à jour du bot IWC avec corrections et nouvelles fonctionnalités.*`)
+    .addFields(
+      { name: '✅ Corrections', value: [
+        '→ **/rdv** — Nouvelle commande slash pour créer un RDV depuis nimporte quel salon',
+        '→ **Bouton 📅 RDV** dans le panel Contrats',
+        '→ **Convocations DM** — Envoi automatique aux membres convoqués',
+        '→ **Archivage Notion** — Chaque RDV créé est archivé dans Notion Agenda',
+        '→ **Routing boutons** — Correction des boutons qui ouvraient le mauvais formulaire',
+        '→ **MessageFlags** — Correction des erreurs de démarrage dans les modules',
+        '→ **CH.LOGS** — Correction de lID du salon logs (affaires allaient dans le mauvais salon)',
+        '→ **Planning** — Ciblé par ID direct, plus de confusion entre les deux salons',
+      ].join('\n'), inline: false },
+      { name: '✨ Nouveautés', value: [
+        '→ **Flow RDV en 4 étapes** — Type → Mode (rôle ou individuel) → Groupe → Détails',
+        '→ **Choix individuel** — Sélectionner les participants par nom IC',
+        '→ **/patch** — Déployer le patch note depuis Discord',
+        '→ **SALON_IDS complets** — Tous les salons ciblés par ID pour éviter les ambiguïtés',
+      ].join('\n'), inline: false },
+    )
+    .setFooter({ text: `IWC Bot ${ver || 'latest'} • Déployé automatiquement` })
+    .setTimestamp();
+
+  await patchCh.send({ embeds: [embed] });
+  await interaction.editReply({ content: `✅ Patch note posté dans ${patchCh}.` });
 }
 
 // ── /purge — Effacer les messages d'un salon ──
