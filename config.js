@@ -120,4 +120,3 @@ module.exports = {
   NOTION_RECRUTEMENT_DB, NOTION_MEMBRES_DB_ID,
   _getPole,
 };
-
