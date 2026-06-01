@@ -362,7 +362,8 @@ async function handleSlashCommand(interaction) {
   if (commandName === 'rdv')               return _ouvrirMenuRdvSlash(interaction);
   if (commandName === 'agenda') {
     const subCmd = interaction.options?.getSubcommand(false);
-    if (subCmd === 'creer' || !subCmd) return _ouvrirMenuRdvSlash(interaction);
+    if (subCmd === 'creer') return _ouvrirModalAgendaSimple(interaction);
+    if (subCmd === 'rdv') return _ouvrirMenuRdvSlash(interaction);
     return notionV3.handleAgendaCommand?.(interaction);
   }
   if (commandName === 'op-programmer')     return _ouvrirModalOpProgrammee(interaction);
@@ -988,6 +989,7 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isModalSubmit() && interaction.customId === 'modal_agenda_rdv')   return notionV3.handleAgendaModal?.(interaction);
   if (interaction.isModalSubmit() && interaction.customId === 'modal_op_programmee') return notionV5.handleOpProgrammeeModal?.(interaction);
   if (interaction.isModalSubmit() && interaction.customId === 'modal_surnom_identite') return _validerModalSurnom(interaction);
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_agenda_simple')) return _validerModalAgendaSimple(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_rdv_individuel_')) return _validerModalRdvIndividuel(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_rdv_')) return _validerModalRdv(interaction);
   if (interaction.isModalSubmit() && interaction.customId === 'modal_informateur') return notionV3.handleInformateurModal?.(interaction);
@@ -1044,6 +1046,7 @@ client.on('interactionCreate', async interaction => {
   }
 
   if (interaction.isStringSelectMenu()) {
+    if (interaction.customId === 'agenda_lieu_select')         return _handleAgendaLieuSelect(interaction);
     if (interaction.customId === 'tresor_config_limite_legal')   return notionModules.handleTresorConfigSelect?.(interaction);
     if (interaction.customId.startsWith('rdv_type_select_'))     return _handleRdvTypeSelect(interaction);
     if (interaction.customId.startsWith('rdv_mode_select_'))     return _handleRdvModeSelect(interaction);
@@ -2662,6 +2665,148 @@ async function setupSurnomFormat(guild) {
 // ── Flow RDV détecté dans #discussion ──
 
 // ── ÉTAPE 1 : Choisir le type de RDV ──
+// ── /agenda creer — Étape 1 : Sélection du lieu ──
+async function _ouvrirModalAgendaSimple(interaction) {
+  await interaction.reply({
+    flags: MessageFlags.Ephemeral,
+    embeds: [new EmbedBuilder()
+      .setColor(0x2C3E50)
+      .setTitle('📅 Nouveau RDV — IWC')
+      .setDescription('**Étape 1/2** — Choisis le lieu du rendez-vous')
+    ],
+    components: [new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('agenda_lieu_select')
+        .setPlaceholder('Choisir un lieu...')
+        .addOptions([
+          { label: '🏛️ Saint Denis',          value: 'Saint Denis',          description: 'La grande ville du sud', emoji: '🏛️' },
+          { label: '🤠 Valentine',             value: 'Valentine',            description: 'Ville du nord-ouest', emoji: '🤠' },
+          { label: '🌵 Armadillo',             value: 'Armadillo',            description: 'Ville désertique du sud', emoji: '🌵' },
+          { label: '⛏️ Annesburg',             value: 'Annesburg',            description: 'Ville minière du nord-est', emoji: '⛏️' },
+          { label: '🏔️ Strawberry',           value: 'Strawberry',           description: 'Ville des montagnes', emoji: '🏔️' },
+          { label: '🌾 Emerald Ranch',         value: 'Emerald Ranch',        description: 'Ranch a l\'est', emoji: '🌾' },
+          { label: '🏜️ Tumbleweed',           value: 'Tumbleweed',           description: 'Ville fantôme du désert', emoji: '🏜️' },
+          { label: '🌊 Lagras',               value: 'Lagras',               description: 'Village des marais', emoji: '🌊' },
+          { label: '🏕️ Flatneck Station',     value: 'Flatneck Station',     description: 'Station ferroviaire', emoji: '🏕️' },
+          { label: '🏞️ Roanoke Ridge',        value: 'Roanoke Ridge',        description: 'Région sauvage du nord', emoji: '🏞️' },
+          { label: '🗻 Tall Trees',            value: 'Tall Trees',           description: 'Foret de l\'ouest', emoji: '🗻' },
+          { label: '🏘️ Rhodes',               value: 'Rhodes',               description: 'Ville du comté de Lemoyne', emoji: '🏘️' },
+          { label: '🌁 Blackwater',            value: 'Blackwater',           description: 'Ville moderne de West Elizabeth', emoji: '🌁' },
+          { label: '⛪ Thieves Landing',       value: 'Thieves Landing',      description: 'Port des hors-la-loi', emoji: '⛪' },
+          { label: '🎪 Circus / Autre',        value: 'Autre',                description: 'Lieu personnalisé', emoji: '📍' },
+        ])
+    )],
+  });
+}
+
+// ── Étape 2 : Modal avec titre, date, heure après choix du lieu ──
+async function _handleAgendaLieuSelect(interaction) {
+  const lieu = interaction.values[0];
+
+  const modal = new ModalBuilder()
+    .setCustomId(`modal_agenda_simple_${encodeURIComponent(lieu)}`)
+    .setTitle(`📅 RDV à ${lieu === 'Autre' ? '...' : lieu}`);
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('titre')
+        .setLabel('Titre du RDV')
+        .setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('Ex: Réunion Direction, Entretien Wellington...')
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('date')
+        .setLabel('Date (JJ/MM/AAAA)')
+        .setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('Ex: 05/06/2026')
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('heure')
+        .setLabel('Heure')
+        .setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('Ex: 21h00')
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('lieu_detail')
+        .setLabel(lieu === 'Autre' ? 'Lieu précis' : `Lieu précis à ${lieu} (optionnel)`)
+        .setStyle(TextInputStyle.Short).setRequired(lieu === 'Autre')
+        .setValue(lieu !== 'Autre' ? lieu : '')
+        .setPlaceholder(`Ex: Mairie de ${lieu}, Journal de ${lieu}...`)
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('notes')
+        .setLabel('Notes (optionnel)')
+        .setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(400)
+        .setPlaceholder('Ordre du jour, informations importantes...')
+    ),
+  );
+
+  await interaction.update({ components: [] });
+  await interaction.showModal(modal).catch(() => {});
+}
+
+// ── Validation du modal agenda simple ──
+async function _validerModalAgendaSimple(interaction) {
+  await interaction.deferReply({ ephemeral: false });
+
+  const titre      = interaction.fields.getTextInputValue('titre');
+  const dateRaw    = interaction.fields.getTextInputValue('date');
+  const heure      = interaction.fields.getTextInputValue('heure');
+  const lieuDetail = interaction.fields.getTextInputValue('lieu_detail').trim() || '';
+  // Récupérer la ville sélectionnée depuis le customId
+  const lieuVille  = interaction.customId.replace('modal_agenda_simple_', '').replace('modal_agenda_simple', '');
+  const lieu       = lieuDetail || (lieuVille ? decodeURIComponent(lieuVille) : '—');
+  const notes      = interaction.fields.getTextInputValue('notes') || '';
+
+  let dateISO = null;
+  try { const p = dateRaw.split('/'); if (p.length === 3) dateISO = `${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`; } catch {}
+  if (!dateISO) return interaction.editReply({ content: '❌ Format de date invalide. Utilise JJ/MM/AAAA.' });
+
+  const db         = loadDB();
+  const emetteurIC = db.members[interaction.user.id]?.name || interaction.user.username;
+  const rdvId      = `RDV-${Date.now().toString().slice(-5)}`;
+  const dateAffiche = new Date(dateISO).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+  const dateCapital = dateAffiche.charAt(0).toUpperCase() + dateAffiche.slice(1);
+
+  const embed = new EmbedBuilder()
+    .setColor(0x2C3E50)
+    .setTitle(`📅 ${titre.toUpperCase()}`)
+    .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   IRON WOLF COMPANY — AVIS DE RENDEZ-VOUS\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
+    .addFields(
+      { name: '🆔 Référence',    value: '`' + rdvId + '`', inline: true },
+      { name: '📅 Date',         value: dateCapital,         inline: true },
+      { name: '🕐 Heure',        value: `**${heure}**`,     inline: true },
+      { name: '📍 Lieu',         value: lieu,                inline: true },
+      { name: '✍️ Créé par',     value: emetteurIC,         inline: true },
+    );
+  if (notes) embed.addFields({ name: '📋 Notes', value: notes });
+  embed.setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` }).setTimestamp();
+
+  await interaction.editReply({ embeds: [embed] });
+
+  // Archivage Notion
+  if (process.env.NOTION_TOKEN && process.env.NOTION_AGENDA_DB_ID) {
+    fetch('https://api.notion.com/v1/pages', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        parent: { database_id: process.env.NOTION_AGENDA_DB_ID },
+        properties: {
+          'Titre': { title:     [{ text: { content: titre } }] },
+          'Date':  { date:      { start: dateISO } },
+          'Heure': { rich_text: [{ text: { content: heure } }] },
+          'Lieu':  { rich_text: [{ text: { content: lieu !== '—' ? lieu : '' } }] },
+          'Notes': { rich_text: [{ text: { content: notes.slice(0, 2000) } }] },
+        },
+      }),
+    }).then(async res => {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) console.log(`✅ RDV archivé Notion : ${titre}`);
+      else console.log(`❌ Notion erreur: ${data?.message || JSON.stringify(data).slice(0,100)}`);
+    }).catch(e => console.log('❌ Notion error:', e.message));
+  }
+}
+
 // ── Version slash command (pas de customId) ──
 async function _ouvrirMenuRdvSlash(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
