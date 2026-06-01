@@ -103,6 +103,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('bilan').setDescription('📊 Résumé trésorerie 7 derniers jours')
     .addStringOption(o => o.setName('coffre').setDescription('Quel coffre ?').setRequired(false)
       .addChoices({ name: '⚖️ Légal', value: 'legal' }, { name: '🔒 Illégal', value: 'illegal' })),
+  new SlashCommandBuilder().setName('rdv').setDescription('📅 Créer un rendez-vous'),
   new SlashCommandBuilder().setName('agenda').setDescription('📅 Voir ou créer un RDV')
     .addSubcommand(s => s.setName('voir').setDescription('Voir les prochains RDV'))
     .addSubcommand(s => s.setName('creer').setDescription('Créer un nouveau RDV dans Notion')),
@@ -357,6 +358,7 @@ async function handleSlashCommand(interaction) {
   if (commandName === 'op')               return _handleOpDetail(interaction);
   if (commandName === 'profil')            return handleProfilEnhanced(interaction);
   if (commandName === 'bilan')             await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleBilanCommand?.(interaction);
+  if (commandName === 'rdv')               return _ouvrirMenuRdvSlash(interaction);
   if (commandName === 'agenda')            return notionV3.handleAgendaCommand?.(interaction);
   if (commandName === 'op-programmer')     return _ouvrirModalOpProgrammee(interaction);
   if (commandName === 'aide')              return _handleAide(interaction);
@@ -3308,3 +3310,4 @@ async function setupPlanningFormat(guild) {
     console.log('❌ setupPlanningFormat error:', e.message);
   }
 }
+
