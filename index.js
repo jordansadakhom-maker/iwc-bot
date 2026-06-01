@@ -84,6 +84,8 @@ const SALON_HARDCODED = {
   AFFAIRES_LEGAL:       '1508756508362674337',
   AFFAIRES_ILLEGAL:     '1509254234413994004',
   DOSSIER_RECRUTEMENT:  '1509252295127466096',
+  PLANS:                '1508756493845925960',   // #plans (séparé d'informateurs)
+  INFORMATEURS:         '1509255294184853524',   // #informateurs
 };
 const NOTION_TRANSACTIONS_DB = '36ff4436a86c80ecb4a9ebcabc104a07';
 
@@ -179,6 +181,8 @@ function getMention(guild) { return guild.roles.cache.filter(r => ['Concepteur',
 function getContratMention(guild) { const roles = CONTRAT_ROLES.map(id => guild.roles.cache.get(id)).filter(Boolean).map(r => `<@&${r.id}>`); return [...roles, `<@${JUNE_MCCALL_ID}>`].join(' '); }
 function isDirection(member) { return member?.roles.cache.some(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier', 'Instructeur', 'Secrétaire'].some(n => r.name.includes(n))); }
 async function getLogsCh(guild) { let ch = guild.channels.cache.get(CH.LOGS); if (!ch) ch = await guild.channels.fetch(CH.LOGS).catch(() => null); return ch; }
+// Salon pour les alertes IC (informateurs, opérations confirmées) → #journal-de-bord
+function getJournalCh(guild) { return guild.channels.cache.get(SALON_HARDCODED.JOURNAL_DE_BORD) || null; }
 
 async function sendToThread(guild, threadId, payload) {
   try {
@@ -193,7 +197,19 @@ async function sendToThread(guild, threadId, payload) {
 }
 
 async function sendLog(guild, type, data) {
-  const ch = await getLogsCh(guild); if (!ch) return;
+  // Logs IC (visibles dans #journal-de-bord) vs logs techniques (#logs/#patch-note)
+  const IC_TYPES = ['ABSENCE', 'OPERATION', 'CONTRAT_SIGNE', 'CONTRAT_REFUSE', 'PROMOTION', 'RETROGRADATION', 'CANDIDATURE_ACCEPTEE', 'CANDIDATURE_REFUSEE'];
+  const isIC = IC_TYPES.includes(type);
+  let ch;
+  if (isIC) {
+    // Logs IC → #journal-de-bord
+    ch = guild.channels.cache.get(SALON_HARDCODED.JOURNAL_DE_BORD);
+    if (!ch) ch = await getLogsCh(guild); // fallback
+  } else {
+    // Logs techniques → #logs
+    ch = await getLogsCh(guild);
+  }
+  if (!ch) return;
   const cfgs = {
     ARRIVEE: { color: 0x57F287, emoji: '👋', title: 'ARRIVÉE — ' + data.username, fields: [{ name: '👤 Membre', value: `<@${data.userId}> (${data.username})`, inline: true }, { name: '🔢 Âge du compte', value: data.accountAge + ' jours', inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }] },
     DEPART: { color: 0x555555, emoji: '🚪', title: 'DÉPART — ' + data.username, fields: [{ name: '👤 Membre', value: data.username, inline: true }, { name: '🎖️ Rang', value: data.rang || '—', inline: true }, { name: '⏱️ Durée', value: data.duree || '—', inline: true }] },
@@ -809,7 +825,8 @@ client.on('messageCreate', async message => {
     await sendLog(guild, 'ABSENCE', { userId: message.author.id, username: message.author.username }); return;
   }
 
-  const infosCh = getChById(guild, 'INFORMATEURS', 'informateurs');
+  // #informateurs avec ID hardcodé
+  const infosCh = guild.channels.cache.get(SALON_HARDCODED.INFORMATEURS) || getChById(guild, 'INFORMATEURS', 'informateurs');
   if (infosCh && message.channel.id === infosCh.id) { await notionV3.handleInformateurMessage?.(message); return; }
 
   const ficheCh = getChById(guild, 'FICHES_PERSONNAGES', 'fiches-personnages', 'fiches-perso', 'fiches');
@@ -865,11 +882,8 @@ client.on('messageCreate', async message => {
   const planCh = getChById(guild, 'PLANNING', 'planning');
   if (planCh && message.channel.id === planCh.id) { if (message.attachments.size > 0) await notionV3.handlePlanningScreenshot?.(message); return; }
 
-  // #plans : chercher le salon exact nommé "plans" (pas informateurs)
-  const plansTactCh = guild.channels.cache.find(c => {
-    const n = c.name?.toLowerCase().replace(/[^a-z0-9]/g,'');
-    return c.isTextBased?.() && n === 'plans';
-  });
+  // #plans avec ID hardcodé
+  const plansTactCh = guild.channels.cache.get(SALON_HARDCODED.PLANS);
   if (plansTactCh && message.channel.id === plansTactCh.id) { await notionV3.handlePlansMessage?.(message); return; }
 });
 
@@ -2427,15 +2441,12 @@ async function setupFicheFormat(guild) {
 
 async function setupPlansFormat(guild) {
   try {
-    // Chercher #plans en excluant explicitement #informateurs
-    let ch = guild.channels.cache.find(c => {
+    // Utiliser l'ID hardcodé pour #plans
+    const ch = guild.channels.cache.get(SALON_HARDCODED.PLANS) || guild.channels.cache.find(c => {
       const n = c.name?.toLowerCase().replace(/[^a-z0-9]/g,'');
-      return c.isTextBased?.() && n === 'plans';
+      return c.isTextBased?.() && n === 'plans' && !c.name.includes('informateur');
     });
-    if (!ch) ch = getChById(guild, 'PLANS', 'plans-tactiques');
     if (!ch) return;
-    // Sécurité : ne jamais poster dans #informateurs
-    if (ch.name?.toLowerCase().includes('informateur')) return;
     const msgs = await ch.messages.fetch({ limit: 20 });
     const existing = msgs.find(m => m.author.id === guild.members.me?.id && m.embeds[0]?.title?.includes('PLANS'));
     if (existing) return;
@@ -2516,6 +2527,12 @@ global.envoyerDMRecap = envoyerDMRecap;
 global.getChById = getChById;
 global.sendLog = sendLog;
 global.isDirection = isDirection;
+global.getLogsCh = getLogsCh;
+global.getJournalCh = getJournalCh;
+// notionV3 utilise global.getLogsCh — on le surcharge pour rediriger vers journal-de-bord
+// pour les alertes informateurs et affaires
+const _origGetLogsCh = getLogsCh;
+global.getInformateurCh = (guild) => getJournalCh(guild) || guild.channels.cache.get(SALON_HARDCODED.JOURNAL_DE_BORD);
 
 client.login(process.env.DISCORD_TOKEN)
   .then(() => console.log('🔑 Login OK'))
