@@ -79,6 +79,11 @@ function getChById(guild, salonKey, ...fallbackNames) {
   return null;
 }
 
+// ── IDs Rôles hardcodés (fallback si config.js incomplet) ──
+const ROLE_ABSENT_ID = '1511134028474876035';
+// Surcharger ROLE_ABSENT si non défini dans config.js
+const _ROLE_ABSENT_FINAL = ROLE_ABSENT || ROLE_ABSENT_ID;
+
 // ── IDs Salons hardcodés (source: config Discord IWC) ──
 const SALON_HARDCODED = {
   JOURNAL_DE_BORD:      '1508756535407542372',
@@ -903,7 +908,7 @@ client.on('messageCreate', async message => {
       if (wasAbsent) {
         const membreRetourMsg = await guild.members.fetch(message.author.id).catch(() => null);
         if (membreRetourMsg) {
-          const roleAbsent = guild.roles.cache.get(ROLE_ABSENT);
+          const roleAbsent = guild.roles.cache.get(_ROLE_ABSENT_FINAL);
           if (roleAbsent) await membreRetourMsg.roles.remove(roleAbsent).catch(() => {});
           await _debloquerEcritureAbsent(guild, membreRetourMsg);
         }
@@ -1011,6 +1016,7 @@ client.on('interactionCreate', async interaction => {
 
   if (interaction.isModalSubmit() && interaction.customId === 'modal_affaire')          return notionV3.handleAffaireModal?.(interaction);
   if (interaction.isModalSubmit() && interaction.customId === 'modal_absent')           return _validerModalAbsent(interaction);
+  if (interaction.isModalSubmit() && interaction.customId === 'modal_absent_programmer') return _validerModalAbsentProgramme(interaction);
   if (interaction.isModalSubmit() && interaction.customId === 'modal_agenda_rdv')        return notionV3.handleAgendaModal?.(interaction);
   if (interaction.isModalSubmit() && interaction.customId === 'modal_op_programmee')     return notionV5.handleOpProgrammeeModal?.(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_op_creer'))   return _validerModalOpCreer(interaction);
@@ -1071,7 +1077,10 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId === 'setup_annuler')               return interaction.update({ content: '❌ Annulé — aucune modification effectuée.', components: [] });
     if (interaction.customId === 'btn_informateur_historique') { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleInformateurHistorique?.(interaction); }
     if (interaction.customId.startsWith('info_confirmer_'))    return notionV3.handleInformateurConfirmer?.(interaction);
-    if (interaction.customId === 'btn_surnom_ouvrir')          return _ouvrirModalSurnom(interaction);
+    if (interaction.customId === 'btn_absent_programmer')         return _ouvrirModalAbsentProgrammer(interaction);
+    if (interaction.customId.startsWith('btn_absent_confirmer_')) return _confirmerAbsence(interaction);
+    if (interaction.customId === 'btn_absent_annuler')             return interaction.update({ content: '↩️ Absence annulée.', embeds: [], components: [] });
+    if (interaction.customId === 'btn_surnom_ouvrir')              return _ouvrirModalSurnom(interaction);
     if (interaction.customId === 'dir_btn_candidatures')       return interaction.reply({ flags: MessageFlags.Ephemeral, content: _buildCandidaturesResume(db) });
     if (interaction.customId === 'dir_btn_ops')                return notionV5.handleStatsAvancees?.(interaction) || interaction.reply({ flags: MessageFlags.Ephemeral, content: '`/stats` pour plus de détails.' });
     if (interaction.customId === 'dir_btn_bilan')              { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleBilanCommand?.(interaction); }
@@ -1309,6 +1318,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId.startsWith('rdv_pole_select_'))     return _handleRdvPoleSelect(interaction);
     if (interaction.customId.startsWith('rdv_lieu_select_'))     return _handleRdvLieuSelect(interaction);
     if (interaction.customId === 'tresor_config_limite_illegal') return notionModules.handleTresorConfigSelect?.(interaction);
+    if (interaction.customId === 'absent_duree_select')           return _handleAbsentDureeSelect(interaction);
     if (interaction.customId === 'grade_select_membre')          return notionV3.handleGradeMembreSelect?.(interaction);
     if (interaction.customId === 'grade_select_grade')           return notionV3.handleGradeGradeSelect?.(interaction);
   }
@@ -2153,11 +2163,13 @@ async function _handleRetour(interaction) {
   const m = db.members[targetId];
   if (!m) return interaction.editReply({ content: `❌ <@${targetId}> n'est pas enregistré dans le système.` });
   if (m.status === 'actif') return interaction.editReply({ content: `✅ <@${targetId}> est déjà actif.` });
+  // Forcer le retour même si statut inconnu
+  console.log(`🔄 Retour de ${targetId} — statut: ${m.status}`);
   const ancienStatut = m.status;
   m.status = 'actif'; m.lastActivity = new Date().toISOString(); m.absentJusqu = null; m.absentRaison = null; saveDB(db);
   const membreRetour = await guild.members.fetch(targetId).catch(() => null);
   if (membreRetour) {
-    const roleAbsent = guild.roles.cache.get(ROLE_ABSENT);
+    const roleAbsent = guild.roles.cache.get(_ROLE_ABSENT_FINAL);
     if (roleAbsent) await membreRetour.roles.remove(roleAbsent).catch(() => {});
     await _debloquerEcritureAbsent(guild, membreRetour);
   }
@@ -2189,11 +2201,16 @@ async function _handleAnnulerAbsence(interaction) {
   if (!cible) return interaction.editReply({ content: '❌ Membre introuvable. Utilise l\'option @membre.' });
   const db = loadDB(); const m = db.members[cible.id];
   if (!m) return interaction.editReply({ content: `❌ <@${cible.id}> n'est pas enregistré dans le système. Vérifie que le membre a bien utilisé /absent.` });
-  if (m.status !== 'absent') return interaction.editReply({ content: `❌ <@${cible.id}> n'est pas marqué absent (statut actuel : ${m.status}).` });
+  if (m.status !== 'absent') {
+    // Forcer quand même le retrait du rôle au cas où
+    const membreForce = await interaction.guild.members.fetch(cible.id).catch(() => null);
+    if (membreForce) await _debloquerEcritureAbsent(interaction.guild, membreForce);
+    return interaction.editReply({ content: `⚠️ <@${cible.id}> n'était pas marqué absent (statut : ${m.status}) mais les permissions ont été rétablies.` });
+  }
   m.status = 'actif'; m.lastActivity = new Date().toISOString(); m.absentJusqu = null; m.absentRaison = null; saveDB(db);
   const membreD = await interaction.guild.members.fetch(cible.id).catch(() => null);
   if (membreD) {
-    const roleAbsent = interaction.guild.roles.cache.get(ROLE_ABSENT);
+    const roleAbsent = interaction.guild.roles.cache.get(_ROLE_ABSENT_FINAL);
     if (roleAbsent) await membreD.roles.remove(roleAbsent).catch(() => {});
     await _debloquerEcritureAbsent(interaction.guild, membreD);
   }
@@ -2747,7 +2764,7 @@ async function _validerModalAgendaSimple(interaction) {
       'Statut':           { select:    { name: 'Planifié' } },
       'Type':             { select:    { name: RDV_TYPE_NOTION_MAP['RDV'] || '📋 Autre' } },
       'Pôle':             { select:    { name: isIlleg ? '🔒 Illégal' : '⚖️ Légal' } },
-      'Mode de convocation': { select: { name: '📢 Par rôle - tout le pôle' } },
+      'Mode de convocation': { select: { name: RDV_MODE_NOTION_MAP['role'] } },
       'Villes RDR2':      { select:    { name: RDV_VILLE_NOTION_MAP[lieuNotionKey] || RDV_VILLE_NOTION_MAP['Autre'] } },
       ...(photoUrl ? { 'Photo': { files: [{ name: 'reperage.jpg', type: 'external', external: { url: photoUrl } }] } } : {}),
     } }) }).then(async res => {
@@ -3112,6 +3129,301 @@ async function _validerModalSurnom(interaction) {
   console.log(`✅ Identité IC : ${nomIC} (${interaction.user.username})`);
 }
 
+
+// ── Handler sélection durée absence ──
+async function _handleAbsentDureeSelect(interaction) {
+  await interaction.deferUpdate();
+  const valeur = interaction.values[0];
+
+  // Cas "programmer" → ouvrir modal avec dates début/fin
+  if (valeur === 'programmer') {
+    const modal = new ModalBuilder()
+      .setCustomId('modal_absent_programmer')
+      .setTitle('📅 Programmer une absence');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('date_debut')
+          .setLabel('Date de début (JJ/MM/AAAA)')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setPlaceholder('Ex: 10/06/2026')
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('date_fin')
+          .setLabel('Date de fin (JJ/MM/AAAA)')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setPlaceholder('Ex: 17/06/2026')
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('raison')
+          .setLabel('Raison (optionnel)')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false)
+          .setPlaceholder('Ex: vacances, travail, IRL...')
+      ),
+    );
+    await interaction.followUp({ flags: MessageFlags.Ephemeral, content: '📅 Remplis les dates de ton absence :' });
+    // showModal nécessite interaction originale → on ne peut pas après deferUpdate
+    // Workaround : bouton intermédiaire
+    await interaction.editReply({
+      embeds: [new EmbedBuilder()
+        .setColor(0xFFA500)
+        .setTitle('📅 Programmer une absence')
+        .setDescription('Clique le bouton ci-dessous pour saisir tes dates.')
+      ],
+      components: [new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('btn_absent_programmer')
+          .setLabel('📅 Saisir mes dates')
+          .setStyle(ButtonStyle.Primary)
+      )],
+    });
+    return;
+  }
+
+  // Calculer la date de fin selon la valeur choisie
+  const maintenant = new Date();
+  let dureeLabel = '';
+  let finAbsence = null;
+
+  switch (valeur) {
+    case '1_soir':
+      dureeLabel = 'Ce soir';
+      finAbsence = new Date(maintenant);
+      finAbsence.setHours(23, 59, 0, 0);
+      break;
+    case '1_jour':
+      dureeLabel = '1 jour';
+      finAbsence = new Date(maintenant.getTime() + 1 * 86400000);
+      break;
+    case '2_jours':
+      dureeLabel = '2 jours';
+      finAbsence = new Date(maintenant.getTime() + 2 * 86400000);
+      break;
+    case '3_jours':
+      dureeLabel = '3 jours';
+      finAbsence = new Date(maintenant.getTime() + 3 * 86400000);
+      break;
+    case '1_semaine':
+      dureeLabel = '1 semaine';
+      finAbsence = new Date(maintenant.getTime() + 7 * 86400000);
+      break;
+    case '2_semaines':
+      dureeLabel = '2 semaines';
+      finAbsence = new Date(maintenant.getTime() + 14 * 86400000);
+      break;
+    case '1_mois':
+      dureeLabel = '1 mois';
+      finAbsence = new Date(maintenant.getTime() + 30 * 86400000);
+      break;
+    case 'indetermine':
+      dureeLabel = 'Indéterminée';
+      finAbsence = null;
+      break;
+  }
+
+  // Demander la raison via modal léger
+  const modal = new ModalBuilder()
+    .setCustomId(`modal_absent_${valeur}`)
+    .setTitle(`🟡 Absence — ${dureeLabel}`);
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('raison')
+        .setLabel('Raison (optionnel)')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false)
+        .setPlaceholder('Ex: vacances, travail, IRL...')
+    ),
+  );
+
+  // Stocker la durée en attente
+  const db = loadDB();
+  if (!db._absencePending) db._absencePending = {};
+  db._absencePending[interaction.user.id] = {
+    dureeLabel,
+    finAbsence: finAbsence ? finAbsence.toISOString() : null,
+  };
+  saveDB(db);
+
+  // Afficher bouton pour ouvrir le modal raison
+  await interaction.editReply({
+    embeds: [new EmbedBuilder()
+      .setColor(0xFFA500)
+      .setTitle(`🟡 Absence — ${dureeLabel}`)
+      .setDescription(finAbsence
+        ? `Retour prévu : **${finAbsence.toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' })}**
+
+Clique pour confirmer.`
+        : `Durée **indéterminée** — tu utiliseras \`/retour\` quand tu reviens.
+
+Clique pour confirmer.`
+      )
+    ],
+    components: [new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`btn_absent_confirmer_${valeur}`)
+        .setLabel('✅ Confirmer mon absence')
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId('btn_absent_annuler')
+        .setLabel('↩️ Annuler')
+        .setStyle(ButtonStyle.Secondary),
+    )],
+  });
+}
+
+// ── Handler bouton confirmation absence ──
+// Routing dans isButton()
+// btn_absent_confirmer_VALEUR → confirmer
+// btn_absent_programmer → ouvrir modal dates
+
+// ── Handler modal absence programmée ──
+async function _validerModalAbsentProgramme(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const guild = interaction.guild;
+  const dateDebutRaw = interaction.fields.getTextInputValue('date_debut').trim();
+  const dateFinRaw   = interaction.fields.getTextInputValue('date_fin').trim();
+  const raison       = interaction.fields.getTextInputValue('raison').trim() || '—';
+
+  // Parser les dates JJ/MM/AAAA
+  const parseDate = (s) => {
+    const p = s.split('/');
+    if (p.length !== 3) return null;
+    const d = new Date(`${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`);
+    return isNaN(d.getTime()) ? null : d;
+  };
+
+  const dateDebut = parseDate(dateDebutRaw);
+  const dateFin   = parseDate(dateFinRaw);
+
+  if (!dateDebut || !dateFin) {
+    return interaction.editReply({ content: '❌ Dates invalides. Utilise le format JJ/MM/AAAA.' });
+  }
+  if (dateFin <= dateDebut) {
+    return interaction.editReply({ content: '❌ La date de fin doit être après la date de début.' });
+  }
+
+  const debutLabel = dateDebut.toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' });
+  const finLabel   = dateFin.toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' });
+  const nbJours    = Math.ceil((dateFin - dateDebut) / 86400000);
+  const dureeLabel = `Du ${debutLabel} au ${finLabel} (${nbJours} jour${nbJours > 1 ? 's' : ''})`;
+
+  // Si l'absence est dans le futur → programmer (pas encore absent)
+  const estFuture = dateDebut > new Date();
+
+  await _enregistrerAbsence(interaction, guild, dureeLabel, dateFin.toISOString(), raison, estFuture ? dateDebut.toISOString() : null);
+}
+
+// ── Fonction centrale enregistrement absence ──
+async function _enregistrerAbsence(interaction, guild, dureeLabel, finAbsence, raison, debutProgramme = null) {
+  const db = loadDB();
+  if (!db.members[interaction.user.id]) db.members[interaction.user.id] = {};
+  const m = db.members[interaction.user.id];
+
+  const estProgrammee = debutProgramme && new Date(debutProgramme) > new Date();
+
+  if (estProgrammee) {
+    // Absence programmée → enregistrer pour activation future
+    m.absenceProgrammee = {
+      debut: debutProgramme,
+      fin: finAbsence,
+      raison,
+      dureeLabel,
+    };
+    saveDB(db);
+    const debutAff = new Date(debutProgramme).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' });
+    const finAff   = finAbsence ? new Date(finAbsence).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' }) : 'Indéterminé';
+    await interaction.editReply({ embeds: [new EmbedBuilder()
+      .setColor(0x5865F2)
+      .setTitle('📅 Absence programmée')
+      .addFields(
+        { name: '📅 Début', value: debutAff, inline: true },
+        { name: '📅 Fin prévue', value: finAff, inline: true },
+        { name: '📝 Raison', value: raison, inline: false },
+      )
+      .setDescription('*Ton absence sera activée automatiquement à la date de début.*')
+      .setFooter({ text: 'IWC • /retour pour revenir à tout moment' })
+    ]});
+    return;
+  }
+
+  // Absence immédiate
+  m.status       = 'absent';
+  m.absentJusqu  = finAbsence;
+  m.absentRaison = raison;
+  m.lastActivity = new Date().toISOString();
+  saveDB(db);
+
+  const membreDiscord = await guild.members.fetch(interaction.user.id).catch(() => null);
+  if (membreDiscord) {
+    const roleAbsent = guild.roles.cache.get(_ROLE_ABSENT_FINAL);
+    if (roleAbsent) await membreDiscord.roles.add(roleAbsent).catch(() => {});
+  }
+
+  await notionExtra.majStatutActiviteNotion?.(interaction.user.id, 'absent');
+  _syncMembreNotion(interaction.user.id, { status: 'absent', lastActivity: new Date().toISOString() }).catch(() => {});
+  _syncStatutFicheNotion(interaction.user.id, 'Absent').catch(() => {});
+  await sendLog(guild, 'ABSENCE', { userId: interaction.user.id, username: interaction.user.username });
+
+  const retourStr = finAbsence
+    ? new Date(finAbsence).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' })
+    : 'Indéterminé';
+
+  await interaction.editReply({ embeds: [new EmbedBuilder()
+    .setColor(0xFFA500)
+    .setTitle('🟡 Absence enregistrée')
+    .addFields(
+      { name: '⏱️ Durée', value: dureeLabel, inline: true },
+      { name: '📅 Retour prévu', value: retourStr, inline: true },
+      { name: '📝 Raison', value: raison, inline: false },
+    )
+    .setDescription('*Tu peux encore lire les salons. Utilise `/retour` pour revenir à tout moment.*')
+    .setFooter({ text: 'IWC • /retour pour revenir à tout moment' })
+  ]});
+
+  // Poster dans #absences
+  const absCh = getAbsencesCh(guild, membreDiscord);
+  if (absCh) await absCh.send({ embeds: [new EmbedBuilder()
+    .setColor(0xFFA500)
+    .setAuthor({ name: `${membreDiscord?.displayName || interaction.user.username} — Absence`, iconURL: interaction.user.displayAvatarURL() })
+    .setTitle(`🟡 Déclaration d'absence`)
+    .addFields(
+      { name: '👤 Membre', value: `<@${interaction.user.id}>`, inline: true },
+      { name: '⏱️ Durée', value: dureeLabel, inline: true },
+      { name: '📅 Retour prévu', value: retourStr, inline: true },
+      { name: '📝 Raison', value: raison, inline: false },
+    )
+    .setFooter({ text: `IWC • ${fmtShort(new Date())}` }).setTimestamp()
+  ]}).catch(() => {});
+}
+
+
+async function _ouvrirModalAbsentProgrammer(interaction) {
+  const modal = new ModalBuilder().setCustomId('modal_absent_programmer').setTitle('📅 Programmer une absence');
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('date_debut').setLabel('Date de début (JJ/MM/AAAA)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 10/06/2026')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('date_fin').setLabel('Date de fin (JJ/MM/AAAA)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 17/06/2026')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('raison').setLabel('Raison (optionnel)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: vacances, travail, IRL...')),
+  );
+  await interaction.showModal(modal);
+}
+
+async function _confirmerAbsence(interaction) {
+  await interaction.deferUpdate();
+  const valeur = interaction.customId.replace('btn_absent_confirmer_', '');
+  const db = loadDB();
+  const pending = db._absencePending?.[interaction.user.id];
+  if (!pending) return interaction.editReply({ content: '❌ Session expirée. Recommence avec /absent.' });
+  delete db._absencePending[interaction.user.id];
+  saveDB(db);
+  await _enregistrerAbsence(interaction, interaction.guild, pending.dureeLabel, pending.finAbsence, '—');
+}
+
 // ── Validation modal absence ──
 async function _validerModalAbsent(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -3152,7 +3464,7 @@ async function _validerModalAbsent(interaction) {
 
   const membreDiscord = await guild.members.fetch(interaction.user.id).catch(() => null);
   if (membreDiscord) {
-    const roleAbsent = guild.roles.cache.get(ROLE_ABSENT);
+    const roleAbsent = guild.roles.cache.get(_ROLE_ABSENT_FINAL);
     if (roleAbsent) await membreDiscord.roles.add(roleAbsent).catch(() => {});
     if (!modeLectureSeule) {
       // Mode absent-total : bloquer aussi la lecture
@@ -3211,7 +3523,7 @@ async function _checkRetoursAbsence(guild) {
     m.status = 'actif'; m.lastActivity = new Date().toISOString(); m.absentJusqu = null; m.absentRaison = null; changed = true;
     const membreD = await guild.members.fetch(uid).catch(() => null);
     if (membreD) {
-      const roleAbsent = guild.roles.cache.get(ROLE_ABSENT);
+      const roleAbsent = guild.roles.cache.get(_ROLE_ABSENT_FINAL);
       if (roleAbsent) await membreD.roles.remove(roleAbsent).catch(() => {});
       await _debloquerEcritureAbsent(guild, membreD);
     }
@@ -3239,7 +3551,7 @@ async function _bloquerEcritureAbsent(guild, member) {
   try {
     // Approche par rôle : on modifie les perms du rôle Absent sur tous les salons
     // Plus robuste que par membre individuel
-    const roleAbsent = guild.roles.cache.get(ROLE_ABSENT);
+    const roleAbsent = guild.roles.cache.get(_ROLE_ABSENT_FINAL);
     if (!roleAbsent) {
       // Fallback : bloquer par membre directement
       for (const [, ch] of guild.channels.cache) {
@@ -3258,15 +3570,29 @@ async function _bloquerEcritureAbsent(guild, member) {
 
 async function _debloquerEcritureAbsent(guild, member) {
   try {
-    // Retirer les overrides par membre si fallback avait été utilisé
+    // 1. Retirer le rôle Absent (méthode principale)
+    const roleAbsent = guild.roles.cache.get(_ROLE_ABSENT_FINAL);
+    if (roleAbsent && member.roles?.cache?.has(roleAbsent.id)) {
+      await member.roles.remove(roleAbsent).catch(() => {});
+      console.log(`🔓 Rôle Absent retiré pour ${member.user?.username || member.id}`);
+    }
+    // 2. Retirer les overrides par membre (fallback)
     for (const [, ch] of guild.channels.cache) {
       if (!ch.isTextBased?.()) continue;
       const perm = ch.permissionOverwrites.cache.get(member.id);
-      if (perm?.deny?.has('SendMessages')) await ch.permissionOverwrites.delete(member).catch(() => {});
+      if (perm?.deny?.has('SendMessages') || perm?.deny?.has('ViewChannel')) {
+        await ch.permissionOverwrites.delete(member).catch(() => {});
+      }
     }
-    // Nettoyer aussi la DB
+    // 3. Nettoyer la DB
     const db = loadDB();
     if (db._absenceOverrides?.[member.id]) { delete db._absenceOverrides[member.id]; saveDB(db); }
+    if (db.members[member.id]) {
+      db.members[member.id].status = 'actif';
+      db.members[member.id].absentJusqu = null;
+      db.members[member.id].absentRaison = null;
+      saveDB(db);
+    }
     console.log(`🔓 Écriture débloquée pour ${member.user?.username || member.id}`);
   } catch (e) { console.log('❌ _debloquerEcritureAbsent error:', e.message); }
 }
