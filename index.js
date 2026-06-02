@@ -1756,7 +1756,114 @@ client.once('clientReady', async () => {
 
 const http = require('http');
 const PORT = process.env.PORT || 3000;
-http.createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('IWC Bot OK'); }).listen(PORT, () => console.log(`🌐 Serveur keepalive en écoute sur le port ${PORT}`));
+
+const NOTE_SECRET = process.env.NOTE_SECRET || 'iwc-secret-1895';
+
+http.createServer(async (req, res) => {
+  // CORS
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
+  // Keepalive
+  if (req.method === 'GET' && req.url === '/') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('IWC Bot OK');
+    return;
+  }
+
+  // Endpoint note rapide
+  if (req.method === 'POST' && req.url === '/api/note-rapide') {
+    // Auth
+    const auth = req.headers['authorization'];
+    if (auth !== `Bearer ${NOTE_SECRET}`) {
+      res.writeHead(401); res.end('Unauthorized'); return;
+    }
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { cible, lieu, info, priorite, agent } = data;
+        if (!info) { res.writeHead(400); res.end('info requis'); return; }
+        // Trouver le salon #informateurs
+        const guild = client.guilds.cache.first();
+        if (!guild) { res.writeHead(500); res.end('Guild introuvable'); return; }
+        const infosCh = guild.channels.cache.get(SALON_HARDCODED.INFORMATEURS);
+        if (!infosCh) { res.writeHead(500); res.end('Salon introuvable'); return; }
+
+        // Couleur selon priorité
+        const colors = { urgente: 0xED4245, importante: 0xFFA500, normale: 0x8B1A1A };
+        const color = colors[priorite] || 0x8B1A1A;
+        const prioLabel = { urgente: '🔴 URGENTE', importante: '🟡 Importante', normale: '⬜ Normale' }[priorite] || '⬜ Normale';
+        const heure = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' });
+
+        const fields = [];
+        if (cible) fields.push({ name: '🎯 Cible', value: cible, inline: true });
+        if (lieu)  fields.push({ name: '📍 Lieu',  value: lieu,  inline: true });
+        fields.push({ name: '📋 Information', value: info, inline: false });
+
+        const embed = new EmbedBuilder()
+          .setColor(color)
+          .setAuthor({ name: `🕵️ Rapport — ${agent || 'Agent'} · ${heure}` })
+          .addFields(...fields)
+          .setFooter({ text: `IWC · Priorité : ${prioLabel}` })
+          .setTimestamp();
+
+        // Chercher ou créer un thread pour cette cible
+        let thread = null;
+        if (cible) {
+          const threadName = `🎯 ${cible}`;
+          // Chercher thread actif
+          await infosCh.threads.fetchActive().catch(() => null);
+          thread = infosCh.threads.cache.find(t => t.name === threadName);
+          // Chercher thread archivé
+          if (!thread) {
+            const archived = await infosCh.threads.fetchArchived().catch(() => null);
+            if (archived) thread = archived.threads.find(t => t.name === threadName);
+          }
+          // Créer si inexistant
+          if (!thread) {
+            try {
+              thread = await infosCh.threads.create({
+                name: threadName,
+                autoArchiveDuration: 10080,
+                reason: `Dossier informateur: ${cible}`,
+              });
+              // Message d'en-tête dans le thread
+              await thread.send({ embeds: [new EmbedBuilder()
+                .setColor(0x8B1A1A)
+                .setTitle(`🎯 Dossier — ${cible}`)
+                .setDescription('*Toutes les informations concernant cette cible sont regroupées ici.*')
+                .setFooter({ text: 'IWC · La Confrérie · Informateurs' })
+              ]});
+            } catch(e) { console.log('❌ Thread création:', e.message); }
+          }
+          // Désarchiver si nécessaire
+          if (thread?.archived) await thread.setArchived(false).catch(() => {});
+        }
+
+        // Envoyer l'embed
+        if (thread) {
+          await thread.send({ embeds: [embed] });
+        } else {
+          await infosCh.send({ embeds: [embed] });
+        }
+
+        console.log(`✅ Note rapide reçue — cible: ${cible || '—'} · agent: ${agent || '—'}`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, thread: thread?.name || null }));
+      } catch(e) {
+        console.log('❌ /api/note-rapide error:', e.message);
+        res.writeHead(500); res.end(e.message);
+      }
+    });
+    return;
+  }
+
+  res.writeHead(404); res.end('Not found');
+}).listen(PORT, () => console.log(`🌐 Serveur keepalive en écoute sur le port ${PORT}`));
 
 async function handleProfilEnhanced(interaction) {
   await interaction.deferReply({ ephemeral: false });
