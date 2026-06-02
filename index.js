@@ -2630,6 +2630,25 @@ async function _handleRdvModalBtn(interaction) {
 }
 
 // [CORRECTION] _validerModalAgendaSimple — collecteurs corrects + photo optionnelle
+
+// Map clés internes → libellés exacts Notion (colonne Taper/Type)
+const RDV_TYPE_NOTION_MAP = {
+  'reunion_direction':  'Direction de la réunion',
+  'rdv_client':         'Rendez-vous Client',
+  'briefing_op':        'Opération de briefing',
+  'debrief_op':         'Opération de débriefing',
+  'entretien_recru':    'Entretien Recrutement',
+  'reunion_legal':      'Pôle de réunion légal',
+  'reunion_confrerie':  'Réunion Confrérie',
+  'formation':          'Membres de la formation',
+  'negociation':        'Négociation',
+  'rdv_medical':        'Rendez-vous Médical',
+  'rdv_juridique':      'Rendez-vous Juridique',
+  'autre':              'Autre',
+  'RDV':                'Autre',
+  'Convocation individuelle': 'Autre',
+};
+
 async function _validerModalAgendaSimple(interaction) {
   console.log('🔵 RDV STEP 5b - _validerModalAgendaSimple appelé');
   await interaction.deferReply({ ephemeral: false });
@@ -2703,11 +2722,15 @@ async function _validerModalAgendaSimple(interaction) {
       'Lieu':     { rich_text: [{ text: { content: lieu !== '—' ? lieu : '' } }] },
       'Notes':    { rich_text: [{ text: { content: (`${heure ? `Heure : ${heure}\n` : ''}${notes}`).slice(0, 2000) } }] },
       'Statut':   { select:    { name: 'Planifié' } },
-      'Type':     { select:    { name: 'RDV' } },
-      'Pôle':     { select:    { name: poleLabel } },
+      'Type':     { select:    { name: RDV_TYPE_NOTION_MAP['RDV'] || 'Autre' } },
+      'Pôle':     { select:    { name: poleLabel.replace(/[^a-zA-ZÀ-ÿ\s]/g, '').trim() } },
       'Créé par': { rich_text: [{ text: { content: emetteurIC } }] },
       ...(photoUrl ? { 'Photo': { files: [{ name: 'reperage.jpg', type: 'external', external: { url: photoUrl } }] } } : {}),
-    } }) }).then(async res => { const data = await res.json().catch(() => ({})); if (res.ok) console.log(`✅ RDV archivé Notion : ${titre}`); else console.log(`❌ Notion RDV erreur: ${data?.message}`); }).catch(e => console.log('❌ Notion RDV error:', e.message));
+    } }) }).then(async res => {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) console.log(`✅ RDV archivé Notion : ${titre}`);
+      else console.log(`❌ Notion RDV erreur complet:`, JSON.stringify(data).slice(0, 500));
+    }).catch(e => console.log('❌ Notion RDV error:', e.message));
   }
 }
 
@@ -2884,13 +2907,17 @@ async function _validerModalRdvIndividuel(interaction) {
       'Lieu':         { rich_text:    [{ text: { content: lieu !== '—' ? lieu : '' } }] },
       'Notes':        { rich_text:    [{ text: { content: (`${heure ? `Heure : ${heure}\n` : ''}${notes}`).slice(0, 2000) } }] },
       'Statut':       { select:       { name: 'Planifié' } },
-      'Type':         { select:       { name: 'Convocation individuelle' } },
-      'Pôle':         { select:       { name: emetteurPole === 'illegal' ? '🔒 Illégal' : '⚖️ Légal' } },
+      'Type':         { select:       { name: RDV_TYPE_NOTION_MAP['Convocation individuelle'] || 'Autre' } },
+      'Pôle':         { select:       { name: emetteurPole === 'illegal' ? 'Illégal' : 'Légal' } },
       'Créé par':     { rich_text:    [{ text: { content: emetteurIC } }] },
       'Participants': { multi_select: participants.map(n => ({ name: n })) },
       'Notif 1h':     { checkbox: true },
       'Notif 15min':  { checkbox: true },
-    } }) }).catch(e => console.log('❌ Notion RDV individuel:', e.message));
+    } }) }).then(async res => {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) console.log(`✅ RDV individuel archivé Notion : ${titre}`);
+      else console.log(`❌ Notion RDV individuel erreur complet:`, JSON.stringify(data).slice(0, 500));
+    }).catch(e => console.log('❌ Notion RDV individuel error:', e.message));
   }
   await interaction.editReply({ content: `✅ Convocation envoyée à ${participants.join(', ')} !`, embeds: [], components: [] });
   try {
@@ -2946,13 +2973,17 @@ async function _validerModalRdv(interaction) {
       'Lieu':     { rich_text: [{ text: { content: lieu !== '—' ? lieu : '' } }] },
       'Notes':    { rich_text: [{ text: { content: (`${heure ? `Heure : ${heure}\n` : ''}${notes}`).slice(0, 2000) } }] },
       'Statut':   { select:    { name: 'Planifié' } },
-      'Type':     { select:    { name: typeRdv.replace(/_/g, ' ') } },
-      'Pôle':     { select:    { name: pole === 'illegal' ? '🔒 Illégal' : pole === 'direction' ? '👑 Direction' : pole === 'tous' ? '👥 Tous' : '⚖️ Légal' } },
+      'Type':     { select:    { name: RDV_TYPE_NOTION_MAP[typeRdv] || typeRdv.replace(/_/g, ' ') } },
+      'Pôle':     { select:    { name: pole === 'illegal' ? 'Illégal' : pole === 'direction' ? 'Direction' : pole === 'tous' ? 'Tous' : 'Légal' } },
       'Créé par': { rich_text: [{ text: { content: emetteurIC } }] },
       'Notif 24h':  { checkbox: true },
       'Notif 1h':   { checkbox: true },
       'Notif 15min':{ checkbox: true },
-    } }) }).catch(e => console.log('❌ Notion RDV pôle:', e.message));
+    } }) }).then(async res => {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) console.log(`✅ RDV pôle archivé Notion : ${titre}`);
+      else console.log(`❌ Notion RDV pôle erreur complet:`, JSON.stringify(data).slice(0, 500));
+    }).catch(e => console.log('❌ Notion RDV pôle error:', e.message));
   }
   const salonLabel = pole === 'illegal' ? '#agenda-illégal' : '#agenda';
   await interaction.editReply({ content: `✅ RDV **${titre}** planifié et posté dans ${salonLabel} !`, embeds: [], components: [] });
