@@ -1307,6 +1307,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId.startsWith('rdv_mode_select_'))     return _handleRdvModeSelect(interaction);
     if (interaction.customId.startsWith('rdv_individuel_select_')) return _handleRdvIndividuelSelect(interaction);
     if (interaction.customId.startsWith('rdv_pole_select_'))     return _handleRdvPoleSelect(interaction);
+    if (interaction.customId.startsWith('rdv_lieu_select_'))     return _handleRdvLieuSelect(interaction);
     if (interaction.customId === 'tresor_config_limite_illegal') return notionModules.handleTresorConfigSelect?.(interaction);
     if (interaction.customId === 'grade_select_membre')          return notionV3.handleGradeMembreSelect?.(interaction);
     if (interaction.customId === 'grade_select_grade')           return notionV3.handleGradeGradeSelect?.(interaction);
@@ -2747,7 +2748,7 @@ async function _validerModalAgendaSimple(interaction) {
       'Type':             { select:    { name: RDV_TYPE_NOTION_MAP['RDV'] || '📋 Autre' } },
       'Pôle':             { select:    { name: isIlleg ? '🔒 Illégal' : '⚖️ Légal' } },
       'Mode de convocation': { select: { name: '📢 Par rôle - tout le pôle' } },
-      'Villes RDR2':      { select:    { name: RDV_VILLE_NOTION_MAP[lieu] || RDV_VILLE_NOTION_MAP['Autre'] } },
+      'Villes RDR2':      { select:    { name: RDV_VILLE_NOTION_MAP[lieuNotionKey] || RDV_VILLE_NOTION_MAP['Autre'] } },
       ...(photoUrl ? { 'Photo': { files: [{ name: 'reperage.jpg', type: 'external', external: { url: photoUrl } }] } } : {}),
     } }) }).then(async res => {
       const data = await res.json().catch(() => ({}));
@@ -2959,8 +2960,20 @@ async function _validerModalRdvIndividuel(interaction) {
 async function _validerModalRdv(interaction) {
   console.log('🔵 RDV STEP 5 - _validerModalRdv appelé, customId:', interaction.customId);
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const parts = interaction.customId.replace('modal_rdv_', '').split('_'); const pole = parts[0]; const typeRdv = parts.slice(1).join('_');
-  const titre = interaction.fields.getTextInputValue('titre'); const dateRaw = interaction.fields.getTextInputValue('date'); const heure = interaction.fields.getTextInputValue('heure'); const lieu = interaction.fields.getTextInputValue('lieu') || '—'; const notes = interaction.fields.getTextInputValue('notes') || '';
+  const rawId = interaction.customId.replace('modal_rdv_', '');
+  const parts = rawId.split('_');
+  const pole = parts[0];
+  // Le lieu est encodé en dernier si vient de _handleRdvLieuSelect
+  let lieuFromMenu = null;
+  try { lieuFromMenu = decodeURIComponent(parts[parts.length - 1]); } catch {}
+  const knownVilles = ['Saint Denis','Valentine','Armadillo','Annesburg','Strawberry','Emerald Ranch','Tumbleweed','Lagras','Flatneck Station','Roanoke Ridge','Tall Trees','Rhodes','Blackwater','Thieves Landing','Autre'];
+  const hasLieuInId = knownVilles.includes(lieuFromMenu);
+  const typeRdv = hasLieuInId ? parts.slice(1, -1).join('_') : parts.slice(1).join('_');
+  const titre = interaction.fields.getTextInputValue('titre'); const dateRaw = interaction.fields.getTextInputValue('date'); const heure = interaction.fields.getTextInputValue('heure');
+  const lieuDetail = interaction.fields.getTextInputValue('lieu_detail').trim();
+  const lieu = lieuDetail || (hasLieuInId && lieuFromMenu !== 'Autre' ? lieuFromMenu : '—');
+  const notes = interaction.fields.getTextInputValue('notes') || '';
+  const lieuNotionKey = hasLieuInId ? lieuFromMenu : lieu;
   let dateISO = null; try { const p = dateRaw.split('/'); if (p.length === 3) dateISO = `${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`; } catch {}
   if (!dateISO) return interaction.editReply({ content: '❌ Format de date invalide. Utilise JJ/MM/AAAA.' });
   const rdvId = `RDV-${Date.now().toString().slice(-5)}`;
@@ -3010,7 +3023,50 @@ async function _validerModalRdv(interaction) {
     }).catch(e => console.log('❌ Notion RDV pôle error:', e.message));
   }
   const salonLabel = pole === 'illegal' ? '#agenda-illégal' : '#agenda';
-  await interaction.editReply({ content: `✅ RDV **${titre}** planifié et posté dans ${salonLabel} !`, embeds: [], components: [] });
+
+  // ── Attente photo optionnelle ──
+  const skipPhotoId = `rdv_skip_photo_${interaction.id}`;
+  await interaction.editReply({
+    content: `✅ RDV **${titre}** posté dans ${salonLabel} !
+
+📸 **Photo de repérage optionnelle** — envoie une image dans ce salon ou clique **Ignorer**.`,
+    embeds: [],
+    components: [new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(skipPhotoId).setLabel('⏭️ Ignorer la photo').setStyle(ButtonStyle.Secondary)
+    )],
+  });
+
+  let photoUrl = null;
+  try {
+    const photoFilter = m => m.author.id === interaction.user.id && m.attachments.size > 0 && m.channel.id === interaction.channel.id;
+    const btnFilter   = i => i.user.id === interaction.user.id && i.customId === skipPhotoId;
+    await new Promise((resolve) => {
+      const msgCollector = interaction.channel.createMessageCollector({ filter: photoFilter, max: 1, time: 60000 });
+      const btnCollector = interaction.channel.createMessageComponentCollector({ filter: btnFilter, max: 1, time: 60000 });
+      msgCollector.on('collect', async msg => { photoUrl = msg.attachments.first().url; await msg.delete().catch(() => {}); btnCollector.stop('photo'); resolve(); });
+      btnCollector.on('collect', async i => { await i.deferUpdate().catch(() => {}); msgCollector.stop('skip'); resolve(); });
+      msgCollector.on('end', (_, reason) => { if (reason !== 'photo') resolve(); });
+      btnCollector.on('end', (_, reason) => { if (reason !== 'photo') resolve(); });
+    });
+  } catch {}
+
+  // Si photo → mettre à jour l'embed dans #agenda avec la photo
+  if (photoUrl && agendaCh) {
+    try {
+      const msgs = await agendaCh.messages.fetch({ limit: 5 });
+      const rdvMsg = msgs.find(m => m.author.id === interaction.client.user.id && m.embeds[0]?.title?.includes(titre.toUpperCase()));
+      if (rdvMsg) {
+        const newEmbed = EmbedBuilder.from(rdvMsg.embeds[0]).setImage(photoUrl);
+        await rdvMsg.edit({ embeds: [newEmbed] });
+      }
+    } catch {}
+  }
+
+  await interaction.editReply({
+    content: photoUrl ? `✅ RDV **${titre}** posté avec photo dans ${salonLabel} !` : `✅ RDV **${titre}** planifié dans ${salonLabel} !`,
+    components: [],
+  });
+
   // Nettoyer les messages intermédiaires dans le salon
   try {
     const ch = interaction.channel;
