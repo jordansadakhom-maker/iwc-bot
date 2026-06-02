@@ -458,7 +458,16 @@ async function handleSlashCommand(interaction) {
   const { commandName, guild } = interaction; const db = loadDB();
   if (commandName === 'grade-set')         { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleGradeSetCommand?.(interaction); }
   if (commandName === 'hierarchie')        return notionV3.handleHierarchieCommand?.(interaction);
-  if (commandName === 'affaire')           { if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral }); return notionV3.handleAffaireNouvelleButton?.(interaction); }
+  if (commandName === 'affaire') {
+    if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral });
+    const modal = new ModalBuilder().setCustomId('modal_affaire').setTitle('📋 Soumettre une affaire');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('titre').setLabel("Titre de l'affaire").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Proposition alliance, Demande de contrat...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('description').setLabel('Description détaillée').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000).setPlaceholder('Détails, contexte, personnes impliquées...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('urgence').setLabel('Urgence (faible / normale / haute)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('normale')),
+    );
+    return interaction.showModal(modal);
+  }
   if (commandName === 'tresor')            { if (!isOfficierOuDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction et aux Officiers de Terrain.', flags: MessageFlags.Ephemeral }); return notionModules.handleTresorCommand?.(interaction); }
   if (commandName === 'dashboard')         { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleDashboard?.(interaction); }
   if (commandName === 'journal')           { if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral }); return notionModules.handleJournalCommand?.(interaction); }
@@ -1105,7 +1114,15 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId === 'btn_grade_panel')            return notionV3.handleGradePanelButton?.(interaction);
     if (interaction.customId === 'btn_agenda_nouveau')         return notionV3.handleAgendaNouveauButton?.(interaction);
     if (interaction.customId === 'btn_hierarchie_refresh')     { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); await notionV3.updateHierarchieEmbed?.(interaction.guild); return interaction.editReply({ content: '✅ Hiérarchie mise à jour.' }); }
-    if (interaction.customId === 'btn_affaire_nouvelle')       return notionV3.handleAffaireNouvelleButton?.(interaction);
+    if (interaction.customId === 'btn_affaire_nouvelle') {
+      const modal = new ModalBuilder().setCustomId('modal_affaire').setTitle('📋 Soumettre une affaire');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('titre').setLabel("Titre de l'affaire").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Proposition alliance, Demande de contrat...')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('description').setLabel('Description détaillée').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000).setPlaceholder('Détails, contexte, personnes impliquées...')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('urgence').setLabel('Urgence (faible / normale / haute)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('normale')),
+      );
+      return interaction.showModal(modal);
+    }
     if (interaction.customId === 'btn_affaires_resume')        return notionV3.handleAffairesResumeButton?.(interaction);
     if (interaction.customId === 'btn_informateur_rapport')    return notionV3.handleInformateurRapportButton?.(interaction);
     if (interaction.customId === 'setup_appliquer')             return _handleSetupServeur({ ...interaction, options: { getString: () => 'appliquer' } });
@@ -1133,7 +1150,12 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId.startsWith('affaire_non_'))       return notionV3.handleAffaireVote?.(interaction, 'non');
     if (interaction.customId.startsWith('affaire_detail_'))    { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleAffaireDetail?.(interaction); }
     if (interaction.customId === 'btn_nouvelle_transaction')   return notionModules.handleTresorCommand?.(interaction);
-    if (interaction.customId === 'btn_tresor_config')          return notionModules.handleTresorConfigButton?.(interaction);
+    if (interaction.customId === 'btn_tresor_config') {
+      if (!isFondateurOuFleau(interaction.member) && !isOfficierOuDirection(interaction.member)) {
+        return interaction.reply({ content: '❌ Accès réservé à la Direction.', flags: MessageFlags.Ephemeral });
+      }
+      return notionModules.handleTresorConfigButton?.(interaction);
+    }
     if (interaction.customId.startsWith('tresor_valider_'))    return notionModules.handleTresorValidation?.(interaction, 'valider');
     if (interaction.customId.startsWith('op_stop_'))           return notionV5.handleOpStop?.(interaction);
     if (interaction.customId.startsWith('op_lancer_force_')) {
@@ -1346,13 +1368,19 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId === 'op_lieu_select')               return _handleOpLieuSelect(interaction);
     if (interaction.customId === 'agenda_lieu_select')           return _handleAgendaLieuSelect(interaction);
     // [CORRECTION] btn_rdv_modal_ retiré d'ici — c'est un bouton pas un select
-    if (interaction.customId === 'tresor_config_limite_legal')   return notionModules.handleTresorConfigSelect?.(interaction);
+    if (interaction.customId === 'tresor_config_limite_legal') {
+      if (!isFondateurOuFleau(interaction.member) && !isOfficierOuDirection(interaction.member)) return;
+      return notionModules.handleTresorConfigSelect?.(interaction);
+    }
     if (interaction.customId.startsWith('rdv_type_select_'))     return _handleRdvTypeSelect(interaction);
     if (interaction.customId.startsWith('rdv_mode_select_'))     return _handleRdvModeSelect(interaction);
     if (interaction.customId.startsWith('rdv_individuel_select_')) return _handleRdvIndividuelSelect(interaction);
     if (interaction.customId.startsWith('rdv_pole_select_'))     return _handleRdvPoleSelect(interaction);
     if (interaction.customId.startsWith('rdv_lieu_select_'))     return _handleRdvLieuSelect(interaction);
-    if (interaction.customId === 'tresor_config_limite_illegal') return notionModules.handleTresorConfigSelect?.(interaction);
+    if (interaction.customId === 'tresor_config_limite_illegal') {
+      if (!isFondateurOuFleau(interaction.member) && !isOfficierOuDirection(interaction.member)) return;
+      return notionModules.handleTresorConfigSelect?.(interaction);
+    }
     if (interaction.customId === 'absent_duree_select')           return _handleAbsentDureeSelect(interaction);
     if (interaction.customId === 'grade_select_membre')          return notionV3.handleGradeMembreSelect?.(interaction);
     if (interaction.customId === 'grade_select_grade')           return notionV3.handleGradeGradeSelect?.(interaction);
