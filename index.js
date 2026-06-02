@@ -130,10 +130,32 @@ async function archiverContratReponses(guild, contrat, statut, embed) {
     // Chercher si un thread existe déjà pour ce contrat
     let thread = ch.threads?.cache.find(t => t.name.includes(contrat.id));
     if (!thread) {
-      const msg = await ch.send({ embeds: [embed] });
-      try { thread = await msg.startThread({ name: threadName, autoArchiveDuration: 10080 }); } catch {}
-    } else {
+      try {
+        // Chercher dans les threads archivés aussi
+        const archived = await ch.threads.fetchArchived().catch(() => null);
+        if (archived) thread = archived.threads.find(t => t.name.includes(contrat.id));
+      } catch {}
+    }
+    if (!thread) {
+      // Créer un thread sans message parent épinglé
+      try {
+        thread = await ch.threads.create({
+          name: threadName,
+          autoArchiveDuration: 10080,
+          type: 12, // PRIVATE_THREAD ou PUBLIC_THREAD selon le salon
+          reason: `Contrat ${contrat.id}`,
+        });
+      } catch {
+        // Fallback si threads.create non supporté → message + thread
+        const msg = await ch.send({ content: `📋 **${threadName}**` });
+        try { thread = await msg.startThread({ name: threadName, autoArchiveDuration: 10080 }); } catch {}
+      }
+    }
+    if (thread) {
       await thread.send({ embeds: [embed] });
+    } else {
+      // Dernier fallback : envoyer directement dans le salon
+      await ch.send({ embeds: [embed] });
     }
   } catch (e) { console.log('❌ archiverContratReponses error:', e.message); }
 }
@@ -195,8 +217,21 @@ function fmtShort(d) { return !d ? '—' : new Date(d).toLocaleDateString('fr-FR
 function getCh(guild, ...names) {
   for (const name of names) {
     const clean = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const ch = guild.channels.cache.find(c => [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(c.type) && clean(c.name).includes(clean(name)));
-    if (ch) return ch;
+    const cleanName = clean(name);
+    // 1. Cherche exact en priorité
+    const exact = guild.channels.cache.find(c =>
+      [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(c.type) &&
+      clean(c.name) === cleanName
+    );
+    if (exact) return exact;
+    // 2. Fallback includes — mais évite les faux positifs (ex: "logs" dans "patch-note-logs")
+    const partial = guild.channels.cache.find(c =>
+      [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(c.type) &&
+      clean(c.name).includes(cleanName) &&
+      !clean(c.name).includes('patchnote') &&
+      !clean(c.name).includes('patch')
+    );
+    if (partial) return partial;
   }
   return null;
 }
