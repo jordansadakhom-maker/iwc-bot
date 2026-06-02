@@ -258,10 +258,7 @@ function isOfficierOuDirection(member) {
   if (!member) return false;
   return member.roles?.cache?.some(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier', 'Co-Directeur'].some(n => r.name.includes(n))) || false;
 }
-// #logs technique (arrivées, règlement...)
-async function getLogsCh(guild) { let ch = guild.channels.cache.get(CH.LOGS); if (!ch) ch = await guild.channels.fetch(CH.LOGS).catch(() => null); return ch; }
 // #journal-de-bord = destination pour TOUS les logs IC
-// notionV3 utilise getLogsCh → on la redirige vers journal-de-bord
 async function getLogsCh(guild) {
   const journalCh = guild.channels.cache.get('1508756535407542372');
   if (journalCh) return journalCh;
@@ -3580,6 +3577,36 @@ async function _validerModalAbsent(interaction) {
 // [CORRECTION] _checkRetoursAbsence — avec _debloquerEcritureAbsent
 async function _checkRetoursAbsence(guild) {
   const db = loadDB(); const maintenant = new Date(); let changed = false;
+
+  // Activer les absences programmées dont la date de début est arrivée
+  for (const [uid, m] of Object.entries(db.members || {})) {
+    if (!m.absenceProgrammee) continue;
+    const debut = new Date(m.absenceProgrammee.debut);
+    if (debut > maintenant) continue;
+    // Heure venue → activer l'absence
+    console.log(`🔄 Activation absence programmée : ${m.name || uid}`);
+    m.status = 'absent';
+    m.absentJusqu = m.absenceProgrammee.fin;
+    m.absentRaison = m.absenceProgrammee.raison;
+    delete m.absenceProgrammee;
+    changed = true;
+    const membreD = await guild.members.fetch(uid).catch(() => null);
+    if (membreD) {
+      const roleAbsent = guild.roles.cache.get(_ROLE_ABSENT_FINAL);
+      if (roleAbsent) await membreD.roles.add(roleAbsent).catch(() => {});
+    }
+    _syncStatutFicheNotion(uid, 'Absent').catch(() => {});
+    const absCh = getAbsencesCh(guild, membreD);
+    if (absCh) await absCh.send({ embeds: [new EmbedBuilder()
+      .setColor(0xFFA500)
+      .setTitle('🟡 Absence activée automatiquement')
+      .addFields(
+        { name: '👤 Membre', value: `<@${uid}>`, inline: true },
+        { name: '📅 Retour prévu', value: m.absentJusqu ? new Date(m.absentJusqu).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' }) : 'Indéterminé', inline: true },
+      ).setFooter({ text: 'IWC • Absence programmée activée' }).setTimestamp()
+    ]}).catch(() => {});
+  }
+
   for (const [uid, m] of Object.entries(db.members || {})) {
     if (m.status !== 'absent' || !m.absentJusqu) continue;
     if (new Date(m.absentJusqu) > maintenant) continue;
