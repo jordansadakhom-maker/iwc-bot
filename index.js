@@ -423,7 +423,7 @@ async function handleSlashCommand(interaction) {
   const { commandName, guild } = interaction; const db = loadDB();
   if (commandName === 'grade-set')         { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleGradeSetCommand?.(interaction); }
   if (commandName === 'hierarchie')        return notionV3.handleHierarchieCommand?.(interaction);
-  if (commandName === 'affaire')           { if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral }); await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleAffaireNouvelleButton?.(interaction); }
+  if (commandName === 'affaire')           { if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral }); return notionV3.handleAffaireNouvelleButton?.(interaction); }
   if (commandName === 'tresor')            { if (!isOfficierOuDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction et aux Officiers de Terrain.', flags: MessageFlags.Ephemeral }); return notionModules.handleTresorCommand?.(interaction); }
   if (commandName === 'dashboard')         { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleDashboard?.(interaction); }
   if (commandName === 'journal')           { if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral }); return notionModules.handleJournalCommand?.(interaction); }
@@ -1070,8 +1070,8 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId === 'btn_grade_panel')            return notionV3.handleGradePanelButton?.(interaction);
     if (interaction.customId === 'btn_agenda_nouveau')         return notionV3.handleAgendaNouveauButton?.(interaction);
     if (interaction.customId === 'btn_hierarchie_refresh')     { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); await notionV3.updateHierarchieEmbed?.(interaction.guild); return interaction.editReply({ content: '✅ Hiérarchie mise à jour.' }); }
-    if (interaction.customId === 'btn_affaire_nouvelle')       { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleAffaireNouvelleButton?.(interaction); }
-    if (interaction.customId === 'btn_affaires_resume')        { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleAffairesResumeButton?.(interaction); }
+    if (interaction.customId === 'btn_affaire_nouvelle')       return notionV3.handleAffaireNouvelleButton?.(interaction);
+    if (interaction.customId === 'btn_affaires_resume')        return notionV3.handleAffairesResumeButton?.(interaction);
     if (interaction.customId === 'btn_informateur_rapport')    return notionV3.handleInformateurRapportButton?.(interaction);
     if (interaction.customId === 'setup_appliquer')             return _handleSetupServeur({ ...interaction, options: { getString: () => 'appliquer' } });
     if (interaction.customId === 'setup_annuler')               return interaction.update({ content: '❌ Annulé — aucune modification effectuée.', components: [] });
@@ -3570,30 +3570,40 @@ async function _bloquerEcritureAbsent(guild, member) {
 
 async function _debloquerEcritureAbsent(guild, member) {
   try {
-    // 1. Retirer le rôle Absent (méthode principale)
+    if (!member) { console.log('⚠️ _debloquerEcritureAbsent: member null, skip'); return; }
+    if (!guild) { console.log('⚠️ _debloquerEcritureAbsent: guild null, skip'); return; }
+    const memberId = member.id || member;
+    // Récupérer le membre si nécessaire (au cas où c'est juste un ID)
+    let m = member;
+    if (typeof member === 'string' || !member.roles) {
+      m = await guild.members.fetch(memberId).catch(() => null);
+    }
+    // 1. Retirer le rôle Absent
     const roleAbsent = guild.roles.cache.get(_ROLE_ABSENT_FINAL);
-    if (roleAbsent && member.roles?.cache?.has(roleAbsent.id)) {
-      await member.roles.remove(roleAbsent).catch(() => {});
-      console.log(`🔓 Rôle Absent retiré pour ${member.user?.username || member.id}`);
+    if (roleAbsent && m?.roles?.cache?.has(roleAbsent.id)) {
+      await m.roles.remove(roleAbsent).catch(() => {});
+      console.log(`🔓 Rôle Absent retiré pour ${m?.user?.username || memberId}`);
     }
     // 2. Retirer les overrides par membre (fallback)
-    for (const [, ch] of guild.channels.cache) {
-      if (!ch.isTextBased?.()) continue;
-      const perm = ch.permissionOverwrites.cache.get(member.id);
-      if (perm?.deny?.has('SendMessages') || perm?.deny?.has('ViewChannel')) {
-        await ch.permissionOverwrites.delete(member).catch(() => {});
+    if (m) {
+      for (const [, ch] of guild.channels.cache) {
+        if (!ch.isTextBased?.()) continue;
+        const perm = ch.permissionOverwrites.cache.get(memberId);
+        if (perm?.deny?.has('SendMessages') || perm?.deny?.has('ViewChannel')) {
+          await ch.permissionOverwrites.delete(m).catch(() => {});
+        }
       }
     }
     // 3. Nettoyer la DB
     const db = loadDB();
-    if (db._absenceOverrides?.[member.id]) { delete db._absenceOverrides[member.id]; saveDB(db); }
-    if (db.members[member.id]) {
-      db.members[member.id].status = 'actif';
-      db.members[member.id].absentJusqu = null;
-      db.members[member.id].absentRaison = null;
+    if (db._absenceOverrides?.[memberId]) { delete db._absenceOverrides[memberId]; saveDB(db); }
+    if (db.members[memberId]) {
+      db.members[memberId].status = 'actif';
+      db.members[memberId].absentJusqu = null;
+      db.members[memberId].absentRaison = null;
       saveDB(db);
     }
-    console.log(`🔓 Écriture débloquée pour ${member.user?.username || member.id}`);
+    console.log(`🔓 Écriture débloquée pour ${m?.user?.username || memberId}`);
   } catch (e) { console.log('❌ _debloquerEcritureAbsent error:', e.message); }
 }
 
