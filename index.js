@@ -166,6 +166,9 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('fiche').setDescription("Affiche la fiche d'un membre").addStringOption(o => o.setName('nom').setDescription('Nom du personnage').setRequired(true)),
   new SlashCommandBuilder().setName('ops').setDescription('Liste les opérations actives'),
   new SlashCommandBuilder().setName('absent').setDescription('🟡 Déclarer une absence'),
+  new SlashCommandBuilder().setName('notes').setDescription('🕵️ Voir les dernières notes de terrain')
+    .addStringOption(o => o.setName('filtre').setDescription('Filtrer par catégorie ou agent').setRequired(false))
+    .addIntegerOption(o => o.setName('nombre').setDescription('Combien de notes (défaut 10)').setRequired(false)),
   new SlashCommandBuilder().setName('rapport').setDescription('Envoie le rapport quotidien en DM (Direction)'),
   new SlashCommandBuilder().setName('promo').setDescription('Promeut un membre (Direction)').addUserOption(o => o.setName('membre').setDescription('Membre').setRequired(true)).addStringOption(o => o.setName('rang').setDescription('Nouveau rang').setRequired(true).setAutocomplete(true)),
   new SlashCommandBuilder().setName('retro').setDescription('Rétrograde un membre (Direction)').addUserOption(o => o.setName('membre').setDescription('Membre').setRequired(true)).addStringOption(o => o.setName('rang').setDescription('Nouveau rang').setRequired(true).setAutocomplete(true)).addStringOption(o => o.setName('raison').setDescription('Raison (optionnel)').setRequired(false)),
@@ -518,6 +521,45 @@ async function handleSlashCommand(interaction) {
     if (!opsActives.length) { await interaction.reply({ content: '*Aucune opération en cours ou en préparation.*', flags: MessageFlags.Ephemeral }); return; }
     await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('🎯 Opérations actives — IWC').setDescription(opsActives.map(o => [`**${o.name}** — ${o.status === 'en_cours' ? '🟢 En cours' : '🟡 Préparation'}`, `📍 ${o.lieu || '—'} · 👥 ${(o.participants || []).join(', ') || 'Aucun'}`].join('\n')).join('\n\n')).setFooter({ text: `IWC • ${fmtShort(new Date())}` })], ephemeral: false });
     return;
+  }
+
+  if (commandName === 'notes') {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const db = loadDB();
+    let notes = (db.notesTerrain || []).slice();
+    if (notes.length === 0) return interaction.editReply({ content: '📭 Aucune note de terrain enregistrée pour le moment.' });
+
+    const filtre = (interaction.options.getString('filtre') || '').toLowerCase().trim();
+    const nombre = interaction.options.getInteger('nombre') || 10;
+
+    if (filtre) {
+      notes = notes.filter(n =>
+        (n.agent || '').toLowerCase().includes(filtre) ||
+        (n.lieu  || '').toLowerCase().includes(filtre) ||
+        (n.info  || '').toLowerCase().includes(filtre) ||
+        (n.cible || '').toLowerCase().includes(filtre) ||
+        (n.tags  || []).some(t => t.toLowerCase().includes(filtre))
+      );
+    }
+    if (notes.length === 0) return interaction.editReply({ content: `📭 Aucune note ne correspond à « ${filtre} ».` });
+
+    notes = notes.slice(-nombre).reverse();
+    const prioEmoji = { normale: '⬜', importante: '🟡', urgente: '🔴' };
+    const lignes = notes.map(n => {
+      const d = new Date(n.date);
+      const quand = d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      const tags = (n.tags || []).length ? '  ' + n.tags.join(' ') : '';
+      const lieu = n.lieu ? ` 📍${n.lieu}` : '';
+      const cible = n.cible ? ` 🎯${n.cible}` : '';
+      return `${prioEmoji[n.priorite] || '⬜'} **${quand}** · ${n.agent}${cible}${lieu}${tags}\n> ${n.info}`;
+    });
+
+    const embed = new EmbedBuilder()
+      .setColor(0x8B5A2A)
+      .setTitle(`🕵️ Notes de terrain ${filtre ? '— « ' + filtre + ' »' : ''}`)
+      .setDescription(lignes.join('\n\n').slice(0, 4000))
+      .setFooter({ text: `IWC · ${notes.length} note(s) affichée(s) sur ${(db.notesTerrain || []).length} total` });
+    return interaction.editReply({ embeds: [embed] });
   }
 
   if (commandName === 'absent') {
@@ -942,11 +984,34 @@ client.on('messageCreate', async message => {
       // Format attendu : 🎙️||cible||lieu||info||priorite||agent
       if (raw.startsWith('🎙️||')) {
         const parts = raw.replace('🎙️||', '').split('||');
-        const cible = (parts[0] || '').trim();
-        const lieu  = (parts[1] || '').trim();
+        let cible   = (parts[0] || '').trim();
+        let lieu    = (parts[1] || '').trim();
         const info  = (parts[2] || '').trim();
-        const priorite = (parts[3] || 'normale').trim();
+        let priorite = (parts[3] || 'normale').trim();
         const agent = (parts[4] || 'Agent inconnu').trim();
+
+        // ── Détection automatique des tags par mots-clés ──
+        const TAGS = {
+          '🔫 Armes':       ['arme', 'fusil', 'pistolet', 'revolver', 'munition', 'gatling', 'carabine', 'dynamite'],
+          '🩸 Violence':    ['meurtre', 'tué', 'tuer', 'mort', 'bagarre', 'agression', 'tabassé', 'sang', 'cadavre', 'assassin'],
+          '🥃 Trafic':      ['alcool', 'whisky', 'contrebande', 'trafic', 'moonshine', 'drogue', 'opium'],
+          '🤝 Alliance':    ['alliance', 'accord', 'pacte', 'collaboration', 'deal', 'négociation', 'allié'],
+          '💰 Argent':      ['argent', 'dollars', 'rançon', 'braquage', 'banque', "l'or", ' or ', 'magot', 'butin'],
+          '🐎 Bétail':      ['cheval', 'chevaux', 'bétail', 'vache', 'ranch', 'troupeau'],
+          '👮 Loi':         ['shérif', 'sherif', 'marshal', 'prison', 'arrestation', 'mandat', 'agent de loi'],
+          '🕴️ Suspect':    ['suspect', 'louche', 'méfiant', 'caché', 'espionne', 'surveille'],
+        };
+        const infoLower = ' ' + info.toLowerCase() + ' ';
+        const tagsDetectes = [];
+        for (const [tag, mots] of Object.entries(TAGS)) {
+          if (mots.some(m => infoLower.includes(m))) tagsDetectes.push(tag);
+        }
+
+        // ── Priorité auto si mots urgents détectés ──
+        if (/urgent|vite|danger|attaque|maintenant|imm[ée]diat/i.test(info)) priorite = 'urgente';
+        else if (tagsDetectes.includes('🩸 Violence') || tagsDetectes.includes('🔫 Armes')) {
+          if (priorite === 'normale') priorite = 'importante';
+        }
 
         const heure = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
         const dateStr = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -958,14 +1023,92 @@ client.on('messageCreate', async message => {
             ...(cible ? [{ name: '🎯 Cible', value: cible, inline: true }] : []),
             ...(lieu  ? [{ name: '📍 Lieu',  value: lieu,  inline: true }] : []),
             { name: '📋 Information', value: info || '—' },
+            ...(tagsDetectes.length ? [{ name: '🏷️ Catégories', value: tagsDetectes.join('  '), inline: false }] : []),
           )
           .setFooter({ text: `IWC · Informateurs · Priorité : ${priorite}` })
           .setTimestamp();
 
-        // Poster directement dans le salon (pas de fil par personne)
-        await message.channel.send({ embeds: [embed] });
-        console.log(`✅ Note vocale postée par ${agent}`);
-        // Supprimer le message brut du webhook
+        // ── Détection automatique d'un nom de joueur connu ──
+        let cibleDetectee = cible;
+        if (!cibleDetectee) {
+          try {
+            const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, '');
+            const infoNorm = ' ' + norm(info) + ' ';
+            // Construire la liste des noms depuis les membres du serveur
+            const membres = await message.guild.members.fetch().catch(() => null);
+            if (membres) {
+              let meilleurNom = null;
+              let meilleureLongueur = 0;
+              for (const [, mem] of membres) {
+                if (mem.user.bot) continue;
+                const displayName = mem.displayName || mem.user.username;
+                // Nettoyer le nom (enlever les grades/préfixes entre crochets ou avant un tiret)
+                const nomClean = displayName.replace(/^\[[^\]]*\]\s*/, '').replace(/^[^|]*\|\s*/, '').trim();
+                const nomNorm = norm(nomClean);
+                if (nomNorm.length < 3) continue;
+                // Vérifier le nom complet
+                if (infoNorm.includes(' ' + nomNorm + ' ') && nomNorm.length > meilleureLongueur) {
+                  meilleurNom = nomClean; meilleureLongueur = nomNorm.length;
+                }
+                // Vérifier chaque partie du nom (prénom seul, nom seul) si >= 4 lettres
+                for (const partie of nomNorm.split(' ')) {
+                  if (partie.length >= 4 && infoNorm.includes(' ' + partie + ' ') && partie.length > meilleureLongueur) {
+                    meilleurNom = nomClean; meilleureLongueur = partie.length;
+                  }
+                }
+              }
+              if (meilleurNom) cibleDetectee = meilleurNom;
+            }
+          } catch(e) { console.log('⚠️ Détection nom:', e.message); }
+        }
+
+        // ── Poster dans un fil si une cible est detectee, sinon dans le salon ──
+        if (cibleDetectee) {
+          // Ajouter la cible à l'embed si pas deja presente
+          if (!cible) {
+            embed.spliceFields(0, 0, { name: '🎯 Cible détectée', value: cibleDetectee, inline: true });
+          }
+          const ch = message.channel;
+          const threadName = `🎯 ${cibleDetectee}`.slice(0, 100);
+          let thread = null;
+          try {
+            const active = await ch.threads.fetchActive().catch(() => null);
+            if (active) thread = active.threads.find(t => t.name === threadName);
+          } catch {}
+          if (!thread) {
+            try {
+              const archived = await ch.threads.fetchArchived().catch(() => null);
+              if (archived) thread = archived.threads.find(t => t.name === threadName);
+            } catch {}
+          }
+          if (!thread) {
+            try {
+              thread = await ch.threads.create({ name: threadName, autoArchiveDuration: 10080, reason: `Dossier : ${cibleDetectee}` });
+            } catch { thread = ch; }
+          } else if (thread.archived) {
+            await thread.setArchived(false).catch(() => {});
+          }
+          await thread.send({ embeds: [embed] });
+        } else {
+          await message.channel.send({ embeds: [embed] });
+        }
+
+        // ── Stockage local de la note (pour /notes) ──
+        try {
+          const db = loadDB();
+          if (!db.notesTerrain) db.notesTerrain = [];
+          db.notesTerrain.push({
+            agent, lieu, info, priorite,
+            cible: cibleDetectee || '',
+            tags: tagsDetectes,
+            date: new Date().toISOString(),
+          });
+          // Garder les 200 dernières
+          if (db.notesTerrain.length > 200) db.notesTerrain = db.notesTerrain.slice(-200);
+          saveDB(db);
+        } catch(e) { console.log('❌ Stockage note:', e.message); }
+
+        console.log(`✅ Note vocale postée par ${agent} ${tagsDetectes.length ? '[' + tagsDetectes.join(',') + ']' : ''}`);
         await message.delete().catch(() => {});
       }
     } catch(e) { console.log('❌ Webhook note error:', e.message); }
