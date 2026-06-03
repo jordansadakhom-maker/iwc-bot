@@ -206,6 +206,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('purge').setDescription('🗑️ Effacer les messages d\'un salon (Direction)').addIntegerOption(o => o.setName('nombre').setDescription('Nombre de messages à supprimer (1-100, défaut: tous)').setRequired(false).setMinValue(1).setMaxValue(100)),
   new SlashCommandBuilder().setName('annuler-absence').setDescription('🔓 Lever l\'absence d\'un membre (Direction)').addUserOption(o => o.setName('membre').setDescription('Membre dont lever l\'absence').setRequired(true)),
   new SlashCommandBuilder().setName('contrats').setDescription('📜 Voir mes contrats en cours'),
+  new SlashCommandBuilder().setName('contrats-sync').setDescription('🔄 Resynchroniser tous les contrats avec Notion (Direction)'),
   new SlashCommandBuilder().setName('registre').setDescription('📋 Liste des membres actifs (Direction)').addStringOption(o => o.setName('pole').setDescription('Filtrer par pôle').setRequired(false).addChoices({ name: 'Tous', value: 'tous' }, { name: '⚖️ Légal', value: 'legal' }, { name: '🔒 Illégal', value: 'illegal' })).addIntegerOption(o => o.setName('page').setDescription('Page').setRequired(false)),
   new SlashCommandBuilder().setName('op').setDescription('🎯 Détail d\'une opération').addStringOption(o => o.setName('id').setDescription('ID de l\'opération').setRequired(false)),
 ].map(c => c.toJSON());
@@ -475,6 +476,23 @@ async function handleSlashCommand(interaction) {
   if (commandName === 'journal')           { if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral }); return notionModules.handleJournalCommand?.(interaction); }
   if (commandName === 'contrats-archives') { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleContratsArchives?.(interaction); }
   if (commandName === 'contrats')          return _handleMesContrats(interaction);
+  if (commandName === 'contrats-sync') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    if (!process.env.NOTION_CONTRATS_DB) return interaction.editReply({ content: '⚠️ Variable NOTION_CONTRATS_DB manquante dans Render. Ajoute-la d\'abord.' });
+    const db = loadDB();
+    const contrats = db.contrats || [];
+    if (!contrats.length) return interaction.editReply({ content: '📭 Aucun contrat à synchroniser.' });
+    let ok = 0;
+    for (const c of contrats) {
+      try {
+        const signePar = c.status === 'signe' ? (c.signePar || c.clientNom || c.signataire || '') : null;
+        await _syncContratNotion(c, c.status || 'en_attente', signePar);
+        ok++;
+      } catch {}
+    }
+    return interaction.editReply({ content: `🔄 Synchronisation lancée pour **${ok}/${contrats.length}** contrat(s).\nVérifie ta base Notion. Si certains manquent, regarde les logs Render pour le détail.` });
+  }
   if (commandName === 'registre') { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); }
   if (commandName === 'registre')         return _handleRegistre(interaction);
   if (commandName === 'op')               return _handleOpDetail(interaction);
@@ -2548,17 +2566,70 @@ async function _syncMembreNotion(discordId, updates) {
 }
 
 async function _syncContratNotion(contrat, statut, signePar) {
-  const DB = process.env.NOTION_CONTRATS_DB || process.env.NOTION_MEMBRES_DB;
-  if (!DB || !process.env.NOTION_TOKEN) return;
+  if (!process.env.NOTION_TOKEN) { console.log('⚠️ Contrat Notion: NOTION_TOKEN manquant'); return; }
+  const DB = process.env.NOTION_CONTRATS_DB;
+  if (!DB) { console.log('⚠️ Contrat Notion: variable NOTION_CONTRATS_DB manquante dans Render'); return; }
+
   const statutMap = { en_attente: '🟡 En attente', signe: '✅ Signé', refuse: '❌ Refusé', expire: '📁 Expiré' };
-  const props = { 'Référence': { title: [{ text: { content: contrat.id } }] }, 'Objet': { rich_text: [{ text: { content: contrat.objet || '—' } }] }, 'Type': { select: { name: contrat.type === 'emploi' ? '📥 Employeur' : '📤 Prestation' } }, 'Statut': { select: { name: statutMap[statut] || statut } }, 'Rémunération': { rich_text: [{ text: { content: contrat.remuneration || '—' } }] }, 'Partenaire': { rich_text: [{ text: { content: contrat.clientNom || contrat.employeurNom || '—' } }] }, 'Émetteur': { rich_text: [{ text: { content: contrat.emetteurIC || contrat.emetteurNom || contrat.signataire || '—' } }] }, 'Date création': { date: { start: new Date(contrat.createdAt || Date.now()).toISOString().split('T')[0] } } };
-  if (statut === 'signe' && signePar) { props['Signé par'] = { rich_text: [{ text: { content: signePar } }] }; props['Date signature'] = { date: { start: new Date().toISOString().split('T')[0] } }; }
-  if (contrat.dateEcheance) props['Échéance'] = { date: { start: contrat.dateEcheance } };
-  const res = await fetch(`https://api.notion.com/v1/databases/${DB}/query`, { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify({ filter: { property: 'Référence', title: { equals: contrat.id } }, page_size: 1 }) }).catch(() => null);
-  const data = res ? await res.json().catch(() => null) : null;
-  const existing = data?.results?.[0];
-  if (existing) await _notionPatch(existing.id, props); else await _notionCreate(DB, props);
-  console.log(`✅ Contrat Notion MàJ : ${contrat.id} → ${statut}`);
+  // Toutes les proprietes possibles
+  const propsComplet = {
+    'Référence':     { title: [{ text: { content: String(contrat.id || '—') } }] },
+    'Objet':         { rich_text: [{ text: { content: (contrat.objet || '—').slice(0, 1900) } }] },
+    'Type':          { select: { name: contrat.type === 'emploi' ? '📥 Employeur' : '📤 Prestation' } },
+    'Statut':        { select: { name: statutMap[statut] || statut } },
+    'Rémunération':  { rich_text: [{ text: { content: (contrat.remuneration || '—').slice(0, 1900) } }] },
+    'Partenaire':    { rich_text: [{ text: { content: (contrat.clientNom || contrat.employeurNom || '—').slice(0, 1900) } }] },
+    'Émetteur':      { rich_text: [{ text: { content: (contrat.emetteurIC || contrat.emetteurNom || contrat.signataire || '—').slice(0, 1900) } }] },
+    'Date création': { date: { start: new Date(contrat.createdAt || Date.now()).toISOString().split('T')[0] } },
+  };
+  if (statut === 'signe' && signePar) {
+    propsComplet['Signé par'] = { rich_text: [{ text: { content: String(signePar).slice(0, 200) } }] };
+    propsComplet['Date signature'] = { date: { start: new Date().toISOString().split('T')[0] } };
+  }
+  if (contrat.dateEcheance) propsComplet['Échéance'] = { date: { start: contrat.dateEcheance } };
+
+  const headers = { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' };
+
+  // Trouver une page existante pour ce contrat
+  let existing = null;
+  try {
+    const res = await fetch(`https://api.notion.com/v1/databases/${DB}/query`, { method: 'POST', headers, body: JSON.stringify({ filter: { property: 'Référence', title: { equals: String(contrat.id) } }, page_size: 1 }) });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.log(`❌ Contrat Notion: requête base échouée (${res.status}) : ${err.message || ''}`);
+      console.log('   → Vérifie que la base a bien une colonne TITRE nommée "Référence" et qu\'elle est partagée avec l\'intégration.');
+      return;
+    }
+    const data = await res.json().catch(() => null);
+    existing = data?.results?.[0] || null;
+  } catch (e) { console.log('❌ Contrat Notion query:', e.message); return; }
+
+  // Helper d'écriture avec retry minimal si une colonne pose problème
+  async function ecrire(props) {
+    const url = existing ? `https://api.notion.com/v1/pages/${existing.id}` : 'https://api.notion.com/v1/pages';
+    const method = existing ? 'PATCH' : 'POST';
+    const body = existing ? { properties: props } : { parent: { database_id: DB }, properties: props };
+    const res = await fetch(url, { method, headers, body: JSON.stringify(body) });
+    return res;
+  }
+
+  let res = await ecrire(propsComplet);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    console.log(`⚠️ Contrat Notion: écriture complète refusée (${res.status}) : ${err.message || ''}`);
+    // Retry avec seulement les colonnes essentielles (Référence + Statut)
+    const propsMini = { 'Référence': propsComplet['Référence'], 'Statut': propsComplet['Statut'] };
+    res = await ecrire(propsMini);
+    if (!res.ok) {
+      const err2 = await res.json().catch(() => ({}));
+      console.log(`❌ Contrat Notion: échec total (${res.status}) : ${err2.message || ''}`);
+      console.log('   → Cause probable : noms de colonnes différents OU base non partagée avec l\'intégration.');
+      return;
+    }
+    console.log(`✅ Contrat ${contrat.id} écrit en mode minimal (vérifie les noms de colonnes pour le détail complet).`);
+    return;
+  }
+  console.log(`✅ Contrat Notion synchronisé : ${contrat.id} → ${statut}`);
 }
 
 async function _syncAffaireNotion(affaire, decision) {
