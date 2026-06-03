@@ -976,6 +976,42 @@ client.on('messageReactionAdd', async (reaction, user) => {
   }
 });
 
+// ── Génère un rapport structuré via Claude (si clé API présente) ──
+async function genererRapportIA(transcription, agent, lieu) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null; // pas de clé -> on garde la mise en forme classique
+  try {
+    const prompt = `Tu es un officier de renseignement de la compagnie Iron Wolf (univers western RP, 1895).
+Transforme cette transcription orale brute en RAPPORT DE TERRAIN clair et concis.
+Transcription brute : "${transcription}"
+
+Réponds UNIQUEMENT en JSON valide, sans markdown, ce format exact :
+{"resume":"1 phrase qui résume l'essentiel","details":"les faits reformulés proprement en français correct, 1 à 3 phrases","personnes":["noms cités"],"lieu":"lieu si mentionné sinon vide","categories":["mots parmi: Armes, Violence, Trafic, Alliance, Argent, Bétail, Loi, Danger"]}
+Si la transcription est incompréhensible ou vide, mets resume="(inaudible)".`;
+
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-3-5-haiku-20241022',
+        max_tokens: 500,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+    const data = await resp.json();
+    const txt = data?.content?.[0]?.text || '';
+    const clean = txt.replace(/```json|```/g, '').trim();
+    return JSON.parse(clean);
+  } catch (e) {
+    console.log('⚠️ Rapport IA échec:', e.message);
+    return null;
+  }
+}
+
 client.on('messageCreate', async message => {
   // ── Traitement des notes vocales via webhook (AVANT le filtre bot) ──
   if (message.webhookId && message.guild && message.channel.id === '1511491314351472701') {
@@ -1016,17 +1052,48 @@ client.on('messageCreate', async message => {
         const heure = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
         const dateStr = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
         const colors = { normale: 0x8B5A2A, importante: 0xFFA500, urgente: 0xED4245 };
-        const embed = new EmbedBuilder()
-          .setColor(colors[priorite] || colors.normale)
-          .setAuthor({ name: `🕵️ ${agent} · ${heure} · ${dateStr}` })
-          .addFields(
-            ...(cible ? [{ name: '🎯 Cible', value: cible, inline: true }] : []),
-            ...(lieu  ? [{ name: '📍 Lieu',  value: lieu,  inline: true }] : []),
-            { name: '📋 Information', value: info || '—' },
-            ...(tagsDetectes.length ? [{ name: '🏷️ Catégories', value: tagsDetectes.join('  '), inline: false }] : []),
-          )
-          .setFooter({ text: `IWC · Informateurs · Priorité : ${priorite}` })
-          .setTimestamp();
+
+        // ── Tenter un rapport IA structuré (transcription brute = info sans le balisage) ──
+        const transcriptionBrute = info.replace(/\*\*/g, '').replace(/▸/g, '').replace(/🔑.*/s, '').trim();
+        const rapport = await genererRapportIA(transcriptionBrute, agent, lieu);
+
+        let embed;
+        if (rapport && rapport.resume && rapport.resume !== '(inaudible)') {
+          // Catégories IA -> emojis
+          const catEmoji = { Armes: '🔫 Armes', Violence: '🩸 Violence', Trafic: '🥃 Trafic', Alliance: '🤝 Alliance', Argent: '💰 Argent', 'Bétail': '🐎 Bétail', Loi: '👮 Loi', Danger: '🔥 Danger' };
+          const catsR = (rapport.categories || []).map(c => catEmoji[c] || c);
+          const lieuFinal = rapport.lieu || lieu;
+          if (catsR.includes('🩸 Violence') || catsR.includes('🔫 Armes') || catsR.includes('🔥 Danger')) {
+            if (priorite === 'normale') priorite = 'importante';
+          }
+          embed = new EmbedBuilder()
+            .setColor(colors[priorite] || colors.normale)
+            .setTitle('📋 RAPPORT DE TERRAIN')
+            .setAuthor({ name: `🕵️ ${agent} · ${heure} · ${dateStr}` })
+            .setDescription(`*${rapport.resume}*`)
+            .addFields(
+              { name: '📝 Détails', value: (rapport.details || transcriptionBrute).slice(0, 1000) },
+              ...(rapport.personnes && rapport.personnes.length ? [{ name: '👤 Personnes', value: rapport.personnes.join(', '), inline: true }] : []),
+              ...(lieuFinal ? [{ name: '📍 Lieu', value: lieuFinal, inline: true }] : []),
+              ...(catsR.length ? [{ name: '🏷️ Catégories', value: catsR.join('  '), inline: false }] : []),
+            )
+            .setFooter({ text: `IWC · Renseignement · Priorité : ${priorite}` })
+            .setTimestamp();
+          if (rapport.lieu) lieu = rapport.lieu;
+        } else {
+          // Pas d'IA -> mise en forme classique
+          embed = new EmbedBuilder()
+            .setColor(colors[priorite] || colors.normale)
+            .setAuthor({ name: `🕵️ ${agent} · ${heure} · ${dateStr}` })
+            .addFields(
+              ...(cible ? [{ name: '🎯 Cible', value: cible, inline: true }] : []),
+              ...(lieu  ? [{ name: '📍 Lieu',  value: lieu,  inline: true }] : []),
+              { name: '📋 Information', value: info || '—' },
+              ...(tagsDetectes.length ? [{ name: '🏷️ Catégories', value: tagsDetectes.join('  '), inline: false }] : []),
+            )
+            .setFooter({ text: `IWC · Informateurs · Priorité : ${priorite}` })
+            .setTimestamp();
+        }
 
         // ── Détection automatique d'un nom de joueur connu ──
         let cibleDetectee = cible;
