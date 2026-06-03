@@ -2647,16 +2647,17 @@ async function _syncContratNotion(contrat, statut, signePar) {
   if (!DB) { console.log('⚠️ Contrat Notion: variable NOTION_CONTRATS_DB manquante dans Render'); return; }
 
   const statutMap = { en_attente: '🟡 En attente', signe: '✅ Signé', refuse: '❌ Refusé', expire: '📁 Expiré' };
-  // Toutes les proprietes possibles
+  // Types adaptés à la base réelle :
+  // Type, Type de mission, Statut = TEXTE ; Émetteur = SELECT ; Détails = TEXTE
   const propsComplet = {
     'Référence':     { title: [{ text: { content: String(contrat.id || '—') } }] },
     'Objet':         { rich_text: [{ text: { content: (contrat.objet || '—').slice(0, 1900) } }] },
-    'Type':          { select: { name: contrat.type === 'emploi' ? '📥 Employeur' : '📤 Prestation' } },
-    ...(contrat.typeMission ? { 'Type de mission': { select: { name: contrat.typeMission } } } : {}),
-    'Statut':        { select: { name: statutMap[statut] || statut } },
+    'Type':          { rich_text: [{ text: { content: contrat.type === 'emploi' ? '📥 Employeur' : '📤 Prestation' } }] },
+    ...(contrat.typeMission ? { 'Type de mission': { rich_text: [{ text: { content: contrat.typeMission } }] } } : {}),
+    'Statut':        { rich_text: [{ text: { content: statutMap[statut] || statut } }] },
     'Rémunération':  { rich_text: [{ text: { content: (contrat.remuneration || '—').slice(0, 1900) } }] },
     'Partenaire':    { rich_text: [{ text: { content: (contrat.clientNom || contrat.employeurNom || '—').slice(0, 1900) } }] },
-    'Émetteur':      { rich_text: [{ text: { content: (contrat.emetteurIC || contrat.emetteurNom || contrat.signataire || '—').slice(0, 1900) } }] },
+    'Émetteur':      { select: { name: (contrat.emetteurIC || contrat.emetteurNom || contrat.signataire || '—').slice(0, 100) } },
     'Date création': { date: { start: new Date(contrat.createdAt || Date.now()).toISOString().split('T')[0] } },
     ...(contrat.details ? { 'Détails': { rich_text: [{ text: { content: contrat.details.slice(0, 1900) } }] } } : {}),
   };
