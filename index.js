@@ -935,6 +935,43 @@ client.on('messageReactionAdd', async (reaction, user) => {
 });
 
 client.on('messageCreate', async message => {
+  // ── Traitement des notes vocales via webhook (AVANT le filtre bot) ──
+  if (message.webhookId && message.guild && message.channel.id === '1511491314351472701') {
+    try {
+      const raw = message.content;
+      // Format attendu : 🎙️||cible||lieu||info||priorite||agent
+      if (raw.startsWith('🎙️||')) {
+        const parts = raw.replace('🎙️||', '').split('||');
+        const cible = (parts[0] || '').trim();
+        const lieu  = (parts[1] || '').trim();
+        const info  = (parts[2] || '').trim();
+        const priorite = (parts[3] || 'normale').trim();
+        const agent = (parts[4] || 'Agent inconnu').trim();
+
+        const heure = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+        const dateStr = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const colors = { normale: 0x8B5A2A, importante: 0xFFA500, urgente: 0xED4245 };
+        const embed = new EmbedBuilder()
+          .setColor(colors[priorite] || colors.normale)
+          .setAuthor({ name: `🕵️ ${agent} · ${heure} · ${dateStr}` })
+          .addFields(
+            ...(cible ? [{ name: '🎯 Cible', value: cible, inline: true }] : []),
+            ...(lieu  ? [{ name: '📍 Lieu',  value: lieu,  inline: true }] : []),
+            { name: '📋 Information', value: info || '—' },
+          )
+          .setFooter({ text: `IWC · Informateurs · Priorité : ${priorite}` })
+          .setTimestamp();
+
+        // Poster directement dans le salon (pas de fil par personne)
+        await message.channel.send({ embeds: [embed] });
+        console.log(`✅ Note vocale postée par ${agent}`);
+        // Supprimer le message brut du webhook
+        await message.delete().catch(() => {});
+      }
+    } catch(e) { console.log('❌ Webhook note error:', e.message); }
+    return;
+  }
+
   if (message.author.bot || !message.guild) return;
   const absenceHandled = await notionV3.handleAbsenceDetection?.(message);
   if (absenceHandled) return;
