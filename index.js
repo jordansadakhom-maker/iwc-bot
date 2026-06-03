@@ -1987,17 +1987,40 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
 
   if (interaction.isButton() && interaction.customId === 'open_contrat_offre') {
     if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return; }
-    const modal = new ModalBuilder().setCustomId('contrat_offre_modal').setTitle('📤 Nos conditions — Contrat client');
+    // Menu Type de mission AVANT le formulaire
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId('contrat_type_offre')
+      .setPlaceholder('Choisis le type de mission...')
+      .addOptions(
+        { label: 'Protection rapprochée', value: 'Protection rapprochée', emoji: '🛡️' },
+        { label: 'Escorte de convoi',     value: 'Escorte de convoi',     emoji: '🐎' },
+        { label: 'Surveillance / Filature', value: 'Surveillance / Filature', emoji: '👁️' },
+        { label: 'Chasse de prime',       value: 'Chasse de prime',       emoji: '🎯' },
+        { label: 'Récupération de dette', value: 'Récupération de dette', emoji: '💰' },
+        { label: 'Intervention armée',    value: 'Intervention armée',    emoji: '⚔️' },
+        { label: 'Autre (à préciser)',    value: 'Autre',                 emoji: '📦' },
+      );
+    await interaction.reply({ content: '📤 **Type de mission ?**\nChoisis dans la liste, le formulaire s\'ouvrira ensuite.', components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  // Après choix du type (offre) -> ouvrir le formulaire avec le type pré-rempli
+  if (interaction.isStringSelectMenu() && interaction.customId === 'contrat_type_offre') {
+    const typeMission = interaction.values[0];
+    const modal = new ModalBuilder().setCustomId(`contrat_offre_modal::${typeMission}`).setTitle('📤 Nos conditions — Contrat client');
     modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('client_nom').setLabel("Nom / Entreprise du client").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Famille Moreau...')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objet').setLabel('Objet de la mission').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Protection rapprochée...')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('remuneration').setLabel('Notre rémunération souhaitée').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 1500$ + 500$/jour')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('user_id').setLabel('ID Discord du client').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Clic droit → Copier l\'identifiant')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('date_echeance').setLabel('Date d\'échéance (optionnel)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: 2026-08-30')));
     await interaction.showModal(modal); return;
   }
 
-  if (interaction.isModalSubmit() && interaction.customId === 'contrat_offre_modal') {
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('contrat_offre_modal')) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     if (!db.contrats) db.contrats = [];
     const contratId = 'IWC-OF-' + Date.now().toString().slice(-5);
     const emetteurICOffre = db.members[interaction.user.id]?.name || interaction.user.username;
-    const contrat = { id: contratId, type: 'offre', clientNom: interaction.fields.getTextInputValue('client_nom'), emetteurIC: emetteurICOffre, objet: interaction.fields.getTextInputValue('objet'), remuneration: interaction.fields.getTextInputValue('remuneration'), userId: interaction.fields.getTextInputValue('user_id').trim(), dateEcheance: interaction.fields.getTextInputValue('date_echeance') || null, emetteurId: interaction.user.id, emetteurNom: interaction.user.username, status: 'en_attente', createdAt: new Date().toISOString() };
+    const typeMissionOffre = interaction.customId.includes('::') ? interaction.customId.split('::')[1] : '';
+    const objetSaisiOffre = interaction.fields.getTextInputValue('objet');
+    const objetFinalOffre = typeMissionOffre && typeMissionOffre !== 'Autre' ? `${typeMissionOffre} — ${objetSaisiOffre}` : objetSaisiOffre;
+    const contrat = { id: contratId, type: 'offre', typeMission: typeMissionOffre, clientNom: interaction.fields.getTextInputValue('client_nom'), emetteurIC: emetteurICOffre, objet: objetFinalOffre, remuneration: interaction.fields.getTextInputValue('remuneration'), userId: interaction.fields.getTextInputValue('user_id').trim(), dateEcheance: interaction.fields.getTextInputValue('date_echeance') || null, emetteurId: interaction.user.id, emetteurNom: interaction.user.username, status: 'en_attente', createdAt: new Date().toISOString() };
     db.contrats.push(contrat); saveDB(db);
     _syncContratNotion(contrat, 'en_attente').catch(() => {});
     await interaction.editReply({ content: `✅ Contrat **${contratId}** envoyé au client.` });
@@ -2043,17 +2066,38 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
 
   if (interaction.isButton() && interaction.customId === 'open_contrat_emploi') {
     if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return; }
-    const modal = new ModalBuilder().setCustomId('contrat_emploi_modal').setTitle('📥 Contrat employeur — À signer');
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId('contrat_type_emploi')
+      .setPlaceholder('Choisis le type de mission...')
+      .addOptions(
+        { label: 'Protection rapprochée', value: 'Protection rapprochée', emoji: '🛡️' },
+        { label: 'Escorte de convoi',     value: 'Escorte de convoi',     emoji: '🐎' },
+        { label: 'Surveillance / Filature', value: 'Surveillance / Filature', emoji: '👁️' },
+        { label: 'Chasse de prime',       value: 'Chasse de prime',       emoji: '🎯' },
+        { label: 'Récupération de dette', value: 'Récupération de dette', emoji: '💰' },
+        { label: 'Intervention armée',    value: 'Intervention armée',    emoji: '⚔️' },
+        { label: 'Autre (à préciser)',    value: 'Autre',                 emoji: '📦' },
+      );
+    await interaction.reply({ content: '📥 **Type de mission ?**\nChoisis dans la liste, le formulaire s\'ouvrira ensuite.', components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (interaction.isStringSelectMenu() && interaction.customId === 'contrat_type_emploi') {
+    const typeMission = interaction.values[0];
+    const modal = new ModalBuilder().setCustomId(`contrat_emploi_modal::${typeMission}`).setTitle('📥 Contrat employeur — À signer');
     modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('employeur_nom').setLabel("Nom de l'employeur").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Société Moreau...')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objet').setLabel('Objet de la mission').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Protection du convoi...')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('remuneration').setLabel('Rémunération proposée').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 2000$ à la livraison')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('user_id').setLabel("ID Discord de l'employeur").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Clic droit → Copier l'identifiant")), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('date_echeance').setLabel('Date d\'échéance (optionnel)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: 2026-08-30')));
     await interaction.showModal(modal); return;
   }
 
-  if (interaction.isModalSubmit() && interaction.customId === 'contrat_emploi_modal') {
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('contrat_emploi_modal')) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     if (!db.contrats) db.contrats = [];
     const contratId = 'IWC-EM-' + Date.now().toString().slice(-5);
     const signataireICEmploi = db.members[interaction.user.id]?.name || interaction.user.username;
-    const contrat = { id: contratId, type: 'emploi', employeurNom: interaction.fields.getTextInputValue('employeur_nom'), emetteurIC: signataireICEmploi, objet: interaction.fields.getTextInputValue('objet'), remuneration: interaction.fields.getTextInputValue('remuneration'), userId: interaction.fields.getTextInputValue('user_id').trim(), dateEcheance: interaction.fields.getTextInputValue('date_echeance') || null, signataire: interaction.user.username, signataireId: interaction.user.id, status: 'en_attente', createdAt: new Date().toISOString() };
+    const typeMissionEmploi = interaction.customId.includes('::') ? interaction.customId.split('::')[1] : '';
+    const objetSaisiEmploi = interaction.fields.getTextInputValue('objet');
+    const objetFinalEmploi = typeMissionEmploi && typeMissionEmploi !== 'Autre' ? `${typeMissionEmploi} — ${objetSaisiEmploi}` : objetSaisiEmploi;
+    const contrat = { id: contratId, type: 'emploi', typeMission: typeMissionEmploi, employeurNom: interaction.fields.getTextInputValue('employeur_nom'), emetteurIC: signataireICEmploi, objet: objetFinalEmploi, remuneration: interaction.fields.getTextInputValue('remuneration'), userId: interaction.fields.getTextInputValue('user_id').trim(), dateEcheance: interaction.fields.getTextInputValue('date_echeance') || null, signataire: interaction.user.username, signataireId: interaction.user.id, status: 'en_attente', createdAt: new Date().toISOString() };
     db.contrats.push(contrat); saveDB(db);
     _syncContratNotion(contrat, 'en_attente').catch(() => {});
     await interaction.editReply({ content: `📋 Contrat **${contratId}** créé.` });
@@ -2576,6 +2620,7 @@ async function _syncContratNotion(contrat, statut, signePar) {
     'Référence':     { title: [{ text: { content: String(contrat.id || '—') } }] },
     'Objet':         { rich_text: [{ text: { content: (contrat.objet || '—').slice(0, 1900) } }] },
     'Type':          { select: { name: contrat.type === 'emploi' ? '📥 Employeur' : '📤 Prestation' } },
+    ...(contrat.typeMission ? { 'Type de mission': { select: { name: contrat.typeMission } } } : {}),
     'Statut':        { select: { name: statutMap[statut] || statut } },
     'Rémunération':  { rich_text: [{ text: { content: (contrat.remuneration || '—').slice(0, 1900) } }] },
     'Partenaire':    { rich_text: [{ text: { content: (contrat.clientNom || contrat.employeurNom || '—').slice(0, 1900) } }] },
