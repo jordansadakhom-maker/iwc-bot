@@ -169,7 +169,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('notes').setDescription('🕵️ Voir les dernières notes de terrain')
     .addStringOption(o => o.setName('filtre').setDescription('Filtrer par catégorie ou agent').setRequired(false))
     .addIntegerOption(o => o.setName('nombre').setDescription('Combien de notes (défaut 10)').setRequired(false)),
-  new SlashCommandBuilder().setName('rapport').setDescription('🧠 Synthèse IA des infos sur un sujet ou une personne')
+  new SlashCommandBuilder().setName('synthese').setDescription('🧠 Synthèse IA des infos sur un sujet ou une personne')
     .addStringOption(o => o.setName('sujet').setDescription('Nom de personne, lieu, ou thème').setRequired(true)),
   new SlashCommandBuilder().setName('rapport').setDescription('Envoie le rapport quotidien en DM (Direction)'),
   new SlashCommandBuilder().setName('promo').setDescription('Promeut un membre (Direction)').addUserOption(o => o.setName('membre').setDescription('Membre').setRequired(true)).addStringOption(o => o.setName('rang').setDescription('Nouveau rang').setRequired(true).setAutocomplete(true)),
@@ -207,6 +207,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('annuler-absence').setDescription('🔓 Lever l\'absence d\'un membre (Direction)').addUserOption(o => o.setName('membre').setDescription('Membre dont lever l\'absence').setRequired(true)),
   new SlashCommandBuilder().setName('contrats').setDescription('📜 Voir mes contrats en cours'),
   new SlashCommandBuilder().setName('contrats-sync').setDescription('🔄 Resynchroniser tous les contrats avec Notion (Direction)'),
+  new SlashCommandBuilder().setName('notion-test').setDescription('🔍 Tester la connexion Notion des contrats (Direction)'),
   new SlashCommandBuilder().setName('registre').setDescription('📋 Liste des membres actifs (Direction)').addStringOption(o => o.setName('pole').setDescription('Filtrer par pôle').setRequired(false).addChoices({ name: 'Tous', value: 'tous' }, { name: '⚖️ Légal', value: 'legal' }, { name: '🔒 Illégal', value: 'illegal' })).addIntegerOption(o => o.setName('page').setDescription('Page').setRequired(false)),
   new SlashCommandBuilder().setName('op').setDescription('🎯 Détail d\'une opération').addStringOption(o => o.setName('id').setDescription('ID de l\'opération').setRequired(false)),
 ].map(c => c.toJSON());
@@ -476,6 +477,37 @@ async function handleSlashCommand(interaction) {
   if (commandName === 'journal')           { if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral }); return notionModules.handleJournalCommand?.(interaction); }
   if (commandName === 'contrats-archives') { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleContratsArchives?.(interaction); }
   if (commandName === 'contrats')          return _handleMesContrats(interaction);
+  if (commandName === 'notion-test') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const lignes = [];
+    lignes.push(process.env.NOTION_TOKEN ? '✅ NOTION_TOKEN présent' : '❌ NOTION_TOKEN MANQUANT dans Render');
+    lignes.push(process.env.NOTION_CONTRATS_DB ? `✅ NOTION_CONTRATS_DB présent` : '❌ NOTION_CONTRATS_DB MANQUANT dans Render');
+    if (process.env.NOTION_TOKEN && process.env.NOTION_CONTRATS_DB) {
+      try {
+        const res = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_CONTRATS_DB}`, {
+          headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28' },
+        });
+        if (res.ok) {
+          const d = await res.json();
+          const cols = Object.keys(d.properties || {});
+          lignes.push('✅ Base Notion accessible !');
+          lignes.push(`📋 Colonnes trouvées : ${cols.join(', ')}`);
+          const attendues = ['Référence','Objet','Type','Statut','Rémunération','Partenaire','Émetteur','Date création'];
+          const manquantes = attendues.filter(c => !cols.includes(c));
+          if (manquantes.length) lignes.push(`⚠️ Colonnes manquantes : ${manquantes.join(', ')}`);
+          else lignes.push('✅ Toutes les colonnes essentielles sont présentes.');
+        } else {
+          const err = await res.json().catch(() => ({}));
+          if (res.status === 404) lignes.push('❌ Base introuvable (404) : soit l\'ID est faux, soit la base n\'est PAS partagée avec l\'intégration Notion.');
+          else if (res.status === 401) lignes.push('❌ Token refusé (401) : le NOTION_TOKEN est invalide.');
+          else lignes.push(`❌ Erreur ${res.status} : ${err.message || 'inconnue'}`);
+        }
+      } catch (e) { lignes.push(`❌ Erreur réseau : ${e.message}`); }
+    }
+    return interaction.editReply({ content: '🔍 **Diagnostic Notion (contrats)**\n\n' + lignes.join('\n') });
+  }
+
   if (commandName === 'contrats-sync') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -543,7 +575,7 @@ async function handleSlashCommand(interaction) {
     return;
   }
 
-  if (commandName === 'rapport') {
+  if (commandName === 'synthese') {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     if (!process.env.ANTHROPIC_API_KEY) {
       return interaction.editReply({ content: '⚠️ La synthèse IA nécessite une clé API (ANTHROPIC_API_KEY) configurée sur le serveur.' });
@@ -2008,7 +2040,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
   if (interaction.isStringSelectMenu() && interaction.customId === 'contrat_type_offre') {
     const typeMission = interaction.values[0];
     const modal = new ModalBuilder().setCustomId(`contrat_offre_modal::${typeMission}`).setTitle('📤 Nos conditions — Contrat client');
-    modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('client_nom').setLabel("Nom / Entreprise du client").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Famille Moreau...')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objet').setLabel('Objet de la mission').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Protection rapprochée...')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('remuneration').setLabel('Notre rémunération souhaitée').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 1500$ + 500$/jour')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('user_id').setLabel('ID Discord du client').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Clic droit → Copier l\'identifiant')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('date_echeance').setLabel('Date d\'échéance (optionnel)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: 2026-08-30')));
+    modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('client_nom').setLabel("Nom / Entreprise du client").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Famille Moreau...')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objet').setLabel('Objet de la mission').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Protection rapprochée...')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('remuneration').setLabel('Notre rémunération souhaitée').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 1500$ + 500$/jour')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('user_id').setLabel('ID Discord du client').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Clic droit → Copier l\'identifiant')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Détails / conditions / échéance').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setPlaceholder('Échéance (ex: 2026-08-30), conditions, lieu, nb d\'agents, infos utiles...')));
     await interaction.showModal(modal); return;
   }
 
@@ -2020,7 +2052,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const typeMissionOffre = interaction.customId.includes('::') ? interaction.customId.split('::')[1] : '';
     const objetSaisiOffre = interaction.fields.getTextInputValue('objet');
     const objetFinalOffre = typeMissionOffre && typeMissionOffre !== 'Autre' ? `${typeMissionOffre} — ${objetSaisiOffre}` : objetSaisiOffre;
-    const contrat = { id: contratId, type: 'offre', typeMission: typeMissionOffre, clientNom: interaction.fields.getTextInputValue('client_nom'), emetteurIC: emetteurICOffre, objet: objetFinalOffre, remuneration: interaction.fields.getTextInputValue('remuneration'), userId: interaction.fields.getTextInputValue('user_id').trim(), dateEcheance: interaction.fields.getTextInputValue('date_echeance') || null, emetteurId: interaction.user.id, emetteurNom: interaction.user.username, status: 'en_attente', createdAt: new Date().toISOString() };
+    const contrat = { id: contratId, type: 'offre', typeMission: typeMissionOffre, clientNom: interaction.fields.getTextInputValue('client_nom'), emetteurIC: emetteurICOffre, objet: objetFinalOffre, remuneration: interaction.fields.getTextInputValue('remuneration'), userId: interaction.fields.getTextInputValue('user_id').trim(), details: interaction.fields.getTextInputValue('details') || '', dateEcheance: (interaction.fields.getTextInputValue('details') || '').match(/\d{4}-\d{2}-\d{2}/)?.[0] || null, emetteurId: interaction.user.id, emetteurNom: interaction.user.username, status: 'en_attente', createdAt: new Date().toISOString() };
     db.contrats.push(contrat); saveDB(db);
     _syncContratNotion(contrat, 'en_attente').catch(() => {});
     await interaction.editReply({ content: `✅ Contrat **${contratId}** envoyé au client.` });
@@ -2085,7 +2117,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
   if (interaction.isStringSelectMenu() && interaction.customId === 'contrat_type_emploi') {
     const typeMission = interaction.values[0];
     const modal = new ModalBuilder().setCustomId(`contrat_emploi_modal::${typeMission}`).setTitle('📥 Contrat employeur — À signer');
-    modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('employeur_nom').setLabel("Nom de l'employeur").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Société Moreau...')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objet').setLabel('Objet de la mission').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Protection du convoi...')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('remuneration').setLabel('Rémunération proposée').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 2000$ à la livraison')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('user_id').setLabel("ID Discord de l'employeur").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Clic droit → Copier l'identifiant")), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('date_echeance').setLabel('Date d\'échéance (optionnel)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: 2026-08-30')));
+    modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('employeur_nom').setLabel("Nom de l'employeur").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Société Moreau...')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objet').setLabel('Objet de la mission').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Protection du convoi...')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('remuneration').setLabel('Rémunération proposée').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 2000$ à la livraison')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('user_id').setLabel("ID Discord de l'employeur").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Clic droit → Copier l'identifiant")), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Détails / conditions / échéance').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setPlaceholder('Échéance (ex: 2026-08-30), conditions, lieu, infos utiles...')));
     await interaction.showModal(modal); return;
   }
 
@@ -2097,7 +2129,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const typeMissionEmploi = interaction.customId.includes('::') ? interaction.customId.split('::')[1] : '';
     const objetSaisiEmploi = interaction.fields.getTextInputValue('objet');
     const objetFinalEmploi = typeMissionEmploi && typeMissionEmploi !== 'Autre' ? `${typeMissionEmploi} — ${objetSaisiEmploi}` : objetSaisiEmploi;
-    const contrat = { id: contratId, type: 'emploi', typeMission: typeMissionEmploi, employeurNom: interaction.fields.getTextInputValue('employeur_nom'), emetteurIC: signataireICEmploi, objet: objetFinalEmploi, remuneration: interaction.fields.getTextInputValue('remuneration'), userId: interaction.fields.getTextInputValue('user_id').trim(), dateEcheance: interaction.fields.getTextInputValue('date_echeance') || null, signataire: interaction.user.username, signataireId: interaction.user.id, status: 'en_attente', createdAt: new Date().toISOString() };
+    const contrat = { id: contratId, type: 'emploi', typeMission: typeMissionEmploi, employeurNom: interaction.fields.getTextInputValue('employeur_nom'), emetteurIC: signataireICEmploi, objet: objetFinalEmploi, remuneration: interaction.fields.getTextInputValue('remuneration'), userId: interaction.fields.getTextInputValue('user_id').trim(), details: interaction.fields.getTextInputValue('details') || '', dateEcheance: (interaction.fields.getTextInputValue('details') || '').match(/\d{4}-\d{2}-\d{2}/)?.[0] || null, signataire: interaction.user.username, signataireId: interaction.user.id, status: 'en_attente', createdAt: new Date().toISOString() };
     db.contrats.push(contrat); saveDB(db);
     _syncContratNotion(contrat, 'en_attente').catch(() => {});
     await interaction.editReply({ content: `📋 Contrat **${contratId}** créé.` });
@@ -2626,6 +2658,7 @@ async function _syncContratNotion(contrat, statut, signePar) {
     'Partenaire':    { rich_text: [{ text: { content: (contrat.clientNom || contrat.employeurNom || '—').slice(0, 1900) } }] },
     'Émetteur':      { rich_text: [{ text: { content: (contrat.emetteurIC || contrat.emetteurNom || contrat.signataire || '—').slice(0, 1900) } }] },
     'Date création': { date: { start: new Date(contrat.createdAt || Date.now()).toISOString().split('T')[0] } },
+    ...(contrat.details ? { 'Détails': { rich_text: [{ text: { content: contrat.details.slice(0, 1900) } }] } } : {}),
   };
   if (statut === 'signe' && signePar) {
     propsComplet['Signé par'] = { rich_text: [{ text: { content: String(signePar).slice(0, 200) } }] };
