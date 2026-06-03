@@ -169,6 +169,8 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('notes').setDescription('🕵️ Voir les dernières notes de terrain')
     .addStringOption(o => o.setName('filtre').setDescription('Filtrer par catégorie ou agent').setRequired(false))
     .addIntegerOption(o => o.setName('nombre').setDescription('Combien de notes (défaut 10)').setRequired(false)),
+  new SlashCommandBuilder().setName('rapport').setDescription('🧠 Synthèse IA des infos sur un sujet ou une personne')
+    .addStringOption(o => o.setName('sujet').setDescription('Nom de personne, lieu, ou thème').setRequired(true)),
   new SlashCommandBuilder().setName('rapport').setDescription('Envoie le rapport quotidien en DM (Direction)'),
   new SlashCommandBuilder().setName('promo').setDescription('Promeut un membre (Direction)').addUserOption(o => o.setName('membre').setDescription('Membre').setRequired(true)).addStringOption(o => o.setName('rang').setDescription('Nouveau rang').setRequired(true).setAutocomplete(true)),
   new SlashCommandBuilder().setName('retro').setDescription('Rétrograde un membre (Direction)').addUserOption(o => o.setName('membre').setDescription('Membre').setRequired(true)).addStringOption(o => o.setName('rang').setDescription('Nouveau rang').setRequired(true).setAutocomplete(true)).addStringOption(o => o.setName('raison').setDescription('Raison (optionnel)').setRequired(false)),
@@ -521,6 +523,63 @@ async function handleSlashCommand(interaction) {
     if (!opsActives.length) { await interaction.reply({ content: '*Aucune opération en cours ou en préparation.*', flags: MessageFlags.Ephemeral }); return; }
     await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('🎯 Opérations actives — IWC').setDescription(opsActives.map(o => [`**${o.name}** — ${o.status === 'en_cours' ? '🟢 En cours' : '🟡 Préparation'}`, `📍 ${o.lieu || '—'} · 👥 ${(o.participants || []).join(', ') || 'Aucun'}`].join('\n')).join('\n\n')).setFooter({ text: `IWC • ${fmtShort(new Date())}` })], ephemeral: false });
     return;
+  }
+
+  if (commandName === 'rapport') {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return interaction.editReply({ content: '⚠️ La synthèse IA nécessite une clé API (ANTHROPIC_API_KEY) configurée sur le serveur.' });
+    }
+    const sujet = interaction.options.getString('sujet').trim();
+    const db = loadDB();
+    const notes = (db.notesTerrain || []);
+    if (notes.length === 0) return interaction.editReply({ content: '📭 Aucune note de terrain enregistrée.' });
+
+    const sujetNorm = sujet.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const pertinentes = notes.filter(n => {
+      const blob = `${n.info || ''} ${n.cible || ''} ${n.lieu || ''} ${n.agent || ''}`.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      return blob.includes(sujetNorm);
+    });
+    if (pertinentes.length === 0) return interaction.editReply({ content: `📭 Aucune note ne mentionne « ${sujet} ».` });
+
+    // Construire le corpus pour l'IA
+    const corpus = pertinentes.slice(-40).map(n => {
+      const d = new Date(n.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+      return `[${d}] (agent ${n.agent}${n.lieu ? ', ' + n.lieu : ''}) ${(n.info || '').replace(/\*\*/g, '').replace(/▸/g, '').replace(/🔑.*/s, '').trim()}`;
+    }).join('\n');
+
+    try {
+      const prompt = `Tu es un officier de renseignement de la compagnie Iron Wolf (western RP, 1895).
+Voici toutes les notes de terrain mentionnant « ${sujet} » :
+
+${corpus}
+
+Rédige une SYNTHÈSE de renseignement claire et structurée sur ${sujet}. Format en texte simple (pas de markdown lourd) :
+- Qui/Quoi c'est (si identifiable)
+- Faits marquants observés (les plus importants)
+- Personnes/lieux associés
+- Niveau de menace estimé (faible / moyen / élevé) avec justification courte
+Sois concis et factuel, base-toi UNIQUEMENT sur les notes. Maximum 250 mots.`;
+
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: 'claude-3-5-haiku-20241022', max_tokens: 700, messages: [{ role: 'user', content: prompt }] }),
+      });
+      const data = await resp.json();
+      const synthese = data?.content?.[0]?.text || 'Synthèse indisponible.';
+
+      const embed = new EmbedBuilder()
+        .setColor(0x8B5A2A)
+        .setTitle(`🧠 Synthèse de renseignement — ${sujet}`)
+        .setDescription(synthese.slice(0, 4000))
+        .setFooter({ text: `IWC · Basé sur ${pertinentes.length} note(s)` })
+        .setTimestamp();
+      return interaction.editReply({ embeds: [embed] });
+    } catch (e) {
+      console.log('❌ /rapport IA:', e.message);
+      return interaction.editReply({ content: '❌ Erreur lors de la génération de la synthèse.' });
+    }
   }
 
   if (commandName === 'notes') {
@@ -976,6 +1035,56 @@ client.on('messageReactionAdd', async (reaction, user) => {
   }
 });
 
+// ── Briefing renseignement quotidien (synthèse IA de la journée) ──
+async function postBriefingRenseignement(guild) {
+  if (!process.env.ANTHROPIC_API_KEY) return;
+  const db = loadDB();
+  const notes = db.notesTerrain || [];
+  // Notes des dernières 24h
+  const depuis = Date.now() - 24 * 60 * 60 * 1000;
+  const dujour = notes.filter(n => new Date(n.date).getTime() >= depuis);
+  if (dujour.length === 0) return; // rien à rapporter
+
+  const corpus = dujour.map(n => {
+    const h = new Date(n.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    return `[${h}] (${n.agent}${n.lieu ? ', ' + n.lieu : ''}) ${(n.info || '').replace(/\*\*/g, '').replace(/▸/g, '').replace(/🔑.*/s, '').trim()}`;
+  }).join('\n');
+
+  let synthese = '';
+  try {
+    const prompt = `Tu es l'officier de renseignement en chef de la compagnie Iron Wolf (western RP, 1895).
+Voici toutes les notes de terrain des dernières 24h :
+
+${corpus}
+
+Rédige le BRIEFING QUOTIDIEN de renseignement. Texte simple, structuré et concis :
+- Résumé de la journée (1-2 phrases)
+- Événements clés (les plus importants)
+- Personnes à surveiller
+- Menaces / points d'attention
+Base-toi UNIQUEMENT sur les notes. Maximum 300 mots.`;
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-3-5-haiku-20241022', max_tokens: 800, messages: [{ role: 'user', content: prompt }] }),
+    });
+    const data = await resp.json();
+    synthese = data?.content?.[0]?.text || '';
+  } catch (e) { console.log('❌ Briefing IA:', e.message); return; }
+  if (!synthese) return;
+
+  const embed = new EmbedBuilder()
+    .setColor(0x8B5A2A)
+    .setTitle('📰 BRIEFING QUOTIDIEN — Renseignement')
+    .setDescription(synthese.slice(0, 4000))
+    .setFooter({ text: `IWC · ${dujour.length} note(s) sur 24h · ${fmtShort(new Date())}` })
+    .setTimestamp();
+
+  // Poster dans le salon notes vocales (ou #informateurs en secours)
+  const ch = guild.channels.cache.get('1511491314351472701') || guild.channels.cache.get(SALON_HARDCODED.INFORMATEURS);
+  if (ch) await ch.send({ embeds: [embed] }).catch(() => {});
+}
+
 // ── Génère un rapport structuré via Claude (si clé API présente) ──
 async function genererRapportIA(transcription, agent, lieu) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -986,7 +1095,7 @@ Transforme cette transcription orale brute en RAPPORT DE TERRAIN clair et concis
 Transcription brute : "${transcription}"
 
 Réponds UNIQUEMENT en JSON valide, sans markdown, ce format exact :
-{"resume":"1 phrase qui résume l'essentiel","details":"les faits reformulés proprement en français correct, 1 à 3 phrases","personnes":["noms cités"],"lieu":"lieu si mentionné sinon vide","categories":["mots parmi: Armes, Violence, Trafic, Alliance, Argent, Bétail, Loi, Danger"]}
+{"resume":"1 phrase qui résume l'essentiel","details":"les faits reformulés proprement en français correct, 1 à 3 phrases","personnes":["noms cités"],"lieu":"lieu si mentionné sinon vide","categories":["mots parmi: Armes, Violence, Trafic, Alliance, Argent, Bétail, Loi, Danger"],"menace":"un seul mot parmi: faible, moyen, eleve"}
 Si la transcription est incompréhensible ou vide, mets resume="(inaudible)".`;
 
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
@@ -1063,7 +1172,12 @@ client.on('messageCreate', async message => {
           const catEmoji = { Armes: '🔫 Armes', Violence: '🩸 Violence', Trafic: '🥃 Trafic', Alliance: '🤝 Alliance', Argent: '💰 Argent', 'Bétail': '🐎 Bétail', Loi: '👮 Loi', Danger: '🔥 Danger' };
           const catsR = (rapport.categories || []).map(c => catEmoji[c] || c);
           const lieuFinal = rapport.lieu || lieu;
-          if (catsR.includes('🩸 Violence') || catsR.includes('🔫 Armes') || catsR.includes('🔥 Danger')) {
+          // Niveau de menace -> priorité + couleur
+          const menace = (rapport.menace || '').toLowerCase();
+          const menaceAffiche = { faible: '🟢 Faible', moyen: '🟡 Moyen', eleve: '🔴 Élevé' }[menace] || '';
+          if (menace === 'eleve') priorite = 'urgente';
+          else if (menace === 'moyen' && priorite === 'normale') priorite = 'importante';
+          else if (catsR.includes('🩸 Violence') || catsR.includes('🔫 Armes') || catsR.includes('🔥 Danger')) {
             if (priorite === 'normale') priorite = 'importante';
           }
           embed = new EmbedBuilder()
@@ -1075,6 +1189,7 @@ client.on('messageCreate', async message => {
               { name: '📝 Détails', value: (rapport.details || transcriptionBrute).slice(0, 1000) },
               ...(rapport.personnes && rapport.personnes.length ? [{ name: '👤 Personnes', value: rapport.personnes.join(', '), inline: true }] : []),
               ...(lieuFinal ? [{ name: '📍 Lieu', value: lieuFinal, inline: true }] : []),
+              ...(menaceAffiche ? [{ name: '⚠️ Menace', value: menaceAffiche, inline: true }] : []),
               ...(catsR.length ? [{ name: '🏷️ Catégories', value: catsR.join('  '), inline: false }] : []),
             )
             .setFooter({ text: `IWC · Renseignement · Priorité : ${priorite}` })
@@ -1095,8 +1210,13 @@ client.on('messageCreate', async message => {
             .setTimestamp();
         }
 
-        // ── Détection automatique d'un nom de joueur connu ──
+        // ── Cible : priorité aux noms extraits par l'IA (plus fiable) ──
         let cibleDetectee = cible;
+        if (!cibleDetectee && rapport && rapport.personnes && rapport.personnes.length) {
+          // Prendre le premier nom valable (>= 3 lettres)
+          const nomIA = rapport.personnes.find(p => p && p.trim().length >= 3);
+          if (nomIA) cibleDetectee = nomIA.trim();
+        }
         if (!cibleDetectee) {
           try {
             const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, '');
@@ -1127,6 +1247,28 @@ client.on('messageCreate', async message => {
               if (meilleurNom) cibleDetectee = meilleurNom;
             }
           } catch(e) { console.log('⚠️ Détection nom:', e.message); }
+        }
+
+        // ── Détection de doublon : note très similaire dans les 10 dernières minutes ? ──
+        let estDoublon = false;
+        try {
+          const dbDup = loadDB();
+          const recent = (dbDup.notesTerrain || []).filter(n => Date.now() - new Date(n.date).getTime() < 10 * 60 * 1000);
+          const normTxt = s => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 3);
+          const motsNouveau = new Set(normTxt(info));
+          for (const n of recent) {
+            if (n.agent === agent) continue; // un même agent peut répéter, on cible les doublons inter-agents
+            const motsAncien = normTxt(n.info);
+            if (motsAncien.length === 0) continue;
+            const communs = motsAncien.filter(w => motsNouveau.has(w)).length;
+            const ratio = communs / Math.max(motsAncien.length, motsNouveau.size);
+            if (ratio > 0.6) { estDoublon = true; break; } // >60% de mots communs = doublon probable
+          }
+        } catch {}
+
+        if (estDoublon) {
+          // Ajouter une mention discrète plutôt qu'un nouveau rapport complet
+          embed.setFooter({ text: `IWC · Renseignement · Priorité : ${priorite} · ⚠️ Recoupe une info déjà signalée` });
         }
 
         // ── Poster dans un fil si une cible est detectee, sinon dans le salon ──
@@ -1174,6 +1316,26 @@ client.on('messageCreate', async message => {
           if (db.notesTerrain.length > 200) db.notesTerrain = db.notesTerrain.slice(-200);
           saveDB(db);
         } catch(e) { console.log('❌ Stockage note:', e.message); }
+
+        // ── Synthèse Notion (si base configurée) ──
+        if (process.env.NOTION_RENSEIGNEMENTS_DB) {
+          try {
+            const catsTexte = (rapport && rapport.categories ? rapport.categories : tagsDetectes).join(', ');
+            const resumeTexte = (rapport && rapport.resume) ? rapport.resume : info.slice(0, 200);
+            const detailsTexte = (rapport && rapport.details) ? rapport.details : info;
+            await _notionCreate(process.env.NOTION_RENSEIGNEMENTS_DB, {
+              'Titre':    { title: [{ text: { content: (resumeTexte || 'Note de terrain').slice(0, 100) } }] },
+              'Agent':    { rich_text: [{ text: { content: agent } }] },
+              'Cible':    { rich_text: [{ text: { content: cibleDetectee || '—' } }] },
+              'Lieu':     { rich_text: [{ text: { content: lieu || '—' } }] },
+              'Détails':  { rich_text: [{ text: { content: (detailsTexte || '—').slice(0, 1900) } }] },
+              'Catégories': { rich_text: [{ text: { content: catsTexte || '—' } }] },
+              'Priorité': { select: { name: priorite } },
+              'Date':     { date: { start: new Date().toISOString() } },
+            });
+            console.log('✅ Renseignement synchronisé sur Notion');
+          } catch(e) { console.log('❌ Sync Notion renseignement:', e.message); }
+        }
 
         console.log(`✅ Note vocale postée par ${agent} ${tagsDetectes.length ? '[' + tagsDetectes.join(',') + ']' : ''}`);
         await message.delete().catch(() => {});
@@ -1978,6 +2140,11 @@ client.once('clientReady', async () => {
     for (const g of client.guilds.cache.values()) await notionV4.checkDashboardAlertes?.(g).catch(() => {});
   });
   cron.schedule('0 9 * * *',  async () => { for (const g of client.guilds.cache.values()) await postDailyAgenda(g).catch(() => {}); }, { timezone: 'Europe/Paris' });
+
+  // ── Briefing renseignement quotidien (20h) ──
+  cron.schedule('0 20 * * *', async () => {
+    for (const g of client.guilds.cache.values()) await postBriefingRenseignement(g).catch(() => {});
+  }, { timezone: 'Europe/Paris' });
   cron.schedule('0 12 * * *', async () => { for (const g of client.guilds.cache.values()) await autoKickVisiteurs(g).catch(() => {}); }, { timezone: 'Europe/Paris' });
 
   // [CORRECTION] Résumés hebdo → #journal-de-bord via ajouterJournalIC
