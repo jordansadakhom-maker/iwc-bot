@@ -544,7 +544,7 @@ function _journalColor(type) {
 }
 
 async function handleJournalCommand(interaction) {
-  await interaction.deferReply({ ephemeral: false });
+  await interaction.deferReply();
   const db = loadDB(); const journal = db[JOURNAL_DB_KEY] || [];
   const filtre = interaction.options?.getString('type') || 'all';
   const page   = Math.max(1, interaction.options?.getInteger('page') || 1);
@@ -578,7 +578,7 @@ async function handleContratsArchives(interaction) {
 }
 
 async function handleDashboard(interaction) {
-  await interaction.deferReply({ ephemeral: false });
+  await interaction.deferReply();
   const db = loadDB(); const now = Date.now();
   const membres = Object.values(db.members || {});
   const actifs = membres.filter(m => m.status !== 'parti').length; const inactifs = membres.filter(m => m.status === 'inactif').length; const absents = membres.filter(m => m.status === 'absent').length; const probatoires = membres.filter(m => m.status === 'probatoire').length;
@@ -718,7 +718,7 @@ function nettoyerTransactionsFantôomes() {
 }
 
 async function handleProfilCommand(interaction) {
-  await interaction.deferReply({ ephemeral: false });
+  await interaction.deferReply();
   const cible = interaction.options?.getUser('membre') || interaction.user; const membre = await interaction.guild.members.fetch(cible.id).catch(() => null); const db = loadDB(); const data = db.members[cible.id];
   let ficheNotion = null;
   if (process.env.NOTION_TOKEN && process.env.NOTION_FICHES_DB) { try { const res = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_FICHES_DB}/query`, { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' }, body: JSON.stringify({ filter: { property: 'Discord ID', rich_text: { equals: cible.id } }, page_size: 1 }) }); const d = await res.json(); ficheNotion = d.results?.[0]; } catch {} }
@@ -735,7 +735,7 @@ async function handleProfilCommand(interaction) {
 function daysSince(d) { return !d ? 999 : Math.floor((Date.now() - new Date(d).getTime()) / 86400000); }
 
 async function handleBilanCommand(interaction) {
-  await interaction.deferReply({ ephemeral: false });
+  await interaction.deferReply();
   const db = loadDB(); const coffre = interaction.options?.getString('coffre') || 'legal';
   let transactions = [];
   if (process.env.NOTION_TOKEN && process.env.NOTION_TRESORERIE_DB) { try { const depuis = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0]; const res = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_TRESORERIE_DB}/query`, { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' }, body: JSON.stringify({ filter: { and: [{ property: 'Date', date: { on_or_after: depuis } }, { property: 'Coffre', select: { equals: coffre === 'illegal' ? '🔒 Illégal' : '⚖️ Légal' } }] }, sorts: [{ property: 'Date', direction: 'descending' }], page_size: 20 }) }); const data = await res.json(); transactions = (data.results || []).map(p => ({ objet: p.properties['Objet']?.title?.[0]?.plain_text || '—', type: p.properties['Type']?.select?.name || '—', montant: p.properties['Montant']?.number || 0, solde: p.properties['Solde']?.number || 0, responsable: p.properties['Responsable']?.rich_text?.[0]?.plain_text || '—', date: p.properties['Date']?.date?.start || '—' })); } catch (e) { console.log('❌ Notion bilan error:', e.message); } }
