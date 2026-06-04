@@ -571,7 +571,7 @@ async function handleSlashCommand(interaction) {
     if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral });
     const opsActives = (db.operations || []).filter(o => ['preparation', 'en_cours'].includes(o.status));
     if (!opsActives.length) { await interaction.reply({ content: '*Aucune opération en cours ou en préparation.*', flags: MessageFlags.Ephemeral }); return; }
-    await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('🎯 Opérations actives — IWC').setDescription(opsActives.map(o => [`**${o.name}** — ${o.status === 'en_cours' ? '🟢 En cours' : '🟡 Préparation'}`, `📍 ${o.lieu || '—'} · 👥 ${(o.participants || []).join(', ') || 'Aucun'}`].join('\n')).join('\n\n')).setFooter({ text: `IWC • ${fmtShort(new Date())}` })], ephemeral: false });
+    await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('🎯 Opérations actives — IWC').setDescription(opsActives.map(o => [`**${o.name}** — ${o.status === 'en_cours' ? '🟢 En cours' : '🟡 Préparation'}`, `📍 ${o.lieu || '—'} · 👥 ${(o.participants || []).join(', ') || 'Aucun'}`].join('\n')).join('\n\n')).setFooter({ text: `IWC • ${fmtShort(new Date())}` })] });
     return;
   }
 
@@ -2385,7 +2385,7 @@ http.createServer(async (req, res) => {
 }).listen(PORT, () => console.log(`🌐 Serveur keepalive en écoute sur le port ${PORT}`));
 
 async function handleProfilEnhanced(interaction) {
-  await interaction.deferReply({ ephemeral: false });
+  await interaction.deferReply();
   const cible = interaction.options?.getUser('membre') || interaction.user;
   const membre = await interaction.guild.members.fetch(cible.id).catch(() => null);
   const db = loadDB(); const data = db.members[cible.id];
@@ -2777,7 +2777,7 @@ async function _handleRegistre(interaction) {
 }
 
 async function _handleOpDetail(interaction) {
-  await interaction.deferReply({ ephemeral: false });
+  await interaction.deferReply();
   const db = loadDB(); const id = interaction.options?.getString('id'); const ops = db.operations || [];
   let op;
   if (id) { op = ops.find(o => o.id === id || o.name?.toLowerCase().includes(id.toLowerCase())); }
@@ -2871,7 +2871,7 @@ async function _handleSync(interaction) {
 
 async function _handleAvertir(interaction) {
   if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
-  await interaction.deferReply({ ephemeral: false });
+  await interaction.deferReply();
   const cible = interaction.options.getUser('membre'); const raison = interaction.options.getString('raison');
   const membre = await interaction.guild.members.fetch(cible.id).catch(() => null);
   const db = loadDB(); if (!db.avertissements) db.avertissements = {}; if (!db.avertissements[cible.id]) db.avertissements[cible.id] = [];
@@ -3432,7 +3432,7 @@ const RDV_MODE_NOTION_MAP = {
 
 async function _validerModalAgendaSimple(interaction) {
   console.log('🔵 RDV STEP 5b - _validerModalAgendaSimple appelé');
-  await interaction.deferReply({ ephemeral: false });
+  await interaction.deferReply();
   const titre      = interaction.fields.getTextInputValue('titre');
   const dateRaw    = interaction.fields.getTextInputValue('date');
   const heure      = interaction.fields.getTextInputValue('heure');
