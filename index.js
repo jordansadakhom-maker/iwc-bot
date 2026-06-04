@@ -2040,6 +2040,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
   if (interaction.isStringSelectMenu() && interaction.customId === 'contrat_type_offre') {
     const typeMission = interaction.values[0];
     const modal = new ModalBuilder().setCustomId(`contrat_offre_modal::${typeMission}`).setTitle('📤 Nos conditions — Contrat client');
+    setTimeout(() => { interaction.message?.delete?.().catch(() => {}); }, 300);
     modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('client_nom').setLabel("Nom / Entreprise du client").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Famille Moreau...')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objet').setLabel('Objet de la mission').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Protection rapprochée...')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('remuneration').setLabel('Notre rémunération souhaitée').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 1500$ + 500$/jour')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('user_id').setLabel('ID Discord du client').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Clic droit → Copier l\'identifiant')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Détails / conditions / échéance').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setPlaceholder('Échéance (ex: 2026-08-30), conditions, lieu, nb d\'agents, infos utiles...')));
     await interaction.showModal(modal); return;
   }
@@ -2117,6 +2118,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
   if (interaction.isStringSelectMenu() && interaction.customId === 'contrat_type_emploi') {
     const typeMission = interaction.values[0];
     const modal = new ModalBuilder().setCustomId(`contrat_emploi_modal::${typeMission}`).setTitle('📥 Contrat employeur — À signer');
+    setTimeout(() => { interaction.message?.delete?.().catch(() => {}); }, 300);
     modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('employeur_nom').setLabel("Nom de l'employeur").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Société Moreau...')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objet').setLabel('Objet de la mission').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Protection du convoi...')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('remuneration').setLabel('Rémunération proposée').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 2000$ à la livraison')), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('user_id').setLabel("ID Discord de l'employeur").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Clic droit → Copier l'identifiant")), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Détails / conditions / échéance').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setPlaceholder('Échéance (ex: 2026-08-30), conditions, lieu, infos utiles...')));
     await interaction.showModal(modal); return;
   }
@@ -4680,4 +4682,3 @@ async function _syncStatutFicheNotion(discordId, statut, extras = {}) {
 client.login(process.env.DISCORD_TOKEN)
   .then(() => console.log('🔑 Login OK'))
   .catch(e => { console.error('❌ Login failed:', e.message); process.exit(1); });
-
