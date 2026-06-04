@@ -2255,12 +2255,14 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
       const operateur = interaction.guild.roles.cache.find(r => r.name.includes('Opérateur') || r.name.includes('Operateur') || r.name.includes('Opérateurs'));
       const ping = operateur ? `<@&${operateur.id}>` : '';
       const mentionIds = operateur ? [operateur.id] : [];
-      await dest.send({
+      const msgTele = await dest.send({
         content: `${ping ? ping + ' — ' : ''}📨 **Nouveau télégramme à traiter, un client demande un rendez-vous.**`,
         embeds: [embed],
         components: [row],
         allowedMentions: { roles: mentionIds },
-      }).catch(() => {});
+      }).catch(() => null);
+      // Épingler le télégramme en attente (tâche à traiter)
+      if (msgTele) await msgTele.pin().catch(() => {});
     }
     return interaction.editReply({ content: '✅ Votre télégramme a bien été transmis à la Direction. Vous recevrez une réponse prochainement.' });
   }
@@ -2295,6 +2297,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const db = loadDB();
     const rdv = (db.rdvClients || []).find(r => r.id === rdvId);
     if (!rdv) return interaction.editReply({ content: '❌ Demande introuvable.' });
+    if (rdv.statut === 'fixe' || rdv.statut === 'refuse') return interaction.editReply({ content: `⚠️ Ce rendez-vous a déjà été traité (statut : ${rdv.statut}).` });
     rdv.statut = 'fixe';
     rdv.dateFixee = dateRdv; rdv.heureFixee = heure; rdv.lieuFixe = lieuRdv;
     saveDB(db);
@@ -2324,7 +2327,8 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const emb = EmbedBuilder.from(interaction.message.embeds[0])
       .setColor(0x57F287)
       .setFooter({ text: `Réf. ${rdvId} · 📅 RDV FIXÉ le ${dateRdv} à ${heure} · par ${interaction.member.displayName}` });
-    await interaction.message.edit({ embeds: [emb], components: [] }).catch(() => {});
+    await interaction.message?.edit({ embeds: [emb], components: [] }).catch(() => {});
+    await interaction.message?.unpin().catch(() => {}); // désépingler : tâche terminée
     return interaction.editReply({ content: `✅ Rendez-vous fixé et confirmé au client : **${dateRdv} à ${heure}** (${lieuRdv}). Ajouté à l'agenda Notion.` });
   }
 
@@ -2367,6 +2371,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const db = loadDB();
     const rdv = (db.rdvClients || []).find(r => r.id === rdvId);
     if (!rdv) return interaction.reply({ content: '❌ Demande introuvable.', flags: MessageFlags.Ephemeral });
+    if (rdv.statut === 'fixe' || rdv.statut === 'refuse') return interaction.reply({ content: `⚠️ Déjà traité (${rdv.statut}).`, flags: MessageFlags.Ephemeral });
     rdv.statut = 'refuse';
     saveDB(db);
     try {
@@ -2383,6 +2388,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     } catch {}
     const emb = EmbedBuilder.from(interaction.message.embeds[0]).setColor(0xED4245).setFooter({ text: `Réf. ${rdvId} · ❌ DÉCLINÉ par ${interaction.member.displayName}` });
     await interaction.update({ embeds: [emb], components: [] });
+    await interaction.message?.unpin().catch(() => {}); // désépingler : tâche terminée
     return;
   }
 
