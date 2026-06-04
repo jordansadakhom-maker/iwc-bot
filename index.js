@@ -1405,25 +1405,28 @@ client.on('messageCreate', async message => {
             .setAuthor({ name: `🕵️ ${agent} · ${heure} · ${dateStr}` })
             .setDescription(`*${rapport.resume}*`)
             .addFields(
-              { name: '📝 Détails', value: (rapport.details || transcriptionBrute).slice(0, 1000) },
+              { name: '📝 Résumé des faits', value: (rapport.details || transcriptionBrute).slice(0, 1000) },
               ...(rapport.personnes && rapport.personnes.length ? [{ name: '👤 Personnes', value: rapport.personnes.join(', '), inline: true }] : []),
               ...(lieuFinal ? [{ name: '📍 Lieu', value: lieuFinal, inline: true }] : []),
               ...(menaceAffiche ? [{ name: '⚠️ Menace', value: menaceAffiche, inline: true }] : []),
               ...(catsR.length ? [{ name: '🏷️ Catégories', value: catsR.join('  '), inline: false }] : []),
+              { name: '🎙️ Transcription complète', value: ('||' + (transcriptionBrute || '—').slice(0, 980) + '||') },
             )
             .setFooter({ text: `IWC · Renseignement · Priorité : ${priorite}` })
             .setTimestamp();
           if (rapport.lieu) lieu = rapport.lieu;
         } else {
-          // Pas d'IA -> mise en forme classique
+          // Pas d'IA -> mise en forme classique (transcription en spoiler pour rester propre)
+          const infoBrute = info.replace(/\*\*/g, '').replace(/▸/g, '').replace(/🔑.*/s, '').trim();
           embed = new EmbedBuilder()
             .setColor(colors[priorite] || colors.normale)
+            .setTitle('📋 NOTE DE TERRAIN')
             .setAuthor({ name: `🕵️ ${agent} · ${heure} · ${dateStr}` })
             .addFields(
               ...(cible ? [{ name: '🎯 Cible', value: cible, inline: true }] : []),
               ...(lieu  ? [{ name: '📍 Lieu',  value: lieu,  inline: true }] : []),
-              { name: '📋 Information', value: info || '—' },
-              ...(tagsDetectes.length ? [{ name: '🏷️ Catégories', value: tagsDetectes.join('  '), inline: false }] : []),
+              ...(tagsDetectes.length ? [{ name: '🏷️ Mots-clés', value: tagsDetectes.join('  '), inline: false }] : []),
+              { name: '🎙️ Transcription', value: ('||' + (infoBrute || '—').slice(0, 980) + '||') },
             )
             .setFooter({ text: `IWC · Informateurs · Priorité : ${priorite}` })
             .setTimestamp();
