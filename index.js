@@ -473,7 +473,7 @@ async function handleSlashCommand(interaction) {
     return interaction.showModal(modal);
   }
   if (commandName === 'tresor')            { if (!isOfficierOuDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction et aux Officiers de Terrain.', flags: MessageFlags.Ephemeral }); return notionModules.handleTresorCommand?.(interaction); }
-  if (commandName === 'dashboard')         { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleDashboard?.(interaction); }
+  if (commandName === 'dashboard')         { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return notionModules.handleDashboard?.(interaction); }
   if (commandName === 'journal')           { if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral }); return notionModules.handleJournalCommand?.(interaction); }
   if (commandName === 'contrats-archives') { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleContratsArchives?.(interaction); }
   if (commandName === 'contrats')          return _handleMesContrats(interaction);
@@ -1512,7 +1512,14 @@ client.on('interactionCreate', async interaction => {
     return;
   }
   if (interaction.isChatInputCommand()) {
-    await handleSlashCommand(interaction).catch(e => { console.log('❌ Slash command error:', e.message); interaction.reply({ content: '❌ Une erreur est survenue.', flags: MessageFlags.Ephemeral }).catch(() => {}); });
+    await handleSlashCommand(interaction).catch(e => {
+      console.log('❌ Slash command error:', e.message);
+      // Répondre proprement selon l'état de l'interaction (évite "already sent or deferred")
+      const msg = { content: '❌ Une erreur est survenue.', flags: MessageFlags.Ephemeral };
+      if (interaction.deferred) { interaction.editReply(msg).catch(() => {}); }
+      else if (interaction.replied) { interaction.followUp(msg).catch(() => {}); }
+      else { interaction.reply(msg).catch(() => {}); }
+    });
     return;
   }
 
@@ -1818,7 +1825,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId.startsWith('tresor_refuser_'))   return notionModules.handleTresorValidation?.(interaction, 'refuser');
     if (interaction.customId.startsWith('tresor_'))           return notionModules.handleTresorFlow?.(interaction);
     if (interaction.customId === 'btn_solde')                 return notionModules.handleSoldeButton?.(interaction);
-    if (interaction.customId === 'btn_dashboard_refresh')     { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleDashboard?.(interaction); }
+    if (interaction.customId === 'btn_dashboard_refresh')     { return notionModules.handleDashboard?.(interaction); }
     if (interaction.customId.startsWith('journal_'))          return notionModules.handleJournalPagination?.(interaction);
   }
 
