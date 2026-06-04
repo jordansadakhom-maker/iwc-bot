@@ -208,6 +208,8 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('contrats').setDescription('📜 Voir mes contrats en cours'),
   new SlashCommandBuilder().setName('contrats-sync').setDescription('🔄 Resynchroniser tous les contrats avec Notion (Direction)'),
   new SlashCommandBuilder().setName('notion-test').setDescription('🔍 Tester la connexion Notion des contrats (Direction)'),
+  new SlashCommandBuilder().setName('stats-agent').setDescription('📊 Statistiques de renseignement par agent')
+    .addStringOption(o => o.setName('agent').setDescription('Nom d\'un agent précis (optionnel)').setRequired(false)),
   new SlashCommandBuilder().setName('registre').setDescription('📋 Liste des membres actifs (Direction)').addStringOption(o => o.setName('pole').setDescription('Filtrer par pôle').setRequired(false).addChoices({ name: 'Tous', value: 'tous' }, { name: '⚖️ Légal', value: 'legal' }, { name: '🔒 Illégal', value: 'illegal' })).addIntegerOption(o => o.setName('page').setDescription('Page').setRequired(false)),
   new SlashCommandBuilder().setName('op').setDescription('🎯 Détail d\'une opération').addStringOption(o => o.setName('id').setDescription('ID de l\'opération').setRequired(false)),
 ].map(c => c.toJSON());
@@ -477,6 +479,46 @@ async function handleSlashCommand(interaction) {
   if (commandName === 'journal')           { if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral }); return notionModules.handleJournalCommand?.(interaction); }
   if (commandName === 'contrats-archives') { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleContratsArchives?.(interaction); }
   if (commandName === 'contrats')          return _handleMesContrats(interaction);
+  if (commandName === 'stats-agent') {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const db = loadDB();
+    const notes = db.notesTerrain || [];
+    if (notes.length === 0) return interaction.editReply({ content: '📭 Aucune note de terrain enregistrée.' });
+
+    const filtreAgent = (interaction.options.getString('agent') || '').toLowerCase().trim();
+
+    // Agréger par agent
+    const stats = {};
+    for (const n of notes) {
+      const ag = n.agent || 'Inconnu';
+      if (filtreAgent && !ag.toLowerCase().includes(filtreAgent)) continue;
+      if (!stats[ag]) stats[ag] = { total: 0, cats: {}, lieux: {}, derniere: null };
+      stats[ag].total++;
+      for (const t of (n.tags || [])) stats[ag].cats[t] = (stats[ag].cats[t] || 0) + 1;
+      if (n.lieu) stats[ag].lieux[n.lieu] = (stats[ag].lieux[n.lieu] || 0) + 1;
+      const d = new Date(n.date).getTime();
+      if (!stats[ag].derniere || d > stats[ag].derniere) stats[ag].derniere = d;
+    }
+    const agents = Object.entries(stats).sort((a, b) => b[1].total - a[1].total);
+    if (agents.length === 0) return interaction.editReply({ content: `📭 Aucune note pour « ${filtreAgent} ».` });
+
+    const lignes = agents.map(([ag, s]) => {
+      const topCat = Object.entries(s.cats).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([c]) => c).join(' ');
+      const topLieu = Object.entries(s.lieux).sort((a, b) => b[1] - a[1])[0];
+      const quand = s.derniere ? new Date(s.derniere).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) : '—';
+      return `**${ag}** — ${s.total} note(s)\n${topCat ? '🏷️ ' + topCat + '\n' : ''}${topLieu ? '📍 Surtout : ' + topLieu[0] + '\n' : ''}🕐 Dernière : ${quand}`;
+    });
+
+    const totalGlobal = notes.length;
+    const embed = new EmbedBuilder()
+      .setColor(0x8B4513)
+      .setTitle('📊 Statistiques de renseignement par agent')
+      .setDescription(lignes.join('\n\n').slice(0, 4000))
+      .setFooter({ text: `IWC · ${agents.length} agent(s) · ${totalGlobal} note(s) au total` })
+      .setTimestamp();
+    return interaction.editReply({ embeds: [embed] });
+  }
+
   if (commandName === 'notion-test') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -582,7 +624,7 @@ async function handleSlashCommand(interaction) {
     }
     const sujet = interaction.options.getString('sujet').trim();
     const db = loadDB();
-    const notes = (db.notesTerrain || []);
+    const notes = [...(db.notesTerrain || []), ...(db.notesArchive || [])];
     if (notes.length === 0) return interaction.editReply({ content: '📭 Aucune note de terrain enregistrée.' });
 
     const sujetNorm = sujet.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -2249,6 +2291,25 @@ client.once('clientReady', async () => {
   // ── Briefing renseignement quotidien (20h) ──
   cron.schedule('0 20 * * *', async () => {
     for (const g of client.guilds.cache.values()) await postBriefingRenseignement(g).catch(() => {});
+  }, { timezone: 'Europe/Paris' });
+
+  // ── Archivage automatique des vieilles notes (chaque nuit à 3h) ──
+  cron.schedule('0 3 * * *', async () => {
+    try {
+      const db = loadDB();
+      const notes = db.notesTerrain || [];
+      const limite = Date.now() - 30 * 24 * 60 * 60 * 1000; // 30 jours
+      const recentes = notes.filter(n => new Date(n.date).getTime() >= limite);
+      const vieilles = notes.filter(n => new Date(n.date).getTime() < limite);
+      if (vieilles.length > 0) {
+        if (!db.notesArchive) db.notesArchive = [];
+        db.notesArchive.push(...vieilles);
+        if (db.notesArchive.length > 1000) db.notesArchive = db.notesArchive.slice(-1000);
+        db.notesTerrain = recentes;
+        saveDB(db);
+        console.log(`📦 Archivage : ${vieilles.length} note(s) > 30j déplacée(s) dans les archives`);
+      }
+    } catch (e) { console.log('❌ Archivage notes:', e.message); }
   }, { timezone: 'Europe/Paris' });
   cron.schedule('0 12 * * *', async () => { for (const g of client.guilds.cache.values()) await autoKickVisiteurs(g).catch(() => {}); }, { timezone: 'Europe/Paris' });
 
