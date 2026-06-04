@@ -212,6 +212,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('stats-agent').setDescription('📊 Statistiques de renseignement par agent')
     .addStringOption(o => o.setName('agent').setDescription('Nom d\'un agent précis (optionnel)').setRequired(false)),
   new SlashCommandBuilder().setName('panel-rdv-client').setDescription('📅 Installer le panneau de prise de RDV client (Direction)'),
+  new SlashCommandBuilder().setName('rdv-nettoyer').setDescription('🧹 Désépingler tous les vieux télégrammes du salon demandes (Direction)'),
   new SlashCommandBuilder().setName('registre').setDescription('📋 Liste des membres actifs (Direction)').addStringOption(o => o.setName('pole').setDescription('Filtrer par pôle').setRequired(false).addChoices({ name: 'Tous', value: 'tous' }, { name: '⚖️ Légal', value: 'legal' }, { name: '🔒 Illégal', value: 'illegal' })).addIntegerOption(o => o.setName('page').setDescription('Page').setRequired(false)),
   new SlashCommandBuilder().setName('op').setDescription('🎯 Détail d\'une opération').addStringOption(o => o.setName('id').setDescription('ID de l\'opération').setRequired(false)),
 ].map(c => c.toJSON());
@@ -481,6 +482,21 @@ async function handleSlashCommand(interaction) {
   if (commandName === 'journal')           { if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral }); return notionModules.handleJournalCommand?.(interaction); }
   if (commandName === 'contrats-archives') { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleContratsArchives?.(interaction); }
   if (commandName === 'contrats')          return _handleMesContrats(interaction);
+  if (commandName === 'rdv-nettoyer') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const salon = interaction.guild.channels.cache.get('1512175624176009348');
+    if (!salon) return interaction.editReply({ content: '❌ Salon des demandes introuvable.' });
+    let n = 0;
+    try {
+      const pins = await salon.messages.fetchPinned();
+      for (const [, msg] of pins) {
+        if (msg.author.id === client.user.id) { await msg.unpin().catch(() => {}); n++; }
+      }
+    } catch (e) { return interaction.editReply({ content: `❌ Erreur : ${e.message}` }); }
+    return interaction.editReply({ content: `🧹 ${n} télégramme(s) désépinglé(s) dans le salon des demandes.` });
+  }
+
   if (commandName === 'panel-rdv-client') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
     const embed = new EmbedBuilder()
@@ -3850,7 +3866,7 @@ async function _validerModalAgendaSimple(interaction) {
     await new Promise((resolve) => {
       const msgCollector = interaction.channel.createMessageCollector({ filter: photoFilter, max: 1, time: 120000 });
       const btnCollector = interaction.channel.createMessageComponentCollector({ filter: btnFilter, max: 1, time: 120000 });
-      msgCollector.on('collect', async msg => { photoUrl = msg.attachments.first().url; await msg.delete().catch(() => {}); btnCollector.stop('photo'); resolve(); });
+      msgCollector.on('collect', async msg => { photoUrl = msg.attachments.first().url; btnCollector.stop('photo'); resolve(); });
       btnCollector.on('collect', async i => { await i.deferUpdate().catch(() => {}); msgCollector.stop('skip'); resolve(); });
       msgCollector.on('end', (_, reason) => { if (reason !== 'photo') resolve(); });
       btnCollector.on('end', (_, reason) => { if (reason !== 'photo') resolve(); });
@@ -3897,7 +3913,12 @@ async function _validerModalAgendaSimple(interaction) {
       'Mode de convocation': { select: { name: RDV_MODE_NOTION_MAP['role'] } },
       'Villes RDR2':      { select:    { name: RDV_VILLE_NOTION_MAP[lieuNotionKey] || RDV_VILLE_NOTION_MAP['Autre'] } },
       ...(photoUrl ? { 'Photo': { files: [{ name: 'reperage.jpg', type: 'external', external: { url: photoUrl } }] } } : {}),
-    } }) }).then(async res => {
+    },
+    ...(photoUrl ? { children: [
+      { object: 'block', type: 'image', image: { type: 'external', external: { url: photoUrl } } },
+      { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ type: 'text', text: { content: '📸 Photo de repérage', link: { url: photoUrl } } }] } },
+    ] } : {}),
+    }) }).then(async res => {
       const data = await res.json().catch(() => ({}));
       if (res.ok) console.log(`✅ RDV archivé Notion : ${titre}`);
       else console.log(`❌ Notion RDV erreur complet:`, JSON.stringify(data).slice(0, 500));
@@ -4163,7 +4184,13 @@ async function _validerModalRdv(interaction) {
       'Notif 24h':  { checkbox: true },
       'Notif 1h':   { checkbox: true },
       'Notif 15min':{ checkbox: true },
-    } }) }).then(async res => {
+      ...(photoUrl ? { 'Photo': { files: [{ name: 'reperage.jpg', type: 'external', external: { url: photoUrl } }] } } : {}),
+    },
+    ...(photoUrl ? { children: [
+      { object: 'block', type: 'image', image: { type: 'external', external: { url: photoUrl } } },
+      { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ type: 'text', text: { content: '📸 Photo de repérage', link: { url: photoUrl } } }] } },
+    ] } : {}),
+    }) }).then(async res => {
       const data = await res.json().catch(() => ({}));
       if (res.ok) console.log(`✅ RDV pôle archivé Notion : ${titre}`);
       else console.log(`❌ Notion RDV pôle erreur complet:`, JSON.stringify(data).slice(0, 500));
@@ -4190,7 +4217,7 @@ async function _validerModalRdv(interaction) {
     await new Promise((resolve) => {
       const msgCollector = interaction.channel.createMessageCollector({ filter: photoFilter, max: 1, time: 60000 });
       const btnCollector = interaction.channel.createMessageComponentCollector({ filter: btnFilter, max: 1, time: 60000 });
-      msgCollector.on('collect', async msg => { photoUrl = msg.attachments.first().url; await msg.delete().catch(() => {}); btnCollector.stop('photo'); resolve(); });
+      msgCollector.on('collect', async msg => { photoUrl = msg.attachments.first().url; btnCollector.stop('photo'); resolve(); });
       btnCollector.on('collect', async i => { await i.deferUpdate().catch(() => {}); msgCollector.stop('skip'); resolve(); });
       msgCollector.on('end', (_, reason) => { if (reason !== 'photo') resolve(); });
       btnCollector.on('end', (_, reason) => { if (reason !== 'photo') resolve(); });
