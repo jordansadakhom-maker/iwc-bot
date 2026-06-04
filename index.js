@@ -2256,6 +2256,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     db.rdvClients.push(rdv);
     if (db.rdvClients.length > 200) db.rdvClients = db.rdvClients.slice(-200);
     saveDB(db);
+    sauvegarderSurGitHub().catch(() => {}); // sauvegarde immédiate pour survivre à un redémarrage
 
     // Télégramme stylé envoyé à la Direction
     const embed = new EmbedBuilder()
@@ -2304,6 +2305,28 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     return member?.roles.cache.some(r => ['Opérateur', 'Operateur', 'Concepteur', 'Fléau', 'Fondateur', 'Directeur'].some(n => r.name.includes(n)));
   }
 
+  // Reconstruit une demande depuis l'embed du télégramme (si absente de la base après un redémarrage)
+  function _rdvDepuisEmbed(interaction, rdvId) {
+    try {
+      const emb = interaction.message?.embeds?.[0];
+      if (!emb) return null;
+      const desc = emb.description || '';
+      const nomM = desc.match(/\*\*De :\*\*\s*(.+)/);
+      const objM = desc.match(/\*\*Objet :\*\*\s*(.+)/);
+      const lieuM = desc.match(/\*\*Lieu :\*\*\s*(.+)/);
+      const demM = desc.match(/<@(\d+)>/);
+      return {
+        id: rdvId,
+        nom: nomM ? nomM[1].trim() : 'Client',
+        objet: objM ? objM[1].trim() : '(demande)',
+        lieu: lieuM ? lieuM[1].trim() : '',
+        details: '', dateSouhait: '', dateNotion: '',
+        demandeurId: demM ? demM[1] : null,
+        statut: 'en_attente', createdAt: new Date().toISOString(),
+      };
+    } catch { return null; }
+  }
+
   // ── FIXER LE RENDEZ-VOUS (la secrétaire fixe date/heure/lieu) ──
   if (interaction.isButton() && interaction.customId.startsWith('rdvclient_fixer_')) {
     if (!_peutGererRdv(interaction.member)) return interaction.reply({ content: '❌ Réservé aux Opérateurs.', flags: MessageFlags.Ephemeral });
@@ -2326,8 +2349,13 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const lieuRdv = interaction.fields.getTextInputValue('lieu');
     const mot = interaction.fields.getTextInputValue('message') || '';
     const db = loadDB();
-    const rdv = (db.rdvClients || []).find(r => r.id === rdvId);
-    if (!rdv) return interaction.editReply({ content: '❌ Demande introuvable.' });
+    let rdv = (db.rdvClients || []).find(r => r.id === rdvId);
+    if (!rdv) {
+      rdv = _rdvDepuisEmbed(interaction, rdvId);
+      if (!rdv) return interaction.editReply({ content: '❌ Demande introuvable.' });
+      if (!db.rdvClients) db.rdvClients = [];
+      db.rdvClients.push(rdv);
+    }
     if (rdv.statut === 'fixe' || rdv.statut === 'refuse') return interaction.editReply({ content: `⚠️ Ce rendez-vous a déjà été traité (statut : ${rdv.statut}).` });
     rdv.statut = 'fixe';
     rdv.dateFixee = dateRdv; rdv.heureFixee = heure; rdv.lieuFixe = lieuRdv;
@@ -2382,8 +2410,8 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const rdvId = interaction.customId.replace('rdvclient_repondre_modal_', '');
     const message = interaction.fields.getTextInputValue('message');
     const db = loadDB();
-    const rdv = (db.rdvClients || []).find(r => r.id === rdvId);
-    if (!rdv) return interaction.editReply({ content: '❌ Demande introuvable.' });
+    let rdv = (db.rdvClients || []).find(r => r.id === rdvId);
+    if (!rdv) { rdv = _rdvDepuisEmbed(interaction, rdvId); if (!rdv) return interaction.editReply({ content: '❌ Demande introuvable.' }); }
     try {
       const u = await client.users.fetch(rdv.demandeurId);
       await u.send([
@@ -2403,8 +2431,13 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     if (!_peutGererRdv(interaction.member)) return interaction.reply({ content: '❌ Réservé aux Opérateurs.', flags: MessageFlags.Ephemeral });
     const rdvId = interaction.customId.replace('rdvclient_refuse_', '');
     const db = loadDB();
-    const rdv = (db.rdvClients || []).find(r => r.id === rdvId);
-    if (!rdv) return interaction.reply({ content: '❌ Demande introuvable.', flags: MessageFlags.Ephemeral });
+    let rdv = (db.rdvClients || []).find(r => r.id === rdvId);
+    if (!rdv) {
+      rdv = _rdvDepuisEmbed(interaction, rdvId);
+      if (!rdv) return interaction.reply({ content: '❌ Demande introuvable.', flags: MessageFlags.Ephemeral });
+      if (!db.rdvClients) db.rdvClients = [];
+      db.rdvClients.push(rdv);
+    }
     if (rdv.statut === 'fixe' || rdv.statut === 'refuse') return interaction.reply({ content: `⚠️ Déjà traité (${rdv.statut}).`, flags: MessageFlags.Ephemeral });
     rdv.statut = 'refuse';
     saveDB(db);
