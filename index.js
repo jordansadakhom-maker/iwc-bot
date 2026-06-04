@@ -49,6 +49,7 @@ const client = new Client({
     GatewayIntentBits.GuildMessageReactions, GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildModeration, GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildPresences, GatewayIntentBits.GuildInvites,
+    GatewayIntentBits.DirectMessages,
   ],
   partials: [Partials.Message, Partials.Reaction, Partials.User, Partials.Channel, Partials.GuildMember],
 });
@@ -1279,6 +1280,42 @@ Si la transcription est incompréhensible ou vide, mets resume="(inaudible)".`;
 }
 
 client.on('messageCreate', async message => {
+  // ── Réponses des clients en MP → réacheminées dans le salon des demandes ──
+  if (!message.guild && !message.author.bot) {
+    try {
+      const db = loadDB();
+      // Chercher si cet utilisateur a une demande de RDV en cours
+      const rdvs = (db.rdvClients || []).filter(r => r.demandeurId === message.author.id);
+      if (rdvs.length > 0) {
+        const rdv = rdvs[rdvs.length - 1]; // la plus récente
+        const salonDemandes = client.channels.cache.get('1512175624176009348');
+        if (salonDemandes) {
+          const operateur = salonDemandes.guild.roles.cache.find(r => r.name.includes('Opérateur') || r.name.includes('Operateur'));
+          const ping = operateur ? `<@&${operateur.id}>` : '';
+          const mentionIds = operateur ? [operateur.id] : [];
+          const embed = new EmbedBuilder()
+            .setColor(0x5865F2)
+            .setAuthor({ name: `💬 Réponse de ${rdv.nom}` })
+            .setDescription(message.content.slice(0, 2000))
+            .addFields(
+              { name: '📋 Demande concernée', value: rdv.objet, inline: true },
+              { name: '🔖 Réf.', value: rdv.id, inline: true },
+            )
+            .setFooter({ text: `Client : ${message.author.tag} · Réponds avec « 💬 Répondre au client »` })
+            .setTimestamp();
+          await salonDemandes.send({
+            content: `${ping ? ping + ' — ' : ''}📨 **Un client a répondu**`,
+            embeds: [embed],
+            allowedMentions: { roles: mentionIds },
+          }).catch(() => {});
+          // Accusé de réception au client
+          await message.react('✅').catch(() => {});
+        }
+      }
+    } catch (e) { console.log('❌ MP client RDV:', e.message); }
+    return;
+  }
+
   // ── Traitement des notes vocales via webhook (AVANT le filtre bot) ──
   if (message.webhookId && message.guild && message.channel.id === '1511491314351472701') {
     try {
