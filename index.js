@@ -1141,11 +1141,13 @@ async function genererRapportIA(transcription, agent, lieu) {
   if (!apiKey) return null; // pas de clé -> on garde la mise en forme classique
   try {
     const prompt = `Tu es un officier de renseignement de la compagnie Iron Wolf (univers western RP, 1895).
-Transforme cette transcription orale brute en RAPPORT DE TERRAIN clair et concis.
-Transcription brute : "${transcription}"
+On te donne une transcription d'écoute de terrain. Chaque ligne (🗨️ ou 💬) est une intervention distincte, possiblement d'une personne différente.
+Transforme-la en RAPPORT DE TERRAIN clair, concis et bien structuré.
+
+Transcription : "${transcription}"
 
 Réponds UNIQUEMENT en JSON valide, sans markdown, ce format exact :
-{"resume":"1 phrase qui résume l'essentiel","details":"les faits reformulés proprement en français correct, 1 à 3 phrases","personnes":["noms cités"],"lieu":"lieu si mentionné sinon vide","categories":["mots parmi: Armes, Violence, Trafic, Alliance, Argent, Bétail, Loi, Danger"],"menace":"un seul mot parmi: faible, moyen, eleve"}
+{"resume":"1 phrase qui résume l'essentiel","details":"les faits reformulés proprement et brièvement en français correct. Si plusieurs personnes parlent, structure par tirets courts (- ...). Reste factuel et synthétique.","personnes":["noms cités"],"lieu":"lieu si mentionné sinon vide","categories":["mots parmi: Armes, Violence, Trafic, Alliance, Argent, Bétail, Loi, Danger"],"menace":"un seul mot parmi: faible, moyen, eleve"}
 Si la transcription est incompréhensible ou vide, mets resume="(inaudible)".`;
 
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
@@ -4682,3 +4684,4 @@ async function _syncStatutFicheNotion(discordId, statut, extras = {}) {
 client.login(process.env.DISCORD_TOKEN)
   .then(() => console.log('🔑 Login OK'))
   .catch(e => { console.error('❌ Login failed:', e.message); process.exit(1); });
+
