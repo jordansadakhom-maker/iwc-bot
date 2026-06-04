@@ -2329,6 +2329,9 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
       .setFooter({ text: `Réf. ${rdvId} · 📅 RDV FIXÉ le ${dateRdv} à ${heure} · par ${interaction.member.displayName}` });
     await interaction.message?.edit({ embeds: [emb], components: [] }).catch(() => {});
     await interaction.message?.unpin().catch(() => {}); // désépingler : tâche terminée
+    // Notion garde la traçabilité : on nettoie le salon en supprimant le télégramme traité
+    const msgFixe = interaction.message;
+    setTimeout(() => { msgFixe?.delete?.().catch(() => {}); }, 8000);
     return interaction.editReply({ content: `✅ Rendez-vous fixé et confirmé au client : **${dateRdv} à ${heure}** (${lieuRdv}). Ajouté à l'agenda Notion.` });
   }
 
@@ -2389,6 +2392,8 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const emb = EmbedBuilder.from(interaction.message.embeds[0]).setColor(0xED4245).setFooter({ text: `Réf. ${rdvId} · ❌ DÉCLINÉ par ${interaction.member.displayName}` });
     await interaction.update({ embeds: [emb], components: [] });
     await interaction.message?.unpin().catch(() => {}); // désépingler : tâche terminée
+    const msgRef = interaction.message;
+    setTimeout(() => { msgRef?.delete?.().catch(() => {}); }, 8000);
     return;
   }
 
