@@ -107,19 +107,13 @@ function getChHard(guild, key) {
   return guild.channels.cache.get(id) || null;
 }
 
-// Retourne le salon #absences selon le pôle du membre
+// Retourne le salon #absences (salon unique pour tous)
 function getAbsencesCh(guild, member) {
-  const roles = member?.roles?.cache;
-  if (!roles) return guild.channels.cache.get(SALON_HARDCODED.ABSENCES_ILLEGAL);
-  // Détecter le pôle : noms de rôles légaux
-  const legalRoles = ['Conseil', 'Directeur', 'Co-Directeur', 'Officier', 'Agent Confirmé', 'Opérateur', 'Recrue', 'Probatoire', 'Instructeur', 'Le Penseur', 'Fondateur'];
-  const illegalRoles = ['Concepteur', 'Fléau', "L'Exécuteur", 'Le Condamné', 'Le Maudit', 'La Confrérie', 'Instructeur', 'Le Concepteur'];
-  const isLegal = roles.some(r => legalRoles.some(n => r.name.includes(n)));
-  const isIllegal = roles.some(r => illegalRoles.some(n => r.name.includes(n)));
-  if (isIllegal && !isLegal) return guild.channels.cache.get(SALON_HARDCODED.ABSENCES_ILLEGAL);
-  if (isLegal && !isIllegal) return guild.channels.cache.get(SALON_HARDCODED.ABSENCES_LEGAL);
-  // Direction (les deux pôles) → légal par défaut
-  return guild.channels.cache.get(SALON_HARDCODED.ABSENCES_LEGAL);
+  // Salon ABSENCES unique pour tout le monde
+  const ch = guild.channels.cache.get(SALON_HARDCODED.ABSENCES);
+  if (ch) return ch;
+  // Filets de sécurité : chercher par nom si l'ID ne correspond pas
+  return getChById(guild, 'ABSENCES', 'absences', 'absence', 'congés', 'conges') || null;
 }
 
 // Archive un contrat signé/refusé dans #contrats-reponses avec un thread par contrat
