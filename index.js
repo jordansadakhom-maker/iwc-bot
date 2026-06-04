@@ -2133,29 +2133,58 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
 
   // ══════════ PRISE DE RDV CLIENT (façon télégramme) ══════════
   if (interaction.isButton() && interaction.customId === 'rdvclient_demande') {
-    const modal = new ModalBuilder().setCustomId('rdvclient_modal').setTitle('✉ Télégramme — Demande de RDV');
+    // Étape 1 : choix du moment souhaité (plus ergonomique qu'une date tapée)
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId('rdvclient_quand')
+      .setPlaceholder('Quand souhaitez-vous le rendez-vous ?')
+      .addOptions(
+        { label: "Aujourd'hui", value: 'aujourdhui', emoji: '⚡', description: 'Le plus tôt possible' },
+        { label: 'Demain', value: 'demain', emoji: '🌅' },
+        { label: 'Dans 2-3 jours', value: '3jours', emoji: '📅' },
+        { label: 'Cette semaine', value: 'semaine', emoji: '🗓️' },
+        { label: 'La semaine prochaine', value: 'semaine_pro', emoji: '📆' },
+        { label: 'À convenir avec vous', value: 'a_convenir', emoji: '🤝', description: 'La Direction proposera un créneau' },
+      );
+    await interaction.reply({ content: '🕐 **Première étape** — quand souhaitez-vous être reçu ?', components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  // Étape 2 : après le choix du moment, ouvrir le formulaire
+  if (interaction.isStringSelectMenu() && interaction.customId === 'rdvclient_quand') {
+    const quand = interaction.values[0];
+    setTimeout(() => { interaction.message?.delete?.().catch(() => {}); }, 300);
+    const modal = new ModalBuilder().setCustomId(`rdvclient_modal::${quand}`).setTitle('✉ Télégramme — Demande de RDV');
     modal.addComponents(
       new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom').setLabel('Votre nom / votre maison').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: M. Hawthorne, Famille Reyes...')),
       new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objet').setLabel('Objet de votre demande').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Protection de convoi, enquête...')),
       new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('lieu').setLabel('Lieu souhaité').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: Saint-Denis, Valentine...')),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('date').setLabel('Date / créneau souhaité').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: 15/08 au soir')),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Détails (le télégramme)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setPlaceholder('Expliquez votre besoin, vos conditions, rémunération proposée...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('moment').setLabel('Moment de la journée (optionnel)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: matin, après-midi, soir, nuit')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Détails (le télégramme)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setPlaceholder('Votre besoin, vos conditions, la rémunération proposée...')),
     );
     return interaction.showModal(modal);
   }
 
-  if (interaction.isModalSubmit() && interaction.customId === 'rdvclient_modal') {
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('rdvclient_modal')) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const quandCode = interaction.customId.includes('::') ? interaction.customId.split('::')[1] : 'a_convenir';
+    const quandLabel = { aujourdhui: "Aujourd'hui", demain: 'Demain', '3jours': 'Dans 2-3 jours', semaine: 'Cette semaine', semaine_pro: 'La semaine prochaine', a_convenir: 'À convenir' }[quandCode] || 'À convenir';
+    // Calculer une date approximative pour Notion
+    const now = new Date();
+    const addDays = d => { const x = new Date(now); x.setDate(x.getDate() + d); return x.toISOString().split('T')[0]; };
+    const dateMap = { aujourdhui: addDays(0), demain: addDays(1), '3jours': addDays(3), semaine: addDays(5), semaine_pro: addDays(8), a_convenir: '' };
+    const dateNotion = dateMap[quandCode] || '';
+
     const nom = interaction.fields.getTextInputValue('nom');
     const objet = interaction.fields.getTextInputValue('objet');
     const lieu = interaction.fields.getTextInputValue('lieu') || '';
-    const dateSouhait = interaction.fields.getTextInputValue('date') || '';
+    const moment = interaction.fields.getTextInputValue('moment') || '';
     const details = interaction.fields.getTextInputValue('details') || '';
+    const dateSouhait = `${quandLabel}${moment ? ' (' + moment + ')' : ''}`;
 
     const db = loadDB();
     if (!db.rdvClients) db.rdvClients = [];
     const rdvId = 'RDVC-' + Date.now().toString().slice(-6);
-    const rdv = { id: rdvId, nom, objet, lieu, dateSouhait, details, demandeurId: interaction.user.id, statut: 'en_attente', createdAt: new Date().toISOString() };
+    const rdv = { id: rdvId, nom, objet, lieu, dateSouhait, dateNotion, details, demandeurId: interaction.user.id, statut: 'en_attente', createdAt: new Date().toISOString() };
     db.rdvClients.push(rdv);
     if (db.rdvClients.length > 200) db.rdvClients = db.rdvClients.slice(-200);
     saveDB(db);
@@ -2179,73 +2208,145 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
       .setFooter({ text: `Réf. ${rdvId} · En attente de décision` })
       .setTimestamp();
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`rdvclient_accept_${rdvId}`).setLabel('✅ Accepter').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`rdvclient_propose_${rdvId}`).setLabel('🕐 Proposer un autre créneau').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(`rdvclient_refuse_${rdvId}`).setLabel('❌ Refuser').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId(`rdvclient_fixer_${rdvId}`).setLabel('📅 Fixer le rendez-vous').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`rdvclient_repondre_${rdvId}`).setLabel('💬 Répondre au client').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`rdvclient_refuse_${rdvId}`).setLabel('❌ Décliner').setStyle(ButtonStyle.Danger),
     );
-    // Envoyer le télégramme dans le salon Direction (traitement), PAS dans le salon du formulaire
-    const dest = interaction.guild.channels.cache.get('1509638226132996178') || interaction.channel;
-    if (dest) await dest.send({ embeds: [embed], components: [row] }).catch(() => {});
+    // Envoyer le télégramme dans le salon des demandes, avec PING du rôle Opérateur (la secrétaire)
+    const dest = interaction.guild.channels.cache.get('1512175624176009348') || interaction.channel;
+    if (dest) {
+      const operateur = interaction.guild.roles.cache.find(r => r.name.includes('Opérateur') || r.name.includes('Operateur') || r.name.includes('Opérateurs'));
+      const ping = operateur ? `<@&${operateur.id}>` : '';
+      const mentionIds = operateur ? [operateur.id] : [];
+      await dest.send({
+        content: `${ping ? ping + ' — ' : ''}📨 **Nouveau télégramme à traiter, un client demande un rendez-vous.**`,
+        embeds: [embed],
+        components: [row],
+        allowedMentions: { roles: mentionIds },
+      }).catch(() => {});
+    }
     return interaction.editReply({ content: '✅ Votre télégramme a bien été transmis à la Direction. Vous recevrez une réponse prochainement.' });
   }
 
   // Décisions de la Direction sur une demande RDV client
-  if (interaction.isButton() && interaction.customId.startsWith('rdvclient_accept_')) {
-    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
-    const rdvId = interaction.customId.replace('rdvclient_accept_', '');
-    const db = loadDB();
-    const rdv = (db.rdvClients || []).find(r => r.id === rdvId);
-    if (!rdv) return interaction.reply({ content: '❌ Demande introuvable.', flags: MessageFlags.Ephemeral });
-    rdv.statut = 'accepte';
-    saveDB(db);
-    // Sync Notion agenda
-    if (typeof archiverRdvNotion === 'function') {
-      archiverRdvNotion(`RDV Client — ${rdv.nom}`, rdv.dateSouhait, rdv.lieu, `${rdv.objet}\n${rdv.details}`, false, rdv.lieu).catch(() => {});
-    }
-    try { const u = await client.users.fetch(rdv.demandeurId); await u.send(`✅ **Iron Wolf Company** a accepté votre demande de rendez-vous (${rdv.objet}). Nous vous contacterons pour les détails.`).catch(() => {}); } catch {}
-    const emb = EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287).setFooter({ text: `Réf. ${rdvId} · ✅ ACCEPTÉ par ${interaction.member.displayName}` });
-    await interaction.update({ embeds: [emb], components: [] });
-    return;
+  // Vérif rôle : Opérateur (la secrétaire) OU Direction
+  function _peutGererRdv(member) {
+    return member?.roles.cache.some(r => ['Opérateur', 'Operateur', 'Concepteur', 'Fléau', 'Fondateur', 'Directeur'].some(n => r.name.includes(n)));
   }
 
+  // ── FIXER LE RENDEZ-VOUS (la secrétaire fixe date/heure/lieu) ──
+  if (interaction.isButton() && interaction.customId.startsWith('rdvclient_fixer_')) {
+    if (!_peutGererRdv(interaction.member)) return interaction.reply({ content: '❌ Réservé aux Opérateurs.', flags: MessageFlags.Ephemeral });
+    const rdvId = interaction.customId.replace('rdvclient_fixer_', '');
+    const modal = new ModalBuilder().setCustomId(`rdvclient_fixer_modal_${rdvId}`).setTitle('📅 Fixer le rendez-vous');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('date').setLabel('Date du RDV (JJ/MM/AAAA)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 15/08/1895')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('heure').setLabel('Heure').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 21h00')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('lieu').setLabel('Lieu du rendez-vous').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Saloon de Valentine')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('message').setLabel('Mot pour le client (optionnel)').setStyle(TextInputStyle.Paragraph).setRequired(false).setPlaceholder('Ex: Présentez-vous à l\'accueil, demandez la secrétaire...')),
+    );
+    return interaction.showModal(modal);
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('rdvclient_fixer_modal_')) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const rdvId = interaction.customId.replace('rdvclient_fixer_modal_', '');
+    const dateRdv = interaction.fields.getTextInputValue('date');
+    const heure = interaction.fields.getTextInputValue('heure');
+    const lieuRdv = interaction.fields.getTextInputValue('lieu');
+    const mot = interaction.fields.getTextInputValue('message') || '';
+    const db = loadDB();
+    const rdv = (db.rdvClients || []).find(r => r.id === rdvId);
+    if (!rdv) return interaction.editReply({ content: '❌ Demande introuvable.' });
+    rdv.statut = 'fixe';
+    rdv.dateFixee = dateRdv; rdv.heureFixee = heure; rdv.lieuFixe = lieuRdv;
+    saveDB(db);
+
+    // Synchro agenda Notion avec la date exacte fixée
+    if (typeof archiverRdvNotion === 'function') {
+      archiverRdvNotion(`RDV Client — ${rdv.nom}`, dateRdv, lieuRdv, `${rdv.objet}\nHeure : ${heure}\n${rdv.details}`, false, rdv.lieu).catch(() => {});
+    }
+
+    // Confirmation au client en MP (ton secrétaire)
+    try {
+      const u = await client.users.fetch(rdv.demandeurId);
+      await u.send([
+        `📅 **Iron Wolf Company — Confirmation de rendez-vous**`,
+        ``,
+        `Bonjour, votre rendez-vous concernant « **${rdv.objet}** » est confirmé :`,
+        `🗓️ **Date :** ${dateRdv}`,
+        `🕐 **Heure :** ${heure}`,
+        `📍 **Lieu :** ${lieuRdv}`,
+        ...(mot ? ['', mot] : []),
+        ``,
+        `Au plaisir de vous recevoir.`,
+        `— *Le secrétariat de l'Iron Wolf Company*`,
+      ].join('\n')).catch(() => {});
+    } catch {}
+
+    const emb = EmbedBuilder.from(interaction.message.embeds[0])
+      .setColor(0x57F287)
+      .setFooter({ text: `Réf. ${rdvId} · 📅 RDV FIXÉ le ${dateRdv} à ${heure} · par ${interaction.member.displayName}` });
+    await interaction.message.edit({ embeds: [emb], components: [] }).catch(() => {});
+    return interaction.editReply({ content: `✅ Rendez-vous fixé et confirmé au client : **${dateRdv} à ${heure}** (${lieuRdv}). Ajouté à l'agenda Notion.` });
+  }
+
+  // ── RÉPONDRE AU CLIENT (échange libre, façon secrétaire) ──
+  if (interaction.isButton() && interaction.customId.startsWith('rdvclient_repondre_')) {
+    if (!_peutGererRdv(interaction.member)) return interaction.reply({ content: '❌ Réservé aux Opérateurs.', flags: MessageFlags.Ephemeral });
+    const rdvId = interaction.customId.replace('rdvclient_repondre_', '');
+    const modal = new ModalBuilder().setCustomId(`rdvclient_repondre_modal_${rdvId}`).setTitle('💬 Répondre au client');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('message').setLabel('Votre message au client').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Ex: Pourriez-vous préciser le nombre de personnes à protéger ? Quel budget prévoyez-vous ?')),
+    );
+    return interaction.showModal(modal);
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('rdvclient_repondre_modal_')) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const rdvId = interaction.customId.replace('rdvclient_repondre_modal_', '');
+    const message = interaction.fields.getTextInputValue('message');
+    const db = loadDB();
+    const rdv = (db.rdvClients || []).find(r => r.id === rdvId);
+    if (!rdv) return interaction.editReply({ content: '❌ Demande introuvable.' });
+    try {
+      const u = await client.users.fetch(rdv.demandeurId);
+      await u.send([
+        `💬 **Iron Wolf Company — Le secrétariat vous répond**`,
+        `*(au sujet de votre demande : ${rdv.objet})*`,
+        ``,
+        message,
+        ``,
+        `— *Le secrétariat de l'Iron Wolf Company*`,
+      ].join('\n')).catch(() => {});
+    } catch {}
+    return interaction.editReply({ content: '✅ Message envoyé au client. Il pourra vous répondre, et vous pourrez fixer le RDV quand vous serez d\'accord.' });
+  }
+
+  // ── DÉCLINER ──
   if (interaction.isButton() && interaction.customId.startsWith('rdvclient_refuse_')) {
-    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    if (!_peutGererRdv(interaction.member)) return interaction.reply({ content: '❌ Réservé aux Opérateurs.', flags: MessageFlags.Ephemeral });
     const rdvId = interaction.customId.replace('rdvclient_refuse_', '');
     const db = loadDB();
     const rdv = (db.rdvClients || []).find(r => r.id === rdvId);
     if (!rdv) return interaction.reply({ content: '❌ Demande introuvable.', flags: MessageFlags.Ephemeral });
     rdv.statut = 'refuse';
     saveDB(db);
-    try { const u = await client.users.fetch(rdv.demandeurId); await u.send(`❌ **Iron Wolf Company** ne peut malheureusement pas donner suite à votre demande (${rdv.objet}) pour le moment.`).catch(() => {}); } catch {}
-    const emb = EmbedBuilder.from(interaction.message.embeds[0]).setColor(0xED4245).setFooter({ text: `Réf. ${rdvId} · ❌ REFUSÉ par ${interaction.member.displayName}` });
+    try {
+      const u = await client.users.fetch(rdv.demandeurId);
+      await u.send([
+        `📜 **Iron Wolf Company — Réponse du secrétariat**`,
+        ``,
+        `Bonjour, nous vous remercions de votre demande concernant « ${rdv.objet} ».`,
+        `Malheureusement, nous ne pouvons y donner suite pour le moment.`,
+        `N'hésitez pas à nous recontacter ultérieurement.`,
+        ``,
+        `— *Le secrétariat de l'Iron Wolf Company*`,
+      ].join('\n')).catch(() => {});
+    } catch {}
+    const emb = EmbedBuilder.from(interaction.message.embeds[0]).setColor(0xED4245).setFooter({ text: `Réf. ${rdvId} · ❌ DÉCLINÉ par ${interaction.member.displayName}` });
     await interaction.update({ embeds: [emb], components: [] });
     return;
-  }
-
-  if (interaction.isButton() && interaction.customId.startsWith('rdvclient_propose_')) {
-    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
-    const rdvId = interaction.customId.replace('rdvclient_propose_', '');
-    const modal = new ModalBuilder().setCustomId(`rdvclient_propose_modal_${rdvId}`).setTitle('🕐 Proposer un autre créneau');
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('creneau').setLabel('Nouveau créneau proposé').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 18/08 à 21h, Saint-Denis')),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('message').setLabel('Message au client (optionnel)').setStyle(TextInputStyle.Paragraph).setRequired(false)),
-    );
-    return interaction.showModal(modal);
-  }
-
-  if (interaction.isModalSubmit() && interaction.customId.startsWith('rdvclient_propose_modal_')) {
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const rdvId = interaction.customId.replace('rdvclient_propose_modal_', '');
-    const creneau = interaction.fields.getTextInputValue('creneau');
-    const message = interaction.fields.getTextInputValue('message') || '';
-    const db = loadDB();
-    const rdv = (db.rdvClients || []).find(r => r.id === rdvId);
-    if (!rdv) return interaction.editReply({ content: '❌ Demande introuvable.' });
-    rdv.statut = 'propose';
-    rdv.creneauPropose = creneau;
-    saveDB(db);
-    try { const u = await client.users.fetch(rdv.demandeurId); await u.send(`🕐 **Iron Wolf Company** vous propose un autre créneau pour « ${rdv.objet} » :\n**${creneau}**${message ? '\n\n' + message : ''}`).catch(() => {}); } catch {}
-    return interaction.editReply({ content: `✅ Nouveau créneau proposé au client : ${creneau}` });
   }
 
   if (interaction.isButton() && interaction.customId === 'open_contrat_offre') {
