@@ -210,6 +210,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('notion-test').setDescription('🔍 Tester la connexion Notion des contrats (Direction)'),
   new SlashCommandBuilder().setName('stats-agent').setDescription('📊 Statistiques de renseignement par agent')
     .addStringOption(o => o.setName('agent').setDescription('Nom d\'un agent précis (optionnel)').setRequired(false)),
+  new SlashCommandBuilder().setName('panel-rdv-client').setDescription('📅 Installer le panneau de prise de RDV client (Direction)'),
   new SlashCommandBuilder().setName('registre').setDescription('📋 Liste des membres actifs (Direction)').addStringOption(o => o.setName('pole').setDescription('Filtrer par pôle').setRequired(false).addChoices({ name: 'Tous', value: 'tous' }, { name: '⚖️ Légal', value: 'legal' }, { name: '🔒 Illégal', value: 'illegal' })).addIntegerOption(o => o.setName('page').setDescription('Page').setRequired(false)),
   new SlashCommandBuilder().setName('op').setDescription('🎯 Détail d\'une opération').addStringOption(o => o.setName('id').setDescription('ID de l\'opération').setRequired(false)),
 ].map(c => c.toJSON());
@@ -479,6 +480,35 @@ async function handleSlashCommand(interaction) {
   if (commandName === 'journal')           { if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral }); return notionModules.handleJournalCommand?.(interaction); }
   if (commandName === 'contrats-archives') { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleContratsArchives?.(interaction); }
   if (commandName === 'contrats')          return _handleMesContrats(interaction);
+  if (commandName === 'panel-rdv-client') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    const embed = new EmbedBuilder()
+      .setColor(0xC8A45C)
+      .setTitle('🤠  IRON WOLF COMPANY  🐺')
+      .setDescription([
+        '```',
+        '╔═══════════════════════════════╗',
+        '║   ✉  BUREAU DES RENDEZ-VOUS  ✉  ║',
+        '╚═══════════════════════════════╝',
+        '```',
+        '*Vous souhaitez faire appel à nos services ?*',
+        '*Protection, escorte, enquête, négociation...*',
+        '',
+        '📜 Laissez-nous un **télégramme** en cliquant ci-dessous.',
+        'La Direction étudiera votre demande et vous répondra.',
+        '',
+        '— *« La force est dans l\'ombre. »*',
+      ].join('\n'))
+      .setFooter({ text: 'Iron Wolf Company · Bureau de Saint-Denis' });
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('rdvclient_demande').setLabel('✉ Envoyer un télégramme').setStyle(ButtonStyle.Primary),
+    );
+    // Toujours installer le panneau dans le salon dédié aux demandes clients
+    const salonForm = interaction.guild.channels.cache.get('1512171267560702013') || interaction.channel;
+    await salonForm.send({ embeds: [embed], components: [row] });
+    return interaction.reply({ content: `✅ Panneau de prise de RDV installé dans ${salonForm}.`, flags: MessageFlags.Ephemeral });
+  }
+
   if (commandName === 'stats-agent') {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const db = loadDB();
@@ -1126,6 +1156,39 @@ client.on('messageReactionAdd', async (reaction, user) => {
     }
   }
 });
+
+// ── Crée un RDV dans l'agenda Notion (réutilisable, ex: RDV client accepté) ──
+async function archiverRdvNotion(titre, dateSouhait, lieu, notes, isIlleg, lieuNotionKey) {
+  if (!process.env.NOTION_TOKEN || !process.env.NOTION_AGENDA_DB_ID) return;
+  // Tenter de convertir une date JJ/MM ou JJ/MM/AAAA en ISO, sinon aujourd'hui
+  let dateISO = new Date().toISOString();
+  const m = (dateSouhait || '').match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/);
+  if (m) {
+    const jour = m[1].padStart(2, '0');
+    const mois = m[2].padStart(2, '0');
+    let annee = m[3] || String(new Date().getFullYear());
+    if (annee.length === 2) annee = '20' + annee;
+    dateISO = `${annee}-${mois}-${jour}T12:00:00.000Z`;
+  }
+  const RDV_VILLE = (typeof RDV_VILLE_NOTION_MAP !== 'undefined') ? RDV_VILLE_NOTION_MAP : {};
+  try {
+    const res = await fetch('https://api.notion.com/v1/pages', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parent: { database_id: process.env.NOTION_AGENDA_DB_ID }, properties: {
+        'Titre':  { title: [{ text: { content: titre.slice(0, 100) } }] },
+        'Date':   { date: { start: dateISO } },
+        'Lieu':   { rich_text: [{ text: { content: ((lieu ? lieu + '\n' : '') + (notes || '')).slice(0, 2000) } }] },
+        'Statut': { select: { name: 'Planifié' } },
+        'Type':   { select: { name: '🤝 Rendez-vous Client' } },
+        'Pôle':   { select: { name: isIlleg ? '🔒 Illégal' : '⚖️ Légal' } },
+        ...(lieuNotionKey && RDV_VILLE[lieuNotionKey] ? { 'Villes RDR2': { select: { name: RDV_VILLE[lieuNotionKey] } } } : {}),
+      } }),
+    });
+    if (res.ok) console.log(`✅ RDV client archivé Notion : ${titre}`);
+    else { const d = await res.json().catch(() => ({})); console.log('❌ RDV client Notion:', (d.message || '').slice(0, 200)); }
+  } catch (e) { console.log('❌ RDV client Notion error:', e.message); }
+}
 
 // ── Briefing renseignement quotidien (synthèse IA de la journée) ──
 async function postBriefingRenseignement(guild) {
@@ -2066,6 +2129,123 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
 
     await interaction.reply({ content: `✅ Message de rassemblement posté dans #operations.`, flags: MessageFlags.Ephemeral });
     return;
+  }
+
+  // ══════════ PRISE DE RDV CLIENT (façon télégramme) ══════════
+  if (interaction.isButton() && interaction.customId === 'rdvclient_demande') {
+    const modal = new ModalBuilder().setCustomId('rdvclient_modal').setTitle('✉ Télégramme — Demande de RDV');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom').setLabel('Votre nom / votre maison').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: M. Hawthorne, Famille Reyes...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objet').setLabel('Objet de votre demande').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Protection de convoi, enquête...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('lieu').setLabel('Lieu souhaité').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: Saint-Denis, Valentine...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('date').setLabel('Date / créneau souhaité').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: 15/08 au soir')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Détails (le télégramme)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setPlaceholder('Expliquez votre besoin, vos conditions, rémunération proposée...')),
+    );
+    return interaction.showModal(modal);
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId === 'rdvclient_modal') {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const nom = interaction.fields.getTextInputValue('nom');
+    const objet = interaction.fields.getTextInputValue('objet');
+    const lieu = interaction.fields.getTextInputValue('lieu') || '';
+    const dateSouhait = interaction.fields.getTextInputValue('date') || '';
+    const details = interaction.fields.getTextInputValue('details') || '';
+
+    const db = loadDB();
+    if (!db.rdvClients) db.rdvClients = [];
+    const rdvId = 'RDVC-' + Date.now().toString().slice(-6);
+    const rdv = { id: rdvId, nom, objet, lieu, dateSouhait, details, demandeurId: interaction.user.id, statut: 'en_attente', createdAt: new Date().toISOString() };
+    db.rdvClients.push(rdv);
+    if (db.rdvClients.length > 200) db.rdvClients = db.rdvClients.slice(-200);
+    saveDB(db);
+
+    // Télégramme stylé envoyé à la Direction
+    const embed = new EmbedBuilder()
+      .setColor(0xC8A45C)
+      .setTitle('✉  TÉLÉGRAMME REÇU  ✉')
+      .setDescription([
+        '```',
+        '═══ WESTERN UNION ═══',
+        '```',
+        `**De :** ${nom}`,
+        `**Objet :** ${objet}`,
+        ...(lieu ? [`**Lieu :** ${lieu}`] : []),
+        ...(dateSouhait ? [`**Créneau souhaité :** ${dateSouhait}`] : []),
+        ...(details ? ['', `> ${details.replace(/\n/g, '\n> ')}`] : []),
+        '',
+        `*Demandeur Discord :* <@${interaction.user.id}>`,
+      ].join('\n'))
+      .setFooter({ text: `Réf. ${rdvId} · En attente de décision` })
+      .setTimestamp();
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`rdvclient_accept_${rdvId}`).setLabel('✅ Accepter').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`rdvclient_propose_${rdvId}`).setLabel('🕐 Proposer un autre créneau').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`rdvclient_refuse_${rdvId}`).setLabel('❌ Refuser').setStyle(ButtonStyle.Danger),
+    );
+    // Envoyer le télégramme dans le salon Direction (traitement), PAS dans le salon du formulaire
+    const dest = interaction.guild.channels.cache.get('1509638226132996178') || interaction.channel;
+    if (dest) await dest.send({ embeds: [embed], components: [row] }).catch(() => {});
+    return interaction.editReply({ content: '✅ Votre télégramme a bien été transmis à la Direction. Vous recevrez une réponse prochainement.' });
+  }
+
+  // Décisions de la Direction sur une demande RDV client
+  if (interaction.isButton() && interaction.customId.startsWith('rdvclient_accept_')) {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    const rdvId = interaction.customId.replace('rdvclient_accept_', '');
+    const db = loadDB();
+    const rdv = (db.rdvClients || []).find(r => r.id === rdvId);
+    if (!rdv) return interaction.reply({ content: '❌ Demande introuvable.', flags: MessageFlags.Ephemeral });
+    rdv.statut = 'accepte';
+    saveDB(db);
+    // Sync Notion agenda
+    if (typeof archiverRdvNotion === 'function') {
+      archiverRdvNotion(`RDV Client — ${rdv.nom}`, rdv.dateSouhait, rdv.lieu, `${rdv.objet}\n${rdv.details}`, false, rdv.lieu).catch(() => {});
+    }
+    try { const u = await client.users.fetch(rdv.demandeurId); await u.send(`✅ **Iron Wolf Company** a accepté votre demande de rendez-vous (${rdv.objet}). Nous vous contacterons pour les détails.`).catch(() => {}); } catch {}
+    const emb = EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287).setFooter({ text: `Réf. ${rdvId} · ✅ ACCEPTÉ par ${interaction.member.displayName}` });
+    await interaction.update({ embeds: [emb], components: [] });
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId.startsWith('rdvclient_refuse_')) {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    const rdvId = interaction.customId.replace('rdvclient_refuse_', '');
+    const db = loadDB();
+    const rdv = (db.rdvClients || []).find(r => r.id === rdvId);
+    if (!rdv) return interaction.reply({ content: '❌ Demande introuvable.', flags: MessageFlags.Ephemeral });
+    rdv.statut = 'refuse';
+    saveDB(db);
+    try { const u = await client.users.fetch(rdv.demandeurId); await u.send(`❌ **Iron Wolf Company** ne peut malheureusement pas donner suite à votre demande (${rdv.objet}) pour le moment.`).catch(() => {}); } catch {}
+    const emb = EmbedBuilder.from(interaction.message.embeds[0]).setColor(0xED4245).setFooter({ text: `Réf. ${rdvId} · ❌ REFUSÉ par ${interaction.member.displayName}` });
+    await interaction.update({ embeds: [emb], components: [] });
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId.startsWith('rdvclient_propose_')) {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    const rdvId = interaction.customId.replace('rdvclient_propose_', '');
+    const modal = new ModalBuilder().setCustomId(`rdvclient_propose_modal_${rdvId}`).setTitle('🕐 Proposer un autre créneau');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('creneau').setLabel('Nouveau créneau proposé').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 18/08 à 21h, Saint-Denis')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('message').setLabel('Message au client (optionnel)').setStyle(TextInputStyle.Paragraph).setRequired(false)),
+    );
+    return interaction.showModal(modal);
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('rdvclient_propose_modal_')) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const rdvId = interaction.customId.replace('rdvclient_propose_modal_', '');
+    const creneau = interaction.fields.getTextInputValue('creneau');
+    const message = interaction.fields.getTextInputValue('message') || '';
+    const db = loadDB();
+    const rdv = (db.rdvClients || []).find(r => r.id === rdvId);
+    if (!rdv) return interaction.editReply({ content: '❌ Demande introuvable.' });
+    rdv.statut = 'propose';
+    rdv.creneauPropose = creneau;
+    saveDB(db);
+    try { const u = await client.users.fetch(rdv.demandeurId); await u.send(`🕐 **Iron Wolf Company** vous propose un autre créneau pour « ${rdv.objet} » :\n**${creneau}**${message ? '\n\n' + message : ''}`).catch(() => {}); } catch {}
+    return interaction.editReply({ content: `✅ Nouveau créneau proposé au client : ${creneau}` });
   }
 
   if (interaction.isButton() && interaction.customId === 'open_contrat_offre') {
@@ -4617,6 +4797,7 @@ global._syncInformateurNotion = _syncInformateurNotion;
 global._syncAvertissementNotion = _syncAvertissementNotion;
 global._syncMembreNotion = _syncMembreNotion;
 global._syncContratNotion = _syncContratNotion;
+global.archiverRdvNotion = archiverRdvNotion;
 global._syncCandidatureNotion = _syncCandidatureNotion;
 global._syncAffaireNotion = _syncAffaireNotion;
 global._syncSurnomNotion = _syncSurnomNotion;
