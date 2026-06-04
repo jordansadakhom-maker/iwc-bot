@@ -1285,10 +1285,25 @@ Si la transcription est incompréhensible ou vide, mets resume="(inaudible)".`;
         messages: [{ role: 'user', content: prompt }],
       }),
     });
-    const data = await resp.json();
+
+    // Lire la réponse en texte d'abord pour diagnostiquer les erreurs
+    const brut = await resp.text();
+    if (!resp.ok) {
+      let raison = brut.slice(0, 300);
+      try { const e = JSON.parse(brut); raison = e.error?.message || raison; } catch {}
+      if (resp.status === 401) console.log('⚠️ Rapport IA : clé API invalide (401).');
+      else if (resp.status === 400 && /credit|balance|quota/i.test(raison)) console.log('⚠️ Rapport IA : crédit Anthropic épuisé. Recharge le compte.');
+      else if (resp.status === 429) console.log('⚠️ Rapport IA : trop de requêtes (429), réessaie plus tard.');
+      else console.log(`⚠️ Rapport IA : erreur API ${resp.status} — ${raison}`);
+      return null;
+    }
+    let data;
+    try { data = JSON.parse(brut); } catch { console.log('⚠️ Rapport IA : réponse API illisible.'); return null; }
     const txt = data?.content?.[0]?.text || '';
+    if (!txt) { console.log('⚠️ Rapport IA : réponse vide de l\'API.'); return null; }
     const clean = txt.replace(/```json|```/g, '').trim();
-    return JSON.parse(clean);
+    try { return JSON.parse(clean); }
+    catch { console.log('⚠️ Rapport IA : le JSON renvoyé par l\'IA est mal formé, on garde le format classique.'); return null; }
   } catch (e) {
     console.log('⚠️ Rapport IA échec:', e.message);
     return null;
