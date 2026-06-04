@@ -3511,11 +3511,14 @@ async function _handleAide(interaction) {
   embed.addFields({ name: '📅 RDV & Agenda', value: '`/rdv` — Créer un RDV\n`/agenda creer` — RDV rapide\n`/agenda voir` — Prochains RDV', inline: false });
   embed.addFields({ name: '🟡 Absences', value: '`/absent [durée]` · `/retour` · `/avertissements`', inline: false });
   embed.addFields({ name: '📜 Contrats', value: '`/contrats` — Tes contrats en cours', inline: false });
+  embed.addFields({ name: '🕵️ Renseignement', value: '`/notes` — Dernières notes de terrain\n`/synthese [sujet]` — Synthèse IA sur une personne/lieu\n`/stats-agent` — Statistiques par agent', inline: false });
   if (isLeg || isDir) embed.addFields({ name: '⚖️ Pôle Légal', value: '`/solde` · `/stats` · `/ops` · `/op`', inline: false });
   if (isIll || isDir) embed.addFields({ name: '🔒 Confrérie', value: '`/solde` · `/stats` · `/ops`', inline: false });
-  if (isDir) embed.addFields({ name: '🎖️ Direction', value: '`/promo` · `/retro` · `/grade-set` · `/avertir` · `/annuler-absence`\n`/dashboard` · `/bilan` · `/contrats-archives` · `/rapport`\n`/purge` · `/sync` · `/version`', inline: false });
+  if (isDir) embed.addFields({ name: '🎖️ Direction', value: '`/promo` · `/retro` · `/grade-set` · `/avertir` · `/annuler-absence`\n`/dashboard` · `/bilan` · `/contrats-archives` · `/rapport`\n`/contrats-sync` · `/notion-test` · `/purge` · `/sync` · `/version`', inline: false });
+  if (isDir) embed.addFields({ name: '🤝 RDV Client', value: '`/panel-rdv-client` — Installer le panneau\n`/rdv-nettoyer` — Nettoyer les vieux télégrammes', inline: false });
   if (isFleau) embed.addFields({ name: '💀 Fléau & Concepteur', value: '`/op-programmer` · `/patch` · ⚙️ config coffre', inline: false });
-  embed.addFields({ name: '🤖 Automatismes', value: 'Trésorerie · Fiches · Identité IC · Plans · Rappels RDV · Absences auto', inline: false });
+  embed.addFields({ name: '🎙️ Micro de terrain', value: 'Programme PC : capture les voix RP et les envoie ici en rapports', inline: false });
+  embed.addFields({ name: '🤖 Automatismes', value: 'Trésorerie · Fiches · Identité IC · Plans · Rappels RDV · Absences auto · Briefing 20h · Archivage', inline: false });
   embed.setFooter({ text: 'IWC Bot • Commandes adaptées à ton rôle' });
   return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
@@ -3885,7 +3888,6 @@ const RDV_MODE_NOTION_MAP = {
 };
 
 async function _validerModalAgendaSimple(interaction) {
-  console.log('🔵 RDV STEP 5b - _validerModalAgendaSimple appelé');
   await interaction.deferReply();
   const titre      = interaction.fields.getTextInputValue('titre');
   const dateRaw    = interaction.fields.getTextInputValue('date');
@@ -3998,7 +4000,6 @@ async function _ouvrirMenuRdvSlash(interaction) {
 }
 
 async function _ouvrirMenuRdv(interaction) {
-  console.log('🔵 RDV STEP 1 - _ouvrirMenuRdv appelé');
   const msgId = interaction.customId ? interaction.customId.replace('btn_rdv_creer_', '') : interaction.id;
   const options = [
     { label: '👑 Reunion Direction', value: 'reunion_direction', description: 'Réunion interne Direction' },
@@ -4027,7 +4028,6 @@ async function _ouvrirMenuRdv(interaction) {
 }
 
 async function _handleRdvTypeSelect(interaction) {
-  console.log('🔵 RDV STEP 2 - _handleRdvTypeSelect, typeRdv:', interaction.values[0]);
   await interaction.deferUpdate();
   const typeRdv = interaction.values[0];
   const msgId = interaction.customId.replace('rdv_type_select_', '');
@@ -4046,7 +4046,6 @@ async function _handleRdvTypeSelect(interaction) {
 }
 
 async function _handleRdvModeSelect(interaction) {
-  console.log('🔵 RDV STEP 3 - _handleRdvModeSelect, mode:', interaction.values[0]);
   await interaction.deferUpdate();
   const mode = interaction.values[0]; const allParts = interaction.customId.replace('rdv_mode_select_', '').split('_'); const typeRdv = allParts.slice(0, -1).join('_'); const msgId = allParts[allParts.length - 1];
   if (mode === 'role') {
@@ -4079,7 +4078,6 @@ async function _handleRdvModeSelect(interaction) {
 }
 
 async function _handleRdvIndividuelSelect(interaction) {
-  console.log('🔵 RDV STEP 3b - _handleRdvIndividuelSelect');
   const selectedIds = interaction.values; const allParts = interaction.customId.replace('rdv_individuel_select_', '').split('_'); const typeRdv = allParts.slice(0, -1).join('_');
   const db = loadDB(); if (!db._rdvPending) db._rdvPending = {}; db._rdvPending[interaction.id] = { type: 'individuel', ids: selectedIds }; saveDB(db);
   const typeLabels = { reunion_direction: 'Réunion Direction', rdv_client: 'Rendez-vous Client', briefing_op: 'Briefing Opération', debrief_op: 'Débrief Opération', entretien_recru: 'Entretien Recrutement', reunion_legal: 'Réunion Pôle Légal', reunion_confrerie: 'Réunion Confrérie', formation: 'Formation Membres', negociation: 'Négociation', rdv_medical: 'Rendez-vous Médical', rdv_juridique: 'Rendez-vous Juridique', autre: 'Autre' };
@@ -4096,7 +4094,6 @@ async function _handleRdvIndividuelSelect(interaction) {
 }
 
 async function _handleRdvPoleSelect(interaction) {
-  console.log('🔵 RDV STEP 4 - _handleRdvPoleSelect, pole:', interaction.values[0]);
   const pole = interaction.values[0]; const allParts = interaction.customId.replace('rdv_pole_select_', '').split('_'); const typeRdv = allParts.slice(0, -1).join('_');
   const typeLabels = { reunion_direction: 'Réunion Direction', rdv_client: 'Rendez-vous Client', briefing_op: 'Briefing Opération', debrief_op: 'Débrief Opération', entretien_recru: 'Entretien Recrutement', reunion_legal: 'Réunion Pôle Légal', reunion_confrerie: 'Réunion Confrérie', formation: 'Formation Membres', negociation: 'Négociation', rdv_medical: 'Rendez-vous Médical', rdv_juridique: 'Rendez-vous Juridique', autre: 'Autre' };
   const typeLabel = typeLabels[typeRdv] || 'Rendez-vous';
@@ -4174,7 +4171,6 @@ async function _validerModalRdvIndividuel(interaction) {
 }
 
 async function _validerModalRdv(interaction) {
-  console.log('🔵 RDV STEP 5 - _validerModalRdv appelé, customId:', interaction.customId);
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const rawId = interaction.customId.replace('modal_rdv_', '');
   const parts = rawId.split('_');
