@@ -1671,8 +1671,69 @@ client.on('messageCreate', async message => {
 
   // #plans avec ID hardcodé
   const plansTactCh = guild.channels.cache.get(SALON_HARDCODED.PLANS);
-  if (plansTactCh && message.channel.id === plansTactCh.id) { await notionV3.handlePlansMessage?.(message); return; }
+  if (plansTactCh && message.channel.id === plansTactCh.id) { await _archiverPlanNotion(message); return; }
 });
+
+// ── Archive une photo de lieu RDR2 dans Notion (salon #plans) — fiabilisé ──
+async function _archiverPlanNotion(message) {
+  if (message.author.bot || !message.guild) return false;
+  const images = message.attachments.filter(a => a.contentType?.startsWith('image/') || /\.(png|jpg|jpeg|gif|webp)$/i.test(a.url));
+  if (!images.size) return false;
+  const lieu = message.content.trim() || 'Lieu non précisé';
+  const DB = process.env.NOTION_PLANS_DB || process.env.NOTION_AGENDA_DB_ID || null;
+
+  let notionOK = false;
+  let raison = '';
+
+  if (!process.env.NOTION_TOKEN) raison = 'NOTION_TOKEN manquant';
+  else if (!DB) raison = 'NOTION_PLANS_DB (ou NOTION_AGENDA_DB_ID) manquant dans Render';
+  else {
+    const headers = { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' };
+    for (const [, att] of images) {
+      try {
+        const propsComplet = {
+          'Titre':     { title:     [{ text: { content: `Plan — ${lieu}`.slice(0, 100) } }] },
+          'Lieu':      { rich_text: [{ text: { content: lieu.slice(0, 1900) } }] },
+          'Date':      { date:      { start: new Date().toISOString().split('T')[0] } },
+          'Auteur':    { rich_text: [{ text: { content: message.author.username } }] },
+          'Type':      { select:    { name: '🗺️ Plan tactique' } },
+          'URL Image': { url: att.url },
+        };
+        const children = [
+          { object: 'block', type: 'image', image: { type: 'external', external: { url: att.url } } },
+          { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ type: 'text', text: { content: `📸 ${lieu} — ${fmtShort(new Date())} · ${message.author.username}`, link: { url: att.url } } }] } },
+        ];
+        let res = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers, body: JSON.stringify({ parent: { database_id: DB }, properties: propsComplet, children }) });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          console.log(`⚠️ Plan Notion: écriture complète refusée (${res.status}) : ${(err.message || '').slice(0, 200)}`);
+          // Retry minimal : juste Titre + image dans la page
+          res = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers, body: JSON.stringify({ parent: { database_id: DB }, properties: { 'Titre': { title: [{ text: { content: `Plan — ${lieu}`.slice(0, 100) } }] } }, children: [{ object: 'block', type: 'image', image: { type: 'external', external: { url: att.url } } }] }) });
+          if (res.ok) { notionOK = true; console.log(`✅ Plan "${lieu}" écrit en mode minimal (vérifie les noms de colonnes).`); }
+          else { const e2 = await res.json().catch(() => ({})); raison = `${res.status} — ${(e2.message || '').slice(0, 150)}`; console.log(`❌ Plan Notion échec total : ${raison}`); }
+        } else { notionOK = true; console.log(`✅ Plan archivé Notion : ${lieu}`); }
+      } catch (e) { raison = e.message; console.log('❌ Plan Notion error:', e.message); }
+    }
+  }
+
+  await message.react(notionOK ? '🗺️' : '⚠️').catch(() => {});
+  const reply = await message.reply({
+    embeds: [new EmbedBuilder()
+      .setColor(notionOK ? 0x5865F2 : 0xFFA500)
+      .setTitle(`🗺️ Plan — ${lieu}`)
+      .addFields(
+        { name: '📍 Lieu', value: lieu, inline: true },
+        { name: '👤 Par', value: message.author.username, inline: true },
+        { name: '📅 Date', value: fmtShort(new Date()), inline: true },
+        { name: '📓 Notion', value: notionOK ? '✅ Archivé' : `⚠️ ${raison || 'voir logs'}`, inline: true },
+      )
+      .setDescription(`${images.size} image(s) — repérage de terrain.`)
+      .setFooter({ text: 'IWC • Plans tactiques' })],
+    allowedMentions: { repliedUser: false },
+  }).catch(() => null);
+  if (reply) setTimeout(() => reply.delete().catch(() => {}), 15000);
+  return true;
+}
 
 client.on('interactionCreate', async interaction => {
   const guild = interaction.guild; const db = loadDB();
