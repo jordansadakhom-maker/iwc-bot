@@ -4020,7 +4020,7 @@ async function _validerModalAgendaSimple(interaction) {
       'Type':             { select:    { name: RDV_TYPE_NOTION_MAP['RDV'] || '📋 Autre' } },
       'Pôle':             { select:    { name: isIlleg ? '🔒 Illégal' : '⚖️ Légal' } },
       'Mode de convocation': { select: { name: RDV_MODE_NOTION_MAP['role'] } },
-      'Villes RDR2':      { select:    { name: RDV_VILLE_NOTION_MAP[lieuNotionKey] || RDV_VILLE_NOTION_MAP['Autre'] } },
+      'Villes RDR2':      { select:    { name: RDV_VILLE_NOTION_MAP[lieuVille ? decodeURIComponent(lieuVille) : 'Autre'] || RDV_VILLE_NOTION_MAP['Autre'] } },
     };
     // L'image va TOUJOURS dans le contenu de la page (marche même sans colonne Photo)
     const children = photoUrl ? [
