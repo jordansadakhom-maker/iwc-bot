@@ -1416,19 +1416,27 @@ client.on('messageCreate', async message => {
             .setTimestamp();
           if (rapport.lieu) lieu = rapport.lieu;
         } else {
-          // Pas d'IA -> mise en forme classique (transcription en spoiler pour rester propre)
-          const infoBrute = info.replace(/\*\*/g, '').replace(/▸/g, '').replace(/🔑.*/s, '').trim();
+          // Pas d'IA -> mise en forme classique soignée
+          // Nettoyer la transcription (retirer le gras markdown, les puces, la ligne mots-clés)
+          const infoBrute = info.replace(/\*\*/g, '').replace(/[▸🗨️💬]/g, '').replace(/🔑.*/s, '').replace(/\n{2,}/g, '\n').trim();
+          // Mini-aperçu : la 1ère phrase (ou les ~140 premiers caractères)
+          const apercu = (() => {
+            const phrase = infoBrute.split(/[.!?]/)[0].trim();
+            if (phrase.length >= 15 && phrase.length <= 150) return phrase + '…';
+            return infoBrute.slice(0, 140).trim() + (infoBrute.length > 140 ? '…' : '');
+          })();
           embed = new EmbedBuilder()
             .setColor(colors[priorite] || colors.normale)
             .setTitle('📋 NOTE DE TERRAIN')
             .setAuthor({ name: `🕵️ ${agent} · ${heure} · ${dateStr}` })
+            .setDescription(`*« ${apercu} »*`)
             .addFields(
               ...(cible ? [{ name: '🎯 Cible', value: cible, inline: true }] : []),
               ...(lieu  ? [{ name: '📍 Lieu',  value: lieu,  inline: true }] : []),
               ...(tagsDetectes.length ? [{ name: '🏷️ Mots-clés', value: tagsDetectes.join('  '), inline: false }] : []),
-              { name: '🎙️ Transcription', value: ('||' + (infoBrute || '—').slice(0, 980) + '||') },
+              { name: '🎙️ Transcription complète', value: ('||' + (infoBrute || '—').slice(0, 980) + '||') },
             )
-            .setFooter({ text: `IWC · Informateurs · Priorité : ${priorite}` })
+            .setFooter({ text: `IWC · Renseignement de terrain · Priorité : ${priorite}` })
             .setTimestamp();
         }
 
