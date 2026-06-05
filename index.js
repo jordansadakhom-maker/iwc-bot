@@ -4011,7 +4011,8 @@ async function _validerModalAgendaSimple(interaction) {
     }
   } catch {}
   if (process.env.NOTION_TOKEN && process.env.NOTION_AGENDA_DB_ID) {
-    fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: process.env.NOTION_AGENDA_DB_ID }, properties: {
+    const headers = { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' };
+    const propsBase = {
       'Titre':    { title:     [{ text: { content: titre } }] },
       'Date':     { date:      { start: dateISO } },
       'Lieu':             { rich_text: [{ text: { content: (`${lieu !== '—' ? lieu + '\n' : ''}${heure ? 'Heure : ' + heure + '\n' : ''}${notes}`).slice(0, 2000) } }] },
@@ -4020,17 +4021,25 @@ async function _validerModalAgendaSimple(interaction) {
       'Pôle':             { select:    { name: isIlleg ? '🔒 Illégal' : '⚖️ Légal' } },
       'Mode de convocation': { select: { name: RDV_MODE_NOTION_MAP['role'] } },
       'Villes RDR2':      { select:    { name: RDV_VILLE_NOTION_MAP[lieuNotionKey] || RDV_VILLE_NOTION_MAP['Autre'] } },
-      ...(photoUrl ? { 'Photo': { files: [{ name: 'reperage.jpg', type: 'external', external: { url: photoUrl } }] } } : {}),
-    },
-    ...(photoUrl ? { children: [
+    };
+    // L'image va TOUJOURS dans le contenu de la page (marche même sans colonne Photo)
+    const children = photoUrl ? [
       { object: 'block', type: 'image', image: { type: 'external', external: { url: photoUrl } } },
       { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ type: 'text', text: { content: '📸 Photo de repérage', link: { url: photoUrl } } }] } },
-    ] } : {}),
-    }) }).then(async res => {
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) console.log(`✅ RDV archivé Notion : ${titre}`);
-      else console.log(`❌ Notion RDV erreur complet:`, JSON.stringify(data).slice(0, 500));
-    }).catch(e => console.log('❌ Notion RDV error:', e.message));
+    ] : [];
+    // Tentative 1 : avec la colonne Photo
+    const propsAvecPhoto = { ...propsBase, ...(photoUrl ? { 'Photo': { files: [{ name: 'reperage.jpg', type: 'external', external: { url: photoUrl } }] } } : {}) };
+    (async () => {
+      let res = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers, body: JSON.stringify({ parent: { database_id: process.env.NOTION_AGENDA_DB_ID }, properties: propsAvecPhoto, children }) });
+      if (res.ok) { console.log(`✅ RDV archivé Notion : ${titre}`); return; }
+      const err = await res.json().catch(() => ({}));
+      console.log(`⚠️ RDV Notion: 1ère tentative refusée (${res.status}) : ${(err.message || '').slice(0, 200)}`);
+      // Tentative 2 : SANS la colonne Photo (l'image reste dans le contenu de la page)
+      res = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers, body: JSON.stringify({ parent: { database_id: process.env.NOTION_AGENDA_DB_ID }, properties: propsBase, children }) });
+      if (res.ok) { console.log(`✅ RDV archivé Notion (sans colonne Photo, image dans la page) : ${titre}`); return; }
+      const err2 = await res.json().catch(() => ({}));
+      console.log(`❌ RDV Notion échec total (${res.status}) : ${(err2.message || '').slice(0, 200)}`);
+    })().catch(e => console.log('❌ Notion RDV error:', e.message));
   }
 }
 
@@ -4274,7 +4283,8 @@ async function _validerModalRdv(interaction) {
     for (const [uid] of dirs) { await envoyerDMRecap(interaction.guild, uid, 'rdv', { titre, date: dateCapital, heure, lieu }).catch(() => {}); }
   }
   if (process.env.NOTION_TOKEN && process.env.NOTION_AGENDA_DB_ID) {
-    fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: process.env.NOTION_AGENDA_DB_ID }, properties: {
+    const headers = { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' };
+    const propsBase = {
       'Titre':    { title:     [{ text: { content: titre } }] },
       'Date':     { date:      { start: dateISO } },
       'Lieu':             { rich_text: [{ text: { content: (`${lieu !== '—' ? lieu + '\n' : ''}${heure ? 'Heure : ' + heure + '\n' : ''}${notes}`).slice(0, 2000) } }] },
@@ -4286,17 +4296,22 @@ async function _validerModalRdv(interaction) {
       'Notif 24h':  { checkbox: true },
       'Notif 1h':   { checkbox: true },
       'Notif 15min':{ checkbox: true },
-      ...(photoUrl ? { 'Photo': { files: [{ name: 'reperage.jpg', type: 'external', external: { url: photoUrl } }] } } : {}),
-    },
-    ...(photoUrl ? { children: [
+    };
+    const children = photoUrl ? [
       { object: 'block', type: 'image', image: { type: 'external', external: { url: photoUrl } } },
       { object: 'block', type: 'paragraph', paragraph: { rich_text: [{ type: 'text', text: { content: '📸 Photo de repérage', link: { url: photoUrl } } }] } },
-    ] } : {}),
-    }) }).then(async res => {
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) console.log(`✅ RDV pôle archivé Notion : ${titre}`);
-      else console.log(`❌ Notion RDV pôle erreur complet:`, JSON.stringify(data).slice(0, 500));
-    }).catch(e => console.log('❌ Notion RDV pôle error:', e.message));
+    ] : [];
+    const propsAvecPhoto = { ...propsBase, ...(photoUrl ? { 'Photo': { files: [{ name: 'reperage.jpg', type: 'external', external: { url: photoUrl } }] } } : {}) };
+    (async () => {
+      let res = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers, body: JSON.stringify({ parent: { database_id: process.env.NOTION_AGENDA_DB_ID }, properties: propsAvecPhoto, children }) });
+      if (res.ok) { console.log(`✅ RDV pôle archivé Notion : ${titre}`); return; }
+      const err = await res.json().catch(() => ({}));
+      console.log(`⚠️ RDV pôle Notion: 1ère tentative refusée (${res.status}) : ${(err.message || '').slice(0, 200)}`);
+      res = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers, body: JSON.stringify({ parent: { database_id: process.env.NOTION_AGENDA_DB_ID }, properties: propsBase, children }) });
+      if (res.ok) { console.log(`✅ RDV pôle archivé Notion (sans colonne Photo, image dans la page) : ${titre}`); return; }
+      const err2 = await res.json().catch(() => ({}));
+      console.log(`❌ RDV pôle Notion échec total (${res.status}) : ${(err2.message || '').slice(0, 200)}`);
+    })().catch(e => console.log('❌ Notion RDV pôle error:', e.message));
   }
   const salonLabel = pole === 'illegal' ? '#agenda-illégal' : '#agenda';
 
