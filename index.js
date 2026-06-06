@@ -970,7 +970,10 @@ function buildRdvDate(dateStr, heureStr) {
   const provisoire = new Date(`${jour}T${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:00Z`);
   return new Date(provisoire.getTime() - parisOffsetHours(provisoire) * 3600000);
 }
-function buildParticipantMentions(participants) { return participants.map(name => { const val = PARTICIPANTS_MAP[name]; if (!val) return null; return val.startsWith('<@') ? val : `<@${val}>`; }).filter(Boolean).join(' '); }
+function buildParticipantMentions(participants) {
+  const EXCLUS_PING = ['982201491773354035']; // Thomas Galagan — ne plus pinger sur les RDV
+  return participants.map(name => { const val = PARTICIPANTS_MAP[name]; if (!val) return null; const m = val.startsWith('<@') ? val : `<@${val}>`; if (EXCLUS_PING.some(id => m.includes(id))) return null; return m; }).filter(Boolean).join(' ');
+}
 
 async function checkAgenda(guild) {
   const appts = await notionQueryAgenda();
@@ -995,7 +998,7 @@ async function checkAgenda(guild) {
       if (prevKey && getMsgId(prevKey)) { const prevMsg = await ch.messages.fetch(getMsgId(prevKey)).catch(() => null); if (prevMsg) await prevMsg.delete().catch(() => {}); delete db.reminderMsgIds[`${a.id}_${prevKey}`]; }
       const msg = await ch.send({ content: pingText, embeds: [embed] }).catch(() => null);
       if (msg) db.reminderMsgIds[`${a.id}_${key}`] = msg.id;
-      for (const name of (a.participants || [])) { const uid = PARTICIPANTS_MAP[name]; if (uid && !uid.startsWith('<@&')) { await envoyerDMRecap(guild, uid, 'rappel', { titre: a.titre, dans: dmTitle, date: fmtLong(a.date), heure: a.heure || '', lieu: a.lieu || '—' }).catch(() => {}); } }
+      for (const name of (a.participants || [])) { const uid = PARTICIPANTS_MAP[name]; if (uid && !uid.startsWith('<@&') && uid !== '982201491773354035') { await envoyerDMRecap(guild, uid, 'rappel', { titre: a.titre, dans: dmTitle, date: fmtLong(a.date), heure: a.heure || '', lieu: a.lieu || '—' }).catch(() => {}); } }
       db.sentReminders[`${a.id}_${key}`] = true; changed = true;
     };
     if (mins > 0) {
@@ -1810,6 +1813,7 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isModalSubmit() && interaction.customId === 'modal_surnom_identite')   return _validerModalSurnom(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_agenda_simple')) return _validerModalAgendaSimple(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_rdv_individuel_')) return _validerModalRdvIndividuel(interaction);
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_rdv_comm_')) return _validerModalRdvCommunaute(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_rdv_'))      return _validerModalRdv(interaction);
   if (interaction.isModalSubmit() && interaction.customId === 'modal_informateur')       return notionV3.handleInformateurModal?.(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_tresor_'))   return notionModules.handleTresorModal?.(interaction);
@@ -2080,6 +2084,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId.startsWith('rdv_mode_select_'))     return _handleRdvModeSelect(interaction);
     if (interaction.customId.startsWith('rdv_individuel_select_')) return _handleRdvIndividuelSelect(interaction);
     if (interaction.customId.startsWith('rdv_pole_select_'))     return _handleRdvPoleSelect(interaction);
+    if (interaction.customId.startsWith('rdv_comm_person_'))     return _handleRdvCommPersonSelect(interaction);
     if (interaction.customId.startsWith('rdv_lieu_select_'))     return _handleRdvLieuSelect(interaction);
     if (interaction.customId === 'tresor_config_limite_illegal') {
       if (!isFondateurOuFleau(interaction.member) && !isOfficierOuDirection(interaction.member)) return;
@@ -3963,13 +3968,26 @@ async function _validerModalAgendaSimple(interaction) {
   const lieu       = lieuDetail || (lieuVille ? decodeURIComponent(lieuVille) : '—');
   const notes      = interaction.fields.getTextInputValue('notes') || '';
   let dateISO = null;
-  try { const p = dateRaw.split('/'); if (p.length === 3) dateISO = `${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`; } catch {}
-  if (!dateISO) return interaction.editReply({ content: '❌ Format de date invalide. Utilise JJ/MM/AAAA.' });
+  try {
+    const p = dateRaw.trim().split(/[\/\-.]/).map(x => x.trim());
+    if (p.length >= 2) {
+      const jour = p[0].padStart(2, '0');
+      const mois = p[1].padStart(2, '0');
+      let annee = p[2] || String(new Date().getFullYear());
+      if (annee.length === 2) annee = '20' + annee;
+      const candidat = `${annee}-${mois}-${jour}`;
+      // Vérifier que la date est réellement valide
+      const test = new Date(candidat + 'T12:00:00');
+      if (!isNaN(test.getTime())) dateISO = candidat;
+    }
+  } catch {}
+  if (!dateISO) return interaction.editReply({ content: '❌ Format de date invalide. Utilise JJ/MM/AAAA (ex: 15/08/2026).' });
   const db = loadDB();
   const emetteurIC = db.members[interaction.user.id]?.name || interaction.user.username;
   const rdvId = `RDV-${Date.now().toString().slice(-5)}`;
-  const dateAffiche = new Date(dateISO).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
-  const dateCapital = dateAffiche.charAt(0).toUpperCase() + dateAffiche.slice(1);
+  const dateObj = new Date(dateISO + 'T12:00:00');
+  const dateAffiche = dateObj.toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+  const dateCapital = isNaN(dateObj.getTime()) ? dateRaw : (dateAffiche.charAt(0).toUpperCase() + dateAffiche.slice(1));
   const skipId = `rdv_skip_photo_${interaction.id}`;
   await interaction.editReply({
     embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📸 Photo de repérage — optionnelle').setDescription(`**📅 ${titre}** — ${heure} à ${lieu}\n\n**Option 1 :** Envoie une capture d\'écran du lieu dans ce salon\n**Option 2 :** Clique **Ignorer** pour poster le RDV sans photo\n\n*Tu as 2 minutes.*`)],
@@ -3996,7 +4014,10 @@ async function _validerModalAgendaSimple(interaction) {
   // Poster dans le bon salon selon le pôle du membre
   const isIlleg = interaction.member?.roles?.cache?.has(ROLE_POLE_ILLEGAL);
   const poleLabel = isIlleg ? '🔒 Illégal' : '⚖️ Légal';
-  const pingRole  = isIlleg ? `<@&${ROLE_POLE_ILLEGAL}>` : `<@&${ROLE_POLE_LEGAL}>`;
+  // Ne pinger que si le rôle existe VRAIMENT sur le serveur (évite "@rôle inconnu")
+  const roleIdCible = isIlleg ? ROLE_POLE_ILLEGAL : ROLE_POLE_LEGAL;
+  const roleExiste  = interaction.guild.roles.cache.has(roleIdCible);
+  const pingRole    = roleExiste ? `<@&${roleIdCible}>` : '';
   let agendaCh;
   if (isIlleg) {
     agendaCh = interaction.guild.channels.cache.get(SALON_HARDCODED.AGENDA_ILLEGAL)
@@ -4004,7 +4025,7 @@ async function _validerModalAgendaSimple(interaction) {
   } else {
     agendaCh = getChById(interaction.guild, 'AGENDA', 'agenda');
   }
-  if (agendaCh) await agendaCh.send({ content: `${pingRole} — 📅 **${titre}** · ${heure} à ${lieu}`, embeds: [embed], allowedMentions: { parse: [], roles: [isIlleg ? ROLE_POLE_ILLEGAL : ROLE_POLE_LEGAL] } }).catch(() => {});
+  if (agendaCh) await agendaCh.send({ content: `${pingRole ? pingRole + ' — ' : ''}📅 **${titre}** · ${heure} à ${lieu}`, embeds: [embed], allowedMentions: { parse: [], roles: roleExiste ? [roleIdCible] : [] } }).catch(() => {});
   const salonLabel = isIlleg ? '#agenda-illégal' : '#agenda';
   const confirmMsg = await interaction.editReply({ content: photoUrl ? '✅ RDV créé avec photo de repérage !' : `✅ RDV créé et posté dans ${salonLabel} !`, embeds: [], components: [] });
   // Supprimer le message intermédiaire "Nouveau RDV — Étape 1/2" dans #contrats
@@ -4131,6 +4152,7 @@ async function _handleRdvModeSelect(interaction) {
         { label: '🔒 La Confrerie', value: 'illegal', description: 'Convoque tout le pôle illégal' },
         { label: '👥 Tout le monde', value: 'tous', description: 'Convoque les deux pôles' },
         { label: '👑 Direction seule', value: 'direction', description: 'Convoque la Direction uniquement' },
+        { label: '🤝 Communauté / Visiteur', value: 'communaute', description: 'RDV avec une personne précise (hors compagnie)' },
       ]))],
     });
   } else {
@@ -4172,6 +4194,22 @@ async function _handleRdvPoleSelect(interaction) {
   const pole = interaction.values[0]; const allParts = interaction.customId.replace('rdv_pole_select_', '').split('_'); const typeRdv = allParts.slice(0, -1).join('_');
   const typeLabels = { reunion_direction: 'Réunion Direction', rdv_client: 'Rendez-vous Client', briefing_op: 'Briefing Opération', debrief_op: 'Débrief Opération', entretien_recru: 'Entretien Recrutement', reunion_legal: 'Réunion Pôle Légal', reunion_confrerie: 'Réunion Confrérie', formation: 'Formation Membres', negociation: 'Négociation', rdv_medical: 'Rendez-vous Médical', rdv_juridique: 'Rendez-vous Juridique', autre: 'Autre' };
   const typeLabel = typeLabels[typeRdv] || 'Rendez-vous';
+
+  // ── Cas spécial Communauté / Visiteur : choisir une personne précise ──
+  if (pole === 'communaute') {
+    const membresComm = interaction.guild.members.cache.filter(m =>
+      !m.user.bot && m.roles.cache.some(r => /visiteur|communaut/i.test(r.name))
+    );
+    if (!membresComm.size) {
+      return interaction.update({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('🤝 Communauté / Visiteur').setDescription('Aucun membre avec un rôle **Visiteur** ou **Communauté** trouvé sur le serveur.')], components: [] });
+    }
+    const options = [...membresComm.values()].slice(0, 25).map(m => ({ label: (m.displayName || m.user.username).slice(0, 100), value: m.id, description: `@${m.user.username}`.slice(0, 100), emoji: '🤝' }));
+    return interaction.update({
+      embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('🤝 Rendez-vous Communauté').setDescription('**Personne à convoquer** — choisis qui recevra ce rendez-vous.')],
+      components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`rdv_comm_person_${typeRdv}`).setPlaceholder('Choisir la personne...').addOptions(options))],
+    });
+  }
+
   const modal = new ModalBuilder().setCustomId(`modal_rdv_${pole}_${typeRdv}`).setTitle(`📅 ${typeLabel}`);
   modal.addComponents(
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('titre').setLabel('Titre / Objet du RDV').setStyle(TextInputStyle.Short).setRequired(true).setValue(typeLabel).setPlaceholder('Ex: Réunion stratégique...')),
@@ -4181,6 +4219,96 @@ async function _handleRdvPoleSelect(interaction) {
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('notes').setLabel('Ordre du jour / Notes').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(400).setPlaceholder('Points à aborder...')),
   );
   await interaction.showModal(modal);
+}
+
+async function _handleRdvCommPersonSelect(interaction) {
+  const personId = interaction.values[0];
+  const typeRdv = interaction.customId.replace('rdv_comm_person_', '');
+  const typeLabels = { reunion_direction: 'Réunion Direction', rdv_client: 'Rendez-vous Client', briefing_op: 'Briefing Opération', debrief_op: 'Débrief Opération', entretien_recru: 'Entretien Recrutement', formation: 'Formation Membres', negociation: 'Négociation', rdv_medical: 'Rendez-vous Médical', rdv_juridique: 'Rendez-vous Juridique', autre: 'Autre' };
+  const typeLabel = typeLabels[typeRdv] || 'Rendez-vous';
+  const modal = new ModalBuilder().setCustomId(`modal_rdv_comm_${personId}`).setTitle(`🤝 ${typeLabel}`.slice(0, 45));
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('titre').setLabel('Titre / Objet du RDV').setStyle(TextInputStyle.Short).setRequired(true).setValue(typeLabel).setPlaceholder('Ex: Rencontre, négociation...')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('date').setLabel('Date (JJ/MM/AAAA)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 15/06/2026')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('heure').setLabel('Heure').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 21h00')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('lieu').setLabel('Lieu de rendez-vous').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: Saloon de Valentine...')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('notes').setLabel('Notes / Détails').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(400)),
+  );
+  await interaction.showModal(modal);
+}
+
+async function _validerModalRdvCommunaute(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const personId = interaction.customId.replace('modal_rdv_comm_', '');
+  const titre = interaction.fields.getTextInputValue('titre');
+  const dateRaw = interaction.fields.getTextInputValue('date');
+  const heure = interaction.fields.getTextInputValue('heure');
+  const lieu = interaction.fields.getTextInputValue('lieu') || '—';
+  const notes = interaction.fields.getTextInputValue('notes') || '';
+
+  // Date robuste
+  let dateISO = null;
+  try {
+    const p = dateRaw.trim().split(/[\/\-.]/).map(x => x.trim());
+    if (p.length >= 2) { const j = p[0].padStart(2,'0'); const m = p[1].padStart(2,'0'); let a = p[2] || String(new Date().getFullYear()); if (a.length === 2) a = '20'+a; const cand = `${a}-${m}-${j}`; if (!isNaN(new Date(cand+'T12:00:00').getTime())) dateISO = cand; }
+  } catch {}
+  if (!dateISO) return interaction.editReply({ content: '❌ Format de date invalide. Utilise JJ/MM/AAAA (ex: 15/06/2026).' });
+
+  const dateObj = new Date(dateISO + 'T12:00:00');
+  const dateAffiche = dateObj.toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+  const dateCapital = dateAffiche.charAt(0).toUpperCase() + dateAffiche.slice(1);
+  const rdvId = `RDV-${Date.now().toString().slice(-5)}`;
+  const db = loadDB();
+  const emetteurIC = db.members[interaction.user.id]?.name || interaction.user.username;
+
+  const personne = await interaction.guild.members.fetch(personId).catch(() => null);
+  const personLabel = personne ? (personne.displayName || personne.user.username) : 'Invité';
+
+  const embed = new EmbedBuilder().setColor(0x8B5A2A).setTitle(`🤝 ${titre.toUpperCase()}`)
+    .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   IRON WOLF COMPANY — INVITATION\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
+    .addFields(
+      { name: '🆔 Référence', value: '`' + rdvId + '`', inline: true },
+      { name: '👤 Invité', value: personne ? `<@${personId}>` : personLabel, inline: true },
+      { name: '📅 Date', value: dateCapital, inline: true },
+      { name: '🕐 Heure', value: `**${heure}**`, inline: true },
+      { name: '📍 Lieu', value: lieu, inline: true },
+      { name: '✍️ Organisé par', value: emetteurIC, inline: true },
+    );
+  if (notes) embed.addFields({ name: '📋 Notes', value: notes });
+  embed.setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` }).setTimestamp();
+
+  // Poster dans l'agenda communauté dédié + ping la personne
+  const agendaComm = interaction.guild.channels.cache.get('1512717271313944678');
+  if (agendaComm) {
+    await agendaComm.send({ content: `<@${personId}> — 🤝 **${titre}** · ${heure} à ${lieu}`, embeds: [embed], allowedMentions: { users: [personId] } }).catch(() => {});
+  }
+
+  // Archiver dans Notion (agenda)
+  if (process.env.NOTION_TOKEN && process.env.NOTION_AGENDA_DB_ID) {
+    const headers = { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' };
+    const props = {
+      'Titre': { title: [{ text: { content: `${titre} — ${personLabel}` } }] },
+      'Date':  { date: { start: dateISO } },
+      'Lieu':  { rich_text: [{ text: { content: (`${lieu !== '—' ? lieu + '\n' : ''}${heure ? 'Heure : ' + heure + '\n' : ''}${notes}`).slice(0, 2000) } }] },
+      'Statut':{ select: { name: 'Planifié' } },
+      'Pôle':  { select: { name: '🤝 Communauté' } },
+    };
+    (async () => {
+      let res = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers, body: JSON.stringify({ parent: { database_id: process.env.NOTION_AGENDA_DB_ID }, properties: props }) });
+      if (res.ok) { console.log(`✅ RDV communauté archivé Notion : ${titre}`); return; }
+      // Retry minimal si une colonne manque (ex: Pôle sans option Communauté)
+      res = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers, body: JSON.stringify({ parent: { database_id: process.env.NOTION_AGENDA_DB_ID }, properties: { 'Titre': props.Titre, 'Date': props.Date, 'Lieu': props.Lieu, 'Statut': props.Statut } }) });
+      if (res.ok) console.log(`✅ RDV communauté archivé (sans Pôle) : ${titre}`);
+      else { const e = await res.json().catch(() => ({})); console.log(`❌ RDV communauté Notion échec : ${(e.message||'').slice(0,150)}`); }
+    })().catch(e => console.log('❌ RDV communauté Notion error:', e.message));
+  }
+
+  // MP à l'invité
+  if (personne) {
+    await personne.send({ embeds: [new EmbedBuilder().setColor(0x8B5A2A).setTitle('🤝 Invitation — Iron Wolf Company').setDescription(`Vous êtes convié(e) à un rendez-vous.\n\n**${titre}**\n📅 ${dateCapital}\n🕐 ${heure}\n📍 ${lieu}${notes ? '\n\n📋 ' + notes : ''}`).setFooter({ text: 'Iron Wolf Company' })] }).catch(() => {});
+  }
+
+  await interaction.editReply({ content: `✅ Rendez-vous **${rdvId}** créé pour **${personLabel}** et posté dans l'agenda communauté.` });
 }
 
 async function _validerModalRdvIndividuel(interaction) {
