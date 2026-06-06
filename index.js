@@ -1308,6 +1308,28 @@ Si la transcription est incompréhensible ou vide, mets resume="(inaudible)".`;
 }
 
 client.on('messageCreate', async message => {
+  // ── Salon d'alerte : tout message → ping tout le monde SAUF Thomas Galagan ──
+  if (message.guild && !message.author.bot && message.channel.id === '1512913726494216222') {
+    try {
+      const THOMAS_ID = '982201491773354035'; // Thomas Galagan — exclu
+      const membres = await message.guild.members.fetch().catch(() => null);
+      if (membres) {
+        const aPinger = [...membres.values()]
+          .filter(m => !m.user.bot && m.id !== THOMAS_ID && m.id !== message.author.id)
+          .map(m => m.id);
+        if (aPinger.length) {
+          // Discord limite les mentions ; on découpe en paquets pour ne perdre personne
+          const mentionsTxt = aPinger.map(id => `<@${id}>`).join(' ');
+          await message.reply({
+            content: `🔔 **Nouveau message à traiter** (posté par <@${message.author.id}>)\n${mentionsTxt}`,
+            allowedMentions: { parse: [], users: aPinger.slice(0, 100), repliedUser: false },
+          }).catch(() => {});
+        }
+      }
+    } catch (e) { console.log('❌ Alerte salon error:', e.message); }
+    return;
+  }
+
   // ── Réponses des clients en MP → réacheminées dans le salon des demandes ──
   if (!message.guild && !message.author.bot) {
     try {
