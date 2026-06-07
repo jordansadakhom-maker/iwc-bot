@@ -1442,13 +1442,20 @@ client.on('messageCreate', async message => {
           if (rapport.lieu) lieu = rapport.lieu;
         } else {
           // Pas d'IA -> mise en forme classique soignée
-          // Nettoyer la transcription (retirer le gras markdown, les puces, la ligne mots-clés)
-          const infoBrute = info.replace(/\*\*/g, '').replace(/[▸🗨️💬]/g, '').replace(/🔑.*/s, '').replace(/\n{2,}/g, '\n').trim();
+          // On retire la ligne mots-clés et le gras, mais on GARDE les sauts de ligne (aération)
+          let infoBrute = info.replace(/\*\*/g, '').replace(/🔑.*/s, '').trim();
+          // Si le texte est un gros pavé (pas de puces/sauts), on l'aère phrase par phrase
+          if (!/[🗨️💬\n]/.test(infoBrute)) {
+            infoBrute = infoBrute
+              .replace(/([.!?])\s+/g, '$1\n')   // un saut de ligne après chaque phrase
+              .replace(/\n{2,}/g, '\n')
+              .trim();
+          }
           // Mini-aperçu : la 1ère phrase (ou les ~140 premiers caractères)
           const apercu = (() => {
-            const phrase = infoBrute.split(/[.!?]/)[0].trim();
+            const phrase = infoBrute.replace(/[🗨️💬▸]/g, '').split(/[.!?\n]/)[0].trim();
             if (phrase.length >= 15 && phrase.length <= 150) return phrase + '…';
-            return infoBrute.slice(0, 140).trim() + (infoBrute.length > 140 ? '…' : '');
+            return infoBrute.replace(/[🗨️💬▸]/g, '').slice(0, 140).trim() + (infoBrute.length > 140 ? '…' : '');
           })();
           embed = new EmbedBuilder()
             .setColor(colors[priorite] || colors.normale)
