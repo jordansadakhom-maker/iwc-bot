@@ -207,6 +207,7 @@ const SLASH_COMMANDS = [
     .addStringOption(o => o.setName('agent').setDescription('Nom d\'un agent précis (optionnel)').setRequired(false)),
   new SlashCommandBuilder().setName('panel-rdv-client').setDescription('📅 Installer le panneau de prise de RDV client (Direction)'),
   new SlashCommandBuilder().setName('rdv-nettoyer').setDescription('🧹 Désépingler tous les vieux télégrammes du salon demandes (Direction)'),
+  new SlashCommandBuilder().setName('engagement').setDescription("✒️ Envoyer un contrat d'engagement à signer (Direction)").addUserOption(o => o.setName('membre').setDescription('Membre qui doit signer').setRequired(true)),
   new SlashCommandBuilder().setName('registre').setDescription('📋 Liste des membres actifs (Direction)').addStringOption(o => o.setName('pole').setDescription('Filtrer par pôle').setRequired(false).addChoices({ name: 'Tous', value: 'tous' }, { name: '⚖️ Légal', value: 'legal' }, { name: '🔒 Illégal', value: 'illegal' })).addIntegerOption(o => o.setName('page').setDescription('Page').setRequired(false)),
   new SlashCommandBuilder().setName('op').setDescription('🎯 Détail d\'une opération').addStringOption(o => o.setName('id').setDescription('ID de l\'opération').setRequired(false)),
 ].map(c => c.toJSON());
@@ -489,6 +490,26 @@ async function handleSlashCommand(interaction) {
       }
     } catch (e) { return interaction.editReply({ content: `❌ Erreur : ${e.message}` }); }
     return interaction.editReply({ content: `🧹 ${n} télégramme(s) désépinglé(s) dans le salon des demandes.` });
+  }
+
+  if (commandName === 'engagement') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    const cible = interaction.options.getUser('membre');
+    if (!cible) return interaction.reply({ content: '❌ Membre introuvable.', flags: MessageFlags.Ephemeral });
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`engagement_signer_${cible.id}`).setLabel('✒️ Signer mon contrat d\'engagement').setStyle(ButtonStyle.Success),
+    );
+    const embedInvit = new EmbedBuilder()
+      .setColor(0x8B5A2A)
+      .setTitle('📜 Contrat d\'Engagement — Iron Wolf Company')
+      .setDescription(['Vous avez été convié(e) à rejoindre officiellement l\'**Iron Wolf Company**.', '', 'En signant ce contrat, vous vous engagez à respecter les règles, la hiérarchie et le secret de la Compagnie.', '', 'Cliquez sur le bouton ci-dessous pour lire et signer votre engagement.'].join('\n'))
+      .setFooter({ text: 'Iron Wolf Company • 1895' });
+    try {
+      await cible.send({ embeds: [embedInvit], components: [row] });
+      return interaction.reply({ content: `✅ Contrat d'engagement envoyé en MP à **${cible.username}**. Il pourra le signer directement.`, flags: MessageFlags.Ephemeral });
+    } catch {
+      return interaction.reply({ content: `⚠️ Impossible d'envoyer un MP à **${cible.username}** (ses messages privés sont peut-être fermés). Demande-lui d'ouvrir ses MP, ou je peux poster le contrat dans un salon à la place.`, flags: MessageFlags.Ephemeral });
+    }
   }
 
   if (commandName === 'panel-rdv-client') {
@@ -1841,6 +1862,7 @@ client.on('interactionCreate', async interaction => {
   }
   if (interaction.isModalSubmit() && interaction.customId === 'modal_surnom_identite')   return _validerModalSurnom(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_agenda_simple')) return _validerModalAgendaSimple(interaction);
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_engagement_')) return _validerModalEngagement(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_rdv_individuel_')) return _validerModalRdvIndividuel(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_rdv_comm_')) return _validerModalRdvCommunaute(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_rdv_'))      return _validerModalRdv(interaction);
@@ -1848,6 +1870,7 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_tresor_'))   return notionModules.handleTresorModal?.(interaction);
 
   if (interaction.isButton()) {
+    if (interaction.customId.startsWith('engagement_signer_'))  return _ouvrirModalEngagement(interaction);
     if (interaction.customId === 'btn_grade_panel')            return notionV3.handleGradePanelButton?.(interaction);
     if (interaction.customId === 'btn_agenda_nouveau')         return notionV3.handleAgendaNouveauButton?.(interaction);
     if (interaction.customId === 'btn_hierarchie_refresh')     { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); await notionV3.updateHierarchieEmbed?.(interaction.guild); return interaction.editReply({ content: '✅ Hiérarchie mise à jour.' }); }
@@ -4248,6 +4271,97 @@ async function _handleRdvPoleSelect(interaction) {
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('notes').setLabel('Ordre du jour / Notes').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(400).setPlaceholder('Points à aborder...')),
   );
   await interaction.showModal(modal);
+}
+
+// ═══ CONTRAT D'ENGAGEMENT (système séparé) ═══
+const ENGAGEMENT_ARCHIVE_CH = '1513253567119495368';
+const ENGAGEMENT_ROLE_ID = '1513255402031022142';
+
+async function _ouvrirModalEngagement(interaction) {
+  const cibleId = interaction.customId.replace('engagement_signer_', '');
+  // Seule la personne destinataire peut signer (ou la signature libre via son propre clic)
+  const modal = new ModalBuilder().setCustomId(`modal_engagement_${cibleId}`).setTitle('✒️ Contrat d\'Engagement — IWC');
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom').setLabel('Nom & Prénom RP').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Viktor Crane')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('alias').setLabel('Alias / Surnom (optionnel)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: Le Corbeau')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('fonction').setLabel('Pôle & Fonction souhaités').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Légal — Agent de terrain')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('parrain').setLabel('Présenté par (parrain)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: June McCall')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('serment').setLabel('Recopiez le serment ci-dessous').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Je jure fidélité à l\'Iron Wolf Company et m\'engage à en respecter les règles et le secret.')),
+  );
+  await interaction.showModal(modal);
+}
+
+async function _validerModalEngagement(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const nom = interaction.fields.getTextInputValue('nom');
+  const alias = interaction.fields.getTextInputValue('alias') || '—';
+  const fonction = interaction.fields.getTextInputValue('fonction');
+  const parrain = interaction.fields.getTextInputValue('parrain') || '—';
+  const serment = interaction.fields.getTextInputValue('serment');
+  const dateStr = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+  const heureStr = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+  const embed = new EmbedBuilder()
+    .setColor(0x8B5A2A)
+    .setTitle('📜 CONTRAT D\'ENGAGEMENT — IRON WOLF COMPANY')
+    .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   ENGAGEMENT OFFICIEL — COMPAGNIE IRON WOLF\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
+    .addFields(
+      { name: '👤 Recrue', value: nom, inline: true },
+      { name: '🎭 Alias', value: alias, inline: true },
+      { name: '⚖️ Pôle & Fonction', value: fonction, inline: true },
+      { name: '🤝 Présenté par', value: parrain, inline: true },
+      { name: '🖋️ Signature Discord', value: `<@${interaction.user.id}>`, inline: true },
+      { name: '📅 Signé le', value: `${dateStr} à ${heureStr}`, inline: true },
+      { name: '✒️ Serment prêté', value: `*« ${serment.slice(0, 900)} »*` },
+    )
+    .setFooter({ text: 'Iron Wolf Company • Document officiel archivé' })
+    .setTimestamp();
+
+  // 1. Archiver dans le salon dédié
+  let salonOK = false;
+  try {
+    const ch = await client.channels.fetch(ENGAGEMENT_ARCHIVE_CH).catch(() => null);
+    if (ch) { await ch.send({ embeds: [embed] }); salonOK = true; }
+  } catch (e) { console.log('❌ Engagement salon error:', e.message); }
+
+  // 2. Archiver dans Notion (base contrats d'engagement, optionnelle)
+  let notionOK = false;
+  const DB = process.env.NOTION_ENGAGEMENTS_DB || null;
+  if (process.env.NOTION_TOKEN && DB) {
+    try {
+      const res = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: DB }, properties: {
+        'Nom': { title: [{ text: { content: nom } }] },
+        'Alias': { rich_text: [{ text: { content: alias } }] },
+        'Pôle & Fonction': { rich_text: [{ text: { content: fonction } }] },
+        'Présenté par': { rich_text: [{ text: { content: parrain } }] },
+        'Serment': { rich_text: [{ text: { content: serment.slice(0, 1900) } }] },
+        'Discord ID': { rich_text: [{ text: { content: interaction.user.id } }] },
+        'Date': { date: { start: new Date().toISOString().split('T')[0] } },
+      } }) });
+      if (res.ok) notionOK = true;
+      else { const e = await res.json().catch(() => ({})); console.log(`⚠️ Engagement Notion: ${(e.message || '').slice(0, 150)}`); }
+    } catch (e) { console.log('❌ Engagement Notion error:', e.message); }
+  }
+
+  // 3. Attribuer le rôle "Engagé"
+  let roleOK = false;
+  try {
+    const guildId = process.env.GUILD_ID || interaction.guild?.id || client.guilds.cache.first()?.id;
+    const guild = client.guilds.cache.get(guildId);
+    if (guild) {
+      const membre = await guild.members.fetch(interaction.user.id).catch(() => null);
+      const role = guild.roles.cache.get(ENGAGEMENT_ROLE_ID);
+      if (membre && role) { await membre.roles.add(role); roleOK = true; }
+    }
+  } catch (e) { console.log('❌ Engagement rôle error:', e.message); }
+
+  await interaction.editReply({ content: [
+    '✅ **Contrat d\'engagement signé !** Bienvenue dans l\'Iron Wolf Company.',
+    '',
+    `📁 Archivé dans le salon : ${salonOK ? '✅' : '⚠️'}`,
+    `📓 Notion : ${notionOK ? '✅' : (DB ? '⚠️' : '— (non configuré)')}`,
+    `🎖️ Rôle « Engagé » : ${roleOK ? '✅' : '⚠️ (vérifie que le bot peut gérer ce rôle)'}`,
+  ].join('\n') });
 }
 
 async function _handleRdvCommPersonSelect(interaction) {
