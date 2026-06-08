@@ -5610,7 +5610,10 @@ async function _syncStatutFicheNotion(discordId, statut, extras = {}) {
 // Crée/MàJ une ligne pour CHAQUE membre ayant un rôle de pôle.
 // Colonnes : Nom (titre), Personnage, Pôle, Rang, Statut, Date d'entrée, Dernière activité, Notes, Absent jusqu'au
 async function _syncRegistreTousMembres(guild) {
-  if (!process.env.NOTION_TOKEN || !process.env.NOTION_MEMBRES_DB) return;
+  const REGISTRE_DB = process.env.NOTION_MEMBRES_DB || NOTION_MEMBRES_DB; // variable Render OU fallback config.js
+  if (!process.env.NOTION_TOKEN) { console.log('⚠️ Sync Registre ignorée : NOTION_TOKEN manquant.'); return; }
+  if (!REGISTRE_DB) { console.log('⚠️ Sync Registre ignorée : aucun ID de base Registre (NOTION_MEMBRES_DB).'); return; }
+  console.log(`📒 Base Registre utilisée : ${REGISTRE_DB.slice(0, 8)}...`);
   try {
     const illegalRoleNames = ['Concepteur', 'Fléau', "L'Exécuteur", 'Le Condamné', 'Le Maudit', 'La Confrérie', 'Instructeur', 'Le Concepteur'];
     const legalRoleNames   = ['Le Conseil', 'Directeur', 'Co-Directeur', 'Officier', 'Agent Confirmé', 'Opérateur', 'Recrue', 'Probatoire', 'Le Penseur', 'Fondateur'];
@@ -5640,12 +5643,12 @@ async function _syncRegistreTousMembres(guild) {
         // Chercher la ligne existante par Discord ID (fiable), sinon par Nom/Personnage
         let page = null;
         try {
-          const sId = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_MEMBRES_DB}/query`, { method: 'POST', headers, body: JSON.stringify({ filter: { property: 'Discord ID', rich_text: { equals: discordId } }, page_size: 1 }) });
+          const sId = await fetch(`https://api.notion.com/v1/databases/${REGISTRE_DB}/query`, { method: 'POST', headers, body: JSON.stringify({ filter: { property: 'Discord ID', rich_text: { equals: discordId } }, page_size: 1 }) });
           const dId = await sId.json().catch(() => ({}));
           page = dId.results?.[0] || null;
         } catch {}
         if (!page) {
-          const search = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_MEMBRES_DB}/query`, {
+          const search = await fetch(`https://api.notion.com/v1/databases/${REGISTRE_DB}/query`, {
             method: 'POST', headers,
             body: JSON.stringify({ filter: { or: [
               { property: 'Nom', title: { equals: member.user.username } },
@@ -5678,13 +5681,13 @@ async function _syncRegistreTousMembres(guild) {
             'Dernière activité':  { date: { start: new Date().toISOString().split('T')[0] } },
             'Notes':      { rich_text: [{ text: { content: `Ajouté automatiquement le ${fmtShort(new Date())}` } }] },
           };
-          const resC = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers, body: JSON.stringify({ parent: { database_id: process.env.NOTION_MEMBRES_DB }, properties: propsNew }) });
+          const resC = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers, body: JSON.stringify({ parent: { database_id: REGISTRE_DB }, properties: propsNew }) });
           if (resC.ok) { console.log(`🆕 Registre CRÉÉ : ${nomIC} (${member.user.username})`); ok++; }
           else {
             const e1 = await resC.json().catch(() => ({}));
             console.log(`⚠️ Registre création refusée: ${(e1.message || '').slice(0, 150)}`);
             // Retry minimal : juste le Nom
-            const resC2 = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers, body: JSON.stringify({ parent: { database_id: process.env.NOTION_MEMBRES_DB }, properties: { 'Nom': { title: [{ text: { content: member.user.username } }] } } }) });
+            const resC2 = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers, body: JSON.stringify({ parent: { database_id: REGISTRE_DB }, properties: { 'Nom': { title: [{ text: { content: member.user.username } }] } } }) });
             if (resC2.ok) { console.log(`🆕 Registre CRÉÉ (minimal) : ${member.user.username}`); ok++; }
             else { const e2 = await resC2.json().catch(() => ({})); console.log(`❌ Registre ${member.user.username}: ${(e2.message || '').slice(0, 150)}`); }
           }
