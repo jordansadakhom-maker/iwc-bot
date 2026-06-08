@@ -4320,6 +4320,7 @@ const ENGAGEMENT_ARCHIVE_CH = '1513253567119495368';
 const ENGAGEMENT_ROLE_ID = '1513255402031022142';
 
 async function _ouvrirModalEngagement(interaction) {
+  try {
   const cibleId = interaction.customId.replace('engagement_signer_', '');
   // Seule la personne destinataire peut signer (ou la signature libre via son propre clic)
   const modal = new ModalBuilder().setCustomId(`modal_engagement_${cibleId}`).setTitle('✒️ Contrat d\'Engagement — IWC');
@@ -4331,10 +4332,15 @@ async function _ouvrirModalEngagement(interaction) {
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('serment').setLabel('Serment — recopiez le texte ci-dessous').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(600).setPlaceholder('Recopiez ici le serment affiche dans le contrat (Article VIII).')),
   );
   await interaction.showModal(modal);
+  } catch (e) {
+    console.log('⚠️ Ouverture formulaire engagement impossible:', e.message);
+    try { await interaction.reply({ content: '⚠️ Une erreur est survenue à l\'ouverture du contrat. Préviens la Direction.', flags: MessageFlags.Ephemeral }); } catch {}
+  }
 }
 
 async function _validerModalEngagement(interaction) {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  try { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); }
+  catch (e) { console.log('⚠️ Engagement defer impossible (interaction expirée):', e.message); return; }
   const nom = interaction.fields.getTextInputValue('nom');
   const alias = interaction.fields.getTextInputValue('alias') || '—';
   const fonction = interaction.fields.getTextInputValue('fonction');
@@ -4371,17 +4377,28 @@ async function _validerModalEngagement(interaction) {
   const DB = process.env.NOTION_ENGAGEMENTS_DB || null;
   if (process.env.NOTION_TOKEN && DB) {
     try {
-      const res = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: DB }, properties: {
+      const headers = { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' };
+      const propsBase = {
         'Nom': { title: [{ text: { content: nom } }] },
         'Alias': { rich_text: [{ text: { content: alias } }] },
         'Pôle & Fonction': { rich_text: [{ text: { content: fonction } }] },
         'Présenté par': { rich_text: [{ text: { content: parrain } }] },
         'Serment': { rich_text: [{ text: { content: serment.slice(0, 1900) } }] },
-        'Discord ID': { rich_text: [{ text: { content: interaction.user.id } }] },
         'Date': { date: { start: new Date().toISOString().split('T')[0] } },
-      } }) });
+      };
+      // L'ID Discord est mis dans le contenu de la page (toujours), et tenté en colonne texte
+      const childrenPage = [{ object: 'block', type: 'paragraph', paragraph: { rich_text: [{ type: 'text', text: { content: `Discord ID : ${interaction.user.id} · Pseudo : ${interaction.user.username}` } }] } }];
+      // Tentative 1 : avec Discord ID en colonne texte
+      let res = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers, body: JSON.stringify({ parent: { database_id: DB }, properties: { ...propsBase, 'Discord ID': { rich_text: [{ text: { content: interaction.user.id } }] } }, children: childrenPage }) });
       if (res.ok) notionOK = true;
-      else { const e = await res.json().catch(() => ({})); console.log(`⚠️ Engagement Notion: ${(e.message || '').slice(0, 150)}`); }
+      else {
+        const e1 = await res.json().catch(() => ({}));
+        console.log(`⚠️ Engagement Notion (tentative 1): ${(e1.message || '').slice(0, 150)}`);
+        // Tentative 2 : SANS la colonne Discord ID (au cas où elle est mal typée) — l'ID reste dans la page
+        res = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers, body: JSON.stringify({ parent: { database_id: DB }, properties: propsBase, children: childrenPage }) });
+        if (res.ok) { notionOK = true; console.log('✅ Engagement archivé (sans colonne Discord ID — mets-la en type Texte dans Notion).'); }
+        else { const e2 = await res.json().catch(() => ({})); console.log(`❌ Engagement Notion échec: ${(e2.message || '').slice(0, 150)}`); }
+      }
     } catch (e) { console.log('❌ Engagement Notion error:', e.message); }
   }
 
