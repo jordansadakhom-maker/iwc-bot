@@ -1122,7 +1122,24 @@ client.on('guildMemberAdd', async member => {
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
   const oldRoles = oldMember.roles.cache.map(r => r.id).sort().join(',');
   const newRoles = newMember.roles.cache.map(r => r.id).sort().join(',');
-  if (oldRoles === newRoles) return;
+  const rolesChanged = oldRoles !== newRoles;
+  // Détecter aussi un changement de surnom (= nom RP affiché sur le serveur)
+  const nomChanged = (oldMember.displayName || '') !== (newMember.displayName || '') || (oldMember.nickname || '') !== (newMember.nickname || '');
+
+  // Si SEUL le nom a changé (pas les rôles) → on resynchronise juste le nom RP dans Notion
+  if (nomChanged && !rolesChanged) {
+    const nouveauNom = newMember.displayName || newMember.user.username;
+    console.log(`🔄 Surnom changé : ${oldMember.displayName} → ${nouveauNom} · resync Notion`);
+    // MàJ du nom dans Fiches_personnages
+    _syncStatutFicheNotion(newMember.id, null, { nom: nouveauNom }).catch(() => {});
+    // MàJ du nom dans le Registre des membres
+    _majNomRegistre(newMember.id, nouveauNom, newMember.user.username).catch(() => {});
+    // MàJ DB locale
+    try { const dbN = loadDB(); if (dbN.members[newMember.id]) { dbN.members[newMember.id].name = nouveauNom; saveDB(dbN); } } catch {}
+    return;
+  }
+
+  if (!rolesChanged) return;
   const db = loadDB();
   const gradeRoleIds = Object.values(require('./notion-modules-v3').ROLES || {});
   const gradeChange = gradeRoleIds.some(id => oldMember.roles.cache.has(id) !== newMember.roles.cache.has(id));
@@ -1149,12 +1166,12 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
       // Calculer le nouveau pôle
       const nouveauPole = isIlleg ? 'illegal' : 'legal'; // illégal prioritaire
       const poleLabel   = nouveauPole === 'illegal' ? '🔒 Illégal' : '⚖️ Légal';
-      // Sync Registre des Membres
-      _syncMembreNotion(newMember.id, { rang: nouveauGrade, pole: nouveauPole }).catch(() => {});
+      // Sync Registre des Membres (avec le nom RP du serveur)
+      _syncMembreNotion(newMember.id, { rang: nouveauGrade, pole: nouveauPole, nom: newMember.displayName || newMember.user.username }).catch(() => {});
       // Sync Fiches_personnages si changement de pôle
       if (poleChange) {
         console.log(`🔄 Changement de pôle pour ${newMember.displayName} → ${poleLabel}`);
-        _syncStatutFicheNotion(newMember.id, null, { pole: poleLabel }).catch(() => {});
+        _syncStatutFicheNotion(newMember.id, null, { pole: poleLabel, nom: newMember.displayName || newMember.user.username }).catch(() => {});
       }
       // Mettre à jour la DB locale
       const dbFresh = loadDB();
@@ -1179,11 +1196,12 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
       saveDB(dbFresh);
       // Sync immédiate dans Notion Fiches_personnages
       const statutNotion = dbFresh.members[newMember.id].status === 'absent' ? 'Absent' : 'Actif';
-      _syncStatutFicheNotion(newMember.id, statutNotion, { pole: poleLabel }).catch(() => {});
-      // Sync Registre des Membres
+      _syncStatutFicheNotion(newMember.id, statutNotion, { pole: poleLabel, nom: newMember.displayName || newMember.user.username }).catch(() => {});
+      // Sync Registre des Membres (avec le nom RP du serveur)
       _syncMembreNotion(newMember.id, {
         rang: nouveauGrade,
         pole: nouveauPole,
+        nom: newMember.displayName || newMember.user.username,
         status: dbFresh.members[newMember.id].status,
         lastActivity: new Date().toISOString(),
       }).catch(() => {});
@@ -3281,13 +3299,14 @@ async function _syncCandidatureNotion(cand, statut, validePar) {
 }
 
 async function _syncMembreNotion(discordId, updates) {
-  const page = await _notionFindByDiscordId(process.env.NOTION_MEMBRES_DB, discordId); if (!page) return;
+  const REGISTRE_DB = process.env.NOTION_MEMBRES_DB || NOTION_MEMBRES_DB;
+  const page = await _notionFindByDiscordId(REGISTRE_DB, discordId); if (!page) return;
   const props = {};
-  if (updates.rang) props['Grade'] = { select: { name: updates.rang } };
+  if (updates.nom)  { props['Nom'] = { title: [{ text: { content: String(updates.nom) } }] }; props['Personnage'] = { rich_text: [{ text: { content: String(updates.nom) } }] }; }
+  if (updates.rang) props['Rang'] = { select: { name: updates.rang } };
   if (updates.status) { const map = { actif: '✅ Actif', absent: '⚠️ Absent', inactif: '💤 Inactif', parti: '🚪 Parti', visiteur: '👁️ Visiteur' }; props['Statut'] = { select: { name: map[updates.status] || updates.status } }; }
   if (updates.lastActivity) props['Dernière activité'] = { date: { start: new Date(updates.lastActivity).toISOString().split('T')[0] } };
-  if (updates.leftAt) props['Date de départ'] = { date: { start: new Date(updates.leftAt).toISOString().split('T')[0] } };
-  if (Object.keys(props).length) { await _notionPatch(page.id, props); console.log(`✅ Membre Notion MàJ : ${discordId}`); }
+  if (Object.keys(props).length) { await _notionPatch(page.id, props); console.log(`✅ Registre MàJ : ${discordId}`); }
 }
 
 async function _syncContratNotion(contrat, statut, signePar) {
@@ -5551,7 +5570,7 @@ async function _syncTousMembresNotion(guild) {
         const isIlleg = member.roles.cache.some(r => illegalRoleNames.some(n => r.name.includes(n)));
         const pole    = isIlleg ? '🔒 Illégal' : '⚖️ Légal'; // illégal prioritaire
         const statut  = m.status === 'absent' ? 'Absent' : m.status === 'inactif' ? 'Inactif' : 'Actif';
-        const nomIC   = m.name || (typeof DISCORD_TO_IC !== 'undefined' && DISCORD_TO_IC[discordId]) || member.displayName || member.user.username;
+        const nomIC   = member.displayName || m.name || (typeof DISCORD_TO_IC !== 'undefined' && DISCORD_TO_IC[discordId]) || member.user.username;
         await _syncStatutFicheNotion(discordId, statut, { pole, nom: nomIC, username: member.user.username });
         synced++;
         await new Promise(r => setTimeout(r, 400)); // pause anti rate-limit Notion
@@ -5596,6 +5615,7 @@ async function _syncStatutFicheNotion(discordId, statut, extras = {}) {
     }
 
     const props = {};
+    if (extras.nom) props['Personnage'] = { title: [{ text: { content: String(extras.nom) } }] };
     if (statut) props['Statut activité'] = { select: { name: statut } };
     if (extras.pole) props['Pôle'] = { select: { name: extras.pole } };
     if (Object.keys(props).length === 0) return;
@@ -5646,7 +5666,7 @@ async function _syncRegistreTousMembres(guild) {
         const isIlleg = member.roles.cache.some(r => illegalRoleNames.some(n => r.name.includes(n)));
         const pole = isIlleg ? '🔒 Illégal' : '⚖️ Légal';
         const statut = m.status === 'absent' ? '⚠️ Absent' : m.status === 'inactif' ? '💤 Inactif' : '✅ Actif';
-        const nomIC = m.name || (typeof DISCORD_TO_IC !== 'undefined' && DISCORD_TO_IC[discordId]) || member.displayName || member.user.username;
+        const nomIC = member.displayName || m.name || (typeof DISCORD_TO_IC !== 'undefined' && DISCORD_TO_IC[discordId]) || member.user.username;
         const rang = m.rang || (isIlleg ? 'Maudit' : 'Recrue');
 
         // Chercher la ligne existante : par Discord ID (si la colonne existe), sinon par Nom/Personnage
@@ -5667,6 +5687,8 @@ async function _syncRegistreTousMembres(guild) {
         if (page) {
           // MàJ : pôle, rang, statut, dernière activité
           await fetch(`https://api.notion.com/v1/pages/${page.id}`, { method: 'PATCH', headers, body: JSON.stringify({ properties: {
+            'Nom':        { title:     [{ text: { content: String(nomIC) } }] },
+            'Personnage': { rich_text: [{ text: { content: String(nomIC) } }] },
             'Pôle':   { select: { name: pole } },
             'Statut': { select: { name: statut } },
             'Discord ID': { rich_text: [{ text: { content: discordId } }] },
@@ -5702,6 +5724,34 @@ async function _syncRegistreTousMembres(guild) {
     }
     console.log(`✅ Sync Registre terminée — ${ok}/${concernes.length} membres`);
   } catch(e) { console.log('❌ _syncRegistreTousMembres:', e.message); }
+}
+
+// Met à jour le NOM (RP) d'un membre dans le Registre des membres
+async function _majNomRegistre(discordId, nouveauNom, username) {
+  const REGISTRE_DB = process.env.NOTION_MEMBRES_DB || NOTION_MEMBRES_DB;
+  if (!process.env.NOTION_TOKEN || !REGISTRE_DB) return;
+  try {
+    const headers = { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' };
+    // Retrouver la ligne par Discord ID, sinon par Nom (= ancien nom ou username)
+    let page = null;
+    try {
+      const sId = await fetch(`https://api.notion.com/v1/databases/${REGISTRE_DB}/query`, { method: 'POST', headers, body: JSON.stringify({ filter: { property: 'Discord ID', rich_text: { equals: discordId } }, page_size: 1 }) });
+      if (sId.ok) { const d = await sId.json().catch(() => ({})); page = d.results?.[0] || null; }
+    } catch {}
+    if (!page && username) {
+      try {
+        const s2 = await fetch(`https://api.notion.com/v1/databases/${REGISTRE_DB}/query`, { method: 'POST', headers, body: JSON.stringify({ filter: { property: 'Nom', title: { equals: username } }, page_size: 1 }) });
+        if (s2.ok) { const d2 = await s2.json().catch(() => ({})); page = d2.results?.[0] || null; }
+      } catch {}
+    }
+    if (!page) { console.log(`⚠️ MàJ nom Registre : ligne introuvable pour ${nouveauNom}`); return; }
+    await fetch(`https://api.notion.com/v1/pages/${page.id}`, { method: 'PATCH', headers, body: JSON.stringify({ properties: {
+      'Nom':        { title:     [{ text: { content: String(nouveauNom) } }] },
+      'Personnage': { rich_text: [{ text: { content: String(nouveauNom) } }] },
+      'Discord ID': { rich_text: [{ text: { content: discordId } }] },
+    } }) });
+    console.log(`✅ Registre : nom mis à jour → ${nouveauNom}`);
+  } catch (e) { console.log('❌ _majNomRegistre:', e.message); }
 }
 
 client.login(process.env.DISCORD_TOKEN)
