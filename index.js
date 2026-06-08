@@ -5620,13 +5620,13 @@ async function _syncRegistreTousMembres(guild) {
     const headers = { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' };
     const db = loadDB();
 
-    const tous = await guild.members.fetch().catch(() => null);
-    if (!tous) return;
+    const tous = await guild.members.fetch().catch(e => { console.log('⚠️ Registre: échec fetch membres:', e.message); return null; });
+    if (!tous) { console.log('⚠️ Sync Registre: impossible de récupérer les membres du serveur.'); return; }
     const concernes = [...tous.values()].filter(m => !m.user.bot && (
       m.roles.cache.some(r => illegalRoleNames.some(n => r.name.includes(n))) ||
       m.roles.cache.some(r => legalRoleNames.some(n => r.name.includes(n)))
     ));
-    if (!concernes.length) return;
+    if (!concernes.length) { console.log('⚠️ Sync Registre: aucun membre avec un rôle de pôle trouvé.'); return; }
     console.log(`🔄 Sync Registre — ${concernes.length} membres...`);
 
     let ok = 0;
@@ -5640,23 +5640,19 @@ async function _syncRegistreTousMembres(guild) {
         const nomIC = m.name || (typeof DISCORD_TO_IC !== 'undefined' && DISCORD_TO_IC[discordId]) || member.displayName || member.user.username;
         const rang = m.rang || (isIlleg ? 'Maudit' : 'Recrue');
 
-        // Chercher la ligne existante par Discord ID (fiable), sinon par Nom/Personnage
+        // Chercher la ligne existante : par Discord ID (si la colonne existe), sinon par Nom/Personnage
         let page = null;
+        // Tentative par Discord ID (ignorée proprement si la colonne n'existe pas)
         try {
           const sId = await fetch(`https://api.notion.com/v1/databases/${REGISTRE_DB}/query`, { method: 'POST', headers, body: JSON.stringify({ filter: { property: 'Discord ID', rich_text: { equals: discordId } }, page_size: 1 }) });
-          const dId = await sId.json().catch(() => ({}));
-          page = dId.results?.[0] || null;
+          if (sId.ok) { const dId = await sId.json().catch(() => ({})); page = dId.results?.[0] || null; }
         } catch {}
+        // Sinon par Nom (titre)
         if (!page) {
-          const search = await fetch(`https://api.notion.com/v1/databases/${REGISTRE_DB}/query`, {
-            method: 'POST', headers,
-            body: JSON.stringify({ filter: { or: [
-              { property: 'Nom', title: { equals: member.user.username } },
-              { property: 'Personnage', rich_text: { equals: String(nomIC) } },
-            ] }, page_size: 1 }),
-          });
-          const data = await search.json().catch(() => ({}));
-          page = data.results?.[0] || null;
+          try {
+            const search = await fetch(`https://api.notion.com/v1/databases/${REGISTRE_DB}/query`, { method: 'POST', headers, body: JSON.stringify({ filter: { property: 'Nom', title: { equals: member.user.username } }, page_size: 1 }) });
+            if (search.ok) { const data = await search.json().catch(() => ({})); page = data.results?.[0] || null; }
+          } catch {}
         }
 
         if (page) {
