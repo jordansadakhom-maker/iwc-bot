@@ -501,8 +501,24 @@ async function handleSlashCommand(interaction) {
     );
     const embedInvit = new EmbedBuilder()
       .setColor(0x8B5A2A)
-      .setTitle('📜 Contrat d\'Engagement — Iron Wolf Company')
-      .setDescription(['Vous avez été convié(e) à rejoindre officiellement l\'**Iron Wolf Company**.', '', 'En signant ce contrat, vous vous engagez à respecter les règles, la hiérarchie et le secret de la Compagnie.', '', 'Cliquez sur le bouton ci-dessous pour lire et signer votre engagement.'].join('\n'))
+      .setTitle('📜 AVIS OFFICIEL — Contrat d\'Engagement')
+      .setDescription([
+        'Messieurs,',
+        '',
+        'Vous êtes convié(e) à rejoindre officiellement l\'**Iron Wolf Company**.',
+        '',
+        'Ce contrat atteste que vous avez pris **pleine connaissance des risques** liés aux activités de la Compagnie et que vous les acceptez en toute connaissance de cause.',
+        '',
+        'Par votre signature, vous reconnaissez sur l\'honneur :',
+        '› avoir été informé(e) des risques encourus ;',
+        '› accepter d\'en assumer les responsabilités ;',
+        '› respecter les règles et le secret de la Compagnie.',
+        '',
+        'Cliquez sur le bouton ci-dessous pour lire et signer votre engagement.',
+        '',
+        '*Que la force reste dans l\'ombre.*',
+        '**— La Direction**',
+      ].join('\n'))
       .setFooter({ text: 'Iron Wolf Company • 1895' });
     try {
       await cible.send({ embeds: [embedInvit], components: [row] });
@@ -4282,11 +4298,11 @@ async function _ouvrirModalEngagement(interaction) {
   // Seule la personne destinataire peut signer (ou la signature libre via son propre clic)
   const modal = new ModalBuilder().setCustomId(`modal_engagement_${cibleId}`).setTitle('✒️ Contrat d\'Engagement — IWC');
   modal.addComponents(
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom').setLabel('Nom & Prénom RP').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Viktor Crane')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('alias').setLabel('Alias / Surnom (optionnel)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: Le Corbeau')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('fonction').setLabel('Pôle & Fonction souhaités').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Légal — Agent de terrain')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('parrain').setLabel('Présenté par (parrain)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: June McCall')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('serment').setLabel('Recopiez le serment ci-dessous').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Je jure fidélité à l\'Iron Wolf Company et m\'engage à en respecter les règles et le secret.')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom').setLabel('Identité — Nom & Prénom du personnage').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setPlaceholder('Ex : Viktor Crane')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('alias').setLabel('Surnom / Nom de rue (facultatif)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(40).setPlaceholder('Ex : « Le Corbeau »')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('fonction').setLabel('Affectation souhaitée — pôle & poste').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setPlaceholder('Ex : Pôle Légal — Agent de terrain')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('parrain').setLabel('Membre qui vous présente (parrain)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(60).setPlaceholder('Ex : June McCall')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('serment').setLabel('Serment — recopiez le texte ci-dessous').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(600).setPlaceholder('Moi, [votre nom], je jure loyauté a l\'Iron Wolf Company. Je connais les risques du metier et les accepte. Je garderai le silence sur ses affaires et tiendrai parole jusqu\'au bout.')),
   );
   await interaction.showModal(modal);
 }
