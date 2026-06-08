@@ -969,6 +969,8 @@ async function autoSetup(guild) {
   if (typeof setupOperationsGuide === 'function') await setupOperationsGuide(guild);
   // Sync statut + pôle de tous les membres dans Fiches_personnages au démarrage
   _syncTousMembresNotion(guild).catch(() => {});
+  // Sync de tous les membres dans le Registre des membres (création + MàJ)
+  _syncRegistreTousMembres(guild).catch(() => {});
 
   const reglCh = getChById(guild, 'REGLEMENT', 'reglement', 'règlement');
   if (reglCh) {
@@ -5514,24 +5516,31 @@ async function _syncTousMembresNotion(guild) {
     const illegalRoleNames = ['Concepteur', 'Fléau', "L'Exécuteur", 'Le Condamné', 'Le Maudit', 'La Confrérie', 'Instructeur', 'Le Concepteur'];
     const legalRoleNames   = ['Le Conseil', 'Directeur', 'Co-Directeur', 'Officier', 'Agent Confirmé', 'Opérateur', 'Recrue', 'Probatoire', 'Le Penseur', 'Fondateur'];
     const db = loadDB();
-    const membres = Object.entries(db.members || {});
-    if (!membres.length) return;
-    console.log(`🔄 Sync Notion — ${membres.length} membres...`);
+    // On scanne TOUS les membres du serveur ayant un rôle de pôle (légal ou illégal),
+    // pas seulement ceux déjà connus → les nouveaux arrivants sont inclus.
+    const tous = await guild.members.fetch().catch(() => null);
+    if (!tous) return;
+    const concernes = [...tous.values()].filter(member => !member.user.bot && (
+      member.roles.cache.some(r => illegalRoleNames.some(n => r.name.includes(n))) ||
+      member.roles.cache.some(r => legalRoleNames.some(n => r.name.includes(n)))
+    ));
+    if (!concernes.length) return;
+    console.log(`🔄 Sync Notion — ${concernes.length} membres (rôles de pôle)...`);
     let synced = 0;
-    for (const [discordId, m] of membres) {
+    for (const member of concernes) {
       try {
-        const member = await guild.members.fetch(discordId).catch(() => null);
-        if (!member) continue;
+        const discordId = member.id;
+        const m = (db.members || {})[discordId] || {};
         const isIlleg = member.roles.cache.some(r => illegalRoleNames.some(n => r.name.includes(n)));
-        const isLegal = member.roles.cache.some(r => legalRoleNames.some(n => r.name.includes(n)));
         const pole    = isIlleg ? '🔒 Illégal' : '⚖️ Légal'; // illégal prioritaire
         const statut  = m.status === 'absent' ? 'Absent' : m.status === 'inactif' ? 'Inactif' : 'Actif';
-        await _syncStatutFicheNotion(discordId, statut, { pole });
+        const nomIC   = m.name || (typeof DISCORD_TO_IC !== 'undefined' && DISCORD_TO_IC[discordId]) || member.displayName || member.user.username;
+        await _syncStatutFicheNotion(discordId, statut, { pole, nom: nomIC, username: member.user.username });
         synced++;
         await new Promise(r => setTimeout(r, 400)); // pause anti rate-limit Notion
-      } catch(e) { console.log(`❌ Sync membre ${discordId}:`, e.message); }
+      } catch(e) { console.log(`❌ Sync membre ${member.id}:`, e.message); }
     }
-    console.log(`✅ Sync Notion terminée — ${synced}/${membres.length} membres mis à jour`);
+    console.log(`✅ Sync Notion terminée — ${synced}/${concernes.length} membres mis à jour`);
   } catch(e) { console.log('❌ _syncTousMembresNotion:', e.message); }
 }
 
@@ -5545,18 +5554,133 @@ async function _syncStatutFicheNotion(discordId, statut, extras = {}) {
     });
     const data = await search.json();
     const page = data.results?.[0];
-    if (!page) return;
-    const props = { 'Dernière MàJ': { date: { start: new Date().toISOString().split('T')[0] } } };
+    const headers = { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' };
+
+    if (!page) {
+      // La fiche n'existe pas encore → on la CRÉE (nouveau membre)
+      const nomIC = (extras.nom) || (typeof DISCORD_TO_IC !== 'undefined' && DISCORD_TO_IC[discordId]) || extras.username || discordId;
+      const propsNew = {
+        'Personnage':       { title:     [{ text: { content: String(nomIC) } }] },
+        'Discord ID':       { rich_text: [{ text: { content: discordId } }] },
+        'Discord username': { rich_text: [{ text: { content: String(extras.username || nomIC) } }] },
+        'Statut activité':  { select:    { name: statut || 'Actif' } },
+        'Statut fiche':     { select:    { name: 'À compléter' } },
+        "Date d'entrée":    { date:      { start: new Date().toISOString().split('T')[0] } },
+      };
+      if (extras.pole) propsNew['Pôle'] = { select: { name: extras.pole } };
+      const resC = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers, body: JSON.stringify({ parent: { database_id: process.env.NOTION_FICHES_DB }, properties: propsNew }) });
+      if (resC.ok) { console.log(`🆕 Fiches_personnages CRÉÉE : ${discordId} (${nomIC})`); return; }
+      const e1 = await resC.json().catch(() => ({}));
+      console.log(`⚠️ Création fiche (complète) refusée: ${(e1.message || '').slice(0, 150)}`);
+      // Retry minimal : juste Personnage + Discord ID
+      const resC2 = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers, body: JSON.stringify({ parent: { database_id: process.env.NOTION_FICHES_DB }, properties: { 'Personnage': { title: [{ text: { content: String(nomIC) } }] }, 'Discord ID': { rich_text: [{ text: { content: discordId } }] } } }) });
+      if (resC2.ok) console.log(`🆕 Fiches_personnages CRÉÉE (minimal) : ${discordId}`);
+      else { const e2 = await resC2.json().catch(() => ({})); console.log(`❌ Création fiche ${discordId}: ${(e2.message || '').slice(0, 150)}`); }
+      return;
+    }
+
+    const props = {};
     if (statut) props['Statut activité'] = { select: { name: statut } };
     if (extras.pole) props['Pôle'] = { select: { name: extras.pole } };
+    if (Object.keys(props).length === 0) return;
     await fetch(`https://api.notion.com/v1/pages/${page.id}`, {
       method: 'PATCH',
-      headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ properties: props }),
     });
     const changes = [statut && `statut → ${statut}`, extras.pole && `pôle → ${extras.pole}`].filter(Boolean).join(', ');
     console.log(`✅ Fiches_personnages MàJ : ${discordId} — ${changes}`);
   } catch(e) { console.log('❌ _syncStatutFicheNotion:', e.message); }
+}
+
+// ═══ SYNC REGISTRE DES MEMBRES (base Notion séparée) ═══
+// Crée/MàJ une ligne pour CHAQUE membre ayant un rôle de pôle.
+// Colonnes : Nom (titre), Personnage, Pôle, Rang, Statut, Date d'entrée, Dernière activité, Notes, Absent jusqu'au
+async function _syncRegistreTousMembres(guild) {
+  if (!process.env.NOTION_TOKEN || !process.env.NOTION_MEMBRES_DB) return;
+  try {
+    const illegalRoleNames = ['Concepteur', 'Fléau', "L'Exécuteur", 'Le Condamné', 'Le Maudit', 'La Confrérie', 'Instructeur', 'Le Concepteur'];
+    const legalRoleNames   = ['Le Conseil', 'Directeur', 'Co-Directeur', 'Officier', 'Agent Confirmé', 'Opérateur', 'Recrue', 'Probatoire', 'Le Penseur', 'Fondateur'];
+    const headers = { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' };
+    const db = loadDB();
+
+    const tous = await guild.members.fetch().catch(() => null);
+    if (!tous) return;
+    const concernes = [...tous.values()].filter(m => !m.user.bot && (
+      m.roles.cache.some(r => illegalRoleNames.some(n => r.name.includes(n))) ||
+      m.roles.cache.some(r => legalRoleNames.some(n => r.name.includes(n)))
+    ));
+    if (!concernes.length) return;
+    console.log(`🔄 Sync Registre — ${concernes.length} membres...`);
+
+    let ok = 0;
+    for (const member of concernes) {
+      try {
+        const discordId = member.id;
+        const m = (db.members || {})[discordId] || {};
+        const isIlleg = member.roles.cache.some(r => illegalRoleNames.some(n => r.name.includes(n)));
+        const pole = isIlleg ? '🔒 Illégal' : '⚖️ Légal';
+        const statut = m.status === 'absent' ? '⚠️ Absent' : m.status === 'inactif' ? '💤 Inactif' : '✅ Actif';
+        const nomIC = m.name || (typeof DISCORD_TO_IC !== 'undefined' && DISCORD_TO_IC[discordId]) || member.displayName || member.user.username;
+        const rang = m.rang || (isIlleg ? 'Maudit' : 'Recrue');
+
+        // Chercher la ligne existante par Discord ID (fiable), sinon par Nom/Personnage
+        let page = null;
+        try {
+          const sId = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_MEMBRES_DB}/query`, { method: 'POST', headers, body: JSON.stringify({ filter: { property: 'Discord ID', rich_text: { equals: discordId } }, page_size: 1 }) });
+          const dId = await sId.json().catch(() => ({}));
+          page = dId.results?.[0] || null;
+        } catch {}
+        if (!page) {
+          const search = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_MEMBRES_DB}/query`, {
+            method: 'POST', headers,
+            body: JSON.stringify({ filter: { or: [
+              { property: 'Nom', title: { equals: member.user.username } },
+              { property: 'Personnage', rich_text: { equals: String(nomIC) } },
+            ] }, page_size: 1 }),
+          });
+          const data = await search.json().catch(() => ({}));
+          page = data.results?.[0] || null;
+        }
+
+        if (page) {
+          // MàJ : pôle, rang, statut, dernière activité
+          await fetch(`https://api.notion.com/v1/pages/${page.id}`, { method: 'PATCH', headers, body: JSON.stringify({ properties: {
+            'Pôle':   { select: { name: pole } },
+            'Statut': { select: { name: statut } },
+            'Discord ID': { rich_text: [{ text: { content: discordId } }] },
+            'Dernière activité': { date: { start: new Date().toISOString().split('T')[0] } },
+          } }) });
+          ok++;
+        } else {
+          // Création de la ligne
+          const propsNew = {
+            'Nom':        { title:     [{ text: { content: member.user.username } }] },
+            'Personnage': { rich_text: [{ text: { content: String(nomIC) } }] },
+            'Discord ID': { rich_text: [{ text: { content: discordId } }] },
+            'Pôle':       { select:    { name: pole } },
+            'Rang':       { select:    { name: rang } },
+            'Statut':     { select:    { name: statut } },
+            "Date d'entrée":      { date: { start: (member.joinedAt ? member.joinedAt.toISOString() : new Date().toISOString()).split('T')[0] } },
+            'Dernière activité':  { date: { start: new Date().toISOString().split('T')[0] } },
+            'Notes':      { rich_text: [{ text: { content: `Ajouté automatiquement le ${fmtShort(new Date())}` } }] },
+          };
+          const resC = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers, body: JSON.stringify({ parent: { database_id: process.env.NOTION_MEMBRES_DB }, properties: propsNew }) });
+          if (resC.ok) { console.log(`🆕 Registre CRÉÉ : ${nomIC} (${member.user.username})`); ok++; }
+          else {
+            const e1 = await resC.json().catch(() => ({}));
+            console.log(`⚠️ Registre création refusée: ${(e1.message || '').slice(0, 150)}`);
+            // Retry minimal : juste le Nom
+            const resC2 = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers, body: JSON.stringify({ parent: { database_id: process.env.NOTION_MEMBRES_DB }, properties: { 'Nom': { title: [{ text: { content: member.user.username } }] } } }) });
+            if (resC2.ok) { console.log(`🆕 Registre CRÉÉ (minimal) : ${member.user.username}`); ok++; }
+            else { const e2 = await resC2.json().catch(() => ({})); console.log(`❌ Registre ${member.user.username}: ${(e2.message || '').slice(0, 150)}`); }
+          }
+        }
+        await new Promise(r => setTimeout(r, 400)); // pause anti rate-limit
+      } catch(e) { console.log(`❌ Sync registre ${member.id}:`, e.message); }
+    }
+    console.log(`✅ Sync Registre terminée — ${ok}/${concernes.length} membres`);
+  } catch(e) { console.log('❌ _syncRegistreTousMembres:', e.message); }
 }
 
 client.login(process.env.DISCORD_TOKEN)
