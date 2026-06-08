@@ -536,6 +536,9 @@ async function handleSlashCommand(interaction) {
         '› connaître les risques encourus et les accepter pleinement ;',
         '› jurer loyauté, discrétion et fidélité à l\'Iron Wolf Company.',
         '',
+        '*Serment à recopier dans le formulaire :*',
+        '> *« Moi, [mon nom], je jure loyauté à l\'Iron Wolf Company. Je connais les risques du métier et les accepte. Je garderai le silence sur ses affaires et tiendrai parole jusqu\'au bout. »*',
+        '',
         '─────────────────────────',
         'Lisez attentivement avant de signer, et adressez-nous toute question si besoin. Lorsque vous serez prêt(e), cliquez ci-dessous pour **renseigner vos informations et apposer votre signature**.',
         '',
@@ -4325,7 +4328,7 @@ async function _ouvrirModalEngagement(interaction) {
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('alias').setLabel('Surnom / Nom de rue (facultatif)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(40).setPlaceholder('Ex : « Le Corbeau »')),
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('fonction').setLabel('Affectation souhaitée — pôle & poste').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setPlaceholder('Ex : Pôle Légal — Agent de terrain')),
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('parrain').setLabel('Membre qui vous présente (parrain)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(60).setPlaceholder('Ex : June McCall')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('serment').setLabel('Serment — recopiez le texte ci-dessous').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(600).setPlaceholder('Moi, [votre nom], je jure loyauté a l\'Iron Wolf Company. Je connais les risques du metier et les accepte. Je garderai le silence sur ses affaires et tiendrai parole jusqu\'au bout.')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('serment').setLabel('Serment — recopiez le texte ci-dessous').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(600).setPlaceholder('Recopiez ici le serment affiche dans le contrat (Article VIII).')),
   );
   await interaction.showModal(modal);
 }
