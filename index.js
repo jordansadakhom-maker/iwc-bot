@@ -208,6 +208,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('panel-rdv-client').setDescription('📅 Installer le panneau de prise de RDV client (Direction)'),
   new SlashCommandBuilder().setName('rdv-nettoyer').setDescription('🧹 Désépingler tous les vieux télégrammes du salon demandes (Direction)'),
   new SlashCommandBuilder().setName('engagement').setDescription("✒️ Envoyer un contrat d'engagement à signer (Direction)").addUserOption(o => o.setName('membre').setDescription('Membre qui doit signer').setRequired(true)),
+  new SlashCommandBuilder().setName('synchroniser').setDescription('🔄 Synchroniser tous les membres dans Notion (Direction)'),
   new SlashCommandBuilder().setName('registre').setDescription('📋 Liste des membres actifs (Direction)').addStringOption(o => o.setName('pole').setDescription('Filtrer par pôle').setRequired(false).addChoices({ name: 'Tous', value: 'tous' }, { name: '⚖️ Légal', value: 'legal' }, { name: '🔒 Illégal', value: 'illegal' })).addIntegerOption(o => o.setName('page').setDescription('Page').setRequired(false)),
   new SlashCommandBuilder().setName('op').setDescription('🎯 Détail d\'une opération').addStringOption(o => o.setName('id').setDescription('ID de l\'opération').setRequired(false)),
 ].map(c => c.toJSON());
@@ -490,6 +491,19 @@ async function handleSlashCommand(interaction) {
       }
     } catch (e) { return interaction.editReply({ content: `❌ Erreur : ${e.message}` }); }
     return interaction.editReply({ content: `🧹 ${n} télégramme(s) désépinglé(s) dans le salon des demandes.` });
+  }
+
+  if (commandName === 'synchroniser') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: '🔄 Synchronisation en cours… (Fiches_personnages + Registre des membres). Cela peut prendre une minute, je te préviens dès que c\'est fini.', flags: MessageFlags.Ephemeral });
+    try {
+      await _syncTousMembresNotion(interaction.guild);
+      await _syncRegistreTousMembres(interaction.guild);
+      await interaction.followUp({ content: '✅ Synchronisation terminée ! Tous les membres avec un rôle de pôle ont été mis à jour dans les deux bases Notion. Regarde les logs pour le détail (créations 🆕 et mises à jour ✅).', flags: MessageFlags.Ephemeral });
+    } catch (e) {
+      await interaction.followUp({ content: `⚠️ La synchronisation a rencontré un souci : ${e.message}. Vérifie que l'intégration Notion est connectée aux deux bases et que les colonnes "Discord ID" sont en type Texte.`, flags: MessageFlags.Ephemeral }).catch(() => {});
+    }
+    return;
   }
 
   if (commandName === 'engagement') {
@@ -3681,7 +3695,7 @@ async function _handleAide(interaction) {
   embed.addFields({ name: '🕵️ Renseignement', value: '`/notes` — Dernières notes de terrain\n`/synthese [sujet]` — Synthèse IA sur une personne/lieu\n`/stats-agent` — Statistiques par agent', inline: false });
   if (isLeg || isDir) embed.addFields({ name: '⚖️ Pôle Légal', value: '`/solde` · `/stats` · `/ops` · `/op`', inline: false });
   if (isIll || isDir) embed.addFields({ name: '🔒 Confrérie', value: '`/solde` · `/stats` · `/ops`', inline: false });
-  if (isDir) embed.addFields({ name: '🎖️ Direction', value: '`/promo` · `/retro` · `/grade-set` · `/avertir` · `/annuler-absence`\n`/dashboard` · `/bilan` · `/contrats-archives` · `/rapport`\n`/contrats-sync` · `/notion-test` · `/purge` · `/sync` · `/version`', inline: false });
+  if (isDir) embed.addFields({ name: '🎖️ Direction', value: '`/promo` · `/retro` · `/grade-set` · `/avertir` · `/annuler-absence`\n`/dashboard` · `/bilan` · `/contrats-archives` · `/rapport`\n`/contrats-sync` · `/notion-test` · `/synchroniser` · `/purge` · `/sync` · `/version`', inline: false });
   if (isDir) embed.addFields({ name: '🤝 RDV Client', value: '`/panel-rdv-client` — Installer le panneau\n`/rdv-nettoyer` — Nettoyer les vieux télégrammes', inline: false });
   if (isFleau) embed.addFields({ name: '💀 Fléau & Concepteur', value: '`/op-programmer` · `/patch` · ⚙️ config coffre', inline: false });
   embed.addFields({ name: '🎙️ Micro de terrain', value: 'Programme PC : capture les voix RP et les envoie ici en rapports', inline: false });
