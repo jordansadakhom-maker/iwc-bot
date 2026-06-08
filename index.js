@@ -1145,8 +1145,8 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
   const gradeChange = gradeRoleIds.some(id => oldMember.roles.cache.has(id) !== newMember.roles.cache.has(id));
 
   // Détecter changement de pôle (légal ↔ illégal)
-  const illegalRoleNames = ['Concepteur', 'Fléau', "L'Exécuteur", 'Le Condamné', 'Le Maudit', 'La Confrérie', 'Instructeur', 'Le Concepteur'];
-  const legalRoleNames   = ['Le Conseil', 'Directeur', 'Co-Directeur', 'Officier', 'Agent Confirmé', 'Opérateur', 'Recrue', 'Probatoire', 'Le Penseur'];
+  const illegalRoleNames = ['Concepteur', 'Fléau', 'fleau', 'Exécuteur', 'éxécuteur', 'execu', 'Condamné', 'condamne', 'Maudit', 'Confrérie', 'confrerie', 'Instructeur'];
+  const legalRoleNames   = ['Le Conseil', 'Directeur', 'Co-Directeur', 'Officier', 'Agent Conf', 'Opérateur', 'Operateur', 'Recrue', 'Probatoire', 'Panseur', 'Penseur'];
   const wasIlleg = oldMember.roles.cache.some(r => illegalRoleNames.some(n => r.name.includes(n)));
   const isIlleg  = newMember.roles.cache.some(r => illegalRoleNames.some(n => r.name.includes(n)));
   const wasLegal = oldMember.roles.cache.some(r => legalRoleNames.some(n => r.name.includes(n)));
@@ -5549,8 +5549,8 @@ global.getInformateurCh = (guild) => getJournalCh(guild) || guild.channels.cache
 async function _syncTousMembresNotion(guild) {
   if (!process.env.NOTION_TOKEN || !process.env.NOTION_FICHES_DB) return;
   try {
-    const illegalRoleNames = ['Concepteur', 'Fléau', "L'Exécuteur", 'Le Condamné', 'Le Maudit', 'La Confrérie', 'Instructeur', 'Le Concepteur'];
-    const legalRoleNames   = ['Le Conseil', 'Directeur', 'Co-Directeur', 'Officier', 'Agent Confirmé', 'Opérateur', 'Recrue', 'Probatoire', 'Le Penseur', 'Fondateur'];
+    const illegalRoleNames = ['Concepteur', 'Fléau', 'fleau', 'Exécuteur', 'éxécuteur', 'execu', 'Condamné', 'condamne', 'Maudit', 'Confrérie', 'confrerie', 'Instructeur'];
+    const legalRoleNames   = ['Le Conseil', 'Directeur', 'Co-Directeur', 'Officier', 'Agent Conf', 'Opérateur', 'Operateur', 'Recrue', 'Probatoire', 'Panseur', 'Penseur'];
     const db = loadDB();
     // On scanne TOUS les membres du serveur ayant un rôle de pôle (légal ou illégal),
     // pas seulement ceux déjà connus → les nouveaux arrivants sont inclus.
@@ -5638,8 +5638,8 @@ async function _syncRegistreTousMembres(guild) {
   if (!REGISTRE_DB) { console.log('⚠️ Sync Registre ignorée : aucun ID de base Registre (NOTION_MEMBRES_DB).'); return; }
   console.log(`📒 Base Registre utilisée : ${REGISTRE_DB.slice(0, 8)}...`);
   try {
-    const illegalRoleNames = ['Concepteur', 'Fléau', "L'Exécuteur", 'Le Condamné', 'Le Maudit', 'La Confrérie', 'Instructeur', 'Le Concepteur'];
-    const legalRoleNames   = ['Le Conseil', 'Directeur', 'Co-Directeur', 'Officier', 'Agent Confirmé', 'Opérateur', 'Recrue', 'Probatoire', 'Le Penseur', 'Fondateur'];
+    const illegalRoleNames = ['Concepteur', 'Fléau', 'fleau', 'Exécuteur', 'éxécuteur', 'execu', 'Condamné', 'condamne', 'Maudit', 'Confrérie', 'confrerie', 'Instructeur'];
+    const legalRoleNames   = ['Le Conseil', 'Directeur', 'Co-Directeur', 'Officier', 'Agent Conf', 'Opérateur', 'Operateur', 'Recrue', 'Probatoire', 'Panseur', 'Penseur'];
     const headers = { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' };
     const db = loadDB();
 
@@ -5667,7 +5667,9 @@ async function _syncRegistreTousMembres(guild) {
         const pole = isIlleg ? '🔒 Illégal' : '⚖️ Légal';
         const statut = m.status === 'absent' ? '⚠️ Absent' : m.status === 'inactif' ? '💤 Inactif' : '✅ Actif';
         const nomIC = member.displayName || m.name || (typeof DISCORD_TO_IC !== 'undefined' && DISCORD_TO_IC[discordId]) || member.user.username;
-        const rang = m.rang || (isIlleg ? 'Maudit' : 'Recrue');
+        // Rang = nom du/des rôle(s) de grade que la personne porte RÉELLEMENT sur Discord
+        let rang;
+        rang = _detecterRang(member, isIlleg);
 
         // Chercher la ligne existante : par Discord ID (si la colonne existe), sinon par Nom/Personnage
         let page = null;
@@ -5690,6 +5692,7 @@ async function _syncRegistreTousMembres(guild) {
             'Nom':        { title:     [{ text: { content: String(nomIC) } }] },
             'Personnage': { rich_text: [{ text: { content: String(nomIC) } }] },
             'Pôle':   { select: { name: pole } },
+            'Rang':   { select: { name: rang } },
             'Statut': { select: { name: statut } },
             'Discord ID': { rich_text: [{ text: { content: discordId } }] },
             'Dernière activité': { date: { start: new Date().toISOString().split('T')[0] } },
@@ -5724,6 +5727,36 @@ async function _syncRegistreTousMembres(guild) {
     }
     console.log(`✅ Sync Registre terminée — ${ok}/${concernes.length} membres`);
   } catch(e) { console.log('❌ _syncRegistreTousMembres:', e.message); }
+}
+
+// Détecte le RANG d'un membre à partir des NOMS de ses rôles Discord réels.
+// Renvoie le grade le plus élevé qu'il porte (priorité du plus haut au plus bas).
+function _detecterRang(member, isIlleg) {
+  const noms = member.roles.cache.map(r => r.name);
+  const a = (motifs) => noms.find(n => motifs.some(mt => n.toLowerCase().includes(mt.toLowerCase())));
+
+  if (isIlleg) {
+    // Hiérarchie illégale, du plus haut au plus bas
+    const grade =
+      a(['Concepteur']) ||
+      a(['Fléau', 'fleau']) ||
+      a(['Exécuteur', 'execu', 'éxécu']) ||
+      a(['Condamné', 'condamne']) ||
+      a(['Maudit']) ||
+      a(['Instructeur']) ||
+      a(['Confrérie', 'confrerie']);
+    return grade || 'La Confrérie';
+  }
+  // Hiérarchie légale, du plus haut au plus bas
+  const grade =
+    a(['Conseil', 'Directeur']) ||
+    a(['Officier']) ||
+    a(['Agent']) ||
+    a(['Opérateur', 'operateur']) ||
+    a(['Instructeur']) ||
+    a(['Panseur', 'Penseur']) ||
+    a(['Recrue', 'Probatoire']);
+  return grade || 'Recrue – Probatoire';
 }
 
 // Met à jour le NOM (RP) d'un membre dans le Registre des membres
