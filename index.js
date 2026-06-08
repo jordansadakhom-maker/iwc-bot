@@ -5576,7 +5576,6 @@ async function _syncStatutFicheNotion(discordId, statut, extras = {}) {
       const propsNew = {
         'Personnage':       { title:     [{ text: { content: String(nomIC) } }] },
         'Discord ID':       { rich_text: [{ text: { content: discordId } }] },
-        'Discord username': { rich_text: [{ text: { content: String(extras.username || nomIC) } }] },
         'Statut activité':  { select:    { name: statut || 'Actif' } },
         'Statut fiche':     { select:    { name: 'À compléter' } },
         "Date d'entrée":    { date:      { start: new Date().toISOString().split('T')[0] } },
