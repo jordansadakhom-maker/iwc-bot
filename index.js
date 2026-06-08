@@ -268,9 +268,12 @@ function isOfficierOuDirection(member) {
 }
 // #journal-de-bord = destination pour TOUS les logs IC
 async function getLogsCh(guild) {
-  const journalCh = guild.channels.cache.get('1508756535407542372');
+  // Journal de bord = destination de TOUS les logs/alertes (inactivité comprise)
+  const JOURNAL_ID = '1508756535407542372';
+  let journalCh = guild.channels.cache.get(JOURNAL_ID);
+  if (!journalCh) journalCh = await guild.channels.fetch(JOURNAL_ID).catch(() => null);
   if (journalCh) return journalCh;
-  // fallback : #logs technique
+  // Dernier recours seulement si le Journal est introuvable
   let ch = guild.channels.cache.get(CH.LOGS);
   if (!ch) ch = await guild.channels.fetch(CH.LOGS).catch(() => null);
   return ch;
@@ -1132,7 +1135,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     console.log(`🔄 Surnom changé : ${oldMember.displayName} → ${nouveauNom} · resync Notion`);
     // MàJ du nom dans Fiches_personnages
     _syncStatutFicheNotion(newMember.id, null, { nom: nouveauNom }).catch(() => {});
-    // MàJ du nom dans le Registre des membres
+    // MàJ du nom RP (Personnage) dans le Registre des membres ; le Nom reste le pseudo Discord
     _majNomRegistre(newMember.id, nouveauNom, newMember.user.username).catch(() => {});
     // MàJ DB locale
     try { const dbN = loadDB(); if (dbN.members[newMember.id]) { dbN.members[newMember.id].name = nouveauNom; saveDB(dbN); } } catch {}
@@ -1166,8 +1169,8 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
       // Calculer le nouveau pôle
       const nouveauPole = isIlleg ? 'illegal' : 'legal'; // illégal prioritaire
       const poleLabel   = nouveauPole === 'illegal' ? '🔒 Illégal' : '⚖️ Légal';
-      // Sync Registre des Membres (avec le nom RP du serveur)
-      _syncMembreNotion(newMember.id, { rang: nouveauGrade, pole: nouveauPole, nom: newMember.displayName || newMember.user.username }).catch(() => {});
+      // Sync Registre des Membres (Nom = pseudo Discord, Personnage = nom RP)
+      _syncMembreNotion(newMember.id, { rang: nouveauGrade, pole: nouveauPole, nom: newMember.displayName || newMember.user.username, username: newMember.user.username }).catch(() => {});
       // Sync Fiches_personnages si changement de pôle
       if (poleChange) {
         console.log(`🔄 Changement de pôle pour ${newMember.displayName} → ${poleLabel}`);
@@ -1197,11 +1200,12 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
       // Sync immédiate dans Notion Fiches_personnages
       const statutNotion = dbFresh.members[newMember.id].status === 'absent' ? 'Absent' : 'Actif';
       _syncStatutFicheNotion(newMember.id, statutNotion, { pole: poleLabel, nom: newMember.displayName || newMember.user.username }).catch(() => {});
-      // Sync Registre des Membres (avec le nom RP du serveur)
+      // Sync Registre des Membres (Nom = pseudo Discord, Personnage = nom RP)
       _syncMembreNotion(newMember.id, {
         rang: nouveauGrade,
         pole: nouveauPole,
         nom: newMember.displayName || newMember.user.username,
+        username: newMember.user.username,
         status: dbFresh.members[newMember.id].status,
         lastActivity: new Date().toISOString(),
       }).catch(() => {});
@@ -3302,7 +3306,8 @@ async function _syncMembreNotion(discordId, updates) {
   const REGISTRE_DB = process.env.NOTION_MEMBRES_DB || NOTION_MEMBRES_DB;
   const page = await _notionFindByDiscordId(REGISTRE_DB, discordId); if (!page) return;
   const props = {};
-  if (updates.nom)  { props['Nom'] = { title: [{ text: { content: String(updates.nom) } }] }; props['Personnage'] = { rich_text: [{ text: { content: String(updates.nom) } }] }; }
+  if (updates.nom)      props['Personnage'] = { rich_text: [{ text: { content: String(updates.nom) } }] };
+  if (updates.username) props['Nom'] = { title: [{ text: { content: String(updates.username) } }] };
   if (updates.rang) props['Rang'] = { select: { name: updates.rang } };
   if (updates.status) { const map = { actif: '✅ Actif', absent: '⚠️ Absent', inactif: '💤 Inactif', parti: '🚪 Parti', visiteur: '👁️ Visiteur' }; props['Statut'] = { select: { name: map[updates.status] || updates.status } }; }
   if (updates.lastActivity) props['Dernière activité'] = { date: { start: new Date(updates.lastActivity).toISOString().split('T')[0] } };
@@ -5544,6 +5549,10 @@ global.getJournalCh = getJournalCh;
 // pour les alertes informateurs et affaires
 const _origGetLogsCh = getLogsCh;
 global.getInformateurCh = (guild) => getJournalCh(guild) || guild.channels.cache.get(SALON_HARDCODED.JOURNAL_DE_BORD);
+// Forcer toutes les alertes (inactivité, etc.) du module vers le Journal de bord
+global.getInactiviteCh = (guild) => getJournalCh(guild) || guild.channels.cache.get(SALON_HARDCODED.JOURNAL_DE_BORD);
+global.getAlerteCh = (guild) => getJournalCh(guild) || guild.channels.cache.get(SALON_HARDCODED.JOURNAL_DE_BORD);
+global.JOURNAL_CH_ID = '1508756535407542372';
 
 // Mettre à jour le statut activité dans Fiches_personnages
 async function _syncTousMembresNotion(guild) {
@@ -5689,7 +5698,7 @@ async function _syncRegistreTousMembres(guild) {
         if (page) {
           // MàJ : pôle, rang, statut, dernière activité
           await fetch(`https://api.notion.com/v1/pages/${page.id}`, { method: 'PATCH', headers, body: JSON.stringify({ properties: {
-            'Nom':        { title:     [{ text: { content: String(nomIC) } }] },
+            'Nom':        { title:     [{ text: { content: member.user.username } }] },
             'Personnage': { rich_text: [{ text: { content: String(nomIC) } }] },
             'Pôle':   { select: { name: pole } },
             'Rang':   { select: { name: rang } },
@@ -5778,12 +5787,11 @@ async function _majNomRegistre(discordId, nouveauNom, username) {
       } catch {}
     }
     if (!page) { console.log(`⚠️ MàJ nom Registre : ligne introuvable pour ${nouveauNom}`); return; }
-    await fetch(`https://api.notion.com/v1/pages/${page.id}`, { method: 'PATCH', headers, body: JSON.stringify({ properties: {
-      'Nom':        { title:     [{ text: { content: String(nouveauNom) } }] },
-      'Personnage': { rich_text: [{ text: { content: String(nouveauNom) } }] },
-      'Discord ID': { rich_text: [{ text: { content: discordId } }] },
-    } }) });
-    console.log(`✅ Registre : nom mis à jour → ${nouveauNom}`);
+    const propsMaj = { 'Personnage': { rich_text: [{ text: { content: String(nouveauNom) } }] }, 'Discord ID': { rich_text: [{ text: { content: discordId } }] } };
+    // Le Nom (titre) reste le pseudo Discord
+    if (username) propsMaj['Nom'] = { title: [{ text: { content: String(username) } }] };
+    await fetch(`https://api.notion.com/v1/pages/${page.id}`, { method: 'PATCH', headers, body: JSON.stringify({ properties: propsMaj }) });
+    console.log(`✅ Registre : personnage mis à jour → ${nouveauNom}`);
   } catch (e) { console.log('❌ _majNomRegistre:', e.message); }
 }
 
