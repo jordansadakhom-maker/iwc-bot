@@ -495,14 +495,17 @@ async function handleSlashCommand(interaction) {
 
   if (commandName === 'synchroniser') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
-    await interaction.reply({ content: '🔄 Synchronisation en cours… (Fiches_personnages + Registre des membres). Cela peut prendre une minute, je te préviens dès que c\'est fini.', flags: MessageFlags.Ephemeral });
-    try {
-      await _syncTousMembresNotion(interaction.guild);
-      await _syncRegistreTousMembres(interaction.guild);
-      await interaction.followUp({ content: '✅ Synchronisation terminée ! Tous les membres avec un rôle de pôle ont été mis à jour dans les deux bases Notion. Regarde les logs pour le détail (créations 🆕 et mises à jour ✅).', flags: MessageFlags.Ephemeral });
-    } catch (e) {
-      await interaction.followUp({ content: `⚠️ La synchronisation a rencontré un souci : ${e.message}. Vérifie que l'intégration Notion est connectée aux deux bases et que les colonnes "Discord ID" sont en type Texte.`, flags: MessageFlags.Ephemeral }).catch(() => {});
-    }
+    // Répondre TOUT DE SUITE (sinon l'interaction expire pendant la synchro)
+    await interaction.reply({ content: '🔄 Synchronisation lancée ! Fiches_personnages puis Registre des membres. Suis l\'avancement dans les logs (🆕 créations, ✅ mises à jour). Ça prend ~1 minute.', flags: MessageFlags.Ephemeral });
+    // Lancer les synchros en arrière-plan (l'une après l'autre)
+    (async () => {
+      try {
+        const guild = interaction.guild;
+        await _syncTousMembresNotion(guild);
+        await _syncRegistreTousMembres(guild);
+        console.log('✅ /synchroniser : les deux synchros sont terminées.');
+      } catch (e) { console.log('❌ /synchroniser erreur:', e.message); }
+    })();
     return;
   }
 
@@ -5620,8 +5623,14 @@ async function _syncRegistreTousMembres(guild) {
     const headers = { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' };
     const db = loadDB();
 
-    const tous = await guild.members.fetch().catch(e => { console.log('⚠️ Registre: échec fetch membres:', e.message); return null; });
-    if (!tous) { console.log('⚠️ Sync Registre: impossible de récupérer les membres du serveur.'); return; }
+    // Petite pause pour laisser Discord respirer après le fetch de la sync Fiches
+    await new Promise(r => setTimeout(r, 1500));
+    let tous = guild.members.cache; // d'abord le cache (déjà rempli par la sync Fiches juste avant)
+    if (!tous || tous.size < 2) {
+      tous = await guild.members.fetch().catch(e => { console.log('⚠️ Registre: échec fetch membres:', e.message); return null; });
+    }
+    if (!tous || !tous.size) { console.log('⚠️ Sync Registre: impossible de récupérer les membres du serveur.'); return; }
+    console.log(`📒 Registre: ${tous.size} membres récupérés, analyse en cours...`);
     const concernes = [...tous.values()].filter(m => !m.user.bot && (
       m.roles.cache.some(r => illegalRoleNames.some(n => r.name.includes(n))) ||
       m.roles.cache.some(r => legalRoleNames.some(n => r.name.includes(n)))
