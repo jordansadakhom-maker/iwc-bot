@@ -501,25 +501,39 @@ async function handleSlashCommand(interaction) {
     );
     const embedInvit = new EmbedBuilder()
       .setColor(0x8B5A2A)
-      .setTitle('📜 AVIS OFFICIEL — Contrat d\'Engagement')
+      .setTitle('📜 RÈGLEMENT & CONTRAT D\'ENGAGEMENT — IRON WOLF COMPANY')
       .setDescription([
         'Messieurs,',
         '',
-        'Vous êtes convié(e) à rejoindre officiellement l\'**Iron Wolf Company**.',
+        'Avant de vous engager auprès de l\'**Iron Wolf Company**, lisez attentivement le présent règlement. Votre signature vaudra acceptation de l\'ensemble de ces conditions.',
         '',
-        'Ce contrat atteste que vous avez pris **pleine connaissance des risques** liés aux activités de la Compagnie et que vous les acceptez en toute connaissance de cause.',
+        '**▌ ARTICLE I — NATURE DE NOS ACTIVITÉS**',
+        'L\'Iron Wolf Company est une **compagnie de sécurité privée**. Notre cœur de métier est la **protection et la sécurisation de convois**, l\'escorte de biens et de personnes, et la défense d\'intérêts qui nous sont confiés. Ce travail se fait **au grand jour** : votre visage et votre nom seront connus et associés à la Compagnie.',
         '',
+        '**▌ ARTICLE II — LES RISQUES DU MÉTIER**',
+        'Vous devez en avoir pleine conscience : ce métier est **dangereux**. Dans l\'exercice de vos fonctions, vous pourrez être amené(e) à **faire usage de votre arme**, à **essuyer des tirs**, à être blessé(e), voire à y laisser la vie. Nul ne peut garantir votre sécurité. En signant, vous **acceptez ces risques en toute connaissance de cause**.',
+        '',
+        '**▌ ARTICLE III — MISSIONS DISCRÈTES**',
+        'La Compagnie peut, à l\'occasion, mener des opérations d\'une **autre nature**, qui doivent demeurer **strictement confidentielles**. Ce qui se décide et s\'exécute dans l\'ombre n\'en sort jamais. La **discrétion absolue** est une condition de votre engagement.',
+        '',
+        '**▌ ARTICLE IV — LOYAUTÉ & CONFIANCE**',
+        'On n\'entre pas dans la Compagnie sans en accepter le code : **fidélité** à la Compagnie et à vos frères d\'armes, **silence** sur ses affaires, **parole tenue** jusqu\'au bout. La trahison et la langue trop longue ne sont pas pardonnées.',
+        '',
+        '**▌ ARTICLE V — ENGAGEMENT SUR L\'HONNEUR**',
         'Par votre signature, vous reconnaissez sur l\'honneur :',
-        '› avoir été informé(e) des risques encourus ;',
-        '› accepter d\'en assumer les responsabilités ;',
-        '› respecter les règles et le secret de la Compagnie.',
+        '› avoir lu et compris le présent règlement ;',
+        '› avoir été informé(e) des risques encourus et les accepter ;',
+        '› vous engager à la loyauté et au secret de la Compagnie.',
         '',
-        'Cliquez sur le bouton ci-dessous pour lire et signer votre engagement.',
+        '─────────────────────────',
+        'Nous vous invitons à **lire attentivement** ce contrat avant de le signer, et à nous faire part de toute question si nécessaire.',
+        '',
+        'Lorsque vous êtes prêt(e), cliquez sur le bouton ci-dessous pour **renseigner vos informations et signer**.',
         '',
         '*Que la force reste dans l\'ombre.*',
-        '**— La Direction**',
+        '**— La Direction, Iron Wolf Company**',
       ].join('\n'))
-      .setFooter({ text: 'Iron Wolf Company • 1895' });
+      .setFooter({ text: 'Iron Wolf Company • 1895 • Document officiel' });
     try {
       await cible.send({ embeds: [embedInvit], components: [row] });
       return interaction.reply({ content: `✅ Contrat d'engagement envoyé en MP à **${cible.username}**. Il pourra le signer directement.`, flags: MessageFlags.Ephemeral });
