@@ -993,18 +993,18 @@ async function autoSetup(guild) {
   // Sync de tous les membres dans le Registre des membres (création + MàJ)
   _syncRegistreTousMembres(guild).catch(() => {});
 
-  const reglCh = getChById(guild, 'REGLEMENT', 'reglement', 'règlement');
+  // Salon du règlement : on cible le salon précis fourni par la Direction (le règlement y est déjà rédigé)
+  const reglCh = guild.channels.cache.get('1508756404260044831') || getChById(guild, 'REGLEMENT', 'reglement', 'règlement');
   if (reglCh) {
-    const msgs = await reglCh.messages.fetch({ limit: 20 });
-    const existing = msgs.find(m => m.author.id === client.user.id && m.content.includes('VALIDATION'));
-    const reglementDejaPoste = msgs.some(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('RÈGLEMENT DE LA COMPAGNIE'));
+    const msgs = await reglCh.messages.fetch({ limit: 30 }).catch(() => null);
+    const existing = msgs ? msgs.find(m => m.author.id === client.user.id && m.content.includes('VALIDATION')) : null;
     if (existing) { db.reglementMsgId = existing.id; }
     else if (!db.reglementMsgId) {
-      // 1) Poster le RÈGLEMENT COMPLET (s'il n'est pas déjà là)
-      if (!reglementDejaPoste) { await _posterReglementComplet(reglCh).catch(e => console.log('⚠️ Règlement:', e.message)); }
-      // 2) Poster le message de VALIDATION avec la réaction ✅
+      // Le règlement est déjà écrit par la Direction dans ce salon.
+      // Le bot ajoute SEULEMENT le message de validation avec la réaction ✅.
       const sent = await reglCh.send('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n✅ VALIDATION DU RÈGLEMENT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```\nSi vous avez lu et accepté **l\'intégralité du règlement ci-dessus**, réagissez avec ✅\n\n*En réagissant, vous confirmez avoir compris et accepté chaque article du code de la Compagnie.*\n— La Direction');
       await sent.react('✅'); db.reglementMsgId = sent.id;
+      console.log('✅ Message de validation du règlement posté dans #' + reglCh.name);
     }
     saveDB(db);
   }
@@ -5808,64 +5808,6 @@ async function _majNomRegistre(discordId, nouveauNom, username) {
   } catch (e) { console.log('❌ _majNomRegistre:', e.message); }
 }
 
-// Poste le règlement complet de la Compagnie (plusieurs embeds) dans le salon règlement.
-async function _posterReglementComplet(ch) {
-  const C = 0x8B5A2A;
-
-  const intro = new EmbedBuilder()
-    .setColor(C)
-    .setTitle('📜 RÈGLEMENT DE LA COMPAGNIE — IRON WOLF COMPANY')
-    .setDescription([
-      '*Far West, 1895.*',
-      '',
-      'Bienvenue, étranger. Avant de fouler le sol de la Compagnie, lis attentivement ce règlement.',
-      'Il vaut autant pour la vie de tous les jours sur ce Discord que pour le jeu (RP).',
-      '',
-      '**En validant ce règlement (réaction ✅ tout en bas), tu acceptes l\'ensemble de ces règles.**',
-    ].join('\n'));
-
-  const discord = new EmbedBuilder()
-    .setColor(C)
-    .setTitle('🤝 I. VIE EN COMMUNAUTÉ (DISCORD)')
-    .setDescription([
-      '**1. Respect avant tout** — Aucune insulte, harcèlement, propos discriminatoires (racisme, homophobie, etc.). On reste correct entre membres.',
-      '**2. Pas de contenu choquant** — Aucun contenu NSFW, violent, gore ou illégal.',
-      '**3. Pas de spam ni de pub** — Pas de flood, de messages répétés, ni de publicité (serveurs, liens) sans accord de la Direction.',
-      '**4. Les bons salons** — Chaque salon a son usage. Poste au bon endroit.',
-      '**5. Pseudo = nom RP** — Ton surnom sur le serveur doit être ton nom de personnage.',
-      '**6. En vocal** — Reste courtois, évite le bruit inutile et la musique non désirée.',
-      '**7. Écoute la Direction** — Les décisions du staff doivent être respectées. Un désaccord se règle en privé, calmement.',
-    ].join('\n\n'));
-
-  const rp = new EmbedBuilder()
-    .setColor(C)
-    .setTitle('🎭 II. RÈGLES DE JEU (RP)')
-    .setDescription([
-      '**1. Immersion** — On reste dans son personnage en zone RP. Le hors-RP (HRP) se fait dans les salons prévus.',
-      '**2. Pas de MetaGaming** — Interdit d\'utiliser en RP des informations obtenues hors-RP (Discord, stream...).',
-      '**3. Pas de PowerGaming** — On n\'impose pas ses actions aux autres ; on leur laisse une chance de réagir.',
-      '**4. RP la peur** — Ton personnage tient à sa vie. Face à une arme, on réagit comme un humain qui a peur.',
-      '**5. Pas de RDM / VDM** — Pas de tir ou de violence gratuite sans raison RP (RDM), ni avec un véhicule/monture (VDM).',
-      '**6. Cohérence de l\'époque** — On respecte l\'univers Far West 1895. Pas d\'anachronismes.',
-      '**7. Le fair-play** — On joue pour créer des histoires ensemble, pas pour "gagner". On accepte les échecs de son personnage.',
-    ].join('\n\n'));
-
-  const fin = new EmbedBuilder()
-    .setColor(C)
-    .setTitle('⚖️ III. SANCTIONS & BON SENS')
-    .setDescription([
-      'Le non-respect du règlement peut entraîner un **avertissement**, une **exclusion temporaire** ou un **bannissement**, selon la gravité.',
-      '',
-      'Ce règlement ne couvre pas tout : le **bon sens** et le **respect** priment en toute situation. La Direction tranche les cas non prévus.',
-      '',
-      '*Que la force reste dans l\'ombre.*',
-      '**— La Direction, Iron Wolf Company**',
-    ].join('\n'));
-
-  await ch.send({ embeds: [intro, discord, rp, fin] });
-  console.log('✅ Règlement complet posté dans #' + ch.name);
-}
-
 // Donne au rôle Visiteur l'accès aux salons d'entrée (recrutement, règlement, arrivées)
 // pour que les nouveaux arrivants tombent bien sur le formulaire de candidature.
 async function _assurerAccesVisiteur(guild) {
@@ -5875,8 +5817,8 @@ async function _assurerAccesVisiteur(guild) {
 
     // Salons d'entrée à rendre visibles pour les visiteurs
     const salonsEntree = [
-      { id: CH.RECRUTEMENT, nom: 'recrutement', ecrire: false },     // voir le panneau (les boutons suffisent)
-      getChById(guild, 'REGLEMENT', 'reglement', 'règlement') && { ch: getChById(guild, 'REGLEMENT', 'reglement', 'règlement'), nom: 'règlement', ecrire: false },
+      { id: CH.RECRUTEMENT, nom: 'recrutement', ecrire: false },         // voir le panneau (les boutons suffisent)
+      { id: '1508756404260044831', nom: 'règlement', ecrire: false },    // le salon règlement précis (pour lire + réagir ✅)
     ].filter(Boolean);
 
     for (const s of salonsEntree) {
