@@ -1352,6 +1352,30 @@ client.on('messageReactionAdd', async (reaction, user) => {
   if (user.bot) return;
   try { if (reaction.partial) await reaction.fetch(); } catch { return; }
   const db = loadDB(); const guild = reaction.message.guild; if (!guild) return;
+
+  // ── 📜 sur une note du micro → proposer un contrat (Direction uniquement) ──
+  if (reaction.emoji.name === '📜') {
+    const msg = reaction.message;
+    const estNote = msg.webhookId && (msg.embeds?.[0]?.title || '').includes('Rapport de terrain');
+    if (!estNote) return;
+    const member = await guild.members.fetch(user.id).catch(() => null);
+    if (!member || !isDirection(member)) return; // réservé Direction / Confrérie
+    try {
+      const att = msg.channel;
+      const notice = await att.send('🔎 Analyse de la note en cours…').catch(() => null);
+      const texte = await _lireTexteNote(msg);
+      const analyse = await _analyserNoteContrat(texte);
+      if (notice) notice.delete().catch(() => {});
+      if (!analyse) { const m = await att.send('⚠️ Impossible d\'analyser la note (IA indisponible ou clé manquante).'); setTimeout(() => m.delete().catch(() => {}), 15000); return; }
+      if (!analyse.est_contrat) { const m = await att.send('🤔 Cette note ne ressemble pas à un contrat/mission. Aucun brouillon créé.'); setTimeout(() => m.delete().catch(() => {}), 15000); return; }
+      const type = (analyse.type === 'illegal') ? 'illegal' : 'legal';
+      const id = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+      _draftStore.set(id, { type, cible: analyse.cible || '?', lieu: analyse.lieu || '', motif: analyse.motif || '', contact: analyse.contact || '', userId: user.id });
+      await att.send({ embeds: [_embedBrouillonContrat(_draftStore.get(id), analyse.confiance)], components: _rowsBrouillonContrat(id, type) });
+    } catch (e) { console.log('❌ 📜 note→contrat:', e.message); }
+    return;
+  }
+
   if (reaction.message.id === db.reglementMsgId && reaction.emoji.name === '✅') {
     await sendLog(guild, 'REGLEMENT_VALIDE', { userId: user.id, username: user.username });
     const logsCh = await getLogsCh(guild);
@@ -1538,6 +1562,12 @@ Si la transcription est incompréhensible ou vide, mets resume="(inaudible)".`;
 }
 
 client.on('messageCreate', async message => {
+  // ── Note du micro de terrain → ajouter la réaction 📜 pour proposer un contrat ──
+  if (message.webhookId && (message.embeds?.[0]?.title || '').includes('Rapport de terrain')) {
+    try { await message.react('📜'); } catch (e) { console.log('⚠️ Réaction note:', e.message); }
+    // on continue (pas de return) au cas où d'autres traitements existent
+  }
+
   // ── Salon d'alerte : tout message → ping tout le monde SAUF Thomas Galagan ──
   if (message.guild && !message.author.bot && message.channel.id === '1512913726494216222') {
     try {
@@ -2082,6 +2112,7 @@ client.on('interactionCreate', async interaction => {
   }
   if (interaction.isModalSubmit() && interaction.customId === 'modal_surnom_identite')   return _validerModalSurnom(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_agenda_simple')) return _validerModalAgendaSimple(interaction);
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('dc_modal_')) return _validerModalBrouillon(interaction);
   if (interaction.isModalSubmit() && interaction.customId === 'modal_mission') return _validerModalMission(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_engagement_')) return _validerModalEngagement(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_rdv_individuel_')) return _validerModalRdvIndividuel(interaction);
@@ -2091,6 +2122,8 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_tresor_'))   return notionModules.handleTresorModal?.(interaction);
 
   if (interaction.isButton()) {
+    // ── Boutons du brouillon de contrat (note → contrat) ──
+    if (interaction.customId.startsWith('dc_')) return _gererBoutonBrouillon(interaction);
     if (interaction.customId.startsWith('engagement_signer_'))  return _ouvrirModalEngagement(interaction);
     if (interaction.customId === 'btn_grade_panel')            return notionV3.handleGradePanelButton?.(interaction);
     if (interaction.customId === 'btn_agenda_nouveau')         return notionV3.handleAgendaNouveauButton?.(interaction);
@@ -5964,6 +5997,227 @@ async function _syncRegistreTousMembres(guild) {
     }
     console.log(`✅ Sync Registre terminée — ${ok}/${concernes.length} membres`);
   } catch(e) { console.log('❌ _syncRegistreTousMembres:', e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  NOTE → CONTRAT (assisté par IA) — le bot propose, la Direction valide
+// ═══════════════════════════════════════════════════════════════
+const _draftStore = new Map(); // brouillons de contrats en cours (mémoire)
+
+// Lit le texte d'une note du micro (pièce jointe .txt si longue, sinon embed)
+async function _lireTexteNote(message) {
+  try {
+    const att = message.attachments?.find?.(a => (a.name || '').toLowerCase().endsWith('.txt'));
+    if (att) { const r = await fetch(att.url); const t = await r.text(); if (t) return t; }
+  } catch (e) { console.log('⚠️ Lecture note (fichier):', e.message); }
+  const emb = message.embeds?.[0];
+  if (emb?.description) return emb.description;
+  return message.content || '';
+}
+
+// Demande à l'IA d'extraire les infos d'un contrat depuis une note
+async function _analyserNoteContrat(texte) {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  const note = (texte || '').slice(0, 4000);
+  const prompt = `Tu es un assistant pour un serveur de jeu de role Far West (RedM, univers Red Dead Redemption 2). Analyse cette note de terrain (conversation transcrite) et determine si elle decrit un CONTRAT / MISSION potentiel (une personne a cibler, escorter, surveiller, intimider, proteger, voler, enqueter, livrer...).
+
+NOTE DE TERRAIN :
+<<<${note}>>>
+
+Reponds UNIQUEMENT avec un objet JSON, sans aucun texte avant ou apres, sans backticks. Format EXACT :
+{"est_contrat": true, "type": "legal", "cible": "", "lieu": "", "motif": "", "contact": "", "confiance": "moyenne"}
+
+Regles :
+- "type": "illegal" si intimidation, violence, vol, elimination, chantage, contrebande, action clandestine. "legal" si escorte, protection, securite, enquete legitime, livraison, garde.
+- "cible": le nom ou une description courte de la personne/objet vise.
+- "motif": la raison en une phrase courte.
+- "contact": l'intermediaire/commanditaire si mentionne, sinon vide.
+- "confiance": "haute", "moyenne" ou "faible" selon la clarte de la note.
+- Si la note ne decrit AUCUNE mission claire, mets "est_contrat": false.`;
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-3-5-haiku-20241022', max_tokens: 400, messages: [{ role: 'user', content: prompt }] }),
+    });
+    const data = await resp.json();
+    let txt = data.content?.[0]?.text || '';
+    txt = txt.replace(/```json|```/g, '').trim();
+    const m = txt.match(/\{[\s\S]*\}/);
+    if (m) txt = m[0];
+    return JSON.parse(txt);
+  } catch (e) { console.log('❌ Analyse note IA:', e.message); return null; }
+}
+
+// Embed du BROUILLON (ce que la Direction relit avant de valider)
+function _embedBrouillonContrat(d, confiance) {
+  const illegal = d.type === 'illegal';
+  return new EmbedBuilder()
+    .setColor(illegal ? 0x8B0000 : 0x1F6FB2)
+    .setTitle('📝 BROUILLON DE CONTRAT — à valider')
+    .setDescription(`Type proposé par l'IA : **${illegal ? '🔒 Illégal (Confrérie)' : '⚖️ Légal'}**` + (confiance ? `\n*Confiance : ${confiance}*` : ''))
+    .addFields(
+      { name: '🎯 Cible', value: (d.cible || '?').slice(0, 1000) },
+      { name: '📍 Lieu', value: (d.lieu || '—').slice(0, 1000), inline: true },
+      { name: '📨 Contact', value: (d.contact || '—').slice(0, 1000), inline: true },
+      { name: '⚖️ Motif', value: (d.motif || '—').slice(0, 1000) },
+    )
+    .setFooter({ text: 'Vérifie les infos, change le type si besoin, puis valide.' });
+}
+
+// Boutons du brouillon
+function _rowsBrouillonContrat(id, type) {
+  const illegal = type === 'illegal';
+  return [new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`dc_valider_${id}`).setLabel('✅ Valider le contrat').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`dc_type_${id}`).setLabel(illegal ? '⚖️ Basculer en Légal' : '🔒 Basculer en Illégal').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`dc_modifier_${id}`).setLabel('✏️ Modifier').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`dc_annuler_${id}`).setLabel('❌ Annuler').setStyle(ButtonStyle.Danger),
+  )];
+}
+
+// Contrat ILLÉGAL final (format Confrérie)
+function _embedContratIllegalFinal(d, ref, auteurId) {
+  const dateStr = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+  return new EmbedBuilder()
+    .setColor(0x8B0000)
+    .setTitle('📜 CONTRAT — DOSSIER CLASSÉ')
+    .setDescription('🔒 **CONFIDENTIEL — CONFRÉRIE UNIQUEMENT**\n*Ne pas diffuser. Silence exigé, même en cas de refus.*')
+    .addFields(
+      { name: '🏷️ Référence', value: ref, inline: true },
+      { name: '📅 Ouvert le', value: dateStr, inline: true },
+      { name: '⚖️ Statut', value: 'En attente de validation', inline: true },
+      { name: '🎯 Cible', value: `**${(d.cible || '?').slice(0, 1000)}**` },
+      { name: '📍 Lieu / repères', value: (d.lieu || '—').slice(0, 1000), inline: true },
+      { name: '✍️ Ouvert par', value: `<@${auteurId}>`, inline: true },
+      { name: '⚖️ Motif', value: (d.motif || '—').slice(0, 1000) },
+      { name: '📋 Conditions', value: '• Méthode physique, sanction marquante.\n• ⚠️ **PAS DE BAVURE — la cible ne doit PAS y rester.**\n• Une seule cible, aucune erreur tolérée.\n• Escalade possible si récidive.' },
+      { name: '📸 Notre condition', value: 'Une **photographie de la cible entre nos mains** = preuve que le message est passé.' },
+      { name: '🚫 SECRET ABSOLU', value: '**Bouche cousue. On n\'en parle À PERSONNE.**\nNi aux proches, ni aux frères hors contrat, **ni aux shérifs**.' },
+      { name: '🤫 Règles d\'opération', value: '⛔ **Bandana relevé en permanence**.\n👕 **Tenue neutre** (rien d\'IWC/Confrérie).\n🐎 Monture & matériel neutres.\n🗣️ Aucun nom ni affiliation sur le terrain.' },
+      { name: '📨 Contact', value: (d.contact || '—').slice(0, 1000) },
+    )
+    .setFooter({ text: 'Les choses vont vite. On ne traîne pas. — God bless Texas.' })
+    .setTimestamp();
+}
+
+// Contrat LÉGAL final (format société de sécurité)
+function _embedContratLegalFinal(d, ref, auteurId) {
+  const dateStr = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+  return new EmbedBuilder()
+    .setColor(0x1F6FB2)
+    .setTitle('📋 CONTRAT — IRON WOLF COMPANY')
+    .setDescription('⚖️ **Contrat officiel — Sécurité & Protection**\n*Iron Wolf Company, services professionnels.*')
+    .addFields(
+      { name: '🏷️ Référence', value: ref, inline: true },
+      { name: '📅 Établi le', value: dateStr, inline: true },
+      { name: '⚖️ Statut', value: 'En attente de validation', inline: true },
+      { name: '🎯 Objet / Client', value: `**${(d.cible || '?').slice(0, 1000)}**` },
+      { name: '📍 Lieu', value: (d.lieu || '—').slice(0, 1000), inline: true },
+      { name: '✍️ Établi par', value: `<@${auteurId}>`, inline: true },
+      { name: '📋 Mission', value: (d.motif || '—').slice(0, 1000) },
+      { name: '✅ Cadre', value: '• Mission menée dans le respect de la loi.\n• Professionnalisme et discrétion.\n• Compte-rendu en fin de mission.' },
+      { name: '💵 Rémunération', value: 'À convenir.' },
+      { name: '📨 Contact', value: (d.contact || '—').slice(0, 1000) },
+    )
+    .setFooter({ text: 'Iron Wolf Company — La sécurité avant tout.' })
+    .setTimestamp();
+}
+
+// Gère les 4 boutons du brouillon de contrat
+async function _gererBoutonBrouillon(interaction) {
+  const cid = interaction.customId; // dc_<action>_<id>
+  const action = cid.split('_')[1];
+  const id = cid.split('_').slice(2).join('_');
+  const d = _draftStore.get(id);
+
+  if (!d) {
+    return interaction.reply({ content: '⚠️ Ce brouillon a expiré (le bot a peut-être redémarré). Reclique sur 📜 sous la note pour en générer un nouveau.', flags: MessageFlags.Ephemeral }).catch(() => {});
+  }
+
+  // ❌ Annuler
+  if (action === 'annuler') {
+    _draftStore.delete(id);
+    await interaction.update({ content: '❌ Brouillon annulé.', embeds: [], components: [] }).catch(() => {});
+    return;
+  }
+
+  // 🔄 Basculer le type légal/illégal
+  if (action === 'type') {
+    d.type = (d.type === 'illegal') ? 'legal' : 'illegal';
+    _draftStore.set(id, d);
+    await interaction.update({ embeds: [_embedBrouillonContrat(d, null)], components: _rowsBrouillonContrat(id, d.type) }).catch(() => {});
+    return;
+  }
+
+  // ✏️ Modifier → ouvrir un formulaire pré-rempli
+  if (action === 'modifier') {
+    const modal = new ModalBuilder().setCustomId(`dc_modal_${id}`).setTitle('✏️ Modifier le contrat');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cible').setLabel('Cible / objet').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(120).setValue((d.cible || '').slice(0, 120))),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('lieu').setLabel('Lieu').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(120).setValue((d.lieu || '').slice(0, 120))),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('motif').setLabel('Motif').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(600).setValue((d.motif || '').slice(0, 600))),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('contact').setLabel('Contact').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100).setValue((d.contact || '').slice(0, 100))),
+    );
+    await interaction.showModal(modal).catch(e => console.log('⚠️ Modal modif brouillon:', e.message));
+    return;
+  }
+
+  // ✅ Valider → publier le contrat final + archiver Notion
+  if (action === 'valider') {
+    await interaction.deferUpdate().catch(() => {});
+    const illegal = d.type === 'illegal';
+    const db = loadDB();
+    db.missionCounter = (db.missionCounter || 0) + 1;
+    const ref = `Contrat-${String(db.missionCounter).padStart(3, '0')}`;
+
+    const embed = illegal ? _embedContratIllegalFinal(d, ref, d.userId) : _embedContratLegalFinal(d, ref, d.userId);
+
+    // Publier dans le salon du brouillon
+    let salonOK = false; let publishedMsgId = null;
+    try { const sent = await interaction.channel.send({ embeds: [embed] }); salonOK = true; publishedMsgId = sent.id; } catch (e) { console.log('⚠️ Publication contrat:', e.message); }
+
+    db.missions = db.missions || {};
+    db.missions[ref] = { messageId: publishedMsgId, channelId: interaction.channel.id, cible: d.cible, type: d.type, statut: 'En attente', createdAt: new Date().toISOString() };
+    saveDB(db);
+
+    // Archiver Notion (optionnel)
+    let notionOK = false; const DB = process.env.NOTION_MISSIONS_DB || null;
+    if (process.env.NOTION_TOKEN && DB) {
+      try {
+        const headers = { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' };
+        const props = {
+          'Référence':    { title: [{ text: { content: ref } }] },
+          'Cible':        { rich_text: [{ text: { content: d.cible || '?' } }] },
+          'Lieu':         { rich_text: [{ text: { content: d.lieu || '' } }] },
+          'Motif':        { rich_text: [{ text: { content: (d.motif || '').slice(0, 1900) } }] },
+          'Contact':      { rich_text: [{ text: { content: d.contact || '' } }] },
+          'Statut':       { select: { name: 'En attente' } },
+          'Date':         { date: { start: new Date().toISOString().split('T')[0] } },
+        };
+        const res = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers, body: JSON.stringify({ parent: { database_id: DB }, properties: props }) });
+        if (res.ok) notionOK = true; else console.log('⚠️ Contrat Notion:', (await res.json().catch(() => ({}))).message);
+      } catch (e) { console.log('❌ Contrat Notion:', e.message); }
+    }
+
+    _draftStore.delete(id);
+    await interaction.editReply({ content: `✅ **Contrat ${ref} publié** (${illegal ? '🔒 Illégal' : '⚖️ Légal'}) · Salon : ${salonOK ? '✅' : '⚠️'} · Notion : ${notionOK ? '✅' : (DB ? '⚠️' : '—')}`, embeds: [], components: [] }).catch(() => {});
+    return;
+  }
+}
+
+// Validation du formulaire de modification d'un brouillon
+async function _validerModalBrouillon(interaction) {
+  const id = interaction.customId.replace('dc_modal_', '');
+  const d = _draftStore.get(id);
+  if (!d) return interaction.reply({ content: '⚠️ Brouillon expiré.', flags: MessageFlags.Ephemeral }).catch(() => {});
+  d.cible = interaction.fields.getTextInputValue('cible');
+  d.lieu = interaction.fields.getTextInputValue('lieu') || '';
+  d.motif = interaction.fields.getTextInputValue('motif');
+  d.contact = interaction.fields.getTextInputValue('contact') || '';
+  _draftStore.set(id, d);
+  await interaction.update({ embeds: [_embedBrouillonContrat(d, null)], components: _rowsBrouillonContrat(id, d.type) }).catch(() => {});
 }
 
 // Trouve l'ID du rôle à pinger pour un pôle (le rôle commun à tous les membres du pôle).
