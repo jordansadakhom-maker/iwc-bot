@@ -395,7 +395,22 @@ async function autoKickVisiteurs(guild) {
         const member = await guild.members.fetch(id).catch(() => null);
         if (!member) { delete db.members[id]; continue; }
         if (!member.roles.cache.some(r => r.name.includes('Visiteur'))) { db.members[id].status = 'actif'; continue; }
-        await member.send({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('🚪 Iron Wolf Company').setDescription(`Tu as été retiré du serveur car tu n'as pas validé le règlement dans les **${JOURS_AVANT_KICK} jours** suivant ton arrivée.\n\n*La porte est ouverte une fois. Une seule.*\n— La Direction`).setFooter({ text: 'IWC • Système automatique' })] }).catch(() => {});
+        await member.send({ embeds: [new EmbedBuilder()
+          .setColor(0xED4245)
+          .setTitle('🚪 Iron Wolf Company — Exclusion automatique')
+          .setDescription([
+            `Bonjour,`,
+            ``,
+            `Ce message est automatique : tu as été **retiré du serveur Iron Wolf Company** par notre système.`,
+            ``,
+            `**📋 Raison :** règlement non validé.`,
+            `**⏱️ Détail :** tu n'as pas validé le règlement dans les **${JOURS_AVANT_KICK} jours** suivant ton arrivée. La validation (réaction ✅ dans le salon règlement) est obligatoire pour rester sur le serveur.`,
+            ``,
+            `Si tu souhaites nous rejoindre à nouveau, tu peux revenir sur le serveur et **valider le règlement dès ton arrivée**.`,
+            ``,
+            `— La Direction, Iron Wolf Company`,
+          ].join('\n'))
+          .setFooter({ text: 'IWC • Message automatique du bot' })] }).catch(() => {});
         const ok = await member.kick(`Visiteur inactif depuis ${joursDepuis} jours`).then(() => true).catch(() => false);
         if (!ok) continue;
         delete db.members[id]; kicked++;
