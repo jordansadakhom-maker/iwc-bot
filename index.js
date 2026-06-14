@@ -211,6 +211,14 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('engagement').setDescription("✒️ Envoyer un contrat d'engagement à signer (Direction)").addUserOption(o => o.setName('membre').setDescription('Membre qui doit signer').setRequired(true)),
   new SlashCommandBuilder().setName('synchroniser').setDescription('🔄 Synchroniser tous les membres dans Notion (Direction)'),
   new SlashCommandBuilder().setName('mission').setDescription('🔪 Créer un contrat de mission (Confrérie / pôle illégal)'),
+  new SlashCommandBuilder().setName('mission-statut').setDescription('🔄 Changer le statut d\'un contrat de mission (Direction)')
+    .addStringOption(o => o.setName('reference').setDescription('Ex : Contrat-001').setRequired(true).setAutocomplete(true))
+    .addStringOption(o => o.setName('statut').setDescription('Nouveau statut').setRequired(true)
+      .addChoices(
+        { name: '⏳ En attente', value: 'En attente' },
+        { name: '🔫 En cours', value: 'En cours' },
+        { name: '✅ Clôturé', value: 'Clôturé' },
+      )),
   new SlashCommandBuilder().setName('descriptions').setDescription('📝 Ajouter/mettre à jour la description de chaque salon (Direction)'),
   new SlashCommandBuilder().setName('registre').setDescription('📋 Liste des membres actifs (Direction)').addStringOption(o => o.setName('pole').setDescription('Filtrer par pôle').setRequired(false).addChoices({ name: 'Tous', value: 'tous' }, { name: '⚖️ Légal', value: 'legal' }, { name: '🔒 Illégal', value: 'illegal' })).addIntegerOption(o => o.setName('page').setDescription('Page').setRequired(false)),
   new SlashCommandBuilder().setName('op').setDescription('🎯 Détail d\'une opération').addStringOption(o => o.setName('id').setDescription('ID de l\'opération').setRequired(false)),
@@ -543,6 +551,66 @@ async function handleSlashCommand(interaction) {
       );
       await interaction.showModal(modal);
     } catch (e) { console.log('⚠️ Ouverture modal mission:', e.message); try { await interaction.reply({ content: '⚠️ Erreur à l\'ouverture du formulaire.', flags: MessageFlags.Ephemeral }); } catch {} }
+    return;
+  }
+
+  if (commandName === 'mission-statut') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction / Confrérie.', flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const ref = interaction.options.getString('reference');
+    const statut = interaction.options.getString('statut');
+    const emojiStatut = statut === 'Clôturé' ? '✅ Clôturé' : statut === 'En cours' ? '🔫 En cours' : '⏳ En attente';
+
+    const db = loadDB();
+    db.missions = db.missions || {};
+    const m = db.missions[ref];
+
+    // 1) Éditer l'embed Discord d'origine (si on connaît le message)
+    let discordOK = false;
+    if (m && m.messageId && m.channelId) {
+      try {
+        const ch = await interaction.guild.channels.fetch(m.channelId).catch(() => null);
+        const msg = ch ? await ch.messages.fetch(m.messageId).catch(() => null) : null;
+        if (msg && msg.embeds[0]) {
+          const eb = EmbedBuilder.from(msg.embeds[0]);
+          // Remplacer le champ Statut
+          const fields = (msg.embeds[0].fields || []).map(f => f.name.includes('Statut') ? { name: f.name, value: emojiStatut, inline: f.inline } : f);
+          eb.setFields(fields);
+          if (statut === 'Clôturé') eb.setColor(0x2ECC71);
+          else if (statut === 'En cours') eb.setColor(0xE67E22);
+          await msg.edit({ embeds: [eb] });
+          discordOK = true;
+        }
+      } catch (e) { console.log('⚠️ Mission-statut édition Discord:', e.message); }
+    }
+    if (m) { m.statut = statut; saveDB(db); }
+
+    // 2) Mettre à jour Notion (chercher la page par Référence)
+    let notionOK = false; let notionInfo = '— (non configuré)';
+    const DB = process.env.NOTION_MISSIONS_DB || null;
+    if (process.env.NOTION_TOKEN && DB) {
+      notionInfo = '⚠️';
+      try {
+        const headers = { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' };
+        const q = await fetch(`https://api.notion.com/v1/databases/${DB}/query`, { method: 'POST', headers, body: JSON.stringify({ filter: { property: 'Référence', title: { equals: ref } }, page_size: 1 }) });
+        const data = await q.json().catch(() => ({}));
+        const page = data.results && data.results[0];
+        if (page) {
+          const upd = await fetch(`https://api.notion.com/v1/pages/${page.id}`, { method: 'PATCH', headers, body: JSON.stringify({ properties: { 'Statut': { select: { name: statut } } } }) });
+          if (upd.ok) { notionOK = true; notionInfo = '✅'; }
+        } else { notionInfo = '⚠️ contrat introuvable dans Notion'; }
+      } catch (e) { console.log('❌ Mission-statut Notion:', e.message); }
+    }
+
+    if (!m && !notionOK) {
+      return interaction.editReply({ content: `⚠️ Contrat **${ref}** introuvable (ni en mémoire, ni dans Notion). Vérifie la référence.` });
+    }
+    await interaction.editReply({ content: [
+      `✅ **${ref}** → statut mis à jour : **${emojiStatut}**`,
+      '',
+      `📁 Embed Discord : ${discordOK ? '✅ modifié' : '⚠️ (message introuvable)'}`,
+      `📓 Notion : ${notionInfo}`,
+    ].join('\n') });
     return;
   }
 
@@ -1943,6 +2011,16 @@ client.on('interactionCreate', async interaction => {
 
   if (interaction.isAutocomplete()) {
     if (['promo','retro'].includes(interaction.commandName)) return handleAutocompleteGrades(interaction);
+    if (interaction.commandName === 'mission-statut') {
+      const db = loadDB();
+      const refs = Object.keys(db.missions || {});
+      const focus = (interaction.options.getFocused() || '').toLowerCase();
+      const choix = refs
+        .filter(r => r.toLowerCase().includes(focus))
+        .slice(-25).reverse()
+        .map(r => ({ name: `${r}${db.missions[r]?.cible ? ' — ' + String(db.missions[r].cible).slice(0, 60) : ''}`.slice(0, 100), value: r }));
+      return interaction.respond(choix).catch(() => {});
+    }
     return;
   }
   if (interaction.isChatInputCommand()) {
@@ -4465,10 +4543,16 @@ async function _validerModalMission(interaction) {
     .setFooter({ text: 'Les choses vont vite. On ne traîne pas. — God bless Texas.' })
     .setTimestamp();
 
-  // 1) Publier dans le salon où la commande a été tapée
+  // 1) Publier dans le salon où la commande a été tapée (et mémoriser le message)
   let salonOK = false;
-  try { await interaction.channel.send({ embeds: [embed] }); salonOK = true; }
-  catch (e) { console.log('⚠️ Mission publication:', e.message); }
+  try {
+    const msg = await interaction.channel.send({ embeds: [embed] });
+    salonOK = true;
+    // Mémoriser pour pouvoir éditer l'embed plus tard via /mission-statut
+    db.missions = db.missions || {};
+    db.missions[ref] = { messageId: msg.id, channelId: interaction.channel.id, cible, statut: 'En attente', createdAt: new Date().toISOString() };
+    saveDB(db);
+  } catch (e) { console.log('⚠️ Mission publication:', e.message); }
 
   // 2) Archiver dans Notion (optionnel — base NOTION_MISSIONS_DB)
   let notionOK = false;
