@@ -210,6 +210,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('rdv-nettoyer').setDescription('🧹 Désépingler tous les vieux télégrammes du salon demandes (Direction)'),
   new SlashCommandBuilder().setName('engagement').setDescription("✒️ Envoyer un contrat d'engagement à signer (Direction)").addUserOption(o => o.setName('membre').setDescription('Membre qui doit signer').setRequired(true)),
   new SlashCommandBuilder().setName('synchroniser').setDescription('🔄 Synchroniser tous les membres dans Notion (Direction)'),
+  new SlashCommandBuilder().setName('mission').setDescription('🔪 Créer un contrat de mission (Confrérie / pôle illégal)'),
   new SlashCommandBuilder().setName('descriptions').setDescription('📝 Ajouter/mettre à jour la description de chaque salon (Direction)'),
   new SlashCommandBuilder().setName('registre').setDescription('📋 Liste des membres actifs (Direction)').addStringOption(o => o.setName('pole').setDescription('Filtrer par pôle').setRequired(false).addChoices({ name: 'Tous', value: 'tous' }, { name: '⚖️ Légal', value: 'legal' }, { name: '🔒 Illégal', value: 'illegal' })).addIntegerOption(o => o.setName('page').setDescription('Page').setRequired(false)),
   new SlashCommandBuilder().setName('op').setDescription('🎯 Détail d\'une opération').addStringOption(o => o.setName('id').setDescription('ID de l\'opération').setRequired(false)),
@@ -526,6 +527,22 @@ async function handleSlashCommand(interaction) {
         console.log('✅ /synchroniser : les deux synchros sont terminées.');
       } catch (e) { console.log('❌ /synchroniser erreur:', e.message); }
     })();
+    return;
+  }
+
+  if (commandName === 'mission') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction / Confrérie.', flags: MessageFlags.Ephemeral });
+    try {
+      const modal = new ModalBuilder().setCustomId('modal_mission').setTitle('🔪 Nouveau contrat de mission');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cible').setLabel('Cible (nom + qui c\'est)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(120).setPlaceholder('Ex : Mercer — propriétaire de la distillerie, médecin de Blackwater')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('lieu').setLabel('Lieu / repères').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(120).setPlaceholder('Ex : Blackwater, autour de la distillerie')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('motif').setLabel('Motif du contrat').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(600).setPlaceholder('Pourquoi cette cible ? Ce qu\'elle a fait...')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('remuneration').setLabel('Rémunération').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100).setPlaceholder('Ex : À confirmer avec William')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('contact').setLabel('Contact / intermédiaire').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100).setPlaceholder('Ex : William — Télégramme 11-529')),
+      );
+      await interaction.showModal(modal);
+    } catch (e) { console.log('⚠️ Ouverture modal mission:', e.message); try { await interaction.reply({ content: '⚠️ Erreur à l\'ouverture du formulaire.', flags: MessageFlags.Ephemeral }); } catch {} }
     return;
   }
 
@@ -1845,7 +1862,8 @@ client.on('messageCreate', async message => {
       const rowP = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`op_participer_${op.id}`).setLabel('✋ Je participe').setStyle(ButtonStyle.Secondary), new ButtonBuilder().setCustomId(`op_retrait_${op.id}`).setLabel('🚪 Me retirer').setStyle(ButtonStyle.Secondary));
       const rowG = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`op_encours_${op.id}`).setLabel('🟢 Lancer').setStyle(ButtonStyle.Success), new ButtonBuilder().setCustomId(`op_terminee_${op.id}`).setLabel('✅ Terminer').setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId(`op_annulee_${op.id}`).setLabel('❌ Annuler').setStyle(ButtonStyle.Danger));
       const rowModif2 = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`op_modifier_${op.id}`).setLabel('✏️ Modifier').setStyle(ButtonStyle.Secondary));
-      await opsCh.send({ content: `<@&${pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL}> — 🎯 Nouvelle opération **${op.name}**. Inscrivez-vous via « ✋ Je participe ».`, embeds: [embed], components: [rowP, rowG, rowModif2], allowedMentions: { parse: [], roles: [pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL] } });
+      const _ridOp1 = _poleRoleId(guild, pole);
+      await opsCh.send({ content: `${_ridOp1 ? `<@&${_ridOp1}> ` : ''}— 🎯 Nouvelle opération **${op.name}**. Inscrivez-vous via « ✋ Je participe ».`, embeds: [embed], components: [rowP, rowG, rowModif2], allowedMentions: { parse: [], roles: _ridOp1 ? [_ridOp1] : [] } });
       await message.react('✅');
     }
     return;
@@ -1986,6 +2004,7 @@ client.on('interactionCreate', async interaction => {
   }
   if (interaction.isModalSubmit() && interaction.customId === 'modal_surnom_identite')   return _validerModalSurnom(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_agenda_simple')) return _validerModalAgendaSimple(interaction);
+  if (interaction.isModalSubmit() && interaction.customId === 'modal_mission') return _validerModalMission(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_engagement_')) return _validerModalEngagement(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_rdv_individuel_')) return _validerModalRdvIndividuel(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_rdv_comm_')) return _validerModalRdvCommunaute(interaction);
@@ -3267,8 +3286,9 @@ async function _validerModalOpCreer(interaction) {
 
   const opsCh = guild.channels.cache.get(SALON_IDS.OPERATIONS) || getChById(guild, 'OPERATIONS', 'operations');
   if (opsCh) {
-    const mention = `<@&${pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL}>`;
-    await opsCh.send({ content: `${mention} — 🎯 Nouvelle opération **${nom}** · Inscrivez-vous ci-dessous.`, embeds: [embed], components: [rowP, rowG, rowModif], allowedMentions: { parse: [], roles: [pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL] } });
+    const _ridOp2 = _poleRoleId(guild, pole);
+    const mention = _ridOp2 ? `<@&${_ridOp2}>` : '';
+    await opsCh.send({ content: `${mention} — 🎯 Nouvelle opération **${nom}** · Inscrivez-vous ci-dessous.`, embeds: [embed], components: [rowP, rowG, rowModif], allowedMentions: { parse: [], roles: _ridOp2 ? [_ridOp2] : [] } });
   }
   await interaction.editReply({ content: `✅ Opération **${nom}** créée${notionPageId ? ' et synchronisée avec Notion' : ''}.` });
 }
@@ -4402,6 +4422,89 @@ async function _handleRdvPoleSelect(interaction) {
 // ═══ CONTRAT D'ENGAGEMENT (système séparé) ═══
 const ENGAGEMENT_ARCHIVE_CH = '1513253567119495368';
 const ENGAGEMENT_ROLE_ID = '1513255402031022142';
+
+// ═══ CONTRAT DE MISSION (Confrérie / pôle illégal) — /mission ═══
+async function _validerModalMission(interaction) {
+  try { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); }
+  catch (e) { console.log('⚠️ Mission defer impossible:', e.message); return; }
+
+  const cible = interaction.fields.getTextInputValue('cible');
+  const lieu = interaction.fields.getTextInputValue('lieu') || '—';
+  const motif = interaction.fields.getTextInputValue('motif');
+  const remuneration = interaction.fields.getTextInputValue('remuneration') || 'À confirmer.';
+  const contact = interaction.fields.getTextInputValue('contact') || '—';
+
+  // Référence auto-incrémentée
+  const db = loadDB();
+  db.missionCounter = (db.missionCounter || 0) + 1;
+  const ref = `Contrat-${String(db.missionCounter).padStart(3, '0')}`;
+  saveDB(db);
+
+  const dateStr = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+
+  const embed = new EmbedBuilder()
+    .setColor(0x8B0000)
+    .setTitle('📜 CONTRAT — DOSSIER CLASSÉ')
+    .setDescription('🔒 **CONFIDENTIEL — CONFRÉRIE UNIQUEMENT**\n*Ne pas diffuser. Silence exigé, même en cas de refus.*')
+    .addFields(
+      { name: '🏷️ Référence', value: ref, inline: true },
+      { name: '📅 Ouvert le', value: dateStr, inline: true },
+      { name: '⚖️ Statut', value: 'En attente de validation', inline: true },
+      { name: '🎯 Cible', value: `**${cible}**` },
+      { name: '📍 Lieu / repères', value: lieu, inline: true },
+      { name: '✍️ Ouvert par', value: `<@${interaction.user.id}>`, inline: true },
+      { name: '⚖️ Motif', value: motif.slice(0, 1000) },
+      { name: '📋 Conditions', value: '• Méthode physique, sanction marquante.\n• ⚠️ **PAS DE BAVURE — la cible ne doit PAS y rester.**\n• Une seule cible, aucune erreur tolérée.\n• Escalade possible si récidive.' },
+      { name: '📸 Notre condition', value: 'Une **photographie de la cible entre nos mains** = preuve que le message est passé.' },
+      { name: '💵 Rémunération', value: remuneration },
+      { name: '🚫 SECRET ABSOLU', value: '**Bouche cousue. On n\'en parle À PERSONNE.**\nNi aux proches, ni aux frères hors contrat, **ni aux shérifs**.\nLe moindre mot qui sort = trahison. Et la trahison se règle.' },
+      { name: '🤫 Règles d\'opération', value: '⛔ **Bandana relevé en permanence** — aucun visage à découvert.\n👕 **Tenue neutre** — rien qui rattache à la Confrérie / IWC.\n🐎 Monture & matériel sans signe distinctif.\n🗣️ Aucun nom ni affiliation prononcés sur le terrain.' },
+      { name: '📨 Contact', value: contact },
+      { name: '✅ Marche à suivre', value: '1️⃣ Validation des frères\n2️⃣ Réception des repères\n3️⃣ Préparation discrète (tenue, bandana, matériel propre)\n4️⃣ Exécution → photographie de la cible\n5️⃣ Retour par télégramme → RDV de clôture' },
+    )
+    .setFooter({ text: 'Les choses vont vite. On ne traîne pas. — God bless Texas.' })
+    .setTimestamp();
+
+  // 1) Publier dans le salon où la commande a été tapée
+  let salonOK = false;
+  try { await interaction.channel.send({ embeds: [embed] }); salonOK = true; }
+  catch (e) { console.log('⚠️ Mission publication:', e.message); }
+
+  // 2) Archiver dans Notion (optionnel — base NOTION_MISSIONS_DB)
+  let notionOK = false;
+  const DB = process.env.NOTION_MISSIONS_DB || null;
+  if (process.env.NOTION_TOKEN && DB) {
+    try {
+      const headers = { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' };
+      const props = {
+        'Référence':    { title: [{ text: { content: ref } }] },
+        'Cible':        { rich_text: [{ text: { content: cible } }] },
+        'Lieu':         { rich_text: [{ text: { content: lieu } }] },
+        'Motif':        { rich_text: [{ text: { content: motif.slice(0, 1900) } }] },
+        'Rémunération': { rich_text: [{ text: { content: remuneration } }] },
+        'Contact':      { rich_text: [{ text: { content: contact } }] },
+        'Statut':       { select: { name: 'En attente' } },
+        'Date':         { date: { start: new Date().toISOString().split('T')[0] } },
+      };
+      let res = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers, body: JSON.stringify({ parent: { database_id: DB }, properties: props }) });
+      if (res.ok) notionOK = true;
+      else {
+        const e1 = await res.json().catch(() => ({}));
+        console.log(`⚠️ Mission Notion: ${(e1.message || '').slice(0, 150)}`);
+        // retry minimal
+        res = await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers, body: JSON.stringify({ parent: { database_id: DB }, properties: { 'Référence': props['Référence'], 'Cible': props.Cible, 'Statut': props.Statut, 'Date': props.Date } }) });
+        if (res.ok) notionOK = true;
+      }
+    } catch (e) { console.log('❌ Mission Notion error:', e.message); }
+  }
+
+  await interaction.editReply({ content: [
+    `✅ **Contrat ${ref} publié !**`,
+    '',
+    `📁 Salon : ${salonOK ? '✅' : '⚠️'}`,
+    `📓 Notion : ${notionOK ? '✅' : (DB ? '⚠️' : '— (non configuré)')}`,
+  ].join('\n') });
+}
 
 async function _ouvrirModalEngagement(interaction) {
   try {
@@ -5719,7 +5822,7 @@ async function _syncRegistreTousMembres(guild) {
         const nomIC = member.displayName || m.name || (typeof DISCORD_TO_IC !== 'undefined' && DISCORD_TO_IC[discordId]) || member.user.username;
         // Rang = nom du/des rôle(s) de grade que la personne porte RÉELLEMENT sur Discord
         let rang;
-        rang = _detecterRang(member, isIlleg);
+        rang = _detecterRang(member);
 
         // Chercher la ligne existante : par Discord ID (si la colonne existe), sinon par Nom/Personnage
         let page = null;
@@ -5779,6 +5882,18 @@ async function _syncRegistreTousMembres(guild) {
   } catch(e) { console.log('❌ _syncRegistreTousMembres:', e.message); }
 }
 
+// Trouve l'ID du rôle à pinger pour un pôle (le rôle commun à tous les membres du pôle).
+// Légal → rôle « Iron Wolf Company » · Illégal → rôle « La Confrérie ».
+// Cherche par NOM (robuste), avec repli sur la config si besoin.
+function _poleRoleId(guild, pole) {
+  const illegal = (pole === 'illegal' || pole === 'illégal' || pole === '🔒 Illégal');
+  const motifs = illegal ? ['Confrérie', 'confrerie'] : ['Iron Wolf', 'iron wolf'];
+  const role = guild.roles.cache.find(r => motifs.some(m => r.name.includes(m)));
+  if (role) return role.id;
+  // repli : constantes de config (si jamais elles sont correctes)
+  return illegal ? ROLE_POLE_ILLEGAL : ROLE_POLE_LEGAL;
+}
+
 // Détecte le PÔLE d'un membre à partir de ses rôles Discord réels.
 // Un membre peut appartenir aux DEUX pôles (légal + illégal) → renvoie « Les deux ».
 function _detecterPole(member) {
@@ -5795,32 +5910,33 @@ function _detecterPole(member) {
 
 // Détecte le RANG d'un membre à partir des NOMS de ses rôles Discord réels.
 // Renvoie le grade le plus élevé qu'il porte (priorité du plus haut au plus bas).
-function _detecterRang(member, isIlleg) {
+function _detecterRang(member) {
   const noms = member.roles.cache.map(r => r.name);
   const a = (motifs) => noms.find(n => motifs.some(mt => n.toLowerCase().includes(mt.toLowerCase())));
 
-  if (isIlleg) {
-    // Hiérarchie illégale, du plus haut au plus bas
-    const grade =
-      a(['Concepteur']) ||
-      a(['Fléau', 'fleau']) ||
-      a(['Exécuteur', 'execu', 'éxécu']) ||
-      a(['Condamné', 'condamne']) ||
-      a(['Maudit']) ||
-      a(['Instructeur']) ||
-      a(['Confrérie', 'confrerie']);
-    return grade || 'La Confrérie';
-  }
-  // Hiérarchie légale, du plus haut au plus bas
-  const grade =
+  // Grade légal (le plus haut porté), s'il y en a un
+  const gradeLegal =
     a(['Conseil', 'Directeur']) ||
     a(['Officier']) ||
     a(['Agent']) ||
     a(['Opérateur', 'operateur']) ||
-    a(['Instructeur']) ||
     a(['Panseur', 'Penseur']) ||
     a(['Recrue', 'Probatoire']);
-  return grade || 'Recrue – Probatoire';
+
+  // Grade illégal (le plus haut porté), s'il y en a un
+  const gradeIlleg =
+    a(['Concepteur']) ||
+    a(['Fléau', 'fleau']) ||
+    a(['Exécuteur', 'execu', 'éxécu']) ||
+    a(['Condamné', 'condamne']) ||
+    a(['Maudit']) ||
+    a(['Confrérie', 'confrerie']);
+
+  // Membre des DEUX pôles → on montre les deux grades
+  if (gradeLegal && gradeIlleg) return `${gradeLegal} / ${gradeIlleg}`;
+  if (gradeIlleg) return gradeIlleg;
+  if (gradeLegal) return gradeLegal;
+  return 'Recrue – Probatoire';
 }
 
 // Met à jour le NOM (RP) d'un membre dans le Registre des membres
@@ -5951,4 +6067,3 @@ async function _assurerAccesVisiteur(guild) {
 client.login(process.env.DISCORD_TOKEN)
   .then(() => console.log('🔑 Login OK'))
   .catch(e => { console.error('❌ Login failed:', e.message); process.exit(1); });
-
