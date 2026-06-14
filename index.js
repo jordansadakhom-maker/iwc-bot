@@ -210,6 +210,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('rdv-nettoyer').setDescription('🧹 Désépingler tous les vieux télégrammes du salon demandes (Direction)'),
   new SlashCommandBuilder().setName('engagement').setDescription("✒️ Envoyer un contrat d'engagement à signer (Direction)").addUserOption(o => o.setName('membre').setDescription('Membre qui doit signer').setRequired(true)),
   new SlashCommandBuilder().setName('synchroniser').setDescription('🔄 Synchroniser tous les membres dans Notion (Direction)'),
+  new SlashCommandBuilder().setName('descriptions').setDescription('📝 Ajouter/mettre à jour la description de chaque salon (Direction)'),
   new SlashCommandBuilder().setName('registre').setDescription('📋 Liste des membres actifs (Direction)').addStringOption(o => o.setName('pole').setDescription('Filtrer par pôle').setRequired(false).addChoices({ name: 'Tous', value: 'tous' }, { name: '⚖️ Légal', value: 'legal' }, { name: '🔒 Illégal', value: 'illegal' })).addIntegerOption(o => o.setName('page').setDescription('Page').setRequired(false)),
   new SlashCommandBuilder().setName('op').setDescription('🎯 Détail d\'une opération').addStringOption(o => o.setName('id').setDescription('ID de l\'opération').setRequired(false)),
 ].map(c => c.toJSON());
@@ -509,6 +510,16 @@ async function handleSlashCommand(interaction) {
         await _syncRegistreTousMembres(guild);
         console.log('✅ /synchroniser : les deux synchros sont terminées.');
       } catch (e) { console.log('❌ /synchroniser erreur:', e.message); }
+    })();
+    return;
+  }
+
+  if (commandName === 'descriptions') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: '📝 Mise à jour des descriptions de salons en cours… (ça prend ~30 sec). Regarde les logs pour le détail.', flags: MessageFlags.Ephemeral });
+    (async () => {
+      try { await _definirDescriptionsSalons(interaction.guild); await interaction.followUp({ content: '✅ Descriptions des salons mises à jour !', flags: MessageFlags.Ephemeral }); }
+      catch (e) { await interaction.followUp({ content: `⚠️ Souci : ${e.message}. Vérifie que le bot a la permission « Gérer les salons ».`, flags: MessageFlags.Ephemeral }).catch(() => {}); }
     })();
     return;
   }
@@ -1011,6 +1022,8 @@ async function autoSetup(guild) {
 
   // S'assurer que les visiteurs ont accès aux salons d'entrée (recrutement, règlement)
   await _assurerAccesVisiteur(guild).catch(() => {});
+  // Définir la description (sujet) de chaque salon — en arrière-plan pour ne pas ralentir le démarrage
+  _definirDescriptionsSalons(guild).catch(() => {});
 
   const recrutCh = guild.channels.cache.get(CH.RECRUTEMENT);
   if (recrutCh) {
@@ -5806,6 +5819,75 @@ async function _majNomRegistre(discordId, nouveauNom, username) {
     await fetch(`https://api.notion.com/v1/pages/${page.id}`, { method: 'PATCH', headers, body: JSON.stringify({ properties: propsMaj }) });
     console.log(`✅ Registre : personnage mis à jour → ${nouveauNom}`);
   } catch (e) { console.log('❌ _majNomRegistre:', e.message); }
+}
+
+// Définit la description (sujet) de chaque salon : à quoi il sert + comment l'utiliser.
+// Les salons sont reconnus par leur nom (insensible aux accents/emojis).
+async function _definirDescriptionsSalons(guild) {
+  try {
+    const clean = s => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+
+    // Liste : [motifs de nom] => description
+    const DESCRIPTIONS = [
+      [['annoncesillegal'], "📣 Annonces réservées au pôle illégal (La Confrérie). Lecture seule — seule la Direction publie ici."],
+      [['annonces'], "📣 Annonces officielles de la Compagnie. Lecture seule — seule la Direction publie ici. Active les notifications pour ne rien rater."],
+      [['reglementillegal'], "📜 Règles propres au pôle illégal. À lire et respecter."],
+      [['reglement'], "📜 Règlement de la Compagnie (Discord + RP). Lis-le entièrement, puis réagis avec ✅ sur le message de validation pour accéder au reste du serveur."],
+      [['arrivee'], "👋 Arrivée des nouveaux visiteurs (automatique). C'est ici qu'on souhaite la bienvenue."],
+      [['evenements'], "📅 Événements à venir de la communauté. Garde un œil ici pour les dates importantes."],
+      [['discussionhrp'], "💬 Discussion hors-RP (entre joueurs). On parle ici en tant que personnes, pas en personnage."],
+      [['discussionrp'], "💬 Discussion en RP (dans la peau de ton personnage). Reste immersif."],
+      [['attentevocal'], "🔊 Salon vocal d'attente pour les visiteurs."],
+      [['suggestionidee'], "💡 Propose tes idées et suggestions pour améliorer la communauté."],
+      [['screenshots'], "📸 Partage tes plus belles captures d'écran en jeu."],
+      [['clipstempsfort'], "🎬 Partage tes clips et moments forts en jeu."],
+      [['planning'], "📋 Planning des sessions et activités. Consulte-le pour t'organiser."],
+      [['hierarchieironwolf', 'hierarchieiron'], "🏛️ Organigramme du pôle légal (qui est qui). Lecture seule, mis à jour automatiquement."],
+      [['hierarchieombre'], "💀 Organigramme du pôle illégal (La Confrérie). Lecture seule."],
+      [['contratsreponses'], "📁 Suivi des réponses aux contrats (Direction). Usage interne."],
+      [['contrats'], "📜 Contrats de mission de la Compagnie. Consulte les offres ; utilise les commandes /contrats pour voir les tiens."],
+      [['coffreentreprise', 'coffreillegal', 'coffre'], "💰 Suivi de la trésorerie / du coffre. Utilise /tresor pour enregistrer une transaction et /solde pour voir l'état."],
+      [['agendaillegal'], "📅 Agenda du pôle illégal. Les rendez-vous y sont publiés ; crée-en avec /rdv."],
+      [['agenda'], "📅 Agenda des rendez-vous. Crée un RDV avec /rdv ; consulte avec /agenda voir."],
+      [['histoireiwc', 'histoireiron'], "📖 L'histoire et le lore de l'Iron Wolf Company. Lecture seule."],
+      [['histoiredelaconfrerie'], "📖 L'histoire du pôle illégal (La Confrérie). Lecture seule."],
+      [['absences'], "🟡 Déclare tes absences ici avec /absent, et ton retour avec /retour. Préviens toujours avant de t'absenter."],
+      [['parlotehrpombre'], "💬 Discussion hors-RP du pôle illégal."],
+      [['parloteombre'], "💬 Discussion en RP du pôle illégal."],
+      [['parlotehrp'], "💬 Discussion hors-RP du pôle légal."],
+      [['parlote'], "💬 Discussion détendue du pôle légal."],
+      [['formation'], "🎓 Formations et entraînements des membres. Consulte les sessions ici."],
+      [['grade'], "🎖️ Tes grades et promotions. Mis à jour automatiquement selon tes rôles."],
+      [['surnompseudo'], "✏️ Définis ton nom RP ici avec la commande /nom. Ton surnom serveur doit être ton nom de personnage."],
+      [['operations'], "🎯 Opérations en cours et à venir. La Direction crée les opérations avec /op-creer ; consulte avec /ops."],
+      [['informateurs'], "🕵️ Gestion des informateurs et de leurs renseignements (Direction). Usage interne."],
+      [['plans'], "🗺️ Partage ici les plans et photos de repérage. Les images sont archivées automatiquement dans Notion."],
+      [['affaires'], "⚔️ Affaires soumises au vote de la Direction. Utilise /affaire pour en proposer une."],
+      [['backgroundsmembres'], "👥 Histoires (backgrounds) des personnages des membres. Usage interne Direction."],
+      [['dossierrecrutement'], "📁 Dossiers de recrutement reçus (Direction). Usage interne."],
+      [['recrutementinterne'], "📋 Suivi interne des candidatures (Direction)."],
+      [['fichespersonnages'], "🧑 Fiches des personnages. Synchronisées automatiquement avec Notion."],
+      [['journaldebord'], "📖 Journal de bord : toutes les actions importantes et alertes du bot sont enregistrées ici (Direction)."],
+      [['loreetunivers', 'loreunivers'], "🌍 Le lore et l'univers du serveur (époque, contexte, factions). Lecture seule."],
+      [['commandesslash'], "⌨️ Liste de toutes les commandes du bot et leur usage. Tape / pour voir les commandes disponibles."],
+      [['conversationdirectionhrp', 'conversationdirection'], "💬 Salon de discussion hors-RP de la Direction. Usage interne."],
+      [['patchnote'], "🔇 Notes de mises à jour du bot. Lecture seule."],
+      [['logs'], "📊 Journal technique du bot (Direction). Usage interne."],
+    ];
+
+    const salons = guild.channels.cache.filter(c => c.type === 0 || c.type === 5); // textuels + annonces
+    let ok = 0;
+    for (const ch of salons.values()) {
+      const nomClean = clean(ch.name);
+      const match = DESCRIPTIONS.find(([motifs]) => motifs.some(m => nomClean.includes(m)));
+      if (!match) continue;
+      const desc = match[1];
+      if ((ch.topic || '') === desc) continue; // déjà à jour
+      try { await ch.setTopic(desc); ok++; await new Promise(r => setTimeout(r, 300)); }
+      catch (e) { /* permissions ou salon spécial */ }
+    }
+    console.log(`✅ Descriptions de salons mises à jour : ${ok}`);
+  } catch (e) { console.log('❌ _definirDescriptionsSalons:', e.message); }
 }
 
 // Donne au rôle Visiteur l'accès aux salons d'entrée (recrutement, règlement, arrivées)
