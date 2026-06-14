@@ -6,6 +6,7 @@ const {
   StringSelectMenuBuilder,
   ModalBuilder, TextInputBuilder, TextInputStyle,
   SlashCommandBuilder, MessageFlags,
+  PermissionFlagsBits,
 } = require('discord.js');
 const cron = require('node-cron');
 
@@ -1001,6 +1002,9 @@ async function autoSetup(guild) {
     saveDB(db);
   }
 
+  // S'assurer que les visiteurs ont accès aux salons d'entrée (recrutement, règlement)
+  await _assurerAccesVisiteur(guild).catch(() => {});
+
   const recrutCh = guild.channels.cache.get(CH.RECRUTEMENT);
   if (recrutCh) {
     const msgs = await recrutCh.messages.fetch({ limit: 20 });
@@ -1113,6 +1117,8 @@ client.on('guildMemberAdd', async member => {
   const db = loadDB(); const guild = member.guild;
   const visiteurRole = guild.roles.cache.find(r => r.name.includes('Visiteur'));
   if (visiteurRole) await member.roles.add(visiteurRole).catch(() => {});
+  // Garantir que le rôle Visiteur a bien accès aux salons d'entrée (recrutement, règlement)
+  await _assurerAccesVisiteur(guild).catch(() => {});
   db.members[member.id] = { id: member.id, name: member.user.username, status: 'visiteur', rang: 'Visiteur', joinedAt: new Date().toISOString(), lastActivity: new Date().toISOString() };
   saveDB(db);
   const arriveesCh = getChById(guild, 'ARRIVEES', 'arrivees', 'arrivée');
@@ -5793,6 +5799,35 @@ async function _majNomRegistre(discordId, nouveauNom, username) {
     await fetch(`https://api.notion.com/v1/pages/${page.id}`, { method: 'PATCH', headers, body: JSON.stringify({ properties: propsMaj }) });
     console.log(`✅ Registre : personnage mis à jour → ${nouveauNom}`);
   } catch (e) { console.log('❌ _majNomRegistre:', e.message); }
+}
+
+// Donne au rôle Visiteur l'accès aux salons d'entrée (recrutement, règlement, arrivées)
+// pour que les nouveaux arrivants tombent bien sur le formulaire de candidature.
+async function _assurerAccesVisiteur(guild) {
+  try {
+    const visiteurRole = guild.roles.cache.find(r => r.name.includes('Visiteur'));
+    if (!visiteurRole) { console.log('⚠️ Accès Visiteur : rôle Visiteur introuvable.'); return; }
+
+    // Salons d'entrée à rendre visibles pour les visiteurs
+    const salonsEntree = [
+      { id: CH.RECRUTEMENT, nom: 'recrutement', ecrire: false },     // voir le panneau (les boutons suffisent)
+      getChById(guild, 'REGLEMENT', 'reglement', 'règlement') && { ch: getChById(guild, 'REGLEMENT', 'reglement', 'règlement'), nom: 'règlement', ecrire: false },
+    ].filter(Boolean);
+
+    for (const s of salonsEntree) {
+      const ch = s.ch || guild.channels.cache.get(s.id);
+      if (!ch) continue;
+      try {
+        await ch.permissionOverwrites.edit(visiteurRole, {
+          ViewChannel: true,           // voir le salon
+          ReadMessageHistory: true,    // lire les messages (le panneau)
+          SendMessages: false,         // pas besoin d'écrire (juste cliquer les boutons)
+          AddReactions: true,          // pour valider le règlement avec ✅
+        });
+        console.log(`✅ Accès Visiteur assuré : #${ch.name}`);
+      } catch (e) { console.log(`⚠️ Accès Visiteur #${ch?.name}: ${e.message}`); }
+    }
+  } catch (e) { console.log('❌ _assurerAccesVisiteur:', e.message); }
 }
 
 client.login(process.env.DISCORD_TOKEN)
