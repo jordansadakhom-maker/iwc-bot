@@ -220,6 +220,7 @@ const SLASH_COMMANDS = [
         { name: '✅ Clôturé', value: 'Clôturé' },
       )),
   new SlashCommandBuilder().setName('descriptions').setDescription('📝 Ajouter/mettre à jour la description de chaque salon (Direction)'),
+  new SlashCommandBuilder().setName('diagnostic').setDescription('🩺 Bilan de santé du bot : config, permissions, Notion (Direction)'),
   new SlashCommandBuilder().setName('registre').setDescription('📋 Liste des membres actifs (Direction)').addStringOption(o => o.setName('pole').setDescription('Filtrer par pôle').setRequired(false).addChoices({ name: 'Tous', value: 'tous' }, { name: '⚖️ Légal', value: 'legal' }, { name: '🔒 Illégal', value: 'illegal' })).addIntegerOption(o => o.setName('page').setDescription('Page').setRequired(false)),
   new SlashCommandBuilder().setName('op').setDescription('🎯 Détail d\'une opération').addStringOption(o => o.setName('id').setDescription('ID de l\'opération').setRequired(false)),
 ].map(c => c.toJSON());
@@ -612,6 +613,74 @@ async function handleSlashCommand(interaction) {
       `📓 Notion : ${notionInfo}`,
     ].join('\n') });
     return;
+  }
+
+  if (commandName === 'diagnostic') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const oui = '✅', non = '❌', opt = '➖';
+    const v = (x) => x ? oui : non;
+
+    // 1) Variables d'environnement (présence seulement, jamais la valeur)
+    const env = [
+      `${v(process.env.DISCORD_TOKEN)} Token Discord`,
+      `${v(process.env.GUILD_ID)} GUILD_ID`,
+      `${v(process.env.NOTION_TOKEN)} Token Notion`,
+      `${v(process.env.ANTHROPIC_API_KEY)} Clé IA (résumés + contrats)`,
+      `${process.env.NOTION_MEMBRES_DB ? oui : opt} Base Registre membres`,
+      `${process.env.NOTION_FICHES_DB ? oui : opt} Base Fiches personnages`,
+      `${process.env.NOTION_ENGAGEMENTS_DB ? oui : opt} Base Engagements`,
+      `${process.env.NOTION_MISSIONS_DB ? oui : opt} Base Missions/Contrats`,
+    ].join('\n');
+
+    // 2) Permissions du bot sur le serveur
+    const me = interaction.guild.members.me;
+    const p = me?.permissions;
+    const perms = [
+      `${v(p?.has(PermissionFlagsBits.ManageRoles))} Gérer les rôles`,
+      `${v(p?.has(PermissionFlagsBits.ManageChannels))} Gérer les salons`,
+      `${v(p?.has(PermissionFlagsBits.KickMembers))} Expulser des membres`,
+      `${v(p?.has(PermissionFlagsBits.ManageMessages))} Gérer les messages`,
+      `${v(p?.has(PermissionFlagsBits.AddReactions))} Ajouter des réactions`,
+      `${v(p?.has(PermissionFlagsBits.MentionEveryone))} Mentionner les rôles`,
+    ].join('\n');
+
+    // 3) Position du rôle du bot (doit être au-dessus des rôles qu'il gère)
+    const botPos = me?.roles?.highest?.position ?? 0;
+    const visiteur = interaction.guild.roles.cache.find(r => r.name.includes('Visiteur'));
+    const ironwolf = interaction.guild.roles.cache.find(r => r.name.includes('Iron Wolf'));
+    const confrerie = interaction.guild.roles.cache.find(r => r.name.includes('Confrérie') || r.name.includes('Confrerie'));
+    const posCheck = [
+      `${visiteur ? (botPos > visiteur.position ? oui : non) : opt} Au-dessus de « Visiteur »`,
+      `${ironwolf ? oui : non} Rôle « Iron Wolf Company » trouvé (ping ops légal)`,
+      `${confrerie ? oui : non} Rôle « La Confrérie » trouvé (ping ops illégal)`,
+    ].join('\n');
+
+    // 4) Test rapide de connexion Notion (si configuré)
+    let notionTest = '➖ Non testé (pas de token)';
+    if (process.env.NOTION_TOKEN && (process.env.NOTION_MEMBRES_DB)) {
+      try {
+        const r = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_MEMBRES_DB}`, {
+          headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28' },
+        });
+        notionTest = r.ok ? '✅ Connexion Notion OK (base Registre accessible)' : `❌ Notion répond mais base inaccessible (${r.status} — intégration connectée ?)`;
+      } catch (e) { notionTest = `❌ Notion injoignable (${e.message})`; }
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0x4E9F3D)
+      .setTitle('🩺 Diagnostic du bot IWC')
+      .setDescription('Bilan de ce qui est configuré. ✅ = OK · ❌ = à régler · ➖ = optionnel/non configuré')
+      .addFields(
+        { name: '🔑 Configuration (Render)', value: env },
+        { name: '🛡️ Permissions du bot', value: perms },
+        { name: '📊 Rôles & hiérarchie', value: posCheck },
+        { name: '🔗 Test Notion', value: notionTest },
+      )
+      .setFooter({ text: 'Astuce : un ❌ en permissions = beaucoup de fonctions cassées.' })
+      .setTimestamp();
+
+    return interaction.editReply({ embeds: [embed] });
   }
 
   if (commandName === 'descriptions') {
@@ -6070,11 +6139,20 @@ Regles :
 async function _resumerNote(texte) {
   if (!process.env.ANTHROPIC_API_KEY) return null;
   const note = (texte || '').slice(0, 5000);
-  const prompt = `Tu es un assistant de renseignement pour un serveur de jeu de role Far West (RedM). Voici une conversation transcrite captee sur le terrain. Resume-la en 3 a 5 points COURTS, en francais, pour quelqu'un qui n'a pas le temps de tout lire.
+  const prompt = `Tu es un assistant de renseignement pour un serveur de jeu de role Far West (RedM). Voici une conversation transcrite captee sur le terrain. Resume-la de facon COURTE en francais, pour quelqu'un qui n'a pas le temps de tout lire.
 
-Concentre-toi sur l'essentiel exploitable : quel groupe / qui parle, ce qui est propose ou demande (contrats, missions, deals, protection, menaces, recrutement), les noms de personnes et de lieux importants, les telegrammes/numeros, et toute info utile.
+REGLE IMPORTANTE : tu dois TOUJOURS conserver dans ton resume, sans jamais les oublier, TOUTES ces infos si elles apparaissent :
+- les NOMS de personnes et de groupes/bandes
+- les LIEUX (villes, saloons, etc.)
+- les TELEGRAMMES / numeros
+- les CONTRATS, missions, demandes, deals proposes
+- les MENACES, cibles, ennemis, alliances
+- les SOMMES d'argent / paiements
+- les ARMES, ressources, livraisons
 
-Format : des puces courtes commencant par "• ". Pas d'introduction ni de conclusion. Si rien d'important, ecris "• Rien de notable.".
+Tu ne coupes QUE le remplissage inutile (politesses, repetitions, hesitations, bavardage). Si une info ci-dessus est presente, elle DOIT figurer dans le resume.
+
+Format : des puces courtes commencant par "• ", regroupees par theme si besoin. Pas d'introduction ni de conclusion. Si vraiment rien d'important, ecris "• Rien de notable.".
 
 CONVERSATION :
 ${note}`;
