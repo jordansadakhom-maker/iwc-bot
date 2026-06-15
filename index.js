@@ -493,7 +493,7 @@ notionModules.ajouterJournalIC = async (guild, entry) => {
 async function handleSlashCommand(interaction) {
   const { commandName, guild } = interaction; const db = loadDB();
   if (commandName === 'grade-set')         { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleGradeSetCommand?.(interaction); }
-  if (commandName === 'hierarchie')        return notionV3.handleHierarchieCommand?.(interaction);
+  if (commandName === 'hierarchie')        { if (!isMembre(interaction.member)) return interaction.reply({ content: '🔒 La hiérarchie est réservée aux membres. Rejoins-nous via une candidature pour y accéder !', flags: MessageFlags.Ephemeral }); return notionV3.handleHierarchieCommand?.(interaction); }
   if (commandName === 'affaire') {
     if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral });
     const modal = new ModalBuilder().setCustomId('modal_affaire').setTitle('📋 Soumettre une affaire');
@@ -3942,7 +3942,7 @@ async function _handleAide(interaction) {
   const member = interaction.member; const isDir = isDirection(member); const isIll = member.roles.cache.has(ROLE_POLE_ILLEGAL); const isLeg = member.roles.cache.has(ROLE_POLE_LEGAL);
   const isFleau = member.roles.cache.some(r => ['Fléau','Fleau','Concepteur','Fondateur'].some(n => r.name.toLowerCase().includes(n.toLowerCase())));
   const embed = new EmbedBuilder().setColor(0x2C3E50).setTitle('📖 Guide des commandes — IWC');
-  embed.addFields({ name: '👤 Profil & Info', value: '`/profil` · `/hierarchie` · `/registre` · `/fiche`', inline: false });
+  embed.addFields({ name: '👤 Profil & Info', value: isMembre(member) ? '`/profil` · `/hierarchie` · `/registre` · `/fiche`' : '`/profil` · `/registre` · `/fiche`', inline: false });
   embed.addFields({ name: '📅 RDV & Agenda', value: '`/rdv` — Créer un RDV\n`/agenda creer` — RDV rapide\n`/agenda voir` — Prochains RDV', inline: false });
   embed.addFields({ name: '🟡 Absences', value: '`/absent [durée]` · `/retour` · `/avertissements`', inline: false });
   embed.addFields({ name: '📜 Contrats', value: '`/contrats` — Tes contrats en cours', inline: false });
@@ -6497,7 +6497,7 @@ async function _gererBoutonMenu(interaction) {
   if (id === 'menu_profil')     return handleProfilEnhanced(interaction);
   if (id === 'menu_retour')     return _handleRetour(interaction);
   if (id === 'menu_contrats')   return _handleMesContrats(interaction);
-  if (id === 'menu_hierarchie') return notionV3.handleHierarchieCommand?.(interaction);
+  if (id === 'menu_hierarchie') { if (!isMembre(interaction.member)) return interaction.reply({ content: '🔒 La hiérarchie est réservée aux membres. Rejoins-nous via une candidature pour y accéder !', flags: MessageFlags.Ephemeral }); return notionV3.handleHierarchieCommand?.(interaction); }
   if (id === 'menu_aide')       return _handleAide(interaction);
   if (id === 'menu_rdv')        return _ouvrirMenuRdvSlash(interaction);
   if (id === 'menu_absence') {
