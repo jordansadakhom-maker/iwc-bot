@@ -619,7 +619,7 @@ async function handleSlashCommand(interaction) {
   if (commandName === 'installer-menu') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
     await interaction.reply({ content: '🎛️ Installation du menu et du salon « Commencer ici »…', flags: MessageFlags.Ephemeral });
-    const r = await _installerMenu(interaction.guild);
+    const r = await _installerMenu(interaction.guild, true); // force le repost
     return interaction.followUp({ content: `Menu principal : ${r.okMenu ? '✅ posé + épinglé' : '⚠️ salon introuvable/permission'}\nCommencer ici : ${r.okStart ? '✅ posé + épinglé' : '⚠️ salon introuvable/permission'}`, flags: MessageFlags.Ephemeral }).catch(() => {});
   }
 
@@ -1139,6 +1139,8 @@ async function autoSetup(guild) {
   await _assurerAccesVisiteur(guild).catch(() => {});
   // Définir la description (sujet) de chaque salon — en arrière-plan pour ne pas ralentir le démarrage
   _definirDescriptionsSalons(guild).catch(() => {});
+  // Installer le menu principal + « Commencer ici » s'ils ne sont pas déjà posés (anti-doublon)
+  _installerMenu(guild, false).then(r => console.log(`🎛️ Menu auto-installé (menu:${r.okMenu} · commencer-ici:${r.okStart})`)).catch(() => {});
 
   const recrutCh = guild.channels.cache.get(CH.RECRUTEMENT);
   if (recrutCh) {
@@ -6446,18 +6448,35 @@ function _buildCommencerIci() {
     .setFooter({ text: 'Iron Wolf Company • 1895' });
 }
 
-// Installe le menu + le message « commencer ici » dans leurs salons
-async function _installerMenu(guild) {
+// Vérifie si un message du bot avec ce titre existe déjà dans le salon
+async function _menuDejaPresent(channel, titrePartiel) {
+  try {
+    const msgs = await channel.messages.fetch({ limit: 30 });
+    return msgs.some(m => m.author.id === client.user.id && (m.embeds[0]?.title || '').includes(titrePartiel));
+  } catch { return false; }
+}
+
+// Installe le menu + le message « commencer ici » dans leurs salons.
+// forcer=false : ne poste que si absent (pour le démarrage auto, évite les doublons).
+// forcer=true  : reposte toujours (commande /installer-menu).
+async function _installerMenu(guild, forcer = false) {
   let okMenu = false, okStart = false;
   try {
     const chMenu = await guild.channels.fetch(MENU_SALON_ID).catch(() => null);
-    if (chMenu) { const m = await chMenu.send(_buildMenuPrincipal()); await m.pin().catch(() => {}); okMenu = true; }
+    if (chMenu) {
+      const present = await _menuDejaPresent(chMenu, 'MENU PRINCIPAL');
+      if (forcer || !present) { const m = await chMenu.send(_buildMenuPrincipal()); await m.pin().catch(() => {}); }
+      okMenu = true;
+    }
   } catch (e) { console.log('⚠️ Install menu:', e.message); }
   try {
     const chStart = await guild.channels.fetch(COMMENCER_SALON_ID).catch(() => null);
     if (chStart) {
-      const m1 = await chStart.send({ embeds: [_buildCommencerIci()] }); await m1.pin().catch(() => {});
-      const m2 = await chStart.send(_buildMenuPrincipal()); await m2.pin().catch(() => {});
+      const present = await _menuDejaPresent(chStart, 'COMMENCE ICI');
+      if (forcer || !present) {
+        const m1 = await chStart.send({ embeds: [_buildCommencerIci()] }); await m1.pin().catch(() => {});
+        const m2 = await chStart.send(_buildMenuPrincipal()); await m2.pin().catch(() => {});
+      }
       okStart = true;
     }
   } catch (e) { console.log('⚠️ Install commencer-ici:', e.message); }
