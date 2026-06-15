@@ -3050,6 +3050,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
 
 client.once('clientReady', async () => {
   console.log(`✅ Connecté : ${client.user.tag}`);
+  console.log('🏷️  VERSION : 5.0 — 15 juin 2026 (menu auto, résumé notes, note→contrat, /diagnostic, accueil nouveaux)');
   client.user.setActivity('la meute • IWC 1895', { type: ActivityType.Watching });
   await restaurerDepuisGitHub();
   for (const guild of client.guilds.cache.values()) {
@@ -3741,7 +3742,7 @@ async function buildMembresDiscordMap(guild) {
 
 async function _handleVersion(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const BOT_VERSION = '4.1'; const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
+  const BOT_VERSION = '5.0 (15 juin — menu auto + résumé notes + note→contrat + diagnostic)'; const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
   let notionOk = false;
   try { const r = await fetch('https://api.notion.com/v1/users/me', { headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28' } }); notionOk = r.ok; } catch {}
   const db = loadDB();
