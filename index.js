@@ -1265,20 +1265,14 @@ client.on('guildMemberAdd', async member => {
   db.members[member.id] = { id: member.id, name: member.user.username, status: 'visiteur', rang: 'Visiteur', joinedAt: new Date().toISOString(), lastActivity: new Date().toISOString() };
   saveDB(db);
 
-  // ── Accueil du nouveau : le mentionner dans le salon « Commencer ici » avec le guide d'arrivée ──
-  try {
-    const startCh = await guild.channels.fetch(COMMENCER_SALON_ID).catch(() => null);
-    if (startCh) {
-      await startCh.send({
-        content: `👋 <@${member.id}> bienvenue à l'**Iron Wolf Company** ! Voici comment bien commencer 👇`,
-        embeds: [_buildCommencerIci()],
-        allowedMentions: { users: [member.id] },
-      });
-    }
-  } catch (e) { console.log('⚠️ Accueil commencer-ici:', e.message); }
-
   const arriveesCh = getChById(guild, 'ARRIVEES', 'arrivees', 'arrivée');
-  if (arriveesCh) await arriveesCh.send({ embeds: [new EmbedBuilder().setColor(0x8B5A2A).setTitle('👁️ Nouveau visiteur').setDescription(`**${member.user.username}** a rejoint le serveur.\nDirigé vers **#règlement** pour validation.`).addFields({ name: 'Compte créé le', value: fmtShort(member.user.createdAt), inline: true }, { name: 'Âge du compte', value: `${daysSince(member.user.createdAt)} jours`, inline: true }).setThumbnail(member.user.displayAvatarURL()).setFooter({ text: 'IWC • Automatique' })] });
+  if (arriveesCh) {
+    await arriveesCh.send({
+      content: `👋 <@${member.id}> bienvenue à l'**Iron Wolf Company** ! Voici comment bien commencer 👇`,
+      embeds: [_buildCommencerIci()],
+      allowedMentions: { users: [member.id] },
+    });
+  }
   await sendLog(guild, 'ARRIVEE', { userId: member.id, username: member.user.username, accountAge: daysSince(member.user.createdAt) });
   await notionExtra.alerteCompteSuspect?.(guild, member);
   await envoyerDMRecap(guild, member.id, 'candidature', { message: '🐺 Bienvenue sur **Iron Wolf Company** !\n\nLis le **#règlement** et postule dans **#recrutement**.\n\n*La porte est ouverte une fois. Une seule.*\n— La Direction' }).catch(() => {});
@@ -6710,6 +6704,7 @@ async function _assurerAccesVisiteur(guild) {
       { id: CH.RECRUTEMENT, nom: 'recrutement', ecrire: false },         // voir le panneau (les boutons suffisent)
       { id: '1508756404260044831', nom: 'règlement', ecrire: false },    // le salon règlement précis (pour lire + réagir ✅)
       { id: '1509243971472195584', nom: 'commencer-ici', ecrire: false },// le salon « Commencer ici » (pour lire le guide d'arrivée)
+      { ch: getChById(guild, 'ARRIVEES', 'arrivees', 'arrivée'), nom: 'arrivée', ecrire: false }, // voir le message de bienvenue + lien règlement
     ].filter(Boolean);
 
     for (const s of salonsEntree) {
