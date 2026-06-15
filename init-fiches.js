@@ -221,6 +221,7 @@ const SLASH_COMMANDS = [
       )),
   new SlashCommandBuilder().setName('descriptions').setDescription('📝 Ajouter/mettre à jour la description de chaque salon (Direction)'),
   new SlashCommandBuilder().setName('diagnostic').setDescription('🩺 Bilan de santé du bot : config, permissions, Notion (Direction)'),
+  new SlashCommandBuilder().setName('installer-menu').setDescription('🎛️ Installer le menu principal + Commencer ici dans leurs salons (Direction)'),
   new SlashCommandBuilder().setName('registre').setDescription('📋 Liste des membres actifs (Direction)').addStringOption(o => o.setName('pole').setDescription('Filtrer par pôle').setRequired(false).addChoices({ name: 'Tous', value: 'tous' }, { name: '⚖️ Légal', value: 'legal' }, { name: '🔒 Illégal', value: 'illegal' })).addIntegerOption(o => o.setName('page').setDescription('Page').setRequired(false)),
   new SlashCommandBuilder().setName('op').setDescription('🎯 Détail d\'une opération').addStringOption(o => o.setName('id').setDescription('ID de l\'opération').setRequired(false)),
 ].map(c => c.toJSON());
@@ -615,73 +616,18 @@ async function handleSlashCommand(interaction) {
     return;
   }
 
+  if (commandName === 'installer-menu') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: '🎛️ Installation du menu et du salon « Commencer ici »…', flags: MessageFlags.Ephemeral });
+    const r = await _installerMenu(interaction.guild);
+    return interaction.followUp({ content: `Menu principal : ${r.okMenu ? '✅ posé + épinglé' : '⚠️ salon introuvable/permission'}\nCommencer ici : ${r.okStart ? '✅ posé + épinglé' : '⚠️ salon introuvable/permission'}`, flags: MessageFlags.Ephemeral }).catch(() => {});
+  }
+
   if (commandName === 'diagnostic') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const oui = '✅', non = '❌', opt = '➖';
-    const v = (x) => x ? oui : non;
-
-    // 1) Variables d'environnement (présence seulement, jamais la valeur)
-    const env = [
-      `${v(process.env.DISCORD_TOKEN)} Token Discord`,
-      `${v(process.env.GUILD_ID)} GUILD_ID`,
-      `${v(process.env.NOTION_TOKEN)} Token Notion`,
-      `${v(process.env.ANTHROPIC_API_KEY)} Clé IA (résumés + contrats)`,
-      `${process.env.NOTION_MEMBRES_DB ? oui : opt} Base Registre membres`,
-      `${process.env.NOTION_FICHES_DB ? oui : opt} Base Fiches personnages`,
-      `${process.env.NOTION_ENGAGEMENTS_DB ? oui : opt} Base Engagements`,
-      `${process.env.NOTION_MISSIONS_DB ? oui : opt} Base Missions/Contrats`,
-    ].join('\n');
-
-    // 2) Permissions du bot sur le serveur
-    const me = interaction.guild.members.me;
-    const p = me?.permissions;
-    const perms = [
-      `${v(p?.has(PermissionFlagsBits.ManageRoles))} Gérer les rôles`,
-      `${v(p?.has(PermissionFlagsBits.ManageChannels))} Gérer les salons`,
-      `${v(p?.has(PermissionFlagsBits.KickMembers))} Expulser des membres`,
-      `${v(p?.has(PermissionFlagsBits.ManageMessages))} Gérer les messages`,
-      `${v(p?.has(PermissionFlagsBits.AddReactions))} Ajouter des réactions`,
-      `${v(p?.has(PermissionFlagsBits.MentionEveryone))} Mentionner les rôles`,
-    ].join('\n');
-
-    // 3) Position du rôle du bot (doit être au-dessus des rôles qu'il gère)
-    const botPos = me?.roles?.highest?.position ?? 0;
-    const visiteur = interaction.guild.roles.cache.find(r => r.name.includes('Visiteur'));
-    const ironwolf = interaction.guild.roles.cache.find(r => r.name.includes('Iron Wolf'));
-    const confrerie = interaction.guild.roles.cache.find(r => r.name.includes('Confrérie') || r.name.includes('Confrerie'));
-    const posCheck = [
-      `${visiteur ? (botPos > visiteur.position ? oui : non) : opt} Au-dessus de « Visiteur »`,
-      `${ironwolf ? oui : non} Rôle « Iron Wolf Company » trouvé (ping ops légal)`,
-      `${confrerie ? oui : non} Rôle « La Confrérie » trouvé (ping ops illégal)`,
-    ].join('\n');
-
-    // 4) Test rapide de connexion Notion (si configuré)
-    let notionTest = '➖ Non testé (pas de token)';
-    if (process.env.NOTION_TOKEN && (process.env.NOTION_MEMBRES_DB)) {
-      try {
-        const r = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_MEMBRES_DB}`, {
-          headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28' },
-        });
-        notionTest = r.ok ? '✅ Connexion Notion OK (base Registre accessible)' : `❌ Notion répond mais base inaccessible (${r.status} — intégration connectée ?)`;
-      } catch (e) { notionTest = `❌ Notion injoignable (${e.message})`; }
-    }
-
-    const embed = new EmbedBuilder()
-      .setColor(0x4E9F3D)
-      .setTitle('🩺 Diagnostic du bot IWC')
-      .setDescription('Bilan de ce qui est configuré. ✅ = OK · ❌ = à régler · ➖ = optionnel/non configuré')
-      .addFields(
-        { name: '🔑 Configuration (Render)', value: env },
-        { name: '🛡️ Permissions du bot', value: perms },
-        { name: '📊 Rôles & hiérarchie', value: posCheck },
-        { name: '🔗 Test Notion', value: notionTest },
-      )
-      .setFooter({ text: 'Astuce : un ❌ en permissions = beaucoup de fonctions cassées.' })
-      .setTimestamp();
-
-    return interaction.editReply({ embeds: [embed] });
+    return _runDiagnostic(interaction);
   }
+
 
   if (commandName === 'descriptions') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
@@ -1310,6 +1256,19 @@ client.on('guildMemberAdd', async member => {
   await _assurerAccesVisiteur(guild).catch(() => {});
   db.members[member.id] = { id: member.id, name: member.user.username, status: 'visiteur', rang: 'Visiteur', joinedAt: new Date().toISOString(), lastActivity: new Date().toISOString() };
   saveDB(db);
+
+  // ── Accueil du nouveau : le mentionner dans le salon « Commencer ici » avec le guide d'arrivée ──
+  try {
+    const startCh = await guild.channels.fetch(COMMENCER_SALON_ID).catch(() => null);
+    if (startCh) {
+      await startCh.send({
+        content: `👋 <@${member.id}> bienvenue à l'**Iron Wolf Company** ! Voici comment bien commencer 👇`,
+        embeds: [_buildCommencerIci()],
+        allowedMentions: { users: [member.id] },
+      });
+    }
+  } catch (e) { console.log('⚠️ Accueil commencer-ici:', e.message); }
+
   const arriveesCh = getChById(guild, 'ARRIVEES', 'arrivees', 'arrivée');
   if (arriveesCh) await arriveesCh.send({ embeds: [new EmbedBuilder().setColor(0x8B5A2A).setTitle('👁️ Nouveau visiteur').setDescription(`**${member.user.username}** a rejoint le serveur.\nDirigé vers **#règlement** pour validation.`).addFields({ name: 'Compte créé le', value: fmtShort(member.user.createdAt), inline: true }, { name: 'Âge du compte', value: `${daysSince(member.user.createdAt)} jours`, inline: true }).setThumbnail(member.user.displayAvatarURL()).setFooter({ text: 'IWC • Automatique' })] });
   await sendLog(guild, 'ARRIVEE', { userId: member.id, username: member.user.username, accountAge: daysSince(member.user.createdAt) });
@@ -2207,6 +2166,8 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_tresor_'))   return notionModules.handleTresorModal?.(interaction);
 
   if (interaction.isButton()) {
+    // ── Boutons du menu principal ──
+    if (interaction.customId.startsWith('menu_')) return _gererBoutonMenu(interaction);
     // ── Boutons du brouillon de contrat (note → contrat) ──
     if (interaction.customId.startsWith('dc_')) return _gererBoutonBrouillon(interaction);
     if (interaction.customId.startsWith('engagement_signer_'))  return _ouvrirModalEngagement(interaction);
@@ -6337,6 +6298,226 @@ async function _validerModalBrouillon(interaction) {
   await interaction.update({ embeds: [_embedBrouillonContrat(d, null)], components: _rowsBrouillonContrat(id, d.type) }).catch(() => {});
 }
 
+async function _runDiagnostic(interaction) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const oui = '✅', non = '❌', opt = '➖';
+    const v = (x) => x ? oui : non;
+
+    // 1) Variables d'environnement (présence seulement, jamais la valeur)
+    const env = [
+      `${v(process.env.DISCORD_TOKEN)} Token Discord`,
+      `${v(process.env.GUILD_ID)} GUILD_ID`,
+      `${v(process.env.NOTION_TOKEN)} Token Notion`,
+      `${v(process.env.ANTHROPIC_API_KEY)} Clé IA (résumés + contrats)`,
+      `${process.env.NOTION_MEMBRES_DB ? oui : opt} Base Registre membres`,
+      `${process.env.NOTION_FICHES_DB ? oui : opt} Base Fiches personnages`,
+      `${process.env.NOTION_ENGAGEMENTS_DB ? oui : opt} Base Engagements`,
+      `${process.env.NOTION_MISSIONS_DB ? oui : opt} Base Missions/Contrats`,
+    ].join('\n');
+
+    // 2) Permissions du bot sur le serveur
+    const me = interaction.guild.members.me;
+    const p = me?.permissions;
+    const perms = [
+      `${v(p?.has(PermissionFlagsBits.ManageRoles))} Gérer les rôles`,
+      `${v(p?.has(PermissionFlagsBits.ManageChannels))} Gérer les salons`,
+      `${v(p?.has(PermissionFlagsBits.KickMembers))} Expulser des membres`,
+      `${v(p?.has(PermissionFlagsBits.ManageMessages))} Gérer les messages`,
+      `${v(p?.has(PermissionFlagsBits.AddReactions))} Ajouter des réactions`,
+      `${v(p?.has(PermissionFlagsBits.MentionEveryone))} Mentionner les rôles`,
+    ].join('\n');
+
+    // 3) Position du rôle du bot (doit être au-dessus des rôles qu'il gère)
+    const botPos = me?.roles?.highest?.position ?? 0;
+    const visiteur = interaction.guild.roles.cache.find(r => r.name.includes('Visiteur'));
+    const ironwolf = interaction.guild.roles.cache.find(r => r.name.includes('Iron Wolf'));
+    const confrerie = interaction.guild.roles.cache.find(r => r.name.includes('Confrérie') || r.name.includes('Confrerie'));
+    const posCheck = [
+      `${visiteur ? (botPos > visiteur.position ? oui : non) : opt} Au-dessus de « Visiteur »`,
+      `${ironwolf ? oui : non} Rôle « Iron Wolf Company » trouvé (ping ops légal)`,
+      `${confrerie ? oui : non} Rôle « La Confrérie » trouvé (ping ops illégal)`,
+    ].join('\n');
+
+    // 4) Test rapide de connexion Notion (si configuré)
+    let notionTest = '➖ Non testé (pas de token)';
+    if (process.env.NOTION_TOKEN && (process.env.NOTION_MEMBRES_DB)) {
+      try {
+        const r = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_MEMBRES_DB}`, {
+          headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28' },
+        });
+        notionTest = r.ok ? '✅ Connexion Notion OK (base Registre accessible)' : `❌ Notion répond mais base inaccessible (${r.status} — intégration connectée ?)`;
+      } catch (e) { notionTest = `❌ Notion injoignable (${e.message})`; }
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0x4E9F3D)
+      .setTitle('🩺 Diagnostic du bot IWC')
+      .setDescription('Bilan de ce qui est configuré. ✅ = OK · ❌ = à régler · ➖ = optionnel/non configuré')
+      .addFields(
+        { name: '🔑 Configuration (Render)', value: env },
+        { name: '🛡️ Permissions du bot', value: perms },
+        { name: '📊 Rôles & hiérarchie', value: posCheck },
+        { name: '🔗 Test Notion', value: notionTest },
+      )
+      .setFooter({ text: 'Astuce : un ❌ en permissions = beaucoup de fonctions cassées.' })
+      .setTimestamp();
+
+    return interaction.editReply({ embeds: [embed] });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MENU PRINCIPAL À BOUTONS (tout accessible sans taper de commande)
+// ═══════════════════════════════════════════════════════════════
+const MENU_SALON_ID = '1510212339285360781';      // salon du menu principal
+const COMMENCER_SALON_ID = '1509243971472195584'; // salon « commencer ici »
+
+function _buildMenuPrincipal() {
+  const embed = new EmbedBuilder()
+    .setColor(0x8B5A2A)
+    .setTitle('🐺 MENU PRINCIPAL — IRON WOLF COMPANY')
+    .setDescription([
+      'Bienvenue. Clique sur un bouton pour agir — **pas besoin de retenir les commandes**.',
+      '',
+      '👤 **Profil** — voir ta fiche et ton grade',
+      '📅 **RDV** — prendre un rendez-vous',
+      '🟡 **Absence** — déclarer une absence · ↩️ **Retour** — signaler ton retour',
+      '📜 **Contrats** — tes contrats en cours',
+      '🏛️ **Hiérarchie** — voir l\'organigramme',
+      '❓ **Toutes les commandes** — la liste complète',
+      '🎖️ **Outils Direction** — réservé au staff',
+    ].join('\n'))
+    .setFooter({ text: 'Iron Wolf Company • Clique, c\'est tout' });
+
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('menu_profil').setLabel('Profil').setEmoji('👤').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('menu_rdv').setLabel('Prendre un RDV').setEmoji('📅').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('menu_absence').setLabel('Absence').setEmoji('🟡').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('menu_retour').setLabel('Retour').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+  );
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('menu_contrats').setLabel('Mes contrats').setEmoji('📜').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('menu_hierarchie').setLabel('Hiérarchie').setEmoji('🏛️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('menu_aide').setLabel('Toutes les commandes').setEmoji('❓').setStyle(ButtonStyle.Secondary),
+  );
+  const row3 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('menu_direction').setLabel('Outils Direction').setEmoji('🎖️').setStyle(ButtonStyle.Danger),
+  );
+  return { embeds: [embed], components: [row1, row2, row3] };
+}
+
+// Sous-panneau Direction (éphémère)
+function _buildPanneauDirection() {
+  const embed = new EmbedBuilder()
+    .setColor(0xC0392B)
+    .setTitle('🎖️ Outils Direction')
+    .setDescription('Actions réservées au staff. Clique pour agir.')
+    .setFooter({ text: 'Réservé à la Direction / Confrérie' });
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('menu_op').setLabel('Créer une opération').setEmoji('🎯').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('menu_mission').setLabel('Créer un contrat').setEmoji('🔪').setStyle(ButtonStyle.Danger),
+  );
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('menu_sync').setLabel('Synchroniser Notion').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('menu_desc').setLabel('MAJ descriptions salons').setEmoji('📝').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('menu_diag').setLabel('Diagnostic').setEmoji('🩺').setStyle(ButtonStyle.Secondary),
+  );
+  return { embeds: [embed], components: [row1, row2] };
+}
+
+// Message « Commencer ici » pour les nouveaux
+function _buildCommencerIci() {
+  return new EmbedBuilder()
+    .setColor(0x8B5A2A)
+    .setTitle('📌 BIENVENUE — COMMENCE ICI')
+    .setDescription([
+      'Heureux de t\'accueillir à l\'Iron Wolf Company ! Voici comment démarrer en **3 étapes** :',
+      '',
+      '**1️⃣ Lis et valide le règlement**',
+      'Va dans le salon **règlement**, lis-le, puis réagis avec ✅ sur le message de validation. C\'est obligatoire pour accéder au serveur.',
+      '',
+      '**2️⃣ Utilise le menu principal**',
+      'Tout se fait avec des boutons dans le salon du **menu** — pas besoin de retenir des commandes. Profil, RDV, absences, contrats... tout est là.',
+      '',
+      '**3️⃣ Présente-toi et lance-toi**',
+      'Si tu veux nous rejoindre officiellement, clique sur **Candidature** dans le salon de recrutement. La Direction te recontactera.',
+      '',
+      '*Une question ? Clique sur ❓ Toutes les commandes dans le menu, ou demande à un membre du staff.*',
+    ].join('\n'))
+    .setFooter({ text: 'Iron Wolf Company • 1895' });
+}
+
+// Installe le menu + le message « commencer ici » dans leurs salons
+async function _installerMenu(guild) {
+  let okMenu = false, okStart = false;
+  try {
+    const chMenu = await guild.channels.fetch(MENU_SALON_ID).catch(() => null);
+    if (chMenu) { const m = await chMenu.send(_buildMenuPrincipal()); await m.pin().catch(() => {}); okMenu = true; }
+  } catch (e) { console.log('⚠️ Install menu:', e.message); }
+  try {
+    const chStart = await guild.channels.fetch(COMMENCER_SALON_ID).catch(() => null);
+    if (chStart) {
+      const m1 = await chStart.send({ embeds: [_buildCommencerIci()] }); await m1.pin().catch(() => {});
+      const m2 = await chStart.send(_buildMenuPrincipal()); await m2.pin().catch(() => {});
+      okStart = true;
+    }
+  } catch (e) { console.log('⚠️ Install commencer-ici:', e.message); }
+  return { okMenu, okStart };
+}
+
+// Gère les boutons du menu
+async function _gererBoutonMenu(interaction) {
+  const id = interaction.customId;
+  // Actions membres
+  if (id === 'menu_profil')     return handleProfilEnhanced(interaction);
+  if (id === 'menu_retour')     return _handleRetour(interaction);
+  if (id === 'menu_contrats')   return _handleMesContrats(interaction);
+  if (id === 'menu_hierarchie') return notionV3.handleHierarchieCommand?.(interaction);
+  if (id === 'menu_aide')       return _handleAide(interaction);
+  if (id === 'menu_rdv')        return _ouvrirMenuRdvSlash(interaction);
+  if (id === 'menu_absence') {
+    const modal = new ModalBuilder().setCustomId('modal_absent').setTitle('🟡 Déclarer une absence');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duree').setLabel('Durée').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex : 2 jours, 1 semaine, jusqu\'au 10 juin')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('raison').setLabel('Raison (optionnel)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex : vacances, travail, IRL...')),
+    );
+    return interaction.showModal(modal);
+  }
+  // Sous-panneau Direction
+  if (id === 'menu_direction') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    return interaction.reply({ ..._buildPanneauDirection(), flags: MessageFlags.Ephemeral });
+  }
+  // Actions Direction
+  if (['menu_op', 'menu_mission', 'menu_sync', 'menu_desc', 'menu_diag'].includes(id)) {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    if (id === 'menu_op')      return _ouvrirModalOpCreer(interaction);
+    if (id === 'menu_diag')    return _runDiagnostic(interaction);
+    if (id === 'menu_mission') {
+      const modal = new ModalBuilder().setCustomId('modal_mission').setTitle('🔪 Nouveau contrat de mission');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cible').setLabel('Cible (nom + qui c\'est)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(120)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('lieu').setLabel('Lieu / repères').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(120)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('motif').setLabel('Motif du contrat').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(600)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('remuneration').setLabel('Rémunération').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('contact').setLabel('Contact / intermédiaire').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100)),
+      );
+      return interaction.showModal(modal);
+    }
+    if (id === 'menu_sync') {
+      await interaction.reply({ content: '🔄 Synchronisation Notion en cours… (regarde les logs)', flags: MessageFlags.Ephemeral });
+      try { await _syncTousMembresNotion(interaction.guild); await _syncRegistreTousMembres(interaction.guild); await interaction.followUp({ content: '✅ Synchronisation terminée.', flags: MessageFlags.Ephemeral }); }
+      catch (e) { await interaction.followUp({ content: `⚠️ ${e.message}`, flags: MessageFlags.Ephemeral }).catch(() => {}); }
+      return;
+    }
+    if (id === 'menu_desc') {
+      await interaction.reply({ content: '📝 Mise à jour des descriptions… (~30 sec)', flags: MessageFlags.Ephemeral });
+      try { await _definirDescriptionsSalons(interaction.guild); await interaction.followUp({ content: '✅ Descriptions mises à jour.', flags: MessageFlags.Ephemeral }); }
+      catch (e) { await interaction.followUp({ content: `⚠️ ${e.message}`, flags: MessageFlags.Ephemeral }).catch(() => {}); }
+      return;
+    }
+  }
+}
+
 // Trouve l'ID du rôle à pinger pour un pôle (le rôle commun à tous les membres du pôle).
 // Légal → rôle « Iron Wolf Company » · Illégal → rôle « La Confrérie ».
 // Cherche par NOM (robuste), avec repli sur la config si besoin.
@@ -6501,6 +6682,7 @@ async function _assurerAccesVisiteur(guild) {
     const salonsEntree = [
       { id: CH.RECRUTEMENT, nom: 'recrutement', ecrire: false },         // voir le panneau (les boutons suffisent)
       { id: '1508756404260044831', nom: 'règlement', ecrire: false },    // le salon règlement précis (pour lire + réagir ✅)
+      { id: '1509243971472195584', nom: 'commencer-ici', ecrire: false },// le salon « Commencer ici » (pour lire le guide d'arrivée)
     ].filter(Boolean);
 
     for (const s of salonsEntree) {
