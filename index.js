@@ -1562,10 +1562,26 @@ Si la transcription est incompréhensible ou vide, mets resume="(inaudible)".`;
 }
 
 client.on('messageCreate', async message => {
-  // ── Note du micro de terrain → ajouter la réaction 📜 pour proposer un contrat ──
+  // ── Note du micro de terrain → réaction 📜 (contrat) + RÉSUMÉ automatique ──
   if (message.webhookId && (message.embeds?.[0]?.title || '').includes('Rapport de terrain')) {
     try { await message.react('📜'); } catch (e) { console.log('⚠️ Réaction note:', e.message); }
-    // on continue (pas de return) au cas où d'autres traitements existent
+    // Résumé automatique en arrière-plan (pour ne pas avoir à tout lire)
+    (async () => {
+      try {
+        const texte = await _lireTexteNote(message);
+        if ((texte || '').length < 250) return; // trop court → pas besoin de résumer
+        const resume = await _resumerNote(texte);
+        if (!resume) return;
+        const agent = message.embeds?.[0]?.author?.name || 'Agent';
+        const emb = new EmbedBuilder()
+          .setColor(0xC9A227)
+          .setTitle('📋 Résumé de la note')
+          .setDescription(resume.slice(0, 4000))
+          .setFooter({ text: `${agent} • résumé automatique` });
+        await message.reply({ embeds: [emb], allowedMentions: { repliedUser: false } }).catch(() => {});
+      } catch (e) { console.log('❌ Auto-résumé:', e.message); }
+    })();
+    // on continue (pas de return)
   }
 
   // ── Salon d'alerte : tout message → ping tout le monde SAUF Thomas Galagan ──
@@ -6048,6 +6064,29 @@ Regles :
     if (m) txt = m[0];
     return JSON.parse(txt);
   } catch (e) { console.log('❌ Analyse note IA:', e.message); return null; }
+}
+
+// Résume une note de terrain en quelques points clés (IA) — pour ne pas tout lire
+async function _resumerNote(texte) {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  const note = (texte || '').slice(0, 5000);
+  const prompt = `Tu es un assistant de renseignement pour un serveur de jeu de role Far West (RedM). Voici une conversation transcrite captee sur le terrain. Resume-la en 3 a 5 points COURTS, en francais, pour quelqu'un qui n'a pas le temps de tout lire.
+
+Concentre-toi sur l'essentiel exploitable : quel groupe / qui parle, ce qui est propose ou demande (contrats, missions, deals, protection, menaces, recrutement), les noms de personnes et de lieux importants, les telegrammes/numeros, et toute info utile.
+
+Format : des puces courtes commencant par "• ". Pas d'introduction ni de conclusion. Si rien d'important, ecris "• Rien de notable.".
+
+CONVERSATION :
+${note}`;
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-3-5-haiku-20241022', max_tokens: 500, messages: [{ role: 'user', content: prompt }] }),
+    });
+    const data = await resp.json();
+    return (data.content?.[0]?.text || '').trim() || null;
+  } catch (e) { console.log('❌ Résumé note:', e.message); return null; }
 }
 
 // Embed du BROUILLON (ce que la Direction relit avant de valider)
