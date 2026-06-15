@@ -6748,3 +6748,4 @@ async function _assurerAccesVisiteur(guild) {
 client.login(process.env.DISCORD_TOKEN)
   .then(() => console.log('🔑 Login OK'))
   .catch(e => { console.error('❌ Login failed:', e.message); process.exit(1); });
+
