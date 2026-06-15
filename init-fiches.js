@@ -633,7 +633,13 @@ async function handleSlashCommand(interaction) {
     if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
     await interaction.reply({ content: '📝 Mise à jour des descriptions de salons en cours… (ça prend ~30 sec). Regarde les logs pour le détail.', flags: MessageFlags.Ephemeral });
     (async () => {
-      try { await _definirDescriptionsSalons(interaction.guild); await interaction.followUp({ content: '✅ Descriptions des salons mises à jour !', flags: MessageFlags.Ephemeral }); }
+      try {
+        const n = await _definirDescriptionsSalons(interaction.guild);
+        const msg = n > 0
+          ? `✅ ${n} salon(s) mis à jour.\n📱 Sur téléphone, appuie sur le **nom du salon** pour voir sa description (elle ne s'affiche pas en haut sur mobile).`
+          : `⚠️ 0 salon reconnu. Mes noms de salons ne correspondent peut-être pas aux tiens — envoie-moi la liste de tes salons et j'ajuste.`;
+        await interaction.followUp({ content: msg, flags: MessageFlags.Ephemeral });
+      }
       catch (e) { await interaction.followUp({ content: `⚠️ Souci : ${e.message}. Vérifie que le bot a la permission « Gérer les salons ».`, flags: MessageFlags.Ephemeral }).catch(() => {}); }
     })();
     return;
@@ -6687,7 +6693,8 @@ async function _definirDescriptionsSalons(guild) {
       catch (e) { /* permissions ou salon spécial */ }
     }
     console.log(`✅ Descriptions de salons mises à jour : ${ok}`);
-  } catch (e) { console.log('❌ _definirDescriptionsSalons:', e.message); }
+    return ok;
+  } catch (e) { console.log('❌ _definirDescriptionsSalons:', e.message); return 0; }
 }
 
 // Donne au rôle Visiteur l'accès aux salons d'entrée (recrutement, règlement, arrivées)
