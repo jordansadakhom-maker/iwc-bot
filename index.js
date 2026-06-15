@@ -6442,7 +6442,7 @@ function _buildCommencerIci() {
       'Heureux de t\'accueillir à l\'Iron Wolf Company ! Voici comment démarrer en **3 étapes** :',
       '',
       '**1️⃣ Lis et valide le règlement**',
-      'Va dans le salon **règlement**, lis-le, puis réagis avec ✅ sur le message de validation. C\'est obligatoire pour accéder au serveur.',
+      'Va dans le salon <#1508756404260044831>, lis-le, puis réagis avec ✅ sur le message de validation. C\'est obligatoire pour accéder au serveur.',
       '',
       '**2️⃣ Utilise le menu principal**',
       'Tout se fait avec des boutons dans le salon du **menu** — pas besoin de retenir des commandes. Profil, RDV, absences, contrats... tout est là.',
