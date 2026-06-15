@@ -6438,6 +6438,23 @@ async function _assurerAccesVisiteur(guild) {
         console.log(`✅ Accès Visiteur assuré : #${ch.name}`);
       } catch (e) { console.log(`⚠️ Accès Visiteur #${ch?.name}: ${e.message}`); }
     }
+
+    // Salon VOCAL d'attente : le visiteur doit pouvoir le voir, le rejoindre et parler
+    const cleanV = x => (x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const vocalAttente = guild.channels.cache.find(c =>
+      (c.type === 2 || c.type === 13) && cleanV(c.name).includes('attente'));
+    if (vocalAttente) {
+      try {
+        await vocalAttente.permissionOverwrites.edit(visiteurRole, {
+          ViewChannel: true,   // voir le salon vocal
+          Connect: true,       // pouvoir le rejoindre
+          Speak: true,         // pouvoir parler dedans
+        });
+        console.log(`✅ Accès Visiteur (vocal) assuré : 🔊 ${vocalAttente.name}`);
+      } catch (e) { console.log(`⚠️ Accès Visiteur vocal: ${e.message}`); }
+    } else {
+      console.log('⚠️ Salon vocal d\'attente introuvable (nom contenant « attente »).');
+    }
   } catch (e) { console.log('❌ _assurerAccesVisiteur:', e.message); }
 }
 
