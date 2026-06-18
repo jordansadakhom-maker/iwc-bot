@@ -11,6 +11,7 @@ const {
 const cron = require('node-cron');
 
 const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub } = require('./db');
+const { initPapiers, papiersCommands } = require('./papiers');
 
 let notionExtra = {};
 try { notionExtra = require('./notion-extra'); console.log('✅ Module notion-extra chargé'); }
@@ -54,6 +55,7 @@ const client = new Client({
   ],
   partials: [Partials.Message, Partials.Reaction, Partials.User, Partials.Channel, Partials.GuildMember],
 });
+initPapiers(client);
 
 const {
   CH, PARTICIPANTS_MAP, CONTRAT_ROLES, JUNE_MCCALL_ID,
@@ -222,12 +224,29 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('descriptions').setDescription('📝 Ajouter/mettre à jour la description de chaque salon (Direction)'),
   new SlashCommandBuilder().setName('diagnostic').setDescription('🩺 Bilan de santé du bot : config, permissions, Notion (Direction)'),
   new SlashCommandBuilder().setName('installer-menu').setDescription('🎛️ Installer le menu principal + Commencer ici dans leurs salons (Direction)'),
+  new SlashCommandBuilder().setName('mon-dossier').setDescription('📋 Voir ton parcours et ta progression vers le grade suivant'),
+  new SlashCommandBuilder().setName('mon-journal').setDescription('📖 Voir et écrire le journal de ton personnage'),
+  new SlashCommandBuilder().setName('ma-fiche').setDescription('✏️ Voir et modifier ta fiche de personnage'),
+  new SlashCommandBuilder().setName('guide-membres').setDescription('📣 Envoyer à chaque membre le guide des outils perso (Direction)'),
+  new SlashCommandBuilder().setName('portefeuille').setDescription('💰 Voir ton portefeuille (dollars RP)'),
+  new SlashCommandBuilder().setName('payer').setDescription('💸 Envoyer des dollars RP à un autre membre')
+    .addUserOption(o => o.setName('membre').setDescription('À qui envoyer l\'argent').setRequired(true))
+    .addIntegerOption(o => o.setName('montant').setDescription('Montant en dollars').setRequired(true))
+    .addStringOption(o => o.setName('raison').setDescription('Motif du paiement').setRequired(false)),
+  new SlashCommandBuilder().setName('argent').setDescription('💵 Créditer/retirer des dollars à un membre (Direction)')
+    .addUserOption(o => o.setName('membre').setDescription('Membre concerné').setRequired(true))
+    .addIntegerOption(o => o.setName('montant').setDescription('Positif = créditer, négatif = retirer').setRequired(true))
+    .addStringOption(o => o.setName('raison').setDescription('Motif (récompense, amende...)').setRequired(false)),
+  new SlashCommandBuilder().setName('parrainage').setDescription('🤝 Attribuer un parrain à un nouveau (Direction)')
+    .addUserOption(o => o.setName('parrain').setDescription('Le parrain (ancien)').setRequired(true))
+    .addUserOption(o => o.setName('filleul').setDescription('Le filleul (nouveau)').setRequired(true)),
+  new SlashCommandBuilder().setName('mon-parrainage').setDescription('🤝 Voir ton parrain et tes filleuls'),
   new SlashCommandBuilder().setName('registre').setDescription('📋 Liste des membres actifs (Direction)').addStringOption(o => o.setName('pole').setDescription('Filtrer par pôle').setRequired(false).addChoices({ name: 'Tous', value: 'tous' }, { name: '⚖️ Légal', value: 'legal' }, { name: '🔒 Illégal', value: 'illegal' })).addIntegerOption(o => o.setName('page').setDescription('Page').setRequired(false)),
   new SlashCommandBuilder().setName('op').setDescription('🎯 Détail d\'une opération').addStringOption(o => o.setName('id').setDescription('ID de l\'opération').setRequired(false)),
 ].map(c => c.toJSON());
 
 async function registerSlashCommands(guild) {
-  try { await guild.commands.set(SLASH_COMMANDS); console.log('✅ Slash commands enregistrées'); }
+  try { await guild.commands.set([...SLASH_COMMANDS, ...(papiersCommands || [])]); console.log('✅ Slash commands enregistrées (+ papiers)'); }
   catch (e) { console.log('❌ Slash commands error:', e.message); }
 }
 
@@ -615,6 +634,16 @@ async function handleSlashCommand(interaction) {
     ].join('\n') });
     return;
   }
+
+  if (commandName === 'mon-dossier') return _handleMonDossier(interaction);
+  if (commandName === 'mon-journal') return _handleJournalVoir(interaction);
+  if (commandName === 'ma-fiche')    return _handleMaFiche(interaction);
+  if (commandName === 'guide-membres') return _handleGuideMembres(interaction);
+  if (commandName === 'portefeuille')  return _handlePortefeuille(interaction);
+  if (commandName === 'payer')         return _handlePayer(interaction);
+  if (commandName === 'argent')        return _handleArgent(interaction);
+  if (commandName === 'parrainage')    return _handleParrainageAssigner(interaction);
+  if (commandName === 'mon-parrainage') return _handleMonParrainage(interaction);
 
   if (commandName === 'installer-menu') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
@@ -2159,6 +2188,8 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isModalSubmit() && interaction.customId === 'modal_surnom_identite')   return _validerModalSurnom(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_agenda_simple')) return _validerModalAgendaSimple(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('dc_modal_')) return _validerModalBrouillon(interaction);
+  if (interaction.isModalSubmit() && interaction.customId === 'modal_journal') return _validerJournal(interaction);
+  if (interaction.isModalSubmit() && interaction.customId === 'modal_mafiche') return _validerMaFiche(interaction);
   if (interaction.isModalSubmit() && interaction.customId === 'modal_mission') return _validerModalMission(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_engagement_')) return _validerModalEngagement(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_rdv_individuel_')) return _validerModalRdvIndividuel(interaction);
@@ -2168,6 +2199,13 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_tresor_'))   return notionModules.handleTresorModal?.(interaction);
 
   if (interaction.isButton()) {
+    // ── Boutons des utilités membres (journal / fiche) ──
+    if (interaction.customId === 'journal_ajouter') return interaction.showModal(_modalJournal());
+    if (interaction.customId === 'mafiche_modifier') {
+      const dbf = loadDB();
+      const fiche = (dbf.fichesPerso && dbf.fichesPerso[interaction.member.id]) || {};
+      return interaction.showModal(_modalMaFiche(fiche));
+    }
     // ── Boutons du menu principal ──
     if (interaction.customId.startsWith('menu_')) return _gererBoutonMenu(interaction);
     // ── Boutons du brouillon de contrat (note → contrat) ──
@@ -3044,7 +3082,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
 
 client.once('clientReady', async () => {
   console.log(`✅ Connecté : ${client.user.tag}`);
-  console.log('🏷️  VERSION : 5.0 — 15 juin 2026 (menu auto, résumé notes, note→contrat, /diagnostic, accueil nouveaux)');
+  console.log('🏷️  VERSION : 5.2 — 15 juin 2026 (économie RP : portefeuille/payer/argent + parrainage des nouveaux)');
   client.user.setActivity('la meute • IWC 1895', { type: ActivityType.Watching });
   await restaurerDepuisGitHub();
   for (const guild of client.guilds.cache.values()) {
@@ -3736,7 +3774,7 @@ async function buildMembresDiscordMap(guild) {
 
 async function _handleVersion(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const BOT_VERSION = '5.0 (15 juin — menu auto + résumé notes + note→contrat + diagnostic)'; const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
+  const BOT_VERSION = '5.2 (15 juin — économie RP + parrainage des nouveaux)'; const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
   let notionOk = false;
   try { const r = await fetch('https://api.notion.com/v1/users/me', { headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28' } }); notionOk = r.ok; } catch {}
   const db = loadDB();
@@ -6393,16 +6431,21 @@ function _buildMenuPrincipal() {
 
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('menu_profil').setLabel('Profil').setEmoji('👤').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('menu_dossier').setLabel('Mon dossier').setEmoji('📋').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu_rdv').setLabel('Prendre un RDV').setEmoji('📅').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('menu_absence').setLabel('Absence').setEmoji('🟡').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu_retour').setLabel('Retour').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
   );
   const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('menu_contrats').setLabel('Mes contrats').setEmoji('📜').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('menu_journal').setLabel('Journal').setEmoji('📖').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('menu_fiche').setLabel('Ma fiche').setEmoji('✏️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu_hierarchie').setLabel('Hiérarchie').setEmoji('🏛️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu_aide').setLabel('Toutes les commandes').setEmoji('❓').setStyle(ButtonStyle.Secondary),
   );
   const row3 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('menu_portefeuille').setLabel('Portefeuille').setEmoji('💰').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('menu_parrainage').setLabel('Mon parrainage').setEmoji('🤝').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu_direction').setLabel('Outils Direction').setEmoji('🎖️').setStyle(ButtonStyle.Danger),
   );
   return { embeds: [embed], components: [row1, row2, row3] };
@@ -6420,6 +6463,7 @@ function _buildPanneauDirection() {
     new ButtonBuilder().setCustomId('menu_mission').setLabel('Créer un contrat').setEmoji('🔪').setStyle(ButtonStyle.Danger),
   );
   const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('menu_guide').setLabel('Prévenir les membres').setEmoji('📣').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu_sync').setLabel('Synchroniser Notion').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu_desc').setLabel('MAJ descriptions salons').setEmoji('📝').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('menu_diag').setLabel('Diagnostic').setEmoji('🩺').setStyle(ButtonStyle.Secondary),
@@ -6493,6 +6537,11 @@ async function _gererBoutonMenu(interaction) {
   if (id === 'menu_contrats')   return _handleMesContrats(interaction);
   if (id === 'menu_hierarchie') { if (!isMembre(interaction.member)) return interaction.reply({ content: '🔒 La hiérarchie est réservée aux membres. Rejoins-nous via une candidature pour y accéder !', flags: MessageFlags.Ephemeral }); return notionV3.handleHierarchieCommand?.(interaction); }
   if (id === 'menu_aide')       return _handleAide(interaction);
+  if (id === 'menu_dossier')    return _handleMonDossier(interaction);
+  if (id === 'menu_journal')    return _handleJournalVoir(interaction);
+  if (id === 'menu_fiche')      return _handleMaFiche(interaction);
+  if (id === 'menu_portefeuille') return _handlePortefeuille(interaction);
+  if (id === 'menu_parrainage')   return _handleMonParrainage(interaction);
   if (id === 'menu_rdv')        return _ouvrirMenuRdvSlash(interaction);
   if (id === 'menu_absence') {
     const modal = new ModalBuilder().setCustomId('modal_absent').setTitle('🟡 Déclarer une absence');
@@ -6508,9 +6557,10 @@ async function _gererBoutonMenu(interaction) {
     return interaction.reply({ ..._buildPanneauDirection(), flags: MessageFlags.Ephemeral });
   }
   // Actions Direction
-  if (['menu_op', 'menu_mission', 'menu_sync', 'menu_desc', 'menu_diag'].includes(id)) {
+  if (['menu_op', 'menu_mission', 'menu_sync', 'menu_desc', 'menu_diag', 'menu_guide'].includes(id)) {
     if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
     if (id === 'menu_op')      return _ouvrirModalOpCreer(interaction);
+    if (id === 'menu_guide')   return _handleGuideMembres(interaction);
     if (id === 'menu_diag')    return _runDiagnostic(interaction);
     if (id === 'menu_mission') {
       const modal = new ModalBuilder().setCustomId('modal_mission').setTitle('🔪 Nouveau contrat de mission');
@@ -6552,6 +6602,345 @@ function _poleRoleId(guild, pole) {
 
 // Détecte le PÔLE d'un membre à partir de ses rôles Discord réels.
 // Un membre peut appartenir aux DEUX pôles (légal + illégal) → renvoie « Les deux ».
+// ═══════════════════════════════════════════════════════════════
+//  UTILITÉS MEMBRES : Mon dossier · Journal de personnage · Ma fiche
+// ═══════════════════════════════════════════════════════════════
+
+// Échelles de grades (du plus BAS au plus HAUT) pour la progression.
+const ECHELLE_LEGAL = [
+  { nom: 'Recrue / Probatoire', motifs: ['recrue', 'probatoire'] },
+  { nom: 'Panseur', motifs: ['panseur', 'penseur'] },
+  { nom: 'Opérateur', motifs: ['opérateur', 'operateur'] },
+  { nom: 'Agent', motifs: ['agent'] },
+  { nom: 'Officier', motifs: ['officier'] },
+  { nom: 'Direction (Le Conseil)', motifs: ['conseil', 'directeur'] },
+];
+const ECHELLE_ILLEGAL = [
+  { nom: 'Confrérie', motifs: ['confrérie', 'confrerie'] },
+  { nom: 'Maudit', motifs: ['maudit'] },
+  { nom: 'Condamné', motifs: ['condamné', 'condamne'] },
+  { nom: 'Exécuteur', motifs: ['exécuteur', 'execu', 'xécu'] },
+  { nom: 'Fléau', motifs: ['fléau', 'fleau'] },
+  { nom: 'Concepteur', motifs: ['concepteur'] },
+];
+
+function _ageTexte(dateIso) {
+  if (!dateIso) return 'inconnue';
+  const j = Math.floor((Date.now() - new Date(dateIso).getTime()) / 86400000);
+  if (j <= 0) return "aujourd'hui";
+  if (j < 31) return `${j} jour${j > 1 ? 's' : ''}`;
+  const mois = Math.floor(j / 30);
+  if (mois < 12) return `${mois} mois`;
+  const ans = Math.floor(j / 365);
+  return `${ans} an${ans > 1 ? 's' : ''}`;
+}
+
+// ─────────── 📋 MON DOSSIER ───────────
+async function _handleMonDossier(interaction) {
+  if (!isMembre(interaction.member)) return interaction.reply({ content: '🔒 Réservé aux membres. Rejoins-nous via une candidature !', flags: MessageFlags.Ephemeral });
+  const db = loadDB();
+  const m = interaction.member; const id = m.id;
+  const info = (db.members && db.members[id]) || {};
+  const grade = _detecterRang(m);
+  const pole = _detecterPole(m);
+  const arrivee = info.joinedAt || (m.joinedAt ? m.joinedAt.toISOString() : null);
+  const nbJournal = ((db.journaux && db.journaux[id]) || []).length;
+
+  const noms = m.roles.cache.map(r => r.name.toLowerCase());
+  const aMatch = (motifs) => motifs.some(mt => noms.some(n => n.includes(mt.toLowerCase())));
+  const estIlleg = ECHELLE_ILLEGAL.some(g => aMatch(g.motifs)) && !ECHELLE_LEGAL.some(g => aMatch(g.motifs));
+  const echelle = estIlleg ? ECHELLE_ILLEGAL : ECHELLE_LEGAL;
+  let idx = -1;
+  echelle.forEach((g, i) => { if (aMatch(g.motifs)) idx = i; });
+  const prochain = (idx >= 0 && idx < echelle.length - 1) ? echelle[idx + 1].nom : (idx < 0 ? echelle[0].nom : null);
+
+  const total = echelle.length;
+  const pos = idx >= 0 ? idx + 1 : 0;
+  const remplies = Math.max(0, Math.round((pos / total) * 10));
+  const barre = '🟩'.repeat(remplies) + '⬜'.repeat(10 - remplies);
+
+  const ladder = echelle.map((g, i) => {
+    if (i === idx) return `**➤ ${g.nom}**  ← tu es ici`;
+    if (i === idx + 1) return `▫️ ${g.nom}  *(prochain)*`;
+    return `▫️ ${g.nom}`;
+  }).reverse().join('\n');
+
+  const embed = new EmbedBuilder()
+    .setColor(estIlleg ? 0x8B1A1A : 0x3B82F6)
+    .setTitle(`📋 Mon dossier — ${m.displayName}`)
+    .setThumbnail(m.user.displayAvatarURL())
+    .addFields(
+      { name: '🎖️ Grade', value: grade || '—', inline: true },
+      { name: '⚖️ Pôle', value: pole || '—', inline: true },
+      { name: '📅 Membre depuis', value: _ageTexte(arrivee), inline: true },
+      { name: `📊 Progression (${pos}/${total})`, value: `${barre}${prochain ? `\n🎯 Prochain grade : **${prochain}**` : '\n🏆 Tu es au sommet de la hiérarchie !'}`, inline: false },
+      { name: '🪜 Hiérarchie de ton pôle', value: ladder.slice(0, 1024), inline: false },
+      { name: '📖 Entrées de journal', value: `${nbJournal} entrée${nbJournal > 1 ? 's' : ''}`, inline: true },
+    )
+    .setFooter({ text: 'Iron Wolf Company • Ton parcours' })
+    .setTimestamp();
+  return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+}
+
+// ─────────── 📖 JOURNAL DE PERSONNAGE ───────────
+function _embedJournal(member, entrees) {
+  const e = new EmbedBuilder().setColor(0x8B5A2A).setTitle(`📖 Journal de ${member.displayName}`).setThumbnail(member.user.displayAvatarURL());
+  if (!entrees.length) {
+    e.setDescription("*Ton journal est vide.*\nClique sur **« ➕ Ajouter une entrée »** pour écrire le premier chapitre de l'histoire de ton personnage.");
+  } else {
+    const recent = entrees.slice(-10).reverse();
+    let desc = recent.map(en => `**📅 ${en.date} — ${en.titre}**\n${en.texte}`).join('\n\n');
+    if (desc.length > 4000) desc = desc.slice(0, 4000) + '…';
+    e.setDescription(desc);
+    e.setFooter({ text: entrees.length > 10 ? `${entrees.length} entrées au total (10 dernières affichées)` : `${entrees.length} entrée${entrees.length > 1 ? 's' : ''}` });
+  }
+  return e;
+}
+
+async function _handleJournalVoir(interaction) {
+  if (!isMembre(interaction.member)) return interaction.reply({ content: '🔒 Réservé aux membres.', flags: MessageFlags.Ephemeral });
+  const db = loadDB();
+  const entrees = (db.journaux && db.journaux[interaction.member.id]) || [];
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('journal_ajouter').setLabel('Ajouter une entrée').setEmoji('➕').setStyle(ButtonStyle.Primary),
+  );
+  return interaction.reply({ embeds: [_embedJournal(interaction.member, entrees)], components: [row], flags: MessageFlags.Ephemeral });
+}
+
+function _modalJournal() {
+  const modal = new ModalBuilder().setCustomId('modal_journal').setTitle('📖 Nouvelle entrée de journal');
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('titre').setLabel("Titre de l'entrée").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setPlaceholder('Ex : La fusillade de Valentine')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('texte').setLabel("Ce qui s'est passé").setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1500).setPlaceholder('Raconte ce qu\'a vécu ton personnage...')),
+  );
+  return modal;
+}
+
+async function _validerJournal(interaction) {
+  const titre = interaction.fields.getTextInputValue('titre').trim();
+  const texte = interaction.fields.getTextInputValue('texte').trim();
+  const db = loadDB();
+  db.journaux = db.journaux || {};
+  db.journaux[interaction.member.id] = db.journaux[interaction.member.id] || [];
+  db.journaux[interaction.member.id].push({ date: new Date().toLocaleDateString('fr-FR'), titre, texte });
+  saveDB(db);
+  return interaction.reply({ content: `✅ Entrée ajoutée à ton journal : **${titre}**\nReviens sur **📖 Journal** pour la relire.`, flags: MessageFlags.Ephemeral });
+}
+
+// ─────────── ✏️ MA FICHE DE PERSONNAGE ───────────
+function _embedMaFiche(member, fiche) {
+  const e = new EmbedBuilder().setColor(0x6B4423).setTitle(`📇 Fiche de personnage — ${member.displayName}`).setThumbnail(member.user.displayAvatarURL());
+  fiche = fiche || {};
+  const rempli = ['nom', 'age', 'apparence', 'histoire', 'traits'].some(k => fiche[k]);
+  if (!rempli) {
+    e.setDescription("*Ta fiche est vide.*\nClique sur **« ✏️ Modifier ma fiche »** pour la remplir toi-même.");
+  } else {
+    if (fiche.nom) e.addFields({ name: '👤 Nom', value: fiche.nom.slice(0, 256), inline: true });
+    if (fiche.age) e.addFields({ name: '🎂 Âge / origine', value: fiche.age.slice(0, 256), inline: true });
+    if (fiche.apparence) e.addFields({ name: '🧥 Apparence', value: fiche.apparence.slice(0, 1024), inline: false });
+    if (fiche.histoire) e.addFields({ name: '📜 Histoire', value: fiche.histoire.slice(0, 1024), inline: false });
+    if (fiche.traits) e.addFields({ name: '🎭 Caractère', value: fiche.traits.slice(0, 1024), inline: false });
+  }
+  e.setFooter({ text: 'Iron Wolf Company • Ta fiche, modifiable quand tu veux' });
+  return e;
+}
+
+async function _handleMaFiche(interaction) {
+  if (!isMembre(interaction.member)) return interaction.reply({ content: '🔒 Réservé aux membres.', flags: MessageFlags.Ephemeral });
+  const db = loadDB();
+  const fiche = (db.fichesPerso && db.fichesPerso[interaction.member.id]) || {};
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('mafiche_modifier').setLabel('Modifier ma fiche').setEmoji('✏️').setStyle(ButtonStyle.Primary),
+  );
+  return interaction.reply({ embeds: [_embedMaFiche(interaction.member, fiche)], components: [row], flags: MessageFlags.Ephemeral });
+}
+
+function _modalMaFiche(fiche) {
+  fiche = fiche || {};
+  const modal = new ModalBuilder().setCustomId('modal_mafiche').setTitle('✏️ Ma fiche de personnage');
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom').setLabel('Nom du personnage').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80).setValue((fiche.nom || '').slice(0, 80))),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('age').setLabel('Âge / origine').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80).setValue((fiche.age || '').slice(0, 80))),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('apparence').setLabel('Apparence').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue((fiche.apparence || '').slice(0, 300))),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('histoire').setLabel('Histoire / background').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(1000).setValue((fiche.histoire || '').slice(0, 1000))),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('traits').setLabel('Caractère / traits').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue((fiche.traits || '').slice(0, 300))),
+  );
+  return modal;
+}
+
+async function _validerMaFiche(interaction) {
+  const db = loadDB();
+  db.fichesPerso = db.fichesPerso || {};
+  const f = {
+    nom: interaction.fields.getTextInputValue('nom').trim(),
+    age: interaction.fields.getTextInputValue('age').trim(),
+    apparence: interaction.fields.getTextInputValue('apparence').trim(),
+    histoire: interaction.fields.getTextInputValue('histoire').trim(),
+    traits: interaction.fields.getTextInputValue('traits').trim(),
+  };
+  db.fichesPerso[interaction.member.id] = f;
+  saveDB(db);
+  return interaction.reply({ content: '✅ Ta fiche de personnage a été mise à jour !', embeds: [_embedMaFiche(interaction.member, f)], flags: MessageFlags.Ephemeral });
+}
+
+// ─────────── 📣 GUIDE MEMBRES : prévenir chaque membre en MP ───────────
+function _embedGuideMembre() {
+  return new EmbedBuilder()
+    .setColor(0x8B5A2A)
+    .setTitle('🐺 Tes outils perso — Iron Wolf Company')
+    .setDescription([
+      'Salut ! Ton serveur dispose maintenant **d\'outils rien que pour toi**. Voici comment t\'en servir 👇',
+      '',
+      '📇 **Crée ta fiche de personnage**',
+      'Tape **`/ma-fiche`** → clique **« ✏️ Modifier »** → remplis ton nom, âge, apparence, histoire et caractère. Modifiable quand tu veux.',
+      '',
+      '📖 **Écris l\'histoire de ton perso**',
+      'Tape **`/mon-journal`** → clique **« ➕ Ajouter une entrée »** → raconte ce que vit ton personnage. Tu construis son background au fil du temps.',
+      '',
+      '📋 **Suis ta progression**',
+      'Tape **`/mon-dossier`** → vois ton grade, ton ancienneté et ta progression vers le grade suivant.',
+      '',
+      '💡 Tu peux aussi tout faire depuis le **menu principal** (les boutons) !',
+    ].join('\n'))
+    .setFooter({ text: 'Iron Wolf Company • Message automatique' });
+}
+
+async function _handleGuideMembres(interaction) {
+  if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+  await interaction.reply({ content: '📣 Envoi du guide à chaque membre en cours… (ça peut prendre une minute selon le nombre de membres). Je te fais un récap à la fin.', flags: MessageFlags.Ephemeral });
+
+  let membres;
+  try { membres = await interaction.guild.members.fetch(); }
+  catch (e) { return interaction.followUp({ content: `⚠️ Impossible de récupérer les membres : ${e.message}`, flags: MessageFlags.Ephemeral }).catch(() => {}); }
+
+  const cibles = membres.filter(m => !m.user.bot && isMembre(m));
+  const embed = _embedGuideMembre();
+  let ok = 0, fermes = 0;
+  for (const m of cibles.values()) {
+    try { await m.send({ embeds: [embed] }); ok++; }
+    catch { fermes++; }
+    await new Promise(r => setTimeout(r, 1200)); // pause anti rate-limit Discord
+  }
+
+  return interaction.followUp({
+    content: `✅ Guide envoyé à **${ok}** membre(s).${fermes ? `\n📪 **${fermes}** n'ont pas pu le recevoir (leurs MP sont fermés — ils devront ouvrir leurs messages privés du serveur).` : ''}`,
+    flags: MessageFlags.Ephemeral,
+  }).catch(() => {});
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  💰 ÉCONOMIE RP (portefeuille perso + transferts)  &  🤝 PARRAINAGE
+// ═══════════════════════════════════════════════════════════════
+function _getCompte(db, id) {
+  db.economie = db.economie || {};
+  const cur = db.economie[id];
+  if (typeof cur !== 'object' || cur === null) {
+    db.economie[id] = { solde: (typeof cur === 'number' ? cur : 0), historique: [] };
+  }
+  if (!Array.isArray(db.economie[id].historique)) db.economie[id].historique = [];
+  return db.economie[id];
+}
+function _fmtDollars(n) { return `${Math.round(Number(n) || 0).toLocaleString('fr-FR')} $`; }
+
+function _embedPortefeuille(member, compte) {
+  const e = new EmbedBuilder().setColor(0x2E8B57)
+    .setTitle(`💰 Portefeuille — ${member.displayName}`)
+    .setThumbnail(member.user.displayAvatarURL())
+    .addFields({ name: '💵 Solde actuel', value: `**${_fmtDollars(compte.solde || 0)}**`, inline: false });
+  const hist = (compte.historique || []).slice(-5).reverse();
+  if (hist.length) {
+    e.addFields({ name: '🧾 Dernières opérations', value: hist.map(h =>
+      `${h.montant >= 0 ? '🟢 +' : '🔴 −'}${_fmtDollars(Math.abs(h.montant))} — ${h.raison || ''} *(${h.date})*`
+    ).join('\n').slice(0, 1024) });
+  }
+  e.setFooter({ text: 'Iron Wolf Company • Dollars RP' });
+  return e;
+}
+
+async function _handlePortefeuille(interaction) {
+  if (!isMembre(interaction.member)) return interaction.reply({ content: '🔒 Réservé aux membres.', flags: MessageFlags.Ephemeral });
+  const db = loadDB(); const compte = _getCompte(db, interaction.member.id); saveDB(db);
+  return interaction.reply({ embeds: [_embedPortefeuille(interaction.member, compte)], flags: MessageFlags.Ephemeral });
+}
+
+async function _handlePayer(interaction) {
+  if (!isMembre(interaction.member)) return interaction.reply({ content: '🔒 Réservé aux membres.', flags: MessageFlags.Ephemeral });
+  const dest = interaction.options.getUser('membre');
+  const montant = Math.floor(interaction.options.getInteger('montant'));
+  const raison = (interaction.options.getString('raison') || 'Paiement').slice(0, 100);
+  if (!dest || dest.id === interaction.user.id) return interaction.reply({ content: '❌ Choisis un autre membre que toi.', flags: MessageFlags.Ephemeral });
+  if (dest.bot) return interaction.reply({ content: '❌ Tu ne peux pas payer un bot.', flags: MessageFlags.Ephemeral });
+  if (!montant || montant <= 0) return interaction.reply({ content: '❌ Le montant doit être un nombre positif.', flags: MessageFlags.Ephemeral });
+  const destMember = await interaction.guild.members.fetch(dest.id).catch(() => null);
+  if (!destMember || !isMembre(destMember)) return interaction.reply({ content: '❌ Le destinataire doit être un membre IWC.', flags: MessageFlags.Ephemeral });
+
+  const db = loadDB();
+  const moi = _getCompte(db, interaction.member.id);
+  if ((moi.solde || 0) < montant) return interaction.reply({ content: `❌ Solde insuffisant. Tu possèdes ${_fmtDollars(moi.solde || 0)}.`, flags: MessageFlags.Ephemeral });
+  const lui = _getCompte(db, dest.id);
+  const date = new Date().toLocaleDateString('fr-FR');
+  moi.solde -= montant; moi.historique.push({ date, montant: -montant, raison: `Vers ${destMember.displayName} : ${raison}` });
+  lui.solde = (lui.solde || 0) + montant; lui.historique.push({ date, montant, raison: `De ${interaction.member.displayName} : ${raison}` });
+  moi.historique = moi.historique.slice(-30); lui.historique = lui.historique.slice(-30);
+  saveDB(db);
+  destMember.send({ content: `💰 **${interaction.member.displayName}** t'a envoyé **${_fmtDollars(montant)}** (${raison}). Nouveau solde : ${_fmtDollars(lui.solde)}.` }).catch(() => {});
+  return interaction.reply({ content: `✅ Tu as envoyé **${_fmtDollars(montant)}** à **${destMember.displayName}**.\nTon nouveau solde : **${_fmtDollars(moi.solde)}**.`, flags: MessageFlags.Ephemeral });
+}
+
+async function _handleArgent(interaction) {
+  if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+  const dest = interaction.options.getUser('membre');
+  const montant = Math.floor(interaction.options.getInteger('montant')); // peut être négatif (amende)
+  const raison = (interaction.options.getString('raison') || 'Ajustement Direction').slice(0, 100);
+  if (!dest) return interaction.reply({ content: '❌ Membre introuvable.', flags: MessageFlags.Ephemeral });
+  if (!montant) return interaction.reply({ content: '❌ Indique un montant (positif pour créditer, négatif pour retirer).', flags: MessageFlags.Ephemeral });
+  const db = loadDB(); const c = _getCompte(db, dest.id);
+  c.solde = Math.max(0, (c.solde || 0) + montant);
+  c.historique.push({ date: new Date().toLocaleDateString('fr-FR'), montant, raison });
+  c.historique = c.historique.slice(-30);
+  saveDB(db);
+  const dm = await interaction.guild.members.fetch(dest.id).catch(() => null);
+  if (dm) dm.send({ content: `💰 ${montant >= 0 ? 'Tu as reçu' : "On t'a retiré"} **${_fmtDollars(Math.abs(montant))}** (${raison}). Nouveau solde : ${_fmtDollars(c.solde)}.` }).catch(() => {});
+  return interaction.reply({ content: `✅ Solde de **${dest.username}** : **${montant >= 0 ? '+' : '−'}${_fmtDollars(Math.abs(montant))}** → nouveau solde **${_fmtDollars(c.solde)}**.`, flags: MessageFlags.Ephemeral });
+}
+
+// ─────────── 🤝 PARRAINAGE ───────────
+async function _handleParrainageAssigner(interaction) {
+  if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+  const parrain = interaction.options.getUser('parrain');
+  const filleul = interaction.options.getUser('filleul');
+  if (!parrain || !filleul || parrain.id === filleul.id) return interaction.reply({ content: '❌ Choisis un parrain et un filleul différents.', flags: MessageFlags.Ephemeral });
+  const db = loadDB();
+  db.parrainages = db.parrainages || {};
+  db.parrainages[filleul.id] = { parrainId: parrain.id, date: new Date().toLocaleDateString('fr-FR') };
+  saveDB(db);
+  const pM = await interaction.guild.members.fetch(parrain.id).catch(() => null);
+  const fM = await interaction.guild.members.fetch(filleul.id).catch(() => null);
+  if (pM) pM.send({ content: `🤝 Tu es désormais le **parrain** de **${fM?.displayName || filleul.username}** à l'Iron Wolf Company. Accompagne-le dans ses débuts !` }).catch(() => {});
+  if (fM) fM.send({ content: `🤝 **${pM?.displayName || parrain.username}** est ton **parrain** à l'Iron Wolf Company. N'hésite pas à lui poser tes questions, il est là pour t'aider !` }).catch(() => {});
+  return interaction.reply({ content: `✅ **${parrain.username}** est maintenant le parrain de **${filleul.username}**. Les deux ont été prévenus en MP.`, flags: MessageFlags.Ephemeral });
+}
+
+async function _handleMonParrainage(interaction) {
+  if (!isMembre(interaction.member)) return interaction.reply({ content: '🔒 Réservé aux membres.', flags: MessageFlags.Ephemeral });
+  const db = loadDB(); const par = db.parrainages || {}; const id = interaction.member.id;
+  const e = new EmbedBuilder().setColor(0xB8860B).setTitle(`🤝 Mon parrainage — ${interaction.member.displayName}`);
+  const monParrain = par[id] && par[id].parrainId;
+  if (monParrain) {
+    const pm = await interaction.guild.members.fetch(monParrain).catch(() => null);
+    e.addFields({ name: '🎓 Mon parrain', value: pm ? `${pm}` : 'Membre inconnu', inline: false });
+  }
+  const filleuls = Object.keys(par).filter(fid => par[fid].parrainId === id);
+  if (filleuls.length) {
+    const noms = [];
+    for (const fid of filleuls) { const fm = await interaction.guild.members.fetch(fid).catch(() => null); if (fm) noms.push(`• ${fm}`); }
+    e.addFields({ name: `👥 Mes filleuls (${noms.length})`, value: (noms.join('\n') || '—').slice(0, 1024), inline: false });
+  }
+  if (!monParrain && !filleuls.length) e.setDescription("*Tu n'as ni parrain ni filleul pour le moment. La Direction peut t'en attribuer un.*");
+  e.setFooter({ text: 'Iron Wolf Company' });
+  return interaction.reply({ embeds: [e], flags: MessageFlags.Ephemeral });
+}
+
 function _detecterPole(member) {
   const legalNames   = ['Le Conseil', 'Directeur', 'Co-Directeur', 'Officier', 'Agent', 'Opérateur', 'Operateur', 'Recrue', 'Probatoire', 'Panseur', 'Penseur'];
   const illegalNames = ['Concepteur', 'Fléau', 'fleau', 'Exécuteur', 'éxécuteur', 'execu', 'Condamné', 'condamne', 'Maudit', 'Confrérie', 'confrerie'];
@@ -6743,4 +7132,3 @@ async function _assurerAccesVisiteur(guild) {
 client.login(process.env.DISCORD_TOKEN)
   .then(() => console.log('🔑 Login OK'))
   .catch(e => { console.error('❌ Login failed:', e.message); process.exit(1); });
-
