@@ -6662,6 +6662,19 @@ async function _menuDejaPresent(channel, titrePartiel) {
   } catch { return false; }
 }
 
+// Supprime (et désépingle) les anciens panneaux du bot portant ce titre, pour éviter l'accumulation
+async function _nettoyerAnciensPanneaux(channel, titrePartiel) {
+  try {
+    const msgs = await channel.messages.fetch({ limit: 50 });
+    for (const m of msgs.values()) {
+      if (m.author.id === client.user.id && (m.embeds[0]?.title || '').includes(titrePartiel)) {
+        await m.unpin().catch(() => {});
+        await m.delete().catch(() => {});
+      }
+    }
+  } catch {}
+}
+
 // Installe le menu + le message « commencer ici » dans leurs salons.
 // forcer=false : ne poste que si absent (pour le démarrage auto, évite les doublons).
 // forcer=true  : reposte toujours (commande /installer-menu).
@@ -6670,7 +6683,8 @@ async function _installerMenu(guild, forcer = false) {
   try {
     const chMenu = await guild.channels.fetch(MENU_SALON_ID).catch(() => null);
     if (chMenu) {
-      const present = await _menuDejaPresent(chMenu, 'MENU PRINCIPAL');
+      if (forcer) await _nettoyerAnciensPanneaux(chMenu, 'MENU PRINCIPAL');
+      const present = forcer ? false : await _menuDejaPresent(chMenu, 'MENU PRINCIPAL');
       if (forcer || !present) { const m = await chMenu.send(_buildMenuPrincipal()); await m.pin().catch(() => {}); }
       okMenu = true;
     }
@@ -6678,7 +6692,8 @@ async function _installerMenu(guild, forcer = false) {
   try {
     const chStart = await guild.channels.fetch(COMMENCER_SALON_ID).catch(() => null);
     if (chStart) {
-      const present = await _menuDejaPresent(chStart, 'COMMENCE ICI');
+      if (forcer) { await _nettoyerAnciensPanneaux(chStart, 'COMMENCE ICI'); await _nettoyerAnciensPanneaux(chStart, 'MENU PRINCIPAL'); }
+      const present = forcer ? false : await _menuDejaPresent(chStart, 'COMMENCE ICI');
       if (forcer || !present) {
         const m1 = await chStart.send({ embeds: [_buildCommencerIci()] }); await m1.pin().catch(() => {});
         const m2 = await chStart.send(_buildMenuPrincipal()); await m2.pin().catch(() => {});
