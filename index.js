@@ -25,6 +25,10 @@ let notionV3 = {};
 try { notionV3 = require('./notion-modules-v3'); console.log('✅ Module notion-modules-v3 chargé'); }
 catch (e) { console.log('⚠️ notion-modules-v3 non chargé:', e.message); }
 
+let contratsConf = {};
+try { contratsConf = require('./contrats-confrerie'); console.log('✅ Module contrats-confrerie chargé'); }
+catch (e) { console.log('⚠️ contrats-confrerie non chargé:', e.message); }
+
 let notionV4 = {};
 try { notionV4 = require('./notion-modules-v4'); console.log('✅ Module notion-modules-v4 chargé'); }
 catch (e) { console.log('⚠️ notion-modules-v4 non chargé:', e.message); }
@@ -103,6 +107,142 @@ const SALON_HARDCODED = {
   INFORMATEURS:         '1509255294184853524',   // #informateurs
 };
 const NOTION_TRANSACTIONS_DB = '36ff4436a86c80ecb4a9ebcabc104a07';
+
+const REGLEMENT_CHUNKS = [
+  `# 🐺 RÈGLEMENT — LA CONFRÉRIE
+
+> *Ici, on ne hausse pas le ton. On agit. Et on joue le jeu — tous, sans exception.*
+
+Bienvenue dans **La Confrérie**. Ce règlement protège deux choses : le **respect entre nous** et la **qualité de nos histoires**. Le lire et l'appliquer, c'est la première preuve de sérieux qu'on attend de toi.
+
+Il se divise en deux blocs : **la vie sur le serveur** et **les règles du RP**.
+
+**Petit rappel :**
+- **RP** *(RolePlay)* → tu **incarnes ton personnage**, dans l'Ouest, à son époque.
+- **HRP** *(Hors-RP)* → toi, le joueur, **en dehors** du personnage. Réservé aux salons et marqueurs prévus.
+
+**En restant sur ce serveur et en validant ce règlement (réaction ✅), tu en acceptes chaque point.**
+
+# 🏛️ PARTIE I — LA VIE SUR LE SERVEUR
+
+## Article 1 — Respect & savoir-vivre
+- Le respect est la règle n°1, sans exception : pas d'insultes, de harcèlement, de menaces ni de mépris envers qui que ce soit.
+- Aucune discrimination tolérée (origine, religion, genre, orientation, handicap…) → exclusion immédiate.
+- Les conflits personnels se règlent en privé ou avec le Staff, **jamais** en public. On ne ramène pas le drama dans les salons.
+- On reste courtois même en désaccord. La Confrérie se reconnaît à son sang-froid.
+
+## Article 2 — Contenu interdit
+- Aucun contenu choquant, violent gratuit, gore ou à caractère sexuel (NSFW).
+- Aucun contenu illégal dans la vraie vie, ni incitation à la haine ou à la violence réelle.
+- Pas de sujets sensibles hors-jeu (politique réelle, religion, débats clivants).
+- Pas de partage d'informations personnelles d'autrui (doxxing) → sanction lourde et définitive.`,
+  `## Article 3 — Spam & publicité
+- Pas de spam : flood, messages répétés, abus de mentions (@everyone, @here) ou de réactions.
+- Aucune publicité (autre serveur, chaîne, projet) sans accord écrit du Staff.
+- Pas de pub ni de démarchage dans les messages privés des membres.
+- On poste dans le bon salon, en restant dans le sujet du canal.
+
+## Article 4 — Pseudo & identité
+- Pseudo Discord lisible et mentionnable. Rien de provocant, offensant ou imprononçable.
+- Interdiction d'usurper l'identité d'un membre, du Staff ou du bot.
+- Ton identité de personnage (IC) se déclare là où c'est prévu — on ne mélange pas les comptes.
+
+## Article 5 — Vocal (Discord)
+- Mêmes règles qu'à l'écrit : respect, pas d'insultes, pas de propos déplacés.
+- Pas de gêne sonore : larsen, musique non désirée, cris, soundboard abusif.
+- **Aucun enregistrement** d'un vocal sans l'accord clair de tous les participants.
+- On ne sature pas un salon et on évite de couper la parole.
+
+## Article 6 — Engagement & activité
+- La Confrérie est vivante : présence et implication régulières attendues.
+- Toute absence prolongée se signale dans **#absences** — c'est respectueux et ça évite les mauvaises surprises.
+- Une inactivité trop longue sans nouvelle peut entraîner un passage en statut inactif, voire un retrait des rangs.
+- On prévient quand on ne peut pas honorer un rendez-vous ou une opération.
+
+## Article 7 — Hiérarchie & Staff
+- La hiérarchie se respecte, en RP comme sur le serveur.
+- Les décisions du Staff s'appliquent. Un désaccord se discute calmement, en privé, **après** application.
+- Pour toute question, signalement ou litige : on contacte le Staff via les canaux prévus, sans spam.
+- Le Staff peut intervenir, trancher et adapter le règlement selon les situations, dans l'intérêt du serveur.`,
+  `# 🎭 PARTIE II — LES RÈGLES DU RP (FAIR-PLAY)
+
+*Enfreindre ces règles, ce n'est pas « gagner » — c'est gâcher la scène des autres.*
+
+## Article 8 — Séparation RP / HRP
+- En zone ou vocal **RP**, tu restes **en personnage**, tout le temps.
+- Le hors-RP passe par les **salons HRP** ou un marqueur clair (ex. \`(( ... ))\`), et reste rare et bref.
+- On ne « casse » jamais une scène pour un détail HRP (voir Article 17).
+
+## Article 9 — Metagaming INTERDIT *(infos HRP ≠ RP)*
+- **Aucune information apprise en HRP** (Discord, stream, vocal externe, message privé…) ne peut être utilisée par ton personnage en jeu.
+- Ton perso **ne sait que ce qu'il a vu ou entendu EN RP**, de ses propres yeux et oreilles.
+- Exemple interdit : apprendre une planque sur Discord, puis « comme par hasard » y débarquer en RP.
+
+## Article 10 — Double VOC INTERDIT
+- Pendant le RP, tu ne peux être connecté qu'à **UNE seule communication vocale** : celle du jeu.
+- **Interdiction d'être en parallèle sur un autre vocal** (Discord, TeamSpeak, appel privé…) avec d'autres joueurs pendant une scène.
+- Pourquoi : le double VOC sert quasi toujours à faire passer des **infos hors-RP** (metagaming) — un perso « muet » en jeu qui balance tout à ses alliés à côté. C'est de la triche → sanction directe.
+
+## Article 11 — Powergaming INTERDIT
+- On **n'impose pas** ses actions aux autres : on laisse toujours une **chance de réagir** (\`/me\`, \`/do\`).
+- Pas d'actions **irréalistes** ou impossibles pour la force/époque de ton personnage.
+- Une action subie se **négocie en RP**, elle ne se décrète pas.
+
+## Article 12 — God-mode & No-life RP
+- Ton personnage **n'est pas invincible** : il saigne, il a peur, il peut mourir.
+- On **assume les conséquences** de ses actes (blessure, capture, mort) sans pleurnicher en HRP.
+- Ignorer une blessure grave ou « oublier » qu'on est menacé = God-mode, interdit.`,
+  `## Article 13 — Value of Life / Peur RP
+- Ton personnage **tient à sa vie**. Face à une arme braquée sur lui, il a **peur** et réagit en conséquence.
+- On ne se jette pas bêtement dans la mort, on ne joue pas les héros suicidaires.
+- Un adversaire armé ou un groupe en supériorité, **ça se respecte** en RP.
+
+## Article 14 — RDM / Initiation obligatoire
+- **RDM interdit** : pas de tir ni de meurtre **sans raison RP valable**.
+- **Initiation obligatoire** : toute action hostile (braquage, agression, kidnapping) commence par une **interaction RP** (menace, sommation) — jamais un kill instantané « sorti de nulle part ».
+- Pas de **charge au cheval / écrasement** gratuit pour tuer sans RP.
+
+## Article 15 — Cohérence : époque & lore
+- On reste dans l'**Ouest, fin du XIXᵉ** : pas d'anachronismes, pas de références modernes.
+- Comportement, langage et tenue **collent au décor** et à l'univers de la Confrérie.
+
+## Article 16 — Mort & conséquences
+- En cas de mort RP, ton personnage **oublie les circonstances exactes** de sa mort (sauf décision RP / CK validée).
+- On respecte **en plus** les règles de mort du serveur sur lequel on joue.
+- Pas de « revenge kill » HRP juste après une mort.
+
+## Article 17 — Un souci en pleine scène ?
+- On **ne casse pas le RP** en plein milieu. On termine la scène proprement.
+- Un problème HRP (triche, litige) se note **discrètement** et se règle **après**, avec le Staff — preuves à l'appui (clips, captures).
+
+# 🔪 PARTIE III — L'OMBRE DE LA CONFRÉRIE
+
+## Article 18 — Discrétion & confidentialité
+- Ce qui se joue dans les opérations **reste dans la Confrérie**. Aucune fuite d'info en HRP, aucune capture partagée à l'extérieur sans aval de la Direction.
+- La force de la Confrérie, c'est l'**ombre, la tête froide et la pression** — pas la violence gratuite.
+- Toute trahison de cette confidentialité est traitée avec la plus grande sévérité.`,
+  `# ⚠️ SANCTIONS
+
+Le non-respect du règlement entraîne, selon la gravité :
+
+1. **Avertissement** — rappel à l'ordre officiel.
+2. **Exclusion temporaire** (mute / mise à l'écart).
+3. **Expulsion** du serveur.
+4. **Bannissement** définitif.
+
+- Les fautes graves (discrimination, doxxing, raid, triche, fuite Confrérie…) peuvent **sauter les étapes** et mener directement au bannissement.
+- Le cumul d'avertissements entraîne une **montée automatique** des sanctions.
+- Le Staff apprécie chaque situation **au cas par cas** — l'esprit du règlement prime sur sa lettre.
+
+## ✅ Acceptation
+
+En validant ce règlement (réaction ✅) et en jouant parmi nous, tu reconnais l'avoir **lu, compris et accepté dans son intégralité**.
+Le fair-play n'est pas une contrainte : c'est ce qui rend nos histoires inoubliables.
+
+> *La Confrérie n'oublie rien. Elle n'oublie personne.*
+> **— La Direction**`,
+];
+
 
 function getChHard(guild, key) {
   const id = SALON_HARDCODED[key];
@@ -204,6 +344,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('purge').setDescription('🗑️ Effacer les messages d\'un salon (Direction)').addIntegerOption(o => o.setName('nombre').setDescription('Nombre de messages à supprimer (1-100, défaut: tous)').setRequired(false).setMinValue(1).setMaxValue(100)),
   new SlashCommandBuilder().setName('annuler-absence').setDescription('🔓 Lever l\'absence d\'un membre (Direction)').addUserOption(o => o.setName('membre').setDescription('Membre dont lever l\'absence').setRequired(true)),
   new SlashCommandBuilder().setName('contrats').setDescription('📜 Voir mes contrats en cours'),
+  new SlashCommandBuilder().setName('contrat-panel').setDescription('📋 Publier le panneau des contrats (Direction)'),
   new SlashCommandBuilder().setName('contrats-sync').setDescription('🔄 Resynchroniser tous les contrats avec Notion (Direction)'),
   new SlashCommandBuilder().setName('notion-test').setDescription('🔍 Tester la connexion Notion des contrats (Direction)'),
   new SlashCommandBuilder().setName('stats-agent').setDescription('📊 Statistiques de renseignement par agent')
@@ -1155,15 +1296,23 @@ async function autoSetup(guild) {
   _syncRegistreTousMembres(guild).catch(() => {});
 
   // Salon du règlement : on cible le salon précis fourni par la Direction (le règlement y est déjà rédigé)
-  const reglCh = guild.channels.cache.get('1508756404260044831') || getChById(guild, 'REGLEMENT', 'reglement', 'règlement');
+  const reglCh = guild.channels.cache.get('1511135557143629926') || getChById(guild, 'REGLEMENT', 'reglement', 'règlement');
   if (reglCh) {
     const msgs = await reglCh.messages.fetch({ limit: 30 }).catch(() => null);
+    // Le règlement complet est-il déjà posté par le bot ? (marqueur = titre du règlement)
+    const reglDejaPoste = msgs ? msgs.some(m => m.author.id === client.user.id && m.content.includes('RÈGLEMENT — LA CONFRÉRIE')) : false;
+    if (!reglDejaPoste) {
+      const _ids = [];
+      for (const _chunk of REGLEMENT_CHUNKS) { const _m = await reglCh.send(_chunk).catch(() => null); if (_m) _ids.push(_m.id); }
+      db.reglementChunkIds = _ids;
+      console.log('✅ Règlement complet posté dans #' + reglCh.name + ' (' + _ids.length + ' messages)');
+    }
     const existing = msgs ? msgs.find(m => m.author.id === client.user.id && m.content.includes('VALIDATION')) : null;
     if (existing) { db.reglementMsgId = existing.id; }
-    else if (!db.reglementMsgId) {
+    else if (!(db.reglementMsgId && (await reglCh.messages.fetch(db.reglementMsgId).catch(() => null)))) {
       // Le règlement est déjà écrit par la Direction dans ce salon.
       // Le bot ajoute SEULEMENT le message de validation avec la réaction ✅.
-      const sent = await reglCh.send('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n✅ VALIDATION DU RÈGLEMENT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```\nSi vous avez lu et accepté **l\'intégralité du règlement ci-dessus**, réagissez avec ✅\n\n*En réagissant, vous confirmez avoir compris et accepté chaque article du code de la Compagnie.*\n— La Direction');
+      const sent = await reglCh.send('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n✅ VALIDATION DU RÈGLEMENT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```\nLe règlement ci-dessus est affiché en plusieurs parties, mais il forme **un seul et même règlement**.\n\n➡️ **Une seule réaction ✅ sur CE message** valide l\'intégralité (toutes les parties). Pas besoin de réagir partie par partie.\n\n*En réagissant, vous confirmez avoir lu, compris et accepté chaque article.*\n— La Direction');
       await sent.react('✅'); db.reglementMsgId = sent.id;
       console.log('✅ Message de validation du règlement posté dans #' + reglCh.name);
     }
@@ -1184,8 +1333,8 @@ async function autoSetup(guild) {
     if (existing) { db.recrutementMsgId = existing.id; }
     else {
       if (db.recrutementMsgId) { const old = await recrutCh.messages.fetch(db.recrutementMsgId).catch(() => null); if (old) await old.delete().catch(() => {}); db.recrutementMsgId = null; }
-      const embed = new EmbedBuilder().setColor(0x8B1A1A).setTitle('📋 IRON WOLF COMPANY — RECRUTEMENT').setDescription('*On ne demande pas à rejoindre la Compagnie. On y est invité.*\n*Si vous êtes ici — vous avez été jugé digne de frapper à la porte.*').addFields({ name: '⚖️ Recrutement Légal', value: '→ Tu exerces un métier légal au sein de la Compagnie\n→ Protection, escorte, commerce...\n→ Clique sur **⚖️ Candidature Légale**' }, { name: '🔪 Recrutement Illégal', value: "→ Tu opères dans l'ombre pour l'organisation\n→ Contrebande, sécurité, assassinat...\n→ Clique sur **🔪 Candidature Illégale**" }, { name: '⚠️ Important', value: '→ Réponse en DM sous 48h\n→ Aucune justification en cas de refus\n→ *La porte est ouverte une fois. Une seule.*' }).setFooter({ text: 'Iron Wolf Company • Recrutement officiel' });
-      const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('open_candidature_legal').setLabel('⚖️ Candidature Légale').setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId('open_candidature_illegal').setLabel('🔪 Candidature Illégale').setStyle(ButtonStyle.Danger));
+      const embed = new EmbedBuilder().setColor(0x8B1A1A).setTitle('📋 IRON WOLF COMPANY — RECRUTEMENT').setDescription('*On ne demande pas à rejoindre la Compagnie. On y est invité.*\n*Si vous êtes ici — vous avez été jugé digne de frapper à la porte.*').addFields({ name: '⚖️ Recrutement Légal', value: '→ Tu exerces un métier légal au sein de la Compagnie\n→ Protection, escorte, commerce...\n→ Clique sur **⚖️ Candidature Légale**' }, { name: '⚠️ Important', value: '→ Réponse en DM sous 48h\n→ Aucune justification en cas de refus\n→ *La porte est ouverte une fois. Une seule.*' }).setFooter({ text: 'Iron Wolf Company • Recrutement officiel' });
+      const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('open_candidature_legal').setLabel('⚖️ Candidature Légale').setStyle(ButtonStyle.Primary));
       const sent = await recrutCh.send({ embeds: [embed], components: [row] }); db.recrutementMsgId = sent.id;
     }
     saveDB(db);
@@ -1770,7 +1919,7 @@ client.on('messageCreate', async message => {
               ...(lieuFinal ? [{ name: '📍 Lieu', value: lieuFinal, inline: true }] : []),
               ...(menaceAffiche ? [{ name: '⚠️ Menace', value: menaceAffiche, inline: true }] : []),
               ...(catsR.length ? [{ name: '🏷️ Catégories', value: catsR.join('  '), inline: false }] : []),
-              { name: '🎙️ Transcription complète', value: ('||' + (transcriptionBrute || '—').slice(0, 980) + '||') },
+              { name: '🎙️ Transcription complète', value: ((transcriptionBrute || '—').length > 980 ? '🎙️ *Transcription intégrale postée ci-dessous ⬇️*' : ('||' + (transcriptionBrute || '—') + '||')) },
             )
             .setFooter({ text: `IWC · Renseignement · Priorité : ${priorite}` })
             .setTimestamp();
@@ -1801,7 +1950,7 @@ client.on('messageCreate', async message => {
               ...(cible ? [{ name: '🎯 Cible', value: cible, inline: true }] : []),
               ...(lieu  ? [{ name: '📍 Lieu',  value: lieu,  inline: true }] : []),
               ...(tagsDetectes.length ? [{ name: '🏷️ Mots-clés', value: tagsDetectes.join('  '), inline: false }] : []),
-              { name: '🎙️ Transcription complète', value: ('||' + (infoBrute || '—').slice(0, 980) + '||') },
+              { name: '🎙️ Transcription complète', value: ((transcriptionBrute || '—').length > 980 ? '🎙️ *Transcription intégrale postée ci-dessous ⬇️*' : ('||' + (transcriptionBrute || '—') + '||')) },
             )
             .setFooter({ text: `IWC · Renseignement de terrain · Priorité : ${priorite}` })
             .setTimestamp();
@@ -1869,6 +2018,7 @@ client.on('messageCreate', async message => {
         }
 
         // ── Poster dans un fil si une cible est detectee, sinon dans le salon ──
+        let destNote = message.channel;
         if (cibleDetectee) {
           // Ajouter la cible à l'embed si pas deja presente
           if (!cible) {
@@ -1894,9 +2044,18 @@ client.on('messageCreate', async message => {
           } else if (thread.archived) {
             await thread.setArchived(false).catch(() => {});
           }
-          await thread.send({ embeds: [embed] });
-        } else {
-          await message.channel.send({ embeds: [embed] });
+          destNote = thread;
+        }
+        await destNote.send({ embeds: [embed] });
+        // ── Transcription COMPLÈTE sans coupure (un champ Discord est limité à 1024 caractères) ──
+        // Au-delà de ~980 caractères, on poste l'intégralité en messages complémentaires (spoiler), par blocs de 1850.
+        const _txtComplet = (transcriptionBrute || '').trim();
+        if (_txtComplet.length > 980) {
+          const blocs = _txtComplet.match(/[\s\S]{1,1850}/g) || [];
+          for (let i = 0; i < blocs.length; i++) {
+            const entete = i === 0 ? `🎙️ **Transcription complète (intégrale — ${blocs.length} partie${blocs.length > 1 ? 's' : ''}) :**\n` : '';
+            await destNote.send({ content: entete + '||' + blocs[i] + '||' }).catch(() => {});
+          }
         }
 
         // ── Stockage local de la note (pour /notes) ──
@@ -2113,6 +2272,7 @@ async function _archiverPlanNotion(message) {
 
 client.on('interactionCreate', async interaction => {
   const guild = interaction.guild; const db = loadDB();
+  if (await contratsConf.routeInteraction?.(interaction)) return;
 
   if (interaction.isAutocomplete()) {
     if (['promo','retro'].includes(interaction.commandName)) return handleAutocompleteGrades(interaction);
@@ -3117,6 +3277,7 @@ client.once('clientReady', async () => {
       await notionV3.checkInactivite?.(g).catch(() => {});
       await notionV3.updateHierarchieEmbed?.(g).catch(() => {});
       await notionV3.checkAffairesTimeout?.(g).catch(() => {});
+      await contratsConf.checkEcheances?.(g).catch(() => {});
       await _checkRetoursAbsence(g).catch(() => {});
       await updateDirectionPanel(g).catch(() => {});
       try {
@@ -6480,7 +6641,7 @@ function _buildCommencerIci() {
       'Heureux de t\'accueillir à l\'Iron Wolf Company ! Voici comment démarrer en **3 étapes** :',
       '',
       '**1️⃣ Lis et valide le règlement**',
-      'Va dans le salon <#1508756404260044831>, lis-le, puis réagis avec ✅ sur le message de validation. C\'est obligatoire pour accéder au serveur.',
+      'Va dans le salon <#1511135557143629926>, lis-le, puis réagis avec ✅ sur le message de validation. C\'est obligatoire pour accéder au serveur.',
       '',
       '**2️⃣ Utilise le menu principal**',
       'Tout se fait avec des boutons dans le salon du **menu** — pas besoin de retenir des commandes. Profil, RDV, absences, contrats... tout est là.',
@@ -7091,7 +7252,7 @@ async function _assurerAccesVisiteur(guild) {
     // Salons d'entrée à rendre visibles pour les visiteurs
     const salonsEntree = [
       { id: CH.RECRUTEMENT, nom: 'recrutement', ecrire: false },         // voir le panneau (les boutons suffisent)
-      { id: '1508756404260044831', nom: 'règlement', ecrire: false },    // le salon règlement précis (pour lire + réagir ✅)
+      { id: '1511135557143629926', nom: 'règlement', ecrire: false },    // le salon règlement précis (pour lire + réagir ✅)
       { id: '1509243971472195584', nom: 'commencer-ici', ecrire: false },// le salon « Commencer ici » (pour lire le guide d'arrivée)
       { ch: getChById(guild, 'ARRIVEES', 'arrivees', 'arrivée'), nom: 'arrivée', ecrire: false }, // voir le message de bienvenue + lien règlement
     ].filter(Boolean);
