@@ -228,11 +228,22 @@ async function archiver(guild, contrat) {
 // ═══════════════════════════════════════════════════════════════
 async function postPanel(channel) {
   const db = loadDB();
-  // Nettoyage : supprimer (et désépingler) l'ancien panneau pour ne pas accumuler
-  if (db.ccPanelMsgId) {
-    const oldCh = (db.ccPanelChanId && channel.guild.channels.cache.get(db.ccPanelChanId)) || channel;
-    const old = await oldCh.messages.fetch(db.ccPanelMsgId).catch(() => null);
-    if (old) { await old.unpin?.().catch(() => {}); await old.delete().catch(() => {}); }
+  const botId = channel.client.user.id;
+  // Nettoyage : supprimer (+ désépingler) TOUT ancien panneau de contrats du salon (épinglé ou non),
+  // pour ne pas accumuler. On cible le TITRE du panneau — jamais les fiches de contrat (titre différent).
+  try {
+    const recent = await channel.messages.fetch({ limit: 50 });
+    for (const m of recent.values()) {
+      if (m.author.id === botId && (m.embeds[0]?.title || '').includes('CONTRATS — LA CONFRÉRIE')) {
+        await m.unpin?.().catch(() => {});
+        await m.delete().catch(() => {});
+      }
+    }
+  } catch {}
+  // Si l'ancien panneau était dans un autre salon, on le retire aussi via l'ID mémorisé
+  if (db.ccPanelMsgId && db.ccPanelChanId && db.ccPanelChanId !== channel.id) {
+    const oldCh = channel.guild.channels.cache.get(db.ccPanelChanId);
+    if (oldCh) { const old = await oldCh.messages.fetch(db.ccPanelMsgId).catch(() => null); if (old) { await old.unpin?.().catch(() => {}); await old.delete().catch(() => {}); } }
   }
   const embed = new EmbedBuilder()
     .setColor(0x8B1A1A)
