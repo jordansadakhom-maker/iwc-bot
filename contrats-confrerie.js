@@ -98,7 +98,11 @@ function buildContratEmbed(contrat) {
     : (contrat.objet || '—');
 
   const agents = (contrat.agents && contrat.agents.length)
-    ? contrat.agents.map(id => `<@${id}>`).join(', ')
+    ? contrat.agents.map(id => {
+        const s = (contrat.agentsStatus || {})[id];
+        const e = s === 'accepte' ? '✅' : s === 'refuse' ? '⛔' : '⏳';
+        return `${e} <@${id}>`;
+      }).join('\n')
     : '*Aucun agent assigné*';
 
   const e = new EmbedBuilder()
@@ -159,12 +163,35 @@ function buildBriefingEmbed(contrat) {
   return e;
 }
 
+// Boutons Accepter / Refuser proposés à l'agent (en DM, ou en secours dans le salon)
+function buildBriefingButtons(contrat) {
+  return [new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`cc_agok::${contrat.id}`).setLabel('✅ Accepter la mission').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`cc_agno::${contrat.id}`).setLabel('⛔ Refuser').setStyle(ButtonStyle.Danger),
+  )];
+}
+
 async function envoyerBriefings(guild, contrat) {
+  const chSecours = await fetchCh(guild, CH_CONTRATS);
   for (const userId of (contrat.agents || [])) {
+    // On ne re-sollicite pas un agent qui a déjà répondu
+    const dejaRepondu = ['accepte', 'refuse'].includes((contrat.agentsStatus || {})[userId]);
+    if (dejaRepondu) continue;
+    let dmOk = false;
     try {
       const m = await guild.members.fetch(userId).catch(() => null);
-      if (m) await m.send({ embeds: [buildBriefingEmbed(contrat)] }).catch(() => {});
+      if (m) {
+        const dm = await m.send({ embeds: [buildBriefingEmbed(contrat)], components: buildBriefingButtons(contrat) }).catch(() => null);
+        if (dm) dmOk = true;
+      }
     } catch {}
+    // MP fermés → on ping l'agent directement dans le salon (sans dévoiler les détails confidentiels)
+    if (!dmOk && chSecours) {
+      await chSecours.send({
+        content: `<@${userId}> — 🗡️ Tu es assigné au contrat **${contrat.id}** (tes MP sont fermés). Accepte ou refuse la mission ci-dessous :`,
+        components: buildBriefingButtons(contrat),
+      }).catch(() => {});
+    }
   }
 }
 
@@ -200,6 +227,13 @@ async function archiver(guild, contrat) {
 // PANNEAU
 // ═══════════════════════════════════════════════════════════════
 async function postPanel(channel) {
+  const db = loadDB();
+  // Nettoyage : supprimer (et désépingler) l'ancien panneau pour ne pas accumuler
+  if (db.ccPanelMsgId) {
+    const oldCh = (db.ccPanelChanId && channel.guild.channels.cache.get(db.ccPanelChanId)) || channel;
+    const old = await oldCh.messages.fetch(db.ccPanelMsgId).catch(() => null);
+    if (old) { await old.unpin?.().catch(() => {}); await old.delete().catch(() => {}); }
+  }
   const embed = new EmbedBuilder()
     .setColor(0x8B1A1A)
     .setTitle('🐺 CONTRATS — LA CONFRÉRIE')
@@ -209,7 +243,7 @@ async function postPanel(channel) {
       '**Fonctionnement :**',
       '→ La Direction crée un contrat (type, risque, prime, échéance).',
       '→ Le contrat est validé, puis des **agents** y sont assignés.',
-      '→ Chaque agent reçoit son **briefing en privé**.',
+      '→ Chaque agent reçoit son **briefing en privé** et **accepte ou refuse**.',
       '→ La mission est clôturée : **réussie** ou **échouée**.',
       '',
       '*Un commanditaire laissé vide = contrat **anonyme & confidentiel**.*',
@@ -219,7 +253,9 @@ async function postPanel(channel) {
     new ButtonBuilder().setCustomId('cc_new').setLabel('📋 Nouveau contrat').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId('cc_mine').setLabel('🗂️ Mes contrats').setStyle(ButtonStyle.Secondary),
   );
-  return channel.send({ embeds: [embed], components: [row] });
+  const sent = await channel.send({ embeds: [embed], components: [row] });
+  db.ccPanelMsgId = sent.id; db.ccPanelChanId = channel.id; saveDB(db);
+  return sent;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -273,6 +309,7 @@ async function onModalSubmit(interaction) {
   const contrat = {
     id: genId(),
     cc: true,
+    guildId: interaction.guild.id,
     typeMission,
     type: 'confrerie',
     risque,
@@ -359,12 +396,48 @@ async function onAssignGo(interaction) {
   const c = findContrat(db, id);
   if (!c) return interaction.update({ content: '❌ Contrat introuvable.', components: [] });
   c.agents = Array.from(new Set([...(c.agents || []), ...interaction.values]));
+  if (!c.agentsStatus) c.agentsStatus = {};
+  for (const uid of c.agents) { if (!c.agentsStatus[uid]) c.agentsStatus[uid] = 'attente'; }
   saveDB(db);
-  await interaction.update({ content: `✅ ${interaction.values.length} agent(s) assigné(s) au contrat **${id}**. Briefings envoyés.`, components: [] });
+  await interaction.update({ content: `✅ ${interaction.values.length} agent(s) assigné(s) au contrat **${id}**. Briefings envoyés — ils doivent **accepter ou refuser**.`, components: [] });
   await envoyerBriefings(interaction.guild, c);
   await rafraichirFiche(interaction.guild, c);
   const jc = journalCh(interaction.guild);
   if (jc) await jc.send({ embeds: [new EmbedBuilder().setColor(0x5865F2).setTitle(`🎯 Agents assignés — ${c.id}`).setDescription(`${c.agents.map(a => `<@${a}>`).join(', ')}`).setFooter({ text: 'La Confrérie • Contrats' }).setTimestamp()] }).catch(() => {});
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RÉPONSE D'UN AGENT (accepte / refuse — depuis son DM ou le salon)
+// ═══════════════════════════════════════════════════════════════
+async function onAgentReponse(interaction, accepte) {
+  const id = interaction.customId.split('::')[1];
+  const db = loadDB();
+  const c = findContrat(db, id);
+  if (!c) return interaction.reply({ content: '❌ Contrat introuvable.', flags: MessageFlags.Ephemeral });
+  const uid = interaction.user.id;
+  if (!(c.agents || []).includes(uid)) return interaction.reply({ content: "❌ Tu n'es pas assigné à ce contrat.", flags: MessageFlags.Ephemeral });
+  if (!c.agentsStatus) c.agentsStatus = {};
+  c.agentsStatus[uid] = accepte ? 'accepte' : 'refuse';
+  saveDB(db);
+  const txt = accepte
+    ? '✅ Tu as **accepté** la mission. La Confrérie compte sur toi.'
+    : "⛔ Tu as **refusé** la mission. C'est noté.";
+  try { await interaction.update({ embeds: interaction.message.embeds, components: [], content: txt }); }
+  catch { try { await interaction.reply({ content: txt, flags: MessageFlags.Ephemeral }); } catch {} }
+  // Retrouver le serveur : un agent peut cliquer depuis ses MP, où interaction.guild est null
+  const guild = interaction.guild || interaction.client.guilds.cache.get(c.guildId);
+  if (guild) {
+    const jc = journalCh(guild);
+    if (jc) await jc.send({
+      content: accepte ? undefined : (directionMention(guild) || undefined), // on prévient la Direction surtout en cas de refus
+      embeds: [new EmbedBuilder()
+        .setColor(accepte ? 0x57F287 : 0xED4245)
+        .setTitle(`${accepte ? '✅ Mission acceptée par un agent' : '⛔ Mission refusée par un agent'} · ${c.id}`)
+        .setDescription(`<@${uid}> a **${accepte ? 'accepté' : 'refusé'}** le contrat **${c.id}** (${emojiType(c.typeMission)} ${c.typeMission}).`)
+        .setFooter({ text: 'La Confrérie • Contrats' }).setTimestamp()],
+    }).catch(() => {});
+    await rafraichirFiche(guild, c);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -464,6 +537,8 @@ async function routeInteraction(interaction) {
       if (id.startsWith('cc_assign::')) { await onAssign(interaction); return true; }
       if (id.startsWith('cc_done::')) { await cloturer(interaction, true); return true; }
       if (id.startsWith('cc_fail::')) { await cloturer(interaction, false); return true; }
+      if (id.startsWith('cc_agok::')) { await onAgentReponse(interaction, true); return true; }
+      if (id.startsWith('cc_agno::')) { await onAgentReponse(interaction, false); return true; }
     }
     if (interaction.isStringSelectMenu?.()) {
       if (interaction.customId === 'cc_type') { await onTypeSelect(interaction); return true; }
