@@ -71,6 +71,12 @@ function estMembre(member) {
   return member.roles?.cache?.some(r => r.name !== '@everyone' && !r.name.toLowerCase().includes('visiteur')) || false;
 }
 
+// Direction de la Confrérie (pour réserver l'envoi du Code)
+const DIRECTION_ROLE_NAMES = ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Conseil'];
+function estDirection(member) {
+  return !!member?.roles?.cache?.some(r => DIRECTION_ROLE_NAMES.some(n => r.name.includes(n)));
+}
+
 // Archive une copie d'un papier dans le salon registre
 async function archiver(client, embed, typeLabel, auteur) {
   try {
@@ -106,7 +112,7 @@ const papiersCommands = [
   new SlashCommandBuilder().setName('ordre').setDescription('🎖️ Émettre un ordre de mission'),
   new SlashCommandBuilder().setName('carte').setDescription('🎴 Délivrer une carte de membre'),
   new SlashCommandBuilder().setName('billet').setDescription('🃏 Laisser le billet de la Confrérie'),
-  new SlashCommandBuilder().setName('code').setDescription('📖 Afficher le Code de la Confrérie').addUserOption(o => o.setName('membre').setDescription('Envoyer le Code en privé à ce membre (DM)').setRequired(false)),
+  new SlashCommandBuilder().setName('code').setDescription('📖 Afficher le Code de la Confrérie').addUserOption(o => o.setName('membre').setDescription('Envoyer le Code en privé à ce membre (DM)').setRequired(false)).addBooleanOption(o => o.setName('tous').setDescription('Envoyer le Code à TOUS les membres en privé (Direction)').setRequired(false)),
   new SlashCommandBuilder().setName('papiers').setDescription('📒 Consulter les derniers papiers archivés'),
 ].map(c => c.toJSON());
 
@@ -306,13 +312,37 @@ async function gererInteractionPapiers(interaction) {
         return interaction.reply({ content: '🔒 Réservé aux membres de la Compagnie.', flags: MessageFlags.Ephemeral }).catch(() => {});
       }
 
-      // /code → affiche le Code + bouton « Je jure » (ou l'envoie en DM à un membre)
+      // /code → affiche le Code, ou l'envoie en DM (à un membre, ou à tous). Envoi réservé à la Direction.
       if (cmd === 'code') {
         const row = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId('papier_code_jurer').setLabel('🤝 Je jure sur l\'honneur').setStyle(ButtonStyle.Success),
         );
         const cible = interaction.options.getUser?.('membre');
+        const tous  = interaction.options.getBoolean?.('tous');
+
+        // → Envoi à TOUS les membres en privé (Direction)
+        if (tous) {
+          if (!estDirection(interaction.member)) {
+            return interaction.reply({ content: '🔒 Seule la Direction peut envoyer le Code à tous les membres.', flags: MessageFlags.Ephemeral }).catch(() => {});
+          }
+          await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+          const membres = await interaction.guild.members.fetch().catch(() => null);
+          if (!membres) return interaction.editReply({ content: '⚠️ Impossible de récupérer la liste des membres.' }).catch(() => {});
+          const destinataires = [...membres.values()].filter(m => !m.user.bot && estMembre(m));
+          let ok = 0, ko = 0;
+          for (const m of destinataires) {
+            try { await m.send({ embeds: [embedCode()], components: [row] }); ok++; }
+            catch { ko++; }
+            await new Promise(r => setTimeout(r, 600)); // anti rate-limit Discord
+          }
+          return interaction.editReply({ content: `📨 Code envoyé à **${ok}** membre(s) en privé.${ko ? ` ⚠️ ${ko} n'ont pas pu être joints (DM fermés).` : ''}` }).catch(() => {});
+        }
+
+        // → Envoi en privé à un membre précis (Direction)
         if (cible) {
+          if (!estDirection(interaction.member)) {
+            return interaction.reply({ content: '🔒 Seule la Direction peut envoyer le Code à un membre.', flags: MessageFlags.Ephemeral }).catch(() => {});
+          }
           try {
             const dest = await interaction.guild?.members.fetch(cible.id).catch(() => null) || cible;
             await dest.send({ embeds: [embedCode()], components: [row] });
@@ -321,6 +351,8 @@ async function gererInteractionPapiers(interaction) {
             return interaction.reply({ content: `⚠️ Impossible d'envoyer le Code à <@${cible.id}> — ses messages privés sont sûrement fermés.`, flags: MessageFlags.Ephemeral }).catch(() => {});
           }
         }
+
+        // → Affichage normal dans le salon (tout membre)
         return interaction.reply({ embeds: [embedCode()], components: [row] }).catch(() => {});
       }
 
