@@ -21,6 +21,7 @@ const {
   EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
   ModalBuilder, TextInputBuilder, TextInputStyle,
   SlashCommandBuilder, MessageFlags,
+  WebhookClient, StringSelectMenuBuilder,
 } = require('discord.js');
 
 // ─────────────────────────────── CONFIG ────────────────────────────────────
@@ -34,6 +35,27 @@ const CONFIG = {
   // Déploiement géré par index.js → on laisse sur false (voir README).
   AUTO_DEPLOY: false,
 };
+// ────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────── SERVEURS ALLIÉS (RP inter-serveurs) ───────────────────
+//  Permet d'envoyer un papier sur un AUTRE serveur, en tant que « La Confrérie »
+//  (ton compte n'apparaît JAMAIS). Un bouton « Transmettre à un allié » apparaît
+//  alors sous chaque papier.
+//
+//  ⚠️ Ça ne marche QUE sur les serveurs qui t'ont DONNÉ une URL de webhook —
+//     donc des serveurs ALLIÉS / partenaires RP. Impossible de poster sur un
+//     serveur qui n'a rien demandé.
+//
+//  Comment obtenir une URL : sur LEUR serveur, un admin va sur le salon cible →
+//  « Modifier le salon » → « Intégrations » → « Webhooks » → « Nouveau webhook »
+//  → « Copier l'URL ». Garde ces URL SECRÈTES.
+//
+//  Ajoute tes alliés ci-dessous (enlève les // devant les lignes d'exemple) :
+const CONFRERIE_AVATAR = ''; // (optionnel) URL d'une image (logo loup) pour l'avatar
+const ALLIES = [
+  // { nom: 'Saloon de Valentine', url: 'https://discord.com/api/webhooks/123456/abcdef...' },
+  // { nom: 'Gang des Corbeaux',   url: 'https://discord.com/api/webhooks/789012/ghijkl...' },
+];
 // ────────────────────────────────────────────────────────────────────────────
 
 // Palette
@@ -58,6 +80,24 @@ async function archiver(client, embed, typeLabel, auteur) {
   } catch (e) { console.log('❌ papiers archiver:', e.message); }
 }
 
+// ───────────────── Bouton « Transmettre à un allié » (anonyme) ──────────────
+// N'apparaît que si au moins un serveur allié est configuré dans ALLIES.
+function boutonTransmettre() {
+  if (!ALLIES.length) return null;
+  return new ButtonBuilder()
+    .setCustomId('papier_transmit')
+    .setLabel('📤 Transmettre à un allié')
+    .setStyle(ButtonStyle.Secondary);
+}
+// Construit la rangée de boutons d'un papier (boutons éventuels + transmit)
+function rowsAvecTransmit(...extraButtons) {
+  const btns = [...extraButtons].filter(Boolean);
+  const t = boutonTransmettre();
+  if (t) btns.push(t);
+  if (!btns.length) return [];
+  return [new ActionRowBuilder().addComponents(...btns)];
+}
+
 // ───────────────────── DÉFINITION DES 8 COMMANDES ──────────────────────────
 const papiersCommands = [
   new SlashCommandBuilder().setName('recu').setDescription('🧾 Établir un reçu / une quittance'),
@@ -66,7 +106,7 @@ const papiersCommands = [
   new SlashCommandBuilder().setName('ordre').setDescription('🎖️ Émettre un ordre de mission'),
   new SlashCommandBuilder().setName('carte').setDescription('🎴 Délivrer une carte de membre'),
   new SlashCommandBuilder().setName('billet').setDescription('🃏 Laisser le billet de la Confrérie'),
-  new SlashCommandBuilder().setName('code').setDescription('📖 Afficher le Code de la Confrérie'),
+  new SlashCommandBuilder().setName('code').setDescription('📖 Afficher le Code de la Confrérie').addUserOption(o => o.setName('membre').setDescription('Envoyer le Code en privé à ce membre (DM)').setRequired(false)),
   new SlashCommandBuilder().setName('papiers').setDescription('📒 Consulter les derniers papiers archivés'),
 ].map(c => c.toJSON());
 
@@ -266,11 +306,21 @@ async function gererInteractionPapiers(interaction) {
         return interaction.reply({ content: '🔒 Réservé aux membres de la Compagnie.', flags: MessageFlags.Ephemeral }).catch(() => {});
       }
 
-      // /code → affiche le Code + bouton « Je jure »
+      // /code → affiche le Code + bouton « Je jure » (ou l'envoie en DM à un membre)
       if (cmd === 'code') {
         const row = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId('papier_code_jurer').setLabel('🤝 Je jure sur l\'honneur').setStyle(ButtonStyle.Success),
         );
+        const cible = interaction.options.getUser?.('membre');
+        if (cible) {
+          try {
+            const dest = await interaction.guild?.members.fetch(cible.id).catch(() => null) || cible;
+            await dest.send({ embeds: [embedCode()], components: [row] });
+            return interaction.reply({ content: `📨 Le Code de la Confrérie a été envoyé à <@${cible.id}> en privé. Il pourra jurer directement depuis son message.`, flags: MessageFlags.Ephemeral }).catch(() => {});
+          } catch {
+            return interaction.reply({ content: `⚠️ Impossible d'envoyer le Code à <@${cible.id}> — ses messages privés sont sûrement fermés.`, flags: MessageFlags.Ephemeral }).catch(() => {});
+          }
+        }
         return interaction.reply({ embeds: [embedCode()], components: [row] }).catch(() => {});
       }
 
@@ -319,16 +369,14 @@ async function gererInteractionPapiers(interaction) {
       else if (type === 'dette') {
         embed = embedDette({ debiteur: g('debiteur'), creancier: g('creancier'), montant: g('montant'), echeance: g('echeance'), motif: g('motif') }, auteur);
         label = 'Reconnaissance de dette';
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('papier_dette_signer').setLabel('✍️ Signer la dette').setStyle(ButtonStyle.Success),
-        );
-        await interaction.editReply({ embeds: [embed], components: [row] }).catch(() => {});
+        const signer = new ButtonBuilder().setCustomId('papier_dette_signer').setLabel('✍️ Signer la dette').setStyle(ButtonStyle.Success);
+        await interaction.editReply({ embeds: [embed], components: rowsAvecTransmit(signer) }).catch(() => {});
         await archiver(interaction.client, embed, label, auteur);
         return;
       }
 
       if (!embed) return interaction.editReply({ content: '⚠️ Type de papier inconnu.' }).catch(() => {});
-      await interaction.editReply({ embeds: [embed] }).catch(() => {});
+      await interaction.editReply({ embeds: [embed], components: rowsAvecTransmit() }).catch(() => {});
       await archiver(interaction.client, embed, label, auteur);
       return;
     }
@@ -353,6 +401,56 @@ async function gererInteractionPapiers(interaction) {
         .setFooter({ text: `La Confrérie • ${fmtDate()} à ${fmtHeure()}` }).setTimestamp();
       await archiver(interaction.client, e, 'Serment (Code)', jureur);
       return interaction.reply({ content: '🤝 Ton serment est enregistré. Bienvenue parmi les nôtres.', flags: MessageFlags.Ephemeral }).catch(() => {});
+    }
+
+    // Bouton « Transmettre à un allié » → propose la liste des serveurs alliés
+    if (interaction.isButton?.() && interaction.customId === 'papier_transmit') {
+      if (!ALLIES.length) {
+        return interaction.reply({ content: '⚠️ Aucun serveur allié configuré. Ajoute-les dans la liste `ALLIES` (en haut de papiers.js).', flags: MessageFlags.Ephemeral }).catch(() => {});
+      }
+      const base = interaction.message?.embeds?.[0];
+      if (!base) return interaction.reply({ content: '⚠️ Papier introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      const select = new StringSelectMenuBuilder()
+        .setCustomId(`papier_transmit_go:${interaction.channelId}:${interaction.message.id}`)
+        .setPlaceholder('Choisis le serveur allié…')
+        .addOptions(ALLIES.slice(0, 25).map((a, i) => ({ label: (a.nom || `Allié ${i + 1}`).slice(0, 100), value: String(i) })));
+      return interaction.reply({
+        content: '📤 Sur quel serveur allié veux-tu **laisser ce papier** (anonymement, en tant que « La Confrérie ») ?',
+        components: [new ActionRowBuilder().addComponents(select)],
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+    }
+
+    // Sélection de l'allié → envoi anonyme via webhook
+    if (interaction.isStringSelectMenu?.() && interaction.customId?.startsWith('papier_transmit_go:')) {
+      await interaction.update({ content: '📤 Transmission en cours…', components: [] }).catch(() => {});
+      const [, channelId, messageId] = interaction.customId.split(':');
+      const idx = parseInt(interaction.values[0], 10);
+      const allie = ALLIES[idx];
+      if (!allie || !allie.url) return interaction.editReply({ content: '⚠️ Serveur allié introuvable.' }).catch(() => {});
+
+      // Récupère le papier d'origine pour le renvoyer tel quel
+      let embed = null;
+      try {
+        const ch = await interaction.client.channels.fetch(channelId);
+        const msg = await ch.messages.fetch(messageId);
+        if (msg.embeds?.[0]) embed = EmbedBuilder.from(msg.embeds[0]).toJSON();
+      } catch { /* ignore */ }
+      if (!embed) return interaction.editReply({ content: '⚠️ Impossible de retrouver le papier à transmettre.' }).catch(() => {});
+
+      // Envoi via le webhook de l'allié → apparaît comme « La Confrérie »
+      try {
+        const wh = new WebhookClient({ url: allie.url });
+        await wh.send({
+          username: 'La Confrérie',
+          ...(CONFRERIE_AVATAR ? { avatarURL: CONFRERIE_AVATAR } : {}),
+          embeds: [embed],
+        });
+        return interaction.editReply({ content: `✅ Papier laissé sur **${allie.nom}** — signé « La Confrérie », sans aucune trace de ton compte.` }).catch(() => {});
+      } catch (e) {
+        console.log('❌ papiers webhook:', e.message);
+        return interaction.editReply({ content: `❌ Échec de l'envoi vers **${allie.nom}**. Vérifie que l'URL du webhook est correcte et toujours active.` }).catch(() => {});
+      }
     }
   } catch (e) {
     console.log('❌ papiers handler:', e.message);
