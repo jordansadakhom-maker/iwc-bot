@@ -21,16 +21,22 @@ function _persist(db) { try { saveDB(db); } catch {} try { if (backupGit) backup
 
 // ── Config (avec valeurs de repli sûres) ──
 const SALON_DEMANDES = '1512171267560702013';
+const SALON_AGENDA = '1509638226132996178';          // #agenda (légal)
+const SALON_AGENDA_ILLEGAL = '1510956171958161528';  // #agenda-illégal
 const GESTION_ROLES = ['Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier', 'Opérateur', 'Operateur', 'Secrétaire', 'Secretaire'];
 const OPERATEUR_ROLES = ['Opérateur', 'Operateur', 'Secrétaire', 'Secretaire'];
 
 const COL = { or: 0xC8A45C, sepia: 0x8B5A2A, vert: 0x2ECC71, rouge: 0xC0392B, orange: 0xE67E22, bleu: 0x5865F2, gris: 0x555555 };
 
 const TYPES = {
-  esc: { label: '🛡️ Escorte', illegal: false },
+  esc: { label: '🛡️ Escorte de personne', illegal: false },
+  cnv: { label: '🚂 Escorte de convoi / diligence', illegal: false },
   pro: { label: '💂 Protection rapprochée', illegal: false },
-  enq: { label: '🔍 Enquête', illegal: false },
-  neg: { label: '🤝 Négociation', illegal: false },
+  sec: { label: '🏠 Sécurisation d\'un lieu', illegal: false },
+  enq: { label: '🔍 Enquête / filature', illegal: false },
+  neg: { label: '🤝 Négociation / médiation', illegal: false },
+  rec: { label: '💰 Récupération de biens / dette', illegal: false },
+  bnt: { label: '🪙 Chasse à la prime (sur mandat)', illegal: false },
   trv: { label: '🗡️ Travail discret', illegal: true },
 };
 const LIEUX = {
@@ -54,6 +60,18 @@ function _salonDemandes(guild) {
   return guild.channels.cache.get(SALON_DEMANDES)
     || guild.channels.cache.find(c => c.isTextBased?.() && /demande|rendez|t[ée]l[ée]gramme/i.test(c.name))
     || null;
+}
+// Salon où atterrit la demande pour validation par l'équipe : Agenda (légal) ou Agenda illégal
+function _salonAgenda(guild, illegal) {
+  if (illegal) {
+    return guild.channels.cache.get(SALON_AGENDA_ILLEGAL)
+      || guild.channels.cache.find(c => c.isTextBased?.() && /agenda.?ill[ée]gal/i.test(c.name))
+      || guild.channels.cache.get(SALON_AGENDA)
+      || _salonDemandes(guild);
+  }
+  return guild.channels.cache.get(SALON_AGENDA)
+    || guild.channels.cache.find(c => c.isTextBased?.() && /agenda|planning/i.test(c.name))
+    || _salonDemandes(guild);
 }
 function _pingOperateur(guild) {
   const r = guild.roles.cache.find(x => OPERATEUR_ROLES.some(n => x.name.includes(n)));
@@ -391,11 +409,11 @@ async function routeInteraction(interaction) {
       rdv.notionId = await _notionCreer(rdv);
       // Dossier client
       _majDossier(store, rdv, 'total');
-      // Télégramme dans le salon des demandes
-      const salon = _salonDemandes(interaction.guild);
+      // La demande part dans l'AGENDA (légal ou illégal selon la prestation) pour validation par l'équipe
+      const salon = _salonAgenda(interaction.guild, TYPES[typeKey]?.illegal);
       if (salon) {
         const ping = _pingOperateur(interaction.guild);
-        const msg = await salon.send({ content: `${ping ? ping + ' — ' : ''}📨 **Nouveau télégramme : un client demande un rendez-vous.**`, embeds: [_embedRdv(rdv)], components: _boutonsTelegramme(rdv) }).catch(() => null);
+        const msg = await salon.send({ content: `${ping ? ping + ' — ' : ''}📨 **Nouvelle demande de rendez-vous à valider.**`, embeds: [_embedRdv(rdv)], components: _boutonsTelegramme(rdv) }).catch(() => null);
         if (msg) { rdv.channelId = salon.id; rdv.msgId = msg.id; await msg.pin().catch(() => {}); }
       }
       store.rdvs[id] = rdv; _persist(db);
