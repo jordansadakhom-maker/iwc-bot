@@ -112,11 +112,12 @@ const papiersCommands = [
   new SlashCommandBuilder().setName('ordre').setDescription('🎖️ Émettre un ordre de mission'),
   new SlashCommandBuilder().setName('carte').setDescription('🎴 Délivrer une carte de membre'),
   new SlashCommandBuilder().setName('billet').setDescription('🃏 Laisser le billet de la Confrérie'),
+  new SlashCommandBuilder().setName('wanted').setDescription('🔫 Émettre un avis de recherche (Direction)'),
   new SlashCommandBuilder().setName('code').setDescription('📖 Afficher le Code de la Confrérie').addUserOption(o => o.setName('membre').setDescription('Envoyer le Code en privé à ce membre (DM)').setRequired(false)).addBooleanOption(o => o.setName('tous').setDescription('Envoyer le Code à TOUS les membres en privé (Direction)').setRequired(false)),
   new SlashCommandBuilder().setName('papiers').setDescription('📒 Consulter les derniers papiers archivés'),
 ].map(c => c.toJSON());
 
-const NOMS = ['recu', 'dette', 'casier', 'ordre', 'carte', 'billet', 'code', 'papiers'];
+const NOMS = ['recu', 'dette', 'casier', 'ordre', 'carte', 'billet', 'code', 'wanted', 'papiers'];
 
 // ─────────────────────────── MODALS (formulaires) ──────────────────────────
 function buildModal(cmd) {
@@ -127,6 +128,16 @@ function buildModal(cmd) {
     return new ActionRowBuilder().addComponents(t);
   };
   const S = TextInputStyle.Short, P = TextInputStyle.Paragraph;
+
+  if (cmd === 'wanted') {
+    return new ModalBuilder().setCustomId('papier_modal_wanted').setTitle('🔫 Avis de recherche').addComponents(
+      ti('nom', 'Nom du recherché (personnage)', S, true, 'Ex : Cole Bishop'),
+      ti('crime', 'Chef d\'accusation / ce qu\'il a fait', P, true, 'Ex : a trahi la Confrérie et balancé deux des nôtres.', 400),
+      ti('prime', 'Prime (récompense)', S, true, 'Ex : 500$ mort · 800$ vif'),
+      ti('position', 'Dernière position connue (facultatif)', S, false, 'Ex : aperçu près de Valentine'),
+      ti('statut', 'Mort ou vif ? (facultatif)', S, false, 'Vide = MORT OU VIF'),
+    );
+  }
 
   if (cmd === 'recu') {
     return new ModalBuilder().setCustomId('papier_modal_recu').setTitle('🧾 Reçu / Quittance').addComponents(
@@ -278,28 +289,55 @@ function embedBillet(message, auteur) {
 function embedCode() {
   return new EmbedBuilder().setColor(COL.rouge).setTitle('📖 LE CODE DE LA CONFRÉRIE')
     .setDescription([
-      '*À lire et à jurer avant d\'être des nôtres.*',
+      '*Tu n\'es pas venu signer un contrat. Tu es venu jurer sur ce qui te reste d\'âme.*',
+      '*Cinq lois. Elles ne sont pas écrites pour être lues — elles sont écrites pour être tenues, jusqu\'au dernier souffle.*',
       '',
-      '**▌ I · DU SILENCE**',
-      'Ce qui se dit dans l\'ombre y reste. Une bouche cousue est la première vertu.',
+      '**▌ I · LE SILENCE**',
+      'Ce que tu vois, ce que tu entends, ce que tu fais sous notre bannière meurt avec toi. La Confrérie n\'a jamais manqué de couteaux pour les langues trop pendues.',
       '',
-      '**▌ II · DE LA LOYAUTÉ**',
-      'On ne laisse pas un frère derrière. On ne vend pas les siens. Jamais.',
+      '**▌ II · LE SANG**',
+      'Tes frères passent avant ta peur, avant ton or, avant ta peau. On ne laisse personne derrière. On ne vend personne. Celui qui trahit le sang perd son nom — il ne lui reste qu\'une prime sur la tête.',
       '',
-      '**▌ III · DU PARTAGE**',
-      'Pris aux puissants, rendu aux oubliés. Le butin se partage, l\'orgueil se tait.',
+      '**▌ III · LE PARTAGE**',
+      'Ce qu\'on arrache aux puissants revient à la table commune. Le butin se divise à parts égales ; qui cache sa part vole ses propres frères — et on connaît le prix du vol.',
       '',
-      '**▌ IV · DE LA DISCRÉTION**',
-      'Bandana relevé, tenue neutre, aucun nom sur le terrain. On ne laisse pas de trace.',
+      '**▌ IV · L\'OMBRE**',
+      'Bandana relevé, nom tu, visage oublié. On frappe, on disparaît. Un fantôme ne laisse ni trace, ni témoin, ni regret.',
       '',
-      '**▌ V · DE LA PAROLE**',
-      'La parole donnée se tient jusqu\'au bout. Qui trahit en répond.',
+      '**▌ V · LA PAROLE**',
+      'Ce que la Confrérie promet — une dette, une vengeance, une protection — la Confrérie le tient. Ta parole est la seule monnaie qui ne se dévalue jamais. Qui la brise en répond dans le sang.',
       '',
       '─────────────────────────',
       'Ici, on ne signe pas à l\'encre. On scelle le Code **dans le sang**.',
       'Si tu es prêt à jurer, **appose ta marque** ci-dessous.',
     ].join('\n'))
     .setFooter({ text: 'La Confrérie • 1899' }).setTimestamp();
+}
+
+function embedWanted({ nom, crime, prime, position, statut }) {
+  const st = (statut && statut.trim()) ? statut.trim() : 'MORT OU VIF';
+  return new EmbedBuilder().setColor(COL.sepia)
+    .setTitle('🔫  AVIS DE RECHERCHE  🔫')
+    .setDescription([
+      '```',
+      '  ★ ─────────────────────────── ★',
+      '          R E C H E R C H É',
+      `            ${st.toUpperCase()}`,
+      '  ★ ─────────────────────────── ★',
+      '```',
+      'Par ordre de **La Confrérie**, l\'individu ci-dessous est activement recherché.',
+      '*Qui le croise est prié d\'agir — ou de prévenir les nôtres. La Confrérie n\'oublie pas, et elle paie ses dettes.*',
+    ].join('\n'))
+    .addFields(
+      { name: '📛 Nom', value: `**${nom || '—'}**`, inline: false },
+      { name: '⚖️ Chef d\'accusation', value: crime || '—', inline: false },
+      { name: '💰 Prime', value: prime || '—', inline: true },
+      { name: '🩸 Statut', value: st, inline: true },
+      ...((position && position.trim()) ? [{ name: '📍 Dernière position connue', value: position, inline: false }] : []),
+      { name: '\u200b', value: '⚠️ *Considéré comme dangereux. Ne sous-estime jamais un rat acculé.*', inline: false },
+    )
+    .setFooter({ text: `La Confrérie • Avis de recherche • ${fmtDate()}` })
+    .setTimestamp();
 }
 
 // ───────────────────────────── HANDLER PRINCIPAL ───────────────────────────
@@ -311,6 +349,10 @@ async function gererInteractionPapiers(interaction) {
 
       if (!estMembre(interaction.member)) {
         return interaction.reply({ content: '🔒 Réservé aux membres de la Compagnie.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      }
+
+      if (cmd === 'wanted' && !estDirection(interaction.member)) {
+        return interaction.reply({ content: '🔒 Émettre un avis de recherche est réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {});
       }
 
       // /code → affiche le Code, ou l'envoie en DM (à un membre, ou à tous). Envoi réservé à la Direction.
@@ -399,6 +441,7 @@ async function gererInteractionPapiers(interaction) {
       else if (type === 'ordre')  { embed = embedOrdre({ operation: g('operation'), objectif: g('objectif'), assignes: g('assignes'), quand: g('quand'), consignes: g('consignes') }, auteur); label = 'Ordre de mission'; }
       else if (type === 'carte')  { embed = embedCarte({ nom: g('nom'), grade: g('grade'), entree: g('entree'), mention: g('mention') }, auteur); label = 'Carte de membre'; }
       else if (type === 'billet') { embed = embedBillet(g('message'), auteur); label = 'Billet de la Confrérie'; }
+      else if (type === 'wanted') { embed = embedWanted({ nom: g('nom'), crime: g('crime'), prime: g('prime'), position: g('position'), statut: g('statut') }); label = 'Avis de recherche'; }
       else if (type === 'dette') {
         embed = embedDette({ debiteur: g('debiteur'), creancier: g('creancier'), montant: g('montant'), echeance: g('echeance'), motif: g('motif') }, auteur);
         label = 'Reconnaissance de dette';
