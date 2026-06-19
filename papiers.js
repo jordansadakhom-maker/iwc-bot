@@ -21,7 +21,7 @@ const {
   EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
   ModalBuilder, TextInputBuilder, TextInputStyle,
   SlashCommandBuilder, MessageFlags,
-  WebhookClient, StringSelectMenuBuilder,
+  WebhookClient, StringSelectMenuBuilder, UserSelectMenuBuilder,
 } = require('discord.js');
 
 // ─────────────────────────────── CONFIG ────────────────────────────────────
@@ -67,6 +67,8 @@ const ref = (p) => `${p}-${Date.now().toString().slice(-5)}`;
 
 // Préfixe de référence par type de papier (pour le tampon + le filtre /papiers)
 const PREFIX_REF = { recu: 'REÇU', dette: 'DETTE', casier: 'FICHE', ordre: 'ORDRE', carte: 'CARTE', billet: 'BILLET', wanted: 'AVIS', code: 'CODE' };
+// Papiers qui concernent une personne précise → peuvent lui être envoyés en DM pour validation
+const ENVOYABLE = ['recu', 'dette', 'ordre', 'carte'];
 // Appose une référence unique en pied de page (sans effacer le pied existant)
 function tamponRef(embed, type) {
   const reference = ref(PREFIX_REF[type] || 'DOC');
@@ -360,6 +362,57 @@ function embedWanted({ nom, crime, prime, position, statut, image }) {
   return e;
 }
 
+// Envoie un papier en MP à une personne (membre OU n'importe quel ID Discord), avec bouton de validation
+async function envoyerPapierA(interaction, channelId, messageId, type, senderId, cibleIdRaw) {
+  const cibleId = String(cibleIdRaw || '').replace(/\D/g, '');
+  if (!/^\d{15,21}$/.test(cibleId)) {
+    return interaction.editReply({ content: '⚠️ ID Discord invalide. Donne un ID numérique (Mode développeur → clic droit sur le profil → « Copier l\'identifiant »).' }).catch(() => {});
+  }
+  // Récupère le papier d'origine
+  let embedJSON = null;
+  try {
+    const ch = await interaction.client.channels.fetch(channelId);
+    const msg = await ch.messages.fetch(messageId);
+    if (msg.embeds?.[0]) embedJSON = EmbedBuilder.from(msg.embeds[0]).toJSON();
+  } catch { /* ignore */ }
+  if (!embedJSON) return interaction.editReply({ content: '⚠️ Document introuvable (message supprimé ?).' }).catch(() => {});
+
+  // Bouton de validation pour le destinataire
+  const labelValide = type === 'dette' ? '✍️ Signer la dette' : '✅ Confirmer la réception';
+  const btn = new ButtonBuilder().setCustomId(`papier_valider:${channelId}:${messageId}:${type}:${senderId}`).setLabel(labelValide).setStyle(ButtonStyle.Success);
+
+  let user;
+  try { user = await interaction.client.users.fetch(cibleId); }
+  catch { return interaction.editReply({ content: `⚠️ Aucun utilisateur Discord trouvé avec l'ID \`${cibleId}\`.` }).catch(() => {}); }
+  const nomCible = user.username || cibleId;
+
+  try {
+    await user.send({
+      content: '📨 **La Confrérie t\'a transmis un document.** Lis-le, puis valide-le ci-dessous.',
+      embeds: [embedJSON],
+      components: [new ActionRowBuilder().addComponents(btn)],
+    });
+  } catch {
+    return interaction.editReply({ content: `⚠️ Impossible d'envoyer un MP à **${nomCible}**. Il faut qu'il partage au moins un serveur avec le bot et que ses messages privés soient ouverts.` }).catch(() => {});
+  }
+
+  // Marque le papier d'origine « en attente de validation »
+  try {
+    const ch = await interaction.client.channels.fetch(channelId);
+    const msg = await ch.messages.fetch(messageId);
+    const base = msg.embeds?.[0];
+    if (base) {
+      const e = EmbedBuilder.from(base);
+      const fields = (base.fields || []).filter(f => !f.name.includes('Transmission') && !f.name.includes('Validation'));
+      fields.push({ name: '📨 Transmission', value: `Envoyé à **${nomCible}** le ${fmtDate()} — *en attente de validation*`, inline: false });
+      e.setFields(fields);
+      await msg.edit({ embeds: [e] }).catch(() => {});
+    }
+  } catch { /* ignore */ }
+
+  return interaction.editReply({ content: `✅ Document envoyé en MP à **${nomCible}**. Tu seras notifié dans le salon dès qu'il l'aura validé.` }).catch(() => {});
+}
+
 // ───────────────────────────── HANDLER PRINCIPAL ───────────────────────────
 async function gererInteractionPapiers(interaction) {
   try {
@@ -501,10 +554,14 @@ async function gererInteractionPapiers(interaction) {
         embed = embedDette({ debiteur: g('debiteur'), creancier: g('creancier'), montant: g('montant'), echeance: g('echeance'), motif: g('motif') }, auteur);
         label = 'Reconnaissance de dette';
         tamponRef(embed, 'dette');
-        const signer = new ButtonBuilder().setCustomId('papier_dette_signer').setLabel('✍️ Signer la dette').setStyle(ButtonStyle.Success);
-        const solder = new ButtonBuilder().setCustomId('papier_dette_solder').setLabel('💰 Marquer soldée').setStyle(ButtonStyle.Secondary);
-        const revoq  = new ButtonBuilder().setCustomId('papier_revoquer').setLabel('🚫 Révoquer').setStyle(ButtonStyle.Secondary);
-        await interaction.editReply({ embeds: [embed], components: rowsAvecTransmit(signer, solder, revoq) }).catch(() => {});
+        const signer  = new ButtonBuilder().setCustomId('papier_dette_signer').setLabel('✍️ Signer la dette').setStyle(ButtonStyle.Success);
+        const solder  = new ButtonBuilder().setCustomId('papier_dette_solder').setLabel('💰 Marquer soldée').setStyle(ButtonStyle.Secondary);
+        const revoq   = new ButtonBuilder().setCustomId('papier_revoquer').setLabel('🚫 Révoquer').setStyle(ButtonStyle.Secondary);
+        const envoyer = new ButtonBuilder().setCustomId('papier_envoyer:dette').setLabel('📨 Envoyer au débiteur').setStyle(ButtonStyle.Primary);
+        const dRow1 = new ActionRowBuilder().addComponents(signer, solder, revoq);
+        const dRow2cmps = [envoyer]; const dT = boutonTransmettre(); if (dT) dRow2cmps.push(dT);
+        const dRow2 = new ActionRowBuilder().addComponents(...dRow2cmps);
+        await interaction.editReply({ embeds: [embed], components: [dRow1, dRow2] }).catch(() => {});
         await archiver(interaction.client, embed, label, auteur);
         return;
       }
@@ -516,8 +573,9 @@ async function gererInteractionPapiers(interaction) {
         const closeBtn = new ButtonBuilder().setCustomId('papier_wanted_close').setLabel('💀 Capturé / Abattu').setStyle(ButtonStyle.Danger);
         comps = rowsAvecTransmit(closeBtn);
       } else {
-        const revoq = new ButtonBuilder().setCustomId('papier_revoquer').setLabel('🚫 Révoquer').setStyle(ButtonStyle.Secondary);
-        comps = rowsAvecTransmit(revoq);
+        const extras = [new ButtonBuilder().setCustomId('papier_revoquer').setLabel('🚫 Révoquer').setStyle(ButtonStyle.Secondary)];
+        if (ENVOYABLE.includes(type)) extras.unshift(new ButtonBuilder().setCustomId(`papier_envoyer:${type}`).setLabel('📨 Envoyer à une personne').setStyle(ButtonStyle.Primary));
+        comps = rowsAvecTransmit(...extras);
       }
       const postOpts = { embeds: [embed], components: comps };
       if (type === 'wanted') {
@@ -545,7 +603,11 @@ async function gererInteractionPapiers(interaction) {
       e.setFields(fields);
       const solder = new ButtonBuilder().setCustomId('papier_dette_solder').setLabel('💰 Marquer soldée').setStyle(ButtonStyle.Secondary);
       const revoq  = new ButtonBuilder().setCustomId('papier_revoquer').setLabel('🚫 Révoquer').setStyle(ButtonStyle.Secondary);
-      return interaction.update({ embeds: [e], components: rowsAvecTransmit(solder, revoq) }).catch(() => {});
+      const envoyer = new ButtonBuilder().setCustomId('papier_envoyer:dette').setLabel('📨 Envoyer au débiteur').setStyle(ButtonStyle.Primary);
+      const sRow1 = new ActionRowBuilder().addComponents(solder, revoq);
+      const sRow2cmps = [envoyer]; const sT = boutonTransmettre(); if (sT) sRow2cmps.push(sT);
+      const sRow2 = new ActionRowBuilder().addComponents(...sRow2cmps);
+      return interaction.update({ embeds: [e], components: [sRow1, sRow2] }).catch(() => {});
     }
 
     // Clôturer un avis de recherche → demande qui l'a eu, puis marque CAPTURÉ / ABATTU (Direction)
@@ -607,6 +669,78 @@ async function gererInteractionPapiers(interaction) {
         .setTitle(`💰 [SOLDÉE] ${titre}`)
         .addFields({ name: '💰 Règlement', value: `Dette **soldée** — confirmée par **${par}** le ${fmtDate()} à ${fmtHeure()}.`, inline: false });
       return interaction.update({ embeds: [e], components: [] }).catch(() => {});
+    }
+
+    // ── Envoyer un papier à une personne (MP) + validation ──
+    // 1) Bouton « Envoyer » → propose un membre OU la saisie d'un ID Discord
+    if (interaction.isButton?.() && interaction.customId?.startsWith('papier_envoyer:')) {
+      const type = interaction.customId.split(':')[1] || 'doc';
+      const refData = `${interaction.channelId}:${interaction.message.id}:${type}:${interaction.user.id}`;
+      const sel = new UserSelectMenuBuilder().setCustomId(`papier_envoyer_go:${refData}`).setPlaceholder('Choisir un membre du serveur…').setMinValues(1).setMaxValues(1);
+      const idBtn = new ButtonBuilder().setCustomId(`papier_envoyer_id:${refData}`).setLabel('🔢 Entrer un ID Discord (hors serveur)').setStyle(ButtonStyle.Secondary);
+      return interaction.reply({
+        content: '📨 À qui envoyer ce document ? Choisis un **membre**, ou entre un **ID Discord** pour quelqu\'un hors du serveur. Il devra **valider** la réception.',
+        components: [new ActionRowBuilder().addComponents(sel), new ActionRowBuilder().addComponents(idBtn)],
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+    }
+
+    // 2a) Sélection d'un membre → envoi
+    if (interaction.isUserSelectMenu?.() && interaction.customId?.startsWith('papier_envoyer_go:')) {
+      await interaction.update({ content: '📨 Envoi en cours…', components: [] }).catch(() => {});
+      const [, channelId, messageId, type, senderId] = interaction.customId.split(':');
+      return envoyerPapierA(interaction, channelId, messageId, type, senderId, interaction.values[0]);
+    }
+
+    // 2b) Bouton « Entrer un ID » → formulaire ID
+    if (interaction.isButton?.() && interaction.customId?.startsWith('papier_envoyer_id:')) {
+      const rest = interaction.customId.slice('papier_envoyer_id:'.length);
+      const modal = new ModalBuilder().setCustomId(`papier_envoyer_idgo:${rest}`).setTitle('📨 Envoyer par ID Discord')
+        .addComponents(new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId('cibleid').setLabel('ID Discord du destinataire').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(25).setPlaceholder('Ex : 123456789012345678'),
+        ));
+      return interaction.showModal(modal).catch(() => {});
+    }
+
+    // 2c) Soumission de l'ID → envoi
+    if (interaction.isModalSubmit?.() && interaction.customId?.startsWith('papier_envoyer_idgo:')) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const [, channelId, messageId, type, senderId] = interaction.customId.split(':');
+      const cibleId = (interaction.fields.getTextInputValue('cibleid') || '').trim();
+      return envoyerPapierA(interaction, channelId, messageId, type, senderId, cibleId);
+    }
+
+    // 3) Le destinataire valide en MP → met à jour le papier d'origine + prévient l'expéditeur
+    if (interaction.isButton?.() && interaction.customId?.startsWith('papier_valider:')) {
+      const [, channelId, messageId, type, senderId] = interaction.customId.split(':');
+      await interaction.update({ content: '✅ **Document validé.** Merci — c\'est transmis à La Confrérie.', components: [] }).catch(() => {});
+      try {
+        const ch = await interaction.client.channels.fetch(channelId);
+        const msg = await ch.messages.fetch(messageId);
+        const base = msg.embeds?.[0];
+        let nom = interaction.user.username;
+        try { const mem = await ch.guild.members.fetch(interaction.user.id); nom = mem.displayName; } catch { /* hors serveur */ }
+        if (base) {
+          const e = EmbedBuilder.from(base);
+          if (type === 'dette') {
+            e.setColor(COL.vert);
+            let hasSig = false;
+            let fields = (base.fields || []).filter(f => !f.name.includes('Transmission'))
+              .map(f => f.name.includes('Signature') ? (hasSig = true, { name: '🖋️ Signature', value: `✅ Signé par **${nom}** (par MP) le ${fmtDate()} à ${fmtHeure()}`, inline: false }) : f);
+            if (!hasSig) fields.push({ name: '✅ Validation', value: `Reçu et validé par **${nom}** le ${fmtDate()} à ${fmtHeure()}`, inline: false });
+            e.setFields(fields);
+          } else {
+            const fields = (base.fields || []).filter(f => !f.name.includes('Transmission') && !f.name.includes('Validation'));
+            fields.push({ name: '✅ Validation', value: `Document reçu et validé par **${nom}** le ${fmtDate()} à ${fmtHeure()}`, inline: false });
+            e.setFields(fields);
+          }
+          await msg.edit({ embeds: [e] }).catch(() => {});
+        }
+        if (senderId && /^\d{15,21}$/.test(senderId)) {
+          await ch.send({ content: `✅ <@${senderId}> — **${nom}** a validé le document que tu lui as envoyé.`, allowedMentions: { users: [senderId] } }).catch(() => {});
+        }
+      } catch { /* ignore */ }
+      return;
     }
 
     if (interaction.isButton?.() && interaction.customId === 'papier_code_jurer') {
