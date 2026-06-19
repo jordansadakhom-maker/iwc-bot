@@ -43,6 +43,10 @@ let operations = {};
 try { operations = require('./operations'); console.log('✅ Module opérations chargé'); }
 catch (e) { console.log('⚠️ operations non chargé:', e.message); }
 
+let telegramme = {};
+try { telegramme = require('./telegramme'); console.log('✅ Module télégrammes (conversations) chargé'); }
+catch (e) { console.log('⚠️ telegramme non chargé:', e.message); }
+
 process.on('unhandledRejection', (reason, promise) => {
   console.log('⚠️ Unhandled Rejection:', reason?.message || reason);
   if (reason?.stack) console.log(reason.stack.split('\n').slice(0,5).join('\n'));
@@ -1866,6 +1870,8 @@ Si la transcription est incompréhensible ou vide, mets resume="(inaudible)".`;
 }
 
 client.on('messageCreate', async message => {
+  // Conversations sur télégrammes : relais MP ↔ fil (avant tout le reste)
+  try { if (await telegramme.onMessage?.(message)) return; } catch {}
   // ── Note du micro de terrain → réaction 📜 (contrat) + RÉSUMÉ automatique ──
   if (message.webhookId && (message.embeds?.[0]?.title || '').includes('Rapport de terrain')) {
     try { await message.react('📜'); } catch (e) { console.log('⚠️ Réaction note:', e.message); }
@@ -2370,6 +2376,7 @@ client.on('interactionCreate', async interaction => {
   const guild = interaction.guild; const db = loadDB();
   if (await contratsConf.routeInteraction?.(interaction)) return;
   if (await operations.routeInteraction?.(interaction)) return;
+  if (await telegramme.routeInteraction?.(interaction)) return;
   if (await securite.routeInteraction?.(interaction)) return;
   if (await rdvplus.routeInteraction?.(interaction)) return;
 
@@ -3017,6 +3024,8 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
       }).catch(() => null);
       // Épingler le télégramme en attente (tâche à traiter)
       if (msgTele) await msgTele.pin().catch(() => {});
+      // Ouvrir une conversation suivie (fil + relais MP) sur ce télégramme
+      if (msgTele) { try { await telegramme.ouvrirConversation?.(msgTele, { rdvId, demandeurId: interaction.user.id, nomRP: nom }); } catch {} }
     }
     return interaction.editReply({ content: '✅ Votre télégramme a bien été transmis à la Direction. Vous recevrez une réponse prochainement.' });
   }
