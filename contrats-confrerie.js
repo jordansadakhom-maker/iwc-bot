@@ -369,9 +369,8 @@ async function onAccept(interaction) {
   c.status = 'actif';
   c.acceptedAt = new Date().toISOString();
   c.acceptePar = db.members?.[interaction.user.id]?.name || interaction.user.username;
-  saveDB(db); _persistNow();
-  syncNotion(c, '🟢 En cours');
-  await interaction.update({ embeds: [buildContratEmbed(c)], components: buildContratButtons(c) });
+  await interaction.update({ embeds: [buildContratEmbed(c)], components: buildContratButtons(c) }); // accusé de réception d'abord
+  saveDB(db); _persistNow(); syncNotion(c, '🟢 En cours');                                          // puis travail lent
   const jc = journalCh(interaction.guild);
   if (jc) await jc.send({ embeds: [new EmbedBuilder().setColor(0x2ECC71).setTitle(`🟢 Contrat validé — ${c.id}`).setDescription(`**${c.typeMission}** · validé par ${c.acceptePar}`).setFooter({ text: 'La Confrérie • Contrats' }).setTimestamp()] }).catch(() => {});
 }
@@ -383,9 +382,8 @@ async function onRefuse(interaction) {
   if (!c || c.status !== 'propose') return interaction.reply({ content: '❌ Contrat introuvable ou déjà traité.', flags: MessageFlags.Ephemeral });
   c.status = 'refuse';
   c.closedAt = new Date().toISOString();
-  saveDB(db); _persistNow();
-  syncNotion(c, '⛔ Refusé');
-  await interaction.update({ embeds: [buildContratEmbed(c)], components: [] });
+  await interaction.update({ embeds: [buildContratEmbed(c)], components: [] }); // accusé de réception d'abord
+  saveDB(db); _persistNow(); syncNotion(c, '⛔ Refusé');
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -412,8 +410,8 @@ async function onAssignGo(interaction) {
   c.agents = Array.from(new Set([...(c.agents || []), ...interaction.values]));
   if (!c.agentsStatus) c.agentsStatus = {};
   for (const uid of c.agents) { if (!c.agentsStatus[uid]) c.agentsStatus[uid] = 'attente'; }
+  await interaction.update({ content: `✅ ${interaction.values.length} agent(s) assigné(s) au contrat **${id}**. Briefings envoyés — ils doivent **accepter ou refuser**.`, components: [] }); // accusé de réception d'abord
   saveDB(db); _persistNow();
-  await interaction.update({ content: `✅ ${interaction.values.length} agent(s) assigné(s) au contrat **${id}**. Briefings envoyés — ils doivent **accepter ou refuser**.`, components: [] });
   await envoyerBriefings(interaction.guild, c);
   await rafraichirFiche(interaction.guild, c);
   const jc = journalCh(interaction.guild);
@@ -466,9 +464,8 @@ async function cloturer(interaction, succes) {
   c.status = succes ? 'reussie' : 'echouee';
   c.closedAt = new Date().toISOString();
   c.clôturePar = db.members?.[interaction.user.id]?.name || interaction.user.username;
-  saveDB(db); _persistNow();
-  syncNotion(c, succes ? '✅ Réussie' : '💀 Échouée');
-  await interaction.update({ embeds: [buildContratEmbed(c)], components: [] });
+  await interaction.update({ embeds: [buildContratEmbed(c)], components: [] }); // accusé de réception d'abord
+  saveDB(db); _persistNow(); syncNotion(c, succes ? '✅ Réussie' : '💀 Échouée');
   await archiver(interaction.guild, c);
   const jc = journalCh(interaction.guild);
   if (jc) await jc.send({ embeds: [new EmbedBuilder().setColor(succes ? 0x57F287 : 0xED4245).setTitle(`${succes ? '✅' : '💀'} Contrat ${succes ? 'réussi' : 'échoué'} — ${c.id}`).setDescription(`**${c.typeMission}** · clôturé par ${c.clôturePar}`).setFooter({ text: 'La Confrérie • Contrats' }).setTimestamp()] }).catch(() => {});
@@ -565,6 +562,9 @@ async function routeInteraction(interaction) {
       if (interaction.customId.startsWith('cc_modal::')) { await onModalSubmit(interaction); return true; }
     }
   } catch (e) {
+    // Erreurs « bénignes » : clic arrivé trop tard pour la fenêtre de 3 s de Discord (10062),
+    // message disparu (10008), ou interaction déjà traitée (40060) → on ignore : rien n'a cassé.
+    if ([10062, 10008, 40060].includes(e?.code)) return true;
     console.log('❌ contrats-confrerie routeInteraction error:', e.message);
     try { if (interaction.isRepliable?.() && !interaction.replied && !interaction.deferred) await interaction.reply({ content: '❌ Une erreur est survenue.', flags: MessageFlags.Ephemeral }); } catch {}
     return true;
