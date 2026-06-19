@@ -20,7 +20,7 @@
 const {
   EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
   ModalBuilder, TextInputBuilder, TextInputStyle,
-  SlashCommandBuilder, MessageFlags,
+  SlashCommandBuilder, MessageFlags, AttachmentBuilder,
   WebhookClient, StringSelectMenuBuilder, UserSelectMenuBuilder,
 } = require('discord.js');
 
@@ -156,7 +156,7 @@ function buildModal(cmd) {
       ti('crime', 'Chef d\'accusation / ce qu\'il a fait', P, true, 'Ex : a trahi la Confrérie et balancé deux des nôtres.', 400),
       ti('prime', 'Prime (récompense)', S, true, 'Ex : 500$ mort · 800$ vif'),
       ti('position', 'Dernière position connue (facultatif)', S, false, 'Ex : aperçu près de Valentine'),
-      ti('image', 'Portrait — lien image (facultatif)', S, false, 'https://… (jpg/png)'),
+      ti('image', 'Portrait — lien image (sinon photo après)', S, false, 'https://…  ou laisse vide : bouton « 📎 photo » après'),
     );
   }
 
@@ -586,7 +586,14 @@ async function gererInteractionPapiers(interaction) {
         }
       }
       await interaction.editReply(postOpts).catch(() => {});
-      if (type === 'wanted') { try { const m = await interaction.fetchReply(); await m.pin().catch(() => {}); } catch {} }
+      if (type === 'wanted') {
+        try {
+          const m = await interaction.fetchReply();
+          await m.pin().catch(() => {});
+          const photoBtn = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`papier_wanted_photo::${m.channelId}::${m.id}`).setLabel('📎 Ajouter une photo du recherché').setStyle(ButtonStyle.Secondary));
+          await interaction.followUp({ content: '📎 *Facultatif : tu peux joindre une photo du recherché (en pièce jointe).*', components: [photoBtn], flags: MessageFlags.Ephemeral }).catch(() => {});
+        } catch {}
+      }
       await archiver(interaction.client, embed, label, auteur);
       return;
     }
@@ -608,6 +615,35 @@ async function gererInteractionPapiers(interaction) {
       const sRow2cmps = [envoyer]; const sT = boutonTransmettre(); if (sT) sRow2cmps.push(sT);
       const sRow2 = new ActionRowBuilder().addComponents(...sRow2cmps);
       return interaction.update({ embeds: [e], components: [sRow1, sRow2] }).catch(() => {});
+    }
+
+    // Ajouter une photo au recherché EN PIÈCE JOINTE : on attend la prochaine image postée par la Direction
+    if (interaction.isButton?.() && interaction.customId?.startsWith('papier_wanted_photo::')) {
+      if (!estDirection(interaction.member)) return interaction.reply({ content: '🔒 Seule la Direction peut ajouter une photo.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      const [, channelId, messageId] = interaction.customId.split('::');
+      await interaction.reply({ content: '📎 **Envoie maintenant la photo** (en pièce jointe) ici même, dans ce salon. Tu as 2 minutes — ton message sera nettoyé automatiquement après.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      const ch = interaction.channel;
+      if (!ch || typeof ch.createMessageCollector !== 'function') { await interaction.followUp({ content: '⚠️ Impossible d\'attendre une photo dans ce salon.', flags: MessageFlags.Ephemeral }).catch(() => {}); return; }
+      const collector = ch.createMessageCollector({ filter: (m) => m.author.id === interaction.user.id && m.attachments.size > 0, time: 120000, max: 1 });
+      collector.on('collect', async (m) => {
+        try {
+          const att = m.attachments.first();
+          const estImage = (att?.contentType || '').startsWith('image/') || /\.(png|jpe?g|gif|webp)(\?|$)/i.test(att?.url || '');
+          if (!att || !estImage) { await interaction.followUp({ content: '⚠️ Ce n\'est pas une image — réessaie avec une photo.', flags: MessageFlags.Ephemeral }).catch(() => {}); await m.delete().catch(() => {}); return; }
+          const tch = await interaction.client.channels.fetch(channelId).catch(() => null);
+          const tmsg = tch && await tch.messages.fetch(messageId).catch(() => null);
+          if (!tmsg) { await interaction.followUp({ content: '⚠️ Avis introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return; }
+          const base = tmsg.embeds?.[0];
+          const e = base ? EmbedBuilder.from(base).setImage('attachment://wanted.png') : null;
+          if (e) await tmsg.edit({ embeds: [e], files: [new AttachmentBuilder(att.url, { name: 'wanted.png' })] }).catch(() => {});
+          await m.delete().catch(() => {});
+          await interaction.followUp({ content: '✅ Photo ajoutée à l\'avis de recherche.', flags: MessageFlags.Ephemeral }).catch(() => {});
+        } catch {}
+      });
+      collector.on('end', async (collected) => {
+        if (collected.size === 0) { await interaction.followUp({ content: '⏱️ Temps écoulé — aucune photo reçue. Tu pourras réessayer.', flags: MessageFlags.Ephemeral }).catch(() => {}); }
+      });
+      return;
     }
 
     // Clôturer un avis de recherche → demande qui l'a eu, puis marque CAPTURÉ / ABATTU (Direction)
