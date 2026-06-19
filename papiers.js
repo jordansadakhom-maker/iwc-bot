@@ -296,7 +296,8 @@ function embedCode() {
       'La parole donnée se tient jusqu\'au bout. Qui trahit en répond.',
       '',
       '─────────────────────────',
-      'Si tu jures sur l\'honneur de respecter ce Code, clique ci-dessous.',
+      'Ici, on ne signe pas à l\'encre. On scelle le Code **dans le sang**.',
+      'Si tu es prêt à jurer, **appose ta marque** ci-dessous.',
     ].join('\n'))
     .setFooter({ text: 'La Confrérie • 1899' }).setTimestamp();
 }
@@ -315,7 +316,7 @@ async function gererInteractionPapiers(interaction) {
       // /code → affiche le Code, ou l'envoie en DM (à un membre, ou à tous). Envoi réservé à la Direction.
       if (cmd === 'code') {
         const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('papier_code_jurer').setLabel('🤝 Je jure sur l\'honneur').setStyle(ButtonStyle.Success),
+          new ButtonBuilder().setCustomId('papier_code_jurer').setLabel('🩸 Apposer ma marque de sang').setStyle(ButtonStyle.Danger),
         );
         const cible = interaction.options.getUser?.('membre');
         const tous  = interaction.options.getBoolean?.('tous');
@@ -427,12 +428,35 @@ async function gererInteractionPapiers(interaction) {
     }
 
     if (interaction.isButton?.() && interaction.customId === 'papier_code_jurer') {
-      const jureur = interaction.member?.displayName || interaction.user.username;
-      const e = new EmbedBuilder().setColor(COL.vert).setTitle('🤝 Serment prêté')
-        .setDescription(`**${jureur}** a juré sur l'honneur de respecter le Code de la Confrérie.`)
-        .setFooter({ text: `La Confrérie • ${fmtDate()} à ${fmtHeure()}` }).setTimestamp();
-      await archiver(interaction.client, e, 'Serment (Code)', jureur);
-      return interaction.reply({ content: '🤝 Ton serment est enregistré. Bienvenue parmi les nôtres.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      const modal = new ModalBuilder().setCustomId('papier_code_serment').setTitle('🩸 Sceller le serment dans le sang')
+        .addComponents(
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nomrp').setLabel('Nom & prénom de ton personnage').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setPlaceholder('Ex : Jonas Caverly')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('mots').setLabel('Tes mots, pour sceller le pacte (facultatif)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setPlaceholder('Sur mon sang, je jure de garder le silence et de ne jamais trahir les miens.')),
+        );
+      return interaction.showModal(modal).catch(() => {});
+    }
+
+    if (interaction.isModalSubmit?.() && interaction.customId === 'papier_code_serment') {
+      const nomRP = (interaction.fields.getTextInputValue('nomrp') || '').trim() || (interaction.member?.displayName || interaction.user.username);
+      const mots  = (interaction.fields.getTextInputValue('mots') || '').trim();
+      const serment = mots ? `*« ${mots} »*` : '*« Sur mon honneur et sur mon sang, je jure de respecter le Code. »*';
+      const e = new EmbedBuilder().setColor(0x6B0000).setTitle('🩸 SERMENT SCELLÉ DANS LE SANG')
+        .setDescription([
+          '*La lame a mordu la paume. Une goutte de sang, puis le nom — apposé sous le Code.*',
+          '*Ce qui se jure dans le sang ne se reprend jamais.*',
+          '',
+          '🩸 ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ 🩸',
+        ].join('\n'))
+        .addFields(
+          { name: '🖋️ Marque de sang', value: `\`\`\`\n${nomRP}\n\`\`\``, inline: false },
+          { name: '🗝️ Serment prêté', value: serment, inline: false },
+          { name: '📅 Scellé le', value: `${fmtDate()} à ${fmtHeure()}`, inline: false },
+        )
+        .setFooter({ text: 'La Confrérie • Scellé dans le sang' }).setTimestamp();
+      await archiver(interaction.client, e, 'Serment scellé (Code)', nomRP);
+      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x6B0000).setTitle('🩸 Ton sang scelle ta parole')
+        .setDescription(`**${nomRP}**, ta marque est apposée sous le Code.\n\nTu es désormais des nôtres. Que le silence te garde, et que le sang te lie.\n\n— La Confrérie`)
+        .setFooter({ text: 'La Confrérie' })], flags: MessageFlags.Ephemeral }).catch(() => {});
     }
 
     // Bouton « Transmettre à un allié » → propose la liste des serveurs alliés
