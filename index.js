@@ -39,6 +39,10 @@ let notionV5 = {};
 try { notionV5 = require('./notion-modules-v5'); console.log('✅ Module notion-modules-v5 chargé'); }
 catch (e) { console.log('⚠️ notion-modules-v5 non chargé:', e.message); }
 
+let operations = {};
+try { operations = require('./operations'); console.log('✅ Module opérations chargé'); }
+catch (e) { console.log('⚠️ operations non chargé:', e.message); }
+
 process.on('unhandledRejection', (reason, promise) => {
   console.log('⚠️ Unhandled Rejection:', reason?.message || reason);
   if (reason?.stack) console.log(reason.stack.split('\n').slice(0,5).join('\n'));
@@ -63,6 +67,14 @@ const client = new Client({
 });
 initPapiers(client);
 securite.initSecurite(client);
+operations.init?.({
+  creerOperationNotion: (op) => notionExtra.creerOperationNotion?.(op),
+  poleRoleId: (guild, pole) => _poleRoleId(guild, pole),
+  journalHook: async (guild, op) => {
+    try { await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: '🟡 En préparation' }); } catch {}
+    try { await ajouterJournalIC(guild, { type: 'operation', titre: `Nouvelle opération — ${op.name}`, description: `📍 ${op.lieu} · Objectif : ${op.objectif} · Pôle : ${op.pole === 'legal' ? '⚖️ Légal' : '🔪 Illégal'}`, auteur: 'Commandement' }); } catch {}
+  },
+});
 
 const {
   CH, PARTICIPANTS_MAP, CONTRAT_ROLES, JUNE_MCCALL_ID,
@@ -100,6 +112,7 @@ const SALON_HARDCODED = {
   JOURNAL_DE_BORD:      '1508756535407542372',
   CONTRATS:             '1508756442730074222',
   CONTRATS_REPONSES:    '1509340674779254876',
+  OPERATIONS:           '1508756486892027904',
   COFFRE_ENTREPRISE:    '1508756453354373202',
   COFFRE_ILLEGAL:       '1508756490432024636',
   ABSENCES:             '1509718164760563743',
@@ -390,7 +403,7 @@ const SLASH_COMMANDS = [
 ].map(c => c.toJSON());
 
 async function registerSlashCommands(guild) {
-  try { await guild.commands.set([...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || [])]); console.log('✅ Slash commands enregistrées (+ papiers + sécurité + rdv+)'); }
+  try { await guild.commands.set([...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || []), ...(operations.operationsCommands || [])]); console.log('✅ Slash commands enregistrées (+ papiers + sécurité + rdv+ + opérations)'); }
   catch (e) { console.log('❌ Slash commands error:', e.message); }
 }
 
@@ -1431,6 +1444,18 @@ async function autoSetup(guild) {
       if (!dejaConf && typeof contratsConf.postPanel === 'function') await contratsConf.postPanel(contratsCh).catch(() => {});
     } catch (e) { console.log('⚠️ auto-post panneau Confrérie:', e.message); }
   }
+
+  // Panneau « 🎯 CENTRE DES OPÉRATIONS » (module operations) — permanent, posté seulement s'il manque
+  try {
+    const opsCh = guild.channels.cache.get(SALON_HARDCODED.OPERATIONS)
+      || getChById(guild, 'OPERATIONS', 'operations', 'operations-en-cours');
+    if (opsCh && typeof operations.postPanel === 'function') {
+      const msgsOps = await opsCh.messages.fetch({ limit: 20 });
+      const dejaOps = msgsOps.find(m => m.author.id === client.user.id && (m.embeds[0]?.title || '').includes('CENTRE DES OPÉRATIONS'));
+      if (!dejaOps) await operations.postPanel(opsCh).catch(() => {});
+    }
+  } catch (e) { console.log('⚠️ auto-post panneau opérations:', e.message); }
+
   console.log('✅ Auto-setup terminé\n');
 }
 
@@ -2253,7 +2278,7 @@ client.on('messageCreate', async message => {
   }
 
   const opsCh = getChById(guild, 'OPERATIONS', 'operations-en-cours', 'operations');
-  if (opsCh && message.channel.id === opsCh.id && isDirection(message.member)) {
+  if (opsCh && !message.author.bot && message.channel.id === opsCh.id && isDirection(message.member)) {
     if (message.content.toUpperCase().includes('OPÉRATION') || message.content.toUpperCase().includes('OPERATION')) {
       const lines = message.content.split('\n'); const get = k => { const l = lines.find(l => l.toUpperCase().includes(k.toUpperCase())); return l ? l.split(':').slice(1).join(':').trim() || '—' : '—'; };
       const poleRaw = get('PÔLE') !== '—' ? get('PÔLE') : get('POLE'); const pole = poleRaw.toLowerCase().includes('lég') || poleRaw.toLowerCase().includes('leg') ? 'legal' : 'illegal';
@@ -2344,6 +2369,7 @@ async function _archiverPlanNotion(message) {
 client.on('interactionCreate', async interaction => {
   const guild = interaction.guild; const db = loadDB();
   if (await contratsConf.routeInteraction?.(interaction)) return;
+  if (await operations.routeInteraction?.(interaction)) return;
   if (await securite.routeInteraction?.(interaction)) return;
   if (await rdvplus.routeInteraction?.(interaction)) return;
 
