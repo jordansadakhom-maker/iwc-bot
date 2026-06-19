@@ -1409,13 +1409,13 @@ async function autoSetup(guild) {
   if (contratsCh) {
     const msgs = await contratsCh.messages.fetch({ limit: 20 });
     for (const [, m] of msgs) {
-      if (m.author.id === client.user.id && m.embeds[0]?.title?.includes('CONTRATS')) {
+      if (m.author.id === client.user.id && m.embeds[0]?.title?.includes('IRON WOLF COMPANY — CONTRATS')) {
         const hasRdvBtn = m.components?.[0]?.components?.some(c => c.customId === 'btn_rdv_creer_contrat_panel');
         if (!hasRdvBtn) await m.delete().catch(() => {});
       }
     }
     const msgs2 = await contratsCh.messages.fetch({ limit: 10 });
-    if (!msgs2.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('CONTRATS'))) {
+    if (!msgs2.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('IRON WOLF COMPANY — CONTRATS'))) {
       const embed = new EmbedBuilder().setColor(0x2C3E50).setTitle('📜 IRON WOLF COMPANY — CONTRATS').setDescription('*Tout accord entre la Compagnie et ses partenaires doit être formalisé.*\n*Un contrat signé engage les deux parties sans exception.*').addFields({ name: '📤 Envoyer nos conditions', value: '→ Tu envoies tes tarifs & conditions à un client\n→ Le client signe → tu reçois la notification' }, { name: '📥 Signer un contrat employeur', value: '→ Une entreprise vous engage\n→ Tu rentres ses infos & ses conditions\n→ Tu signes → ils reçoivent la notification' }).setFooter({ text: 'Iron Wolf Company • Secrétariat officiel' });
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('open_contrat_offre').setLabel('📤 Envoyer nos conditions').setStyle(ButtonStyle.Primary),
@@ -1424,6 +1424,12 @@ async function autoSetup(guild) {
       );
       await contratsCh.send({ embeds: [embed], components: [row] });
     }
+    // Panneau « 🐺 CONTRATS — LA CONFRÉRIE » (module contrats-confrerie) — permanent, posté seulement s'il manque
+    try {
+      const msgs3 = await contratsCh.messages.fetch({ limit: 20 });
+      const dejaConf = msgs3.find(m => m.author.id === client.user.id && (m.embeds[0]?.title || '').includes('CONTRATS — LA CONFRÉRIE'));
+      if (!dejaConf && typeof contratsConf.postPanel === 'function') await contratsConf.postPanel(contratsCh).catch(() => {});
+    } catch (e) { console.log('⚠️ auto-post panneau Confrérie:', e.message); }
   }
   console.log('✅ Auto-setup terminé\n');
 }
