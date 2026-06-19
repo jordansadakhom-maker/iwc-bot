@@ -1233,6 +1233,54 @@ async function _cleanTransactionMessages(guild, channelName) {
   } catch (e) { console.log('❌ _cleanTransactionMessages error:', e.message); }
 }
 
+const GUIDE_PAPIERS_CHUNKS = [
+  `# 📒 LES PAPIERS — GUIDE DES COMMANDES
+*Tous les documents officiels de La Confrérie. Chaque papier reçoit une référence unique et est archivé automatiquement au registre.*
+
+## ✍️ Créer un document
+Chaque commande ci-dessous ouvre un **formulaire** à remplir ; le document est ensuite posté, mis en page proprement, puis archivé.
+
+**\`/recu\`** 🧾 — un reçu / une quittance (preuve de paiement ou de remise).
+**\`/dette\`** 📜 — une reconnaissance de dette (signable et soldable).
+**\`/casier\`** 🗂️ — une fiche sur un membre ou sur une cible.
+**\`/ordre\`** 🎖️ — un ordre de mission destiné à des agents.
+**\`/carte\`** 🎴 — une carte de membre officielle.
+**\`/billet\`** 🃏 — le billet de La Confrérie, laissé après un coup.`,
+  `## 🩸 Le Code
+**\`/code\`** 📖 — affiche le Code de La Confrérie.
+> • Option \`membre\` → l'envoie en privé (MP) à quelqu'un.
+> • Option \`tous\` → l'envoie à tous les membres en MP *(Direction)*.
+> • Bouton **« 🩸 Apposer ma marque de sang »** : le nouveau prête serment, le scelle dans le sang, et son **nom RP** est inscrit au registre.
+
+## 🔫 Avis de recherche
+**\`/wanted\`** 🔫 *(Direction)* — émet un avis de recherche : nom, chef d'accusation, prime, dernière position connue, et un **portrait**. Tout le pôle Confrérie est **ping** et l'avis est **épinglé** automatiquement.
+> Bouton **« 💀 Capturé / Abattu »** → clôture l'avis (qui a touché la prime, vivant ou mort).
+**\`/wanted-liste\`** 📋 — affiche tous les avis de recherche **encore actifs** du salon.
+
+## 📂 Consulter les archives
+**\`/papiers\`** 📒 — affiche les derniers documents archivés.
+> • Option \`type\` → filtre par type (dettes, avis, reçus…).
+> • Option \`recherche\` → cherche par nom ou mot-clé.`,
+  `## 🔘 Les actions sur un document
+Selon le type de papier, des boutons apparaissent dessous :
+
+**📨 Envoyer à une personne** — *(reçu, dette, ordre, carte)*
+Envoie le document **en MP** à un **membre du serveur**, OU à n'importe quel **ID Discord** (même quelqu'un hors du serveur). Le destinataire doit **valider la réception** (ou **signer**, pour une dette). Dès qu'il valide, le document passe en « ✅ Validé » et **tu es prévenu automatiquement** dans le salon.
+
+**✍️ Signer la dette** / **💰 Marquer soldée** — *(dette)*
+Faire signer la reconnaissance de dette, ou la clôturer une fois réglée.
+
+**🚫 Révoquer** — *(tous, Direction)*
+Annule un document (devenu caduc) sans le supprimer du registre.
+
+**📤 Transmettre à un allié**
+Laisse une copie du papier sur un serveur allié, **anonymement**, signée « La Confrérie ».
+
+*ℹ️ Chaque document conserve une référence unique (ex. \`DETTE-04821\`) pour le retrouver facilement via \`/papiers\`.*
+
+*— L'Administration de La Confrérie*`,
+];
+
 async function autoSetup(guild) {
   const db = loadDB(); console.log('🔧 Auto-setup en cours...');
   await cleanBotPinnedMessages(guild, 'planning', 'grade', 'coffre-entreprise', 'coffre-illegal', 'affaires');
@@ -1317,6 +1365,20 @@ async function autoSetup(guild) {
       console.log('✅ Message de validation du règlement posté dans #' + reglCh.name);
     }
     saveDB(db);
+  }
+
+  // Salon « guide des commandes Papiers » : le bot poste le guide s'il n'y est pas déjà (anti-doublon par titre)
+  const guideCh = guild.channels.cache.get('1510212339285360781');
+  if (guideCh) {
+    const gmsgs = await guideCh.messages.fetch({ limit: 30 }).catch(() => null);
+    const guideDejaPoste = gmsgs ? gmsgs.some(m => m.author.id === client.user.id && m.content.includes('LES PAPIERS — GUIDE DES COMMANDES')) : false;
+    if (!guideDejaPoste) {
+      const _gids = [];
+      for (const _g of GUIDE_PAPIERS_CHUNKS) { const _m = await guideCh.send(_g).catch(() => null); if (_m) _gids.push(_m.id); }
+      db.guidePapiersIds = _gids;
+      saveDB(db);
+      console.log('✅ Guide des commandes Papiers posté dans #' + guideCh.name + ' (' + _gids.length + ' messages)');
+    }
   }
 
   // S'assurer que les visiteurs ont accès aux salons d'entrée (recrutement, règlement)
