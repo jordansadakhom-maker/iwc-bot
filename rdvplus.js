@@ -9,7 +9,7 @@
 const {
   SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
   StringSelectMenuBuilder, UserSelectMenuBuilder, ModalBuilder, TextInputBuilder,
-  TextInputStyle, MessageFlags,
+  TextInputStyle, MessageFlags, AttachmentBuilder,
 } = require('discord.js');
 
 let dbMod = {};
@@ -206,7 +206,7 @@ function _embedRdv(rdv) {
     )
     .setFooter({ text: `Iron Wolf Company · Bureau des Rendez-vous` })
     .setTimestamp();
-  if (rdv.photo && /^https?:\/\/\S+/i.test(rdv.photo)) e.setImage(rdv.photo);
+  if (rdv.photo) e.setImage(rdv.photo);
   return e;
 }
 function _boutonsTelegramme(rdv) {
@@ -372,6 +372,40 @@ async function routeInteraction(interaction) {
       await interaction.reply({ content: '✉ **Prise de rendez-vous** — étape 1/2 : la prestation.', components: [new ActionRowBuilder().addComponents(sel)], flags: MessageFlags.Ephemeral }).catch(() => {});
       return true;
     }
+
+    // Ajout d'une photo du lieu EN PIÈCE JOINTE : on attend le prochain message-image du client
+    if (interaction.isButton?.() && interaction.customId?.startsWith('rdvp_addphoto::')) {
+      const rdvId = interaction.customId.split('::')[1];
+      const store = _store(loadDB()); const rdv = store.rdvs[rdvId];
+      if (!rdv) { await interaction.reply({ content: '⚠️ Demande introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      if (interaction.user.id !== rdv.clientId) { await interaction.reply({ content: '🔒 Seul l\'auteur de la demande peut ajouter une photo.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      await interaction.reply({ content: '📎 **Envoie maintenant ta photo** (en pièce jointe) ici même, dans ce salon. Tu as 2 minutes — ton message sera nettoyé automatiquement après.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      const ch = interaction.channel;
+      if (!ch || typeof ch.createMessageCollector !== 'function') { await interaction.followUp({ content: '⚠️ Impossible d\'attendre une photo dans ce salon.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const collector = ch.createMessageCollector({ filter: (m) => m.author.id === interaction.user.id && m.attachments.size > 0, time: 120000, max: 1 });
+      collector.on('collect', async (m) => {
+        try {
+          const att = m.attachments.first();
+          const estImage = (att?.contentType || '').startsWith('image/') || /\.(png|jpe?g|gif|webp)(\?|$)/i.test(att?.url || '');
+          if (!att || !estImage) { await interaction.followUp({ content: '⚠️ Ce n\'est pas une image — réessaie avec une photo.', flags: MessageFlags.Ephemeral }).catch(() => {}); await m.delete().catch(() => {}); return; }
+          const db2 = loadDB(); const store2 = _store(db2); const rdv2 = store2.rdvs[rdvId];
+          if (!rdv2) return;
+          rdv2.photo = 'attachment://lieu.png'; store2.rdvs[rdvId] = rdv2; _persist(db2);
+          // On recopie l'image SUR le télégramme : elle y reste même après suppression du message d'origine
+          try {
+            const tch = await interaction.client.channels.fetch(rdv2.channelId).catch(() => null);
+            const tmsg = tch && await tch.messages.fetch(rdv2.msgId).catch(() => null);
+            if (tmsg) await tmsg.edit({ embeds: [_embedRdv(rdv2)], files: [new AttachmentBuilder(att.url, { name: 'lieu.png' })], components: _boutonsTelegramme(rdv2) }).catch(() => {});
+          } catch {}
+          await m.delete().catch(() => {});
+          await interaction.followUp({ content: '✅ Photo ajoutée à ta demande.', flags: MessageFlags.Ephemeral }).catch(() => {});
+        } catch {}
+      });
+      collector.on('end', async (collected) => {
+        if (collected.size === 0) { await interaction.followUp({ content: '⏱️ Temps écoulé — aucune photo reçue. Tu pourras réessayer plus tard.', flags: MessageFlags.Ephemeral }).catch(() => {}); }
+      });
+      return true;
+    }
     if (interaction.isStringSelectMenu?.() && interaction.customId === 'rdvp_type') {
       const typeKey = interaction.values[0];
       const sel = new StringSelectMenuBuilder().setCustomId(`rdvp_lieu::${typeKey}`).setPlaceholder('2️⃣ Choisis le lieu')
@@ -387,7 +421,6 @@ async function routeInteraction(interaction) {
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom').setLabel('Votre nom (personnage)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setPlaceholder('Ex : Mr. Abberline')),
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('quand').setLabel('Quand ? (jour + heure souhaités)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setPlaceholder('Ex : 20/06 à 21h, ou samedi soir')),
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Votre demande (détails)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setPlaceholder('Le besoin, le contexte…')),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('photo').setLabel('Photo du lieu — lien (facultatif)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(300).setPlaceholder('https://… (lien d\'une image)')),
       );
       await interaction.showModal(modal).catch(() => {});
       return true;
@@ -398,12 +431,10 @@ async function routeInteraction(interaction) {
       const nomRP = (interaction.fields.getTextInputValue('nom') || '').trim() || (interaction.member?.displayName || interaction.user.username);
       const quand = (interaction.fields.getTextInputValue('quand') || '').trim();
       const details = (interaction.fields.getTextInputValue('details') || '').trim();
-      const photoRaw = (interaction.fields.getTextInputValue('photo') || '').trim();
-      const photo = /^https?:\/\/\S+/i.test(photoRaw) ? photoRaw : '';
       const slot = _parseSlot(quand); // créneau précis si on a pu le lire, sinon null (on garde le texte)
       const db = loadDB(); const store = _store(db);
       const id = ref();
-      const rdv = { id, clientId: interaction.user.id, nomRP, typeKey, lieuKey, slot, souhaitTexte: quand, photo, details, statut: 'Planifié', notionId: null, channelId: null, msgId: null, agentId: null, sent: {}, createdAt: Date.now() };
+      const rdv = { id, clientId: interaction.user.id, nomRP, typeKey, lieuKey, slot, souhaitTexte: quand, photo: '', details, statut: 'Planifié', notionId: null, channelId: null, msgId: null, agentId: null, sent: {}, createdAt: Date.now() };
       // Notion (best-effort)
       rdv.notionId = await _notionCreer(rdv);
       // Dossier client
@@ -428,7 +459,8 @@ async function routeInteraction(interaction) {
         ].filter(Boolean).join('\n'))
         .setFooter({ text: 'Bureau des Rendez-vous · Saint-Denis' });
       await _mpClient(interaction.client, interaction.user.id, '', accuse);
-      await interaction.editReply({ content: `✅ Votre télégramme a été transmis à la Direction (réf. \`${id}\`). Vous recevrez une réponse prochainement.` }).catch(() => {});
+      const photoBtn = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`rdvp_addphoto::${id}`).setLabel('📎 Ajouter une photo du lieu').setStyle(ButtonStyle.Secondary));
+      await interaction.editReply({ content: `✅ Votre demande a été transmise à la Direction (réf. \`${id}\`). Vous recevrez une réponse prochainement.\n\n📎 *Facultatif : vous pouvez joindre une photo du lieu.*`, components: [photoBtn] }).catch(() => {});
       return true;
     }
 
