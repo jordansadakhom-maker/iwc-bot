@@ -12,6 +12,7 @@ const cron = require('node-cron');
 
 const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub } = require('./db');
 const { initPapiers, papiersCommands } = require('./papiers');
+const securite = require('./securite');
 
 let notionExtra = {};
 try { notionExtra = require('./notion-extra'); console.log('✅ Module notion-extra chargé'); }
@@ -60,6 +61,7 @@ const client = new Client({
   partials: [Partials.Message, Partials.Reaction, Partials.User, Partials.Channel, Partials.GuildMember],
 });
 initPapiers(client);
+securite.initSecurite(client);
 
 const {
   CH, PARTICIPANTS_MAP, CONTRAT_ROLES, JUNE_MCCALL_ID,
@@ -387,7 +389,7 @@ const SLASH_COMMANDS = [
 ].map(c => c.toJSON());
 
 async function registerSlashCommands(guild) {
-  try { await guild.commands.set([...SLASH_COMMANDS, ...(papiersCommands || [])]); console.log('✅ Slash commands enregistrées (+ papiers)'); }
+  try { await guild.commands.set([...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || [])]); console.log('✅ Slash commands enregistrées (+ papiers + sécurité)'); }
   catch (e) { console.log('❌ Slash commands error:', e.message); }
 }
 
@@ -2335,6 +2337,7 @@ async function _archiverPlanNotion(message) {
 client.on('interactionCreate', async interaction => {
   const guild = interaction.guild; const db = loadDB();
   if (await contratsConf.routeInteraction?.(interaction)) return;
+  if (await securite.routeInteraction?.(interaction)) return;
 
   if (interaction.isAutocomplete()) {
     if (['promo','retro'].includes(interaction.commandName)) return handleAutocompleteGrades(interaction);
