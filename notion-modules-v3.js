@@ -118,6 +118,11 @@ async function _upsertBotMessage(guild, ch, dbKey, payload) {
 // ═══════════════════════════════════════════════════════════════
 const ABSENCE_KEYWORDS = ['absent', 'absence', 'absente', 'serai pas là', 'serai pas dispo', 'pas disponible', 'pas là', 'dispo pas', 'en pause', 'pause de', 'reviens dans', 'retour dans', 'indisponible'];
 async function handleAbsenceDetection(message) {
+  // ⛔ DÉSACTIVÉ : la détection automatique par mot-clé mettait en absence dès qu'on
+  // écrivait « absence », « pas là », « en pause »… (beaucoup trop de faux positifs).
+  // L'absence se déclare désormais UNIQUEMENT avec /absent, ou en postant dans #absences.
+  return false;
+  // eslint-disable-next-line no-unreachable
   if (message.author.bot || !message.guild) return false;
   const absCh = getCh(message.guild, 'absences');
   if (!absCh || message.channel.id === absCh.id) return false;
