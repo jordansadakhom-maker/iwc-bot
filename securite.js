@@ -73,6 +73,8 @@ async function _onChannelDelete(channel) {
 
     const auteur = await _trouverAuteur(guild, AuditLogEvent.ChannelDelete, channel.id);
     const auteurId = auteur?.id;
+    // Responsable autorisé (toi ou 696…) → action de confiance, on NE restaure PAS
+    if (auteurId && estAutorise(auteurId)) { console.log(`[SÉCURITÉ] Salon #${channel.name} supprimé par un responsable autorisé (${auteurId}) — autorisé.`); return; }
 
     // Recrée le salon à l'identique (au mieux)
     let recree = null;
@@ -118,6 +120,8 @@ async function _onRoleDelete(role) {
 
     const auteur = await _trouverAuteur(guild, AuditLogEvent.RoleDelete, role.id);
     const auteurId = auteur?.id;
+    // Responsable autorisé (toi ou 696…) → action de confiance, on NE restaure PAS
+    if (auteurId && estAutorise(auteurId)) { console.log(`[SÉCURITÉ] Rôle @${role.name} supprimé par un responsable autorisé (${auteurId}) — autorisé.`); return; }
 
     let recree = null;
     try {
