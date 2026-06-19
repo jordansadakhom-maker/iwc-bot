@@ -13,6 +13,7 @@ const cron = require('node-cron');
 const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub } = require('./db');
 const { initPapiers, papiersCommands } = require('./papiers');
 const securite = require('./securite');
+const rdvplus = require('./rdvplus');
 
 let notionExtra = {};
 try { notionExtra = require('./notion-extra'); console.log('✅ Module notion-extra chargé'); }
@@ -389,7 +390,7 @@ const SLASH_COMMANDS = [
 ].map(c => c.toJSON());
 
 async function registerSlashCommands(guild) {
-  try { await guild.commands.set([...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || [])]); console.log('✅ Slash commands enregistrées (+ papiers + sécurité)'); }
+  try { await guild.commands.set([...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || [])]); console.log('✅ Slash commands enregistrées (+ papiers + sécurité + rdv+)'); }
   catch (e) { console.log('❌ Slash commands error:', e.message); }
 }
 
@@ -2338,6 +2339,7 @@ client.on('interactionCreate', async interaction => {
   const guild = interaction.guild; const db = loadDB();
   if (await contratsConf.routeInteraction?.(interaction)) return;
   if (await securite.routeInteraction?.(interaction)) return;
+  if (await rdvplus.routeInteraction?.(interaction)) return;
 
   if (interaction.isAutocomplete()) {
     if (['promo','retro'].includes(interaction.commandName)) return handleAutocompleteGrades(interaction);
@@ -3324,6 +3326,7 @@ client.once('clientReady', async () => {
   });
   cron.schedule('*/5 * * * *', async () => {
     for (const g of client.guilds.cache.values()) await checkAgenda(g).catch(() => {});
+    for (const g of client.guilds.cache.values()) await rdvplus.checkRappelsClients?.(g).catch(() => {});
   });
   cron.schedule('*/15 * * * *', async () => {
     for (const g of client.guilds.cache.values()) await syncRegistreNotion(g).catch(() => {});
