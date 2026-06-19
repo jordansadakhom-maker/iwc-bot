@@ -65,6 +65,16 @@ const fmtDate  = () => new Date().toLocaleDateString('fr-FR', { day: '2-digit', 
 const fmtHeure = () => new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 const ref = (p) => `${p}-${Date.now().toString().slice(-5)}`;
 
+// Préfixe de référence par type de papier (pour le tampon + le filtre /papiers)
+const PREFIX_REF = { recu: 'REÇU', dette: 'DETTE', casier: 'FICHE', ordre: 'ORDRE', carte: 'CARTE', billet: 'BILLET', wanted: 'AVIS', code: 'CODE' };
+// Appose une référence unique en pied de page (sans effacer le pied existant)
+function tamponRef(embed, type) {
+  const reference = ref(PREFIX_REF[type] || 'DOC');
+  const prev = embed?.data?.footer?.text || '';
+  embed.setFooter({ text: prev ? `${prev}  •  Réf. ${reference}` : `Réf. ${reference}` });
+  return reference;
+}
+
 // Un membre de l'équipe = possède au moins un rôle autre que @everyone et n'est pas « visiteur »
 function estMembre(member) {
   if (!member) return false;
@@ -115,11 +125,18 @@ const papiersCommands = [
   new SlashCommandBuilder().setName('carte').setDescription('🎴 Délivrer une carte de membre'),
   new SlashCommandBuilder().setName('billet').setDescription('🃏 Laisser le billet de la Confrérie'),
   new SlashCommandBuilder().setName('wanted').setDescription('🔫 Émettre un avis de recherche (Direction)'),
+  new SlashCommandBuilder().setName('wanted-liste').setDescription('📋 Liste des avis de recherche actifs (dans ce salon)'),
   new SlashCommandBuilder().setName('code').setDescription('📖 Afficher le Code de la Confrérie').addUserOption(o => o.setName('membre').setDescription('Envoyer le Code en privé à ce membre (DM)').setRequired(false)).addBooleanOption(o => o.setName('tous').setDescription('Envoyer le Code à TOUS les membres en privé (Direction)').setRequired(false)),
-  new SlashCommandBuilder().setName('papiers').setDescription('📒 Consulter les derniers papiers archivés'),
+  new SlashCommandBuilder().setName('papiers').setDescription('📒 Consulter les derniers papiers archivés')
+    .addStringOption(o => o.setName('type').setDescription('Filtrer par type de papier').setRequired(false).addChoices(
+      { name: 'Reçu', value: 'recu' }, { name: 'Dette', value: 'dette' }, { name: 'Fiche / Casier', value: 'casier' },
+      { name: 'Ordre de mission', value: 'ordre' }, { name: 'Carte de membre', value: 'carte' }, { name: 'Billet', value: 'billet' },
+      { name: 'Avis de recherche', value: 'wanted' }, { name: 'Serment (Code)', value: 'code' },
+    ))
+    .addStringOption(o => o.setName('recherche').setDescription('Chercher un nom ou un mot-clé').setRequired(false)),
 ].map(c => c.toJSON());
 
-const NOMS = ['recu', 'dette', 'casier', 'ordre', 'carte', 'billet', 'code', 'wanted', 'papiers'];
+const NOMS = ['recu', 'dette', 'casier', 'ordre', 'carte', 'billet', 'code', 'wanted', 'wanted-liste', 'papiers'];
 
 // ─────────────────────────── MODALS (formulaires) ──────────────────────────
 function buildModal(cmd) {
@@ -137,7 +154,7 @@ function buildModal(cmd) {
       ti('crime', 'Chef d\'accusation / ce qu\'il a fait', P, true, 'Ex : a trahi la Confrérie et balancé deux des nôtres.', 400),
       ti('prime', 'Prime (récompense)', S, true, 'Ex : 500$ mort · 800$ vif'),
       ti('position', 'Dernière position connue (facultatif)', S, false, 'Ex : aperçu près de Valentine'),
-      ti('statut', 'Mort ou vif ? (facultatif)', S, false, 'Vide = MORT OU VIF'),
+      ti('image', 'Portrait — lien image (facultatif)', S, false, 'https://… (jpg/png)'),
     );
   }
 
@@ -315,9 +332,9 @@ function embedCode() {
     .setFooter({ text: 'La Confrérie • 1899' }).setTimestamp();
 }
 
-function embedWanted({ nom, crime, prime, position, statut }) {
+function embedWanted({ nom, crime, prime, position, statut, image }) {
   const st = (statut && statut.trim()) ? statut.trim() : 'MORT OU VIF';
-  return new EmbedBuilder().setColor(COL.sepia)
+  const e = new EmbedBuilder().setColor(COL.sepia)
     .setTitle('🔫  AVIS DE RECHERCHE  🔫')
     .setDescription([
       '```',
@@ -339,6 +356,8 @@ function embedWanted({ nom, crime, prime, position, statut }) {
     )
     .setFooter({ text: `La Confrérie • Avis de recherche • ${fmtDate()}` })
     .setTimestamp();
+  if (image && /^https?:\/\/\S+/i.test(image.trim())) e.setImage(image.trim());
+  return e;
 }
 
 // ───────────────────────────── HANDLER PRINCIPAL ───────────────────────────
@@ -403,24 +422,59 @@ async function gererInteractionPapiers(interaction) {
       // /papiers → consulter les derniers papiers archivés
       if (cmd === 'papiers') {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const fType = interaction.options.getString('type');
+        const fRech = (interaction.options.getString('recherche') || '').trim().toLowerCase();
         const ch = await interaction.client.channels.fetch(CONFIG.REGISTRE_CHANNEL_ID).catch(() => null);
         if (!ch) return interaction.editReply({ content: '⚠️ Salon registre introuvable. Vérifie REGISTRE_CHANNEL_ID dans papiers.js.' });
-        const msgs = await ch.messages.fetch({ limit: 30 }).catch(() => null);
+        const msgs = await ch.messages.fetch({ limit: (fType || fRech) ? 100 : 30 }).catch(() => null);
         if (!msgs) return interaction.editReply({ content: '⚠️ Impossible de lire le salon registre (permissions ?).' });
-        const papiers = [...msgs.values()]
-          .filter(m => m.author.id === interaction.client.user.id && m.embeds?.length > 0)
-          .sort((a, b) => b.createdTimestamp - a.createdTimestamp)
-          .slice(0, 12);
-        if (!papiers.length) return interaction.editReply({ content: '📭 Aucun papier archivé pour le moment.' });
+        let papiers = [...msgs.values()].filter(m => m.author.id === interaction.client.user.id && m.embeds?.length > 0);
+        if (fType) {
+          const pref = `${PREFIX_REF[fType] || '∅'}-`;
+          papiers = papiers.filter(m => (m.embeds[0]?.footer?.text || '').includes(pref));
+        }
+        if (fRech) {
+          papiers = papiers.filter(m => {
+            const e = m.embeds[0];
+            const hay = [e.title, e.description, ...(e.fields || []).flatMap(f => [f.name, f.value]), e.footer?.text]
+              .filter(Boolean).join(' ').toLowerCase();
+            return hay.includes(fRech);
+          });
+        }
+        papiers = papiers.sort((a, b) => b.createdTimestamp - a.createdTimestamp).slice(0, 12);
+        if (!papiers.length) return interaction.editReply({ content: (fType || fRech) ? '📭 Aucun papier ne correspond à ce filtre.' : '📭 Aucun papier archivé pour le moment.' });
         const lignes = papiers.map(m => {
           const titre = (m.embeds[0]?.title || 'Papier').replace(/[*_`]/g, '');
           const quand = `<t:${Math.floor(m.createdTimestamp / 1000)}:R>`;
           return `• [**${titre}**](${m.url}) — ${quand}`;
         });
+        const sousTitre = [fType ? `type : ${fType}` : null, fRech ? `recherche : « ${fRech} »` : null].filter(Boolean).join(' · ');
         return interaction.editReply({ embeds: [new EmbedBuilder().setColor(COL.sepia)
-          .setTitle('📒 Derniers papiers archivés')
+          .setTitle('📒 Papiers archivés' + (sousTitre ? ` — ${sousTitre}` : ''))
           .setDescription(lignes.join('\n'))
           .setFooter({ text: `${papiers.length} papier(s) affiché(s)` })] });
+      }
+
+      // /wanted-liste → le « bounty board » : tous les avis encore actifs dans ce salon
+      if (cmd === 'wanted-liste') {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const msgs = await interaction.channel?.messages?.fetch({ limit: 100 }).catch(() => null);
+        if (!msgs) return interaction.editReply({ content: '⚠️ Impossible de lire ce salon.' });
+        const avis = [...msgs.values()]
+          .filter(m => m.author.id === interaction.client.user.id && m.embeds?.[0]?.title?.includes('AVIS DE RECHERCHE'))
+          .sort((a, b) => b.createdTimestamp - a.createdTimestamp)
+          .slice(0, 15);
+        if (!avis.length) return interaction.editReply({ content: '📭 Aucun avis de recherche actif dans ce salon.' });
+        const lignes = avis.map(m => {
+          const f = m.embeds[0].fields || [];
+          const nom = (f.find(x => x.name.includes('Nom'))?.value || '?').replace(/\*/g, '');
+          const prime = (f.find(x => x.name.includes('Prime'))?.value || '—').replace(/\*/g, '');
+          return `• **${nom}** — 💰 ${prime} · [voir l'avis](${m.url})`;
+        });
+        return interaction.editReply({ embeds: [new EmbedBuilder().setColor(COL.sepia)
+          .setTitle('📋 Avis de recherche actifs')
+          .setDescription(lignes.join('\n'))
+          .setFooter({ text: `${avis.length} avis actif(s) • La Confrérie` })] });
       }
 
       // Les autres → on ouvre un formulaire (modal)
@@ -442,18 +496,30 @@ async function gererInteractionPapiers(interaction) {
       else if (type === 'ordre')  { embed = embedOrdre({ operation: g('operation'), objectif: g('objectif'), assignes: g('assignes'), quand: g('quand'), consignes: g('consignes') }, auteur); label = 'Ordre de mission'; }
       else if (type === 'carte')  { embed = embedCarte({ nom: g('nom'), grade: g('grade'), entree: g('entree'), mention: g('mention') }, auteur); label = 'Carte de membre'; }
       else if (type === 'billet') { embed = embedBillet(g('message'), auteur); label = 'Billet de la Confrérie'; }
-      else if (type === 'wanted') { embed = embedWanted({ nom: g('nom'), crime: g('crime'), prime: g('prime'), position: g('position'), statut: g('statut') }); label = 'Avis de recherche'; }
+      else if (type === 'wanted') { embed = embedWanted({ nom: g('nom'), crime: g('crime'), prime: g('prime'), position: g('position'), image: g('image') }); label = 'Avis de recherche'; }
       else if (type === 'dette') {
         embed = embedDette({ debiteur: g('debiteur'), creancier: g('creancier'), montant: g('montant'), echeance: g('echeance'), motif: g('motif') }, auteur);
         label = 'Reconnaissance de dette';
+        tamponRef(embed, 'dette');
         const signer = new ButtonBuilder().setCustomId('papier_dette_signer').setLabel('✍️ Signer la dette').setStyle(ButtonStyle.Success);
-        await interaction.editReply({ embeds: [embed], components: rowsAvecTransmit(signer) }).catch(() => {});
+        const solder = new ButtonBuilder().setCustomId('papier_dette_solder').setLabel('💰 Marquer soldée').setStyle(ButtonStyle.Secondary);
+        const revoq  = new ButtonBuilder().setCustomId('papier_revoquer').setLabel('🚫 Révoquer').setStyle(ButtonStyle.Secondary);
+        await interaction.editReply({ embeds: [embed], components: rowsAvecTransmit(signer, solder, revoq) }).catch(() => {});
         await archiver(interaction.client, embed, label, auteur);
         return;
       }
 
       if (!embed) return interaction.editReply({ content: '⚠️ Type de papier inconnu.' }).catch(() => {});
-      const postOpts = { embeds: [embed], components: rowsAvecTransmit() };
+      tamponRef(embed, type);
+      let comps;
+      if (type === 'wanted') {
+        const closeBtn = new ButtonBuilder().setCustomId('papier_wanted_close').setLabel('💀 Capturé / Abattu').setStyle(ButtonStyle.Danger);
+        comps = rowsAvecTransmit(closeBtn);
+      } else {
+        const revoq = new ButtonBuilder().setCustomId('papier_revoquer').setLabel('🚫 Révoquer').setStyle(ButtonStyle.Secondary);
+        comps = rowsAvecTransmit(revoq);
+      }
+      const postOpts = { embeds: [embed], components: comps };
       if (type === 'wanted') {
         const ids = interaction.guild?.roles?.cache?.filter(r => CONFRERIE_ROLE_NAMES.some(n => r.name.includes(n))).map(r => r.id) || [];
         if (ids.length) {
@@ -462,6 +528,7 @@ async function gererInteractionPapiers(interaction) {
         }
       }
       await interaction.editReply(postOpts).catch(() => {});
+      if (type === 'wanted') { try { const m = await interaction.fetchReply(); await m.pin().catch(() => {}); } catch {} }
       await archiver(interaction.client, embed, label, auteur);
       return;
     }
@@ -476,6 +543,69 @@ async function gererInteractionPapiers(interaction) {
         ? { name: '🖋️ Signature', value: `✅ Signé par **${signataire}** le ${fmtDate()} à ${fmtHeure()}`, inline: false }
         : f);
       e.setFields(fields);
+      const solder = new ButtonBuilder().setCustomId('papier_dette_solder').setLabel('💰 Marquer soldée').setStyle(ButtonStyle.Secondary);
+      const revoq  = new ButtonBuilder().setCustomId('papier_revoquer').setLabel('🚫 Révoquer').setStyle(ButtonStyle.Secondary);
+      return interaction.update({ embeds: [e], components: rowsAvecTransmit(solder, revoq) }).catch(() => {});
+    }
+
+    // Clôturer un avis de recherche → demande qui l'a eu, puis marque CAPTURÉ / ABATTU (Direction)
+    if (interaction.isButton?.() && interaction.customId === 'papier_wanted_close') {
+      if (!estDirection(interaction.member)) return interaction.reply({ content: '🔒 Seule la Direction peut clôturer un avis.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      const modal = new ModalBuilder().setCustomId(`papier_wanted_close:${interaction.channelId}:${interaction.message.id}`).setTitle('💀 Clôturer l\'avis de recherche')
+        .addComponents(
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('par').setLabel('Capturé / abattu par (chasseur)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setPlaceholder('Ex : Jonas Caverly')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('issue').setLabel('Issue : capturé vivant ou abattu ?').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(30).setPlaceholder('capturé / abattu')),
+        );
+      return interaction.showModal(modal).catch(() => {});
+    }
+
+    if (interaction.isModalSubmit?.() && interaction.customId?.startsWith('papier_wanted_close:')) {
+      const [, channelId, messageId] = interaction.customId.split(':');
+      const par = (interaction.fields.getTextInputValue('par') || '').trim() || 'un chasseur';
+      const issue = (interaction.fields.getTextInputValue('issue') || '').trim().toLowerCase();
+      const abattu = /abat|mort|tu[eé]|descend|ex[eé]cu|enterr/.test(issue);
+      const badge = abattu ? '💀' : '⛓️';
+      const mot = abattu ? 'ABATTU' : 'CAPTURÉ';
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      try {
+        const ch = await interaction.client.channels.fetch(channelId);
+        const msg = await ch.messages.fetch(messageId);
+        const base = msg.embeds?.[0];
+        if (!base) return interaction.editReply({ content: '⚠️ Avis introuvable.' });
+        const e = EmbedBuilder.from(base).setColor(abattu ? COL.rouge : COL.vert)
+          .setTitle(`${badge} AVIS CLÔTURÉ — ${mot}`)
+          .addFields({ name: `${badge} Issue`, value: `**${mot}** par **${par}**\n${fmtDate()} à ${fmtHeure()}`, inline: false });
+        await msg.edit({ embeds: [e], components: [] }).catch(() => {});
+        await msg.unpin().catch(() => {});
+        return interaction.editReply({ content: `✅ Avis clôturé : **${mot.toLowerCase()}** par **${par}**.` });
+      } catch {
+        return interaction.editReply({ content: '⚠️ Impossible de clôturer cet avis (message introuvable ou permissions manquantes).' });
+      }
+    }
+
+    // Révoquer / annuler un papier (Direction)
+    if (interaction.isButton?.() && interaction.customId === 'papier_revoquer') {
+      if (!estDirection(interaction.member)) return interaction.reply({ content: '🔒 Seule la Direction peut révoquer un document.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      const base = interaction.message.embeds?.[0];
+      if (!base) return interaction.reply({ content: '⚠️ Document introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      const par = interaction.member?.displayName || interaction.user.username;
+      const titre = (base.title || 'Document').replace(/^🚫 \[RÉVOQUÉ\]\s*/, '');
+      const e = EmbedBuilder.from(base).setColor(COL.gris)
+        .setTitle(`🚫 [RÉVOQUÉ] ${titre}`)
+        .addFields({ name: '🚫 Révocation', value: `Document annulé par **${par}** le ${fmtDate()} à ${fmtHeure()}.`, inline: false });
+      return interaction.update({ embeds: [e], components: [] }).catch(() => {});
+    }
+
+    // Marquer une dette comme soldée (Direction)
+    if (interaction.isButton?.() && interaction.customId === 'papier_dette_solder') {
+      if (!estDirection(interaction.member)) return interaction.reply({ content: '🔒 Seule la Direction peut solder une dette.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      const base = interaction.message.embeds?.[0];
+      if (!base) return interaction.reply({ content: '⚠️ Document introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      const par = interaction.member?.displayName || interaction.user.username;
+      const titre = (base.title || 'Reconnaissance de dette').replace(/^💰 \[SOLDÉE\]\s*/, '');
+      const e = EmbedBuilder.from(base).setColor(COL.vert)
+        .setTitle(`💰 [SOLDÉE] ${titre}`)
+        .addFields({ name: '💰 Règlement', value: `Dette **soldée** — confirmée par **${par}** le ${fmtDate()} à ${fmtHeure()}.`, inline: false });
       return interaction.update({ embeds: [e], components: [] }).catch(() => {});
     }
 
@@ -505,6 +635,7 @@ async function gererInteractionPapiers(interaction) {
           { name: '📅 Scellé le', value: `${fmtDate()} à ${fmtHeure()}`, inline: false },
         )
         .setFooter({ text: 'La Confrérie • Scellé dans le sang' }).setTimestamp();
+      tamponRef(e, 'code');
       await archiver(interaction.client, e, 'Serment scellé (Code)', nomRP);
       return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x6B0000).setTitle('🩸 Ton sang scelle ta parole')
         .setDescription(`**${nomRP}**, ta marque est apposée sous le Code.\n\nTu es désormais des nôtres. Que le silence te garde, et que le sang te lie.\n\n— La Confrérie`)
