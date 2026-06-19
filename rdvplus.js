@@ -139,7 +139,7 @@ async function _notionCreer(rdv) {
         'Heure':  { rich_text: [{ text: { content: heure } }] },
         'Type':   { select: { name: '🤝 Rendez-vous Client' } },
         'Pôle':   { select: { name: TYPES[rdv.typeKey]?.illegal ? '🔒 Illégal' : '⚖️ Légal' } },
-        'Lieu':   { rich_text: [{ text: { content: `${lieuLabel}${!_slotToDate(rdv.slot) && rdv.souhaitTexte ? '\n🕐 Souhait : ' + rdv.souhaitTexte : ''}${rdv.details ? '\n' + rdv.details : ''}`.slice(0, 2000) } }] },
+        'Lieu':   { rich_text: [{ text: { content: `${lieuLabel}${rdv.contactId ? '\n📇 ID Discord : ' + rdv.contactId : ''}${!_slotToDate(rdv.slot) && rdv.souhaitTexte ? '\n🕐 Souhait : ' + rdv.souhaitTexte : ''}${rdv.details ? '\n' + rdv.details : ''}`.slice(0, 2000) } }] },
         'Statut': { select: { name: 'Planifié' } },
         'Notif 24h':   { checkbox: true },
         'Notif 1h':    { checkbox: true },
@@ -201,6 +201,7 @@ function _embedRdv(rdv) {
       { name: '🧰 Prestation', value: typeLabel, inline: true },
       { name: '📍 Lieu', value: lieuLabel, inline: true },
       { name: '🕐 Créneau', value: dt ? `${tsF(dt)}\n${tsR(dt)}` : (rdv.souhaitTexte ? `*Souhait : ${rdv.souhaitTexte}* (à fixer)` : '—'), inline: false },
+      { name: '📇 Contact (pour le contrat)', value: `<@${rdv.contactId || rdv.clientId}> · ID : \`${rdv.contactId || rdv.clientId}\``, inline: false },
       ...(rdv.agentId ? [{ name: '🤝 Agent assigné', value: `<@${rdv.agentId}>`, inline: true }] : []),
       ...(rdv.details ? [{ name: '📝 Détails', value: rdv.details.slice(0, 1000), inline: false }] : []),
     )
@@ -420,6 +421,7 @@ async function routeInteraction(interaction) {
       modal.addComponents(
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom').setLabel('Votre nom (personnage)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setPlaceholder('Ex : Mr. Abberline')),
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('quand').setLabel('Quand ? (jour + heure souhaités)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setPlaceholder('Ex : 20/06 à 21h, ou samedi soir')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('contact').setLabel('Votre ID Discord (pour le contrat)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(25).setValue(interaction.user.id).setPlaceholder('Identifiant numérique — laissez tel quel')),
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Votre demande (détails)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setPlaceholder('Le besoin, le contexte…')),
       );
       await interaction.showModal(modal).catch(() => {});
@@ -431,10 +433,12 @@ async function routeInteraction(interaction) {
       const nomRP = (interaction.fields.getTextInputValue('nom') || '').trim() || (interaction.member?.displayName || interaction.user.username);
       const quand = (interaction.fields.getTextInputValue('quand') || '').trim();
       const details = (interaction.fields.getTextInputValue('details') || '').trim();
+      const contactRaw = (interaction.fields.getTextInputValue('contact') || '').replace(/[^0-9]/g, '');
+      const contactId = /^\d{16,21}$/.test(contactRaw) ? contactRaw : interaction.user.id;
       const slot = _parseSlot(quand); // créneau précis si on a pu le lire, sinon null (on garde le texte)
       const db = loadDB(); const store = _store(db);
       const id = ref();
-      const rdv = { id, clientId: interaction.user.id, nomRP, typeKey, lieuKey, slot, souhaitTexte: quand, photo: '', details, statut: 'Planifié', notionId: null, channelId: null, msgId: null, agentId: null, sent: {}, createdAt: Date.now() };
+      const rdv = { id, clientId: interaction.user.id, contactId, nomRP, typeKey, lieuKey, slot, souhaitTexte: quand, photo: '', details, statut: 'Planifié', notionId: null, channelId: null, msgId: null, agentId: null, sent: {}, createdAt: Date.now() };
       // Notion (best-effort)
       rdv.notionId = await _notionCreer(rdv);
       // Dossier client
@@ -456,6 +460,7 @@ async function routeInteraction(interaction) {
           `PRESTATION ${TYPES[typeKey]?.label || '—'} STOP LIEU ${LIEUX[lieuKey] || '—'} STOP`,
           dt ? `CRÉNEAU SOUHAITÉ ${tsF(dt)} STOP` : (quand ? `CRÉNEAU SOUHAITÉ ${quand} STOP` : ''),
           'LA DIRECTION ÉTUDIE VOTRE DEMANDE STOP RÉPONSE À SUIVRE STOP',
+          'UN CONTRAT POURRA VOUS ÊTRE ENVOYÉ À SIGNER STOP',
         ].filter(Boolean).join('\n'))
         .setFooter({ text: 'Bureau des Rendez-vous · Saint-Denis' });
       await _mpClient(interaction.client, interaction.user.id, '', accuse);
