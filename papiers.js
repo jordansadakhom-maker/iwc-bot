@@ -73,6 +73,8 @@ function estMembre(member) {
 
 // Direction de la Confrérie (pour réserver l'envoi du Code)
 const DIRECTION_ROLE_NAMES = ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Conseil'];
+// Membres de La Confrérie (pôle illégal) — à pinger sur un avis de recherche (mêmes rôles que index.js)
+const CONFRERIE_ROLE_NAMES = ['Concepteur', 'Fléau', 'fleau', 'Exécuteur', 'éxécuteur', 'execu', 'Condamné', 'condamne', 'Maudit', 'Confrérie', 'confrerie'];
 function estDirection(member) {
   return !!member?.roles?.cache?.some(r => DIRECTION_ROLE_NAMES.some(n => r.name.includes(n)));
 }
@@ -451,7 +453,15 @@ async function gererInteractionPapiers(interaction) {
       }
 
       if (!embed) return interaction.editReply({ content: '⚠️ Type de papier inconnu.' }).catch(() => {});
-      await interaction.editReply({ embeds: [embed], components: rowsAvecTransmit() }).catch(() => {});
+      const postOpts = { embeds: [embed], components: rowsAvecTransmit() };
+      if (type === 'wanted') {
+        const ids = interaction.guild?.roles?.cache?.filter(r => CONFRERIE_ROLE_NAMES.some(n => r.name.includes(n))).map(r => r.id) || [];
+        if (ids.length) {
+          postOpts.content = `🚨 ${ids.map(id => `<@&${id}>`).join(' ')} — un avis de recherche vient d'être émis.`;
+          postOpts.allowedMentions = { roles: ids };
+        }
+      }
+      await interaction.editReply(postOpts).catch(() => {});
       await archiver(interaction.client, embed, label, auteur);
       return;
     }
