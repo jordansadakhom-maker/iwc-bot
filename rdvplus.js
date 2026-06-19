@@ -40,12 +40,23 @@ const TYPES = {
   trv: { label: '🗡️ Travail discret', illegal: true },
 };
 const LIEUX = {
-  sd:  '🏙️ Bureau de Saint-Denis',
   val: '🐎 Valentine',
-  rho: '🌾 Rhodes',
-  bw:  '⚓ Blackwater',
   str: '⛰️ Strawberry',
+  rho: '🌾 Rhodes',
+  sd:  '🏙️ Saint-Denis',
+  bw:  '⚓ Blackwater',
+  ann: '⛏️ Annesburg',
+  vh:  '🛶 Van Horn',
+  tum: '🌵 Tumbleweed',
+  arm: '🤠 Armadillo',
+  emr: '🐂 Emerald Ranch',
+  lag: '🐊 Lagras',
+  col: '❄️ Colter',
+  man: '🏕️ Manzanita Post',
+  was: '🚉 Wallace Station',
+  rig: '🚉 Riggs Station',
   dsc: '🌫️ Un lieu discret',
+  aut: '📍 Autre (précisé dans les détails)',
 };
 
 // ── Helpers généraux ──
@@ -92,27 +103,21 @@ function _slotToDate(slot) { // "YYYY-MM-DD|HHMM"
     return new Date(prov.getTime() - _parisOffset(prov) * 3600000);
   } catch { return null; }
 }
-function _slotLabel(slot) {
-  const dt = _slotToDate(slot); if (!dt) return slot;
-  return dt.toLocaleString('fr-FR', { timeZone: 'Europe/Paris', weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
-}
-function _slotsDisponibles() {
-  const heures = [10, 14, 18, 21];
-  const out = [];
-  const now = new Date();
-  for (let j = 0; j < 7 && out.length < 25; j++) {
-    for (const h of heures) {
-      if (out.length >= 25) break;
-      const base = new Date(now.getTime() + j * 86400000);
-      const y = base.toLocaleString('en-CA', { timeZone: 'Europe/Paris', year: 'numeric' });
-      const mo = base.toLocaleString('en-CA', { timeZone: 'Europe/Paris', month: '2-digit' });
-      const da = base.toLocaleString('en-CA', { timeZone: 'Europe/Paris', day: '2-digit' });
-      const slot = `${y}-${mo}-${da}|${String(h).padStart(2, '0')}00`;
-      const dt = _slotToDate(slot);
-      if (dt && dt.getTime() > Date.now() + 30 * 60000) out.push(slot); // au moins 30 min à l'avance
-    }
-  }
-  return out;
+// Convertit une saisie libre (« 20/06 à 21h », « le 3/07 vers 14h30 ») en créneau "YYYY-MM-DD|HHMM".
+// Renvoie null si aucune date claire n'est trouvée (on garde alors le texte tel quel comme « souhait »).
+function _parseSlot(texte) {
+  const s = String(texte || '');
+  const md = s.match(/(\d{1,2})[\/\-.](\d{1,2})(?:[\/\-.](\d{2,4}))?/);
+  if (!md) return null;
+  const jj = md[1].padStart(2, '0');
+  const mm = md[2].padStart(2, '0');
+  let aa = md[3] || String(new Date().getFullYear());
+  if (aa.length === 2) aa = '20' + aa;
+  if (+mm < 1 || +mm > 12 || +jj < 1 || +jj > 31) return null;
+  let hh = '12', mn = '00';
+  const hm = s.match(/(\d{1,2})\s*[h:]\s*(\d{1,2})?/);
+  if (hm && +hm[1] <= 23) { hh = hm[1].padStart(2, '0'); mn = (hm[2] || '0').padStart(2, '0'); if (+mn > 59) mn = '00'; }
+  return `${aa}-${mm}-${jj}|${hh}${mn}`;
 }
 const tsF = (dt) => `<t:${Math.floor(dt.getTime() / 1000)}:F>`;
 const tsR = (dt) => `<t:${Math.floor(dt.getTime() / 1000)}:R>`;
@@ -134,7 +139,7 @@ async function _notionCreer(rdv) {
         'Heure':  { rich_text: [{ text: { content: heure } }] },
         'Type':   { select: { name: '🤝 Rendez-vous Client' } },
         'Pôle':   { select: { name: TYPES[rdv.typeKey]?.illegal ? '🔒 Illégal' : '⚖️ Légal' } },
-        'Lieu':   { rich_text: [{ text: { content: `${lieuLabel}${rdv.details ? '\n' + rdv.details : ''}${rdv.remun ? '\n💰 ' + rdv.remun : ''}`.slice(0, 2000) } }] },
+        'Lieu':   { rich_text: [{ text: { content: `${lieuLabel}${!_slotToDate(rdv.slot) && rdv.souhaitTexte ? '\n🕐 Souhait : ' + rdv.souhaitTexte : ''}${rdv.details ? '\n' + rdv.details : ''}`.slice(0, 2000) } }] },
         'Statut': { select: { name: 'Planifié' } },
         'Notif 24h':   { checkbox: true },
         'Notif 1h':    { checkbox: true },
@@ -195,13 +200,13 @@ function _embedRdv(rdv) {
       { name: '👤 Demandeur', value: `${rdv.nomRP}${rdv.clientId ? ` (<@${rdv.clientId}>)` : ''}`, inline: false },
       { name: '🧰 Prestation', value: typeLabel, inline: true },
       { name: '📍 Lieu', value: lieuLabel, inline: true },
-      { name: '🕐 Créneau', value: dt ? `${tsF(dt)}\n${tsR(dt)}` : (rdv.slot || '—'), inline: false },
-      ...(rdv.remun ? [{ name: '💰 Rémunération proposée', value: rdv.remun, inline: true }] : []),
+      { name: '🕐 Créneau', value: dt ? `${tsF(dt)}\n${tsR(dt)}` : (rdv.souhaitTexte ? `*Souhait : ${rdv.souhaitTexte}* (à fixer)` : '—'), inline: false },
       ...(rdv.agentId ? [{ name: '🤝 Agent assigné', value: `<@${rdv.agentId}>`, inline: true }] : []),
       ...(rdv.details ? [{ name: '📝 Détails', value: rdv.details.slice(0, 1000), inline: false }] : []),
     )
     .setFooter({ text: `Iron Wolf Company · Bureau des Rendez-vous` })
     .setTimestamp();
+  if (rdv.photo && /^https?:\/\/\S+/i.test(rdv.photo)) e.setImage(rdv.photo);
   return e;
 }
 function _boutonsTelegramme(rdv) {
@@ -364,47 +369,41 @@ async function routeInteraction(interaction) {
     if (interaction.isButton?.() && interaction.customId === 'rdvp_book') {
       const sel = new StringSelectMenuBuilder().setCustomId('rdvp_type').setPlaceholder('1️⃣ Choisis la prestation')
         .addOptions(Object.entries(TYPES).map(([k, v]) => ({ label: v.label, value: k })));
-      await interaction.reply({ content: '✉ **Prise de rendez-vous** — étape 1/3 : la prestation.', components: [new ActionRowBuilder().addComponents(sel)], flags: MessageFlags.Ephemeral }).catch(() => {});
+      await interaction.reply({ content: '✉ **Prise de rendez-vous** — étape 1/2 : la prestation.', components: [new ActionRowBuilder().addComponents(sel)], flags: MessageFlags.Ephemeral }).catch(() => {});
       return true;
     }
     if (interaction.isStringSelectMenu?.() && interaction.customId === 'rdvp_type') {
       const typeKey = interaction.values[0];
       const sel = new StringSelectMenuBuilder().setCustomId(`rdvp_lieu::${typeKey}`).setPlaceholder('2️⃣ Choisis le lieu')
         .addOptions(Object.entries(LIEUX).map(([k, v]) => ({ label: v, value: k })));
-      await interaction.update({ content: `✉ Prestation : **${TYPES[typeKey]?.label || typeKey}** — étape 2/3 : le lieu.`, components: [new ActionRowBuilder().addComponents(sel)] }).catch(() => {});
+      await interaction.update({ content: `✉ Prestation : **${TYPES[typeKey]?.label || typeKey}** — étape 2/2 : le lieu, puis un court formulaire.`, components: [new ActionRowBuilder().addComponents(sel)] }).catch(() => {});
       return true;
     }
     if (interaction.isStringSelectMenu?.() && interaction.customId?.startsWith('rdvp_lieu::')) {
       const typeKey = interaction.customId.split('::')[1];
       const lieuKey = interaction.values[0];
-      const slots = _slotsDisponibles();
-      if (!slots.length) { await interaction.update({ content: '⚠️ Aucun créneau disponible pour le moment. Réessaie plus tard.', components: [] }).catch(() => {}); return true; }
-      const sel = new StringSelectMenuBuilder().setCustomId(`rdvp_creneau::${typeKey}::${lieuKey}`).setPlaceholder('3️⃣ Choisis un créneau')
-        .addOptions(slots.map(s => ({ label: _slotLabel(s).slice(0, 100), value: s })));
-      await interaction.update({ content: `✉ Lieu : **${LIEUX[lieuKey] || lieuKey}** — étape 3/3 : le créneau.`, components: [new ActionRowBuilder().addComponents(sel)] }).catch(() => {});
-      return true;
-    }
-    if (interaction.isStringSelectMenu?.() && interaction.customId?.startsWith('rdvp_creneau::')) {
-      const [, typeKey, lieuKey] = interaction.customId.split('::');
-      const slot = interaction.values[0];
-      const modal = new ModalBuilder().setCustomId(`rdvp_modal::${typeKey}::${lieuKey}::${slot}`).setTitle('✉ Votre télégramme');
+      const modal = new ModalBuilder().setCustomId(`rdvp_modal::${typeKey}::${lieuKey}`).setTitle('✉ Votre demande de rendez-vous');
       modal.addComponents(
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom').setLabel('Votre nom (personnage)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setPlaceholder('Ex : Mr. Abberline')),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Votre demande (détails)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setPlaceholder('Le besoin, le contexte, vos conditions…')),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('remun').setLabel('Rémunération proposée (facultatif)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80).setPlaceholder('Ex : 150$ + frais')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('quand').setLabel('Quand ? (jour + heure souhaités)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setPlaceholder('Ex : 20/06 à 21h, ou samedi soir')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Votre demande (détails)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setPlaceholder('Le besoin, le contexte…')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('photo').setLabel('Photo du lieu — lien (facultatif)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(300).setPlaceholder('https://… (lien d\'une image)')),
       );
       await interaction.showModal(modal).catch(() => {});
       return true;
     }
     if (interaction.isModalSubmit?.() && interaction.customId?.startsWith('rdvp_modal::')) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
-      const [, typeKey, lieuKey, slot] = interaction.customId.split('::');
+      const [, typeKey, lieuKey] = interaction.customId.split('::');
       const nomRP = (interaction.fields.getTextInputValue('nom') || '').trim() || (interaction.member?.displayName || interaction.user.username);
+      const quand = (interaction.fields.getTextInputValue('quand') || '').trim();
       const details = (interaction.fields.getTextInputValue('details') || '').trim();
-      const remun = (interaction.fields.getTextInputValue('remun') || '').trim();
+      const photoRaw = (interaction.fields.getTextInputValue('photo') || '').trim();
+      const photo = /^https?:\/\/\S+/i.test(photoRaw) ? photoRaw : '';
+      const slot = _parseSlot(quand); // créneau précis si on a pu le lire, sinon null (on garde le texte)
       const db = loadDB(); const store = _store(db);
       const id = ref();
-      const rdv = { id, clientId: interaction.user.id, nomRP, typeKey, lieuKey, slot, details, remun, statut: 'Planifié', notionId: null, channelId: null, msgId: null, agentId: null, sent: {}, createdAt: Date.now() };
+      const rdv = { id, clientId: interaction.user.id, nomRP, typeKey, lieuKey, slot, souhaitTexte: quand, photo, details, statut: 'Planifié', notionId: null, channelId: null, msgId: null, agentId: null, sent: {}, createdAt: Date.now() };
       // Notion (best-effort)
       rdv.notionId = await _notionCreer(rdv);
       // Dossier client
@@ -424,7 +423,7 @@ async function routeInteraction(interaction) {
           '```', ' WESTERN UNION ', '```',
           `REÇU STOP DEMANDE ENREGISTRÉE STOP RÉF **${id}** STOP`,
           `PRESTATION ${TYPES[typeKey]?.label || '—'} STOP LIEU ${LIEUX[lieuKey] || '—'} STOP`,
-          dt ? `CRÉNEAU SOUHAITÉ ${tsF(dt)} STOP` : '',
+          dt ? `CRÉNEAU SOUHAITÉ ${tsF(dt)} STOP` : (quand ? `CRÉNEAU SOUHAITÉ ${quand} STOP` : ''),
           'LA DIRECTION ÉTUDIE VOTRE DEMANDE STOP RÉPONSE À SUIVRE STOP',
         ].filter(Boolean).join('\n'))
         .setFooter({ text: 'Bureau des Rendez-vous · Saint-Denis' });
@@ -501,10 +500,9 @@ async function routeInteraction(interaction) {
       }
 
       if (action === 'rdvp_reschedule') {
-        const slots = _slotsDisponibles();
-        if (!slots.length) { await interaction.reply({ content: '⚠️ Aucun créneau disponible.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
-        const sel = new StringSelectMenuBuilder().setCustomId(`rdvp_resch_go::${rdvId}`).setPlaceholder('Nouveau créneau').addOptions(slots.map(s => ({ label: _slotLabel(s).slice(0, 100), value: s })));
-        await interaction.reply({ content: '🔁 Choisis le nouveau créneau :', components: [new ActionRowBuilder().addComponents(sel)], flags: MessageFlags.Ephemeral }).catch(() => {});
+        const modal = new ModalBuilder().setCustomId(`rdvp_resch_modal::${rdvId}`).setTitle('🔁 Reprogrammer le rendez-vous')
+          .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('quand').setLabel('Nouveau créneau (jour + heure)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setPlaceholder('Ex : 20/06 à 21h')));
+        await interaction.showModal(modal).catch(() => {});
         return true;
       }
     }
@@ -525,9 +523,8 @@ async function routeInteraction(interaction) {
         .addFields(
           { name: '🧰 Prestation', value: TYPES[rdv.typeKey]?.label || '—', inline: true },
           { name: '📍 Lieu', value: LIEUX[rdv.lieuKey] || '—', inline: true },
-          { name: '🕐 Quand', value: dt ? `${tsF(dt)} (${tsR(dt)})` : (rdv.slot || '—'), inline: false },
+          { name: '🕐 Quand', value: dt ? `${tsF(dt)} (${tsR(dt)})` : (rdv.souhaitTexte ? `*Souhait : ${rdv.souhaitTexte}* (à fixer)` : '—'), inline: false },
           { name: '👤 Client', value: rdv.nomRP, inline: true },
-          ...(rdv.remun ? [{ name: '💰 Rémunération', value: rdv.remun, inline: true }] : []),
           ...(rdv.details ? [{ name: '📝 Détails', value: rdv.details.slice(0, 1000), inline: false }] : []),
         ).setFooter({ text: 'Iron Wolf Company · Bureau des Rendez-vous' });
       await _mpClient(interaction.client, agentId, '', brief);
@@ -546,16 +543,20 @@ async function routeInteraction(interaction) {
       return true;
     }
 
-    // Reprogrammation : nouveau créneau choisi
-    if (interaction.isStringSelectMenu?.() && interaction.customId?.startsWith('rdvp_resch_go::')) {
-      if (!peutGerer(interaction.member)) { await interaction.update({ content: '🔒 Réservé.', components: [] }).catch(() => {}); return true; }
+    // Reprogrammation : nouveau créneau saisi librement
+    if (interaction.isModalSubmit?.() && interaction.customId?.startsWith('rdvp_resch_modal::')) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      if (!peutGerer(interaction.member)) { await interaction.editReply({ content: '🔒 Réservé.' }).catch(() => {}); return true; }
       const rdvId = interaction.customId.split('::')[1];
       const db = loadDB(); const store = _store(db); const rdv = store.rdvs[rdvId];
-      if (!rdv) { await interaction.update({ content: '⚠️ RDV introuvable.', components: [] }).catch(() => {}); return true; }
-      rdv.slot = interaction.values[0]; rdv.sent = {}; store.rdvs[rdvId] = rdv; _persist(db);
+      if (!rdv) { await interaction.editReply({ content: '⚠️ RDV introuvable.' }).catch(() => {}); return true; }
+      const quand = (interaction.fields.getTextInputValue('quand') || '').trim();
+      const slot = _parseSlot(quand);
+      if (!slot) { await interaction.editReply({ content: '⚠️ Je n\'ai pas reconnu de date. Réessaie en indiquant le jour, ex : `20/06 à 21h`.' }).catch(() => {}); return true; }
+      rdv.slot = slot; rdv.souhaitTexte = quand; rdv.sent = {}; store.rdvs[rdvId] = rdv; _persist(db);
       await _notionDate(rdv.notionId, rdv.slot);
       const dt = _slotToDate(rdv.slot);
-      await interaction.update({ content: `✅ RDV \`${rdvId}\` reprogrammé : ${dt ? tsF(dt) : rdv.slot}.`, components: [] }).catch(() => {});
+      await interaction.editReply({ content: `✅ RDV \`${rdvId}\` reprogrammé : ${dt ? tsF(dt) : quand}.` }).catch(() => {});
       await _rafraichirTelegramme(interaction.client, rdv);
       if (rdv.clientId) await _mpClient(interaction.client, rdv.clientId, '', new EmbedBuilder().setColor(COL.orange).setTitle('✉ RENDEZ-VOUS REPROGRAMMÉ').setDescription([`RÉF **${rdv.id}** STOP NOUVEAU CRÉNEAU STOP`, dt ? `QUAND ${tsF(dt)} (${tsR(dt)}) STOP` : ''].filter(Boolean).join('\n')).setFooter({ text: 'Bureau des Rendez-vous' }));
       return true;
