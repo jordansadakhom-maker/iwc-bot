@@ -9,7 +9,10 @@ const {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   StringSelectMenuBuilder, UserSelectMenuBuilder, MessageFlags,
 } = require('discord.js');
-const { loadDB, saveDB } = require('./db');
+const { loadDB, saveDB, sauvegarderSurGitHub } = require('./db');
+// Sauvegarde immédiate sur GitHub : sur Render le disque est éphémère — sans ça, un contrat créé
+// est perdu au prochain redéploiement (d'où « Contrat introuvable » au moment de valider).
+function _persistNow() { try { if (typeof sauvegarderSurGitHub === 'function') sauvegarderSurGitHub().catch(() => {}); } catch {} }
 
 // ─── Salons (IDs figés du serveur) ───
 const CH_CONTRATS          = '1508756442730074222';
@@ -17,7 +20,7 @@ const CH_CONTRATS_REPONSES = '1509340674779254876';
 const CH_JOURNAL           = '1508756535407542372';
 
 // ─── Rôles Direction (permissions + ping) ───
-const DIRECTION_ROLE_NAMES = ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Conseil'];
+const DIRECTION_ROLE_NAMES = ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'];
 
 // ─── Types de mission (clandestins) ───
 const TYPES_MISSION = [
@@ -265,7 +268,7 @@ async function postPanel(channel) {
     new ButtonBuilder().setCustomId('cc_mine').setLabel('🗂️ Mes contrats').setStyle(ButtonStyle.Secondary),
   );
   const sent = await channel.send({ embeds: [embed], components: [row] });
-  db.ccPanelMsgId = sent.id; db.ccPanelChanId = channel.id; saveDB(db);
+  db.ccPanelMsgId = sent.id; db.ccPanelChanId = channel.id; saveDB(db); _persistNow();
   return sent;
 }
 
@@ -338,7 +341,7 @@ async function onModalSubmit(interaction) {
     createdAt: new Date().toISOString(),
   };
   db.contrats.push(contrat);
-  saveDB(db);
+  saveDB(db); _persistNow();
   syncNotion(contrat, '🟡 Proposé');
 
   const ch = await fetchCh(interaction.guild, CH_CONTRATS);
@@ -350,7 +353,7 @@ async function onModalSubmit(interaction) {
   });
   contrat.msgId = sent.id;
   contrat.channelId = ch.id;
-  saveDB(db);
+  saveDB(db); _persistNow();
   await interaction.editReply({ content: `✅ Contrat **${contrat.id}** créé${confidentiel ? ' *(anonyme & confidentiel)*' : ''}.` });
 }
 
@@ -366,7 +369,7 @@ async function onAccept(interaction) {
   c.status = 'actif';
   c.acceptedAt = new Date().toISOString();
   c.acceptePar = db.members?.[interaction.user.id]?.name || interaction.user.username;
-  saveDB(db);
+  saveDB(db); _persistNow();
   syncNotion(c, '🟢 En cours');
   await interaction.update({ embeds: [buildContratEmbed(c)], components: buildContratButtons(c) });
   const jc = journalCh(interaction.guild);
@@ -380,7 +383,7 @@ async function onRefuse(interaction) {
   if (!c || c.status !== 'propose') return interaction.reply({ content: '❌ Contrat introuvable ou déjà traité.', flags: MessageFlags.Ephemeral });
   c.status = 'refuse';
   c.closedAt = new Date().toISOString();
-  saveDB(db);
+  saveDB(db); _persistNow();
   syncNotion(c, '⛔ Refusé');
   await interaction.update({ embeds: [buildContratEmbed(c)], components: [] });
 }
@@ -409,7 +412,7 @@ async function onAssignGo(interaction) {
   c.agents = Array.from(new Set([...(c.agents || []), ...interaction.values]));
   if (!c.agentsStatus) c.agentsStatus = {};
   for (const uid of c.agents) { if (!c.agentsStatus[uid]) c.agentsStatus[uid] = 'attente'; }
-  saveDB(db);
+  saveDB(db); _persistNow();
   await interaction.update({ content: `✅ ${interaction.values.length} agent(s) assigné(s) au contrat **${id}**. Briefings envoyés — ils doivent **accepter ou refuser**.`, components: [] });
   await envoyerBriefings(interaction.guild, c);
   await rafraichirFiche(interaction.guild, c);
@@ -429,7 +432,7 @@ async function onAgentReponse(interaction, accepte) {
   if (!(c.agents || []).includes(uid)) return interaction.reply({ content: "❌ Tu n'es pas assigné à ce contrat.", flags: MessageFlags.Ephemeral });
   if (!c.agentsStatus) c.agentsStatus = {};
   c.agentsStatus[uid] = accepte ? 'accepte' : 'refuse';
-  saveDB(db);
+  saveDB(db); _persistNow();
   const txt = accepte
     ? '✅ Tu as **accepté** la mission. La Confrérie compte sur toi.'
     : "⛔ Tu as **refusé** la mission. C'est noté.";
@@ -463,7 +466,7 @@ async function cloturer(interaction, succes) {
   c.status = succes ? 'reussie' : 'echouee';
   c.closedAt = new Date().toISOString();
   c.clôturePar = db.members?.[interaction.user.id]?.name || interaction.user.username;
-  saveDB(db);
+  saveDB(db); _persistNow();
   syncNotion(c, succes ? '✅ Réussie' : '💀 Échouée');
   await interaction.update({ embeds: [buildContratEmbed(c)], components: [] });
   await archiver(interaction.guild, c);
@@ -524,7 +527,7 @@ async function checkEcheances(guild) {
         c.relance3j = true; changed = true;
       }
     }
-    if (changed) saveDB(db);
+    if (changed) saveDB(db); _persistNow();
   } catch (e) { console.log('❌ checkEcheances error:', e.message); }
 }
 
