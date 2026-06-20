@@ -71,7 +71,7 @@ let monitoring = {};
 try { monitoring = require('./monitoring'); console.log('✅ Module monitoring chargé'); }
 catch (e) { console.log('⚠️ monitoring non chargé:', e.message); }
 
-const { fmtLong, fmtShort } = require('./utils');
+const { fmtLong, fmtShort, daysSince, parisOffsetHours, _fmtDollars } = require('./utils');
 
 process.on('unhandledRejection', (reason, promise) => {
   console.log('⚠️ Unhandled Rejection:', reason?.message || reason);
@@ -448,7 +448,7 @@ async function registerSlashCommands(guild) {
 }
 
 function nomParticipant(member) { return DISCORD_TO_IC[member.id] || member.user?.username || member.displayName || 'Inconnu'; }
-function daysSince(d) { return !d ? 999 : Math.floor((Date.now() - new Date(d).getTime()) / 86400000); }
+// (déplacé dans utils.js)
 // fmtLong / fmtShort → déplacés dans utils.js (importés en haut du fichier)
 function getCh(guild, ...names) {
   for (const name of names) {
@@ -1507,7 +1507,7 @@ async function notionQueryAgenda() {
   } catch { return []; }
 }
 
-function parisOffsetHours(date) { const tzStr = date.toLocaleString('en-US', { timeZone: 'Europe/Paris' }); const utcStr = date.toLocaleString('en-US', { timeZone: 'UTC' }); return Math.round((new Date(tzStr).getTime() - new Date(utcStr).getTime()) / 3600000); }
+// (déplacé dans utils.js)
 function buildRdvDate(dateStr, heureStr) {
   if (!dateStr) return null; const jour = dateStr.split('T')[0]; let hh = 0, mm = 0;
   if (heureStr && /\d{1,2}[:hH]\d{2}/.test(heureStr)) { const m = heureStr.match(/(\d{1,2})[:hH](\d{2})/); hh = parseInt(m[1], 10); mm = parseInt(m[2], 10); }
@@ -7242,7 +7242,7 @@ function _getCompte(db, id) {
   if (!Array.isArray(db.economie[id].historique)) db.economie[id].historique = [];
   return db.economie[id];
 }
-function _fmtDollars(n) { return `${Math.round(Number(n) || 0).toLocaleString('fr-FR')} $`; }
+// (déplacé dans utils.js)
 
 function _embedPortefeuille(member, compte) {
   const e = new EmbedBuilder().setColor(0x2E8B57)
