@@ -2,13 +2,15 @@
 //  inventaire.js — Coffre commun de l'organisation (hors argent)
 //  ----------------------------------------------------------------------------
 //  UN SEUL coffre partagé (Compagnie & Confrérie ensemble).
-//  Catégories : Armes · Munitions · Provisions · Médecine · Matériel.
-//  Tout le monde peut ajouter / retirer / corriger. Installation : Direction.
-//  La photo est RÉ-UPLOADÉE en vrai fichier épinglé (pas un lien qui expire).
+//  Catégories : Armes · Munitions · Provisions · Médecine · Matériel · Commun.
+//  Gestion manuelle (boutons ➕➖✏️) ET lecture d'une capture par l'IA :
+//   - via /inventaire-photo  (image jointe)
+//   - ou en glissant une image directement dans le salon
+//  La lecture IA propose, et l'utilisateur VALIDE avant toute modification.
 //
 //  /inventaire-installer  → poser le tableau dans CE salon         [Direction]
-//  /inventaire-photo      → joindre une capture du coffre en jeu   [tous]
-//  Identifiants isolés : inv_*  ·  Données dans db.inventaire
+//  /inventaire-photo      → lire une capture du coffre en jeu      [tous]
+//  Identifiants isolés : inv_*  /  invp_*  ·  Données dans db.inventaire
 // ───────────────────────────────────────────────────────────────────────────
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder, MessageFlags } = require('discord.js');
 
@@ -54,10 +56,8 @@ function _counts(inv) {
 function _boardEmbed(inv) {
   const { per, total } = _counts(inv);
   const e = new EmbedBuilder().setColor(COULEUR).setTitle(TITRE).setDescription(SOUS);
-  // Récapitulatif (total + compte par catégorie)
   const recap = CATS.map(c => `${CAT_EMOJI[c]} ${c} : **${per[c]}**`).join(" · ");
   e.addFields({ name: `📊 Récapitulatif — ${total} article(s) en réserve`, value: recap, inline: false });
-  // Détail par catégorie
   for (const c of CATS) {
     const items = inv.stock[c] || {};
     const noms = Object.keys(items).sort();
@@ -65,7 +65,7 @@ function _boardEmbed(inv) {
     if (val.length > 1000) val = val.slice(0, 1000) + "\n…";
     e.addFields({ name: `${CAT_EMOJI[c]} ${c} (${per[c]})`, value: val, inline: false });
   }
-  if (inv.photoMsg) e.addFields({ name: "📷 Photo du coffre", value: "Capture réelle épinglée dans ce salon.", inline: false });
+  if (inv.photoMsg) e.addFields({ name: "📷 Photo du coffre", value: "Dernière capture épinglée dans ce salon.", inline: false });
   e.setFooter({ text: "Iron Wolf Company & La Confrérie • mis à jour automatiquement" });
   return e;
 }
@@ -114,9 +114,88 @@ function _modal(action) {
   return m;
 }
 
+// ── Lecture d'image par l'IA ──────────────────────────────────────────────
+const PROMPT_VISION = `Tu analyses une capture d'écran de l'inventaire d'un coffre dans un jeu vidéo type Far West (RedM / Red Dead Redemption).
+Liste CHAQUE objet visible avec sa quantité exacte.
+Réponds UNIQUEMENT avec un tableau JSON valide, sans aucun texte autour ni balises de code, au format exact :
+[{"nom":"Nom de l'objet","quantite":12,"categorie":"Armes"}]
+La "categorie" doit obligatoirement être l'une de : Armes, Munitions, Provisions, Médecine, Matériel, Commun.
+Si tu hésites sur la catégorie, mets "Commun". Ne réponds que la liste. Si aucun objet n'est visible, réponds [].`;
+
+async function _imageBytes(url) {
+  try { const r = await fetch(url); if (!r.ok) return null; return Buffer.from(await r.arrayBuffer()); } catch { return null; }
+}
+
+async function _analyserImage(b64, mediaType) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 2000,
+        messages: [{ role: 'user', content: [
+          { type: 'image', source: { type: 'base64', media_type: mediaType || 'image/png', data: b64 } },
+          { type: 'text', text: PROMPT_VISION },
+        ] }],
+      }),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    let txt = (data?.content?.[0]?.text || "").trim().replace(/```json/gi, "").replace(/```/g, "").trim();
+    const m = txt.match(/\[[\s\S]*\]/);
+    if (!m) return null;
+    const arr = JSON.parse(m[0]);
+    if (!Array.isArray(arr)) return null;
+    const out = [];
+    for (const it of arr) {
+      const nom = String(it.nom || it.name || "").trim().slice(0, 80);
+      const q = parseInt(it.quantite ?? it.quantity ?? it.qte, 10);
+      const cat = _matchCat(it.categorie || it.category || "") || 'Commun';
+      if (nom && Number.isFinite(q) && q > 0) out.push({ nom, quantite: q, categorie: cat });
+    }
+    return out;
+  } catch { return null; }
+}
+
+// Propositions de lecture en attente de validation (en mémoire, clé = id du message)
+const _pending = new Map();
+
+async function _proposer(channel, items, byUserId) {
+  try {
+    const lignes = {};
+    for (const it of items) { (lignes[it.categorie] = lignes[it.categorie] || []).push(`${it.nom} × **${it.quantite}**`); }
+    let desc = CATS.filter(c => lignes[c]).map(c => `${CAT_EMOJI[c]} **${c}**\n${lignes[c].join("\n")}`).join("\n\n") || "*(aucun objet lu)*";
+    if (desc.length > 3800) desc = desc.slice(0, 3800) + "\n…";
+    const e = new EmbedBuilder().setColor(0xC9A66B).setTitle("📷 Lecture de la capture du coffre")
+      .setDescription("Voici ce que j'ai lu sur l'image. **Vérifie bien**, puis choisis ci-dessous :\n\n" + desc)
+      .setFooter({ text: "« Remplacer » écrase le coffre · « Ajouter » complète l'existant · « Annuler » ne change rien" });
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("invp_replace").setLabel("Remplacer le coffre").setEmoji("✅").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("invp_add").setLabel("Ajouter au coffre").setEmoji("🔀").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("invp_cancel").setLabel("Annuler").setEmoji("❌").setStyle(ButtonStyle.Secondary),
+    );
+    const m = await channel.send({ embeds: [e], components: [row], allowedMentions: { parse: [] } }).catch(() => null);
+    if (m) _pending.set(m.id, { items, by: byUserId, ts: Date.now() });
+    return m;
+  } catch { return null; }
+}
+
+function _appliquer(inv, items, mode) {
+  if (mode === 'replace') { for (const c of CATS) inv.stock[c] = {}; }
+  for (const it of items) {
+    if (!inv.stock[it.categorie]) inv.stock[it.categorie] = {};
+    const b = inv.stock[it.categorie];
+    const key = Object.keys(b).find(k => _norm(k) === _norm(it.nom)) || it.nom;
+    b[key] = (b[key] || 0) + it.quantite;
+  }
+}
+
 const inventaireCommands = [
   new SlashCommandBuilder().setName("inventaire-installer").setDescription("📦 Poser le tableau du coffre commun dans CE salon (Direction)"),
-  new SlashCommandBuilder().setName("inventaire-photo").setDescription("📷 Joindre une capture (fichier) de l'état réel du coffre")
+  new SlashCommandBuilder().setName("inventaire-photo").setDescription("📷 Lire une capture (fichier) de l'état réel du coffre")
     .addAttachmentOption(o => o.setName("image").setDescription("Capture d'écran de l'inventaire en jeu").setRequired(true)),
 ];
 
@@ -132,11 +211,11 @@ async function routeInteraction(interaction) {
       if (!m) { await interaction.editReply({ content: "❌ Je n'ai pas pu poster ici (vérifie mes permissions d'écriture dans ce salon)." }).catch(() => {}); return true; }
       inv.panneau = m.id; try { await m.pin(); } catch {}
       persist(db);
-      await interaction.editReply({ content: "✅ Tableau du coffre commun installé. Tout le monde peut ajouter / retirer / corriger via les boutons, et joindre une capture avec /inventaire-photo." }).catch(() => {});
+      await interaction.editReply({ content: "✅ Tableau du coffre commun installé. Boutons pour gérer à la main, ou /inventaire-photo (ou glisse une image ici) pour que le bot lise une capture." }).catch(() => {});
       return true;
     }
 
-    // ── Photo du coffre (ré-uploadée en vrai fichier épinglé) ──
+    // ── Photo du coffre : capture épinglée + lecture IA ──
     if (interaction.isChatInputCommand?.() && interaction.commandName === "inventaire-photo") {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       const att = interaction.options.getAttachment("image");
@@ -145,30 +224,49 @@ async function routeInteraction(interaction) {
       if (!inv.channelId) { await interaction.editReply({ content: "❌ Installe d'abord le tableau avec /inventaire-installer." }).catch(() => {}); return true; }
       const ch = await interaction.client.channels.fetch(inv.channelId).catch(() => null);
       if (!ch) { await interaction.editReply({ content: "❌ Salon du coffre introuvable." }).catch(() => {}); return true; }
+      // (1) garder la capture comme vrai fichier épinglé
       const ext = (((att.name || "").match(/\.(png|jpe?g|webp|gif)$/i)) || [".png"])[0];
       const file = new AttachmentBuilder(att.url, { name: `coffre-commun${ext}` });
-      const cap = `📷 **État réel du coffre commun** — capture mise à jour par <@${interaction.user.id}>.`;
+      const cap = `📷 **État réel du coffre commun** — capture par <@${interaction.user.id}>.`;
       let msg = inv.photoMsg ? await ch.messages.fetch(inv.photoMsg).catch(() => null) : null;
-      if (msg) {
-        await msg.edit({ content: cap, files: [file], attachments: [], allowedMentions: { parse: [] } }).catch(() => {});
-      } else {
-        const m = await ch.send({ content: cap, files: [file], allowedMentions: { parse: [] } }).catch(() => null);
-        if (m) { inv.photoMsg = m.id; try { await m.pin(); } catch {} }
-      }
+      if (msg) { await msg.edit({ content: cap, files: [file], attachments: [], allowedMentions: { parse: [] } }).catch(() => {}); }
+      else { const mm = await ch.send({ content: cap, files: [file], allowedMentions: { parse: [] } }).catch(() => null); if (mm) { inv.photoMsg = mm.id; try { await mm.pin(); } catch {} } }
       persist(db);
       await _refreshBoard(interaction.client, inv);
-      await interaction.editReply({ content: "✅ Capture du coffre mise à jour — vrai fichier épinglé dans le salon (téléchargeable)." }).catch(() => {});
+      // (2) lecture IA + proposition
+      const buf = await _imageBytes(att.url);
+      const items = buf ? await _analyserImage(buf.toString('base64'), att.contentType || 'image/png') : null;
+      if (!items || !items.length) { await interaction.editReply({ content: "📷 Capture épinglée ✅. En revanche je n'ai pas réussi à lire les objets dessus (image peu nette, ou clé IA absente) — tu peux saisir les quantités avec les boutons." }).catch(() => {}); return true; }
+      await _proposer(ch, items, interaction.user.id);
+      await interaction.editReply({ content: "📷 Capture épinglée ✅ et lue ! **Vérifie et valide** sur le message que je viens de poster dans le salon." }).catch(() => {});
       return true;
     }
 
-    // ── Boutons : ouvrir le formulaire ──
+    // ── Boutons : ouvrir le formulaire manuel ──
     if (interaction.isButton?.() && ["inv_add", "inv_remove", "inv_set"].includes(interaction.customId)) {
       const action = interaction.customId.replace("inv_", "");
       await interaction.showModal(_modal(action)).catch(() => {});
       return true;
     }
 
-    // ── Soumission du formulaire ──
+    // ── Validation d'une lecture IA ──
+    if (interaction.isButton?.() && ["invp_replace", "invp_add", "invp_cancel"].includes(interaction.customId)) {
+      const pend = _pending.get(interaction.message.id);
+      if (!pend) { await interaction.reply({ content: "⏳ Cette lecture a expiré (ou le bot a redémarré). Renvoie la capture.", flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      await interaction.deferUpdate().catch(() => {});
+      _pending.delete(interaction.message.id);
+      if (interaction.customId === "invp_cancel") { await interaction.editReply({ content: "❌ Lecture annulée — rien n'a changé dans le coffre.", embeds: [], components: [] }).catch(() => {}); return true; }
+      const db = loadDB(); const inv = _ensure(db);
+      const mode = interaction.customId === "invp_replace" ? "replace" : "add";
+      _appliquer(inv, pend.items, mode);
+      persist(db);
+      await _refreshBoard(interaction.client, inv);
+      await _log(interaction.client, inv, `📷 <@${interaction.user.id}> a ${mode === 'replace' ? "remplacé" : "complété"} le coffre depuis une capture (${pend.items.length} objet(s) lu(s)).`);
+      await interaction.editReply({ content: `✅ Coffre ${mode === 'replace' ? "remplacé" : "complété"} depuis la capture.`, embeds: [], components: [] }).catch(() => {});
+      return true;
+    }
+
+    // ── Soumission du formulaire manuel ──
     if (interaction.isModalSubmit?.() && interaction.customId.startsWith("invm::")) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       const action = interaction.customId.split("::")[1];
@@ -186,13 +284,12 @@ async function routeInteraction(interaction) {
       let apres;
       if (action === 'add') apres = avant + qte;
       else if (action === 'remove') apres = Math.max(0, avant - qte);
-      else apres = qte; // set
+      else apres = qte;
       if (apres <= 0) delete bucket[existante];
       else bucket[existante] = apres;
       persist(db);
       await _refreshBoard(interaction.client, inv);
 
-      // Mise à jour visible dans le salon
       const who = `<@${interaction.user.id}>`;
       let logTxt;
       if (action === 'set') logTxt = `📦 ${who} a recompté **${existante}** → **${apres}** *(${cat})*.`;
@@ -210,4 +307,21 @@ async function routeInteraction(interaction) {
   }
 }
 
-module.exports = { inventaireCommands, routeInteraction };
+// ── Image glissée directement dans le salon → lecture IA + proposition ──
+async function onMessage(message) {
+  try {
+    if (!message || message.author?.bot) return false;
+    const db = loadDB();
+    if (!db.inventaire || !db.inventaire.channelId || message.channelId !== db.inventaire.channelId) return false;
+    const img = message.attachments?.find?.(a => (a.contentType || "").startsWith("image"));
+    if (!img) return false;
+    await message.react("🔍").catch(() => {});
+    const buf = await _imageBytes(img.url);
+    const items = buf ? await _analyserImage(buf.toString('base64'), img.contentType || 'image/png') : null;
+    if (!items || !items.length) { await message.reply({ content: "📷 Je n'ai pas réussi à lire d'objets sur cette image. Essaie une capture plus nette, ou utilise les boutons du tableau.", allowedMentions: { parse: [] } }).catch(() => {}); return true; }
+    await _proposer(message.channel, items, message.author.id);
+    return true;
+  } catch { return false; }
+}
+
+module.exports = { inventaireCommands, routeInteraction, onMessage };
