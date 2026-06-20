@@ -1113,7 +1113,7 @@ Sois concis et factuel, base-toi UNIQUEMENT sur les notes. Maximum 250 mots.`;
       const resp = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: 'claude-3-5-haiku-20241022', max_tokens: 700, messages: [{ role: 'user', content: prompt }] }),
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 700, messages: [{ role: 'user', content: prompt }] }),
       });
       const data = await resp.json();
       const synthese = data?.content?.[0]?.text || 'Synthèse indisponible.';
@@ -1808,7 +1808,7 @@ Base-toi UNIQUEMENT sur les notes. Maximum 300 mots.`;
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-3-5-haiku-20241022', max_tokens: 800, messages: [{ role: 'user', content: prompt }] }),
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 800, messages: [{ role: 'user', content: prompt }] }),
     });
     const data = await resp.json();
     synthese = data?.content?.[0]?.text || '';
@@ -1850,7 +1850,7 @@ Si la transcription est incompréhensible ou vide, mets resume="(inaudible)".`;
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-3-5-haiku-20241022',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 500,
         messages: [{ role: 'user', content: prompt }],
       }),
@@ -5446,25 +5446,23 @@ async function _ouvrirModalSurnom(interaction) {
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom_ic').setLabel('Nom IC').setStyle(TextInputStyle.Short).setRequired(true).setValue(m?.name || '').setPlaceholder('Ex: Jonas Caverly')),
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('surnom_ic').setLabel('Surnom IC (optionnel)').setStyle(TextInputStyle.Short).setRequired(false).setValue(m?.surnom || '').setPlaceholder('Ex: Le Loup, L\'Ombre...')),
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('pseudo_discord').setLabel('Pseudo Discord').setStyle(TextInputStyle.Short).setRequired(true).setValue(interaction.user.username).setPlaceholder('Ton pseudo Discord actuel')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('appartenance').setLabel('Appartenance (Légal / Illégal)').setStyle(TextInputStyle.Short).setRequired(true).setValue(m?.pole === 'illegal' ? 'Illégal' : 'Légal').setPlaceholder('Légal ou Illégal')),
   );
   await interaction.showModal(modal);
 }
 
 async function _validerModalSurnom(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const nomIC = interaction.fields.getTextInputValue('nom_ic').trim(); const surnomIC = interaction.fields.getTextInputValue('surnom_ic').trim(); const pseudoDiscord = interaction.fields.getTextInputValue('pseudo_discord').trim(); const appartenance = interaction.fields.getTextInputValue('appartenance').trim().toLowerCase();
+  const nomIC = interaction.fields.getTextInputValue('nom_ic').trim(); const surnomIC = interaction.fields.getTextInputValue('surnom_ic').trim(); const pseudoDiscord = interaction.fields.getTextInputValue('pseudo_discord').trim();
   if (!nomIC) return interaction.editReply({ content: '❌ Le nom IC est obligatoire.' });
   const db = loadDB(); if (!db.members[interaction.user.id]) db.members[interaction.user.id] = {};
   db.members[interaction.user.id].name     = nomIC;
   db.members[interaction.user.id].surnom   = surnomIC || null;
   db.members[interaction.user.id].username = pseudoDiscord;
-  db.members[interaction.user.id].pole     = appartenance.includes('ill') ? 'illegal' : 'legal';
   db.members[interaction.user.id].lastActivity = new Date().toISOString();
   saveDB(db);
-  await _syncSurnomNotion({ content: `NOM IC: ${nomIC}\nSURNOM IC: ${surnomIC || ''}\nAPPARTENANCE: ${appartenance}\nPSEUDO DISCORD: ${pseudoDiscord}`, discordId: interaction.user.id, pseudoDiscord });
+  await _syncSurnomNotion({ content: `NOM IC: ${nomIC}\nSURNOM IC: ${surnomIC || ''}\nPSEUDO DISCORD: ${pseudoDiscord}`, discordId: interaction.user.id, pseudoDiscord });
   const nomComplet = surnomIC ? `${nomIC} dit « ${surnomIC} »` : nomIC;
-  await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ Identité IC enregistrée').addFields({ name: '🎭 Nom IC', value: nomIC, inline: true }, ...(surnomIC ? [{ name: '🐺 Surnom', value: surnomIC, inline: true }] : []), { name: '💬 Pseudo Discord', value: pseudoDiscord, inline: true }, { name: '⚖️ Appartenance', value: appartenance.includes('ill') ? '🔒 Illégal' : '⚖️ Légal', inline: true }).setDescription('*Ton identité IC a été synchronisée avec Notion.*').setFooter({ text: 'IWC • Registre des Membres' })] });
+  await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ Identité IC enregistrée').addFields({ name: '🎭 Nom IC', value: nomIC, inline: true }, ...(surnomIC ? [{ name: '🐺 Surnom', value: surnomIC, inline: true }] : []), { name: '💬 Pseudo Discord', value: pseudoDiscord, inline: true }).setDescription('*Ton identité IC a été synchronisée avec Notion.*').setFooter({ text: 'IWC • Registre des Membres' })] });
   try {
     await interaction.member?.setNickname(nomComplet).catch(() => {});
   } catch {}
@@ -6465,7 +6463,7 @@ Regles :
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-3-5-haiku-20241022', max_tokens: 400, messages: [{ role: 'user', content: prompt }] }),
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 400, messages: [{ role: 'user', content: prompt }] }),
     });
     const data = await resp.json();
     let txt = data.content?.[0]?.text || '';
@@ -6501,7 +6499,7 @@ ${note}`;
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-3-5-haiku-20241022', max_tokens: 500, messages: [{ role: 'user', content: prompt }] }),
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 500, messages: [{ role: 'user', content: prompt }] }),
     });
     const data = await resp.json();
     return (data.content?.[0]?.text || '').trim() || null;
