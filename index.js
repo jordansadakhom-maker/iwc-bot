@@ -713,7 +713,7 @@ notionModules.ajouterJournalIC = async (guild, entry) => {
 
 async function handleSlashCommand(interaction) {
   const { commandName, guild } = interaction; const db = loadDB();
-  if (commandName === 'grade-set')         { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleGradeSetCommand?.(interaction); }
+  if (commandName === 'grade-set')         { return notionV3.handleGradeSetCommand?.(interaction); }
   if (commandName === 'hierarchie')        { if (!isMembre(interaction.member)) return interaction.reply({ content: '🔒 La hiérarchie est réservée aux membres. Rejoins-nous via une candidature pour y accéder !', flags: MessageFlags.Ephemeral }); return notionV3.handleHierarchieCommand?.(interaction); }
   if (commandName === 'affaire') {
     if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral });
