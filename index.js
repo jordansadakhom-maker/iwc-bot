@@ -1879,6 +1879,29 @@ client.on('messageCreate', async message => {
   // ── Note du micro de terrain → réaction 📜 (contrat) + RÉSUMÉ automatique ──
   if (message.webhookId && (message.embeds?.[0]?.title || '').includes('Rapport de terrain')) {
     try { await message.react('📜'); } catch (e) { console.log('⚠️ Réaction note:', e.message); }
+    // ── Longue scène (fichier .txt joint) → conversation COMPLÈTE dans un FIL sous le rapport ──
+    // Le salon reste propre : seul le rapport y apparaît, le détail est dans le fil (lisible sans télécharger).
+    (async () => {
+      try {
+        const aFichier = message.attachments?.some?.(a => (a.name || '').toLowerCase().endsWith('.txt'));
+        if (!aFichier) return; // scène courte : tout est déjà affiché dans le rapport, pas besoin de fil
+        const texteComplet = await _lireTexteNote(message);
+        if (!texteComplet || texteComplet.length < 50) return;
+        // On retire l'en-tête technique du fichier (jusqu'à la ligne de ===) pour ne garder que la conversation
+        const sep = '='.repeat(50);
+        let corps = texteComplet;
+        const iSep = texteComplet.indexOf(sep);
+        if (iSep !== -1) corps = texteComplet.slice(iSep + sep.length).replace(/^\s+/, '');
+        if (!corps) corps = texteComplet;
+        const agent = message.embeds?.[0]?.author?.name || 'Agent';
+        let fil;
+        try { fil = await message.startThread({ name: `📜 Transcription — ${agent}`.slice(0, 100), autoArchiveDuration: 1440 }); }
+        catch (e) { console.log('⚠️ Création du fil de transcription:', e.message); return; }
+        if (!fil) return;
+        const blocs = corps.match(/[\s\S]{1,1850}/g) || [];
+        for (let i = 0; i < blocs.length; i++) await fil.send({ content: blocs[i] }).catch(() => {});
+      } catch (e) { console.log('❌ Fil transcription:', e.message); }
+    })();
     // Résumé automatique en arrière-plan (pour ne pas avoir à tout lire)
     (async () => {
       try {
