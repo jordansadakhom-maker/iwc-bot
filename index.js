@@ -404,7 +404,6 @@ const SLASH_COMMANDS = [
         { name: '✅ Clôturé', value: 'Clôturé' },
       )),
   new SlashCommandBuilder().setName('descriptions').setDescription('📝 Ajouter/mettre à jour la description de chaque salon (Direction)'),
-  new SlashCommandBuilder().setName('diagnostic').setDescription('🩺 Bilan de santé du bot : config, permissions, Notion (Direction)'),
   new SlashCommandBuilder().setName('installer-menu').setDescription('🎛️ Installer le menu principal + Commencer ici dans leurs salons (Direction)'),
   new SlashCommandBuilder().setName('mon-dossier').setDescription('📋 Voir ton parcours et ta progression vers le grade suivant'),
   new SlashCommandBuilder().setName('mon-journal').setDescription('📖 Voir et écrire le journal de ton personnage'),
@@ -838,12 +837,6 @@ async function handleSlashCommand(interaction) {
     const r = await _installerMenu(interaction.guild, true); // force le repost
     return interaction.followUp({ content: `Menu principal : ${r.okMenu ? '✅ posé + épinglé' : '⚠️ salon introuvable/permission'}\nCommencer ici : ${r.okStart ? '✅ posé + épinglé' : '⚠️ salon introuvable/permission'}`, flags: MessageFlags.Ephemeral }).catch(() => {});
   }
-
-  if (commandName === 'diagnostic') {
-    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
-    return _runDiagnostic(interaction);
-  }
-
 
   if (commandName === 'descriptions') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
