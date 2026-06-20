@@ -7,6 +7,7 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 let dbMod = {};
 try { dbMod = require('./db'); } catch { dbMod = {}; }
 const loadDB = dbMod.loadDB || (() => ({}));
+const backupGit = (typeof dbMod.sauvegarderSurGitHub === 'function') ? dbMod.sauvegarderSurGitHub : null;
 
 const DIRECTION_ROLES = ['Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'];
 function estDirection(member) {
@@ -16,6 +17,37 @@ function oui(b) { return b ? "✅" : "❌"; }
 function _count(x) { if (Array.isArray(x)) return x.length; if (x && typeof x === 'object') return Object.keys(x).length; return 0; }
 function _invTotal(db) {
   try { const s = db.inventaire?.stock; if (!s) return 0; let t = 0; for (const c of Object.keys(s)) for (const q of Object.values(s[c] || {})) t += (q || 0); return t; } catch { return 0; }
+}
+
+// Mini-appel réel à l'IA pour vérifier que la clé fonctionne (pas juste présente)
+async function _testIA(key) {
+  if (!key) return { ok: false, msg: "clé absente" };
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 5, messages: [{ role: 'user', content: 'Réponds: OK' }] }),
+    });
+    if (r.ok) return { ok: true, msg: "ok" };
+    if (r.status === 401) return { ok: false, msg: "clé refusée (401)" };
+    return { ok: false, msg: `erreur ${r.status}` };
+  } catch { return { ok: false, msg: "injoignable" }; }
+}
+
+// Lit le Gist et renvoie la date du dernier instantané backup-AAAA-MM-JJ
+async function _dernierBackup(token, gistId) {
+  if (!token || !gistId) return null;
+  try {
+    const r = await fetch(`https://api.github.com/gists/${gistId}`, {
+      headers: { 'Authorization': `Bearer ${token}`, 'User-Agent': 'iwc-bot', 'Accept': 'application/vnd.github+json' },
+    });
+    if (!r.ok) return null;
+    const data = await r.json();
+    const dates = Object.keys(data.files || {})
+      .map(n => (n.match(/^backup-(\d{4}-\d{2}-\d{2})\.json$/) || [])[1])
+      .filter(Boolean).sort();
+    return dates.length ? dates[dates.length - 1] : null;
+  } catch { return null; }
 }
 
 const diagnosticCommands = [
@@ -30,6 +62,14 @@ async function routeInteraction(interaction) {
     const db = loadDB();
     const env = process.env;
 
+    // Tests en direct (en parallèle pour aller vite)
+    const gitConfigured = !!(env.GITHUB_TOKEN && env.GITHUB_GIST_ID);
+    const [iaTest, saveOk, backup] = await Promise.all([
+      _testIA(env.ANTHROPIC_API_KEY),
+      (gitConfigured && backupGit ? backupGit().catch(() => false) : Promise.resolve(null)),
+      (gitConfigured ? _dernierBackup(env.GITHUB_TOKEN, env.GITHUB_GIST_ID) : Promise.resolve(null)),
+    ]);
+
     const e = new EmbedBuilder().setColor(0x4A7C59).setTitle("🩺 Diagnostic du bot IWC")
       .setDescription("État de santé actuel — une croix rouge = quelque chose à régler.");
 
@@ -39,6 +79,15 @@ async function routeInteraction(interaction) {
         `${oui(!!env.ANTHROPIC_API_KEY)} Clé IA — résumés, contrats, lecture photo\n` +
         `${oui(!!env.NOTION_TOKEN)} Notion — archivage\n` +
         `${oui(!!(env.GITHUB_TOKEN && env.GITHUB_GIST_ID))} Sauvegarde des données (GitHub Gist)`,
+      inline: false,
+    });
+
+    e.addFields({
+      name: "🧪 Tests en direct",
+      value:
+        `${oui(iaTest.ok)} IA joignable${iaTest.ok ? "" : ` — ${iaTest.msg}`}\n` +
+        `${saveOk === null ? "➖" : oui(saveOk)} Écriture de la sauvegarde${saveOk === null ? " — non configurée" : saveOk === false ? " — ÉCHEC" : " — testée à l'instant"}\n` +
+        `🗄️ Dernier backup : **${backup || "—"}**`,
       inline: false,
     });
 
