@@ -189,8 +189,8 @@ async function routeInteraction(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       const db = loadDB(); const rep = _ensure(db);
       const terme = (interaction.options.getString("recherche") || "").trim();
-      if (terme) { await interaction.editReply({ embeds: [_resultsEmbed(_filter(rep.contacts, terme), terme)] }).catch(() => {}); return true; }
-      await interaction.editReply({ embeds: [_panelEmbed(rep)] }).catch(() => {});
+      if (terme) { await interaction.editReply({ embeds: [_resultsEmbed(_filter(rep.contacts, terme), terme)], components: [_panelButtons()] }).catch(() => {}); return true; }
+      await interaction.editReply({ embeds: [_panelEmbed(rep)], components: [_panelButtons()] }).catch(() => {});
       return true;
     }
 
