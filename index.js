@@ -71,6 +71,8 @@ let monitoring = {};
 try { monitoring = require('./monitoring'); console.log('✅ Module monitoring chargé'); }
 catch (e) { console.log('⚠️ monitoring non chargé:', e.message); }
 
+const { fmtLong, fmtShort } = require('./utils');
+
 process.on('unhandledRejection', (reason, promise) => {
   console.log('⚠️ Unhandled Rejection:', reason?.message || reason);
   if (reason?.stack) console.log(reason.stack.split('\n').slice(0,5).join('\n'));
@@ -447,8 +449,7 @@ async function registerSlashCommands(guild) {
 
 function nomParticipant(member) { return DISCORD_TO_IC[member.id] || member.user?.username || member.displayName || 'Inconnu'; }
 function daysSince(d) { return !d ? 999 : Math.floor((Date.now() - new Date(d).getTime()) / 86400000); }
-function fmtLong(d) { return !d ? '—' : new Date(d).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }); }
-function fmtShort(d) { return !d ? '—' : new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
+// fmtLong / fmtShort → déplacés dans utils.js (importés en haut du fichier)
 function getCh(guild, ...names) {
   for (const name of names) {
     const clean = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
