@@ -1,16 +1,16 @@
 // ───────────────────────────────────────────────────────────────────────────
 //  inventaire.js — Coffre commun de l'organisation (hors argent)
 //  ----------------------------------------------------------------------------
-//  UN SEUL coffre partagé (Compagnie & Confrérie ensemble).
-//  Catégories : Armes · Munitions · Provisions · Médecine · Matériel · Commun.
-//  Gestion manuelle (boutons ➕➖✏️) ET lecture d'une capture par l'IA :
-//   - via /inventaire-photo  (image jointe)
-//   - ou en glissant une image directement dans le salon
-//  La lecture IA propose, et l'utilisateur VALIDE avant toute modification.
+//  UN SEUL coffre partagé (Compagnie & Confrérie). Catégories :
+//  Armes · Munitions · Provisions · Médecine · Matériel · Commun.
+//  - Gestion manuelle (boutons ➕➖✏️)
+//  - Lecture d'une (ou plusieurs) capture(s) par l'IA, avec correction + validation
+//  - Alertes de stock bas (seuils)
+//  - Export du coffre en fichier
+//  - Tous les mouvements partent dans un FIL « Journal du coffre » → salon propre
 //
-//  /inventaire-installer  → poser le tableau dans CE salon         [Direction]
-//  /inventaire-photo      → lire une capture du coffre en jeu      [tous]
-//  Identifiants isolés : inv_*  /  invp_*  ·  Données dans db.inventaire
+//  /inventaire-installer  /inventaire-photo  /inventaire-seuil  /inventaire-export
+//  Identifiants : inv_*  invp_*  invpc::*  ·  Données dans db.inventaire
 // ───────────────────────────────────────────────────────────────────────────
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder, MessageFlags } = require('discord.js');
 
@@ -44,6 +44,8 @@ function _ensure(db) {
   const inv = db.inventaire;
   if (!inv.stock) inv.stock = {};
   for (const c of CATS) if (!inv.stock[c]) inv.stock[c] = {};
+  if (!inv.seuils) inv.seuils = {};
+  if (!inv.journal) inv.journal = [];
   return inv;
 }
 
@@ -65,8 +67,8 @@ function _boardEmbed(inv) {
     if (val.length > 1000) val = val.slice(0, 1000) + "\n…";
     e.addFields({ name: `${CAT_EMOJI[c]} ${c} (${per[c]})`, value: val, inline: false });
   }
-  if (inv.photoMsg) e.addFields({ name: "📷 Photo du coffre", value: "Dernière capture épinglée dans ce salon.", inline: false });
-  e.setFooter({ text: "Iron Wolf Company & La Confrérie • mis à jour automatiquement" });
+  if (inv.photoMsg) e.addFields({ name: "📷 Photo du coffre", value: "Dernière(s) capture(s) épinglée(s) dans ce salon.", inline: false });
+  e.setFooter({ text: "Mouvements dans le fil « 📦 Journal du coffre » · mis à jour automatiquement" });
   return e;
 }
 
@@ -89,11 +91,30 @@ async function _refreshBoard(client, inv) {
   } catch {}
 }
 
+// Journal des mouvements → dans le FIL (repli sur le salon si pas de fil)
+async function _thread(client, inv) {
+  const id = inv.threadId || inv.channelId;
+  if (!id) return null;
+  return await client.channels.fetch(id).catch(() => null);
+}
 async function _log(client, inv, texte) {
+  try { const ch = await _thread(client, inv); if (ch) await ch.send({ content: texte, allowedMentions: { parse: [] } }).catch(() => {}); } catch {}
+}
+function _journalAdd(inv, txt) {
+  inv.journal = inv.journal || [];
+  inv.journal.unshift({ t: Date.now(), txt });
+  if (inv.journal.length > 40) inv.journal.length = 40;
+}
+
+async function _checkSeuils(client, inv, names) {
   try {
-    if (!inv.channelId) return;
-    const ch = await client.channels.fetch(inv.channelId).catch(() => null);
-    if (ch) await ch.send({ content: texte, allowedMentions: { parse: [] } }).catch(() => {});
+    if (!inv.seuils || !Object.keys(inv.seuils).length) return;
+    const alerts = [];
+    for (const c of CATS) for (const [nom, q] of Object.entries(inv.stock[c] || {})) {
+      const seuil = inv.seuils[_norm(nom)];
+      if (seuil != null && q <= seuil && (!names || names.has(_norm(nom)))) alerts.push(`⚠️ **Stock bas** — ${nom} : **${q}** (seuil ${seuil}).`);
+    }
+    if (alerts.length) await _log(client, inv, alerts.join("\n"));
   } catch {}
 }
 
@@ -106,15 +127,11 @@ function _modal(action) {
     .setPlaceholder("ex : Carabine Repeater, Balles .44, Conserves…").setRequired(true);
   const qte = new TextInputBuilder().setCustomId("qte").setLabel(action === 'set' ? "Quantité exacte (0 = retirer)" : "Quantité").setStyle(TextInputStyle.Short)
     .setPlaceholder("ex : 5").setRequired(true);
-  m.addComponents(
-    new ActionRowBuilder().addComponents(cat),
-    new ActionRowBuilder().addComponents(obj),
-    new ActionRowBuilder().addComponents(qte),
-  );
+  m.addComponents(new ActionRowBuilder().addComponents(cat), new ActionRowBuilder().addComponents(obj), new ActionRowBuilder().addComponents(qte));
   return m;
 }
 
-// ── Lecture d'image par l'IA ──────────────────────────────────────────────
+// ── Lecture d'image(s) par l'IA ────────────────────────────────────────────
 const PROMPT_VISION = `Tu analyses une capture d'écran de l'inventaire d'un coffre dans un jeu vidéo type Far West (RedM / Red Dead Redemption).
 Liste ABSOLUMENT TOUS les objets visibles sans en oublier un seul, Y COMPRIS les outils, crochets, cordes, lanternes, pelles, kits et tout équipement utilitaire, avec leur quantité exacte.
 Réponds UNIQUEMENT avec un tableau JSON valide, sans aucun texte autour ni balises de code, au format exact :
@@ -125,30 +142,28 @@ Règles de catégorie : Armes (revolvers, fusils, couteaux) ; Munitions (balles,
 async function _imageBytes(url) {
   try { const r = await fetch(url); if (!r.ok) return null; return Buffer.from(await r.arrayBuffer()); } catch { return null; }
 }
-
-async function _analyserImage(b64, mediaType) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
+async function _callVision(model, b64, mt) {
+  const apiKey = process.env.ANTHROPIC_API_KEY; if (!apiKey) return null;
   try {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 2000,
-        messages: [{ role: 'user', content: [
-          { type: 'image', source: { type: 'base64', media_type: mediaType || 'image/png', data: b64 } },
-          { type: 'text', text: PROMPT_VISION },
-        ] }],
-      }),
+      body: JSON.stringify({ model, max_tokens: 2000, messages: [{ role: 'user', content: [
+        { type: 'image', source: { type: 'base64', media_type: mt || 'image/png', data: b64 } },
+        { type: 'text', text: PROMPT_VISION },
+      ] }] }),
     });
     if (!resp.ok) return null;
     const data = await resp.json();
-    let txt = (data?.content?.[0]?.text || "").trim().replace(/```json/gi, "").replace(/```/g, "").trim();
-    const m = txt.match(/\[[\s\S]*\]/);
-    if (!m) return null;
-    const arr = JSON.parse(m[0]);
-    if (!Array.isArray(arr)) return null;
+    return (data?.content?.[0]?.text || "");
+  } catch { return null; }
+}
+function _parseItems(txt) {
+  if (!txt) return null;
+  txt = String(txt).trim().replace(/```json/gi, "").replace(/```/g, "").trim();
+  const m = txt.match(/\[[\s\S]*\]/); if (!m) return null;
+  try {
+    const arr = JSON.parse(m[0]); if (!Array.isArray(arr)) return null;
     const out = [];
     for (const it of arr) {
       const nom = String(it.nom || it.name || "").trim().slice(0, 80);
@@ -159,49 +174,86 @@ async function _analyserImage(b64, mediaType) {
     return out;
   } catch { return null; }
 }
+async function _analyserImage(b64, mt) {
+  // modèle puissant d'abord (meilleure lecture), repli sur le rapide
+  let txt = await _callVision('claude-sonnet-4-6', b64, mt);
+  if (!txt) txt = await _callVision('claude-haiku-4-5-20251001', b64, mt);
+  return _parseItems(txt);
+}
+function _merge(lists) {
+  const map = new Map();
+  for (const list of lists) for (const it of (list || [])) {
+    const k = it.categorie + "|" + _norm(it.nom);
+    if (map.has(k)) map.get(k).quantite += it.quantite;
+    else map.set(k, { nom: it.nom, quantite: it.quantite, categorie: it.categorie });
+  }
+  return [...map.values()];
+}
+async function _lireImages(atts) {
+  const lists = [];
+  for (const a of atts) {
+    const buf = await _imageBytes(a.url); if (!buf) continue;
+    const items = await _analyserImage(buf.toString('base64'), a.contentType || 'image/png');
+    if (items && items.length) lists.push(items);
+  }
+  return _merge(lists);
+}
 
-// Propositions de lecture en attente de validation (en mémoire, clé = id du message)
+// Propositions de lecture en attente de validation (mémoire, clé = id du message)
 const _pending = new Map();
 
-async function _proposer(channel, items, byUserId) {
+function _proposalEmbed(items) {
+  const lignes = {};
+  for (const it of items) { (lignes[it.categorie] = lignes[it.categorie] || []).push(`${it.nom} × **${it.quantite}**`); }
+  let desc = CATS.filter(c => lignes[c]).map(c => `${CAT_EMOJI[c]} **${c}**\n${lignes[c].join("\n")}`).join("\n\n") || "*(aucun objet lu)*";
+  if (desc.length > 3600) desc = desc.slice(0, 3600) + "\n…";
+  return new EmbedBuilder().setColor(0xC9A66B).setTitle("📷 Lecture de la capture du coffre")
+    .setDescription("Voici ce que j'ai lu. **Vérifie**, corrige si besoin, puis choisis :\n\n" + desc)
+    .setFooter({ text: "Remplacer = écrase · Ajouter = complète · Corriger = rectifier un objet · Annuler = rien" });
+}
+function _proposalRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("invp_replace").setLabel("Remplacer").setEmoji("✅").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("invp_add").setLabel("Ajouter").setEmoji("🔀").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("invp_edit").setLabel("Corriger").setEmoji("✏️").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("invp_cancel").setLabel("Annuler").setEmoji("❌").setStyle(ButtonStyle.Secondary),
+  );
+}
+async function _proposer(channel, items, by) {
   try {
-    const lignes = {};
-    for (const it of items) { (lignes[it.categorie] = lignes[it.categorie] || []).push(`${it.nom} × **${it.quantite}**`); }
-    let desc = CATS.filter(c => lignes[c]).map(c => `${CAT_EMOJI[c]} **${c}**\n${lignes[c].join("\n")}`).join("\n\n") || "*(aucun objet lu)*";
-    if (desc.length > 3800) desc = desc.slice(0, 3800) + "\n…";
-    const e = new EmbedBuilder().setColor(0xC9A66B).setTitle("📷 Lecture de la capture du coffre")
-      .setDescription("Voici ce que j'ai lu sur l'image. **Vérifie bien**, puis choisis ci-dessous :\n\n" + desc)
-      .setFooter({ text: "« Remplacer » écrase le coffre · « Ajouter » complète l'existant · « Annuler » ne change rien" });
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("invp_replace").setLabel("Remplacer le coffre").setEmoji("✅").setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId("invp_add").setLabel("Ajouter au coffre").setEmoji("🔀").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("invp_cancel").setLabel("Annuler").setEmoji("❌").setStyle(ButtonStyle.Secondary),
-    );
-    const m = await channel.send({ embeds: [e], components: [row], allowedMentions: { parse: [] } }).catch(() => null);
-    if (m) _pending.set(m.id, { items, by: byUserId, ts: Date.now() });
+    const m = await channel.send({ embeds: [_proposalEmbed(items)], components: [_proposalRow()], allowedMentions: { parse: [] } }).catch(() => null);
+    if (m) _pending.set(m.id, { items, by, ts: Date.now() });
     return m;
   } catch { return null; }
 }
-
 function _appliquer(inv, items, mode) {
+  const names = new Set();
   if (mode === 'replace') { for (const c of CATS) inv.stock[c] = {}; }
   for (const it of items) {
     if (!inv.stock[it.categorie]) inv.stock[it.categorie] = {};
     const b = inv.stock[it.categorie];
     const key = Object.keys(b).find(k => _norm(k) === _norm(it.nom)) || it.nom;
     b[key] = (b[key] || 0) + it.quantite;
+    names.add(_norm(key));
   }
+  return names;
 }
 
 const inventaireCommands = [
   new SlashCommandBuilder().setName("inventaire-installer").setDescription("📦 Poser le tableau du coffre commun dans CE salon (Direction)"),
-  new SlashCommandBuilder().setName("inventaire-photo").setDescription("📷 Lire une capture (fichier) de l'état réel du coffre")
-    .addAttachmentOption(o => o.setName("image").setDescription("Capture d'écran de l'inventaire en jeu").setRequired(true)),
+  new SlashCommandBuilder().setName("inventaire-photo").setDescription("📷 Lire une ou plusieurs captures du coffre en jeu")
+    .addAttachmentOption(o => o.setName("image").setDescription("Capture (1)").setRequired(true))
+    .addAttachmentOption(o => o.setName("image2").setDescription("Capture (2, optionnel)").setRequired(false))
+    .addAttachmentOption(o => o.setName("image3").setDescription("Capture (3, optionnel)").setRequired(false)),
+  new SlashCommandBuilder().setName("inventaire-seuil").setDescription("⚠️ Définir une alerte de stock bas pour un objet (Direction)")
+    .addStringOption(o => o.setName("objet").setDescription("Nom de l'objet").setRequired(true))
+    .addIntegerOption(o => o.setName("seuil").setDescription("Alerter quand la quantité descend à ce nombre (0 = enlever l'alerte)").setRequired(true)),
+  new SlashCommandBuilder().setName("inventaire-export").setDescription("📜 Exporter l'état du coffre + derniers mouvements (fichier)"),
 ];
 
 async function routeInteraction(interaction) {
   try {
-    // ── Installation du tableau ──
+    // ── Installation ──
     if (interaction.isChatInputCommand?.() && interaction.commandName === "inventaire-installer") {
       if (!estDirection(interaction.member)) { await interaction.reply({ content: "🔒 Réservé à la Direction.", flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
@@ -210,63 +262,130 @@ async function routeInteraction(interaction) {
       const m = await interaction.channel.send({ embeds: [_boardEmbed(inv)], components: [_boardButtons()] }).catch(() => null);
       if (!m) { await interaction.editReply({ content: "❌ Je n'ai pas pu poster ici (vérifie mes permissions d'écriture dans ce salon)." }).catch(() => {}); return true; }
       inv.panneau = m.id; try { await m.pin(); } catch {}
+      try { const th = await m.startThread({ name: "📦 Journal du coffre", autoArchiveDuration: 10080 }); inv.threadId = th.id; await th.send({ content: "📦 Ici s'inscrivent **tous les mouvements** du coffre (ajouts, retraits, lectures, alertes). Le salon reste propre." }).catch(() => {}); } catch {}
       persist(db);
-      await interaction.editReply({ content: "✅ Tableau du coffre commun installé. Boutons pour gérer à la main, ou /inventaire-photo (ou glisse une image ici) pour que le bot lise une capture." }).catch(() => {});
+      await interaction.editReply({ content: "✅ Coffre installé : tableau épinglé + fil « 📦 Journal du coffre » pour les mouvements. Gère via les boutons, /inventaire-photo (ou glisse des images), /inventaire-seuil, /inventaire-export." }).catch(() => {});
       return true;
     }
 
-    // ── Photo du coffre : capture épinglée + lecture IA ──
+    // ── Photo : capture(s) épinglée(s) + lecture IA ──
     if (interaction.isChatInputCommand?.() && interaction.commandName === "inventaire-photo") {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
-      const att = interaction.options.getAttachment("image");
-      if (!att || !((att.contentType || "").startsWith("image"))) { await interaction.editReply({ content: "❌ Joins bien une image (capture d'écran de l'inventaire en jeu)." }).catch(() => {}); return true; }
+      const atts = ["image", "image2", "image3"].map(n => interaction.options.getAttachment(n)).filter(a => a && (a.contentType || "").startsWith("image"));
+      if (!atts.length) { await interaction.editReply({ content: "❌ Joins au moins une image (capture d'écran de l'inventaire)." }).catch(() => {}); return true; }
       const db = loadDB(); const inv = _ensure(db);
       if (!inv.channelId) { await interaction.editReply({ content: "❌ Installe d'abord le tableau avec /inventaire-installer." }).catch(() => {}); return true; }
       const ch = await interaction.client.channels.fetch(inv.channelId).catch(() => null);
       if (!ch) { await interaction.editReply({ content: "❌ Salon du coffre introuvable." }).catch(() => {}); return true; }
-      // (1) garder la capture comme vrai fichier épinglé
-      const ext = (((att.name || "").match(/\.(png|jpe?g|webp|gif)$/i)) || [".png"])[0];
-      const file = new AttachmentBuilder(att.url, { name: `coffre-commun${ext}` });
-      const cap = `📷 **État réel du coffre commun** — capture par <@${interaction.user.id}>.`;
+      // (1) garder les captures comme vrais fichiers épinglés
+      const files = atts.map((a, i) => { const ext = (((a.name || "").match(/\.(png|jpe?g|webp|gif)$/i)) || [".png"])[0]; return new AttachmentBuilder(a.url, { name: `coffre-${i + 1}${ext}` }); });
+      const cap = `📷 **État réel du coffre commun** — ${atts.length} capture(s) par <@${interaction.user.id}>.`;
       let msg = inv.photoMsg ? await ch.messages.fetch(inv.photoMsg).catch(() => null) : null;
-      if (msg) { await msg.edit({ content: cap, files: [file], attachments: [], allowedMentions: { parse: [] } }).catch(() => {}); }
-      else { const mm = await ch.send({ content: cap, files: [file], allowedMentions: { parse: [] } }).catch(() => null); if (mm) { inv.photoMsg = mm.id; try { await mm.pin(); } catch {} } }
+      if (msg) { await msg.edit({ content: cap, files, attachments: [], allowedMentions: { parse: [] } }).catch(() => {}); }
+      else { const mm = await ch.send({ content: cap, files, allowedMentions: { parse: [] } }).catch(() => null); if (mm) { inv.photoMsg = mm.id; try { await mm.pin(); } catch {} } }
       persist(db);
       await _refreshBoard(interaction.client, inv);
-      // (2) lecture IA + proposition
-      const buf = await _imageBytes(att.url);
-      const items = buf ? await _analyserImage(buf.toString('base64'), att.contentType || 'image/png') : null;
-      if (!items || !items.length) { await interaction.editReply({ content: "📷 Capture épinglée ✅. En revanche je n'ai pas réussi à lire les objets dessus (image peu nette, ou clé IA absente) — tu peux saisir les quantités avec les boutons." }).catch(() => {}); return true; }
+      // (2) lecture IA (multi-captures fusionnées)
+      const items = await _lireImages(atts);
+      if (!items || !items.length) { await interaction.editReply({ content: "📷 Capture(s) épinglée(s) ✅. Mais je n'ai pas réussi à lire d'objets dessus (peu net, ou clé IA absente) — tu peux saisir avec les boutons." }).catch(() => {}); return true; }
       await _proposer(ch, items, interaction.user.id);
-      await interaction.editReply({ content: "📷 Capture épinglée ✅ et lue ! **Vérifie et valide** sur le message que je viens de poster dans le salon." }).catch(() => {});
+      await interaction.editReply({ content: "📷 Capture(s) épinglée(s) ✅ et lue(s) ! **Vérifie / corrige / valide** sur le message que je viens de poster." }).catch(() => {});
       return true;
     }
 
-    // ── Boutons : ouvrir le formulaire manuel ──
+    // ── Seuil d'alerte ──
+    if (interaction.isChatInputCommand?.() && interaction.commandName === "inventaire-seuil") {
+      if (!estDirection(interaction.member)) { await interaction.reply({ content: "🔒 Réservé à la Direction.", flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const objet = (interaction.options.getString("objet") || "").trim().slice(0, 80);
+      const seuil = interaction.options.getInteger("seuil");
+      if (!objet) { await interaction.editReply({ content: "❌ Objet manquant." }).catch(() => {}); return true; }
+      const db = loadDB(); const inv = _ensure(db);
+      if (seuil > 0) inv.seuils[_norm(objet)] = seuil; else delete inv.seuils[_norm(objet)];
+      persist(db);
+      await interaction.editReply({ content: seuil > 0 ? `✅ Alerte réglée : **${objet}** → je préviens dans le fil quand la quantité descend à **${seuil}** ou moins.` : `✅ Alerte retirée pour **${objet}**.` }).catch(() => {});
+      return true;
+    }
+
+    // ── Export ──
+    if (interaction.isChatInputCommand?.() && interaction.commandName === "inventaire-export") {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const db = loadDB(); const inv = _ensure(db);
+      const { per, total } = _counts(inv);
+      let txt = `COFFRE COMMUN — Iron Wolf Company & La Confrérie\nÉtat au ${new Date().toLocaleString('fr-FR')}\nTotal : ${total} article(s)\n`;
+      for (const c of CATS) {
+        txt += `\n=== ${c} (${per[c]}) ===\n`;
+        const items = inv.stock[c] || {}; const noms = Object.keys(items).sort();
+        txt += noms.length ? noms.map(n => `  - ${n} x ${items[n]}`).join("\n") : "  (vide)";
+        txt += "\n";
+      }
+      if (inv.journal && inv.journal.length) {
+        txt += `\n\n=== Derniers mouvements ===\n` + inv.journal.slice(0, 40).map(e => `  [${new Date(e.t).toLocaleString('fr-FR')}] ${e.txt}`).join("\n");
+      }
+      const file = new AttachmentBuilder(Buffer.from(txt, 'utf-8'), { name: 'coffre-commun.txt' });
+      await interaction.editReply({ content: "📜 Voici l'export complet du coffre.", files: [file] }).catch(() => {});
+      return true;
+    }
+
+    // ── Boutons manuels : ouvrir le formulaire ──
     if (interaction.isButton?.() && ["inv_add", "inv_remove", "inv_set"].includes(interaction.customId)) {
       const action = interaction.customId.replace("inv_", "");
       await interaction.showModal(_modal(action)).catch(() => {});
       return true;
     }
 
-    // ── Validation d'une lecture IA ──
-    if (interaction.isButton?.() && ["invp_replace", "invp_add", "invp_cancel"].includes(interaction.customId)) {
+    // ── Validation/correction d'une lecture IA ──
+    if (interaction.isButton?.() && ["invp_replace", "invp_add", "invp_cancel", "invp_edit"].includes(interaction.customId)) {
       const pend = _pending.get(interaction.message.id);
       if (!pend) { await interaction.reply({ content: "⏳ Cette lecture a expiré (ou le bot a redémarré). Renvoie la capture.", flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      if (interaction.customId === "invp_edit") {
+        const mm = new ModalBuilder().setCustomId(`invpc::${interaction.message.id}`).setTitle("Corriger / ajouter un objet");
+        const obj = new TextInputBuilder().setCustomId("objet").setLabel("Objet").setStyle(TextInputStyle.Short).setPlaceholder("Nom exact de l'objet").setRequired(true);
+        const qte = new TextInputBuilder().setCustomId("qte").setLabel("Quantité (0 = retirer de la lecture)").setStyle(TextInputStyle.Short).setPlaceholder("ex : 5").setRequired(true);
+        const cat = new TextInputBuilder().setCustomId("cat").setLabel("Catégorie (si nouvel objet, sinon laisse vide)").setStyle(TextInputStyle.Short).setPlaceholder("Armes / Munitions / Provisions / Médecine / Matériel / Commun").setRequired(false);
+        mm.addComponents(new ActionRowBuilder().addComponents(obj), new ActionRowBuilder().addComponents(qte), new ActionRowBuilder().addComponents(cat));
+        await interaction.showModal(mm).catch(() => {});
+        return true;
+      }
       await interaction.deferUpdate().catch(() => {});
       _pending.delete(interaction.message.id);
-      if (interaction.customId === "invp_cancel") { await interaction.editReply({ content: "❌ Lecture annulée — rien n'a changé dans le coffre.", embeds: [], components: [] }).catch(() => {}); return true; }
+      if (interaction.customId === "invp_cancel") { await interaction.editReply({ content: "❌ Lecture annulée — rien n'a changé.", embeds: [], components: [] }).catch(() => {}); return true; }
       const db = loadDB(); const inv = _ensure(db);
       const mode = interaction.customId === "invp_replace" ? "replace" : "add";
-      _appliquer(inv, pend.items, mode);
+      const names = _appliquer(inv, pend.items, mode);
+      _journalAdd(inv, `📷 ${mode === 'replace' ? "Remplacé" : "Complété"} depuis une capture (${pend.items.length} objet(s)).`);
       persist(db);
       await _refreshBoard(interaction.client, inv);
       await _log(interaction.client, inv, `📷 <@${interaction.user.id}> a ${mode === 'replace' ? "remplacé" : "complété"} le coffre depuis une capture (${pend.items.length} objet(s) lu(s)).`);
-      await interaction.editReply({ content: `✅ Coffre ${mode === 'replace' ? "remplacé" : "complété"} depuis la capture.`, embeds: [], components: [] }).catch(() => {});
+      await _checkSeuils(interaction.client, inv, names);
+      await interaction.editReply({ content: `✅ Coffre ${mode === 'replace' ? "remplacé" : "complété"} — détails dans le fil 📦.`, embeds: [], components: [] }).catch(() => {});
       return true;
     }
 
-    // ── Soumission du formulaire manuel ──
+    // ── Soumission correction de lecture ──
+    if (interaction.isModalSubmit?.() && interaction.customId.startsWith("invpc::")) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const msgId = interaction.customId.split("::")[1];
+      const pend = _pending.get(msgId);
+      if (!pend) { await interaction.editReply({ content: "⏳ Cette lecture a expiré." }).catch(() => {}); return true; }
+      const objet = (interaction.fields.getTextInputValue("objet") || "").trim().slice(0, 80);
+      const qte = parseInt(((interaction.fields.getTextInputValue("qte") || "").replace(/[^0-9]/g, "")), 10);
+      const cat = _matchCat(interaction.fields.getTextInputValue("cat") || "");
+      const idx = pend.items.findIndex(it => _norm(it.nom) === _norm(objet));
+      if (idx >= 0) {
+        if (!Number.isFinite(qte) || qte <= 0) pend.items.splice(idx, 1);
+        else { pend.items[idx].quantite = qte; if (cat) pend.items[idx].categorie = cat; }
+      } else if (objet && Number.isFinite(qte) && qte > 0) {
+        pend.items.push({ nom: objet, quantite: qte, categorie: cat || 'Commun' });
+      }
+      const ch = interaction.channel;
+      const msg = ch ? await ch.messages.fetch(msgId).catch(() => null) : null;
+      if (msg) await msg.edit({ embeds: [_proposalEmbed(pend.items)], components: [_proposalRow()] }).catch(() => {});
+      await interaction.editReply({ content: "✏️ Correction appliquée à la lecture. Vérifie le message, puis valide quand c'est bon." }).catch(() => {});
+      return true;
+    }
+
+    // ── Soumission formulaire manuel ──
     if (interaction.isModalSubmit?.() && interaction.customId.startsWith("invm::")) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       const action = interaction.customId.split("::")[1];
@@ -287,6 +406,7 @@ async function routeInteraction(interaction) {
       else apres = qte;
       if (apres <= 0) delete bucket[existante];
       else bucket[existante] = apres;
+      _journalAdd(inv, `${action === 'add' ? "Ajout" : action === 'remove' ? "Retrait" : "Correction"} : ${action === 'set' ? "" : qte + " × "}${existante} (${cat}) → ${apres}`);
       persist(db);
       await _refreshBoard(interaction.client, inv);
 
@@ -295,7 +415,8 @@ async function routeInteraction(interaction) {
       if (action === 'set') logTxt = `📦 ${who} a recompté **${existante}** → **${apres}** *(${cat})*.`;
       else { const mot = action === 'add' ? "a rangé" : "a sorti"; const fin = action === 'add' ? "total" : "reste"; logTxt = `📦 ${who} ${mot} **${qte} × ${existante}** *(${cat})* · ${fin} : **${apres}**.`; }
       await _log(interaction.client, inv, logTxt);
-      await interaction.editReply({ content: "✅ Mouvement enregistré." }).catch(() => {});
+      await _checkSeuils(interaction.client, inv, new Set([_norm(existante)]));
+      await interaction.editReply({ content: "✅ Mouvement enregistré (détail dans le fil 📦)." }).catch(() => {});
       return true;
     }
 
@@ -307,18 +428,17 @@ async function routeInteraction(interaction) {
   }
 }
 
-// ── Image glissée directement dans le salon → lecture IA + proposition ──
+// ── Image(s) glissée(s) dans le salon → lecture IA + proposition ──
 async function onMessage(message) {
   try {
     if (!message || message.author?.bot) return false;
     const db = loadDB();
     if (!db.inventaire || !db.inventaire.channelId || message.channelId !== db.inventaire.channelId) return false;
-    const img = message.attachments?.find?.(a => (a.contentType || "").startsWith("image"));
-    if (!img) return false;
+    const imgs = message.attachments ? [...message.attachments.values()].filter(a => (a.contentType || "").startsWith("image")) : [];
+    if (!imgs.length) return false;
     await message.react("🔍").catch(() => {});
-    const buf = await _imageBytes(img.url);
-    const items = buf ? await _analyserImage(buf.toString('base64'), img.contentType || 'image/png') : null;
-    if (!items || !items.length) { await message.reply({ content: "📷 Je n'ai pas réussi à lire d'objets sur cette image. Essaie une capture plus nette, ou utilise les boutons du tableau.", allowedMentions: { parse: [] } }).catch(() => {}); return true; }
+    const items = await _lireImages(imgs);
+    if (!items || !items.length) { await message.reply({ content: "📷 Je n'ai pas réussi à lire d'objets sur cette/ces image(s). Essaie une capture plus nette, ou les boutons du tableau.", allowedMentions: { parse: [] } }).catch(() => {}); return true; }
     await _proposer(message.channel, items, message.author.id);
     return true;
   } catch { return false; }
