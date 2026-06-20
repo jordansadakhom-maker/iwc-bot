@@ -359,8 +359,8 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('synthese').setDescription('🧠 Synthèse IA des infos sur un sujet ou une personne')
     .addStringOption(o => o.setName('sujet').setDescription('Nom de personne, lieu, ou thème').setRequired(true)),
   new SlashCommandBuilder().setName('rapport').setDescription('Envoie le rapport quotidien en DM (Direction)'),
-  new SlashCommandBuilder().setName('promo').setDescription('Promeut un membre (Direction)').addUserOption(o => o.setName('membre').setDescription('Membre').setRequired(true)).addStringOption(o => o.setName('rang').setDescription('Nouveau rang').setRequired(true).setAutocomplete(true)),
-  new SlashCommandBuilder().setName('retro').setDescription('Rétrograde un membre (Direction)').addUserOption(o => o.setName('membre').setDescription('Membre').setRequired(true)).addStringOption(o => o.setName('rang').setDescription('Nouveau rang').setRequired(true).setAutocomplete(true)).addStringOption(o => o.setName('raison').setDescription('Raison (optionnel)').setRequired(false)),
+  new SlashCommandBuilder().setName('promo').setDescription('Ouvre la gestion du grade d\'un membre (Concepteur/Fléau)').addUserOption(o => o.setName('membre').setDescription('Membre').setRequired(true)),
+  new SlashCommandBuilder().setName('retro').setDescription('Ouvre la gestion du grade d\'un membre (Concepteur/Fléau)').addUserOption(o => o.setName('membre').setDescription('Membre').setRequired(true)),
   new SlashCommandBuilder().setName('tresor').setDescription('💰 Enregistrer une transaction'),
   new SlashCommandBuilder().setName('dashboard').setDescription('🐺 Tableau de bord complet de la faction'),
   new SlashCommandBuilder().setName('suivi').setDescription('📋 Vue globale : candidatures, contrats, opérations, RDV, trésorerie (Direction)'),
@@ -1225,35 +1225,10 @@ Sois concis et factuel, base-toi UNIQUEMENT sur les notes. Maximum 250 mots.`;
     await interaction.reply({ content: '📋 Rapport en cours d\'envoi en DM...', flags: MessageFlags.Ephemeral });
     await envoyerRapportDirection(guild); return;
   }
-  if (commandName === 'promo') {
-    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return; }
-    const cible = interaction.options.getUser('membre'); const nouveauRang = interaction.options.getString('rang');
-    const membre = await guild.members.fetch(cible.id).catch(() => null);
-    if (!membre) { await interaction.reply({ content: '❌ Membre introuvable.', flags: MessageFlags.Ephemeral }); return; }
-    const ancienRang = db.members[cible.id]?.rang || '—';
-    if (db.members[cible.id]) { db.members[cible.id].rang = nouveauRang; saveDB(db); }
-    _syncMembreNotion(cible.id, { rang: nouveauRang, lastActivity: new Date().toISOString() }).catch(() => {});
-    await sendLog(guild, 'PROMOTION', { userId: cible.id, username: cible.username, ancienRang, nouveauRang, validePar: interaction.user.username });
-    await notionExtra.logPromotionNotion?.(guild, { userId: cible.id, username: cible.username, nomPerso: db.members[cible.id]?.name || cible.username, ancienRang, nouveauRang, type: 'promotion', validePar: interaction.user.username });
-    await ajouterJournalIC(guild, { type: 'promotion', titre: `Promotion — ${cible.username}`, description: `${ancienRang} → **${nouveauRang}** · Décidé par ${interaction.user.username}`, auteur: interaction.user.username });
-    await envoyerDMRecap(interaction.guild, membre.id, 'grade', { ancien: ancienRang, nouveau: nouveauRang }).catch(() => {});
-    await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle(`⬆️ Promotion — ${cible.username}`).addFields({ name: '👤 Membre', value: `<@${cible.id}>`, inline: true }, { name: '📉 Ancien rang', value: ancienRang, inline: true }, { name: '📈 Nouveau rang', value: nouveauRang, inline: true }, { name: '✅ Décidé par', value: interaction.user.username, inline: true }).setFooter({ text: `IWC • ${fmtShort(new Date())}` })] });
-    return;
-  }
-  if (commandName === 'retro') {
-    if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return; }
-    const cible = interaction.options.getUser('membre'); const nouveauRang = interaction.options.getString('rang'); const raison = interaction.options.getString('raison') || '—';
-    const membre = await guild.members.fetch(cible.id).catch(() => null);
-    if (!membre) { await interaction.reply({ content: '❌ Membre introuvable.', flags: MessageFlags.Ephemeral }); return; }
-    const ancienRang = db.members[cible.id]?.rang || '—';
-    if (db.members[cible.id]) { db.members[cible.id].rang = nouveauRang; saveDB(db); }
-    _syncMembreNotion(cible.id, { rang: nouveauRang, lastActivity: new Date().toISOString() }).catch(() => {});
-    await sendLog(guild, 'RETROGRADATION', { userId: cible.id, username: cible.username, ancienRang, nouveauRang, raison, validePar: interaction.user.username });
-    await notionExtra.logPromotionNotion?.(guild, { userId: cible.id, username: cible.username, nomPerso: db.members[cible.id]?.name || cible.username, ancienRang, nouveauRang, type: 'retrogradation', validePar: interaction.user.username });
-    await ajouterJournalIC(guild, { type: 'promotion', titre: `Rétrogradation — ${cible.username}`, description: `${ancienRang} → **${nouveauRang}** · Raison : ${raison}`, auteur: interaction.user.username });
-    await envoyerDMRecap(interaction.guild, membre.id, 'grade', { ancien: ancienRang, nouveau: nouveauRang }).catch(() => {});
-    await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle(`⬇️ Rétrogradation — ${cible.username}`).addFields({ name: '👤 Membre', value: `<@${cible.id}>`, inline: true }, { name: '📉 Ancien rang', value: ancienRang, inline: true }, { name: '📈 Nouveau rang', value: nouveauRang, inline: true }, { name: '📝 Raison', value: raison, inline: true }, { name: '✅ Décidé par', value: interaction.user.username, inline: true }).setFooter({ text: `IWC • ${fmtShort(new Date())}` })] });
-    return;
+  if (commandName === 'promo' || commandName === 'retro') {
+    const cible = interaction.options.getUser('membre');
+    if (!cible) { await interaction.reply({ content: '❌ Précise un membre.', flags: MessageFlags.Ephemeral }); return; }
+    return notionV3.showGradeMembre?.(interaction, cible.id);
   }
 }
 
@@ -2577,6 +2552,10 @@ client.on('interactionCreate', async interaction => {
     // [CORRECTION] btn_rdv_modal_ est un bouton, pas un select menu
     if (interaction.customId.startsWith('btn_rdv_modal_'))     return _handleRdvModalBtn(interaction);
     if (interaction.customId.startsWith('btn_grade_maj_'))     return notionV3.handleGradeMajButton?.(interaction);
+    if (interaction.customId.startsWith('grade_up_'))          return notionV3.handleGradeUp?.(interaction);
+    if (interaction.customId.startsWith('grade_down_'))        return notionV3.handleGradeDown?.(interaction);
+    if (interaction.customId.startsWith('grade_fiche_'))       return notionV3.handleGradeFiche?.(interaction);
+    if (interaction.customId === 'grade_eligibles')            return notionV3.handleGradeEligibles?.(interaction);
     if (interaction.customId.startsWith('info_infirmer_'))     return notionV3.handleInformateurInfirmer?.(interaction);
     if (interaction.customId.startsWith('affaire_oui_'))       return notionV3.handleAffaireVote?.(interaction, 'oui');
     if (interaction.customId.startsWith('affaire_non_'))       return notionV3.handleAffaireVote?.(interaction, 'non');
