@@ -1415,12 +1415,13 @@ async function autoSetup(guild) {
   const recrutCh = guild.channels.cache.get(CH.RECRUTEMENT);
   if (recrutCh) {
     const msgs = await recrutCh.messages.fetch({ limit: 20 });
-    const existing = msgs.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('RECRUTEMENT') && m.components.length > 0 && m.components[0]?.components?.length >= 2);
+    const existing = msgs.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('CANDIDATURE') && m.components.length > 0 && m.components[0]?.components?.length >= 1);
     if (existing) { db.recrutementMsgId = existing.id; }
     else {
+      for (const [, mm] of msgs) { if (mm.author.id === client.user.id && /RECRUTEMENT|CANDIDATURE/i.test(mm.embeds[0]?.title || '') && (mm.components?.length || 0) > 0) await mm.delete().catch(() => {}); }
       if (db.recrutementMsgId) { const old = await recrutCh.messages.fetch(db.recrutementMsgId).catch(() => null); if (old) await old.delete().catch(() => {}); db.recrutementMsgId = null; }
-      const embed = new EmbedBuilder().setColor(0x8B1A1A).setTitle('📋 IRON WOLF COMPANY — RECRUTEMENT').setDescription('*On ne demande pas à rejoindre la Compagnie. On y est invité.*\n*Si vous êtes ici — vous avez été jugé digne de frapper à la porte.*').addFields({ name: '⚖️ Recrutement Légal', value: '→ Tu exerces un métier légal au sein de la Compagnie\n→ Protection, escorte, commerce...\n→ Clique sur **⚖️ Candidature Légale**' }, { name: '⚠️ Important', value: '→ Réponse en DM sous 48h\n→ Aucune justification en cas de refus\n→ *La porte est ouverte une fois. Une seule.*' }).setFooter({ text: 'Iron Wolf Company • Recrutement officiel' });
-      const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('open_candidature_legal').setLabel('⚖️ Candidature Légale').setStyle(ButtonStyle.Primary));
+      const embed = new EmbedBuilder().setColor(0x8B1A1A).setTitle('📋 CANDIDATURE — IRON WOLF COMPANY').setDescription('*On ne demande pas à rejoindre la Compagnie. On y est invité.*\n*Si vous êtes ici, c\'est qu\'on vous en juge digne.*').addFields({ name: '📝 Rejoindre la Compagnie', value: '→ Clique sur **📋 Candidature** et remplis le formulaire.\n→ Présente ton personnage, son parcours, tes disponibilités.' }, { name: '⚠️ Important', value: '→ Réponse en DM sous 48h\n→ Aucune justification en cas de refus\n→ *La porte est ouverte une fois. Une seule.*' }).setFooter({ text: 'Iron Wolf Company • Recrutement officiel' });
+      const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('open_candidature_legal').setLabel('📋 Candidature').setStyle(ButtonStyle.Primary));
       const sent = await recrutCh.send({ embeds: [embed], components: [row] }); db.recrutementMsgId = sent.id;
     }
     saveDB(db);
@@ -2781,7 +2782,7 @@ client.on('interactionCreate', async interaction => {
   }
 
   if (interaction.isButton() && interaction.customId === 'open_candidature_legal') {
-    const modal = new ModalBuilder().setCustomId('candidature_modal_legal').setTitle('⚖️ Iron Wolf Company — Légal');
+    const modal = new ModalBuilder().setCustomId('candidature_modal_legal').setTitle('📋 Candidature — Iron Wolf Company');
     modal.addComponents(
       new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom_perso').setLabel('Nom IC · Âge (Ex: Jonas Caverly, 34 ans)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Jonas Caverly, 34 ans')),
       new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('metier').setLabel('Métier / Compétences').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Médecin, Avocat, Ingénieur...')),
@@ -6774,15 +6775,18 @@ function _buildCommencerIci() {
     .setColor(0x8B5A2A)
     .setTitle('📌 BIENVENUE — COMMENCE ICI')
     .setDescription([
-      'Heureux de t\'accueillir à l\'Iron Wolf Company ! Voici comment démarrer en **3 étapes** :',
+      'Heureux de t\'accueillir à l\'Iron Wolf Company ! Voici comment démarrer en **4 étapes** :',
       '',
-      '**1️⃣ Lis et valide le règlement**',
+      '**1️⃣ Définis ton pseudo RP**',
+      'Clique sur **✏️ Définir mon pseudo RP** (bouton ci-dessous) : ton pseudo Discord prendra le nom de ton personnage. C\'est la base du RP.',
+      '',
+      '**2️⃣ Lis et valide le règlement**',
       'Va dans le salon <#1511135557143629926>, lis-le, puis réagis avec ✅ sur le message de validation. C\'est obligatoire pour accéder au serveur.',
       '',
-      '**2️⃣ Utilise le menu principal**',
+      '**3️⃣ Utilise le menu principal**',
       'Tout se fait avec des boutons dans le salon du **menu** — pas besoin de retenir des commandes. Profil, RDV, absences, contrats... tout est là.',
       '',
-      '**3️⃣ Présente-toi et lance-toi**',
+      '**4️⃣ Présente-toi et lance-toi**',
       'Si tu veux nous rejoindre officiellement, clique sur **Candidature** dans le salon de recrutement. La Direction te recontactera.',
       '',
       '*Une question ? Clique sur ❓ Toutes les commandes dans le menu, ou demande à un membre du staff.*',
@@ -6831,7 +6835,7 @@ async function _installerMenu(guild, forcer = false) {
       if (forcer) { await _nettoyerAnciensPanneaux(chStart, 'COMMENCE ICI'); await _nettoyerAnciensPanneaux(chStart, 'MENU PRINCIPAL'); }
       const present = forcer ? false : await _menuDejaPresent(chStart, 'COMMENCE ICI');
       if (forcer || !present) {
-        const m1 = await chStart.send({ embeds: [_buildCommencerIci()] }); await m1.pin().catch(() => {});
+        const m1 = await chStart.send({ embeds: [_buildCommencerIci()], components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_surnom_ouvrir').setLabel('✏️ Définir mon pseudo RP').setStyle(ButtonStyle.Primary))] }); await m1.pin().catch(() => {});
         const m2 = await chStart.send(_buildMenuPrincipal()); await m2.pin().catch(() => {});
       }
       okStart = true;
