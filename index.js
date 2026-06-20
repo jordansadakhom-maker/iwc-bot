@@ -522,12 +522,41 @@ async function sendToThread(guild, threadId, payload) {
   return false;
 }
 
+// ── Suivi des invitations : détecter qui a invité un nouveau membre ──
+const _inviteCache = new Map(); // guildId -> Map(code -> { uses, inviterTag, inviterId })
+async function _snapshotInvites(guild) {
+  const m = new Map();
+  try {
+    const invites = await guild.invites.fetch();
+    for (const inv of invites.values()) m.set(inv.code, { uses: inv.uses || 0, inviterTag: inv.inviter?.username || null, inviterId: inv.inviter?.id || null });
+  } catch {}
+  return m;
+}
+async function _cacheInvites(guild) { _inviteCache.set(guild.id, await _snapshotInvites(guild)); }
+async function _detecterInviteur(guild) {
+  const avant = _inviteCache.get(guild.id) || new Map();
+  const apres = await _snapshotInvites(guild);
+  let res = null;
+  for (const [code, info] of apres.entries()) {
+    const a = avant.get(code);
+    if (a && info.uses > a.uses) { res = { code, ...info }; break; }
+    if (!a && info.uses > 0 && !res) res = { code, ...info };
+  }
+  if (!res) {
+    for (const [code, info] of avant.entries()) {
+      if (!apres.has(code)) { res = { code, ...info, disparue: true }; break; }
+    }
+  }
+  _inviteCache.set(guild.id, apres);
+  return res;
+}
+
 async function sendLog(guild, type, data) {
   // Tout va dans #journal-de-bord
   const ch = await getLogsCh(guild);
   if (!ch) return;
   const cfgs = {
-    ARRIVEE: { color: 0x57F287, title: 'ARRIVÉE — ' + data.username, fields: [{ name: '👤 Membre', value: `<@${data.userId}> (${data.username})`, inline: true }, { name: '🔢 Âge du compte', value: data.accountAge + ' jours', inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }] },
+    ARRIVEE: { color: 0x57F287, title: 'ARRIVÉE — ' + data.username, fields: [{ name: '👤 Membre', value: `<@${data.userId}> (${data.username})`, inline: true }, { name: '🔢 Âge du compte', value: data.accountAge + ' jours', inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: '🤝 Invité par', value: data.inviteur ? (data.inviteur.inviterId ? `<@${data.inviteur.inviterId}> \`${data.inviteur.code}\`` : `\`${data.inviteur.code}\``) : 'Lien public / inconnu', inline: false }] },
     DEPART: { color: 0x555555, title: 'DÉPART — ' + data.username, fields: [{ name: '👤 Membre', value: data.username, inline: true }, { name: '🎖️ Rang', value: data.rang || '—', inline: true }, { name: '⏱️ Durée', value: data.duree || '—', inline: true }] },
     REGLEMENT_VALIDE: { color: 0x3B82F6, title: 'RÈGLEMENT VALIDÉ — ' + data.username, fields: [{ name: '👤 Membre', value: `<@${data.userId}> (${data.username})`, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }] },
     CANDIDATURE_RECUE: { color: 0xFFA500, title: 'CANDIDATURE REÇUE — ' + data.nomPerso, fields: [{ name: '👤 Joueur', value: `<@${data.userId}>`, inline: true }, { name: '⚖️ Type', value: data.type || '—', inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }] },
@@ -1546,6 +1575,7 @@ async function postDailyAgenda(guild) {
 
 client.on('guildMemberAdd', async member => {
   const db = loadDB(); const guild = member.guild;
+  const inviteur = await _detecterInviteur(guild);
   const visiteurRole = guild.roles.cache.find(r => r.name.includes('Visiteur'));
   if (visiteurRole) await member.roles.add(visiteurRole).catch(() => {});
   // Garantir que le rôle Visiteur a bien accès aux salons d'entrée (recrutement, règlement)
@@ -1561,10 +1591,13 @@ client.on('guildMemberAdd', async member => {
       allowedMentions: { users: [member.id] },
     });
   }
-  await sendLog(guild, 'ARRIVEE', { userId: member.id, username: member.user.username, accountAge: daysSince(member.user.createdAt) });
+  await sendLog(guild, 'ARRIVEE', { userId: member.id, username: member.user.username, accountAge: daysSince(member.user.createdAt), inviteur });
   await notionExtra.alerteCompteSuspect?.(guild, member);
   await envoyerDMRecap(guild, member.id, 'candidature', { message: '🐺 Bienvenue sur **Iron Wolf Company** !\n\nLis le **#règlement** et postule dans **#recrutement**.\n\n*La porte est ouverte une fois. Une seule.*\n— La Direction' }).catch(() => {});
 });
+
+client.on('inviteCreate', invite => { try { const m = _inviteCache.get(invite.guild.id) || new Map(); m.set(invite.code, { uses: invite.uses || 0, inviterTag: invite.inviter?.username || null, inviterId: invite.inviter?.id || null }); _inviteCache.set(invite.guild.id, m); } catch {} });
+client.on('inviteDelete', invite => { try { const m = _inviteCache.get(invite.guild.id); if (m) { m.delete(invite.code); _inviteCache.set(invite.guild.id, m); } } catch {} });
 
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
   const oldRoles = oldMember.roles.cache.map(r => r.id).sort().join(',');
@@ -3419,6 +3452,7 @@ client.once('clientReady', async () => {
     await registerSlashCommands(guild).catch(e => console.log('registerSlashCommands error:', e.message));
     await autoSetup(guild).catch(e => console.log('autoSetup error:', e.message));
     await buildMembresDiscordMap(guild).catch(() => {});
+    await _cacheInvites(guild).catch(() => {});
   }
   try { await monitoring.autoCheck?.(client, client._cmdNames); } catch {}
   for (const guild of client.guilds.cache.values()) {
