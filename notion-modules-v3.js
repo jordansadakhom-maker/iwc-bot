@@ -237,20 +237,43 @@ async function _showGradePanel(interaction) {
   const db = loadDB(); const membres = Object.values(db.members || {}).filter(m => m.status !== 'parti' && m.status !== 'visiteur');
   if (!membres.length) return interaction.reply({ content: '❌ Aucun membre dans la base.', flags: MessageFlags.Ephemeral });
   const options = membres.slice(0, 25).map(m => ({ label: m.name, value: m.id || Object.entries(MEMBRES_DISCORD_MAP).find(([n]) => n === m.name)?.[1] || m.name, description: `Rang : ${m.rang || '—'} · Statut : ${m.status}`, emoji: m.status === 'actif' ? '✅' : m.status === 'absent' ? '⚠️' : '💤' }));
-  await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle('🎖️ Gestion des Grades — IWC').setDescription('**Étape 1/2** — Sélectionnez le membre.').addFields({ name: '⚖️ Grades Légal', value: GRADES_LEGAL.map(g => `${g.emoji} ${g.nom}`).join('\n'), inline: true }, { name: '🔪 Grades Illégal', value: GRADES_ILLEGAL.map(g => `${g.emoji} ${g.nom}`).join('\n'), inline: true }).setFooter({ text: 'IWC • Panneau de gestion' })], components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('grade_select_membre').setPlaceholder('Sélectionner un membre...').addOptions(options))], flags: MessageFlags.Ephemeral });
+  await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle('🎖️ Gestion des Grades — IWC').setDescription('**Étape 1/2** — Sélectionnez le membre.').addFields({ name: '⚖️ Grades Légal', value: GRADES_LEGAL.map(g => `${g.emoji} ${g.nom}`).join('\n'), inline: true }, { name: '🔪 Grades Illégal', value: GRADES_ILLEGAL.map(g => `${g.emoji} ${g.nom}`).join('\n'), inline: true }).setFooter({ text: 'IWC • Panneau de gestion' })], components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('grade_select_membre').setPlaceholder('Sélectionner un membre...').addOptions(options)), new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('grade_eligibles').setLabel('Éligibles à une promotion').setEmoji('📈').setStyle(ButtonStyle.Success))], flags: MessageFlags.Ephemeral });
+}
+function _membreFromId(db, userId) {
+  return db.members[userId] || Object.values(db.members || {}).find(m => Object.entries(MEMBRES_DISCORD_MAP).find(([n, id]) => id === userId && n === m.name)) || null;
+}
+function _vueEtape2Payload(userId, membre) {
+  const rangActuel = membre?.rang || '—';
+  const allGrades = [...GRADES_LEGAL, ...GRADES_ILLEGAL];
+  const embed = new EmbedBuilder().setColor(0x8B1A1A).setTitle(`🎖️ Gestion du grade — ${membre?.name || userId}`).setDescription(`Grade actuel : **${rangActuel}**\n\nChoisis un nouveau grade ci-dessous, ou monte / descends d'un cran.`).setFooter({ text: 'IWC • Panneau de gestion' });
+  const selectRow = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('grade_select_grade').setPlaceholder(`Actuel : ${rangActuel} — Choisir le nouveau...`).addOptions(allGrades.map(g => ({ label: g.nom, value: `${userId}||${g.nom}`, description: GRADES_LEGAL.includes(g) ? '⚖️ Légal' : '🔪 Illégal', emoji: g.emoji })).slice(0, 25)));
+  const btnRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`grade_up_${userId}`).setLabel("Monter d'un cran").setEmoji('⬆️').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`grade_down_${userId}`).setLabel("Descendre d'un cran").setEmoji('⬇️').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`grade_fiche_${userId}`).setLabel('Fiche').setEmoji('📋').setStyle(ButtonStyle.Secondary),
+  );
+  return { embeds: [embed], components: [selectRow, btnRow] };
 }
 async function handleGradeMembreSelect(interaction) {
   const userId = interaction.values[0]; const db = loadDB();
-  const membre = db.members[userId] || Object.values(db.members).find(m => Object.entries(MEMBRES_DISCORD_MAP).find(([n, id]) => id === userId && n === m.name));
-  const nomMembre = membre?.name || userId; const rangActuel = membre?.rang || '—';
-  const allGrades = [...GRADES_LEGAL, ...GRADES_ILLEGAL];
-  await interaction.update({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle(`🎖️ Attribution de grade — ${nomMembre}`).setDescription(`**Étape 2/2** — Sélectionnez le nouveau grade.\n\nGrade actuel : **${rangActuel}**`).setFooter({ text: 'IWC • Panneau de gestion' })], components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('grade_select_grade').setPlaceholder(`Actuel : ${rangActuel} — Choisir le nouveau...`).addOptions(allGrades.map(g => ({ label: g.nom, value: `${userId}||${g.nom}`, description: GRADES_LEGAL.includes(g) ? '⚖️ Légal' : '🔪 Illégal', emoji: g.emoji })).slice(0, 25)))] });
+  const membre = _membreFromId(db, userId);
+  await interaction.update(_vueEtape2Payload(userId, membre));
+}
+async function showGradeMembre(interaction, userId) {
+  if (!canManageGrades(interaction.member)) return interaction.reply({ content: '❌ Réservé au Concepteur et au Fléau.', flags: MessageFlags.Ephemeral });
+  const db = loadDB(); const membre = _membreFromId(db, userId);
+  const payload = _vueEtape2Payload(userId, membre);
+  return interaction.reply({ embeds: payload.embeds, components: payload.components, flags: MessageFlags.Ephemeral });
 }
 async function handleGradeGradeSelect(interaction) {
   const [userId, nouveauGrade] = interaction.values[0].split('||');
+  return _appliquerGrade(interaction, userId, nouveauGrade);
+}
+async function _appliquerGrade(interaction, userId, nouveauGrade) {
   const db = loadDB(); const membre = db.members[userId]; const nomMembre = membre?.name || userId; const ancienGrade = membre?.rang || '—';
   const gradeInfo = [...GRADES_LEGAL, ...GRADES_ILLEGAL].find(g => g.nom === nouveauGrade);
-  if (db.members[userId]) { db.members[userId].rang = nouveauGrade; db.members[userId].pole = GRADES_ILLEGAL.some(g => g.nom === nouveauGrade) ? 'illegal' : 'legal'; saveDB(db); }
+  if (db.members[userId]) { const m = db.members[userId]; if (!Array.isArray(m.historiqueGrades)) m.historiqueGrades = []; if ((m.rang || '—') !== nouveauGrade) m.historiqueGrades.push({ de: m.rang || '—', vers: nouveauGrade, par: interaction.user?.username || '—', at: new Date().toISOString() }); m.rang = nouveauGrade; m.pole = GRADES_ILLEGAL.some(g => g.nom === nouveauGrade) ? 'illegal' : 'legal'; m.gradeDepuis = new Date().toISOString(); saveDB(db); }
+  try { if (global._syncMembreNotion) global._syncMembreNotion(userId, { rang: nouveauGrade, lastActivity: new Date().toISOString() }).catch(() => {}); } catch {}
   try {
     const guildMember = await interaction.guild.members.fetch(userId).catch(() => null);
     if (guildMember && gradeInfo?.roleKey && ROLES[gradeInfo.roleKey]) {
@@ -293,7 +316,7 @@ async function handleGradeGradeSelect(interaction) {
   } catch (e) { console.log('❌ Grade Discord role error:', e.message); }
   await notionExtra.logPromotionNotion?.(interaction.guild, { userId, username: nomMembre, nomPerso: nomMembre, ancienRang: ancienGrade, nouveauRang: nouveauGrade, type: 'promotion', validePar: interaction.user.username });
   let notionModules = {}; try { notionModules = require('./notion-modules-v2'); } catch {}
-  // Journal géré par /promo ou /retro — pas de doublon ici
+  try { if (global.ajouterJournalIC) await global.ajouterJournalIC(interaction.guild, { type: 'promotion', titre: `Grade — ${nomMembre}`, description: `${ancienGrade} → **${nouveauGrade}** · par ${interaction.user?.username || '—'}`, auteur: interaction.user?.username || '—' }); } catch {}
   const logsCh = _journalCh(interaction.guild);
   if (logsCh) await logsCh.send({ embeds: [new EmbedBuilder().setColor(gradeInfo?.couleur || 0x8B1A1A).setTitle(`🎖️ Grade modifié — ${nomMembre}`).addFields({ name: '👤 Membre', value: `<@${userId}>`, inline: true }, { name: '📉 Ancien', value: ancienGrade, inline: true }, { name: '📈 Nouveau', value: nouveauGrade, inline: true }, { name: '✅ Décidé par', value: interaction.user.username, inline: true }).setFooter({ text: `IWC • ${fmtShort(new Date())}` })] }).catch(() => {});
   await interaction.update({ embeds: [new EmbedBuilder().setColor(gradeInfo?.couleur || 0x57F287).setTitle(`✅ Grade appliqué — ${nomMembre}`).addFields({ name: '📉 Ancien grade', value: ancienGrade, inline: true }, { name: '📈 Nouveau grade', value: nouveauGrade, inline: true }, { name: '✅ Appliqué par', value: interaction.user.username, inline: true }).setDescription('Discord, Notion et le Journal IC ont été mis à jour.').setFooter({ text: 'IWC • Panneau de gestion' })], components: [
@@ -307,31 +330,75 @@ async function handleGradeGradeSelect(interaction) {
 // ── Bouton "Modifier à nouveau" — relance directement le menu de grade pour ce membre ──
 async function handleGradeMajButton(interaction) {
   const userId = interaction.customId.replace('btn_grade_maj_', '');
-  const db     = loadDB();
-  const membre = db.members[userId];
+  const db = loadDB(); const membre = _membreFromId(db, userId);
   if (!membre) return interaction.reply({ content: '❌ Membre introuvable.', flags: MessageFlags.Ephemeral });
-  const rangActuel = membre.rang || '—';
-  const allGrades  = [...GRADES_LEGAL, ...GRADES_ILLEGAL];
-  await interaction.update({
-    embeds: [new EmbedBuilder()
-      .setColor(0x8B1A1A)
-      .setTitle(`🔄 Mise à jour grade — ${membre.name || userId}`)
-      .setDescription(`Grade actuel : **${rangActuel}**
-Sélectionnez le nouveau grade.`)
-      .setFooter({ text: 'IWC • Mise à jour rapide' })
-    ],
-    components: [new ActionRowBuilder().addComponents(
-      new StringSelectMenuBuilder()
-        .setCustomId('grade_select_grade')
-        .setPlaceholder(`Actuel : ${rangActuel} — Choisir le nouveau...`)
-        .addOptions(allGrades.map(g => ({
-          label: g.nom,
-          value: `${userId}||${g.nom}`,
-          description: GRADES_LEGAL.includes(g) ? '⚖️ Légal' : '🔪 Illégal',
-          emoji: g.emoji,
-        })).slice(0, 25))
-    )],
-  });
+  await interaction.update(_vueEtape2Payload(userId, membre));
+}
+// ── 1-clic : monter / descendre d'un cran, fiche, éligibles ──
+function _gradeVoisin(userId, sens) {
+  const db = loadDB(); const membre = db.members[userId]; if (!membre) return null;
+  const rang = membre.rang || '—';
+  const lL = GRADES_LEGAL.map(g => g.nom), lI = GRADES_ILLEGAL.map(g => g.nom);
+  const ladder = lL.includes(rang) ? lL : lI.includes(rang) ? lI : (membre.pole === 'illegal' ? lI : lL);
+  const idx = ladder.indexOf(rang);
+  if (idx === -1) return sens === 'up' ? ladder[ladder.length - 1] : null;
+  const newIdx = sens === 'up' ? idx - 1 : idx + 1;
+  if (newIdx < 0 || newIdx >= ladder.length) return null;
+  return ladder[newIdx];
+}
+async function handleGradeUp(interaction) {
+  if (!canManageGrades(interaction.member)) return interaction.reply({ content: '❌ Réservé au Concepteur et au Fléau.', flags: MessageFlags.Ephemeral });
+  const userId = interaction.customId.replace('grade_up_', '');
+  const cible = _gradeVoisin(userId, 'up');
+  if (!cible) return interaction.reply({ content: '⛔ Déjà au grade le plus élevé de son pôle (ou membre introuvable).', flags: MessageFlags.Ephemeral });
+  return _appliquerGrade(interaction, userId, cible);
+}
+async function handleGradeDown(interaction) {
+  if (!canManageGrades(interaction.member)) return interaction.reply({ content: '❌ Réservé au Concepteur et au Fléau.', flags: MessageFlags.Ephemeral });
+  const userId = interaction.customId.replace('grade_down_', '');
+  const cible = _gradeVoisin(userId, 'down');
+  if (!cible) return interaction.reply({ content: '⛔ Déjà au grade le plus bas de son pôle (ou membre introuvable).', flags: MessageFlags.Ephemeral });
+  return _appliquerGrade(interaction, userId, cible);
+}
+async function handleGradeFiche(interaction) {
+  if (!canManageGrades(interaction.member)) return interaction.reply({ content: '❌ Réservé au Concepteur et au Fléau.', flags: MessageFlags.Ephemeral });
+  const userId = interaction.customId.replace('grade_fiche_', '');
+  const db = loadDB(); const membre = _membreFromId(db, userId);
+  if (!membre) return interaction.reply({ content: '❌ Membre introuvable.', flags: MessageFlags.Ephemeral });
+  const rang = membre.rang || '—';
+  const gradeInfo = [...GRADES_LEGAL, ...GRADES_ILLEGAL].find(g => g.nom === rang);
+  const depuis = membre.gradeDepuis ? `${daysSince(membre.gradeDepuis)} j (depuis le ${fmtShort(membre.gradeDepuis)})` : '— (non enregistré)';
+  const prochain = _gradeVoisin(userId, 'up');
+  const hist = (membre.historiqueGrades || []).slice(-8).reverse();
+  const histTxt = hist.length ? hist.map(h => `• ${fmtShort(h.at)} — ${h.de || '—'} → ${h.vers}${h.par ? ` _(par ${h.par})_` : ''}`).join('\n').slice(0, 1024) : '*Aucun historique enregistré.*';
+  const e = new EmbedBuilder().setColor(gradeInfo?.couleur || 0x8B1A1A).setTitle(`📋 Fiche de grade — ${membre.name || userId}`)
+    .addFields(
+      { name: '🎖️ Grade actuel', value: `${gradeInfo?.emoji || ''} ${rang}`.trim(), inline: true },
+      { name: '⚖️ Pôle', value: membre.pole === 'illegal' ? '🔪 Confrérie' : '⚖️ Légal', inline: true },
+      { name: '⏱️ Ancienneté', value: depuis, inline: true },
+      { name: '⬆️ Prochain grade', value: prochain || '— (au sommet)', inline: false },
+      { name: '📜 Historique', value: histTxt, inline: false },
+    ).setFooter({ text: 'IWC • Fiche de grade' });
+  return interaction.reply({ embeds: [e], flags: MessageFlags.Ephemeral });
+}
+async function handleGradeEligibles(interaction) {
+  if (!canManageGrades(interaction.member)) return interaction.reply({ content: '❌ Réservé au Concepteur et au Fléau.', flags: MessageFlags.Ephemeral });
+  const SEUIL = 14;
+  const db = loadDB();
+  const lL = GRADES_LEGAL.map(g => g.nom), lI = GRADES_ILLEGAL.map(g => g.nom);
+  const elig = Object.values(db.members || {}).filter(m => {
+    if (m.status !== 'actif') return false;
+    const rang = m.rang || '—';
+    const ladder = lL.includes(rang) ? lL : lI.includes(rang) ? lI : null;
+    if (!ladder || ladder.indexOf(rang) <= 0) return false;
+    return m.gradeDepuis ? daysSince(m.gradeDepuis) >= SEUIL : false;
+  }).sort((a, b) => daysSince(b.gradeDepuis) - daysSince(a.gradeDepuis));
+  const txt = elig.length ? elig.slice(0, 20).map(m => {
+    const id = m.id || Object.entries(MEMBRES_DISCORD_MAP).find(([n]) => n === m.name)?.[1] || m.name;
+    return `• <@${id}> — ${m.rang} _(${daysSince(m.gradeDepuis)} j à ce grade)_`;
+  }).join('\n') : `*Aucun membre actif depuis ≥ ${SEUIL} j à son grade actuel (ou ancienneté pas encore enregistrée).*`;
+  const e = new EmbedBuilder().setColor(0x57F287).setTitle('📈 Éligibles à une promotion').setDescription(txt.slice(0, 4000)).setFooter({ text: `IWC • Actifs ≥ ${SEUIL} j au grade actuel` });
+  return interaction.reply({ embeds: [e], flags: MessageFlags.Ephemeral });
 }
 // ═══════════════════════════════════════════════════════════════
 // 4. AFFAIRES — Panel sans doublon + Détails propres (FIX defer)
@@ -719,7 +786,7 @@ async function updateNotionStatutPole(userId, pole) {
 module.exports = {
   handleAbsenceDetection, ABSENCE_KEYWORDS,
   checkInactivite, JOURS_INACTIF,
-  updateHierarchieEmbed, handleHierarchieCommand, handleGradeSetCommand, handleGradePanelButton, handleGradeMembreSelect, handleGradeGradeSelect, handleGradeMajButton, GRADES_LEGAL, GRADES_ILLEGAL,
+  updateHierarchieEmbed, handleHierarchieCommand, handleGradeSetCommand, handleGradePanelButton, handleGradeMembreSelect, handleGradeGradeSelect, handleGradeMajButton, handleGradeUp, handleGradeDown, handleGradeFiche, handleGradeEligibles, showGradeMembre, GRADES_LEGAL, GRADES_ILLEGAL,
   setupAffairesPanel, handleAffaireNouvelleButton, handleAffaireModal, handleAffaireVote, handleAffaireDetail, postResumeAffaires, handleAffairesResumeButton, checkAffairesTimeout,
   setupInformateursPanel, handleInformateurRapportButton, handleInformateurModal, handleInformateurHistorique, handleInformateurMessage, handleInformateurConfirmer, handleInformateurInfirmer,
   handlePlanningScreenshot, handlePlansMessage,
