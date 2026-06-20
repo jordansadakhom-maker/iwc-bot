@@ -2873,17 +2873,17 @@ client.on('interactionCreate', async interaction => {
     const op = db.operations.find(o => o.id === opId);
     if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }); return; }
     if (['terminee', 'annulee'].includes(op.status)) { await interaction.reply({ content: '❌ Cette opération est clôturée.', flags: MessageFlags.Ephemeral }); return; }
-    op.participants = op.participants || []; const nom = nomParticipant(interaction.member);
-    if (retrait) { op.participants = op.participants.filter(p => p !== nom); }
-    else if (!op.participants.includes(nom)) { op.participants.push(nom); }
+    op.participants = op.participants || []; op.participantsIds = op.participantsIds || []; const nom = nomParticipant(interaction.member); const uid = interaction.user.id;
+    if (retrait) { op.participants = op.participants.filter(p => p !== nom); op.participantsIds = op.participantsIds.filter(i => i !== uid); }
+    else { if (!op.participants.includes(nom)) op.participants.push(nom); if (!op.participantsIds.includes(uid)) op.participantsIds.push(uid); }
     saveDB(db); await notionExtra.majOperationNotion?.(op);
     // Sync participants Notion
     if (op.notionPageId && process.env.NOTION_TOKEN) {
       _notionPatch(op.notionPageId, { 'Participants': { multi_select: (op.participants || []).map(n => ({ name: n })) } }).catch(() => {});
     }
-    const liste = op.participants.length ? op.participants.join(', ') : '*Personne pour l\'instant.*';
+    const liste = (op.participantsIds && op.participantsIds.length) ? op.participantsIds.map(i => `<@${i}>`).join(', ') : (op.participants.length ? op.participants.join(', ') : '*Personne pour l\'instant.*');
     const updated = EmbedBuilder.from(interaction.message.embeds[0]); const idx = interaction.message.embeds[0].fields.findIndex(f => f.name.startsWith('👥 Participants'));
-    if (idx >= 0) updated.spliceFields(idx, 1, { name: `👥 Participants (${op.participants.length})`, value: liste });
+    if (idx >= 0) updated.spliceFields(idx, 1, { name: `👥 Participants (${(op.participantsIds && op.participantsIds.length) ? op.participantsIds.length : op.participants.length})`, value: liste });
     await interaction.update({ embeds: [updated] }); return;
   }
 
