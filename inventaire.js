@@ -116,11 +116,11 @@ function _modal(action) {
 
 // ── Lecture d'image par l'IA ──────────────────────────────────────────────
 const PROMPT_VISION = `Tu analyses une capture d'écran de l'inventaire d'un coffre dans un jeu vidéo type Far West (RedM / Red Dead Redemption).
-Liste CHAQUE objet visible avec sa quantité exacte.
+Liste ABSOLUMENT TOUS les objets visibles sans en oublier un seul, Y COMPRIS les outils, crochets, cordes, lanternes, pelles, kits et tout équipement utilitaire, avec leur quantité exacte.
 Réponds UNIQUEMENT avec un tableau JSON valide, sans aucun texte autour ni balises de code, au format exact :
 [{"nom":"Nom de l'objet","quantite":12,"categorie":"Armes"}]
 La "categorie" doit obligatoirement être l'une de : Armes, Munitions, Provisions, Médecine, Matériel, Commun.
-Si tu hésites sur la catégorie, mets "Commun". Ne réponds que la liste. Si aucun objet n'est visible, réponds [].`;
+Règles de catégorie : Armes (revolvers, fusils, couteaux) ; Munitions (balles, cartouches, poudre) ; Provisions (nourriture, boissons, alcool) ; Médecine (remèdes, toniques, bandages) ; Matériel (OUTILS, CROCHETS, cordes, lanternes, pelles, pièges, kits, tout objet utilitaire) ; Commun (le reste, ou si tu hésites). N'omets aucun objet réellement présent, mais n'en invente aucun. Ne réponds que la liste. Si aucun objet n'est visible, réponds [].`;
 
 async function _imageBytes(url) {
   try { const r = await fetch(url); if (!r.ok) return null; return Buffer.from(await r.arrayBuffer()); } catch { return null; }
