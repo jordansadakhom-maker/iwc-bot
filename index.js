@@ -338,6 +338,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('retro').setDescription('Rétrograde un membre (Direction)').addUserOption(o => o.setName('membre').setDescription('Membre').setRequired(true)).addStringOption(o => o.setName('rang').setDescription('Nouveau rang').setRequired(true).setAutocomplete(true)).addStringOption(o => o.setName('raison').setDescription('Raison (optionnel)').setRequired(false)),
   new SlashCommandBuilder().setName('tresor').setDescription('💰 Enregistrer une transaction'),
   new SlashCommandBuilder().setName('dashboard').setDescription('🐺 Tableau de bord complet de la faction'),
+  new SlashCommandBuilder().setName('suivi').setDescription('📋 Vue globale : candidatures, contrats, opérations, RDV, trésorerie (Direction)'),
   new SlashCommandBuilder().setName('grade-set').setDescription('🎖️ Attribuer un grade à un membre (Direction)'),
   new SlashCommandBuilder().setName('hierarchie').setDescription('⚔️ Afficher le tableau hiérarchique'),
   new SlashCommandBuilder().setName('affaire').setDescription('📋 Soumettre une affaire à la Direction'),
@@ -697,6 +698,7 @@ async function handleSlashCommand(interaction) {
   if (commandName === 'journal')           { if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral }); return notionModules.handleJournalCommand?.(interaction); }
   if (commandName === 'contrats-archives') { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleContratsArchives?.(interaction); }
   if (commandName === 'contrats')          return _handleMesContrats(interaction);
+  if (commandName === 'suivi') { if (!isDirection(interaction.member)) return interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return interaction.reply({ embeds: [_buildSuivi(loadDB())], flags: MessageFlags.Ephemeral }); }
   if (commandName === 'rdv-nettoyer') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -4016,6 +4018,39 @@ async function _handleOpDetail(interaction) {
   if (op.status === 'programmee' && op.lancementAt) embed.addFields({ name: '⏰ Lancement prévu', value: new Date(op.lancementAt).toLocaleString('fr-FR'), inline: false });
   embed.addFields({ name: '📅 Créée le', value: fmtShort(op.createdAt), inline: true }).setFooter({ text: 'IWC • Opérations' }).setTimestamp();
   await interaction.editReply({ embeds: [embed] });
+}
+
+function _buildSuivi(db) {
+  const cands = (db.candidatures || []).filter(c => ['reçue', 'examen'].includes(c.status));
+  const contratsAtt = (db.contrats || []).filter(c => c.status === 'en_attente');
+  const ops = db.operations || [];
+  const opsEnCours = ops.filter(o => o.status === 'en_cours');
+  const opsPrep = ops.filter(o => o.status === 'preparation');
+  const members = Object.values(db.members || {});
+  const absents = members.filter(m => m.status === 'absent');
+  const inactifs = members.filter(m => m.status !== 'parti' && daysSince(m.lastActivity) > 7);
+  const rdvs = Object.values(db.rdvplus?.rdvs || {}).filter(r => ['Planifié', 'Confirmé'].includes(r.statut));
+  const coffreL = db.coffres?.legal || 0, coffreI = db.coffres?.illegal || 0;
+  const li = (arr, fn, max = 6) => {
+    if (!arr.length) return '*Aucun*';
+    const out = arr.slice(0, max).map(fn).join('\n');
+    return arr.length > max ? `${out}\n*…+${arr.length - max} autre(s)*` : out;
+  };
+  return new EmbedBuilder()
+    .setColor(0x8B1A1A)
+    .setTitle('📋 SUIVI — IRON WOLF COMPANY')
+    .setDescription('*Tout ce qui demande ton attention, en temps réel.*')
+    .addFields(
+      { name: `📥 Candidatures en attente (${cands.length})`, value: li(cands, c => `→ **${c.nomPerso || '—'}**${c.type === 'illegal' ? ' · 🔪' : ''}`).slice(0, 1024), inline: false },
+      { name: `📜 Contrats à traiter (${contratsAtt.length})`, value: li(contratsAtt, c => `→ \`${c.id}\` · ${(c.objet || '—').slice(0, 60)}`).slice(0, 1024), inline: false },
+      { name: '🎯 Opérations', value: [`🟢 En cours : **${opsEnCours.length}**`, opsEnCours.length ? li(opsEnCours, o => `· ${o.name || 'Opération'} (${o.lieu || '—'})`, 5) : null, `🟡 En préparation : **${opsPrep.length}**`].filter(v => v !== null).join('\n').slice(0, 1024), inline: true },
+      { name: `📅 RDV à venir (${rdvs.length})`, value: (rdvs.length ? li(rdvs, r => `→ ${r.nomRP || 'Client'}`, 5) : '*Aucun*').slice(0, 1024), inline: true },
+      { name: '💰 Trésorerie', value: `⚖️ Légal : **${coffreL.toLocaleString('fr-FR')} $**\n🔪 Illégal : **${coffreI.toLocaleString('fr-FR')} $**`, inline: true },
+      { name: '👥 Membres', value: `✅ Actifs : **${members.filter(m => m.status === 'actif').length}**\n⚠️ Absents : **${absents.length}**\n❌ Inactifs : **${members.filter(m => m.status === 'inactif').length}**`, inline: true },
+      { name: absents.length ? `🟡 Absents (${absents.length})` : '🟡 Absents', value: (absents.length ? li(absents, m => `→ ${m.name}`, 6) : '*Personne*').slice(0, 1024), inline: true },
+      { name: inactifs.length ? `⚠️ Inactifs +7j (${inactifs.length})` : '✅ Activité', value: (inactifs.length ? li(inactifs, m => `→ ${m.name} (${daysSince(m.lastActivity)}j)`, 6) : '*Tout le monde est actif*').slice(0, 1024), inline: true },
+    )
+    .setFooter({ text: `IWC • ${new Date().toLocaleString('fr-FR')}` });
 }
 
 function _buildCandidaturesResume(db) {
