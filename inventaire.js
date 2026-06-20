@@ -1,16 +1,15 @@
 // ───────────────────────────────────────────────────────────────────────────
 //  inventaire.js — Coffre commun de l'organisation (hors argent)
 //  ----------------------------------------------------------------------------
-//  UN SEUL coffre partagé (Compagnie & Confrérie). Catégories :
-//  Armes · Munitions · Provisions · Médecine · Matériel · Commun.
-//  - Gestion manuelle (boutons ➕➖✏️)
-//  - Lecture d'une (ou plusieurs) capture(s) par l'IA, avec correction + validation
-//  - Alertes de stock bas (seuils)
-//  - Export du coffre en fichier
-//  - Tous les mouvements partent dans un FIL « Journal du coffre » → salon propre
+//  UN SEUL coffre partagé. Catégories : Armes · Munitions · Provisions ·
+//  Médecine · Matériel · Commun. Gestion manuelle (boutons) + lecture IA
+//  (multi-captures, correction, validation). Alertes de stock bas (au passage
+//  sous le seuil seulement). Export. Tous les mouvements → fil « Journal ».
+//  Noms consolidés (casse/accents/ponctuation ignorés). « Qui a pris quoi ».
+//  Lectures en attente persistées (survivent à un redémarrage).
 //
-//  /inventaire-installer  /inventaire-photo  /inventaire-seuil  /inventaire-export
-//  Identifiants : inv_*  invp_*  invpc::*  ·  Données dans db.inventaire
+//  /inventaire-installer  /inventaire-photo  /inventaire-seuil
+//  /inventaire-export     /inventaire-qui
 // ───────────────────────────────────────────────────────────────────────────
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder, MessageFlags } = require('discord.js');
 
@@ -32,10 +31,11 @@ const TITRE = "🤝 COFFRE COMMUN";
 const SOUS = "*Réserves de l'organisation (Compagnie & Confrérie) — l'argent, lui, dort dans les coffres.*";
 const COULEUR = 0x8C6D3F;
 
-function _norm(x) { return (x || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
+// Normalisation agressive : casse, accents, ponctuation et espaces ignorés
+// → « Balles .44 », « Balles.44 », « balles 44 » comptent comme le même objet.
+function _norm(x) { return (x || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, ""); }
 function _matchCat(input) {
-  const ns = _norm(input).trim();
-  if (!ns) return null;
+  const ns = _norm(input); if (!ns) return null;
   return CATS.find(c => { const nc = _norm(c); return nc === ns || nc.startsWith(ns) || ns.startsWith(nc); }) || null;
 }
 
@@ -46,6 +46,7 @@ function _ensure(db) {
   for (const c of CATS) if (!inv.stock[c]) inv.stock[c] = {};
   if (!inv.seuils) inv.seuils = {};
   if (!inv.journal) inv.journal = [];
+  if (!inv.lectures) inv.lectures = {};
   return inv;
 }
 
@@ -91,7 +92,6 @@ async function _refreshBoard(client, inv) {
   } catch {}
 }
 
-// Journal des mouvements → dans le FIL (repli sur le salon si pas de fil)
 async function _thread(client, inv) {
   const id = inv.threadId || inv.channelId;
   if (!id) return null;
@@ -100,19 +100,23 @@ async function _thread(client, inv) {
 async function _log(client, inv, texte) {
   try { const ch = await _thread(client, inv); if (ch) await ch.send({ content: texte, allowedMentions: { parse: [] } }).catch(() => {}); } catch {}
 }
-function _journalAdd(inv, txt) {
+function _journalAdd(inv, who, txt) {
   inv.journal = inv.journal || [];
-  inv.journal.unshift({ t: Date.now(), txt });
-  if (inv.journal.length > 40) inv.journal.length = 40;
+  inv.journal.unshift({ t: Date.now(), who: who || null, txt });
+  if (inv.journal.length > 60) inv.journal.length = 60;
 }
 
-async function _checkSeuils(client, inv, names) {
+// Alerte seulement quand un objet PASSE sous son seuil (anti-spam)
+async function _checkSeuils(client, inv, changes) {
   try {
-    if (!inv.seuils || !Object.keys(inv.seuils).length) return;
+    if (!inv.seuils || !Object.keys(inv.seuils).length || !changes) return;
     const alerts = [];
     for (const c of CATS) for (const [nom, q] of Object.entries(inv.stock[c] || {})) {
       const seuil = inv.seuils[_norm(nom)];
-      if (seuil != null && q <= seuil && (!names || names.has(_norm(nom)))) alerts.push(`⚠️ **Stock bas** — ${nom} : **${q}** (seuil ${seuil}).`);
+      if (seuil == null) continue;
+      const ch = changes[_norm(nom)];
+      if (!ch) continue; // pas modifié → pas d'alerte
+      if (ch.apres <= seuil && (ch.avant == null || ch.avant > seuil)) alerts.push(`⚠️ **Stock bas** — ${nom} : **${q}** (seuil ${seuil}).`);
     }
     if (alerts.length) await _log(client, inv, alerts.join("\n"));
   } catch {}
@@ -175,7 +179,6 @@ function _parseItems(txt) {
   } catch { return null; }
 }
 async function _analyserImage(b64, mt) {
-  // modèle puissant d'abord (meilleure lecture), repli sur le rapide
   let txt = await _callVision('claude-sonnet-4-6', b64, mt);
   if (!txt) txt = await _callVision('claude-haiku-4-5-20251001', b64, mt);
   return _parseItems(txt);
@@ -199,8 +202,10 @@ async function _lireImages(atts) {
   return _merge(lists);
 }
 
-// Propositions de lecture en attente de validation (mémoire, clé = id du message)
-const _pending = new Map();
+// Lectures en attente (persistées dans db.inventaire.lectures, survivent au redémarrage)
+function _prunePending(inv) {
+  try { const L = inv.lectures || {}; const now = Date.now(); for (const k of Object.keys(L)) if (now - (L[k]?.ts || 0) > 86400000) delete L[k]; } catch {}
+}
 
 function _proposalEmbed(items) {
   const lignes = {};
@@ -219,24 +224,28 @@ function _proposalRow() {
     new ButtonBuilder().setCustomId("invp_cancel").setLabel("Annuler").setEmoji("❌").setStyle(ButtonStyle.Secondary),
   );
 }
-async function _proposer(channel, items, by) {
+// Poste la proposition, l'enregistre dans db (persistant) et sauvegarde
+async function _proposer(channel, items, by, db, inv) {
   try {
     const m = await channel.send({ embeds: [_proposalEmbed(items)], components: [_proposalRow()], allowedMentions: { parse: [] } }).catch(() => null);
-    if (m) _pending.set(m.id, { items, by, ts: Date.now() });
+    if (m) { _prunePending(inv); inv.lectures[m.id] = { items, by, ts: Date.now() }; persist(db); }
     return m;
   } catch { return null; }
 }
+// Applique en consolidant les noms ; renvoie les variations {normNom:{avant,apres}}
 function _appliquer(inv, items, mode) {
-  const names = new Set();
+  const before = {};
+  for (const c of CATS) for (const [n, q] of Object.entries(inv.stock[c] || {})) before[_norm(n)] = (before[_norm(n)] || 0) + (q || 0);
   if (mode === 'replace') { for (const c of CATS) inv.stock[c] = {}; }
+  const changes = {};
   for (const it of items) {
     if (!inv.stock[it.categorie]) inv.stock[it.categorie] = {};
     const b = inv.stock[it.categorie];
     const key = Object.keys(b).find(k => _norm(k) === _norm(it.nom)) || it.nom;
     b[key] = (b[key] || 0) + it.quantite;
-    names.add(_norm(key));
+    changes[_norm(key)] = { avant: before[_norm(key)] ?? 0, apres: b[key] };
   }
-  return names;
+  return changes;
 }
 
 const inventaireCommands = [
@@ -249,6 +258,7 @@ const inventaireCommands = [
     .addStringOption(o => o.setName("objet").setDescription("Nom de l'objet").setRequired(true))
     .addIntegerOption(o => o.setName("seuil").setDescription("Alerter quand la quantité descend à ce nombre (0 = enlever l'alerte)").setRequired(true)),
   new SlashCommandBuilder().setName("inventaire-export").setDescription("📜 Exporter l'état du coffre + derniers mouvements (fichier)"),
+  new SlashCommandBuilder().setName("inventaire-qui").setDescription("👤 Voir qui a bougé quoi dans le coffre (activité récente)"),
 ];
 
 async function routeInteraction(interaction) {
@@ -264,7 +274,7 @@ async function routeInteraction(interaction) {
       inv.panneau = m.id; try { await m.pin(); } catch {}
       try { const th = await m.startThread({ name: "📦 Journal du coffre", autoArchiveDuration: 10080 }); inv.threadId = th.id; await th.send({ content: "📦 Ici s'inscrivent **tous les mouvements** du coffre (ajouts, retraits, lectures, alertes). Le salon reste propre." }).catch(() => {}); } catch {}
       persist(db);
-      await interaction.editReply({ content: "✅ Coffre installé : tableau épinglé + fil « 📦 Journal du coffre » pour les mouvements. Gère via les boutons, /inventaire-photo (ou glisse des images), /inventaire-seuil, /inventaire-export." }).catch(() => {});
+      await interaction.editReply({ content: "✅ Coffre installé : tableau épinglé + fil « 📦 Journal du coffre ». Gère via les boutons, /inventaire-photo (ou glisse des images), /inventaire-seuil, /inventaire-export, /inventaire-qui." }).catch(() => {});
       return true;
     }
 
@@ -277,7 +287,6 @@ async function routeInteraction(interaction) {
       if (!inv.channelId) { await interaction.editReply({ content: "❌ Installe d'abord le tableau avec /inventaire-installer." }).catch(() => {}); return true; }
       const ch = await interaction.client.channels.fetch(inv.channelId).catch(() => null);
       if (!ch) { await interaction.editReply({ content: "❌ Salon du coffre introuvable." }).catch(() => {}); return true; }
-      // (1) garder les captures comme vrais fichiers épinglés
       const files = atts.map((a, i) => { const ext = (((a.name || "").match(/\.(png|jpe?g|webp|gif)$/i)) || [".png"])[0]; return new AttachmentBuilder(a.url, { name: `coffre-${i + 1}${ext}` }); });
       const cap = `📷 **État réel du coffre commun** — ${atts.length} capture(s) par <@${interaction.user.id}>.`;
       let msg = inv.photoMsg ? await ch.messages.fetch(inv.photoMsg).catch(() => null) : null;
@@ -285,15 +294,14 @@ async function routeInteraction(interaction) {
       else { const mm = await ch.send({ content: cap, files, allowedMentions: { parse: [] } }).catch(() => null); if (mm) { inv.photoMsg = mm.id; try { await mm.pin(); } catch {} } }
       persist(db);
       await _refreshBoard(interaction.client, inv);
-      // (2) lecture IA (multi-captures fusionnées)
       const items = await _lireImages(atts);
-      if (!items || !items.length) { await interaction.editReply({ content: "📷 Capture(s) épinglée(s) ✅. Mais je n'ai pas réussi à lire d'objets dessus (peu net, ou clé IA absente) — tu peux saisir avec les boutons." }).catch(() => {}); return true; }
-      await _proposer(ch, items, interaction.user.id);
+      if (!items || !items.length) { await interaction.editReply({ content: "📷 Capture(s) épinglée(s) ✅. Mais je n'ai pas réussi à lire d'objets dessus (peu net, ou clé IA absente) — saisis avec les boutons." }).catch(() => {}); return true; }
+      await _proposer(ch, items, interaction.user.id, db, inv);
       await interaction.editReply({ content: "📷 Capture(s) épinglée(s) ✅ et lue(s) ! **Vérifie / corrige / valide** sur le message que je viens de poster." }).catch(() => {});
       return true;
     }
 
-    // ── Seuil d'alerte ──
+    // ── Seuil ──
     if (interaction.isChatInputCommand?.() && interaction.commandName === "inventaire-seuil") {
       if (!estDirection(interaction.member)) { await interaction.reply({ content: "🔒 Réservé à la Direction.", flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
@@ -303,7 +311,7 @@ async function routeInteraction(interaction) {
       const db = loadDB(); const inv = _ensure(db);
       if (seuil > 0) inv.seuils[_norm(objet)] = seuil; else delete inv.seuils[_norm(objet)];
       persist(db);
-      await interaction.editReply({ content: seuil > 0 ? `✅ Alerte réglée : **${objet}** → je préviens dans le fil quand la quantité descend à **${seuil}** ou moins.` : `✅ Alerte retirée pour **${objet}**.` }).catch(() => {});
+      await interaction.editReply({ content: seuil > 0 ? `✅ Alerte réglée : **${objet}** → je préviens dans le fil quand la quantité passe à **${seuil}** ou moins.` : `✅ Alerte retirée pour **${objet}**.` }).catch(() => {});
       return true;
     }
 
@@ -320,44 +328,64 @@ async function routeInteraction(interaction) {
         txt += "\n";
       }
       if (inv.journal && inv.journal.length) {
-        txt += `\n\n=== Derniers mouvements ===\n` + inv.journal.slice(0, 40).map(e => `  [${new Date(e.t).toLocaleString('fr-FR')}] ${e.txt}`).join("\n");
+        txt += `\n\n=== Derniers mouvements ===\n` + inv.journal.slice(0, 60).map(e => `  [${new Date(e.t).toLocaleString('fr-FR')}] ${e.txt}`).join("\n");
       }
       const file = new AttachmentBuilder(Buffer.from(txt, 'utf-8'), { name: 'coffre-commun.txt' });
       await interaction.editReply({ content: "📜 Voici l'export complet du coffre.", files: [file] }).catch(() => {});
       return true;
     }
 
-    // ── Boutons manuels : ouvrir le formulaire ──
+    // ── Qui a bougé quoi ──
+    if (interaction.isChatInputCommand?.() && interaction.commandName === "inventaire-qui") {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const db = loadDB(); const inv = _ensure(db);
+      const j = inv.journal || [];
+      if (!j.length) { await interaction.editReply({ content: "Aucun mouvement enregistré pour l'instant." }).catch(() => {}); return true; }
+      const parUser = {};
+      for (const e of j) { if (e.who) parUser[e.who] = (parUser[e.who] || 0) + 1; }
+      const top = Object.entries(parUser).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([id, n]) => `<@${id}> — **${n}** mouvement(s)`);
+      const recent = j.slice(0, 12).map(e => `• ${e.who ? `<@${e.who}> ` : ""}${e.txt}`).join("\n").slice(0, 1024);
+      const e2 = new EmbedBuilder().setColor(0x4A7C59).setTitle("👤 Activité du coffre")
+        .addFields(
+          { name: "Par membre (sur les mouvements récents)", value: top.join("\n") || "—", inline: false },
+          { name: "Derniers mouvements", value: recent || "—", inline: false },
+        );
+      await interaction.editReply({ embeds: [e2] }).catch(() => {});
+      return true;
+    }
+
+    // ── Boutons manuels ──
     if (interaction.isButton?.() && ["inv_add", "inv_remove", "inv_set"].includes(interaction.customId)) {
       const action = interaction.customId.replace("inv_", "");
       await interaction.showModal(_modal(action)).catch(() => {});
       return true;
     }
 
-    // ── Validation/correction d'une lecture IA ──
+    // ── Validation / correction d'une lecture IA ──
     if (interaction.isButton?.() && ["invp_replace", "invp_add", "invp_cancel", "invp_edit"].includes(interaction.customId)) {
-      const pend = _pending.get(interaction.message.id);
-      if (!pend) { await interaction.reply({ content: "⏳ Cette lecture a expiré (ou le bot a redémarré). Renvoie la capture.", flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const db = loadDB(); const inv = _ensure(db); _prunePending(inv);
+      const pend = inv.lectures[interaction.message.id];
+      if (!pend) { await interaction.reply({ content: "⏳ Cette lecture a expiré. Renvoie la capture.", flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       if (interaction.customId === "invp_edit") {
         const mm = new ModalBuilder().setCustomId(`invpc::${interaction.message.id}`).setTitle("Corriger / ajouter un objet");
         const obj = new TextInputBuilder().setCustomId("objet").setLabel("Objet").setStyle(TextInputStyle.Short).setPlaceholder("Nom exact de l'objet").setRequired(true);
         const qte = new TextInputBuilder().setCustomId("qte").setLabel("Quantité (0 = retirer de la lecture)").setStyle(TextInputStyle.Short).setPlaceholder("ex : 5").setRequired(true);
-        const cat = new TextInputBuilder().setCustomId("cat").setLabel("Catégorie (si nouvel objet, sinon laisse vide)").setStyle(TextInputStyle.Short).setPlaceholder("Armes / Munitions / Provisions / Médecine / Matériel / Commun").setRequired(false);
+        const cat = new TextInputBuilder().setCustomId("cat").setLabel("Catégorie (si nouvel objet, sinon vide)").setStyle(TextInputStyle.Short).setPlaceholder("Armes / Munitions / Provisions / Médecine / Matériel / Commun").setRequired(false);
         mm.addComponents(new ActionRowBuilder().addComponents(obj), new ActionRowBuilder().addComponents(qte), new ActionRowBuilder().addComponents(cat));
         await interaction.showModal(mm).catch(() => {});
         return true;
       }
       await interaction.deferUpdate().catch(() => {});
-      _pending.delete(interaction.message.id);
-      if (interaction.customId === "invp_cancel") { await interaction.editReply({ content: "❌ Lecture annulée — rien n'a changé.", embeds: [], components: [] }).catch(() => {}); return true; }
-      const db = loadDB(); const inv = _ensure(db);
+      const items = pend.items;
+      delete inv.lectures[interaction.message.id];
+      if (interaction.customId === "invp_cancel") { persist(db); await interaction.editReply({ content: "❌ Lecture annulée — rien n'a changé.", embeds: [], components: [] }).catch(() => {}); return true; }
       const mode = interaction.customId === "invp_replace" ? "replace" : "add";
-      const names = _appliquer(inv, pend.items, mode);
-      _journalAdd(inv, `📷 ${mode === 'replace' ? "Remplacé" : "Complété"} depuis une capture (${pend.items.length} objet(s)).`);
+      const changes = _appliquer(inv, items, mode);
+      _journalAdd(inv, interaction.user.id, `📷 ${mode === 'replace' ? "Remplacé" : "Complété"} depuis une capture (${items.length} objet(s))`);
       persist(db);
       await _refreshBoard(interaction.client, inv);
-      await _log(interaction.client, inv, `📷 <@${interaction.user.id}> a ${mode === 'replace' ? "remplacé" : "complété"} le coffre depuis une capture (${pend.items.length} objet(s) lu(s)).`);
-      await _checkSeuils(interaction.client, inv, names);
+      await _log(interaction.client, inv, `📷 <@${interaction.user.id}> a ${mode === 'replace' ? "remplacé" : "complété"} le coffre depuis une capture (${items.length} objet(s) lu(s)).`);
+      await _checkSeuils(interaction.client, inv, changes);
       await interaction.editReply({ content: `✅ Coffre ${mode === 'replace' ? "remplacé" : "complété"} — détails dans le fil 📦.`, embeds: [], components: [] }).catch(() => {});
       return true;
     }
@@ -366,7 +394,8 @@ async function routeInteraction(interaction) {
     if (interaction.isModalSubmit?.() && interaction.customId.startsWith("invpc::")) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       const msgId = interaction.customId.split("::")[1];
-      const pend = _pending.get(msgId);
+      const db = loadDB(); const inv = _ensure(db); _prunePending(inv);
+      const pend = inv.lectures[msgId];
       if (!pend) { await interaction.editReply({ content: "⏳ Cette lecture a expiré." }).catch(() => {}); return true; }
       const objet = (interaction.fields.getTextInputValue("objet") || "").trim().slice(0, 80);
       const qte = parseInt(((interaction.fields.getTextInputValue("qte") || "").replace(/[^0-9]/g, "")), 10);
@@ -378,6 +407,7 @@ async function routeInteraction(interaction) {
       } else if (objet && Number.isFinite(qte) && qte > 0) {
         pend.items.push({ nom: objet, quantite: qte, categorie: cat || 'Commun' });
       }
+      persist(db);
       const ch = interaction.channel;
       const msg = ch ? await ch.messages.fetch(msgId).catch(() => null) : null;
       if (msg) await msg.edit({ embeds: [_proposalEmbed(pend.items)], components: [_proposalRow()] }).catch(() => {});
@@ -406,7 +436,7 @@ async function routeInteraction(interaction) {
       else apres = qte;
       if (apres <= 0) delete bucket[existante];
       else bucket[existante] = apres;
-      _journalAdd(inv, `${action === 'add' ? "Ajout" : action === 'remove' ? "Retrait" : "Correction"} : ${action === 'set' ? "" : qte + " × "}${existante} (${cat}) → ${apres}`);
+      _journalAdd(inv, interaction.user.id, `${action === 'add' ? "Ajout" : action === 'remove' ? "Retrait" : "Correction"} : ${action === 'set' ? "" : qte + " × "}${existante} (${cat}) → ${apres}`);
       persist(db);
       await _refreshBoard(interaction.client, inv);
 
@@ -415,7 +445,7 @@ async function routeInteraction(interaction) {
       if (action === 'set') logTxt = `📦 ${who} a recompté **${existante}** → **${apres}** *(${cat})*.`;
       else { const mot = action === 'add' ? "a rangé" : "a sorti"; const fin = action === 'add' ? "total" : "reste"; logTxt = `📦 ${who} ${mot} **${qte} × ${existante}** *(${cat})* · ${fin} : **${apres}**.`; }
       await _log(interaction.client, inv, logTxt);
-      await _checkSeuils(interaction.client, inv, new Set([_norm(existante)]));
+      await _checkSeuils(interaction.client, inv, { [_norm(existante)]: { avant, apres } });
       await interaction.editReply({ content: "✅ Mouvement enregistré (détail dans le fil 📦)." }).catch(() => {});
       return true;
     }
@@ -436,10 +466,11 @@ async function onMessage(message) {
     if (!db.inventaire || !db.inventaire.channelId || message.channelId !== db.inventaire.channelId) return false;
     const imgs = message.attachments ? [...message.attachments.values()].filter(a => (a.contentType || "").startsWith("image")) : [];
     if (!imgs.length) return false;
+    const inv = _ensure(db);
     await message.react("🔍").catch(() => {});
     const items = await _lireImages(imgs);
     if (!items || !items.length) { await message.reply({ content: "📷 Je n'ai pas réussi à lire d'objets sur cette/ces image(s). Essaie une capture plus nette, ou les boutons du tableau.", allowedMentions: { parse: [] } }).catch(() => {}); return true; }
-    await _proposer(message.channel, items, message.author.id);
+    await _proposer(message.channel, items, message.author.id, db, inv);
     return true;
   } catch { return false; }
 }
