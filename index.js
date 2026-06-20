@@ -576,6 +576,10 @@ async function updateDashboard(guild) {
 
 const JOURS_AVANT_KICK = 5;
 async function autoKickVisiteurs(guild) {
+  // ⛔ DÉSACTIVÉ à la demande de la Direction : plus aucun kick automatique
+  // pour « règlement non validé ». La fonction ne fait plus rien.
+  return;
+  // eslint-disable-next-line no-unreachable
   try {
     const db = loadDB(); const logsCh = await getLogsCh(guild); const maintenant = Date.now(); let kicked = 0;
     for (const [id, membre] of Object.entries(db.members || {})) {
