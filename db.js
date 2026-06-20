@@ -91,6 +91,9 @@ function invalidateCache() { _cache = null; }
 
 // ── Sauvegarde automatique vers GitHub (vérifiée, avec reprises + instantané quotidien) ──
 let _lastPurgeDate = null;
+// Coalescing des sauvegardes Gist : pas d'écritures simultanées + saut si contenu identique
+let _saving = false, _redo = false, _waiters = [];
+let _lastPushedContent = null, _lastBackupDay = null;
 
 // Garde les 7 instantanés les plus récents, supprime les plus vieux (au plus 1×/jour)
 async function _purgerVieuxInstantanes() {
@@ -110,7 +113,7 @@ async function _purgerVieuxInstantanes() {
   } catch {}
 }
 
-async function sauvegarderSurGitHub() {
+async function _doSauvegardeGitHub() {
   if (!process.env.GITHUB_TOKEN || !process.env.GITHUB_GIST_ID) return false;
   try {
     saveDBSync();
@@ -130,6 +133,7 @@ async function sauvegarderSurGitHub() {
 
     // Fichier principal + un instantané daté du jour (pour revenir en arrière)
     const jour = new Date().toISOString().slice(0, 10);
+    if (contenu === _lastPushedContent && jour === _lastBackupDay) return true; // déjà sauvegardé à l'identique → on évite un appel GitHub inutile
     const files = { 'iwc-data.json': { content: contenu }, [`backup-${jour}.json`]: { content: contenu } };
 
     // Envoi avec vérification réelle du statut + 2 reprises en cas d'échec
@@ -146,6 +150,7 @@ async function sauvegarderSurGitHub() {
       } catch (e) { lastErr = e.message; await new Promise(r => setTimeout(r, 800 * essai)); }
     }
     if (ok) {
+      _lastPushedContent = contenu; _lastBackupDay = jour;
       console.log(`✅ Sauvegarde GitHub OK (+ instantané ${jour}) — ${new Date().toLocaleString('fr-FR')}`);
       _purgerVieuxInstantanes().catch(() => {});
       return true;
@@ -156,6 +161,23 @@ async function sauvegarderSurGitHub() {
     console.log('❌ Sauvegarde GitHub error:', e.message);
     return false;
   }
+}
+
+// Coalescing : si une sauvegarde est déjà en cours, on n'en lance pas une 2e en parallèle ;
+// on note qu'il faudra refaire un tour à la fin pour capturer les derniers changements.
+// → jamais de perte de données, juste moins d'appels GitHub simultanés.
+async function sauvegarderSurGitHub() {
+  if (_saving) { _redo = true; return new Promise(res => _waiters.push(res)); }
+  _saving = true;
+  let result = false;
+  try {
+    do { _redo = false; result = await _doSauvegardeGitHub(); } while (_redo);
+  } finally {
+    _saving = false;
+    const w = _waiters; _waiters = [];
+    w.forEach(r => { try { r(result); } catch {} });
+  }
+  return result;
 }
 
 // ── Restauration depuis GitHub au démarrage ──
