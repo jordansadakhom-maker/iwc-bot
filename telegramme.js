@@ -95,6 +95,13 @@ async function ouvrirConversation(message, { rdvId, demandeurId, nomRP }) {
 //  RELAIS DES MESSAGES (appelé par index.js dans messageCreate)
 //  → renvoie true si le message a été pris en charge
 // ═══════════════════════════════════════════════════════════════
+function _pingRoles(guild) {
+  try {
+    const ids = guild.roles.cache.filter(r => { const n = (r.name || '').toLowerCase(); return n.includes('homme') || n.includes('fondateur'); }).map(r => r.id);
+    return { content: ids.map(id => `<@&${id}>`).join(' '), ids };
+  } catch { return { content: '', ids: [] }; }
+}
+
 async function onMessage(message) {
   try {
     if (message.author?.bot) return false;
@@ -115,7 +122,9 @@ async function onMessage(message) {
         .setAuthor({ name: `📨 ${conv.nomRP || message.author.username} (client)`, iconURL: message.author.displayAvatarURL?.() })
         .setDescription((message.content || '').slice(0, 4000) || '*(pièce jointe)*')
         .setTimestamp();
-      await thread.send({ content: files.length ? files.join('\n') : null, embeds: [e] }).catch(() => {});
+      const ping = _pingRoles(thread.guild);
+      const tete = [ping.content ? `${ping.content} — 📨 **réponse d'un client**` : '', files.length ? files.join('\n') : ''].filter(Boolean).join('\n');
+      await thread.send({ content: tete || null, embeds: [e], allowedMentions: { roles: ping.ids } }).catch(() => {});
       await message.react('📨').catch(() => {});
       return true;
     }
