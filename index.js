@@ -75,6 +75,10 @@ let tableaubord = {};
 try { tableaubord = require('./tableaubord'); console.log('✅ Module tableau de bord chargé'); }
 catch (e) { console.log('⚠️ tableaubord non chargé:', e.message); }
 
+let traque = {};
+try { traque = require('./traque'); console.log('✅ Module traque (avis de recherche) chargé'); }
+catch (e) { console.log('⚠️ traque non chargé:', e.message); }
+
 const { fmtLong, fmtShort, daysSince, parisOffsetHours, _fmtDollars } = require('./utils');
 const parrainage = require('./parrainage');
 parrainage.init({ isDirection, isMembre });
@@ -440,7 +444,7 @@ const SLASH_COMMANDS = [
 ].map(c => c.toJSON());
 
 async function registerSlashCommands(guild) {
-  const cmds = [...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || []), ...(operations.operationsCommands || []), ...(rumeurs.rumeursCommands || []), ...(inventaire.inventaireCommands || []), ...(diagnostic.diagnosticCommands || []), ...(absences.absencesCommands || []), ...(repertoire.repertoireCommands || []), ...(monitoring.monitoringCommands || []), ...(telegramme.telegrammeCommands || []), ...(tableaubord.tableauCommands || [])];
+  const cmds = [...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || []), ...(operations.operationsCommands || []), ...(rumeurs.rumeursCommands || []), ...(inventaire.inventaireCommands || []), ...(diagnostic.diagnosticCommands || []), ...(absences.absencesCommands || []), ...(repertoire.repertoireCommands || []), ...(monitoring.monitoringCommands || []), ...(telegramme.telegrammeCommands || []), ...(tableaubord.tableauCommands || []), ...(traque.traqueCommands || [])];
   try {
     const noms = cmds.map(c => c?.name || c?.toJSON?.()?.name).filter(Boolean);
     client._cmdNames = noms;
@@ -2458,6 +2462,7 @@ client.on('interactionCreate', async interaction => {
   if (await rdvplus.routeInteraction?.(interaction)) return;
   if (await parrainage.routeInteraction?.(interaction)) return;
   if (await tableaubord.routeInteraction?.(interaction)) return;
+  if (await traque.routeInteraction?.(interaction)) return;
 
   if (interaction.isAutocomplete()) {
     if (['promo','retro'].includes(interaction.commandName)) return handleAutocompleteGrades(interaction);
