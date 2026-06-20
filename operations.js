@@ -134,6 +134,7 @@ function _embedOrdre(op) {
       { name: 'Statut', value: '🟡 En préparation', inline: true },
       { name: 'Pôle', value: op.pole === 'legal' ? '⚖️ Pôle Légal' : '🔪 La Confrérie', inline: true },
       { name: '🎯 Type', value: t.label || 'Opération', inline: true },
+      { name: '🤠 Organisé par', value: op.createurId ? `<@${op.createurId}>` : (op.createurNom || '—'), inline: true },
       { name: '📍 Lieu', value: op.lieu || '—', inline: true },
       { name: '🕐 Quand', value: dt ? `${tsF(dt)}\n${tsR(dt)}` : (op.quandTexte ? `*${op.quandTexte}* (à fixer)` : '*À définir*'), inline: true },
       ...(op.butin ? [{ name: '💰 Butin / prime visé', value: op.butin, inline: true }] : []),
@@ -283,6 +284,8 @@ async function routeInteraction(interaction) {
         participants: [],
         status: 'preparation',
         createdAt: new Date().toISOString(),
+        createurId: interaction.user?.id || null,
+        createurNom: interaction.member?.displayName || interaction.user?.username || 'Inconnu',
         // extras immersifs (ignorés par l'ancien système, sans risque)
         typeKey,
         quandSlot: _parseSlot(quand),
