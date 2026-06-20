@@ -2755,6 +2755,22 @@ client.on('interactionCreate', async interaction => {
           await opsCh.send({ content: `🟢 L'opération **${op2.name}** est **LANCÉE**.` });
         }
       }
+      // ── Fil de coordination sous l'ordre d'opération (salon propre, coordination dans le fil) ──
+      try {
+        let ancreOp = null;
+        if (op2.channelId && op2.msgId) {
+          const chOp = await interaction.client.channels.fetch(op2.channelId).catch(() => null);
+          ancreOp = chOp && await chOp.messages.fetch(op2.msgId).catch(() => null);
+        }
+        if (!ancreOp && opsCh) ancreOp = await opsCh.send({ content: `🎯 Coordination — **${op2.name}**` }).catch(() => null);
+        if (ancreOp && !ancreOp.hasThread) {
+          const filOp = await ancreOp.startThread({ name: `🎯 ${op2.name}`.slice(0, 100), autoArchiveDuration: 1440 }).catch(() => null);
+          if (filOp) {
+            op2.threadId = filOp.id; saveDB(db);
+            await filOp.send({ content: `🎯 **Coordination — ${op2.name}**\n📍 ${op2.lieu || '—'} · 🎯 ${op2.objectif || '—'}\n\nServez-vous de ce fil pour vous organiser, partager les infos et faire les comptes-rendus. Le salon reste propre.` }).catch(() => {});
+          }
+        }
+      } catch (e) { console.log('⚠️ Fil coordination opération:', e.message); }
       notionV4.envoyerBriefingOp?.(guild, op2).catch(() => {});
       return;
     }
