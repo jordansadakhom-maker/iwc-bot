@@ -43,6 +43,10 @@ let operations = {};
 try { operations = require('./operations'); console.log('✅ Module opérations chargé'); }
 catch (e) { console.log('⚠️ operations non chargé:', e.message); }
 
+let rumeurs = {};
+try { rumeurs = require('./rumeurs'); console.log('✅ Module rumeurs chargé'); }
+catch (e) { console.log('⚠️ rumeurs non chargé:', e.message); }
+
 let telegramme = {};
 try { telegramme = require('./telegramme'); console.log('✅ Module télégrammes (conversations) chargé'); }
 catch (e) { console.log('⚠️ telegramme non chargé:', e.message); }
@@ -407,7 +411,7 @@ const SLASH_COMMANDS = [
 ].map(c => c.toJSON());
 
 async function registerSlashCommands(guild) {
-  try { await guild.commands.set([...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || []), ...(operations.operationsCommands || [])]); console.log('✅ Slash commands enregistrées (+ papiers + sécurité + rdv+ + opérations)'); }
+  try { await guild.commands.set([...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || []), ...(operations.operationsCommands || []), ...(rumeurs.rumeursCommands || [])]); console.log('✅ Slash commands enregistrées (+ papiers + sécurité + rdv+ + opérations + rumeurs)'); }
   catch (e) { console.log('❌ Slash commands error:', e.message); }
 }
 
@@ -2404,6 +2408,7 @@ client.on('interactionCreate', async interaction => {
   const guild = interaction.guild; const db = loadDB();
   if (await contratsConf.routeInteraction?.(interaction)) return;
   if (await operations.routeInteraction?.(interaction)) return;
+  if (await rumeurs.routeInteraction?.(interaction)) return;
   if (await telegramme.routeInteraction?.(interaction)) return;
   if (await securite.routeInteraction?.(interaction)) return;
   if (await rdvplus.routeInteraction?.(interaction)) return;
@@ -3380,6 +3385,7 @@ client.once('clientReady', async () => {
   console.log(`✅ Connecté : ${client.user.tag}`);
   console.log('🏷️  VERSION : 5.2 — 15 juin 2026 (économie RP : portefeuille/payer/argent + parrainage des nouveaux)');
   client.user.setActivity('la meute • IWC 1895', { type: ActivityType.Watching });
+  try { rumeurs.init?.(client); } catch (e) { console.log('⚠️ rumeurs.init:', e.message); }
   await restaurerDepuisGitHub();
   for (const guild of client.guilds.cache.values()) {
     await registerSlashCommands(guild).catch(e => console.log('registerSlashCommands error:', e.message));
