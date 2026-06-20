@@ -192,27 +192,34 @@ async function posterRumeur(client) {
 }
 
 // ── Planification interne : vérifie toutes les 15 min, poste à 13h et 20h (Paris) ──
+//  Robuste : rattrapage si le bot était hors-ligne à l'heure pile, anti-doublon
+//  persistant (db.rumeursLastSlot) qui survit aux redémarrages, et vérif au démarrage.
 let _interval = null;
-let _lastKey = null;
 const HEURES = [13, 20];
 
 function _maybePost(client) {
   try {
+    const db = loadDB();
+    if (!db.rumeursChannelId) return; // aucun salon défini → rien à poster
     const now = new Date();
-    const h = Number(now.toLocaleString('fr-FR', { timeZone: 'Europe/Paris', hour: 'numeric', hour12: false }));
-    if (!HEURES.includes(h)) return;
+    const h = parseInt(now.toLocaleString('en-GB', { timeZone: 'Europe/Paris', hour: '2-digit', hour12: false }), 10);
     const jour = now.toLocaleString('fr-FR', { timeZone: 'Europe/Paris', day: '2-digit', month: '2-digit' });
-    const key = `${jour}-${h}`;
-    if (_lastKey === key) return; // déjà posté à cette heure aujourd'hui
-    _lastKey = key;
+    const passes = HEURES.filter(x => h >= x);  // créneaux déjà atteints aujourd'hui
+    if (passes.length === 0) return;            // aucun créneau encore passé
+    const slot = Math.max(...passes);           // le plus récent (= rattrapage)
+    const key = `${jour}-${slot}`;
+    if (db.rumeursLastSlot === key) return;     // créneau déjà posté (anti-doublon persistant)
+    db.rumeursLastSlot = key;
+    persist(db);
     posterRumeur(client);
   } catch {}
 }
 
 function init(client) {
   if (_interval) clearInterval(_interval);
+  try { _maybePost(client); } catch {}        // vérif immédiate au démarrage
   _interval = setInterval(() => _maybePost(client), 15 * 60 * 1000);
-  console.log('✅ Rumeurs : planification active (13h & 20h)');
+  console.log('✅ Rumeurs : planification active (13h & 20h, avec rattrapage)');
 }
 
 const rumeursCommands = [
