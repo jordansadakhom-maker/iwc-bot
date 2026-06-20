@@ -67,9 +67,14 @@ let telegramme = {};
 try { telegramme = require('./telegramme'); console.log('✅ Module télégrammes (conversations) chargé'); }
 catch (e) { console.log('⚠️ telegramme non chargé:', e.message); }
 
+let monitoring = {};
+try { monitoring = require('./monitoring'); console.log('✅ Module monitoring chargé'); }
+catch (e) { console.log('⚠️ monitoring non chargé:', e.message); }
+
 process.on('unhandledRejection', (reason, promise) => {
   console.log('⚠️ Unhandled Rejection:', reason?.message || reason);
   if (reason?.stack) console.log(reason.stack.split('\n').slice(0,5).join('\n'));
+  try { monitoring.logTech?.(client, 'error', '⚠️ Erreur non gérée', (reason?.message || String(reason)) + (reason?.stack ? '\n```\n' + reason.stack.split('\n').slice(0, 4).join('\n') + '\n```' : '')); } catch {}
 });
 process.on('uncaughtException', err => {
   console.log('⚠️ Uncaught Exception:', err?.message || err);
@@ -427,8 +432,17 @@ const SLASH_COMMANDS = [
 ].map(c => c.toJSON());
 
 async function registerSlashCommands(guild) {
-  try { await guild.commands.set([...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || []), ...(operations.operationsCommands || []), ...(rumeurs.rumeursCommands || []), ...(inventaire.inventaireCommands || []), ...(diagnostic.diagnosticCommands || []), ...(absences.absencesCommands || []), ...(repertoire.repertoireCommands || [])]); console.log('✅ Slash commands enregistrées (+ papiers + sécurité + rdv+ + opérations + rumeurs + inventaire + diagnostic)'); }
-  catch (e) { console.log('❌ Slash commands error:', e.message); }
+  const cmds = [...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || []), ...(operations.operationsCommands || []), ...(rumeurs.rumeursCommands || []), ...(inventaire.inventaireCommands || []), ...(diagnostic.diagnosticCommands || []), ...(absences.absencesCommands || []), ...(repertoire.repertoireCommands || []), ...(monitoring.monitoringCommands || [])];
+  try {
+    const noms = cmds.map(c => c?.name || c?.toJSON?.()?.name).filter(Boolean);
+    client._cmdNames = noms;
+    const vus = new Set(); const doublons = [];
+    for (const n of noms) { if (vus.has(n)) { if (!doublons.includes(n)) doublons.push(n); } else vus.add(n); }
+    if (doublons.length) { console.log('❌ Commandes en double:', doublons.join(', ')); try { monitoring.logTech?.(client, 'error', '❌ Commandes en double', 'Discord rejette TOUT le lot tant que ce n\'est pas corrigé :\n' + doublons.join(', ')); } catch {} }
+    await guild.commands.set(cmds);
+    console.log('✅ Slash commands enregistrées (+ modules + monitoring)');
+  }
+  catch (e) { console.log('❌ Slash commands error:', e.message); try { monitoring.logTech?.(client, 'error', '❌ Échec d\'enregistrement des commandes', e.message); } catch {} }
 }
 
 function nomParticipant(member) { return DISCORD_TO_IC[member.id] || member.user?.username || member.displayName || 'Inconnu'; }
@@ -2425,6 +2439,7 @@ client.on('interactionCreate', async interaction => {
   if (await diagnostic.routeInteraction?.(interaction)) return;
   if (await absences.routeInteraction?.(interaction)) return;
   if (await repertoire.routeInteraction?.(interaction)) return;
+  if (await monitoring.routeInteraction?.(interaction)) return;
   if (await telegramme.routeInteraction?.(interaction)) return;
   if (await securite.routeInteraction?.(interaction)) return;
   if (await rdvplus.routeInteraction?.(interaction)) return;
@@ -3424,6 +3439,7 @@ client.once('clientReady', async () => {
     await autoSetup(guild).catch(e => console.log('autoSetup error:', e.message));
     await buildMembresDiscordMap(guild).catch(() => {});
   }
+  try { await monitoring.autoCheck?.(client, client._cmdNames); } catch {}
   for (const guild of client.guilds.cache.values()) {
     await notionExtra.envoyerRappelsFiches?.(guild).catch(() => {});
   }
