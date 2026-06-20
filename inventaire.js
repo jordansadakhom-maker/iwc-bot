@@ -24,8 +24,8 @@ function estDirection(member) {
   try { return !!member?.roles?.cache?.some(r => DIRECTION_ROLES.some(n => r.name.includes(n))); } catch { return false; }
 }
 
-const CATS = ['Armes', 'Munitions', 'Provisions', 'Médecine', 'Matériel'];
-const CAT_EMOJI = { 'Armes': '🔫', 'Munitions': '🧨', 'Provisions': '🥫', 'Médecine': '💊', 'Matériel': '🧰' };
+const CATS = ['Armes', 'Munitions', 'Provisions', 'Médecine', 'Matériel', 'Commun'];
+const CAT_EMOJI = { 'Armes': '🔫', 'Munitions': '🧨', 'Provisions': '🥫', 'Médecine': '💊', 'Matériel': '🧰', 'Commun': '🎒' };
 const TITRE = "🤝 COFFRE COMMUN";
 const SOUS = "*Réserves de l'organisation (Compagnie & Confrérie) — l'argent, lui, dort dans les coffres.*";
 const COULEUR = 0x8C6D3F;
@@ -101,7 +101,7 @@ function _modal(action) {
   const verbe = action === 'add' ? "Ajouter au coffre" : action === 'remove' ? "Retirer du coffre" : "Corriger le coffre";
   const m = new ModalBuilder().setCustomId(`invm::${action}`).setTitle(verbe);
   const cat = new TextInputBuilder().setCustomId("cat").setLabel("Catégorie").setStyle(TextInputStyle.Short)
-    .setPlaceholder("Armes / Munitions / Provisions / Médecine / Matériel").setRequired(true);
+    .setPlaceholder("Armes / Munitions / Provisions / Médecine / Matériel / Commun").setRequired(true);
   const obj = new TextInputBuilder().setCustomId("objet").setLabel("Objet").setStyle(TextInputStyle.Short)
     .setPlaceholder("ex : Carabine Repeater, Balles .44, Conserves…").setRequired(true);
   const qte = new TextInputBuilder().setCustomId("qte").setLabel(action === 'set' ? "Quantité exacte (0 = retirer)" : "Quantité").setStyle(TextInputStyle.Short)
