@@ -55,6 +55,14 @@ let diagnostic = {};
 try { diagnostic = require('./diagnostic'); console.log('✅ Module diagnostic chargé'); }
 catch (e) { console.log('⚠️ diagnostic non chargé:', e.message); }
 
+let absences = {};
+try { absences = require('./absences'); console.log('✅ Module absences chargé'); }
+catch (e) { console.log('⚠️ absences non chargé:', e.message); }
+
+let repertoire = {};
+try { repertoire = require('./repertoire'); console.log('✅ Module répertoire chargé'); }
+catch (e) { console.log('⚠️ répertoire non chargé:', e.message); }
+
 let telegramme = {};
 try { telegramme = require('./telegramme'); console.log('✅ Module télégrammes (conversations) chargé'); }
 catch (e) { console.log('⚠️ telegramme non chargé:', e.message); }
@@ -420,7 +428,7 @@ const SLASH_COMMANDS = [
 ].map(c => c.toJSON());
 
 async function registerSlashCommands(guild) {
-  try { await guild.commands.set([...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || []), ...(operations.operationsCommands || []), ...(rumeurs.rumeursCommands || []), ...(inventaire.inventaireCommands || []), ...(diagnostic.diagnosticCommands || [])]); console.log('✅ Slash commands enregistrées (+ papiers + sécurité + rdv+ + opérations + rumeurs + inventaire + diagnostic)'); }
+  try { await guild.commands.set([...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || []), ...(operations.operationsCommands || []), ...(rumeurs.rumeursCommands || []), ...(inventaire.inventaireCommands || []), ...(diagnostic.diagnosticCommands || []), ...(absences.absencesCommands || []), ...(repertoire.repertoireCommands || [])]); console.log('✅ Slash commands enregistrées (+ papiers + sécurité + rdv+ + opérations + rumeurs + inventaire + diagnostic)'); }
   catch (e) { console.log('❌ Slash commands error:', e.message); }
 }
 
@@ -2422,6 +2430,8 @@ client.on('interactionCreate', async interaction => {
   if (await rumeurs.routeInteraction?.(interaction)) return;
   if (await inventaire.routeInteraction?.(interaction)) return;
   if (await diagnostic.routeInteraction?.(interaction)) return;
+  if (await absences.routeInteraction?.(interaction)) return;
+  if (await repertoire.routeInteraction?.(interaction)) return;
   if (await telegramme.routeInteraction?.(interaction)) return;
   if (await securite.routeInteraction?.(interaction)) return;
   if (await rdvplus.routeInteraction?.(interaction)) return;
