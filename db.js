@@ -89,27 +89,72 @@ function saveDBSync() {
 // Invalide le cache (utile après une mise à jour externe)
 function invalidateCache() { _cache = null; }
 
-// ── Sauvegarde automatique vers GitHub ──
+// ── Sauvegarde automatique vers GitHub (vérifiée, avec reprises + instantané quotidien) ──
+let _lastPurgeDate = null;
+
+// Garde les 7 instantanés les plus récents, supprime les plus vieux (au plus 1×/jour)
+async function _purgerVieuxInstantanes() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (_lastPurgeDate === today) return;
+  _lastPurgeDate = today;
+  try {
+    const res = await fetch(`https://api.github.com/gists/${process.env.GITHUB_GIST_ID}`, { headers: { 'Authorization': `Bearer ${process.env.GITHUB_TOKEN}` } });
+    if (!res.ok) return;
+    const gist = await res.json();
+    const noms = Object.keys(gist.files || {}).filter(n => /^backup-\d{4}-\d{2}-\d{2}\.json$/.test(n)).sort();
+    if (noms.length <= 7) return;
+    const aSupprimer = noms.slice(0, noms.length - 7);
+    const files = {}; for (const n of aSupprimer) files[n] = null; // null = supprime le fichier du gist
+    await fetch(`https://api.github.com/gists/${process.env.GITHUB_GIST_ID}`, { method: 'PATCH', headers: { 'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ files }) });
+    console.log(`🧹 Anciens instantanés supprimés : ${aSupprimer.length}`);
+  } catch {}
+}
+
 async function sauvegarderSurGitHub() {
-  if (!process.env.GITHUB_TOKEN || !process.env.GITHUB_GIST_ID) return;
+  if (!process.env.GITHUB_TOKEN || !process.env.GITHUB_GIST_ID) return false;
   try {
     saveDBSync();
     const contenu = _cache
       ? JSON.stringify(_cache, null, 2)
       : (fs.existsSync(DB_PATH) ? fs.readFileSync(DB_PATH, 'utf8') : '{}');
-    await fetch(`https://api.github.com/gists/${process.env.GITHUB_GIST_ID}`, {
-      method: 'PATCH',
-      headers: {
-        'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        files: { 'iwc-data.json': { content: contenu } }
-      }),
-    });
-    console.log(`✅ Sauvegarde GitHub effectuée — ${new Date().toLocaleString('fr-FR')}`);
+
+    // ── Garde-fou anti-écrasement : ne JAMAIS remplacer la sauvegarde par des données vides/corrompues ──
+    try {
+      const d = JSON.parse(contenu);
+      const aDuContenu = (d.members && Object.keys(d.members).length > 0) ||
+        (d.candidatures || []).length || (d.contrats || []).length || (d.operations || []).length ||
+        (d.affaires || []).length || (d.informateurs || []).length ||
+        (d.coffres?.legal || 0) || (d.coffres?.illegal || 0);
+      if (!aDuContenu) { console.log('⚠️ Sauvegarde GitHub ANNULÉE : données vides/suspectes (protection anti-écrasement)'); return false; }
+    } catch { console.log('⚠️ Sauvegarde GitHub ANNULÉE : JSON invalide'); return false; }
+
+    // Fichier principal + un instantané daté du jour (pour revenir en arrière)
+    const jour = new Date().toISOString().slice(0, 10);
+    const files = { 'iwc-data.json': { content: contenu }, [`backup-${jour}.json`]: { content: contenu } };
+
+    // Envoi avec vérification réelle du statut + 2 reprises en cas d'échec
+    let ok = false, lastErr = '';
+    for (let essai = 1; essai <= 3 && !ok; essai++) {
+      try {
+        const res = await fetch(`https://api.github.com/gists/${process.env.GITHUB_GIST_ID}`, {
+          method: 'PATCH',
+          headers: { 'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ files }),
+        });
+        if (res.ok) ok = true;
+        else { lastErr = `HTTP ${res.status}`; await new Promise(r => setTimeout(r, 800 * essai)); }
+      } catch (e) { lastErr = e.message; await new Promise(r => setTimeout(r, 800 * essai)); }
+    }
+    if (ok) {
+      console.log(`✅ Sauvegarde GitHub OK (+ instantané ${jour}) — ${new Date().toLocaleString('fr-FR')}`);
+      _purgerVieuxInstantanes().catch(() => {});
+      return true;
+    }
+    console.log(`❌ Sauvegarde GitHub ÉCHOUÉE après 3 essais : ${lastErr}`);
+    return false;
   } catch (e) {
     console.log('❌ Sauvegarde GitHub error:', e.message);
+    return false;
   }
 }
 
