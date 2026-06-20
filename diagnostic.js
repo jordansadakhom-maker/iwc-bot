@@ -50,6 +50,17 @@ async function _dernierBackup(token, gistId) {
   } catch { return null; }
 }
 
+// Mini-appel réel à Notion pour vérifier que le token fonctionne
+async function _testNotion(token) {
+  if (!token) return { ok: false, msg: "token absent" };
+  try {
+    const r = await fetch('https://api.notion.com/v1/users/me', { headers: { 'Authorization': `Bearer ${token}`, 'Notion-Version': '2022-06-28' } });
+    if (r.ok) return { ok: true, msg: "ok" };
+    if (r.status === 401) return { ok: false, msg: "token refusé (401)" };
+    return { ok: false, msg: `erreur ${r.status}` };
+  } catch { return { ok: false, msg: "injoignable" }; }
+}
+
 const diagnosticCommands = [
   new SlashCommandBuilder().setName("diagnostic").setDescription("🩺 État de santé du bot : config, salons, données (Direction)"),
 ];
@@ -64,8 +75,9 @@ async function routeInteraction(interaction) {
 
     // Tests en direct (en parallèle pour aller vite)
     const gitConfigured = !!(env.GITHUB_TOKEN && env.GITHUB_GIST_ID);
-    const [iaTest, saveOk, backup] = await Promise.all([
+    const [iaTest, notionTest, saveOk, backup] = await Promise.all([
       _testIA(env.ANTHROPIC_API_KEY),
+      _testNotion(env.NOTION_TOKEN),
       (gitConfigured && backupGit ? backupGit().catch(() => false) : Promise.resolve(null)),
       (gitConfigured ? _dernierBackup(env.GITHUB_TOKEN, env.GITHUB_GIST_ID) : Promise.resolve(null)),
     ]);
@@ -86,6 +98,7 @@ async function routeInteraction(interaction) {
       name: "🧪 Tests en direct",
       value:
         `${oui(iaTest.ok)} IA joignable${iaTest.ok ? "" : ` — ${iaTest.msg}`}\n` +
+        `${oui(notionTest.ok)} Notion joignable${notionTest.ok ? "" : ` — ${notionTest.msg}`}\n` +
         `${saveOk === null ? "➖" : oui(saveOk)} Écriture de la sauvegarde${saveOk === null ? " — non configurée" : saveOk === false ? " — ÉCHEC" : " — testée à l'instant"}\n` +
         `🗄️ Dernier backup : **${backup || "—"}**`,
       inline: false,
