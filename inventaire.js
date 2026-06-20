@@ -4,13 +4,13 @@
 //  UN SEUL coffre partagé (Compagnie & Confrérie ensemble).
 //  Catégories : Armes · Munitions · Provisions · Médecine · Matériel.
 //  Tout le monde peut ajouter / retirer / corriger. Installation : Direction.
-//  Photo du coffre, récapitulatif des quantités, et journal des mouvements.
+//  La photo est RÉ-UPLOADÉE en vrai fichier épinglé (pas un lien qui expire).
 //
 //  /inventaire-installer  → poser le tableau dans CE salon         [Direction]
 //  /inventaire-photo      → joindre une capture du coffre en jeu   [tous]
 //  Identifiants isolés : inv_*  ·  Données dans db.inventaire
 // ───────────────────────────────────────────────────────────────────────────
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder, MessageFlags } = require('discord.js');
 
 let dbMod = {};
 try { dbMod = require('./db'); } catch { dbMod = {}; }
@@ -65,7 +65,7 @@ function _boardEmbed(inv) {
     if (val.length > 1000) val = val.slice(0, 1000) + "\n…";
     e.addFields({ name: `${CAT_EMOJI[c]} ${c} (${per[c]})`, value: val, inline: false });
   }
-  if (inv.photo) e.setImage(inv.photo);
+  if (inv.photoMsg) e.addFields({ name: "📷 Photo du coffre", value: "Capture réelle épinglée dans ce salon.", inline: false });
   e.setFooter({ text: "Iron Wolf Company & La Confrérie • mis à jour automatiquement" });
   return e;
 }
@@ -116,8 +116,8 @@ function _modal(action) {
 
 const inventaireCommands = [
   new SlashCommandBuilder().setName("inventaire-installer").setDescription("📦 Poser le tableau du coffre commun dans CE salon (Direction)"),
-  new SlashCommandBuilder().setName("inventaire-photo").setDescription("📷 Joindre une capture de l'état réel du coffre")
-    .addAttachmentOption(o => o.setName("image").setDescription("Capture de l'inventaire en jeu").setRequired(true)),
+  new SlashCommandBuilder().setName("inventaire-photo").setDescription("📷 Joindre une capture (fichier) de l'état réel du coffre")
+    .addAttachmentOption(o => o.setName("image").setDescription("Capture d'écran de l'inventaire en jeu").setRequired(true)),
 ];
 
 async function routeInteraction(interaction) {
@@ -132,20 +132,32 @@ async function routeInteraction(interaction) {
       if (!m) { await interaction.editReply({ content: "❌ Je n'ai pas pu poster ici (vérifie mes permissions d'écriture dans ce salon)." }).catch(() => {}); return true; }
       inv.panneau = m.id; try { await m.pin(); } catch {}
       persist(db);
-      await interaction.editReply({ content: "✅ Tableau du coffre commun installé. Tout le monde peut ajouter / retirer / corriger via les boutons, et joindre une photo avec /inventaire-photo." }).catch(() => {});
+      await interaction.editReply({ content: "✅ Tableau du coffre commun installé. Tout le monde peut ajouter / retirer / corriger via les boutons, et joindre une capture avec /inventaire-photo." }).catch(() => {});
       return true;
     }
 
-    // ── Photo du coffre ──
+    // ── Photo du coffre (ré-uploadée en vrai fichier épinglé) ──
     if (interaction.isChatInputCommand?.() && interaction.commandName === "inventaire-photo") {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       const att = interaction.options.getAttachment("image");
-      if (!att || !((att.contentType || "").startsWith("image"))) { await interaction.editReply({ content: "❌ Joins bien une image (capture de l'inventaire en jeu)." }).catch(() => {}); return true; }
+      if (!att || !((att.contentType || "").startsWith("image"))) { await interaction.editReply({ content: "❌ Joins bien une image (capture d'écran de l'inventaire en jeu)." }).catch(() => {}); return true; }
       const db = loadDB(); const inv = _ensure(db);
-      inv.photo = att.url; persist(db);
+      if (!inv.channelId) { await interaction.editReply({ content: "❌ Installe d'abord le tableau avec /inventaire-installer." }).catch(() => {}); return true; }
+      const ch = await interaction.client.channels.fetch(inv.channelId).catch(() => null);
+      if (!ch) { await interaction.editReply({ content: "❌ Salon du coffre introuvable." }).catch(() => {}); return true; }
+      const ext = (((att.name || "").match(/\.(png|jpe?g|webp|gif)$/i)) || [".png"])[0];
+      const file = new AttachmentBuilder(att.url, { name: `coffre-commun${ext}` });
+      const cap = `📷 **État réel du coffre commun** — capture mise à jour par <@${interaction.user.id}>.`;
+      let msg = inv.photoMsg ? await ch.messages.fetch(inv.photoMsg).catch(() => null) : null;
+      if (msg) {
+        await msg.edit({ content: cap, files: [file], attachments: [], allowedMentions: { parse: [] } }).catch(() => {});
+      } else {
+        const m = await ch.send({ content: cap, files: [file], allowedMentions: { parse: [] } }).catch(() => null);
+        if (m) { inv.photoMsg = m.id; try { await m.pin(); } catch {} }
+      }
+      persist(db);
       await _refreshBoard(interaction.client, inv);
-      await _log(interaction.client, inv, `📷 <@${interaction.user.id}> a mis à jour la **photo du coffre**.`);
-      await interaction.editReply({ content: "✅ Photo du coffre mise à jour (visible sur le tableau)." }).catch(() => {});
+      await interaction.editReply({ content: "✅ Capture du coffre mise à jour — vrai fichier épinglé dans le salon (téléchargeable)." }).catch(() => {});
       return true;
     }
 
