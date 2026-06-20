@@ -226,7 +226,12 @@ function _boutonsTelegramme(rdv) {
       ),
     ];
   }
-  if (['Annulé', 'Décliné', 'Honoré', 'Lapin'].includes(rdv.statut)) return []; // clôturé
+  if (rdv.statut === 'Honoré') {
+    return [new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`rdvp_contrat::${rdv.id}`).setLabel('📜 Établir le contrat').setStyle(ButtonStyle.Primary),
+    )];
+  }
+  if (['Annulé', 'Décliné', 'Lapin'].includes(rdv.statut)) return []; // clôturé
   // En attente
   return [
     new ActionRowBuilder().addComponents(
@@ -466,6 +471,27 @@ async function routeInteraction(interaction) {
       await _mpClient(interaction.client, interaction.user.id, '', accuse);
       const photoBtn = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`rdvp_addphoto::${id}`).setLabel('📎 Ajouter une photo du lieu').setStyle(ButtonStyle.Secondary));
       await interaction.editReply({ content: `✅ Votre demande a été transmise à la Direction (réf. \`${id}\`). Vous recevrez une réponse prochainement.\n\n📎 *Facultatif : vous pouvez joindre une photo du lieu.*`, components: [photoBtn] }).catch(() => {});
+      return true;
+    }
+
+    // ===== Établir un contrat à partir d'un RDV honoré (pré-remplit le formulaire de contrat existant) =====
+    if (interaction.isButton?.() && /^rdvp_contrat::/.test(interaction.customId || '')) {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction / aux opérateurs.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const rdvId = interaction.customId.split('::')[1];
+      const store = _store(loadDB()); const rdv = store.rdvs[rdvId];
+      if (!rdv) { await interaction.reply({ content: '⚠️ Rendez-vous introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const lieuLabel = LIEUX[rdv.lieuKey] || rdv.lieuKey || '';
+      const typeLabel = TYPES[rdv.typeKey]?.label || 'Prestation';
+      const detailsPre = [lieuLabel ? `Lieu : ${lieuLabel}` : '', rdv.souhaitTexte ? `Souhait du client : ${rdv.souhaitTexte}` : '', rdv.details || ''].filter(Boolean).join('\n').slice(0, 800);
+      const modal = new ModalBuilder().setCustomId('contrat_offre_modal::Autre').setTitle('📜 Contrat — suite au RDV');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('client_nom').setLabel('Nom / Entreprise du client').setStyle(TextInputStyle.Short).setRequired(true).setValue((rdv.nomRP || '').toString().slice(0, 100))),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objet').setLabel('Objet de la mission').setStyle(TextInputStyle.Short).setRequired(true).setValue(typeLabel.toString().slice(0, 100))),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('remuneration').setLabel('Notre rémunération souhaitée').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 1500$ + 500$/jour')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('user_id').setLabel('ID Discord du client').setStyle(TextInputStyle.Short).setRequired(true).setValue((rdv.contactId || rdv.clientId || '').toString())),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Détails / conditions / échéance').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setValue(detailsPre)),
+      );
+      await interaction.showModal(modal).catch(() => {});
       return true;
     }
 
