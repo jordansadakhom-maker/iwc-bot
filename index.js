@@ -1592,6 +1592,8 @@ async function autoSetup(guild) {
 
   // Tableau immersif des échéances de contrats dans le salon planning/agenda
   _installerPlanningContrats(guild).then(() => console.log('📜 Tableau des échéances de contrats installé')).catch(() => {});
+  // Panneau d'accueil du salon Vestiaire / Tenue
+  _installerTenuePanel(guild).then(() => console.log('🤠 Panneau Vestiaire installé')).catch(() => {});
 
   console.log('✅ Auto-setup terminé\n');
 }
@@ -4423,13 +4425,18 @@ async function _updatePlanningContrats(client) {
 }
 async function _installerPlanningContrats(guild) {
   try {
-    const ch = getChById(guild, 'AGENDA', 'agenda') || getChById(guild, 'PLANNING', 'planning');
+    const ch = getChById(guild, 'PLANNING', 'planning') || getChById(guild, 'AGENDA', 'agenda');
     if (!ch) return;
     const db = loadDB();
-    // Déjà posé et toujours présent ? on garde
+    // Déjà posé au bon endroit et toujours présent ? on garde
     if (db.planningContratsPanel?.channelId === ch.id && db.planningContratsPanel?.messageId) {
       const old = await ch.messages.fetch(db.planningContratsPanel.messageId).catch(() => null);
       if (old) { await old.edit({ embeds: [_planningContratsEmbed(db)] }).catch(() => {}); return; }
+    }
+    // Le tableau était dans un autre salon (ex. agenda) ? on supprime l'ancien pour éviter le doublon
+    if (db.planningContratsPanel?.channelId && db.planningContratsPanel?.messageId && db.planningContratsPanel.channelId !== ch.id) {
+      const oldCh = await client.channels.fetch(db.planningContratsPanel.channelId).catch(() => null);
+      if (oldCh) { const oldMsg = await oldCh.messages.fetch(db.planningContratsPanel.messageId).catch(() => null); if (oldMsg) await oldMsg.delete().catch(() => {}); }
     }
     // Nettoyer un éventuel ancien tableau du bot
     const recent = await ch.messages.fetch({ limit: 30 }).catch(() => null);
@@ -4437,6 +4444,25 @@ async function _installerPlanningContrats(guild) {
     const sent = await ch.send({ embeds: [_planningContratsEmbed(db)] }).catch(() => null);
     if (sent) { await sent.pin().catch(() => {}); const d2 = loadDB(); d2.planningContratsPanel = { channelId: ch.id, messageId: sent.id }; saveDB(d2); }
   } catch (e) { console.log('⚠️ install tableau planning contrats:', e.message); }
+}
+async function _installerTenuePanel(guild) {
+  try {
+    const ch = getChById(guild, 'TENUE', 'tenue', 'vestiaire', 'allure', 'dressing');
+    if (!ch) return;
+    const msgs = await ch.messages.fetch({ limit: 30 }).catch(() => null);
+    if (msgs && msgs.find(m => m.author.id === client.user.id && (m.embeds?.[0]?.title || '').includes('VESTIAIRE'))) return; // déjà posé
+    const embed = new EmbedBuilder()
+      .setColor(0x8B5A2B)
+      .setTitle('🤠 LE VESTIAIRE — ALLURE & TENUES')
+      .setDescription('```\n  IRON WOLF COMPANY · NEW AUSTIN, TEXAS \n```\n*Dans le Far West, l\'allure d\'un homme en dit long avant même qu\'il ne dégaine.*\nIci, on expose **sa tenue, son style, son personnage**.')
+      .addFields(
+        { name: '📸 Comment faire', value: '→ Poste une **photo** de ta tenue (capture en jeu).\n→ Ajoute le **nom de ton personnage** en légende.\n→ Affirme ton style et inspire les autres.' },
+        { name: '🎩 Conseil d\'allure', value: 'Chapeau, manteau, foulard, bottes, ceinturon… chaque détail raconte qui tu es dans l\'Ouest.' },
+      )
+      .setFooter({ text: 'Iron Wolf Company • Le Vestiaire' });
+    const sent = await ch.send({ embeds: [embed] }).catch(() => null);
+    if (sent) await sent.pin().catch(() => {});
+  } catch (e) { console.log('⚠️ install panneau tenue:', e.message); }
 }
 async function _setContratSuiviNotion(contrat, stage) {
   if (!process.env.NOTION_TOKEN) return;
