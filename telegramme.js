@@ -193,6 +193,21 @@ async function ouvrirConversation(message, { rdvId, demandeurId, nomRP }) {
       ], rdvId)] }).catch(() => null);
       if (!sent) await thread.send('⚠️ Le client a ses **MP fermés** : il ne pourra peut-être pas recevoir vos réponses ni vous répondre en MP.').catch(() => {});
     }
+
+    // Trace dans le journal de bord (demande client)
+    try {
+      if (typeof global.ajouterJournalIC === 'function' && thread.guild) {
+        const apercuRaw = (message.embeds?.[0]?.description || (message.embeds?.[0]?.fields || []).map(f => f.value).join(' · ') || message.content || '').replace(/\s+/g, ' ').trim();
+        const apercu = apercuRaw ? apercuRaw.slice(0, 300) : '';
+        await global.ajouterJournalIC(thread.guild, {
+          type: 'autre', emoji: '📨',
+          titre: `Nouveau télégramme — ${nomRP || 'Client'}`,
+          description: `Demande reçue de <@${demandeurId}>.${apercu ? `\n\n*${apercu}*` : ''}\n\n💬 Suivi dans le fil : <#${thread.id}>`,
+          auteur: nomRP || 'Client',
+        });
+      }
+    } catch {}
+
     return store[rdvId];
   } catch (e) { console.log('❌ telegramme ouvrirConversation:', e.message); return null; }
 }
