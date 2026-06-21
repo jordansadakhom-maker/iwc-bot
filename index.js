@@ -4001,7 +4001,14 @@ async function _syncContratNotion(contrat, statut, signePar) {
     return res;
   }
 
+  // Suivi (Kanban) : uniquement à la création de la page, pour ne JAMAIS écraser un classement fait à la main dans Notion
+  if (!existing) propsComplet['Suivi'] = { select: { name: 'En attente' } };
   let res = await ecrire(propsComplet);
+  if (!res.ok && propsComplet['Suivi']) {
+    // La colonne « Suivi » n'existe peut-être pas encore → on réessaie sans elle (sans rien perdre d'autre)
+    const sansSuivi = { ...propsComplet }; delete sansSuivi['Suivi'];
+    res = await ecrire(sansSuivi);
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     console.log(`⚠️ Contrat Notion: écriture complète refusée (${res.status}) : ${err.message || ''}`);
