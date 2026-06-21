@@ -2540,6 +2540,30 @@ async function _archiverPlanNotion(message) {
   return true;
 }
 
+// ── Auto-fermeture des menus éphémères après inactivité (anti-encombrement) ──
+// Second écouteur indépendant : ne touche PAS au routage ci-dessous, et ne supprime QUE des messages éphémères (jamais du public).
+const _ephCleanup = new Map(); // userId -> { timer, interaction }
+const EPH_IDLE_MS = 3 * 60 * 1000; // 3 min sans nouvelle action => le menu éphémère se referme tout seul
+function _estEphemere(it) {
+  try { if (it.ephemeral === true) return true; } catch {}
+  try { if (it.message?.flags?.has?.(MessageFlags.Ephemeral)) return true; } catch {}
+  return false;
+}
+client.on('interactionCreate', interaction => {
+  try {
+    if (!interaction?.user) return;
+    if (!(interaction.isChatInputCommand?.() || interaction.isMessageComponent?.() || interaction.isModalSubmit?.())) return;
+    const uid = interaction.user.id;
+    const prev = _ephCleanup.get(uid);
+    if (prev?.timer) clearTimeout(prev.timer); // remise à zéro : on ne ferme jamais en plein flux
+    const timer = setTimeout(() => {
+      _ephCleanup.delete(uid);
+      try { if (_estEphemere(interaction)) interaction.deleteReply().catch(() => {}); } catch {}
+    }, EPH_IDLE_MS);
+    _ephCleanup.set(uid, { timer, interaction });
+  } catch {}
+});
+
 client.on('interactionCreate', async interaction => {
   const guild = interaction.guild; const db = loadDB();
   if (await contratsConf.routeInteraction?.(interaction)) return;
