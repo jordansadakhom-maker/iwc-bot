@@ -12,7 +12,7 @@ const {
 const { loadDB, saveDB } = require('./db');
 
 const CH_JOURNAL = '1508756535407542372';
-const ROLE_CONFRERIE = '1508756479274913903';
+const ROLE_CONFRERIE = '1508898841993281658';
 const RESP_ROLES = ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Conseil', 'Officier', 'Instructeur'];
 
 const STATUTS = {
