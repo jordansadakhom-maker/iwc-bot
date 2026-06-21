@@ -3050,7 +3050,7 @@ client.on('interactionCreate', async interaction => {
     const opId = interaction.customId.replace('op_resultat_modal_', ''); const op = db.operations.find(o => o.id === opId);
     if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }); return; }
     await interaction.deferUpdate();
-    op.status = 'terminee'; op.endedAt = new Date().toISOString(); op.resultat = interaction.fields.getTextInputValue('resultat'); op.butin = interaction.fields.getTextInputValue('butin') || '—'; op.pertes = interaction.fields.getTextInputValue('pertes') || '—'; op.debrief = interaction.fields.getTextInputValue('debrief') || '—'; saveDB(db);
+    op.status = 'terminee'; op.endedAt = new Date().toISOString(); op.deleteAt = Date.now() + 24 * 60 * 60 * 1000; op.resultat = interaction.fields.getTextInputValue('resultat'); op.butin = interaction.fields.getTextInputValue('butin') || '—'; op.pertes = interaction.fields.getTextInputValue('pertes') || '—'; op.debrief = interaction.fields.getTextInputValue('debrief') || '—'; saveDB(db);
     await notionExtra.majOperationNotion?.(op);
     await notionV3.syncOperationTermineeNotion?.(op).catch(() => {});
     // Sync directe Notion si notionPageId existe
@@ -3065,7 +3065,7 @@ client.on('interactionCreate', async interaction => {
     }
     await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: '✅ Terminée — ' + op.resultat });
     await ajouterJournalIC(guild, { type: 'operation', titre: `Opération terminée — ${op.name}`, description: `Résultat : **${op.resultat}** · Butin : ${op.butin}`, auteur: interaction.user.username });
-    const updated = EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287).spliceFields(0, 1, { name: 'Statut', value: '✅ Terminée', inline: true }).addFields({ name: '🏁 Résultat', value: op.resultat, inline: true }, { name: '💰 Butin', value: op.butin, inline: true }, { name: '⚠️ Pertes', value: op.pertes, inline: true }, { name: '📝 Débrief', value: op.debrief });
+    const updated = EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287).spliceFields(0, 1, { name: 'Statut', value: '✅ Terminée', inline: true }).addFields({ name: '🏁 Résultat', value: op.resultat, inline: true }, { name: '💰 Butin', value: op.butin, inline: true }, { name: '⚠️ Pertes', value: op.pertes, inline: true }, { name: '📝 Débrief', value: op.debrief }, { name: '🗑️ Archivage', value: `Compte-rendu visible pour tous, puis supprimé automatiquement <t:${Math.floor(op.deleteAt / 1000)}:R>.`, inline: false });
     await interaction.editReply({ embeds: [updated], components: [] }); return;
   }
 
@@ -3677,6 +3677,36 @@ client.once('clientReady', async () => {
   }, { timezone: 'Europe/Paris' });
   cron.schedule('*/15 * * * *', async () => {
     for (const g of client.guilds.cache.values()) await syncRegistreNotion(g).catch(() => {});
+  });
+  // Purge auto des opérations terminées après 24h de visibilité (supprime le post/forum + le fil)
+  cron.schedule('*/15 * * * *', async () => {
+    try {
+      const db = loadDB();
+      if (!Array.isArray(db.operations) || db.operations.length === 0) return;
+      const now = Date.now();
+      const restantes = [];
+      let changed = false;
+      for (const op of db.operations) {
+        if (op.status === 'terminee' && op.deleteAt && now >= op.deleteAt) {
+          try {
+            // Forum : op.threadId == le post lui-même (un thread) → le supprimer efface tout
+            if (op.threadId) {
+              const th = await client.channels.fetch(op.threadId).catch(() => null);
+              if (th && typeof th.delete === 'function') await th.delete('Opération terminée — purge auto 24h').catch(() => {});
+            }
+            // Salon texte : supprimer aussi le message d'ancrage s'il est distinct du fil
+            if (op.channelId && op.msgId && op.channelId !== op.threadId) {
+              const ch = await client.channels.fetch(op.channelId).catch(() => null);
+              if (ch && ch.messages) { const m = await ch.messages.fetch(op.msgId).catch(() => null); if (m) await m.delete().catch(() => {}); }
+            }
+          } catch {}
+          changed = true; // retirée de la liste active
+        } else {
+          restantes.push(op);
+        }
+      }
+      if (changed) { db.operations = restantes; saveDB(db); }
+    } catch (e) { console.log('⚠️ purge opérations terminées:', e.message); }
   });
   cron.schedule('*/30 * * * *', async () => {
     for (const g of client.guilds.cache.values()) {
