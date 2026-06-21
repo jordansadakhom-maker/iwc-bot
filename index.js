@@ -4050,8 +4050,8 @@ async function _syncContratNotion(contrat, statut, signePar) {
     return res;
   }
 
-  // Suivi (Kanban) : uniquement à la création de la page, pour ne JAMAIS écraser un classement fait à la main dans Notion
-  if (!existing) propsComplet['Suivi'] = { select: { name: 'En attente' } };
+  // Suivi (Kanban) : à la création, OU sur une page existante encore SANS Suivi (rattrapage) — sans JAMAIS écraser un classement fait à la main dans Notion
+  if (!existing || !existing.properties?.Suivi?.select) propsComplet['Suivi'] = { select: { name: 'En attente' } };
   // Robustesse : n'écrire QUE les colonnes réellement présentes dans la base (sinon une colonne absente ferait échouer toute l'écriture)
   if (_contratsSchemaCache.db !== DB) {
     try {
