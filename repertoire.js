@@ -9,7 +9,7 @@
 //  /repertoire-installer  (Direction → pose le panneau ici)
 //  /repertoire [recherche]  (tout le monde → voir / chercher, en privé)
 // ───────────────────────────────────────────────────────────────────────────
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, MessageFlags, AttachmentBuilder } = require('discord.js');
 
 let dbMod = {};
 try { dbMod = require('./db'); } catch { dbMod = {}; }
@@ -162,10 +162,127 @@ function _selectMenu(rep, action) {
   return { row: new ActionRowBuilder().addComponents(menu) };
 }
 
+// ═══ /contact — fiche de contact au format exact (formulaire guidé) ═══
+const _contactDrafts = new Map(); // draftId -> { champs..., userId, at }
+function _cleanupDrafts() { const now = Date.now(); for (const [k, v] of _contactDrafts) { if (now - (v.at || 0) > 3600000) _contactDrafts.delete(k); } }
+const _pendingPhoto = new Map(); // userId -> { url, ct, at } : photo jointe à /contact, en attente du formulaire
+const SALON_PANEL_CONTACT = '1518385544860667945'; // salon où poser le panneau « Nouvelle fiche »
+async function _imageBytes(url) { try { const r = await fetch(url); if (!r.ok) return null; return Buffer.from(await r.arrayBuffer()); } catch { return null; } }
+const C_AFFILIATIONS = ["Civil", "Loi", "Hors-la-loi", "Loups de Fer", "Cartel", "Autre"];
+const C_RELATIONS = ["Amicale", "Professionnelle", "Affaire", "Tendue", "Hostile"];
+const C_STATUTS = ["Vivant", "Disparu", "Recherché", "Décédé"];
+
+function _richFiche(d) {
+  const v = (x, def) => (x && String(x).trim()) ? String(x).trim() : (def || "—");
+  return [
+    `# 🎴 ${v(d.nomsurnom, "Inconnu")}`,
+    `-# Fiche de contact · La Confrérie`,
+    ``,
+    `📟 **Télégramme** — ${v(d.telegramme)}`,
+    `💼 **Métier** — ${v(d.metier)}`,
+    `📍 **Secteur** — ${v(d.secteur)}`,
+    `🪪 **Affiliation** — ${v(d.affiliation)}`,
+    `🤝 **Relation** — ${v(d.relation)}`,
+    `⭐ **Fiabilité** — ${_stars(d.fiabilite)}`,
+    `🩸 **Statut** — ${v(d.statut)}`,
+    `🗓️ **Dernier contact** — ${v(d.dernierContact)}`,
+    ``,
+    `📝 **Notes**`,
+    v(d.notes, "—"),
+  ].join("\n");
+}
+function _contactFormModal() {
+  const m = new ModalBuilder().setCustomId("contact_form").setTitle("🎴 Nouvelle fiche de contact");
+  m.addComponents(
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("nomsurnom").setLabel("Nom & surnom").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setPlaceholder("Cole Bradford « Le Coyote »")),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("telegramme").setLabel("Télégramme (numéro)").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(40).setPlaceholder("00000")),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("metier").setLabel("Métier").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(60).setPlaceholder("Forgeron, contrebandier, shérif…")),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("secteur").setLabel("Secteur / lieu").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(60).setPlaceholder("Armadillo, Tumbleweed, Fort Mercer, Rio Bravo…")),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("notes").setLabel("Notes").setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500).setPlaceholder("Où on l'a croisé, ce qu'il peut fournir, prudences…")),
+  );
+  return m;
+}
+function _contactSelectsMsg(d, draftId) {
+  const selRow = (cid, ph, opts, chosen) => new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder().setCustomId(cid).setPlaceholder(ph).addOptions(opts.map(o => ({ label: o, value: o, default: chosen === o })))
+  );
+  const fiaOpts = [1, 2, 3, 4, 5].map(n => ({ label: "★".repeat(n) + "☆".repeat(5 - n), value: String(n), default: String(d.fiabilite) === String(n) }));
+  const rows = [
+    selRow(`contact_aff::${draftId}`, "🪪 Affiliation", C_AFFILIATIONS, d.affiliation),
+    selRow(`contact_rel::${draftId}`, "🤝 Relation", C_RELATIONS, d.relation),
+    new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`contact_fia::${draftId}`).setPlaceholder("⭐ Fiabilité").addOptions(fiaOpts)),
+    selRow(`contact_sta::${draftId}`, "🩸 Statut", C_STATUTS, d.statut),
+    new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`contact_gen::${draftId}`).setLabel("Générer la fiche").setEmoji("🎴").setStyle(ButtonStyle.Success)),
+  ];
+  const recap = `**🎴 ${d.nomsurnom}**\nComplète les 4 menus puis clique **Générer la fiche** :\n\n🪪 Affiliation — ${d.affiliation || "*à choisir*"}\n🤝 Relation — ${d.relation || "*à choisir*"}\n⭐ Fiabilité — ${d.fiabilite ? _stars(d.fiabilite) : "*à choisir*"}\n🩸 Statut — ${d.statut || "*à choisir*"}`;
+  return { content: recap, components: rows };
+}
+function _deriveType(d) {
+  const aff = _norm(d.affiliation), rel = _norm(d.relation);
+  if (/horsla|cartel/.test(aff) || /hostile|tendue/.test(rel)) return 'Ennemi';
+  if (/amicale/.test(rel) || /loupsdefer/.test(aff)) return 'Allié';
+  if (/affaire|professionnelle/.test(rel)) return 'Client';
+  return 'Neutre';
+}
+const FORUM_REPERTOIRE = '1517505221629050901'; // forum dédié au répertoire de contacts (même principe que les opérations)
+async function _publierFiche(interaction, d, fiche) {
+  try {
+    const guild = interaction.guild;
+    const clean = s => (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+    const titre = `🎴 ${(d.nomsurnom || "Contact").slice(0, 90)}`.slice(0, 100);
+    const corps = fiche.slice(0, 1900);
+    // Photo optionnelle : fichier réuploadé (pas de lien). On recrée la pièce jointe à chaque tentative d'envoi.
+    let buf = null;
+    if (d.photoUrl) buf = await _imageBytes(d.photoUrl);
+    const mkPayload = () => buf ? { content: corps, files: [new AttachmentBuilder(buf, { name: 'contact.png' })] } : { content: corps };
+    // 1) Forum dédié (ID fixe), sinon recherche par nom — on crée un POST de forum (comme les opérations)
+    let forum = guild.channels.cache.get(FORUM_REPERTOIRE);
+    if (!forum || forum.type !== 15) forum = guild.channels.cache.find(c => c.type === 15 && /repertoire|contact|carnet|annuaire/.test(clean(c.name)));
+    if (forum && forum.type === 15 && forum.threads?.create) {
+      const tags = forum.availableTags || [];
+      const veut = [d.relation, _deriveType(d), d.affiliation, d.statut].filter(Boolean).map(clean);
+      const appliedTags = tags.filter(t => veut.some(w => w && (clean(t.name).includes(w) || w.includes(clean(t.name))))).map(t => t.id).slice(0, 5);
+      const opts = { name: titre, message: mkPayload() };
+      if (appliedTags.length) opts.appliedTags = appliedTags;
+      let post = await forum.threads.create(opts).catch(() => null);
+      if (!post && appliedTags.length) post = await forum.threads.create({ name: titre, message: mkPayload() }).catch(() => null); // repli sans étiquettes
+      if (post) return { where: `<#${forum.id}>` };
+    }
+    // 2) Salon texte répertoire
+    const textCh = guild.channels.cache.find(c => c.type !== 15 && c.isTextBased?.() && /repertoire|contact|carnet|annuaire/.test(clean(c.name)));
+    if (textCh) { const m = await textCh.send(mkPayload()).catch(() => null); if (m) return { where: `<#${textCh.id}>` }; }
+    // 3) Salon courant
+    if (interaction.channel && typeof interaction.channel.send === "function") { const m = await interaction.channel.send(mkPayload()).catch(() => null); if (m) return { where: "ce salon" }; }
+    return null;
+  } catch { return null; }
+}
+// ── Panneau « Nouvelle fiche de contact » (salon dédié) ──
+function _panelContactEmbed() {
+  return new EmbedBuilder().setColor(COULEUR).setTitle("🎴 NOUVELLE FICHE DE CONTACT")
+    .setDescription("*Un visage croisé sur la piste ? Inscris-le au carnet.*\n\nClique sur **🎴 Nouvelle fiche** pour remplir le formulaire — la fiche sera publiée proprement dans le répertoire.\n\n📸 *Pour joindre une photo, utilise plutôt la commande* `/contact` *(tu pourras glisser un fichier).*")
+    .setFooter({ text: "Iron Wolf Company • Le Carnet" });
+}
+function _panelContactButtons() {
+  return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("contact_new").setLabel("Nouvelle fiche").setEmoji("🎴").setStyle(ButtonStyle.Success));
+}
+async function installerPanelContact(guild) {
+  try {
+    const ch = guild.channels.cache.get(SALON_PANEL_CONTACT);
+    if (!ch || typeof ch.send !== "function") return;
+    const uid = guild.client?.user?.id;
+    const msgs = await ch.messages.fetch({ limit: 20 }).catch(() => null);
+    if (msgs && msgs.find(m => m.author.id === uid && (m.embeds?.[0]?.title || "").includes("NOUVELLE FICHE DE CONTACT"))) return;
+    const sent = await ch.send({ embeds: [_panelContactEmbed()], components: [_panelContactButtons()] }).catch(() => null);
+    if (sent) await sent.pin().catch(() => {});
+  } catch (e) { console.log("⚠️ install panneau contact:", e.message); }
+}
+
 const repertoireCommands = [
   new SlashCommandBuilder().setName("repertoire-installer").setDescription("📇 Poser le panneau du répertoire de contacts dans CE salon (Direction)"),
   new SlashCommandBuilder().setName("repertoire").setDescription("📇 Voir ou rechercher dans le carnet de contacts (en privé)")
     .addStringOption(o => o.setName("recherche").setDescription("Nom, télégramme, type ou mot-clé").setRequired(false)),
+  new SlashCommandBuilder().setName("contact").setDescription("🎴 Créer une fiche de contact (formulaire, photo en option)")
+    .addAttachmentOption(o => o.setName("photo").setDescription("Photo du contact (optionnel — glisse un fichier image)").setRequired(false)),
 ];
 
 async function routeInteraction(interaction) {
@@ -296,6 +413,74 @@ async function routeInteraction(interaction) {
       return true;
     }
 
+    // ═══ /contact — formulaire guidé → fiche au format exact ═══
+    if (interaction.isChatInputCommand?.() && interaction.commandName === "contact") {
+      const photo = interaction.options.getAttachment?.("photo");
+      if (photo && (photo.contentType || "").startsWith("image")) _pendingPhoto.set(interaction.user.id, { url: photo.url, ct: photo.contentType, at: Date.now() });
+      else _pendingPhoto.delete(interaction.user.id);
+      await interaction.showModal(_contactFormModal()).catch(() => {});
+      return true;
+    }
+    // Bouton du panneau « Nouvelle fiche » (flux rapide, sans photo)
+    if (interaction.isButton?.() && interaction.customId === "contact_new") {
+      _pendingPhoto.delete(interaction.user.id);
+      await interaction.showModal(_contactFormModal()).catch(() => {});
+      return true;
+    }
+    if (interaction.isModalSubmit?.() && interaction.customId === "contact_form") {
+      _cleanupDrafts();
+      const draftId = _id();
+      const pend = _pendingPhoto.get(interaction.user.id);
+      const photoUrl = (pend && (Date.now() - pend.at) < 600000) ? pend.url : null;
+      _pendingPhoto.delete(interaction.user.id);
+      _contactDrafts.set(draftId, {
+        nomsurnom: (interaction.fields.getTextInputValue("nomsurnom") || "").trim(),
+        telegramme: (interaction.fields.getTextInputValue("telegramme") || "").trim(),
+        metier: (interaction.fields.getTextInputValue("metier") || "").trim(),
+        secteur: (interaction.fields.getTextInputValue("secteur") || "").trim(),
+        notes: (interaction.fields.getTextInputValue("notes") || "").trim(),
+        affiliation: "", relation: "", fiabilite: "", statut: "",
+        dernierContact: new Date().toLocaleDateString("fr-FR"),
+        photoUrl,
+        userId: interaction.user.id, at: Date.now(),
+      });
+      const d = _contactDrafts.get(draftId);
+      await interaction.reply({ ..._contactSelectsMsg(d, draftId), flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+    if (interaction.isStringSelectMenu?.() && /^contact_(aff|rel|fia|sta)::/.test(interaction.customId || "")) {
+      const [key, draftId] = interaction.customId.split("::");
+      const d = _contactDrafts.get(draftId);
+      if (!d) { await interaction.update({ content: "⌛ Fiche expirée — relance `/contact`.", components: [] }).catch(() => {}); return true; }
+      const val = interaction.values[0];
+      if (key === "contact_aff") d.affiliation = val;
+      else if (key === "contact_rel") d.relation = val;
+      else if (key === "contact_fia") d.fiabilite = val;
+      else if (key === "contact_sta") d.statut = val;
+      d.at = Date.now();
+      await interaction.update(_contactSelectsMsg(d, draftId)).catch(() => {});
+      return true;
+    }
+    if (interaction.isButton?.() && (interaction.customId || "").startsWith("contact_gen::")) {
+      const draftId = interaction.customId.split("::")[1];
+      const d = _contactDrafts.get(draftId);
+      if (!d) { await interaction.update({ content: "⌛ Fiche expirée — relance `/contact`.", components: [] }).catch(() => {}); return true; }
+      await interaction.deferUpdate().catch(() => {});
+      const fiche = _richFiche(d);
+      try {
+        const db = loadDB(); const rep = _ensure(db);
+        rep.contacts.push({ id: _id(), nom: d.nomsurnom, type: _deriveType(d), telegramme: d.telegramme, fiabilite: parseInt(d.fiabilite, 10) || 0, notes: d.notes, metier: d.metier, secteur: d.secteur, affiliation: d.affiliation, relation: d.relation, statut: d.statut, dernierContact: d.dernierContact, par: interaction.user.id, maj: Date.now() });
+        persist(db);
+        await _refreshPanel(interaction.client, rep);
+      } catch {}
+      const posted = await _publierFiche(interaction, d, fiche);
+      _contactDrafts.delete(draftId);
+      const okMsg = `✅ Fiche de **${d.nomsurnom}** publiée dans ${posted ? posted.where : "—"} et ajoutée au carnet (recherchable avec \`/repertoire\`).`;
+      const koMsg = `⚠️ Je n'ai pas trouvé de salon où publier (répertoire/contacts). La fiche est ajoutée au carnet ; copie-la si besoin :\n\n${fiche}`.slice(0, 1900);
+      await interaction.editReply({ content: posted ? okMsg : koMsg, components: [] }).catch(() => {});
+      return true;
+    }
+
     return false;
   } catch (err) {
     if ([10062, 10008, 40060].includes(err?.code)) return true;
@@ -304,4 +489,4 @@ async function routeInteraction(interaction) {
   }
 }
 
-module.exports = { repertoireCommands, routeInteraction };
+module.exports = { repertoireCommands, routeInteraction, installerPanelContact };
