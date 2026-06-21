@@ -3610,7 +3610,7 @@ client.once('clientReady', async () => {
     for (const g of client.guilds.cache.values()) await checkAgenda(g).catch(() => {});
     for (const g of client.guilds.cache.values()) await rdvplus.checkRappelsClients?.(g).catch(() => {});
   });
-  cron.schedule('*/5 * * * *', async () => {
+  cron.schedule('* * * * *', async () => {
     try { await _importContratsDepuisNotion(client.guilds.cache.first()); } catch {}
   });
   cron.schedule('*/15 * * * *', async () => {
