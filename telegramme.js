@@ -12,7 +12,7 @@
 //  Stockage : db.conversations[rdvId].
 // ───────────────────────────────────────────────────────────────────────────
 const {
-  EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, SlashCommandBuilder,
+  EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, SlashCommandBuilder, AttachmentBuilder,
 } = require('discord.js');
 
 let dbMod = {};
@@ -105,6 +105,9 @@ async function _cloturerAvecRecap(interaction, conv, thread) {
 
     const resume = msgs.length ? await _resumeIA(conv) : null;
 
+    const repondants = [...new Set(msgs.filter(m => m.from === 'equipe').map(m => m.name).filter(Boolean))];
+    const premier = msgs.find(m => m.from === 'client');
+
     const recap = new EmbedBuilder().setColor(COL.sepia)
       .setTitle(`📜 Récapitulatif — Télégramme ${conv.rdvId}`)
       .addFields(
@@ -114,16 +117,31 @@ async function _cloturerAvecRecap(interaction, conv, thread) {
         { name: '📅 Ouvert', value: ouvertLe ? _dateHeure(ouvertLe) : '—', inline: true },
         { name: '📪 Clôturé', value: _dateHeure(clotLe), inline: true },
         { name: '⏱️ Durée', value: ouvertLe ? _dureeHumaine(clotLe - ouvertLe) : '—', inline: true },
+        { name: '✍️ Ont répondu', value: (repondants.join(', ') || '—').slice(0, 1024), inline: false },
       )
       .setFooter({ text: `Clôturé par ${interaction.user.username} • IWC — Confidentiel` }).setTimestamp();
+    if (premier) recap.addFields({ name: '📩 Demande initiale', value: String(premier.content || '—').slice(0, 1024) });
     if (resume) recap.addFields({ name: '🧠 Résumé', value: resume.slice(0, 1024) });
     if (lien) recap.addFields({ name: '🔗 Conversation', value: `[Ouvrir le fil](${lien})` });
 
-    if (thread) await thread.send({ embeds: [recap] }).catch(() => {});
+    // Transcription intégrale (.txt) — trace de TOUT
+    let transcriptTxt = '';
+    try {
+      const lignes = msgs.map(m => {
+        const who = m.from === 'client' ? `CLIENT (${m.name})` : m.from === 'note' ? `NOTE INTERNE (${m.name})` : `IWC (${m.name})`;
+        const t = m.at ? new Date(m.at).toLocaleString('fr-FR') : '';
+        return `[${t}] ${who} :\n${m.content || ''}${m.files ? `\n  (${m.files} pièce(s) jointe(s))` : ''}`;
+      });
+      const entete = `TÉLÉGRAMME ${conv.rdvId} — ${conv.nomRP || 'Client'}\nOuvert : ${ouvertLe ? _dateHeure(ouvertLe) : '—'} · Clôturé : ${_dateHeure(clotLe)} · Clôturé par : ${interaction.user.username}\n${'='.repeat(50)}\n\n`;
+      transcriptTxt = entete + (lignes.join('\n\n') || 'Aucun message enregistré.');
+    } catch {}
+    const mkFile = () => transcriptTxt ? [new AttachmentBuilder(Buffer.from(transcriptTxt, 'utf8'), { name: `telegramme-${conv.rdvId}.txt` })] : [];
+
+    if (thread) await thread.send({ embeds: [recap], files: mkFile() }).catch(() => {});
     const db = loadDB();
     if (db.registreTelegrammesId) {
       const reg = await interaction.client.channels.fetch(db.registreTelegrammesId).catch(() => null);
-      if (reg) await reg.send({ embeds: [recap] }).catch(() => {});
+      if (reg) await reg.send({ embeds: [recap], files: mkFile() }).catch(() => {});
     }
     await _archiverConversationNotion(conv, resume).catch(() => {});
   } catch (e) { console.log('❌ telegramme cloturerAvecRecap:', e.message); }
@@ -167,6 +185,8 @@ async function ouvrirConversation(message, { rdvId, demandeurId, nomRP }) {
       threadId: thread.id, parentChannelId: message.channel.id, msgId: message.id,
       status: 'ouvert', createdAt: Date.now(),
     };
+    const initial = (message.embeds?.[0]?.description || (message.embeds?.[0]?.fields || []).map(f => `${f.name}: ${f.value}`).join(' · ') || message.content || '').replace(/\s+/g, ' ').trim();
+    if (initial) _logMsg(store[rdvId], 'client', nomRP || 'Client', initial.slice(0, 1000));
     persist(db);
 
     const intro = new EmbedBuilder().setColor(COL.vert).setTitle('💬 Conversation ouverte')
