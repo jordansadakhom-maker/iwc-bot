@@ -456,6 +456,7 @@ async function registerSlashCommands(guild) {
     const vus = new Set(); const doublons = [];
     for (const n of noms) { if (vus.has(n)) { if (!doublons.includes(n)) doublons.push(n); } else vus.add(n); }
     if (doublons.length) { console.log('❌ Commandes en double:', doublons.join(', ')); try { monitoring.logTech?.(client, 'error', '❌ Commandes en double', 'Discord rejette TOUT le lot tant que ce n\'est pas corrigé :\n' + doublons.join(', ')); } catch {} }
+    if (cmds.length > 100) { console.log(`❌ Trop de commandes (${cmds.length}/100) — Discord va en refuser.`); try { monitoring.logTech?.(client, 'error', '❌ Limite de commandes dépassée', `${cmds.length}/100 commandes — Discord rejette le surplus, il faut en retirer.`); } catch {} }
     await guild.commands.set(cmds);
     console.log('✅ Slash commands enregistrées (+ modules + monitoring)');
   }
@@ -4554,9 +4555,11 @@ async function _handleSync(interaction) {
   if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const guild = interaction.guild; const start = Date.now();
+  await registerSlashCommands(guild).catch(() => {});
   await syncRegistreNotion(guild).catch(() => {}); await updateDashboard(guild).catch(() => {}); await notionV3.updateHierarchieEmbed?.(guild).catch(() => {}); await buildMembresDiscordMap(guild).catch(() => {});
   const ms = Date.now() - start;
-  await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('🔄 Synchronisation terminée').addFields({ name: '✅ Registre Notion', value: 'Synchronisé', inline: true }, { name: '✅ Dashboard', value: 'Mis à jour', inline: true }, { name: '✅ Hiérarchie', value: 'Actualisée', inline: true }).setFooter({ text: `Durée : ${ms}ms` }).setTimestamp()] });
+  const nbCmds = (client._cmdNames || []).length;
+  await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('🔄 Synchronisation terminée').addFields({ name: '✅ Commandes', value: `**${nbCmds}** réenregistrées`, inline: true }, { name: '✅ Registre Notion', value: 'Synchronisé', inline: true }, { name: '✅ Dashboard', value: 'Mis à jour', inline: true }, { name: '✅ Hiérarchie', value: 'Actualisée', inline: true }).setFooter({ text: `Durée : ${ms}ms • Si une commande manque, ferme et rouvre Discord` }).setTimestamp()] });
 }
 
 async function _handleAvertir(interaction) {
