@@ -405,6 +405,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('contrat-panel').setDescription('📋 Publier le panneau des contrats (Direction)'),
   new SlashCommandBuilder().setName('contrats-sync').setDescription('🔄 Resynchroniser tous les contrats avec Notion (Direction)'),
   new SlashCommandBuilder().setName('notion-test').setDescription('🔍 Tester la connexion Notion des contrats (Direction)'),
+  new SlashCommandBuilder().setName('connecter-notion-contrats').setDescription('🔗 Connecter une base Notion aux contrats — coller le lien (Direction)').addStringOption(o => o.setName('lien').setDescription('Lien de ta base Notion (··· en haut à droite → Copier le lien)').setRequired(true)),
   new SlashCommandBuilder().setName('stats-agent').setDescription('📊 Statistiques de renseignement par agent')
     .addStringOption(o => o.setName('agent').setDescription('Nom d\'un agent précis (optionnel)').setRequired(false)),
   new SlashCommandBuilder().setName('panel-rdv-client').setDescription('📅 Installer le panneau de prise de RDV client (Direction)'),
@@ -1037,15 +1038,61 @@ async function handleSlashCommand(interaction) {
     return interaction.editReply({ embeds: [embed] });
   }
 
+  if (commandName === 'connecter-notion-contrats') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    if (!process.env.NOTION_TOKEN) return interaction.editReply({ content: "❌ NOTION_TOKEN manquant dans Render — impossible de connecter Notion sans le token de l'intégration." });
+    const lien = interaction.options.getString('lien') || '';
+    const sansQuery = lien.split('?')[0];
+    const matches = sansQuery.replace(/-/g, '').match(/[0-9a-fA-F]{32}/g);
+    if (!matches || !matches.length) {
+      return interaction.editReply({ content: "❌ Je n'ai pas trouvé d'identifiant de base dans ce lien.\n\nDans Notion : ouvre ta base de contrats → clique sur **···** (en haut à droite) → **Copier le lien**, puis recolle-le ici." });
+    }
+    const id = matches[matches.length - 1].toLowerCase();
+    const idTirets = id.replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5');
+    let dbData = null;
+    try {
+      const res = await fetch(`https://api.notion.com/v1/databases/${idTirets}`, { headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28' } });
+      if (res.ok) { dbData = await res.json(); }
+      else {
+        const err = await res.json().catch(() => ({}));
+        if (res.status === 404) return interaction.editReply({ content: "❌ **Lien lu, mais le bot n'a pas accès à cette base (404).**\n\nIl manque le partage : dans Notion, ouvre ta base → **···** → **Connexions** (ou *Connections*) → ajoute l'intégration du bot. Puis relance `/connecter-notion-contrats`." });
+        if (res.status === 401) return interaction.editReply({ content: "❌ Token Notion refusé (401) : le NOTION_TOKEN dans Render n'est pas valide." });
+        return interaction.editReply({ content: `❌ Erreur Notion ${res.status} : ${err.message || 'inconnue'}.` });
+      }
+    } catch (e) { return interaction.editReply({ content: `❌ Erreur réseau en contactant Notion : ${e.message}` }); }
+    const db = loadDB();
+    db.notionContratsDbId = idTirets;
+    saveDB(db);
+    const cols = Object.keys(dbData.properties || {});
+    const aSuivi = cols.includes('Suivi');
+    const contrats = db.contrats || [];
+    let ok = 0;
+    for (const c of contrats) {
+      try {
+        const signePar = c.status === 'signe' ? (c.signePar || c.clientNom || c.signataire || '') : null;
+        await _syncContratNotion(c, c.status || 'en_attente', signePar);
+        ok++;
+      } catch {}
+    }
+    const titre = (dbData.title && dbData.title[0] && dbData.title[0].plain_text) ? dbData.title[0].plain_text : 'ta base';
+    let msg = `✅ **Base Notion connectée : « ${titre} »**\n`;
+    msg += `🔄 ${ok}/${contrats.length} contrat(s) existant(s) envoyé(s) vers Notion.\n`;
+    msg += aSuivi ? "✅ Colonne **Suivi** détectée — parfait pour le tableau.\n" : "⚠️ Pas de colonne **Suivi** (type *Sélection*) : ajoute-la dans Notion pour grouper le tableau par étape.\n";
+    msg += "\n📌 **Dernière étape dans Notion** : crée une vue **Tableau / Board** groupée par **Suivi** → tu pourras glisser-déposer. Les nouveaux contrats du bot apparaîtront tout seuls.";
+    return interaction.editReply({ content: msg });
+  }
+
   if (commandName === 'notion-test') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const lignes = [];
     lignes.push(process.env.NOTION_TOKEN ? '✅ NOTION_TOKEN présent' : '❌ NOTION_TOKEN MANQUANT dans Render');
-    lignes.push(process.env.NOTION_CONTRATS_DB ? `✅ NOTION_CONTRATS_DB présent` : '❌ NOTION_CONTRATS_DB MANQUANT dans Render');
-    if (process.env.NOTION_TOKEN && process.env.NOTION_CONTRATS_DB) {
+    lignes.push(process.env.NOTION_CONTRATS_DB ? `✅ NOTION_CONTRATS_DB présent` : (loadDB().notionContratsDbId ? `✅ Base liée via /connecter-notion-contrats` : '❌ Aucune base liée'));
+    const _dbid = process.env.NOTION_CONTRATS_DB || loadDB().notionContratsDbId;
+    if (process.env.NOTION_TOKEN && _dbid) {
       try {
-        const res = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_CONTRATS_DB}`, {
+        const res = await fetch(`https://api.notion.com/v1/databases/${_dbid}`, {
           headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28' },
         });
         if (res.ok) {
@@ -1071,7 +1118,8 @@ async function handleSlashCommand(interaction) {
   if (commandName === 'contrats-sync') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    if (!process.env.NOTION_CONTRATS_DB) return interaction.editReply({ content: '⚠️ Variable NOTION_CONTRATS_DB manquante dans Render. Ajoute-la d\'abord.' });
+    const _dbid = process.env.NOTION_CONTRATS_DB || loadDB().notionContratsDbId;
+    if (!_dbid) return interaction.editReply({ content: "⚠️ Aucune base Notion liée. Utilise d'abord `/connecter-notion-contrats` en collant le lien de ta base." });
     const db = loadDB();
     const contrats = db.contrats || [];
     if (!contrats.length) return interaction.editReply({ content: '📭 Aucun contrat à synchroniser.' });
@@ -3952,8 +4000,8 @@ async function _syncMembreNotion(discordId, updates) {
 
 async function _syncContratNotion(contrat, statut, signePar) {
   if (!process.env.NOTION_TOKEN) { console.log('⚠️ Contrat Notion: NOTION_TOKEN manquant'); return; }
-  const DB = process.env.NOTION_CONTRATS_DB;
-  if (!DB) { console.log('⚠️ Contrat Notion: variable NOTION_CONTRATS_DB manquante dans Render'); return; }
+  const DB = process.env.NOTION_CONTRATS_DB || loadDB().notionContratsDbId;
+  if (!DB) { console.log('⚠️ Contrat Notion: aucune base liée (NOTION_CONTRATS_DB ou /connecter-notion-contrats)'); return; }
 
   const statutMap = { en_attente: '🟡 En attente', signe: '✅ Signé', refuse: '❌ Refusé', expire: '📁 Expiré' };
   // Types adaptés à la base réelle :
