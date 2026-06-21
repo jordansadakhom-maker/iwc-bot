@@ -30,7 +30,7 @@ let cfg = {};
 try { cfg = require('./config'); } catch { cfg = {}; }
 const ROLE_LEGAL = cfg.ROLE_POLE_LEGAL || '1508756436082102303';
 const ROLE_ILLEGAL = cfg.ROLE_POLE_ILLEGAL || '1508756479274913903';
-const SALON_OPERATIONS = '1508756486892027904';
+const SALON_OPERATIONS = '1518349707686973470';
 
 const DIRECTION_ROLE_NAMES = ['Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'];
 function isDirection(member) {
@@ -314,6 +314,14 @@ async function routeInteraction(interaction) {
       if (sent) {
         op.msgId = sent.id; op.channelId = opsCh.id;
         await sent.pin().catch(() => {});
+        // Fil de contribution ouvert dès la création : tous les membres peuvent ajouter des infos complémentaires
+        if (!sent.hasThread) {
+          const fil = await sent.startThread({ name: `🎯 ${op.name}`.slice(0, 100), autoArchiveDuration: 10080 }).catch(() => null);
+          if (fil) {
+            op.threadId = fil.id;
+            await fil.send({ content: `🎯 **${op.name}** — espace de coordination.\n\nTout le monde peut **ajouter ici ses infos complémentaires** : repérages, plan, rôles, horaires, comptes-rendus… On s'organise dans ce fil, le salon reste propre.` }).catch(() => {});
+          }
+        }
         _persist(db);
       }
 
