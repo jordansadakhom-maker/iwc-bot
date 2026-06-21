@@ -3445,6 +3445,32 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     if (!payload) return interaction.reply({ content: "Aucun contrat archivé (honoré ou abandonné) pour le moment.", flags: MessageFlags.Ephemeral });
     return interaction.reply(payload);
   }
+  if (interaction.isButton() && interaction.customId.startsWith('csuivi_filtre::')) {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    const f = interaction.customId.split('::')[1];
+    const m = _contratSuiviMenu(false, f === 'tous' ? null : f, null);
+    if (!m) return interaction.update({ content: "Aucun contrat actif.", embeds: [], components: [] });
+    return interaction.update({ content: m.content, embeds: m.embeds || [], components: m.components });
+  }
+  if (interaction.isButton() && interaction.customId === 'csuivi_search') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    const modal = new ModalBuilder().setCustomId('csuivi_search_modal').setTitle('🔍 Chercher un contrat');
+    modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('q').setLabel('Nom du client, objet ou code').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex : Callahan')));
+    return interaction.showModal(modal);
+  }
+  if (interaction.isModalSubmit() && interaction.customId === 'csuivi_search_modal') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    const q = (interaction.fields.getTextInputValue('q') || '').trim();
+    const m = _contratSuiviMenu(false, null, q);
+    if (!m) return interaction.reply({ content: `Aucun contrat ne correspond à « ${q} ».`, flags: MessageFlags.Ephemeral });
+    return interaction.reply(m);
+  }
+  if (interaction.isButton() && interaction.customId === 'csuivi_retour') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    const m = _contratSuiviMenu();
+    if (!m) return interaction.update({ content: "Aucun contrat actif pour le moment.", embeds: [], components: [] });
+    return interaction.update({ content: m.content, embeds: m.embeds || [], components: m.components });
+  }
   if (interaction.isStringSelectMenu() && interaction.customId === 'csuivi_select') {
     const c = (loadDB().contrats || []).find(x => String(x.id) === interaction.values[0]);
     if (!c) return interaction.update({ content: "❌ Contrat introuvable.", embeds: [], components: [] });
@@ -4128,13 +4154,23 @@ function _contratSuiviPayload(c, note) {
   const stade = c.suivi || _suiviDepuisStatut(c);
   const emo = { 'En attente': '🟡', 'En cours': '🔵', 'Validé': '✅', 'Honoré': '🏁', 'Abandonné': '✖️' }[stade] || '⚪';
   const pole = (c.cc || c.type === 'confrerie' || String(c.id).startsWith('CF-')) ? '🔒 Confrérie (coffre illégal)' : '⚖️ IWC (coffre légal)';
+  const ech = c.dateEcheance ? (() => { const d = new Date(c.dateEcheance); return isNaN(d.getTime()) ? String(c.dateEcheance) : d.toLocaleDateString('fr-FR'); })() : '—';
+  const emisPar = c.emetteurIC || c.emetteurNom || (c.emetteurId ? `<@${c.emetteurId}>` : '—');
+  const signePar = c.signePar || (c.status === 'signe' && c.userId ? `<@${c.userId}>` : (c.status === 'signe' ? (c.clientNom || '—') : '—'));
+  const cree = c.createdAt ? fmtShort(new Date(c.createdAt)) : '—';
   const embed = new EmbedBuilder().setColor(0x8B1A1A).setTitle(`📜 Contrat ${c.id}`).addFields(
     { name: 'Objet', value: String(c.objet || '—').slice(0, 1024), inline: false },
     { name: 'Client / Commanditaire', value: String(c.clientNom || c.commanditaire || '—').slice(0, 256), inline: true },
     { name: 'Rémunération', value: String(c.remuneration || '—').slice(0, 256), inline: true },
     { name: 'Pôle', value: pole, inline: true },
-    { name: 'Étape actuelle', value: `${emo} **${stade}**`, inline: false },
+    { name: '📅 Échéance', value: ech, inline: true },
+    { name: '🗓️ Créé le', value: cree, inline: true },
+    { name: '✍️ Émis par', value: String(emisPar).slice(0, 256), inline: true },
+    { name: '🖋️ Signé par', value: String(signePar).slice(0, 256), inline: true },
+    { name: 'Étape actuelle', value: `${emo} **${stade}**`, inline: true },
   );
+  const montant = _montantDetecte(c.remuneration);
+  if (!c.remuVerseAuCoffre && montant) embed.addFields({ name: '💰 Montant détecté', value: `$${montant.toLocaleString('fr-FR')} (irait au coffre si tu honores)`, inline: false });
   if (c.remuVerseAuCoffre) embed.addFields({ name: '💰 Déjà encaissé', value: `$${Number(c.remuVerseAuCoffre).toLocaleString('fr-FR')} versés au coffre`, inline: false });
   if (note) embed.setDescription(note);
   const row1 = new ActionRowBuilder().addComponents(
@@ -4146,20 +4182,56 @@ function _contratSuiviPayload(c, note) {
     new ButtonBuilder().setCustomId(`csuivi::honore::${c.id}`).setLabel('🏁 Honoré (encaisser)').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`csuivi::abandon::${c.id}`).setLabel('✖️ Abandonné').setStyle(ButtonStyle.Danger),
   );
-  return { content: '', embeds: [embed], components: [row1, row2] };
+  const row3 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('csuivi_retour').setLabel('↩️ Retour à la liste').setStyle(ButtonStyle.Secondary),
+  );
+  return { content: '', embeds: [embed], components: [row1, row2, row3] };
 }
-function _contratSuiviMenu(archived) {
+function _contratSuiviMenu(archived, filtre, recherche) {
   const clos = ['Honoré', 'Abandonné'];
-  let liste = (loadDB().contrats || []).slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-  liste = liste.filter(c => { const s = c.suivi || _suiviDepuisStatut(c); return archived ? clos.includes(s) : !clos.includes(s); }).slice(0, 25);
-  if (!liste.length) return null;
+  const now = new Date();
+  const emo = { 'En attente': '🟡', 'En cours': '🔵', 'Validé': '✅', 'Honoré': '🏁', 'Abandonné': '✖️' };
+  const stadeOf = c => c.suivi || _suiviDepuisStatut(c);
+  const joursEch = c => { if (!c.dateEcheance) return Infinity; const d = new Date(c.dateEcheance); if (isNaN(d.getTime())) return Infinity; return Math.round((Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())) / 86400000); };
+  const ordre = { 'En attente': 0, 'En cours': 1, 'Validé': 2, 'Honoré': 3, 'Abandonné': 4 };
+  let liste = (loadDB().contrats || []).slice().filter(c => { const s = stadeOf(c); return archived ? clos.includes(s) : !clos.includes(s); });
+  if (filtre) liste = liste.filter(c => stadeOf(c) === filtre);
+  if (recherche) { const q = recherche.toLowerCase(); liste = liste.filter(c => [c.clientNom, c.commanditaire, c.objet, c.id].some(v => String(v || '').toLowerCase().includes(q))); }
+  liste.sort((a, b) => { const ja = joursEch(a), jb = joursEch(b); if (ja !== jb) return ja - jb; const sa = ordre[stadeOf(a)] ?? 9, sb = ordre[stadeOf(b)] ?? 9; if (sa !== sb) return sa - sb; return new Date(b.createdAt || 0) - new Date(a.createdAt || 0); });
+  const total = liste.length;
+  liste = liste.slice(0, 25);
+  const fmtEch = c => { const j = joursEch(c); if (j === Infinity) return ''; if (j < 0) return '⏰ en retard'; if (j === 0) return "⏰ auj."; if (j === 1) return '⏰ demain'; if (j <= 3) return `⏰ ${j}j`; return `${j}j`; };
   const opts = liste.map(c => {
-    const stade = c.suivi || _suiviDepuisStatut(c);
-    const nom = c.clientNom || c.commanditaire || c.objet || c.id;
-    return { label: String(c.id).slice(0, 100), description: `${stade} · ${String(nom).slice(0, 50)}`.slice(0, 100), value: String(c.id) };
+    const stade = stadeOf(c);
+    const nom = c.clientNom || c.commanditaire || '';
+    const objet = c.objet || '';
+    const label = ([nom, objet].filter(Boolean).join(' — ') || String(c.id)).slice(0, 100);
+    const desc = [stade, fmtEch(c), String(c.id)].filter(Boolean).join(' · ').slice(0, 100);
+    return { label, description: desc, value: String(c.id), emoji: emo[stade] || '⚪' };
   });
+  if (!opts.length) {
+    if (archived || (!filtre && !recherche)) return null;
+    const vide = recherche ? `Aucun contrat ne correspond à « ${recherche} ».` : `Aucun contrat à l'étape « ${filtre} ».`;
+    return { content: `📋 ${vide}`, embeds: [], components: _contratFiltreRows(filtre), flags: MessageFlags.Ephemeral };
+  }
   const menu = new StringSelectMenuBuilder().setCustomId('csuivi_select').setPlaceholder(archived ? 'Contrat archivé à rouvrir' : 'Choisis un contrat à gérer').addOptions(opts);
-  return { content: archived ? "📁 **Archives** — contrats honorés / abandonnés (tu peux les rouvrir) :" : "📋 **Gestion des contrats** — choisis le contrat à gérer :", components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral };
+  const rows = [new ActionRowBuilder().addComponents(menu)];
+  if (!archived) rows.push(..._contratFiltreRows(filtre));
+  let head = archived ? "📁 **Archives** — contrats honorés / abandonnés (tu peux les rouvrir) :" : "📋 **Gestion des contrats** — choisis le contrat à gérer (les plus urgents en haut) :";
+  if (filtre) head += `\n*Filtre : ${emo[filtre] || ''} ${filtre}*`;
+  if (recherche) head += `\n*Recherche : « ${recherche} »*`;
+  if (total > 25) head += `\n*(${total} contrats au total — 25 affichés, affine avec un filtre ou 🔍)*`;
+  return { content: head, embeds: [], components: rows, flags: MessageFlags.Ephemeral };
+}
+function _contratFiltreRows(filtre) {
+  const B = (id, emoji, label, f) => { const b = new ButtonBuilder().setCustomId(id).setLabel(label).setStyle(filtre === f ? ButtonStyle.Primary : ButtonStyle.Secondary); if (emoji) b.setEmoji(emoji); return b; };
+  return [new ActionRowBuilder().addComponents(
+    B('csuivi_filtre::tous', null, 'Tous', null),
+    B('csuivi_filtre::En attente', '🟡', 'Attente', 'En attente'),
+    B('csuivi_filtre::En cours', '🔵', 'Cours', 'En cours'),
+    B('csuivi_filtre::Validé', '✅', 'Validé', 'Validé'),
+    new ButtonBuilder().setCustomId('csuivi_search').setLabel('Chercher').setEmoji('🔍').setStyle(ButtonStyle.Secondary),
+  )];
 }
 function _contratStats(db) {
   const cs = (db.contrats || []);
