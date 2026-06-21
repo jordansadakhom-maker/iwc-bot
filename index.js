@@ -156,7 +156,7 @@ const _ROLE_ABSENT_FINAL = ROLE_ABSENT || ROLE_ABSENT_ID;
 const SALON_HARDCODED = {
   JOURNAL_DE_BORD:      '1508756535407542372',
   CONTRATS:             '1508756442730074222',
-  CONTRATS_REPONSES:    '1509340674779254876',
+  CONTRATS_REPONSES:    '1518392786301227250',
   OPERATIONS:           '1508756486892027904',
   COFFRE_ENTREPRISE:    '1508756453354373202',
   COFFRE_ILLEGAL:       '1508756490432024636',
@@ -323,7 +323,7 @@ function getAbsencesCh(guild, member) {
 // Archive un contrat signé/refusé dans #contrats-reponses avec un thread par contrat
 async function archiverContratReponses(guild, contrat, statut, embed) {
   try {
-    const ch = getChHard(guild, 'CONTRATS_REPONSES') || guild.channels.cache.get('1509340674779254876');
+    const ch = getChHard(guild, 'CONTRATS_REPONSES') || guild.channels.cache.get('1518392786301227250');
     if (!ch) return;
     const threadName = `${statut === 'signe' ? '✅' : '❌'} ${contrat.id} — ${(contrat.objet || '').slice(0, 50)}`;
     // Chercher si un thread existe déjà pour ce contrat
@@ -3509,6 +3509,29 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     if (!payload) return interaction.reply({ content: "Aucun contrat archivé (honoré ou abandonné) pour le moment.", flags: MessageFlags.Ephemeral });
     return interaction.reply(payload);
   }
+  if (interaction.isButton() && interaction.customId === 'csuivi_reset') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    const n = (loadDB().contrats || []).length;
+    if (!n) return interaction.reply({ content: "Il n'y a aucun contrat à supprimer — c'est déjà vide. 👍", flags: MessageFlags.Ephemeral });
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('csuivi_reset_go').setLabel(`Oui, supprimer les ${n} contrat(s)`).setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('csuivi_reset_cancel').setLabel('Annuler').setStyle(ButtonStyle.Secondary),
+    );
+    return interaction.reply({ content: `⚠️ **Réinitialisation des contrats**\nCeci va **supprimer définitivement les ${n} contrat(s)** de la base. Le tableau **#planning** et le **forum des contrats** repartiront à zéro.\n\n*(À n'utiliser que pour effacer des tests. Les fiches déjà envoyées dans Notion ne sont pas touchées.)*\n\nConfirmer ?`, components: [row], flags: MessageFlags.Ephemeral });
+  }
+  if (interaction.isButton() && interaction.customId === 'csuivi_reset_cancel') {
+    return interaction.update({ content: "✅ Annulé — rien n'a été supprimé.", components: [] });
+  }
+  if (interaction.isButton() && interaction.customId === 'csuivi_reset_go') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    const dbR = loadDB();
+    const n = (dbR.contrats || []).length;
+    dbR.contrats = [];
+    saveDB(dbR);
+    try { await _updatePlanningContrats(interaction.client); } catch {}
+    try { await _updateContratPanel(interaction.client); } catch {}
+    return interaction.update({ content: `🗑️ **${n} contrat(s) supprimé(s).** Le tableau des échéances et le panneau sont remis à zéro. Tu peux repartir sur du propre. ✅`, components: [] });
+  }
   if (interaction.isButton() && interaction.customId.startsWith('csuivi_filtre::')) {
     if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
     const f = interaction.customId.split('::')[1];
@@ -4314,6 +4337,7 @@ function _contratSuiviMenu(archived, filtre, recherche) {
   const menu = new StringSelectMenuBuilder().setCustomId('csuivi_select').setPlaceholder(archived ? 'Contrat archivé à rouvrir' : 'Choisis un contrat à gérer').addOptions(opts);
   const rows = [new ActionRowBuilder().addComponents(menu)];
   if (!archived) rows.push(..._contratFiltreRows(filtre));
+  if (!archived) rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('csuivi_reset').setLabel('Tout réinitialiser (tests)').setEmoji('🗑️').setStyle(ButtonStyle.Danger)));
   let head = archived ? "📁 **Archives** — contrats honorés / abandonnés (tu peux les rouvrir) :" : "📋 **Gestion des contrats** — choisis le contrat à gérer (les plus urgents en haut) :";
   if (filtre) head += `\n*Filtre : ${emo[filtre] || ''} ${filtre}*`;
   if (recherche) head += `\n*Recherche : « ${recherche} »*`;
@@ -4432,8 +4456,8 @@ async function _updatePlanningContrats(client) {
     await msg.edit({ embeds: [_planningContratsEmbed(loadDB())] }).catch(() => {});
   } catch {}
 }
-// Poste un nouveau contrat en POST de forum catégorisé (salon 1509340674779254876) — même principe que les opérations
-const FORUM_CONTRATS = '1509340674779254876';
+// Poste un nouveau contrat en POST de forum catégorisé (salon 1518392786301227250) — même principe que les opérations
+const FORUM_CONTRATS = '1518392786301227250';
 async function _posterContratForum(guild, contrat, embed) {
   try {
     const forum = guild.channels.cache.get(FORUM_CONTRATS);
