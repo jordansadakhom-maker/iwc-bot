@@ -7,7 +7,7 @@
 const {
   EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  StringSelectMenuBuilder, SlashCommandBuilder, MessageFlags,
+  StringSelectMenuBuilder, SlashCommandBuilder, MessageFlags, AttachmentBuilder,
 } = require('discord.js');
 const { loadDB, saveDB } = require('./db');
 
@@ -396,7 +396,7 @@ async function onMessage(message) {
     const img = message.attachments ? [...message.attachments.values()].find(a => (a.contentType || '').startsWith('image')) : null;
     if (!img) return false;
     const cible = (message.content || '').trim().slice(0, 80);
-    const wait = await message.reply({ content: "📋 J'établis le signalement à partir de la photo…", allowedMentions: { parse: [] } }).catch(() => null);
+    const wait = await message.channel.send({ content: "📋 J'établis le signalement à partir de la photo…", allowedMentions: { parse: [] } }).catch(() => null);
     const buf = await _imageBytes(img.url);
     const s = buf ? await _analyserSignalement(buf.toString('base64'), img.contentType || 'image/png') : null;
     if (!s) { if (wait) await wait.edit({ content: "❌ Je n'ai pas réussi à lire cette photo pour un signalement. Essaie une capture plus nette, où on voit bien la personne." }).catch(() => {}); return true; }
@@ -404,13 +404,20 @@ async function onMessage(message) {
     if (!db2._signalements) db2._signalements = {};
     for (const k of Object.keys(db2._signalements)) { if (Date.now() - (db2._signalements[k].at || 0) > 7200000) delete db2._signalements[k]; }
     const sid = (Date.now().toString(36) + Math.random().toString(36).slice(2, 5)).slice(-8);
-    db2._signalements[sid] = { cible, signalement: _signalementTexte(s), dangerosite: (DANGER[s.dangerosite] ? s.dangerosite : parseDanger(s.dangerosite)), photoUrl: img.url, createdBy: message.author.username, at: Date.now() };
-    saveDB(db2);
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`traque_from_signal::${sid}`).setLabel("Créer l'avis de recherche").setEmoji('📌').setStyle(ButtonStyle.Danger),
     );
-    const payload = { content: '', embeds: [buildSignalementEmbed(s, cible, img.url, message.author.username)], components: [row] };
-    if (wait) await wait.edit(payload).catch(() => {}); else await message.reply(payload).catch(() => {});
+    // On réuploade la photo dans le récap pour qu'elle survive à la suppression du message d'origine
+    const fileName = 'signalement.png';
+    const att = new AttachmentBuilder(buf, { name: fileName });
+    const payload = { content: '', embeds: [buildSignalementEmbed(s, cible, `attachment://${fileName}`, message.author.username)], components: [row], files: [att] };
+    let recapMsg = null;
+    if (wait) recapMsg = await wait.edit(payload).catch(() => null); else recapMsg = await message.channel.send(payload).catch(() => null);
+    const photoUrl = (recapMsg && [...recapMsg.attachments.values()][0]?.url) || img.url;
+    db2._signalements[sid] = { cible, signalement: _signalementTexte(s), dangerosite: (DANGER[s.dangerosite] ? s.dangerosite : parseDanger(s.dangerosite)), photoUrl, createdBy: message.author.username, at: Date.now() };
+    saveDB(db2);
+    // Supprimer le message photo d'origine (la photo reste dans le récap réuploadé)
+    await message.delete().catch(() => {});
     return true;
   } catch { return false; }
 }
