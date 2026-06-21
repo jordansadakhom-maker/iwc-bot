@@ -26,6 +26,28 @@ const saveDB = dbMod.saveDB || (() => {});
 const backupGit = (typeof dbMod.sauvegarderSurGitHub === 'function') ? dbMod.sauvegarderSurGitHub : null;
 function _persist(db) { try { saveDB(db); } catch {} try { if (backupGit) backupGit(); } catch {} }
 
+// ── Correction orthographique automatique (IA — ne change pas le sens) ──
+async function _corrigerTexte(texte) {
+  const t = (texte || '').trim();
+  if (t.length < 3) return t;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return t;
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 700, messages: [{ role: 'user', content:
+        "Corrige uniquement l'orthographe, la grammaire, les accents et la ponctuation du texte ci-dessous, en francais. Ne change NI le sens, NI le style, NI le vocabulaire, NI la mise en forme. N'ajoute aucun commentaire ni guillemet. Reponds UNIQUEMENT par le texte corrige.\n\nTexte :\n" + t }] }),
+    });
+    if (!resp.ok) return t;
+    const data = await resp.json();
+    const out = (data?.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+    // Garde-fou : sortie vide ou anormalement longue => on garde l'original
+    if (!out || out.length > t.length * 3 + 40) return t;
+    return out;
+  } catch { return t; }
+}
+
 let cfg = {};
 try { cfg = require('./config'); } catch { cfg = {}; }
 const ROLE_LEGAL = cfg.ROLE_POLE_LEGAL || '1508756436082102303';
@@ -265,14 +287,20 @@ async function routeInteraction(interaction) {
 
     // Formulaire soumis → création + ORDRE D'OPÉRATION
     if (interaction.isModalSubmit?.() && interaction.customId?.startsWith('opnew_modal::')) {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      // Nettoyage : on transforme le menu éphémère existant en confirmation (au lieu d'en empiler un nouveau)
+      if (interaction.isFromMessage?.()) await interaction.update({ content: '⏳ Création de l\'opération en cours (correction du texte…)', components: [], embeds: [] }).catch(() => {});
+      else await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       const [, typeKey, lieuKey] = interaction.customId.split('::');
       const t = TYPES[typeKey] || { pole: 'legal' };
       const code = (interaction.fields.getTextInputValue('code') || '').trim() || genCodeName();
-      const objectif = (interaction.fields.getTextInputValue('objectif') || '').trim() || '—';
       const quand = (interaction.fields.getTextInputValue('quand') || '').trim();
-      const butin = (interaction.fields.getTextInputValue('butin') || '').trim();
-      const briefing = (interaction.fields.getTextInputValue('briefing') || '').trim();
+      // Correction orthographique automatique (objectif, butin, briefing — pas le nom de code ni la date)
+      const [objectifC, butin, briefing] = await Promise.all([
+        _corrigerTexte((interaction.fields.getTextInputValue('objectif') || '').trim()),
+        _corrigerTexte((interaction.fields.getTextInputValue('butin') || '').trim()),
+        _corrigerTexte((interaction.fields.getTextInputValue('briefing') || '').trim()),
+      ]);
+      const objectif = objectifC || '—';
 
       const op = {
         id: Date.now().toString(),
