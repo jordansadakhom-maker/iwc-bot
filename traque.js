@@ -314,7 +314,6 @@ async function handleListe(interaction) {
 
 // ─── Signalement par photo : commande + bouton ───
 async function handleSignalement(interaction) {
-  if (!estResponsable(interaction.member)) { await interaction.reply({ content: '❌ Le signalement est réservé aux responsables.', flags: MessageFlags.Ephemeral }); return; }
   const photo = interaction.options.getAttachment('photo');
   const cible = (interaction.options.getString('cible') || '').trim();
   if (!photo || !((photo.contentType || '').startsWith('image'))) { await interaction.reply({ content: "❌ Joins une **image** (capture de la personne en jeu).", flags: MessageFlags.Ephemeral }); return; }
@@ -335,18 +334,91 @@ async function handleSignalement(interaction) {
   await interaction.editReply({ embeds: [buildSignalementEmbed(s, cible, photo.url, interaction.user.username)], components: [row] });
 }
 async function handleFromSignal(interaction) {
-  if (!estResponsable(interaction.member)) { await interaction.reply({ content: '❌ Réservé aux responsables.', flags: MessageFlags.Ephemeral }); return; }
   const sid = interaction.customId.split('::')[1];
   const stash = (loadDB()._signalements || {})[sid];
   if (!stash) { await interaction.reply({ content: "⏱️ Ce signalement a expiré. Relance /signalement avec la photo.", flags: MessageFlags.Ephemeral }); return; }
   await interaction.showModal(modalCreation({ cible: stash.cible, signalement: stash.signalement }, sid));
 }
 
+// ─── Panneau #wanted + dépôt de photo ───
+function buildWantedPanel() {
+  return new EmbedBuilder()
+    .setColor(0x8B5A2B)
+    .setTitle('🤠 AVIS DE RECHERCHE & SIGNALEMENTS')
+    .setDescription([
+      'Le tableau des recherches de la compagnie — tout se passe ici 👇',
+      '',
+      '📸 **Signalement par photo**',
+      "Dépose simplement une **photo** de la personne dans ce salon (ajoute son nom en légende si tu veux). J'établis aussitôt un **signalement détaillé** : tenue et couleurs, chapeau, armes, signes distinctifs, dangerosité estimée…",
+      'Un bouton te permet ensuite de le transformer en **avis de recherche** en un clic.',
+      '',
+      '🎯 **Avis de recherche**',
+      'Clique sur le bouton ci-dessous pour lancer un avis classique (prime, dangerosité, dernière position connue, vivant/mort…).',
+    ].join('\n'))
+    .setFooter({ text: 'Iron Wolf Company • New Austin' });
+}
+function buildWantedButtons() {
+  return [new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('wanted_avis').setLabel('Lancer un avis de recherche').setEmoji('🎯').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('wanted_list').setLabel('Voir les avis en cours').setEmoji('📋').setStyle(ButtonStyle.Secondary),
+  )];
+}
+function _findWantedChannel(guild) {
+  return guild.channels.cache.find(c => (c.type === 0 || c.type === 5) && /wanted|avis.?recherche/i.test(c.name || '')) || null;
+}
+async function ensureWantedPanel(guild) {
+  try {
+    const db = loadDB();
+    let ch = null;
+    if (db.wantedChannelId) ch = await guild.channels.fetch(db.wantedChannelId).catch(() => null);
+    if (!ch) ch = _findWantedChannel(guild);
+    if (!ch) return;
+    if (db.wantedPanel && db.wantedPanel.messageId && db.wantedPanel.channelId === ch.id) {
+      const existing = await ch.messages.fetch(db.wantedPanel.messageId).catch(() => null);
+      if (existing) { if (db.wantedChannelId !== ch.id) { db.wantedChannelId = ch.id; saveDB(db); } return; }
+    }
+    const sent = await ch.send({ embeds: [buildWantedPanel()], components: buildWantedButtons() }).catch(() => null);
+    if (!sent) return;
+    sent.pin().catch(() => {});
+    const db2 = loadDB();
+    db2.wantedChannelId = ch.id;
+    db2.wantedPanel = { channelId: ch.id, messageId: sent.id };
+    saveDB(db2);
+  } catch {}
+}
+async function onMessage(message) {
+  try {
+    if (!message.guild || message.author?.bot) return false;
+    const db = loadDB();
+    const wid = db.wantedChannelId;
+    const isWanted = (wid && message.channel.id === wid) || /wanted|avis.?recherche/i.test(message.channel?.name || '');
+    if (!isWanted) return false;
+    const img = message.attachments ? [...message.attachments.values()].find(a => (a.contentType || '').startsWith('image')) : null;
+    if (!img) return false;
+    const cible = (message.content || '').trim().slice(0, 80);
+    const wait = await message.reply({ content: "📋 J'établis le signalement à partir de la photo…", allowedMentions: { parse: [] } }).catch(() => null);
+    const buf = await _imageBytes(img.url);
+    const s = buf ? await _analyserSignalement(buf.toString('base64'), img.contentType || 'image/png') : null;
+    if (!s) { if (wait) await wait.edit({ content: "❌ Je n'ai pas réussi à lire cette photo pour un signalement. Essaie une capture plus nette, où on voit bien la personne." }).catch(() => {}); return true; }
+    const db2 = loadDB();
+    if (!db2._signalements) db2._signalements = {};
+    for (const k of Object.keys(db2._signalements)) { if (Date.now() - (db2._signalements[k].at || 0) > 7200000) delete db2._signalements[k]; }
+    const sid = (Date.now().toString(36) + Math.random().toString(36).slice(2, 5)).slice(-8);
+    db2._signalements[sid] = { cible, signalement: _signalementTexte(s), dangerosite: (DANGER[s.dangerosite] ? s.dangerosite : parseDanger(s.dangerosite)), photoUrl: img.url, createdBy: message.author.username, at: Date.now() };
+    saveDB(db2);
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`traque_from_signal::${sid}`).setLabel("Créer l'avis de recherche").setEmoji('📌').setStyle(ButtonStyle.Danger),
+    );
+    const payload = { content: '', embeds: [buildSignalementEmbed(s, cible, img.url, message.author.username)], components: [row] };
+    if (wait) await wait.edit(payload).catch(() => {}); else await message.reply(payload).catch(() => {});
+    return true;
+  } catch { return false; }
+}
+
 // ─── Routage ───
 async function routeInteraction(interaction) {
   if (interaction.isChatInputCommand?.()) {
     if (interaction.commandName === 'avis-recherche') {
-      if (!estResponsable(interaction.member)) { await interaction.reply({ content: '❌ Lancer un avis de recherche est réservé aux responsables.', flags: MessageFlags.Ephemeral }); return true; }
       await interaction.showModal(modalCreation());
       return true;
     }
@@ -359,6 +431,8 @@ async function routeInteraction(interaction) {
     if (cid.startsWith('traque_chasseur::'))  { await handleChasseurButton(interaction); return true; }
     if (cid.startsWith('traque_cloturer::'))  { await handleCloturerButton(interaction); return true; }
     if (cid.startsWith('traque_from_signal::')) { await handleFromSignal(interaction); return true; }
+    if (cid === 'wanted_avis') { await interaction.showModal(modalCreation()); return true; }
+    if (cid === 'wanted_list') { await handleListe(interaction); return true; }
     if (cid.startsWith('traque_noop::'))      { await interaction.deferUpdate().catch(() => {}); return true; }
   }
   if (interaction.isStringSelectMenu?.() && (interaction.customId || '').startsWith('traque_cloture_select::')) { await handleClotureSelect(interaction); return true; }
@@ -369,4 +443,4 @@ async function routeInteraction(interaction) {
   return false;
 }
 
-module.exports = { traqueCommands, routeInteraction };
+module.exports = { traqueCommands, routeInteraction, onMessage, ensureWantedPanel };
