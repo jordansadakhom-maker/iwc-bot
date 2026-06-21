@@ -79,6 +79,10 @@ let traque = {};
 try { traque = require('./traque'); console.log('✅ Module traque (avis de recherche) chargé'); }
 catch (e) { console.log('⚠️ traque non chargé:', e.message); }
 
+let tenue = {};
+try { tenue = require('./tenue'); console.log('✅ Module tenue (Le Vestiaire) chargé'); }
+catch (e) { console.log('⚠️ tenue non chargé:', e.message); }
+
 const { fmtLong, fmtShort, daysSince, parisOffsetHours, _fmtDollars } = require('./utils');
 const parrainage = require('./parrainage');
 parrainage.init({ isDirection, isMembre });
@@ -2022,6 +2026,7 @@ client.on('messageCreate', async message => {
   try { if (await telegramme.onMessage?.(message)) return; } catch {}
   try { if (await inventaire.onMessage?.(message)) return; } catch {}
   try { if (await traque.onMessage?.(message)) return; } catch {}
+  try { if (await tenue.onMessage?.(message)) return; } catch {}
   // ── Note du micro de terrain → réaction 📜 (contrat) + RÉSUMÉ automatique ──
   if (message.webhookId && (message.embeds?.[0]?.title || '').includes('Rapport de terrain')) {
     try { await message.react('📜'); } catch (e) { console.log('⚠️ Réaction note:', e.message); }
