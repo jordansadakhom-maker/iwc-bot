@@ -1598,6 +1598,8 @@ async function autoSetup(guild) {
   _installerPlanningContrats(guild).then(() => console.log('📜 Tableau des échéances de contrats installé')).catch(() => {});
   // Panneau d'accueil du salon Vestiaire / Tenue
   _installerTenuePanel(guild).then(() => console.log('🤠 Panneau Vestiaire installé')).catch(() => {});
+  // Panneau « Nouvelle fiche de contact »
+  repertoire.installerPanelContact?.(guild).then(() => console.log('🎴 Panneau Contact installé')).catch(() => {});
 
   console.log('✅ Auto-setup terminé\n');
 }
