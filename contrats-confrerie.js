@@ -16,7 +16,7 @@ function _persistNow() { try { if (typeof sauvegarderSurGitHub === 'function') s
 
 // ─── Salons (IDs figés du serveur) ───
 const CH_CONTRATS          = '1508756442730074222';
-const CH_CONTRATS_REPONSES = '1509340674779254876';
+const CH_CONTRATS_REPONSES = '1518392786301227250';
 const CH_JOURNAL           = '1508756535407542372';
 
 // ─── Rôles Direction (permissions + ping) ───
@@ -309,7 +309,7 @@ async function onRiskSelect(interaction) {
   return interaction.showModal(modal);
 }
 // Poste le contrat Confrérie en POST de forum catégorisé (salon partagé des contrats)
-const FORUM_CONTRATS = '1509340674779254876';
+const FORUM_CONTRATS = '1518392786301227250';
 async function posterForum(guild, contrat) {
   try {
     const forum = guild.channels.cache.get(FORUM_CONTRATS);
