@@ -1088,8 +1088,10 @@ async function handleSlashCommand(interaction) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const lignes = [];
     lignes.push(process.env.NOTION_TOKEN ? '✅ NOTION_TOKEN présent' : '❌ NOTION_TOKEN MANQUANT dans Render');
-    lignes.push(process.env.NOTION_CONTRATS_DB ? `✅ NOTION_CONTRATS_DB présent` : (loadDB().notionContratsDbId ? `✅ Base liée via /connecter-notion-contrats` : '❌ Aucune base liée'));
-    const _dbid = process.env.NOTION_CONTRATS_DB || loadDB().notionContratsDbId;
+    const _dbid = loadDB().notionContratsDbId || process.env.NOTION_CONTRATS_DB;
+    const _src = loadDB().notionContratsDbId ? 'lien (/connecter-notion-contrats)' : (process.env.NOTION_CONTRATS_DB ? 'variable Render (NOTION_CONTRATS_DB)' : null);
+    lignes.push(_src ? `✅ Base liée via ${_src}` : '❌ Aucune base liée');
+    if (_dbid) lignes.push(`🆔 Base utilisée : ${_dbid}`);
     if (process.env.NOTION_TOKEN && _dbid) {
       try {
         const res = await fetch(`https://api.notion.com/v1/databases/${_dbid}`, {
@@ -1118,7 +1120,7 @@ async function handleSlashCommand(interaction) {
   if (commandName === 'contrats-sync') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const _dbid = process.env.NOTION_CONTRATS_DB || loadDB().notionContratsDbId;
+    const _dbid = loadDB().notionContratsDbId || process.env.NOTION_CONTRATS_DB;
     if (!_dbid) return interaction.editReply({ content: "⚠️ Aucune base Notion liée. Utilise d'abord `/connecter-notion-contrats` en collant le lien de ta base." });
     const db = loadDB();
     const contrats = db.contrats || [];
@@ -4001,7 +4003,7 @@ async function _syncMembreNotion(discordId, updates) {
 let _contratsSchemaCache = { db: null, cols: null };
 async function _syncContratNotion(contrat, statut, signePar) {
   if (!process.env.NOTION_TOKEN) { console.log('⚠️ Contrat Notion: NOTION_TOKEN manquant'); return; }
-  const DB = process.env.NOTION_CONTRATS_DB || loadDB().notionContratsDbId;
+  const DB = loadDB().notionContratsDbId || process.env.NOTION_CONTRATS_DB;
   if (!DB) { console.log('⚠️ Contrat Notion: aucune base liée (NOTION_CONTRATS_DB ou /connecter-notion-contrats)'); return; }
 
   const statutMap = { en_attente: '🟡 En attente', signe: '✅ Signé', refuse: '❌ Refusé', expire: '📁 Expiré' };
