@@ -1590,6 +1590,9 @@ async function autoSetup(guild) {
     }
   } catch (e) { console.log('⚠️ auto-post panneau opérations:', e.message); }
 
+  // Tableau immersif des échéances de contrats dans le salon planning/agenda
+  _installerPlanningContrats(guild).then(() => console.log('📜 Tableau des échéances de contrats installé')).catch(() => {});
+
   console.log('✅ Auto-setup terminé\n');
 }
 
@@ -3545,6 +3548,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     _setContratSuiviNotion(c, stage).catch(() => {});
     ajouterJournalIC(interaction.guild, { type: 'contrat', emoji: '📜', titre: `Contrat ${c.id} → ${stage}`, description: String(c.objet || c.clientNom || c.commanditaire || '').slice(0, 200), auteur: interaction.user.username }).catch(() => {});
     _updateContratPanel(interaction.client).catch(() => {});
+    _updatePlanningContrats(interaction.client).catch(() => {});
     return interaction.update(_contratSuiviPayload(c, `✅ Étape mise à jour : **${stage}** — synchronisé dans Notion.`));
   }
   if (interaction.isModalSubmit() && interaction.customId.startsWith('csuivi_montant::')) {
@@ -3568,6 +3572,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     try { await notionExtra.enregistrerTransactionNotion?.({ type: 'Entrée', coffre: coffreLabel, montant, objet: `Contrat ${c.id} honoré`, responsable: interaction.user.username, solde }); } catch {}
     _syncTransactionNotion({ type: 'Entrée', coffre: pole, montant, objet: `Contrat ${c.id} honoré`, responsable: interaction.user.username, solde, date: new Date().toISOString(), discordId: interaction.user.id, userId: interaction.user.id }).catch(() => {});
     _updateContratPanel(interaction.client).catch(() => {});
+    _updatePlanningContrats(interaction.client).catch(() => {});
     return interaction.editReply({ content: `🏁 **Contrat ${c.id} honoré !**\n💰 **+$${montant.toLocaleString('fr-FR')}** versés au coffre ${coffreLabel}.\n💼 Nouveau solde : **$${solde.toLocaleString('fr-FR')}**\n📒 Étape passée à **Honoré** (Notion + journal de bord).` });
   }
   if (interaction.isButton() && interaction.customId.startsWith('signer_offre_')) {
@@ -3707,7 +3712,7 @@ client.once('clientReady', async () => {
   cron.schedule('* * * * *', async () => {
     try { await _importContratsDepuisNotion(client.guilds.cache.first()); } catch {}
   });
-  cron.schedule('*/5 * * * *', async () => { try { await _updateContratPanel(client); } catch {} });
+  cron.schedule('*/5 * * * *', async () => { try { await _updateContratPanel(client); } catch {} try { await _updatePlanningContrats(client); } catch {} });
   cron.schedule('0 18 * * *', async () => {
     try { const u = await client.users.fetch('944208797084311583').catch(() => null); if (u) await u.send({ embeds: [_genererRecapEmbed(loadDB())] }).catch(() => {}); } catch {}
   }, { timezone: 'Europe/Paris' });
@@ -4368,6 +4373,70 @@ async function _updateContratPanel(client) {
     if (!msg) return;
     await msg.edit({ embeds: [_contratPanelEmbed(loadDB())] }).catch(() => {});
   } catch {}
+}
+
+// ═══ TABLEAU IMMERSIF DES ÉCHÉANCES DE CONTRATS (planning) ═══
+function _planningContratsEmbed(db) {
+  const now = new Date();
+  const joursEch = c => { if (!c.dateEcheance) return Infinity; const d = new Date(c.dateEcheance); if (isNaN(d.getTime())) return Infinity; return Math.round((Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())) / 86400000); };
+  const stadeOf = c => c.suivi || _suiviDepuisStatut(c);
+  const stadeEmoji = { 'En attente': '🟡', 'En cours': '🔵', 'Validé': '✅', 'Honoré': '🏁', 'Abandonné': '✖️' };
+  const nomClient = c => c.clientNom || c.employeurNom || c.commanditaire || c.clientIC || '—';
+  const objetCourt = c => (c.objet || '—').replace(/\s+/g, ' ').slice(0, 40);
+  const dateFr = c => { if (!c.dateEcheance) return null; const d = new Date(c.dateEcheance); return isNaN(d.getTime()) ? String(c.dateEcheance).slice(0, 12) : d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }); };
+  const cd = c => { const j = joursEch(c); if (j === Infinity) return ''; if (j < 0) return ` · ⏰ retard ${Math.abs(j)}j`; if (j === 0) return " · ⏰ aujourd'hui"; if (j === 1) return ' · ⏰ demain'; if (j <= 7) return ` · ⏰ ${j}j`; return ` · 🗓️ ${j}j`; };
+  const ligne = c => { const dt = dateFr(c); return `${stadeEmoji[stadeOf(c)] || '•'} \`${c.id}\` — **${nomClient(c)}** · ${objetCourt(c)}${dt ? ` · 📅 ${dt}` : ''}${cd(c)}`; };
+  const actifs = (db.contrats || []).filter(c => !['Honoré', 'Abandonné'].includes(stadeOf(c)));
+  actifs.sort((a, b) => joursEch(a) - joursEch(b));
+  const retard  = actifs.filter(c => { const j = joursEch(c); return j !== Infinity && j < 0; });
+  const proche  = actifs.filter(c => { const j = joursEch(c); return j >= 0 && j <= 1; });
+  const semaine = actifs.filter(c => { const j = joursEch(c); return j >= 2 && j <= 7; });
+  const avenir  = actifs.filter(c => { const j = joursEch(c); return j > 7 && j !== Infinity; });
+  const sansEch = actifs.filter(c => joursEch(c) === Infinity);
+  const bloc = (titre, arr) => arr.length ? { name: `${titre} (${arr.length})`, value: arr.slice(0, 10).map(ligne).join('\n').slice(0, 1024), inline: false } : null;
+  const fields = [
+    bloc('🔴 EN RETARD', retard),
+    bloc('🔥 AUJOURD’HUI / DEMAIN', proche),
+    bloc('📅 CETTE SEMAINE', semaine),
+    bloc('🗓️ À VENIR', avenir),
+    bloc('♾️ SANS ÉCHÉANCE', sansEch),
+  ].filter(Boolean);
+  const e = new EmbedBuilder()
+    .setColor(0x8B5A2B)
+    .setTitle('📜 REGISTRE DES AFFAIRES — TABLEAU DES ÉCHÉANCES')
+    .setDescription('```\n  IRON WOLF COMPANY · BUREAU DES CONTRATS · TEXAS \n```\nLes affaires en cours, classées par échéance. Le secrétariat tient ce registre à jour à mesure que les contrats avancent.\n\n🟡 *en attente* · 🔵 *en cours* · ✅ *à encaisser*');
+  if (fields.length) e.addFields(fields);
+  else e.addFields({ name: '— Registre vide —', value: "*Aucune affaire en cours, cow-boy. Le tableau est propre.*", inline: false });
+  e.setFooter({ text: `Iron Wolf Company • ${actifs.length} affaire(s) en cours • à jour le ${fmtShort(new Date())}` }).setTimestamp();
+  return e;
+}
+async function _updatePlanningContrats(client) {
+  const ref = loadDB().planningContratsPanel;
+  if (!ref || !ref.channelId || !ref.messageId) return;
+  try {
+    const ch = await client.channels.fetch(ref.channelId).catch(() => null);
+    if (!ch) return;
+    const msg = await ch.messages.fetch(ref.messageId).catch(() => null);
+    if (!msg) return;
+    await msg.edit({ embeds: [_planningContratsEmbed(loadDB())] }).catch(() => {});
+  } catch {}
+}
+async function _installerPlanningContrats(guild) {
+  try {
+    const ch = getChById(guild, 'AGENDA', 'agenda') || getChById(guild, 'PLANNING', 'planning');
+    if (!ch) return;
+    const db = loadDB();
+    // Déjà posé et toujours présent ? on garde
+    if (db.planningContratsPanel?.channelId === ch.id && db.planningContratsPanel?.messageId) {
+      const old = await ch.messages.fetch(db.planningContratsPanel.messageId).catch(() => null);
+      if (old) { await old.edit({ embeds: [_planningContratsEmbed(db)] }).catch(() => {}); return; }
+    }
+    // Nettoyer un éventuel ancien tableau du bot
+    const recent = await ch.messages.fetch({ limit: 30 }).catch(() => null);
+    if (recent) for (const [, m] of recent) { if (m.author.id === client.user.id && (m.embeds[0]?.title || '').includes('TABLEAU DES ÉCHÉANCES')) await m.delete().catch(() => {}); }
+    const sent = await ch.send({ embeds: [_planningContratsEmbed(db)] }).catch(() => null);
+    if (sent) { await sent.pin().catch(() => {}); const d2 = loadDB(); d2.planningContratsPanel = { channelId: ch.id, messageId: sent.id }; saveDB(d2); }
+  } catch (e) { console.log('⚠️ install tableau planning contrats:', e.message); }
 }
 async function _setContratSuiviNotion(contrat, stage) {
   if (!process.env.NOTION_TOKEN) return;
