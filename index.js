@@ -402,6 +402,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('purge').setDescription('🗑️ Effacer les messages d\'un salon (Direction)').addIntegerOption(o => o.setName('nombre').setDescription('Nombre de messages à supprimer (1-100, défaut: tous)').setRequired(false).setMinValue(1).setMaxValue(100)),
   new SlashCommandBuilder().setName('annuler-absence').setDescription('🔓 Lever l\'absence d\'un membre (Direction)').addUserOption(o => o.setName('membre').setDescription('Membre dont lever l\'absence').setRequired(true)),
   new SlashCommandBuilder().setName('contrats').setDescription('📜 Voir mes contrats en cours'),
+  new SlashCommandBuilder().setName('contrat-suivi').setDescription('🎮 Gérer une étape de contrat (en cours, honoré…) + coffre (Direction)'),
   new SlashCommandBuilder().setName('contrat-panel').setDescription('📋 Publier le panneau des contrats (Direction)'),
   new SlashCommandBuilder().setName('contrats-sync').setDescription('🔄 Resynchroniser tous les contrats avec Notion (Direction)'),
   new SlashCommandBuilder().setName('notion-test').setDescription('🔍 Tester la connexion Notion des contrats (Direction)'),
@@ -762,6 +763,18 @@ async function handleSlashCommand(interaction) {
       new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('urgence').setLabel('Urgence (faible / normale / haute)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('normale')),
     );
     return interaction.showModal(modal);
+  }
+  if (commandName === 'contrat-suivi') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    const liste = (db.contrats || []).slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)).slice(0, 25);
+    if (!liste.length) return interaction.reply({ content: "Aucun contrat enregistré pour le moment.", flags: MessageFlags.Ephemeral });
+    const opts = liste.map(c => {
+      const stade = c.suivi || _suiviDepuisStatut(c);
+      const nom = c.clientNom || c.commanditaire || c.objet || c.id;
+      return { label: String(c.id).slice(0, 100), description: `${stade} · ${String(nom).slice(0, 50)}`.slice(0, 100), value: String(c.id) };
+    });
+    const menu = new StringSelectMenuBuilder().setCustomId('csuivi_select').setPlaceholder('Choisis un contrat à faire avancer').addOptions(opts);
+    return interaction.reply({ content: "📋 **Gestion des contrats** — choisis le contrat à gérer :", components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral });
   }
   if (commandName === 'tresor')            { if (!isOfficierOuDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction et aux Officiers de Terrain.', flags: MessageFlags.Ephemeral }); return notionModules.handleTresorCommand?.(interaction); }
   if (commandName === 'dashboard')         { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return notionModules.handleDashboard?.(interaction); }
@@ -3393,6 +3406,52 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     return;
   }
 
+  if (interaction.isStringSelectMenu() && interaction.customId === 'csuivi_select') {
+    const c = (loadDB().contrats || []).find(x => String(x.id) === interaction.values[0]);
+    if (!c) return interaction.update({ content: "❌ Contrat introuvable.", embeds: [], components: [] });
+    return interaction.update(_contratSuiviPayload(c));
+  }
+  if (interaction.isButton() && interaction.customId.startsWith('csuivi::')) {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    const parts = interaction.customId.split('::'); const stageKey = parts[1]; const ref = parts.slice(2).join('::');
+    const stageMap = { attente: 'En attente', cours: 'En cours', valide: 'Validé', honore: 'Honoré', abandon: 'Abandonné' };
+    const stage = stageMap[stageKey];
+    const dbX = loadDB(); const c = (dbX.contrats || []).find(x => String(x.id) === ref);
+    if (!c || !stage) return interaction.reply({ content: "❌ Contrat introuvable.", flags: MessageFlags.Ephemeral });
+    if (stageKey === 'honore') {
+      if (c.remuVerseAuCoffre) return interaction.reply({ content: `⚠️ Ce contrat a déjà été honoré et encaissé ($${Number(c.remuVerseAuCoffre).toLocaleString('fr-FR')} versés au coffre).`, flags: MessageFlags.Ephemeral });
+      const detecte = _montantDetecte(c.remuneration);
+      const modal = new ModalBuilder().setCustomId(`csuivi_montant::${ref}`).setTitle(`Honorer ${ref}`.slice(0, 45));
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('montant').setLabel('Montant à verser au coffre ($)').setStyle(TextInputStyle.Short).setRequired(true).setValue(detecte ? String(detecte) : '').setPlaceholder('Ex : 1500')));
+      return interaction.showModal(modal);
+    }
+    c.suivi = stage; saveDB(dbX);
+    _setContratSuiviNotion(c, stage).catch(() => {});
+    ajouterJournalIC(interaction.guild, { type: 'contrat', emoji: '📜', titre: `Contrat ${c.id} → ${stage}`, description: String(c.objet || c.clientNom || c.commanditaire || '').slice(0, 200), auteur: interaction.user.username }).catch(() => {});
+    return interaction.update(_contratSuiviPayload(c, `✅ Étape mise à jour : **${stage}** — synchronisé dans Notion.`));
+  }
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('csuivi_montant::')) {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const ref = interaction.customId.split('::')[1];
+    const dbX = loadDB(); const c = (dbX.contrats || []).find(x => String(x.id) === ref);
+    if (!c) return interaction.editReply({ content: "❌ Contrat introuvable." });
+    if (c.remuVerseAuCoffre) return interaction.editReply({ content: "⚠️ Ce contrat a déjà été encaissé." });
+    const montant = _montantDetecte(interaction.fields.getTextInputValue('montant'));
+    if (!montant || montant <= 0) return interaction.editReply({ content: "❌ Montant invalide. Relance et entre un nombre (ex : 1500)." });
+    const pole = (c.cc || c.type === 'confrerie' || String(c.id).startsWith('CF-')) ? 'illegal' : 'legal';
+    if (!dbX.coffres) dbX.coffres = { legal: 0, illegal: 0 };
+    dbX.coffres[pole] += montant;
+    const solde = dbX.coffres[pole];
+    c.suivi = 'Honoré'; c.remuVerseAuCoffre = montant; c.honoreAt = new Date().toISOString();
+    saveDB(dbX);
+    _setContratSuiviNotion(c, 'Honoré').catch(() => {});
+    const coffreLabel = pole === 'illegal' ? '🔒 Illégal' : '⚖️ Légal';
+    try { await ajouterJournalIC(interaction.guild, { type: 'tresorerie', emoji: '💵', titre: `Entrée — Coffre ${pole === 'illegal' ? 'Illégal' : 'Légal'}`, description: `Contrat **${c.id}** honoré · +$${montant.toLocaleString('fr-FR')} · ${String(c.clientNom || c.commanditaire || '')}`.slice(0, 300), auteur: interaction.user.username }); } catch {}
+    try { await notionExtra.enregistrerTransactionNotion?.({ type: 'Entrée', coffre: coffreLabel, montant, objet: `Contrat ${c.id} honoré`, responsable: interaction.user.username, solde }); } catch {}
+    _syncTransactionNotion({ type: 'Entrée', coffre: pole, montant, objet: `Contrat ${c.id} honoré`, responsable: interaction.user.username, solde, date: new Date().toISOString(), discordId: interaction.user.id, userId: interaction.user.id }).catch(() => {});
+    return interaction.editReply({ content: `🏁 **Contrat ${c.id} honoré !**\n💰 **+$${montant.toLocaleString('fr-FR')}** versés au coffre ${coffreLabel}.\n💼 Nouveau solde : **$${solde.toLocaleString('fr-FR')}**\n📒 Étape passée à **Honoré** (Notion + journal de bord).` });
+  }
   if (interaction.isButton() && interaction.customId.startsWith('signer_offre_')) {
     const contratId = interaction.customId.replace('signer_offre_', ''); const contrat = (db.contrats || []).find(c => c.id === contratId);
     if (!contrat) { await interaction.reply({ content: '❌ Contrat introuvable.', flags: MessageFlags.Ephemeral }); return; }
@@ -4000,6 +4059,64 @@ async function _syncMembreNotion(discordId, updates) {
   if (Object.keys(props).length) { await _notionPatch(page.id, props); console.log(`✅ Registre MàJ : ${discordId}`); }
 }
 
+// ---- Gestion de l'étape (Suivi) d'un contrat depuis Discord + crédit du coffre ----
+function _montantDetecte(str) {
+  const s = String(str || '').replace(/\s/g, '');
+  const m = s.match(/\d+(?:[.,]\d{3})*/);
+  if (!m) return null;
+  const n = parseInt(m[0].replace(/[.,]/g, ''), 10);
+  return Number.isFinite(n) ? n : null;
+}
+function _suiviDepuisStatut(c) {
+  if (c && c.suivi) return c.suivi;
+  const s = c ? c.status : null;
+  if (s === 'signe' || s === 'actif') return 'En cours';
+  if (s === 'refuse' || s === 'echouee') return 'Abandonné';
+  if (s === 'reussie') return 'Validé';
+  return 'En attente';
+}
+function _contratSuiviPayload(c, note) {
+  const stade = c.suivi || _suiviDepuisStatut(c);
+  const emo = { 'En attente': '🟡', 'En cours': '🔵', 'Validé': '✅', 'Honoré': '🏁', 'Abandonné': '✖️' }[stade] || '⚪';
+  const pole = (c.cc || c.type === 'confrerie' || String(c.id).startsWith('CF-')) ? '🔒 Confrérie (coffre illégal)' : '⚖️ IWC (coffre légal)';
+  const embed = new EmbedBuilder().setColor(0x8B1A1A).setTitle(`📜 Contrat ${c.id}`).addFields(
+    { name: 'Objet', value: String(c.objet || '—').slice(0, 1024), inline: false },
+    { name: 'Client / Commanditaire', value: String(c.clientNom || c.commanditaire || '—').slice(0, 256), inline: true },
+    { name: 'Rémunération', value: String(c.remuneration || '—').slice(0, 256), inline: true },
+    { name: 'Pôle', value: pole, inline: true },
+    { name: 'Étape actuelle', value: `${emo} **${stade}**`, inline: false },
+  );
+  if (c.remuVerseAuCoffre) embed.addFields({ name: '💰 Déjà encaissé', value: `$${Number(c.remuVerseAuCoffre).toLocaleString('fr-FR')} versés au coffre`, inline: false });
+  if (note) embed.setDescription(note);
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`csuivi::attente::${c.id}`).setLabel('🟡 En attente').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`csuivi::cours::${c.id}`).setLabel('🔵 En cours').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`csuivi::valide::${c.id}`).setLabel('✅ Validé').setStyle(ButtonStyle.Success),
+  );
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`csuivi::honore::${c.id}`).setLabel('🏁 Honoré (encaisser)').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`csuivi::abandon::${c.id}`).setLabel('✖️ Abandonné').setStyle(ButtonStyle.Danger),
+  );
+  return { content: '', embeds: [embed], components: [row1, row2] };
+}
+async function _setContratSuiviNotion(contrat, stage) {
+  if (!process.env.NOTION_TOKEN) return;
+  const DB = loadDB().notionContratsDbId || process.env.NOTION_CONTRATS_DB;
+  if (!DB) return;
+  const headers = { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' };
+  async function findPage() {
+    const r = await fetch(`https://api.notion.com/v1/databases/${DB}/query`, { method: 'POST', headers, body: JSON.stringify({ filter: { property: 'Référence', title: { equals: String(contrat.id) } }, page_size: 1 }) });
+    if (!r.ok) return null;
+    const d = await r.json().catch(() => null);
+    return (d && d.results && d.results[0]) || null;
+  }
+  try {
+    let page = await findPage();
+    if (!page) { await _syncContratNotion(contrat, contrat.status || 'en_attente', null); page = await findPage(); }
+    if (!page) return;
+    await fetch(`https://api.notion.com/v1/pages/${page.id}`, { method: 'PATCH', headers, body: JSON.stringify({ properties: { 'Suivi': { select: { name: stage } } } }) });
+  } catch (e) { console.log('Suivi Notion:', e.message); }
+}
 let _contratsSchemaCache = { db: null, cols: null };
 async function _syncContratNotion(contrat, statut, signePar) {
   if (!process.env.NOTION_TOKEN) { console.log('⚠️ Contrat Notion: NOTION_TOKEN manquant'); return; }
