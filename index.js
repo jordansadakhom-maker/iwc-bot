@@ -1690,6 +1690,15 @@ client.on('guildMemberAdd', async member => {
 client.on('inviteCreate', invite => { try { const m = _inviteCache.get(invite.guild.id) || new Map(); m.set(invite.code, { uses: invite.uses || 0, inviterTag: invite.inviter?.username || null, inviterId: invite.inviter?.id || null }); _inviteCache.set(invite.guild.id, m); } catch {} });
 client.on('inviteDelete', invite => { try { const m = _inviteCache.get(invite.guild.id); if (m) { m.delete(invite.code); _inviteCache.set(invite.guild.id, m); } } catch {} });
 
+function _gradeDepuisRoles(member) {
+  try {
+    const v3 = require('./notion-modules-v3');
+    const ROLES = v3.ROLES || {};
+    const ordered = [...(v3.GRADES_LEGAL || []), ...(v3.GRADES_ILLEGAL || [])]; // index 0 = grade le plus élevé
+    for (const g of ordered) { const rid = ROLES[g.roleKey]; if (rid && member.roles.cache.has(rid)) return g.nom; }
+  } catch {}
+  return 'Visiteur';
+}
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
   const oldRoles = oldMember.roles.cache.map(r => r.id).sort().join(',');
   const newRoles = newMember.roles.cache.map(r => r.id).sort().join(',');
@@ -1733,7 +1742,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
         await require('./notion-modules-v3').updateHierarchieEmbed?.(newMember.guild).catch(() => {});
         console.log(`✅ Hiérarchie mise à jour suite au changement de rôle de ${newMember.displayName}`);
       }
-      const nouveauGrade = newMember.roles.cache.filter(r => gradeRoleIds.includes(r.id)).map(r => r.name).join(', ') || 'Visiteur';
+      const nouveauGrade = _gradeDepuisRoles(newMember);
       // Calculer le nouveau pôle
       const nouveauPole = isIlleg ? 'illegal' : 'legal'; // illégal prioritaire
       const poleLabel   = nouveauPole === 'illegal' ? '🔒 Illégal' : '⚖️ Légal';
@@ -3198,13 +3207,14 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
       new ButtonBuilder().setCustomId(`rdvclient_repondre_${rdvId}`).setLabel('💬 Répondre au client').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`rdvclient_refuse_${rdvId}`).setLabel('❌ Décliner').setStyle(ButtonStyle.Danger),
     );
-    // Envoyer le télégramme dans le salon des demandes, avec PING du rôle Opérateur (la secrétaire)
+    // Envoyer le télégramme dans le salon des demandes, avec PING Opérateur + Homme de main + Fondateur
     const dest = interaction.guild.channels.cache.get('1512175624176009348') || interaction.channel;
+    let msgTele = null;
     if (dest) {
-      const operateur = interaction.guild.roles.cache.find(r => r.name.includes('Opérateur') || r.name.includes('Operateur') || r.name.includes('Opérateurs'));
-      const ping = operateur ? `<@&${operateur.id}>` : '';
-      const mentionIds = operateur ? [operateur.id] : [];
-      const msgTele = await dest.send({
+      const rolesPing = interaction.guild.roles.cache.filter(r => { const n = (r.name || '').toLowerCase(); return n.includes('opérateur') || n.includes('operateur') || n.includes('homme de main') || n.includes('fondateur'); });
+      const mentionIds = [...rolesPing.values()].map(r => r.id);
+      const ping = mentionIds.map(id => `<@&${id}>`).join(' ');
+      msgTele = await dest.send({
         content: `${ping ? ping + ' — ' : ''}📨 **Nouveau télégramme à traiter, un client demande un rendez-vous.**`,
         embeds: [embed],
         components: [row],
@@ -3214,6 +3224,11 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
       if (msgTele) await msgTele.pin().catch(() => {});
       // Ouvrir une conversation suivie (fil + relais MP) sur ce télégramme
       if (msgTele) { try { await telegramme.ouvrirConversation?.(msgTele, { rdvId, demandeurId: interaction.user.id, nomRP: nom }); } catch {} }
+    }
+    if (!msgTele) {
+      console.log('❌ Télégramme non transmis (salon 1512175624176009348 introuvable ou bot sans permission d écrire).');
+      try { monitoring.logTech?.(interaction.client, 'error', '❌ Télégramme non transmis', 'Le bot n a pas pu poster le télégramme dans le salon des demandes (1512175624176009348). Vérifier que le salon existe et que le bot peut y écrire.'); } catch {}
+      return interaction.editReply({ content: "⚠️ Votre télégramme n'a pas pu être transmis pour un souci technique. Prévenez directement un responsable, désolé." });
     }
     return interaction.editReply({ content: '✅ Votre télégramme a bien été transmis à la Direction. Vous recevrez une réponse prochainement.' });
   }
