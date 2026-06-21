@@ -4005,7 +4005,7 @@ async function _syncContratNotion(contrat, statut, signePar) {
 
   const statutMap = { en_attente: '🟡 En attente', signe: '✅ Signé', refuse: '❌ Refusé', expire: '📁 Expiré' };
   // Types adaptés à la base réelle :
-  // Type, Type de mission, Statut = TEXTE ; Émetteur = SELECT ; Détails = TEXTE
+  // Tout en TEXTE sauf Référence (Titre) et Suivi (Sélection) — pour matcher un import CSV simple
   const propsComplet = {
     'Référence':     { title: [{ text: { content: String(contrat.id || '—') } }] },
     'Objet':         { rich_text: [{ text: { content: (contrat.objet || '—').slice(0, 1900) } }] },
@@ -4014,15 +4014,15 @@ async function _syncContratNotion(contrat, statut, signePar) {
     'Statut':        { rich_text: [{ text: { content: statutMap[statut] || statut } }] },
     'Rémunération':  { rich_text: [{ text: { content: (contrat.remuneration || '—').slice(0, 1900) } }] },
     'Partenaire':    { rich_text: [{ text: { content: (contrat.clientNom || contrat.employeurNom || '—').slice(0, 1900) } }] },
-    'Émetteur':      { select: { name: (contrat.emetteurIC || contrat.emetteurNom || contrat.signataire || '—').slice(0, 100) } },
-    'Date création': { date: { start: new Date(contrat.createdAt || Date.now()).toISOString().split('T')[0] } },
+    'Émetteur':      { rich_text: [{ text: { content: (contrat.emetteurIC || contrat.emetteurNom || contrat.signataire || '—').slice(0, 1900) } }] },
+    'Date création': { rich_text: [{ text: { content: new Date(contrat.createdAt || Date.now()).toISOString().split('T')[0] } }] },
     ...(contrat.details ? { 'Détails': { rich_text: [{ text: { content: contrat.details.slice(0, 1900) } }] } } : {}),
   };
   if (statut === 'signe' && signePar) {
     propsComplet['Signé par'] = { rich_text: [{ text: { content: String(signePar).slice(0, 200) } }] };
-    propsComplet['Date signature'] = { date: { start: new Date().toISOString().split('T')[0] } };
+    propsComplet['Date signature'] = { rich_text: [{ text: { content: new Date().toISOString().split('T')[0] } }] };
   }
-  if (contrat.dateEcheance) propsComplet['Échéance'] = { date: { start: contrat.dateEcheance } };
+  if (contrat.dateEcheance) propsComplet['Échéance'] = { rich_text: [{ text: { content: String(contrat.dateEcheance) } }] };
 
   const headers = { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' };
 
