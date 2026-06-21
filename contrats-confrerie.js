@@ -308,6 +308,26 @@ async function onRiskSelect(interaction) {
   );
   return interaction.showModal(modal);
 }
+// Poste le contrat Confrérie en POST de forum catégorisé (salon partagé des contrats)
+const FORUM_CONTRATS = '1509340674779254876';
+async function posterForum(guild, contrat) {
+  try {
+    const forum = guild.channels.cache.get(FORUM_CONTRATS);
+    if (!forum || forum.type !== 15 || !forum.threads?.create) return;
+    const clean = s => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+    const cli = contrat.commanditaire || (contrat.confidentiel ? 'Anonyme' : '');
+    const titre = `${contrat.id}${cli ? ' — ' + cli : ''}`.slice(0, 100);
+    const veut = ['confrerie', 'illegal', clean(contrat.status === 'propose' ? 'en attente' : contrat.status)].filter(Boolean);
+    const tags = forum.availableTags || [];
+    const appliedTags = tags.filter(t => { const tn = clean(t.name); return veut.some(w => w && (tn.includes(w) || w.includes(tn))); }).map(t => t.id).slice(0, 5);
+    const msg = { embeds: [buildContratEmbed(contrat)] };
+    const opts = { name: titre, message: msg };
+    if (appliedTags.length) opts.appliedTags = appliedTags;
+    let post = await forum.threads.create(opts).catch(() => null);
+    if (!post && appliedTags.length) post = await forum.threads.create({ name: titre, message: msg }).catch(() => null); // repli sans étiquettes
+  } catch (e) { console.log('⚠️ post contrat Confrérie forum:', e.message); }
+}
+
 async function onModalSubmit(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const parts = interaction.customId.split('::');
@@ -354,6 +374,7 @@ async function onModalSubmit(interaction) {
   contrat.msgId = sent.id;
   contrat.channelId = ch.id;
   saveDB(db); _persistNow();
+  posterForum(interaction.guild, contrat).catch(() => {});
   await interaction.editReply({ content: `✅ Contrat **${contrat.id}** créé${confidentiel ? ' *(anonyme & confidentiel)*' : ''}.` });
 }
 
