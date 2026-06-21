@@ -181,7 +181,8 @@ async function ouvrirConversation(message, { rdvId, demandeurId, nomRP }) {
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`tg_close::${rdvId}`).setLabel('🔒 Clôturer la conversation').setStyle(ButtonStyle.Danger),
     );
-    await thread.send({ embeds: [intro], components: [row] }).catch(() => {});
+    const pingNew = _pingRoles(thread.guild);
+    await thread.send({ content: pingNew.content ? `${pingNew.content} — 📨 **nouveau télégramme reçu**` : null, embeds: [intro], components: [row], allowedMentions: { roles: pingNew.ids } }).catch(() => {});
 
     // Prévenir le client qu'il peut répondre en MP
     const user = await message.client.users.fetch(demandeurId).catch(() => null);
