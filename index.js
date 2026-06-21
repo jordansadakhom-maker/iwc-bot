@@ -1563,9 +1563,9 @@ async function autoSetup(guild) {
     }
     const msgs2 = await contratsCh.messages.fetch({ limit: 10 });
     if (!msgs2.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('IRON WOLF COMPANY — CONTRATS'))) {
-      const embed = new EmbedBuilder().setColor(0x2C3E50).setTitle('📜 IRON WOLF COMPANY — CONTRATS').setDescription('*Tout accord entre la Compagnie et ses partenaires doit être formalisé.*\n*Un contrat signé engage les deux parties sans exception.*').addFields({ name: '📤 Envoyer nos conditions', value: '→ Tu envoies tes tarifs & conditions à un client\n→ Le client signe → tu reçois la notification' }, { name: '📥 Signer un contrat employeur', value: '→ Une entreprise vous engage\n→ Tu rentres ses infos & ses conditions\n→ Tu signes → ils reçoivent la notification' }).setFooter({ text: 'Iron Wolf Company • Secrétariat officiel' });
+      const embed = new EmbedBuilder().setColor(0x2C3E50).setTitle('📜 IRON WOLF COMPANY — CONTRATS').setDescription('*Tout accord entre la Compagnie et ses partenaires doit être formalisé.*\n*Un contrat signé engage les deux parties sans exception.*').addFields({ name: '📥 Recevoir nos conditions', value: '→ Le client reçoit tes tarifs & conditions\n→ Il signe → tu reçois la notification' }, { name: '📥 Signer un contrat employeur', value: '→ Une entreprise vous engage\n→ Tu rentres ses infos & ses conditions\n→ Tu signes → ils reçoivent la notification' }).setFooter({ text: 'Iron Wolf Company • Secrétariat officiel' });
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('open_contrat_offre').setLabel('📤 Envoyer nos conditions').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('open_contrat_offre').setLabel('📥 Recevoir nos conditions').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('open_contrat_emploi').setLabel('📥 Signer un contrat employeur').setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId('btn_rdv_creer_contrat_panel').setLabel('📅 Planifier un RDV').setStyle(ButtonStyle.Secondary),
       );
@@ -7349,6 +7349,9 @@ function _buildCommencerIci() {
       '',
       '**4️⃣ Présente-toi et lance-toi**',
       'Si tu veux nous rejoindre officiellement, clique sur **Candidature** dans le salon de recrutement. La Direction te recontactera.',
+      '',
+      '**📞 Besoin de nos services ?**',
+      'Dans la section **Rendez-vous client**, tu peux solliciter la Compagnie et demander un rendez-vous (escorte, protection, contrat…). Remplis la demande : un opérateur te recontactera rapidement.',
       '',
       '*Une question ? Clique sur ❓ Toutes les commandes dans le menu, ou demande à un membre du staff.*',
     ].join('\n'))
