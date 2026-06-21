@@ -4445,6 +4445,9 @@ function _planningContratsEmbed(db) {
   e.setFooter({ text: `Iron Wolf Company • ${actifs.length} affaire(s) en cours • à jour le ${fmtShort(new Date())}` }).setTimestamp();
   return e;
 }
+function _planningResetRow() {
+  return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('csuivi_reset').setLabel('Réinitialiser les contrats (Direction)').setEmoji('🗑️').setStyle(ButtonStyle.Danger));
+}
 async function _updatePlanningContrats(client) {
   const ref = loadDB().planningContratsPanel;
   if (!ref || !ref.channelId || !ref.messageId) return;
@@ -4453,7 +4456,7 @@ async function _updatePlanningContrats(client) {
     if (!ch) return;
     const msg = await ch.messages.fetch(ref.messageId).catch(() => null);
     if (!msg) return;
-    await msg.edit({ embeds: [_planningContratsEmbed(loadDB())] }).catch(() => {});
+    await msg.edit({ embeds: [_planningContratsEmbed(loadDB())], components: [_planningResetRow()] }).catch(() => {});
   } catch {}
 }
 // Poste un nouveau contrat en POST de forum catégorisé (salon 1518392786301227250) — même principe que les opérations
@@ -4486,7 +4489,7 @@ async function _installerPlanningContrats(guild) {
     // Déjà posé au bon endroit et toujours présent ? on garde
     if (db.planningContratsPanel?.channelId === ch.id && db.planningContratsPanel?.messageId) {
       const old = await ch.messages.fetch(db.planningContratsPanel.messageId).catch(() => null);
-      if (old) { await old.edit({ embeds: [_planningContratsEmbed(db)] }).catch(() => {}); return; }
+      if (old) { await old.edit({ embeds: [_planningContratsEmbed(db)], components: [_planningResetRow()] }).catch(() => {}); return; }
     }
     // Le tableau était dans un autre salon (ex. agenda) ? on supprime l'ancien pour éviter le doublon
     if (db.planningContratsPanel?.channelId && db.planningContratsPanel?.messageId && db.planningContratsPanel.channelId !== ch.id) {
@@ -4496,7 +4499,7 @@ async function _installerPlanningContrats(guild) {
     // Nettoyer un éventuel ancien tableau du bot
     const recent = await ch.messages.fetch({ limit: 30 }).catch(() => null);
     if (recent) for (const [, m] of recent) { if (m.author.id === client.user.id && (m.embeds[0]?.title || '').includes('TABLEAU DES ÉCHÉANCES')) await m.delete().catch(() => {}); }
-    const sent = await ch.send({ embeds: [_planningContratsEmbed(db)] }).catch(() => null);
+    const sent = await ch.send({ embeds: [_planningContratsEmbed(db)], components: [_planningResetRow()] }).catch(() => null);
     if (sent) { await sent.pin().catch(() => {}); const d2 = loadDB(); d2.planningContratsPanel = { channelId: ch.id, messageId: sent.id }; saveDB(d2); }
   } catch (e) { console.log('⚠️ install tableau planning contrats:', e.message); }
 }
