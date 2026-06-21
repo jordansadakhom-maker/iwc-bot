@@ -2007,6 +2007,7 @@ client.on('messageCreate', async message => {
   // Conversations sur télégrammes : relais MP ↔ fil (avant tout le reste)
   try { if (await telegramme.onMessage?.(message)) return; } catch {}
   try { if (await inventaire.onMessage?.(message)) return; } catch {}
+  try { if (await traque.onMessage?.(message)) return; } catch {}
   // ── Note du micro de terrain → réaction 📜 (contrat) + RÉSUMÉ automatique ──
   if (message.webhookId && (message.embeds?.[0]?.title || '').includes('Rapport de terrain')) {
     try { await message.react('📜'); } catch (e) { console.log('⚠️ Réaction note:', e.message); }
@@ -3610,6 +3611,7 @@ client.once('clientReady', async () => {
   for (const guild of client.guilds.cache.values()) {
     await registerSlashCommands(guild).catch(e => console.log('registerSlashCommands error:', e.message));
     await autoSetup(guild).catch(e => console.log('autoSetup error:', e.message));
+    await traque.ensureWantedPanel?.(guild).catch(() => {});
     await buildMembresDiscordMap(guild).catch(() => {});
     await _cacheInvites(guild).catch(() => {});
   }
