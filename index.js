@@ -3998,6 +3998,7 @@ async function _syncMembreNotion(discordId, updates) {
   if (Object.keys(props).length) { await _notionPatch(page.id, props); console.log(`✅ Registre MàJ : ${discordId}`); }
 }
 
+let _contratsSchemaCache = { db: null, cols: null };
 async function _syncContratNotion(contrat, statut, signePar) {
   if (!process.env.NOTION_TOKEN) { console.log('⚠️ Contrat Notion: NOTION_TOKEN manquant'); return; }
   const DB = process.env.NOTION_CONTRATS_DB || loadDB().notionContratsDbId;
@@ -4051,6 +4052,16 @@ async function _syncContratNotion(contrat, statut, signePar) {
 
   // Suivi (Kanban) : uniquement à la création de la page, pour ne JAMAIS écraser un classement fait à la main dans Notion
   if (!existing) propsComplet['Suivi'] = { select: { name: 'En attente' } };
+  // Robustesse : n'écrire QUE les colonnes réellement présentes dans la base (sinon une colonne absente ferait échouer toute l'écriture)
+  if (_contratsSchemaCache.db !== DB) {
+    try {
+      const sres = await fetch(`https://api.notion.com/v1/databases/${DB}`, { headers });
+      if (sres.ok) { const sd = await sres.json(); _contratsSchemaCache = { db: DB, cols: Object.keys(sd.properties || {}) }; }
+    } catch {}
+  }
+  if (Array.isArray(_contratsSchemaCache.cols) && _contratsSchemaCache.cols.length) {
+    for (const k of Object.keys(propsComplet)) { if (k !== 'Référence' && !_contratsSchemaCache.cols.includes(k)) delete propsComplet[k]; }
+  }
   let res = await ecrire(propsComplet);
   if (!res.ok && propsComplet['Suivi']) {
     // La colonne « Suivi » n'existe peut-être pas encore → on réessaie sans elle (sans rien perdre d'autre)
