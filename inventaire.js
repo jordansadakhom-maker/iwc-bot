@@ -141,7 +141,7 @@ Liste ABSOLUMENT TOUS les objets visibles sans en oublier un seul, Y COMPRIS les
 Réponds UNIQUEMENT avec un tableau JSON valide, sans aucun texte autour ni balises de code, au format exact :
 [{"nom":"Nom de l'objet","quantite":12,"categorie":"Armes"}]
 La "categorie" doit obligatoirement être l'une de : Armes, Munitions, Provisions, Médecine, Matériel, Commun.
-Règles de catégorie : Armes (revolvers, fusils, couteaux) ; Munitions (balles, cartouches, poudre) ; Provisions (nourriture, boissons, alcool) ; Médecine (remèdes, toniques, bandages) ; Matériel (OUTILS, CROCHETS, cordes, lanternes, pelles, pièges, kits, tout objet utilitaire) ; Commun (le reste, ou si tu hésites). N'omets aucun objet réellement présent, mais n'en invente aucun. Ne réponds que la liste. Si aucun objet n'est visible, réponds [].`;
+Règles de catégorie : Armes (revolvers, fusils, couteaux) ; Munitions (balles, cartouches, poudre) ; Provisions (nourriture, boissons, alcool) ; Médecine (remèdes, toniques, bandages) ; Matériel (OUTILS, CROCHETS, cordes, lanternes, pelles, pièges, kits, tout objet utilitaire) ; Commun (le reste, ou si tu hésites). Si tu vois un objet sans réussir à l'identifier ou à lire son nom, NE L'OMETS PAS : ajoute-le quand même avec "nom":"Objet inconnu" (ou une brève description de ce que tu vois), "categorie":"Commun", et la quantité visible (1 si tu ne sais pas). N'omets aucun objet réellement présent, mais n'en invente aucun. Ne réponds que la liste. Si aucun objet n'est visible, réponds [].`;
 
 async function _imageBytes(url) {
   try { const r = await fetch(url); if (!r.ok) return null; return Buffer.from(await r.arrayBuffer()); } catch { return null; }
@@ -170,10 +170,16 @@ function _parseItems(txt) {
     const arr = JSON.parse(m[0]); if (!Array.isArray(arr)) return null;
     const out = [];
     for (const it of arr) {
-      const nom = String(it.nom || it.name || "").trim().slice(0, 80);
-      const q = parseInt(it.quantite ?? it.quantity ?? it.qte, 10);
-      const cat = _matchCat(it.categorie || it.category || "") || 'Commun';
-      if (nom && Number.isFinite(q) && q > 0) out.push({ nom, quantite: q, categorie: cat });
+      if (!it || typeof it !== 'object') continue;
+      let nom = String(it.nom || it.name || "").trim().slice(0, 80);
+      const rawQ = it.quantite ?? it.quantity ?? it.qte;
+      const rawCat = it.categorie || it.category;
+      if (!nom && (rawQ === undefined || rawQ === null) && !rawCat) continue; // entrée totalement vide → ignorée
+      let q = parseInt(rawQ, 10);
+      if (!Number.isFinite(q) || q <= 0) q = 1; // quantité inconnue → 1 (on garde l'objet)
+      const cat = _matchCat(rawCat || "") || 'Commun';
+      if (!nom) nom = "Objet inconnu"; // l'IA n'a pas su nommer → on garde une ligne quand même
+      out.push({ nom, quantite: q, categorie: cat });
     }
     return out;
   } catch { return null; }
