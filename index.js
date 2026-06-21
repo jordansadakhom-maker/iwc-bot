@@ -403,6 +403,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('annuler-absence').setDescription('🔓 Lever l\'absence d\'un membre (Direction)').addUserOption(o => o.setName('membre').setDescription('Membre dont lever l\'absence').setRequired(true)),
   new SlashCommandBuilder().setName('contrats').setDescription('📜 Voir mes contrats en cours'),
   new SlashCommandBuilder().setName('contrat-suivi').setDescription('🎮 Gérer une étape de contrat (en cours, honoré…) + coffre (Direction)'),
+  new SlashCommandBuilder().setName('contrat-suivi-panneau').setDescription('📌 Installer le panneau permanent de gestion des contrats (Direction)'),
   new SlashCommandBuilder().setName('contrat-panel').setDescription('📋 Publier le panneau des contrats (Direction)'),
   new SlashCommandBuilder().setName('contrats-sync').setDescription('🔄 Resynchroniser tous les contrats avec Notion (Direction)'),
   new SlashCommandBuilder().setName('notion-test').setDescription('🔍 Tester la connexion Notion des contrats (Direction)'),
@@ -766,15 +767,17 @@ async function handleSlashCommand(interaction) {
   }
   if (commandName === 'contrat-suivi') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
-    const liste = (db.contrats || []).slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)).slice(0, 25);
-    if (!liste.length) return interaction.reply({ content: "Aucun contrat enregistré pour le moment.", flags: MessageFlags.Ephemeral });
-    const opts = liste.map(c => {
-      const stade = c.suivi || _suiviDepuisStatut(c);
-      const nom = c.clientNom || c.commanditaire || c.objet || c.id;
-      return { label: String(c.id).slice(0, 100), description: `${stade} · ${String(nom).slice(0, 50)}`.slice(0, 100), value: String(c.id) };
-    });
-    const menu = new StringSelectMenuBuilder().setCustomId('csuivi_select').setPlaceholder('Choisis un contrat à faire avancer').addOptions(opts);
-    return interaction.reply({ content: "📋 **Gestion des contrats** — choisis le contrat à gérer :", components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral });
+    const payload = _contratSuiviMenu();
+    if (!payload) return interaction.reply({ content: "Aucun contrat enregistré pour le moment.", flags: MessageFlags.Ephemeral });
+    return interaction.reply(payload);
+  }
+  if (commandName === 'contrat-suivi-panneau') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    const embedP = new EmbedBuilder().setColor(0x8B1A1A).setTitle('📜 GESTION DES CONTRATS').setDescription("Faites avancer chaque contrat et encaissez les primes, directement depuis ce salon.\n\n🟡 En attente · 🔵 En cours · ✅ Validé · 🏁 Honoré · ✖️ Abandonné\n\nCliquez sur le bouton ci-dessous — la gestion s'ouvre **pour vous seul**, avec la liste toujours à jour.").setFooter({ text: 'Iron Wolf Company • Direction' });
+    const rowP = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('csuivi_open').setLabel('🎮 Gérer les contrats').setStyle(ButtonStyle.Primary));
+    const sentP = await interaction.channel.send({ embeds: [embedP], components: [rowP] });
+    sentP.pin().catch(() => {});
+    return interaction.reply({ content: "✅ Panneau de gestion installé et épinglé dans ce salon. Il reste utilisable en permanence.", flags: MessageFlags.Ephemeral });
   }
   if (commandName === 'tresor')            { if (!isOfficierOuDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction et aux Officiers de Terrain.', flags: MessageFlags.Ephemeral }); return notionModules.handleTresorCommand?.(interaction); }
   if (commandName === 'dashboard')         { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return notionModules.handleDashboard?.(interaction); }
@@ -3406,6 +3409,12 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     return;
   }
 
+  if (interaction.isButton() && interaction.customId === 'csuivi_open') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    const payload = _contratSuiviMenu();
+    if (!payload) return interaction.reply({ content: "Aucun contrat enregistré pour le moment.", flags: MessageFlags.Ephemeral });
+    return interaction.reply(payload);
+  }
   if (interaction.isStringSelectMenu() && interaction.customId === 'csuivi_select') {
     const c = (loadDB().contrats || []).find(x => String(x.id) === interaction.values[0]);
     if (!c) return interaction.update({ content: "❌ Contrat introuvable.", embeds: [], components: [] });
@@ -4098,6 +4107,17 @@ function _contratSuiviPayload(c, note) {
     new ButtonBuilder().setCustomId(`csuivi::abandon::${c.id}`).setLabel('✖️ Abandonné').setStyle(ButtonStyle.Danger),
   );
   return { content: '', embeds: [embed], components: [row1, row2] };
+}
+function _contratSuiviMenu() {
+  const liste = (loadDB().contrats || []).slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)).slice(0, 25);
+  if (!liste.length) return null;
+  const opts = liste.map(c => {
+    const stade = c.suivi || _suiviDepuisStatut(c);
+    const nom = c.clientNom || c.commanditaire || c.objet || c.id;
+    return { label: String(c.id).slice(0, 100), description: `${stade} · ${String(nom).slice(0, 50)}`.slice(0, 100), value: String(c.id) };
+  });
+  const menu = new StringSelectMenuBuilder().setCustomId('csuivi_select').setPlaceholder('Choisis un contrat à gérer').addOptions(opts);
+  return { content: "📋 **Gestion des contrats** — choisis le contrat à gérer :", components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral };
 }
 async function _setContratSuiviNotion(contrat, stage) {
   if (!process.env.NOTION_TOKEN) return;
