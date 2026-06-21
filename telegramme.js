@@ -12,7 +12,7 @@
 //  Stockage : db.conversations[rdvId].
 // ───────────────────────────────────────────────────────────────────────────
 const {
-  EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, SlashCommandBuilder, AttachmentBuilder,
+  EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, SlashCommandBuilder, AttachmentBuilder, ChannelType,
 } = require('discord.js');
 
 let dbMod = {};
@@ -174,11 +174,26 @@ async function ouvrirConversation(message, { rdvId, demandeurId, nomRP }) {
     const db = loadDB(); const store = _store(db);
     if (store[rdvId]?.threadId) return store[rdvId]; // déjà ouverte
 
-    const thread = await message.startThread({
-      name: `💬 ${(nomRP || 'Client').slice(0, 60)} — ${rdvId}`,
+    const tname = `💬 ${(nomRP || 'Client').slice(0, 60)} — ${rdvId}`;
+    let thread = await message.channel.threads.create({
+      name: tname,
       autoArchiveDuration: 10080,
+      type: ChannelType.PrivateThread,
+      invitable: false,
     }).catch(() => null);
+    if (!thread) thread = await message.startThread({ name: tname, autoArchiveDuration: 10080 }).catch(() => null); // repli fil public si privé indisponible
     if (!thread) return null;
+    // Option B : ajouter automatiquement l'équipe au fil privé (Opérateur / Homme de main / Fondateur)
+    if (thread.type === ChannelType.PrivateThread) {
+      try {
+        const g = message.guild;
+        const cible = r => { const n = (r.name || '').toLowerCase(); return n.includes('opérateur') || n.includes('operateur') || n.includes('homme de main') || n.includes('fondateur'); };
+        const ids = new Set();
+        for (const role of g.roles.cache.filter(cible).values()) { for (const mem of role.members.values()) ids.add(mem.id); }
+        let n = 0;
+        for (const uid of ids) { if (n >= 40) break; await thread.members.add(uid).catch(() => {}); n++; }
+      } catch {}
+    }
 
     store[rdvId] = {
       rdvId, demandeurId, nomRP: nomRP || 'Client',
