@@ -101,7 +101,7 @@ function modalCreation() {
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cible').setLabel('Cible (nom / identité)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex : Cole Bradford, le contrebandier')),
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('signalement').setLabel('Signalement (description, délit)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500).setPlaceholder('Apparence, méfaits, raison de la traque...')),
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('position').setLabel('Dernière position connue').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Armadillo, Tumbleweed, Fort Mercer, Rio Bravo...')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prime').setLabel('Prime + dangerosité (faible/moyen/élevé/extrême)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex : 500 $ · élevé')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prime').setLabel('Prime + dangerosité').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex : 500 $ · élevé  (faible/moyen/élevé/extrême)')),
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('infos').setLabel('Commanditaire + vivant/mort').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex : Shérif de Armadillo · Vivant de préférence')),
   );
   return m;
