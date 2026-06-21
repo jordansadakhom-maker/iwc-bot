@@ -3486,6 +3486,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const embed = new EmbedBuilder().setColor(0x2C3E50).setTitle(`📤 CONTRAT DE PRESTATION — ${contratId}`).setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   IRON WOLF COMPANY — OFFRE DE PRESTATION\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```').addFields({ name: '🆔 Référence', value: `\`${contratId}\``, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: '✍️ Émis par', value: emetteurICOffre, inline: true }, { name: '📋 Objet', value: contrat.objet }, { name: '📅 Échéance', value: contrat.dateEcheance ? fmtShort(contrat.dateEcheance) : 'Aucune', inline: true }, { name: '💰 Rémunération souhaitée', value: contrat.remuneration }, { name: '📌 Statut', value: '🟡 En attente de signature', inline: true }).setFooter({ text: `Iron Wolf Company • Secrétariat officiel • ${fmtShort(new Date())}` });
     const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`signer_offre_${contratId}`).setLabel("✍️ J'accepte les termes").setStyle(ButtonStyle.Success), new ButtonBuilder().setCustomId(`refuser_offre_${contratId}`).setLabel('❌ Refuser').setStyle(ButtonStyle.Danger));
     const ch = guild.channels.cache.get(SALON_HARDCODED.CONTRATS) || guild.channels.cache.get(CH.CONTRATS); if (ch) await ch.send({ content: `<@${contrat.userId}> — Iron Wolf Company vous soumet un contrat.`, embeds: [embed], components: [row] });
+    _posterContratForum(guild, contrat, embed).catch(() => {});
     try { const m = await guild.members.fetch(contrat.userId).catch(() => null); if (m) await m.send({ embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📤 Contrat — IWC').setDescription(`L'IWC vous soumet le contrat **${contratId}**.\n\n**Mission :** ${contrat.objet}\n**Rémunération :** ${contrat.remuneration}\n\nRépondez dans **#contrats**.`).setFooter({ text: 'Iron Wolf Company' })] }); } catch {}
     return;
   }
@@ -3658,6 +3659,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const embed = new EmbedBuilder().setColor(0x8B5A2A).setTitle(`📥 CONTRAT EMPLOYEUR — ${contratId}`).setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n  CONTRAT PROPOSÉ À IRON WOLF COMPANY\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```').addFields({ name: '🆔 Référence', value: `\`${contratId}\``, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: '✍️ Soumis par', value: signataireICEmploi, inline: true }, { name: `🏭 Employeur — ${contrat.employeurNom}`, value: contrat.dateEcheance ? `📅 Échéance : ${fmtShort(contrat.dateEcheance)}` : '—' }, { name: '💰 Rémunération', value: contrat.remuneration }, { name: '📋 Objet', value: contrat.objet }, { name: '📌 Statut', value: '🟡 En attente de notre signature', inline: true }).setFooter({ text: `Iron Wolf Company • Secrétariat officiel • ${fmtShort(new Date())}` });
     const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`signer_emploi_${contratId}`).setLabel('✍️ Signer & Accepter').setStyle(ButtonStyle.Success), new ButtonBuilder().setCustomId(`refuser_emploi_${contratId}`).setLabel('❌ Décliner').setStyle(ButtonStyle.Danger), new ButtonBuilder().setCustomId(`btn_rdv_creer_contrat_${contratId}`).setLabel('📅 Planifier un RDV').setStyle(ButtonStyle.Secondary));
     const ch = guild.channels.cache.get(SALON_HARDCODED.CONTRATS) || guild.channels.cache.get(CH.CONTRATS); if (ch) await ch.send({ content: `${getContratMention(guild)} — 📥 Nouveau contrat employeur à examiner.`, embeds: [embed], components: [row] });
+    _posterContratForum(guild, contrat, embed).catch(() => {});
     return;
   }
 
@@ -4429,6 +4431,28 @@ async function _updatePlanningContrats(client) {
     if (!msg) return;
     await msg.edit({ embeds: [_planningContratsEmbed(loadDB())] }).catch(() => {});
   } catch {}
+}
+// Poste un nouveau contrat en POST de forum catégorisé (salon 1509340674779254876) — même principe que les opérations
+const FORUM_CONTRATS = '1509340674779254876';
+async function _posterContratForum(guild, contrat, embed) {
+  try {
+    const forum = guild.channels.cache.get(FORUM_CONTRATS);
+    if (!forum || forum.type !== 15 || !forum.threads?.create) return;
+    const clean = s => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+    const client = contrat.clientNom || contrat.employeurNom || contrat.commanditaire || '';
+    const titre = `${contrat.id}${client ? ' — ' + client : ''}`.slice(0, 100);
+    // Catégorisation par étiquettes du forum (type de contrat + statut)
+    const cf = String(contrat.id).startsWith('CF-') || contrat.type === 'confrerie' || contrat.cc;
+    const typeKw = cf ? ['confrerie', 'illegal'] : (contrat.type === 'emploi' ? ['employeur', 'emploi'] : ['prestation', 'offre']);
+    const veut = [...typeKw, clean(contrat.suivi || contrat.status || 'en attente')].filter(Boolean);
+    const tags = forum.availableTags || [];
+    const appliedTags = tags.filter(t => { const tn = clean(t.name); return veut.some(w => w && (tn.includes(w) || w.includes(tn))); }).map(t => t.id).slice(0, 5);
+    const msg = embed ? { embeds: [embed] } : { content: `📜 Contrat ${contrat.id}` };
+    const opts = { name: titre, message: msg };
+    if (appliedTags.length) opts.appliedTags = appliedTags;
+    let post = await forum.threads.create(opts).catch(() => null);
+    if (!post && appliedTags.length) post = await forum.threads.create({ name: titre, message: msg }).catch(() => null); // repli sans étiquettes
+  } catch (e) { console.log('⚠️ post contrat forum:', e.message); }
 }
 async function _installerPlanningContrats(guild) {
   try {
