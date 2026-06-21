@@ -12,6 +12,7 @@ const {
 const { loadDB, saveDB } = require('./db');
 
 const CH_JOURNAL = '1508756535407542372';
+const ROLE_CONFRERIE = '1508756479274913903';
 const RESP_ROLES = ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Conseil', 'Officier', 'Instructeur'];
 
 const STATUTS = {
@@ -46,11 +47,16 @@ function findTraque(db, id) { return (db.traques || []).find(t => t.id === id); 
 function dangerLabel(v) { return DANGER[v] || '🟡 Moyen'; }
 
 // ─── Signalement par photo (vision IA) ───
-const PROMPT_SIGNALEMENT = `Tu rédiges un SIGNALEMENT (avis de recherche) à partir d'une capture d'écran d'un personnage dans un jeu vidéo Far West (RedM / Red Dead Redemption 2). C'est un personnage de jeu fictif.
-Décris UNIQUEMENT ce qui est réellement visible sur l'image. N'invente rien : si un élément n'est pas visible, mets "Non visible".
+const PROMPT_SIGNALEMENT = `Tu es un traqueur chevronné qui rédige un SIGNALEMENT TRÈS DÉTAILLÉ à partir d'une capture d'écran d'un personnage dans un jeu vidéo Far West (RedM / Red Dead Redemption 2). C'est un personnage de jeu fictif.
+Observe l'image avec la plus grande minutie, comme un chasseur de primes qui doit pouvoir reconnaître la cible dans une foule. Sois EXHAUSTIF et PRÉCIS :
+- Note les COULEURS EXACTES (pas "sombre" mais "brun foncé", "bordeaux", "bleu nuit", "beige sable"...).
+- Précise les MATIÈRES (cuir, laine, lin, peau de bête...) et l'ÉTAT (neuf, usé, sale, déchiré, rapiécé).
+- Décris les vêtements en COUCHES, du dessus au-dessous (manteau → veste → gilet → chemise).
+- Repère le moindre détail distinctif : accessoires, marques, façon de porter les armes, posture.
+Décris UNIQUEMENT ce qui est réellement visible. N'invente rien : si un élément n'est pas visible, mets "Non visible".
 Réponds UNIQUEMENT avec un objet JSON valide, sans aucun texte ni balise autour, au format EXACT :
-{"allure":"sexe apparent, corpulence, allure générale","visage":"cheveux (couleur/longueur), barbe ou moustache, traits marquants, cicatrices visibles","chapeau":"type et couleur du chapeau ou couvre-chef, sinon Non visible","tenue":"vêtements visibles avec leurs couleurs : manteau, chemise, gilet, pantalon, bottes, foulard/bandana","armes":"armes visibles (revolver, fusil, couteau, holster...), sinon Aucune visible","distinctifs":"signes particuliers : accessoires, masque, badge, sacoche, bijoux, tatouages, objets portés","monture":"description du cheval si visible, sinon Non visible","dangerosite":"faible|moyen|eleve|extreme","resume":"une phrase de synthèse façon avis de recherche"}
-Écris en français, de façon factuelle et concise.`;
+{"allure":"sexe apparent, corpulence, carrure, taille estimée, posture/attitude","teint":"carnation de la peau si visible, sinon Non visible","cheveux":"couleur précise, longueur, coiffure, sinon Non visible","pilosite":"barbe/moustache/favoris : type, couleur, longueur, sinon Rasé ou Non visible","visage":"forme du visage, traits marquants, regard/yeux, âge apparent, rides, sinon Non visible","chapeau":"couvre-chef : type précis, couleur, état, bandeau/ornement, sinon Non visible","haut":"vêtements du haut en couches (manteau, veste, gilet, chemise) avec couleurs précises, matières et état","bas":"pantalon/jambières : couleur, matière, état, sinon Non visible","chaussures":"bottes/souliers : couleur, type, éperons, sinon Non visible","accessoires":"bandana/foulard, gants, ceinture, cartouchière, sacoche, bijoux, badge, lunettes, cigare, montre... sinon Aucun visible","armes":"armes visibles : type précis (revolver, carabine, fusil à canon scié, couteau, lasso...) et où elles sont portées (holster, dos, ceinture), sinon Aucune visible","marques":"cicatrices, tatouages, blessures, peintures de guerre, masque, marques distinctives, sinon Aucune visible","monture":"cheval si visible : robe/couleur, marques, selle/équipement, sinon Non visible","environnement":"décor visible, lieu probable, moment de la journée, sinon Non visible","dangerosite":"faible|moyen|eleve|extreme","resume":"une phrase percutante de synthèse, façon avis de recherche du Far West"}
+Écris en français, de façon factuelle, riche et précise.`;
 
 async function _imageBytes(url) {
   try { const r = await fetch(url); if (!r.ok) return null; return Buffer.from(await r.arrayBuffer()); } catch { return null; }
@@ -61,7 +67,7 @@ async function _callVisionSignal(model, b64, mt) {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model, max_tokens: 1200, messages: [{ role: 'user', content: [
+      body: JSON.stringify({ model, max_tokens: 1600, messages: [{ role: 'user', content: [
         { type: 'image', source: { type: 'base64', media_type: mt || 'image/png', data: b64 } },
         { type: 'text', text: PROMPT_SIGNALEMENT },
       ] }] }),
@@ -83,35 +89,46 @@ async function _analyserSignalement(b64, mt) {
   return _parseSignal(txt);
 }
 function _signalementTexte(s) {
-  const ok = v => v && !/non visible|aucune visible/i.test(String(v));
+  const ok = v => v && !/^(non visible|aucune? visible|aucun visible|rasé|néant)$/i.test(String(v).trim());
   const parts = [];
   if (ok(s.allure)) parts.push(String(s.allure));
-  if (ok(s.visage)) parts.push(String(s.visage));
+  if (ok(s.teint)) parts.push('Teint : ' + s.teint);
+  if (ok(s.cheveux)) parts.push('Cheveux : ' + s.cheveux);
+  if (ok(s.pilosite)) parts.push('Pilosité : ' + s.pilosite);
+  if (ok(s.visage)) parts.push('Visage : ' + s.visage);
   if (ok(s.chapeau)) parts.push('Chapeau : ' + s.chapeau);
-  if (ok(s.tenue)) parts.push('Tenue : ' + s.tenue);
+  if (ok(s.haut)) parts.push('Haut : ' + s.haut);
+  if (ok(s.bas)) parts.push('Bas : ' + s.bas);
+  if (ok(s.accessoires)) parts.push('Accessoires : ' + s.accessoires);
   if (ok(s.armes)) parts.push('Armé : ' + s.armes);
-  if (ok(s.distinctifs)) parts.push('Signes : ' + s.distinctifs);
+  if (ok(s.marques)) parts.push('Marques : ' + s.marques);
   let txt = parts.join('. ');
   if (!txt) txt = String(s.resume || "Signalement établi d'après la photo.");
-  return txt.slice(0, 480);
+  return txt.slice(0, 700);
 }
 function buildSignalementEmbed(s, cible, photoUrl, auteur) {
   const dKey = DANGER[s.dangerosite] ? s.dangerosite : parseDanger(s.dangerosite);
-  const field = (n, v, inline) => ({ name: n, value: String(v || 'Non visible').slice(0, 1024) || 'Non visible', inline: !!inline });
+  const ok = v => v && !/^(non visible|aucune? visible|aucun visible|rasé|néant)$/i.test(String(v).trim());
+  const f = (n, v, inline) => ({ name: n, value: (ok(v) ? String(v) : 'Non visible').slice(0, 1024), inline: !!inline });
   const e = new EmbedBuilder()
     .setColor(0x8B5A2B)
     .setTitle(`📋 SIGNALEMENT${cible ? ' — ' + cible : ''}`)
-    .setDescription(s.resume ? `*${String(s.resume).slice(0, 400)}*` : "*Signalement établi d'après la photo.*")
-    .addFields(
-      field('🧍 Allure', s.allure, false),
-      field('👤 Visage', s.visage, false),
-      field('🤠 Chapeau', s.chapeau, true),
-      field('🔫 Armes', s.armes, true),
-      field('🧥 Tenue', s.tenue, false),
-      field('🔎 Signes distinctifs', s.distinctifs, false),
-      { name: '⚠️ Dangerosité estimée', value: dangerLabel(dKey), inline: true },
-    );
-  if (s.monture && !/non visible/i.test(String(s.monture))) e.addFields(field('🐴 Monture', s.monture, false));
+    .setDescription(s.resume ? `*${String(s.resume).slice(0, 400)}*` : "*Signalement établi d'après la photo.*");
+  const fields = [f('🧍 Allure', s.allure, false)];
+  if (ok(s.teint)) fields.push(f('🎨 Teint', s.teint, true));
+  if (ok(s.cheveux)) fields.push(f('💈 Cheveux', s.cheveux, true));
+  if (ok(s.pilosite)) fields.push(f('🧔 Pilosité', s.pilosite, true));
+  if (ok(s.visage)) fields.push(f('👤 Visage', s.visage, false));
+  fields.push(f('🤠 Couvre-chef', s.chapeau, true), f('🔫 Armes', s.armes, true));
+  fields.push(f('🧥 Haut du corps', s.haut, false));
+  if (ok(s.bas)) fields.push(f('👖 Bas', s.bas, true));
+  if (ok(s.chaussures)) fields.push(f('🥾 Chaussures', s.chaussures, true));
+  if (ok(s.accessoires)) fields.push(f('🎒 Accessoires', s.accessoires, false));
+  if (ok(s.marques)) fields.push(f('🩹 Marques distinctives', s.marques, false));
+  if (ok(s.monture)) fields.push(f('🐴 Monture', s.monture, false));
+  if (ok(s.environnement)) fields.push(f('🌅 Repéré', s.environnement, true));
+  fields.push({ name: '⚠️ Dangerosité estimée', value: dangerLabel(dKey), inline: true });
+  e.addFields(...fields.slice(0, 25));
   if (photoUrl) e.setThumbnail(photoUrl);
   e.setFooter({ text: `IWC • Signalement établi par ${auteur} • généré par l'IA d'après la photo` });
   return e;
@@ -222,7 +239,7 @@ async function handleCreateModal(interaction) {
     channelId: interaction.channelId,
   };
   if (stash && stash.photoUrl) t.photo = stash.photoUrl;
-  const sent = await interaction.channel.send({ embeds: [buildPoster(t)], components: buildBoutons(t) }).catch(() => null);
+  const sent = await interaction.channel.send({ content: `<@&${ROLE_CONFRERIE}> — 🎯 **Nouvel avis de recherche.** La traque est ouverte.`, embeds: [buildPoster(t)], components: buildBoutons(t), allowedMentions: { roles: [ROLE_CONFRERIE] } }).catch(() => null);
   if (sent) t.messageId = sent.id;
   db.traques.push(t);
   if (sid && db._signalements) delete db._signalements[sid];
@@ -248,9 +265,16 @@ async function handlePisteModal(interaction) {
   const t = findTraque(db, id);
   if (!t) return interaction.reply({ content: '❌ Avis introuvable.', flags: MessageFlags.Ephemeral });
   if (!Array.isArray(t.pistes)) t.pistes = [];
-  t.pistes.push({ lieu: (interaction.fields.getTextInputValue('lieu') || '').trim(), info: interaction.fields.getTextInputValue('info').trim(), par: interaction.user.username, at: new Date().toISOString() });
+  const lieu = (interaction.fields.getTextInputValue('lieu') || '').trim();
+  const info = interaction.fields.getTextInputValue('info').trim();
+  t.pistes.push({ lieu, info, par: interaction.user.username, at: new Date().toISOString() });
   saveDB(db);
   await rafraichir(interaction.guild, t);
+  // Alerte publique + ping Confrérie : une piste fraîche est tombée
+  const alerte = new EmbedBuilder().setColor(0x3498DB).setTitle(`🧭 Nouvelle piste — ${t.cible}`)
+    .setDescription(`${lieu ? `📍 **Lieu :** ${lieu}\n` : ''}🗒️ ${info}`)
+    .setFooter({ text: `Signalée par ${interaction.user.username} • ${t.id}` }).setTimestamp();
+  if (interaction.channel?.send) await interaction.channel.send({ content: `<@&${ROLE_CONFRERIE}> — une piste vient d'être signalée sur **${t.cible}**.`, embeds: [alerte], allowedMentions: { roles: [ROLE_CONFRERIE] } }).catch(() => {});
   return interaction.reply({ content: '✅ Piste enregistrée. Merci, chasseur.', flags: MessageFlags.Ephemeral });
 }
 
@@ -410,9 +434,9 @@ async function onMessage(message) {
     // On réuploade la photo dans le récap pour qu'elle survive à la suppression du message d'origine
     const fileName = 'signalement.png';
     const att = new AttachmentBuilder(buf, { name: fileName });
-    const payload = { content: '', embeds: [buildSignalementEmbed(s, cible, `attachment://${fileName}`, message.author.username)], components: [row], files: [att] };
-    let recapMsg = null;
-    if (wait) recapMsg = await wait.edit(payload).catch(() => null); else recapMsg = await message.channel.send(payload).catch(() => null);
+    const payload = { content: `<@&${ROLE_CONFRERIE}> — 📋 **Signalement repéré.** Avis à la Confrérie.`, embeds: [buildSignalementEmbed(s, cible, `attachment://${fileName}`, message.author.username)], components: [row], files: [att], allowedMentions: { roles: [ROLE_CONFRERIE] } };
+    const recapMsg = await message.channel.send(payload).catch(() => null); // nouveau message (l'édition ne pingue pas) → le ping Confrérie fonctionne
+    if (recapMsg && wait) await wait.delete().catch(() => {}); // on retire le message d'attente une fois le récap publié
     const photoUrl = (recapMsg && [...recapMsg.attachments.values()][0]?.url) || img.url;
     db2._signalements[sid] = { cible, signalement: _signalementTexte(s), dangerosite: (DANGER[s.dangerosite] ? s.dangerosite : parseDanger(s.dangerosite)), photoUrl, createdBy: message.author.username, at: Date.now() };
     saveDB(db2);
