@@ -51,7 +51,7 @@ async function _corrigerTexte(texte) {
 let cfg = {};
 try { cfg = require('./config'); } catch { cfg = {}; }
 const ROLE_LEGAL = cfg.ROLE_POLE_LEGAL || '1508756436082102303';
-const ROLE_ILLEGAL = cfg.ROLE_POLE_ILLEGAL || '1508756479274913903';
+const ROLE_ILLEGAL = cfg.ROLE_POLE_ILLEGAL || '1508898841993281658';
 const SALON_OPERATIONS = '1518349707686973470';
 
 const DIRECTION_ROLE_NAMES = ['Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'];
