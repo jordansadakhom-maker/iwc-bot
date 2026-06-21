@@ -302,33 +302,48 @@ async function routeInteraction(interaction) {
       try { if (typeof _inj.creerOperationNotion === 'function') op.notionPageId = await _inj.creerOperationNotion(op); } catch {}
       _persist(db);
 
-      // Poster l'ordre dans #operations
+      // Poster l'ordre d'opération (gère salon TEXTE et salon FORUM)
       const opsCh = _salonOps(interaction.guild) || interaction.channel;
       const rid = _poleRoleId(interaction.guild, op.pole);
-      const sent = await opsCh.send({
+      const coordTxt = `🎯 **${op.name}** — espace de coordination.\n\nTout le monde peut **ajouter ici ses infos complémentaires** : repérages, plan, rôles, horaires, comptes-rendus… On s'organise dans ce fil, le salon reste propre.`;
+      const payloadMsg = {
         content: `${rid ? `<@&${rid}> — ` : ''}🎯 Nouvel **ordre d'opération** : « **${op.name}** ». Inscrivez-vous via **✋ Je participe**.`,
         embeds: [_embedOrdre(op)],
         components: _boutons(op),
         allowedMentions: { roles: rid ? [rid] : [] },
-      }).catch(() => null);
-      if (sent) {
-        op.msgId = sent.id; op.channelId = opsCh.id;
-        await sent.pin().catch(() => {});
-        // Fil de contribution ouvert dès la création : tous les membres peuvent ajouter des infos complémentaires
-        if (!sent.hasThread) {
-          const fil = await sent.startThread({ name: `🎯 ${op.name}`.slice(0, 100), autoArchiveDuration: 10080 }).catch(() => null);
-          if (fil) {
-            op.threadId = fil.id;
-            await fil.send({ content: `🎯 **${op.name}** — espace de coordination.\n\nTout le monde peut **ajouter ici ses infos complémentaires** : repérages, plan, rôles, horaires, comptes-rendus… On s'organise dans ce fil, le salon reste propre.` }).catch(() => {});
+      };
+      let sent = null;
+      try {
+        if (opsCh && opsCh.type === 15 && opsCh.threads?.create) {
+          // Salon FORUM → créer un post (le post est lui-même le fil de contribution)
+          const post = await opsCh.threads.create({ name: `🎯 ${op.name}`.slice(0, 100), message: payloadMsg }).catch(() => null);
+          if (post) {
+            op.channelId = post.id; op.threadId = post.id;
+            const starter = await post.fetchStarterMessage().catch(() => null);
+            if (starter) { op.msgId = starter.id; await starter.pin().catch(() => {}); }
+            sent = starter || post;
+            await post.send({ content: coordTxt }).catch(() => {});
+          }
+        } else if (opsCh && typeof opsCh.send === 'function') {
+          // Salon TEXTE → message épinglé + fil de contribution
+          sent = await opsCh.send(payloadMsg).catch(() => null);
+          if (sent) {
+            op.channelId = opsCh.id; op.msgId = sent.id;
+            await sent.pin().catch(() => {});
+            if (!sent.hasThread) {
+              const fil = await sent.startThread({ name: `🎯 ${op.name}`.slice(0, 100), autoArchiveDuration: 10080 }).catch(() => null);
+              if (fil) { op.threadId = fil.id; await fil.send({ content: coordTxt }).catch(() => {}); }
+            }
           }
         }
-        _persist(db);
-      }
+      } catch (e) { console.log('⚠️ post opération:', e.message); }
+      if (sent) _persist(db);
 
       // Journal RP + log (réutilise les hooks injectés)
       try { if (typeof _inj.journalHook === 'function') await _inj.journalHook(interaction.guild, op); } catch {}
 
-      await interaction.editReply({ content: `✅ Opération « **${op.name}** » ouverte dans <#${opsCh.id}> (réf. \`${op.id}\`).` }).catch(() => {});
+      if (sent) await interaction.editReply({ content: `✅ Opération « **${op.name}** » ouverte dans <#${opsCh.id}> (réf. \`${op.id}\`).` }).catch(() => {});
+      else await interaction.editReply({ content: `⚠️ L'opération « **${op.name}** » est créée (réf. \`${op.id}\`) mais je n'ai pas pu la poster dans <#${opsCh.id}> — ce salon n'accepte peut-être pas les messages (une **catégorie** ?). Indique-moi un salon **texte** ou **forum** valide.` }).catch(() => {});
       return true;
     }
   } catch (e) {
