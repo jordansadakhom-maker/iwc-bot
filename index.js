@@ -404,6 +404,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('contrats').setDescription('📜 Voir mes contrats en cours'),
   new SlashCommandBuilder().setName('contrat-suivi').setDescription('🎮 Gérer une étape de contrat (en cours, honoré…) + coffre (Direction)'),
   new SlashCommandBuilder().setName('contrat-suivi-panneau').setDescription('📌 Installer le panneau permanent de gestion des contrats (Direction)'),
+  new SlashCommandBuilder().setName('contrats-importer').setDescription('📥 Importer dans Discord les contrats ajoutés sur Notion (Direction)'),
   new SlashCommandBuilder().setName('contrat-panel').setDescription('📋 Publier le panneau des contrats (Direction)'),
   new SlashCommandBuilder().setName('contrats-sync').setDescription('🔄 Resynchroniser tous les contrats avec Notion (Direction)'),
   new SlashCommandBuilder().setName('notion-test').setDescription('🔍 Tester la connexion Notion des contrats (Direction)'),
@@ -774,10 +775,19 @@ async function handleSlashCommand(interaction) {
   if (commandName === 'contrat-suivi-panneau') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
     const embedP = new EmbedBuilder().setColor(0x8B1A1A).setTitle('📜 GESTION DES CONTRATS').setDescription("Faites avancer chaque contrat et encaissez les primes, directement depuis ce salon.\n\n🟡 En attente · 🔵 En cours · ✅ Validé · 🏁 Honoré · ✖️ Abandonné\n\nCliquez sur le bouton ci-dessous — la gestion s'ouvre **pour vous seul**, avec la liste toujours à jour.").setFooter({ text: 'Iron Wolf Company • Direction' });
-    const rowP = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('csuivi_open').setLabel('🎮 Gérer les contrats').setStyle(ButtonStyle.Primary));
+    const rowP = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('csuivi_open').setLabel('🎮 Gérer les contrats').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('csuivi_import').setLabel('📥 Importer depuis Notion').setStyle(ButtonStyle.Secondary),
+    );
     const sentP = await interaction.channel.send({ embeds: [embedP], components: [rowP] });
     sentP.pin().catch(() => {});
     return interaction.reply({ content: "✅ Panneau de gestion installé et épinglé dans ce salon. Il reste utilisable en permanence.", flags: MessageFlags.Ephemeral });
+  }
+  if (commandName === 'contrats-importer') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const n = await _importContratsDepuisNotion(interaction.guild);
+    return interaction.editReply({ content: n > 0 ? `✅ ${n} contrat(s) importé(s) depuis Notion. Ils sont maintenant dans \`/contrat-suivi\`.` : "Aucun nouveau contrat à importer — tout est déjà synchronisé. 👍" });
   }
   if (commandName === 'tresor')            { if (!isOfficierOuDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction et aux Officiers de Terrain.', flags: MessageFlags.Ephemeral }); return notionModules.handleTresorCommand?.(interaction); }
   if (commandName === 'dashboard')         { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return notionModules.handleDashboard?.(interaction); }
@@ -3415,6 +3425,12 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     if (!payload) return interaction.reply({ content: "Aucun contrat enregistré pour le moment.", flags: MessageFlags.Ephemeral });
     return interaction.reply(payload);
   }
+  if (interaction.isButton() && interaction.customId === 'csuivi_import') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const n = await _importContratsDepuisNotion(interaction.guild);
+    return interaction.editReply({ content: n > 0 ? `✅ ${n} contrat(s) importé(s) depuis Notion.` : "Aucun nouveau contrat à importer — tout est déjà synchronisé. 👍" });
+  }
   if (interaction.isStringSelectMenu() && interaction.customId === 'csuivi_select') {
     const c = (loadDB().contrats || []).find(x => String(x.id) === interaction.values[0]);
     if (!c) return interaction.update({ content: "❌ Contrat introuvable.", embeds: [], components: [] });
@@ -3593,6 +3609,9 @@ client.once('clientReady', async () => {
   cron.schedule('*/5 * * * *', async () => {
     for (const g of client.guilds.cache.values()) await checkAgenda(g).catch(() => {});
     for (const g of client.guilds.cache.values()) await rdvplus.checkRappelsClients?.(g).catch(() => {});
+  });
+  cron.schedule('*/5 * * * *', async () => {
+    try { await _importContratsDepuisNotion(client.guilds.cache.first()); } catch {}
   });
   cron.schedule('*/15 * * * *', async () => {
     for (const g of client.guilds.cache.values()) await syncRegistreNotion(g).catch(() => {});
@@ -4137,8 +4156,68 @@ async function _setContratSuiviNotion(contrat, stage) {
     await fetch(`https://api.notion.com/v1/pages/${page.id}`, { method: 'PATCH', headers, body: JSON.stringify({ properties: { 'Suivi': { select: { name: stage } } } }) });
   } catch (e) { console.log('Suivi Notion:', e.message); }
 }
+function _notionPropText(prop) {
+  if (!prop) return '';
+  if (prop.title) return prop.title.map(t => t.plain_text || '').join('');
+  if (prop.rich_text) return prop.rich_text.map(t => t.plain_text || '').join('');
+  if (prop.select) return prop.select.name || '';
+  if (prop.number != null) return String(prop.number);
+  if (prop.date) return prop.date.start || '';
+  return '';
+}
+async function _importContratsDepuisNotion(guild) {
+  if (!process.env.NOTION_TOKEN) return 0;
+  const DB = loadDB().notionContratsDbId || process.env.NOTION_CONTRATS_DB;
+  if (!DB) return 0;
+  const headers = { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' };
+  let pages = []; let cursor = undefined;
+  try {
+    do {
+      const body = { page_size: 100 };
+      if (cursor) body.start_cursor = cursor;
+      const r = await fetch(`https://api.notion.com/v1/databases/${DB}/query`, { method: 'POST', headers, body: JSON.stringify(body) });
+      if (!r.ok) return 0;
+      const d = await r.json();
+      pages = pages.concat(d.results || []);
+      cursor = d.has_more ? d.next_cursor : undefined;
+    } while (cursor);
+  } catch (e) { console.log('Import Notion query:', e.message); return 0; }
+  const db = loadDB();
+  if (!db.contrats) db.contrats = [];
+  const existingIds = new Set(db.contrats.map(c => String(c.id)));
+  let imported = 0; const nouveaux = [];
+  for (const page of pages) {
+    const p = page.properties || {};
+    let ref = _notionPropText(p['Référence']).trim();
+    if (/^EX-00[1-5]$/.test(ref)) continue; // ignorer les exemples fournis
+    if (!ref) {
+      ref = 'NOT-' + Date.now().toString().slice(-5) + Math.floor(Math.random() * 10);
+      try { await fetch(`https://api.notion.com/v1/pages/${page.id}`, { method: 'PATCH', headers, body: JSON.stringify({ properties: { 'Référence': { title: [{ text: { content: ref } }] } } }) }); } catch {}
+    }
+    if (existingIds.has(ref)) continue;
+    const contrat = {
+      id: ref, source: 'notion', type: 'notion',
+      objet: _notionPropText(p['Objet']).trim() || ref,
+      clientNom: _notionPropText(p['Partenaire']).trim(),
+      remuneration: _notionPropText(p['Rémunération']).trim(),
+      typeMission: _notionPropText(p['Type de mission']).trim(),
+      details: _notionPropText(p['Détails']).trim(),
+      dateEcheance: _notionPropText(p['Échéance']).trim() || null,
+      emetteurNom: _notionPropText(p['Émetteur']).trim(),
+      suivi: _notionPropText(p['Suivi']).trim() || 'En attente',
+      status: 'en_attente', createdAt: new Date().toISOString(), notionPageId: page.id,
+    };
+    db.contrats.push(contrat); existingIds.add(ref); nouveaux.push(contrat); imported++;
+  }
+  if (imported > 0) {
+    saveDB(db);
+    if (guild) { try { await ajouterJournalIC(guild, { type: 'contrat', emoji: '📥', titre: `${imported} contrat(s) importé(s) depuis Notion`, description: nouveaux.map(c => `• ${c.id}${c.clientNom ? ' — ' + c.clientNom : ''}`).join('\n').slice(0, 800), auteur: 'Notion' }); } catch {} }
+  }
+  return imported;
+}
 let _contratsSchemaCache = { db: null, cols: null };
 async function _syncContratNotion(contrat, statut, signePar) {
+  if (contrat && contrat.source === 'notion') return; // contrat venu de Notion : on ne le réécrit pas vers Notion (évite d'écraser tes saisies)
   if (!process.env.NOTION_TOKEN) { console.log('⚠️ Contrat Notion: NOTION_TOKEN manquant'); return; }
   const DB = loadDB().notionContratsDbId || process.env.NOTION_CONTRATS_DB;
   if (!DB) { console.log('⚠️ Contrat Notion: aucune base liée (NOTION_CONTRATS_DB ou /connecter-notion-contrats)'); return; }
