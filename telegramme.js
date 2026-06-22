@@ -203,7 +203,7 @@ async function ouvrirConversation(message, { rdvId, demandeurId, nomRP }) {
     if (thread.type === ChannelType.PrivateThread) {
       try {
         const g = message.guild;
-        const cible = r => { const n = (r.name || '').toLowerCase(); return n.includes('opérateur') || n.includes('operateur') || n.includes('homme de main') || n.includes('fondateur'); };
+        const cible = r => { const n = (r.name || '').toLowerCase(); return n.includes('opérateur') || n.includes('operateur') || n.includes('homme de main') || n.includes('fondateur') || n.includes('panseur') || PING_TELEGRAMME.includes(r.id); };
         const ids = new Set();
         for (const role of g.roles.cache.filter(cible).values()) { for (const mem of role.members.values()) ids.add(mem.id); }
         let n = 0;
