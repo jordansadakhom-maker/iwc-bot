@@ -269,7 +269,7 @@ async function ouvrirConversation(message, { rdvId, demandeurId, nomRP }) {
 // ═══════════════════════════════════════════════════════════════
 function _pingRoles(guild) {
   try {
-    const ids = guild.roles.cache.filter(r => { const n = (r.name || '').toLowerCase(); return n.includes('homme') || n.includes('fondateur'); }).map(r => r.id);
+    const ids = guild.roles.cache.filter(r => { const n = (r.name || '').toLowerCase(); return n.includes('homme') || n.includes('fondateur') || n.includes('panseur'); }).map(r => r.id);
     return { content: ids.map(id => `<@&${id}>`).join(' '), ids };
   } catch { return { content: '', ids: [] }; }
 }
