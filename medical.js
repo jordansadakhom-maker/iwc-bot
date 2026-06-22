@@ -27,6 +27,19 @@ function peutGerer(member) { try { return !!member?.roles?.cache?.some(r => r.id
 function _ch(guild, id) { try { return guild.channels.cache.get(id) || null; } catch { return null; } }
 function _dateFR(ts) { try { return new Date(ts).toLocaleDateString('fr-FR'); } catch { return ''; } }
 
+// Brouillons du test d'aptitude entre l'étape 1 et l'étape 2 (clé : `${id}::${userId}`)
+const _aptDrafts = new Map();
+function _aptCleanup() { const now = Date.now(); for (const [k, v] of _aptDrafts) if (now - (v.at || 0) > 3600000) _aptDrafts.delete(k); }
+// Valeurs par défaut (patient en bonne santé) — le médecin n'a qu'à ajuster ce qui cloche.
+const APT_DEF = {
+  apparence: "Posture droite · allure soignée · esprit clair et présent",
+  corps:     "Force bonne · endurance bonne · coordination normale",
+  sensoriel: "Vue normale · ouïe normale · odorat normal · réactivité vive",
+  sante:     "Constitution robuste · pas de fatigue anormale · respiration normale · pouls régulier",
+  habitudes: "Régime correct · consommation modérée · aucun antécédent ni allergie connus",
+  intellect: "Lecture bonne · écriture bonne · calcul bon · compréhension bonne",
+};
+
 const STATUTS = {
   non_teste:   { label: '⏳ Non testé',      couleur: 0x95A5A6 },
   apte:        { label: '✅ Apte',           couleur: 0x2ECC71 },
@@ -352,28 +365,68 @@ async function routeInteraction(interaction) {
       if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé au médecin et à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const id = cid.split('::')[1];
       const gm = await interaction.guild.members.fetch(id).catch(() => null);
-      const modal = new ModalBuilder().setCustomId(`med_apt_modal::${id}`).setTitle('🧪 Test d\'aptitude');
+      const modal = new ModalBuilder().setCustomId(`med_apt_modal::${id}`).setTitle('🧪 Test d\'aptitude (1/2)');
       modal.addComponents(
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('patient').setLabel('Nom du patient (RP)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(gm?.displayName || '')),
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('datelieu').setLabel('Date & lieu d\'examen').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80).setPlaceholder('ex : 6 Septembre 1879 — Rhodes')),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('physique').setLabel('Taille · Poids · apparence').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(120).setPlaceholder('ex : 180 · 79 · cheveux rouges, yeux verts')),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('resume').setLabel('Résumé de l\'examen (l\'essentiel)').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(900).setPlaceholder('Forme physique, sens, santé, état mental, antécédents…')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('physique').setLabel('Taille · Poids · Signes particuliers').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(120).setPlaceholder('ex : 180 cm · 79 kg · cheveux roux, yeux verts')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('apparence').setLabel('Apparence & état général').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue(APT_DEF.apparence)),
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('verdict').setLabel('Verdict : APTE / AVEC RÉSERVES / INAPTE').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(40).setValue('APTE')),
       );
       await interaction.showModal(modal).catch(() => {});
       return true;
     }
+    // Étape 1 → on enregistre, puis on propose l'étape 2 (examen détaillé)
     if (interaction.isModalSubmit?.() && cid.startsWith('med_apt_modal::')) {
       if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      _aptCleanup();
       const id = cid.split('::')[1];
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
-      const input = {
+      _aptDrafts.set(`${id}::${interaction.user.id}`, {
         patient: interaction.fields.getTextInputValue('patient').trim(),
         dateLieu: (interaction.fields.getTextInputValue('datelieu') || '').trim(),
         physique: (interaction.fields.getTextInputValue('physique') || '').trim(),
-        resume: interaction.fields.getTextInputValue('resume').trim(),
+        apparence: (interaction.fields.getTextInputValue('apparence') || '').trim() || APT_DEF.apparence,
         verdict: (interaction.fields.getTextInputValue('verdict') || 'APTE').trim(),
-      };
+        at: Date.now(),
+      });
+      const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`med_apt_next::${id}`).setLabel('Étape 2 — examen détaillé').setEmoji('➡️').setStyle(ButtonStyle.Primary));
+      await interaction.reply({ content: '🧪 **Étape 1 enregistrée.** Clique pour remplir l\'examen détaillé (physique, sens, santé, habitudes, intellect). Tout est pré-rempli — n\'ajuste que ce qui cloche.', components: [row], flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+    // Étape 2 → ouvre le second formulaire (5 cases détaillées, pré-remplies)
+    if (interaction.isButton?.() && cid.startsWith('med_apt_next::')) {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const id = cid.split('::')[1];
+      const draft = _aptDrafts.get(`${id}::${interaction.user.id}`);
+      if (!draft) { await interaction.reply({ content: '⌛ Examen expiré — relance le test (bouton 🧪).', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const modal = new ModalBuilder().setCustomId(`med_apt_modal2::${id}`).setTitle('🧪 Test d\'aptitude (2/2)');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('corps').setLabel('Physique (force · endurance · coordination)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue(APT_DEF.corps)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('sensoriel').setLabel('Sensoriel (vue · ouïe · odorat · réactivité)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue(APT_DEF.sensoriel)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('sante').setLabel('Santé (constitution · respiration · pouls)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue(APT_DEF.sante)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('habitudes').setLabel('Habitudes · antécédents · maladies · allergies').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue(APT_DEF.habitudes)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('intellect').setLabel('Intellect (lecture · écriture · calcul)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue(APT_DEF.intellect)),
+      );
+      await interaction.showModal(modal).catch(() => {});
+      return true;
+    }
+    // Étape 2 soumise → génération + publication du test
+    if (interaction.isModalSubmit?.() && cid.startsWith('med_apt_modal2::')) {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const id = cid.split('::')[1];
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const draft = _aptDrafts.get(`${id}::${interaction.user.id}`) || {};
+      _aptDrafts.delete(`${id}::${interaction.user.id}`);
+      const g = (k, def) => (interaction.fields.getTextInputValue(k) || '').trim() || def;
+      const resume = [
+        `Apparence & état général : ${draft.apparence || APT_DEF.apparence}`,
+        `Physique : ${g('corps', APT_DEF.corps)}`,
+        `Sensoriel : ${g('sensoriel', APT_DEF.sensoriel)}`,
+        `Santé : ${g('sante', APT_DEF.sante)}`,
+        `Habitudes & antécédents : ${g('habitudes', APT_DEF.habitudes)}`,
+        `Intellect : ${g('intellect', APT_DEF.intellect)}`,
+      ].join('\n');
+      const input = { patient: draft.patient || (await interaction.guild.members.fetch(id).catch(() => null))?.displayName || 'Patient', dateLieu: draft.dateLieu || '', physique: draft.physique || '', resume, verdict: draft.verdict || 'APTE' };
       const r = await _genererTest(input);
       const gm = await interaction.guild.members.fetch(id).catch(() => null);
       const embed = _embedTest(input, r, gm);
