@@ -225,16 +225,57 @@ function _deriveType(d) {
   return 'Neutre';
 }
 const FORUM_REPERTOIRE = '1517505221629050901'; // forum dédié au répertoire de contacts (même principe que les opérations)
-async function _publierFiche(interaction, d, fiche) {
+function _ficheRow(contactId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`contact_edit::${contactId}`).setLabel("Modifier").setEmoji("✏️").setStyle(ButtonStyle.Secondary),
+  );
+}
+// Modal pré-rempli pour MODIFIER une fiche existante (les champs à menus se rechoisissent ensuite).
+function _contactEditModal(d, draftId) {
+  const m = new ModalBuilder().setCustomId(`contact_form::e::${draftId}`).setTitle("✏️ Modifier la fiche");
+  const f = (id, label, val, para, max, ph, req) => {
+    const t = new TextInputBuilder().setCustomId(id).setLabel(label).setStyle(para ? TextInputStyle.Paragraph : TextInputStyle.Short).setRequired(!!req).setMaxLength(max);
+    if (ph) t.setPlaceholder(ph);
+    const vv = (val == null ? "" : String(val)).slice(0, max);
+    if (vv) t.setValue(vv);
+    return new ActionRowBuilder().addComponents(t);
+  };
+  m.addComponents(
+    f("nomsurnom", "Nom & surnom", d.nomsurnom, false, 80, "Cole Bradford « Le Coyote »", true),
+    f("telegramme", "Télégramme (numéro)", d.telegramme, false, 40, "00000", false),
+    f("metier", "Métier", d.metier, false, 60, "Forgeron, contrebandier, shérif…", false),
+    f("secteur", "Secteur / lieu", d.secteur, false, 60, "Armadillo, Tumbleweed…", false),
+    f("notes", "Notes", d.notes, true, 500, "Où on l'a croisé, ce qu'il peut fournir…", false),
+  );
+  return m;
+}
+async function _publierFiche(interaction, d, fiche, contactId, editRefs) {
   try {
     const guild = interaction.guild;
+    // ── MODIFICATION en place : édite le message existant (contenu + bouton), sans toucher à la photo ──
+    if (editRefs) {
+      try {
+        const corpsE = fiche.slice(0, 1900);
+        const boutonsE = contactId ? [_ficheRow(contactId)] : [];
+        let msg = null;
+        if (editRefs.threadId) {
+          const th = await guild.channels.fetch(editRefs.threadId).catch(() => null);
+          if (th) msg = await th.fetchStarterMessage().catch(() => null) || (editRefs.msgId ? await th.messages.fetch(editRefs.msgId).catch(() => null) : null);
+        } else if (editRefs.channelId && editRefs.msgId) {
+          const ch = await guild.channels.fetch(editRefs.channelId).catch(() => null);
+          if (ch) msg = await ch.messages.fetch(editRefs.msgId).catch(() => null);
+        }
+        if (msg) { await msg.edit({ content: corpsE, components: boutonsE }).catch(() => {}); return { where: "la fiche", refs: editRefs }; }
+      } catch {}
+      return null; // message d'origine introuvable (supprimé ?)
+    }
     const clean = s => (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
     const titre = `🎴 ${(d.nomsurnom || "Contact").slice(0, 90)}`.slice(0, 100);
     const corps = fiche.slice(0, 1900);
     // Photo optionnelle : fichier réuploadé (pas de lien). On recrée la pièce jointe à chaque tentative d'envoi.
     let buf = null;
     if (d.photoUrl) buf = await _imageBytes(d.photoUrl);
-    const mkPayload = () => buf ? { content: corps, files: [new AttachmentBuilder(buf, { name: 'contact.png' })] } : { content: corps };
+    const mkPayload = () => { const p = buf ? { content: corps, files: [new AttachmentBuilder(buf, { name: 'contact.png' })] } : { content: corps }; if (contactId) p.components = [_ficheRow(contactId)]; return p; };
     // 1) Forum dédié (ID fixe), sinon recherche par nom — on crée un POST de forum (comme les opérations)
     let forum = guild.channels.cache.get(FORUM_REPERTOIRE);
     if (!forum || forum.type !== 15) forum = guild.channels.cache.find(c => c.type === 15 && /repertoire|contact|carnet|annuaire/.test(clean(c.name)));
@@ -246,13 +287,13 @@ async function _publierFiche(interaction, d, fiche) {
       if (appliedTags.length) opts.appliedTags = appliedTags;
       let post = await forum.threads.create(opts).catch(() => null);
       if (!post && appliedTags.length) post = await forum.threads.create({ name: titre, message: mkPayload() }).catch(() => null); // repli sans étiquettes
-      if (post) return { where: `<#${forum.id}>` };
+      if (post) return { where: `<#${forum.id}>`, refs: { threadId: post.id, channelId: forum.id } };
     }
     // 2) Salon texte répertoire
     const textCh = guild.channels.cache.find(c => c.type !== 15 && c.isTextBased?.() && /repertoire|contact|carnet|annuaire/.test(clean(c.name)));
-    if (textCh) { const m = await textCh.send(mkPayload()).catch(() => null); if (m) return { where: `<#${textCh.id}>` }; }
+    if (textCh) { const m = await textCh.send(mkPayload()).catch(() => null); if (m) return { where: `<#${textCh.id}>`, refs: { channelId: textCh.id, msgId: m.id } }; }
     // 3) Salon courant
-    if (interaction.channel && typeof interaction.channel.send === "function") { const m = await interaction.channel.send(mkPayload()).catch(() => null); if (m) return { where: "ce salon" }; }
+    if (interaction.channel && typeof interaction.channel.send === "function") { const m = await interaction.channel.send(mkPayload()).catch(() => null); if (m) return { where: "ce salon", refs: { channelId: interaction.channel.id, msgId: m.id } }; }
     return null;
   } catch { return null; }
 }
@@ -427,6 +468,20 @@ async function routeInteraction(interaction) {
       await interaction.showModal(_contactFormModal()).catch(() => {});
       return true;
     }
+    if (interaction.isModalSubmit?.() && (interaction.customId || "").startsWith("contact_form::e::")) {
+      _cleanupDrafts();
+      const editDraftId = interaction.customId.split("::")[2];
+      const d = _contactDrafts.get(editDraftId);
+      if (!d) { await interaction.reply({ content: "⌛ Modification expirée — rouvre la fiche et reclique **✏️ Modifier**.", flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      d.nomsurnom = (interaction.fields.getTextInputValue("nomsurnom") || "").trim();
+      d.telegramme = (interaction.fields.getTextInputValue("telegramme") || "").trim();
+      d.metier = (interaction.fields.getTextInputValue("metier") || "").trim();
+      d.secteur = (interaction.fields.getTextInputValue("secteur") || "").trim();
+      d.notes = (interaction.fields.getTextInputValue("notes") || "").trim();
+      d.at = Date.now();
+      await interaction.reply({ ..._contactSelectsMsg(d, editDraftId), flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
     if (interaction.isModalSubmit?.() && interaction.customId === "contact_form") {
       _cleanupDrafts();
       const draftId = _id();
@@ -461,21 +516,56 @@ async function routeInteraction(interaction) {
       await interaction.update(_contactSelectsMsg(d, draftId)).catch(() => {});
       return true;
     }
+    // ── Ouvrir la modification d'une fiche publiée (bouton ✏️ sur la fiche) ──
+    if (interaction.isButton?.() && (interaction.customId || "").startsWith("contact_edit::")) {
+      const cid = interaction.customId.split("::")[1];
+      const db = loadDB(); const rep = _ensure(db);
+      const c = (rep.contacts || []).find(x => x.id === cid);
+      if (!c) { await interaction.reply({ content: "⚠️ Fiche introuvable (peut-être supprimée du carnet).", flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      if (!estDirection(interaction.member) && c.par !== interaction.user.id) { await interaction.reply({ content: "🔒 Seuls la Direction ou le créateur de la fiche peuvent la modifier.", flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      _cleanupDrafts();
+      const draftId = _id();
+      _contactDrafts.set(draftId, {
+        nomsurnom: c.nom || c.nomsurnom || "", telegramme: c.telegramme || "", metier: c.metier || "", secteur: c.secteur || "", notes: c.notes || "",
+        affiliation: c.affiliation || "", relation: c.relation || "", fiabilite: c.fiabilite ? String(c.fiabilite) : "", statut: c.statut || "",
+        dernierContact: new Date().toLocaleDateString("fr-FR"),
+        photoUrl: c.photoUrl || null,
+        editContactId: c.id, ficheRefs: c.ficheRefs || null,
+        userId: interaction.user.id, at: Date.now(),
+      });
+      await interaction.showModal(_contactEditModal(_contactDrafts.get(draftId), draftId)).catch(() => {});
+      return true;
+    }
     if (interaction.isButton?.() && (interaction.customId || "").startsWith("contact_gen::")) {
       const draftId = interaction.customId.split("::")[1];
       const d = _contactDrafts.get(draftId);
       if (!d) { await interaction.update({ content: "⌛ Fiche expirée — relance `/contact`.", components: [] }).catch(() => {}); return true; }
       await interaction.deferUpdate().catch(() => {});
       const fiche = _richFiche(d);
-      try {
-        const db = loadDB(); const rep = _ensure(db);
-        rep.contacts.push({ id: _id(), nom: d.nomsurnom, type: _deriveType(d), telegramme: d.telegramme, fiabilite: parseInt(d.fiabilite, 10) || 0, notes: d.notes, metier: d.metier, secteur: d.secteur, affiliation: d.affiliation, relation: d.relation, statut: d.statut, dernierContact: d.dernierContact, par: interaction.user.id, maj: Date.now() });
-        persist(db);
-        await _refreshPanel(interaction.client, rep);
-      } catch {}
-      const posted = await _publierFiche(interaction, d, fiche);
+      const db = loadDB(); const rep = _ensure(db);
+      // ── MODIFICATION d'une fiche existante ──
+      if (d.editContactId) {
+        const c = (rep.contacts || []).find(x => x.id === d.editContactId);
+        if (c) {
+          Object.assign(c, { nom: d.nomsurnom, type: _deriveType(d), telegramme: d.telegramme, fiabilite: parseInt(d.fiabilite, 10) || 0, notes: d.notes, metier: d.metier, secteur: d.secteur, affiliation: d.affiliation, relation: d.relation, statut: d.statut, maj: Date.now(), par: c.par || interaction.user.id });
+          persist(db);
+          await _refreshPanel(interaction.client, rep);
+        }
+        const refs = d.ficheRefs || (c && c.ficheRefs) || null;
+        const edited = await _publierFiche(interaction, d, fiche, d.editContactId, refs);
+        _contactDrafts.delete(draftId);
+        await interaction.editReply({ content: edited ? `✏️ Fiche de **${d.nomsurnom}** mise à jour.` : `✏️ Fiche **${d.nomsurnom}** mise à jour dans le carnet (le message d'origine n'a pas pu être édité — il a peut-être été supprimé).`, components: [] }).catch(() => {});
+        return true;
+      }
+      // ── CRÉATION ──
+      const contactId = _id();
+      const contact = { id: contactId, nom: d.nomsurnom, type: _deriveType(d), telegramme: d.telegramme, fiabilite: parseInt(d.fiabilite, 10) || 0, notes: d.notes, metier: d.metier, secteur: d.secteur, affiliation: d.affiliation, relation: d.relation, statut: d.statut, dernierContact: d.dernierContact, photoUrl: d.photoUrl || null, par: interaction.user.id, maj: Date.now() };
+      try { rep.contacts.push(contact); } catch {}
+      const posted = await _publierFiche(interaction, d, fiche, contactId, null);
+      if (posted && posted.refs) contact.ficheRefs = posted.refs;
+      try { persist(db); await _refreshPanel(interaction.client, rep); } catch {}
       _contactDrafts.delete(draftId);
-      const okMsg = `✅ Fiche de **${d.nomsurnom}** publiée dans ${posted ? posted.where : "—"} et ajoutée au carnet (recherchable avec \`/repertoire\`).`;
+      const okMsg = `✅ Fiche de **${d.nomsurnom}** publiée dans ${posted ? posted.where : "—"} et ajoutée au carnet (recherchable avec \`/repertoire\`). Clique **✏️ Modifier** sur la fiche pour la mettre à jour plus tard.`;
       const koMsg = `⚠️ Je n'ai pas trouvé de salon où publier (répertoire/contacts). La fiche est ajoutée au carnet ; copie-la si besoin :\n\n${fiche}`.slice(0, 1900);
       await interaction.editReply({ content: posted ? okMsg : koMsg, components: [] }).catch(() => {});
       return true;
