@@ -1544,6 +1544,51 @@ function buildParticipantMentions(participants) {
   return participants.map(name => { const val = PARTICIPANTS_MAP[name]; if (!val) return null; const m = val.startsWith('<@') ? val : `<@${val}>`; if (EXCLUS_PING.some(id => m.includes(id))) return null; return m; }).filter(Boolean).join(' ');
 }
 
+// ── Date réelle d'un RDV client télégramme (dateFixee "JJ/MM/AAAA" ou ISO + heureFixee "21h00") ──
+function _rdvClientDate(rdv) {
+  const d = rdv.dateFixee; const h = rdv.heureFixee;
+  if (!d) return null;
+  let jourISO = null;
+  const fr = String(d).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);          // JJ/MM/AAAA
+  if (fr) jourISO = `${fr[3]}-${fr[2].padStart(2, '0')}-${fr[1].padStart(2, '0')}`;
+  else if (/^\d{4}-\d{2}-\d{2}/.test(String(d))) jourISO = String(d).slice(0, 10); // déjà ISO
+  if (!jourISO) return null;
+  const dt = buildRdvDate(jourISO, h);
+  return (dt && !isNaN(dt.getTime())) ? dt : null;
+}
+
+// ── Rappel client 1h avant un RDV télégramme fixé (db.rdvClients) ──
+// Le MP « RDV établi » est déjà envoyé à la fixation ; ici on ajoute le rappel.
+async function checkRappelsRdvClients(guild) {
+  try {
+    const db = loadDB(); let changed = false;
+    for (const rdv of (db.rdvClients || [])) {
+      if (rdv.statut !== 'fixe' || !rdv.demandeurId) continue;
+      const dt = _rdvClientDate(rdv); if (!dt) continue;
+      const mins = Math.floor((dt.getTime() - Date.now()) / 60000);
+      if (!rdv.sentRappel) rdv.sentRappel = {};
+      if (mins > 2 && mins <= 60 && !rdv.sentRappel['1h']) {
+        try {
+          const u = await guild.client.users.fetch(rdv.demandeurId);
+          await u.send([
+            `⏰ **Iron Wolf Company — Rappel de rendez-vous**`,
+            ``,
+            `Bonjour, petit rappel : votre rendez-vous concernant « **${rdv.objet || 'votre demande'}** » a lieu **dans 1 heure**.`,
+            `🗓️ **Date :** ${rdv.dateFixee}`,
+            `🕐 **Heure :** ${rdv.heureFixee}`,
+            `📍 **Lieu :** ${rdv.lieuFixe || '—'}`,
+            ``,
+            `À tout à l'heure.`,
+            `— *Le secrétariat de l'Iron Wolf Company*`,
+          ].join('\n')).catch(() => {});
+        } catch {}
+        rdv.sentRappel['1h'] = true; changed = true;
+      }
+    }
+    if (changed) saveDB(db);
+  } catch (e) { console.log('❌ checkRappelsRdvClients:', e.message); }
+}
+
 async function checkAgenda(guild) {
   const appts = await notionQueryAgenda();
   const ch = getChById(guild, 'AGENDA', 'agenda') || getChById(guild, 'PLANNING', 'planning');
@@ -3782,6 +3827,7 @@ client.once('clientReady', async () => {
   cron.schedule('*/5 * * * *', async () => {
     for (const g of client.guilds.cache.values()) await checkAgenda(g).catch(() => {});
     for (const g of client.guilds.cache.values()) await rdvplus.checkRappelsClients?.(g).catch(() => {});
+    for (const g of client.guilds.cache.values()) await checkRappelsRdvClients(g).catch(() => {});
   });
   // (Import Notion automatique RETIRÉ : il réimportait chaque minute les contrats supprimés après un reset.
   //  Les contrats viennent maintenant de la base locale sauvegardée + import manuel via /import-contrats.)
