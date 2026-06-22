@@ -362,7 +362,7 @@ async function archiverContratReponses(guild, contrat, statut, embed) {
 const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('stats').setDescription('Affiche les statistiques de la Compagnie'),
   new SlashCommandBuilder().setName('solde').setDescription('Affiche les soldes des coffres'),
-  new SlashCommandBuilder().setName('fiche').setDescription("Affiche la fiche d'un membre").addStringOption(o => o.setName('nom').setDescription('Nom du personnage').setRequired(true)),
+  new SlashCommandBuilder().setName('fiche').setDescription("Affiche le dossier complet d'un membre").addUserOption(o => o.setName('membre').setDescription('Membre dont tu veux le dossier complet').setRequired(false)).addStringOption(o => o.setName('nom').setDescription('Ou recherche par nom de personnage').setRequired(false)),
   new SlashCommandBuilder().setName('ops').setDescription('Liste les opérations actives'),
   new SlashCommandBuilder().setName('absent').setDescription('🟡 Déclarer une absence'),
   new SlashCommandBuilder().setName('notes').setDescription('🕵️ Voir les dernières notes de terrain')
@@ -1208,7 +1208,15 @@ async function handleSlashCommand(interaction) {
   }
   if (commandName === 'fiche') {
     if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral });
-    const nom = interaction.options.getString('nom').toLowerCase();
+    const membreOpt = interaction.options.getUser('membre');
+    if (membreOpt) {
+      const gm = await interaction.guild.members.fetch(membreOpt.id).catch(() => null);
+      if (!gm) return interaction.reply({ content: '❌ Membre introuvable sur le serveur.', flags: MessageFlags.Ephemeral });
+      return interaction.reply({ embeds: [_ficheMembreEmbed(gm, db)], flags: MessageFlags.Ephemeral });
+    }
+    const nomRaw = interaction.options.getString('nom');
+    if (!nomRaw) return interaction.reply({ content: 'Indique un **membre** (mention @) ou un **nom** de personnage.', flags: MessageFlags.Ephemeral });
+    const nom = nomRaw.toLowerCase();
     const cand = (db.candidatures || []).find(c => c.status === 'acceptee' && c.nomPerso?.toLowerCase().includes(nom));
     if (!cand) { const nomIC = Object.keys(MEMBRES_DISCORD_MAP).find(n => n.toLowerCase().includes(nom)); if (nomIC) { const discordId = MEMBRES_DISCORD_MAP[nomIC]; const membre = db.members[discordId]; await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle(`👤 Fiche — ${nomIC}`).setDescription('*Membre fondateur — fiche à compléter dans Notion*').addFields({ name: '🎭 Personnage', value: nomIC, inline: true }, { name: '📋 Statut', value: membre?.status === 'absent' ? '⚠️ Absent' : '✅ Actif', inline: true }, { name: '🎖️ Rang', value: membre?.rang || '—', inline: true }).setFooter({ text: 'IWC • Fiche personnage' })], flags: MessageFlags.Ephemeral }); return; } await interaction.reply({ content: `❌ Aucune fiche trouvée pour **${interaction.options.getString('nom')}**.`, flags: MessageFlags.Ephemeral }); return; }
     await interaction.reply({ embeds: [new EmbedBuilder().setColor(cand.type === 'illegal' ? 0x8B1A1A : 0x3B82F6).setTitle(`👤 Fiche — ${cand.nomPerso}`).addFields({ name: '🎭 Personnage', value: cand.nomPerso, inline: true }, { name: '🎂 Âge', value: cand.agePerso || '—', inline: true }, { name: '⚖️ Pôle', value: cand.type === 'illegal' ? '🔪 Illégal' : '⚖️ Légal', inline: true }, { name: '💼 Métier', value: cand.metier || cand.specialite || '—', inline: true }, { name: '🕐 Disponibilités', value: cand.dispos || '—', inline: true }, { name: '📅 Entrée', value: fmtShort(cand.acceptedAt), inline: true }, { name: '📖 Background', value: (cand.background || '—').slice(0, 500) + ((cand.background?.length || 0) > 500 ? '...' : '') }).setFooter({ text: 'IWC • Fiche personnage' })], flags: MessageFlags.Ephemeral });
@@ -4727,6 +4735,41 @@ async function handleAutocompleteGrades(interaction) {
   await interaction.respond(filtered).catch(() => {});
 }
 
+// Dossier complet d'un membre (utilisé par /fiche @membre et le registre forum)
+function _ficheMembreEmbed(guildMember, db) {
+  const id = guildMember.id;
+  const m = (db.members && db.members[id]) || {};
+  const cand = (db.candidatures || []).find(c => c.userId === id && c.status === 'acceptee')
+            || (db.candidatures || []).find(c => c.userId === id) || {};
+  const perso = cand.nomPerso || m.nomRP || guildMember.displayName || guildMember.user.username;
+  const pole = m.pole === 'illegal' ? '🔪 La Confrérie' : (m.pole === 'legal' ? '⚖️ Pôle Légal' : '—');
+  const statut = m.status === 'absent' ? '⚠️ Absent' : (m.status === 'visiteur' ? '👁️ Visiteur' : '✅ Actif');
+  const entree = m.joinedAt || cand.acceptedAt;
+  const histo = (Array.isArray(m.historiqueGrades) && m.historiqueGrades.length)
+    ? m.historiqueGrades.slice(-6).map(h => `• ${fmtShort(h.at)} — ${h.de || '—'} → **${h.vers}**`).join('\n').slice(0, 1024)
+    : '*Aucun changement de grade enregistré.*';
+  const nbContrats = (db.contrats || []).filter(c => c.emetteurId === id || c.signataireId === id).length;
+  const color = m.pole === 'illegal' ? 0x8B1A1A : 0x3B82F6;
+  const e = new EmbedBuilder()
+    .setColor(color)
+    .setTitle(`🪪 DOSSIER — ${perso}`)
+    .addFields(
+      { name: '👤 Joueur', value: `<@${id}>`, inline: true },
+      { name: '🎖️ Grade', value: m.rang || '—', inline: true },
+      { name: '🏛️ Pôle', value: pole, inline: true },
+      { name: '📋 Statut', value: statut, inline: true },
+      { name: '📅 Entrée', value: entree ? fmtShort(entree) : '—', inline: true },
+      { name: '💼 Métier', value: cand.metier || cand.specialite || '—', inline: true },
+    );
+  if (cand.agePerso) e.addFields({ name: '🎂 Âge du perso', value: String(cand.agePerso), inline: true });
+  e.addFields({ name: '📜 Contrats émis', value: String(nbContrats), inline: true });
+  e.addFields({ name: '📈 Historique de grades', value: histo, inline: false });
+  if (cand.background) e.addFields({ name: '📖 Background', value: String(cand.background).slice(0, 600) + (cand.background.length > 600 ? '…' : ''), inline: false });
+  const av = guildMember.user.displayAvatarURL ? guildMember.user.displayAvatarURL() : null;
+  if (av) e.setThumbnail(av);
+  e.setFooter({ text: `IWC • Dossier membre • ${fmtShort(new Date())}` });
+  return e;
+}
 async function _handleRegistre(interaction) {
   if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
