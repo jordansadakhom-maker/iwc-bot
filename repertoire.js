@@ -43,7 +43,7 @@ function _matchType(input) {
   for (const t of TYPES) { if (_norm(t) === n) return t; if (TYPE_ALIAS[t].some(a => n.includes(a))) return t; }
   return 'Neutre';
 }
-function _stars(n) { n = Math.max(0, Math.min(5, parseInt(n, 10) || 0)); return n ? "★".repeat(n) + "☆".repeat(5 - n) : "—"; }
+function _stars(n) { n = Math.max(0, Math.min(5, parseInt(n, 10) || 0)); return n ? "⭐".repeat(n) + "☆".repeat(5 - n) : "—"; }
 function _id() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
 function _ensure(db) {
@@ -206,7 +206,7 @@ function _contactSelectsMsg(d, draftId) {
   const selRow = (cid, ph, opts, chosen) => new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder().setCustomId(cid).setPlaceholder(ph).addOptions(opts.map(o => ({ label: o, value: o, default: chosen === o })))
   );
-  const fiaOpts = [1, 2, 3, 4, 5].map(n => ({ label: "★".repeat(n) + "☆".repeat(5 - n), value: String(n), default: String(d.fiabilite) === String(n) }));
+  const fiaOpts = [1, 2, 3, 4, 5].map(n => ({ label: "⭐".repeat(n) + "☆".repeat(5 - n), value: String(n), default: String(d.fiabilite) === String(n) }));
   const rows = [
     selRow(`contact_aff::${draftId}`, "🪪 Affiliation", C_AFFILIATIONS, d.affiliation),
     selRow(`contact_rel::${draftId}`, "🤝 Relation", C_RELATIONS, d.relation),
