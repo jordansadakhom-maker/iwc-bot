@@ -141,30 +141,33 @@ function buildSignalementEmbed(s, cible, photoUrl, auteur) {
   return e;
 }
 
-// ─── Affichage de l'avis (poster) ───
+// ─── Affichage de l'avis (poster CONCIS — le détail complet est dans le fil) ───
 function buildPoster(t) {
   const st = STATUTS[t.status] || STATUTS.chasse;
   const closed = ['capturee', 'eliminee', 'abandonnee'].includes(t.status);
-  const chasseurs = (t.chasseurs || []).length ? t.chasseurs.map(id => `<@${id}>`).join(', ') : '*Aucun chasseur assigné*';
-  const pistes = (t.pistes || []).slice(-5).reverse();
-  const pistesTxt = pistes.length
-    ? pistes.map(p => `• ${fmtDate(p.at)} — ${p.lieu ? `📍 **${p.lieu}** · ` : ''}${p.info || ''}${p.par ? ` _(${p.par})_` : ''}`).join('\n').slice(0, 1024)
-    : '*Aucune piste signalée.*';
+  const chasseurs = (t.chasseurs || []).length ? t.chasseurs.map(id => `<@${id}>`).join(', ') : '*Aucun*';
+  const nbPistes = (t.pistes || []).length;
+  const clean = v => v && !/^(non visible|aucune? visible|aucun visible|non applicable|non identifiable|n\/a|néant)$/i.test(String(v).trim());
+  const resume = (t.full && clean(t.full.resume)) ? String(t.full.resume) : String(t.signalement || '').slice(0, 200);
+  const trait = (t.full && clean(t.full.trait_distinctif)) ? String(t.full.trait_distinctif) : '';
   const e = new EmbedBuilder()
     .setColor(st.couleur)
     .setTitle(`🎯 AVIS DE RECHERCHE — ${t.cible}`)
-    .setDescription(t.signalement ? `*${String(t.signalement).slice(0, 500)}*` : '*Pas de signalement.*')
+    .setDescription(`${resume ? `*${resume.slice(0, 280)}*\n\n` : ''}🔍 *Description physique complète et discussion → dans le fil ci-dessous.* 👇`)
     .addFields(
-      { name: '📍 Dernière position', value: t.position || '—', inline: true },
-      { name: '⚠️ Dangerosité', value: dangerLabel(t.dangerosite), inline: true },
       { name: '💰 Prime', value: t.prime || '—', inline: true },
-      { name: '👤 Commanditaire', value: t.commanditaire || '—', inline: true },
-      { name: '🎯 Consigne', value: t.vivantMort || 'Indifférent', inline: true },
+      { name: '⚠️ Dangerosité', value: dangerLabel(t.dangerosite), inline: true },
       { name: '📌 Statut', value: st.label, inline: true },
-      { name: '🤠 Chasseurs', value: chasseurs, inline: false },
-      { name: `🧭 Pistes (${(t.pistes || []).length})`, value: pistesTxt, inline: false },
-    )
-    .setFooter({ text: `IWC • Avis ${t.id}${closed && t.resultat ? ' • ' + t.resultat : ''}` });
+      { name: '📍 Dernière position', value: t.position || '—', inline: true },
+      { name: '🎯 Consigne', value: t.vivantMort || 'Indifférent', inline: true },
+      { name: '👤 Commanditaire', value: t.commanditaire || '—', inline: true },
+    );
+  if (trait) e.addFields({ name: '⭐ Signe le plus reconnaissable', value: trait.slice(0, 256), inline: false });
+  e.addFields(
+    { name: '🤠 Chasseurs', value: chasseurs, inline: true },
+    { name: '🧭 Pistes', value: nbPistes ? `**${nbPistes}** signalée(s) — voir le fil` : '*Aucune*', inline: true },
+  );
+  e.setFooter({ text: `IWC • Avis ${t.id}${closed && t.resultat ? ' • ' + t.resultat : ''}` });
   if (t.photo) e.setThumbnail(t.photo);
   if (t.createdAt) e.setTimestamp(new Date(t.createdAt));
   return e;
@@ -237,6 +240,7 @@ async function handleCreateModal(interaction) {
     id: 'AR-' + Date.now().toString().slice(-5),
     cible,
     signalement: interaction.fields.getTextInputValue('signalement') || '',
+    full: (stash && stash.full) ? stash.full : null,
     position: (interaction.fields.getTextInputValue('position') || '').trim() || '—',
     prime, dangerosite, commanditaire, vivantMort,
     status: 'chasse',
@@ -247,7 +251,24 @@ async function handleCreateModal(interaction) {
   };
   if (stash && stash.photoUrl) t.photo = stash.photoUrl;
   const sent = await interaction.channel.send({ content: `<@&${ROLE_CONFRERIE}> — 🎯 **Nouvel avis de recherche.** La traque est ouverte.`, embeds: [buildPoster(t)], components: buildBoutons(t), allowedMentions: { roles: [ROLE_CONFRERIE] } }).catch(() => null);
-  if (sent) t.messageId = sent.id;
+  if (sent) {
+    t.messageId = sent.id;
+    // Ouvrir un fil « Dossier » avec la description physique complète + la discussion
+    try {
+      const thread = await sent.startThread({ name: `🔍 Dossier — ${t.cible}`.slice(0, 100), autoArchiveDuration: 10080 }).catch(() => null);
+      if (thread) {
+        t.threadId = thread.id;
+        const intro = "📋 **Dossier complet de la cible.** Signalez vos pistes (bouton sur l'avis ci-dessus) et échangez sur la traque ici.";
+        if (t.full && typeof t.full === 'object') {
+          await thread.send({ content: intro, embeds: [buildSignalementEmbed(t.full, t.cible, t.photo, t.createdBy)] }).catch(() => {});
+        } else if (t.signalement) {
+          await thread.send({ content: `${intro}\n\n**Signalement :**\n*${String(t.signalement).slice(0, 1500)}*` }).catch(() => {});
+        } else {
+          await thread.send({ content: intro }).catch(() => {});
+        }
+      }
+    } catch {}
+  }
   db.traques.push(t);
   if (sid && db._signalements) delete db._signalements[sid];
   saveDB(db);
@@ -281,7 +302,9 @@ async function handlePisteModal(interaction) {
   const alerte = new EmbedBuilder().setColor(0x3498DB).setTitle(`🧭 Nouvelle piste — ${t.cible}`)
     .setDescription(`${lieu ? `📍 **Lieu :** ${lieu}\n` : ''}🗒️ ${info}`)
     .setFooter({ text: `Signalée par ${interaction.user.username} • ${t.id}` }).setTimestamp();
-  if (interaction.channel?.send) await interaction.channel.send({ content: `<@&${ROLE_CONFRERIE}> — une piste vient d'être signalée sur **${t.cible}**.`, embeds: [alerte], allowedMentions: { roles: [ROLE_CONFRERIE] } }).catch(() => {});
+  const dest = t.threadId ? (await interaction.guild.channels.fetch(t.threadId).catch(() => null)) : null;
+  const cibleDest = dest || interaction.channel;
+  if (cibleDest?.send) await cibleDest.send({ content: `<@&${ROLE_CONFRERIE}> — une piste vient d'être signalée sur **${t.cible}**.`, embeds: [alerte], allowedMentions: { roles: [ROLE_CONFRERIE] } }).catch(() => {});
   return interaction.reply({ content: '✅ Piste enregistrée. Merci, chasseur.', flags: MessageFlags.Ephemeral });
 }
 
@@ -357,7 +380,7 @@ async function handleSignalement(interaction) {
   if (!db._signalements) db._signalements = {};
   for (const k of Object.keys(db._signalements)) { if (Date.now() - (db._signalements[k].at || 0) > 7200000) delete db._signalements[k]; }
   const sid = (Date.now().toString(36) + Math.random().toString(36).slice(2, 5)).slice(-8);
-  db._signalements[sid] = { cible, signalement: _signalementTexte(s), dangerosite: (DANGER[s.dangerosite] ? s.dangerosite : parseDanger(s.dangerosite)), photoUrl: photo.url, createdBy: interaction.user.username, at: Date.now() };
+  db._signalements[sid] = { cible, full: s, signalement: _signalementTexte(s), dangerosite: (DANGER[s.dangerosite] ? s.dangerosite : parseDanger(s.dangerosite)), photoUrl: photo.url, createdBy: interaction.user.username, at: Date.now() };
   saveDB(db);
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`traque_from_signal::${sid}`).setLabel("Créer l'avis de recherche").setEmoji('📌').setStyle(ButtonStyle.Danger),
@@ -438,7 +461,7 @@ async function _traiterPhotoWanted(message, img, cible, idx, total) {
   const recapMsg = await message.channel.send(payload).catch(() => null); // nouveau message (l'édition ne pingue pas) → le ping Confrérie fonctionne
   if (recapMsg && wait) await wait.delete().catch(() => {}); // on retire le message d'attente une fois le récap publié
   const photoUrl = (recapMsg && [...recapMsg.attachments.values()][0]?.url) || img.url;
-  db2._signalements[sid] = { cible, signalement: _signalementTexte(s), dangerosite: (DANGER[s.dangerosite] ? s.dangerosite : parseDanger(s.dangerosite)), photoUrl, createdBy: message.author.username, at: Date.now() };
+  db2._signalements[sid] = { cible, full: s, signalement: _signalementTexte(s), dangerosite: (DANGER[s.dangerosite] ? s.dangerosite : parseDanger(s.dangerosite)), photoUrl, createdBy: message.author.username, at: Date.now() };
   saveDB(db2);
   return true;
 }
