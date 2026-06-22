@@ -5845,15 +5845,10 @@ async function _validerModalAgendaSimple(interaction) {
   const roleIdCible = isIlleg ? ROLE_POLE_ILLEGAL : ROLE_POLE_LEGAL;
   const roleExiste  = interaction.guild.roles.cache.has(roleIdCible);
   const pingRole    = roleExiste ? `<@&${roleIdCible}>` : '';
-  let agendaCh;
-  if (isIlleg) {
-    agendaCh = interaction.guild.channels.cache.get(SALON_HARDCODED.AGENDA_ILLEGAL)
-      || getChById(interaction.guild, 'AGENDA_ILLEGAL', 'agenda-illegal', 'agenda-illégal');
-  } else {
-    agendaCh = getChById(interaction.guild, 'AGENDA', 'agenda');
-  }
+  // Tous les RDV vont dans le même salon #agenda (plus de séparation légal/illégal)
+  const agendaCh = interaction.guild.channels.cache.get('1509638226132996178') || getChById(interaction.guild, 'AGENDA', 'agenda');
   if (agendaCh) await agendaCh.send({ content: `${pingRole ? pingRole + ' — ' : ''}📅 **${titre}** · ${heure} à ${lieu}`, embeds: [embed], allowedMentions: { parse: [], roles: roleExiste ? [roleIdCible] : [] } }).catch(() => {});
-  const salonLabel = isIlleg ? '#agenda-illégal' : '#agenda';
+  const salonLabel = '#agenda';
   const confirmMsg = await interaction.editReply({ content: photoUrl ? '✅ RDV créé avec photo de repérage !' : `✅ RDV créé et posté dans ${salonLabel} !`, embeds: [], components: [] });
   // Supprimer le message intermédiaire "Nouveau RDV — Étape 1/2" dans #contrats
   try {
@@ -6351,15 +6346,8 @@ async function _validerModalRdvIndividuel(interaction) {
     .addFields({ name: '🆔 Référence', value: '`' + rdvId + '`', inline: true }, { name: '📅 Date', value: dateCapital, inline: true }, { name: '🕐 Heure', value: `**${heure}**`, inline: true }, { name: '📍 Lieu', value: lieu, inline: true }, { name: '✍️ Convoqué par', value: emetteurIC, inline: true }, { name: `👥 Participants (${participants.length})`, value: participants.join(', ') || '—' })
     .setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` }).setTimestamp();
   if (notes) embed.addFields({ name: '📋 Ordre du jour', value: notes });
-  // Détecter le pôle de l'émetteur pour poster dans le bon salon
-  const emetteurPole = db.members[interaction.user.id]?.pole || 'legal';
-  let agendaCh;
-  if (emetteurPole === 'illegal') {
-    agendaCh = interaction.guild.channels.cache.get(SALON_HARDCODED.AGENDA_ILLEGAL)
-      || getChById(interaction.guild, 'AGENDA_ILLEGAL', 'agenda-illegal', 'agenda-illégal');
-  } else {
-    agendaCh = getChById(interaction.guild, 'AGENDA', 'agenda');
-  }
+  // Tous les RDV dans le même salon #agenda (plus de séparation légal/illégal)
+  const agendaCh = interaction.guild.channels.cache.get('1509638226132996178') || getChById(interaction.guild, 'AGENDA', 'agenda');
   const mentionsMembres = pending.ids.map(id => `<@${id}>`).join(' ');
   if (agendaCh) await agendaCh.send({ content: `${mentionsMembres} — 📅 Convocation : **${titre}** · ${heure} à ${lieu}`, embeds: [embed] }).catch(() => {});
   for (const uid of pending.ids) { await envoyerDMRecap(interaction.guild, uid, 'rdv', { titre, date: dateCapital, heure, lieu, notes }).catch(() => {}); }
@@ -6426,13 +6414,8 @@ async function _validerModalRdv(interaction) {
     .setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` }).setTimestamp();
   if (notes) embed.addFields({ name: '📋 Ordre du jour', value: notes });
   // Poster dans le bon salon selon le pôle
-  let agendaCh;
-  if (pole === 'illegal') {
-    agendaCh = interaction.guild.channels.cache.get(SALON_HARDCODED.AGENDA_ILLEGAL)
-      || getChById(interaction.guild, 'AGENDA_ILLEGAL', 'agenda-illegal', 'agenda-illégal');
-  } else {
-    agendaCh = getChById(interaction.guild, 'AGENDA', 'agenda');
-  }
+  // Tous les RDV dans le même salon #agenda (plus de séparation légal/illégal)
+  const agendaCh = interaction.guild.channels.cache.get('1509638226132996178') || getChById(interaction.guild, 'AGENDA', 'agenda');
   let mention = ''; if (poleCfg.roleId) mention = `<@&${poleCfg.roleId}>`; else if (pole === 'direction') mention = getMention(interaction.guild); else mention = `<@&${ROLE_POLE_LEGAL}> <@&${ROLE_POLE_ILLEGAL}>`;
   if (agendaCh) await agendaCh.send({ content: `${mention} — 📅 **${titre}** · ${heure} à ${lieu}`, embeds: [embed] }).catch(() => {});
   if (poleCfg.roleId) {
@@ -6473,7 +6456,7 @@ async function _validerModalRdv(interaction) {
       console.log(`❌ RDV pôle Notion échec total (${res.status}) : ${(err2.message || '').slice(0, 200)}`);
     })().catch(e => console.log('❌ Notion RDV pôle error:', e.message));
   }
-  const salonLabel = pole === 'illegal' ? '#agenda-illégal' : '#agenda';
+  const salonLabel = '#agenda';
 
   // ── Attente photo optionnelle ──
   const skipPhotoId = `rdv_skip_photo_${interaction.id}`;
