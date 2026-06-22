@@ -126,9 +126,8 @@ async function routeInteraction(interaction) {
       inline: false,
     });
 
-    const cof = db.coffres || {};
-    if (typeof cof.legal === 'number' || typeof cof.illegal === 'number') {
-      e.addFields({ name: "💰 Trésorerie", value: `Légal : **${cof.legal ?? 0}** · Illégal : **${cof.illegal ?? 0}**`, inline: false });
+    if (typeof db.coffre === 'number') {
+      e.addFields({ name: "💰 Trésorerie", value: `🏦 Coffre commun : **$${(db.coffre || 0).toLocaleString('fr-FR')}**`, inline: false });
     }
 
     e.setFooter({ text: "Iron Wolf Company • diagnostic" });
