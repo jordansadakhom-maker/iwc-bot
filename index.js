@@ -1662,8 +1662,6 @@ async function autoSetup(guild) {
   // Exemples contrats & opérations
   _exempleContratForum(guild).then(() => console.log('📜 Exemple contrat posté')).catch(() => {});
   _exempleOperationForum(guild).then(() => console.log('🎯 Exemple opération posté')).catch(() => {});
-  // Diagnostic forum contrats (liste les forums dans le journal)
-  _diagContrats(guild).catch(() => {});
 
   console.log('✅ Auto-setup terminé\n');
 }
@@ -4548,12 +4546,10 @@ async function _diagContrats(guild) {
 
 // Posts d'EXEMPLE (idempotents) pour contrats & opérations
 async function _exempleContratForum(guild) {
-  const jrn = guild.channels.cache.get('1508756535407542372');
-  const dire = async (m) => { if (jrn?.send) await jrn.send(`🧪 [exemple contrat] ${m}`).catch(() => {}); };
   try {
     let forum = guild.channels.cache.get(FORUM_CONTRATS);
     try { forum = await guild.channels.fetch(FORUM_CONTRATS) || forum; } catch {}
-    if (!forum) { await dire(`forum \`${FORUM_CONTRATS}\` introuvable`); return; }
+    if (!forum) return;
     const e = new EmbedBuilder().setColor(0x999999).setTitle('📜 EXEMPLE — Contrat OFF-000')
       .setDescription('*Exemple : voici à quoi ressemble un contrat. Les vrais sont créés via le panneau des contrats.*')
       .addFields(
@@ -4564,23 +4560,19 @@ async function _exempleContratForum(guild) {
         { name: 'Statut', value: '🟡 En attente', inline: true },
       ).setFooter({ text: 'Iron Wolf Company • Contrat (exemple)' });
     if (forum.type !== 15 || !forum.threads?.create) {
-      if (!forum.send) { await dire(`type ${forum.type} non gérable`); return; }
-      await forum.send({ embeds: [e] }).catch(() => {});
-      await dire(`salon texte (type ${forum.type}) → message envoyé`); return;
+      if (!forum.send) return;
+      const recent = await forum.messages?.fetch({ limit: 30 }).catch(() => null);
+      if (recent && [...recent.values()].some(m => (m.embeds?.[0]?.title || '').includes('EXEMPLE'))) return;
+      await forum.send({ embeds: [e] }).catch(() => {}); return;
     }
     const act = await forum.threads.fetchActive().catch(() => null);
-    if (act?.threads && [...act.threads.values()].some(t => (t.name || '').includes('EXEMPLE'))) { await dire('un post « EXEMPLE » existe déjà → rien fait'); return; }
+    if (act?.threads && [...act.threads.values()].some(t => (t.name || '').includes('EXEMPLE'))) return;
     const tags = forum.availableTags || [];
     const essais = []; if (tags.length) essais.push([tags[0].id]); essais.push(undefined);
-    let post = null, err = '';
-    for (const at of essais) {
-      const opts = { name: '📜 EXEMPLE — Contrat (ne pas supprimer)', message: { embeds: [e] } };
-      if (at) opts.appliedTags = at;
-      try { post = await forum.threads.create(opts); break; } catch (e2) { err = e2.message; }
-    }
-    if (post) { await post.pin().catch(() => {}); await dire(`✅ créé dans #${forum.name}`); }
-    else await dire(`❌ ÉCHEC création dans #${forum.name} — raison : \`${err || 'inconnue'}\` · ${tags.length ? tags.length + ' étiquette(s)' : 'aucune étiquette'}`);
-  } catch (e) { await dire(`💥 exception : ${e.message}`); }
+    let post = null;
+    for (const at of essais) { const opts = { name: '📜 EXEMPLE — Contrat (ne pas supprimer)', message: { embeds: [e] } }; if (at) opts.appliedTags = at; try { post = await forum.threads.create(opts); break; } catch {} }
+    if (post) await post.pin().catch(() => {});
+  } catch {}
 }
 async function _exempleOperationForum(guild) {
   const forum = guild.channels.cache.get('1518349707686973470');
