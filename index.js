@@ -4544,7 +4544,10 @@ async function _exempleContratForum(guild) {
       { name: '📋 Objet', value: 'Escorte d\'une diligence d\'Armadillo à Tumbleweed, protection contre les bandits sur la route.', inline: false },
       { name: 'Statut', value: '🟡 En attente', inline: true },
     ).setFooter({ text: 'Iron Wolf Company • Contrat (exemple)' });
-  const post = await forum.threads.create({ name: '📜 EXEMPLE — Contrat (ne pas supprimer)', message: { embeds: [e] } }).catch(() => null);
+  const optsC = { name: '📜 EXEMPLE — Contrat (ne pas supprimer)', message: { embeds: [e] } };
+  if (forum.availableTags?.length) optsC.appliedTags = [forum.availableTags[0].id];
+  let post = await forum.threads.create(optsC).catch(() => null);
+  if (!post) post = await forum.threads.create({ name: '📜 EXEMPLE — Contrat (ne pas supprimer)', message: { embeds: [e] } }).catch(() => null);
   if (post?.pin) await post.pin().catch(() => {});
 }
 async function _exempleOperationForum(guild) {
@@ -4560,7 +4563,10 @@ async function _exempleOperationForum(guild) {
       { name: '🎯 Objectif', value: 'Intercepter un convoi d\'or de la compagnie minière à l\'aube, sans effusion de sang inutile.', inline: false },
       { name: 'Statut', value: '🟡 En préparation', inline: true },
     ).setFooter({ text: 'La Confrérie • Opération (exemple)' });
-  const post = await forum.threads.create({ name: '🎯 EXEMPLE — Opération (ne pas supprimer)', message: { embeds: [e] } }).catch(() => null);
+  const optsO = { name: '🎯 EXEMPLE — Opération (ne pas supprimer)', message: { embeds: [e] } };
+  if (forum.availableTags?.length) optsO.appliedTags = [forum.availableTags[0].id];
+  let post = await forum.threads.create(optsO).catch(() => null);
+  if (!post) post = await forum.threads.create({ name: '🎯 EXEMPLE — Opération (ne pas supprimer)', message: { embeds: [e] } }).catch(() => null);
   if (post?.pin) await post.pin().catch(() => {});
 }
 async function _posterContratForum(guild, contrat, embed) {
