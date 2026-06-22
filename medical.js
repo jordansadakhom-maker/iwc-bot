@@ -132,7 +132,7 @@ function _actions(id) {
     ),
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`med_test::${id}`).setLabel('Marquer test ✓/✗').setEmoji('✔️').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`med_rdv::${id}`).setLabel('Prochain RDV').setEmoji('📅').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`med_rdv::${id}`).setLabel('Convoquer pour un RDV').setEmoji('📅').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`med_note::${id}`).setLabel('Note').setEmoji('📝').setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder().addComponents(
@@ -255,7 +255,16 @@ async function routeInteraction(interaction) {
       f.prochainRdv = v || null; f.majPar = interaction.member?.displayName || interaction.user.username; f.majAt = Date.now();
       _log(f, v ? `RDV fixé : ${v}` : 'RDV retiré', f.majPar); saveDB(db);
       const gm = await interaction.guild.members.fetch(id).catch(() => null);
-      await interaction.editReply({ content: '✅ RDV mis à jour.', embeds: [_embedFiche(f, gm)], components: _actions(id) }).catch(() => {});
+      // Convoquer le membre : on le prévient directement en MP de son RDV avec le médecin
+      let notif = '';
+      if (v && gm) {
+        const e = new EmbedBuilder().setColor(0x2ECC71).setTitle('🩺 Convocation médicale — Iron Wolf Company')
+          .setDescription(['Le médecin de la compagnie souhaite te voir.', '', `**📅 Rendez-vous :** ${v}`, '', '*Présente-toi au créneau indiqué. En cas d\'empêchement, préviens la Direction.*'].join('\n'))
+          .setFooter({ text: 'Dr. June McCall • Confidentiel' }).setTimestamp();
+        const dm = await gm.send({ embeds: [e] }).catch(() => null);
+        notif = dm ? ' Le membre a été **convoqué en MP**.' : ' *(MP au membre impossible — préviens-le autrement.)*';
+      }
+      await interaction.editReply({ content: `✅ RDV mis à jour.${notif}`, embeds: [_embedFiche(f, gm)], components: _actions(id) }).catch(() => {});
       return true;
     }
 
