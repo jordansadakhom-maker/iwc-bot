@@ -9,7 +9,7 @@ const {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   StringSelectMenuBuilder, SlashCommandBuilder, MessageFlags, AttachmentBuilder,
 } = require('discord.js');
-const { loadDB, saveDB } = require('./db');
+const { loadDB, saveDB, sauvegarderSurGitHub } = require('./db');
 
 const CH_JOURNAL = '1508756535407542372';
 const ROLE_CONFRERIE = '1508898841993281658';
@@ -43,7 +43,7 @@ function journalCh(guild) {
   return guild.channels.cache.get(CH_JOURNAL) || null;
 }
 function fmtDate(d) { if (!d) return '—'; const dt = new Date(d); return isNaN(dt.getTime()) ? String(d) : dt.toLocaleDateString('fr-FR'); }
-function findTraque(db, id) { return (db.traques || []).find(t => t.id === id); }
+function findTraque(db, id) { return (db.traques || []).find(t => t.id === id || t.messageId === id); }
 function dangerLabel(v) { return DANGER[v] || '🟡 Moyen'; }
 
 // ─── Signalement par photo (vision IA) ───
@@ -169,6 +169,7 @@ function buildPoster(t) {
   );
   e.setFooter({ text: `IWC • Avis ${t.id}${closed && t.resultat ? ' • ' + t.resultat : ''}` });
   if (t.photo) e.setThumbnail(t.photo);
+  if (t.photoCapture) e.setImage(t.photoCapture); // preuve de capture/clôture
   if (t.createdAt) e.setTimestamp(new Date(t.createdAt));
   return e;
 }
@@ -287,6 +288,7 @@ async function handleCreateModal(interaction) {
   db.traques.push(t);
   if (sid && db._signalements) delete db._signalements[sid];
   saveDB(db);
+  sauvegarderSurGitHub?.().catch(() => {}); // sauvegarde immédiate : l'avis survit à un redémarrage
   const jc = journalCh(interaction.guild);
   if (jc) await jc.send({ embeds: [new EmbedBuilder().setColor(0xE67E22).setTitle(`🎯 Avis de recherche lancé — ${t.cible}`).setDescription(`Prime : **${t.prime}** · Dangerosité : ${dangerLabel(t.dangerosite)}\nLancé par ${t.createdBy}`).setFooter({ text: `IWC • ${t.id}` }).setTimestamp()] }).catch(() => {});
   await interaction.editReply({ content: `✅ Avis de recherche **${t.id}** publié pour **${cible}**.` });
@@ -341,7 +343,19 @@ async function handleChasseurButton(interaction) {
 // ─── Clôture ───
 async function handleCloturerButton(interaction) {
   if (!estResponsable(interaction.member)) return interaction.reply({ content: '❌ Seul un responsable peut clôturer un avis.', flags: MessageFlags.Ephemeral });
-  const id = interaction.customId.split('::')[1];
+  const db = loadDB();
+  let id = interaction.customId.split('::')[1];
+  // On résout l'avis ici (le bouton est sur l'avis → on a son message). Robuste aux ids périmés.
+  let t = findTraque(db, id) || (db.traques || []).find(x => x.messageId === interaction.message?.id);
+  if (!t) {
+    // Avis orphelin (données perdues après un redémarrage) : on le reconstruit depuis le message
+    if (!db.traques) db.traques = [];
+    const titre = interaction.message?.embeds?.[0]?.title || '';
+    const cible = (titre.split('—')[1] || titre.split(' - ')[1] || 'Cible inconnue').trim() || 'Cible inconnue';
+    t = { id: id || ('AR-' + Date.now().toString().slice(-5)), cible, status: 'chasse', chasseurs: [], pistes: [], prime: '—', dangerosite: 'moyen', position: '—', vivantMort: 'Indifférent', commanditaire: '—', messageId: interaction.message?.id, channelId: interaction.channelId, createdAt: new Date().toISOString(), recupere: true };
+    db.traques.push(t); saveDB(db); sauvegarderSurGitHub?.().catch(() => {});
+  }
+  id = t.id;
   const row = new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder().setCustomId(`traque_cloture_select::${id}`).setPlaceholder('Résultat de la traque...').addOptions(
       { label: 'Capturée', value: 'capturee', emoji: '✅', description: 'Cible capturée vivante' },
@@ -361,11 +375,19 @@ async function handleClotureSelect(interaction) {
   t.closedAt = new Date().toISOString();
   t.resultat = (STATUTS[choix] || {}).label || choix;
   const prime = choix === 'capturee' || choix === 'eliminee' ? t.prime : null;
+  // Clôture avec photo : on invite à déposer une photo dans le fil du dossier (les modals Discord
+  // ne peuvent pas recevoir de fichier → on passe par le fil).
+  let invitePhoto = '';
+  if ((choix === 'capturee' || choix === 'eliminee') && t.threadId) {
+    t.attentePhotoCloture = Date.now();
+    invitePhoto = `\n📸 Pour ajouter une **photo de la capture**, glisse-la dans le fil du dossier <#${t.threadId}> dans l'heure — je l'ajouterai à l'avis.`;
+  }
   saveDB(db);
+  sauvegarderSurGitHub?.().catch(() => {});
   await rafraichir(interaction.guild, t);
   const jc = journalCh(interaction.guild);
   if (jc) await jc.send({ embeds: [new EmbedBuilder().setColor((STATUTS[choix] || {}).couleur || 0x555555).setTitle(`🎯 Avis clôturé — ${t.cible}`).setDescription(`Résultat : **${t.resultat}**${prime ? `\n💰 Prime à verser : **${prime}**` : ''}\nChasseurs : ${(t.chasseurs || []).map(x => `<@${x}>`).join(', ') || '—'}`).setFooter({ text: `IWC • ${t.id}` }).setTimestamp()] }).catch(() => {});
-  return interaction.update({ content: `✅ Avis **${id}** clôturé : ${t.resultat}.${prime ? ` Pense à verser la prime (${prime}) aux chasseurs via ton système d'économie.` : ''}`, components: [] });
+  return interaction.update({ content: `✅ Avis **${id}** clôturé : ${t.resultat}.${prime ? ` Pense à verser la prime (${prime}) aux chasseurs.` : ''}${invitePhoto}`, components: [] });
 }
 
 // ─── Liste des traques en cours ───
@@ -485,6 +507,22 @@ async function onMessage(message) {
   try {
     if (!message.guild || message.author?.bot) return false;
     const db = loadDB();
+    // ── Photo de clôture déposée dans le fil d'un dossier (après "Capturée"/"Éliminée") ──
+    const imgsThread = message.attachments ? [...message.attachments.values()].filter(a => (a.contentType || '').startsWith('image')) : [];
+    if (imgsThread.length && message.channel?.isThread?.()) {
+      const tt = (db.traques || []).find(x => x.threadId === message.channel.id && x.attentePhotoCloture);
+      if (tt && (Date.now() - tt.attentePhotoCloture < 3600000)) {
+        tt.photoCapture = imgsThread[0].url;
+        delete tt.attentePhotoCloture;
+        saveDB(db);
+        sauvegarderSurGitHub?.().catch(() => {});
+        try { await rafraichir(message.guild, tt); } catch {}
+        const jc = journalCh(message.guild);
+        if (jc) await jc.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle(`📸 Preuve de clôture — ${tt.cible}`).setDescription(`Résultat : **${tt.resultat || '—'}**`).setImage(imgsThread[0].url).setFooter({ text: `IWC • ${tt.id}` }).setTimestamp()] }).catch(() => {});
+        await message.react('✅').catch(() => {});
+        return true;
+      }
+    }
     const wid = db.wantedChannelId;
     const isWanted = (wid && message.channel.id === wid) || /wanted|avis.?recherche/i.test(message.channel?.name || '');
     if (!isWanted) return false;
