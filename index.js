@@ -91,6 +91,10 @@ let factures = {};
 try { factures = require('./factures'); console.log('✅ Module factures (Facturation) chargé'); }
 catch (e) { console.log('⚠️ factures non chargé:', e.message); }
 
+let medical = {};
+try { medical = require('./medical'); console.log('✅ Module medical (Suivi médical) chargé'); }
+catch (e) { console.log('⚠️ medical non chargé:', e.message); }
+
 const { fmtLong, fmtShort, daysSince, parisOffsetHours, _fmtDollars } = require('./utils');
 const parrainage = require('./parrainage');
 parrainage.init({ isDirection, isMembre });
@@ -1622,6 +1626,8 @@ async function autoSetup(guild) {
   reseau.installerPanel?.(guild).then(() => console.log('🕵️ Panneau Le Réseau installé')).catch(() => {});
   // Facturation — panneau du salon factures
   factures.installerPanel?.(guild).then(() => console.log('🧾 Panneau Facturation installé')).catch(() => {});
+  // Suivi médical — panneau du salon privé
+  medical.installerPanel?.(guild).then(() => console.log('🩺 Panneau Suivi médical installé')).catch(() => {});
 
   console.log('✅ Auto-setup terminé\n');
 }
@@ -2628,6 +2634,7 @@ client.on('interactionCreate', async interaction => {
   if (await traque.routeInteraction?.(interaction)) return;
   if (await reseau.routeInteraction?.(interaction)) return;
   if (await factures.routeInteraction?.(interaction)) return;
+  if (await medical.routeInteraction?.(interaction)) return;
 
   if (interaction.isAutocomplete()) {
     if (['promo','retro'].includes(interaction.commandName)) return handleAutocompleteGrades(interaction);
