@@ -177,6 +177,62 @@ async function routeInteraction(interaction) {
   try {
     const cid = interaction.customId || '';
 
+    // ── Demande de RDV médical (PUBLIC : tout membre peut demander) ──
+    // Trace + discussion interne dans le salon médical privé ; le patient n'est
+    // PAS ajouté au fil → il ne peut ni voir ni répondre. Accusé de réception en MP.
+    if (interaction.isButton?.() && cid === 'med_demande::open') {
+      const modal = new ModalBuilder().setCustomId('med_demande_modal').setTitle('🩺 Demande de RDV médical');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nomrp').setLabel('Nom de ton personnage').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('motif').setLabel('Motif de la consultation').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(800).setPlaceholder("Décris brièvement ce qui t'amène...")),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('dispos').setLabel('Tes disponibilités').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(120).setPlaceholder('ex : en soirée la semaine, week-end...')),
+      );
+      await interaction.showModal(modal).catch(() => {});
+      return true;
+    }
+    if (interaction.isModalSubmit?.() && cid === 'med_demande_modal') {
+      await interaction.reply({ content: '🩺 Ta demande de rendez-vous médical a bien été transmise au médecin. Il te recontactera en jeu.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      const nomRP  = (interaction.fields.getTextInputValue('nomrp')  || '').trim() || interaction.member?.displayName || interaction.user.username;
+      const motif  = (interaction.fields.getTextInputValue('motif')  || '').trim() || '—';
+      const dispos = (interaction.fields.getTextInputValue('dispos') || '').trim() || '—';
+      const embed = new EmbedBuilder()
+        .setColor(0x2ECC71)
+        .setTitle('🩺 Nouvelle demande de RDV médical')
+        .addFields(
+          { name: '👤 Patient', value: `${nomRP} (<@${interaction.user.id}>)`, inline: false },
+          { name: '📝 Motif', value: motif.slice(0, 1024), inline: false },
+          { name: '🕐 Disponibilités', value: dispos, inline: true },
+          { name: '📅 Reçue le', value: _dateFR(Date.now()), inline: true },
+        )
+        .setFooter({ text: "Discussion interne équipe médicale — le patient n'a pas accès à ce fil." })
+        .setTimestamp();
+      try {
+        const forum = _ch(interaction.guild, MEDICAL_CHANNEL);
+        const titre = `🩺 Demande RDV — ${nomRP}`.slice(0, 100);
+        const contenu = `<@&${ROLE_MEDECIN}> — nouvelle demande de RDV médical à traiter.`;
+        if (forum?.type === 15 && forum.threads?.create) {
+          await forum.threads.create({ name: titre, message: { content: contenu, embeds: [embed], allowedMentions: { roles: [ROLE_MEDECIN] } } }).catch(() => {});
+        } else if (forum?.send) {
+          await forum.send({ content: contenu, embeds: [embed], allowedMentions: { roles: [ROLE_MEDECIN] } }).catch(() => {});
+        }
+      } catch (e) { console.log('❌ med_demande fil:', e.message); }
+      // Accusé de réception en MP (le patient ne peut pas répondre)
+      try {
+        const u = await interaction.client.users.fetch(interaction.user.id);
+        await u.send([
+          '🩺 **Iron Wolf Company — Demande de rendez-vous médical**',
+          '',
+          'Bonjour, ta demande de rendez-vous avec le médecin a bien été **transmise**.',
+          `📝 Motif : ${motif.slice(0, 500)}`,
+          `🕐 Disponibilités : ${dispos}`,
+          '',
+          "Le médecin te recontactera **en jeu**. (Message automatique — inutile d'y répondre.)",
+          "— *Cabinet médical de l'Iron Wolf Company*",
+        ].join('\n')).catch(() => {});
+      } catch {}
+      return true;
+    }
+
     // Ouvrir le sélecteur de membre (Confrérie uniquement)
     if (interaction.isButton?.() && cid === 'med_select') {
       if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Dossier confidentiel — réservé au médecin et à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
@@ -362,4 +418,26 @@ async function installerExemple(guild) {
   if (post?.pin) await post.pin().catch(() => {});
 }
 
-module.exports = { installerPanel, installerExemple, routeInteraction, MEDICAL_CHANNEL, ROLE_MEDECIN };
+// Panneau public « Demander un RDV médical » (à installer dans un salon accessible aux membres)
+async function installerPanelDemande(channel) {
+  if (!channel?.send) return false;
+  const e = new EmbedBuilder()
+    .setColor(0x2ECC71)
+    .setTitle('🩺 Cabinet médical — Iron Wolf Company')
+    .setDescription([
+      '*Besoin de voir le médecin ?*',
+      '',
+      'Clique sur le bouton ci-dessous pour **demander un rendez-vous médical**.',
+      'Indique le motif et tes disponibilités — le médecin sera prévenu et te recontactera **en jeu**.',
+      '',
+      '*Ta demande est confidentielle.*',
+    ].join('\n'))
+    .setFooter({ text: 'Suivi médical · IWC' });
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('med_demande::open').setLabel('Demander un RDV médical').setEmoji('🩺').setStyle(ButtonStyle.Success),
+  );
+  await channel.send({ embeds: [e], components: [row] }).catch(() => {});
+  return true;
+}
+
+module.exports = { installerPanel, installerExemple, installerPanelDemande, routeInteraction, MEDICAL_CHANNEL, ROLE_MEDECIN };

@@ -297,6 +297,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('stats-agent').setDescription('📊 Statistiques de renseignement par agent')
     .addStringOption(o => o.setName('agent').setDescription('Nom d\'un agent précis (optionnel)').setRequired(false)),
   new SlashCommandBuilder().setName('panel-rdv-client').setDescription('📅 Installer le panneau de prise de RDV client (Direction)'),
+  new SlashCommandBuilder().setName('panneau-rdv-medical').setDescription('🩺 Installer le bouton « Demander un RDV médical » (Direction)'),
   new SlashCommandBuilder().setName('rdv-nettoyer').setDescription('🧹 Désépingler tous les vieux télégrammes du salon demandes (Direction)'),
   new SlashCommandBuilder().setName('engagement').setDescription("✒️ Envoyer un contrat d'engagement à signer (Direction)").addUserOption(o => o.setName('membre').setDescription('Membre qui doit signer').setRequired(true)),
   new SlashCommandBuilder().setName('synchroniser').setDescription('🔄 Synchroniser tous les membres dans Notion (Direction)'),
@@ -914,6 +915,12 @@ async function handleSlashCommand(interaction) {
     const salonForm = interaction.guild.channels.cache.get('1512171267560702013') || interaction.channel;
     await salonForm.send({ embeds: [embed], components: [row] });
     return interaction.reply({ content: `✅ Panneau de prise de RDV installé dans ${salonForm}.`, flags: MessageFlags.Ephemeral });
+  }
+
+  if (commandName === 'panneau-rdv-medical') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    const ok = await medical.installerPanelDemande?.(interaction.channel);
+    return interaction.reply({ content: ok ? `✅ Panneau « Demander un RDV médical » installé dans ${interaction.channel}. Les membres peuvent désormais demander un RDV ; chaque demande crée un fil privé dans le salon médical (le patient n'y a pas accès).` : "⚠️ Impossible d'installer le panneau ici.", flags: MessageFlags.Ephemeral });
   }
 
   if (commandName === 'stats-agent') {
