@@ -182,6 +182,20 @@ const SALON_HARDCODED = {
 const NOTION_TRANSACTIONS_DB = '36ff4436a86c80ecb4a9ebcabc104a07';
 
 const REGLEMENT_CHUNKS = [
+  `# 🤝 BIENVENUE — À QUOI SERT CE SERVEUR
+
+Tu viens d'arriver chez la **Iron Wolf Company**. L'essentiel en quelques lignes :
+
+**Ce Discord est l'antichambre de nos affaires.** On y vient surtout pour deux choses :
+
+🎯 **Faire appel à nos services** — escortes, protection, récupérations, enquêtes, négociations… La compagnie prend des **contrats** dans tout New Austin.
+📅 **Nous contacter / prendre rendez-vous** — pour discuter d'une affaire ou monter un contrat avec nous.
+
+👉 **Direction le salon <#1512171267560702013>** : clique sur **« ✉ Envoyer un télégramme »** pour nous laisser un message **ou fixer un rendez-vous**. La Direction te répondra directement.
+
+📜 **Avant tout : lis le règlement ci-dessous et valide-le (réaction ✅).** C'est obligatoire pour rester parmi nous.
+
+━━━━━━━━━━━━━━━━━━━━━━`,
   `# 🐺 RÈGLEMENT — LA CONFRÉRIE
 
 > *Ici, on ne hausse pas le ton. On agit. Et on joue le jeu — tous, sans exception.*
@@ -1030,10 +1044,11 @@ async function handleSlashCommand(interaction) {
         '╚═══════════════════════════════╝',
         '```',
         '*Vous souhaitez faire appel à nos services ?*',
-        '*Protection, escorte, enquête, négociation...*',
+        '*Protection, escorte, enquête, négociation, contrat...*',
         '',
-        '📜 Laissez-nous un **télégramme** en cliquant ci-dessous.',
-        'La Direction étudiera votre demande et vous répondra.',
+        '📜 **Envoyez-nous un télégramme** en cliquant ci-dessous —',
+        'pour exposer votre demande **ou prendre rendez-vous** avec nous.',
+        'La Direction étudiera votre message et vous répondra directement.',
         '',
         '— *« La force est dans l\'ombre. »*',
       ].join('\n'))
@@ -1519,25 +1534,27 @@ async function autoSetup(guild) {
   // Salon du règlement : on cible le salon précis fourni par la Direction (le règlement y est déjà rédigé)
   const reglCh = guild.channels.cache.get('1511135557143629926') || getChById(guild, 'REGLEMENT', 'reglement', 'règlement');
   if (reglCh) {
-    const msgs = await reglCh.messages.fetch({ limit: 30 }).catch(() => null);
-    // Le règlement complet est-il déjà posté par le bot ? (marqueur = titre du règlement)
-    const reglDejaPoste = msgs ? msgs.some(m => m.author.id === client.user.id && m.content.includes('RÈGLEMENT — LA CONFRÉRIE')) : false;
-    if (!reglDejaPoste) {
+    const _valMsg = '```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n✅ VALIDATION DU RÈGLEMENT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```\nLe règlement ci-dessus est affiché en plusieurs parties, mais il forme **un seul et même règlement**.\n\n➡️ **Une seule réaction ✅ sur CE message** valide l\'intégralité (toutes les parties). Pas besoin de réagir partie par partie.\n\n*En réagissant, vous confirmez avoir lu, compris et accepté chaque article.*\n— La Direction';
+    const msgs = await reglCh.messages.fetch({ limit: 50 }).catch(() => null);
+    // Marqueur = l'accueil. S'il manque, on reposte TOUT (accueil → règlement → validation) dans le bon ordre.
+    const accueilDejaPoste = msgs ? msgs.some(m => m.author.id === client.user.id && m.content.includes('BIENVENUE — À QUOI SERT')) : false;
+    if (!accueilDejaPoste) {
+      if (msgs) { for (const m of msgs.values()) { if (m.author.id === client.user.id) await m.delete().catch(() => {}); } }
       const _ids = [];
       for (const _chunk of REGLEMENT_CHUNKS) { const _m = await reglCh.send(_chunk).catch(() => null); if (_m) _ids.push(_m.id); }
       db.reglementChunkIds = _ids;
-      console.log('✅ Règlement complet posté dans #' + reglCh.name + ' (' + _ids.length + ' messages)');
+      const sent = await reglCh.send(_valMsg).catch(() => null);
+      if (sent) { await sent.react('✅').catch(() => {}); db.reglementMsgId = sent.id; }
+      saveDB(db);
+      console.log('✅ Règlement (accueil + validation) reposté dans #' + reglCh.name + ' (' + _ids.length + ' parties)');
+    } else {
+      const existing = msgs ? msgs.find(m => m.author.id === client.user.id && m.content.includes('VALIDATION')) : null;
+      if (existing) { db.reglementMsgId = existing.id; saveDB(db); }
+      else if (!(db.reglementMsgId && (await reglCh.messages.fetch(db.reglementMsgId).catch(() => null)))) {
+        const sent = await reglCh.send(_valMsg).catch(() => null);
+        if (sent) { await sent.react('✅').catch(() => {}); db.reglementMsgId = sent.id; saveDB(db); }
+      }
     }
-    const existing = msgs ? msgs.find(m => m.author.id === client.user.id && m.content.includes('VALIDATION')) : null;
-    if (existing) { db.reglementMsgId = existing.id; }
-    else if (!(db.reglementMsgId && (await reglCh.messages.fetch(db.reglementMsgId).catch(() => null)))) {
-      // Le règlement est déjà écrit par la Direction dans ce salon.
-      // Le bot ajoute SEULEMENT le message de validation avec la réaction ✅.
-      const sent = await reglCh.send('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n✅ VALIDATION DU RÈGLEMENT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```\nLe règlement ci-dessus est affiché en plusieurs parties, mais il forme **un seul et même règlement**.\n\n➡️ **Une seule réaction ✅ sur CE message** valide l\'intégralité (toutes les parties). Pas besoin de réagir partie par partie.\n\n*En réagissant, vous confirmez avoir lu, compris et accepté chaque article.*\n— La Direction');
-      await sent.react('✅'); db.reglementMsgId = sent.id;
-      console.log('✅ Message de validation du règlement posté dans #' + reglCh.name);
-    }
-    saveDB(db);
   }
 
   // Salon « guide des commandes Papiers » : le bot poste le guide s'il n'y est pas déjà (anti-doublon par titre)
