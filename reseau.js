@@ -16,6 +16,9 @@ let dbMod = {}; try { dbMod = require('./db'); } catch { dbMod = {}; }
 const loadDB = dbMod.loadDB || (() => ({}));
 const saveDB = dbMod.saveDB || (() => {});
 
+let _utils = {}; try { _utils = require('./utils'); } catch { _utils = {}; }
+const transcriptionHallucinee = _utils.transcriptionHallucinee || (() => false);
+
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || null;
 
 // ⚠️ Salons (à confirmer / inverser si besoin)
@@ -42,7 +45,8 @@ async function _lireTranscription(guild, sinceTs = 0) {
     .filter(m => m.content && m.createdTimestamp > sinceTs)
     .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
     .map(m => (m.content || '').replace(/\s+/g, ' ').trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter(l => !transcriptionHallucinee(l)); // ignore le charabia halluciné par Whisper
   return lignes.join('\n').slice(0, 8000);
 }
 

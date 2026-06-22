@@ -95,7 +95,7 @@ let medical = {};
 try { medical = require('./medical'); console.log('✅ Module medical (Suivi médical) chargé'); }
 catch (e) { console.log('⚠️ medical non chargé:', e.message); }
 
-const { fmtLong, fmtShort, daysSince, parisOffsetHours, _fmtDollars } = require('./utils');
+const { fmtLong, fmtShort, daysSince, parisOffsetHours, _fmtDollars, transcriptionHallucinee } = require('./utils');
 const parrainage = require('./parrainage');
 parrainage.init({ isDirection, isMembre });
 
@@ -1822,6 +1822,11 @@ client.on('messageReactionAdd', async (reaction, user) => {
       const att = msg.channel;
       const notice = await att.send('🔎 Analyse de la note en cours…').catch(() => null);
       const texte = await _lireTexteNote(msg);
+      if (transcriptionHallucinee(texte)) {
+        if (notice) notice.delete().catch(() => {});
+        const m = await att.send('🌫️ Cette note semble être une transcription brouillée (silence/bruit du jeu, pas de vraie parole) — analyse ignorée.');
+        setTimeout(() => m.delete().catch(() => {}), 15000); return;
+      }
       const analyse = await _analyserNoteContrat(texte);
       if (notice) notice.delete().catch(() => {});
       if (!analyse) { const m = await att.send('⚠️ Impossible d\'analyser la note (IA indisponible ou clé manquante).'); setTimeout(() => m.delete().catch(() => {}), 15000); return; }
