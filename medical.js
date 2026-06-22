@@ -73,7 +73,7 @@ function _embedFiche(f, gm) {
 // Génère le contenu détaillé du test (IA) à partir d'un résumé court + verdict
 async function _genererTest(input) {
   if (!ANTHROPIC_API_KEY) return null;
-  const prompt = `Tu es le Dr. June McCall, médecin praticien agréé (RP western, ~1899, État de Louisiane — Bureau Médical de Rhodes). Tu rédiges un TEST D'APTITUDE MÉDICALE complet et cohérent.
+  const prompt = `Tu es le Dr. June McCall, médecin praticien agréé (RP western, ~1904, État du Texas — Bureau Médical de Blackwater). Tu rédiges un TEST D'APTITUDE MÉDICALE complet et cohérent.
 
 À partir des infos patient, du RÉSUMÉ d'examen du praticien et du VERDICT, génère le contenu détaillé des 7 sections, COHÉRENT avec le résumé et le verdict (un patient APTE a de bons résultats ; un INAPTE présente des faiblesses qui collent au résumé). Ton sérieux, médical, à la première personne du praticien pour les observations.
 
@@ -115,7 +115,7 @@ function _embedTest(input, r, gm) {
   const e = new EmbedBuilder().setColor(col).setTitle('🩺 TEST D\'APTITUDE MÉDICALE')
     .setDescription([
       '*Examen complet de l\'état physique, sensoriel et intellectuel du sujet*',
-      '__**État de Louisiane — Bureau Médical de Rhodes**__',
+      '__**État du Texas — Bureau Médical de Blackwater**__',
       '✦✦✦',
       `**Patient :** ${input.patient}`,
       `**Date & lieu :** ${input.dateLieu || '—'}`,
@@ -368,7 +368,7 @@ async function routeInteraction(interaction) {
       const modal = new ModalBuilder().setCustomId(`med_apt_modal::${id}`).setTitle('🧪 Test d\'aptitude (1/2)');
       modal.addComponents(
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('patient').setLabel('Nom du patient (RP)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(gm?.displayName || '')),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('datelieu').setLabel('Date & lieu d\'examen').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80).setPlaceholder('ex : 6 Septembre 1879 — Rhodes')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('datelieu').setLabel('Date & lieu d\'examen').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80).setPlaceholder('ex : 6 Septembre 1904 — Blackwater')),
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('physique').setLabel('Taille · Poids · Signes particuliers').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(120).setPlaceholder('ex : 180 cm · 79 kg · cheveux roux, yeux verts')),
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('apparence').setLabel('Apparence & état général').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue(APT_DEF.apparence)),
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('verdict').setLabel('Verdict : APTE / AVEC RÉSERVES / INAPTE').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(40).setValue('APTE')),
@@ -455,7 +455,7 @@ async function installerExemple(guild) {
   if (!ch || ch.type !== 15 || !ch.threads?.create) return;
   const act = await ch.threads.fetchActive().catch(() => null);
   if (act?.threads && [...act.threads.values()].some(t => (t.name || '').includes('EXEMPLE'))) return;
-  const input = { patient: 'Sidjay Kelton (EXEMPLE)', dateLieu: '6 Septembre 1879 — Rhodes, Scarlett Meadows', physique: '180 · 79 · cheveux rouges, yeux verts', verdict: 'APTE' };
+  const input = { patient: 'Sidjay Kelton (EXEMPLE)', dateLieu: '6 Septembre 1904 — Blackwater', physique: '180 · 79 · cheveux rouges, yeux verts', verdict: 'APTE' };
   const r = {
     apparence: { posture: 'Droite', aspect: 'Bonne forme, aucun signe distinctif', obs: 'Patient en bonne forme générale.' },
     physique: { force: 'Bonne', endurance: 'Moyenne', coordination: 'Normale', obs: 'Bonnes capacités physiques, bons réflexes.' },

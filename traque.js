@@ -209,7 +209,7 @@ function modalCreation(def, sid) {
   m.addComponents(
     new ActionRowBuilder().addComponents(cibleInput),
     new ActionRowBuilder().addComponents(signInput),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('position').setLabel('Dernière position connue').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Armadillo, Tumbleweed, Fort Mercer, Rio Bravo...')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('position').setLabel('Dernière position connue').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Blackwater, Strawberry, et environs...')),
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prime').setLabel('Prime + dangerosité').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex : 500 $ · élevé  (faible/moyen/élevé/extrême)')),
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('infos').setLabel('Commanditaire + vivant/mort').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex : Shérif de Armadillo · Vivant de préférence')),
   );
@@ -447,7 +447,7 @@ function buildWantedPanel() {
       '🎯 **Avis de recherche**',
       'Clique sur le bouton ci-dessous pour lancer un avis classique (prime, dangerosité, dernière position connue, vivant/mort…).',
     ].join('\n'))
-    .setFooter({ text: 'Iron Wolf Company • New Austin' });
+    .setFooter({ text: 'Iron Wolf Company • État du Texas' });
 }
 function buildWantedButtons() {
   return [new ActionRowBuilder().addComponents(

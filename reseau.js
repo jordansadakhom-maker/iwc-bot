@@ -28,9 +28,9 @@ const CHANNEL_INFORMATEUR   = '1517785774211207288'; // SORTIE : salon informate
 const HEURES = [14, 21]; // briefs auto (Europe/Paris)
 
 const INFORMATEURS = {
-  'La Pie':       { emoji: '🐦', lieu: 'Tumbleweed',  couleur: 0xC8A45C },
-  'Vieux Caleb':  { emoji: '🐴', lieu: 'Armadillo',   couleur: 0x8B5A2A },
-  "L'Adjoint":    { emoji: '🎖️', lieu: 'Fort Mercer', couleur: 0x6B4423 },
+  'La Pie':       { emoji: '🐦', lieu: 'Strawberry', couleur: 0xC8A45C },
+  'Vieux Caleb':  { emoji: '🐴', lieu: 'Blackwater', couleur: 0x8B5A2A },
+  "L'Adjoint":    { emoji: '🎖️', lieu: 'Blackwater', couleur: 0x6B4423 },
 };
 
 function _ch(guild, id) { try { return guild.channels.cache.get(id) || null; } catch { return null; } }
@@ -53,14 +53,14 @@ async function _lireTranscription(guild, sinceTs = 0) {
 // Générer les rapports via l'IA → tableau [{informateur, rapport, piste}]
 async function _genererRapports(transcript) {
   if (!ANTHROPIC_API_KEY || !transcript || transcript.length < 40) return [];
-  const prompt = `Tu es "Le Réseau" d'informateurs d'Iron Wolf Company et de La Confrérie — deux organisations TEXANES du Far West de New Austin (désert, ranchs, Rio Bravo ; villes : Armadillo, Tumbleweed, Fort Mercer). Année ~1899.
+  const prompt = `Tu es "Le Réseau" d'informateurs d'Iron Wolf Company et de La Confrérie — deux organisations de l'ouest de l'État du TEXAS (forêts, ranchs, rivières ; villes principales : Blackwater et Strawberry, et leurs environs). Année ~1904.
 
 Voici une RETRANSCRIPTION de ce qui a été entendu en jeu récemment (dialogues, événements, bruits). Elle est brute, parfois désordonnée ou partielle.
 
 À partir UNIQUEMENT de cette matière, rédige 1 à 3 RAPPORTS d'informateurs. Personnages disponibles :
-- "La Pie" : serveuse du saloon de Tumbleweed, commère, entend les conversations privées.
-- "Vieux Caleb" : palefrenier d'Armadillo, voit qui passe avec quels chevaux et diligences.
-- "L'Adjoint" : homme de loi corrompu de Fort Mercer, au courant des affaires officielles et des primes.
+- "La Pie" : serveuse du saloon de Strawberry, commère, entend les conversations privées.
+- "Vieux Caleb" : palefrenier de Blackwater, voit qui passe avec quels chevaux et diligences.
+- "L'Adjoint" : homme de loi corrompu de Blackwater, au courant des affaires officielles et des primes.
 
 Règles STRICTES :
 - Ancre-toi sur ce qui a RÉELLEMENT été dit/entendu. N'invente PAS d'événements absents de la transcription.
@@ -136,7 +136,7 @@ async function installerPanel(guild) {
   if (existing && [...existing.values()].some(m => m.author?.id === moi && m.components?.length && (m.embeds?.[0]?.title || '').includes('Réseau'))) return;
   const e = new EmbedBuilder().setColor(0x2B2118).setTitle('🕵️ Le Réseau d\'informateurs')
     .setDescription([
-      'Nos oreilles dans tout New Austin.',
+'Nos oreilles dans tout l\'ouest du Texas.',
       '',
       'Le Réseau remonte **automatiquement** ce qui se dit sur le terrain (2× par jour).',
       'Tu peux aussi le faire parler **à la demande** avec le bouton ci-dessous.',
