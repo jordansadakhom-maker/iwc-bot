@@ -108,8 +108,8 @@ process.on('uncaughtException', err => {
   console.log('⚠️ Uncaught Exception:', err?.message || err);
   if (err?.stack) console.log(err.stack.split('\n').slice(0,8).join('\n'));
 });
-process.on('SIGTERM', () => { saveDBSync(); process.exit(0); });
-process.on('SIGINT',  () => { saveDBSync(); process.exit(0); });
+process.on('SIGTERM', async () => { try { await sauvegarderSurGitHub(); } catch {} saveDBSync(); process.exit(0); });
+process.on('SIGINT',  async () => { try { await sauvegarderSurGitHub(); } catch {} saveDBSync(); process.exit(0); });
 
 const client = new Client({
   intents: [
@@ -3593,6 +3593,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const n = (dbR.contrats || []).length;
     dbR.contrats = [];
     saveDB(dbR);
+    await sauvegarderSurGitHub().catch(() => {}); // pousse le reset sur le Gist TOUT DE SUITE (sinon il revient au redémarrage)
     try { await _updatePlanningContrats(interaction.client); } catch {}
     try { await _updateContratPanel(interaction.client); } catch {}
     return interaction.update({ content: `🗑️ **${n} contrat(s) supprimé(s).** Le tableau des échéances et le panneau sont remis à zéro. Tu peux repartir sur du propre. ✅`, components: [] });
@@ -4532,9 +4533,7 @@ const FORUM_CONTRATS = '1518392786301227250';
 // Posts d'EXEMPLE (idempotents) pour contrats & opérations
 async function _exempleContratForum(guild) {
   const forum = guild.channels.cache.get(FORUM_CONTRATS);
-  if (!forum || forum.type !== 15 || !forum.threads?.create) return;
-  const act = await forum.threads.fetchActive().catch(() => null);
-  if (act?.threads && [...act.threads.values()].some(t => (t.name || '').includes('EXEMPLE'))) return;
+  if (!forum) return;
   const e = new EmbedBuilder().setColor(0x999999).setTitle('📜 EXEMPLE — Contrat OFF-000')
     .setDescription('*Exemple : voici à quoi ressemble un contrat. Les vrais sont créés via le panneau des contrats.*')
     .addFields(
@@ -4544,6 +4543,14 @@ async function _exempleContratForum(guild) {
       { name: '📋 Objet', value: 'Escorte d\'une diligence d\'Armadillo à Tumbleweed, protection contre les bandits sur la route.', inline: false },
       { name: 'Statut', value: '🟡 En attente', inline: true },
     ).setFooter({ text: 'Iron Wolf Company • Contrat (exemple)' });
+  if (forum.type !== 15 || !forum.threads?.create) { // salon texte classique
+    if (!forum.send) return;
+    const recent = await forum.messages?.fetch({ limit: 30 }).catch(() => null);
+    if (recent && [...recent.values()].some(m => (m.embeds?.[0]?.title || '').includes('EXEMPLE'))) return;
+    await forum.send({ embeds: [e] }).catch(() => {}); return;
+  }
+  const act = await forum.threads.fetchActive().catch(() => null);
+  if (act?.threads && [...act.threads.values()].some(t => (t.name || '').includes('EXEMPLE'))) return;
   const optsC = { name: '📜 EXEMPLE — Contrat (ne pas supprimer)', message: { embeds: [e] } };
   if (forum.availableTags?.length) optsC.appliedTags = [forum.availableTags[0].id];
   let post = await forum.threads.create(optsC).catch(() => null);
@@ -4552,9 +4559,7 @@ async function _exempleContratForum(guild) {
 }
 async function _exempleOperationForum(guild) {
   const forum = guild.channels.cache.get('1518349707686973470');
-  if (!forum || forum.type !== 15 || !forum.threads?.create) return;
-  const act = await forum.threads.fetchActive().catch(() => null);
-  if (act?.threads && [...act.threads.values()].some(t => (t.name || '').includes('EXEMPLE'))) return;
+  if (!forum) return;
   const e = new EmbedBuilder().setColor(0x999999).setTitle('🎯 EXEMPLE — Opération « Convoi de l\'Aube »')
     .setDescription('*Exemple : voici à quoi ressemble une opération. Les vraies sont créées via le panneau des opérations.*')
     .addFields(
@@ -4563,6 +4568,14 @@ async function _exempleOperationForum(guild) {
       { name: '🎯 Objectif', value: 'Intercepter un convoi d\'or de la compagnie minière à l\'aube, sans effusion de sang inutile.', inline: false },
       { name: 'Statut', value: '🟡 En préparation', inline: true },
     ).setFooter({ text: 'La Confrérie • Opération (exemple)' });
+  if (forum.type !== 15 || !forum.threads?.create) { // salon texte classique
+    if (!forum.send) return;
+    const recent = await forum.messages?.fetch({ limit: 30 }).catch(() => null);
+    if (recent && [...recent.values()].some(m => (m.embeds?.[0]?.title || '').includes('EXEMPLE'))) return;
+    await forum.send({ embeds: [e] }).catch(() => {}); return;
+  }
+  const act = await forum.threads.fetchActive().catch(() => null);
+  if (act?.threads && [...act.threads.values()].some(t => (t.name || '').includes('EXEMPLE'))) return;
   const optsO = { name: '🎯 EXEMPLE — Opération (ne pas supprimer)', message: { embeds: [e] } };
   if (forum.availableTags?.length) optsO.appliedTags = [forum.availableTags[0].id];
   let post = await forum.threads.create(optsO).catch(() => null);
@@ -4572,18 +4585,20 @@ async function _exempleOperationForum(guild) {
 async function _posterContratForum(guild, contrat, embed) {
   try {
     const forum = guild.channels.cache.get(FORUM_CONTRATS);
-    if (!forum || forum.type !== 15 || !forum.threads?.create) return;
+    if (!forum) return;
     const clean = s => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
     const client = contrat.clientNom || contrat.employeurNom || contrat.commanditaire || '';
     const titre = `${contrat.id}${client ? ' — ' + client : ''}`.slice(0, 100);
-    // Catégorisation par étiquettes du forum (type de contrat + statut)
+    const resume = `📜 **Contrat ${contrat.id}**${client ? ` — ${client}` : ''}\n**Objet :** ${(contrat.objet || '—').slice(0, 400)}\n**Rémunération :** ${contrat.remuneration || '—'} · **Statut :** ${contrat.suivi || 'En attente'}`;
+    const msg = embed ? { content: resume, embeds: [embed] } : { content: resume };
+    // Salon texte classique (pas un forum) → simple message
+    if (forum.type !== 15 || !forum.threads?.create) { if (forum.send) await forum.send(msg).catch(() => {}); return; }
+    // Forum → publication catégorisée par étiquettes (type + statut)
     const cf = String(contrat.id).startsWith('CF-') || contrat.type === 'confrerie' || contrat.cc;
     const typeKw = cf ? ['confrerie', 'illegal'] : (contrat.type === 'emploi' ? ['employeur', 'emploi'] : ['prestation', 'offre']);
     const veut = [...typeKw, clean(contrat.suivi || contrat.status || 'en attente')].filter(Boolean);
     const tags = forum.availableTags || [];
     const appliedTags = tags.filter(t => { const tn = clean(t.name); return veut.some(w => w && (tn.includes(w) || w.includes(tn))); }).map(t => t.id).slice(0, 5);
-    const resume = `📜 **Contrat ${contrat.id}**${client ? ` — ${client}` : ''}\n**Objet :** ${(contrat.objet || '—').slice(0, 400)}\n**Rémunération :** ${contrat.remuneration || '—'} · **Statut :** ${contrat.suivi || 'En attente'}`;
-    const msg = embed ? { content: resume, embeds: [embed] } : { content: resume };
     const opts = { name: titre, message: msg };
     if (appliedTags.length) opts.appliedTags = appliedTags;
     let post = await forum.threads.create(opts).catch(() => null);
