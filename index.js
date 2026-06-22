@@ -4764,8 +4764,13 @@ function _ficheMembreEmbed(guildMember, db) {
       { name: '💼 Métier', value: cand.metier || cand.specialite || '—', inline: true },
     );
   if (cand.agePerso) e.addFields({ name: '🎂 Âge du perso', value: String(cand.agePerso), inline: true });
+  if (cand.specialite && cand.specialite !== (cand.metier || '')) e.addFields({ name: '🎯 Spécialité', value: String(cand.specialite).slice(0, 200), inline: true });
+  if (cand.dispos) e.addFields({ name: '🕒 Disponibilités', value: String(cand.dispos).slice(0, 200), inline: true });
+  if (m.lastActivity) e.addFields({ name: '⚡ Dernière activité', value: fmtShort(m.lastActivity), inline: true });
   e.addFields({ name: '📜 Contrats émis', value: String(nbContrats), inline: true });
+  if (m.status === 'absent' && (m.absentRaison || m.absentJusqu)) e.addFields({ name: '⚠️ Absence', value: (`${m.absentRaison ? String(m.absentRaison).slice(0, 150) : ''}${m.absentJusqu ? ` — jusqu'au ${fmtShort(m.absentJusqu)}` : ''}`).trim() || '—', inline: false });
   e.addFields({ name: '📈 Historique de grades', value: histo, inline: false });
+  if (cand.motivation) e.addFields({ name: '💬 Motivation', value: String(cand.motivation).slice(0, 400) + (cand.motivation.length > 400 ? '…' : ''), inline: false });
   if (cand.background) e.addFields({ name: '📖 Background', value: String(cand.background).slice(0, 600) + (cand.background.length > 600 ? '…' : ''), inline: false });
   const av = guildMember.user.displayAvatarURL ? guildMember.user.displayAvatarURL() : null;
   if (av) e.setThumbnail(av);
@@ -4784,27 +4789,50 @@ async function _posterOuMajFiche(guild, forum, gm, db) {
   const existingId = db.ficheForumPosts[id];
   if (existingId) {
     const thread = await guild.channels.fetch(existingId).catch(() => null);
-    if (thread && !thread.archived && thread.fetchStarterMessage) {
+    if (thread && thread.fetchStarterMessage) {
+      if (thread.archived && thread.setArchived) await thread.setArchived(false).catch(() => {});
       const starter = await thread.fetchStarterMessage().catch(() => null);
-      if (starter) { await starter.edit({ embeds: [embed] }).catch(() => {}); return; }
+      if (starter) { await starter.edit({ embeds: [embed] }).catch(() => {}); return 'updated'; }
     }
-    if (thread) return; // existe mais archivé → on laisse (pas de doublon)
+    if (thread) return 'updated'; // existe → pas de doublon
   }
   const post = await forum.threads.create({ name: titre, message: { embeds: [embed] } }).catch(() => null);
-  if (post) db.ficheForumPosts[id] = post.id;
+  if (post) { db.ficheForumPosts[id] = post.id; return 'created'; }
+  return null;
 }
 async function _syncRegistreForum(guild) {
   try {
     const forum = guild.channels.cache.get(FORUM_REGISTRE);
     if (!forum || forum.type !== 15 || !forum.threads?.create) return;
     const db = loadDB();
-    const membres = Object.values(db.members || {}).filter(m => m && m.id && m.status !== 'visiteur' && m.rang && m.rang !== 'Visiteur');
+    if (!db.ficheForumPosts) db.ficheForumPosts = {};
+    // 1) DÉDOUBLONNAGE : on scanne les posts existants (actifs + archivés), on garde 1 seul post par membre, on supprime les doublons.
+    let posts = [];
+    const act = await forum.threads.fetchActive().catch(() => null);
+    if (act?.threads) posts = posts.concat([...act.threads.values()]);
+    const arch = await forum.threads.fetchArchived({ limit: 100 }).catch(() => null);
+    if (arch?.threads) posts = posts.concat([...arch.threads.values()]);
+    const garde = {}; // memberId -> threadId conservé
+    for (const th of posts) {
+      const starter = await th.fetchStarterMessage().catch(() => null);
+      const fld = starter?.embeds?.[0]?.fields?.find(f => /Joueur/i.test(f.name || ''));
+      const mid = (fld?.value || '').match(/(\d{17,20})/)?.[1];
+      if (!mid) continue;
+      if (garde[mid]) { await th.delete().catch(() => {}); } // déjà un post pour ce membre → doublon supprimé
+      else garde[mid] = th.id;
+      await new Promise(r => setTimeout(r, 250));
+    }
+    db.ficheForumPosts = { ...garde }; // mapping reconstruit depuis l'état RÉEL du forum (plus de fantômes)
+    saveDB(db);
+    // 2) CRÉER/METTRE À JOUR une fiche par membre — tout le monde sauf les visiteurs (on ne filtre plus sur le grade).
+    const membres = Object.values(db.members || {}).filter(m => m && m.id && m.status !== 'visiteur');
     let n = 0;
     for (const m of membres) {
-      if (n >= 60) break;
+      if (n >= 80) break;
       const gm = await guild.members.fetch(m.id).catch(() => null);
-      if (!gm) continue;
-      await _posterOuMajFiche(guild, forum, gm, db);
+      if (!gm) continue; // a quitté le serveur → ignoré
+      const res = await _posterOuMajFiche(guild, forum, gm, db);
+      if (res === 'created') saveDB(db); // on persiste tout de suite : si Render redémarre en plein milieu, pas de doublon
       n++;
       await new Promise(r => setTimeout(r, 450)); // throttle anti rate-limit
     }
