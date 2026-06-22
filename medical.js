@@ -14,6 +14,8 @@ let dbMod = {}; try { dbMod = require('./db'); } catch { dbMod = {}; }
 const loadDB = dbMod.loadDB || (() => ({}));
 const saveDB = dbMod.saveDB || (() => {});
 
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || null;
+
 // ⚠️ À DÉFINIR
 const MEDICAL_CHANNEL = '1518574479830155355'; // salon privé où vit le panneau
 const ROLE_MEDECIN = '1518574549875163136';       // rôle du médecin
@@ -54,6 +56,72 @@ function _embedFiche(f, gm) {
   return e;
 }
 
+// Génère le contenu détaillé du test (IA) à partir d'un résumé court + verdict
+async function _genererTest(input) {
+  if (!ANTHROPIC_API_KEY) return null;
+  const prompt = `Tu es le Dr. June McCall, médecin praticien agréé (RP western, ~1899, État de Louisiane — Bureau Médical de Rhodes). Tu rédiges un TEST D'APTITUDE MÉDICALE complet et cohérent.
+
+À partir des infos patient, du RÉSUMÉ d'examen du praticien et du VERDICT, génère le contenu détaillé des 7 sections, COHÉRENT avec le résumé et le verdict (un patient APTE a de bons résultats ; un INAPTE présente des faiblesses qui collent au résumé). Ton sérieux, médical, à la première personne du praticien pour les observations.
+
+Patient : ${input.patient}
+Données physiques : ${input.physique || '—'}
+Résumé d'examen : ${input.resume}
+Verdict : ${input.verdict}
+
+Réponds STRICTEMENT en JSON, rien d'autre :
+{
+ "apparence": {"posture":"Droite/Voûtée/…","aspect":"courte description","obs":"observation"},
+ "physique": {"force":"Faible/Moyenne/Bonne","endurance":"Faible/Moyenne/Bonne","coordination":"Normale/Altérée","obs":"…"},
+ "sensoriel": {"vue":"Normale/Altérée","ouie":"Normale/Altérée","odorat":"Normal/Altéré","toucher":"Normal/Altéré","reactivite":"Vive/Normale/Lente","obs":"…"},
+ "sante": {"constitution":"Robuste/Moyenne/Fragile","fatigue":"Oui/Non","respiration":"Normale/Difficultés","pouls":"Régulier/Irrégulier","obs":"…"},
+ "habitudes": {"regime":"…","consommation":"…","antecedents":"…","obs":"…"},
+ "maladies": {"actuelles":"Aucune/…","passees":"…","allergies":"Aucune/…","traitements":"…","obs":"…"},
+ "intellect": {"lecture":"Bonne/Moyenne/Faible/Nulle","ecriture":"Bonne/Moyenne/Faible/Nulle","calcul":"Bon/Moyen/Faible/Nul","comprehension":"Bon/Moyen/Faible","obs":"…"},
+ "conclusion": "2-3 phrases de motivation du verdict, style praticien"
+}`;
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1600, messages: [{ role: 'user', content: prompt }] }),
+    });
+    const data = await res.json();
+    let txt = (data?.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+    txt = txt.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+    return JSON.parse(txt);
+  } catch (e) { console.log('❌ medical genererTest:', e.message); return null; }
+}
+
+function _sec(pairs, obs) {
+  const line = pairs.filter(([, v]) => v).map(([k, v]) => `**${k} :** ${v}`).join(' · ');
+  return ((line || '—') + (obs ? `\n*${obs}*` : '')).slice(0, 1024);
+}
+
+function _embedTest(input, r, gm) {
+  const col = /inapte/i.test(input.verdict) ? 0xE74C3C : (/r[ée]serve/i.test(input.verdict) ? 0xF1C40F : 0x2ECC71);
+  const e = new EmbedBuilder().setColor(col).setTitle('🩺 TEST D\'APTITUDE MÉDICALE')
+    .setDescription([
+      '*Examen complet de l\'état physique, sensoriel et intellectuel du sujet*',
+      '__**État de Louisiane — Bureau Médical de Rhodes**__',
+      '✦✦✦',
+      `**Patient :** ${input.patient}`,
+      `**Date & lieu :** ${input.dateLieu || '—'}`,
+      input.physique ? `**Données :** ${input.physique}` : '',
+    ].filter(Boolean).join('\n').slice(0, 4000));
+  const s = r || {};
+  if (s.apparence) e.addFields({ name: '§ I — Apparence générale', value: _sec([['Posture', s.apparence.posture], ['Aspect', s.apparence.aspect]], s.apparence.obs) });
+  if (s.physique) e.addFields({ name: '§ II — État physique', value: _sec([['Force', s.physique.force], ['Endurance', s.physique.endurance], ['Coordination', s.physique.coordination]], s.physique.obs) });
+  if (s.sensoriel) e.addFields({ name: '§ III — Capacités sensorielles', value: _sec([['Vue', s.sensoriel.vue], ['Ouïe', s.sensoriel.ouie], ['Odorat', s.sensoriel.odorat], ['Toucher', s.sensoriel.toucher], ['Réactivité', s.sensoriel.reactivite]], s.sensoriel.obs) });
+  if (s.sante) e.addFields({ name: '§ IV — État général de santé', value: _sec([['Constitution', s.sante.constitution], ['Fatigue', s.sante.fatigue], ['Respiration', s.sante.respiration], ['Pouls', s.sante.pouls]], s.sante.obs) });
+  if (s.habitudes) e.addFields({ name: '§ V — Habitudes & antécédents', value: _sec([['Régime', s.habitudes.regime], ['Consommation', s.habitudes.consommation], ['Antécédents', s.habitudes.antecedents]], s.habitudes.obs) });
+  if (s.maladies) e.addFields({ name: '§ VI — Maladies & allergies', value: _sec([['Actuelles', s.maladies.actuelles], ['Passées', s.maladies.passees], ['Allergies', s.maladies.allergies], ['Traitements', s.maladies.traitements]], s.maladies.obs) });
+  if (s.intellect) e.addFields({ name: '§ VII — Capacités intellectuelles', value: _sec([['Lecture', s.intellect.lecture], ['Écriture', s.intellect.ecriture], ['Calcul', s.intellect.calcul], ['Compréhension', s.intellect.comprehension]], s.intellect.obs) });
+  e.addFields({ name: '✦ CONCLUSION — Verdict d\'aptitude', value: `**${(input.verdict || '').toUpperCase()}**\n${s.conclusion || (r ? '' : '_Détails de l\'examen à compléter._')}`.slice(0, 1024) });
+  e.setFooter({ text: 'Dr. June McCall, praticien agréé • Établi de bonne foi, fait foi auprès des autorités. Toute falsification est passible de poursuites (loi fédérale des É.-U.).' });
+  if (gm?.user) e.setThumbnail(gm.user.displayAvatarURL());
+  e.setTimestamp();
+  return e;
+}
+
 function _actions(id) {
   return [
     new ActionRowBuilder().addComponents(
@@ -62,9 +130,12 @@ function _actions(id) {
       new ButtonBuilder().setCustomId(`med_inapte::${id}`).setLabel('Inapte').setEmoji('❌').setStyle(ButtonStyle.Danger),
     ),
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`med_test::${id}`).setLabel('Test d\'aptitude ✓/✗').setEmoji('🧪').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`med_test::${id}`).setLabel('Marquer test ✓/✗').setEmoji('✔️').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`med_rdv::${id}`).setLabel('Prochain RDV').setEmoji('📅').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`med_note::${id}`).setLabel('Note').setEmoji('📝').setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`med_aptitude::${id}`).setLabel('Rédiger le test d\'aptitude').setEmoji('🧪').setStyle(ButtonStyle.Primary),
     ),
   ];
 }
@@ -200,6 +271,51 @@ async function routeInteraction(interaction) {
       _log(f, 'Notes mises à jour', f.majPar); saveDB(db);
       const gm = await interaction.guild.members.fetch(id).catch(() => null);
       await interaction.editReply({ content: '✅ Notes enregistrées.', embeds: [_embedFiche(f, gm)], components: _actions(id) }).catch(() => {});
+      return true;
+    }
+
+    // ── Rédiger le test d'aptitude (formulaire court → rapport généré) ──
+    if (interaction.isButton?.() && cid.startsWith('med_aptitude::')) {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé au médecin et à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const id = cid.split('::')[1];
+      const gm = await interaction.guild.members.fetch(id).catch(() => null);
+      const modal = new ModalBuilder().setCustomId(`med_apt_modal::${id}`).setTitle('🧪 Test d\'aptitude');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('patient').setLabel('Nom du patient (RP)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(gm?.displayName || '')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('datelieu').setLabel('Date & lieu d\'examen').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80).setPlaceholder('ex : 6 Septembre 1879 — Rhodes')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('physique').setLabel('Taille · Poids · apparence').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(120).setPlaceholder('ex : 180 · 79 · cheveux rouges, yeux verts')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('resume').setLabel('Résumé de l\'examen (l\'essentiel)').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(900).setPlaceholder('Forme physique, sens, santé, état mental, antécédents…')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('verdict').setLabel('Verdict : APTE / AVEC RÉSERVES / INAPTE').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(40).setValue('APTE')),
+      );
+      await interaction.showModal(modal).catch(() => {});
+      return true;
+    }
+    if (interaction.isModalSubmit?.() && cid.startsWith('med_apt_modal::')) {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const id = cid.split('::')[1];
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const input = {
+        patient: interaction.fields.getTextInputValue('patient').trim(),
+        dateLieu: (interaction.fields.getTextInputValue('datelieu') || '').trim(),
+        physique: (interaction.fields.getTextInputValue('physique') || '').trim(),
+        resume: interaction.fields.getTextInputValue('resume').trim(),
+        verdict: (interaction.fields.getTextInputValue('verdict') || 'APTE').trim(),
+      };
+      const r = await _genererTest(input);
+      const gm = await interaction.guild.members.fetch(id).catch(() => null);
+      const embed = _embedTest(input, r, gm);
+      const forum = _ch(interaction.guild, MEDICAL_CHANNEL);
+      let posted = false;
+      if (forum?.type === 15 && forum.threads?.create) {
+        const post = await forum.threads.create({ name: `🧪 ${input.patient} — ${input.verdict}`.slice(0, 100), message: { embeds: [embed] } }).catch(() => null);
+        posted = !!post;
+      } else if (forum?.send) { posted = !!(await forum.send({ embeds: [embed] }).catch(() => null)); }
+      const db = loadDB(); const f = _fiche(db, id);
+      f.statut = /inapte/i.test(input.verdict) ? 'inapte' : (/r[ée]serve/i.test(input.verdict) ? 'observation' : 'apte');
+      f.testValide = true; f.testDate = Date.now();
+      f.majPar = interaction.member?.displayName || interaction.user.username; f.majAt = Date.now();
+      _log(f, `Test d'aptitude rédigé — ${input.verdict}`, f.majPar); saveDB(db);
+      await interaction.editReply({ content: posted ? `✅ Test d'aptitude de **${input.patient}** rédigé et posté dans le forum. Statut → **${f.statut}**, test validé.` : '⚠️ Test généré mais impossible de le poster (vérifie les permissions du bot sur le forum).' }).catch(() => {});
       return true;
     }
 
