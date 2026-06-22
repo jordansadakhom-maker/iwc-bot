@@ -48,6 +48,22 @@ function _logMsg(conv, from, name, content, opts = {}) {
   if (conv.messages.length > 300) conv.messages = conv.messages.slice(-300);
 }
 
+// Correction orthographique d'un message (silencieux si pas de clé ; renvoie l'original en cas d'échec).
+async function _corriger(texte) {
+  const t = (texte || '').trim();
+  if (!ANTHROPIC_API_KEY || t.length < 2) return texte;
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1200, messages: [{ role: 'user', content: "Corrige uniquement l'orthographe, la grammaire, les accents et la ponctuation du texte ci-dessous, en français. Ne change NI le sens, NI le style, NI le vocabulaire, NI la mise en forme. N'ajoute aucun commentaire ni guillemet. Réponds UNIQUEMENT par le texte corrigé.\n\nTexte :\n" + t }] }),
+    });
+    const data = await res.json();
+    const out = (data?.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+    return out || texte;
+  } catch (e) { return texte; }
+}
+
 // (B bonus) Résumé IA de l'échange (silencieux s'il n'y a pas de clé).
 async function _resumeIA(conv) {
   if (!ANTHROPIC_API_KEY) return null;
@@ -298,11 +314,19 @@ async function onMessage(message) {
     const user = await message.client.users.fetch(conv.demandeurId).catch(() => null);
     if (!user) { await message.react('⚠️').catch(() => {}); return true; }
     const files = [...message.attachments.values()].map(a => a.url);
+    // Correction orthographique du message envoyé au client (⏳ pendant le traitement)
+    let contentCorr = content;
+    if (content) {
+      await message.react('⏳').catch(() => {});
+      contentCorr = await _corriger(content);
+      const hg = message.reactions?.cache?.find(r => r.emoji?.name === '⏳');
+      if (hg) await hg.users.remove(message.client.user.id).catch(() => {});
+    }
     const sent = await user.send({
       content: files.length ? files.join('\n') : null,
-      embeds: [_embedMP('✉ TÉLÉGRAMME — IRON WOLF COMPANY', [content.slice(0, 3500) || '*(pièce jointe)*', '', '*Répondez à ce message pour continuer.*'], conv.rdvId)],
+      embeds: [_embedMP('✉ TÉLÉGRAMME — IRON WOLF COMPANY', [contentCorr.slice(0, 3500) || '*(pièce jointe)*', '', '*Répondez à ce message pour continuer.*'], conv.rdvId)],
     }).catch(() => null);
-    if (sent) { _logMsg(conv, 'equipe', message.member?.displayName || message.author.username, content, { files: files.length }); persist(db); }
+    if (sent) { _logMsg(conv, 'equipe', message.member?.displayName || message.author.username, contentCorr, { files: files.length }); persist(db); }
     await message.react(sent ? '✅' : '⚠️').catch(() => {});
     return true;
   } catch (e) { console.log('❌ telegramme onMessage:', e.message); return false; }
@@ -323,7 +347,8 @@ async function routeInteraction(interaction) {
     if (!interaction.isButton?.()) return false;
     const isClose = interaction.customId?.startsWith('tg_close::');
     const isReopen = interaction.customId?.startsWith('tg_reopen::');
-    if (!isClose && !isReopen) return false;
+    const isPurge = interaction.customId?.startsWith('tg_purge::');
+    if (!isClose && !isReopen && !isPurge) return false;
 
     if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à l\'équipe.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
     const rdvId = interaction.customId.split('::')[1];
@@ -331,33 +356,57 @@ async function routeInteraction(interaction) {
     const conv = store[rdvId];
     if (!conv) { await interaction.reply({ content: '⚠️ Conversation introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
 
+    // ─── CLASSER : retirer la conversation du salon (le récap reste archivé dans le registre) ───
+    if (isPurge) {
+      await interaction.deferUpdate?.().catch(() => {});
+      const thread0 = await interaction.client.channels.fetch(conv.threadId).catch(() => null);
+      if (!db.registreTelegrammesId && !NOTION_TELEGRAMMES_DB) {
+        if (thread0) await thread0.setArchived(true).catch(() => {});
+        await interaction.followUp?.({ content: '⚠️ Aucun **registre** n\'est configuré : je ne supprime pas (pour ne pas perdre la trace de l\'échange). Installe un registre avec `/registre-telegrammes-installer`, puis réessaie. En attendant, la conversation est archivée.', flags: MessageFlags.Ephemeral }).catch(() => {});
+        return true;
+      }
+      if (conv.status !== 'cloture' && conv.status !== 'classe') { try { await _cloturerAvecRecap(interaction, conv, thread0); } catch {} } // on archive le récap avant de supprimer
+      if (thread0) await thread0.delete().catch(() => {});
+      try {
+        const parent = await interaction.client.channels.fetch(conv.parentChannelId).catch(() => null);
+        if (parent && conv.msgId) { const pm = await parent.messages.fetch(conv.msgId).catch(() => null); if (pm) await pm.delete().catch(() => {}); }
+      } catch {}
+      conv.status = 'classe'; conv.classedAt = Date.now(); persist(db);
+      return true;
+    }
+
     conv.status = isReopen ? 'ouvert' : 'cloture';
     conv[isReopen ? 'reopenedAt' : 'closedAt'] = Date.now();
     persist(db);
 
-    // Met à jour le bouton du message d'intro
-    const newRow = new ActionRowBuilder().addComponents(
-      isReopen
-        ? new ButtonBuilder().setCustomId(`tg_close::${rdvId}`).setLabel('🔒 Clôturer la conversation').setStyle(ButtonStyle.Danger)
-        : new ButtonBuilder().setCustomId(`tg_reopen::${rdvId}`).setLabel('♻️ Rouvrir la conversation').setStyle(ButtonStyle.Secondary),
-    );
+    // (1) FEEDBACK IMMÉDIAT : on met à jour les boutons tout de suite
+    const closeBtn = new ButtonBuilder().setCustomId(`tg_close::${rdvId}`).setLabel('🔒 Clôturer la conversation').setStyle(ButtonStyle.Danger);
+    const reopenBtn = new ButtonBuilder().setCustomId(`tg_reopen::${rdvId}`).setLabel('♻️ Rouvrir').setStyle(ButtonStyle.Secondary);
+    const purgeBtn = new ButtonBuilder().setCustomId(`tg_purge::${rdvId}`).setLabel('🗑️ Classer (retirer du salon)').setStyle(ButtonStyle.Secondary);
+    const newRow = new ActionRowBuilder().addComponents(...(isReopen ? [closeBtn] : [reopenBtn, purgeBtn]));
     await interaction.update({ components: [newRow] }).catch(() => { interaction.deferUpdate?.().catch(() => {}); });
 
-    // Notifier le client
-    const user = await interaction.client.users.fetch(conv.demandeurId).catch(() => null);
-    if (user) {
+    // (2) Confirmation visible immédiate dans le fil
+    const thread = await interaction.client.channels.fetch(conv.threadId).catch(() => null);
+    if (thread) await thread.send(isReopen ? `♻️ **Conversation rouverte** par <@${interaction.user.id}>.` : `🔒 **Conversation clôturée** par <@${interaction.user.id}>.`).catch(() => {});
+
+    // (3) Prévenir le client (en arrière-plan, sans bloquer le feedback)
+    interaction.client.users.fetch(conv.demandeurId).then(u => {
+      if (!u) return;
       const e = isReopen
         ? _embedMP('✉ CONVERSATION ROUVERTE', ['Iron Wolf Company a rouvert votre échange.', '', 'Vous pouvez de nouveau **répondre à ce message**.'], rdvId)
         : _embedMP('📪 CONVERSATION CLÔTURÉE', ['Votre échange avec Iron Wolf Company est terminé. Merci !', '', 'Pour une nouvelle demande, repassez par le bouton **✉ Envoyer un télégramme**.'], rdvId);
-      await user.send({ embeds: [e] }).catch(() => {});
-    }
+      u.send({ embeds: [e] }).catch(() => {});
+    }).catch(() => {});
 
-    // Mettre à jour le fil (+ récap de clôture)
-    const thread = await interaction.client.channels.fetch(conv.threadId).catch(() => null);
-    if (isClose) { try { await _cloturerAvecRecap(interaction, conv, thread); } catch {} }
-    if (thread) {
-      await thread.send(isReopen ? `♻️ **Conversation rouverte** par <@${interaction.user.id}>.` : `🔒 **Conversation clôturée** par <@${interaction.user.id}>.`).catch(() => {});
-      await thread.setArchived(!isReopen).catch(() => {});
+    // (4) Récap + archive (en arrière-plan : ne bloque plus l'affichage)
+    if (isClose) {
+      (async () => {
+        try { await _cloturerAvecRecap(interaction, conv, thread); } catch {}
+        if (thread) await thread.setArchived(true).catch(() => {});
+      })();
+    } else if (thread) {
+      await thread.setArchived(false).catch(() => {});
     }
     return true;
   } catch (e) {
