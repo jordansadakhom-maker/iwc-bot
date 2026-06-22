@@ -267,10 +267,14 @@ async function ouvrirConversation(message, { rdvId, demandeurId, nomRP }) {
 //  RELAIS DES MESSAGES (appelé par index.js dans messageCreate)
 //  → renvoie true si le message a été pris en charge
 // ═══════════════════════════════════════════════════════════════
+const PING_TELEGRAMME = ['1508290255055229019', '1508459187456442561']; // rôles à ping en plus (par ID)
 function _pingRoles(guild) {
   try {
-    const ids = guild.roles.cache.filter(r => { const n = (r.name || '').toLowerCase(); return n.includes('homme') || n.includes('fondateur') || n.includes('panseur'); }).map(r => r.id);
-    return { content: ids.map(id => `<@&${id}>`).join(' '), ids };
+    const ids = new Set();
+    for (const id of PING_TELEGRAMME) if (guild.roles.cache.has(id)) ids.add(id);
+    guild.roles.cache.forEach(r => { const n = (r.name || '').toLowerCase(); if (n.includes('homme') || n.includes('fondateur') || n.includes('panseur')) ids.add(r.id); });
+    const arr = [...ids];
+    return { content: arr.map(id => `<@&${id}>`).join(' '), ids: arr };
   } catch { return { content: '', ids: [] }; }
 }
 
