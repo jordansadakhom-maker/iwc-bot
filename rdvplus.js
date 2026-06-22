@@ -72,14 +72,8 @@ function _salonDemandes(guild) {
     || guild.channels.cache.find(c => c.isTextBased?.() && /demande|rendez|t[ée]l[ée]gramme/i.test(c.name))
     || null;
 }
-// Salon où atterrit la demande pour validation par l'équipe : Agenda (légal) ou Agenda illégal
+// Tous les RDV vont dans le MÊME salon #agenda (plus de séparation légal/illégal)
 function _salonAgenda(guild, illegal) {
-  if (illegal) {
-    return guild.channels.cache.get(SALON_AGENDA_ILLEGAL)
-      || guild.channels.cache.find(c => c.isTextBased?.() && /agenda.?ill[ée]gal/i.test(c.name))
-      || guild.channels.cache.get(SALON_AGENDA)
-      || _salonDemandes(guild);
-  }
   return guild.channels.cache.get(SALON_AGENDA)
     || guild.channels.cache.find(c => c.isTextBased?.() && /agenda|planning/i.test(c.name))
     || _salonDemandes(guild);
