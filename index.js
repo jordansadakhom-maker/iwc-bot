@@ -87,6 +87,10 @@ let reseau = {};
 try { reseau = require('./reseau'); console.log('✅ Module reseau (Le Réseau d\'informateurs) chargé'); }
 catch (e) { console.log('⚠️ reseau non chargé:', e.message); }
 
+let factures = {};
+try { factures = require('./factures'); console.log('✅ Module factures (Facturation) chargé'); }
+catch (e) { console.log('⚠️ factures non chargé:', e.message); }
+
 const { fmtLong, fmtShort, daysSince, parisOffsetHours, _fmtDollars } = require('./utils');
 const parrainage = require('./parrainage');
 parrainage.init({ isDirection, isMembre });
@@ -1616,6 +1620,8 @@ async function autoSetup(guild) {
   _syncRegistreForum(guild).then(() => console.log('🗂️ Registre forum synchronisé')).catch(() => {});
   // Le Réseau — panneau du salon informateur
   reseau.installerPanel?.(guild).then(() => console.log('🕵️ Panneau Le Réseau installé')).catch(() => {});
+  // Facturation — panneau du salon factures
+  factures.installerPanel?.(guild).then(() => console.log('🧾 Panneau Facturation installé')).catch(() => {});
 
   console.log('✅ Auto-setup terminé\n');
 }
@@ -2621,6 +2627,7 @@ client.on('interactionCreate', async interaction => {
   if (await tableaubord.routeInteraction?.(interaction)) return;
   if (await traque.routeInteraction?.(interaction)) return;
   if (await reseau.routeInteraction?.(interaction)) return;
+  if (await factures.routeInteraction?.(interaction)) return;
 
   if (interaction.isAutocomplete()) {
     if (['promo','retro'].includes(interaction.commandName)) return handleAutocompleteGrades(interaction);
@@ -3616,6 +3623,8 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const solde = dbX.coffres[pole];
     c.suivi = 'Honoré'; c.remuVerseAuCoffre = montant; c.honoreAt = new Date().toISOString();
     saveDB(dbX);
+    // 🧾 Trace écrite : facture automatique dans le forum des factures
+    factures.creerFactureContrat?.(interaction.guild, c, { montant, par: interaction.user.username, parId: interaction.user.id }).catch(() => {});
     _setContratSuiviNotion(c, 'Honoré').catch(() => {});
     const coffreLabel = pole === 'illegal' ? '🔒 Illégal' : '⚖️ Légal';
     try { await ajouterJournalIC(interaction.guild, { type: 'tresorerie', emoji: '💵', titre: `Entrée — Coffre ${pole === 'illegal' ? 'Illégal' : 'Légal'}`, description: `Contrat **${c.id}** honoré · +$${montant.toLocaleString('fr-FR')} · ${String(c.clientNom || c.commanditaire || '')}`.slice(0, 300), auteur: interaction.user.username }); } catch {}
@@ -3623,7 +3632,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     _syncTransactionNotion({ type: 'Entrée', coffre: pole, montant, objet: `Contrat ${c.id} honoré`, responsable: interaction.user.username, solde, date: new Date().toISOString(), discordId: interaction.user.id, userId: interaction.user.id }).catch(() => {});
     _updateContratPanel(interaction.client).catch(() => {});
     _updatePlanningContrats(interaction.client).catch(() => {});
-    return interaction.editReply({ content: `🏁 **Contrat ${c.id} honoré !**\n💰 **+$${montant.toLocaleString('fr-FR')}** versés au coffre ${coffreLabel}.\n💼 Nouveau solde : **$${solde.toLocaleString('fr-FR')}**\n📒 Étape passée à **Honoré** (Notion + journal de bord).` });
+    return interaction.editReply({ content: `🏁 **Contrat ${c.id} honoré !**\n💰 **+$${montant.toLocaleString('fr-FR')}** versés au coffre ${coffreLabel}.\n💼 Nouveau solde : **$${solde.toLocaleString('fr-FR')}**\n🧾 Facture créée dans le forum (trace écrite).\n📒 Étape passée à **Honoré** (Notion + journal de bord).` });
   }
   if (interaction.isButton() && interaction.customId.startsWith('signer_offre_')) {
     const contratId = interaction.customId.replace('signer_offre_', ''); const contrat = (db.contrats || []).find(c => c.id === contratId);
