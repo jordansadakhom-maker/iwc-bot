@@ -1628,6 +1628,7 @@ async function autoSetup(guild) {
   factures.installerPanel?.(guild).then(() => console.log('🧾 Panneau Facturation installé')).catch(() => {});
   // Suivi médical — panneau du salon privé
   medical.installerPanel?.(guild).then(() => console.log('🩺 Panneau Suivi médical installé')).catch(() => {});
+  medical.installerExemple?.(guild).then(() => console.log('🩺 Exemple test d\'aptitude posté')).catch(() => {});
 
   console.log('✅ Auto-setup terminé\n');
 }
@@ -3777,9 +3778,8 @@ client.once('clientReady', async () => {
     for (const g of client.guilds.cache.values()) await checkAgenda(g).catch(() => {});
     for (const g of client.guilds.cache.values()) await rdvplus.checkRappelsClients?.(g).catch(() => {});
   });
-  cron.schedule('* * * * *', async () => {
-    try { await _importContratsDepuisNotion(client.guilds.cache.first()); } catch {}
-  });
+  // (Import Notion automatique RETIRÉ : il réimportait chaque minute les contrats supprimés après un reset.
+  //  Les contrats viennent maintenant de la base locale sauvegardée + import manuel via /import-contrats.)
   cron.schedule('*/5 * * * *', async () => { try { await _updateContratPanel(client); } catch {} try { await _updatePlanningContrats(client); } catch {} });
   cron.schedule('0 18 * * *', async () => {
     try { const u = await client.users.fetch('944208797084311583').catch(() => null); if (u) await u.send({ embeds: [_genererRecapEmbed(loadDB())] }).catch(() => {}); } catch {}
