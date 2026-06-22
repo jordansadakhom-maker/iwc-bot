@@ -740,7 +740,7 @@ async function envoyerRapportDirection(guild) {
     const opsTermHier = (db.operations || []).filter(o => o.status === 'terminee' && depuisHier(o.endedAt));
     const alertes = Object.values(db.members || {}).filter(m => m.status !== 'parti' && daysSince(m.lastActivity) > 7);
     const visiteurs = Object.values(db.members || {}).filter(m => m.status === 'visiteur');
-    const soldeLegal = db.coffres?.legal || 0; const soldeIlleg = db.coffres?.illegal || 0;
+    const soldeLegal = db.coffre || 0; const soldeIlleg = 0;
     const embed = new EmbedBuilder().setColor(0x8B1A1A)
       .setTitle(`📋 Rapport hebdomadaire — Semaine du ${new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}`)
       .setDescription('*Résumé des dernières 24 heures — Iron Wolf Company*')
@@ -1229,8 +1229,8 @@ async function handleSlashCommand(interaction) {
     if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral }); await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV5.handleStatsAvancees?.(interaction); }
   if (commandName === 'solde') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
-    const soldeLegal = db.coffres?.legal || 0; const soldeIlleg = db.coffres?.illegal || 0;
-    await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('💰 Soldes des coffres — IWC').addFields({ name: '⚖️ Coffre Légal', value: `**$${soldeLegal.toLocaleString('fr-FR')}**`, inline: true }, { name: '🔒 Coffre Illégal', value: `**$${soldeIlleg.toLocaleString('fr-FR')}**`, inline: true }, { name: '💎 Total', value: `**$${(soldeLegal + soldeIlleg).toLocaleString('fr-FR')}**`, inline: true }).setFooter({ text: `IWC • ${fmtShort(new Date())}` })], flags: isDirection(interaction.member) ? undefined : MessageFlags.Ephemeral });
+    const solde = db.coffre || 0;
+    await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('🏦 Coffre commun — IWC').addFields({ name: '💰 Solde', value: `**$${solde.toLocaleString('fr-FR')}**`, inline: false }).setFooter({ text: `IWC • ${fmtShort(new Date())}` })], flags: isDirection(interaction.member) ? undefined : MessageFlags.Ephemeral });
     return;
   }
   if (commandName === 'fiche') {
@@ -2511,9 +2511,9 @@ client.on('messageCreate', async message => {
       const type = get('TYPE').toLowerCase().includes('sort') ? 'Sortie' : 'Entrée';
       const montant = (() => { const n = parseInt((get('MONTANT') || '').replace(/[^0-9]/g, ''), 10); return isNaN(n) ? 0 : n; })();
       const objet = get('OBJET') || '—'; const responsable = get('RESPONSABLE') || message.author.username;
-      const dbFresh = loadDB(); if (!dbFresh.coffres) dbFresh.coffres = { legal: 0, illegal: 0 };
-      dbFresh.coffres.illegal += (type === 'Sortie' ? -montant : montant);
-      const solde = dbFresh.coffres.illegal; saveDB(dbFresh);
+      const dbFresh = loadDB(); if (typeof dbFresh.coffre !== 'number') dbFresh.coffre = 0;
+      dbFresh.coffre = Math.max(0, dbFresh.coffre + (type === 'Sortie' ? -montant : montant));
+      const solde = dbFresh.coffre; saveDB(dbFresh);
       // Sync Notion DB transactions
       await notionExtra.enregistrerTransactionNotion?.({ type, coffre: '🔒 Illégal', montant, objet, responsable, solde });
       _syncTransactionNotion({ type, coffre: 'illegal', montant, objet, responsable, solde, date: new Date().toISOString(), discordId: message.author.id, userId: message.author.id }).catch(() => {});
@@ -3036,6 +3036,22 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId.startsWith('tresor_refuser_'))   return notionModules.handleTresorValidation?.(interaction, 'refuser');
     if (interaction.customId.startsWith('tresor_'))           return notionModules.handleTresorFlow?.(interaction);
     if (interaction.customId === 'btn_solde')                 return notionModules.handleSoldeButton?.(interaction);
+    if (interaction.customId === 'btn_coffre_reset') {
+      if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('btn_coffre_reset_go').setLabel('Oui, remettre à 0').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('btn_coffre_reset_cancel').setLabel('Annuler').setStyle(ButtonStyle.Secondary),
+      );
+      return interaction.reply({ content: '⚠️ Remettre le **coffre commun à 0 $** ? Action immédiate et sauvegardée (Gist).', components: [row], flags: MessageFlags.Ephemeral });
+    }
+    if (interaction.customId === 'btn_coffre_reset_cancel') return interaction.update({ content: 'Annulé — le coffre est inchangé.', components: [] });
+    if (interaction.customId === 'btn_coffre_reset_go') {
+      if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+      const dbC = loadDB(); dbC.coffre = 0; if (dbC.coffres) { dbC.coffres.legal = 0; dbC.coffres.illegal = 0; } saveDB(dbC);
+      await sauvegarderSurGitHub().catch(() => {});
+      try { await notionModules.setupTresorButton?.(interaction.guild); } catch {}
+      return interaction.update({ content: '🗑️ **Coffre remis à 0 $.** Sauvegardé (Gist) — ça tiendra au redémarrage. ✅', components: [] });
+    }
     if (interaction.customId === 'btn_dashboard_refresh')     { return notionModules.handleDashboard?.(interaction); }
     if (interaction.customId.startsWith('journal_'))          return notionModules.handleJournalPagination?.(interaction);
   }
@@ -3660,9 +3676,9 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const montant = _montantDetecte(interaction.fields.getTextInputValue('montant'));
     if (!montant || montant <= 0) return interaction.editReply({ content: "❌ Montant invalide. Relance et entre un nombre (ex : 1500)." });
     const pole = (c.cc || c.type === 'confrerie' || String(c.id).startsWith('CF-')) ? 'illegal' : 'legal';
-    if (!dbX.coffres) dbX.coffres = { legal: 0, illegal: 0 };
-    dbX.coffres[pole] += montant;
-    const solde = dbX.coffres[pole];
+    if (typeof dbX.coffre !== 'number') dbX.coffre = 0;
+    dbX.coffre += montant;
+    const solde = dbX.coffre;
     c.suivi = 'Honoré'; c.remuVerseAuCoffre = montant; c.honoreAt = new Date().toISOString();
     saveDB(dbX);
     // 🧾 Trace écrite : facture automatique dans le forum des factures
@@ -5012,7 +5028,7 @@ function _buildSuivi(db) {
   const absents = members.filter(m => m.status === 'absent');
   const inactifs = members.filter(m => m.status !== 'parti' && daysSince(m.lastActivity) > 7);
   const rdvs = Object.values(db.rdvplus?.rdvs || {}).filter(r => ['Planifié', 'Confirmé'].includes(r.statut));
-  const coffreL = db.coffres?.legal || 0, coffreI = db.coffres?.illegal || 0;
+  const coffreL = db.coffre || 0, coffreI = 0;
   const li = (arr, fn, max = 6) => {
     if (!arr.length) return '*Aucun*';
     const out = arr.slice(0, max).map(fn).join('\n');
@@ -5526,7 +5542,7 @@ async function setupPanelDirection(guild) {
 function _buildDirectionPanelEmbed(guild, db) {
   const membres = Object.values(db.members || {}); const cands = (db.candidatures || []).filter(c => c.status === 'reçue'); const opsEnCours = (db.operations || []).filter(o => o.status === 'en_cours'); const opsProg = (db.operations || []).filter(o => o.status === 'programmee'); const absents = membres.filter(m => m.status === 'absent');
   const contrats3j = (db.contrats || []).filter(c => { if (c.status !== 'signe' || !c.dateEcheance) return false; const j = Math.floor((new Date(c.dateEcheance) - new Date()) / 86400000); return j >= 0 && j <= 3; });
-  const legal = db.coffres?.legal || 0; const illeg = db.coffres?.illegal || 0;
+  const legal = db.coffre || 0; const illeg = 0;
   const ligne = (emoji, label, val, urgent) => `${urgent && val > 0 ? '🔴' : '🟢'} ${emoji} **${label}** — ${val}`;
   return new EmbedBuilder().setColor(0x8B1A1A).setAuthor({ name: 'IWC Setup • Panel Direction', iconURL: guild.iconURL() || undefined }).setTitle('🐺 Tableau de bord — Iron Wolf Company')
     .addFields({ name: '📋 RECRUTEMENT', value: ligne('📥', 'Candidatures en attente', cands.length, true), inline: true }, { name: '🎯 OPÉRATIONS', value: [ligne('🟢', 'En cours', opsEnCours.length, false), ligne('🕐', 'Programmées', opsProg.length, false)].join('\n'), inline: true }, { name: '💰 TRÉSORERIE', value: [`⚖️ Légal : **$${legal.toLocaleString('fr-FR')}**`, `🔒 Illégal : **$${illeg.toLocaleString('fr-FR')}**`].join('\n'), inline: true }, { name: '👥 MEMBRES', value: [ligne('⚠️', 'Absents', absents.length, false), ligne('📜', 'Contrats expirent ≤3j', contrats3j.length, true)].join('\n'), inline: true })
