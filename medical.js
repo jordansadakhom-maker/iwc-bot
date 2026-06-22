@@ -8,13 +8,14 @@
 //     éphémères, dans un salon réservé).
 //   • Piloté par boutons + sélecteur de membre (aucune commande slash ajoutée).
 // ───────────────────────────────────────────────────────────────────────────
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, UserSelectMenuBuilder, MessageFlags } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, UserSelectMenuBuilder, StringSelectMenuBuilder, MessageFlags } = require('discord.js');
 
 let dbMod = {}; try { dbMod = require('./db'); } catch { dbMod = {}; }
 const loadDB = dbMod.loadDB || (() => ({}));
 const saveDB = dbMod.saveDB || (() => {});
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || null;
+const ROLE_CONFRERIE = '1508898841993281658'; // pôle illégal — le médecin ne suit que la Confrérie
 
 // ⚠️ À DÉFINIR
 const MEDICAL_CHANNEL = '1518574479830155355'; // salon privé où vit le panneau
@@ -176,16 +177,22 @@ async function routeInteraction(interaction) {
   try {
     const cid = interaction.customId || '';
 
-    // Ouvrir le sélecteur de membre
+    // Ouvrir le sélecteur de membre (Confrérie uniquement)
     if (interaction.isButton?.() && cid === 'med_select') {
       if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Dossier confidentiel — réservé au médecin et à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
-      const row = new ActionRowBuilder().addComponents(new UserSelectMenuBuilder().setCustomId('med_pick').setPlaceholder('Choisis le membre').setMaxValues(1));
-      await interaction.reply({ content: '🩺 De quel membre veux-tu ouvrir le dossier médical ?', components: [row], flags: MessageFlags.Ephemeral }).catch(() => {});
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      await interaction.guild.members.fetch().catch(() => {});
+      const role = interaction.guild.roles.cache.get(ROLE_CONFRERIE);
+      const membres = role ? [...role.members.values()].filter(m => !m.user.bot) : [];
+      if (!membres.length) { await interaction.editReply({ content: '⚠️ Aucun membre de la Confrérie trouvé (vérifie le rôle).' }).catch(() => {}); return true; }
+      const options = membres.slice(0, 25).map(m => ({ label: m.displayName.slice(0, 100), value: m.id }));
+      const row = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('med_pick').setPlaceholder('Choisis un membre de la Confrérie').addOptions(options));
+      await interaction.editReply({ content: `🩺 Dossier médical — choisis un membre de la **Confrérie**${membres.length > 25 ? ' *(25 premiers affichés)*' : ''} :`, components: [row] }).catch(() => {});
       return true;
     }
 
     // Membre sélectionné
-    if (interaction.isUserSelectMenu?.() && cid === 'med_pick') {
+    if (interaction.isStringSelectMenu?.() && cid === 'med_pick') {
       if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé au médecin et à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const id = interaction.values?.[0];
       if (!id) return true;
@@ -323,4 +330,26 @@ async function routeInteraction(interaction) {
   } catch (e) { if ([10062, 40060].includes(e?.code)) return true; console.log('❌ medical routeInteraction:', e.message); return true; }
 }
 
-module.exports = { installerPanel, routeInteraction, MEDICAL_CHANNEL, ROLE_MEDECIN };
+// Post d'exemple (idempotent) — montre à quoi ressemble un test d'aptitude
+async function installerExemple(guild) {
+  const ch = _ch(guild, MEDICAL_CHANNEL);
+  if (!ch || ch.type !== 15 || !ch.threads?.create) return;
+  const act = await ch.threads.fetchActive().catch(() => null);
+  if (act?.threads && [...act.threads.values()].some(t => (t.name || '').includes('EXEMPLE'))) return;
+  const input = { patient: 'Sidjay Kelton (EXEMPLE)', dateLieu: '6 Septembre 1879 — Rhodes, Scarlett Meadows', physique: '180 · 79 · cheveux rouges, yeux verts', verdict: 'APTE' };
+  const r = {
+    apparence: { posture: 'Droite', aspect: 'Bonne forme, aucun signe distinctif', obs: 'Patient en bonne forme générale.' },
+    physique: { force: 'Bonne', endurance: 'Moyenne', coordination: 'Normale', obs: 'Bonnes capacités physiques, bons réflexes.' },
+    sensoriel: { vue: 'Normale', ouie: 'Normale', odorat: 'Normal', toucher: 'Normal', reactivite: 'Vive', obs: 'Sens normaux, bonne réaction aux tests.' },
+    sante: { constitution: 'Robuste', fatigue: 'Non', respiration: 'Normale', pouls: 'Régulier', obs: 'Bon état de santé général.' },
+    habitudes: { regime: 'Repas équilibré, bon sommeil', consommation: 'Aucune dépendance', antecedents: 'RAS', obs: 'Habitudes de vie saines.' },
+    maladies: { actuelles: 'Aucune', passees: 'Pneumonie (guérie)', allergies: 'Aucune', traitements: 'Aucun', obs: 'RAS.' },
+    intellect: { lecture: 'Bonne', ecriture: 'Bonne', calcul: 'Bon', comprehension: 'Bon', obs: 'Facultés intellectuelles bonnes, raisonne et réagit vite.' },
+    conclusion: 'M. Kelton est apte à exercer les fonctions qui lui seront demandées.',
+  };
+  const embed = _embedTest(input, r, null); embed.setColor(0x999999);
+  const post = await ch.threads.create({ name: '📋 EXEMPLE — Test d\'aptitude (ne pas supprimer)', message: { content: '*Exemple : voici à quoi ressemble un test d\'aptitude. Les vrais sont rédigés depuis la fiche d\'un membre (bouton 🧪).*', embeds: [embed] } }).catch(() => null);
+  if (post?.pin) await post.pin().catch(() => {});
+}
+
+module.exports = { installerPanel, installerExemple, routeInteraction, MEDICAL_CHANNEL, ROLE_MEDECIN };
