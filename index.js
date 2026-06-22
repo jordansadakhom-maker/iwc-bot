@@ -1877,6 +1877,32 @@ client.on('messageReactionAdd', async (reaction, user) => {
   try { if (reaction.partial) await reaction.fetch(); } catch { return; }
   const db = loadDB(); const guild = reaction.message.guild; if (!guild) return;
 
+  // ── 🗳️ Vote d'un contrat express (5 voix ✅ pour valider) ──
+  if (db.contratsVote && db.contratsVote[reaction.message.id]) {
+    const isAccept = reaction.emoji.name === '✅'; const isRefuse = reaction.emoji.name === '❌';
+    if (!isAccept && !isRefuse) return;
+    const reactUsers = await reaction.users.fetch().catch(() => null);
+    const count = reactUsers ? reactUsers.filter(u => !u.bot).size : 0;
+    if (count < 5) return;
+    const vote = db.contratsVote[reaction.message.id];
+    delete db.contratsVote[reaction.message.id];
+    if (isRefuse) {
+      saveDB(db);
+      try { await reaction.message.edit({ embeds: [EmbedBuilder.from(reaction.message.embeds[0]).setColor(0xED4245).setTitle(`❌ REFUSÉ — ${vote.contratId}`)] }); } catch {}
+      return;
+    }
+    if (!db.contrats) db.contrats = [];
+    const contrat = { id: vote.contratId, type: 'offre', clientNom: vote.clientNom, objet: `${vote.titre} — ${vote.objet}`, remuneration: `$${vote.montant}`, montant: vote.montant, details: vote.conditions || '', dateEcheance: null, emetteurId: vote.proposePar, emetteurNom: vote.proposeNom, status: 'en_attente', suivi: 'En attente', createdAt: new Date().toISOString() };
+    db.contrats.push(contrat); saveDB(db);
+    sauvegarderSurGitHub().catch(() => {});
+    try { await reaction.message.edit({ embeds: [EmbedBuilder.from(reaction.message.embeds[0]).setColor(0x2ECC71).setTitle(`✅ VALIDÉ — ${vote.contratId}`)] }); } catch {}
+    try { const ef = new EmbedBuilder().setColor(0x2C3E50).setTitle(`📜 ${vote.contratId} — ${vote.clientNom}`).addFields({ name: '💵 Montant', value: `$${vote.montant.toLocaleString('fr-FR')}`, inline: true }, { name: '📅 Échéance', value: vote.echeance || 'Aucune', inline: true }, { name: '📋 Objet', value: vote.objet.slice(0, 1000) }); await _posterContratForum(guild, contrat, ef); } catch {}
+    _updatePlanningContrats(client).catch(() => {});
+    _updateContratPanel(client).catch(() => {});
+    try { await reaction.message.channel.send({ content: `✅ **Contrat ${vote.contratId} validé** par le groupe (5 votes) — il rejoint les contrats officiels.` }); } catch {}
+    return;
+  }
+
   // ── 📜 sur une note du micro → proposer un contrat (Direction uniquement) ──
   if (reaction.emoji.name === '📜') {
     const msg = reaction.message;
@@ -3590,6 +3616,48 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     if (!payload) return interaction.reply({ content: "Aucun contrat archivé (honoré ou abandonné) pour le moment.", flags: MessageFlags.Ephemeral });
     return interaction.reply(payload);
   }
+  if (interaction.isButton() && interaction.customId === 'cexp_open') {
+    if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Réservé aux membres.', flags: MessageFlags.Ephemeral });
+    const modal = new ModalBuilder().setCustomId('cexp_modal').setTitle('⚡ Contrat express');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('client').setLabel('Client').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(100).setPlaceholder('ex : Saloon de Tumbleweed')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prestation').setLabel('Prestation (ce qu\'on doit faire)').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500).setPlaceholder('ex : escorter une diligence jusqu\'à Armadillo, protéger des bandits')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('montant').setLabel('Montant ($)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(12).setPlaceholder('ex : 250')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('echeance').setLabel('Échéance (optionnel)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(60).setPlaceholder('ex : avant samedi')),
+    );
+    return interaction.showModal(modal);
+  }
+  if (interaction.isModalSubmit() && interaction.customId === 'cexp_modal') {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const clientNom = interaction.fields.getTextInputValue('client').trim();
+    const prestation = interaction.fields.getTextInputValue('prestation').trim();
+    const montant = Math.max(0, parseFloat((interaction.fields.getTextInputValue('montant') || '').replace(/[^0-9.,]/g, '').replace(',', '.')) || 0);
+    const echeance = (interaction.fields.getTextInputValue('echeance') || '').trim();
+    const r = await _reformulerContratIA({ client: clientNom, prestation, montant, echeance });
+    const titre = (r?.titre || prestation.slice(0, 60)).trim();
+    const objet = (r?.objet || prestation).trim();
+    const conditions = (r?.conditions || '').trim();
+    const contratId = 'IWC-EXP-' + Date.now().toString().slice(-5);
+    const embed = new EmbedBuilder().setColor(0xC8A45C).setTitle(`⚡ Contrat proposé — ${contratId}`)
+      .setDescription('*Proposé au vote — il faut **5 votes ✅** pour le valider.*')
+      .addFields(
+        { name: '📌 Intitulé', value: titre.slice(0, 250), inline: false },
+        { name: '👤 Client', value: clientNom.slice(0, 200), inline: true },
+        { name: '💵 Montant', value: `$${montant.toLocaleString('fr-FR')}`, inline: true },
+        { name: '📅 Échéance', value: echeance || 'Aucune', inline: true },
+        { name: '📋 Objet', value: objet.slice(0, 1000), inline: false },
+      );
+    if (conditions) embed.addFields({ name: '📜 Conditions', value: conditions.slice(0, 500), inline: false });
+    embed.addFields({ name: '🗳️ Vote', value: 'Réagissez **✅** pour accepter (5 voix) · **❌** pour refuser.', inline: false }).setFooter({ text: `Proposé par ${interaction.member?.displayName || interaction.user.username}` }).setTimestamp();
+    const voteMsg = await interaction.channel.send({ embeds: [embed] }).catch(() => null);
+    if (voteMsg) {
+      await voteMsg.react('✅').catch(() => {}); await voteMsg.react('❌').catch(() => {});
+      const dbE = loadDB(); if (!dbE.contratsVote) dbE.contratsVote = {};
+      dbE.contratsVote[voteMsg.id] = { contratId, titre, objet, conditions, clientNom, montant, echeance, proposePar: interaction.user.id, proposeNom: interaction.member?.displayName || interaction.user.username, channelId: interaction.channel.id, createdAt: Date.now() };
+      saveDB(dbE);
+    }
+    return interaction.editReply({ content: voteMsg ? `✅ Contrat **${contratId}** proposé au vote (5 ✅ requis) — reformulé par l'IA. 🗳️` : '⚠️ Impossible de poster le vote.' });
+  }
   if (interaction.isButton() && interaction.customId === 'csuivi_reset') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
     const n = (loadDB().contrats || []).length;
@@ -4529,8 +4597,32 @@ function _planningContratsEmbed(db) {
   e.setFooter({ text: `Iron Wolf Company • ${actifs.length} affaire(s) en cours • à jour le ${fmtShort(new Date())}` }).setTimestamp();
   return e;
 }
+// Reformule un brouillon de contrat en contrat propre via l'IA
+async function _reformulerContratIA(input) {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) return null;
+  const prompt = `Tu rédiges un contrat pour l'Iron Wolf Company (compagnie de protection texane, New Austin, 1895). À partir des infos brutes, produis un contrat propre et professionnel, ton western sobre, en français.
+
+Client : ${input.client}
+Prestation demandée : ${input.prestation}
+Montant : $${input.montant}
+Échéance : ${input.echeance || 'non précisée'}
+
+Réponds STRICTEMENT en JSON (rien d'autre) :
+{"titre":"titre court (max 8 mots)","objet":"description claire et pro de la mission, 2-3 phrases","conditions":"1-2 clauses/conditions clés"}`;
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 800, messages: [{ role: 'user', content: prompt }] }) });
+    const data = await res.json();
+    let txt = (data?.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+    return JSON.parse(txt);
+  } catch (e) { console.log('❌ reformulerContratIA:', e.message); return null; }
+}
+
 function _planningResetRow() {
-  return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('csuivi_reset').setLabel('Réinitialiser les contrats (Direction)').setEmoji('🗑️').setStyle(ButtonStyle.Danger));
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('cexp_open').setLabel('Contrat express').setEmoji('⚡').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('csuivi_reset').setLabel('Réinitialiser les contrats (Direction)').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+  );
 }
 async function _updatePlanningContrats(client) {
   const ref = loadDB().planningContratsPanel;
