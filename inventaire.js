@@ -320,9 +320,10 @@ async function routeInteraction(interaction) {
       if (!ch) { await interaction.editReply({ content: "❌ Salon du coffre introuvable." }).catch(() => {}); return true; }
       const files = atts.map((a, i) => { const ext = (((a.name || "").match(/\.(png|jpe?g|webp|gif)$/i)) || [".png"])[0]; return new AttachmentBuilder(a.url, { name: `coffre-${i + 1}${ext}` }); });
       const cap = `📷 **État réel du coffre commun** — ${atts.length} capture(s) par <@${interaction.user.id}>.`;
-      let msg = inv.photoMsg ? await ch.messages.fetch(inv.photoMsg).catch(() => null) : null;
-      if (msg) { await msg.edit({ content: cap, files, attachments: [], allowedMentions: { parse: [] } }).catch(() => {}); }
-      else { const mm = await ch.send({ content: cap, files, allowedMentions: { parse: [] } }).catch(() => null); if (mm) { inv.photoMsg = mm.id; try { await mm.pin(); } catch {} } }
+      // Une seule photo dans le salon : on supprime la précédente puis on poste la nouvelle
+      await _purgerPhotoPrecedente(ch, inv, null);
+      const mm = await ch.send({ content: cap, files, allowedMentions: { parse: [] } }).catch(() => null);
+      if (mm) { inv.photoMsg = mm.id; try { await mm.pin(); } catch {} }
       persist(db);
       await _refreshBoard(interaction.client, inv);
       const items = await _lireImages(atts);
@@ -489,6 +490,16 @@ async function routeInteraction(interaction) {
   }
 }
 
+// Garde UNE SEULE photo dans le salon du coffre : supprime la photo précédemment suivie.
+async function _purgerPhotoPrecedente(ch, inv, saufId) {
+  try {
+    if (!ch || !inv?.photoMsg || inv.photoMsg === saufId) return;
+    const old = await ch.messages.fetch(inv.photoMsg).catch(() => null);
+    if (old) await old.delete().catch(() => {});
+  } catch {}
+  if (inv && inv.photoMsg !== saufId) inv.photoMsg = null;
+}
+
 // ── Image(s) glissée(s) dans le salon → lecture IA + proposition ──
 async function onMessage(message) {
   try {
@@ -499,6 +510,9 @@ async function onMessage(message) {
     if (!imgs.length) return false;
     const inv = _ensure(db);
     await message.react("🔍").catch(() => {});
+    // Une seule photo dans le salon : on supprime la précédente et ce dépôt devient la photo courante
+    await _purgerPhotoPrecedente(message.channel, inv, message.id);
+    inv.photoMsg = message.id; persist(db);
     const items = await _lireImages(imgs);
     if (!items || !items.length) { await message.reply({ content: "📷 Je n'ai pas réussi à lire d'objets sur cette/ces image(s). Essaie une capture plus nette, ou les boutons du tableau.", allowedMentions: { parse: [] } }).catch(() => {}); return true; }
     await _proposer(message.channel, items, message.author.id, db, inv);
