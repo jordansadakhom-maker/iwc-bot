@@ -1608,6 +1608,8 @@ async function autoSetup(guild) {
   _installerTenuePanel(guild).then(() => console.log('🤠 Panneau Vestiaire installé')).catch(() => {});
   // Panneau « Nouvelle fiche de contact »
   repertoire.installerPanelContact?.(guild).then(() => console.log('🎴 Panneau Contact installé')).catch(() => {});
+  // Registre forum — une fiche (post) par membre
+  _syncRegistreForum(guild).then(() => console.log('🗂️ Registre forum synchronisé')).catch(() => {});
 
   console.log('✅ Auto-setup terminé\n');
 }
@@ -4769,6 +4771,45 @@ function _ficheMembreEmbed(guildMember, db) {
   if (av) e.setThumbnail(av);
   e.setFooter({ text: `IWC • Dossier membre • ${fmtShort(new Date())}` });
   return e;
+}
+// Forum registre — un post par membre (réutilise le dossier /fiche)
+const FORUM_REGISTRE = '1518409832892469450';
+async function _posterOuMajFiche(guild, forum, gm, db) {
+  const id = gm.id;
+  if (!db.ficheForumPosts) db.ficheForumPosts = {};
+  const embed = _ficheMembreEmbed(gm, db);
+  const cand = (db.candidatures || []).find(c => c.userId === id && c.status === 'acceptee');
+  const perso = (cand && cand.nomPerso) || (db.members[id] && db.members[id].nomRP) || gm.displayName || gm.user.username;
+  const titre = `🪪 ${perso}`.slice(0, 100);
+  const existingId = db.ficheForumPosts[id];
+  if (existingId) {
+    const thread = await guild.channels.fetch(existingId).catch(() => null);
+    if (thread && !thread.archived && thread.fetchStarterMessage) {
+      const starter = await thread.fetchStarterMessage().catch(() => null);
+      if (starter) { await starter.edit({ embeds: [embed] }).catch(() => {}); return; }
+    }
+    if (thread) return; // existe mais archivé → on laisse (pas de doublon)
+  }
+  const post = await forum.threads.create({ name: titre, message: { embeds: [embed] } }).catch(() => null);
+  if (post) db.ficheForumPosts[id] = post.id;
+}
+async function _syncRegistreForum(guild) {
+  try {
+    const forum = guild.channels.cache.get(FORUM_REGISTRE);
+    if (!forum || forum.type !== 15 || !forum.threads?.create) return;
+    const db = loadDB();
+    const membres = Object.values(db.members || {}).filter(m => m && m.id && m.status !== 'visiteur' && m.rang && m.rang !== 'Visiteur');
+    let n = 0;
+    for (const m of membres) {
+      if (n >= 60) break;
+      const gm = await guild.members.fetch(m.id).catch(() => null);
+      if (!gm) continue;
+      await _posterOuMajFiche(guild, forum, gm, db);
+      n++;
+      await new Promise(r => setTimeout(r, 450)); // throttle anti rate-limit
+    }
+    saveDB(db);
+  } catch (e) { console.log('⚠️ sync registre forum:', e.message); }
 }
 async function _handleRegistre(interaction) {
   if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
