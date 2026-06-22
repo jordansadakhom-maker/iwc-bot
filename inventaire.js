@@ -148,6 +148,16 @@ async function _imageBytes(url) {
 }
 const _SUPPORTED_MT = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 function _cleanMt(mt) { let m = String(mt || 'image/png').split(';')[0].trim().toLowerCase(); if (m === 'image/jpg') m = 'image/jpeg'; return _SUPPORTED_MT.includes(m) ? m : 'image/png'; }
+// Détecte le vrai type d'image d'après les octets (magic bytes). Le contentType annoncé
+// par Discord ment parfois (ex : webp déclaré pour des octets PNG) → Anthropic renvoie 400.
+function _sniffMt(buf) {
+  if (!buf || buf.length < 12) return null;
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return 'image/png';
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return 'image/jpeg';
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return 'image/gif';
+  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return 'image/webp';
+  return null;
+}
 async function _callVision(model, b64, mt) {
   const apiKey = process.env.ANTHROPIC_API_KEY; if (!apiKey) { console.log('⚠️ inventaire vision: ANTHROPIC_API_KEY absente'); return null; }
   try {
@@ -215,7 +225,8 @@ async function _lireImages(atts) {
     let buf = await _imageBytes(_urlPourIA(a));
     if (!buf) buf = await _imageBytes(a.url); // repli sur l'URL d'origine si le proxy échoue
     if (!buf) { console.log('⚠️ inventaire: téléchargement image échoué'); continue; }
-    const items = await _analyserImage(buf.toString('base64'), a.contentType || 'image/png');
+    const mt = _sniffMt(buf) || _cleanMt(a.contentType); // type réel d'après les octets (le contentType Discord ment parfois)
+    const items = await _analyserImage(buf.toString('base64'), mt);
     if (items && items.length) lists.push(items);
     else console.log(`⚠️ inventaire: 0 objet lu (${a.name || '?'} · ${a.width || '?'}x${a.height || '?'} · ${Math.round((a.size || 0) / 1024)} Ko)`);
   }
