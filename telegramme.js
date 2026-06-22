@@ -203,7 +203,7 @@ async function ouvrirConversation(message, { rdvId, demandeurId, nomRP }) {
     if (thread.type === ChannelType.PrivateThread) {
       try {
         const g = message.guild;
-        const cible = r => { const n = (r.name || '').toLowerCase(); return n.includes('opérateur') || n.includes('operateur') || n.includes('homme de main') || n.includes('fondateur') || n.includes('panseur') || PING_TELEGRAMME.includes(r.id); };
+        const cible = r => { const n = (r.name || '').toLowerCase(); return n.includes('opérateur') || n.includes('operateur') || n.includes('officier') || n.includes('homme de main') || n.includes('fondateur') || n.includes('panseur') || PING_TELEGRAMME.includes(r.id); };
         const ids = new Set();
         for (const role of g.roles.cache.filter(cible).values()) { for (const mem of role.members.values()) ids.add(mem.id); }
         let n = 0;
@@ -272,7 +272,7 @@ function _pingRoles(guild) {
   try {
     const ids = new Set();
     for (const id of PING_TELEGRAMME) if (guild.roles.cache.has(id)) ids.add(id);
-    guild.roles.cache.forEach(r => { const n = (r.name || '').toLowerCase(); if (n.includes('homme') || n.includes('fondateur') || n.includes('panseur')) ids.add(r.id); });
+    guild.roles.cache.forEach(r => { const n = (r.name || '').toLowerCase(); if (n.includes('homme') || n.includes('fondateur') || n.includes('panseur') || n.includes('opérateur') || n.includes('operateur') || n.includes('officier')) ids.add(r.id); });
     const arr = [...ids];
     return { content: arr.map(id => `<@&${id}>`).join(' '), ids: arr };
   } catch { return { content: '', ids: [] }; }

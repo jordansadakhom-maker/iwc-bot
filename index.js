@@ -159,6 +159,26 @@ function getChById(guild, salonKey, ...fallbackNames) {
   return null;
 }
 
+// Renvoie TOUJOURS #agenda (1509638226132996178) — jamais #agenda-illégal.
+// Le fallback par nom exclut explicitement l'agenda illégal pour éviter toute fuite.
+function getAgendaCh(guild) {
+  return guild.channels.cache.get('1509638226132996178')
+      || guild.channels.cache.find(c => c.isTextBased?.() && /agenda/i.test(c.name) && !/ill[ée]gal/i.test(c.name))
+      || null;
+}
+
+// Équipe RDV à pinger : Fondateur, Officier de Terrain, Opérateur, Panseur.
+function pingEquipeRdv(guild) {
+  try {
+    const ids = [];
+    guild.roles.cache.forEach(r => {
+      const n = (r.name || '').toLowerCase();
+      if (n.includes('fondateur') || n.includes('officier') || n.includes('opérateur') || n.includes('operateur') || n.includes('panseur')) ids.push(r.id);
+    });
+    return { content: ids.map(id => `<@&${id}>`).join(' '), ids };
+  } catch { return { content: '', ids: [] }; }
+}
+
 // ── IDs Rôles hardcodés (fallback si config.js incomplet) ──
 const ROLE_ABSENT_ID = '1511134028474876035';
 // Surcharger ROLE_ABSENT si non défini dans config.js
@@ -3455,6 +3475,38 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
       archiverRdvNotion(`RDV Client — ${rdv.nom}`, dateRdv, lieuRdv, `${rdv.objet}\nHeure : ${heure}\n${rdv.details}`, false, rdv.lieu).catch(() => {});
     }
 
+    // Poster aussi le RDV dans #agenda (Discord), avec ping de l'équipe + bouton "Répondre au client"
+    try {
+      const agendaCh = getAgendaCh(interaction.guild);
+      if (agendaCh) {
+        const ping = pingEquipeRdv(interaction.guild);
+        const embedAgenda = new EmbedBuilder()
+          .setColor(0x57F287)
+          .setTitle(`📅 RDV CLIENT — ${rdv.nom || 'Client'}`)
+          .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   IRON WOLF COMPANY — RENDEZ-VOUS CLIENT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
+          .addFields(
+            { name: '🆔 Référence', value: '`' + rdvId + '`', inline: true },
+            { name: '📅 Date', value: dateRdv, inline: true },
+            { name: '🕐 Heure', value: `**${heure}**`, inline: true },
+            { name: '📍 Lieu', value: lieuRdv || '—', inline: true },
+            { name: '👤 Client', value: rdv.nom || 'Client', inline: true },
+            { name: '✍️ Fixé par', value: interaction.member.displayName, inline: true },
+          )
+          .setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` })
+          .setTimestamp();
+        if (rdv.objet) embedAgenda.addFields({ name: '📋 Objet', value: String(rdv.objet).slice(0, 1000) });
+        const rowAgenda = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId(`rdvclient_repondre_${rdvId}`).setLabel('💬 Répondre au client').setStyle(ButtonStyle.Primary),
+        );
+        await agendaCh.send({
+          content: `${ping.content ? ping.content + ' — ' : ''}📅 **RDV client fixé** : ${dateRdv} à ${heure}`,
+          embeds: [embedAgenda],
+          components: [rowAgenda],
+          allowedMentions: { roles: ping.ids },
+        }).catch(() => {});
+      }
+    } catch (e) { console.log('❌ post RDV client #agenda:', e.message); }
+
     // Confirmation au client en MP (ton secrétaire)
     try {
       const u = await client.users.fetch(rdv.demandeurId);
@@ -5846,7 +5898,7 @@ async function _validerModalAgendaSimple(interaction) {
   const roleExiste  = interaction.guild.roles.cache.has(roleIdCible);
   const pingRole    = roleExiste ? `<@&${roleIdCible}>` : '';
   // Tous les RDV vont dans le même salon #agenda (plus de séparation légal/illégal)
-  const agendaCh = interaction.guild.channels.cache.get('1509638226132996178') || getChById(interaction.guild, 'AGENDA', 'agenda');
+  const agendaCh = getAgendaCh(interaction.guild);
   if (agendaCh) await agendaCh.send({ content: `${pingRole ? pingRole + ' — ' : ''}📅 **${titre}** · ${heure} à ${lieu}`, embeds: [embed], allowedMentions: { parse: [], roles: roleExiste ? [roleIdCible] : [] } }).catch(() => {});
   const salonLabel = '#agenda';
   const confirmMsg = await interaction.editReply({ content: photoUrl ? '✅ RDV créé avec photo de repérage !' : `✅ RDV créé et posté dans ${salonLabel} !`, embeds: [], components: [] });
@@ -6347,7 +6399,7 @@ async function _validerModalRdvIndividuel(interaction) {
     .setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` }).setTimestamp();
   if (notes) embed.addFields({ name: '📋 Ordre du jour', value: notes });
   // Tous les RDV dans le même salon #agenda (plus de séparation légal/illégal)
-  const agendaCh = interaction.guild.channels.cache.get('1509638226132996178') || getChById(interaction.guild, 'AGENDA', 'agenda');
+  const agendaCh = getAgendaCh(interaction.guild);
   const mentionsMembres = pending.ids.map(id => `<@${id}>`).join(' ');
   if (agendaCh) await agendaCh.send({ content: `${mentionsMembres} — 📅 Convocation : **${titre}** · ${heure} à ${lieu}`, embeds: [embed] }).catch(() => {});
   for (const uid of pending.ids) { await envoyerDMRecap(interaction.guild, uid, 'rdv', { titre, date: dateCapital, heure, lieu, notes }).catch(() => {}); }
@@ -6415,7 +6467,7 @@ async function _validerModalRdv(interaction) {
   if (notes) embed.addFields({ name: '📋 Ordre du jour', value: notes });
   // Poster dans le bon salon selon le pôle
   // Tous les RDV dans le même salon #agenda (plus de séparation légal/illégal)
-  const agendaCh = interaction.guild.channels.cache.get('1509638226132996178') || getChById(interaction.guild, 'AGENDA', 'agenda');
+  const agendaCh = getAgendaCh(interaction.guild);
   let mention = ''; if (poleCfg.roleId) mention = `<@&${poleCfg.roleId}>`; else if (pole === 'direction') mention = getMention(interaction.guild); else mention = `<@&${ROLE_POLE_LEGAL}> <@&${ROLE_POLE_ILLEGAL}>`;
   if (agendaCh) await agendaCh.send({ content: `${mention} — 📅 **${titre}** · ${heure} à ${lieu}`, embeds: [embed] }).catch(() => {});
   if (poleCfg.roleId) {
