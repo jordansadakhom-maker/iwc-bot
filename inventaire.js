@@ -92,6 +92,12 @@ async function _refreshBoard(client, inv) {
   } catch {}
 }
 
+// Rafraîchit le board au démarrage : les boutons (Ajouter / Retirer / Corriger) d'un
+// ancien tableau épinglé sont remis à jour automatiquement.
+async function rafraichirBoardDemarrage(client) {
+  try { const db = loadDB(); const inv = db.inventaire; if (inv && inv.channelId && inv.panneau) await _refreshBoard(client, inv); } catch {}
+}
+
 async function _thread(client, inv) {
   const id = inv.threadId || inv.channelId;
   if (!id) return null;
@@ -520,4 +526,4 @@ async function onMessage(message) {
   } catch { return false; }
 }
 
-module.exports = { inventaireCommands, routeInteraction, onMessage };
+module.exports = { inventaireCommands, routeInteraction, onMessage, rafraichirBoardDemarrage };
