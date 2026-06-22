@@ -1666,6 +1666,8 @@ async function autoSetup(guild) {
 
   // Tableau immersif des échéances de contrats dans le salon planning/agenda
   _installerPlanningContrats(guild).then(() => console.log('📜 Tableau des échéances de contrats installé')).catch(() => {});
+  // Bouton « Contrat express » dans #contrats (déplacé depuis le planning)
+  _installerBoutonContratExpress(guild).then(() => console.log('⚡ Bouton Contrat express installé dans #contrats')).catch(() => {});
   // Panneau d'accueil du salon Vestiaire / Tenue
   _installerTenuePanel(guild).then(() => console.log('🤠 Panneau Vestiaire installé')).catch(() => {});
   // Panneau « Nouvelle fiche de contact »
@@ -4672,9 +4674,47 @@ Réponds STRICTEMENT en JSON (rien d'autre) :
 
 function _planningResetRow() {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('cexp_open').setLabel('Contrat express').setEmoji('⚡').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId('csuivi_reset').setLabel('Réinitialiser les contrats (Direction)').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
   );
+}
+
+// Panneau « Contrat express » déplacé dans #contrats (1508756442730074222)
+const SALON_CONTRATS_EXPRESS = '1508756442730074222';
+function _contratExpressRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('cexp_open').setLabel('Contrat express').setEmoji('⚡').setStyle(ButtonStyle.Success),
+  );
+}
+function _contratExpressEmbed() {
+  return new EmbedBuilder().setColor(0x57F287).setTitle('⚡ CONTRAT EXPRESS — Iron Wolf Company')
+    .setDescription([
+      'Besoin de créer un contrat rapidement ?',
+      '',
+      'Clique sur **⚡ Contrat express** : un mini-formulaire (client, prestation, montant, échéance), l\'IA le reformule proprement, puis vote (5 voix) pour le rendre officiel.',
+    ].join('\n'))
+    .setFooter({ text: 'Iron Wolf Company • Contrat express' });
+}
+async function _installerBoutonContratExpress(guild) {
+  try {
+    const ch = guild.channels.cache.get(SALON_CONTRATS_EXPRESS) || getChById(guild, 'CONTRATS', 'contrats');
+    if (!ch) return;
+    const db = loadDB();
+    // Déjà posé au bon endroit et toujours présent ? on rafraîchit et on garde
+    if (db.contratExpressPanel?.channelId === ch.id && db.contratExpressPanel?.messageId) {
+      const old = await ch.messages.fetch(db.contratExpressPanel.messageId).catch(() => null);
+      if (old) { await old.edit({ embeds: [_contratExpressEmbed()], components: [_contratExpressRow()] }).catch(() => {}); return; }
+    }
+    // Ancien panneau dans un autre salon ? on le supprime pour éviter le doublon
+    if (db.contratExpressPanel?.channelId && db.contratExpressPanel?.messageId && db.contratExpressPanel.channelId !== ch.id) {
+      const oldCh = await client.channels.fetch(db.contratExpressPanel.channelId).catch(() => null);
+      if (oldCh) { const oldMsg = await oldCh.messages.fetch(db.contratExpressPanel.messageId).catch(() => null); if (oldMsg) await oldMsg.delete().catch(() => {}); }
+    }
+    // Nettoyer un éventuel ancien panneau du bot
+    const recent = await ch.messages.fetch({ limit: 30 }).catch(() => null);
+    if (recent) for (const [, m] of recent) { if (m.author.id === client.user.id && (m.embeds[0]?.title || '').includes('CONTRAT EXPRESS')) await m.delete().catch(() => {}); }
+    const sent = await ch.send({ embeds: [_contratExpressEmbed()], components: [_contratExpressRow()] }).catch(() => null);
+    if (sent) { await sent.pin().catch(() => {}); const d2 = loadDB(); d2.contratExpressPanel = { channelId: ch.id, messageId: sent.id }; saveDB(d2); }
+  } catch (e) { console.log('⚠️ install bouton contrat express:', e.message); }
 }
 async function _updatePlanningContrats(client) {
   const ref = loadDB().planningContratsPanel;
