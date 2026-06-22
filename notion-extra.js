@@ -1275,6 +1275,66 @@ async function handlePlanningScreenshot(message) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// SYNC NOTION — Statut d'activité · Pôle · Promotions (helpers)
+// Ces fonctions étaient appelées via notionExtra.X?.() mais n'étaient
+// définies nulle part → no-op silencieux. Réintroduites ici en
+// self-contained, gardées (NOTION_TOKEN + try/catch + res.ok) :
+// pire cas = no-op (comportement actuel), jamais de crash.
+// ═══════════════════════════════════════════════════════════════
+const _NOTION_VERSION = '2022-06-28';
+const _notionHeaders = () => ({ 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': _NOTION_VERSION, 'Content-Type': 'application/json' });
+
+// PATCH générique des propriétés d'une page Notion
+async function notionPatch(pageId, properties) {
+  if (!process.env.NOTION_TOKEN || !pageId) return false;
+  try {
+    const res = await fetch(`https://api.notion.com/v1/pages/${pageId}`, { method: 'PATCH', headers: _notionHeaders(), body: JSON.stringify({ properties }) });
+    if (!res.ok) { console.log('❌ notionPatch HTTP', res.status); return false; }
+    return true;
+  } catch (e) { console.log('❌ notionPatch error:', e.message); return false; }
+}
+
+// Récupère l'ID de page de la fiche d'un membre (NOTION_FICHES_DB) via son Discord ID
+async function getFicheId(userId) {
+  if (!process.env.NOTION_TOKEN || !process.env.NOTION_FICHES_DB || !userId) return null;
+  try {
+    const res = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_FICHES_DB}/query`, { method: 'POST', headers: _notionHeaders(), body: JSON.stringify({ filter: { property: 'Discord ID', rich_text: { equals: String(userId) } }, page_size: 1 }) });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.results?.[0]?.id || null;
+  } catch (e) { console.log('❌ getFicheId error:', e.message); return null; }
+}
+
+// Met à jour le statut d'activité d'un membre dans le registre Notion (NOTION_MEMBRES_DB).
+// Schéma IDENTIQUE à syncAbsenceNotion (notion-modules-v3) : idempotent, jamais de doublon.
+async function majStatutActiviteNotion(userId, statut) {
+  if (!process.env.NOTION_TOKEN || !process.env.NOTION_MEMBRES_DB || !userId) return;
+  try {
+    const res = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_MEMBRES_DB}/query`, { method: 'POST', headers: _notionHeaders(), body: JSON.stringify({ filter: { property: 'Discord ID', rich_text: { equals: String(userId) } }, page_size: 1 }) });
+    if (!res.ok) return;
+    const data = await res.json();
+    const page = data.results?.[0];
+    if (!page) return;
+    const statutNotion = statut === 'absent' ? '⚠️ Absent' : statut === 'inactif' ? '💤 Inactif' : '✅ Actif';
+    await notionPatch(page.id, { 'Statut': { select: { name: statutNotion } }, 'Dernière activité': { date: { start: new Date().toISOString().split('T')[0] } } });
+  } catch (e) { console.log('❌ majStatutActiviteNotion error:', e.message); }
+}
+
+// Met à jour le rang d'un membre dans le registre Notion lors d'une promotion/rétrogradation.
+// (La promotion reste loguée côté Discord via ajouterJournalIC ; ici on ne touche QUE Notion.)
+async function logPromotionNotion(guild, info = {}) {
+  if (!process.env.NOTION_TOKEN || !process.env.NOTION_MEMBRES_DB || !info.userId || !info.nouveauRang) return;
+  try {
+    const res = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_MEMBRES_DB}/query`, { method: 'POST', headers: _notionHeaders(), body: JSON.stringify({ filter: { property: 'Discord ID', rich_text: { equals: String(info.userId) } }, page_size: 1 }) });
+    if (!res.ok) return;
+    const data = await res.json();
+    const page = data.results?.[0];
+    if (!page) return;
+    await notionPatch(page.id, { 'Rang': { select: { name: info.nouveauRang } }, 'Dernière activité': { date: { start: new Date().toISOString().split('T')[0] } } });
+  } catch (e) { console.log('❌ logPromotionNotion error:', e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // EXPORTS
 // ═══════════════════════════════════════════════════════════════
 module.exports = {
@@ -1307,5 +1367,10 @@ module.exports = {
   // Pings
   getMentionPole,
   updateNotionStatutPole,
+  // Sync Notion réintroduite (statut/activité, pôle, promotions)
+  notionPatch,
+  getFicheId,
+  majStatutActiviteNotion,
+  logPromotionNotion,
 };
 

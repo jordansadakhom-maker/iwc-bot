@@ -7113,20 +7113,24 @@ async function _syncTransactionNotion(t) {
   const dbId = process.env.NOTION_TRESORERIE_DB || NOTION_TRANSACTIONS_DB;
   if (!dbId) return;
   try {
-    await fetch('https://api.notion.com/v1/pages', {
+    // Schéma aligné sur _archiverTransactionNotion (notion-modules-v2) et sur le lecteur
+    // du bilan : colonne 'Solde' (et non 'Solde après') + 'Type' avec emoji, pour que
+    // les transactions écrites ici remontent bien dans le bilan trésorerie.
+    const res = await fetch('https://api.notion.com/v1/pages', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
       body: JSON.stringify({ parent: { database_id: dbId }, properties: {
         'Objet': { title: [{ text: { content: t.objet || '—' } }] },
-        'Type': { select: { name: t.type || 'Entrée' } },
+        'Type': { select: { name: /sortie/i.test(t.type || '') ? '📤 Sortie' : '📥 Entrée' } },
         'Coffre': { select: { name: t.coffre === 'illegal' ? '🔒 Illégal' : '⚖️ Légal' } },
         'Montant': { number: t.montant || 0 },
+        'Solde': { number: t.solde || 0 },
         'Responsable': { rich_text: [{ text: { content: t.responsable || '—' } }] },
-        'Discord ID': { rich_text: [{ text: { content: t.discordId || t.userId || '—' } }] },
-        'Solde après': { number: t.solde || 0 },
         'Date': { date: { start: (t.date || new Date().toISOString()).split('T')[0] } },
       }})
     });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.object === 'error') { console.log('❌ Transaction Notion error:', data.message || res.status); return; }
     console.log(`✅ Transaction Notion: ${t.type} ${t.coffre} $${t.montant} par ${t.responsable}`);
   } catch (e) { console.log('❌ _syncTransactionNotion error:', e.message); }
 }
@@ -8455,6 +8459,6 @@ async function _assurerAccesVisiteur(guild) {
   } catch (e) { console.log('❌ _assurerAccesVisiteur:', e.message); }
 }
 
-client.login(process.env.DISCORD_TOKEN)
+client.login(process.env.DISCORD_TOKEN || process.env.TOKEN || process.env.BOT_TOKEN)
   .then(() => console.log('🔑 Login OK'))
   .catch(e => { console.error('❌ Login failed:', e.message); process.exit(1); });
