@@ -1662,6 +1662,8 @@ async function autoSetup(guild) {
   // Exemples contrats & opérations
   _exempleContratForum(guild).then(() => console.log('📜 Exemple contrat posté')).catch(() => {});
   _exempleOperationForum(guild).then(() => console.log('🎯 Exemple opération posté')).catch(() => {});
+  // Diagnostic forum contrats (liste les forums dans le journal)
+  _diagContrats(guild).catch(() => {});
 
   console.log('✅ Auto-setup terminé\n');
 }
@@ -4529,6 +4531,20 @@ async function _updatePlanningContrats(client) {
 }
 // Poste un nouveau contrat en POST de forum catégorisé (salon 1518392786301227250) — même principe que les opérations
 const FORUM_CONTRATS = '1518392786301227250';
+
+// Diagnostic : liste les forums du serveur dans le journal (pour trouver le bon ID si besoin)
+async function _diagContrats(guild) {
+  try {
+    const jrn = guild.channels.cache.get('1508756535407542372');
+    if (!jrn?.send) return;
+    const fc = guild.channels.cache.get(FORUM_CONTRATS);
+    const lignes = ['🔍 **Diagnostic — forum des contrats**', `ID configuré \`${FORUM_CONTRATS}\` → ${fc ? `✅ **#${fc.name}** (type ${fc.type}${fc.type === 15 ? ' = forum ✅' : ' — ⚠️ PAS un forum'})` : '❌ **INTROUVABLE sur ce serveur** (mauvais ID)'}`];
+    const forums = guild.channels.cache.filter(c => c.type === 15);
+    if (forums.size) { lignes.push('', '**Tous les forums du serveur (copie l\'ID du bon) :**'); for (const c of forums.values()) lignes.push(`• \`${c.id}\` — #${c.name}`); }
+    else lignes.push('', '⚠️ Aucun salon de type *forum* trouvé sur le serveur.');
+    await jrn.send(lignes.join('\n').slice(0, 1900)).catch(() => {});
+  } catch {}
+}
 
 // Posts d'EXEMPLE (idempotents) pour contrats & opérations
 async function _exempleContratForum(guild) {
