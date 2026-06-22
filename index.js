@@ -1569,6 +1569,19 @@ async function autoSetup(guild) {
       saveDB(db);
       console.log('✅ Guide des commandes Papiers posté dans #' + guideCh.name + ' (' + _gids.length + ' messages)');
     }
+    // Guide COMPLET des commandes & fonctionnalités (anti-doublon par titre)
+    const _guideComplPoste = gmsgs ? gmsgs.some(m => m.author.id === client.user.id && m.content.includes('GUIDE DES COMMANDES & FONCTIONNALITÉS')) : false;
+    if (!_guideComplPoste) {
+      const GUIDE_COMPLET_CHUNKS = [
+        `# 📖 GUIDE DES COMMANDES & FONCTIONNALITÉS — IRON WOLF COMPANY\n\nTout ce que le bot sait faire, en un coup d'œil. La plupart des actions passent par des **boutons** dans les salons dédiés — pas besoin de retenir des commandes.\n\n━━━━━━━━━━━━━━━━━━━━━━\n\n## 👋 POUR LES CLIENTS\nDans <#1512171267560702013> → bouton **« ✉ Envoyer un télégramme »** : nous laisser un message **ou prendre rendez-vous** (escorte, protection, contrat…). La Direction répond directement.`,
+        `## 📜 CONTRATS *(Direction)*\n• Panneau des contrats → créer une **offre** ou un **contrat d'emploi** ; gérer les étapes (en cours, validé, **honoré**…).\n• Chaque contrat ouvre un **post dans le forum des contrats**.\n• Quand un contrat est **honoré** (client a payé) → le montant va au **coffre** ET une **facture** est créée automatiquement.\n• \`/contrat-suivi\` → gérer une étape + le coffre. Bouton **🗑️ Réinitialiser** sur le planning.\n\n## 🧾 FACTURES\n• Créées **automatiquement** à chaque contrat honoré (trace écrite dans le forum des factures). Rien à faire à la main.`,
+        `## 🎯 OPÉRATIONS *(membres)*\n• Panneau des opérations → créer/gérer une opération de terrain (lieu, objectif, équipe). Postée dans le forum des opérations.\n\n## 🕵️ LE RÉSEAU D'INFORMATEURS\n• À partir de la transcription du jeu, le bot fait parler tes indics (rapports + pistes), **2×/jour** + bouton **« 📨 Faire parler les indics »**.\n\n## 🔍 AVIS DE RECHERCHE (#wanted)\n• Dépose une **photo** dans le salon → signalement détaillé généré. Bouton pour créer un **avis de recherche** (avec fil de traque) + pings de la Confrérie.`,
+        `## 👤 MEMBRES\n• \`/fiche @membre\` → dossier complet. \`/registre\` → liste des membres. Registre forum : une fiche par membre, à jour automatiquement.\n\n## 🎖️ GRADES *(Direction)*\n• \`/promo\` et \`/retro\` → monter/descendre un membre (rôles + DM + journal).\n\n## 💰 COFFRE & ÉCONOMIE\n• \`/solde\` → voir le coffre · \`/bilan\` → bilan financier · \`/tresor\` → enregistrer une transaction. + économie RP (portefeuille, payer…).`,
+        `## 🩺 SUIVI MÉDICAL *(médecin + Direction — confidentiel)*\n• Forum médical → **Ouvrir un dossier** (membres Confrérie) → statut (apte/inapte), **test d'aptitude** (rapport généré), notes, **prendre RDV avec le médecin**.\n\n## 📋 RÉPERTOIRE DE CONTACTS\n• \`/contact\` ou panneau **« Nouvelle fiche »** → ficher un contact (fiabilité en ⭐, photo). Forum répertoire.\n\n## 👔 LE VESTIAIRE\n• Dépose des photos d'une tenue → **fiche d'allure** (palette, matières).\n\n## 📨 TÉLÉGRAMMES *(équipe)*\n• Demandes clients en conversation privée. Boutons Clôturer / Rouvrir / **🗑️ Classer**. Correction orthographique auto des réponses.\n\n━━━━━━━━━━━━━━━━━━━━━━\n*Une question ? Demande au staff.*`,
+      ];
+      for (const _g of GUIDE_COMPLET_CHUNKS) { await guideCh.send(_g).catch(() => {}); }
+      console.log('✅ Guide complet des commandes posté dans #' + guideCh.name);
+    }
   }
 
   // S'assurer que les visiteurs ont accès aux salons d'entrée (recrutement, règlement)
@@ -4563,7 +4576,8 @@ async function _posterContratForum(guild, contrat, embed) {
     const veut = [...typeKw, clean(contrat.suivi || contrat.status || 'en attente')].filter(Boolean);
     const tags = forum.availableTags || [];
     const appliedTags = tags.filter(t => { const tn = clean(t.name); return veut.some(w => w && (tn.includes(w) || w.includes(tn))); }).map(t => t.id).slice(0, 5);
-    const msg = embed ? { embeds: [embed] } : { content: `📜 Contrat ${contrat.id}` };
+    const resume = `📜 **Contrat ${contrat.id}**${client ? ` — ${client}` : ''}\n**Objet :** ${(contrat.objet || '—').slice(0, 400)}\n**Rémunération :** ${contrat.remuneration || '—'} · **Statut :** ${contrat.suivi || 'En attente'}`;
+    const msg = embed ? { content: resume, embeds: [embed] } : { content: resume };
     const opts = { name: titre, message: msg };
     if (appliedTags.length) opts.appliedTags = appliedTags;
     let post = await forum.threads.create(opts).catch(() => null);
