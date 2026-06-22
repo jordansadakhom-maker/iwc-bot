@@ -250,9 +250,17 @@ async function handleCreateModal(interaction) {
     channelId: interaction.channelId,
   };
   if (stash && stash.photoUrl) t.photo = stash.photoUrl;
-  const sent = await interaction.channel.send({ content: `<@&${ROLE_CONFRERIE}> — 🎯 **Nouvel avis de recherche.** La traque est ouverte.`, embeds: [buildPoster(t)], components: buildBoutons(t), allowedMentions: { roles: [ROLE_CONFRERIE] } }).catch(() => null);
+  // On récupère la photo en mémoire pour la réuploader DANS l'avis (elle survivra à la suppression du signalement)
+  let photoBuf = null;
+  if (t.photo) photoBuf = await _imageBytes(t.photo);
+  const posterEmbed = buildPoster(t);
+  const posterPayload = { content: `<@&${ROLE_CONFRERIE}> — 🎯 **Nouvel avis de recherche.** La traque est ouverte.`, embeds: [posterEmbed], components: buildBoutons(t), allowedMentions: { roles: [ROLE_CONFRERIE] } };
+  if (photoBuf) { posterEmbed.setThumbnail('attachment://wanted.png'); posterPayload.files = [new AttachmentBuilder(photoBuf, { name: 'wanted.png' })]; }
+  const sent = await interaction.channel.send(posterPayload).catch(() => null);
   if (sent) {
     t.messageId = sent.id;
+    // La photo de l'avis pointe désormais sur SA propre pièce jointe (indépendante du signalement supprimé)
+    if (photoBuf) { const u = [...sent.attachments.values()][0]?.url; if (u) t.photo = u; }
     // Ouvrir un fil « Dossier » avec la description physique complète + la discussion
     try {
       const thread = await sent.startThread({ name: `🔍 Dossier — ${t.cible}`.slice(0, 100), autoArchiveDuration: 10080 }).catch(() => null);
@@ -267,6 +275,13 @@ async function handleCreateModal(interaction) {
           await thread.send({ content: intro }).catch(() => {});
         }
       }
+    } catch {}
+  }
+  // Supprimer le signalement d'origine : le détail est dans le fil, et la photo est désormais dans l'avis
+  if (stash && stash.signalMsgId && stash.signalChannelId) {
+    try {
+      const sch = await interaction.guild.channels.fetch(stash.signalChannelId).catch(() => null);
+      if (sch && sch.messages) { const sm = await sch.messages.fetch(stash.signalMsgId).catch(() => null); if (sm) await sm.delete().catch(() => {}); }
     } catch {}
   }
   db.traques.push(t);
@@ -385,7 +400,8 @@ async function handleSignalement(interaction) {
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`traque_from_signal::${sid}`).setLabel("Créer l'avis de recherche").setEmoji('📌').setStyle(ButtonStyle.Danger),
   );
-  await interaction.editReply({ embeds: [buildSignalementEmbed(s, cible, photo.url, interaction.user.username)], components: [row] });
+  const sentSig = await interaction.editReply({ embeds: [buildSignalementEmbed(s, cible, photo.url, interaction.user.username)], components: [row] }).catch(() => null);
+  if (sentSig && db._signalements[sid]) { db._signalements[sid].signalMsgId = sentSig.id; db._signalements[sid].signalChannelId = interaction.channelId; saveDB(db); }
 }
 async function handleFromSignal(interaction) {
   const sid = interaction.customId.split('::')[1];
@@ -461,7 +477,7 @@ async function _traiterPhotoWanted(message, img, cible, idx, total) {
   const recapMsg = await message.channel.send(payload).catch(() => null); // nouveau message (l'édition ne pingue pas) → le ping Confrérie fonctionne
   if (recapMsg && wait) await wait.delete().catch(() => {}); // on retire le message d'attente une fois le récap publié
   const photoUrl = (recapMsg && [...recapMsg.attachments.values()][0]?.url) || img.url;
-  db2._signalements[sid] = { cible, full: s, signalement: _signalementTexte(s), dangerosite: (DANGER[s.dangerosite] ? s.dangerosite : parseDanger(s.dangerosite)), photoUrl, createdBy: message.author.username, at: Date.now() };
+  db2._signalements[sid] = { cible, full: s, signalement: _signalementTexte(s), dangerosite: (DANGER[s.dangerosite] ? s.dangerosite : parseDanger(s.dangerosite)), photoUrl, createdBy: message.author.username, at: Date.now(), signalMsgId: recapMsg?.id, signalChannelId: message.channel.id };
   saveDB(db2);
   return true;
 }
