@@ -4559,19 +4559,26 @@ async function _exempleContratForum(guild) {
       { name: '📋 Objet', value: 'Escorte d\'une diligence d\'Armadillo à Tumbleweed, protection contre les bandits sur la route.', inline: false },
       { name: 'Statut', value: '🟡 En attente', inline: true },
     ).setFooter({ text: 'Iron Wolf Company • Contrat (exemple)' });
-  if (forum.type !== 15 || !forum.threads?.create) { // salon texte classique
-    if (!forum.send) return;
-    const recent = await forum.messages?.fetch({ limit: 30 }).catch(() => null);
+  const jrn = guild.channels.cache.get('1508756535407542372');
+  let f2 = forum; try { f2 = await guild.channels.fetch(FORUM_CONTRATS) || forum; } catch {}
+  if (f2.type !== 15 || !f2.threads?.create) { // salon texte classique
+    if (!f2.send) return;
+    const recent = await f2.messages?.fetch({ limit: 30 }).catch(() => null);
     if (recent && [...recent.values()].some(m => (m.embeds?.[0]?.title || '').includes('EXEMPLE'))) return;
-    await forum.send({ embeds: [e] }).catch(() => {}); return;
+    await f2.send({ embeds: [e] }).catch(() => {}); return;
   }
-  const act = await forum.threads.fetchActive().catch(() => null);
+  const act = await f2.threads.fetchActive().catch(() => null);
   if (act?.threads && [...act.threads.values()].some(t => (t.name || '').includes('EXEMPLE'))) return;
-  const optsC = { name: '📜 EXEMPLE — Contrat (ne pas supprimer)', message: { embeds: [e] } };
-  if (forum.availableTags?.length) optsC.appliedTags = [forum.availableTags[0].id];
-  let post = await forum.threads.create(optsC).catch(() => null);
-  if (!post) post = await forum.threads.create({ name: '📜 EXEMPLE — Contrat (ne pas supprimer)', message: { embeds: [e] } }).catch(() => null);
-  if (post?.pin) await post.pin().catch(() => {});
+  const tags = f2.availableTags || [];
+  const essais = []; if (tags.length) essais.push([tags[0].id]); essais.push(undefined);
+  let post = null, err = '';
+  for (const at of essais) {
+    const opts = { name: '📜 EXEMPLE — Contrat (ne pas supprimer)', message: { embeds: [e] } };
+    if (at) opts.appliedTags = at;
+    try { post = await f2.threads.create(opts); break; } catch (e2) { err = e2.message; }
+  }
+  if (post) await post.pin().catch(() => {});
+  else if (jrn) await jrn.send(`⚠️ **Exemple contrat — échec création** dans #${f2.name}. Raison : \`${err || 'inconnue'}\` · ${tags.length ? tags.length + ' étiquette(s) dispo' : 'aucune étiquette définie'}`).catch(() => {});
 }
 async function _exempleOperationForum(guild) {
   const forum = guild.channels.cache.get('1518349707686973470');
