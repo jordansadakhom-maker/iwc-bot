@@ -132,7 +132,7 @@ function _actions(id) {
     ),
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`med_test::${id}`).setLabel('Marquer test ✓/✗').setEmoji('✔️').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`med_rdv::${id}`).setLabel('Convoquer pour un RDV').setEmoji('📅').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`med_rdv::${id}`).setLabel('Prendre RDV avec le médecin').setEmoji('📅').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`med_note::${id}`).setLabel('Note').setEmoji('📝').setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder().addComponents(
@@ -255,16 +255,17 @@ async function routeInteraction(interaction) {
       f.prochainRdv = v || null; f.majPar = interaction.member?.displayName || interaction.user.username; f.majAt = Date.now();
       _log(f, v ? `RDV fixé : ${v}` : 'RDV retiré', f.majPar); saveDB(db);
       const gm = await interaction.guild.members.fetch(id).catch(() => null);
-      // Convoquer le membre : on le prévient directement en MP de son RDV avec le médecin
+      // On prévient LE MÉDECIN (c'est nous qui prenons rendez-vous avec elle)
       let notif = '';
-      if (v && gm) {
-        const e = new EmbedBuilder().setColor(0x2ECC71).setTitle('🩺 Convocation médicale — Iron Wolf Company')
-          .setDescription(['Le médecin de la compagnie souhaite te voir.', '', `**📅 Rendez-vous :** ${v}`, '', '*Présente-toi au créneau indiqué. En cas d\'empêchement, préviens la Direction.*'].join('\n'))
-          .setFooter({ text: 'Dr. June McCall • Confidentiel' }).setTimestamp();
-        const dm = await gm.send({ embeds: [e] }).catch(() => null);
-        notif = dm ? ' Le membre a été **convoqué en MP**.' : ' *(MP au membre impossible — préviens-le autrement.)*';
+      if (v) {
+        const role = interaction.guild.roles.cache.get(ROLE_MEDECIN);
+        const docs = role ? [...role.members.values()].filter(m => !m.user.bot) : [];
+        const e = new EmbedBuilder().setColor(0x2ECC71).setTitle('🩺 Rendez-vous médical demandé')
+          .setDescription([`La compagnie souhaite te voir${gm ? ` concernant **${gm.displayName}**` : ''}.`, '', `**📅 Quand :** ${v}`, '', `*Fixé par ${f.majPar}.*`].join('\n')).setFooter({ text: 'Iron Wolf Company' }).setTimestamp();
+        let sent = 0; for (const doc of docs) { const dm = await doc.send({ embeds: [e] }).catch(() => null); if (dm) sent++; }
+        notif = sent ? ` Le médecin a été **prévenu en MP**.` : ' *(Aucun médecin trouvé à prévenir, ou MP fermés.)*';
       }
-      await interaction.editReply({ content: `✅ RDV mis à jour.${notif}`, embeds: [_embedFiche(f, gm)], components: _actions(id) }).catch(() => {});
+      await interaction.editReply({ content: `✅ RDV noté.${notif}`, embeds: [_embedFiche(f, gm)], components: _actions(id) }).catch(() => {});
       return true;
     }
 
