@@ -1357,8 +1357,8 @@ async function autoSetup(guild) {
   await notionModules.setupTresorButton?.(guild);
   // Nettoyer les mauvais messages dans #absences (le panel affaires ne doit pas être là)
   try {
-    // Nettoyer les deux salons absences (légal + illégal)
-    for (const absId of [SALON_HARDCODED.ABSENCES_LEGAL, SALON_HARDCODED.ABSENCES_ILLEGAL]) {
+    // Nettoyer le salon d'absences (unique, partagé)
+    for (const absId of [SALON_HARDCODED.ABSENCES]) {
       const absCh = guild.channels.cache.get(absId);
       if (!absCh) continue;
       const msgs = await absCh.messages.fetch({ limit: 50 }).catch(() => null);
@@ -2360,10 +2360,9 @@ client.on('messageCreate', async message => {
     saveDB(db);
   }
 
-  // Détecter si le message est dans l'un des deux salons absences
-  const _absLegal = guild.channels.cache.get(SALON_HARDCODED.ABSENCES_LEGAL);
-  const _absIlleg = guild.channels.cache.get(SALON_HARDCODED.ABSENCES_ILLEGAL);
-  const _isInAbsSalon = (message.channel.id === _absLegal?.id || message.channel.id === _absIlleg?.id);
+  // Détecter si le message est dans le salon d'absences (unique, partagé)
+  const _absSalon = guild.channels.cache.get(SALON_HARDCODED.ABSENCES);
+  const _isInAbsSalon = (message.channel.id === _absSalon?.id);
   if (_isInAbsSalon) {
     if (db.members[message.author.id]) { db.members[message.author.id].status = 'absent'; saveDB(db); await message.react('✅'); await notionExtra.majStatutActiviteNotion?.(message.author.id, 'absent'); }
     await notionV3.syncAbsenceNotion?.(message.author.id, 'absent').catch(() => {});
@@ -5381,6 +5380,8 @@ async function _handleSetupServeur(interaction) {
     dir:       [{ id: EVERYONE, deny: ['ViewChannel'] }, ...dir],
     absLegal:  [{ id: EVERYONE, deny: ['ViewChannel'] }, { id: R_LEGAL, allow: ['ViewChannel','SendMessages'] }, { id: R_ABSENT, allow: ['ViewChannel','SendMessages'] }, ...dir],
     absIlleg:  [{ id: EVERYONE, deny: ['ViewChannel'] }, { id: R_ILLEG, allow: ['ViewChannel','SendMessages'] }, { id: R_ABSENT, allow: ['ViewChannel','SendMessages'] }, ...dir],
+    // Salon d'absences UNIQUE et partagé : légal + illégal + rôle Absent peuvent écrire
+    absences:  [{ id: EVERYONE, deny: ['ViewChannel'] }, { id: R_LEGAL, allow: ['ViewChannel','SendMessages'] }, { id: R_ILLEG, allow: ['ViewChannel','SendMessages'] }, { id: R_ABSENT, allow: ['ViewChannel','SendMessages'] }, ...dir],
     legalRO:   [{ id: EVERYONE, deny: ['ViewChannel'] }, { id: R_LEGAL, allow: ['ViewChannel'], deny: ['SendMessages'] }, ...dir],
     illegRO:   [{ id: EVERYONE, deny: ['ViewChannel'] }, { id: R_ILLEG, allow: ['ViewChannel'], deny: ['SendMessages'] }, ...dir],
     membresRO: [{ id: EVERYONE, deny: ['ViewChannel'] }, { id: R_LEGAL, allow: ['ViewChannel'], deny: ['SendMessages'] }, { id: R_ILLEG, allow: ['ViewChannel'], deny: ['SendMessages'] }, ...dir],
@@ -5419,7 +5420,6 @@ async function _handleSetupServeur(interaction) {
       { name: '💰・coffre-entreprise',             type: 0, perms: p.dir,      id: null },
       { name: '📅・agenda',                        type: 0, perms: p.legal,    id: null },
       { name: '📖・histoire-iwc',                  type: 0, perms: p.legalRO,  id: null },
-      { name: '🟡・absences',                      type: 0, perms: p.absLegal, id: SALON_HARDCODED.ABSENCES_LEGAL },
       { name: '💬・parlote',                       type: 0, perms: p.legal,    id: null },
       { name: '💬・parlote-hrp',                   type: 0, perms: p.legal,    id: null },
       { name: '🎓・formation',                     type: 0, perms: p.legal,    id: null },
@@ -5437,7 +5437,6 @@ async function _handleSetupServeur(interaction) {
       { name: '🎯・operations',              type: 0, perms: p.illeg,    id: null },
       { name: '🕵️・informateurs',            type: 0, perms: p.dir,      id: null },
       { name: '🗺️・plans',                   type: 0, perms: p.illeg,    id: null },
-      { name: '🟡・absences',               type: 0, perms: p.absIlleg, id: SALON_HARDCODED.ABSENCES_ILLEGAL },
       { name: '💬・parlote-ombre',           type: 0, perms: p.illeg,    id: null },
       { name: '💬・parlote-hrp-ombre',       type: 0, perms: p.illeg,    id: null },
       { name: '🔊・Opérations — vocal',      type: 2, perms: p.illeg,    id: null },
@@ -5458,6 +5457,7 @@ async function _handleSetupServeur(interaction) {
     ]},
     { name: '🎭 ROLEPLAY HRP', catPerms: p.catMembres, channels: [
       { name: '🧑・fiches-personnages',         type: 0, perms: p.membres,   id: null },
+      { name: '🟡・absences',                   type: 0, perms: p.absences,  id: SALON_HARDCODED.ABSENCES },
       { name: '📖・journal-de-bord',            type: 0, perms: p.dir,       id: SALON_HARDCODED.JOURNAL_DE_BORD },
       { name: '🌍・lore-et-univers',            type: 0, perms: p.membresRO, id: null },
       { name: '⌨️・commandes-slash',            type: 0, perms: p.membres,   id: null },
@@ -6927,7 +6927,7 @@ async function _bloquerEcritureAbsent(guild, member) {
       // Fallback : bloquer par membre directement
       for (const [, ch] of guild.channels.cache) {
         if (!ch.isTextBased?.() || ch.type === 4) continue;
-        if (ch.id === SALON_HARDCODED.ABSENCES_LEGAL || ch.id === SALON_HARDCODED.ABSENCES_ILLEGAL) continue; // laisser écrire dans #absences
+        if (ch.id === SALON_HARDCODED.ABSENCES) continue; // laisser écrire dans #absences
         await ch.permissionOverwrites.edit(member, { SendMessages: false }).catch(() => {});
       }
       console.log(`🔒 Écriture bloquée (membre) pour ${member.user?.username || member.id}`);
