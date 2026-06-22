@@ -75,7 +75,7 @@ const SALON_IDS = {
   ABSENCES:            '1509718164760563743', // #absences
   AFFAIRES:            '1508756508362674337', // #affaires
   INFORMATEURS:        '1509255294184853524', // #informateurs (= #plans, même salon)
-  PLANS:               '1509255294184853524', // #plans (= #informateurs, même salon)
+  PLANS:               '1508756493845925960', // #plans (salon distinct d'#informateurs — aligné sur SALON_HARDCODED.PLANS)
   FICHES_PERSONNAGES:  '1508756528277225512', // #fiches-personnages
   SURNOM_PSEUDO:       '1508915628315115581', // #surnom-pseudo
   PATCH_NOTE:          '1509695000441786608', // #patch-note (= #logs)
@@ -105,7 +105,7 @@ const SALON_HARDCODED = {
   ABSENCES:             '1509718164760563743',
   AFFAIRES_LEGAL:       '1508756508362674337',
   AFFAIRES_ILLEGAL:     '1509254234413994004',
-  DOSSIER_RECRUTEMENT:  '1509252295127466096',
+  DOSSIER_RECRUTEMENT:  '1509337860724228137',  // #dossier-recrutement (corrigé : pointait vers #dossier-illégal)
   PLANS:                '1508756493845925960',   // #plans (séparé d'informateurs)
   INFORMATEURS:         '1509255294184853524',   // #informateurs
 };
