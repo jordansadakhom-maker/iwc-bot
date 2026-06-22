@@ -83,6 +83,10 @@ let tenue = {};
 try { tenue = require('./tenue'); console.log('✅ Module tenue (Le Vestiaire) chargé'); }
 catch (e) { console.log('⚠️ tenue non chargé:', e.message); }
 
+let reseau = {};
+try { reseau = require('./reseau'); console.log('✅ Module reseau (Le Réseau d\'informateurs) chargé'); }
+catch (e) { console.log('⚠️ reseau non chargé:', e.message); }
+
 const { fmtLong, fmtShort, daysSince, parisOffsetHours, _fmtDollars } = require('./utils');
 const parrainage = require('./parrainage');
 parrainage.init({ isDirection, isMembre });
@@ -1610,6 +1614,8 @@ async function autoSetup(guild) {
   repertoire.installerPanelContact?.(guild).then(() => console.log('🎴 Panneau Contact installé')).catch(() => {});
   // Registre forum — une fiche (post) par membre
   _syncRegistreForum(guild).then(() => console.log('🗂️ Registre forum synchronisé')).catch(() => {});
+  // Le Réseau — panneau du salon informateur
+  reseau.installerPanel?.(guild).then(() => console.log('🕵️ Panneau Le Réseau installé')).catch(() => {});
 
   console.log('✅ Auto-setup terminé\n');
 }
@@ -2614,6 +2620,7 @@ client.on('interactionCreate', async interaction => {
   if (await parrainage.routeInteraction?.(interaction)) return;
   if (await tableaubord.routeInteraction?.(interaction)) return;
   if (await traque.routeInteraction?.(interaction)) return;
+  if (await reseau.routeInteraction?.(interaction)) return;
 
   if (interaction.isAutocomplete()) {
     if (['promo','retro'].includes(interaction.commandName)) return handleAutocompleteGrades(interaction);
@@ -3733,6 +3740,7 @@ client.once('clientReady', async () => {
   console.log('🏷️  VERSION : 5.2 — 15 juin 2026 (économie RP : portefeuille/payer/argent + parrainage des nouveaux)');
   client.user.setActivity('la meute • IWC 1895', { type: ActivityType.Watching });
   try { rumeurs.init?.(client); } catch (e) { console.log('⚠️ rumeurs.init:', e.message); }
+  try { reseau.init?.(client); } catch (e) { console.log('⚠️ reseau.init:', e.message); }
   await restaurerDepuisGitHub();
   for (const guild of client.guilds.cache.values()) {
     await registerSlashCommands(guild).catch(e => console.log('registerSlashCommands error:', e.message));
