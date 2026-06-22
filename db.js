@@ -18,6 +18,7 @@ const DEFAULT_DB = {
   candidatures: [], contrats: [], sentReminders: {},
   dashboardMsgId: null, reglementMsgId: null, recrutementMsgId: null,
   coffres: { legal: 0, illegal: 0 },
+  coffre: 0, // 🏦 coffre commun unique (remplace legal/illegal — démarre à 0)
   fichesCompleteesNotifiees: [],
   anniversairesEnvoyes: {},
   rappelsFiches: {},
