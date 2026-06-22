@@ -1646,6 +1646,9 @@ async function autoSetup(guild) {
   // Suivi médical — panneau du salon privé
   medical.installerPanel?.(guild).then(() => console.log('🩺 Panneau Suivi médical installé')).catch(() => {});
   medical.installerExemple?.(guild).then(() => console.log('🩺 Exemple test d\'aptitude posté')).catch(() => {});
+  // Exemples contrats & opérations
+  _exempleContratForum(guild).then(() => console.log('📜 Exemple contrat posté')).catch(() => {});
+  _exempleOperationForum(guild).then(() => console.log('🎯 Exemple opération posté')).catch(() => {});
 
   console.log('✅ Auto-setup terminé\n');
 }
@@ -4512,6 +4515,41 @@ async function _updatePlanningContrats(client) {
 }
 // Poste un nouveau contrat en POST de forum catégorisé (salon 1518392786301227250) — même principe que les opérations
 const FORUM_CONTRATS = '1518392786301227250';
+
+// Posts d'EXEMPLE (idempotents) pour contrats & opérations
+async function _exempleContratForum(guild) {
+  const forum = guild.channels.cache.get(FORUM_CONTRATS);
+  if (!forum || forum.type !== 15 || !forum.threads?.create) return;
+  const act = await forum.threads.fetchActive().catch(() => null);
+  if (act?.threads && [...act.threads.values()].some(t => (t.name || '').includes('EXEMPLE'))) return;
+  const e = new EmbedBuilder().setColor(0x999999).setTitle('📜 EXEMPLE — Contrat OFF-000')
+    .setDescription('*Exemple : voici à quoi ressemble un contrat. Les vrais sont créés via le panneau des contrats.*')
+    .addFields(
+      { name: '🏷️ Type', value: 'Offre — IWC', inline: true },
+      { name: '👤 Client', value: 'Saloon de Tumbleweed', inline: true },
+      { name: '💵 Rémunération', value: '250 $', inline: true },
+      { name: '📋 Objet', value: 'Escorte d\'une diligence d\'Armadillo à Tumbleweed, protection contre les bandits sur la route.', inline: false },
+      { name: 'Statut', value: '🟡 En attente', inline: true },
+    ).setFooter({ text: 'Iron Wolf Company • Contrat (exemple)' });
+  const post = await forum.threads.create({ name: '📜 EXEMPLE — Contrat (ne pas supprimer)', message: { embeds: [e] } }).catch(() => null);
+  if (post?.pin) await post.pin().catch(() => {});
+}
+async function _exempleOperationForum(guild) {
+  const forum = guild.channels.cache.get('1518349707686973470');
+  if (!forum || forum.type !== 15 || !forum.threads?.create) return;
+  const act = await forum.threads.fetchActive().catch(() => null);
+  if (act?.threads && [...act.threads.values()].some(t => (t.name || '').includes('EXEMPLE'))) return;
+  const e = new EmbedBuilder().setColor(0x999999).setTitle('🎯 EXEMPLE — Opération « Convoi de l\'Aube »')
+    .setDescription('*Exemple : voici à quoi ressemble une opération. Les vraies sont créées via le panneau des opérations.*')
+    .addFields(
+      { name: '📍 Lieu', value: 'Fort Mercer', inline: true },
+      { name: '👥 Équipe', value: '4 membres', inline: true },
+      { name: '🎯 Objectif', value: 'Intercepter un convoi d\'or de la compagnie minière à l\'aube, sans effusion de sang inutile.', inline: false },
+      { name: 'Statut', value: '🟡 En préparation', inline: true },
+    ).setFooter({ text: 'La Confrérie • Opération (exemple)' });
+  const post = await forum.threads.create({ name: '🎯 EXEMPLE — Opération (ne pas supprimer)', message: { embeds: [e] } }).catch(() => null);
+  if (post?.pin) await post.pin().catch(() => {});
+}
 async function _posterContratForum(guild, contrat, embed) {
   try {
     const forum = guild.channels.cache.get(FORUM_CONTRATS);
@@ -7708,7 +7746,11 @@ function _buildCommencerIci() {
     .setColor(0x8B5A2A)
     .setTitle('📌 BIENVENUE — COMMENCE ICI')
     .setDescription([
-      'Heureux de t\'accueillir à l\'Iron Wolf Company ! Voici comment démarrer en **4 étapes** :',
+      'Heureux de t\'accueillir à l\'Iron Wolf Company ! 🐺',
+      '',
+      '**Ce Discord est l\'antichambre de nos affaires** : on y vient pour **faire des contrats** avec nous (escortes, protection, récupérations…) et pour **nous contacter / prendre rendez-vous**. 👉 Tout ça se passe dans <#1512171267560702013>.',
+      '',
+      'Voici comment démarrer en **4 étapes** :',
       '',
       '**1️⃣ Définis ton pseudo RP**',
       'Clique sur **✏️ Définir mon pseudo RP** (bouton ci-dessous) : ton pseudo Discord prendra le nom de ton personnage. C\'est la base du RP.',
@@ -7722,8 +7764,8 @@ function _buildCommencerIci() {
       '**4️⃣ Présente-toi et lance-toi**',
       'Si tu veux nous rejoindre officiellement, clique sur **Candidature** dans le salon de recrutement. La Direction te recontactera.',
       '',
-      '**📞 Besoin de nos services ?**',
-      'Dans la section **Rendez-vous client**, tu peux solliciter la Compagnie et demander un rendez-vous (escorte, protection, contrat…). Remplis la demande : un opérateur te recontactera rapidement.',
+      '**📞 Besoin de nos services / d\'un rendez-vous ?**',
+      'Va dans <#1512171267560702013> et clique sur **« ✉ Envoyer un télégramme »** pour exposer ta demande **ou prendre rendez-vous** (escorte, protection, contrat…). La Direction te répond directement.',
       '',
       '*Une question ? Clique sur ❓ Toutes les commandes dans le menu, ou demande à un membre du staff.*',
     ].join('\n'))
