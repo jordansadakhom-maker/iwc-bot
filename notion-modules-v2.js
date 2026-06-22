@@ -59,29 +59,14 @@ async function handleTresorFlow(interaction) {
 
   if (id === 'tresor_type_entree' || id === 'tresor_type_sortie') {
     const type      = id === 'tresor_type_entree' ? 'entree' : 'sortie';
-    const typeLabel = type === 'entree' ? '📈 Entrée' : '📉 Sortie';
-    const pole      = _getPole(interaction.member);
-
-    const buttons = [];
-    if (pole === 'legal' || pole === 'both') {
-      buttons.push(new ButtonBuilder().setCustomId(`tresor_coffre_legal_${type}`).setLabel('⚖️ Coffre Légal').setStyle(ButtonStyle.Primary));
-    }
-    if (pole === 'illegal' || pole === 'both') {
-      buttons.push(new ButtonBuilder().setCustomId(`tresor_coffre_illegal_${type}`).setLabel('🔒 Coffre Illégal').setStyle(ButtonStyle.Secondary));
-    }
-    if (buttons.length === 0) {
-      return interaction.update({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('❌ Accès refusé').setDescription("Tu n'as pas accès à un coffre.")], components: [] });
-    }
-
-    return interaction.update({
-      embeds: [new EmbedBuilder()
-        .setColor(type === 'entree' ? 0x57F287 : 0xED4245)
-        .setTitle(`💰 Nouvelle Transaction — ${typeLabel}`)
-        .setDescription('**Étape 2/3** — Quel coffre ?')
-        .setFooter({ text: 'IWC • Trésorerie' })
-      ],
-      components: [new ActionRowBuilder().addComponents(...buttons)],
-    });
+    const modal = new ModalBuilder()
+      .setCustomId(`modal_tresor_${type}_commun`)
+      .setTitle(`💰 ${type === 'entree' ? 'Entrée' : 'Sortie'} — Coffre`);
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('montant').setLabel('Montant ($)').setPlaceholder('Ex : 5000').setStyle(TextInputStyle.Short).setRequired(true)),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objet').setLabel('Objet / Description').setPlaceholder('Ex : Paiement mission').setStyle(TextInputStyle.Short).setRequired(true)),
+    );
+    return interaction.showModal(modal);
   }
 
   if (id.startsWith('tresor_coffre_')) {
@@ -104,7 +89,6 @@ async function handleTresorModal(interaction) {
 
   const parts     = interaction.customId.split('_');
   const typeRaw   = parts[2];
-  const coffreRaw = parts[3];
 
   const montant = parseInt(interaction.fields.getTextInputValue('montant').replace(/[^0-9.,]/g, '').replace(',', '.'), 10);
   const objet   = interaction.fields.getTextInputValue('objet').trim();
@@ -113,16 +97,15 @@ async function handleTresorModal(interaction) {
     return interaction.followUp({ content: '❌ Montant invalide. Entre un nombre positif.', flags: MessageFlags.Ephemeral });
   }
 
-  const type   = typeRaw   === 'entree'  ? 'Entrée'  : 'Sortie';
-  const coffre = coffreRaw === 'illegal' ? 'Illégal' : 'Légal';
-  const key    = coffreRaw === 'illegal' ? 'illegal' : 'legal';
+  const type   = typeRaw === 'entree' ? 'Entrée' : 'Sortie';
+  const coffre = 'commun';
+  const key    = 'commun';
 
   // ══ FIX TDZ : db déclaré ICI, avant toute utilisation ══
   const db = loadDB();
 
-  // Limite dynamique — configurable par le Fléau/Concepteur
-  const limiteDb = key === 'illegal' ? (db.limiteSortieIllegal || LIMITE_SORTIE_ILLEGAL) : (db.limiteSortieLegal || LIMITE_SORTIE_LEGAL);
-  const limite = limiteDb;
+  // Coffre commun unique — une seule limite de sortie
+  const limite = db.limiteSortieLegal || LIMITE_SORTIE_LEGAL;
 
   const txId = `TX-${Date.now().toString().slice(-6)}`;
 
@@ -136,7 +119,7 @@ async function handleTresorModal(interaction) {
       return interaction.followUp({ flags: MessageFlags.Ephemeral, embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('📨 Sortie importante soumise').setDescription(`Sortie de **$${montant.toLocaleString('fr-FR')}** soumise à validation Direction (traçabilité).\n\n*En tant que Direction, la preuve photo n'est pas requise.*`).setFooter({ text: `IWC • Réf. ${txId}` })] });
     }
     await _validerTransaction(interaction.guild, txDirect, null);
-    const soldeFinal2 = loadDB().coffres?.[key] || 0;
+    const soldeFinal2 = loadDB().coffre || 0;
     return interaction.followUp({ flags: MessageFlags.Ephemeral, embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ Transaction validée').addFields({ name: '🆔 Réf.', value: `\`${txId}\``, inline: true }, { name: `${type === 'Entrée' ? '📥' : '📤'} ${type}`, value: `$${montant.toLocaleString('fr-FR')}`, inline: true }, { name: '💰 Solde', value: `**$${soldeFinal2.toLocaleString('fr-FR')}**`, inline: true }).setFooter({ text: `IWC • Direction — Sans preuve photo` })] });
   }
 
@@ -298,7 +281,7 @@ async function handleTresorModal(interaction) {
   delete dbFinal2.transactionsPendantes[txId];
   saveDB(dbFinal2);
 
-  const soldeFinal = (loadDB().coffres?.[key] || 0);
+  const soldeFinal = (loadDB().coffre || 0);
   await interaction.followUp({
     flags: MessageFlags.Ephemeral,
     embeds: [new EmbedBuilder()
@@ -347,10 +330,10 @@ async function _soumettreValidationDirection(guild, tx, photoUrl) {
 
 async function _validerTransaction(guild, tx, photoUrl) {
   const db = loadDB();
-  if (!db.coffres) db.coffres = { legal: 0, illegal: 0 };
-  if (tx.type === 'Entrée') db.coffres[tx.key] += tx.montant;
-  else                      db.coffres[tx.key] = Math.max(0, db.coffres[tx.key] - tx.montant);
-  const nouveauSolde = db.coffres[tx.key];
+  if (typeof db.coffre !== 'number') db.coffre = 0;
+  if (tx.type === 'Entrée') db.coffre += tx.montant;
+  else                      db.coffre = Math.max(0, db.coffre - tx.montant);
+  const nouveauSolde = db.coffre;
   saveDB(db);
 
   _archiverTransactionNotion({
@@ -501,18 +484,18 @@ async function setupTresorButton(guild) {
 }
 
 function _tresorEmbed() {
-  const db = loadDB(); const legal = db.coffres?.legal || 0; const illega = db.coffres?.illegal || 0;
-  return new EmbedBuilder().setColor(0x8B1A1A).setTitle('💰 Trésorerie — Iron Wolf Company').setDescription('Enregistrez chaque mouvement financier via le bouton ci-dessous.\nToute transaction est archivée automatiquement dans Notion.').addFields({ name: '⚖️ Coffre Légal', value: `**$${legal.toLocaleString('fr-FR')}**`, inline: true }, { name: '🔒 Coffre Illégal', value: `**$${illega.toLocaleString('fr-FR')}**`, inline: true }, { name: '💼 Total', value: `**$${(legal + illega).toLocaleString('fr-FR')}**`, inline: true }).setFooter({ text: `IWC • Trésorerie automatique • Mis à jour le ${new Date().toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` }).setTimestamp();
+  const db = loadDB(); const solde = db.coffre || 0;
+  return new EmbedBuilder().setColor(0x8B1A1A).setTitle('💰 Trésorerie — Iron Wolf Company').setDescription('Enregistrez chaque mouvement financier via le bouton ci-dessous.\nToute transaction est archivée automatiquement dans Notion.').addFields({ name: '🏦 Coffre commun', value: `**$${solde.toLocaleString('fr-FR')}**`, inline: false }).setFooter({ text: `IWC • Trésorerie automatique • Mis à jour le ${new Date().toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` }).setTimestamp();
 }
 function _tresorRow() {
-  return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_nouvelle_transaction').setLabel('💰 Nouvelle Transaction').setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId('btn_solde').setLabel('📊 Voir les soldes').setStyle(ButtonStyle.Secondary), new ButtonBuilder().setCustomId('btn_tresor_config').setLabel('⚙️').setStyle(ButtonStyle.Secondary));
+  return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_nouvelle_transaction').setLabel('💰 Nouvelle Transaction').setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId('btn_solde').setLabel('📊 Voir le solde').setStyle(ButtonStyle.Secondary), new ButtonBuilder().setCustomId('btn_coffre_reset').setLabel('🗑️ Coffre à 0').setStyle(ButtonStyle.Danger), new ButtonBuilder().setCustomId('btn_tresor_config').setLabel('⚙️').setStyle(ButtonStyle.Secondary));
 }
 
 async function handleSoldeButton(interaction) {
-  const db = loadDB(); const legal = db.coffres?.legal || 0; const illega = db.coffres?.illegal || 0;
+  const db = loadDB(); const solde = db.coffre || 0;
   const ch = interaction.guild.channels.cache.find(c => c.name?.includes('coffre-entreprise'));
   if (ch && db.tresorButtonMsgId) { const msg = await ch.messages.fetch(db.tresorButtonMsgId).catch(() => null); if (msg) await msg.edit({ embeds: [_tresorEmbed()], components: [_tresorRow()] }).catch(() => {}); }
-  await interaction.reply({ flags: MessageFlags.Ephemeral, content: `💰 **Soldes mis à jour dans le salon**\n⚖️ Légal : **$${legal.toLocaleString('fr-FR')}** · 🔒 Illégal : **$${illega.toLocaleString('fr-FR')}** · Total : **$${(legal + illega).toLocaleString('fr-FR')}**` });
+  await interaction.reply({ flags: MessageFlags.Ephemeral, content: `🏦 **Coffre commun : $${solde.toLocaleString('fr-FR')}** (mis à jour dans le salon)` });
 }
 
 async function _archiverTransactionNotion({ objet, type, coffre, montant, solde, responsable, date }) {
@@ -583,7 +566,7 @@ async function handleDashboard(interaction) {
   const membres = Object.values(db.members || {});
   const actifs = membres.filter(m => m.status !== 'parti').length; const inactifs = membres.filter(m => m.status === 'inactif').length; const absents = membres.filter(m => m.status === 'absent').length; const probatoires = membres.filter(m => m.status === 'probatoire').length;
   const candsEnAttente = (db.candidatures || []).filter(c => c.status === 'en_attente').length;
-  const legal = db.coffres?.legal || 0; const illegal = db.coffres?.illegal || 0;
+  const legal = db.coffre || 0; const illegal = 0;
   const opsEnCours = (db.operations || []).filter(o => o.status === 'en_cours').length; const opsPrepa = (db.operations || []).filter(o => o.status === 'preparation').length;
   const opsTerminees7j = (db.operations || []).filter(o => o.status === 'terminee' && o.endedAt && (now - new Date(o.endedAt).getTime()) < 7 * 86400000).length;
   const contratsActifs = (db.contrats || []).filter(c => c.status === 'signe').length; const contratsExpires = (db.contrats || []).filter(c => c.status === 'signe' && c.dateEcheance && new Date(c.dateEcheance) < new Date()).length;
@@ -739,7 +722,7 @@ async function handleBilanCommand(interaction) {
   const db = loadDB(); const coffre = interaction.options?.getString('coffre') || 'legal';
   let transactions = [];
   if (process.env.NOTION_TOKEN && process.env.NOTION_TRESORERIE_DB) { try { const depuis = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0]; const res = await fetch(`https://api.notion.com/v1/databases/${process.env.NOTION_TRESORERIE_DB}/query`, { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' }, body: JSON.stringify({ filter: { and: [{ property: 'Date', date: { on_or_after: depuis } }, { property: 'Coffre', select: { equals: coffre === 'illegal' ? '🔒 Illégal' : '⚖️ Légal' } }] }, sorts: [{ property: 'Date', direction: 'descending' }], page_size: 20 }) }); const data = await res.json(); transactions = (data.results || []).map(p => ({ objet: p.properties['Objet']?.title?.[0]?.plain_text || '—', type: p.properties['Type']?.select?.name || '—', montant: p.properties['Montant']?.number || 0, solde: p.properties['Solde']?.number || 0, responsable: p.properties['Responsable']?.rich_text?.[0]?.plain_text || '—', date: p.properties['Date']?.date?.start || '—' })); } catch (e) { console.log('❌ Notion bilan error:', e.message); } }
-  const key = coffre === 'illegal' ? 'illegal' : 'legal'; const soldeActuel = db.coffres?.[key] || 0; const label = coffre === 'illegal' ? '🔒 Coffre Illégal' : '⚖️ Coffre Légal'; const color = coffre === 'illegal' ? 0x8B1A1A : 0x3B82F6;
+  const key = coffre === 'illegal' ? 'illegal' : 'legal'; const soldeActuel = db.coffre || 0; const label = coffre === 'illegal' ? '🔒 Coffre Illégal' : '⚖️ Coffre Légal'; const color = coffre === 'illegal' ? 0x8B1A1A : 0x3B82F6;
   const entrees = transactions.filter(t => t.type.includes('Entrée')); const sorties = transactions.filter(t => t.type.includes('Sortie')); const totalEntrees = entrees.reduce((s, t) => s + t.montant, 0); const totalSorties = sorties.reduce((s, t) => s + t.montant, 0);
   const embed = new EmbedBuilder().setColor(color).setTitle(`📊 Bilan — ${label}`).setDescription(`*7 derniers jours — ${new Date(Date.now() - 7 * 86400000).toLocaleDateString('fr-FR')} → ${new Date().toLocaleDateString('fr-FR')}*`).addFields({ name: '💰 Solde actuel', value: `**$${soldeActuel.toLocaleString('fr-FR')}**`, inline: true }, { name: '📥 Total entrées', value: `**+$${totalEntrees.toLocaleString('fr-FR')}**`, inline: true }, { name: '📤 Total sorties', value: `**-$${totalSorties.toLocaleString('fr-FR')}**`, inline: true });
   if (transactions.length > 0) { const lignes = transactions.slice(0, 8).map(t => { const emoji = t.type.includes('Entrée') ? '📥' : '📤'; const signe = t.type.includes('Entrée') ? '+' : '-'; return `${emoji} \`${_fmtDate(t.date)}\` **${t.objet}** — ${signe}$${t.montant.toLocaleString('fr-FR')} · *${t.responsable}*`; }).join('\n'); embed.addFields({ name: `📋 Dernières transactions (${transactions.length})`, value: lignes, inline: false }); }
@@ -750,14 +733,12 @@ async function handleBilanCommand(interaction) {
 
 async function checkAlerteCoffre(guild) {
   try {
-    const db = loadDB(); const legal = db.coffres?.legal || 0; const illegal = db.coffres?.illegal || 0;
+    const db = loadDB(); const solde = db.coffre || 0;
     const logsCh = guild.channels.cache.find(c => { const cl = s => s.toLowerCase().replace(/[^a-z0-9]/g, ''); return c.isTextBased?.() && cl(c.name).includes('logs'); });
     if (!logsCh) return;
     if (!db.alertesCoffre) db.alertesCoffre = {};
-    if (legal < SEUIL_LEGAL && !db.alertesCoffre.legal) { await logsCh.send({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('⚠️ Alerte — Coffre Légal bas').setDescription("Le **Coffre Légal** est passé sous le seuil d'alerte.").addFields({ name: '💰 Solde actuel', value: `**$${legal.toLocaleString('fr-FR')}**`, inline: true }, { name: '⚠️ Seuil', value: `$${SEUIL_LEGAL.toLocaleString('fr-FR')}`, inline: true }).setFooter({ text: 'IWC • Alerte automatique' }).setTimestamp()] }); db.alertesCoffre.legal = true; saveDB(db); }
-    else if (legal >= SEUIL_LEGAL && db.alertesCoffre.legal) { db.alertesCoffre.legal = false; saveDB(db); }
-    if (illegal < SEUIL_ILLEGAL && !db.alertesCoffre.illegal) { await logsCh.send({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('⚠️ Alerte — Coffre Illégal bas').setDescription("Le **Coffre Illégal** est passé sous le seuil d'alerte.").addFields({ name: '💰 Solde actuel', value: `**$${illegal.toLocaleString('fr-FR')}**`, inline: true }, { name: '⚠️ Seuil', value: `$${SEUIL_ILLEGAL.toLocaleString('fr-FR')}`, inline: true }).setFooter({ text: 'IWC • Alerte automatique' }).setTimestamp()] }); db.alertesCoffre.illegal = true; saveDB(db); }
-    else if (illegal >= SEUIL_ILLEGAL && db.alertesCoffre.illegal) { db.alertesCoffre.illegal = false; saveDB(db); }
+    if (solde < SEUIL_LEGAL && !db.alertesCoffre.commun) { await logsCh.send({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('⚠️ Alerte — Coffre bas').setDescription("Le **coffre commun** est passé sous le seuil d'alerte.").addFields({ name: '💰 Solde actuel', value: `**$${solde.toLocaleString('fr-FR')}**`, inline: true }, { name: '⚠️ Seuil', value: `$${SEUIL_LEGAL.toLocaleString('fr-FR')}`, inline: true }).setFooter({ text: 'IWC • Alerte automatique' }).setTimestamp()] }); db.alertesCoffre.commun = true; saveDB(db); }
+    else if (solde >= SEUIL_LEGAL && db.alertesCoffre.commun) { db.alertesCoffre.commun = false; saveDB(db); }
   } catch (e) { console.log('❌ checkAlerteCoffre error:', e.message); }
 }
 
