@@ -146,26 +146,30 @@ Règles de catégorie : Armes (revolvers, fusils, couteaux) ; Munitions (balles,
 async function _imageBytes(url) {
   try { const r = await fetch(url); if (!r.ok) return null; return Buffer.from(await r.arrayBuffer()); } catch { return null; }
 }
+const _SUPPORTED_MT = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+function _cleanMt(mt) { let m = String(mt || 'image/png').split(';')[0].trim().toLowerCase(); if (m === 'image/jpg') m = 'image/jpeg'; return _SUPPORTED_MT.includes(m) ? m : 'image/png'; }
 async function _callVision(model, b64, mt) {
-  const apiKey = process.env.ANTHROPIC_API_KEY; if (!apiKey) return null;
+  const apiKey = process.env.ANTHROPIC_API_KEY; if (!apiKey) { console.log('⚠️ inventaire vision: ANTHROPIC_API_KEY absente'); return null; }
   try {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({ model, max_tokens: 2000, messages: [{ role: 'user', content: [
-        { type: 'image', source: { type: 'base64', media_type: mt || 'image/png', data: b64 } },
+        { type: 'image', source: { type: 'base64', media_type: _cleanMt(mt), data: b64 } },
         { type: 'text', text: PROMPT_VISION },
       ] }] }),
     });
-    if (!resp.ok) return null;
+    if (!resp.ok) { const body = await resp.text().catch(() => ''); console.log(`❌ inventaire vision ${model} HTTP ${resp.status}: ${body.slice(0, 300)}`); return null; }
     const data = await resp.json();
-    return (data?.content?.[0]?.text || "");
-  } catch { return null; }
+    const txt = data?.content?.[0]?.text || "";
+    if (!txt) console.log(`⚠️ inventaire vision ${model}: réponse sans texte`);
+    return txt;
+  } catch (e) { console.log(`❌ inventaire vision ${model} exception:`, e.message); return null; }
 }
 function _parseItems(txt) {
   if (!txt) return null;
   txt = String(txt).trim().replace(/```json/gi, "").replace(/```/g, "").trim();
-  const m = txt.match(/\[[\s\S]*\]/); if (!m) return null;
+  const m = txt.match(/\[[\s\S]*\]/); if (!m) { console.log('⚠️ inventaire: pas de tableau JSON dans la réponse IA:', String(txt).slice(0, 200)); return null; }
   try {
     const arr = JSON.parse(m[0]); if (!Array.isArray(arr)) return null;
     const out = [];
@@ -198,12 +202,22 @@ function _merge(lists) {
   }
   return [...map.values()];
 }
+// URL à envoyer à l'IA : si l'image est grande, on demande une version redimensionnée
+// au proxy Discord (≤1568px, le max utile pour l'IA) pour rester sous la limite Anthropic (~5 Mo).
+function _urlPourIA(a) {
+  const grande = (a.width && a.width > 1600) || (a.height && a.height > 1600) || (a.size && a.size > 3500000);
+  if (grande && a.proxyURL) { const sep = a.proxyURL.includes('?') ? '&' : '?'; return `${a.proxyURL}${sep}width=1568&height=1568`; }
+  return a.url;
+}
 async function _lireImages(atts) {
   const lists = [];
   for (const a of atts) {
-    const buf = await _imageBytes(a.url); if (!buf) continue;
+    let buf = await _imageBytes(_urlPourIA(a));
+    if (!buf) buf = await _imageBytes(a.url); // repli sur l'URL d'origine si le proxy échoue
+    if (!buf) { console.log('⚠️ inventaire: téléchargement image échoué'); continue; }
     const items = await _analyserImage(buf.toString('base64'), a.contentType || 'image/png');
     if (items && items.length) lists.push(items);
+    else console.log(`⚠️ inventaire: 0 objet lu (${a.name || '?'} · ${a.width || '?'}x${a.height || '?'} · ${Math.round((a.size || 0) / 1024)} Ko)`);
   }
   return _merge(lists);
 }
