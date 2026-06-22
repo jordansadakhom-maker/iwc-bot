@@ -76,21 +76,16 @@ async function creerFactureContrat(guild, c, opts = {}) {
   });
 }
 
-// Post-bouton « créer une facture manuelle » (épinglé, idempotent)
+// Le bouton de facture manuelle a été retiré : les factures se créent automatiquement
+// à partir des contrats honorés. On nettoie l'ancien post « ➕ CRÉER UNE FACTURE » s'il reste.
 async function installerPanel(guild) {
   const forum = _ch(guild, FACTURES_FORUM);
-  if (!forum || forum.type !== 15 || !forum.threads?.create) return;
-  const moi = guild.members.me?.id;
+  if (!forum || forum.type !== 15 || !forum.threads?.fetchActive) return;
   const act = await forum.threads.fetchActive().catch(() => null);
-  const deja = act?.threads && [...act.threads.values()].some(t => (t.name || '').includes('CRÉER UNE FACTURE'));
-  if (deja) return;
-  const e = new EmbedBuilder().setColor(0xB8860B).setTitle('➕ CRÉER UNE FACTURE (manuelle)')
-    .setDescription(['Les factures des **contrats honorés** arrivent ici automatiquement.', '', 'Pour une facture **manuelle** (soin du médecin, prestation ponctuelle…), clique le bouton ci-dessous.'].join('\n'));
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('fac_new').setLabel('Nouvelle facture').setEmoji('🧾').setStyle(ButtonStyle.Primary),
-  );
-  const post = await forum.threads.create({ name: '➕ CRÉER UNE FACTURE', message: { embeds: [e], components: [row] } }).catch(() => null);
-  if (post?.pin) await post.pin().catch(() => {});
+  if (!act?.threads) return;
+  for (const t of act.threads.values()) {
+    if ((t.name || '').includes('CRÉER UNE FACTURE')) await t.delete().catch(() => {});
+  }
 }
 
 async function routeInteraction(interaction) {
