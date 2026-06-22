@@ -76,16 +76,26 @@ async function creerFactureContrat(guild, c, opts = {}) {
   });
 }
 
-// Le bouton de facture manuelle a été retiré : les factures se créent automatiquement
-// à partir des contrats honorés. On nettoie l'ancien post « ➕ CRÉER UNE FACTURE » s'il reste.
+// Au démarrage : nettoie l'ancien bouton manuel, VERROUILLE le forum (seul le bot poste),
+// et publie un post d'EXEMPLE. (Les vraies factures viennent des contrats honorés.)
 async function installerPanel(guild) {
   const forum = _ch(guild, FACTURES_FORUM);
-  if (!forum || forum.type !== 15 || !forum.threads?.fetchActive) return;
-  const act = await forum.threads.fetchActive().catch(() => null);
-  if (!act?.threads) return;
-  for (const t of act.threads.values()) {
-    if ((t.name || '').includes('CRÉER UNE FACTURE')) await t.delete().catch(() => {});
-  }
+  if (!forum || forum.type !== 15) return;
+  // 1) Nettoyer l'ancien post « ➕ CRÉER UNE FACTURE »
+  const act = await forum.threads?.fetchActive?.().catch(() => null);
+  if (act?.threads) for (const t of act.threads.values()) { if ((t.name || '').includes('CRÉER UNE FACTURE')) await t.delete().catch(() => {}); }
+  // 2) Verrouiller : @everyone ne peut plus poster, seul le bot peut
+  try {
+    await forum.permissionOverwrites.edit(guild.roles.everyone, { CreatePublicThreads: false, CreatePrivateThreads: false, SendMessages: false, SendMessagesInThreads: false });
+    if (guild.members.me) await forum.permissionOverwrites.edit(guild.members.me, { ViewChannel: true, CreatePublicThreads: true, SendMessages: true, SendMessagesInThreads: true });
+  } catch (e) { console.log('⚠️ verrou forum factures (permissions bot ?):', e.message); }
+  // 3) Poster l'exemple (idempotent)
+  const act2 = await forum.threads?.fetchActive?.().catch(() => null);
+  if (act2?.threads && [...act2.threads.values()].some(t => (t.name || '').includes('EXEMPLE'))) return;
+  const f = { numero: 'FAC-000', objet: 'Escorte d\'une diligence d\'Armadillo à Tumbleweed', montant: 250, clientNom: 'Saloon de Tumbleweed (EXEMPLE)', type: 'Contrat — IWC', remuneration: '250 $ à la livraison', ref: 'Contrat OFF-EXEMPLE', createdAt: Date.now() };
+  const embed = _factureEmbed(f); embed.setColor(0x999999);
+  const post = await forum.threads.create({ name: '📋 EXEMPLE — Facture (ne pas supprimer)', message: { content: '*Exemple : voici à quoi ressemble une facture. Les vraies sont créées automatiquement quand un contrat est honoré.*', embeds: [embed] } }).catch(() => null);
+  if (post?.pin) await post.pin().catch(() => {});
 }
 
 async function routeInteraction(interaction) {
