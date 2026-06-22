@@ -125,10 +125,15 @@ async function _doSauvegardeGitHub() {
     // ── Garde-fou anti-écrasement : ne JAMAIS remplacer la sauvegarde par des données vides/corrompues ──
     try {
       const d = JSON.parse(contenu);
-      const aDuContenu = (d.members && Object.keys(d.members).length > 0) ||
+      // Présence de données « réelles » : plus de membres que les fondateurs par défaut
+      // (ceux-ci sont TOUJOURS réinjectés par deepMerge, donc leur seule présence ne prouve rien),
+      // OU au moins une collection / un coffre non vide — coffre COMMUN inclus.
+      const nbMembres = (d.members && typeof d.members === 'object') ? Object.keys(d.members).length : 0;
+      const aDuContenu =
+        nbMembres > Object.keys(DEFAULT_DB.members).length ||
         (d.candidatures || []).length || (d.contrats || []).length || (d.operations || []).length ||
         (d.affaires || []).length || (d.informateurs || []).length ||
-        (d.coffres?.legal || 0) || (d.coffres?.illegal || 0);
+        (d.coffre || 0) || (d.coffres?.legal || 0) || (d.coffres?.illegal || 0);
       if (!aDuContenu) { console.log('⚠️ Sauvegarde GitHub ANNULÉE : données vides/suspectes (protection anti-écrasement)'); return false; }
     } catch { console.log('⚠️ Sauvegarde GitHub ANNULÉE : JSON invalide'); return false; }
 
@@ -188,11 +193,16 @@ async function restaurerDepuisGitHub() {
   if (fs.existsSync(DB_PATH)) {
     try {
       const existing = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
+      const nbMembres = (existing.members && typeof existing.members === 'object') ? Object.keys(existing.members).length : 0;
       const hasData = (existing.candidatures || []).length > 0 ||
                       (existing.contrats || []).length > 0 ||
+                      (existing.operations || []).length > 0 ||
+                      (existing.affaires || []).length > 0 ||
+                      (existing.informateurs || []).length > 0 ||
+                      (existing.coffre || 0) > 0 ||
                       (existing.coffres?.legal || 0) > 0 ||
                       (existing.coffres?.illegal || 0) > 0 ||
-                      (existing.operations || []).length > 0;
+                      nbMembres > Object.keys(DEFAULT_DB.members).length;
       if (hasData) return false; // Des données réelles existent → pas besoin de restaurer
     } catch {}
   }

@@ -35,6 +35,7 @@ const CH = {
 const ROLE_POLE_LEGAL   = '1508756436082102303';
 const ROLE_POLE_ILLEGAL = '1508898841993281658';
 const ROLE_ABSENT       = '1510636619873517648';
+const ROLE_ABSENT_ID    = '1511134028474876035'; // fallback historique si ROLE_ABSENT vide
 const CONTRAT_ROLES     = ['1508289999035039875', '1508290320763195482', '1508292278953836655'];
 const JUNE_MCCALL_ID    = '998581854791798835';
 
@@ -74,7 +75,7 @@ const SALON_IDS = {
   ABSENCES:            '1509718164760563743', // #absences
   AFFAIRES:            '1508756508362674337', // #affaires
   INFORMATEURS:        '1509255294184853524', // #informateurs (= #plans, même salon)
-  PLANS:               '1509255294184853524', // #plans (= #informateurs, même salon)
+  PLANS:               '1508756493845925960', // #plans (salon distinct d'#informateurs — aligné sur SALON_HARDCODED.PLANS)
   FICHES_PERSONNAGES:  '1508756528277225512', // #fiches-personnages
   SURNOM_PSEUDO:       '1508915628315115581', // #surnom-pseudo
   PATCH_NOTE:          '1509695000441786608', // #patch-note (= #logs)
@@ -92,6 +93,25 @@ const SALON_IDS = {
   AGENDA_ILLEGAL:      '1510956171958161528', // #agenda-illégal
   OPERATIONS:          '1508756486892027904', // #operations
 };
+
+// ── IDs Salons hardcodés (source: config Discord IWC) — déplacé depuis index.js ──
+const SALON_HARDCODED = {
+  JOURNAL_DE_BORD:      '1508756535407542372',
+  CONTRATS:             '1508756442730074222',
+  CONTRATS_REPONSES:    '1518392786301227250',
+  OPERATIONS:           '1508756486892027904',
+  COFFRE_ENTREPRISE:    '1508756453354373202',
+  COFFRE_ILLEGAL:       '1508756490432024636',
+  ABSENCES:             '1509718164760563743',
+  AFFAIRES_LEGAL:       '1508756508362674337',
+  AFFAIRES_ILLEGAL:     '1509254234413994004',
+  DOSSIER_RECRUTEMENT:  '1509337860724228137',  // #dossier-recrutement (corrigé : pointait vers #dossier-illégal)
+  PLANS:                '1508756493845925960',   // #plans (séparé d'informateurs)
+  INFORMATEURS:         '1509255294184853524',   // #informateurs
+};
+
+// ── Base Notion des transactions (trésorerie) ──
+const NOTION_TRANSACTIONS_DB = '36ff4436a86c80ecb4a9ebcabc104a07';
 
 // ── Détection du pôle d'un membre depuis ses rôles Discord ──
 function _getPole(member) {
@@ -111,7 +131,8 @@ module.exports = {
   MEMBRES_DISCORD_MAP, DISCORD_TO_IC,
   CH, PARTICIPANTS_MAP,
   ROLE_POLE_LEGAL, ROLE_POLE_ILLEGAL,
-  CONTRAT_ROLES, JUNE_MCCALL_ID, ROLE_ABSENT, SALON_IDS,
+  CONTRAT_ROLES, JUNE_MCCALL_ID, ROLE_ABSENT, ROLE_ABSENT_ID, SALON_IDS,
+  SALON_HARDCODED, NOTION_TRANSACTIONS_DB,
   NOTION_VERSION,
   LIMITE_SORTIE_LEGAL, LIMITE_SORTIE_ILLEGAL,
   SEUIL_COFFRE_LEGAL, SEUIL_COFFRE_ILLEGAL,

@@ -1,0 +1,24 @@
+# ── Secrets & environnement ──
+.env
+.env.*
+!.env.example
+
+# ── Dépendances ──
+node_modules/
+
+# ── État runtime du bot (persisté via GitHub Gist, jamais dans git) ──
+data.json
+data.json.bak
+*.local.json
+
+# ── Logs & divers ──
+*.log
+npm-debug.log*
+logs/
+
+# ── Fichiers OS / éditeurs ──
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

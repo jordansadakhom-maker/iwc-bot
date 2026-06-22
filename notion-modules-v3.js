@@ -799,7 +799,9 @@ module.exports = {
 // 9. SYNC NOTION — Opérations terminées
 // ═══════════════════════════════════════════════════════════════
 async function syncOperationTermineeNotion(op) {
-  if (!process.env.NOTION_TOKEN || !process.env.NOTION_OPS_DB) return;
+  // Accepte les deux noms d'env (NOTION_OPS_DB historique + NOTION_OPERATIONS_DB utilisé ailleurs)
+  const OPS_DB = process.env.NOTION_OPS_DB || process.env.NOTION_OPERATIONS_DB;
+  if (!process.env.NOTION_TOKEN || !OPS_DB) return;
   try {
     const props = {
       'Nom':         { title:     [{ text: { content: op.name || '—' } }] },
@@ -823,7 +825,7 @@ async function syncOperationTermineeNotion(op) {
       await fetch('https://api.notion.com/v1/pages', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parent: { database_id: process.env.NOTION_OPS_DB }, properties: props }),
+        body: JSON.stringify({ parent: { database_id: OPS_DB }, properties: props }),
       });
     }
     console.log(`✅ Opération archivée dans Notion : ${op.name}`);
