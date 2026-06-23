@@ -167,6 +167,22 @@ function getAgendaCh(guild) {
       || null;
 }
 
+// Panneau permanent dans #agenda : un bouton « Nouveau rendez-vous » plutôt qu'une commande.
+async function _installerPanelAgenda(guild) {
+  try {
+    const ch = getAgendaCh(guild); if (!ch?.send) return;
+    const me = guild.client.user.id;
+    const msgs = await ch.messages.fetch({ limit: 30 }).catch(() => null);
+    if (msgs && [...msgs.values()].some(m => m.author?.id === me && (m.embeds?.[0]?.title || '').includes('PRENDRE UN RENDEZ-VOUS'))) return;
+    const e = new EmbedBuilder().setColor(0x8B5A2A).setTitle('📅 PRENDRE UN RENDEZ-VOUS')
+      .setDescription('Clique sur le bouton ci-dessous pour **fixer un rendez-vous** à l\'agenda.\nChoisis le **lieu**, la **date** et l\'**heure** — l\'équipe concernée est prévenue automatiquement.')
+      .setFooter({ text: 'Iron Wolf Company · Agenda' });
+    const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('agenda_panel_creer').setLabel('Nouveau rendez-vous').setEmoji('📅').setStyle(ButtonStyle.Success));
+    const sent = await ch.send({ embeds: [e], components: [row] }).catch(() => null);
+    if (sent) await sent.pin().catch(() => {});
+  } catch (e) { console.log('⚠️ install panneau agenda:', e.message); }
+}
+
 // Équipe RDV à pinger : Fondateur, Officier de Terrain, Opérateur, Panseur.
 function pingEquipeRdv(guild) {
   try {
@@ -1523,6 +1539,7 @@ async function autoSetup(guild) {
   medical.installerPanel?.(guild).then(() => console.log('🩺 Panneau Suivi médical installé')).catch(() => {});
   medical.installerExemple?.(guild).then(() => console.log('🩺 Exemple test d\'aptitude posté')).catch(() => {});
   inventaire.rafraichirBoardDemarrage?.(guild.client).then(() => console.log('📦 Board inventaire rafraîchi (boutons à jour)')).catch(() => {});
+  _installerPanelAgenda(guild).then(() => console.log('📅 Panneau agenda installé')).catch(() => {});
   // Exemples contrats & opérations
   _exempleContratForum(guild).then(() => console.log('📜 Exemple contrat posté')).catch(() => {});
   _exempleOperationForum(guild).then(() => console.log('🎯 Exemple opération posté')).catch(() => {});
@@ -2708,6 +2725,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId.startsWith('engagement_signer_'))  return _ouvrirModalEngagement(interaction);
     if (interaction.customId === 'btn_grade_panel')            return notionV3.handleGradePanelButton?.(interaction);
     if (interaction.customId === 'btn_agenda_nouveau')         return notionV3.handleAgendaNouveauButton?.(interaction);
+    if (interaction.customId === 'agenda_panel_creer')         return _ouvrirModalAgendaSimple(interaction);
     if (interaction.customId === 'btn_hierarchie_refresh')     { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); await notionV3.updateHierarchieEmbed?.(interaction.guild); return interaction.editReply({ content: '✅ Hiérarchie mise à jour.' }); }
     if (interaction.customId === 'btn_affaire_nouvelle') {
       const modal = new ModalBuilder().setCustomId('modal_affaire').setTitle('📋 Soumettre une affaire');

@@ -186,6 +186,7 @@ function _richFiche(d) {
     `⭐ **Fiabilité** — ${_stars(d.fiabilite)}`,
     `🩸 **Statut** — ${v(d.statut)}`,
     `🗓️ **Dernier contact** — ${v(d.dernierContact)}`,
+    `👤 **Fiche établie par** — ${v(d.creeParNom)}`,
     ``,
     `📝 **Notes**`,
     v(d.notes, "—"),
@@ -497,6 +498,7 @@ async function routeInteraction(interaction) {
         affiliation: "", relation: "", fiabilite: "", statut: "",
         dernierContact: new Date().toLocaleDateString("fr-FR"),
         photoUrl,
+        creeParNom: interaction.member?.displayName || interaction.user.username,
         userId: interaction.user.id, at: Date.now(),
       });
       const d = _contactDrafts.get(draftId);
@@ -531,6 +533,7 @@ async function routeInteraction(interaction) {
         dernierContact: new Date().toLocaleDateString("fr-FR"),
         photoUrl: c.photoUrl || null,
         editContactId: c.id, ficheRefs: c.ficheRefs || null,
+        creeParNom: c.creeParNom || "—",
         userId: interaction.user.id, at: Date.now(),
       });
       await interaction.showModal(_contactEditModal(_contactDrafts.get(draftId), draftId)).catch(() => {});
@@ -559,7 +562,7 @@ async function routeInteraction(interaction) {
       }
       // ── CRÉATION ──
       const contactId = _id();
-      const contact = { id: contactId, nom: d.nomsurnom, type: _deriveType(d), telegramme: d.telegramme, fiabilite: parseInt(d.fiabilite, 10) || 0, notes: d.notes, metier: d.metier, secteur: d.secteur, affiliation: d.affiliation, relation: d.relation, statut: d.statut, dernierContact: d.dernierContact, photoUrl: d.photoUrl || null, par: interaction.user.id, maj: Date.now() };
+      const contact = { id: contactId, nom: d.nomsurnom, type: _deriveType(d), telegramme: d.telegramme, fiabilite: parseInt(d.fiabilite, 10) || 0, notes: d.notes, metier: d.metier, secteur: d.secteur, affiliation: d.affiliation, relation: d.relation, statut: d.statut, dernierContact: d.dernierContact, photoUrl: d.photoUrl || null, creeParNom: d.creeParNom || (interaction.member?.displayName || interaction.user.username), par: interaction.user.id, maj: Date.now() };
       try { rep.contacts.push(contact); } catch {}
       const posted = await _publierFiche(interaction, d, fiche, contactId, null);
       if (posted && posted.refs) contact.ficheRefs = posted.refs;

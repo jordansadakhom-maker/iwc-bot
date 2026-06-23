@@ -69,6 +69,7 @@ function _boardEmbed(inv) {
     e.addFields({ name: `${CAT_EMOJI[c]} ${c} (${per[c]})`, value: val, inline: false });
   }
   if (inv.photoMsg) e.addFields({ name: "📷 Photo du coffre", value: "Dernière(s) capture(s) épinglée(s) dans ce salon.", inline: false });
+  e.addFields({ name: "🛠️ Comment gérer le coffre", value: "➕ **Ajouter** — ajoute une quantité à un objet\n➖ **Retirer** — enlève une quantité (pour vider ou diminuer)\n✏️ **Corriger** — fixe la quantité exacte d'un objet (mets **0** pour le **supprimer**)", inline: false });
   e.setFooter({ text: "Mouvements dans le fil « 📦 Journal du coffre » · mis à jour automatiquement" });
   return e;
 }
@@ -250,14 +251,19 @@ function _proposalEmbed(items) {
   let desc = CATS.filter(c => lignes[c]).map(c => `${CAT_EMOJI[c]} **${c}**\n${lignes[c].join("\n")}`).join("\n\n") || "*(aucun objet lu)*";
   if (desc.length > 3600) desc = desc.slice(0, 3600) + "\n…";
   return new EmbedBuilder().setColor(0xC9A66B).setTitle("📷 Lecture de la capture du coffre")
-    .setDescription("Voici ce que j'ai lu. **Vérifie**, corrige si besoin, puis choisis :\n\n" + desc)
-    .setFooter({ text: "Remplacer = écrase · Ajouter = complète · Corriger = rectifier un objet · Annuler = rien" });
+    .setDescription("Voici ce que j'ai lu sur la photo. **Vérifie**, puis choisis quoi en faire :\n\n" + desc +
+      "\n\n**Que faire de cette lecture ?**\n" +
+      "✅ **Tout remplacer** — le coffre devient EXACTEMENT cette liste (l'ancien contenu est effacé)\n" +
+      "🔀 **Ajouter au coffre** — additionne cette liste au contenu déjà présent\n" +
+      "✏️ **Corriger un objet** — rectifier une ligne avant d'enregistrer\n" +
+      "❌ **Annuler** — ne rien changer")
+    .setFooter({ text: "Pour ENLEVER des objets sans photo : utilise ➖ Retirer ou ✏️ Corriger sur le tableau du coffre." });
 }
 function _proposalRow() {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("invp_replace").setLabel("Remplacer").setEmoji("✅").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId("invp_add").setLabel("Ajouter").setEmoji("🔀").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("invp_edit").setLabel("Corriger").setEmoji("✏️").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("invp_replace").setLabel("Tout remplacer").setEmoji("✅").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("invp_add").setLabel("Ajouter au coffre").setEmoji("🔀").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("invp_edit").setLabel("Corriger un objet").setEmoji("✏️").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("invp_cancel").setLabel("Annuler").setEmoji("❌").setStyle(ButtonStyle.Secondary),
   );
 }

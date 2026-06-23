@@ -106,8 +106,8 @@ Réponds STRICTEMENT en JSON, rien d'autre :
 }
 
 function _sec(pairs, obs) {
-  const line = pairs.filter(([, v]) => v).map(([k, v]) => `**${k} :** ${v}`).join(' · ');
-  return ((line || '—') + (obs ? `\n*${obs}*` : '')).slice(0, 1024);
+  const line = pairs.filter(([, v]) => v).map(([k, v]) => `**${k} :** ${String(v).slice(0, 200)}`).join(' · ');
+  return ((line || '—') + (obs ? `\n*${String(obs).slice(0, 600)}*` : '')).slice(0, 1024);
 }
 
 function _embedTest(input, r, gm) {
@@ -429,13 +429,15 @@ async function routeInteraction(interaction) {
       const input = { patient: draft.patient || (await interaction.guild.members.fetch(id).catch(() => null))?.displayName || 'Patient', dateLieu: draft.dateLieu || '', physique: draft.physique || '', resume, verdict: draft.verdict || 'APTE' };
       const r = await _genererTest(input);
       const gm = await interaction.guild.members.fetch(id).catch(() => null);
-      const embed = _embedTest(input, r, gm);
       const forum = _ch(interaction.guild, MEDICAL_CHANNEL);
       let posted = false;
+      let payload;
+      try { payload = { embeds: [_embedTest(input, r, gm)] }; }
+      catch (e) { console.log('❌ medical _embedTest:', e.message); payload = { content: `🩺 **Test d'aptitude — ${String(input.patient).slice(0,80)}**\nVerdict : **${String(input.verdict).slice(0,40)}**\n\n${resume}`.slice(0, 1900) }; }
       if (forum?.type === 15 && forum.threads?.create) {
-        const post = await forum.threads.create({ name: `🧪 ${input.patient} — ${input.verdict}`.slice(0, 100), message: { embeds: [embed] } }).catch(() => null);
+        const post = await forum.threads.create({ name: `🧪 ${input.patient} — ${input.verdict}`.slice(0, 100), message: payload }).catch(() => null);
         posted = !!post;
-      } else if (forum?.send) { posted = !!(await forum.send({ embeds: [embed] }).catch(() => null)); }
+      } else if (forum?.send) { posted = !!(await forum.send(payload).catch(() => null)); }
       const db = loadDB(); const f = _fiche(db, id);
       f.statut = /inapte/i.test(input.verdict) ? 'inapte' : (/r[ée]serve/i.test(input.verdict) ? 'observation' : 'apte');
       f.testValide = true; f.testDate = Date.now();
