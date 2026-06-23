@@ -143,15 +143,33 @@ function _modal(action) {
 }
 
 // ── Lecture d'image(s) par l'IA ────────────────────────────────────────────
-const PROMPT_VISION = `Tu analyses une capture d'écran de l'inventaire d'un coffre dans un jeu vidéo type Far West (RedM / Red Dead Redemption).
-Liste ABSOLUMENT TOUS les objets visibles sans en oublier un seul, Y COMPRIS les outils, crochets, cordes, lanternes, pelles, kits et tout équipement utilitaire, avec leur quantité exacte.
+const PROMPT_VISION = `Tu es un greffier méticuleux. Tu analyses une capture d'écran de l'inventaire d'un coffre dans un jeu vidéo type Far West (RedM / Red Dead Redemption). Ta priorité ABSOLUE est l'EXACTITUDE.
+
+MÉTHODE (suis-la case par case) :
+1. Examine la grille case par case, de gauche à droite puis de haut en bas, SANS en sauter une seule.
+2. Pour CHAQUE case occupée : lis le NOM exact de l'objet (souvent affiché au survol ou sous l'icône) et sa QUANTITÉ.
+3. La QUANTITÉ est le petit nombre affiché sur l'icône (en général en bas à droite, parfois précédé de « x » : x12, ×3…). Lis-le avec la plus grande attention, chiffre par chiffre. Si AUCUN nombre n'est affiché, la quantité est 1.
+4. Ne CONFONDS pas deux objets différents qui se ressemblent (ex. deux revolvers de modèles distincts = deux lignes séparées). Ne FUSIONNE jamais des objets différents.
+5. Utilise le nom le plus précis et fidèle possible à ce qui est écrit à l'écran (garde la langue affichée). N'abrège pas, ne traduis pas, ne reformule pas.
+
+Liste ABSOLUMENT TOUS les objets visibles sans en oublier un seul, Y COMPRIS les outils, crochets, cordes, lanternes, pelles, kits et tout équipement utilitaire.
 Réponds UNIQUEMENT avec un tableau JSON valide, sans aucun texte autour ni balises de code, au format exact :
-[{"nom":"Nom de l'objet","quantite":12,"categorie":"Armes"}]
+[{"nom":"Nom exact lu à l'écran","quantite":12,"categorie":"Armes"}]
 La "categorie" doit obligatoirement être l'une de : Armes, Munitions, Provisions, Médecine, Matériel, Commun.
-Règles de catégorie : Armes (revolvers, fusils, couteaux) ; Munitions (balles, cartouches, poudre) ; Provisions (nourriture, boissons, alcool) ; Médecine (remèdes, toniques, bandages) ; Matériel (OUTILS, CROCHETS, cordes, lanternes, pelles, pièges, kits, tout objet utilitaire) ; Commun (le reste, ou si tu hésites). Si tu vois un objet sans réussir à l'identifier ou à lire son nom, NE L'OMETS PAS : ajoute-le quand même avec "nom":"Objet inconnu" (ou une brève description de ce que tu vois), "categorie":"Commun", et la quantité visible (1 si tu ne sais pas). N'omets aucun objet réellement présent, mais n'en invente aucun. Ne réponds que la liste. Si aucun objet n'est visible, réponds [].`;
+Règles de catégorie : Armes (revolvers, fusils, couteaux) ; Munitions (balles, cartouches, poudre) ; Provisions (nourriture, boissons, alcool) ; Médecine (remèdes, toniques, bandages) ; Matériel (OUTILS, CROCHETS, cordes, lanternes, pelles, pièges, kits, tout objet utilitaire) ; Commun (le reste, ou si tu hésites).
+Si tu vois un objet sans réussir à lire son nom, NE L'OMETS PAS : ajoute-le avec "nom":"Objet inconnu" (ou une brève description), "categorie":"Commun", et la quantité visible (1 si tu ne sais pas).
+N'omets aucun objet réellement présent, mais n'en invente aucun et ne devine pas une quantité que tu ne vois pas. Ne réponds que la liste. Si aucun objet n'est visible, réponds [].`;
 
 async function _imageBytes(url) {
   try { const r = await fetch(url); if (!r.ok) return null; return Buffer.from(await r.arrayBuffer()); } catch { return null; }
+}
+// Toute pièce jointe « photo » est acceptée (le contentType Discord est parfois vide/erroné) :
+// on se base aussi sur l'extension, et on laisse _sniffMt corriger le type réel ensuite.
+function _estImage(a) {
+  if (!a) return false;
+  if ((a.contentType || "").startsWith("image")) return true;
+  if (/\.(png|jpe?g|gif|webp|bmp|tiff?|heic|heif|jfif|avif)(\?|$)/i.test(a.name || a.url || "")) return true;
+  return (a.width != null && a.height != null); // Discord remplit width/height pour toute image
 }
 const _SUPPORTED_MT = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 function _cleanMt(mt) { let m = String(mt || 'image/png').split(';')[0].trim().toLowerCase(); if (m === 'image/jpg') m = 'image/jpeg'; return _SUPPORTED_MT.includes(m) ? m : 'image/png'; }
@@ -276,19 +294,51 @@ async function _proposer(channel, items, by, db, inv) {
   } catch { return null; }
 }
 // Applique en consolidant les noms ; renvoie les variations {normNom:{avant,apres}}
+function _snapshot(inv) {
+  const m = {};
+  for (const c of CATS) for (const [n, q] of Object.entries(inv.stock[c] || {})) {
+    const k = _norm(n); m[k] = { nom: n, qte: (m[k]?.qte || 0) + (q || 0) };
+  }
+  return m;
+}
+// Applique la lecture et renvoie un DIFF complet (avant → après) pour vérification.
 function _appliquer(inv, items, mode) {
-  const before = {};
-  for (const c of CATS) for (const [n, q] of Object.entries(inv.stock[c] || {})) before[_norm(n)] = (before[_norm(n)] || 0) + (q || 0);
+  const before = _snapshot(inv);
   if (mode === 'replace') { for (const c of CATS) inv.stock[c] = {}; }
-  const changes = {};
   for (const it of items) {
     if (!inv.stock[it.categorie]) inv.stock[it.categorie] = {};
     const b = inv.stock[it.categorie];
     const key = Object.keys(b).find(k => _norm(k) === _norm(it.nom)) || it.nom;
     b[key] = (b[key] || 0) + it.quantite;
-    changes[_norm(key)] = { avant: before[_norm(key)] ?? 0, apres: b[key] };
   }
-  return changes;
+  const after = _snapshot(inv);
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  const lignes = [];
+  for (const k of keys) {
+    const av = before[k]?.qte || 0;
+    const ap = after[k]?.qte || 0;
+    if (av === ap) continue;
+    lignes.push({ nom: after[k]?.nom || before[k]?.nom || k, avant: av, apres: ap });
+  }
+  lignes.sort((a, b) => (b.apres - b.avant) - (a.apres - a.avant));
+  const changes = {};
+  for (const l of lignes) changes[_norm(l.nom)] = { avant: l.avant, apres: l.apres };
+  return { lignes, changes };
+}
+function _recapDiff(lignes) {
+  if (!lignes.length) return "Aucun changement — le coffre correspondait déjà exactement à la lecture. ✅";
+  return lignes.slice(0, 40).map(l => {
+    const delta = l.apres - l.avant;
+    const tag = l.avant === 0 ? "🆕" : l.apres === 0 ? "🗑️" : delta > 0 ? "➕" : "➖";
+    const d = delta > 0 ? ` (+${delta})` : delta < 0 ? ` (${delta})` : "";
+    return `${tag} **${l.nom}** : ${l.avant} → **${l.apres}**${d}`;
+  }).join("\n").slice(0, 1800);
+}
+function _recapEmbed(mode, lignes) {
+  return new EmbedBuilder().setColor(mode === 'replace' ? 0xC9A66B : 0x2ECC71)
+    .setTitle(mode === 'replace' ? "📸 Coffre mis à jour (= la photo)" : "➕ Objets ajoutés au stock")
+    .setDescription(_recapDiff(lignes).slice(0, 4000))
+    .setFooter({ text: `${lignes.length} changement(s) appliqué(s) au coffre` });
 }
 
 const inventaireCommands = [
@@ -324,7 +374,7 @@ async function routeInteraction(interaction) {
     // ── Photo : capture(s) épinglée(s) + lecture IA ──
     if (interaction.isChatInputCommand?.() && interaction.commandName === "inventaire-photo") {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
-      const atts = ["image", "image2", "image3"].map(n => interaction.options.getAttachment(n)).filter(a => a && (a.contentType || "").startsWith("image"));
+      const atts = ["image", "image2", "image3"].map(n => interaction.options.getAttachment(n)).filter(a => _estImage(a));
       if (!atts.length) { await interaction.editReply({ content: "❌ Joins au moins une image (capture d'écran de l'inventaire)." }).catch(() => {}); return true; }
       const db = loadDB(); const inv = _ensure(db);
       if (!inv.channelId) { await interaction.editReply({ content: "❌ Installe d'abord le tableau avec /inventaire-installer." }).catch(() => {}); return true; }
@@ -424,13 +474,13 @@ async function routeInteraction(interaction) {
       delete inv.lectures[interaction.message.id];
       if (interaction.customId === "invp_cancel") { persist(db); await interaction.editReply({ content: "❌ Lecture annulée — rien n'a changé.", embeds: [], components: [] }).catch(() => {}); return true; }
       const mode = interaction.customId === "invp_replace" ? "replace" : "add";
-      const changes = _appliquer(inv, items, mode);
-      _journalAdd(inv, interaction.user.id, `📷 ${mode === 'replace' ? "Remplacé" : "Complété"} depuis une capture (${items.length} objet(s))`);
+      const { lignes, changes } = _appliquer(inv, items, mode);
+      _journalAdd(inv, interaction.user.id, `📷 ${mode === 'replace' ? "Remplacé" : "Complété"} depuis une capture (${items.length} lu(s) · ${lignes.length} changement(s))`);
       persist(db);
       await _refreshBoard(interaction.client, inv);
-      await _log(interaction.client, inv, `📷 <@${interaction.user.id}> a ${mode === 'replace' ? "remplacé" : "complété"} le coffre depuis une capture (${items.length} objet(s) lu(s)).`);
+      await _log(interaction.client, inv, `📷 <@${interaction.user.id}> a ${mode === 'replace' ? "remplacé tout le coffre par" : "ajouté au coffre"} la lecture (${items.length} objet(s) lu(s)) :\n${_recapDiff(lignes)}`);
       await _checkSeuils(interaction.client, inv, changes);
-      await interaction.editReply({ content: `✅ Coffre ${mode === 'replace' ? "remplacé" : "complété"} — détails dans le fil 📦.`, embeds: [], components: [] }).catch(() => {});
+      await interaction.editReply({ content: `✅ **Coffre mis à jour** — ${lignes.length} changement(s). Vérifie le détail ci-dessous (avant → après) :`, embeds: [_recapEmbed(mode, lignes)], components: [] }).catch(() => {});
       return true;
     }
 
@@ -518,7 +568,7 @@ async function onMessage(message) {
     if (!message || message.author?.bot) return false;
     const db = loadDB();
     if (!db.inventaire || !db.inventaire.channelId || message.channelId !== db.inventaire.channelId) return false;
-    const imgs = message.attachments ? [...message.attachments.values()].filter(a => (a.contentType || "").startsWith("image")) : [];
+    const imgs = message.attachments ? [...message.attachments.values()].filter(a => _estImage(a)) : [];
     if (!imgs.length) return false;
     const inv = _ensure(db);
     await message.react("🔍").catch(() => {});
