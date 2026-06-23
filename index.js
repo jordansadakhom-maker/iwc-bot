@@ -1571,31 +1571,57 @@ async function autoSetup(guild) {
 
   const contratsCh = guild.channels.cache.get(SALON_HARDCODED.CONTRATS) || guild.channels.cache.get(CH.CONTRATS);
   if (contratsCh) {
-    const embed = new EmbedBuilder().setColor(0x2C3E50).setTitle('📜 IRON WOLF COMPANY — CONTRATS').setDescription('*Tout accord entre la Compagnie et ses partenaires doit être formalisé.*\n*Un contrat signé engage les deux parties sans exception.*').addFields(
-      { name: '📤 « Nous proposons un contrat à un client »', value: 'Bouton **bleu**. Tu choisis le **type de mission**, **le client** (membre Discord), puis tu remplis **objet, prime proposée, échéance, conditions**.\n→ Le client reçoit le contrat **en message privé** et peut **Accepter**, **Refuser** ou **Faire une contre-offre**.' },
-      { name: '📥 « Une entreprise NOUS engage »', value: 'Bouton **vert**. Pour un contrat où *on est l\'employé* : tu saisis les infos de l\'employeur et ses conditions, tu signes → il reçoit la notification.' },
-      { name: '🤝 Et la contre-offre ?', value: 'Si le client clique **Faire une contre-offre**, il propose ses modalités. La Direction reçoit ici le détail et peut **Accepter**, **Refuser (garder notre offre)** ou **Proposer un rendez-vous**.' },
-    ).setFooter({ text: 'Iron Wolf Company • Secrétariat officiel' });
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('open_contrat_offre').setLabel('Proposer un contrat à un client').setEmoji('📤').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('open_contrat_emploi').setLabel('Une entreprise nous engage').setEmoji('📥').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('btn_rdv_creer_contrat_panel').setLabel('📅 Planifier un RDV').setStyle(ButtonStyle.Secondary),
-    );
-    const msgs = await contratsCh.messages.fetch({ limit: 20 });
-    const panels = [...msgs.values()].filter(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('IRON WOLF COMPANY — CONTRATS'));
-    // Met le panneau existant À JOUR (corrige les anciens textes type « Envoyer nos conditions ») et supprime les doublons
-    if (panels.length) {
-      await panels[0].edit({ embeds: [embed], components: [row] }).catch(() => {});
-      for (const p of panels.slice(1)) await p.delete().catch(() => {});
-    } else {
-      await contratsCh.send({ embeds: [embed], components: [row] });
-    }
-    // Panneau « 🐺 CONTRATS — LA CONFRÉRIE » (module contrats-confrerie) — permanent, posté seulement s'il manque
+    // PANNEAU UNIFIÉ « 📜 LES CONTRATS » — un seul point d'entrée (création + gestion).
+    // La liste vivante des contrats est dans le tableau de #planning (plus de récap ici).
+    const embed = new EmbedBuilder().setColor(0x2C3E50).setTitle('📜 LES CONTRATS — IRON WOLF COMPANY')
+      .setDescription([
+        '*Le bureau des contrats : on lance et on gère tout ici. Le suivi vivant (échéances) est dans le tableau de #planning.*',
+        '',
+        '__**Créer un contrat**__',
+        '📤 **Proposer à un client** — on offre nos services (le client reçoit le contrat en MP : accepter / refuser / contre-offre).',
+        '📥 **Une entreprise nous engage** — on est l\'employé : on saisit l\'employeur et ses conditions.',
+        '⚡ **Express** — mini-formulaire (client, prestation, montant), reformulé par l\'IA puis validé par vote.',
+        '🐺 **Confrérie** — contrats clandestins (briefing privé des agents).',
+        '',
+        '__**Gérer**__',
+        '🎮 **Gérer les contrats** — faire avancer une étape, honorer, encaisser au coffre.',
+        '🗂️ **Mes contrats** — tes contrats Confrérie assignés.',
+      ].join('\n'))
+      .setFooter({ text: 'Iron Wolf Company • Secrétariat officiel' });
+    const rows = [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('open_contrat_offre').setLabel('Proposer à un client').setEmoji('📤').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('open_contrat_emploi').setLabel('Une entreprise nous engage').setEmoji('📥').setStyle(ButtonStyle.Success),
+      ),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('cexp_open').setLabel('Contrat express').setEmoji('⚡').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('cc_new').setLabel('Contrat Confrérie').setEmoji('🐺').setStyle(ButtonStyle.Danger),
+      ),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('csuivi_open').setLabel('Gérer les contrats').setEmoji('🎮').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('cc_mine').setLabel('Mes contrats').setEmoji('🗂️').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('btn_rdv_creer_contrat_panel').setLabel('Planifier un RDV').setEmoji('📅').setStyle(ButtonStyle.Secondary),
+      ),
+    ];
+    // Nettoyage : supprimer les anciens panneaux qui faisaient doublon
     try {
-      const msgs3 = await contratsCh.messages.fetch({ limit: 20 });
-      const dejaConf = msgs3.find(m => m.author.id === client.user.id && (m.embeds[0]?.title || '').includes('CONTRATS — LA CONFRÉRIE'));
-      if (!dejaConf && typeof contratsConf.postPanel === 'function') await contratsConf.postPanel(contratsCh).catch(() => {});
-    } catch (e) { console.log('⚠️ auto-post panneau Confrérie:', e.message); }
+      const old = await contratsCh.messages.fetch({ limit: 40 }).catch(() => null);
+      if (old) {
+        const doublons = ['iron wolf company — contrats', 'contrats — la confrérie', 'contrat express', 'gestion des contrats'];
+        for (const m of old.values()) {
+          if (m.author.id !== client.user.id) continue;
+          const t = (m.embeds?.[0]?.title || '').toLowerCase();
+          if (doublons.some(x => t.includes(x))) { await m.unpin?.().catch(() => {}); await m.delete().catch(() => {}); }
+        }
+      }
+    } catch {}
+    // Panneau unifié : édite s'il existe déjà, sinon le poste et l'épingle
+    const fresh = await contratsCh.messages.fetch({ limit: 40 }).catch(() => null);
+    const existant = fresh ? [...fresh.values()].find(m => m.author.id === client.user.id && (m.embeds?.[0]?.title || '').includes('LES CONTRATS — IRON WOLF COMPANY')) : null;
+    if (existant) { await existant.edit({ embeds: [embed], components: rows }).catch(() => {}); }
+    else { const sent = await contratsCh.send({ embeds: [embed], components: rows }).catch(() => null); if (sent) { try { await sent.pin(); } catch {} } }
+    db.contratPanel = null; // désactive l'ancien récap auto « GESTION DES CONTRATS » (doublon de #planning)
+    saveDB(db);
   }
 
   // Panneau « 🎯 CENTRE DES OPÉRATIONS » (module operations) — permanent, posté seulement s'il manque
@@ -1612,7 +1638,7 @@ async function autoSetup(guild) {
   // Tableau immersif des échéances de contrats dans le salon planning/agenda
   _installerPlanningContrats(guild).then(() => console.log('📜 Tableau des échéances de contrats installé')).catch(() => {});
   // Bouton « Contrat express » dans #contrats (déplacé depuis le planning)
-  _installerBoutonContratExpress(guild).then(() => console.log('⚡ Bouton Contrat express installé dans #contrats')).catch(() => {});
+  // (Panneau Express séparé désactivé — son bouton ⚡ est désormais dans le panneau unifié « 📜 LES CONTRATS »)
   // Panneau d'accueil du salon Vestiaire / Tenue
   _installerTenuePanel(guild).then(() => console.log('🤠 Panneau Vestiaire installé')).catch(() => {});
   // Panneau « Nouvelle fiche de contact »
