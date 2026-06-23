@@ -13,6 +13,8 @@ let dbMod = {};
 try { dbMod = require('./db'); } catch { dbMod = {}; }
 const loadDB = dbMod.loadDB || (() => ({}));
 const saveDB = dbMod.saveDB || (() => {});
+const backup = (typeof dbMod.sauvegarderSurGitHub === 'function') ? dbMod.sauvegarderSurGitHub : null;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || null;
 
 const DIRECTION_ROLES = ['Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'];
 function estDirection(m) { try { return !!m?.roles?.cache?.some(r => DIRECTION_ROLES.some(n => r.name.includes(n))); } catch { return false; } }
@@ -162,6 +164,66 @@ function _exportTexte(db) {
   return L.join('\n');
 }
 
+// ── Lecture IA d'une capture de paiement (montant + sens entrée/sortie) ──
+async function _imgBytes(url) { try { const r = await fetch(url); if (!r.ok) return null; return Buffer.from(await r.arrayBuffer()); } catch { return null; } }
+function _mt(buf, fallback) {
+  if (buf && buf.length > 11) {
+    if (buf[0] === 0x89 && buf[1] === 0x50) return 'image/png';
+    if (buf[0] === 0xFF && buf[1] === 0xD8) return 'image/jpeg';
+    if (buf[0] === 0x47 && buf[1] === 0x49) return 'image/gif';
+    if (buf[0] === 0x52 && buf[8] === 0x57) return 'image/webp';
+  }
+  let m = String(fallback || 'image/png').split(';')[0].toLowerCase(); if (m === 'image/jpg') m = 'image/jpeg';
+  return ['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(m) ? m : 'image/png';
+}
+async function _lirePaiement(b64, mt) {
+  if (!ANTHROPIC_API_KEY) return null;
+  const prompt = `Tu analyses une capture d'écran (jeu RP western RedM / RDR2) montrant une transaction d'argent : un paiement reçu, un tarif, une somme due/à devoir, une facture, etc.
+Identifie le MONTANT principal en dollars ($) concerné, et dis si c'est une ENTRÉE d'argent (la compagnie REÇOIT/encaisse) ou une SORTIE (la compagnie DÉPENSE/paie).
+Réponds UNIQUEMENT en JSON strict, sans texte autour : {"type":"entree|sortie|inconnu","montant":<entier sans symbole ni espace>,"libelle":"courte description (max 60 car.)","confiance":"haute|moyenne|basse"}
+Lis le montant chiffre par chiffre, avec la plus grande attention. Si aucun montant clair n'est visible : montant=0, confiance="basse".`;
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 300, messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: mt, data: b64 } }, { type: 'text', text: prompt }] }] }),
+    });
+    if (!resp.ok) { console.log('❌ compta vision HTTP', resp.status); return null; }
+    const data = await resp.json();
+    const txt = (data?.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+    const m = txt.match(/\{[\s\S]*\}/); if (!m) return null;
+    const o = JSON.parse(m[0]); o.montant = parseInt(String(o.montant).replace(/[^0-9]/g, ''), 10) || 0;
+    return o;
+  } catch (e) { console.log('❌ compta vision:', e.message); return null; }
+}
+// Une capture déposée dans le salon du panneau compta → lecture + proposition à valider
+async function onMessage(message) {
+  try {
+    if (!message?.guild || message.author?.bot) return false;
+    const ref = loadDB().comptaPanel;
+    if (!ref?.channelId || message.channelId !== ref.channelId) return false;
+    const img = message.attachments ? [...message.attachments.values()].find(a => (a.contentType || '').startsWith('image') || /\.(png|jpe?g|webp|gif)(\?|$)/i.test(a.name || a.url || '') || (a.width != null)) : null;
+    if (!img) return false;
+    if (!ANTHROPIC_API_KEY) return false;
+    await message.react('🔍').catch(() => {});
+    const buf = await _imgBytes(img.url);
+    if (!buf) { await message.reply({ content: '❌ Image illisible, réessaie.', allowedMentions: { parse: [] } }).catch(() => {}); return true; }
+    const r = await _lirePaiement(buf.toString('base64'), _mt(buf, img.contentType));
+    if (!r || !r.montant) { await message.reply({ content: "📷 Je n'ai pas lu de montant clair. Tu peux encaisser un contrat via le bouton 💵 du panneau, ou réessayer avec une image plus nette.", allowedMentions: { parse: [] } }).catch(() => {}); return true; }
+    const type = r.type === 'sortie' ? 'sortie' : 'entree';
+    const e = new EmbedBuilder().setColor(type === 'entree' ? 0x57F287 : 0xED4245)
+      .setTitle('🧾 Lecture de la capture — à valider')
+      .setDescription(`J'ai lu : **${type === 'entree' ? 'Entrée' : 'Sortie'} de $${_eur(r.montant)}**${r.libelle ? ` — *${String(r.libelle).slice(0, 100)}*` : ''}\nFiabilité : **${r.confiance || '?'}**\n\n👉 **Vérifie le montant**, puis valide. Si le sens est faux, choisis l'autre bouton.`)
+      .setFooter({ text: 'Rien n\'est enregistré au coffre tant que tu n\'as pas validé.' });
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`compta_cap::entree::${r.montant}`).setLabel(`Entrée +$${_eur(r.montant)}`).setEmoji('✅').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`compta_cap::sortie::${r.montant}`).setLabel(`Sortie -$${_eur(r.montant)}`).setEmoji('➖').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('compta_cap::cancel').setLabel('Annuler').setEmoji('❌').setStyle(ButtonStyle.Secondary),
+    );
+    await message.reply({ embeds: [e], components: [row], allowedMentions: { parse: [] } }).catch(() => {});
+    return true;
+  } catch { return false; }
+}
+
 async function routeInteraction(interaction) {
   try {
     // /compta → installe (ou rafraîchit) le PANNEAU permanent dans le salon courant
@@ -205,6 +267,23 @@ async function routeInteraction(interaction) {
       await interaction.showModal(modal).catch(() => {});
       return true;
     }
+    // Validation d'une lecture de capture → applique au coffre (entrée/sortie)
+    if (interaction.isButton?.() && interaction.customId.startsWith('compta_cap::')) {
+      if (!estDirection(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const [, type, mStr] = interaction.customId.split('::');
+      if (type === 'cancel') { await interaction.update({ content: '❌ Annulé — rien n\'a été enregistré au coffre.', embeds: [], components: [] }).catch(() => {}); return true; }
+      const montant = parseInt(mStr, 10) || 0;
+      if (!montant) { await interaction.update({ content: '❌ Montant invalide.', embeds: [], components: [] }).catch(() => {}); return true; }
+      const db = loadDB(); if (typeof db.coffre !== 'number') db.coffre = 0;
+      db.coffre += (type === 'sortie' ? -montant : montant); if (db.coffre < 0) db.coffre = 0;
+      if (!db.transactions) db.transactions = [];
+      db.transactions.push({ type: type === 'sortie' ? 'Sortie' : 'Entrée', montant, objet: 'Lecture capture (compta)', par: interaction.user.username, date: new Date().toISOString() });
+      saveDB(db); try { backup?.(); } catch {}
+      try { if (typeof global.ajouterJournalIC === 'function') await global.ajouterJournalIC(interaction.guild, { type: 'tresorerie', emoji: type === 'sortie' ? '💸' : '💵', titre: `${type === 'sortie' ? 'Sortie' : 'Entrée'} — Coffre`, description: `$${montant.toLocaleString('fr-FR')} · capture validée par ${interaction.user.username}`, auteur: interaction.user.username }); } catch {}
+      await refreshPanel(interaction.client);
+      await interaction.update({ content: `✅ **${type === 'sortie' ? 'Sortie' : 'Entrée'} de $${_eur(montant)}** enregistrée. Nouveau solde du coffre : **$${_eur(db.coffre)}**.`, embeds: [], components: [] }).catch(() => {});
+      return true;
+    }
     if (interaction.isButton?.() && interaction.customId === 'compta_export') {
       if (!estDirection(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const db = loadDB();
@@ -217,4 +296,4 @@ async function routeInteraction(interaction) {
   } catch (e) { console.log('❌ comptabilite routeInteraction:', e.message); return true; }
 }
 
-module.exports = { comptaCommands, routeInteraction, bilanEmbed, installerPanel, refreshPanel };
+module.exports = { comptaCommands, routeInteraction, onMessage, bilanEmbed, installerPanel, refreshPanel };
