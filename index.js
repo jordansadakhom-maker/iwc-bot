@@ -12,7 +12,7 @@ const cron = require('node-cron');
 
 const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub } = require('./db');
 // Version du bot (sert au /version ET à la génération auto des patch notes)
-const BOT_VERSION = '6.8 (23 juin — recrutement : 3 votes Direction/Officier + rôle attribué manuellement)';
+const BOT_VERSION = '6.9 (23 juin — vocal RP : micro coupé automatiquement à l\'entrée)';
 const { initPapiers, papiersCommands } = require('./papiers');
 const securite = require('./securite');
 const rdvplus = require('./rdvplus');
@@ -2101,6 +2101,24 @@ Si la transcription est incompréhensible ou vide, mets resume="(inaudible)".`;
     return null;
   }
 }
+
+// Salon vocal RP « écoute seule » : on coupe le micro (server-mute) à l'entrée — impossible de se démute.
+client.on('voiceStateUpdate', async (oldState, newState) => {
+  try {
+    const member = newState.member; if (!member || member.user?.bot) return;
+    const entre = newState.channelId === SALON_VOCAL_MUET && oldState.channelId !== SALON_VOCAL_MUET;
+    const sort = oldState.channelId === SALON_VOCAL_MUET && newState.channelId !== SALON_VOCAL_MUET;
+    if (entre) {
+      await member.voice.setMute(true, 'Salon RP écoute seule — micro coupé').catch(e => console.log('⚠️ mute vocal RP (manque « Rendre muet des membres » ?):', e.message));
+    } else if (sort) {
+      // On retire le server-mute en sortant pour ne pas le laisser muet ailleurs
+      if (member.voice?.serverMute) await member.voice.setMute(false, 'Quitte le salon écoute seule').catch(() => {});
+    } else if (newState.channelId === SALON_VOCAL_MUET && newState.serverMute === false) {
+      // Sécurité : si le server-mute a été retiré alors qu'il est encore dans le salon, on le ré-applique
+      await member.voice.setMute(true, 'Salon RP écoute seule — micro coupé').catch(() => {});
+    }
+  } catch {}
+});
 
 client.on('messageCreate', async message => {
   // Nettoyage : les messages système « X a épinglé un message » n'apportent rien → on les retire
