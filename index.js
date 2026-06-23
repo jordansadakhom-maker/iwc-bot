@@ -198,11 +198,14 @@ async function _reformulerRP(texte) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;
   try {
-    const prompt = `Tu reformules un message pour un jeu de rôle Far West (RedM / Red Dead Redemption 2), dans l'Ouest américain vers 1899-1904.
-Réécris le message ci-dessous en FRANÇAIS RP immersif et soigné, comme le dirait un personnage de l'époque : ton naturel, vocabulaire western d'époque, AUCUN anachronisme (pas de mot ni d'objet moderne), aucun emoji.
-Conserve EXACTEMENT le sens, les informations et l'intention d'origine ; n'invente aucun fait nouveau ; garde une longueur comparable.
-Si le message contient une partie hors-RP entre (parenthèses) ou (( doubles parenthèses )), laisse-la telle quelle.
-Réponds UNIQUEMENT avec le message reformulé, sans guillemets ni commentaire.
+    const prompt = `Tu transformes un message en TÉLÉGRAMME, dans l'Ouest américain vers 1899-1904 (jeu de rôle RedM / Red Dead Redemption 2).
+Réécris le message ci-dessous en style TÉLÉGRAPHIQUE d'époque, en FRANÇAIS :
+- phrases TRÈS courtes et factuelles, UNE idée par ligne ;
+- termine CHAQUE phrase par le mot " STOP" (à la place du point), comme dans les vrais télégrammes ;
+- casse normale (PAS de majuscules intégrales), aucun emoji, aucun anachronisme (rien de moderne).
+Conserve EXACTEMENT le sens, les informations et l'intention d'origine ; n'invente aucun fait nouveau.
+Si le message contient une partie hors-RP entre (parenthèses) ou (( doubles parenthèses )), laisse-la telle quelle, sur sa propre ligne, sans STOP.
+Réponds UNIQUEMENT avec le corps du télégramme (sans en-tête, sans guillemets, sans commentaire).
 
 Message : "${texte}"`;
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
@@ -2183,7 +2186,7 @@ client.on('messageCreate', async message => {
   } catch {}
   // Réorganisation du serveur : !reorg test / !reorg / !reorg annuler (direction uniquement)
   try { if (await reorg.onMessage?.(message)) return; } catch {}
-  // Salon RP : on réécrit le message en western immersif puis on le re-poste sous le nom de l'auteur
+  // Salon RP : on transforme le message en TÉLÉGRAMME d'époque puis on le re-poste sous le nom de l'auteur
   try {
     if (message.channel?.id === SALON_RP_REFORMULATION && !message.author?.bot && !message.webhookId && message.guild) {
       const brut = (message.content || '').trim();
@@ -2191,12 +2194,13 @@ client.on('messageCreate', async message => {
       if (!skip && process.env.ANTHROPIC_API_KEY) {
         const reformule = await _reformulerRP(brut);
         if (reformule && _norm2(reformule) !== _norm2(brut)) {
-          const ok = await _reposterCommeMembre(message.channel, message.member, message.author, reformule);
+          const telegramme = `📨 ═══ TÉLÉGRAMME ═══\n${reformule}`;
+          const ok = await _reposterCommeMembre(message.channel, message.member, message.author, telegramme);
           if (ok) { await message.delete().catch(() => {}); return; }
         }
       }
     }
-  } catch (e) { console.log('⚠️ reformulation RP:', e.message); }
+  } catch (e) { console.log('⚠️ reformulation RP → télégramme:', e.message); }
   // Conversations sur télégrammes : relais MP ↔ fil (avant tout le reste)
   try { if (await telegramme.onMessage?.(message)) return; } catch {}
   try { if (await inventaire.onMessage?.(message)) return; } catch {}
