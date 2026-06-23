@@ -12,7 +12,7 @@ const cron = require('node-cron');
 
 const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub } = require('./db');
 // Version du bot (sert au /version ET à la génération auto des patch notes)
-const BOT_VERSION = '6.4 (23 juin — salon compta auto + RDV client auto-MAJ + patch notes auto)';
+const BOT_VERSION = '6.5 (23 juin — panneau compta : boutons explicites + mode d\'emploi intégré)';
 const { initPapiers, papiersCommands } = require('./papiers');
 const securite = require('./securite');
 const rdvplus = require('./rdvplus');
