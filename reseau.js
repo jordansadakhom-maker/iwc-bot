@@ -67,11 +67,12 @@ Règles STRICTES :
 - Ton western, immersif, à la première personne de l'informateur, en français.
 - Cite les noms, lieux, convois, tensions, dettes, menaces quand ils apparaissent.
 - Si la matière suggère une OPPORTUNITÉ pour IWC ou La Confrérie (cible, convoi à intercepter, contrat potentiel, dette à recouvrer), mets-la dans "piste". Sinon "piste" = "".
+- Évalue la FIABILITÉ de chaque rapport selon la netteté de la source : "Bonne" (entendu clairement / vu de ses yeux), "Moyenne" (rapporté, à recouper), "Faible" (rumeur vague, ouï-dire).
 - Choisis l'informateur le plus logique selon le lieu/sujet. Tu peux n'en utiliser qu'un seul si la matière est mince.
 - 2 à 5 phrases par rapport, pas plus.
 
 Réponds STRICTEMENT en JSON (aucun texte autour, aucune balise) :
-[{"informateur":"La Pie","rapport":"...","piste":""}]
+[{"informateur":"La Pie","fiabilite":"Moyenne","rapport":"...","piste":""}]
 
 Si rien d'exploitable, réponds exactement : []
 
@@ -93,11 +94,14 @@ ${transcript}`;
 
 function _embedRapport(r) {
   const info = INFORMATEURS[r.informateur] || { emoji: '📨', lieu: '', couleur: 0x8B5A2A };
+  const fiab = String(r.fiabilite || 'Moyenne');
+  const fiabTxt = /bonne/i.test(fiab) ? '🟢 Bonne' : /faible/i.test(fiab) ? '🔴 Faible' : '🟠 Moyenne';
   const e = new EmbedBuilder().setColor(info.couleur)
     .setAuthor({ name: `${info.emoji} ${r.informateur || 'Un informateur'}${info.lieu ? ` — ${info.lieu}` : ''}` })
     .setDescription(String(r.rapport || '').slice(0, 3500))
+    .addFields({ name: '🎚️ Fiabilité', value: fiabTxt, inline: true })
     .setFooter({ text: 'Le Réseau • À recouper — un indic dit ce qu\'il croit avoir entendu' }).setTimestamp();
-  if (r.piste && String(r.piste).trim()) e.addFields({ name: '🎯 Piste à creuser', value: String(r.piste).slice(0, 1000) });
+  if (r.piste && String(r.piste).trim()) e.addFields({ name: '🎯 Opportunité — piste à exploiter', value: String(r.piste).slice(0, 1000), inline: false });
   return e;
 }
 
