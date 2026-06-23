@@ -12,10 +12,11 @@ const cron = require('node-cron');
 
 const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub } = require('./db');
 // Version du bot (sert au /version ET à la génération auto des patch notes)
-const BOT_VERSION = '7.2 (23 juin — panneau grades unique : qui est à quel grade + rôle de chacun + boutons Gérer/Actualiser)';
+const BOT_VERSION = '7.3 (23 juin — réorganisation sûre du serveur : !reorg test / !reorg / !reorg annuler — perms conservées)';
 const { initPapiers, papiersCommands } = require('./papiers');
 const securite = require('./securite');
 const rdvplus = require('./rdvplus');
+const reorg = require('./reorg');
 
 let notionExtra = {};
 try { notionExtra = require('./notion-extra'); console.log('✅ Module notion-extra chargé'); }
@@ -2142,6 +2143,8 @@ client.on('messageCreate', async message => {
       return;
     }
   } catch {}
+  // Réorganisation du serveur : !reorg test / !reorg / !reorg annuler (direction uniquement)
+  try { if (await reorg.onMessage?.(message)) return; } catch {}
   // Salon RP : on réécrit le message en western immersif puis on le re-poste sous le nom de l'auteur
   try {
     if (message.channel?.id === SALON_RP_REFORMULATION && !message.author?.bot && !message.webhookId && message.guild) {
