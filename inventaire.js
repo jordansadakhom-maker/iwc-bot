@@ -79,6 +79,7 @@ function _boardButtons() {
     new ButtonBuilder().setCustomId("inv_add").setLabel("Ajouter").setEmoji("➕").setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId("inv_remove").setLabel("Retirer").setEmoji("➖").setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId("inv_set").setLabel("Corriger").setEmoji("✏️").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("inv_photo").setLabel("Mettre à jour par photo").setEmoji("📸").setStyle(ButtonStyle.Primary),
   );
 }
 
@@ -383,14 +384,14 @@ function _proposalEmbed(items) {
     .setDescription("Voici ce que j'ai lu sur la photo. **Vérifie bien les quantités**, puis valide :\n\n" + desc +
       "\n\n**Que faire de cette lecture ?**\n" +
       "📸 **Le coffre = la photo** — le coffre devient EXACTEMENT cette liste *(la photo montre TOUT le coffre)*\n" +
-      "✏️ **Corriger un objet** — rectifier une ligne mal lue avant d'enregistrer\n" +
+      "✏️ **Corriger / ajouter un objet** — rectifier une ligne mal lue, **ou ajouter un objet que la photo n'a pas bien vu**\n" +
       "❌ **Annuler** — ne rien changer")
-    .setFooter({ text: "Pour AJOUTER ou RETIRER un nombre précis d'objets : utilise les boutons ➕ / ➖ du tableau du coffre." });
+    .setFooter({ text: "Astuce : si l'IA a raté/mal lu un objet, clique « Corriger / ajouter » avant de valider." });
 }
 function _proposalRow() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("invp_replace").setLabel("Le coffre = la photo").setEmoji("📸").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId("invp_edit").setLabel("Corriger un objet").setEmoji("✏️").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("invp_edit").setLabel("Corriger / ajouter un objet").setEmoji("✏️").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("invp_cancel").setLabel("Annuler").setEmoji("❌").setStyle(ButtonStyle.Secondary),
   );
 }
@@ -566,6 +567,12 @@ async function routeInteraction(interaction) {
           { name: "Derniers mouvements", value: recent || "—", inline: false },
         );
       await interaction.editReply({ embeds: [e2] }).catch(() => {});
+      return true;
+    }
+
+    // ── Bouton « Mettre à jour par photo » : guide pour déposer la capture (lue par onMessage) ──
+    if (interaction.isButton?.() && interaction.customId === "inv_photo") {
+      await interaction.reply({ content: "📸 **Mise à jour par photo**\nGlisse maintenant une **capture du coffre** dans ce salon. Je la lis et je te propose la mise à jour :\n• **📸 Le coffre = la photo** → le coffre devient exactement la capture\n• **✏️ Corriger / ajouter un objet** → si une ligne est mal lue ou manquante", flags: MessageFlags.Ephemeral }).catch(() => {});
       return true;
     }
 
