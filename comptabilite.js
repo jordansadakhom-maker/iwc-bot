@@ -74,16 +74,23 @@ function bilanEmbed(db, jours) {
     e.addFields({ name: `🧾 Paiements en attente${enRetard.length ? ` — ⚠️ ${enRetard.length} en retard` : ''}`, value: lignes.join('\n').slice(0, 1024), inline: false });
   }
   if (top.length) e.addFields({ name: '🏆 Meilleurs clients (période)', value: top.map(([n, v]) => `• **${n}** — $${_eur(v)}`).join('\n').slice(0, 1024), inline: false });
-  e.setFooter({ text: 'Iron Wolf Company • Comptabilité' }).setTimestamp();
+  e.addFields({ name: 'ℹ️ Comment utiliser ce panneau', value: [
+    '🗓️ **7 jours / 30 jours / Tout** — change la période affichée du bilan.',
+    '💵 **Encaisser un contrat** — marque un contrat comme payé : crédite le **coffre**, crée la **facture** et met à jour ce bilan, automatiquement.',
+    '📸 **Dépose une photo de paiement dans ce salon** — je lis le montant, tu **valides**, je l\'ajoute au coffre (entrée/sortie).',
+    '📤 **Exporter** — télécharge le récap (factures + contrats).',
+    '🔄 **Rafraîchir** — recalcule le bilan tout de suite.',
+  ].join('\n'), inline: false });
+  e.setFooter({ text: 'Iron Wolf Company • Comptabilité • mis à jour automatiquement' }).setTimestamp();
   return e;
 }
 
 function _bilanRow(jours) {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('compta_p::7').setLabel('7 jours').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('compta_p::30').setLabel('30 jours').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('compta_p::0').setLabel('Tout').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('compta_export').setLabel('Exporter').setEmoji('📤').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('compta_p::7').setLabel('Bilan 7 jours').setEmoji('🗓️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('compta_p::30').setLabel('Bilan 30 jours').setEmoji('🗓️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('compta_p::0').setLabel('Tout l\'historique').setEmoji('📚').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('compta_export').setLabel('Exporter (fichier)').setEmoji('📤').setStyle(ButtonStyle.Success),
   );
 }
 // Lignes de boutons du PANNEAU permanent (avec encaissement de contrat)
@@ -91,8 +98,8 @@ function _panelRows() {
   return [
     _bilanRow(30),
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('compta_encaisser').setLabel('Encaisser un contrat').setEmoji('💵').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('compta_refresh').setLabel('Rafraîchir').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('compta_encaisser').setLabel('Encaisser un contrat (payé → coffre)').setEmoji('💵').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('compta_refresh').setLabel('Rafraîchir le bilan').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
     ),
   ];
 }
