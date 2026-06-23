@@ -671,4 +671,135 @@ async function onMessage(message) {
   } catch (e) { console.log("⚠️ repertoire onMessage:", e.message); return false; }
 }
 
-module.exports = { repertoireCommands, routeInteraction, installerPanelContact, onMessage };
+// ═══════════════════════════════════════════════════════════════════════════
+//  RENSEIGNEMENT AUTO — un rapport de terrain (micro) mentionne un télégramme
+//  ou un nom/prénom → l'IA en extrait les contacts et crée/complète les fiches.
+//  Tout est centralisé ici : le micro (script local) n'a rien à savoir.
+// ═══════════════════════════════════════════════════════════════════════════
+function _digits(x) { return String(x || "").replace(/[^0-9]/g, ""); }
+
+// L'IA repère les personnes identifiables (nom et/ou n° de télégramme) dans la transcription.
+async function _extraireContactsIA(texte) {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) return null;
+  const note = String(texte || "").slice(0, 6000);
+  if (note.trim().length < 15) return [];
+  const prompt = `Tu es un greffier de renseignement pour un serveur de jeu de rôle Far West (RedM, univers Red Dead Redemption 2). On te donne une conversation transcrite captée sur le terrain. Repère UNIQUEMENT les PERSONNES identifiables qui méritent une fiche de contact : il faut AU MOINS un vrai nom/prénom OU un numéro de télégramme clairement associé à quelqu'un.
+
+CONVERSATION :
+<<<${note}>>>
+
+Réponds UNIQUEMENT avec un tableau JSON (sans texte autour, sans backticks), au format EXACT :
+[{"nom":"Nom et/ou surnom","telegramme":"chiffres uniquement","metier":"","secteur":"lieu","affiliation":"Civil|Loi|Hors-la-loi|Loups de Fer|Cartel|Autre","relation":"Amicale|Professionnelle|Affaire|Tendue|Hostile","notes":"ce qu'on apprend sur la personne en une phrase"}]
+
+Règles STRICTES :
+- N'inclus une personne QUE si elle a un nom propre crédible OU un télégramme (numéro). Ignore les "il/elle/le gars" sans nom, les personnages flous, et le narrateur/agent qui parle.
+- "telegramme" : garde uniquement les chiffres (ex : "22173"). Vide si non mentionné.
+- Laisse un champ vide ("") si l'info n'est pas dans la conversation. N'invente RIEN.
+- Maximum 5 personnes, les plus pertinentes.
+- Si aucune personne identifiable, réponds exactement : []`;
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 700, messages: [{ role: 'user', content: prompt }] }),
+    });
+    if (!resp.ok) { console.log('❌ extraction contacts IA HTTP', resp.status); return null; }
+    const data = await resp.json();
+    let txt = (data?.content?.[0]?.text || '').replace(/```json|```/g, '').trim();
+    const m = txt.match(/\[[\s\S]*\]/); if (!m) return [];
+    const arr = JSON.parse(m[0]);
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { console.log('❌ extraction contacts IA:', e.message); return null; }
+}
+
+// Crée la fiche si le contact est nouveau, sinon complète les champs manquants.
+async function creerOuMajContactAuto(guild, data, sourceLabel) {
+  const db = loadDB(); const rep = _ensure(db);
+  const nom = String(data.nom || "").trim().slice(0, 80);
+  const tel = _digits(data.telegramme).slice(0, 20);
+  // Garde-fous : il faut un vrai nom (≥3 lettres) OU un télégramme (≥3 chiffres).
+  const nomOk = nom && _norm(nom).length >= 3;
+  if (!nomOk && tel.length < 3) return null;
+  // Ne pas se ficher soi-même (l'agent qui parle).
+  if (nomOk && sourceLabel && _norm(nom) === _norm(sourceLabel)) return null;
+
+  // Dédoublonnage : par télégramme d'abord (clé forte), puis par nom normalisé.
+  let c = null;
+  if (tel.length >= 3) c = (rep.contacts || []).find(x => _digits(x.telegramme) && _digits(x.telegramme) === tel);
+  if (!c && nomOk) c = (rep.contacts || []).find(x => _norm(x.nom) && _norm(x.nom) === _norm(nom));
+
+  const champs = {
+    metier: String(data.metier || "").trim().slice(0, 60),
+    secteur: String(data.secteur || "").trim().slice(0, 60),
+    affiliation: C_AFFILIATIONS.includes(data.affiliation) ? data.affiliation : "",
+    relation: C_RELATIONS.includes(data.relation) ? data.relation : "",
+    notes: String(data.notes || "").trim().slice(0, 400),
+  };
+  const dateJour = new Date().toLocaleDateString("fr-FR");
+
+  if (c) {
+    // ── Mise à jour : on ne remplit QUE le vide, on n'écrase pas une fiche curée ──
+    let change = false;
+    if (tel.length >= 3 && !_digits(c.telegramme)) { c.telegramme = tel; change = true; }
+    for (const k of ["metier", "secteur", "affiliation", "relation"]) {
+      if (champs[k] && !String(c[k] || "").trim()) { c[k] = champs[k]; change = true; }
+    }
+    if (champs.notes && !_norm(c.notes || "").includes(_norm(champs.notes).slice(0, 40))) {
+      c.notes = (String(c.notes || "").trim() ? c.notes.trim() + "\n• " : "") + `${champs.notes} (terrain, ${dateJour})`;
+      c.notes = c.notes.slice(0, 1000); change = true;
+    }
+    c.dernierContact = dateJour;
+    if (!change) { persist(db); return { created: false, updated: false, nom: c.nom, contact: c }; }
+    c.type = _deriveType(c); c.maj = Date.now();
+    persist(db);
+    // Met à jour le message de la fiche si elle est déjà publiée.
+    if (c.ficheRefs) {
+      const d = { nomsurnom: c.nom, telegramme: c.telegramme, metier: c.metier, secteur: c.secteur, affiliation: c.affiliation, relation: c.relation, fiabilite: c.fiabilite, statut: c.statut, dernierContact: c.dernierContact, creeParNom: c.creeParNom, notes: c.notes };
+      await _publierFiche({ guild }, d, _richFiche(d), c.id, c.ficheRefs).catch(() => {});
+    }
+    try { await _refreshPanel(guild.client, rep); } catch {}
+    return { created: false, updated: true, nom: c.nom, contact: c };
+  }
+
+  // ── Création ──
+  const contactId = _id();
+  const creePar = sourceLabel ? `Micro de terrain (${sourceLabel})` : "Micro de terrain";
+  const noteFinale = (champs.notes ? champs.notes + " " : "") + `— relevé sur le terrain le ${dateJour}.`;
+  const contact = {
+    id: contactId, nom: nom || `Télégramme ${tel}`,
+    telegramme: tel, metier: champs.metier, secteur: champs.secteur,
+    affiliation: champs.affiliation, relation: champs.relation,
+    fiabilite: 0, statut: "Vivant", notes: noteFinale.slice(0, 1000),
+    dernierContact: dateJour, creeParNom: creePar, par: null, maj: Date.now(), auto: true,
+  };
+  contact.type = _deriveType(contact);
+  const d = { nomsurnom: contact.nom, telegramme: contact.telegramme, metier: contact.metier, secteur: contact.secteur, affiliation: contact.affiliation, relation: contact.relation, fiabilite: contact.fiabilite, statut: contact.statut, dernierContact: contact.dernierContact, creeParNom: contact.creeParNom, notes: contact.notes };
+  try { rep.contacts.push(contact); } catch {}
+  const posted = await _publierFiche({ guild }, d, _richFiche(d), contactId, null).catch(() => null);
+  if (posted && posted.refs) contact.ficheRefs = posted.refs;
+  persist(db);
+  try { await _refreshPanel(guild.client, rep); } catch {}
+  return { created: true, updated: false, nom: contact.nom, contact, where: posted ? posted.where : null };
+}
+
+// Point d'entrée appelé par index.js sur chaque « Rapport de terrain ».
+// Retourne un récapitulatif { crees:[], majs:[] } ou null si rien/pas d'IA.
+async function traiterRapportTerrain(guild, texte, sourceLabel) {
+  try {
+    if (!guild) return null;
+    const liste = await _extraireContactsIA(texte);
+    if (!Array.isArray(liste) || !liste.length) return null;
+    const crees = [], majs = [];
+    for (const data of liste.slice(0, 5)) {
+      const r = await creerOuMajContactAuto(guild, data, sourceLabel).catch(() => null);
+      if (!r) continue;
+      if (r.created) crees.push(r.nom);
+      else if (r.updated) majs.push(r.nom);
+    }
+    if (!crees.length && !majs.length) return null;
+    return { crees, majs };
+  } catch (e) { console.log('❌ traiterRapportTerrain:', e.message); return null; }
+}
+
+module.exports = { repertoireCommands, routeInteraction, installerPanelContact, onMessage, traiterRapportTerrain };

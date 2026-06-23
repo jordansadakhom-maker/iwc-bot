@@ -2247,6 +2247,26 @@ client.on('messageCreate', async message => {
         await message.reply({ embeds: [emb], allowedMentions: { repliedUser: false } }).catch(() => {});
       } catch (e) { console.log('❌ Auto-résumé:', e.message); }
     })();
+    // ── Renseignement : un télégramme ou un nom/prénom entendu → fiche de contact auto ──
+    (async () => {
+      try {
+        const texte = await _lireTexteNote(message);
+        if ((texte || '').length < 15) return;
+        const agent = message.embeds?.[0]?.author?.name || '';
+        const res = await repertoire.traiterRapportTerrain?.(message.guild, texte, agent);
+        if (!res) return;
+        const parts = [];
+        if (res.crees?.length) parts.push(`🆕 **${res.crees.length}** fiche(s) créée(s) : ${res.crees.join(', ')}`);
+        if (res.majs?.length) parts.push(`✏️ **${res.majs.length}** fiche(s) complétée(s) : ${res.majs.join(', ')}`);
+        if (!parts.length) return;
+        const emb = new EmbedBuilder()
+          .setColor(0x6B4F2A)
+          .setTitle('📇 Répertoire mis à jour')
+          .setDescription(parts.join('\n').slice(0, 4000) + '\n\n*Vérifiable et modifiable dans le forum des contacts.*')
+          .setFooter({ text: `${agent || 'Micro de terrain'} • renseignement automatique` });
+        await message.reply({ embeds: [emb], allowedMentions: { repliedUser: false } }).catch(() => {});
+      } catch (e) { console.log('❌ Auto-contacts:', e.message); }
+    })();
     // on continue (pas de return)
   }
 
