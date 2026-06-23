@@ -2988,6 +2988,7 @@ client.on('interactionCreate', async interaction => {
       const opId = interaction.customId.replace('op_annulee_confirm_', '');
       const op = db.operations.find(o => o.id === opId); if (!op) return;
       op.status = 'annulee'; op.updatedAt = new Date().toISOString(); saveDB(db);
+      try { await operations.refreshOpById(guild, op.id); } catch {} // remet la fiche d'origine à jour
       await interaction.update({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle(`❌ Opération annulée — ${op.name}`).setDescription(`Annulée par **${interaction.user.username}**.`).setTimestamp()], components: [] });
       const opsCh = getChById(guild, 'OPERATIONS', 'operations-en-cours', 'operations');
       if (opsCh) await opsCh.send({ content: `❌ L'opération **${op.name}** a été annulée par ${interaction.user.username}.` }).catch(() => {});
@@ -3123,6 +3124,7 @@ client.on('interactionCreate', async interaction => {
       if (!op2) { await interaction.update({ content: '❌ Opération introuvable.', embeds: [], components: [] }); return; }
 
       op2.status = 'en_cours'; saveDB(db);
+      try { await operations.refreshOpById(guild, op2.id); } catch {} // la fiche passe en « En cours »
       await notionExtra.majOperationNotion?.(op2);
       if (op2.notionPageId && process.env.NOTION_TOKEN) {
         _notionPatch(op2.notionPageId, {
@@ -3319,6 +3321,7 @@ client.on('interactionCreate', async interaction => {
     if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }); return; }
     await interaction.deferUpdate();
     op.status = 'terminee'; op.endedAt = new Date().toISOString(); op.deleteAt = Date.now() + 24 * 60 * 60 * 1000; op.resultat = interaction.fields.getTextInputValue('resultat'); op.butin = interaction.fields.getTextInputValue('butin') || '—'; op.pertes = interaction.fields.getTextInputValue('pertes') || '—'; op.debrief = interaction.fields.getTextInputValue('debrief') || '—'; saveDB(db);
+    try { await operations.refreshOpById(guild, op.id); } catch {} // fiche d'origine marquée « Terminée »
     await notionExtra.majOperationNotion?.(op);
     await notionV3.syncOperationTermineeNotion?.(op).catch(() => {});
     // Sync directe Notion si notionPageId existe
