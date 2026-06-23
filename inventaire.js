@@ -82,24 +82,39 @@ function _boardButtons() {
   );
 }
 
-function _estTableau(m, clientUserId) { return m.author?.id === clientUserId && (m.embeds?.[0]?.title || '').includes('COFFRE COMMUN'); }
+function _estTableau(m, clientUserId) {
+  if (m.author?.id !== clientUserId) return false;
+  const e = m.embeds?.[0]; if (!e) return false;
+  const title = e.title || ''; const footer = e.footer?.text || '';
+  return title.includes('COFFRE COMMUN') || footer.includes('Journal du coffre');
+}
 // Retrouve TOUS les tableaux « COFFRE COMMUN » du salon, via les ÉPINGLES (fiable même si le
-// tableau a défilé loin) ET les messages récents.
-async function _trouverTableaux(client, ch) {
+// tableau a défilé loin) ET l'historique récent. En mode "deep", on remonte plus loin (jusqu'à
+// ~300 messages) pour rattraper un VIEUX tableau enfoui qui n'est plus épinglé.
+async function _trouverTableaux(client, ch, deep) {
   const found = new Map();
   try { const pins = await ch.messages.fetchPinned().catch(() => null); if (pins) for (const m of pins.values()) if (_estTableau(m, client.user.id)) found.set(m.id, m); } catch {}
-  try { const recent = await ch.messages.fetch({ limit: 50 }).catch(() => null); if (recent) for (const m of recent.values()) if (_estTableau(m, client.user.id)) found.set(m.id, m); } catch {}
+  try {
+    let before; const pages = deep ? 3 : 1;
+    for (let i = 0; i < pages; i++) {
+      const batch = await ch.messages.fetch({ limit: 100, before }).catch(() => null);
+      if (!batch || !batch.size) break;
+      for (const m of batch.values()) if (_estTableau(m, client.user.id)) found.set(m.id, m);
+      before = batch.last()?.id;
+      if (batch.size < 100) break;
+    }
+  } catch {}
   return [...found.values()];
 }
 function _persistPanneau(id) { try { const d = loadDB(); if (d.inventaire) { d.inventaire.panneau = id; saveDB(d); } } catch {} }
 // Ne garde qu'UN seul tableau (le référencé, sinon celui qui porte le fil, sinon le plus ancien) ;
 // supprime les doublons. Renvoie le tableau conservé (ou null).
-async function _dedupeBoards(client, inv) {
+async function _dedupeBoards(client, inv, deep) {
   try {
     if (!inv.channelId) return null;
     const ch = await client.channels.fetch(inv.channelId).catch(() => null);
     if (!ch?.messages) return null;
-    const boards = await _trouverTableaux(client, ch);
+    const boards = await _trouverTableaux(client, ch, deep);
     if (!boards.length) return null;
     const keep = boards.find(m => m.id === inv.panneau) || boards.find(m => m.hasThread) || boards[0];
     for (const m of boards) { if (m.id !== keep.id) await m.delete().catch(() => {}); }
@@ -130,8 +145,8 @@ async function rafraichirBoardDemarrage(client) {
     if (!inv || !inv.channelId) return;
     const ch = await client.channels.fetch(inv.channelId).catch(() => null);
     if (!ch?.send) return;
-    // Cherche le tableau (épingles + récents) et supprime les doublons éventuels
-    const msg = await _dedupeBoards(client, inv);
+    // Cherche le tableau (épingles + historique profond) et supprime les doublons éventuels
+    const msg = await _dedupeBoards(client, inv, true);
     if (msg) {
       await msg.edit({ embeds: [_boardEmbed(_ensure(db))], components: [_boardButtons()] }).catch(() => {});
     } else {
@@ -463,9 +478,9 @@ async function routeInteraction(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       const db = loadDB(); const inv = _ensure(db);
       inv.channelId = interaction.channelId;
-      // « Installer » = repartir PROPRE : on supprime TOUS les anciens tableaux (même un vieux design)
-      // et on en pose un NEUF, avec un fil Journal neuf.
-      const olds = await _trouverTableaux(interaction.client, interaction.channel);
+      // « Installer » = repartir PROPRE : on supprime TOUS les anciens tableaux (même un vieux
+      // design enfoui dans l'historique) et on en pose un NEUF, avec un fil Journal neuf.
+      const olds = await _trouverTableaux(interaction.client, interaction.channel, true);
       for (const o of olds) await o.delete().catch(() => {});
       inv.panneau = null; inv.threadId = null;
       const m = await interaction.channel.send({ embeds: [_boardEmbed(inv)], components: [_boardButtons()] }).catch(() => null);
