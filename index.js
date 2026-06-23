@@ -2862,16 +2862,24 @@ client.on('interactionCreate', async interaction => {
         'Notes':     { rich_text: [{ text: { content: opMod.equipe || '—' } }] },
       }).catch(() => {});
     }
-    // Mettre à jour l'embed dans #operations
-    const opsCh3 = getChById(interaction.guild, 'OPERATIONS', 'operations');
-    if (opsCh3) {
-      const msgs3 = await opsCh3.messages.fetch({ limit: 50 }).catch(() => null);
-      const msgOp = msgs3?.find(m => m.embeds[0]?.footer?.text?.includes(opIdMod));
-      if (msgOp) {
-        const newEmbed = EmbedBuilder.from(msgOp.embeds[0])
-          .spliceFields(2, 1, { name: 'Lieu', value: opMod.lieu, inline: true })
-          .spliceFields(3, 1, { name: 'Objectif', value: opMod.objectif, inline: false });
-        await msgOp.edit({ embeds: [newEmbed] }).catch(() => {});
+    // Mettre à jour la fiche d'origine — re-rendu complet (bons champs, bon salon) via l'ID stocké
+    if (opMod.channelId && opMod.msgId) {
+      try { await operations.refreshOpById(interaction.guild, opMod.id); } catch {}
+    } else {
+      // Repli pour les opérations héritées (sans réf. de message) : édition par NOM de champ, pas par index
+      const opsCh3 = getChById(interaction.guild, 'OPERATIONS', 'operations');
+      if (opsCh3) {
+        const msgs3 = await opsCh3.messages.fetch({ limit: 50 }).catch(() => null);
+        const msgOp = msgs3?.find(m => m.embeds[0]?.footer?.text?.includes(opIdMod));
+        if (msgOp) {
+          const fields = (msgOp.embeds[0].fields || []).map(f => {
+            if (/lieu/i.test(f.name)) return { name: f.name, value: opMod.lieu, inline: f.inline };
+            if (/objectif/i.test(f.name)) return { name: f.name, value: opMod.objectif, inline: f.inline };
+            return { name: f.name, value: f.value, inline: f.inline };
+          });
+          const newEmbed = EmbedBuilder.from(msgOp.embeds[0]).setFields(fields);
+          await msgOp.edit({ embeds: [newEmbed] }).catch(() => {});
+        }
       }
     }
     await interaction.editReply({ content: `✅ Opération **${opMod.name}** modifiée — Lieu: ${opMod.lieu} · Objectif: ${opMod.objectif}` });
