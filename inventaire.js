@@ -460,7 +460,18 @@ function _recapEmbed(mode, lignes) {
   return new EmbedBuilder().setColor(mode === 'replace' ? 0xC9A66B : 0x2ECC71)
     .setTitle(mode === 'replace' ? "📸 Coffre mis à jour (= la photo)" : "➕ Objets ajoutés au stock")
     .setDescription(_recapDiff(lignes).slice(0, 4000))
-    .setFooter({ text: `${lignes.length} changement(s) appliqué(s) au coffre` });
+    .setFooter({ text: `${lignes.length} changement(s) · une erreur ? ✏️ Corriger sur le tableau` });
+}
+// Met à jour le coffre DIRECTEMENT d'après une photo (le coffre = la photo), sans étape de
+// proposition. Journalise le détail avant→après et renvoie les lignes de changement.
+async function _majParPhoto(client, inv, db, items, byId) {
+  const { lignes, changes } = _appliquer(inv, items, 'replace');
+  _journalAdd(inv, byId, `📷 Coffre mis à jour par photo (${items.length} lu(s) · ${lignes.length} changement(s))`);
+  persist(db);
+  await _refreshBoard(client, inv);
+  await _log(client, inv, `📷 <@${byId}> a mis à jour le coffre par photo :\n${_recapDiff(lignes)}`);
+  await _checkSeuils(client, inv, changes);
+  return lignes;
 }
 
 const inventaireCommands = [
@@ -517,8 +528,9 @@ async function routeInteraction(interaction) {
       await _refreshBoard(interaction.client, inv);
       const items = await _lireImages(atts);
       if (!items || !items.length) { await interaction.editReply({ content: "📷 Capture(s) épinglée(s) ✅. Mais je n'ai pas réussi à lire d'objets dessus (peu net, ou clé IA absente) — saisis avec les boutons." }).catch(() => {}); return true; }
-      await _proposer(ch, items, interaction.user.id, db, inv);
-      await interaction.editReply({ content: "📷 Capture(s) épinglée(s) ✅ et lue(s) ! **Vérifie / corrige / valide** sur le message que je viens de poster." }).catch(() => {});
+      // Mise à jour DIRECTE du coffre (le coffre = la photo), sans étape de proposition
+      const lignes = await _majParPhoto(interaction.client, inv, db, items, interaction.user.id);
+      await interaction.editReply({ content: `✅ Coffre **mis à jour d'après la photo** — ${lignes.length} changement(s). Détail dans le fil 📦 Journal du coffre. Une erreur ? **✏️ Corriger** sur le tableau.` }).catch(() => {});
       return true;
     }
 
@@ -577,7 +589,7 @@ async function routeInteraction(interaction) {
 
     // ── Bouton « Mettre à jour par photo » : guide pour déposer la capture (lue par onMessage) ──
     if (interaction.isButton?.() && interaction.customId === "inv_photo") {
-      await interaction.reply({ content: "📸 **Mise à jour par photo**\nGlisse maintenant une **capture du coffre** dans ce salon. Je la lis et je te propose la mise à jour :\n• **📸 Le coffre = la photo** → le coffre devient exactement la capture\n• **✏️ Corriger / ajouter un objet** → si une ligne est mal lue ou manquante", flags: MessageFlags.Ephemeral }).catch(() => {});
+      await interaction.reply({ content: "📸 **Mise à jour par photo**\nGlisse maintenant une **capture du coffre** dans ce salon. Je la lis et **je mets le coffre à jour directement** (le coffre = la photo) + récap avant→après dans le 📦 Journal.\nUne quantité fausse ? Corrige avec **✏️ Corriger** sur le tableau.", flags: MessageFlags.Ephemeral }).catch(() => {});
       return true;
     }
 
@@ -746,7 +758,7 @@ async function _purgerPhotoPrecedente(ch, inv, saufId) {
   if (inv && inv.photoMsg !== saufId) inv.photoMsg = null;
 }
 
-// ── Image(s) glissée(s) dans le salon → lecture IA + proposition ──
+// ── Image(s) glissée(s) dans le salon → lecture IA → MISE À JOUR DIRECTE du coffre ──
 async function onMessage(message) {
   try {
     if (!message || message.author?.bot) return false;
@@ -763,7 +775,10 @@ async function onMessage(message) {
     inv.photoMsg = message.id; persist(db);
     const items = await _lireImages(imgs);
     if (!items || !items.length) { await message.reply({ content: "📷 Je n'ai pas réussi à lire d'objets sur cette/ces image(s). Essaie une capture plus nette, ou les boutons du tableau.", allowedMentions: { parse: [] } }).catch(() => {}); return true; }
-    await _proposer(message.channel, items, message.author.id, db, inv);
+    // Mise à jour DIRECTE : le coffre devient exactement la photo (pas d'étape de proposition).
+    const lignes = await _majParPhoto(message.client, inv, db, items, message.author.id);
+    await message.react("✅").catch(() => {});
+    await message.channel.send({ embeds: [_recapEmbed('replace', lignes)], allowedMentions: { parse: [] } }).catch(() => {});
     return true;
   } catch { return false; }
 }
