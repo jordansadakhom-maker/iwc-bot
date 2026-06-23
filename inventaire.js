@@ -93,10 +93,32 @@ async function _refreshBoard(client, inv) {
   } catch {}
 }
 
-// Rafraîchit le board au démarrage : les boutons (Ajouter / Retirer / Corriger) d'un
-// ancien tableau épinglé sont remis à jour automatiquement.
+// Rafraîchit le board au démarrage et le RÉPARE : si le tableau a disparu (message
+// supprimé, référence perdue après restauration), on le retrouve par son titre ou on le
+// repose entièrement — pour toujours avoir le panneau complet avec ses boutons.
 async function rafraichirBoardDemarrage(client) {
-  try { const db = loadDB(); const inv = db.inventaire; if (inv && inv.channelId && inv.panneau) await _refreshBoard(client, inv); } catch {}
+  try {
+    const db = loadDB(); const inv = db.inventaire;
+    if (!inv || !inv.channelId) return;
+    const ch = await client.channels.fetch(inv.channelId).catch(() => null);
+    if (!ch?.send) return;
+    let msg = inv.panneau ? await ch.messages.fetch(inv.panneau).catch(() => null) : null;
+    if (!msg) {
+      const recent = await ch.messages.fetch({ limit: 30 }).catch(() => null);
+      if (recent) msg = [...recent.values()].find(m => m.author.id === client.user.id && (m.embeds?.[0]?.title || '').includes('COFFRE COMMUN')) || null;
+    }
+    if (msg) {
+      await msg.edit({ embeds: [_boardEmbed(_ensure(db))], components: [_boardButtons()] }).catch(() => {});
+      if (inv.panneau !== msg.id) { inv.panneau = msg.id; persist(db); }
+    } else {
+      const sent = await ch.send({ embeds: [_boardEmbed(_ensure(db))], components: [_boardButtons()] }).catch(() => null);
+      if (sent) {
+        inv.panneau = sent.id; try { await sent.pin(); } catch {}
+        if (!inv.threadId) { try { const th = await sent.startThread({ name: "📦 Journal du coffre", autoArchiveDuration: 10080 }); inv.threadId = th.id; await th.send({ content: "📦 Ici s'inscrivent **tous les mouvements** du coffre. Le salon reste propre." }).catch(() => {}); } catch {} }
+        persist(db);
+      }
+    }
+  } catch {}
 }
 
 async function _thread(client, inv) {
@@ -394,12 +416,21 @@ async function routeInteraction(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       const db = loadDB(); const inv = _ensure(db);
       inv.channelId = interaction.channelId;
-      const m = await interaction.channel.send({ embeds: [_boardEmbed(inv)], components: [_boardButtons()] }).catch(() => null);
-      if (!m) { await interaction.editReply({ content: "❌ Je n'ai pas pu poster ici (vérifie mes permissions d'écriture dans ce salon)." }).catch(() => {}); return true; }
-      inv.panneau = m.id; try { await m.pin(); } catch {}
-      try { const th = await m.startThread({ name: "📦 Journal du coffre", autoArchiveDuration: 10080 }); inv.threadId = th.id; await th.send({ content: "📦 Ici s'inscrivent **tous les mouvements** du coffre (ajouts, retraits, lectures, alertes). Le salon reste propre." }).catch(() => {}); } catch {}
+      // Réutilise un tableau déjà présent dans le salon (pas de doublon) ; sinon en pose un neuf
+      let m = inv.panneau ? await interaction.channel.messages.fetch(inv.panneau).catch(() => null) : null;
+      if (!m) {
+        const recent = await interaction.channel.messages.fetch({ limit: 30 }).catch(() => null);
+        if (recent) m = [...recent.values()].find(x => x.author.id === interaction.client.user.id && (x.embeds?.[0]?.title || '').includes('COFFRE COMMUN')) || null;
+      }
+      if (m) { await m.edit({ embeds: [_boardEmbed(inv)], components: [_boardButtons()] }).catch(() => {}); inv.panneau = m.id; try { await m.pin(); } catch {} }
+      else {
+        m = await interaction.channel.send({ embeds: [_boardEmbed(inv)], components: [_boardButtons()] }).catch(() => null);
+        if (!m) { await interaction.editReply({ content: "❌ Je n'ai pas pu poster ici (vérifie mes permissions d'écriture dans ce salon)." }).catch(() => {}); return true; }
+        inv.panneau = m.id; try { await m.pin(); } catch {}
+      }
+      if (!inv.threadId) { try { const th = await m.startThread({ name: "📦 Journal du coffre", autoArchiveDuration: 10080 }); inv.threadId = th.id; await th.send({ content: "📦 Ici s'inscrivent **tous les mouvements** du coffre (ajouts, retraits, lectures, alertes). Le salon reste propre." }).catch(() => {}); } catch {} }
       persist(db);
-      await interaction.editReply({ content: "✅ Coffre installé : tableau épinglé + fil « 📦 Journal du coffre ». Gère via les boutons, /inventaire-photo (ou glisse des images), /inventaire-seuil, /inventaire-export, /inventaire-qui." }).catch(() => {});
+      await interaction.editReply({ content: "✅ Coffre installé : tableau épinglé + fil « 📦 Journal du coffre ». Gère via les boutons (➕ Ajouter / ➖ Retirer / ✏️ Corriger), /inventaire-photo (ou glisse des images), /inventaire-seuil, /inventaire-export, /inventaire-qui." }).catch(() => {});
       return true;
     }
 
