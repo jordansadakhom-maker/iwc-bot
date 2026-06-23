@@ -97,6 +97,9 @@ catch (e) { console.log('⚠️ reddead non chargé:', e.message); }
 let reseau = {};
 try { reseau = require('./reseau'); console.log('✅ Module reseau (Le Réseau d\'informateurs) chargé'); }
 catch (e) { console.log('⚠️ reseau non chargé:', e.message); }
+let ripoux = {};
+try { ripoux = require('./ripoux'); console.log('✅ Module ripoux (Le Ripoux — indic dans la loi) chargé'); }
+catch (e) { console.log('⚠️ ripoux non chargé:', e.message); }
 
 let factures = {};
 try { factures = require('./factures'); console.log('✅ Module factures (Facturation) chargé'); }
@@ -1618,6 +1621,7 @@ async function autoSetup(guild) {
   _syncRegistreForum(guild).then(() => console.log('🗂️ Registre forum synchronisé')).catch(() => {});
   // Le Réseau — panneau du salon informateur
   reseau.installerPanel?.(guild).then(() => console.log('🕵️ Panneau Le Réseau installé')).catch(() => {});
+  ripoux.installerPanel?.(guild).then(() => console.log('🎖️ Panneau Le Ripoux installé')).catch(() => {});
   // Facturation — panneau du salon factures
   factures.installerPanel?.(guild).then(() => console.log('🧾 Panneau Facturation installé')).catch(() => {});
   // Suivi médical — panneau du salon privé
@@ -2813,6 +2817,7 @@ client.on('interactionCreate', async interaction => {
   if (await traque.routeInteraction?.(interaction)) return;
   if (await comptabilite.routeInteraction?.(interaction)) return;
   if (await reseau.routeInteraction?.(interaction)) return;
+  if (await ripoux.routeInteraction?.(interaction)) return;
   if (await factures.routeInteraction?.(interaction)) return;
   if (await medical.routeInteraction?.(interaction)) return;
 
@@ -4356,6 +4361,8 @@ client.once('clientReady', async () => {
   cron.schedule('0 12 * * *', async () => { for (const g of client.guilds.cache.values()) await autoKickVisiteurs(g).catch(() => {}); }, { timezone: 'Europe/Paris' });
   // Re-sync quotidien du registre forum (4h) → statuts actif/absent/inactif toujours à jour, pas que sur promo
   cron.schedule('0 4 * * *', async () => { for (const g of client.guilds.cache.values()) await _syncRegistreForum(g).catch(() => {}); }, { timezone: 'Europe/Paris' });
+  // Le Ripoux : fuite spontanée + décroissance suspicion/heat (13h, décalé du Réseau)
+  cron.schedule('0 13 * * *', async () => { try { await ripoux.tickQuotidien?.(client); } catch (e) { console.log('⚠️ ripoux tick:', e.message); } }, { timezone: 'Europe/Paris' });
 
   // [CORRECTION] Résumés hebdo → #journal-de-bord via ajouterJournalIC
   cron.schedule('0 8 * * 1', async () => {
