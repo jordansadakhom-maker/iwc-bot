@@ -128,10 +128,12 @@ Voici une RETRANSCRIPTION de ce qui a été entendu en jeu récemment (brute, pa
 ${transcript}
 """
 
-À partir UNIQUEMENT de cette matière (n'invente PAS d'événements absents), rédige une FUITE confidentielle adressée à la Confrérie, à la PREMIÈRE PERSONNE, ton nerveux et vénal d'un homme de loi qui trahit son camp et prend des risques. Révèle ce que la LOI sait ou prépare : patrouilles, surveillances, enquêtes, arrestations imminentes, qui a parlé au shérif, primes/avis de recherche sur des membres ou des cibles.
+À partir UNIQUEMENT de cette matière (n'invente PAS d'événements absents), rédige un RAPPORT confidentiel adressé à la Confrérie, à la PREMIÈRE PERSONNE, ton nerveux et vénal d'un homme de loi qui trahit son camp et prend des risques.
+Rapporte TOUT ce qu'il a ENTENDU et APPRIS : conversations surprises, affaires en cours, deals, dettes, tensions, allées et venues, qui traîne avec qui, menaces, opportunités à saisir — ET, grâce à sa place au bureau du shérif, ce que la LOI sait ou prépare : patrouilles, surveillances, enquêtes, arrestations imminentes, qui a parlé au shérif, primes/avis de recherche.
+Cite les noms, lieux et chiffres quand ils apparaissent.
 
 Réponds STRICTEMENT en JSON (aucun texte autour, aucune balise) :
-{"rapport":"la fuite immersive, 3 à 6 phrases","primes":[{"cible":"nom de la personne/cible recherchée","montant":0,"raison":"motif court"}],"heatDelta":0}
+{"rapport":"le rapport immersif, 3 à 7 phrases, ce qu'il a entendu/appris + le volet loi","primes":[{"cible":"nom de la personne/cible recherchée","montant":0,"raison":"motif court"}],"heatDelta":0}
 
 - "primes" : uniquement si la transcription évoque clairement une tête mise à prix / un avis de recherche ; sinon [].
 - "heatDelta" : entier de -10 à +25 — à quel point la pression de la loi sur la bande monte d'après ce qu'on entend.
@@ -159,7 +161,7 @@ function _fuiteEmbed(db, rapport, { auto = false } = {}) {
   return new EmbedBuilder()
     .setColor(auto ? 0x4B3621 : 0x6B4423)
     .setAuthor({ name: `🎖️ ${r.nom} — adjoint du shérif (acheté)` })
-    .setTitle(auto ? '🕯️ Un mot glissé sous la porte' : '🤝 Tuyau soutiré')
+    .setTitle(auto ? '🕯️ Un mot glissé sous la porte' : '🤝 Rapport de l\'indic')
     .setDescription(String(rapport || '').slice(0, 3500))
     .addFields({ name: '🔥 Niveau de recherche', value: `${_jauge(r.heat)} · ${_heatLabel(r.heat)}`, inline: false })
     .setFooter({ text: 'La Confrérie • Brûle ce papier après lecture' })
