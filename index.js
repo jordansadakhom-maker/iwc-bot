@@ -43,6 +43,10 @@ let operations = {};
 try { operations = require('./operations'); console.log('✅ Module opérations chargé'); }
 catch (e) { console.log('⚠️ operations non chargé:', e.message); }
 
+let comptabilite = {};
+try { comptabilite = require('./comptabilite'); console.log('✅ Module comptabilité chargé'); }
+catch (e) { console.log('⚠️ comptabilite non chargé:', e.message); }
+
 let rumeurs = {};
 try { rumeurs = require('./rumeurs'); console.log('✅ Module rumeurs chargé'); }
 catch (e) { console.log('⚠️ rumeurs non chargé:', e.message); }
@@ -399,7 +403,7 @@ const SLASH_COMMANDS = [
 ].map(c => c.toJSON());
 
 async function registerSlashCommands(guild) {
-  const cmds = [...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || []), ...(operations.operationsCommands || []), ...(rumeurs.rumeursCommands || []), ...(inventaire.inventaireCommands || []), ...(diagnostic.diagnosticCommands || []), ...(absences.absencesCommands || []), ...(repertoire.repertoireCommands || []), ...(monitoring.monitoringCommands || []), ...(telegramme.telegrammeCommands || []), ...(tableaubord.tableauCommands || []), ...(traque.traqueCommands || [])];
+  const cmds = [...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || []), ...(operations.operationsCommands || []), ...(rumeurs.rumeursCommands || []), ...(inventaire.inventaireCommands || []), ...(diagnostic.diagnosticCommands || []), ...(absences.absencesCommands || []), ...(repertoire.repertoireCommands || []), ...(monitoring.monitoringCommands || []), ...(telegramme.telegrammeCommands || []), ...(tableaubord.tableauCommands || []), ...(traque.traqueCommands || []), ...(comptabilite.comptaCommands || [])];
   try {
     const noms = cmds.map(c => c?.name || c?.toJSON?.()?.name).filter(Boolean);
     client._cmdNames = noms;
@@ -2728,6 +2732,7 @@ client.on('interactionCreate', async interaction => {
   if (await parrainage.routeInteraction?.(interaction)) return;
   if (await tableaubord.routeInteraction?.(interaction)) return;
   if (await traque.routeInteraction?.(interaction)) return;
+  if (await comptabilite.routeInteraction?.(interaction)) return;
   if (await reseau.routeInteraction?.(interaction)) return;
   if (await factures.routeInteraction?.(interaction)) return;
   if (await medical.routeInteraction?.(interaction)) return;
@@ -5359,7 +5364,7 @@ async function buildMembresDiscordMap(guild) {
 
 async function _handleVersion(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const BOT_VERSION = '5.9 (23 juin — panneau contrats auto-mis à jour : « Recevoir nos conditions »)'; const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
+  const BOT_VERSION = '6.0 (23 juin — comptabilité : /compta bilan + à encaisser + export)'; const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
   let notionOk = false;
   try { const r = await fetch('https://api.notion.com/v1/users/me', { headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28' } }); notionOk = r.ok; } catch {}
   const db = loadDB();
