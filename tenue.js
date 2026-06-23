@@ -7,7 +7,10 @@
 //   → le message d'origine est retiré (salon propre)
 //   → réactions d'appréciation
 // ═══════════════════════════════════════════════════════════════
-const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
+const { EmbedBuilder, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
+let dbMod = {}; try { dbMod = require('./db'); } catch { dbMod = {}; }
+const loadDB = dbMod.loadDB || (() => ({}));
+const saveDB = dbMod.saveDB || (() => {});
 
 const PROMPT_TENUE = "Tu es le tailleur d'une compagnie de mercenaires dans un RP western (Far West texan, fin XIXe siecle). On te montre une ou PLUSIEURS photos de la MEME tenue d'un personnage (parfois sous des angles ou des lumieres differents — utilise-les TOUTES pour bien juger les COULEURS et les details). Reponds UNIQUEMENT en JSON strict, sans aucun texte autour, au format exact : {\"description\":\"3 a 4 phrases immersives et elogieuses, facon avis d'un tailleur de l'Ouest : la silhouette, l'effet d'ensemble, ce qui fait le caractere et la prestance du personnage\",\"pieces\":\"liste detaillee des pieces visibles AVEC leurs couleurs precises et leurs matieres (chapeau, manteau, veste, gilet, chemise, pantalon, bottes, foulard/bandana, gants, ceinturon, sacoche, arme portee...), separees par des virgules\",\"couleurs\":\"la palette dominante de la tenue en 2 a 4 couleurs precises (ex: brun cuir, bordeaux, beige sable, noir charbon)\",\"matieres\":\"les matieres apparentes (cuir, laine, lin, coton, peau de bete...), sinon Non visible\",\"style\":\"un ou deux mots qualifiant le style (ex: elegant, brut, hors-la-loi, distingue, sauvage, sobre, baroudeur)\"}. Si les images ne montrent pas un personnage en tenue, mets description a 'Tenue non identifiable'.";
 
@@ -95,10 +98,49 @@ async function onMessage(message) {
     if (wait) card = await wait.edit(payload).catch(() => null); else card = await message.channel.send(payload).catch(() => null);
 
     if (card) { for (const r of ['🤠', '🔥', '👍']) { await card.react(r).catch(() => {}); } }
+    // 👗 Garde-robe : on mémorise la dernière tenue décrite du membre
+    if (card && t && _ok(t.description)) {
+      try {
+        const db = loadDB(); if (!db.garderobe) db.garderobe = {};
+        db.garderobe[message.author.id] = {
+          nomPerso,
+          description: String(t.description).slice(0, 700),
+          pieces: _ok(t.pieces) ? String(t.pieces).slice(0, 1024) : '',
+          couleurs: _ok(t.couleurs) ? String(t.couleurs).slice(0, 256) : '',
+          matieres: _ok(t.matieres) ? String(t.matieres).slice(0, 256) : '',
+          style: _ok(t.style) ? String(t.style).slice(0, 200) : '',
+          image: card.embeds?.[0]?.image?.url || null,
+          lien: card.url || null,
+          at: Date.now(),
+        };
+        saveDB(db);
+      } catch {}
+    }
     // Retirer le message d'origine UNIQUEMENT si au moins une photo a pu être réuploadée
     if (files.length && card) await message.delete().catch(() => {});
     return true;
   } catch { return false; }
 }
 
-module.exports = { onMessage };
+// Bouton « 👔 Ma garde-robe » → affiche la dernière tenue enregistrée du membre
+async function routeInteraction(interaction) {
+  try {
+    if (!interaction.isButton?.() || interaction.customId !== 'tenue_garderobe') return false;
+    const g = (loadDB().garderobe || {})[interaction.user.id];
+    if (!g) { await interaction.reply({ content: '👔 Ta garde-robe est vide — poste une photo de ta tenue dans le vestiaire pour l\'enregistrer.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+    const e = new EmbedBuilder().setColor(0x8B5A2B)
+      .setTitle(`👔 Garde-robe — ${g.nomPerso || interaction.member?.displayName || interaction.user.username}`)
+      .setDescription(g.description ? `*« ${g.description} »*\n— le tailleur de la Compagnie` : '*Ta dernière tenue enregistrée.*');
+    if (g.image) e.setImage(g.image);
+    if (g.pieces) e.addFields({ name: '👔 Pièces', value: g.pieces.slice(0, 1024), inline: false });
+    if (g.couleurs) e.addFields({ name: '🎨 Palette', value: g.couleurs.slice(0, 256), inline: true });
+    if (g.matieres) e.addFields({ name: '🧶 Matières', value: g.matieres.slice(0, 256), inline: true });
+    if (g.style) e.addFields({ name: '✨ Style', value: g.style.slice(0, 200), inline: true });
+    if (g.lien) e.addFields({ name: '🔗 Fiche', value: `[Voir dans le vestiaire](${g.lien})`, inline: false });
+    e.setFooter({ text: `Enregistrée le ${new Date(g.at).toLocaleDateString('fr-FR')}` });
+    await interaction.reply({ embeds: [e], flags: MessageFlags.Ephemeral }).catch(() => {});
+    return true;
+  } catch (e) { if ([10062, 40060].includes(e?.code)) return true; console.log('❌ tenue routeInteraction:', e.message); return true; }
+}
+
+module.exports = { onMessage, routeInteraction };

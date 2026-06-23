@@ -1664,6 +1664,8 @@ async function autoSetup(guild) {
   ripoux.installerPanel?.(guild).then(() => console.log('🎖️ Panneau Le Ripoux installé')).catch(() => {});
   // Facturation — panneau du salon factures
   factures.installerPanel?.(guild).then(() => console.log('🧾 Panneau Facturation installé')).catch(() => {});
+  // Panneau « Bilan comptable » dans le salon comptabilité dédié
+  { const comptaCh = guild.channels.cache.get('1518922581720170608'); if (comptaCh) comptabilite.installerPanel?.(guild, comptaCh).then(() => console.log('📊 Panneau comptabilité installé')).catch(() => {}); }
   // Suivi médical — panneau du salon privé
   medical.installerPanel?.(guild).then(() => console.log('🩺 Panneau Suivi médical installé')).catch(() => {});
   medical.installerExemple?.(guild).then(() => console.log('🩺 Exemple test d\'aptitude posté')).catch(() => {});
@@ -2855,6 +2857,7 @@ client.on('interactionCreate', async interaction => {
   if (await parrainage.routeInteraction?.(interaction)) return;
   if (await tableaubord.routeInteraction?.(interaction)) return;
   if (await traque.routeInteraction?.(interaction)) return;
+  if (await tenue.routeInteraction?.(interaction)) return;
   if (await comptabilite.routeInteraction?.(interaction)) return;
   if (await reseau.routeInteraction?.(interaction)) return;
   if (await ripoux.routeInteraction?.(interaction)) return;
@@ -5247,18 +5250,20 @@ async function _installerTenuePanel(guild) {
   try {
     const ch = getChById(guild, 'TENUE', 'tenue', 'vestiaire', 'allure', 'dressing');
     if (!ch) return;
-    const msgs = await ch.messages.fetch({ limit: 30 }).catch(() => null);
-    if (msgs && msgs.find(m => m.author.id === client.user.id && (m.embeds?.[0]?.title || '').includes('VESTIAIRE'))) return; // déjà posé
     const embed = new EmbedBuilder()
       .setColor(0x8B5A2B)
       .setTitle('🤠 LE VESTIAIRE — ALLURE & TENUES')
-      .setDescription('```\n  IRON WOLF COMPANY · NEW AUSTIN, TEXAS \n```\n*Dans le Far West, l\'allure d\'un homme en dit long avant même qu\'il ne dégaine.*\nIci, on expose **sa tenue, son style, son personnage**.')
+      .setDescription('```\n  IRON WOLF COMPANY · NEW AUSTIN, TEXAS \n```\n*Dans le Far West, l\'allure d\'un homme en dit long avant même qu\'il ne dégaine.*\nIci, on expose **sa tenue, son style, son personnage** — le tailleur en fait l\'éloge et la garde dans ta garde-robe.')
       .addFields(
-        { name: '📸 Comment faire', value: '→ Poste une **photo** de ta tenue (capture en jeu).\n→ Ajoute le **nom de ton personnage** en légende.\n→ Affirme ton style et inspire les autres.' },
-        { name: '🎩 Conseil d\'allure', value: 'Chapeau, manteau, foulard, bottes, ceinturon… chaque détail raconte qui tu es dans l\'Ouest.' },
+        { name: '📸 Comment faire', value: '→ Poste une **photo** de ta tenue (capture en jeu).\n→ Ajoute le **nom de ton personnage** en légende.\n→ Le tailleur rédige son avis et l\'enregistre.' },
+        { name: '👔 Ta garde-robe', value: 'Clique sur **Ma garde-robe** ci-dessous pour revoir ta dernière tenue enregistrée.' },
       )
       .setFooter({ text: 'Iron Wolf Company • Le Vestiaire' });
-    const sent = await ch.send({ embeds: [embed] }).catch(() => null);
+    const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('tenue_garderobe').setLabel('Ma garde-robe').setEmoji('👔').setStyle(ButtonStyle.Secondary));
+    const msgs = await ch.messages.fetch({ limit: 30 }).catch(() => null);
+    const panel = msgs ? [...msgs.values()].find(m => m.author.id === client.user.id && (m.embeds?.[0]?.title || '').includes('VESTIAIRE')) : null;
+    if (panel) { await panel.edit({ embeds: [embed], components: [row] }).catch(() => {}); return; }
+    const sent = await ch.send({ embeds: [embed], components: [row] }).catch(() => null);
     if (sent) await sent.pin().catch(() => {});
   } catch (e) { console.log('⚠️ install panneau tenue:', e.message); }
 }
