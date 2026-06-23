@@ -78,9 +78,15 @@ function _salonAgenda(guild, illegal) {
     || guild.channels.cache.find(c => c.isTextBased?.() && /agenda|planning/i.test(c.name))
     || _salonDemandes(guild);
 }
+// Agenda : on prévient le Panseur, les Officiers de Terrain et les Fondateurs dès qu'un RDV arrive.
+const AGENDA_PING_ROLES = ['Panseur', 'Officier de Terrain', 'Officier', 'Fondateur'];
 function _pingOperateur(guild) {
-  const r = guild.roles.cache.find(x => OPERATEUR_ROLES.some(n => x.name.includes(n)));
-  return r ? `<@&${r.id}>` : '';
+  const ids = new Set();
+  for (const motif of AGENDA_PING_ROLES) {
+    const r = guild.roles.cache.find(x => x.name.includes(motif));
+    if (r) ids.add(r.id);
+  }
+  return [...ids].map(id => `<@&${id}>`).join(' ');
 }
 
 // ── Dates / créneaux (heure de Paris, comme le reste du bot) ──
