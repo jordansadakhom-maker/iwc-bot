@@ -167,6 +167,17 @@ function getAgendaCh(guild) {
       || null;
 }
 
+// Salon vocal RP « écoute seule » : personne ne peut PARLER (on peut venir/écouter).
+// On retire la permission Parler à @everyone sur ce salon (appliqué au démarrage).
+const SALON_VOCAL_MUET = '1511135632838365284';
+async function _verrouillerVocalRP(guild) {
+  try {
+    const ch = guild.channels.cache.get(SALON_VOCAL_MUET) || await guild.channels.fetch(SALON_VOCAL_MUET).catch(() => null);
+    if (!ch || !ch.permissionOverwrites) return;
+    await ch.permissionOverwrites.edit(guild.roles.everyone, { Speak: false }).catch(e => console.log('⚠️ verrou vocal RP (manque "Gérer les permissions" ?):', e.message));
+  } catch (e) { console.log('⚠️ _verrouillerVocalRP:', e.message); }
+}
+
 // Panneau permanent dans #agenda : un bouton « Nouveau rendez-vous » plutôt qu'une commande.
 async function _installerPanelAgenda(guild) {
   try {
@@ -1540,6 +1551,7 @@ async function autoSetup(guild) {
   medical.installerExemple?.(guild).then(() => console.log('🩺 Exemple test d\'aptitude posté')).catch(() => {});
   inventaire.rafraichirBoardDemarrage?.(guild.client).then(() => console.log('📦 Board inventaire rafraîchi (boutons à jour)')).catch(() => {});
   _installerPanelAgenda(guild).then(() => console.log('📅 Panneau agenda installé')).catch(() => {});
+  _verrouillerVocalRP(guild).then(() => console.log('🔇 Salon vocal RP verrouillé (parole bloquée)')).catch(() => {});
   // Exemples contrats & opérations
   _exempleContratForum(guild).then(() => console.log('📜 Exemple contrat posté')).catch(() => {});
   _exempleOperationForum(guild).then(() => console.log('🎯 Exemple opération posté')).catch(() => {});
