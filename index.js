@@ -5366,7 +5366,7 @@ async function buildMembresDiscordMap(guild) {
 
 async function _handleVersion(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const BOT_VERSION = '6.2 (23 juin — compta : lecture de capture de paiement par IA, à valider)'; const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
+  const BOT_VERSION = '6.3 (23 juin — fix boucle planning + patch note 6.3)'; const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
   let notionOk = false;
   try { const r = await fetch('https://api.notion.com/v1/users/me', { headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28' } }); notionOk = r.ok; } catch {}
   const db = loadDB();
@@ -5509,37 +5509,38 @@ async function _handlePatchDeploy(interaction) {
   const dateStr = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
 
   const embed1 = new EmbedBuilder()
-    .setColor(0x8B4513)
+    .setColor(0xC9A227)
     .setAuthor({ name: 'Iron Wolf Company \u00b7 IWC Setup', iconURL: interaction.guild.iconURL() || undefined })
-    .setTitle('\uD83D\uDC3A IWC Bot \u2014 Mise \u00e0 jour majeure \u00b7 Version 6.0')
-    .setDescription('*D\u00e9ploy\u00e9 le **' + dateStr + '** \u2014 Le Renseignement de terrain*')
+    .setTitle('\uD83D\uDC3A IWC Bot \u2014 Mise \u00e0 jour \u00b7 Version 6.3')
+    .setDescription('*D\u00e9ploy\u00e9 le **' + dateStr + '** \u2014 Coffre, Comptabilit\u00e9, Suivi m\u00e9dical & Recrutement*')
     .addFields(
-      { name: '\uD83C\uDF99\uFE0F MICRO DE TERRAIN (NOUVEAU)', value: '\u2192 Programme PC qui \u00e9coute le son du jeu et transcrit les voix RP\n\u2192 Maintiens une touche \u2192 la conversation est transcrite et envoy\u00e9e\n\u2192 Transcription locale haute qualit\u00e9 (Whisper) avec ponctuation\n\u2192 D\u00e9coupage automatique par interventions (qui dit quoi)\n\u2192 D\u00e9tection auto des lieux Red Dead + mots-cl\u00e9s en gras\n\u2192 File d\'attente hors-ligne \u2014 aucune info perdue', inline: false },
-      { name: '\uD83E\uDDE0 RAPPORTS IA (NOUVEAU)', value: '\u2192 Chaque note vocale transform\u00e9e en RAPPORT DE TERRAIN propre\n\u2192 R\u00e9sum\u00e9, d\u00e9tails reformul\u00e9s, personnes, lieu, niveau de menace\n\u2192 Classement automatique par cat\u00e9gorie (armes, argent, loi...)\n\u2192 Fils par personne \u2014 dossier automatique sur chaque individu', inline: false },
+      { name: '\uD83D\udcb0 COMPTABILIT\u00c9 (NOUVEAU)', value: '\u2192 **/compta** installe un panneau permanent qui se met \u00e0 jour tout seul\n\u2192 Tr\u00e9sorerie, chiffre d\'affaires, contrats \u00e0 encaisser, retards, top clients\n\u2192 **\uD83D\udcb5 Encaisser un contrat** : on choisit le contrat \u2192 coffre + facture auto\n\u2192 **\uD83D\uddbc\uFE0F Capture de paiement** : l\'IA lit le montant, tu valides \u2192 coffre\n\u2192 **\uD83D\udce4 Export** comptable en fichier', inline: false },
+      { name: '\uD83D\udce6 COFFRE COMMUN (REFAIT)', value: '\u2192 Tableau unique auto-r\u00e9par\u00e9, jamais en double\n\u2192 **\u2795 Ajouter / \u2796 Retirer** : on choisit l\'objet (avec sa cat\u00e9gorie) + la quantit\u00e9\n\u2192 **\uD83D\udcf8 Photo** : le coffre devient exactement la photo, mise \u00e0 jour directe + r\u00e9cap avant\u2192apr\u00e8s\n\u2192 Lecture IA des captures plus pr\u00e9cise', inline: false },
     )
-    .setFooter({ text: 'IWC Bot v6.0 \u00b7 1/3' });
+    .setFooter({ text: 'IWC Bot v6.3 \u00b7 1/3' });
 
   const embed2 = new EmbedBuilder()
-    .setColor(0x8B1A1A)
+    .setColor(0x2ECC71)
     .addFields(
-      { name: '\uD83D\uDD0D COMMANDES RENSEIGNEMENT (NOUVEAU)', value: '\u2192 /notes \u2014 consulter les derni\u00e8res notes de terrain (filtres)\n\u2192 /synthese [sujet] \u2014 l\'IA compile tout ce qu\'on sait sur une personne ou un lieu\n\u2192 Briefing quotidien automatique \u2014 synth\u00e8se IA chaque soir \u00e0 20h\n\u2192 D\u00e9tection de doublons \u2014 recoupement des infos entre agents', inline: false },
-      { name: '\uD83D\uDCDC CONTRATS AM\u00c9LIOR\u00c9S', value: '\u2192 Menu Type de mission \u2014 Protection, Escorte, Surveillance, Chasse de prime...\n\u2192 Nouveau champ D\u00e9tails \u2014 conditions, lieu, infos en plus\n\u2192 Synchronisation Notion fiabilis\u00e9e + auto-diagnostic\n\u2192 /contrats-sync \u2014 resynchroniser tous les contrats d\'un coup\n\u2192 /notion-test \u2014 v\u00e9rifier la connexion Notion', inline: false },
+      { name: '\uD83E\ude7a SUIVI M\u00c9DICAL (AM\u00c9LIOR\u00c9)', value: '\u2192 Alerte automatique quand un membre passe **Inapte** ou **En observation**\n\u2192 Rappels de RDV m\u00e9dicaux en MP au m\u00e9decin ~1h avant\n\u2192 Vue d\'ensemble regroup\u00e9e par statut + historique d\u00e9taill\u00e9\n\u2192 Test d\'aptitude en 2 \u00e9tapes (bug corrig\u00e9)', inline: false },
+      { name: '\uD83E\udd1d RENDEZ-VOUS CLIENT (PLUS CLAIR)', value: '\u2192 **\uD83D\udce8 Contacter la compagnie** \u2014 exposer sa demande librement\n\u2192 **\uD83E\udd1d Besoin de nos services** \u2014 r\u00e9server une prestation (lieu + cr\u00e9neau)\n\u2192 Textes des panneaux clarifi\u00e9s', inline: false },
+      { name: '\uD83C\udfaf OP\u00c9RATIONS & AVIS DE RECHERCHE', value: '\u2192 Avis cl\u00f4tur\u00e9 \u2192 archiv\u00e9 dans #\u00e9l\u00e9ment-op\u00e9rations (+ photo de capture)\n\u2192 Liaison **op\u00e9ration \u2194 avis de recherche** dans les deux sens\n\u2192 Agenda : RDV auto-effac\u00e9s une fois pass\u00e9s \u00b7 choix du ping (Confr\u00e9rie ou membre)', inline: false },
     )
-    .setFooter({ text: 'IWC Bot v6.0 \u00b7 2/3' });
+    .setFooter({ text: 'IWC Bot v6.3 \u00b7 2/3' });
 
   const embed3 = new EmbedBuilder()
     .setColor(0x2C3E50)
     .addFields(
-      { name: '\uD83D\uDC1B CORRECTIONS', value: '\u2192 /dashboard \u2014 bug de double r\u00e9ponse corrig\u00e9\n\u2192 Bouton Rafra\u00eechir du dashboard corrig\u00e9\n\u2192 Gestion d\'erreur des commandes fiabilis\u00e9e\n\u2192 Menus d\u00e9roulants nettoy\u00e9s automatiquement apr\u00e8s usage\n\u2192 Synchro Notion contrats \u2014 types de colonnes adapt\u00e9s', inline: false },
-      { name: '\uD83D\uDD2E PROCHAINES MISES \u00c0 JOUR', value: '\u2192 Toujours plus de pr\u00e9cision sur la transcription\n\u2192 Statistiques de renseignement par agent\n\u2192 Archivage automatique des vieux rapports', inline: false },
+      { name: '\uD83D\uDC3A RECRUTEMENT', value: '\u2192 Candidatures : ping **Direction + Officier de Terrain**\n\u2192 \u00c0 l\'acceptation : le nouveau membre est redirig\u00e9 en MP pour nous joindre', inline: false },
+      { name: '\uD83D\uDC1B CORRECTIONS', value: '\u2192 Panneau #contrats : \u00ab Recevoir nos conditions \u00bb (corrig\u00e9)\n\u2192 Salon planning : fini les reposts en boucle\n\u2192 Messages \u00e9pingl\u00e9s inutiles supprim\u00e9s automatiquement\n\u2192 Stabilit\u00e9 g\u00e9n\u00e9rale (gestion d\'erreurs renforc\u00e9e)', inline: false },
     )
-    .setFooter({ text: 'IWC Bot v6.0 \u00b7 3/3 \u00b7 La force est dans l\'ombre. \u2014 La Compagnie' })
+    .setFooter({ text: 'IWC Bot v6.3 \u00b7 3/3 \u00b7 La force est dans l\'ombre. \u2014 La Compagnie' })
     .setTimestamp();
 
   await patchCh.send({ embeds: [embed1] });
   await patchCh.send({ embeds: [embed2] });
   await patchCh.send({ embeds: [embed3] });
-  await interaction.editReply({ content: '\u2705 Patch note v6.0 post\u00e9 dans ' + patchCh + ' (3 embeds).' });
+  await interaction.editReply({ content: '\u2705 Patch note v6.3 post\u00e9 dans ' + patchCh + ' (3 embeds).' });
 }
 async function _handlePurge(interaction) {
   if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
@@ -7371,10 +7372,11 @@ async function setupPlansFormat(guild) {
 async function setupPlanningFormat(guild) {
   try {
     const ch = getChById(guild, 'PLANNING', 'planning'); if (!ch) return;
-    const msgs = await ch.messages.fetch({ limit: 20 });
-    const existing = msgs.find(m => m.author.id === guild.members.me?.id && m.embeds[0]?.title?.includes('PLANNING'));
-    if (existing) return;
-    for (const [, m] of msgs) { if (m.author.id === guild.members.me?.id) await m.delete().catch(() => {}); }
+    const moi = guild.client.user.id; // ⚠️ guild.members.me peut être absent au démarrage → faux négatif = reposte en boucle
+    const msgs = await ch.messages.fetch({ limit: 30 }).catch(() => null);
+    if (!msgs) return;
+    const formats = [...msgs.values()].filter(m => m.author.id === moi && (m.embeds?.[0]?.title || '').includes('PLANNING — Iron Wolf Company'));
+    if (formats.length) { for (const m of formats.slice(1)) await m.delete().catch(() => {}); return; } // déjà présent → on garde (et on dédoublonne)
     const embed = new EmbedBuilder().setColor(0x2C3E50).setTitle('📅 PLANNING — Iron Wolf Company').setDescription('*Planning hebdomadaire de la Compagnie.*\n\nPartagez ici les screenshots de planning ou utilisez la commande `/rdv` pour créer un rendez-vous.').addFields({ name: '📌 Utilisation', value: ['→ Postez un screenshot → automatiquement archivé', '→ `/rdv` pour créer un RDV officiel', '→ `/agenda voir` pour voir les prochains RDV'].join('\n') }).setFooter({ text: 'IWC • Planning • Mis à jour automatiquement' });
     await ch.send({ embeds: [embed] });
     console.log('✅ Format planning posté');
