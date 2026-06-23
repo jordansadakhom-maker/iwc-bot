@@ -448,7 +448,7 @@ async function routeInteraction(interaction) {
     }
 
     return false;
-  } catch (e) { if ([10062, 40060].includes(e?.code)) return true; console.log('❌ medical routeInteraction:', e.message); return true; }
+  } catch (e) { if ([10062, 40060].includes(e?.code)) return true; console.log('❌ medical routeInteraction:', e.message, '\n', (e.stack || '').split('\n').slice(0, 4).join('\n')); return true; }
 }
 
 // Post d'exemple (idempotent) — montre à quoi ressemble un test d'aptitude

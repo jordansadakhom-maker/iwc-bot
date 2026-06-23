@@ -3,7 +3,7 @@ const {
   Client, GatewayIntentBits, Partials,
   EmbedBuilder, ChannelType, ActivityType,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  StringSelectMenuBuilder,
+  StringSelectMenuBuilder, UserSelectMenuBuilder,
   ModalBuilder, TextInputBuilder, TextInputStyle,
   SlashCommandBuilder, MessageFlags,
   PermissionFlagsBits,
@@ -176,6 +176,50 @@ async function _verrouillerVocalRP(guild) {
     if (!ch || !ch.permissionOverwrites) return;
     await ch.permissionOverwrites.edit(guild.roles.everyone, { Speak: false }).catch(e => console.log('⚠️ verrou vocal RP (manque "Gérer les permissions" ?):', e.message));
   } catch (e) { console.log('⚠️ _verrouillerVocalRP:', e.message); }
+}
+
+// ── Salon RP : reformulation automatique en français western immersif ──
+// Tout message humain y est réécrit en RP Far West (~1899-1904), puis re-posté
+// sous le nom/avatar de l'auteur (via webhook). Le message d'origine est supprimé.
+const SALON_RP_REFORMULATION = '1509244143199715499';
+function _norm2(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+async function _reformulerRP(texte) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const prompt = `Tu reformules un message pour un jeu de rôle Far West (RedM / Red Dead Redemption 2), dans l'Ouest américain vers 1899-1904.
+Réécris le message ci-dessous en FRANÇAIS RP immersif et soigné, comme le dirait un personnage de l'époque : ton naturel, vocabulaire western d'époque, AUCUN anachronisme (pas de mot ni d'objet moderne), aucun emoji.
+Conserve EXACTEMENT le sens, les informations et l'intention d'origine ; n'invente aucun fait nouveau ; garde une longueur comparable.
+Si le message contient une partie hors-RP entre (parenthèses) ou (( doubles parenthèses )), laisse-la telle quelle.
+Réponds UNIQUEMENT avec le message reformulé, sans guillemets ni commentaire.
+
+Message : "${texte}"`;
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 700, messages: [{ role: 'user', content: prompt }] }),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    let txt = (data?.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+    txt = txt.replace(/^["«»\s]+|["«»\s]+$/g, '').trim();
+    return txt && txt.length > 1 ? txt.slice(0, 1900) : null;
+  } catch { return null; }
+}
+async function _reposterCommeMembre(channel, member, user, content) {
+  try {
+    const hooks = await channel.fetchWebhooks().catch(() => null);
+    let hook = hooks?.find(h => h.owner?.id === channel.client.user.id && h.name === 'IWC RP');
+    if (!hook) hook = await channel.createWebhook({ name: 'IWC RP' }).catch(() => null);
+    if (!hook) return false;
+    await hook.send({
+      content: content.slice(0, 2000),
+      username: ((member?.displayName || user?.username || 'Inconnu')).slice(0, 80),
+      avatarURL: member?.displayAvatarURL?.() || user?.displayAvatarURL?.() || undefined,
+      allowedMentions: { parse: [] },
+    }).catch(() => {});
+    return true;
+  } catch { return false; }
 }
 
 // Panneau permanent dans #agenda : un bouton « Nouveau rendez-vous » plutôt qu'une commande.
@@ -2077,6 +2121,20 @@ client.on('messageCreate', async message => {
   try {
     if (message.type === 6 /* ChannelPinnedMessage */) { await message.delete().catch(() => {}); return; }
   } catch {}
+  // Salon RP : on réécrit le message en western immersif puis on le re-poste sous le nom de l'auteur
+  try {
+    if (message.channel?.id === SALON_RP_REFORMULATION && !message.author?.bot && !message.webhookId && message.guild) {
+      const brut = (message.content || '').trim();
+      const skip = !brut || brut.length < 2 || message.attachments.size > 0 || /^[\/!.]/.test(brut) || /^https?:\/\//i.test(brut);
+      if (!skip && process.env.ANTHROPIC_API_KEY) {
+        const reformule = await _reformulerRP(brut);
+        if (reformule && _norm2(reformule) !== _norm2(brut)) {
+          const ok = await _reposterCommeMembre(message.channel, message.member, message.author, reformule);
+          if (ok) { await message.delete().catch(() => {}); return; }
+        }
+      }
+    }
+  } catch (e) { console.log('⚠️ reformulation RP:', e.message); }
   // Conversations sur télégrammes : relais MP ↔ fil (avant tout le reste)
   try { if (await telegramme.onMessage?.(message)) return; } catch {}
   try { if (await inventaire.onMessage?.(message)) return; } catch {}
@@ -4782,9 +4840,20 @@ async function _installerPlanningContrats(guild) {
       const oldCh = await client.channels.fetch(db.planningContratsPanel.channelId).catch(() => null);
       if (oldCh) { const oldMsg = await oldCh.messages.fetch(db.planningContratsPanel.messageId).catch(() => null); if (oldMsg) await oldMsg.delete().catch(() => {}); }
     }
-    // Nettoyer un éventuel ancien tableau du bot
+    // Auto-réparation : si la référence a été perdue (redémarrage / restauration), on RÉUTILISE
+    // un tableau déjà présent dans le salon au lieu d'en reposter un (évite le « repost en boucle »).
     const recent = await ch.messages.fetch({ limit: 30 }).catch(() => null);
-    if (recent) for (const [, m] of recent) { if (m.author.id === client.user.id && (m.embeds[0]?.title || '').includes('TABLEAU DES ÉCHÉANCES')) await m.delete().catch(() => {}); }
+    let existant = null;
+    if (recent) for (const [, m] of [...recent].reverse()) {
+      if (m.author.id === client.user.id && (m.embeds[0]?.title || '').includes('TABLEAU DES ÉCHÉANCES')) {
+        if (!existant) existant = m; else await m.delete().catch(() => {}); // garde le 1er, supprime les doublons
+      }
+    }
+    if (existant) {
+      await existant.edit({ embeds: [_planningContratsEmbed(db)], components: [_planningResetRow()] }).catch(() => {});
+      const d2 = loadDB(); d2.planningContratsPanel = { channelId: ch.id, messageId: existant.id }; saveDB(d2);
+      return;
+    }
     const sent = await ch.send({ embeds: [_planningContratsEmbed(db)], components: [_planningResetRow()] }).catch(() => null);
     if (sent) { await sent.pin().catch(() => {}); const d2 = loadDB(); d2.planningContratsPanel = { channelId: ch.id, messageId: sent.id }; saveDB(d2); }
   } catch (e) { console.log('⚠️ install tableau planning contrats:', e.message); }
@@ -5876,16 +5945,41 @@ async function _validerModalAgendaSimple(interaction) {
   if (notes) embed.addFields({ name: '📋 Notes', value: notes });
   if (photoUrl) embed.setImage(photoUrl);
   embed.setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` }).setTimestamp();
-  // Poster dans le bon salon selon le pôle du membre
-  const isIlleg = interaction.member?.roles?.cache?.has(ROLE_POLE_ILLEGAL);
-  const poleLabel = isIlleg ? '🔒 Illégal' : '⚖️ Légal';
-  // Ne pinger que si le rôle existe VRAIMENT sur le serveur (évite "@rôle inconnu")
-  const roleIdCible = isIlleg ? ROLE_POLE_ILLEGAL : ROLE_POLE_LEGAL;
-  const roleExiste  = interaction.guild.roles.cache.has(roleIdCible);
-  const pingRole    = roleExiste ? `<@&${roleIdCible}>` : '';
+  const isIlleg = interaction.member?.roles?.cache?.has(ROLE_POLE_ILLEGAL); // (conservé pour la synchro Notion plus bas)
+  // ── Choix du destinataire du ping : toute la Confrérie OU un/plusieurs membres précis ──
+  const confId = `rdv_ping_conf_${interaction.id}`;
+  const noneId = `rdv_ping_none_${interaction.id}`;
+  const selId  = `rdv_ping_sel_${interaction.id}`;
+  await interaction.editReply({
+    content: '📢 **Qui veux-tu prévenir pour ce rendez-vous ?**\n• **Toute la Confrérie**, ou\n• **un ou plusieurs membres précis** (menu ci-dessous).\n\n*Tu as 1 minute — sans réponse, personne n\'est pingué.*',
+    embeds: [],
+    components: [
+      new ActionRowBuilder().addComponents(new UserSelectMenuBuilder().setCustomId(selId).setPlaceholder('Prévenir un ou plusieurs membres…').setMinValues(1).setMaxValues(10)),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(confId).setLabel('Toute la Confrérie').setEmoji('📢').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(noneId).setLabel('Personne').setEmoji('🔕').setStyle(ButtonStyle.Secondary),
+      ),
+    ],
+  }).catch(() => {});
+  let pingContent = '';
+  const mentionRoles = [];
+  const mentionUsers = [];
+  try {
+    const f = i => i.user.id === interaction.user.id && [confId, noneId, selId].includes(i.customId);
+    const choice = await interaction.channel.awaitMessageComponent({ filter: f, time: 60000 }).catch(() => null);
+    if (choice) {
+      await choice.deferUpdate().catch(() => {});
+      if (choice.customId === confId) {
+        if (interaction.guild.roles.cache.has(ROLE_POLE_ILLEGAL)) { pingContent = `<@&${ROLE_POLE_ILLEGAL}>`; mentionRoles.push(ROLE_POLE_ILLEGAL); }
+      } else if (choice.customId === selId && choice.values?.length) {
+        mentionUsers.push(...choice.values);
+        pingContent = choice.values.map(id => `<@${id}>`).join(' ');
+      }
+    }
+  } catch {}
   // Tous les RDV vont dans le même salon #agenda (plus de séparation légal/illégal)
   const agendaCh = getAgendaCh(interaction.guild);
-  const rdvMsg = agendaCh ? await agendaCh.send({ content: `${pingRole ? pingRole + ' — ' : ''}📅 **${titre}** · ${heure} à ${lieu}`, embeds: [embed], allowedMentions: { parse: [], roles: roleExiste ? [roleIdCible] : [] } }).catch(() => null) : null;
+  const rdvMsg = agendaCh ? await agendaCh.send({ content: `${pingContent ? pingContent + ' — ' : ''}📅 **${titre}** · ${heure} à ${lieu}`, embeds: [embed], allowedMentions: { parse: [], roles: mentionRoles, users: mentionUsers } }).catch(() => null) : null;
   // On mémorise le post pour pouvoir l'effacer automatiquement une fois la date/heure passée (salon propre)
   if (rdvMsg) {
     const hm = (heure || '').match(/(\d{1,2})\s*[h:]\s*(\d{0,2})/i);

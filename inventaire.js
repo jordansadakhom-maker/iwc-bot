@@ -253,16 +253,16 @@ function _proposalEmbed(items) {
   return new EmbedBuilder().setColor(0xC9A66B).setTitle("📷 Lecture de la capture du coffre")
     .setDescription("Voici ce que j'ai lu sur la photo. **Vérifie**, puis choisis quoi en faire :\n\n" + desc +
       "\n\n**Que faire de cette lecture ?**\n" +
-      "✅ **Tout remplacer** — le coffre devient EXACTEMENT cette liste (l'ancien contenu est effacé)\n" +
-      "🔀 **Ajouter au coffre** — additionne cette liste au contenu déjà présent\n" +
+      "📸 **Le coffre = la photo** — le coffre devient EXACTEMENT cette liste *(à utiliser quand tu prends en photo TOUT le coffre — l'ancien contenu est remplacé)*\n" +
+      "➕ **Ajouter au stock** — ces objets s'**additionnent** à ce qui est déjà dans le coffre *(à utiliser quand tu ne photographies QUE ce que tu déposes)*\n" +
       "✏️ **Corriger un objet** — rectifier une ligne avant d'enregistrer\n" +
       "❌ **Annuler** — ne rien changer")
     .setFooter({ text: "Pour ENLEVER des objets sans photo : utilise ➖ Retirer ou ✏️ Corriger sur le tableau du coffre." });
 }
 function _proposalRow() {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("invp_replace").setLabel("Tout remplacer").setEmoji("✅").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId("invp_add").setLabel("Ajouter au coffre").setEmoji("🔀").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("invp_replace").setLabel("Le coffre = la photo").setEmoji("📸").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("invp_add").setLabel("Ajouter au stock").setEmoji("➕").setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId("invp_edit").setLabel("Corriger un objet").setEmoji("✏️").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("invp_cancel").setLabel("Annuler").setEmoji("❌").setStyle(ButtonStyle.Secondary),
   );
@@ -497,7 +497,7 @@ async function routeInteraction(interaction) {
     return false;
   } catch (e) {
     if ([10062, 10008, 40060].includes(e?.code)) return true;
-    console.log("❌ inventaire routeInteraction:", e.message);
+    console.log("❌ inventaire routeInteraction:", e.message, "\n", (e.stack || "").split("\n").slice(0, 4).join("\n"));
     return true;
   }
 }
