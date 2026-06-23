@@ -361,6 +361,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('contrat-suivi-panneau').setDescription('📌 Installer le panneau permanent de gestion des contrats (Direction)'),
   new SlashCommandBuilder().setName('contrats-importer').setDescription('📥 Importer dans Discord les contrats ajoutés sur Notion (Direction)'),
   new SlashCommandBuilder().setName('recap').setDescription('📊 Ton récap : ce qui demande ton attention (Direction)'),
+  new SlashCommandBuilder().setName('reset-registre').setDescription('🗑️ Effacer les opérations & avis de recherche de test (Direction)'),
   new SlashCommandBuilder().setName('contrat-panel').setDescription('📋 Publier le panneau des contrats (Direction)'),
   new SlashCommandBuilder().setName('contrats-sync').setDescription('🔄 Resynchroniser tous les contrats avec Notion (Direction)'),
   new SlashCommandBuilder().setName('notion-test').setDescription('🔍 Tester la connexion Notion des contrats (Direction)'),
@@ -741,6 +742,18 @@ async function handleSlashCommand(interaction) {
     sentP.pin().catch(() => {});
     const dbPan = loadDB(); dbPan.contratPanel = { channelId: interaction.channel.id, messageId: sentP.id }; saveDB(dbPan);
     return interaction.reply({ content: "✅ Panneau installé et épinglé, avec **compteur live** (il se met à jour tout seul). Utilisable en permanence.", flags: MessageFlags.Ephemeral });
+  }
+  if (commandName === 'reset-registre') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    const d = loadDB();
+    const nOps = (d.operations || []).length;
+    const nWanted = (d.traques || []).length;
+    if (!nOps && !nWanted) return interaction.reply({ content: "Aucune opération ni avis de recherche en base — c'est déjà propre. 👍", flags: MessageFlags.Ephemeral });
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('reg_reset_go').setLabel(`Oui, tout effacer (${nOps} op · ${nWanted} avis)`).setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('reg_reset_cancel').setLabel('Annuler').setStyle(ButtonStyle.Secondary),
+    );
+    return interaction.reply({ content: `⚠️ **Réinitialisation du registre**\nCeci supprime **${nOps} opération(s)** et **${nWanted} avis de recherche** de la base (+ leurs messages/fils Discord).\n\n*(À n'utiliser que pour effacer les tests. Action irréversible.)*\n\nConfirmer ?`, components: [row], flags: MessageFlags.Ephemeral });
   }
   if (commandName === 'recap') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
@@ -3726,6 +3739,25 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
   if (interaction.isButton() && interaction.customId === 'csuivi_reset_cancel') {
     return interaction.update({ content: "✅ Annulé — rien n'a été supprimé.", components: [] });
   }
+  if (interaction.isButton() && interaction.customId === 'reg_reset_cancel') {
+    return interaction.update({ content: "✅ Annulé — rien n'a été supprimé.", components: [] });
+  }
+  if (interaction.isButton() && interaction.customId === 'reg_reset_go') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    await interaction.update({ content: '🗑️ Nettoyage en cours…', components: [] }).catch(() => {});
+    const dbR = loadDB();
+    const ops = dbR.operations || [];
+    const traques = dbR.traques || [];
+    const nOps = ops.length, nWanted = traques.length;
+    const delMsg = async (chId, msgId) => { if (!chId || !msgId) return; try { const ch = await interaction.client.channels.fetch(chId).catch(() => null); if (ch) { const m = await ch.messages.fetch(msgId).catch(() => null); if (m) await m.delete().catch(() => {}); } } catch {} };
+    const delThread = async (thId) => { if (!thId) return; try { const th = await interaction.client.channels.fetch(thId).catch(() => null); if (th?.delete) await th.delete().catch(() => {}); } catch {} };
+    for (const o of ops) { await delMsg(o.channelId, o.msgId); await delThread(o.threadId); }
+    for (const t of traques) { await delMsg(t.channelId, t.messageId); await delMsg(t.opChannelId, t.opMessageId); await delThread(t.threadId); }
+    dbR.operations = []; dbR.traques = [];
+    saveDB(dbR);
+    await sauvegarderSurGitHub().catch(() => {}); // pousse le reset sur le Gist tout de suite
+    return interaction.editReply({ content: `🗑️ **Registre réinitialisé** — ${nOps} opération(s) et ${nWanted} avis de recherche supprimés. Les listes de liaison repartent propres. ✅` }).catch(() => {});
+  }
   if (interaction.isButton() && interaction.customId === 'csuivi_reset_go') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
     const dbR = loadDB();
@@ -4609,11 +4641,19 @@ function _genererRecapEmbed(db) {
 }
 async function _updateContratPanel(client) {
   const ref = loadDB().contratPanel;
-  if (!ref || !ref.channelId || !ref.messageId) return;
+  if (!ref || !ref.channelId) return;
   try {
     const ch = await client.channels.fetch(ref.channelId).catch(() => null);
     if (!ch) return;
-    const msg = await ch.messages.fetch(ref.messageId).catch(() => null);
+    let msg = ref.messageId ? await ch.messages.fetch(ref.messageId).catch(() => null) : null;
+    // Auto-réparation : si la référence est périmée, on retrouve le panneau par son titre et on ré-enregistre l'id
+    if (!msg) {
+      const recent = await ch.messages.fetch({ limit: 30 }).catch(() => null);
+      if (recent) {
+        msg = [...recent.values()].find(m => m.author.id === client.user.id && (m.embeds?.[0]?.title || '').includes('GESTION DES CONTRATS')) || null;
+        if (msg) { const d = loadDB(); d.contratPanel = { channelId: ch.id, messageId: msg.id }; saveDB(d); }
+      }
+    }
     if (!msg) return;
     await msg.edit({ embeds: [_contratPanelEmbed(loadDB())] }).catch(() => {});
   } catch {}
@@ -4721,11 +4761,19 @@ async function _installerBoutonContratExpress(guild) {
 }
 async function _updatePlanningContrats(client) {
   const ref = loadDB().planningContratsPanel;
-  if (!ref || !ref.channelId || !ref.messageId) return;
+  if (!ref || !ref.channelId) return;
   try {
     const ch = await client.channels.fetch(ref.channelId).catch(() => null);
     if (!ch) return;
-    const msg = await ch.messages.fetch(ref.messageId).catch(() => null);
+    let msg = ref.messageId ? await ch.messages.fetch(ref.messageId).catch(() => null) : null;
+    // Auto-réparation : si la référence est périmée, on retrouve le tableau par son titre et on ré-enregistre l'id
+    if (!msg) {
+      const recent = await ch.messages.fetch({ limit: 30 }).catch(() => null);
+      if (recent) {
+        msg = [...recent.values()].find(m => m.author.id === client.user.id && (m.embeds?.[0]?.title || '').includes('TABLEAU DES ÉCHÉANCES')) || null;
+        if (msg) { const d = loadDB(); d.planningContratsPanel = { channelId: ch.id, messageId: msg.id }; saveDB(d); }
+      }
+    }
     if (!msg) return;
     await msg.edit({ embeds: [_planningContratsEmbed(loadDB())], components: [_planningResetRow()] }).catch(() => {});
   } catch {}

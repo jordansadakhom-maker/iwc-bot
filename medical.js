@@ -54,19 +54,22 @@ function _fiche(db, id) {
 }
 function _log(f, action, par) { if (!f.historique) f.historique = []; f.historique.push({ date: _dateFR(Date.now()), action, par }); if (f.historique.length > 30) f.historique = f.historique.slice(-30); }
 
+// Tronque proprement toute valeur dynamique avant de la donner à un builder Discord
+// (évite les RangeError « Invalid string length » de la validation discord.js).
+function _clip(v, n) { return String(v == null ? '' : v).slice(0, n); }
 function _embedFiche(f, gm) {
   const st = STATUTS[f.statut] || STATUTS.non_teste;
   const e = new EmbedBuilder().setColor(st.couleur).setTitle('🩺 Suivi médical — confidentiel')
-    .setDescription(gm ? `**${gm.displayName}** · <@${gm.id}>` : 'Membre')
+    .setDescription(gm ? `**${_clip(gm.displayName, 80)}** · <@${gm.id}>` : 'Membre')
     .addFields(
-      { name: 'État', value: st.label, inline: true },
+      { name: 'État', value: _clip(st.label, 100), inline: true },
       { name: 'Test d\'aptitude', value: f.testValide ? `✅ Validé${f.testDate ? ` (${_dateFR(f.testDate)})` : ''}` : '❌ Non validé', inline: true },
-      { name: 'Prochain RDV', value: f.prochainRdv || '—', inline: true },
-      { name: '📝 Notes', value: (f.notes || '*Aucune note*').slice(0, 1000), inline: false },
+      { name: 'Prochain RDV', value: _clip(f.prochainRdv || '—', 200), inline: true },
+      { name: '📝 Notes', value: _clip(f.notes || '*Aucune note*', 1000), inline: false },
     );
-  if (f.historique?.length) e.addFields({ name: '🕓 Historique', value: f.historique.slice(-5).reverse().map(h => `• \`${h.date}\` ${h.action}${h.par ? ` — *${h.par}*` : ''}`).join('\n').slice(0, 1000), inline: false });
+  if (f.historique?.length) e.addFields({ name: '🕓 Historique', value: _clip(f.historique.slice(-5).reverse().map(h => `• \`${_clip(h.date, 40)}\` ${_clip(h.action, 120)}${h.par ? ` — *${_clip(h.par, 60)}*` : ''}`).join('\n'), 1000), inline: false });
   if (gm?.user) e.setThumbnail(gm.user.displayAvatarURL());
-  e.setFooter({ text: f.majPar ? `Dernière mise à jour par ${f.majPar}` : 'Dossier médical confidentiel' });
+  e.setFooter({ text: _clip(f.majPar ? `Dernière mise à jour par ${f.majPar}` : 'Dossier médical confidentiel', 200) });
   return e;
 }
 
@@ -181,7 +184,9 @@ async function installerPanel(guild) {
 async function _afficherFiche(interaction, id, viaUpdate) {
   const gm = await interaction.guild.members.fetch(id).catch(() => null);
   const db = loadDB(); const f = _fiche(db, id); saveDB(db);
-  const payload = { content: `Dossier de <@${id}> :`, embeds: [_embedFiche(f, gm)], components: _actions(id), flags: MessageFlags.Ephemeral };
+  let payload;
+  try { payload = { content: `Dossier de <@${id}> :`, embeds: [_embedFiche(f, gm)], components: _actions(id), flags: MessageFlags.Ephemeral }; }
+  catch (e) { console.log('❌ medical _embedFiche:', e.message); payload = { content: `🩺 Dossier de <@${id}> — État : **${_clip((STATUTS[f.statut] || STATUTS.non_teste).label, 60)}**.`, components: _actions(id), flags: MessageFlags.Ephemeral }; }
   if (viaUpdate) await interaction.update(payload).catch(() => {});
   else await interaction.reply(payload).catch(() => {});
 }
@@ -312,7 +317,7 @@ async function routeInteraction(interaction) {
       const id = cid.split('::')[1];
       const db = loadDB(); const f = _fiche(db, id);
       const modal = new ModalBuilder().setCustomId(`med_rdv_modal::${id}`).setTitle('📅 Prochain RDV médical');
-      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('rdv').setLabel('Date / créneau du RDV').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80).setValue(f.prochainRdv || '').setPlaceholder('ex : Samedi 14h au cabinet d\'Armadillo')));
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('rdv').setLabel('Date / créneau du RDV').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80).setValue(_clip(f.prochainRdv || '', 80)).setPlaceholder('ex : Samedi 14h au cabinet d\'Armadillo')));
       await interaction.showModal(modal).catch(() => {});
       return true;
     }
@@ -344,7 +349,7 @@ async function routeInteraction(interaction) {
       const id = cid.split('::')[1];
       const db = loadDB(); const f = _fiche(db, id);
       const modal = new ModalBuilder().setCustomId(`med_note_modal::${id}`).setTitle('📝 Notes médicales');
-      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('note').setLabel('Notes (remplace les notes actuelles)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(1000).setValue(f.notes || '')));
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('note').setLabel('Notes (remplace les notes actuelles)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(1000).setValue(_clip(f.notes || '', 1000))));
       await interaction.showModal(modal).catch(() => {});
       return true;
     }
@@ -367,7 +372,7 @@ async function routeInteraction(interaction) {
       const gm = await interaction.guild.members.fetch(id).catch(() => null);
       const modal = new ModalBuilder().setCustomId(`med_apt_modal::${id}`).setTitle('🧪 Test d\'aptitude (1/2)');
       modal.addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('patient').setLabel('Nom du patient (RP)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(gm?.displayName || '')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('patient').setLabel('Nom du patient (RP)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(_clip(gm?.displayName || '', 80))),
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('datelieu').setLabel('Date & lieu d\'examen').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80).setPlaceholder('ex : 6 Septembre 1904 — Blackwater')),
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('physique').setLabel('Taille · Poids · Signes particuliers').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(120).setPlaceholder('ex : 180 cm · 79 kg · cheveux roux, yeux verts')),
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('apparence').setLabel('Apparence & état général').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue(APT_DEF.apparence)),
@@ -448,7 +453,7 @@ async function routeInteraction(interaction) {
     }
 
     return false;
-  } catch (e) { if ([10062, 40060].includes(e?.code)) return true; console.log('❌ medical routeInteraction:', e.message, '\n', (e.stack || '').split('\n').slice(0, 4).join('\n')); return true; }
+  } catch (e) { if ([10062, 40060].includes(e?.code)) return true; console.log('❌ medical routeInteraction [', (interaction.customId || interaction.commandName || '?'), ']:', e.message, '\n', (e.stack || '').split('\n').slice(0, 4).join('\n')); return true; }
 }
 
 // Post d'exemple (idempotent) — montre à quoi ressemble un test d'aptitude
