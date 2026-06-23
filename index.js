@@ -442,6 +442,11 @@ function getChExact(guild, name) {
   return guild.channels.cache.find(c => [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(c.type) && clean(c.name) === clean(name)) || null;
 }
 function getMention(guild) { return guild.roles.cache.filter(r => ['Concepteur', 'Fléau', 'Fondateur'].some(n => r.name.includes(n))).map(r => `<@&${r.id}>`).join(' ') || ''; }
+// Ping des candidatures : Direction (Concepteur/Fléau/Fondateur) + les Hommes de main
+function getMentionRecrutement(guild) {
+  const hdm = guild.roles.cache.filter(r => { const n = (r.name || '').toLowerCase(); return n.includes('homme de main') || n.includes('hommes de main'); }).map(r => `<@&${r.id}>`).join(' ');
+  return [getMention(guild), hdm].filter(Boolean).join(' ');
+}
 // Retourne les options allowedMentions sécurisées (jamais @everyone/@here)
 function safeMentions(roleIds = [], userIds = []) {
   return { parse: [], roles: roleIds.filter(Boolean), users: userIds.filter(Boolean) };
@@ -960,21 +965,22 @@ async function handleSlashCommand(interaction) {
       .setDescription([
         '```',
         '╔═══════════════════════════════╗',
-        '║   ✉  BUREAU DES RENDEZ-VOUS  ✉  ║',
+        '║      ✉  NOUS CONTACTER  ✉      ║',
         '╚═══════════════════════════════╝',
         '```',
-        '*Vous souhaitez faire appel à nos services ?*',
-        '*Protection, escorte, enquête, négociation, contrat...*',
+        '*Un besoin ? Protection, escorte, enquête, négociation, contrat… ou une affaire plus discrète ?*',
         '',
-        '📜 **Envoyez-nous un télégramme** en cliquant ci-dessous —',
-        'pour exposer votre demande **ou prendre rendez-vous** avec nous.',
-        'La Direction étudiera votre message et vous répondra directement.',
+        '📨 **Contactez la compagnie** en cliquant ci-dessous.',
+        'Expliquez-nous votre demande **avec vos propres mots** — votre affaire, vos conditions, ce que vous cherchez.',
+        'La Direction lit chaque message et **vous répond en personne**, en toute discrétion.',
+        '',
+        '*(Pour réserver directement une prestation avec un créneau, utilisez plutôt le bouton « 🤝 Besoin de nos services » du panneau juste en dessous.)*',
         '',
         '— *« La force est dans l\'ombre. »*',
       ].join('\n'))
       .setFooter({ text: 'Iron Wolf Company · Bureau de Saint-Denis' });
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('rdvclient_demande').setLabel('✉ Envoyer un télégramme').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('rdvclient_demande').setLabel('Contacter la compagnie').setEmoji('📨').setStyle(ButtonStyle.Primary),
     );
     // Toujours installer le panneau dans le salon dédié aux demandes clients
     const salonForm = interaction.guild.channels.cache.get('1512171267560702013') || interaction.channel;
@@ -3175,7 +3181,7 @@ client.on('interactionCreate', async interaction => {
     const dossierCh = guild.channels.cache.get(CH.RECRUTEMENT_INT_LEGAL);
     if (dossierCh) {
       const embed = new EmbedBuilder().setColor(0x3B82F6).setTitle(`📁 [IRON WOLF COMPANY] DOSSIER LÉGAL — ${cand.nomPerso}`).setDescription(`> *"Chaque talent a sa place au sein de la Compagnie."*\n\nCandidature de <@${cand.userId}> (**${cand.username}**)\n**⚖️ TYPE : RECRUTEMENT LÉGAL**`).addFields({ name: '👤 Personnage', value: `**${cand.nomPerso}**, ${cand.agePerso}`, inline: true }, { name: '📅 Reçue le', value: fmtShort(new Date()), inline: true }, { name: '🆔 ID', value: `\`${cand.id}\``, inline: true }, { name: '💼 Métier', value: cand.metier }, { name: '📖 Background', value: cand.background.slice(0, 800) }, { name: '💡 Motivation', value: (cand.motivation || '—').slice(0, 500) }, { name: '🕐 Disponibilités', value: cand.dispos, inline: true }, { name: '📋 Statut', value: '🟡 En attente', inline: true }, { name: '\u200b', value: '**Réagissez :** ✅ Accepter · ❌ Refuser · 🤔 À revoir' }).setThumbnail(interaction.user.displayAvatarURL()).setFooter({ text: `IWC • Légal • ${fmtShort(new Date())}` });
-      const dossierMsg = await dossierCh.send({ content: `${getMention(guild)} — 📋 Nouveau dossier **LÉGAL**`, embeds: [embed] });
+      const dossierMsg = await dossierCh.send({ content: `${getMentionRecrutement(guild)} — 📋 Nouveau dossier **LÉGAL**`, embeds: [embed] });
       await dossierMsg.react('✅'); await dossierMsg.react('❌'); await dossierMsg.react('🤔');
       try { const t = await dossierMsg.startThread({ name: `[LÉGAL] Discussion — ${cand.nomPerso}`, autoArchiveDuration: 10080 }); await t.send(`**Discussion interne — ${cand.nomPerso}** ⚖️\n\nÉchangez ici avant de voter.`); } catch {}
     }
@@ -3195,7 +3201,7 @@ client.on('interactionCreate', async interaction => {
     const dossierCh = guild.channels.cache.get(CH.RECRUTEMENT_INT_ILLEG);
     if (dossierCh) {
       const embed = new EmbedBuilder().setColor(0x8B1A1A).setTitle(`📁 [LA CONFRÉRIE] DOSSIER ILLÉGAL — ${cand.nomPerso}`).setDescription(`> *"L'ombre protège ceux qui savent s'y fondre."*\n\nCandidature de <@${cand.userId}> (**${cand.username}**)\n**🔪 TYPE : RECRUTEMENT ILLÉGAL**`).addFields({ name: '👤 Personnage', value: `**${cand.nomPerso}**, ${cand.agePerso}`, inline: true }, { name: '📅 Reçue le', value: fmtShort(new Date()), inline: true }, { name: '🆔 ID', value: `\`${cand.id}\``, inline: true }, { name: '🔪 Spécialité', value: cand.specialite }, { name: '📖 Background', value: cand.background.slice(0, 800) }, { name: '💡 Motivation', value: (cand.motivation || '—').slice(0, 500) }, { name: '🕐 Disponibilités', value: cand.dispos, inline: true }, { name: '📋 Statut', value: '🟡 En attente', inline: true }, { name: '\u200b', value: '**Réagissez :** ✅ Accepter · ❌ Refuser · 🤔 À revoir' }).setThumbnail(interaction.user.displayAvatarURL()).setFooter({ text: `La Confrérie • CONFIDENTIEL • ${fmtShort(new Date())}` });
-      const dossierMsg = await dossierCh.send({ content: `${getMention(guild)} — 🔪 Nouveau dossier **ILLÉGAL**`, embeds: [embed] });
+      const dossierMsg = await dossierCh.send({ content: `${getMentionRecrutement(guild)} — 🔪 Nouveau dossier **ILLÉGAL**`, embeds: [embed] });
       await dossierMsg.react('✅'); await dossierMsg.react('❌'); await dossierMsg.react('🤔');
       try { const t = await dossierMsg.startThread({ name: `[ILLÉGAL] Discussion — ${cand.nomPerso}`, autoArchiveDuration: 10080 }); await t.send(`**Discussion interne — ${cand.nomPerso}** 🔪\n\nÉchangez ici avant de voter.`); } catch {}
     }
@@ -5354,7 +5360,7 @@ async function buildMembresDiscordMap(guild) {
 
 async function _handleVersion(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const BOT_VERSION = '5.5 (23 juin — photo met à jour le coffre directement)'; const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
+  const BOT_VERSION = '5.6 (23 juin — RDV client plus clair + ping Hommes de main au recrutement)'; const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
   let notionOk = false;
   try { const r = await fetch('https://api.notion.com/v1/users/me', { headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28' } }); notionOk = r.ok; } catch {}
   const db = loadDB();

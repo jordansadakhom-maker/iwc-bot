@@ -287,19 +287,21 @@ async function routeInteraction(interaction) {
           .setDescription([
             '```',
             '╔═══════════════════════════════╗',
-            '║   ✉  BUREAU DES RENDEZ-VOUS  ✉  ║',
+            '║    🤝  BESOIN DE NOS SERVICES  🤝   ║',
             '╚═══════════════════════════════╝',
             '```',
-            '*Un besoin ? Protection, escorte, enquête, négociation… ou un travail plus discret ?*',
+            '*Un besoin précis ? Protection, escorte, enquête, négociation… ou un travail plus discret ?*',
             '',
-            '📜 Cliquez ci-dessous : choisissez la **prestation**, le **lieu** et un **créneau**.',
-            'La Direction confirmera votre rendez-vous, et vous recevrez un télégramme de confirmation.',
+            '🤝 Clique sur **« Besoin de nos services »** : tu choisis la **prestation**, le **lieu** et un **créneau** qui t\'arrange.',
+            'La Direction confirme ton rendez-vous, et tu reçois un **télégramme de confirmation**.',
+            '',
+            '*(Tu préfères juste nous exposer ton affaire librement ? Utilise « 📨 Contacter la compagnie » au-dessus.)*',
             '',
             '— *« La force est dans l\'ombre. »*',
           ].join('\n'))
           .setFooter({ text: 'Iron Wolf Company · Bureau de Saint-Denis' });
         const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('rdvp_book').setLabel('✉ Prendre rendez-vous').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId('rdvp_book').setLabel('Besoin de nos services').setEmoji('🤝').setStyle(ButtonStyle.Primary),
         );
         const salon = _salonDemandes(interaction.guild) || interaction.channel;
         await salon.send({ embeds: [embed], components: [row] }).catch(() => {});
