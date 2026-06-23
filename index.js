@@ -5354,7 +5354,7 @@ async function buildMembresDiscordMap(guild) {
 
 async function _handleVersion(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const BOT_VERSION = '5.3 (23 juin — coffre photo/anti-doublon + fix test médical)'; const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
+  const BOT_VERSION = '5.4 (23 juin — coffre : nettoyage profond du vieux tableau)'; const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
   let notionOk = false;
   try { const r = await fetch('https://api.notion.com/v1/users/me', { headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28' } }); notionOk = r.ok; } catch {}
   const db = loadDB();
