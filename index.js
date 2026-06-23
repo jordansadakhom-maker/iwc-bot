@@ -12,7 +12,7 @@ const cron = require('node-cron');
 
 const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub } = require('./db');
 // Version du bot (sert au /version ET à la génération auto des patch notes)
-const BOT_VERSION = '7.1 (23 juin — grades unifiés : vraie hiérarchie IWC (Fondateur → Recrue), salon renommé)';
+const BOT_VERSION = '7.2 (23 juin — panneau grades unique : qui est à quel grade + rôle de chacun + boutons Gérer/Actualiser)';
 const { initPapiers, papiersCommands } = require('./papiers');
 const securite = require('./securite');
 const rdvplus = require('./rdvplus');
@@ -7416,89 +7416,36 @@ async function _setupComptaChannel(guild) {
   } catch (e) { console.log('⚠️ _setupComptaChannel:', e.message); }
 }
 
-// Panneau d'information « Grades » — hiérarchie UNIFIÉE d'Iron Wolf Company (rôle de chacun)
-// On résout les rôles PAR NOM (live) → effectif et noms toujours exacts, sans dépendre d'IDs figés.
-const GRADES_INFO = [
-  { emoji: '👑', nom: 'Fondateur', match: ['Fondateur'],
-    desc: "Fondateurs de la compagnie. Vision d'ensemble, dernière décision, gardiens de l'esprit IWC." },
-  { emoji: '🔴', nom: 'Le Conseil — Directeur / Co-Directeur', match: ['Conseil', 'Directeur'],
-    desc: "La direction. Pilote la compagnie au quotidien, tranche les décisions importantes et représente IWC à l'extérieur." },
-  { emoji: '🎖️', nom: 'Officier de Terrain', match: ['Officier'],
-    desc: "Encadrement de terrain : organise les opérations, répartit les missions et forme les membres. A le droit de voter au recrutement." },
-  { emoji: '🔵', nom: 'Agent Confirmé', match: ['Agent Confimé', 'Agent Confirmé', 'Agent'],
-    desc: "Membre aguerri et autonome. On lui confie les missions sensibles et l'encadrement des plus jeunes." },
-  { emoji: '🟢', nom: 'Opérateur', match: ['Opérateur'],
-    desc: "Le cœur opérationnel de la compagnie. Participe activement aux contrats et aux opérations." },
-  { emoji: '⚪', nom: 'Recrue — Probatoire', match: ['Recrue'],
-    desc: "Nouvelle recrue en période d'essai. Accompagnée sur ses premières missions avant d'être confirmée." },
-];
-const GRADES_PARTICULIERS = [
-  { emoji: '🩺', nom: 'Le Panseur / Medecin', match: ['Panseur', 'Medecin', 'Médecin'],
-    desc: "Pôle médical : soins, suivi des fiches médicales et des aptitudes." },
-  { emoji: '🔥', nom: 'Engagé', match: ['Engagé'],
-    desc: "Membre particulièrement impliqué et actif dans la vie de la compagnie." },
-  { emoji: '👁️', nom: 'Visiteur', match: ['Visiteur'],
-    desc: "Invités et extérieurs : accès limité, peuvent contacter la compagnie." },
-  { emoji: '💤', nom: 'Absent', match: ['Absent'],
-    desc: "Membre en absence déclarée (mis en pause temporairement)." },
-];
-function _grade_compte(guild, matchNames) {
-  const clean = s => (s || '').toLowerCase();
-  const role = guild.roles.cache.find(r => matchNames.some(m => clean(r.name) === clean(m)))
-            || guild.roles.cache.find(r => matchNames.some(m => clean(r.name).includes(clean(m))));
-  return role ? role.members.size : null;
-}
-function _gradesPayload(guild) {
-  const ligne = (g) => {
-    const n = _grade_compte(guild, g.match);
-    const eff = (n != null) ? `  ·  ${n} membre${n > 1 ? 's' : ''}` : '';
-    return `**${g.emoji} ${g.nom}**${eff}\n${g.desc}`;
-  };
-  const embed = new EmbedBuilder()
-    .setColor(0xC9A227)
-    .setAuthor({ name: 'Iron Wolf Company · La Confrérie', iconURL: guild.iconURL() || undefined })
-    .setTitle('🎖️  LES GRADES DE LA COMPAGNIE')
-    .setDescription([
-      '*Voici la hiérarchie d\'Iron Wolf Company, du sommet jusqu\'aux nouvelles recrues, et le rôle de chacun.*',
-      '*Chaque grade se mérite : il s\'obtient par la confiance, l\'implication et le travail bien fait.*',
-      '',
-      '```',
-      '👑  →  🔴  →  🎖️  →  🔵  →  🟢  →  ⚪',
-      'du sommet            vers la base',
-      '```',
-    ].join('\n'))
-    .addFields(
-      { name: '— Hiérarchie —', value: GRADES_INFO.map(ligne).join('\n\n') },
-      { name: '— Rôles particuliers —', value: GRADES_PARTICULIERS.map(ligne).join('\n\n') },
-    )
-    .setFooter({ text: 'Iron Wolf Company · « La force est dans l\'ombre. »' })
-    .setTimestamp();
-  return { embeds: [embed] };
-}
+// Salon des grades : tout est unifié → on garde UN SEUL panneau (le tableau hiérarchique
+// interactif de notion-modules-v3, avec « Gérer les grades » + « Actualiser »). Ici on se
+// contente de renommer le salon et de supprimer l'ancien panneau descriptif redondant.
 async function _setupGradesIllegalPanel(guild) {
   try {
     const { SALON_IDS } = require('./config');
     const ch = guild.channels.cache.get(SALON_IDS?.GRADE_ILLEGAL || '1508788467008667819');
     if (!ch?.messages) return;
-    // Tout est unifié : on retire la mention « illegal » du nom du salon si elle traîne encore
+    // Plus aucune distinction légal/illégal : on nettoie le nom du salon
     if (/illegal|illégal/i.test(ch.name || '')) {
       await ch.setName('🎖️・grades').catch(() => {});
     }
+    // Supprimer l'ancien panneau descriptif (doublon) si le bot l'avait posté
     const db = loadDB();
-    const ref = db.gradesIllegalPanel;
-    const payload = _gradesPayload(guild);
-    if (ref?.messageId && ref?.channelId === ch.id) {
-      const ex = await ch.messages.fetch(ref.messageId).catch(() => null);
-      if (ex) { await ex.edit(payload).catch(() => {}); return; }
-    }
-    // Sinon : réutiliser un éventuel panneau déjà posté par le bot, ou en créer un
     const me = guild.client.user.id;
-    const msgs = await ch.messages.fetch({ limit: 20 }).catch(() => null);
-    const mien = msgs && [...msgs.values()].find(m => m.author.id === me && /GRADES DE (LA COMPAGNIE|L'OMBRE)/.test(m.embeds?.[0]?.title || ''));
-    let msg;
-    if (mien) { await mien.edit(payload).catch(() => {}); msg = mien; }
-    else { msg = await ch.send(payload).catch(() => null); }
-    if (msg) { db.gradesIllegalPanel = { channelId: ch.id, messageId: msg.id }; saveDB(db); }
+    const ref = db.gradesIllegalPanel;
+    if (ref?.messageId && ref?.channelId === ch.id) {
+      await ch.messages.fetch(ref.messageId).then(m => m.delete()).catch(() => {});
+      delete db.gradesIllegalPanel; saveDB(db);
+    }
+    const msgs = await ch.messages.fetch({ limit: 30 }).catch(() => null);
+    if (msgs) {
+      for (const m of msgs.values()) {
+        if (m.author.id === me && /LES GRADES DE (LA COMPAGNIE|L'OMBRE)/.test(m.embeds?.[0]?.title || '')) {
+          await m.delete().catch(() => {});
+        }
+      }
+    }
+    // Le tableau hiérarchique unifié est (re)posté par notionV3.updateHierarchieEmbed
+    await notionV3.updateHierarchieEmbed?.(guild).catch(() => {});
   } catch (e) { console.log('⚠️ _setupGradesIllegalPanel:', e.message); }
 }
 
