@@ -19,8 +19,14 @@ const RED_DEAD_CHANNEL_ID = process.env.RED_DEAD_CHANNEL_ID || '1508756424862203
 // Modèle Gemini d'édition d'image. Overridable via .env (GEMINI_IMAGE_MODEL).
 // Par défaut : Nano Banana PRO (meilleur réalisme), avec repli auto sur Nano Banana flash
 // si le Pro n'est pas disponible sur la clé — donc aucun risque de panne.
-const GEMINI_MODELS = [process.env.GEMINI_IMAGE_MODEL, 'gemini-3-pro-image-preview', 'gemini-2.5-flash-image']
+const GEMINI_MODELS = ['gemini-3-pro-image-preview', process.env.GEMINI_IMAGE_MODEL, 'gemini-2.5-flash-image']
   .filter((m, i, a) => m && a.indexOf(m) === i);
+// Nom lisible du modèle (pour afficher ce qui a réellement produit l'image)
+function _nomModele(m) {
+  if (/3-pro-image/.test(m || '')) return 'Nano Banana Pro';
+  if (/flash-image/.test(m || '')) return 'Nano Banana';
+  return m || '—';
+}
 
 const PROMPT_FARWEST = [
   "Transforme cette capture d'écran du jeu Red Dead Redemption en une VRAIE PHOTOGRAPHIE PHOTORÉALISTE, comme prise par un appareil photo réel — PAS une peinture, PAS une illustration, PAS un rendu de jeu vidéo.",
@@ -103,7 +109,7 @@ async function _transformer(b64, mt) {
   for (const model of GEMINI_MODELS) {
     let img = await _callGemini(model, b64, mt, false);
     if (!img) img = await _callGemini(model, b64, mt, true);
-    if (img) return img;
+    if (img) { img.model = model; return img; }
   }
   return null;
 }
@@ -131,13 +137,14 @@ async function onMessage(message) {
 
     // Repeindre chaque image
     const outBufs = [];
+    let modelUtilise = null;
     for (const a of atts) {
       let buf = await _imageBytes(_urlPourIA(a));
       if (!buf) buf = await _imageBytes(a.url);
       if (!buf) continue;
       const mt = _sniffMt(buf) || _cleanMt(a.contentType);
       const img = await _transformer(buf.toString('base64'), mt);
-      if (img && img.b64) { try { outBufs.push(Buffer.from(img.b64, 'base64')); } catch {} }
+      if (img && img.b64) { try { outBufs.push(Buffer.from(img.b64, 'base64')); modelUtilise = img.model || modelUtilise; } catch {} }
     }
 
     // Échec total → on garde la capture d'origine et on retire le message d'attente.
@@ -149,7 +156,7 @@ async function onMessage(message) {
       .setTitle('🤠 Cliché du Far West')
       .setDescription("*Capture sublimée par l'IA — rendu cinématographique de l'Ouest.*")
       .setImage('attachment://farwest_0.png')
-      .setFooter({ text: `Salon Far West • Iron Wolf Company • partagé par ${auteur}` })
+      .setFooter({ text: `Salon Far West • rendu ${_nomModele(modelUtilise)} • partagé par ${auteur}` })
       .setTimestamp();
     if (cap) e.addFields({ name: '📝 Légende', value: cap, inline: false });
 
