@@ -7293,6 +7293,9 @@ global.envoyerDMRecap = envoyerDMRecap;
 global.getChById = getChById;
 global.sendLog = sendLog;
 global.isDirection = isDirection;
+// Rafraîchissement croisé wanted ↔ opération (liaison dans les deux sens)
+global.refreshOp = (guild, opId) => operations.refreshOpById?.(guild, opId);
+global.refreshAvis = (guild, wid) => traque.refreshAvisById?.(guild, wid);
 
 // Créer la DB Informateurs dans Notion si elle n'existe pas
 async function _initDBInformateursNotion(guild) {

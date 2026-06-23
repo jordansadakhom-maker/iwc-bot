@@ -171,6 +171,7 @@ function buildPoster(t) {
     { name: '🤠 Chasseurs', value: chasseurs, inline: true },
     { name: '🧭 Pistes', value: nbPistes ? `**${nbPistes}** signalée(s) — voir le fil` : '*Aucune*', inline: true },
   );
+  if ((t.linkedOps || []).length) e.addFields({ name: '🔗 Opération(s) liée(s)', value: t.linkedOps.map(o => `• **${o.name}** \`${o.id}\``).join('\n').slice(0, 1000), inline: false });
   e.setFooter({ text: `IWC • Avis ${t.id}${closed && t.resultat ? ' • ' + t.resultat : ''}` });
   if (t.photo) e.setThumbnail(t.photo);
   if (t.photoCapture) e.setImage(t.photoCapture); // preuve de capture/clôture
@@ -187,6 +188,7 @@ function buildBoutons(t) {
   return [new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`traque_piste::${t.id}`).setLabel('Signaler une piste').setEmoji('🧭').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(`traque_chasseur::${t.id}`).setLabel('Rejoindre la traque').setEmoji('🤠').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`traque_lierop::${t.id}`).setLabel('Lier une opération').setEmoji('🔗').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`traque_cloturer::${t.id}`).setLabel('Clôturer').setEmoji('✅').setStyle(ButtonStyle.Danger),
   )];
 }
@@ -470,6 +472,44 @@ async function handleFinir(interaction) {
   return interaction.update({ content: '✅ Avis retiré de #wanted. Fiche conservée dans <#' + CH_ELEMENT_OPS + '>.', components: [] }).catch(() => {});
 }
 
+// ─── Lien avis de recherche ↔ opération (côté wanted) ───
+function _addLink(t, op) {
+  if (!t.linkedOps) t.linkedOps = [];
+  if (!t.linkedOps.some(x => x.id === op.id)) t.linkedOps.push({ id: op.id, name: op.name });
+  if (!op.linkedWanteds) op.linkedWanteds = [];
+  if (!op.linkedWanteds.some(x => x.id === t.id)) op.linkedWanteds.push({ id: t.id, cible: t.cible });
+}
+async function handleLierOpButton(interaction) {
+  if (!estResponsable(interaction.member)) return interaction.reply({ content: '❌ Réservé aux responsables.', flags: MessageFlags.Ephemeral });
+  const db = loadDB();
+  const t = findTraque(db, interaction.customId.split('::')[1]);
+  if (!t) return interaction.reply({ content: '❌ Avis introuvable.', flags: MessageFlags.Ephemeral });
+  const ops = (db.operations || []).filter(o => ['preparation', 'programmee', 'en_cours'].includes(o.status)).filter(o => !(t.linkedOps || []).some(x => x.id === o.id));
+  if (!ops.length) return interaction.reply({ content: 'ℹ️ Aucune opération en cours à lier.', flags: MessageFlags.Ephemeral });
+  const sel = new StringSelectMenuBuilder().setCustomId(`traque_lierop_sel::${t.id}`).setPlaceholder('Choisis l\'opération à lier…')
+    .addOptions(ops.slice(0, 25).map(o => ({ label: `${o.name}`.slice(0, 100), value: o.id, description: `${o.lieu || '—'} · ${o.status}`.slice(0, 100) })));
+  return interaction.reply({ content: `🔗 Lier une opération à l'avis **${t.cible}** :`, components: [new ActionRowBuilder().addComponents(sel)], flags: MessageFlags.Ephemeral });
+}
+async function handleLierOpSelect(interaction) {
+  const wid = interaction.customId.split('::')[1];
+  const opId = interaction.values[0];
+  const db = loadDB();
+  const t = findTraque(db, wid);
+  const op = (db.operations || []).find(o => o.id === opId);
+  if (!t || !op) return interaction.update({ content: '❌ Lien impossible (élément introuvable).', components: [] });
+  _addLink(t, op);
+  saveDB(db);
+  sauvegarderSurGitHub?.().catch(() => {});
+  try { await rafraichir(interaction.guild, t); } catch {}
+  try { if (typeof global.refreshOp === 'function') await global.refreshOp(interaction.guild, opId); } catch {}
+  return interaction.update({ content: `✅ Opération **${op.name}** liée à l'avis **${t.cible}**.`, components: [] });
+}
+// Exposé pour le rafraîchissement croisé (appelé depuis operations.js via global.refreshAvis)
+async function refreshAvisById(guild, wantedId) {
+  const t = findTraque(loadDB(), wantedId);
+  if (t) await rafraichir(guild, t);
+}
+
 // ─── Liste des traques en cours ───
 async function handleListe(interaction) {
   const db = loadDB();
@@ -650,12 +690,14 @@ async function routeInteraction(interaction) {
     if (cid.startsWith('traque_chasseur::'))  { await handleChasseurButton(interaction); return true; }
     if (cid.startsWith('traque_cloturer::'))  { await handleCloturerButton(interaction); return true; }
     if (cid.startsWith('traque_finir::'))     { await handleFinir(interaction); return true; }
+    if (cid.startsWith('traque_lierop::'))    { await handleLierOpButton(interaction); return true; }
     if (cid.startsWith('traque_from_signal::')) { await handleFromSignal(interaction); return true; }
     if (cid === 'wanted_avis') { await interaction.showModal(modalCreation()); return true; }
     if (cid === 'wanted_list') { await handleListe(interaction); return true; }
     if (cid.startsWith('traque_noop::'))      { await interaction.deferUpdate().catch(() => {}); return true; }
   }
   if (interaction.isStringSelectMenu?.() && (interaction.customId || '').startsWith('traque_cloture_select::')) { await handleClotureSelect(interaction); return true; }
+  if (interaction.isStringSelectMenu?.() && (interaction.customId || '').startsWith('traque_lierop_sel::')) { await handleLierOpSelect(interaction); return true; }
   if (interaction.isModalSubmit?.()) {
     if (interaction.customId === 'traque_create_modal' || (interaction.customId || '').startsWith('traque_create_modal::')) { await handleCreateModal(interaction); return true; }
     if ((interaction.customId || '').startsWith('traque_piste_modal::')) { await handlePisteModal(interaction); return true; }
@@ -663,4 +705,4 @@ async function routeInteraction(interaction) {
   return false;
 }
 
-module.exports = { traqueCommands, routeInteraction, onMessage, ensureWantedPanel };
+module.exports = { traqueCommands, routeInteraction, onMessage, ensureWantedPanel, refreshAvisById };
