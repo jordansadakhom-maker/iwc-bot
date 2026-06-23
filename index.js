@@ -3972,6 +3972,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
       return interaction.showModal(modal);
     }
     c.suivi = stage; saveDB(dbX);
+    _majContratForum(interaction.guild, c).catch(() => {});
     _setContratSuiviNotion(c, stage).catch(() => {});
     ajouterJournalIC(interaction.guild, { type: 'contrat', emoji: '📜', titre: `Contrat ${c.id} → ${stage}`, description: String(c.objet || c.clientNom || c.commanditaire || '').slice(0, 200), auteur: interaction.user.username }).catch(() => {});
     _updateContratPanel(interaction.client).catch(() => {});
@@ -3993,6 +3994,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const solde = dbX.coffre;
     c.suivi = 'Honoré'; c.remuVerseAuCoffre = montant; c.honoreAt = new Date().toISOString();
     saveDB(dbX);
+    _majContratForum(interaction.guild, c).catch(() => {});
     // 🧾 Trace écrite : facture automatique dans le forum des factures
     factures.creerFactureContrat?.(interaction.guild, c, { montant, par: interaction.user.username, parId: interaction.user.id }).catch(() => {});
     comptabilite.refreshPanel?.(interaction.client).catch(() => {});
@@ -4011,6 +4013,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', flags: MessageFlags.Ephemeral }); return; }
     const gd = guild || interaction.client.guilds.cache.first(); // bouton cliquable en MP → guild peut être null
     contrat.status = 'signe'; contrat.signedAt = new Date().toISOString(); saveDB(db);
+    _majContratForum(gd, contrat).catch(() => {});
     await notionExtra.ajouterContratNotion?.(contrat);
     const clientIC = db.members[interaction.user.id]?.name || interaction.user.username;
     _syncContratNotion(contrat, 'signe', clientIC).catch(() => {});
@@ -4029,6 +4032,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     if (!contrat || contrat.userId !== interaction.user.id || contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Action impossible.', flags: MessageFlags.Ephemeral }); return; }
     const gd = guild || interaction.client.guilds.cache.first(); // bouton cliquable en MP → guild peut être null
     contrat.status = 'refuse'; contrat.refusedAt = new Date().toISOString(); saveDB(db);
+    _majContratForum(gd, contrat).catch(() => {});
     const refuseurIC = db.members[interaction.user.id]?.name || interaction.user.username;
     _syncContratNotion(contrat, 'refuse', refuseurIC).catch(() => {});
     if (gd) await sendLog(gd, 'CONTRAT_REFUSE', { contratId, objet: contrat.objet }).catch(() => {});
@@ -4102,6 +4106,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
       // On applique les nouvelles modalités et le contrat est conclu
       contrat.objet = co.objet; contrat.prime = co.prime; contrat.remuneration = co.prime; contrat.echeanceTexte = co.echeance || contrat.echeanceTexte;
       contrat.status = 'signe'; contrat.signedAt = new Date().toISOString(); saveDB(db);
+      _majContratForum(gd || interaction.guild, contrat).catch(() => {});
       _syncContratNotion(contrat, 'signe', contrat.clientNom).catch(() => {});
       if (gd) await ajouterJournalIC(gd, { type: 'contrat', titre: `Contrat conclu (contre-offre) — ${contratId}`, description: `Client : **${contrat.clientNom}** · Prime : ${contrat.prime}`, auteur: interaction.user.username }).catch(() => {});
       if (gd) await archiverContratReponses(gd, contrat, 'signe', _contratOffreEmbed(contrat)).catch(() => {});
@@ -4175,6 +4180,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     if (!contrat || contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Contrat introuvable ou déjà traité.', flags: MessageFlags.Ephemeral }); return; }
     if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Seule la Direction peut signer.', flags: MessageFlags.Ephemeral }); return; }
     contrat.status = 'signe'; contrat.signedAt = new Date().toISOString(); contrat.signedBy = interaction.user.username; saveDB(db);
+    _majContratForum(interaction.guild, contrat).catch(() => {});
     await notionExtra.ajouterContratNotion?.(contrat);
     const signataireDirIC = db.members[interaction.user.id]?.name || interaction.user.username;
     _syncContratNotion(contrat, 'signe', signataireDirIC).catch(() => {});
@@ -4192,6 +4198,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     if (!contrat || contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Contrat introuvable ou déjà traité.', flags: MessageFlags.Ephemeral }); return; }
     if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Seule la Direction peut décliner.', flags: MessageFlags.Ephemeral }); return; }
     contrat.status = 'refuse'; contrat.refusedAt = new Date().toISOString(); saveDB(db);
+    _majContratForum(interaction.guild, contrat).catch(() => {});
     const refuseurDirIC = db.members[interaction.user.id]?.name || interaction.user.username;
     _syncContratNotion(contrat, 'refuse', refuseurDirIC).catch(() => {});
     await sendLog(guild, 'CONTRAT_REFUSE', { contratId, objet: contrat.objet });
@@ -5117,7 +5124,40 @@ async function _posterContratForum(guild, contrat, embed) {
     if (appliedTags.length) opts.appliedTags = appliedTags;
     let post = await forum.threads.create(opts).catch(() => null);
     if (!post && appliedTags.length) post = await forum.threads.create({ name: titre, message: msg }).catch(() => null); // repli sans étiquettes
+    if (post) {
+      // Mémoriser le post pour pouvoir le re-synchroniser quand le statut change
+      contrat.ficheForumThreadId = post.id; contrat.ficheForumChannelId = forum.id;
+      try { const db = loadDB(); const c = (db.contrats || []).find(x => String(x.id) === String(contrat.id)); if (c) { c.ficheForumThreadId = post.id; c.ficheForumChannelId = forum.id; saveDB(db); } } catch {}
+    }
   } catch (e) { console.log('⚠️ post contrat forum:', e.message); }
+}
+// Re-synchronise le post de forum d'un contrat IWC quand son statut change (signé / refusé / honoré / étape)
+async function _majContratForum(guild, contrat) {
+  try {
+    if (!guild || !contrat?.ficheForumThreadId) return;
+    const th = await guild.channels.fetch(contrat.ficheForumThreadId).catch(() => null);
+    if (!th) return;
+    const client = contrat.clientNom || contrat.employeurNom || contrat.commanditaire || '';
+    let statut = contrat.suivi || 'En attente';
+    if (contrat.status === 'refuse') statut = '❌ Refusé';
+    else if (contrat.suivi === 'Honoré' || contrat.status === 'honore') statut = '✅ Honoré';
+    else if (contrat.status === 'signe') statut = (contrat.suivi && contrat.suivi !== 'En attente') ? contrat.suivi : '✍️ Signé';
+    const resume = `📜 **Contrat ${contrat.id}**${client ? ` — ${client}` : ''}\n**Objet :** ${(contrat.objet || '—').slice(0, 400)}\n**Rémunération :** ${contrat.remuneration || '—'} · **Statut :** ${statut}`;
+    const starter = await th.fetchStarterMessage().catch(() => null);
+    if (starter) await starter.edit({ content: resume }).catch(() => {}); // n'altère pas l'embed (édition du contenu seul)
+    // Étiquettes du forum mises à jour selon le nouveau statut
+    try {
+      const forum = th.parent;
+      if (forum?.availableTags?.length && th.setAppliedTags) {
+        const clean = s => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
+        const cf = String(contrat.id).startsWith('CF-') || contrat.type === 'confrerie' || contrat.cc;
+        const typeKw = cf ? ['confrerie', 'illegal'] : (contrat.type === 'emploi' ? ['employeur', 'emploi'] : ['prestation', 'offre']);
+        const veut = [...typeKw, clean(statut)].filter(Boolean);
+        const ids = forum.availableTags.filter(t => { const tn = clean(t.name); return veut.some(w => w && (tn.includes(w) || w.includes(tn))); }).map(t => t.id).slice(0, 5);
+        if (ids.length) await th.setAppliedTags(ids).catch(() => {});
+      }
+    } catch {}
+  } catch (e) { console.log('⚠️ maj contrat forum:', e.message); }
 }
 async function _installerPlanningContrats(guild) {
   try {
