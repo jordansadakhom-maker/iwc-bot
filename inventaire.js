@@ -82,22 +82,31 @@ function _boardButtons() {
   );
 }
 
-// Supprime les tableaux « COFFRE COMMUN » en DOUBLE : on n'en garde qu'un seul
-// (celui de référence si possible). Évite qu'un vieux tableau périmé reste affiché.
+function _estTableau(m, clientUserId) { return m.author?.id === clientUserId && (m.embeds?.[0]?.title || '').includes('COFFRE COMMUN'); }
+// Retrouve TOUS les tableaux « COFFRE COMMUN » du salon, via les ÉPINGLES (fiable même si le
+// tableau a défilé loin) ET les messages récents.
+async function _trouverTableaux(client, ch) {
+  const found = new Map();
+  try { const pins = await ch.messages.fetchPinned().catch(() => null); if (pins) for (const m of pins.values()) if (_estTableau(m, client.user.id)) found.set(m.id, m); } catch {}
+  try { const recent = await ch.messages.fetch({ limit: 50 }).catch(() => null); if (recent) for (const m of recent.values()) if (_estTableau(m, client.user.id)) found.set(m.id, m); } catch {}
+  return [...found.values()];
+}
+function _persistPanneau(id) { try { const d = loadDB(); if (d.inventaire) { d.inventaire.panneau = id; saveDB(d); } } catch {} }
+// Ne garde qu'UN seul tableau (le référencé, sinon celui qui porte le fil, sinon le plus ancien) ;
+// supprime les doublons. Renvoie le tableau conservé (ou null).
 async function _dedupeBoards(client, inv) {
   try {
-    if (!inv.channelId) return;
+    if (!inv.channelId) return null;
     const ch = await client.channels.fetch(inv.channelId).catch(() => null);
-    if (!ch?.messages) return;
-    const recent = await ch.messages.fetch({ limit: 50 }).catch(() => null);
-    if (!recent) return;
-    const boards = [...recent.values()].filter(m => m.author.id === client.user.id && (m.embeds?.[0]?.title || '').includes('COFFRE COMMUN'));
-    if (boards.length <= 1) { if (boards[0] && inv.panneau !== boards[0].id) { inv.panneau = boards[0].id; try { const d = loadDB(); if (d.inventaire) { d.inventaire.panneau = boards[0].id; saveDB(d); } } catch {} } return; }
-    // On garde en priorité le tableau de référence, sinon celui qui PORTE le fil Journal (pour ne pas le tuer)
+    if (!ch?.messages) return null;
+    const boards = await _trouverTableaux(client, ch);
+    if (!boards.length) return null;
     const keep = boards.find(m => m.id === inv.panneau) || boards.find(m => m.hasThread) || boards[0];
     for (const m of boards) { if (m.id !== keep.id) await m.delete().catch(() => {}); }
-    if (inv.panneau !== keep.id) { inv.panneau = keep.id; try { const d = loadDB(); if (d.inventaire) { d.inventaire.panneau = keep.id; saveDB(d); } } catch {} }
-  } catch {}
+    if (inv.panneau !== keep.id) { inv.panneau = keep.id; _persistPanneau(keep.id); }
+    if (!keep.pinned) await keep.pin().catch(() => {});
+    return keep;
+  } catch { return null; }
 }
 async function _refreshBoard(client, inv) {
   try {
@@ -121,16 +130,12 @@ async function rafraichirBoardDemarrage(client) {
     if (!inv || !inv.channelId) return;
     const ch = await client.channels.fetch(inv.channelId).catch(() => null);
     if (!ch?.send) return;
-    await _dedupeBoards(client, inv); // supprime les tableaux en double au démarrage
-    let msg = inv.panneau ? await ch.messages.fetch(inv.panneau).catch(() => null) : null;
-    if (!msg) {
-      const recent = await ch.messages.fetch({ limit: 30 }).catch(() => null);
-      if (recent) msg = [...recent.values()].find(m => m.author.id === client.user.id && (m.embeds?.[0]?.title || '').includes('COFFRE COMMUN')) || null;
-    }
+    // Cherche le tableau (épingles + récents) et supprime les doublons éventuels
+    const msg = await _dedupeBoards(client, inv);
     if (msg) {
       await msg.edit({ embeds: [_boardEmbed(_ensure(db))], components: [_boardButtons()] }).catch(() => {});
-      if (inv.panneau !== msg.id) { inv.panneau = msg.id; persist(db); }
     } else {
+      // AUCUN tableau trouvé nulle part → on en pose un (et un seul)
       const sent = await ch.send({ embeds: [_boardEmbed(_ensure(db))], components: [_boardButtons()] }).catch(() => null);
       if (sent) {
         inv.panneau = sent.id; try { await sent.pin(); } catch {}
@@ -377,6 +382,13 @@ function _proposalRow() {
 // Poste la proposition, l'enregistre dans db (persistant) et sauvegarde
 async function _proposer(channel, items, by, db, inv) {
   try {
+    // Retire les anciennes propositions de lecture NON validées (évite l'empilement de doublons)
+    inv.lectures = inv.lectures || {};
+    for (const oldId of Object.keys(inv.lectures)) {
+      const om = await channel.messages.fetch(oldId).catch(() => null);
+      if (om) await om.delete().catch(() => {});
+      delete inv.lectures[oldId];
+    }
     const m = await channel.send({ embeds: [_proposalEmbed(items)], components: [_proposalRow()], allowedMentions: { parse: [] } }).catch(() => null);
     if (m) { _prunePending(inv); inv.lectures[m.id] = { items, by, ts: Date.now() }; persist(db); }
     return m;
@@ -451,13 +463,9 @@ async function routeInteraction(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       const db = loadDB(); const inv = _ensure(db);
       inv.channelId = interaction.channelId;
-      // Réutilise un tableau déjà présent dans le salon (pas de doublon) ; sinon en pose un neuf
-      let m = inv.panneau ? await interaction.channel.messages.fetch(inv.panneau).catch(() => null) : null;
-      if (!m) {
-        const recent = await interaction.channel.messages.fetch({ limit: 30 }).catch(() => null);
-        if (recent) m = [...recent.values()].find(x => x.author.id === interaction.client.user.id && (x.embeds?.[0]?.title || '').includes('COFFRE COMMUN')) || null;
-      }
-      if (m) { await m.edit({ embeds: [_boardEmbed(inv)], components: [_boardButtons()] }).catch(() => {}); inv.panneau = m.id; try { await m.pin(); } catch {} }
+      // Réutilise le tableau déjà présent (épingles + récents) et supprime les doublons ; sinon en pose un
+      let m = await _dedupeBoards(interaction.client, inv);
+      if (m) { await m.edit({ embeds: [_boardEmbed(inv)], components: [_boardButtons()] }).catch(() => {}); try { if (!m.pinned) await m.pin(); } catch {} }
       else {
         m = await interaction.channel.send({ embeds: [_boardEmbed(inv)], components: [_boardButtons()] }).catch(() => null);
         if (!m) { await interaction.editReply({ content: "❌ Je n'ai pas pu poster ici (vérifie mes permissions d'écriture dans ce salon)." }).catch(() => {}); return true; }
