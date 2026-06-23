@@ -442,10 +442,10 @@ function getChExact(guild, name) {
   return guild.channels.cache.find(c => [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(c.type) && clean(c.name) === clean(name)) || null;
 }
 function getMention(guild) { return guild.roles.cache.filter(r => ['Concepteur', 'Fléau', 'Fondateur'].some(n => r.name.includes(n))).map(r => `<@&${r.id}>`).join(' ') || ''; }
-// Ping des candidatures : Direction (Concepteur/Fléau/Fondateur) + les Hommes de main
+// Ping des candidatures : Direction (Concepteur/Fléau/Fondateur) + les Officiers de Terrain
 function getMentionRecrutement(guild) {
-  const hdm = guild.roles.cache.filter(r => { const n = (r.name || '').toLowerCase(); return n.includes('homme de main') || n.includes('hommes de main'); }).map(r => `<@&${r.id}>`).join(' ');
-  return [getMention(guild), hdm].filter(Boolean).join(' ');
+  const off = guild.roles.cache.filter(r => { const n = (r.name || '').toLowerCase(); return n.includes('officier de terrain') || n.includes('officier'); }).map(r => `<@&${r.id}>`).join(' ');
+  return [getMention(guild), off].filter(Boolean).join(' ');
 }
 // Retourne les options allowedMentions sécurisées (jamais @everyone/@here)
 function safeMentions(roleIds = [], userIds = []) {
@@ -1952,11 +1952,11 @@ client.on('messageReactionAdd', async (reaction, user) => {
       if (member) {
         if (isIllegal) {
           const role = guild.roles.cache.find(r => r.name.includes('Maudit') || r.name.includes('Ombre')); if (role) await member.roles.add(role).catch(() => {});
-          member.send({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle("🔪 Bienvenue dans l'ombre — La Confrérie").setDescription("Tu as été **accepté** au sein de la Confrérie.\n\nDiscrétion absolue.\n\n*Ne fais confiance qu'à ceux que la Direction te désignera.*\n— La Direction").setFooter({ text: 'La Confrérie • Confidentiel' })] }).catch(() => {});
+          member.send({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle("🔪 Bienvenue dans l'ombre — La Confrérie").setDescription("Tu as été **accepté** au sein de la Confrérie.\n\nDiscrétion absolue.\n\n*Ne fais confiance qu'à ceux que la Direction te désignera.*\n\n📨 **Pour la suite** : viens te présenter et joindre la Direction en envoyant un **télégramme** dans <#1512171267560702013>.\n— La Direction").setFooter({ text: 'La Confrérie • Confidentiel' })] }).catch(() => {});
           const annCh = guild.channels.cache.get(CH.DOSSIER_ILLEG); if (annCh) await annCh.send({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle("🔪 La Confrérie — Nouveau visage dans l'ombre").setDescription(`**${cand.nomPerso}** a intégré la Confrérie.\n*Certains chemins ne se montrent pas à la lumière.*`).setThumbnail(member.user.displayAvatarURL()).setFooter({ text: `La Confrérie • ${fmtShort(new Date())}` })] });
         } else {
           const role = guild.roles.cache.find(r => r.name.includes('Recrue') || r.name.includes('Employé')); if (role) await member.roles.add(role).catch(() => {});
-          member.send({ embeds: [new EmbedBuilder().setColor(0x3B82F6).setTitle('⚖️ Candidature acceptée — Iron Wolf Company').setDescription("Ta candidature a été **acceptée**.\n\nLa période d'observation commence maintenant.\n\n*Tu connais les règles. Tu connais les attentes.*\n— La Direction").setFooter({ text: 'Iron Wolf Company • Légal' })] }).catch(() => {});
+          member.send({ embeds: [new EmbedBuilder().setColor(0x3B82F6).setTitle('⚖️ Candidature acceptée — Iron Wolf Company').setDescription("Ta candidature a été **acceptée**.\n\nLa période d'observation commence maintenant.\n\n*Tu connais les règles. Tu connais les attentes.*\n\n📨 **Pour la suite** : viens te présenter et joindre la Direction en envoyant un **télégramme** dans <#1512171267560702013>.\n— La Direction").setFooter({ text: 'Iron Wolf Company • Légal' })] }).catch(() => {});
           const annCh = guild.channels.cache.get(CH.DOSSIER_LEGAL); if (annCh) await annCh.send({ embeds: [new EmbedBuilder().setColor(0x3B82F6).setTitle('⚖️ Nouveau membre — Iron Wolf Company').setDescription(`**${cand.nomPerso}** rejoint la Compagnie.\n*Bienvenue dans la meute.*`).setThumbnail(member.user.displayAvatarURL()).setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` })] });
         }
       }
@@ -5361,7 +5361,7 @@ async function buildMembresDiscordMap(guild) {
 
 async function _handleVersion(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const BOT_VERSION = '5.7 (23 juin — suivi médical : alertes, rappels RDV, vue par statut)'; const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
+  const BOT_VERSION = '5.8 (23 juin — recrutement : ping Officier de Terrain + redirect télégramme à l\'acceptation)'; const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
   let notionOk = false;
   try { const r = await fetch('https://api.notion.com/v1/users/me', { headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28' } }); notionOk = r.ok; } catch {}
   const db = loadDB();
