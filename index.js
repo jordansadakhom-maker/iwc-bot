@@ -8569,10 +8569,16 @@ async function _installerMenu(guild, forcer = false) {
     const chStart = await guild.channels.fetch(COMMENCER_SALON_ID).catch(() => null);
     if (chStart) {
       if (forcer) { await _nettoyerAnciensPanneaux(chStart, 'COMMENCE ICI'); await _nettoyerAnciensPanneaux(chStart, 'MENU PRINCIPAL'); }
-      const present = forcer ? false : await _menuDejaPresent(chStart, 'COMMENCE ICI');
-      if (forcer || !present) {
-        const m1 = await chStart.send({ embeds: [_buildCommencerIci()], components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_surnom_ouvrir').setLabel('✏️ Définir mon pseudo RP').setStyle(ButtonStyle.Primary))] }); await m1.pin().catch(() => {});
+      const rowStart = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_surnom_ouvrir').setLabel('✏️ Définir mon pseudo RP').setStyle(ButtonStyle.Primary));
+      // Cherche un panneau « COMMENCE ICI » déjà présent
+      let existant = null;
+      try { const msgs = await chStart.messages.fetch({ limit: 30 }); existant = msgs.find(m => m.author.id === client.user.id && (m.embeds[0]?.title || '').includes('COMMENCE ICI')) || null; } catch {}
+      if (forcer || !existant) {
+        const m1 = await chStart.send({ embeds: [_buildCommencerIci()], components: [rowStart] }); await m1.pin().catch(() => {});
         const m2 = await chStart.send(_buildMenuPrincipal()); await m2.pin().catch(() => {});
+      } else {
+        // Déjà présent → on met le contenu à jour EN PLACE (pas de doublon, garde l'épingle)
+        await existant.edit({ embeds: [_buildCommencerIci()], components: [rowStart] }).catch(() => {});
       }
       okStart = true;
     }
