@@ -229,6 +229,7 @@ const FORUM_REPERTOIRE = '1517505221629050901'; // forum dédié au répertoire 
 function _ficheRow(contactId) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`contact_edit::${contactId}`).setLabel("Modifier").setEmoji("✏️").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`contact_photo::${contactId}`).setLabel("Photo").setEmoji("📸").setStyle(ButtonStyle.Secondary),
   );
 }
 // Modal pré-rempli pour MODIFIER une fiche existante (les champs à menus se rechoisissent ensuite).
@@ -250,10 +251,12 @@ function _contactEditModal(d, draftId) {
   );
   return m;
 }
-async function _publierFiche(interaction, d, fiche, contactId, editRefs) {
+async function _publierFiche(interaction, d, fiche, contactId, editRefs, opts) {
   try {
     const guild = interaction.guild;
-    // ── MODIFICATION en place : édite le message existant (contenu + bouton), sans toucher à la photo ──
+    const withPhoto = !!(opts && opts.withPhoto); // (re)pose la photo sur le message édité
+    // ── MODIFICATION en place : édite le message existant (contenu + bouton) ──
+    // Par défaut on ne touche pas à la photo ; avec withPhoto on la (re)pose comme portrait.
     if (editRefs) {
       try {
         const corpsE = fiche.slice(0, 1900);
@@ -266,7 +269,16 @@ async function _publierFiche(interaction, d, fiche, contactId, editRefs) {
           const ch = await guild.channels.fetch(editRefs.channelId).catch(() => null);
           if (ch) msg = await ch.messages.fetch(editRefs.msgId).catch(() => null);
         }
-        if (msg) { await msg.edit({ content: corpsE, components: boutonsE }).catch(() => {}); return { where: "la fiche", refs: editRefs }; }
+        if (msg) {
+          const payload = { content: corpsE, components: boutonsE };
+          if (withPhoto) {
+            const buf = d.photoUrl ? await _imageBytes(d.photoUrl) : null;
+            payload.files = buf ? [new AttachmentBuilder(buf, { name: 'contact.png' })] : [];
+            payload.attachments = []; // remplace l'ancienne photo éventuelle
+          }
+          await msg.edit(payload).catch(() => {});
+          return { where: "la fiche", refs: editRefs };
+        }
       } catch {}
       return null; // message d'origine introuvable (supprimé ?)
     }
@@ -301,7 +313,7 @@ async function _publierFiche(interaction, d, fiche, contactId, editRefs) {
 // ── Panneau « Nouvelle fiche de contact » (salon dédié) ──
 function _panelContactEmbed() {
   return new EmbedBuilder().setColor(COULEUR).setTitle("🎴 NOUVELLE FICHE DE CONTACT")
-    .setDescription("*Un visage croisé sur la piste ? Inscris-le au carnet.*\n\nClique sur **🎴 Nouvelle fiche** pour remplir le formulaire — la fiche sera publiée proprement dans le répertoire.\n\n📸 *Pour joindre une photo, utilise plutôt la commande* `/contact` *(tu pourras glisser un fichier).*")
+    .setDescription("*Un visage croisé sur la piste ? Inscris-le au carnet.*\n\nClique sur **🎴 Nouvelle fiche** pour remplir le formulaire — la fiche sera publiée proprement dans le répertoire.\n\n📸 *Pour ajouter le portrait de la personne, clique sur* **📸 Photo** *sous la fiche une fois créée (glisse une image), ou crée-la directement avec la commande* `/contact`*.*")
     .setFooter({ text: "Iron Wolf Company • Le Carnet" });
 }
 function _panelContactButtons() {
@@ -537,6 +549,45 @@ async function routeInteraction(interaction) {
         userId: interaction.user.id, at: Date.now(),
       });
       await interaction.showModal(_contactEditModal(_contactDrafts.get(draftId), draftId)).catch(() => {});
+      return true;
+    }
+    // ── Ajouter / changer la photo (portrait) d'une fiche publiée (bouton 📸) ──
+    // Les modals Discord n'acceptent pas de fichier : on capture la prochaine image déposée par l'auteur.
+    if (interaction.isButton?.() && (interaction.customId || "").startsWith("contact_photo::")) {
+      const cid = interaction.customId.split("::")[1];
+      const db = loadDB(); const rep = _ensure(db);
+      const c = (rep.contacts || []).find(x => x.id === cid);
+      if (!c) { await interaction.reply({ content: "⚠️ Fiche introuvable (peut-être supprimée du carnet).", flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      if (!estDirection(interaction.member) && c.par !== interaction.user.id) { await interaction.reply({ content: "🔒 Seuls la Direction ou le créateur de la fiche peuvent changer la photo.", flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const ch = interaction.channel;
+      if (!ch || typeof ch.createMessageCollector !== "function") { await interaction.reply({ content: "❌ Impossible d'attendre une photo ici. Utilise plutôt `/contact` avec une photo jointe.", flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const _estImg = a => (a?.contentType || "").startsWith("image") || /\.(png|jpe?g|gif|webp)(\?|$)/i.test(a?.name || a?.url || "");
+      await interaction.reply({ content: `📸 **Glisse une image dans ce salon dans les 2 minutes** pour l'ajouter à la fiche de **${c.nom || "ce contact"}** — ce sera son portrait.`, flags: MessageFlags.Ephemeral }).catch(() => {});
+      const collector = ch.createMessageCollector({
+        filter: m => m.author?.id === interaction.user.id && [...(m.attachments?.values?.() || [])].some(_estImg),
+        time: 120000, max: 1,
+      });
+      collector.on("collect", async (m) => {
+        try {
+          const img = [...m.attachments.values()].find(_estImg);
+          if (!img) return;
+          const db2 = loadDB(); const rep2 = _ensure(db2);
+          const c2 = (rep2.contacts || []).find(x => x.id === cid);
+          if (!c2) { await interaction.followUp({ content: "⚠️ Fiche introuvable entre-temps.", flags: MessageFlags.Ephemeral }).catch(() => {}); return; }
+          c2.photoUrl = img.url; c2.maj = Date.now();
+          persist(db2);
+          const d = { nomsurnom: c2.nom, telegramme: c2.telegramme, metier: c2.metier, secteur: c2.secteur, affiliation: c2.affiliation, relation: c2.relation, fiabilite: c2.fiabilite, statut: c2.statut, dernierContact: c2.dernierContact, creeParNom: c2.creeParNom, notes: c2.notes, photoUrl: c2.photoUrl };
+          const fiche = _richFiche(d);
+          let res = null;
+          if (c2.ficheRefs) res = await _publierFiche(interaction, d, fiche, c2.id, c2.ficheRefs, { withPhoto: true });
+          if (!res) { res = await _publierFiche(interaction, d, fiche, c2.id, null); if (res && res.refs) { c2.ficheRefs = res.refs; persist(db2); } }
+          await m.delete().catch(() => {});
+          await interaction.followUp({ content: res ? `📸 Photo ajoutée à la fiche de **${c2.nom}**.` : `📸 Photo enregistrée pour **${c2.nom}** (mais le message de la fiche n'a pas pu être mis à jour).`, flags: MessageFlags.Ephemeral }).catch(() => {});
+        } catch (e) { console.log("⚠️ contact_photo collect:", e.message); }
+      });
+      collector.on("end", async (collected) => {
+        if (!collected.size) await interaction.followUp({ content: "⌛ Aucune image reçue — réessaie en cliquant **📸 Photo** sous la fiche.", flags: MessageFlags.Ephemeral }).catch(() => {});
+      });
       return true;
     }
     if (interaction.isButton?.() && (interaction.customId || "").startsWith("contact_gen::")) {

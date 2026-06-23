@@ -90,6 +90,10 @@ let tenue = {};
 try { tenue = require('./tenue'); console.log('✅ Module tenue (Le Vestiaire) chargé'); }
 catch (e) { console.log('⚠️ tenue non chargé:', e.message); }
 
+let reddead = {};
+try { reddead = require('./reddead'); console.log('✅ Module reddead (Le Photographe Far West) chargé'); }
+catch (e) { console.log('⚠️ reddead non chargé:', e.message); }
+
 let reseau = {};
 try { reseau = require('./reseau'); console.log('✅ Module reseau (Le Réseau d\'informateurs) chargé'); }
 catch (e) { console.log('⚠️ reseau non chargé:', e.message); }
@@ -2197,6 +2201,8 @@ client.on('messageCreate', async message => {
   try { if (await comptabilite.onMessage?.(message)) return; } catch {}
   try { if (await traque.onMessage?.(message)) return; } catch {}
   try { if (await tenue.onMessage?.(message)) return; } catch {}
+  // Salon Far West : capture Red Dead → cliché repeint par l'IA (Gemini), original retiré
+  try { if (await reddead.onMessage?.(message)) return; } catch {}
   // ── Note du micro de terrain → réaction 📜 (contrat) + RÉSUMÉ automatique ──
   if (message.webhookId && (message.embeds?.[0]?.title || '').includes('Rapport de terrain')) {
     try { await message.react('📜'); } catch (e) { console.log('⚠️ Réaction note:', e.message); }

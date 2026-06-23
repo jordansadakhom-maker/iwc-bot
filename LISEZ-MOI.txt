@@ -176,6 +176,40 @@ La secrétaire crée des RDV sur Notion.
 Le bot envoie les notifications automatiquement sur Discord.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SALON FAR WEST — PHOTOS RED DEAD EN STYLE IA (optionnel)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Quand quelqu'un poste une capture Red Dead dans le salon dédié,
+le bot la repeint avec l'IA en une belle photo style Far West
+(sépia, grain, lumière d'époque), retire le menu/HUD du jeu,
+puis re-poste le cliché propre et efface la capture d'origine.
+
+Pour l'activer, il faut une clé d'IA qui GÉNÈRE des images
+(Google Gemini — « Nano Banana »). La clé Anthropic actuelle ne
+sait que LIRE des images, pas les transformer.
+
+1. Va sur aistudio.google.com → "Get API key" → crée une clé
+2. Dans Railway → Variables → ajoute :
+   GEMINI_API_KEY = ta_cle_google
+3. (Facultatif) Pour changer le salon ciblé :
+   RED_DEAD_CHANNEL_ID = identifiant_du_salon
+   (par défaut : 1508756424862203988)
+4. Redéploie / relance le bot.
+
+Sans GEMINI_API_KEY, la fonction reste silencieuse : les captures
+restent telles quelles, rien d'autre n'est touché.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FICHE DE CONTACT — PHOTO (PORTRAIT)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Une fiche de contact peut afficher le portrait de la personne :
+→ /contact (glisse une photo dans l'option "photo"), OU
+→ clique sur le bouton 📸 Photo sous une fiche déjà publiée,
+  puis dépose une image dans les 2 minutes.
+La Direction ou le créateur de la fiche peuvent changer la photo.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Iron Wolf Company • Bot permanent • 1895
 Mode SAFE — Aucune permission modifiée
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
