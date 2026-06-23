@@ -3844,6 +3844,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     saveDB(dbX);
     // 🧾 Trace écrite : facture automatique dans le forum des factures
     factures.creerFactureContrat?.(interaction.guild, c, { montant, par: interaction.user.username, parId: interaction.user.id }).catch(() => {});
+    comptabilite.refreshPanel?.(interaction.client).catch(() => {});
     _setContratSuiviNotion(c, 'Honoré').catch(() => {});
     const coffreLabel = pole === 'illegal' ? '🔒 Illégal' : '⚖️ Légal';
     try { await ajouterJournalIC(interaction.guild, { type: 'tresorerie', emoji: '💵', titre: `Entrée — Coffre ${pole === 'illegal' ? 'Illégal' : 'Légal'}`, description: `Contrat **${c.id}** honoré · +$${montant.toLocaleString('fr-FR')} · ${String(c.clientNom || c.commanditaire || '')}`.slice(0, 300), auteur: interaction.user.username }); } catch {}
@@ -3994,7 +3995,7 @@ client.once('clientReady', async () => {
   });
   // (Import Notion automatique RETIRÉ : il réimportait chaque minute les contrats supprimés après un reset.
   //  Les contrats viennent maintenant de la base locale sauvegardée + import manuel via /import-contrats.)
-  cron.schedule('*/5 * * * *', async () => { try { await _updateContratPanel(client); } catch {} try { await _updatePlanningContrats(client); } catch {} });
+  cron.schedule('*/5 * * * *', async () => { try { await _updateContratPanel(client); } catch {} try { await _updatePlanningContrats(client); } catch {} try { await comptabilite.refreshPanel?.(client); } catch {} });
   cron.schedule('0 18 * * *', async () => {
     try { const u = await client.users.fetch('944208797084311583').catch(() => null); if (u) await u.send({ embeds: [_genererRecapEmbed(loadDB())] }).catch(() => {}); } catch {}
   }, { timezone: 'Europe/Paris' });
@@ -5364,7 +5365,7 @@ async function buildMembresDiscordMap(guild) {
 
 async function _handleVersion(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const BOT_VERSION = '6.0 (23 juin — comptabilité : /compta bilan + à encaisser + export)'; const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
+  const BOT_VERSION = '6.1 (23 juin — compta : panneau permanent + encaisser un contrat en 1 clic)'; const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
   let notionOk = false;
   try { const r = await fetch('https://api.notion.com/v1/users/me', { headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28' } }); notionOk = r.ok; } catch {}
   const db = loadDB();
