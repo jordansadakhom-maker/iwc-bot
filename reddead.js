@@ -16,8 +16,11 @@ const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 // Salon Far West (overridable via .env). ID demandé par la Direction.
 const RED_DEAD_CHANNEL_ID = process.env.RED_DEAD_CHANNEL_ID || '1508756424862203988';
 
-// Modèles Gemini d'édition d'image (du plus récent au repli)
-const GEMINI_MODELS = ['gemini-2.5-flash-image', 'gemini-2.5-flash-image-preview'];
+// Modèle Gemini d'édition d'image. Overridable via .env (GEMINI_IMAGE_MODEL),
+// p. ex. « gemini-3-pro-image-preview » (Nano Banana Pro) pour la meilleure qualité.
+// Par défaut : « gemini-2.5-flash-image » (Nano Banana), le plus économique.
+const GEMINI_MODELS = [process.env.GEMINI_IMAGE_MODEL, 'gemini-2.5-flash-image']
+  .filter((m, i, a) => m && a.indexOf(m) === i);
 
 const PROMPT_FARWEST = [
   "Transforme cette capture d'écran du jeu vidéo Red Dead Redemption en une véritable et magnifique photographie ancienne du Far West américain (frontière, fin du XIXe siècle, vers 1890).",
