@@ -7,7 +7,7 @@
 const {
   EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  StringSelectMenuBuilder, SlashCommandBuilder, MessageFlags, AttachmentBuilder,
+  StringSelectMenuBuilder, SlashCommandBuilder, MessageFlags, AttachmentBuilder, ChannelType,
 } = require('discord.js');
 const { loadDB, saveDB, sauvegarderSurGitHub } = require('./db');
 
@@ -45,6 +45,25 @@ function journalCh(guild) {
 }
 function elementOpsCh(guild) {
   return guild.channels.cache.get(CH_ELEMENT_OPS) || null;
+}
+// #élément-opérations est un salon FORUM → pas de .send() : on crée un post (thread).
+// Helper unifié : marche pour un forum (crée un post) comme pour un salon texte (.send()).
+async function postElementOps(ops, payload, titre = 'Opération') {
+  if (!ops) return null;
+  try {
+    if (ops.type === ChannelType.GuildForum) {
+      const thread = await ops.threads.create({
+        name: String(titre).slice(0, 100),
+        message: payload,
+      }).catch(() => null);
+      return thread ? { id: thread.id, threadId: thread.id } : null;
+    }
+    if (typeof ops.send === 'function') {
+      const m = await ops.send(payload).catch(() => null);
+      return m ? { id: m.id } : null;
+    }
+  } catch { /* noop */ }
+  return null;
 }
 function fmtDate(d) { if (!d) return '—'; const dt = new Date(d); return isNaN(dt.getTime()) ? String(d) : dt.toLocaleDateString('fr-FR'); }
 function findTraque(db, id) { return (db.traques || []).find(t => t.id === id || t.messageId === id); }
@@ -433,8 +452,8 @@ async function handleClotureSelect(interaction) {
   // 1) Archivage de la fiche clôturée dans #élément-opérations (la traque fait partie d'une opération)
   const ops = elementOpsCh(interaction.guild);
   if (ops) {
-    const sent = await ops.send({ embeds: [buildClosedFiche(t)] }).catch(() => null);
-    if (sent) { t.opMessageId = sent.id; t.opChannelId = ops.id; }
+    const sent = await postElementOps(ops, { embeds: [buildClosedFiche(t)] }, `🎯 ${t.cible} — ${t.resultat}`);
+    if (sent) { t.opMessageId = sent.id; t.opChannelId = ops.id; if (sent.threadId) t.opThreadId = sent.threadId; }
   }
   // 2) Trace au journal
   const jc = journalCh(interaction.guild);
