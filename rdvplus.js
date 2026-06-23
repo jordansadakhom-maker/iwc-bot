@@ -273,6 +273,32 @@ const rdvplusCommands = [
     .addStringOption(o => o.setName('id').setDescription('Ou son ID Discord').setRequired(false)),
 ];
 
+// Panneau « Besoin de nos services » (réserver une prestation) — builder réutilisable
+function panelPayload() {
+  const embed = new EmbedBuilder().setColor(COL.or)
+    .setTitle('🤠  IRON WOLF COMPANY  🐺')
+    .setDescription([
+      '```',
+      '╔═══════════════════════════════╗',
+      '║    🤝  BESOIN DE NOS SERVICES  🤝   ║',
+      '╚═══════════════════════════════╝',
+      '```',
+      '*Un besoin précis ? Protection, escorte, enquête, négociation… ou un travail plus discret ?*',
+      '',
+      '🤝 Clique sur **« Besoin de nos services »** : tu choisis la **prestation**, le **lieu** et un **créneau** qui t\'arrange.',
+      'La Direction confirme ton rendez-vous, et tu reçois un **télégramme de confirmation**.',
+      '',
+      '*(Tu préfères juste nous exposer ton affaire librement ? Utilise « 📨 Contacter la compagnie » au-dessus.)*',
+      '',
+      '— *« La force est dans l\'ombre. »*',
+    ].join('\n'))
+    .setFooter({ text: 'Iron Wolf Company · Bureau de Saint-Denis' });
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('rdvp_book').setLabel('Besoin de nos services').setEmoji('🤝').setStyle(ButtonStyle.Primary),
+  );
+  return { embeds: [embed], components: [row] };
+}
+
 // ───────────────────────── Routeur d'interactions ─────────────────────────
 async function routeInteraction(interaction) {
   try {
@@ -282,29 +308,8 @@ async function routeInteraction(interaction) {
 
       if (cmd === 'panel-rdv-plus') {
         if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
-        const embed = new EmbedBuilder().setColor(COL.or)
-          .setTitle('🤠  IRON WOLF COMPANY  🐺')
-          .setDescription([
-            '```',
-            '╔═══════════════════════════════╗',
-            '║    🤝  BESOIN DE NOS SERVICES  🤝   ║',
-            '╚═══════════════════════════════╝',
-            '```',
-            '*Un besoin précis ? Protection, escorte, enquête, négociation… ou un travail plus discret ?*',
-            '',
-            '🤝 Clique sur **« Besoin de nos services »** : tu choisis la **prestation**, le **lieu** et un **créneau** qui t\'arrange.',
-            'La Direction confirme ton rendez-vous, et tu reçois un **télégramme de confirmation**.',
-            '',
-            '*(Tu préfères juste nous exposer ton affaire librement ? Utilise « 📨 Contacter la compagnie » au-dessus.)*',
-            '',
-            '— *« La force est dans l\'ombre. »*',
-          ].join('\n'))
-          .setFooter({ text: 'Iron Wolf Company · Bureau de Saint-Denis' });
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('rdvp_book').setLabel('Besoin de nos services').setEmoji('🤝').setStyle(ButtonStyle.Primary),
-        );
         const salon = _salonDemandes(interaction.guild) || interaction.channel;
-        await salon.send({ embeds: [embed], components: [row] }).catch(() => {});
+        await salon.send(panelPayload()).catch(() => {});
         await interaction.reply({ content: `✅ Nouveau panneau de RDV installé dans ${salon}.`, flags: MessageFlags.Ephemeral }).catch(() => {});
         return true;
       }
@@ -647,4 +652,4 @@ async function checkRappelsClients(guild) {
   } catch (e) { console.log('[RDV+] checkRappelsClients erreur:', e?.message); }
 }
 
-module.exports = { routeInteraction, checkRappelsClients, rdvplusCommands };
+module.exports = { routeInteraction, checkRappelsClients, rdvplusCommands, panelPayload };

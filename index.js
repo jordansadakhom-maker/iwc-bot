@@ -11,6 +11,8 @@ const {
 const cron = require('node-cron');
 
 const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub } = require('./db');
+// Version du bot (sert au /version ET à la génération auto des patch notes)
+const BOT_VERSION = '6.4 (23 juin — salon compta auto + RDV client auto-MAJ + patch notes auto)';
 const { initPapiers, papiersCommands } = require('./papiers');
 const securite = require('./securite');
 const rdvplus = require('./rdvplus');
@@ -963,32 +965,9 @@ async function handleSlashCommand(interaction) {
 
   if (commandName === 'panel-rdv-client') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
-    const embed = new EmbedBuilder()
-      .setColor(0xC8A45C)
-      .setTitle('🤠  IRON WOLF COMPANY  🐺')
-      .setDescription([
-        '```',
-        '╔═══════════════════════════════╗',
-        '║      ✉  NOUS CONTACTER  ✉      ║',
-        '╚═══════════════════════════════╝',
-        '```',
-        '*Un besoin ? Protection, escorte, enquête, négociation, contrat… ou une affaire plus discrète ?*',
-        '',
-        '📨 **Contactez la compagnie** en cliquant ci-dessous.',
-        'Expliquez-nous votre demande **avec vos propres mots** — votre affaire, vos conditions, ce que vous cherchez.',
-        'La Direction lit chaque message et **vous répond en personne**, en toute discrétion.',
-        '',
-        '*(Pour réserver directement une prestation avec un créneau, utilisez plutôt le bouton « 🤝 Besoin de nos services » du panneau juste en dessous.)*',
-        '',
-        '— *« La force est dans l\'ombre. »*',
-      ].join('\n'))
-      .setFooter({ text: 'Iron Wolf Company · Bureau de Saint-Denis' });
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('rdvclient_demande').setLabel('Contacter la compagnie').setEmoji('📨').setStyle(ButtonStyle.Primary),
-    );
     // Toujours installer le panneau dans le salon dédié aux demandes clients
     const salonForm = interaction.guild.channels.cache.get('1512171267560702013') || interaction.channel;
-    await salonForm.send({ embeds: [embed], components: [row] });
+    await salonForm.send(_rdvClientPayload());
     return interaction.reply({ content: `✅ Panneau de prise de RDV installé dans ${salonForm}.`, flags: MessageFlags.Ephemeral });
   }
 
@@ -1597,6 +1576,9 @@ async function autoSetup(guild) {
   medical.installerExemple?.(guild).then(() => console.log('🩺 Exemple test d\'aptitude posté')).catch(() => {});
   inventaire.rafraichirBoardDemarrage?.(guild.client).then(() => console.log('📦 Board inventaire rafraîchi (boutons à jour)')).catch(() => {});
   _installerPanelAgenda(guild).then(() => console.log('📅 Panneau agenda installé')).catch(() => {});
+  _setupComptaChannel(guild).then(() => console.log('💰 Salon comptabilité prêt')).catch(() => {});
+  _majPanneauxRdvClient(guild).then(() => console.log('📨 Panneaux RDV client à jour')).catch(() => {});
+  checkAutoPatchNote(guild).catch(() => {});
   _verrouillerVocalRP(guild).then(() => console.log('🔇 Salon vocal RP verrouillé (parole bloquée)')).catch(() => {});
   // Exemples contrats & opérations
   _exempleContratForum(guild).then(() => console.log('📜 Exemple contrat posté')).catch(() => {});
@@ -5366,7 +5348,7 @@ async function buildMembresDiscordMap(guild) {
 
 async function _handleVersion(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const BOT_VERSION = '6.3 (23 juin — fix boucle planning + patch note 6.3)'; const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
+  const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
   let notionOk = false;
   try { const r = await fetch('https://api.notion.com/v1/users/me', { headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28' } }); notionOk = r.ok; } catch {}
   const db = loadDB();
@@ -7367,6 +7349,97 @@ async function setupPlansFormat(guild) {
     await ch.send({ embeds: [new EmbedBuilder().setColor(0x8B5A2A).setTitle('🗺️ PLANS TACTIQUES — IWC').setDescription(['*Partagez vos plans et cartes tactiques ici.*', '', '**Format recommandé :**', '```', '━━━━━━━━━━━━━━━━━━━━━━━━', 'PLAN TACTIQUE', '━━━━━━━━━━━━━━━━━━━━━━━━', 'OPÉRATION: ', 'LIEU: ', 'OBJECTIF: ', 'POINT DE RASSEMBLEMENT: ', 'PLAN D\'ATTAQUE: ', 'PLAN DE REPLI: ', 'NOTES: ', '━━━━━━━━━━━━━━━━━━━━━━━━', '```'].join('\n')).setFooter({ text: 'IWC • Plans tactiques' })] });
     console.log('✅ Format plans posté');
   } catch (e) { console.log('❌ setupPlansFormat:', e.message); }
+}
+
+// Crée (au besoin) le salon #comptabilité (Direction) et y installe le panneau compta
+async function _setupComptaChannel(guild) {
+  try {
+    if (!comptabilite.installerPanel) return;
+    // Si un panneau compta existe déjà quelque part, on le rafraîchit là-bas (pas de nouveau salon)
+    const ref = loadDB().comptaPanel;
+    if (ref?.channelId) { const ex = await guild.channels.fetch(ref.channelId).catch(() => null); if (ex) { await comptabilite.installerPanel(guild, ex); return; } }
+    // Sinon : trouver un salon compta existant, ou en créer un sous la catégorie Direction (perms de #tableau-de-bord)
+    let ch = guild.channels.cache.find(c => c.type === 0 && /comptabilit|・compta|^compta/i.test(c.name || ''));
+    if (!ch) {
+      const refCh = guild.channels.cache.find(c => c.type === 0 && /tableau.?de.?bord/i.test(c.name || ''));
+      const overwrites = refCh ? [...refCh.permissionOverwrites.cache.values()].map(o => ({ id: o.id, allow: o.allow.bitfield, deny: o.deny.bitfield })) : undefined;
+      ch = await guild.channels.create({ name: '💰・comptabilité', type: 0, parent: refCh?.parentId || null, topic: '💰 Comptabilité : bilan en direct, encaissements, captures de paiement.', permissionOverwrites: overwrites }).catch(() => null);
+    }
+    if (ch) await comptabilite.installerPanel(guild, ch).catch(() => {});
+  } catch (e) { console.log('⚠️ _setupComptaChannel:', e.message); }
+}
+
+// Panneau « Contacter la compagnie » (message libre) — builder réutilisable
+function _rdvClientPayload() {
+  const embed = new EmbedBuilder()
+    .setColor(0xC8A45C)
+    .setTitle('🤠  IRON WOLF COMPANY  🐺')
+    .setDescription([
+      '```',
+      '╔═══════════════════════════════╗',
+      '║      ✉  NOUS CONTACTER  ✉      ║',
+      '╚═══════════════════════════════╝',
+      '```',
+      '*Un besoin ? Protection, escorte, enquête, négociation, contrat… ou une affaire plus discrète ?*',
+      '',
+      '📨 **Contactez la compagnie** en cliquant ci-dessous.',
+      'Expliquez-nous votre demande **avec vos propres mots** — votre affaire, vos conditions, ce que vous cherchez.',
+      'La Direction lit chaque message et **vous répond en personne**, en toute discrétion.',
+      '',
+      '*(Pour réserver directement une prestation avec un créneau, utilisez plutôt le bouton « 🤝 Besoin de nos services » du panneau juste en dessous.)*',
+      '',
+      '— *« La force est dans l\'ombre. »*',
+    ].join('\n'))
+    .setFooter({ text: 'Iron Wolf Company · Bureau de Saint-Denis' });
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('rdvclient_demande').setLabel('Contacter la compagnie').setEmoji('📨').setStyle(ButtonStyle.Primary),
+  );
+  return { embeds: [embed], components: [row] };
+}
+
+// Met à jour EN PLACE les panneaux du salon rendez-vous-client (nouveaux textes/boutons)
+async function _majPanneauxRdvClient(guild) {
+  try {
+    const ch = guild.channels.cache.get('1512171267560702013'); if (!ch?.messages) return;
+    const me = guild.client.user.id;
+    const msgs = await ch.messages.fetch({ limit: 30 }).catch(() => null); if (!msgs) return;
+    const aBouton = (m, id) => m.components?.some(r => r.components?.some(c => c.customId === id));
+    const tele = [...msgs.values()].find(m => m.author.id === me && aBouton(m, 'rdvclient_demande'));
+    const book = [...msgs.values()].find(m => m.author.id === me && aBouton(m, 'rdvp_book'));
+    if (tele) await tele.edit(_rdvClientPayload()).catch(() => {});
+    if (book && rdvplus.panelPayload) await book.edit(rdvplus.panelPayload()).catch(() => {});
+  } catch (e) { console.log('⚠️ _majPanneauxRdvClient:', e.message); }
+}
+
+// Patch notes AUTOMATIQUES : on accumule chaque nouvelle version vue ; à partir de 5, on publie un récap
+async function checkAutoPatchNote(guild) {
+  try {
+    const db = loadDB();
+    db.patchSeen = db.patchSeen || []; db.patchPending = db.patchPending || [];
+    if (!db.patchSeen.includes(BOT_VERSION)) {
+      db.patchSeen.push(BOT_VERSION); if (db.patchSeen.length > 60) db.patchSeen = db.patchSeen.slice(-60);
+      const ver = (BOT_VERSION.match(/^([\d.]+)/) || [])[1] || '';
+      const desc = (BOT_VERSION.match(/—\s*(.+?)\)\s*$/) || [])[1] || BOT_VERSION;
+      db.patchPending.push({ ver, desc, at: Date.now() });
+      saveDB(db);
+    }
+    if (db.patchPending.length >= 5) {
+      const ch = getChById(guild, 'PATCH_NOTE', 'patch-note', 'patch'); if (!ch?.send) return;
+      const lignes = db.patchPending.map(p => `→ **v${p.ver}** — ${p.desc}`).join('\n').slice(0, 1024);
+      const e = new EmbedBuilder().setColor(0xC9A227)
+        .setAuthor({ name: 'Iron Wolf Company · IWC Setup', iconURL: guild.iconURL() || undefined })
+        .setTitle('🐺 IWC Bot — Notes de mise à jour')
+        .setDescription('*Récapitulatif des dernières améliorations du bot.*')
+        .addFields({ name: '✨ Nouveautés & améliorations', value: lignes })
+        .setFooter({ text: `IWC Bot v${db.patchPending[db.patchPending.length - 1].ver} · La force est dans l'ombre.` })
+        .setTimestamp();
+      await ch.send({ embeds: [e] }).catch(() => {});
+      db.patchHistory = (db.patchHistory || []).concat(db.patchPending).slice(-200);
+      db.patchPending = [];
+      saveDB(db);
+      console.log('📝 Patch note automatique publié');
+    }
+  } catch (e) { console.log('⚠️ checkAutoPatchNote:', e.message); }
 }
 
 async function setupPlanningFormat(guild) {
