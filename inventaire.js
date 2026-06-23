@@ -748,6 +748,19 @@ async function routeInteraction(interaction) {
   }
 }
 
+// Garde UN SEUL récap « Coffre mis à jour » dans le salon : retire les récaps précédents du bot.
+async function _purgerRecapsPrecedents(channel, botId) {
+  try {
+    if (!channel?.messages?.fetch) return;
+    const msgs = await channel.messages.fetch({ limit: 30 }).catch(() => null);
+    if (!msgs) return;
+    for (const m of msgs.values()) {
+      if (m.author?.id === botId && (m.embeds?.[0]?.title || '').includes('Coffre mis à jour')) {
+        await m.delete().catch(() => {});
+      }
+    }
+  } catch {}
+}
 // Garde UNE SEULE photo dans le salon du coffre : supprime la photo précédemment suivie.
 async function _purgerPhotoPrecedente(ch, inv, saufId) {
   try {
@@ -780,6 +793,8 @@ async function onMessage(message) {
     // Mise à jour DIRECTE : le coffre devient exactement la photo (pas d'étape de proposition).
     const lignes = await _majParPhoto(message.client, inv, db, items, message.author.id);
     await message.react("✅").catch(() => {});
+    // Un seul « Coffre mis à jour » : on retire les récaps précédents avant de poster le nouveau
+    await _purgerRecapsPrecedents(message.channel, message.client.user.id);
     await message.channel.send({ embeds: [_recapEmbed('replace', lignes)], allowedMentions: { parse: [] } }).catch(() => {});
     return true;
   } catch { return false; }

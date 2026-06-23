@@ -8503,27 +8503,30 @@ function _buildCommencerIci() {
     .setDescription([
       'Heureux de t\'accueillir à l\'Iron Wolf Company ! 🐺',
       '',
-      '**Ce Discord est l\'antichambre de nos affaires** : on y vient pour **faire des contrats** avec nous (escortes, protection, récupérations…) et pour **nous contacter / prendre rendez-vous**. 👉 Tout ça se passe dans <#1512171267560702013>.',
-      '',
-      'Voici comment démarrer en **4 étapes** :',
-      '',
-      '**1️⃣ Définis ton pseudo RP**',
-      'Clique sur **✏️ Définir mon pseudo RP** (bouton ci-dessous) : ton pseudo Discord prendra le nom de ton personnage. C\'est la base du RP.',
-      '',
-      '**2️⃣ Lis et valide le règlement**',
-      'Va dans le salon <#1511135557143629926>, lis-le, puis réagis avec ✅ sur le message de validation. C\'est obligatoire pour accéder au serveur.',
-      '',
-      '**3️⃣ Utilise le menu principal**',
-      'Tout se fait avec des boutons dans le salon du **menu** — pas besoin de retenir des commandes. Profil, RDV, absences, contrats... tout est là.',
-      '',
-      '**4️⃣ Présente-toi et lance-toi**',
-      'Si tu veux nous rejoindre officiellement, clique sur **Candidature** dans le salon de recrutement. La Direction te recontactera.',
-      '',
-      '**📞 Besoin de nos services / d\'un rendez-vous ?**',
-      'Va dans <#1512171267560702013> et clique sur **« ✉ Envoyer un télégramme »** pour exposer ta demande **ou prendre rendez-vous** (escorte, protection, contrat…). La Direction te répond directement.',
-      '',
-      '*Une question ? Clique sur ❓ Toutes les commandes dans le menu, ou demande à un membre du staff.*',
+      '**Ce Discord est l\'antichambre de nos affaires** : on y vient pour **faire des contrats** avec nous (escortes, protection, récupérations…) et pour **nous contacter / prendre rendez-vous**.',
     ].join('\n'))
+    .addFields(
+      {
+        name: '🤝 BESOIN DE NOS SERVICES / D\'UN RENDEZ-VOUS ?',
+        value: '➡️ Va dans <#1512171267560702013> et clique sur **« ✉ Envoyer un télégramme »** pour **exposer ta demande ou prendre rendez-vous** (escorte, protection, contrat…).\n**La Direction te répond directement.**',
+        inline: false,
+      },
+      {
+        name: '❓ UNE QUESTION ?',
+        value: 'Clique sur **❓ Toutes les commandes** dans le menu, ou demande à un membre du **staff**.',
+        inline: false,
+      },
+      {
+        name: '🚀 Bien démarrer en 4 étapes',
+        value: [
+          '**1️⃣ Pseudo RP** — clique sur **✏️ Définir mon pseudo RP** (ci-dessous).',
+          '**2️⃣ Règlement** — dans <#1511135557143629926>, lis et réagis ✅ (obligatoire).',
+          '**3️⃣ Menu principal** — tout se fait avec des boutons (profil, RDV, absences, contrats…).',
+          '**4️⃣ Nous rejoindre** — bouton **Candidature** dans le salon recrutement. La Direction te recontactera.',
+        ].join('\n'),
+        inline: false,
+      },
+    )
     .setFooter({ text: 'Iron Wolf Company • 1895' });
 }
 
