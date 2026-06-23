@@ -406,13 +406,14 @@ async function routeInteraction(interaction) {
       if (!draft) { await interaction.reply({ content: '⌛ Examen expiré — relance le test (bouton 🧪).', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const modal = new ModalBuilder().setCustomId(`med_apt_modal2::${id}`).setTitle('🧪 Test d\'aptitude (2/2)');
       modal.addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('corps').setLabel('Physique (force · endurance · coordination)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue(APT_DEF.corps)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('sensoriel').setLabel('Sensoriel (vue · ouïe · odorat · réactivité)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue(APT_DEF.sensoriel)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('sante').setLabel('Santé (constitution · respiration · pouls)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue(APT_DEF.sante)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('habitudes').setLabel('Habitudes · antécédents · maladies · allergies').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue(APT_DEF.habitudes)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('intellect').setLabel('Intellect (lecture · écriture · calcul)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue(APT_DEF.intellect)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('corps').setLabel(_clip('Physique (force, endurance, coordination)', 45)).setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue(_clip(APT_DEF.corps, 300))),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('sensoriel').setLabel(_clip('Sensoriel (vue, ouïe, odorat, réactivité)', 45)).setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue(_clip(APT_DEF.sensoriel, 300))),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('sante').setLabel(_clip('Santé (constitution, respiration, pouls)', 45)).setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue(_clip(APT_DEF.sante, 300))),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('habitudes').setLabel(_clip('Habitudes, antécédents, allergies', 45)).setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue(_clip(APT_DEF.habitudes, 300))),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('intellect').setLabel(_clip('Intellect (lecture, écriture, calcul)', 45)).setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue(_clip(APT_DEF.intellect, 300))),
       );
-      await interaction.showModal(modal).catch(() => {});
+      try { await interaction.showModal(modal); }
+      catch (e) { console.log('❌ medical med_apt_next showModal:', e.message); await interaction.reply({ content: '⚠️ Impossible d\'ouvrir l\'étape 2. Réessaie le test.', flags: MessageFlags.Ephemeral }).catch(() => {}); }
       return true;
     }
     // Étape 2 soumise → génération + publication du test
