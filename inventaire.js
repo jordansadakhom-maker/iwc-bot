@@ -82,9 +82,27 @@ function _boardButtons() {
   );
 }
 
+// Supprime les tableaux « COFFRE COMMUN » en DOUBLE : on n'en garde qu'un seul
+// (celui de référence si possible). Évite qu'un vieux tableau périmé reste affiché.
+async function _dedupeBoards(client, inv) {
+  try {
+    if (!inv.channelId) return;
+    const ch = await client.channels.fetch(inv.channelId).catch(() => null);
+    if (!ch?.messages) return;
+    const recent = await ch.messages.fetch({ limit: 50 }).catch(() => null);
+    if (!recent) return;
+    const boards = [...recent.values()].filter(m => m.author.id === client.user.id && (m.embeds?.[0]?.title || '').includes('COFFRE COMMUN'));
+    if (boards.length <= 1) { if (boards[0] && inv.panneau !== boards[0].id) { inv.panneau = boards[0].id; try { const d = loadDB(); if (d.inventaire) { d.inventaire.panneau = boards[0].id; saveDB(d); } } catch {} } return; }
+    const keep = boards.find(m => m.id === inv.panneau) || boards[0];
+    for (const m of boards) { if (m.id !== keep.id) await m.delete().catch(() => {}); }
+    if (inv.panneau !== keep.id) { inv.panneau = keep.id; try { const d = loadDB(); if (d.inventaire) { d.inventaire.panneau = keep.id; saveDB(d); } } catch {} }
+  } catch {}
+}
 async function _refreshBoard(client, inv) {
   try {
-    if (!inv.channelId || !inv.panneau) return;
+    if (!inv.channelId) return;
+    await _dedupeBoards(client, inv); // retire les tableaux en double avant de rafraîchir
+    if (!inv.panneau) return;
     const ch = await client.channels.fetch(inv.channelId).catch(() => null);
     if (!ch) return;
     const msg = await ch.messages.fetch(inv.panneau).catch(() => null);
@@ -102,6 +120,7 @@ async function rafraichirBoardDemarrage(client) {
     if (!inv || !inv.channelId) return;
     const ch = await client.channels.fetch(inv.channelId).catch(() => null);
     if (!ch?.send) return;
+    await _dedupeBoards(client, inv); // supprime les tableaux en double au démarrage
     let msg = inv.panneau ? await ch.messages.fetch(inv.panneau).catch(() => null) : null;
     if (!msg) {
       const recent = await ch.messages.fetch({ limit: 30 }).catch(() => null);
@@ -684,6 +703,8 @@ async function onMessage(message) {
     if (!imgs.length) return false;
     const inv = _ensure(db);
     await message.react("🔍").catch(() => {});
+    // Nettoie d'éventuels tableaux du coffre en double avant de traiter la photo
+    await _dedupeBoards(message.client, inv);
     // Une seule photo dans le salon : on supprime la précédente et ce dépôt devient la photo courante
     await _purgerPhotoPrecedente(message.channel, inv, message.id);
     inv.photoMsg = message.id; persist(db);
