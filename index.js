@@ -1662,6 +1662,24 @@ async function checkAgenda(guild) {
   if (changed) saveDB(db);
 }
 
+// Efface automatiquement les RDV (modal simple) dont la date/heure est passée, pour garder #agenda propre
+async function nettoyerAgendaPasses(guild) {
+  try {
+    const db = loadDB();
+    if (!Array.isArray(db.agendaPosts) || !db.agendaPosts.length) return;
+    const now = Date.now();
+    const restants = [];
+    let changed = false;
+    for (const p of db.agendaPosts) {
+      if (!p || !p.expireAt || now < p.expireAt) { restants.push(p); continue; }
+      const ch = await guild.channels.fetch(p.channelId).catch(() => null);
+      if (ch) { const m = await ch.messages.fetch(p.messageId).catch(() => null); if (m) await m.delete().catch(() => {}); }
+      changed = true; // post arrivé à échéance → retiré de la liste
+    }
+    if (changed) { db.agendaPosts = restants; saveDB(db); }
+  } catch (e) { console.log('❌ nettoyerAgendaPasses:', e.message); }
+}
+
 async function postDailyAgenda(guild) {
   const ch = getChById(guild, 'AGENDA', 'agenda') || getChById(guild, 'PLANNING', 'planning'); if (!ch) return;
   const appts = await notionQueryAgenda(); const today = new Date().toISOString().split('T')[0];
@@ -2055,6 +2073,10 @@ Si la transcription est incompréhensible ou vide, mets resume="(inaudible)".`;
 }
 
 client.on('messageCreate', async message => {
+  // Nettoyage : les messages système « X a épinglé un message » n'apportent rien → on les retire
+  try {
+    if (message.type === 6 /* ChannelPinnedMessage */) { await message.delete().catch(() => {}); return; }
+  } catch {}
   // Conversations sur télégrammes : relais MP ↔ fil (avant tout le reste)
   try { if (await telegramme.onMessage?.(message)) return; } catch {}
   try { if (await inventaire.onMessage?.(message)) return; } catch {}
@@ -3871,6 +3893,7 @@ client.once('clientReady', async () => {
     for (const g of client.guilds.cache.values()) await checkAgenda(g).catch(() => {});
     for (const g of client.guilds.cache.values()) await rdvplus.checkRappelsClients?.(g).catch(() => {});
     for (const g of client.guilds.cache.values()) await checkRappelsRdvClients(g).catch(() => {});
+    for (const g of client.guilds.cache.values()) await nettoyerAgendaPasses(g).catch(() => {});
   });
   // (Import Notion automatique RETIRÉ : il réimportait chaque minute les contrats supprimés après un reset.
   //  Les contrats viennent maintenant de la base locale sauvegardée + import manuel via /import-contrats.)
@@ -5862,9 +5885,20 @@ async function _validerModalAgendaSimple(interaction) {
   const pingRole    = roleExiste ? `<@&${roleIdCible}>` : '';
   // Tous les RDV vont dans le même salon #agenda (plus de séparation légal/illégal)
   const agendaCh = getAgendaCh(interaction.guild);
-  if (agendaCh) await agendaCh.send({ content: `${pingRole ? pingRole + ' — ' : ''}📅 **${titre}** · ${heure} à ${lieu}`, embeds: [embed], allowedMentions: { parse: [], roles: roleExiste ? [roleIdCible] : [] } }).catch(() => {});
+  const rdvMsg = agendaCh ? await agendaCh.send({ content: `${pingRole ? pingRole + ' — ' : ''}📅 **${titre}** · ${heure} à ${lieu}`, embeds: [embed], allowedMentions: { parse: [], roles: roleExiste ? [roleIdCible] : [] } }).catch(() => null) : null;
+  // On mémorise le post pour pouvoir l'effacer automatiquement une fois la date/heure passée (salon propre)
+  if (rdvMsg) {
+    const hm = (heure || '').match(/(\d{1,2})\s*[h:]\s*(\d{0,2})/i);
+    const dateRdv = new Date(dateISO + 'T' + (hm ? `${String(hm[1]).padStart(2, '0')}:${(hm[2] || '00').padStart(2, '0')}` : '23:59') + ':00');
+    const expireAt = isNaN(dateRdv.getTime()) ? (Date.now() + 30 * 86400000) : (dateRdv.getTime() + 90 * 60000); // 1h30 après l'heure du RDV
+    if (!Array.isArray(db.agendaPosts)) db.agendaPosts = [];
+    db.agendaPosts.push({ id: rdvId, channelId: agendaCh.id, messageId: rdvMsg.id, expireAt });
+    saveDB(db);
+  }
   const salonLabel = '#agenda';
   const confirmMsg = await interaction.editReply({ content: photoUrl ? '✅ RDV créé avec photo de repérage !' : `✅ RDV créé et posté dans ${salonLabel} !`, embeds: [], components: [] });
+  // Confirmation éphémère : on la retire au bout de quelques secondes pour ne pas encombrer le salon
+  setTimeout(() => { interaction.deleteReply().catch(() => {}); }, 12000);
   // Supprimer le message intermédiaire "Nouveau RDV — Étape 1/2" dans #contrats
   try {
     const ch = interaction.channel;
@@ -7259,6 +7293,9 @@ global.envoyerDMRecap = envoyerDMRecap;
 global.getChById = getChById;
 global.sendLog = sendLog;
 global.isDirection = isDirection;
+// Rafraîchissement croisé wanted ↔ opération (liaison dans les deux sens)
+global.refreshOp = (guild, opId) => operations.refreshOpById?.(guild, opId);
+global.refreshAvis = (guild, wid) => traque.refreshAvisById?.(guild, wid);
 
 // Créer la DB Informateurs dans Notion si elle n'existe pas
 async function _initDBInformateursNotion(guild) {

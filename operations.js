@@ -166,6 +166,9 @@ function _embedOrdre(op) {
     )
     .setFooter({ text: `Réf. ${op.id} • Iron Wolf Company` })
     .setTimestamp();
+  if ((op.linkedWanteds || []).length) {
+    e.addFields({ name: '🔗 Avis de recherche liés', value: op.linkedWanteds.map(w => `• **${w.cible}** \`${w.id}\``).join('\n').slice(0, 1000), inline: false });
+  }
   return e;
 }
 function _boutons(op) {
@@ -180,8 +183,28 @@ function _boutons(op) {
   );
   const rowM = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`op_modifier_${op.id}`).setLabel('✏️ Modifier').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`op_lierwanted_${op.id}`).setLabel('🔗 Lier un avis de recherche').setStyle(ButtonStyle.Secondary),
   );
   return [rowP, rowG, rowM];
+}
+// Lien op ↔ avis de recherche (objets simples partagés dans la même DB)
+function _addLink(t, op) {
+  if (!t.linkedOps) t.linkedOps = [];
+  if (!t.linkedOps.some(x => x.id === op.id)) t.linkedOps.push({ id: op.id, name: op.name });
+  if (!op.linkedWanteds) op.linkedWanteds = [];
+  if (!op.linkedWanteds.some(x => x.id === t.id)) op.linkedWanteds.push({ id: t.id, cible: t.cible });
+}
+// Réaffiche l'ordre d'opération (utilisé après un lien créé depuis le côté wanted)
+async function refreshOpById(guild, opId) {
+  try {
+    const db = loadDB();
+    const op = (db.operations || []).find(o => o.id === opId);
+    if (!op || !op.channelId || !op.msgId) return;
+    const ch = await guild.channels.fetch(op.channelId).catch(() => null);
+    if (!ch) return;
+    const msg = await ch.messages.fetch(op.msgId).catch(() => null);
+    if (msg) await msg.edit({ embeds: [_embedOrdre(op)], components: _boutons(op) }).catch(() => {});
+  } catch {}
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -251,6 +274,35 @@ async function routeInteraction(interaction) {
         await interaction.reply({ content: '🎯 **Nouvelle opération** — étape 1/2 : le type de mission.', components: [new ActionRowBuilder().addComponents(_menuType())], flags: MessageFlags.Ephemeral }).catch(() => {});
         return true;
       }
+    }
+
+    // ── Lier un avis de recherche à cette opération ──
+    if (interaction.isButton?.() && interaction.customId?.startsWith('op_lierwanted_')) {
+      if (!isDirection(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const opId = interaction.customId.replace('op_lierwanted_', '');
+      const db = loadDB();
+      const op = (db.operations || []).find(o => o.id === opId);
+      if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const actifs = (db.traques || []).filter(t => ['chasse', 'reperee'].includes(t.status)).filter(t => !(op.linkedWanteds || []).some(w => w.id === t.id));
+      if (!actifs.length) { await interaction.reply({ content: 'ℹ️ Aucun avis de recherche actif à lier.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const sel = new StringSelectMenuBuilder().setCustomId(`op_lierwanted_sel::${opId}`).setPlaceholder('Choisis l\'avis de recherche à lier…')
+        .addOptions(actifs.slice(0, 25).map(t => ({ label: `${t.cible}`.slice(0, 100), value: t.id, description: `Prime ${t.prime || '—'} · ${t.position || '—'}`.slice(0, 100) })));
+      await interaction.reply({ content: `🔗 Lier un avis de recherche à l'opération **${op.name}** :`, components: [new ActionRowBuilder().addComponents(sel)], flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+    if (interaction.isStringSelectMenu?.() && interaction.customId?.startsWith('op_lierwanted_sel::')) {
+      const opId = interaction.customId.split('::')[1];
+      const wid = interaction.values[0];
+      const db = loadDB();
+      const op = (db.operations || []).find(o => o.id === opId);
+      const t = (db.traques || []).find(x => x.id === wid);
+      if (!op || !t) { await interaction.update({ content: '❌ Lien impossible (élément introuvable).', components: [] }).catch(() => {}); return true; }
+      _addLink(t, op);
+      _persist(db);
+      try { await refreshOpById(interaction.guild, opId); } catch {}
+      try { if (typeof global.refreshAvis === 'function') await global.refreshAvis(interaction.guild, wid); } catch {}
+      await interaction.update({ content: `✅ Avis **${t.cible}** (\`${t.id}\`) lié à l'opération **${op.name}**.`, components: [] }).catch(() => {});
+      return true;
     }
 
     // Bouton du panneau
@@ -383,4 +435,4 @@ async function routeInteraction(interaction) {
   return false;
 }
 
-module.exports = { init, routeInteraction, postPanel, operationsCommands };
+module.exports = { init, routeInteraction, postPanel, operationsCommands, refreshOpById };
