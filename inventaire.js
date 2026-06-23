@@ -463,17 +463,17 @@ async function routeInteraction(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       const db = loadDB(); const inv = _ensure(db);
       inv.channelId = interaction.channelId;
-      // Réutilise le tableau déjà présent (épingles + récents) et supprime les doublons ; sinon en pose un
-      let m = await _dedupeBoards(interaction.client, inv);
-      if (m) { await m.edit({ embeds: [_boardEmbed(inv)], components: [_boardButtons()] }).catch(() => {}); try { if (!m.pinned) await m.pin(); } catch {} }
-      else {
-        m = await interaction.channel.send({ embeds: [_boardEmbed(inv)], components: [_boardButtons()] }).catch(() => null);
-        if (!m) { await interaction.editReply({ content: "❌ Je n'ai pas pu poster ici (vérifie mes permissions d'écriture dans ce salon)." }).catch(() => {}); return true; }
-        inv.panneau = m.id; try { await m.pin(); } catch {}
-      }
-      if (!inv.threadId) { try { const th = await m.startThread({ name: "📦 Journal du coffre", autoArchiveDuration: 10080 }); inv.threadId = th.id; await th.send({ content: "📦 Ici s'inscrivent **tous les mouvements** du coffre (ajouts, retraits, lectures, alertes). Le salon reste propre." }).catch(() => {}); } catch {} }
+      // « Installer » = repartir PROPRE : on supprime TOUS les anciens tableaux (même un vieux design)
+      // et on en pose un NEUF, avec un fil Journal neuf.
+      const olds = await _trouverTableaux(interaction.client, interaction.channel);
+      for (const o of olds) await o.delete().catch(() => {});
+      inv.panneau = null; inv.threadId = null;
+      const m = await interaction.channel.send({ embeds: [_boardEmbed(inv)], components: [_boardButtons()] }).catch(() => null);
+      if (!m) { await interaction.editReply({ content: "❌ Je n'ai pas pu poster ici (vérifie mes permissions d'écriture dans ce salon)." }).catch(() => {}); return true; }
+      inv.panneau = m.id; try { await m.pin(); } catch {}
+      try { const th = await m.startThread({ name: "📦 Journal du coffre", autoArchiveDuration: 10080 }); inv.threadId = th.id; await th.send({ content: "📦 Ici s'inscrivent **tous les mouvements** du coffre (ajouts, retraits, lectures, alertes). Le salon reste propre." }).catch(() => {}); } catch {}
       persist(db);
-      await interaction.editReply({ content: "✅ Coffre installé : tableau épinglé + fil « 📦 Journal du coffre ». Gère via les boutons (➕ Ajouter / ➖ Retirer / ✏️ Corriger), /inventaire-photo (ou glisse des images), /inventaire-seuil, /inventaire-export, /inventaire-qui." }).catch(() => {});
+      await interaction.editReply({ content: "✅ **Nouveau** tableau du coffre installé (les anciens ont été retirés) : tableau épinglé + fil « 📦 Journal du coffre ». Gère via les boutons (➕ Ajouter / ➖ Retirer / ✏️ Corriger), ou glisse une **photo** du coffre pour le mettre à jour." }).catch(() => {});
       return true;
     }
 
