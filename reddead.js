@@ -23,9 +23,11 @@ const GEMINI_MODELS = [process.env.GEMINI_IMAGE_MODEL, 'gemini-2.5-flash-image']
   .filter((m, i, a) => m && a.indexOf(m) === i);
 
 const PROMPT_FARWEST = [
-  "Transforme cette capture d'écran du jeu vidéo Red Dead Redemption en une véritable et magnifique photographie ancienne du Far West américain (frontière, fin du XIXe siècle, vers 1890).",
-  "Garde EXACTEMENT la même scène : mêmes personnages, mêmes poses, même décor, même cadrage et même composition.",
-  "Rends-la comme un authentique cliché d'époque, photoréaliste et cinématographique : tons chauds sépia/ambre, grain de pellicule argentique, léger vignettage, lumière naturelle d'époque, poussière et atmosphère, à la manière d'une photo de l'Ouest des années 1890 ou d'un plan de film western.",
+  "Transforme cette capture d'écran du jeu vidéo Red Dead Redemption en une image ULTRA-RÉALISTE et CINÉMATOGRAPHIQUE, comme un plan de film western haut de gamme ou une photo photoréaliste.",
+  "Garde EXACTEMENT la même scène : mêmes personnages, mêmes visages, mêmes poses, même décor, même cadrage et même composition.",
+  "Style recherché : éclairage dramatique en clair-obscur, forte profondeur, contraste marqué entre une lumière chaude et dorée (bougie, lanterne, feu, flamme) et une nuit froide et bleutée (clair de lune).",
+  "Ambiance atmosphérique : brume, fumée, poussière en suspension, halos de lumière, ombres profondes et riches, hautes lumières chaudes et lumineuses.",
+  "Rendu photoréaliste : peau, barbe, tissus et matières très détaillés, grain de cinéma subtil, étalonnage colorimétrique digne d'un film (couleurs riches, noirs profonds), netteté élevée et léger flou d'arrière-plan (profondeur de champ).",
   "Retire impérativement tous les éléments d'interface du jeu : ATH/HUD, textes à l'écran, menus, mini-carte, icônes, jauges, sous-titres, filigranes.",
   "Ne réponds qu'avec l'image éditée, sans texte.",
 ].join(' ');
@@ -145,7 +147,7 @@ async function onMessage(message) {
     const e = new EmbedBuilder()
       .setColor(0x8B5A2B)
       .setTitle('🤠 Cliché du Far West')
-      .setDescription("*Capture repeinte par l'IA, façon vieille photographie de l'Ouest.*")
+      .setDescription("*Capture sublimée par l'IA — rendu cinématographique de l'Ouest.*")
       .setImage('attachment://farwest_0.png')
       .setFooter({ text: `Salon Far West • Iron Wolf Company • partagé par ${auteur}` })
       .setTimestamp();
