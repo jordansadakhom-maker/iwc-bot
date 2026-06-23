@@ -27,9 +27,25 @@ function peutGerer(member) { try { return !!member?.roles?.cache?.some(r => r.id
 function _ch(guild, id) { try { return guild.channels.cache.get(id) || null; } catch { return null; } }
 function _dateFR(ts) { try { return new Date(ts).toLocaleDateString('fr-FR'); } catch { return ''; } }
 
-// Brouillons du test d'aptitude entre l'étape 1 et l'étape 2 (clé : `${id}::${userId}`)
+// Brouillons du test d'aptitude entre l'étape 1 et l'étape 2 (clé : `${id}::${userId}`).
+// Persistés EN BASE → ne périment jamais et survivent aux redémarrages du bot (plus de « examen expiré »).
 const _aptDrafts = new Map();
-function _aptCleanup() { const now = Date.now(); for (const [k, v] of _aptDrafts) if (now - (v.at || 0) > 3600000) _aptDrafts.delete(k); }
+function _aptSet(key, val) {
+  _aptDrafts.set(key, val);
+  try {
+    const db = loadDB(); db.aptDrafts = db.aptDrafts || {}; db.aptDrafts[key] = val;
+    const keys = Object.keys(db.aptDrafts); if (keys.length > 200) delete db.aptDrafts[keys[0]]; // garde-fou anti-fuite (pas d'expiration temporelle)
+    saveDB(db);
+  } catch {}
+}
+function _aptGet(key) {
+  if (_aptDrafts.has(key)) return _aptDrafts.get(key);
+  try { const db = loadDB(); return db.aptDrafts?.[key] || null; } catch { return null; }
+}
+function _aptDel(key) {
+  _aptDrafts.delete(key);
+  try { const db = loadDB(); if (db.aptDrafts && db.aptDrafts[key]) { delete db.aptDrafts[key]; saveDB(db); } } catch {}
+}
 // Valeurs par défaut (patient en bonne santé) — le médecin n'a qu'à ajuster ce qui cloche.
 const APT_DEF = {
   apparence: "Posture droite · allure soignée · esprit clair et présent",
@@ -532,9 +548,8 @@ async function routeInteraction(interaction) {
     // Étape 1 → on enregistre, puis on propose l'étape 2 (examen détaillé)
     if (interaction.isModalSubmit?.() && cid.startsWith('med_apt_modal::')) {
       if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
-      _aptCleanup();
       const id = cid.split('::')[1];
-      _aptDrafts.set(`${id}::${interaction.user.id}`, {
+      _aptSet(`${id}::${interaction.user.id}`, {
         patient: interaction.fields.getTextInputValue('patient').trim(),
         dateLieu: (interaction.fields.getTextInputValue('datelieu') || '').trim(),
         physique: (interaction.fields.getTextInputValue('physique') || '').trim(),
@@ -550,8 +565,7 @@ async function routeInteraction(interaction) {
     if (interaction.isButton?.() && cid.startsWith('med_apt_next::')) {
       if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const id = cid.split('::')[1];
-      const draft = _aptDrafts.get(`${id}::${interaction.user.id}`);
-      if (!draft) { await interaction.reply({ content: '⌛ Examen expiré — relance le test (bouton 🧪).', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      // Plus de péremption : on ouvre toujours l'étape 2 (le brouillon, persisté en base, est relu à la soumission).
       const modal = new ModalBuilder().setCustomId(`med_apt_modal2::${id}`).setTitle('🧪 Test d\'aptitude (2/2)');
       modal.addComponents(
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('corps').setLabel(_clip('Physique (force, endurance, coordination)', 45)).setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue(_clip(APT_DEF.corps, 300))),
@@ -569,8 +583,8 @@ async function routeInteraction(interaction) {
       if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const id = cid.split('::')[1];
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
-      const draft = _aptDrafts.get(`${id}::${interaction.user.id}`) || {};
-      _aptDrafts.delete(`${id}::${interaction.user.id}`);
+      const draft = _aptGet(`${id}::${interaction.user.id}`) || {};
+      _aptDel(`${id}::${interaction.user.id}`);
       const g = (k, def) => (interaction.fields.getTextInputValue(k) || '').trim() || def;
       const resume = [
         `Apparence & état général : ${draft.apparence || APT_DEF.apparence}`,
