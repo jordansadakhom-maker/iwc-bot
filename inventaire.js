@@ -86,8 +86,13 @@ function _boardButtons() {
 function _estTableau(m, clientUserId) {
   if (m.author?.id !== clientUserId) return false;
   const e = m.embeds?.[0]; if (!e) return false;
-  const title = e.title || ''; const footer = e.footer?.text || '';
-  return title.includes('COFFRE COMMUN') || footer.includes('Journal du coffre');
+  const title = e.title || '';
+  if (/Lecture de la capture/i.test(title)) return false; // ça, c'est une proposition de lecture, pas le tableau
+  const footer = e.footer?.text || '';
+  if (title.includes('COFFRE COMMUN') || footer.includes('Journal du coffre')) return true;
+  // Filet : un VIEUX tableau au titre différent est reconnu par ses champs caractéristiques
+  if (/coffre/i.test(title) && (e.fields || []).some(f => /Comment g[eé]rer le coffre|R[eé]capitulatif/i.test(f.name || ''))) return true;
+  return false;
 }
 // Retrouve TOUS les tableaux « COFFRE COMMUN » du salon, via les ÉPINGLES (fiable même si le
 // tableau a défilé loin) ET l'historique récent. En mode "deep", on remonte plus loin (jusqu'à
@@ -96,7 +101,7 @@ async function _trouverTableaux(client, ch, deep) {
   const found = new Map();
   try { const pins = await ch.messages.fetchPinned().catch(() => null); if (pins) for (const m of pins.values()) if (_estTableau(m, client.user.id)) found.set(m.id, m); } catch {}
   try {
-    let before; const pages = deep ? 3 : 1;
+    let before; const pages = deep ? 8 : 1;
     for (let i = 0; i < pages; i++) {
       const batch = await ch.messages.fetch({ limit: 100, before }).catch(() => null);
       if (!batch || !batch.size) break;
@@ -751,8 +756,8 @@ async function onMessage(message) {
     if (!imgs.length) return false;
     const inv = _ensure(db);
     await message.react("🔍").catch(() => {});
-    // Nettoie d'éventuels tableaux du coffre en double avant de traiter la photo
-    await _dedupeBoards(message.client, inv);
+    // Nettoie d'éventuels tableaux du coffre en double (scan profond) avant de traiter la photo
+    await _dedupeBoards(message.client, inv, true);
     // Une seule photo dans le salon : on supprime la précédente et ce dépôt devient la photo courante
     await _purgerPhotoPrecedente(message.channel, inv, message.id);
     inv.photoMsg = message.id; persist(db);
