@@ -506,6 +506,15 @@ async function cloturer(interaction, succes) {
   c.status = succes ? 'reussie' : 'echouee';
   c.closedAt = new Date().toISOString();
   c.clôturePar = db.members?.[interaction.user.id]?.name || interaction.user.username;
+  // Montant de la prime (best effort depuis le champ rémunération en texte libre)
+  const montant = succes ? (parseFloat(String(c.remuneration || '').replace(/[^0-9.,]/g, '').replace(',', '.')) || 0) : 0;
+  // 💰 Créditer le coffre commun UNE SEULE FOIS (anti-double-encaissement) — corrige la désync CA↔coffre
+  if (succes && montant > 0 && !c.remuVerseAuCoffre) {
+    if (typeof db.coffre !== 'number') db.coffre = 0;
+    db.coffre += montant;
+    c.remuVerseAuCoffre = montant;
+    c.honoreAt = new Date().toISOString();
+  }
   await interaction.update({ embeds: [buildContratEmbed(c)], components: [] }); // accusé de réception d'abord
   saveDB(db); _persistNow(); syncNotion(c, succes ? '✅ Réussie' : '💀 Échouée');
   await archiver(interaction.guild, c);
@@ -513,7 +522,6 @@ async function cloturer(interaction, succes) {
   if (succes) {
     try {
       const fact = require('./factures');
-      const montant = parseFloat(String(c.remuneration || '').replace(/[^0-9.,]/g, '').replace(',', '.')) || 0;
       await fact.creerFactureContrat?.(interaction.guild, c, { montant, par: c.clôturePar, parId: interaction.user.id });
     } catch (e) { console.log('⚠️ facture contrat Confrérie:', e.message); }
   }

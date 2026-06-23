@@ -326,25 +326,25 @@ async function archiverContratReponses(guild, contrat, statut, embed) {
       } catch {}
     }
     if (!thread) {
-      // Créer un thread sans message parent épinglé
-      try {
-        thread = await ch.threads.create({
-          name: threadName,
-          autoArchiveDuration: 10080,
-          type: 12, // PRIVATE_THREAD ou PUBLIC_THREAD selon le salon
-          reason: `Contrat ${contrat.id}`,
-        });
-      } catch {
-        // Fallback si threads.create non supporté → message + thread
-        const msg = await ch.send({ content: `📋 **${threadName}**` });
-        try { thread = await msg.startThread({ name: threadName, autoArchiveDuration: 10080 }); } catch {}
+      // Salon FORUM (type 15) → on crée un POST de forum (message obligatoire), pas un thread classique
+      if (ch.type === 15 && ch.threads?.create) {
+        const post = await ch.threads.create({ name: threadName, autoArchiveDuration: 10080, message: { embeds: [embed] } }).catch(() => null);
+        if (post) return; // l'embed est déjà dans le post du forum → terminé
+      } else {
+        // Salon texte → thread public sans message parent, sinon message + thread
+        try {
+          thread = await ch.threads.create({ name: threadName, autoArchiveDuration: 10080, type: 11, reason: `Contrat ${contrat.id}` });
+        } catch {
+          const msg = await ch.send({ content: `📋 **${threadName}**` }).catch(() => null);
+          if (msg) { try { thread = await msg.startThread({ name: threadName, autoArchiveDuration: 10080 }); } catch {} }
+        }
       }
     }
     if (thread) {
       await thread.send({ embeds: [embed] });
-    } else {
-      // Dernier fallback : envoyer directement dans le salon
-      await ch.send({ embeds: [embed] });
+    } else if (ch.type !== 15) {
+      // Dernier fallback (salon texte uniquement) : envoyer directement dans le salon
+      await ch.send({ embeds: [embed] }).catch(() => {});
     }
   } catch (e) { console.log('❌ archiverContratReponses error:', e.message); }
 }
@@ -588,7 +588,7 @@ async function archiverCandidatureNotion(cand, statut, validePar) {
 
 async function ajouterMembreNotion(cand, type) {
   if (!process.env.NOTION_TOKEN) return;
-  try { await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: NOTION_MEMBRES_DB }, properties: { 'Nom': { title: [{ text: { content: cand.nomPerso || '—' } }] }, 'Personnage': { rich_text: [{ text: { content: cand.nomPerso || '—' } }] }, "Date d'entrée": { date: { start: new Date().toISOString().split('T')[0] } }, 'Dernière activité': { date: { start: new Date().toISOString().split('T')[0] } }, 'Pôle': { select: { name: type === 'illegal' ? '🔪 Illégal' : '⚖️ Légal' } }, 'Rang': { select: { name: type === 'illegal' ? 'Loup Confirmé' : 'Recrue' } }, 'Statut': { select: { name: '✅ Actif' } }, 'Notes': { rich_text: [{ text: { content: `Accepté le ${fmtShort(new Date())}` } }] } } }) }); console.log(`✅ Registre Notion: ${cand.nomPerso} ajouté`); } catch (e) { console.log('❌ Registre Notion error:', e.message); }
+  try { await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: NOTION_MEMBRES_DB }, properties: { 'Nom': { title: [{ text: { content: cand.nomPerso || '—' } }] }, 'Personnage': { rich_text: [{ text: { content: cand.nomPerso || '—' } }] }, "Date d'entrée": { date: { start: new Date().toISOString().split('T')[0] } }, 'Dernière activité': { date: { start: new Date().toISOString().split('T')[0] } }, 'Pôle': { select: { name: type === 'illegal' ? '🔪 Illégal' : '⚖️ Légal' } }, 'Rang': { select: { name: type === 'illegal' ? 'Loup Confirmé' : 'Recrue' } }, 'Statut': { select: { name: '✅ Actif' } }, 'Discord ID': { rich_text: [{ text: { content: cand.userId || '—' } }] }, 'Notes': { rich_text: [{ text: { content: `Accepté le ${fmtShort(new Date())}` } }] } } }) }); console.log(`✅ Registre Notion: ${cand.nomPerso} ajouté`); } catch (e) { console.log('❌ Registre Notion error:', e.message); }
 }
 
 async function syncRegistreNotion(guild) {
@@ -1968,7 +1968,9 @@ client.on('messageReactionAdd', async (reaction, user) => {
     const title = reaction.message.embeds[0]?.title || ''; if (!title.includes('DOSSIER')) return;
     const isIllegal = title.includes('ILLÉGAL'); const isAccept = reaction.emoji.name === '✅';
     const nom = title.replace(/📁 \[.*?\] DOSSIER (LÉGAL|ILLÉGAL) — /, '').replace(/✅ ACCEPTÉ — /, '').trim();
-    const cand = (db.candidatures || []).find(c => c.nomPerso === nom && c.status === 'reçue'); if (!cand) return;
+    // Repérage fiable par ID du message (robuste aux homonymes / titres édités), repli par nom
+    const cand = (db.candidatures || []).find(c => c.dossierMsgId === reaction.message.id && c.status === 'reçue')
+              || (db.candidatures || []).find(c => c.nomPerso === nom && c.status === 'reçue'); if (!cand) return;
     // Seuls la Direction ET les Officiers de Terrain peuvent voter (isDirection inclut « Officier »)
     const voteur = await guild.members.fetch(user.id).catch(() => null);
     if (!voteur || !isDirection(voteur)) { try { await reaction.users.remove(user.id); } catch {} return; }
@@ -3252,6 +3254,7 @@ client.on('interactionCreate', async interaction => {
     if (dossierCh) {
       const embed = new EmbedBuilder().setColor(0x3B82F6).setTitle(`📁 [IRON WOLF COMPANY] DOSSIER LÉGAL — ${cand.nomPerso}`).setDescription(`> *"Chaque talent a sa place au sein de la Compagnie."*\n\nCandidature de <@${cand.userId}> (**${cand.username}**)\n**⚖️ TYPE : RECRUTEMENT LÉGAL**`).addFields({ name: '👤 Personnage', value: `**${cand.nomPerso}**, ${cand.agePerso}`, inline: true }, { name: '📅 Reçue le', value: fmtShort(new Date()), inline: true }, { name: '🆔 ID', value: `\`${cand.id}\``, inline: true }, { name: '💼 Métier', value: cand.metier }, { name: '📖 Background', value: cand.background.slice(0, 800) }, { name: '💡 Motivation', value: (cand.motivation || '—').slice(0, 500) }, { name: '🕐 Disponibilités', value: cand.dispos, inline: true }, { name: '📋 Statut', value: '🟡 En attente', inline: true }, { name: '\u200b', value: '**Réagissez :** ✅ Accepter · ❌ Refuser · 🤔 À revoir' }).setThumbnail(interaction.user.displayAvatarURL()).setFooter({ text: `IWC • Légal • ${fmtShort(new Date())}` });
       const dossierMsg = await dossierCh.send({ content: `${getMentionRecrutement(guild)} — 📋 Nouveau dossier **LÉGAL**`, embeds: [embed] });
+      cand.dossierMsgId = dossierMsg.id; cand.dossierChannelId = dossierCh.id; saveDB(db);
       await dossierMsg.react('✅'); await dossierMsg.react('❌'); await dossierMsg.react('🤔');
       try { const t = await dossierMsg.startThread({ name: `[LÉGAL] Discussion — ${cand.nomPerso}`, autoArchiveDuration: 10080 }); await t.send(`**Discussion interne — ${cand.nomPerso}** ⚖️\n\nÉchangez ici avant de voter.`); } catch {}
     }
@@ -3272,6 +3275,7 @@ client.on('interactionCreate', async interaction => {
     if (dossierCh) {
       const embed = new EmbedBuilder().setColor(0x8B1A1A).setTitle(`📁 [LA CONFRÉRIE] DOSSIER ILLÉGAL — ${cand.nomPerso}`).setDescription(`> *"L'ombre protège ceux qui savent s'y fondre."*\n\nCandidature de <@${cand.userId}> (**${cand.username}**)\n**🔪 TYPE : RECRUTEMENT ILLÉGAL**`).addFields({ name: '👤 Personnage', value: `**${cand.nomPerso}**, ${cand.agePerso}`, inline: true }, { name: '📅 Reçue le', value: fmtShort(new Date()), inline: true }, { name: '🆔 ID', value: `\`${cand.id}\``, inline: true }, { name: '🔪 Spécialité', value: cand.specialite }, { name: '📖 Background', value: cand.background.slice(0, 800) }, { name: '💡 Motivation', value: (cand.motivation || '—').slice(0, 500) }, { name: '🕐 Disponibilités', value: cand.dispos, inline: true }, { name: '📋 Statut', value: '🟡 En attente', inline: true }, { name: '\u200b', value: '**Réagissez :** ✅ Accepter · ❌ Refuser · 🤔 À revoir' }).setThumbnail(interaction.user.displayAvatarURL()).setFooter({ text: `La Confrérie • CONFIDENTIEL • ${fmtShort(new Date())}` });
       const dossierMsg = await dossierCh.send({ content: `${getMentionRecrutement(guild)} — 🔪 Nouveau dossier **ILLÉGAL**`, embeds: [embed] });
+      cand.dossierMsgId = dossierMsg.id; cand.dossierChannelId = dossierCh.id; saveDB(db);
       await dossierMsg.react('✅'); await dossierMsg.react('❌'); await dossierMsg.react('🤔');
       try { const t = await dossierMsg.startThread({ name: `[ILLÉGAL] Discussion — ${cand.nomPerso}`, autoArchiveDuration: 10080 }); await t.send(`**Discussion interne — ${cand.nomPerso}** 🔪\n\nÉchangez ici avant de voter.`); } catch {}
     }
@@ -3334,6 +3338,7 @@ client.on('interactionCreate', async interaction => {
   }
 
   if (interaction.isButton() && (interaction.customId.startsWith('op_encours_') || interaction.customId.startsWith('op_annulee_'))) {
+    if (!isDirection(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return; }
     const isLancer = interaction.customId.startsWith('op_encours_'); const opId = interaction.customId.replace(isLancer ? 'op_encours_' : 'op_annulee_', '');
     if (!isLancer) {
       const op = db.operations.find(o => o.id === opId); if (!op) return;
@@ -7794,6 +7799,8 @@ global.isDirection = isDirection;
 // Rafraîchissement croisé wanted ↔ opération (liaison dans les deux sens)
 global.refreshOp = (guild, opId) => operations.refreshOpById?.(guild, opId);
 global.refreshAvis = (guild, wid) => traque.refreshAvisById?.(guild, wid);
+// Rafraîchir le registre forum (ex: après une promotion/rétrogradation)
+global.refreshRegistreForum = (guild) => { try { return _syncRegistreForum(guild).catch(() => {}); } catch { return null; } };
 
 // Créer la DB Informateurs dans Notion si elle n'existe pas
 async function _initDBInformateursNotion(guild) {

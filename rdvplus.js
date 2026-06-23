@@ -141,9 +141,11 @@ async function _notionCreer(rdv) {
         'Pôle':   { select: { name: TYPES[rdv.typeKey]?.illegal ? '🔒 Illégal' : '⚖️ Légal' } },
         'Lieu':   { rich_text: [{ text: { content: `${lieuLabel}${rdv.contactId ? '\n📇 ID Discord : ' + rdv.contactId : ''}${!_slotToDate(rdv.slot) && rdv.souhaitTexte ? '\n🕐 Souhait : ' + rdv.souhaitTexte : ''}${rdv.details ? '\n' + rdv.details : ''}`.slice(0, 2000) } }] },
         'Statut': { select: { name: 'Planifié' } },
-        'Notif 24h':   { checkbox: true },
-        'Notif 1h':    { checkbox: true },
-        'Notif 15min': { checkbox: true },
+        // Les rappels des RDV clients sont gérés par checkRappelsClients (MP au client).
+        // On laisse ces cases décochées pour éviter que checkAgenda ne re-notifie en double dans #agenda.
+        'Notif 24h':   { checkbox: false },
+        'Notif 1h':    { checkbox: false },
+        'Notif 15min': { checkbox: false },
       } }),
     });
     if (res.ok) { const d = await res.json().catch(() => ({})); return d.id || null; }

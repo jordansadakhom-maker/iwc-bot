@@ -766,6 +766,8 @@ async function onMessage(message) {
     if (!db.inventaire || !db.inventaire.channelId || message.channelId !== db.inventaire.channelId) return false;
     const imgs = message.attachments ? [...message.attachments.values()].filter(a => _estImage(a)) : [];
     if (!imgs.length) return false;
+    // Pas de clé IA → on ne touche à rien (sinon on supprimerait la photo de référence pour rien)
+    if (!process.env.ANTHROPIC_API_KEY) { await message.react("⚠️").catch(() => {}); return false; }
     const inv = _ensure(db);
     await message.react("🔍").catch(() => {});
     // Nettoie d'éventuels tableaux du coffre en double (scan profond) avant de traiter la photo

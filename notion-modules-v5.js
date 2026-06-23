@@ -393,9 +393,8 @@ async function handleStatsAvancees(interaction) {
   const opsReussies   = ops.filter(o => o.status === 'terminee' && o.resultat && (o.resultat.toLowerCase().includes('réuss') || o.resultat.toLowerCase().includes('succes') || o.resultat.toLowerCase().includes('succès'))).length;
   const tauxReussite  = opsTerminees > 0 ? Math.round(opsReussies / opsTerminees * 100) : 0;
 
-  // ── Trésorerie ──
-  const legal    = db.coffres?.legal   || 0;
-  const illegal  = db.coffres?.illegal || 0;
+  // ── Trésorerie (coffre commun unique) ──
+  const coffreTotal = db.coffre || 0;
 
   // ── Activité par pôle ──
   const membresLegal   = membres.filter(m => m.pole === 'legal'   && m.status !== 'parti').length;
@@ -443,8 +442,7 @@ async function handleStatsAvancees(interaction) {
       {
         name: '💰 TRÉSORERIE',
         value: [
-          `⚖️ Légal : **$${legal.toLocaleString('fr-FR')}** · 🔒 Illégal : **$${illegal.toLocaleString('fr-FR')}**`,
-          `💎 Total : **$${(legal + illegal).toLocaleString('fr-FR')}**`,
+          `💎 Coffre commun : **$${coffreTotal.toLocaleString('fr-FR')}**`,
         ].join('\n'),
         inline: false,
       },

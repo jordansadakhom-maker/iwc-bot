@@ -158,7 +158,7 @@ async function checkInactivite(guild) {
   try {
     const db = loadDB(); const logsCh = _journalCh(guild); let changed = false;
     for (const [userId, membre] of Object.entries(db.members || {})) {
-      if (membre.status === 'parti' || membre.status === 'visiteur') continue;
+      if (membre.status === 'parti' || membre.status === 'visiteur' || membre.status === 'absent') continue;
       if (daysSince(membre.lastActivity) >= JOURS_INACTIF && membre.status !== 'inactif') {
         const ancienStatut = membre.status; db.members[userId].status = 'inactif'; changed = true;
         await notionExtra.majStatutActiviteNotion?.(userId, 'inactif');
@@ -336,6 +336,7 @@ async function _appliquerGrade(interaction, userId, nouveauGrade) {
   ] });
   setTimeout(() => interaction.deleteReply().catch(() => {}), 10000);
   await updateHierarchieEmbed(interaction.guild);
+  try { global.refreshRegistreForum?.(interaction.guild); } catch {}
 }
 // ── Bouton "Modifier à nouveau" — relance directement le menu de grade pour ce membre ──
 async function handleGradeMajButton(interaction) {
