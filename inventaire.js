@@ -93,7 +93,8 @@ async function _dedupeBoards(client, inv) {
     if (!recent) return;
     const boards = [...recent.values()].filter(m => m.author.id === client.user.id && (m.embeds?.[0]?.title || '').includes('COFFRE COMMUN'));
     if (boards.length <= 1) { if (boards[0] && inv.panneau !== boards[0].id) { inv.panneau = boards[0].id; try { const d = loadDB(); if (d.inventaire) { d.inventaire.panneau = boards[0].id; saveDB(d); } } catch {} } return; }
-    const keep = boards.find(m => m.id === inv.panneau) || boards[0];
+    // On garde en priorité le tableau de référence, sinon celui qui PORTE le fil Journal (pour ne pas le tuer)
+    const keep = boards.find(m => m.id === inv.panneau) || boards.find(m => m.hasThread) || boards[0];
     for (const m of boards) { if (m.id !== keep.id) await m.delete().catch(() => {}); }
     if (inv.panneau !== keep.id) { inv.panneau = keep.id; try { const d = loadDB(); if (d.inventaire) { d.inventaire.panneau = keep.id; saveDB(d); } } catch {} }
   } catch {}
@@ -140,10 +141,25 @@ async function rafraichirBoardDemarrage(client) {
   } catch {}
 }
 
+// Renvoie le fil « Journal du coffre », en le RÉPARANT si besoin : si le fil a disparu
+// (ex. le tableau auquel il était rattaché a été supprimé), on le retrouve sur le tableau
+// courant ou on le recrée — pour que les mouvements s'inscrivent toujours dedans.
 async function _thread(client, inv) {
-  const id = inv.threadId || inv.channelId;
-  if (!id) return null;
-  return await client.channels.fetch(id).catch(() => null);
+  // 1) Fil enregistré et toujours vivant
+  if (inv.threadId) { const t = await client.channels.fetch(inv.threadId).catch(() => null); if (t) return t; }
+  // 2) Fil rattaché au tableau courant (ou on le crée)
+  if (inv.channelId && inv.panneau) {
+    const ch = await client.channels.fetch(inv.channelId).catch(() => null);
+    const msg = ch ? await ch.messages.fetch(inv.panneau).catch(() => null) : null;
+    if (msg) {
+      let th = msg.thread || null;
+      if (!th && msg.startThread) { th = await msg.startThread({ name: "📦 Journal du coffre", autoArchiveDuration: 10080 }).catch(() => null); if (th) await th.send({ content: "📦 Ici s'inscrivent **tous les mouvements** du coffre (ajouts, retraits, lectures, alertes)." }).catch(() => {}); }
+      if (th) { if (inv.threadId !== th.id) { inv.threadId = th.id; try { const d = loadDB(); if (d.inventaire) { d.inventaire.threadId = th.id; saveDB(d); } } catch {} } return th; }
+    }
+  }
+  // 3) Repli : le salon du coffre
+  if (inv.channelId) return await client.channels.fetch(inv.channelId).catch(() => null);
+  return null;
 }
 async function _log(client, inv, texte) {
   try { const ch = await _thread(client, inv); if (ch) await ch.send({ content: texte, allowedMentions: { parse: [] } }).catch(() => {}); } catch {}
@@ -565,12 +581,14 @@ async function routeInteraction(interaction) {
     }
     // Quantité saisie → application du mouvement
     if (interaction.isModalSubmit?.() && interaction.customId.startsWith("invq::")) {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      // Le menu d'objet (message éphémère) est REMPLACÉ par le résultat → impossible de re-cliquer dessus
+      const fromMsg = interaction.isFromMessage?.();
+      if (fromMsg) await interaction.deferUpdate().catch(() => {}); else await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       const action = interaction.customId.split("::")[1];
       const pend = _pendingMov.get(interaction.user.id); _pendingMov.delete(interaction.user.id);
-      if (!pend) { await interaction.editReply({ content: "⏳ Sélection expirée — relance via le bouton du tableau." }).catch(() => {}); return true; }
+      if (!pend) { await interaction.editReply({ content: "⏳ Sélection expirée — relance via le bouton du tableau.", components: [], embeds: [] }).catch(() => {}); return true; }
       const qte = parseInt(((interaction.fields.getTextInputValue("qte") || "").replace(/[^0-9]/g, "")), 10);
-      if (!Number.isFinite(qte) || qte < 0 || (action !== 'set' && qte <= 0)) { await interaction.editReply({ content: "❌ Quantité invalide (mets un nombre, ex : 5)." }).catch(() => {}); return true; }
+      if (!Number.isFinite(qte) || qte < 0 || (action !== 'set' && qte <= 0)) { await interaction.editReply({ content: "❌ Quantité invalide (mets un nombre, ex : 5). Relance via le bouton du tableau.", components: [], embeds: [] }).catch(() => {}); return true; }
       const db = loadDB(); const inv = _ensure(db);
       const { existante, avant, apres } = _applyMov(inv, action, pend.cat, pend.nom, qte);
       _journalAdd(inv, interaction.user.id, `${action === 'add' ? "Ajout" : action === 'remove' ? "Retrait" : "Correction"} : ${action === 'set' ? "" : qte + " × "}${existante} (${pend.cat}) → ${apres}`);
@@ -582,7 +600,7 @@ async function routeInteraction(interaction) {
       else { const mot = action === 'add' ? "a rangé" : "a sorti"; const fin = action === 'add' ? "total" : "reste"; logTxt = `📦 ${who} ${mot} **${qte} × ${existante}** *(${pend.cat})* · ${fin} : **${apres}**.`; }
       await _log(interaction.client, inv, logTxt);
       await _checkSeuils(interaction.client, inv, { [_norm(existante)]: { avant, apres } });
-      await interaction.editReply({ content: `✅ **${action === 'add' ? "Ajouté" : action === 'remove' ? "Retiré" : "Corrigé"}** : ${existante} — ${avant} → **${apres}** *(${pend.cat})*.` }).catch(() => {});
+      await interaction.editReply({ content: `✅ **${action === 'add' ? "Ajouté" : action === 'remove' ? "Retiré" : "Corrigé"}** : ${existante} — ${avant} → **${apres}** *(${pend.cat})*.`, components: [], embeds: [] }).catch(() => {});
       return true;
     }
 
