@@ -118,7 +118,7 @@ function buildContratEmbed(contrat) {
       { name: '⚠️ Risque', value: `${r.emoji} ${r.label}`, inline: true },
       { name: '👤 Commanditaire', value: commanditaire, inline: true },
       { name: '💰 Prime', value: `${contrat.remuneration || '—'}\n*Prime ${r.prime}*`, inline: true },
-      { name: '📅 Échéance', value: contrat.dateEcheance ? fmtDate(contrat.dateEcheance) : 'Aucune', inline: true },
+      { name: '📅 Échéance', value: contrat.dateEcheance ? fmtDate(contrat.dateEcheance) : (contrat.echeanceTexte || 'Aucune'), inline: true },
       { name: '🗡️ Agents assignés', value: agents, inline: false },
       { name: '📋 Objet', value: objet, inline: false },
       { name: '📌 Statut', value: st.label, inline: true },
@@ -156,7 +156,7 @@ function buildBriefingEmbed(contrat) {
     .addFields(
       { name: '🎯 Type de mission', value: `${emojiType(contrat.typeMission)} ${contrat.typeMission || '—'}`, inline: true },
       { name: '⚠️ Risque', value: `${r.emoji} ${r.label}`, inline: true },
-      { name: '📅 Échéance', value: contrat.dateEcheance ? fmtDate(contrat.dateEcheance) : 'Aucune', inline: true },
+      { name: '📅 Échéance', value: contrat.dateEcheance ? fmtDate(contrat.dateEcheance) : (contrat.echeanceTexte || 'Aucune'), inline: true },
       { name: '👤 Commanditaire', value: contrat.commanditaire ? contrat.commanditaire : '🕶️ Anonyme', inline: false },
       { name: '📋 Objet', value: contrat.objet || '—', inline: false },
       { name: '💰 Prime', value: `${contrat.remuneration || '—'} *(prime ${r.prime})*`, inline: false },
@@ -200,12 +200,27 @@ async function envoyerBriefings(guild, contrat) {
 
 // ─── Mise à jour de la fiche déjà postée ───
 async function rafraichirFiche(guild, contrat) {
-  if (!contrat.channelId || !contrat.msgId) return;
-  const ch = await fetchCh(guild, contrat.channelId);
-  if (!ch) return;
-  const msg = await ch.messages.fetch(contrat.msgId).catch(() => null);
-  if (!msg) return;
-  await msg.edit({ embeds: [buildContratEmbed(contrat)], components: buildContratButtons(contrat) }).catch(() => {});
+  // 1) Message principal dans #contrats
+  if (contrat.channelId && contrat.msgId) {
+    const ch = await fetchCh(guild, contrat.channelId);
+    const msg = ch && await ch.messages.fetch(contrat.msgId).catch(() => null);
+    if (msg) await msg.edit({ embeds: [buildContratEmbed(contrat)], components: buildContratButtons(contrat) }).catch(() => {});
+  }
+  // 2) Copie dans le forum #contrats-réponses (agents, échéance, statut à jour)
+  await majForum(guild, contrat);
+}
+
+// Met à jour le post de forum (sa fiche reflète agents / statut / échéance en direct)
+async function majForum(guild, contrat) {
+  try {
+    if (!contrat.forumThreadId) return;
+    const thread = await guild.channels.fetch(contrat.forumThreadId).catch(() => null);
+    if (!thread) return;
+    const starter = contrat.forumMsgId
+      ? await thread.messages.fetch(contrat.forumMsgId).catch(() => null)
+      : await thread.fetchStarterMessage?.().catch(() => null);
+    if (starter) await starter.edit({ embeds: [buildContratEmbed(contrat)] }).catch(() => {});
+  } catch (e) { console.log('⚠️ majForum contrat:', e.message); }
 }
 
 // ─── Notion (réutilise la synchro existante d'index.js) ───
@@ -219,11 +234,10 @@ function syncNotion(contrat, statutTexte) {
   } catch {}
 }
 
-// ─── Archivage dans #contrats-reponses ───
+// ─── Archivage dans #contrats-reponses (forum) : on met à jour la fiche en place ───
 async function archiver(guild, contrat) {
-  const ch = await fetchCh(guild, CH_CONTRATS_REPONSES);
-  if (!ch) return;
-  await ch.send({ embeds: [buildContratEmbed(contrat)] }).catch(() => {});
+  // Le salon #contrats-réponses est un FORUM → pas de .send(). On rafraîchit le post existant.
+  await majForum(guild, contrat);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -325,6 +339,12 @@ async function posterForum(guild, contrat) {
     if (appliedTags.length) opts.appliedTags = appliedTags;
     let post = await forum.threads.create(opts).catch(() => null);
     if (!post && appliedTags.length) post = await forum.threads.create({ name: titre, message: msg }).catch(() => null); // repli sans étiquettes
+    if (post) {
+      const starter = await post.fetchStarterMessage?.().catch(() => null);
+      const db = loadDB(); const c = findContrat(db, contrat.id);
+      if (c) { c.forumThreadId = post.id; c.forumMsgId = starter?.id || null; saveDB(db); }
+      contrat.forumThreadId = post.id; contrat.forumMsgId = starter?.id || null;
+    }
   } catch (e) { console.log('⚠️ post contrat Confrérie forum:', e.message); }
 }
 
@@ -352,6 +372,7 @@ async function onModalSubmit(interaction) {
     objet: interaction.fields.getTextInputValue('objet'),
     remuneration: interaction.fields.getTextInputValue('remuneration'),
     dateEcheance: parseDateFR(interaction.fields.getTextInputValue('echeance')),
+    echeanceTexte: (interaction.fields.getTextInputValue('echeance') || '').trim() || null,
     details: (interaction.fields.getTextInputValue('details') || '').trim(),
     agents: [],
     emetteurId: interaction.user.id,
@@ -488,6 +509,14 @@ async function cloturer(interaction, succes) {
   await interaction.update({ embeds: [buildContratEmbed(c)], components: [] }); // accusé de réception d'abord
   saveDB(db); _persistNow(); syncNotion(c, succes ? '✅ Réussie' : '💀 Échouée');
   await archiver(interaction.guild, c);
+  // Facture : un contrat Confrérie réussi est aussi répertorié dans le forum factures
+  if (succes) {
+    try {
+      const fact = require('./factures');
+      const montant = parseFloat(String(c.remuneration || '').replace(/[^0-9.,]/g, '').replace(',', '.')) || 0;
+      await fact.creerFactureContrat?.(interaction.guild, c, { montant, par: c.clôturePar, parId: interaction.user.id });
+    } catch (e) { console.log('⚠️ facture contrat Confrérie:', e.message); }
+  }
   const jc = journalCh(interaction.guild);
   if (jc) await jc.send({ embeds: [new EmbedBuilder().setColor(succes ? 0x57F287 : 0xED4245).setTitle(`${succes ? '✅' : '💀'} Contrat ${succes ? 'réussi' : 'échoué'} — ${c.id}`).setDescription(`**${c.typeMission}** · clôturé par ${c.clôturePar}`).setFooter({ text: 'La Confrérie • Contrats' }).setTimestamp()] }).catch(() => {});
   // prévenir les agents

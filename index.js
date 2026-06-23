@@ -12,7 +12,7 @@ const cron = require('node-cron');
 
 const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub } = require('./db');
 // Version du bot (sert au /version ET à la génération auto des patch notes)
-const BOT_VERSION = '7.7 (23 juin — suivi médical : bouton « Signaler une blessure », l\'IA évalue la gravité et met le dossier à jour (inapte/observation) automatiquement)';
+const BOT_VERSION = '7.8 (23 juin — contrats Confrérie : fiche du forum #contrats-réponses synchronisée (agents/statut/échéance) + facture générée à la réussite)';
 const { initPapiers, papiersCommands } = require('./papiers');
 const securite = require('./securite');
 const rdvplus = require('./rdvplus');
