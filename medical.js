@@ -67,6 +67,7 @@ function _embedFiche(f, gm) {
       { name: 'Prochain RDV', value: _clip((f.prochainRdv || '—') + (f.prochainRdvAt ? ' ⏰' : ''), 200), inline: true },
       { name: '📝 Notes', value: _clip(f.notes || '*Aucune note*', 1000), inline: false },
     );
+  if (f.blessures?.length) e.addFields({ name: '🩹 Blessures / soins', value: _clip(f.blessures.slice(-5).reverse().map(b => `• \`${_clip(b.date, 40)}\` ${_clip(b.desc, 100)}${b.localisation ? ` (${_clip(b.localisation, 40)})` : ''}${b.gravite ? ` — **${_clip(b.gravite, 20)}**` : ''}`).join('\n'), 1024), inline: false });
   if (f.historique?.length) e.addFields({ name: '🕓 Historique', value: _clip(f.historique.slice(-8).reverse().map(h => `• \`${_clip(h.date, 40)}\` ${_clip(h.action, 120)}${h.par ? ` — *${_clip(h.par, 60)}*` : ''}`).join('\n'), 1024), inline: false });
   if (gm?.user) e.setThumbnail(gm.user.displayAvatarURL());
   e.setFooter({ text: _clip(f.majPar ? `Dernière mise à jour par ${f.majPar}` : 'Dossier médical confidentiel', 200) });
@@ -152,9 +153,40 @@ function _actions(id) {
       new ButtonBuilder().setCustomId(`med_note::${id}`).setLabel('Note').setEmoji('📝').setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`med_blessure::${id}`).setLabel('Signaler une blessure / un soin').setEmoji('🩹').setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId(`med_aptitude::${id}`).setLabel('Rédiger le test d\'aptitude').setEmoji('🧪').setStyle(ButtonStyle.Primary),
     ),
   ];
+}
+
+// L'IA évalue une blessure / un événement médical et décide du statut d'aptitude
+async function _evaluerBlessure(desc, localisation, contexteNotes) {
+  if (!ANTHROPIC_API_KEY) return null;
+  const prompt = `Tu es le médecin de la compagnie (RP western, ~1904). Un membre vient de subir une blessure ou un événement médical. Évalue son aptitude au service.
+
+Blessure / événement : ${desc}
+Localisation : ${localisation || '—'}
+Notes médicales actuelles : ${contexteNotes || 'aucune'}
+
+Décide du STATUT d'aptitude :
+- "apte" : blessure bénigne, peut servir normalement.
+- "observation" : blessure modérée, à surveiller, service limité.
+- "inapte" : blessure grave (balle dans un organe/membre handicapant, fracture, hémorragie, coup de couteau profond…), ne peut pas servir tant qu'il n'est pas soigné/rétabli.
+
+Réponds STRICTEMENT en JSON, rien d'autre :
+{"statut":"apte|observation|inapte","gravite":"bénigne|modérée|grave","resume":"1 phrase clinique factuelle","recommandation":"soin/repos recommandé en 1 phrase"}`;
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 400, messages: [{ role: 'user', content: prompt }] }),
+    });
+    const data = await res.json();
+    let txt = (data?.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+    txt = txt.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+    const r = JSON.parse(txt);
+    if (!['apte', 'observation', 'inapte'].includes(r.statut)) r.statut = 'observation';
+    return r;
+  } catch (e) { console.log('❌ medical evaluerBlessure:', e.message); return null; }
 }
 
 // ── Alerte quand un membre devient INAPTE ou EN OBSERVATION (prévient le médecin) ──
@@ -437,6 +469,47 @@ async function routeInteraction(interaction) {
       _log(f, 'Notes mises à jour', f.majPar); saveDB(db);
       const gm = await interaction.guild.members.fetch(id).catch(() => null);
       await interaction.editReply({ content: '✅ Notes enregistrées.', embeds: [_embedFiche(f, gm)], components: _actions(id) }).catch(() => {});
+      return true;
+    }
+
+    // ── Signaler une blessure / un soin → l'IA met le dossier à jour (statut auto) ──
+    if (interaction.isButton?.() && cid.startsWith('med_blessure::')) {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé au médecin et à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const id = cid.split('::')[1];
+      const modal = new ModalBuilder().setCustomId(`med_blessure_modal::${id}`).setTitle('🩹 Blessure / événement médical');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('desc').setLabel('Que s\'est-il passé ?').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(600).setPlaceholder('ex : a pris une balle dans l\'épaule · coup de couteau au bras · jambe cassée…')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('localisation').setLabel('Localisation (facultatif)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80).setPlaceholder('ex : épaule droite, abdomen…')),
+      );
+      await interaction.showModal(modal).catch(() => {});
+      return true;
+    }
+    if (interaction.isModalSubmit?.() && cid.startsWith('med_blessure_modal::')) {
+      const id = cid.split('::')[1];
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const db = loadDB(); const f = _fiche(db, id);
+      const desc = (interaction.fields.getTextInputValue('desc') || '').trim();
+      const localisation = (interaction.fields.getTextInputValue('localisation') || '').trim();
+      const par = interaction.member?.displayName || interaction.user.username;
+      // L'IA évalue la gravité et décide du statut d'aptitude
+      const evalRes = await _evaluerBlessure(desc, localisation, f.notes);
+      if (!f.blessures) f.blessures = [];
+      f.blessures.push({ date: _dateFR(Date.now()), desc, localisation, gravite: evalRes?.gravite || null, par });
+      if (f.blessures.length > 20) f.blessures = f.blessures.slice(-20);
+      // Mise à jour automatique du statut (l'IA fait la vérification)
+      const ancien = f.statut;
+      if (evalRes?.statut) f.statut = evalRes.statut;
+      f.majPar = par; f.majAt = Date.now();
+      const noteLigne = `🩹 ${_dateFR(Date.now())} — ${desc}${localisation ? ` (${localisation})` : ''}${evalRes ? ` → ${evalRes.gravite}, ${evalRes.recommandation}` : ""}`;
+      f.notes = ((f.notes ? f.notes + '\n' : '') + noteLigne).slice(0, 1000);
+      _log(f, `Blessure signalée${evalRes ? ` → ${STATUTS[f.statut]?.label || f.statut}` : ''}`, par);
+      saveDB(db);
+      if (evalRes?.statut && evalRes.statut !== ancien) await _alerteStatut(interaction.guild, id, f).catch(() => {});
+      const gm = await interaction.guild.members.fetch(id).catch(() => null);
+      const verdict = evalRes
+        ? `🧠 **Évaluation automatique :** blessure **${evalRes.gravite}**.\n→ Statut mis à jour : **${STATUTS[f.statut]?.label || f.statut}**\n💊 *${evalRes.recommandation}*`
+        : '⚠️ Blessure enregistrée (l\'évaluation IA est indisponible — ajuste le statut à la main si besoin).';
+      await interaction.editReply({ content: verdict, embeds: [_embedFiche(f, gm)], components: _actions(id) }).catch(() => {});
       return true;
     }
 
