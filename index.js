@@ -4354,6 +4354,8 @@ client.once('clientReady', async () => {
     } catch (e) { console.log('❌ Archivage notes:', e.message); }
   }, { timezone: 'Europe/Paris' });
   cron.schedule('0 12 * * *', async () => { for (const g of client.guilds.cache.values()) await autoKickVisiteurs(g).catch(() => {}); }, { timezone: 'Europe/Paris' });
+  // Re-sync quotidien du registre forum (4h) → statuts actif/absent/inactif toujours à jour, pas que sur promo
+  cron.schedule('0 4 * * *', async () => { for (const g of client.guilds.cache.values()) await _syncRegistreForum(g).catch(() => {}); }, { timezone: 'Europe/Paris' });
 
   // [CORRECTION] Résumés hebdo → #journal-de-bord via ajouterJournalIC
   cron.schedule('0 8 * * 1', async () => {
@@ -5508,7 +5510,7 @@ async function _syncRegistreForum(guild) {
     const membres = Object.values(db.members || {}).filter(m => m && m.id && m.status !== 'visiteur');
     let n = 0;
     for (const m of membres) {
-      if (n >= 80) break;
+      if (n >= 200) break;
       const gm = await guild.members.fetch(m.id).catch(() => null);
       if (!gm) continue; // a quitté le serveur → ignoré
       const res = await _posterOuMajFiche(guild, forum, gm, db);

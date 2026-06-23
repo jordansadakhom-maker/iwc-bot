@@ -485,7 +485,28 @@ async function setupTresorButton(guild) {
 
 function _tresorEmbed() {
   const db = loadDB(); const solde = db.coffre || 0;
-  return new EmbedBuilder().setColor(0x8B1A1A).setTitle('💰 Trésorerie — Iron Wolf Company').setDescription('Enregistrez chaque mouvement financier via le bouton ci-dessous.\nToute transaction est archivée automatiquement dans Notion.').addFields({ name: '🏦 Coffre commun', value: `**$${solde.toLocaleString('fr-FR')}**`, inline: false }).setFooter({ text: `IWC • Trésorerie automatique • Mis à jour le ${new Date().toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` }).setTimestamp();
+  const tx = db.transactions || [];
+  const dateMs = t => new Date(t.date || t.createdAt || 0).getTime();
+  const estEntree = t => (t.type || '').toLowerCase().startsWith('entr');
+  const now = Date.now();
+  const recent = tx.filter(t => dateMs(t) >= now - 7 * 86400000);
+  const sum = arr => arr.reduce((s, t) => s + (Number(t.montant) || 0), 0);
+  const entrees7 = sum(recent.filter(estEntree));
+  const sorties7 = sum(recent.filter(t => !estEntree(t)));
+  const net = entrees7 - sorties7;
+  // Top contributeurs (entrées) sur 30 jours
+  const contrib = {};
+  for (const t of tx) { if (dateMs(t) < now - 30 * 86400000 || !estEntree(t)) continue; const who = t.par || t.responsable || '—'; contrib[who] = (contrib[who] || 0) + (Number(t.montant) || 0); }
+  const top = Object.entries(contrib).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const fmt = n => `$${Math.round(Number(n) || 0).toLocaleString('fr-FR')}`;
+  return new EmbedBuilder().setColor(0x8B1A1A).setTitle('💰 Trésorerie — Iron Wolf Company')
+    .setDescription('Enregistrez chaque mouvement financier via le bouton ci-dessous.\nToute transaction est archivée automatiquement dans Notion.')
+    .addFields(
+      { name: '🏦 Coffre commun', value: `**${fmt(solde)}**`, inline: false },
+      { name: '📊 7 derniers jours', value: `📈 Entrées : **${fmt(entrees7)}**\n📉 Sorties : **${fmt(sorties7)}**\n${net >= 0 ? '🟢' : '🔴'} Net : **${fmt(net)}**`, inline: true },
+      { name: '🏅 Top contributeurs (30j)', value: top.length ? top.map(([w, s], i) => `${['🥇', '🥈', '🥉'][i]} ${w} — ${fmt(s)}`).join('\n') : '*Aucune entrée récente*', inline: true },
+    )
+    .setFooter({ text: `IWC • Trésorerie automatique • Mis à jour le ${new Date().toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` }).setTimestamp();
 }
 function _tresorRow() {
   return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_nouvelle_transaction').setLabel('💰 Nouvelle Transaction').setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId('btn_solde').setLabel('📊 Voir le solde').setStyle(ButtonStyle.Secondary), new ButtonBuilder().setCustomId('btn_coffre_reset').setLabel('🗑️ Coffre à 0').setStyle(ButtonStyle.Danger), new ButtonBuilder().setCustomId('btn_tresor_config').setLabel('⚙️').setStyle(ButtonStyle.Secondary));
