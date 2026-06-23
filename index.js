@@ -12,7 +12,7 @@ const cron = require('node-cron');
 
 const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub } = require('./db');
 // Version du bot (sert au /version ET à la génération auto des patch notes)
-const BOT_VERSION = '6.7 (23 juin — fix DÉFINITIF boucle planning : purge des épingles ne touche plus #planning)';
+const BOT_VERSION = '6.8 (23 juin — recrutement : 3 votes Direction/Officier + rôle attribué manuellement)';
 const { initPapiers, papiersCommands } = require('./papiers');
 const securite = require('./securite');
 const rdvplus = require('./rdvplus');
@@ -1931,29 +1931,29 @@ client.on('messageReactionAdd', async (reaction, user) => {
     const isIllegal = title.includes('ILLÉGAL'); const isAccept = reaction.emoji.name === '✅';
     const nom = title.replace(/📁 \[.*?\] DOSSIER (LÉGAL|ILLÉGAL) — /, '').replace(/✅ ACCEPTÉ — /, '').trim();
     const cand = (db.candidatures || []).find(c => c.nomPerso === nom && c.status === 'reçue'); if (!cand) return;
-    const reactUsers = await reaction.users.fetch(); const voteCount = reactUsers.filter(u => !u.bot).size; const VOTES_REQUIS = 2;
-    if (voteCount < VOTES_REQUIS) { const msg = await reaction.message.channel.send({ content: `⏳ **${voteCount}/${VOTES_REQUIS} votes** pour ${isAccept ? 'accepter' : 'refuser'} **${cand.nomPerso}**. Il manque **${VOTES_REQUIS - voteCount} vote(s)**.` }); setTimeout(() => msg.delete().catch(() => {}), 10000); return; }
+    // Seuls la Direction ET les Officiers de Terrain peuvent voter (isDirection inclut « Officier »)
+    const voteur = await guild.members.fetch(user.id).catch(() => null);
+    if (!voteur || !isDirection(voteur)) { try { await reaction.users.remove(user.id); } catch {} return; }
+    const reactUsers = await reaction.users.fetch();
+    let voteCount = 0;
+    for (const u of reactUsers.values()) { if (u.bot) continue; const mm = await guild.members.fetch(u.id).catch(() => null); if (mm && isDirection(mm)) voteCount++; }
+    const VOTES_REQUIS = 3; // 3 voix, hors bot
+    if (voteCount < VOTES_REQUIS) { const msg = await reaction.message.channel.send({ content: `⏳ **${voteCount}/${VOTES_REQUIS} votes** (Direction / Officier de Terrain) pour ${isAccept ? 'accepter' : 'refuser'} **${cand.nomPerso}**. Il manque **${VOTES_REQUIS - voteCount} vote(s)**.` }); setTimeout(() => msg.delete().catch(() => {}), 10000); return; }
     const member = await guild.members.fetch(cand.userId).catch(() => null);
     if (isAccept) {
-      if (member) {
-        if (isIllegal) {
-          const role = guild.roles.cache.find(r => r.name.includes('Maudit') || r.name.includes('Ombre')); if (role) await member.roles.add(role).catch(() => {});
-          member.send({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle("🔪 Bienvenue dans l'ombre — La Confrérie").setDescription("Tu as été **accepté** au sein de la Confrérie.\n\nDiscrétion absolue.\n\n*Ne fais confiance qu'à ceux que la Direction te désignera.*\n\n📨 **Pour la suite** : viens te présenter et joindre la Direction en envoyant un **télégramme** dans <#1512171267560702013>.\n— La Direction").setFooter({ text: 'La Confrérie • Confidentiel' })] }).catch(() => {});
-          const annCh = guild.channels.cache.get(CH.DOSSIER_ILLEG); if (annCh) await annCh.send({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle("🔪 La Confrérie — Nouveau visage dans l'ombre").setDescription(`**${cand.nomPerso}** a intégré la Confrérie.\n*Certains chemins ne se montrent pas à la lumière.*`).setThumbnail(member.user.displayAvatarURL()).setFooter({ text: `La Confrérie • ${fmtShort(new Date())}` })] });
-        } else {
-          const role = guild.roles.cache.find(r => r.name.includes('Recrue') || r.name.includes('Employé')); if (role) await member.roles.add(role).catch(() => {});
-          member.send({ embeds: [new EmbedBuilder().setColor(0x3B82F6).setTitle('⚖️ Candidature acceptée — Iron Wolf Company').setDescription("Ta candidature a été **acceptée**.\n\nLa période d'observation commence maintenant.\n\n*Tu connais les règles. Tu connais les attentes.*\n\n📨 **Pour la suite** : viens te présenter et joindre la Direction en envoyant un **télégramme** dans <#1512171267560702013>.\n— La Direction").setFooter({ text: 'Iron Wolf Company • Légal' })] }).catch(() => {});
-          const annCh = guild.channels.cache.get(CH.DOSSIER_LEGAL); if (annCh) await annCh.send({ embeds: [new EmbedBuilder().setColor(0x3B82F6).setTitle('⚖️ Nouveau membre — Iron Wolf Company').setDescription(`**${cand.nomPerso}** rejoint la Compagnie.\n*Bienvenue dans la meute.*`).setThumbnail(member.user.displayAvatarURL()).setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` })] });
-        }
-      }
-      cand.status = 'acceptee'; cand.acceptedAt = new Date().toISOString(); saveDB(db);
+      // ⚠️ Le rôle N'EST PAS donné automatiquement : la Direction gère l'arrivée en jeu, puis attribue le rôle via les boutons.
+      cand.status = 'acceptee'; cand.acceptedAt = new Date().toISOString(); cand.roleAttribue = false; saveDB(db);
       await archiverCandidatureNotion(cand, 'acceptee', user.username); await ajouterMembreNotion(cand, cand.type);
       _syncCandidatureNotion(cand, 'acceptee', user.username).catch(() => {});
       notionV5.archiverThreadCandidature?.(guild, cand, 'acceptee', user.username).catch(() => {});
       await notionExtra.creerFichePersonnageNotion?.(cand); notionExtra.planifierRappelFiche?.(guild, cand);
       await sendLog(guild, 'CANDIDATURE_ACCEPTEE', { userId: cand.userId, nomPerso: cand.nomPerso, type: isIllegal ? '🔪 Illégal' : '⚖️ Légal', validePar: user.username });
-      await ajouterJournalIC(guild, { type: 'recrutement', titre: `Nouveau membre — ${cand.nomPerso}`, description: `${cand.nomPerso} rejoint la Compagnie · Pôle : ${isIllegal ? '🔪 Illégal' : '⚖️ Légal'} · Accepté par ${user.username}`, auteur: user.username });
-      try { await reaction.message.edit({ embeds: [EmbedBuilder.from(reaction.message.embeds[0]).setColor(isIllegal ? 0x8B1A1A : 0x3B82F6).setTitle(`✅ ACCEPTÉ — ${cand.nomPerso}`)] }); } catch {}
+      try { await reaction.message.edit({ embeds: [EmbedBuilder.from(reaction.message.embeds[0]).setColor(0xF1C40F).setTitle(`✅ VALIDÉ — ${cand.nomPerso} (rôle à attribuer)`)] }); } catch {}
+      const rowRole = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`rec_role_ok::${cand.userId}::${isIllegal ? 1 : 0}`).setLabel('Donner le rôle de recrue').setEmoji('✅').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`rec_role_no::${cand.userId}`).setLabel('Ne pas donner le rôle').setEmoji('❌').setStyle(ButtonStyle.Danger),
+      );
+      await reaction.message.channel.send({ content: `✅ **${cand.nomPerso}** est **validé** par le vote (${VOTES_REQUIS} voix). \n👉 Gérez son arrivée **en jeu**, puis cliquez pour **lui attribuer le rôle** (ou non) :`, components: [rowRole] }).catch(() => {});
     } else {
       cand.status = 'refusee'; cand.refusedAt = new Date().toISOString(); saveDB(db);
       _syncCandidatureNotion(cand, 'refusee', user.username).catch(() => {});
@@ -3729,6 +3729,33 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
   }
   if (interaction.isButton() && interaction.customId === 'csuivi_reset_cancel') {
     return interaction.update({ content: "✅ Annulé — rien n'a été supprimé.", components: [] });
+  }
+  // ── Attribution manuelle du rôle de recrue (après validation du recrutement) ──
+  if (interaction.isButton() && interaction.customId.startsWith('rec_role_ok::')) {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '🔒 Réservé à la Direction / Officiers de Terrain.', flags: MessageFlags.Ephemeral });
+    const [, uid, ill] = interaction.customId.split('::'); const isIllegal = ill === '1';
+    const m = await interaction.guild.members.fetch(uid).catch(() => null);
+    if (!m) return interaction.update({ content: '❌ Membre introuvable (a-t-il quitté le serveur ?).', components: [] }).catch(() => {});
+    const role = isIllegal
+      ? interaction.guild.roles.cache.find(r => r.name.includes('Maudit') || r.name.includes('Ombre'))
+      : interaction.guild.roles.cache.find(r => r.name.includes('Recrue') || r.name.includes('Employé'));
+    if (role) await m.roles.add(role).catch(() => {});
+    // MP de bienvenue + annonce (déplacés ici : seulement quand le rôle est réellement donné)
+    if (isIllegal) {
+      m.send({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle("🔪 Bienvenue dans l'ombre — La Confrérie").setDescription("Tu as été **accepté** au sein de la Confrérie.\n\nDiscrétion absolue.\n\n📨 **Pour la suite** : envoie un **télégramme** dans <#1512171267560702013>.\n— La Direction").setFooter({ text: 'La Confrérie • Confidentiel' })] }).catch(() => {});
+      const annCh = guild.channels.cache.get(CH.DOSSIER_ILLEG); if (annCh) await annCh.send({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle("🔪 La Confrérie — Nouveau visage dans l'ombre").setDescription(`**${m.displayName}** a intégré la Confrérie.`).setThumbnail(m.user.displayAvatarURL()).setFooter({ text: `La Confrérie • ${fmtShort(new Date())}` })] }).catch(() => {});
+    } else {
+      m.send({ embeds: [new EmbedBuilder().setColor(0x3B82F6).setTitle('⚖️ Bienvenue — Iron Wolf Company').setDescription("Ta candidature a été **acceptée** et ton rôle vient de t'être attribué.\n\nLa période d'observation commence maintenant.\n\n📨 **Pour la suite** : envoie un **télégramme** dans <#1512171267560702013>.\n— La Direction").setFooter({ text: 'Iron Wolf Company • Légal' })] }).catch(() => {});
+      const annCh = guild.channels.cache.get(CH.DOSSIER_LEGAL); if (annCh) await annCh.send({ embeds: [new EmbedBuilder().setColor(0x3B82F6).setTitle('⚖️ Nouveau membre — Iron Wolf Company').setDescription(`**${m.displayName}** rejoint la Compagnie.\n*Bienvenue dans la meute.*`).setThumbnail(m.user.displayAvatarURL()).setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` })] }).catch(() => {});
+    }
+    const dbR = loadDB(); const c = (dbR.candidatures || []).find(x => x.userId === uid); if (c) { c.roleAttribue = true; saveDB(dbR); }
+    try { await ajouterJournalIC(interaction.guild, { type: 'recrutement', titre: `Rôle attribué — ${m.displayName}`, description: `${m.displayName} reçoit son rôle${role ? ` (${role.name})` : ''} · par ${interaction.user.username}`, auteur: interaction.user.username }); } catch {}
+    return interaction.update({ content: `✅ Rôle ${role ? `**${role.name}** ` : ''}attribué à <@${uid}>. Bienvenue à lui !`, components: [] }).catch(() => {});
+  }
+  if (interaction.isButton() && interaction.customId.startsWith('rec_role_no::')) {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '🔒 Réservé à la Direction / Officiers de Terrain.', flags: MessageFlags.Ephemeral });
+    const uid = interaction.customId.split('::')[1];
+    return interaction.update({ content: `🚫 Rôle **non attribué** à <@${uid}> pour l'instant. Tu pourras le faire plus tard (réagis à nouveau au dossier si besoin).`, components: [] }).catch(() => {});
   }
   if (interaction.isButton() && interaction.customId === 'reg_reset_cancel') {
     return interaction.update({ content: "✅ Annulé — rien n'a été supprimé.", components: [] });
