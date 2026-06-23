@@ -240,17 +240,31 @@ async function _reposterCommeMembre(channel, member, user, content) {
 }
 
 // Panneau permanent dans #agenda : un bouton « Nouveau rendez-vous » plutôt qu'une commande.
+function _agendaPanelPayload(appts) {
+  const now = new Date(); const minuit = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const up = (appts || [])
+    .filter(a => { if (!a.date || a.statut === 'Annulé') return false; const d = new Date(a.date); return !isNaN(d) && d >= minuit; })
+    .sort((a, b) => new Date(a.date) - new Date(b.date)).slice(0, 8);
+  const liste = up.length
+    ? up.map(a => `📅 **${a.titre || 'RDV'}** — ${fmtShort(a.date)}${a.heure ? ' · ' + a.heure : ''} · 📍 ${a.lieu || '—'}`).join('\n')
+    : '*Aucun rendez-vous à venir pour l\'instant.*';
+  const e = new EmbedBuilder().setColor(0x8B5A2A).setTitle('📅 PRENDRE UN RENDEZ-VOUS')
+    .setDescription('Clique sur le bouton ci-dessous pour **fixer un rendez-vous** à l\'agenda.\nChoisis le **lieu**, la **date** et l\'**heure** — l\'équipe concernée est prévenue automatiquement.')
+    .addFields({ name: '📆 Prochains rendez-vous', value: liste.slice(0, 1024), inline: false })
+    .setFooter({ text: `Iron Wolf Company · Agenda · à jour le ${fmtShort(new Date())}` });
+  const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('agenda_panel_creer').setLabel('Nouveau rendez-vous').setEmoji('📅').setStyle(ButtonStyle.Success));
+  return { embeds: [e], components: [row] };
+}
 async function _installerPanelAgenda(guild) {
   try {
     const ch = getAgendaCh(guild); if (!ch?.send) return;
     const me = guild.client.user.id;
+    let appts = []; try { appts = await notionQueryAgenda(); } catch {}
+    const payload = _agendaPanelPayload(appts);
     const msgs = await ch.messages.fetch({ limit: 30 }).catch(() => null);
-    if (msgs && [...msgs.values()].some(m => m.author?.id === me && (m.embeds?.[0]?.title || '').includes('PRENDRE UN RENDEZ-VOUS'))) return;
-    const e = new EmbedBuilder().setColor(0x8B5A2A).setTitle('📅 PRENDRE UN RENDEZ-VOUS')
-      .setDescription('Clique sur le bouton ci-dessous pour **fixer un rendez-vous** à l\'agenda.\nChoisis le **lieu**, la **date** et l\'**heure** — l\'équipe concernée est prévenue automatiquement.')
-      .setFooter({ text: 'Iron Wolf Company · Agenda' });
-    const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('agenda_panel_creer').setLabel('Nouveau rendez-vous').setEmoji('📅').setStyle(ButtonStyle.Success));
-    const sent = await ch.send({ embeds: [e], components: [row] }).catch(() => null);
+    const panel = msgs ? [...msgs.values()].find(m => m.author?.id === me && (m.embeds?.[0]?.title || '').includes('PRENDRE UN RENDEZ-VOUS')) : null;
+    if (panel) { await panel.edit(payload).catch(() => {}); return; }
+    const sent = await ch.send(payload).catch(() => null);
     if (sent) await sent.pin().catch(() => {});
   } catch (e) { console.log('⚠️ install panneau agenda:', e.message); }
 }
@@ -4327,6 +4341,7 @@ client.once('clientReady', async () => {
   cron.schedule('0 * * * *', async () => {
     for (const g of client.guilds.cache.values()) {
       await updateDashboard(g).catch(() => {});
+      await _installerPanelAgenda(g).catch(() => {}); // rafraîchit la liste des prochains RDV
       await notionExtra.checkFichesCompletees?.(g).catch(() => {});
       await notionExtra.checkEcheancesContrats?.(g).catch(() => {});
       await notionV3.checkInactivite?.(g).catch(() => {});

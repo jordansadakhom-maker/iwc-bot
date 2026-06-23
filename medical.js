@@ -273,22 +273,31 @@ async function installerPanel(guild) {
   if (!ch) return;
   const moi = guild.members.me?.id;
   const e = new EmbedBuilder().setColor(0x2ECC71).setTitle('🩺 Suivi médical & aptitude')
-    .setDescription(['Dossier médical **confidentiel** de chaque membre (réservé au médecin et à la Direction).', '', '• **Ouvrir un dossier** : choisis un membre et consulte/édite son suivi.', '• **Vue d\'ensemble** : la liste des statuts.'].join('\n'));
+    .setDescription([
+      'Dossier médical **confidentiel** de chaque membre.',
+      '',
+      '• **Ouvrir un dossier** — consulter/éditer le suivi d\'un membre *(médecin & Direction)*.',
+      '• **Vue d\'ensemble** — la liste des statuts *(médecin & Direction)*.',
+      '• **🆘 Demander un RDV** — besoin de soins ? Décris ton motif, le médecin te recontacte *(tout le monde)*.',
+    ].join('\n'));
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('med_select').setLabel('Ouvrir un dossier').setEmoji('🩺').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('med_liste').setLabel('Vue d\'ensemble').setEmoji('📋').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('med_demande::open').setLabel('Demander un RDV').setEmoji('🆘').setStyle(ButtonStyle.Success),
   );
-  // Forum (type 15) → post épinglé ; sinon salon classique → message
+  // Forum (type 15) → post épinglé ; sinon salon classique → message. Mise à jour EN PLACE si déjà présent.
   if (ch.type === 15 && ch.threads?.create) {
     const act = await ch.threads.fetchActive().catch(() => null);
-    if (act?.threads && [...act.threads.values()].some(t => (t.name || '').includes('SUIVI MÉDICAL'))) return;
+    const existing = act?.threads ? [...act.threads.values()].find(t => (t.name || '').includes('SUIVI MÉDICAL')) : null;
+    if (existing) { const st = await existing.fetchStarterMessage().catch(() => null); if (st) await st.edit({ embeds: [e], components: [row] }).catch(() => {}); return; }
     const post = await ch.threads.create({ name: '🩺 SUIVI MÉDICAL', message: { embeds: [e], components: [row] } }).catch(() => null);
     if (post?.pin) await post.pin().catch(() => {});
     return;
   }
   if (!ch.send) return;
   const existing = await ch.messages.fetch({ limit: 30 }).catch(() => null);
-  if (existing && [...existing.values()].some(m => m.author?.id === moi && m.components?.length && (m.embeds?.[0]?.title || '').includes('Suivi médical'))) return;
+  const panel = existing ? [...existing.values()].find(m => m.author?.id === moi && m.components?.length && (m.embeds?.[0]?.title || '').includes('Suivi médical')) : null;
+  if (panel) { await panel.edit({ embeds: [e], components: [row] }).catch(() => {}); return; }
   await ch.send({ embeds: [e], components: [row] }).catch(() => {});
 }
 
