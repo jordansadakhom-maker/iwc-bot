@@ -11,7 +11,7 @@
 //  /inventaire-installer  /inventaire-photo  /inventaire-seuil
 //  /inventaire-export     /inventaire-qui
 // ───────────────────────────────────────────────────────────────────────────
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, AttachmentBuilder, MessageFlags } = require('discord.js');
 
 let dbMod = {};
 try { dbMod = require('./db'); } catch { dbMod = {}; }
@@ -69,7 +69,7 @@ function _boardEmbed(inv) {
     e.addFields({ name: `${CAT_EMOJI[c]} ${c} (${per[c]})`, value: val, inline: false });
   }
   if (inv.photoMsg) e.addFields({ name: "📷 Photo du coffre", value: "Dernière(s) capture(s) épinglée(s) dans ce salon.", inline: false });
-  e.addFields({ name: "🛠️ Comment gérer le coffre", value: "➕ **Ajouter** — ajoute une quantité à un objet\n➖ **Retirer** — enlève une quantité (pour vider ou diminuer)\n✏️ **Corriger** — fixe la quantité exacte d'un objet (mets **0** pour le **supprimer**)", inline: false });
+  e.addFields({ name: "🛠️ Comment gérer le coffre", value: "➕ **Ajouter** — choisis l'objet (ou « 🆕 Nouvel objet ») puis le **nombre à faire ENTRER**\n➖ **Retirer** — choisis l'objet puis le **nombre à faire SORTIR**\n✏️ **Corriger** — *seulement en cas d'erreur* : remets la **quantité exacte** (0 = supprimer)\n📷 *Tu peux aussi déposer une photo du coffre : je la lis et le coffre devient exactement la photo.*", inline: false });
   e.setFooter({ text: "Mouvements dans le fil « 📦 Journal du coffre » · mis à jour automatiquement" });
   return e;
 }
@@ -129,6 +129,40 @@ async function _checkSeuils(client, inv, changes) {
   } catch {}
 }
 
+// Sélection en attente entre le menu d'objet et la saisie de quantité (clé : userId)
+const _pendingMov = new Map();
+function _pendingCleanup() { const now = Date.now(); for (const [k, v] of _pendingMov) if (now - (v.at || 0) > 600000) _pendingMov.delete(k); }
+// Liste des objets présents dans le coffre, prête pour un menu déroulant (max 25)
+function _itemOptions(inv) {
+  const opts = [];
+  for (const c of CATS) for (const [nom, q] of Object.entries(inv.stock[c] || {})) {
+    opts.push({ label: String(nom).slice(0, 90), description: `${c} · en stock : ${q}`.slice(0, 100), value: `${c}|${nom}`.slice(0, 100) });
+  }
+  return opts.sort((a, b) => a.label.localeCompare(b.label)).slice(0, 25);
+}
+// Applique un mouvement (add/remove/set) et renvoie {existante, avant, apres}
+function _applyMov(inv, action, cat, objet, qte) {
+  if (!inv.stock[cat]) inv.stock[cat] = {};
+  const bucket = inv.stock[cat];
+  const existante = Object.keys(bucket).find(k => _norm(k) === _norm(objet)) || objet;
+  const avant = bucket[existante] || 0;
+  let apres;
+  if (action === 'add') apres = avant + qte;
+  else if (action === 'remove') apres = Math.max(0, avant - qte);
+  else apres = qte;
+  if (apres <= 0) delete bucket[existante]; else bucket[existante] = apres;
+  return { existante, avant, apres };
+}
+// Petit modal ne demandant QUE la quantité (l'objet est déjà choisi dans le menu)
+function _modalQuantite(action) {
+  const titre = action === 'add' ? "➕ Ajouter — quantité" : action === 'remove' ? "➖ Retirer — quantité" : "✏️ Corriger — quantité exacte";
+  const label = action === 'add' ? "Combien en AJOUTER ?" : action === 'remove' ? "Combien en RETIRER ?" : "Nouvelle quantité EXACTE (0 = supprimer)";
+  const m = new ModalBuilder().setCustomId(`invq::${action}`).setTitle(titre);
+  m.addComponents(new ActionRowBuilder().addComponents(
+    new TextInputBuilder().setCustomId("qte").setLabel(label).setStyle(TextInputStyle.Short).setPlaceholder("ex : 5").setRequired(true),
+  ));
+  return m;
+}
 function _modal(action) {
   const verbe = action === 'add' ? "Ajouter au coffre" : action === 'remove' ? "Retirer du coffre" : "Corriger le coffre";
   const m = new ModalBuilder().setCustomId(`invm::${action}`).setTitle(verbe);
@@ -269,18 +303,16 @@ function _proposalEmbed(items) {
   let desc = CATS.filter(c => lignes[c]).map(c => `${CAT_EMOJI[c]} **${c}**\n${lignes[c].join("\n")}`).join("\n\n") || "*(aucun objet lu)*";
   if (desc.length > 3600) desc = desc.slice(0, 3600) + "\n…";
   return new EmbedBuilder().setColor(0xC9A66B).setTitle("📷 Lecture de la capture du coffre")
-    .setDescription("Voici ce que j'ai lu sur la photo. **Vérifie**, puis choisis quoi en faire :\n\n" + desc +
+    .setDescription("Voici ce que j'ai lu sur la photo. **Vérifie bien les quantités**, puis valide :\n\n" + desc +
       "\n\n**Que faire de cette lecture ?**\n" +
-      "📸 **Le coffre = la photo** — le coffre devient EXACTEMENT cette liste *(à utiliser quand tu prends en photo TOUT le coffre — l'ancien contenu est remplacé)*\n" +
-      "➕ **Ajouter au stock** — ces objets s'**additionnent** à ce qui est déjà dans le coffre *(à utiliser quand tu ne photographies QUE ce que tu déposes)*\n" +
-      "✏️ **Corriger un objet** — rectifier une ligne avant d'enregistrer\n" +
+      "📸 **Le coffre = la photo** — le coffre devient EXACTEMENT cette liste *(la photo montre TOUT le coffre)*\n" +
+      "✏️ **Corriger un objet** — rectifier une ligne mal lue avant d'enregistrer\n" +
       "❌ **Annuler** — ne rien changer")
-    .setFooter({ text: "Pour ENLEVER des objets sans photo : utilise ➖ Retirer ou ✏️ Corriger sur le tableau du coffre." });
+    .setFooter({ text: "Pour AJOUTER ou RETIRER un nombre précis d'objets : utilise les boutons ➕ / ➖ du tableau du coffre." });
 }
 function _proposalRow() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("invp_replace").setLabel("Le coffre = la photo").setEmoji("📸").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId("invp_add").setLabel("Ajouter au stock").setEmoji("➕").setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId("invp_edit").setLabel("Corriger un objet").setEmoji("✏️").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("invp_cancel").setLabel("Annuler").setEmoji("❌").setStyle(ButtonStyle.Secondary),
   );
@@ -448,10 +480,59 @@ async function routeInteraction(interaction) {
       return true;
     }
 
-    // ── Boutons manuels ──
+    // ── Boutons manuels : panneau « choisis l'objet → indique la quantité » ──
     if (interaction.isButton?.() && ["inv_add", "inv_remove", "inv_set"].includes(interaction.customId)) {
       const action = interaction.customId.replace("inv_", "");
-      await interaction.showModal(_modal(action)).catch(() => {});
+      const db = loadDB(); const inv = _ensure(db);
+      const opts = _itemOptions(inv);
+      // Ajout d'un objet ABSENT du coffre → formulaire direct (nom + catégorie + quantité)
+      if (action === 'add' && !opts.length) { await interaction.showModal(_modal('add')).catch(() => {}); return true; }
+      if (action !== 'add' && !opts.length) { await interaction.reply({ content: `Le coffre est vide — rien à ${action === 'remove' ? "retirer" : "corriger"}.`, flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const ph = action === 'add' ? "Choisis l'objet à réapprovisionner…" : action === 'remove' ? "Choisis l'objet à retirer…" : "Choisis l'objet à corriger…";
+      const select = new StringSelectMenuBuilder().setCustomId(`invsel::${action}`).setPlaceholder(ph).addOptions(opts);
+      const comps = [new ActionRowBuilder().addComponents(select)];
+      if (action === 'add') comps.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("inv_new").setLabel("Nouvel objet (absent de la liste)").setEmoji("🆕").setStyle(ButtonStyle.Secondary)));
+      const verbe = action === 'add' ? "➕ **Ajouter** au coffre" : action === 'remove' ? "➖ **Retirer** du coffre" : "✏️ **Corriger** (uniquement en cas d'erreur)";
+      await interaction.reply({ content: `${verbe}\nChoisis l'objet dans le menu, puis indique la **quantité**.`, components: comps, flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+    // Nouvel objet (absent du coffre) → formulaire complet
+    if (interaction.isButton?.() && interaction.customId === "inv_new") {
+      await interaction.showModal(_modal('add')).catch(() => {});
+      return true;
+    }
+    // Objet choisi dans le menu → on demande la quantité
+    if (interaction.isStringSelectMenu?.() && interaction.customId.startsWith("invsel::")) {
+      const action = interaction.customId.split("::")[1];
+      const raw = interaction.values[0] || "";
+      const i = raw.indexOf("|");
+      const cat = i >= 0 ? raw.slice(0, i) : "Commun";
+      const nom = i >= 0 ? raw.slice(i + 1) : raw;
+      _pendingCleanup();
+      _pendingMov.set(interaction.user.id, { action, cat, nom, at: Date.now() });
+      await interaction.showModal(_modalQuantite(action)).catch(() => {});
+      return true;
+    }
+    // Quantité saisie → application du mouvement
+    if (interaction.isModalSubmit?.() && interaction.customId.startsWith("invq::")) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const action = interaction.customId.split("::")[1];
+      const pend = _pendingMov.get(interaction.user.id); _pendingMov.delete(interaction.user.id);
+      if (!pend) { await interaction.editReply({ content: "⏳ Sélection expirée — relance via le bouton du tableau." }).catch(() => {}); return true; }
+      const qte = parseInt(((interaction.fields.getTextInputValue("qte") || "").replace(/[^0-9]/g, "")), 10);
+      if (!Number.isFinite(qte) || qte < 0 || (action !== 'set' && qte <= 0)) { await interaction.editReply({ content: "❌ Quantité invalide (mets un nombre, ex : 5)." }).catch(() => {}); return true; }
+      const db = loadDB(); const inv = _ensure(db);
+      const { existante, avant, apres } = _applyMov(inv, action, pend.cat, pend.nom, qte);
+      _journalAdd(inv, interaction.user.id, `${action === 'add' ? "Ajout" : action === 'remove' ? "Retrait" : "Correction"} : ${action === 'set' ? "" : qte + " × "}${existante} (${pend.cat}) → ${apres}`);
+      persist(db);
+      await _refreshBoard(interaction.client, inv);
+      const who = `<@${interaction.user.id}>`;
+      let logTxt;
+      if (action === 'set') logTxt = `📦 ${who} a recompté **${existante}** : ${avant} → **${apres}** *(${pend.cat})*.`;
+      else { const mot = action === 'add' ? "a rangé" : "a sorti"; const fin = action === 'add' ? "total" : "reste"; logTxt = `📦 ${who} ${mot} **${qte} × ${existante}** *(${pend.cat})* · ${fin} : **${apres}**.`; }
+      await _log(interaction.client, inv, logTxt);
+      await _checkSeuils(interaction.client, inv, { [_norm(existante)]: { avant, apres } });
+      await interaction.editReply({ content: `✅ **${action === 'add' ? "Ajouté" : action === 'remove' ? "Retiré" : "Corrigé"}** : ${existante} — ${avant} → **${apres}** *(${pend.cat})*.` }).catch(() => {});
       return true;
     }
 
