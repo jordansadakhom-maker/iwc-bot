@@ -39,6 +39,22 @@ const GRADES_ILLEGAL = [
   { nom: 'Le Condamné',    emoji: '🔴', roleKey: 'CONDAMNE',      couleur: 0xFFA500 },
   { nom: 'Le Maudit',      emoji: '🟤', roleKey: 'MAUDIT',        couleur: 0x8B5A2A },
 ];
+// Hiérarchie UNIFIÉE d'Iron Wolf Company (plus aucune distinction légal/illégal).
+// Rôles résolus PAR NOM → effectif et libellés toujours exacts. Visiteur/Absent volontairement exclus.
+const GRADES_UNIFIES = [
+  { emoji: '👑', nom: 'Fondateur',                            match: ['Fondateur'],
+    desc: 'Vision d\'ensemble, dernière décision, gardiens de l\'esprit IWC.' },
+  { emoji: '🔴', nom: 'Le Conseil — Directeur / Co-Directeur', match: ['Conseil', 'Directeur'],
+    desc: 'La direction : pilote la compagnie et tranche les décisions importantes.' },
+  { emoji: '🎖️', nom: 'Officier de Terrain',                  match: ['Officier'],
+    desc: 'Encadre le terrain, organise les opérations, vote au recrutement.' },
+  { emoji: '🔵', nom: 'Agent Confirmé',                        match: ['Agent Confimé', 'Agent Confirmé', 'Agent'],
+    desc: 'Membre aguerri et autonome, encadre les plus jeunes.' },
+  { emoji: '🟢', nom: 'Opérateur',                             match: ['Opérateur'],
+    desc: 'Le cœur opérationnel : contrats et opérations de la compagnie.' },
+  { emoji: '⚪', nom: 'Recrue — Probatoire',                   match: ['Recrue'],
+    desc: 'Nouvelle recrue en période d\'essai, accompagnée sur ses débuts.' },
+];
 const { MEMBRES_DISCORD_MAP, NOTION_VERSION: NOTION_VERSION_V3, _getPole } = require('./config');
 function fmtShort(d) { return !d ? '—' : new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
 function daysSince(d) { return !d ? 999 : Math.floor((Date.now() - new Date(d).getTime()) / 86400000); }
@@ -80,7 +96,7 @@ function isDirection(member) {
   );
 }
 function canManageGrades(member) {
-  return member?.roles?.cache?.some(r => ['Concepteur', 'Fléau', 'Fondateur'].some(n => r.name.includes(n)));
+  return member?.roles?.cache?.some(r => ['Fondateur', 'Conseil', 'Directeur'].some(n => r.name.includes(n)));
 }
 // ═══════════════════════════════════════════════════════════════
 // HELPER — Upsert message bot sans doublon, sans pin
@@ -164,53 +180,47 @@ async function updateHierarchieEmbed(guild) {
     // ── Source de vérité = les vrais rôles Discord des membres ──
     const allMembers = await guild.members.fetch().catch(() => null);
     if (!allMembers) return;
-    // Construire une map roleId → liste de membres Discord
-    const roleMembers = {};
-    const allGrades   = [...GRADES_LEGAL, ...GRADES_ILLEGAL];
-    for (const g of allGrades) {
-      const roleId = ROLES[g.roleKey];
-      if (!roleId) continue;
-      roleMembers[roleId] = [...allMembers.values()].filter(m =>
-        !m.user.bot && m.roles.cache.has(roleId)
-      );
+    // Résolution d'un grade unifié → son rôle Discord (par nom)
+    const clean = s => (s || '').toLowerCase();
+    const roleDuGrade = (g) =>
+      guild.roles.cache.find(r => g.match.some(m => clean(r.name) === clean(m)))
+   || guild.roles.cache.find(r => g.match.some(m => clean(r.name).includes(clean(m))));
+    // Construire les blocs (un champ par grade) — chaque membre n'apparaît
+    // qu'une seule fois, dans son grade le plus élevé. Visiteur/Absent exclus.
+    const dejaVus = new Set();
+    const fields = [];
+    const tousLesIds = new Set();
+    for (const g of GRADES_UNIFIES) {
+      const role = roleDuGrade(g);
+      const members = role
+        ? [...allMembers.values()].filter(m => !m.user.bot && m.roles.cache.has(role.id) && !dejaVus.has(m.id))
+        : [];
+      members.forEach(m => { dejaVus.add(m.id); tousLesIds.add(m.id); });
+      const liste = members.length
+        ? members.map(m => {
+            const statut = db.members[m.id]?.status;
+            const suffix = statut === 'absent' ? ' *(absent)*' : statut === 'inactif' ? ' *(inactif)*' : '';
+            return `┗ ${m.displayName}${suffix}`;
+          }).join('\n')
+        : '*— aucun —*';
+      fields.push({
+        name: `${g.emoji} ${g.nom} · ${members.length} membre${members.length > 1 ? 's' : ''}`,
+        value: `*${g.desc}*\n${liste}`.slice(0, 1024),
+        inline: false,
+      });
     }
-    // Construire une section — chaque membre n'apparaît qu'une seule fois
-    // dans son grade le plus élevé (premier grade dans la liste)
-    const buildSection = (grades) => {
-      const dejaVus = new Set(); // éviter les doublons
-      const lignes = [];
-      for (const g of grades) {
-        const roleId  = ROLES[g.roleKey];
-        const members = (roleMembers[roleId] || []).filter(m => !dejaVus.has(m.id));
-        if (!members.length) continue;
-        members.forEach(m => dejaVus.add(m.id));
-        const lines = members.map(m => {
-          const dbData = db.members[m.id];
-          const statut = dbData?.status;
-          const suffix = statut === 'absent' ? ' *(absent)*' : statut === 'inactif' ? ' *(inactif)*' : '';
-          return `┗ ${m.displayName}${suffix}`;
-        }).join('\n');
-        lignes.push(`${g.emoji} **${g.nom}**\n${lines}`);
-      }
-      return lignes.join('\n\n') || '*Aucun membre*';
-    };
-    // Compter les membres actifs depuis les rôles Discord
-    const allRoleIds  = allGrades.map(g => ROLES[g.roleKey]).filter(Boolean);
-    const membresRole = [...allMembers.values()].filter(m =>
-      !m.user.bot && m.roles.cache.some(r => allRoleIds.includes(r.id))
-    );
-    const actifs  = membresRole.filter(m => db.members[m.id]?.status !== 'absent' && db.members[m.id]?.status !== 'inactif').length;
-    const absents = membresRole.filter(m => db.members[m.id]?.status === 'absent').length;
-    const inactifs= membresRole.filter(m => db.members[m.id]?.status === 'inactif').length;
+    // Effectifs (sur l'ensemble des membres gradés)
+    const gradés = [...tousLesIds].map(id => allMembers.get(id)).filter(Boolean);
+    const actifs  = gradés.filter(m => db.members[m.id]?.status !== 'absent' && db.members[m.id]?.status !== 'inactif').length;
+    const absents = gradés.filter(m => db.members[m.id]?.status === 'absent').length;
+    const inactifs= gradés.filter(m => db.members[m.id]?.status === 'inactif').length;
+    fields.push({ name: '📊 Effectifs', value: [`✅ Actifs : **${actifs}**`, `⚠️ Absents : **${absents}**`, `💤 Inactifs : **${inactifs}**`].join(' · '), inline: false });
     const embed = new EmbedBuilder()
-      .setColor(0x8B1A1A)
-      .setTitle('⚔️ IRON WOLF COMPANY — Tableau Hiérarchique')
-      .setDescription('*Structure interne de la Compagnie. Basée sur les vrais rôles Discord.*')
-      .addFields(
-        { name: '⚖️ ═══ PÔLE LÉGAL ═══',  value: buildSection(GRADES_LEGAL),   inline: false },
-        { name: '🔪 ═══ LA CONFRÉRIE ═══', value: buildSection(GRADES_ILLEGAL), inline: false },
-        { name: '📊 Effectifs', value: [`✅ Actifs : **${actifs}**`, `⚠️ Absents : **${absents}**`, `💤 Inactifs : **${inactifs}**`].join(' · '), inline: false },
-      )
+      .setColor(0xC9A227)
+      .setAuthor({ name: 'Iron Wolf Company · La Confrérie', iconURL: guild.iconURL() || undefined })
+      .setTitle('🎖️ IRON WOLF COMPANY — Grades & Hiérarchie')
+      .setDescription('*Hiérarchie unifiée de la Compagnie — qui occupe quel grade, et le rôle de chacun. Basée sur les vrais rôles Discord.*')
+      .addFields(...fields)
       .setFooter({ text: `IWC • Hiérarchie • MàJ ${new Date().toLocaleString('fr-FR')}` });
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('btn_grade_panel').setLabel('🎖️ Gérer les grades').setStyle(ButtonStyle.Primary),
@@ -226,11 +236,11 @@ async function handleHierarchieCommand(interaction) {
   await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x8B1A1A).setTitle('⚔️ Hiérarchie — Iron Wolf Company').addFields({ name: '⚖️ PÔLE LÉGAL', value: buildSection(GRADES_LEGAL), inline: false }, { name: '🔪 LA CONFRÉRIE', value: buildSection(GRADES_ILLEGAL), inline: false }).setFooter({ text: `IWC • ${new Date().toLocaleString('fr-FR')}` })] });
 }
 async function handleGradeSetCommand(interaction) {
-  if (!canManageGrades(interaction.member)) return interaction.reply({ content: '❌ Réservé au Concepteur et au Fléau.', flags: MessageFlags.Ephemeral });
+  if (!canManageGrades(interaction.member)) return interaction.reply({ content: '❌ Réservé à la direction (Fondateur · Le Conseil).', flags: MessageFlags.Ephemeral });
   await _showGradePanel(interaction);
 }
 async function handleGradePanelButton(interaction) {
-  if (!canManageGrades(interaction.member)) return interaction.reply({ content: '❌ Réservé au Concepteur et au Fléau.', flags: MessageFlags.Ephemeral });
+  if (!canManageGrades(interaction.member)) return interaction.reply({ content: '❌ Réservé à la direction (Fondateur · Le Conseil).', flags: MessageFlags.Ephemeral });
   await _showGradePanel(interaction);
 }
 async function _showGradePanel(interaction) {
@@ -260,7 +270,7 @@ async function handleGradeMembreSelect(interaction) {
   await interaction.update(_vueEtape2Payload(userId, membre));
 }
 async function showGradeMembre(interaction, userId) {
-  if (!canManageGrades(interaction.member)) return interaction.reply({ content: '❌ Réservé au Concepteur et au Fléau.', flags: MessageFlags.Ephemeral });
+  if (!canManageGrades(interaction.member)) return interaction.reply({ content: '❌ Réservé à la direction (Fondateur · Le Conseil).', flags: MessageFlags.Ephemeral });
   const db = loadDB(); const membre = _membreFromId(db, userId);
   const payload = _vueEtape2Payload(userId, membre);
   return interaction.reply({ embeds: payload.embeds, components: payload.components, flags: MessageFlags.Ephemeral });
@@ -347,21 +357,21 @@ function _gradeVoisin(userId, sens) {
   return ladder[newIdx];
 }
 async function handleGradeUp(interaction) {
-  if (!canManageGrades(interaction.member)) return interaction.reply({ content: '❌ Réservé au Concepteur et au Fléau.', flags: MessageFlags.Ephemeral });
+  if (!canManageGrades(interaction.member)) return interaction.reply({ content: '❌ Réservé à la direction (Fondateur · Le Conseil).', flags: MessageFlags.Ephemeral });
   const userId = interaction.customId.replace('grade_up_', '');
   const cible = _gradeVoisin(userId, 'up');
   if (!cible) return interaction.reply({ content: '⛔ Déjà au grade le plus élevé de son pôle (ou membre introuvable).', flags: MessageFlags.Ephemeral });
   return _appliquerGrade(interaction, userId, cible);
 }
 async function handleGradeDown(interaction) {
-  if (!canManageGrades(interaction.member)) return interaction.reply({ content: '❌ Réservé au Concepteur et au Fléau.', flags: MessageFlags.Ephemeral });
+  if (!canManageGrades(interaction.member)) return interaction.reply({ content: '❌ Réservé à la direction (Fondateur · Le Conseil).', flags: MessageFlags.Ephemeral });
   const userId = interaction.customId.replace('grade_down_', '');
   const cible = _gradeVoisin(userId, 'down');
   if (!cible) return interaction.reply({ content: '⛔ Déjà au grade le plus bas de son pôle (ou membre introuvable).', flags: MessageFlags.Ephemeral });
   return _appliquerGrade(interaction, userId, cible);
 }
 async function handleGradeFiche(interaction) {
-  if (!canManageGrades(interaction.member)) return interaction.reply({ content: '❌ Réservé au Concepteur et au Fléau.', flags: MessageFlags.Ephemeral });
+  if (!canManageGrades(interaction.member)) return interaction.reply({ content: '❌ Réservé à la direction (Fondateur · Le Conseil).', flags: MessageFlags.Ephemeral });
   const userId = interaction.customId.replace('grade_fiche_', '');
   const db = loadDB(); const membre = _membreFromId(db, userId);
   if (!membre) return interaction.reply({ content: '❌ Membre introuvable.', flags: MessageFlags.Ephemeral });
@@ -382,7 +392,7 @@ async function handleGradeFiche(interaction) {
   return interaction.reply({ embeds: [e], flags: MessageFlags.Ephemeral });
 }
 async function handleGradeEligibles(interaction) {
-  if (!canManageGrades(interaction.member)) return interaction.reply({ content: '❌ Réservé au Concepteur et au Fléau.', flags: MessageFlags.Ephemeral });
+  if (!canManageGrades(interaction.member)) return interaction.reply({ content: '❌ Réservé à la direction (Fondateur · Le Conseil).', flags: MessageFlags.Ephemeral });
   const SEUIL = 14;
   const db = loadDB();
   const lL = GRADES_LEGAL.map(g => g.nom), lI = GRADES_ILLEGAL.map(g => g.nom);
