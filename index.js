@@ -12,7 +12,7 @@ const cron = require('node-cron');
 
 const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub } = require('./db');
 // Version du bot (sert au /version ET à la génération auto des patch notes)
-const BOT_VERSION = '6.9 (23 juin — vocal RP : micro coupé automatiquement à l\'entrée)';
+const BOT_VERSION = '7.0 (23 juin — #grade-illegal : hiérarchie de l\'ombre à jour + rôle de chaque grade)';
 const { initPapiers, papiersCommands } = require('./papiers');
 const securite = require('./securite');
 const rdvplus = require('./rdvplus');
@@ -1580,6 +1580,7 @@ async function autoSetup(guild) {
   _installerPanelAgenda(guild).then(() => console.log('📅 Panneau agenda installé')).catch(() => {});
   _setupComptaChannel(guild).then(() => console.log('💰 Salon comptabilité prêt')).catch(() => {});
   _majPanneauxRdvClient(guild).then(() => console.log('📨 Panneaux RDV client à jour')).catch(() => {});
+  _setupGradesIllegalPanel(guild).then(() => console.log('🕯️ Panneau grades de l\'ombre à jour')).catch(() => {});
   checkAutoPatchNote(guild).catch(() => {});
   _verrouillerVocalRP(guild).then(() => console.log('🔇 Salon vocal RP verrouillé (parole bloquée)')).catch(() => {});
   // Exemples contrats & opérations
@@ -7413,6 +7414,70 @@ async function _setupComptaChannel(guild) {
     }
     if (ch) await comptabilite.installerPanel(guild, ch).catch(() => {});
   } catch (e) { console.log('⚠️ _setupComptaChannel:', e.message); }
+}
+
+// Panneau d'information « Grades » de #grade-illegal — hiérarchie de l'ombre à jour + rôle de chacun
+const GRADES_ILLEGAL_INFO = [
+  { key: 'LE_CONCEPTEUR', emoji: '💀', nom: 'Le Concepteur',
+    desc: "À la tête de l'ombre. Il décide des grandes orientations, valide les opérations sensibles et détient le dernier mot. Rien d'important ne se lance sans son aval." },
+  { key: 'LE_FLEAU', emoji: '⚔️', nom: 'Le Fléau',
+    desc: "Bras droit du Concepteur. Commande sur le terrain, répartit les missions et fait respecter la discipline. C'est le relais entre la tête et les opérateurs." },
+  { key: 'EXECUTEUR', emoji: '🗡️', nom: "L'Exécuteur",
+    desc: "L'opérateur de confiance. Mène les contrats et les coups les plus délicats. Expérimenté et autonome, on lui confie le travail qui ne souffre aucune erreur." },
+  { key: 'CONDAMNE', emoji: '🔴', nom: 'Le Condamné',
+    desc: "Membre confirmé de l'ombre. Il a fait ses preuves, participe aux opérations courantes et épaule les nouveaux. Pleinement intégré à la Confrérie." },
+  { key: 'MAUDIT', emoji: '🟤', nom: 'Le Maudit',
+    desc: "Le nouveau venu, en période probatoire. Accompagné sur ses premières missions, il doit gagner la confiance du groupe avant de gravir les échelons." },
+];
+function _gradesIllegalPayload(guild) {
+  let ROLES = {}; try { ROLES = require('./notion-modules-v3').ROLES || {}; } catch {}
+  const lignes = GRADES_ILLEGAL_INFO.map((g, i) => {
+    const role = ROLES[g.key] ? guild.roles.cache.get(ROLES[g.key]) : null;
+    const n = role ? role.members.size : null;
+    const eff = (n != null) ? `  ·  ${n} membre${n > 1 ? 's' : ''}` : '';
+    return `**${g.emoji} ${g.nom}**${eff}\n${g.desc}`;
+  }).join('\n\n');
+  const embed = new EmbedBuilder()
+    .setColor(0x8B1A1A)
+    .setAuthor({ name: 'La Confrérie · Hiérarchie de l\'ombre', iconURL: guild.iconURL() || undefined })
+    .setTitle('🕯️  LES GRADES DE L\'OMBRE')
+    .setDescription([
+      '*Voici la hiérarchie de la Confrérie, du sommet jusqu\'aux nouveaux venus, et le rôle de chacun.*',
+      '*Chaque grade se mérite : il s\'obtient par la confiance, l\'implication et le travail bien fait.*',
+      '',
+      '```',
+      '╔══════════════════════════════════╗',
+      '║   💀  →  ⚔️  →  🗡️  →  🔴  →  🟤   ║',
+      '║   du sommet     vers la base     ║',
+      '╚══════════════════════════════════╝',
+      '```',
+    ].join('\n'))
+    .addFields({ name: '​', value: lignes })
+    .setFooter({ text: 'Iron Wolf Company · « La force est dans l\'ombre. »' })
+    .setTimestamp();
+  return { embeds: [embed] };
+}
+async function _setupGradesIllegalPanel(guild) {
+  try {
+    const { SALON_IDS } = require('./config');
+    const ch = guild.channels.cache.get(SALON_IDS?.GRADE_ILLEGAL || '1508788467008667819');
+    if (!ch?.messages) return;
+    const db = loadDB();
+    const ref = db.gradesIllegalPanel;
+    const payload = _gradesIllegalPayload(guild);
+    if (ref?.messageId && ref?.channelId === ch.id) {
+      const ex = await ch.messages.fetch(ref.messageId).catch(() => null);
+      if (ex) { await ex.edit(payload).catch(() => {}); return; }
+    }
+    // Sinon : réutiliser un éventuel panneau déjà posté par le bot, ou en créer un
+    const me = guild.client.user.id;
+    const msgs = await ch.messages.fetch({ limit: 20 }).catch(() => null);
+    const mien = msgs && [...msgs.values()].find(m => m.author.id === me && m.embeds?.[0]?.title?.includes('GRADES DE L\'OMBRE'));
+    let msg;
+    if (mien) { await mien.edit(payload).catch(() => {}); msg = mien; }
+    else { msg = await ch.send(payload).catch(() => null); }
+    if (msg) { db.gradesIllegalPanel = { channelId: ch.id, messageId: msg.id }; saveDB(db); }
+  } catch (e) { console.log('⚠️ _setupGradesIllegalPanel:', e.message); }
 }
 
 // Panneau « Contacter la compagnie » (message libre) — builder réutilisable
