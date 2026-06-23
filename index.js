@@ -12,7 +12,7 @@ const cron = require('node-cron');
 
 const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub } = require('./db');
 // Version du bot (sert au /version ET à la génération auto des patch notes)
-const BOT_VERSION = '7.4 (23 juin — contrat client par MP avec boutons Accepter/Refuser · opération lancée ping La Confrérie · fix crash clôture avis #élément-opérations)';
+const BOT_VERSION = '7.5 (23 juin — agenda : une demande de RDV ping le Panseur, les Officiers de Terrain et les Fondateurs)';
 const { initPapiers, papiersCommands } = require('./papiers');
 const securite = require('./securite');
 const rdvplus = require('./rdvplus');
