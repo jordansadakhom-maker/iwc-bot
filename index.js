@@ -361,7 +361,6 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('contrat-suivi-panneau').setDescription('📌 Installer le panneau permanent de gestion des contrats (Direction)'),
   new SlashCommandBuilder().setName('contrats-importer').setDescription('📥 Importer dans Discord les contrats ajoutés sur Notion (Direction)'),
   new SlashCommandBuilder().setName('recap').setDescription('📊 Ton récap : ce qui demande ton attention (Direction)'),
-  new SlashCommandBuilder().setName('reset-registre').setDescription('🗑️ Effacer les opérations & avis de recherche de test (Direction)'),
   new SlashCommandBuilder().setName('contrat-panel').setDescription('📋 Publier le panneau des contrats (Direction)'),
   new SlashCommandBuilder().setName('contrats-sync').setDescription('🔄 Resynchroniser tous les contrats avec Notion (Direction)'),
   new SlashCommandBuilder().setName('notion-test').setDescription('🔍 Tester la connexion Notion des contrats (Direction)'),
@@ -742,18 +741,6 @@ async function handleSlashCommand(interaction) {
     sentP.pin().catch(() => {});
     const dbPan = loadDB(); dbPan.contratPanel = { channelId: interaction.channel.id, messageId: sentP.id }; saveDB(dbPan);
     return interaction.reply({ content: "✅ Panneau installé et épinglé, avec **compteur live** (il se met à jour tout seul). Utilisable en permanence.", flags: MessageFlags.Ephemeral });
-  }
-  if (commandName === 'reset-registre') {
-    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
-    const d = loadDB();
-    const nOps = (d.operations || []).length;
-    const nWanted = (d.traques || []).length;
-    if (!nOps && !nWanted) return interaction.reply({ content: "Aucune opération ni avis de recherche en base — c'est déjà propre. 👍", flags: MessageFlags.Ephemeral });
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('reg_reset_go').setLabel(`Oui, tout effacer (${nOps} op · ${nWanted} avis)`).setEmoji('🗑️').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('reg_reset_cancel').setLabel('Annuler').setStyle(ButtonStyle.Secondary),
-    );
-    return interaction.reply({ content: `⚠️ **Réinitialisation du registre**\nCeci supprime **${nOps} opération(s)** et **${nWanted} avis de recherche** de la base (+ leurs messages/fils Discord).\n\n*(À n'utiliser que pour effacer les tests. Action irréversible.)*\n\nConfirmer ?`, components: [row], flags: MessageFlags.Ephemeral });
   }
   if (commandName === 'recap') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
@@ -2133,6 +2120,22 @@ client.on('messageCreate', async message => {
   // Nettoyage : les messages système « X a épinglé un message » n'apportent rien → on les retire
   try {
     if (message.type === 6 /* ChannelPinnedMessage */) { await message.delete().catch(() => {}); return; }
+  } catch {}
+  // Réinitialisation du registre (sans commande slash, pour ne pas dépasser la limite Discord) :
+  // un responsable tape « !reset-registre » → confirmation par boutons.
+  try {
+    if (message.guild && !message.author?.bot && /^!reset-registre\b/i.test((message.content || '').trim())) {
+      if (!isDirection(message.member)) { await message.reply({ content: "❌ Réservé à la Direction.", allowedMentions: { parse: [] } }).catch(() => {}); return; }
+      const d = loadDB();
+      const nOps = (d.operations || []).length, nWanted = (d.traques || []).length;
+      if (!nOps && !nWanted) { await message.reply({ content: "Aucune opération ni avis de recherche en base — c'est déjà propre. 👍", allowedMentions: { parse: [] } }).catch(() => {}); return; }
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('reg_reset_go').setLabel(`Oui, tout effacer (${nOps} op · ${nWanted} avis)`).setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('reg_reset_cancel').setLabel('Annuler').setStyle(ButtonStyle.Secondary),
+      );
+      await message.reply({ content: `⚠️ **Réinitialisation du registre**\nCeci supprime **${nOps} opération(s)** et **${nWanted} avis de recherche** (+ leurs messages/fils).\n\n*(Tests uniquement. Irréversible.)* Confirmer ?`, components: [row], allowedMentions: { parse: [] } }).catch(() => {});
+      return;
+    }
   } catch {}
   // Salon RP : on réécrit le message en western immersif puis on le re-poste sous le nom de l'auteur
   try {
