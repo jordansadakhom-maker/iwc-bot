@@ -136,7 +136,7 @@ function _pendingCleanup() { const now = Date.now(); for (const [k, v] of _pendi
 function _itemOptions(inv) {
   const opts = [];
   for (const c of CATS) for (const [nom, q] of Object.entries(inv.stock[c] || {})) {
-    opts.push({ label: String(nom).slice(0, 90), description: `${c} · en stock : ${q}`.slice(0, 100), value: `${c}|${nom}`.slice(0, 100) });
+    opts.push({ label: `${CAT_EMOJI[c] || ''} ${nom} — ${c}`.trim().slice(0, 100), description: `Catégorie : ${c} · en stock : ${q}`.slice(0, 100), value: `${c}|${nom}`.slice(0, 100) });
   }
   return opts.sort((a, b) => a.label.localeCompare(b.label)).slice(0, 25);
 }
