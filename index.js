@@ -12,7 +12,7 @@ const cron = require('node-cron');
 
 const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub } = require('./db');
 // Version du bot (sert au /version ET à la génération auto des patch notes)
-const BOT_VERSION = '6.5 (23 juin — panneau compta : boutons explicites + mode d\'emploi intégré)';
+const BOT_VERSION = '6.6 (23 juin — trésorerie centralisée : un seul coffre commun, plus de légal/illégal)';
 const { initPapiers, papiersCommands } = require('./papiers');
 const securite = require('./securite');
 const rdvplus = require('./rdvplus');
@@ -680,7 +680,7 @@ async function envoyerRapportDirection(guild) {
         { name: '📋 RECRUTEMENT', value: candsRecues.length > 0 ? [`📥 Reçues : **${candsRecues.length}**`, `✅ Acceptées : **${candsAccept.length}**`, `❌ Refusées : **${candsRefus.length}**`].join('\n') : '*Aucune candidature hier*', inline: true },
         { name: '📜 CONTRATS', value: contratsSign.length > 0 ? contratsSign.map(c => `→ \`${c.id}\` — ${c.objet}`).join('\n') : '*Aucun contrat signé hier*', inline: true },
         { name: '🎯 OPÉRATIONS', value: [opsEnCours.length > 0 ? `🟢 En cours : **${opsEnCours.length}**` : '🟢 Aucune', opsTermHier.length > 0 ? `✅ Terminées hier : **${opsTermHier.length}**` : ''].filter(Boolean).join('\n') || '*Aucune activité*', inline: false },
-        { name: '💰 TRÉSORERIE', value: [`⚖️ Légal : **$${soldeLegal.toLocaleString('fr-FR')}**`, `🔒 Illégal : **$${soldeIlleg.toLocaleString('fr-FR')}**`, `💎 Total : **$${(soldeLegal + soldeIlleg).toLocaleString('fr-FR')}**`].join('\n'), inline: false },
+        { name: '💰 TRÉSORERIE', value: `🏦 Coffre commun : **$${(db.coffre || 0).toLocaleString('fr-FR')}**`, inline: false },
       ).setFooter({ text: `IWC • Rapport automatique • ${new Date().toLocaleString('fr-FR')}` });
     const rolesCibles = ['Fléau', 'Concepteur'];
     let envoyes = 0;
@@ -3829,13 +3829,12 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     factures.creerFactureContrat?.(interaction.guild, c, { montant, par: interaction.user.username, parId: interaction.user.id }).catch(() => {});
     comptabilite.refreshPanel?.(interaction.client).catch(() => {});
     _setContratSuiviNotion(c, 'Honoré').catch(() => {});
-    const coffreLabel = pole === 'illegal' ? '🔒 Illégal' : '⚖️ Légal';
-    try { await ajouterJournalIC(interaction.guild, { type: 'tresorerie', emoji: '💵', titre: `Entrée — Coffre ${pole === 'illegal' ? 'Illégal' : 'Légal'}`, description: `Contrat **${c.id}** honoré · +$${montant.toLocaleString('fr-FR')} · ${String(c.clientNom || c.commanditaire || '')}`.slice(0, 300), auteur: interaction.user.username }); } catch {}
-    try { await notionExtra.enregistrerTransactionNotion?.({ type: 'Entrée', coffre: coffreLabel, montant, objet: `Contrat ${c.id} honoré`, responsable: interaction.user.username, solde }); } catch {}
-    _syncTransactionNotion({ type: 'Entrée', coffre: pole, montant, objet: `Contrat ${c.id} honoré`, responsable: interaction.user.username, solde, date: new Date().toISOString(), discordId: interaction.user.id, userId: interaction.user.id }).catch(() => {});
+    try { await ajouterJournalIC(interaction.guild, { type: 'tresorerie', emoji: '💵', titre: `Entrée — Coffre`, description: `Contrat **${c.id}** honoré · +$${montant.toLocaleString('fr-FR')} · ${String(c.clientNom || c.commanditaire || '')}`.slice(0, 300), auteur: interaction.user.username }); } catch {}
+    try { await notionExtra.enregistrerTransactionNotion?.({ type: 'Entrée', coffre: 'Coffre', montant, objet: `Contrat ${c.id} honoré`, responsable: interaction.user.username, solde }); } catch {}
+    _syncTransactionNotion({ type: 'Entrée', coffre: 'legal', montant, objet: `Contrat ${c.id} honoré`, responsable: interaction.user.username, solde, date: new Date().toISOString(), discordId: interaction.user.id, userId: interaction.user.id }).catch(() => {});
     _updateContratPanel(interaction.client).catch(() => {});
     _updatePlanningContrats(interaction.client).catch(() => {});
-    return interaction.editReply({ content: `🏁 **Contrat ${c.id} honoré !**\n💰 **+$${montant.toLocaleString('fr-FR')}** versés au coffre ${coffreLabel}.\n💼 Nouveau solde : **$${solde.toLocaleString('fr-FR')}**\n🧾 Facture créée dans le forum (trace écrite).\n📒 Étape passée à **Honoré** (Notion + journal de bord).` });
+    return interaction.editReply({ content: `🏁 **Contrat ${c.id} honoré !**\n💰 **+$${montant.toLocaleString('fr-FR')}** versés au coffre commun.\n💼 Nouveau solde : **$${solde.toLocaleString('fr-FR')}**\n🧾 Facture créée dans le forum (trace écrite).\n📒 Étape passée à **Honoré** (Notion + journal de bord).` });
   }
   if (interaction.isButton() && interaction.customId.startsWith('signer_offre_')) {
     const contratId = interaction.customId.replace('signer_offre_', ''); const contrat = (db.contrats || []).find(c => c.id === contratId);
@@ -5280,7 +5279,7 @@ function _buildSuivi(db) {
       { name: `📜 Contrats à traiter (${contratsAtt.length})`, value: li(contratsAtt, c => `→ \`${c.id}\` · ${(c.objet || '—').slice(0, 60)}`).slice(0, 1024), inline: false },
       { name: '🎯 Opérations', value: [`🟢 En cours : **${opsEnCours.length}**`, opsEnCours.length ? li(opsEnCours, o => `· ${o.name || 'Opération'} (${o.lieu || '—'})`, 5) : null, `🟡 En préparation : **${opsPrep.length}**`].filter(v => v !== null).join('\n').slice(0, 1024), inline: true },
       { name: `📅 RDV à venir (${rdvs.length})`, value: (rdvs.length ? li(rdvs, r => `→ ${r.nomRP || 'Client'}`, 5) : '*Aucun*').slice(0, 1024), inline: true },
-      { name: '💰 Trésorerie', value: `⚖️ Légal : **${coffreL.toLocaleString('fr-FR')} $**\n🔪 Illégal : **${coffreI.toLocaleString('fr-FR')} $**`, inline: true },
+      { name: '💰 Trésorerie', value: `🏦 Coffre commun : **${(db.coffre || 0).toLocaleString('fr-FR')} $**`, inline: true },
       { name: '👥 Membres', value: `✅ Actifs : **${members.filter(m => m.status === 'actif').length}**\n⚠️ Absents : **${absents.length}**\n❌ Inactifs : **${members.filter(m => m.status === 'inactif').length}**`, inline: true },
       { name: absents.length ? `🟡 Absents (${absents.length})` : '🟡 Absents', value: (absents.length ? li(absents, m => `→ ${m.name}`, 6) : '*Personne*').slice(0, 1024), inline: true },
       { name: inactifs.length ? `⚠️ Inactifs +7j (${inactifs.length})` : '✅ Activité', value: (inactifs.length ? li(inactifs, m => `→ ${m.name} (${daysSince(m.lastActivity)}j)`, 6) : '*Tout le monde est actif*').slice(0, 1024), inline: true },
@@ -5784,7 +5783,7 @@ function _buildDirectionPanelEmbed(guild, db) {
   const legal = db.coffre || 0; const illeg = 0;
   const ligne = (emoji, label, val, urgent) => `${urgent && val > 0 ? '🔴' : '🟢'} ${emoji} **${label}** — ${val}`;
   return new EmbedBuilder().setColor(0x8B1A1A).setAuthor({ name: 'IWC Setup • Panel Direction', iconURL: guild.iconURL() || undefined }).setTitle('🐺 Tableau de bord — Iron Wolf Company')
-    .addFields({ name: '📋 RECRUTEMENT', value: ligne('📥', 'Candidatures en attente', cands.length, true), inline: true }, { name: '🎯 OPÉRATIONS', value: [ligne('🟢', 'En cours', opsEnCours.length, false), ligne('🕐', 'Programmées', opsProg.length, false)].join('\n'), inline: true }, { name: '💰 TRÉSORERIE', value: [`⚖️ Légal : **$${legal.toLocaleString('fr-FR')}**`, `🔒 Illégal : **$${illeg.toLocaleString('fr-FR')}**`].join('\n'), inline: true }, { name: '👥 MEMBRES', value: [ligne('⚠️', 'Absents', absents.length, false), ligne('📜', 'Contrats expirent ≤3j', contrats3j.length, true)].join('\n'), inline: true })
+    .addFields({ name: '📋 RECRUTEMENT', value: ligne('📥', 'Candidatures en attente', cands.length, true), inline: true }, { name: '🎯 OPÉRATIONS', value: [ligne('🟢', 'En cours', opsEnCours.length, false), ligne('🕐', 'Programmées', opsProg.length, false)].join('\n'), inline: true }, { name: '💰 TRÉSORERIE', value: `🏦 Coffre commun : **$${(db.coffre || 0).toLocaleString('fr-FR')}**`, inline: true }, { name: '👥 MEMBRES', value: [ligne('⚠️', 'Absents', absents.length, false), ligne('📜', 'Contrats expirent ≤3j', contrats3j.length, true)].join('\n'), inline: true })
     .setFooter({ text: `IWC • Panel Direction • MàJ ${new Date().toLocaleString('fr-FR')}` }).setTimestamp();
 }
 
