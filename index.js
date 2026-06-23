@@ -12,7 +12,7 @@ const cron = require('node-cron');
 
 const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub } = require('./db');
 // Version du bot (sert au /version ET à la génération auto des patch notes)
-const BOT_VERSION = '7.3 (23 juin — réorganisation sûre du serveur : !reorg test / !reorg / !reorg annuler — perms conservées)';
+const BOT_VERSION = '7.4 (23 juin — contrat client par MP avec boutons Accepter/Refuser · opération lancée ping La Confrérie · fix crash clôture avis #élément-opérations)';
 const { initPapiers, papiersCommands } = require('./papiers');
 const securite = require('./securite');
 const rdvplus = require('./rdvplus');
@@ -3282,9 +3282,10 @@ client.on('interactionCreate', async interaction => {
     const op = db.operations.find(o => o.id === opId);
     if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }); return; }
 
-    // ── Étape 1 : Rassemblement — avertir les membres avant de lancer ──
-    const roleId  = op.pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL;
-    const roleLabel = op.pole === 'legal' ? '⚖️ Pôle Légal' : '🔪 Pôle Illégal';
+    // ── Étape 1 : Rassemblement — avertir LA CONFRÉRIE avant de lancer (tout est unifié) ──
+    const roleConfrerie = guild.roles.cache.find(r => /confr[ée]rie/i.test(r.name)) || guild.roles.cache.get(ROLE_POLE_ILLEGAL);
+    const roleId  = roleConfrerie?.id || ROLE_POLE_ILLEGAL;
+    const roleLabel = '🐺 La Confrérie';
     const participantsText = (op.participants || []).length > 0
       ? op.participants.join(', ')
       : '*Aucun inscrit*';
@@ -3304,7 +3305,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
       .addFields(
         { name: '📍 Lieu',         value: op.lieu || '—',    inline: true },
         { name: '🎯 Objectif',     value: op.objectif || '—', inline: true },
-        { name: '📂 Pôle',         value: roleLabel,           inline: true },
+        { name: '📢 Convoqués',    value: roleLabel,           inline: true },
         { name: '👥 Participants inscrits', value: participantsText, inline: false },
         { name: '✋ Présents (0)', value: '*En attente...*', inline: true },
         { name: '❌ Absents (0)', value: '*—*', inline: true },
@@ -3673,9 +3674,23 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     await interaction.editReply({ content: `✅ Contrat **${contratId}** envoyé au client.` });
     const embed = new EmbedBuilder().setColor(0x2C3E50).setTitle(`📤 CONTRAT DE PRESTATION — ${contratId}`).setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   IRON WOLF COMPANY — OFFRE DE PRESTATION\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```').addFields({ name: '🆔 Référence', value: `\`${contratId}\``, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: '✍️ Émis par', value: emetteurICOffre, inline: true }, { name: '📋 Objet', value: contrat.objet }, { name: '📅 Échéance', value: contrat.dateEcheance ? fmtShort(contrat.dateEcheance) : 'Aucune', inline: true }, { name: '💰 Rémunération souhaitée', value: contrat.remuneration }, { name: '📌 Statut', value: '🟡 En attente de signature', inline: true }).setFooter({ text: `Iron Wolf Company • Secrétariat officiel • ${fmtShort(new Date())}` });
     const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`signer_offre_${contratId}`).setLabel("✍️ J'accepte les termes").setStyle(ButtonStyle.Success), new ButtonBuilder().setCustomId(`refuser_offre_${contratId}`).setLabel('❌ Refuser').setStyle(ButtonStyle.Danger));
-    const ch = guild.channels.cache.get(SALON_HARDCODED.CONTRATS) || guild.channels.cache.get(CH.CONTRATS); if (ch) await ch.send({ content: `<@${contrat.userId}> — Iron Wolf Company vous soumet un contrat.`, embeds: [embed], components: [row] });
+    // 1) On envoie le contrat AU CLIENT par message privé, avec les boutons Accepter / Refuser :
+    //    il accepte ou refuse directement via le bot, sans passer par le serveur.
+    let dmOk = false;
+    try {
+      const m = await guild.members.fetch(contrat.userId).catch(() => null);
+      if (m) {
+        // L'embed du contrat doit rester en position 0 (le handler des boutons édite embeds[0]).
+        const intro = `📨 **Iron Wolf Company vous soumet un contrat.**\nLisez les termes ci-dessous, puis cliquez sur **✍️ J'accepte les termes** ou **❌ Refuser** — votre réponse nous parvient automatiquement.`;
+        await m.send({ content: intro, embeds: [embed], components: [row] });
+        dmOk = true;
+      }
+    } catch {}
+    // 2) Trace + secours dans #contrats (au cas où le client a fermé ses MP) :
+    const ch = guild.channels.cache.get(SALON_HARDCODED.CONTRATS) || guild.channels.cache.get(CH.CONTRATS);
+    if (ch) await ch.send({ content: dmOk ? `📤 Contrat **${contratId}** envoyé en privé à <@${contrat.userId}>. *(boutons de secours ci-dessous si besoin)*` : `<@${contrat.userId}> — Iron Wolf Company vous soumet un contrat. *(vos MP semblent fermés — répondez ici)*`, embeds: [embed], components: [row] });
     _posterContratForum(guild, contrat, embed).catch(() => {});
-    try { const m = await guild.members.fetch(contrat.userId).catch(() => null); if (m) await m.send({ embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📤 Contrat — IWC').setDescription(`L'IWC vous soumet le contrat **${contratId}**.\n\n**Mission :** ${contrat.objet}\n**Rémunération :** ${contrat.remuneration}\n\nRépondez dans **#contrats**.`).setFooter({ text: 'Iron Wolf Company' })] }); } catch {}
+    await interaction.editReply({ content: dmOk ? `✅ Contrat **${contratId}** envoyé au client en message privé (avec boutons Accepter/Refuser).` : `✅ Contrat **${contratId}** posté dans #contrats (MP du client fermés).` }).catch(() => {});
     return;
   }
 
@@ -3892,16 +3907,17 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     if (!contrat) { await interaction.reply({ content: '❌ Contrat introuvable.', flags: MessageFlags.Ephemeral }); return; }
     if (contrat.userId !== interaction.user.id) { await interaction.reply({ content: '❌ Ce contrat ne vous est pas destiné.', flags: MessageFlags.Ephemeral }); return; }
     if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', flags: MessageFlags.Ephemeral }); return; }
+    const gd = guild || interaction.client.guilds.cache.first(); // bouton cliquable en MP → guild peut être null
     contrat.status = 'signe'; contrat.signedAt = new Date().toISOString(); saveDB(db);
     await notionExtra.ajouterContratNotion?.(contrat);
     const clientIC = db.members[interaction.user.id]?.name || interaction.user.username;
     _syncContratNotion(contrat, 'signe', clientIC).catch(() => {});
-    await sendLog(guild, 'CONTRAT_SIGNE', { contratId, objet: contrat.objet, signe: `${clientIC} (${contrat.clientNom})` });
-    await ajouterJournalIC(guild, { type: 'contrat', titre: `Contrat signé — ${contratId}`, description: `Client : **${contrat.clientNom}** · Mission : ${contrat.objet}`, auteur: interaction.user.username });
-    await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287).spliceFields(5, 1, { name: '📌 Statut', value: `✅ Signé le ${fmtShort(new Date())} par ${interaction.user.username}`, inline: true })], components: [] });
+    if (gd) await sendLog(gd, 'CONTRAT_SIGNE', { contratId, objet: contrat.objet, signe: `${clientIC} (${contrat.clientNom})` }).catch(() => {});
+    if (gd) await ajouterJournalIC(gd, { type: 'contrat', titre: `Contrat signé — ${contratId}`, description: `Client : **${contrat.clientNom}** · Mission : ${contrat.objet}`, auteur: interaction.user.username }).catch(() => {});
+    await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287).spliceFields(5, 1, { name: '📌 Statut', value: `✅ Signé le ${fmtShort(new Date())} par ${interaction.user.username}`, inline: true })], components: [] }).catch(() => {});
     const _embedContratSigne = new EmbedBuilder().setColor(0x57F287).setTitle(`✅ CONTRAT ACCEPTÉ — ${contratId}`).addFields({ name: '🆔 Réf', value: `\`${contratId}\``, inline: true }, { name: '📅 Signé le', value: fmtShort(new Date()), inline: true }, { name: '✍️ Client', value: contrat.clientNom || interaction.user.username, inline: true }, { name: '📋 Mission', value: contrat.objet }, { name: '💰 Rémunération', value: contrat.remuneration }).setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` });
-    await archiverContratReponses(guild, contrat, 'signe', _embedContratSigne);
-    try { const em = await guild.members.fetch(contrat.emetteurId).catch(() => null); if (em) await em.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle(`✅ Contrat signé — ${contratId}`).setDescription(`**${contrat.clientNom}** a accepté le contrat.\n\n**Mission :** ${contrat.objet}`).setFooter({ text: 'IWC • Notification contrat' })] }); } catch {}
+    if (gd) await archiverContratReponses(gd, contrat, 'signe', _embedContratSigne).catch(() => {});
+    try { const em = gd && await gd.members.fetch(contrat.emetteurId).catch(() => null); if (em) await em.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle(`✅ Contrat signé — ${contratId}`).setDescription(`**${contrat.clientNom}** a accepté le contrat.\n\n**Mission :** ${contrat.objet}`).setFooter({ text: 'IWC • Notification contrat' })] }); } catch {}
     interaction.user.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ Contrat signé — IWC').setDescription(`Vous avez accepté le contrat **${contratId}**.\n\n**Mission :** ${contrat.objet}\n**Rémunération :** ${contrat.remuneration}`).setFooter({ text: 'IWC • Document Officiel' })] }).catch(() => {});
     return;
   }
@@ -3909,14 +3925,15 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
   if (interaction.isButton() && interaction.customId.startsWith('refuser_offre_')) {
     const contratId = interaction.customId.replace('refuser_offre_', ''); const contrat = (db.contrats || []).find(c => c.id === contratId);
     if (!contrat || contrat.userId !== interaction.user.id || contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Action impossible.', flags: MessageFlags.Ephemeral }); return; }
+    const gd = guild || interaction.client.guilds.cache.first(); // bouton cliquable en MP → guild peut être null
     contrat.status = 'refuse'; contrat.refusedAt = new Date().toISOString(); saveDB(db);
     const refuseurIC = db.members[interaction.user.id]?.name || interaction.user.username;
     _syncContratNotion(contrat, 'refuse', refuseurIC).catch(() => {});
-    await sendLog(guild, 'CONTRAT_REFUSE', { contratId, objet: contrat.objet });
-    await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0xED4245).spliceFields(5, 1, { name: '📌 Statut', value: `❌ Refusé le ${fmtShort(new Date())}`, inline: true })], components: [] });
+    if (gd) await sendLog(gd, 'CONTRAT_REFUSE', { contratId, objet: contrat.objet }).catch(() => {});
+    await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0xED4245).spliceFields(5, 1, { name: '📌 Statut', value: `❌ Refusé le ${fmtShort(new Date())}`, inline: true })], components: [] }).catch(() => {});
     const _embedContratRefuse = new EmbedBuilder().setColor(0xED4245).setTitle(`❌ CONTRAT REFUSÉ — ${contratId}`).addFields({ name: '🆔 Réf', value: `\`${contratId}\``, inline: true }, { name: '👤 Refusé par', value: interaction.user.username, inline: true }, { name: '📋 Mission', value: contrat.objet }).setFooter({ text: `IWC • ${fmtShort(new Date())}` });
-    await archiverContratReponses(guild, contrat, 'refuse', _embedContratRefuse);
-    try { const em = await guild.members.fetch(contrat.emetteurId).catch(() => null); if (em) await em.send({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle(`❌ Contrat refusé — ${contratId}`).setDescription(`**${contrat.clientNom}** a refusé le contrat pour **${contrat.objet}**.`).setFooter({ text: 'IWC • Notification' })] }); } catch {}
+    if (gd) await archiverContratReponses(gd, contrat, 'refuse', _embedContratRefuse).catch(() => {});
+    try { const em = gd && await gd.members.fetch(contrat.emetteurId).catch(() => null); if (em) await em.send({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle(`❌ Contrat refusé — ${contratId}`).setDescription(`**${contrat.clientNom}** a refusé le contrat pour **${contrat.objet}**.`).setFooter({ text: 'IWC • Notification' })] }); } catch {}
     return;
   }
 
