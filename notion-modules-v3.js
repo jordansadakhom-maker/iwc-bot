@@ -786,7 +786,7 @@ async function updateNotionStatutPole(userId, pole) {
 module.exports = {
   handleAbsenceDetection, ABSENCE_KEYWORDS,
   checkInactivite, JOURS_INACTIF,
-  updateHierarchieEmbed, handleHierarchieCommand, handleGradeSetCommand, handleGradePanelButton, handleGradeMembreSelect, handleGradeGradeSelect, handleGradeMajButton, handleGradeUp, handleGradeDown, handleGradeFiche, handleGradeEligibles, showGradeMembre, GRADES_LEGAL, GRADES_ILLEGAL,
+  updateHierarchieEmbed, handleHierarchieCommand, handleGradeSetCommand, handleGradePanelButton, handleGradeMembreSelect, handleGradeGradeSelect, handleGradeMajButton, handleGradeUp, handleGradeDown, handleGradeFiche, handleGradeEligibles, showGradeMembre, GRADES_LEGAL, GRADES_ILLEGAL, ROLES,
   setupAffairesPanel, handleAffaireNouvelleButton, handleAffaireModal, handleAffaireVote, handleAffaireDetail, postResumeAffaires, handleAffairesResumeButton, checkAffairesTimeout,
   setupInformateursPanel, handleInformateurRapportButton, handleInformateurModal, handleInformateurHistorique, handleInformateurMessage, handleInformateurConfirmer, handleInformateurInfirmer,
   handlePlanningScreenshot, handlePlansMessage,
