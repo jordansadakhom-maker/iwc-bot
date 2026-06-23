@@ -313,7 +313,7 @@ async function _publierFiche(interaction, d, fiche, contactId, editRefs, opts) {
 // ── Panneau « Nouvelle fiche de contact » (salon dédié) ──
 function _panelContactEmbed() {
   return new EmbedBuilder().setColor(COULEUR).setTitle("🎴 NOUVELLE FICHE DE CONTACT")
-    .setDescription("*Un visage croisé sur la piste ? Inscris-le au carnet.*\n\nClique sur **🎴 Nouvelle fiche** pour remplir le formulaire — la fiche sera publiée proprement dans le répertoire.\n\n📸 *Pour ajouter le portrait de la personne, clique sur* **📸 Photo** *sous la fiche une fois créée (glisse une image), ou crée-la directement avec la commande* `/contact`*.*")
+    .setDescription("*Un visage croisé sur la piste ? Inscris-le au carnet.*\n\nClique sur **🎴 Nouvelle fiche** pour remplir le formulaire — la fiche sera publiée proprement dans le répertoire.\n\n📸 *Pour ajouter le portrait : ouvre la fiche et **dépose simplement une image dans son fil** (ça devient la photo). Ou crée la fiche avec* `/contact` *en joignant une photo.*")
     .setFooter({ text: "Iron Wolf Company • Le Carnet" });
 }
 function _panelContactButtons() {
@@ -633,4 +633,42 @@ async function routeInteraction(interaction) {
   }
 }
 
-module.exports = { repertoireCommands, routeInteraction, installerPanelContact };
+// ── Photo déposée DANS le fil d'une fiche → devient le portrait du contact ──
+//  Marche pour TOUTES les fiches (anciennes comprises), sans dépendre d'un bouton.
+//  Le forum répertoire étant réservé aux modérateurs, quiconque peut y poster peut
+//  ajouter la photo. Le message-image est ensuite retiré (le fil reste propre).
+const _estImgRep = a => (a?.contentType || "").startsWith("image") || /\.(png|jpe?g|gif|webp|bmp|tiff?|jfif|avif)(\?|$)/i.test(a?.name || a?.url || "");
+async function onMessage(message) {
+  try {
+    if (!message.guild || message.author?.bot || message.webhookId) return false;
+    const ch = message.channel;
+    if (!ch || !ch.isThread?.()) return false;
+    const img = message.attachments ? [...message.attachments.values()].find(_estImgRep) : null;
+    if (!img) return false;
+
+    const db = loadDB(); const rep = _ensure(db);
+    // 1) Le fil correspond-il à une fiche connue ?
+    let c = (rep.contacts || []).find(x => x.ficheRefs && x.ficheRefs.threadId === ch.id);
+    // 2) Repli : fil du forum répertoire → on rattache par le nom du fil
+    if (!c) {
+      const okForum = ch.parentId === FORUM_REPERTOIRE || /repertoire|contact|carnet|annuaire/.test(_norm(ch.parent?.name || ""));
+      if (!okForum) return false;
+      const tn = _norm(ch.name);
+      c = (rep.contacts || []).find(x => { const nn = _norm(x.nom); return nn && tn && (tn.includes(nn) || nn.includes(tn)); });
+      if (c) c.ficheRefs = { threadId: ch.id, channelId: ch.parentId };
+    }
+    if (!c) return false;
+
+    c.photoUrl = img.url; c.maj = Date.now();
+    persist(db);
+    const d = { nomsurnom: c.nom, telegramme: c.telegramme, metier: c.metier, secteur: c.secteur, affiliation: c.affiliation, relation: c.relation, fiabilite: c.fiabilite, statut: c.statut, dernierContact: c.dernierContact, creeParNom: c.creeParNom, notes: c.notes, photoUrl: c.photoUrl };
+    const fiche = _richFiche(d);
+    const shim = { guild: message.guild, channel: message.channel };
+    const res = await _publierFiche(shim, d, fiche, c.id, c.ficheRefs, { withPhoto: true });
+    if (res) { await message.delete().catch(() => {}); }
+    else { await message.react("⚠️").catch(() => {}); }
+    return true;
+  } catch (e) { console.log("⚠️ repertoire onMessage:", e.message); return false; }
+}
+
+module.exports = { repertoireCommands, routeInteraction, installerPanelContact, onMessage };
