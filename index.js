@@ -1540,21 +1540,19 @@ async function autoSetup(guild) {
 
   const contratsCh = guild.channels.cache.get(SALON_HARDCODED.CONTRATS) || guild.channels.cache.get(CH.CONTRATS);
   if (contratsCh) {
+    const embed = new EmbedBuilder().setColor(0x2C3E50).setTitle('📜 IRON WOLF COMPANY — CONTRATS').setDescription('*Tout accord entre la Compagnie et ses partenaires doit être formalisé.*\n*Un contrat signé engage les deux parties sans exception.*').addFields({ name: '📥 Recevoir nos conditions', value: '→ Le client reçoit tes tarifs & conditions\n→ Il signe → tu reçois la notification' }, { name: '📥 Signer un contrat employeur', value: '→ Une entreprise vous engage\n→ Tu rentres ses infos & ses conditions\n→ Tu signes → ils reçoivent la notification' }).setFooter({ text: 'Iron Wolf Company • Secrétariat officiel' });
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('open_contrat_offre').setLabel('📥 Recevoir nos conditions').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('open_contrat_emploi').setLabel('📥 Signer un contrat employeur').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('btn_rdv_creer_contrat_panel').setLabel('📅 Planifier un RDV').setStyle(ButtonStyle.Secondary),
+    );
     const msgs = await contratsCh.messages.fetch({ limit: 20 });
-    for (const [, m] of msgs) {
-      if (m.author.id === client.user.id && m.embeds[0]?.title?.includes('IRON WOLF COMPANY — CONTRATS')) {
-        const hasRdvBtn = m.components?.[0]?.components?.some(c => c.customId === 'btn_rdv_creer_contrat_panel');
-        if (!hasRdvBtn) await m.delete().catch(() => {});
-      }
-    }
-    const msgs2 = await contratsCh.messages.fetch({ limit: 10 });
-    if (!msgs2.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('IRON WOLF COMPANY — CONTRATS'))) {
-      const embed = new EmbedBuilder().setColor(0x2C3E50).setTitle('📜 IRON WOLF COMPANY — CONTRATS').setDescription('*Tout accord entre la Compagnie et ses partenaires doit être formalisé.*\n*Un contrat signé engage les deux parties sans exception.*').addFields({ name: '📥 Recevoir nos conditions', value: '→ Le client reçoit tes tarifs & conditions\n→ Il signe → tu reçois la notification' }, { name: '📥 Signer un contrat employeur', value: '→ Une entreprise vous engage\n→ Tu rentres ses infos & ses conditions\n→ Tu signes → ils reçoivent la notification' }).setFooter({ text: 'Iron Wolf Company • Secrétariat officiel' });
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('open_contrat_offre').setLabel('📥 Recevoir nos conditions').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('open_contrat_emploi').setLabel('📥 Signer un contrat employeur').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('btn_rdv_creer_contrat_panel').setLabel('📅 Planifier un RDV').setStyle(ButtonStyle.Secondary),
-      );
+    const panels = [...msgs.values()].filter(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('IRON WOLF COMPANY — CONTRATS'));
+    // Met le panneau existant À JOUR (corrige les anciens textes type « Envoyer nos conditions ») et supprime les doublons
+    if (panels.length) {
+      await panels[0].edit({ embeds: [embed], components: [row] }).catch(() => {});
+      for (const p of panels.slice(1)) await p.delete().catch(() => {});
+    } else {
       await contratsCh.send({ embeds: [embed], components: [row] });
     }
     // Panneau « 🐺 CONTRATS — LA CONFRÉRIE » (module contrats-confrerie) — permanent, posté seulement s'il manque
@@ -5361,7 +5359,7 @@ async function buildMembresDiscordMap(guild) {
 
 async function _handleVersion(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const BOT_VERSION = '5.8 (23 juin — recrutement : ping Officier de Terrain + redirect télégramme à l\'acceptation)'; const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
+  const BOT_VERSION = '5.9 (23 juin — panneau contrats auto-mis à jour : « Recevoir nos conditions »)'; const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
   let notionOk = false;
   try { const r = await fetch('https://api.notion.com/v1/users/me', { headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28' } }); notionOk = r.ok; } catch {}
   const db = loadDB();
