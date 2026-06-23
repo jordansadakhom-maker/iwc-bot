@@ -12,7 +12,7 @@ const cron = require('node-cron');
 
 const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub } = require('./db');
 // Version du bot (sert au /version ET à la génération auto des patch notes)
-const BOT_VERSION = '6.6 (23 juin — trésorerie centralisée : un seul coffre commun, plus de légal/illégal)';
+const BOT_VERSION = '6.7 (23 juin — fix DÉFINITIF boucle planning : purge des épingles ne touche plus #planning)';
 const { initPapiers, papiersCommands } = require('./papiers');
 const securite = require('./securite');
 const rdvplus = require('./rdvplus');
@@ -1386,7 +1386,9 @@ Laisse une copie du papier sur un serveur allié, **anonymement**, signée « La
 
 async function autoSetup(guild) {
   const db = loadDB(); console.log('🔧 Auto-setup en cours...');
-  await cleanBotPinnedMessages(guild, 'planning', 'grade', 'coffre-entreprise', 'coffre-illegal', 'affaires');
+  // ⚠️ #planning RETIRÉ de cette purge : il a des panneaux ÉPINGLÉS légitimes (tableau des échéances,
+  // format planning) — les supprimer ici provoquait un repost en boucle à chaque démarrage.
+  await cleanBotPinnedMessages(guild, 'grade', 'coffre-entreprise', 'affaires');
   // Nettoyer le format "PLANS TACTIQUES" s'il a été posté par erreur dans #informateurs
   try {
     const infosCh2 = getChById(guild, 'INFORMATEURS', 'informateurs');
