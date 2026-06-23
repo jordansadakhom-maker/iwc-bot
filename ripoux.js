@@ -1,57 +1,49 @@
 // ───────────────────────────────────────────────────────────────────────────
-//  ripoux.js — « Le Ripoux » : un adjoint du shérif CORROMPU à la solde de
-//  La Confrérie. Il fait fuiter ce que la loi sait/prépare, annonce les primes
-//  sur les têtes de la bande, suit le niveau de recherche (heat) et peut faire
-//  disparaître un avis de recherche — mais plus on l'utilise, plus il devient
-//  nerveux (jauge de suspicion) : trop sollicité, il se met au vert un moment.
+//  ripoux.js — « Le Ripoux » : OUTIL pour le MEMBRE de l'équipe infiltré comme
+//  shérif/adjoint corrompu. Ce n'est PAS une IA : c'est LUI qui rédige ses
+//  rapports (ce qu'il a entendu/appris au bureau du shérif) et les partage à la
+//  Confrérie, avec les fonctionnalités autour : avis de recherche, niveau de
+//  recherche (heat), faire disparaître un dossier, et une jauge d'exposition de
+//  sa couverture (plus il agit, plus il se met en danger).
 //  ----------------------------------------------------------------------------
-//   • Salon : FORUM dédié (chaque tuyau = un post/dossier).
-//   • Source : CHANNEL_TRANSCRIPTION (ce qui est entendu en jeu) → fuites IA.
-//   • Gratuit (pas de coût coffre), avec mécanique de risque (suspicion).
-//   • Auto : 1 fuite gratuite/jour + décroissance suspicion/heat.
+//   • Salon : FORUM dédié (chaque rapport = un post/dossier).
+//   • Panneau de commande épinglé avec les boutons.
 // ───────────────────────────────────────────────────────────────────────────
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, MessageFlags } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, UserSelectMenuBuilder, MessageFlags } = require('discord.js');
 
 let dbMod = {}; try { dbMod = require('./db'); } catch { dbMod = {}; }
 const loadDB = dbMod.loadDB || (() => ({}));
 const saveDB = dbMod.saveDB || (() => {});
-let _utils = {}; try { _utils = require('./utils'); } catch { _utils = {}; }
-const transcriptionHallucinee = _utils.transcriptionHallucinee || (() => false);
 
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || null;
+const FORUM_RIPOUX = '1519114962738348102'; // FORUM dédié au Ripoux
 
-const FORUM_RIPOUX          = '1519114962738348102'; // FORUM dédié au Ripoux
-const CHANNEL_TRANSCRIPTION = '1511491314351472701'; // ce qui est entendu en jeu
-
-const SUSPICION_MAX   = 100;
-const SUSPICION_SOUDO = 18;  // soutirer une info
-const SUSPICION_AVIS  = 28;  // faire disparaître un avis (gros risque)
-const SUSPICION_AUTO  = 6;   // fuite spontanée
-const SUSPICION_DECAY = 13;  // par jour
-const HEAT_DECAY      = 8;    // par jour
-const SILENCE_MS      = 2 * 24 * 3600 * 1000; // 2 jours au vert
+const EXPO_MAX     = 100;
+const EXPO_RAPPORT = 8;   // un rapport = un petit risque
+const EXPO_AVIS    = 22;  // faire disparaître un avis = gros risque
+const EXPO_DECAY   = 10;  // par jour (la couverture se referme avec le temps)
+const HEAT_DECAY   = 6;   // par jour
 
 const GESTION = ['Opérateur', 'Operateur', 'Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'];
 function peutGerer(member) { try { return !!member?.roles?.cache?.some(r => GESTION.some(n => r.name.includes(n))); } catch { return false; } }
+// Le membre ripoux désigné OU l'équipe de gestion
+function peutRipoux(member, db) { try { const r = (db || loadDB()).ripoux || {}; return (r.userId && member?.id === r.userId) || peutGerer(member); } catch { return peutGerer(member); } }
 
 function _ch(guild, id) { try { return guild.channels.cache.get(id) || null; } catch { return null; } }
 function _now() { return Date.now(); }
+const _clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, Math.round(n)));
 
 function _ensure(db) {
   if (!db.ripoux) db.ripoux = {};
   const r = db.ripoux;
-  if (typeof r.nom !== 'string' || !r.nom) r.nom = "L'Adjoint Caleb Mercer";
-  if (typeof r.suspicion !== 'number') r.suspicion = 0;
-  if (typeof r.silentUntil !== 'number') r.silentUntil = 0;
+  if (typeof r.nom !== 'string' || !r.nom) r.nom = "L'indic dans la loi";
+  if (!('userId' in r)) r.userId = null;
+  if (typeof r.exposition !== 'number') r.exposition = 0;
   if (typeof r.heat !== 'number') r.heat = 0;
   if (!Array.isArray(r.primes)) r.primes = [];
-  if (typeof r.lastAutoLeakAt !== 'number') r.lastAutoLeakAt = 0;
-  if (!r.panelThreadId) r.panelThreadId = null;
+  if (!('panelThreadId' in r)) r.panelThreadId = null;
   return r;
 }
-const _clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, Math.round(n)));
 
-// Jauge texte : [██████░░░░] 60%
 function _jauge(val) {
   const v = _clamp(val, 0, 100); const plein = Math.round(v / 10);
   return `\`${'█'.repeat(plein)}${'░'.repeat(10 - plein)}\` ${v}%`;
@@ -62,28 +54,28 @@ function _heatLabel(h) {
   if (h < 80) return '🟠 Recherchés activement — prudence';
   return '🔴 Chasse à l\'homme — la corde n\'est pas loin';
 }
-function _estAuVert(r) { return r.silentUntil && _now() < r.silentUntil; }
+function _expoLabel(e) {
+  if (e < 30) return '🟢 Couverture solide';
+  if (e < 60) return '🟡 Quelques regards de travers';
+  if (e < 85) return '🟠 On commence à le soupçonner — qu\'il se calme';
+  return '🔴 Couverture en danger — il doit disparaître un moment';
+}
 
 function _panelEmbed(db) {
   const r = _ensure(db);
-  const auVert = _estAuVert(r);
-  const statut = auVert
-    ? `🕳️ **Au vert** — il se fait oublier (revient le ${new Date(r.silentUntil).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })})`
-    : '✅ **Joignable** — discrètement';
   const primesTxt = r.primes.length
     ? r.primes.slice(0, 8).map(p => `• **${p.cible}** — ${p.montant ? `$${Number(p.montant).toLocaleString('fr-FR')}` : 'prime inconnue'}${p.raison ? ` · *${p.raison}*` : ''}`).join('\n')
     : '*Aucun avis de recherche connu pour l\'instant.*';
   return new EmbedBuilder()
-    .setColor(auVert ? 0x555555 : 0x6B4423)
+    .setColor(0x6B4423)
     .setTitle(`🎖️ LE RIPOUX — ${r.nom}`)
     .setDescription([
-      '*Un adjoint du shérif acheté par la Confrérie. Il vend ce que la loi sait… tant qu\'on ne le grille pas.*',
-      '',
-      statut,
+      '*Notre homme à l\'intérieur de la loi. Il rapporte ici ce qu\'il entend et apprend au bureau du shérif.*',
+      r.userId ? `\n🕵️ Indic : <@${r.userId}>` : '\n*(Aucun membre désigné — règle-le via ⚙️.)*',
     ].join('\n'))
     .addFields(
       { name: '🔥 Niveau de recherche de la bande', value: `${_jauge(r.heat)}\n${_heatLabel(r.heat)}`, inline: false },
-      { name: '🫣 Nervosité de l\'indic (suspicion)', value: `${_jauge(r.suspicion)}\n${r.suspicion >= 75 ? '⚠️ *Il commence à flipper — espace les demandes.*' : '*Plus on le sollicite, plus il prend de risques.*'}`, inline: false },
+      { name: '🎭 Exposition de la couverture', value: `${_jauge(r.exposition)}\n${_expoLabel(r.exposition)}`, inline: false },
       { name: `📜 Avis de recherche connus (${r.primes.length})`, value: primesTxt.slice(0, 1024), inline: false },
     )
     .setFooter({ text: 'La Confrérie • CONFIDENTIEL — à ne jamais ébruiter' })
@@ -92,83 +84,18 @@ function _panelEmbed(db) {
 function _panelRows() {
   return [
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('ripoux_soudoyer').setLabel('Soutirer une info').setEmoji('🤝').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('ripoux_rapport').setLabel('Faire un rapport').setEmoji('📝').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('ripoux_traque').setLabel('État de la traque').setEmoji('🔥').setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('ripoux_prime_add').setLabel('Signaler une prime').setEmoji('📜').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('ripoux_prime_add').setLabel('Signaler un avis').setEmoji('📜').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('ripoux_avis_clear').setLabel('Faire disparaître un avis').setEmoji('🧹').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('ripoux_heat_set').setLabel('Régler la pression').setEmoji('🔥').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('ripoux_config').setLabel('⚙️').setStyle(ButtonStyle.Secondary),
     ),
   ];
 }
 
-// Lire la transcription récente (ce qui est entendu en jeu)
-async function _lireTranscription(guild, sinceTs = 0) {
-  const ch = _ch(guild, CHANNEL_TRANSCRIPTION);
-  if (!ch || !ch.messages) return '';
-  const fetched = await ch.messages.fetch({ limit: 90 }).catch(() => null);
-  if (!fetched) return '';
-  return [...fetched.values()]
-    .filter(m => m.content && m.createdTimestamp > sinceTs)
-    .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
-    .map(m => (m.content || '').replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-    .filter(l => !transcriptionHallucinee(l))
-    .join('\n').slice(0, 8000);
-}
-
-// L'IA incarne le ripoux et génère une fuite côté LOI à partir de la transcription
-async function _genererFuite(transcript, nom) {
-  if (!ANTHROPIC_API_KEY || !transcript || transcript.length < 40) return null;
-  const prompt = `Tu incarnes "${nom}", un adjoint du shérif CORROMPU, secrètement à la solde de La Confrérie — ouest de l'État du TEXAS, villes de Blackwater et Strawberry, année ~1904.
-
-Voici une RETRANSCRIPTION de ce qui a été entendu en jeu récemment (brute, partielle) :
-"""
-${transcript}
-"""
-
-À partir UNIQUEMENT de cette matière (n'invente PAS d'événements absents), rédige un RAPPORT confidentiel adressé à la Confrérie, à la PREMIÈRE PERSONNE, ton nerveux et vénal d'un homme de loi qui trahit son camp et prend des risques.
-Rapporte TOUT ce qu'il a ENTENDU et APPRIS : conversations surprises, affaires en cours, deals, dettes, tensions, allées et venues, qui traîne avec qui, menaces, opportunités à saisir — ET, grâce à sa place au bureau du shérif, ce que la LOI sait ou prépare : patrouilles, surveillances, enquêtes, arrestations imminentes, qui a parlé au shérif, primes/avis de recherche.
-Cite les noms, lieux et chiffres quand ils apparaissent.
-
-Réponds STRICTEMENT en JSON (aucun texte autour, aucune balise) :
-{"rapport":"le rapport immersif, 3 à 7 phrases, ce qu'il a entendu/appris + le volet loi","primes":[{"cible":"nom de la personne/cible recherchée","montant":0,"raison":"motif court"}],"heatDelta":0}
-
-- "primes" : uniquement si la transcription évoque clairement une tête mise à prix / un avis de recherche ; sinon [].
-- "heatDelta" : entier de -10 à +25 — à quel point la pression de la loi sur la bande monte d'après ce qu'on entend.
-- Si rien d'exploitable côté loi : {"rapport":"","primes":[],"heatDelta":0}`;
-  try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1200, messages: [{ role: 'user', content: prompt }] }),
-    });
-    const data = await res.json();
-    let txt = (data?.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
-    txt = txt.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
-    const obj = JSON.parse(txt);
-    if (!obj || typeof obj !== 'object') return null;
-    obj.primes = Array.isArray(obj.primes) ? obj.primes.filter(p => p && p.cible).slice(0, 5) : [];
-    obj.heatDelta = Number(obj.heatDelta) || 0;
-    obj.rapport = String(obj.rapport || '').trim();
-    return obj;
-  } catch (e) { console.log('❌ ripoux _genererFuite:', e.message); return null; }
-}
-
-function _fuiteEmbed(db, rapport, { auto = false } = {}) {
-  const r = _ensure(db);
-  return new EmbedBuilder()
-    .setColor(auto ? 0x4B3621 : 0x6B4423)
-    .setAuthor({ name: `🎖️ ${r.nom} — adjoint du shérif (acheté)` })
-    .setTitle(auto ? '🕯️ Un mot glissé sous la porte' : '🤝 Rapport de l\'indic')
-    .setDescription(String(rapport || '').slice(0, 3500))
-    .addFields({ name: '🔥 Niveau de recherche', value: `${_jauge(r.heat)} · ${_heatLabel(r.heat)}`, inline: false })
-    .setFooter({ text: 'La Confrérie • Brûle ce papier après lecture' })
-    .setTimestamp();
-}
-
-// Poste un dossier (tuyau) comme NOUVEAU post du forum
 async function _posterDossier(guild, titre, embed) {
   const forum = _ch(guild, FORUM_RIPOUX);
   if (!forum || forum.type !== 15 || !forum.threads?.create) return null;
@@ -179,7 +106,6 @@ async function _posterDossier(guild, titre, embed) {
   return post;
 }
 
-// Met à jour le panneau de commande (post épinglé) en place
 async function _refreshPanel(guild) {
   try {
     const db = loadDB(); const r = _ensure(db);
@@ -191,33 +117,17 @@ async function _refreshPanel(guild) {
   } catch {}
 }
 
-// Applique la décroissance (suspicion + heat) — appelé par le cron quotidien
 function _decay(db) {
   const r = _ensure(db);
-  r.suspicion = _clamp(r.suspicion - SUSPICION_DECAY, 0, SUSPICION_MAX);
+  r.exposition = _clamp(r.exposition - EXPO_DECAY, 0, EXPO_MAX);
   r.heat = _clamp(r.heat - HEAT_DECAY, 0, 100);
-  if (r.silentUntil && _now() >= r.silentUntil) r.silentUntil = 0;
 }
 
-// Monte la suspicion ; si elle sature → l'indic se met au vert
-function _monterSuspicion(db, montant) {
-  const r = _ensure(db);
-  r.suspicion = _clamp(r.suspicion + montant, 0, SUSPICION_MAX);
-  if (r.suspicion >= SUSPICION_MAX && !_estAuVert(r)) {
-    r.silentUntil = _now() + SILENCE_MS;
-    r.suspicion = 35; // il a eu chaud, il recommence plus calme
-    return true; // vient de se mettre au vert
-  }
-  return false;
-}
-
-// ── INSTALLATION du panneau de commande dans le forum ──
 async function installerPanel(guild) {
   try {
     const forum = _ch(guild, FORUM_RIPOUX);
     if (!forum || forum.type !== 15 || !forum.threads?.create) return;
     const db = loadDB(); const r = _ensure(db);
-    // Déjà installé ?
     let existing = null;
     if (r.panelThreadId) existing = await guild.channels.fetch(r.panelThreadId).catch(() => null);
     if (!existing) {
@@ -239,81 +149,77 @@ async function installerPanel(guild) {
   } catch (e) { console.log('⚠️ ripoux installerPanel:', e.message); }
 }
 
-// ── Tick quotidien : décroissance + fuite spontanée gratuite ──
+// Tick quotidien : la couverture se referme + la pression retombe (aucune génération auto)
 async function tickQuotidien(client) {
   for (const guild of client.guilds.cache.values()) {
     try {
-      const forum = _ch(guild, FORUM_RIPOUX);
-      if (!forum) continue;
-      let db = loadDB(); const r = _ensure(db);
-      _decay(db); saveDB(db);
-      // Fuite spontanée si l'indic n'est pas au vert et qu'on a de la matière
-      if (!_estAuVert(r)) {
-        const transcript = await _lireTranscription(guild, _now() - 24 * 3600 * 1000);
-        const fuite = await _genererFuite(transcript, r.nom);
-        if (fuite && fuite.rapport) {
-          db = loadDB(); const r2 = _ensure(db);
-          r2.heat = _clamp(r2.heat + (fuite.heatDelta || 0), 0, 100);
-          for (const p of fuite.primes) r2.primes.push({ id: `${_now()}${Math.floor(Math.random() * 1000)}`, cible: String(p.cible).slice(0, 60), montant: Number(p.montant) || 0, raison: String(p.raison || '').slice(0, 80), at: _now() });
-          if (r2.primes.length > 30) r2.primes = r2.primes.slice(-30);
-          _monterSuspicion(db, SUSPICION_AUTO);
-          saveDB(db);
-          await _posterDossier(guild, `🕯️ Mot de l'indic — ${new Date().toLocaleDateString('fr-FR')}`, _fuiteEmbed(db, fuite.rapport, { auto: true }));
-        }
-      }
+      if (!_ch(guild, FORUM_RIPOUX)) continue;
+      const db = loadDB(); _ensure(db); _decay(db); saveDB(db);
       await _refreshPanel(guild);
     } catch (e) { console.log('⚠️ ripoux tickQuotidien:', e.message); }
   }
 }
 
-// ── ROUTAGE DES INTERACTIONS ──
+const HEAT_NIVEAUX = { calme: 10, surveilles: 40, recherches: 70, chasse: 95 };
+
 async function routeInteraction(interaction) {
   try {
     const cid = interaction.customId || '';
     if (!cid.startsWith('ripoux_')) return false;
 
-    // 🤝 Soutirer une info (gratuit, mais monte la suspicion)
-    if (interaction.isButton?.() && cid === 'ripoux_soudoyer') {
-      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Confrérie.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
-      let db = loadDB(); const r = _ensure(db);
-      if (_estAuVert(r)) { await interaction.reply({ content: `🕳️ *${r.nom} s'est mis au vert — il refuse tout contact pour l'instant. Laisse retomber la pression.*`, flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
-      await interaction.reply({ content: `🤫 *Tu fais passer le mot à ${r.nom}… patiente quelques secondes.*`, flags: MessageFlags.Ephemeral }).catch(() => {});
-      const transcript = await _lireTranscription(interaction.guild, _now() - 12 * 3600 * 1000);
-      const fuite = await _genererFuite(transcript, r.nom);
-      if (!fuite || !fuite.rapport) {
-        await interaction.editReply({ content: `🤷 *${r.nom} n'a rien de neuf à vendre pour le moment — la loi est calme, ou rien d'exploitable n'a filtré.*` }).catch(() => {});
-        return true;
-      }
-      db = loadDB(); const r2 = _ensure(db);
-      r2.heat = _clamp(r2.heat + (fuite.heatDelta || 0), 0, 100);
-      for (const p of fuite.primes) r2.primes.push({ id: `${_now()}${Math.floor(Math.random() * 1000)}`, cible: String(p.cible).slice(0, 60), montant: Number(p.montant) || 0, raison: String(p.raison || '').slice(0, 80), at: _now() });
-      if (r2.primes.length > 30) r2.primes = r2.primes.slice(-30);
-      const auVert = _monterSuspicion(db, SUSPICION_SOUDO);
+    // 📝 Faire un rapport (le membre rédige ce qu'il a entendu/appris)
+    if (interaction.isButton?.() && cid === 'ripoux_rapport') {
+      const db = loadDB();
+      if (!peutRipoux(interaction.member, db)) { await interaction.reply({ content: '🔒 Réservé à l\'indic et à la Confrérie.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const modal = new ModalBuilder().setCustomId('ripoux_rapport_modal').setTitle('📝 Rapport de l\'indic');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('titre').setLabel('Sujet (court)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setPlaceholder('Ex : Patrouille prévue vers Blackwater')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('rapport').setLabel('Ce que tu as entendu / appris').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1500).setPlaceholder('Tout ce qui peut servir : enquêtes, patrouilles, qui a parlé, deals, tensions, opportunités…')),
+      );
+      await interaction.showModal(modal).catch(() => {});
+      return true;
+    }
+    if (interaction.isModalSubmit?.() && cid === 'ripoux_rapport_modal') {
+      const db = loadDB(); const r = _ensure(db);
+      const titre = interaction.fields.getTextInputValue('titre').trim();
+      const rapport = interaction.fields.getTextInputValue('rapport').trim();
+      r.exposition = _clamp(r.exposition + EXPO_RAPPORT, 0, EXPO_MAX);
       saveDB(db);
-      const post = await _posterDossier(interaction.guild, `🤝 Tuyau — ${new Date().toLocaleDateString('fr-FR')}`, _fuiteEmbed(db, fuite.rapport));
+      const embed = new EmbedBuilder()
+        .setColor(0x6B4423)
+        .setAuthor({ name: `🎖️ ${r.nom} — notre homme dans la loi` })
+        .setTitle(`📝 ${titre}`.slice(0, 256))
+        .setDescription(rapport.slice(0, 4000))
+        .addFields(
+          { name: '🔥 Niveau de recherche', value: `${_jauge(r.heat)} · ${_heatLabel(r.heat)}`, inline: false },
+          { name: '✍️ Rapporté par', value: `${interaction.member?.displayName || interaction.user.username}`, inline: true },
+        )
+        .setFooter({ text: 'La Confrérie • Brûle ce papier après lecture' })
+        .setTimestamp();
+      const post = await _posterDossier(interaction.guild, `📝 ${titre} — ${new Date().toLocaleDateString('fr-FR')}`, embed);
       await _refreshPanel(interaction.guild);
-      const extra = auVert ? `\n⚠️ *Il a senti le danger : il se met AU VERT un moment. Plus de contact tant que ça n'est pas retombé.*` : (fuite.primes.length ? `\n📜 ${fuite.primes.length} avis de recherche relevé(s).` : '');
-      await interaction.editReply({ content: `✅ *${r2.nom} a parlé.*${post ? ` Dossier posté : <#${post.id}>` : ''}${extra}` }).catch(() => {});
+      const alerte = r.exposition >= 85 ? '\n⚠️ *Attention : ta couverture est très exposée — fais profil bas un moment.*' : '';
+      await interaction.reply({ content: `✅ Rapport transmis à la Confrérie.${post ? ` Dossier : <#${post.id}>` : ''}${alerte}`, flags: MessageFlags.Ephemeral }).catch(() => {});
       return true;
     }
 
-    // 🔥 État de la traque
+    // 🔥 État de la traque (lecture)
     if (interaction.isButton?.() && cid === 'ripoux_traque') {
-      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Confrérie.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const db = loadDB(); const r = _ensure(db);
       const e = new EmbedBuilder().setColor(0x6B4423).setTitle('🔥 État de la traque')
         .addFields(
           { name: 'Niveau de recherche', value: `${_jauge(r.heat)}\n${_heatLabel(r.heat)}`, inline: false },
           { name: `Avis de recherche (${r.primes.length})`, value: (r.primes.length ? r.primes.slice(0, 12).map(p => `• **${p.cible}** — ${p.montant ? `$${Number(p.montant).toLocaleString('fr-FR')}` : '?'}${p.raison ? ` · *${p.raison}*` : ''}`).join('\n') : '*Aucun pour l\'instant.*').slice(0, 1024), inline: false },
-          { name: 'Indic', value: _estAuVert(r) ? '🕳️ Au vert' : `🫣 Suspicion ${r.suspicion}%`, inline: false },
+          { name: 'Couverture de l\'indic', value: `${_jauge(r.exposition)} · ${_expoLabel(r.exposition)}`, inline: false },
         );
       await interaction.reply({ embeds: [e], flags: MessageFlags.Ephemeral }).catch(() => {});
       return true;
     }
 
-    // 📜 Signaler une prime (ajout manuel)
+    // 📜 Signaler un avis de recherche
     if (interaction.isButton?.() && cid === 'ripoux_prime_add') {
-      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Confrérie.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const db = loadDB();
+      if (!peutRipoux(interaction.member, db)) { await interaction.reply({ content: '🔒 Réservé à l\'indic et à la Confrérie.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const modal = new ModalBuilder().setCustomId('ripoux_prime_modal').setTitle('📜 Signaler un avis de recherche');
       modal.addComponents(
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cible').setLabel('Qui est recherché ?').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60)),
@@ -337,52 +243,91 @@ async function routeInteraction(interaction) {
       return true;
     }
 
-    // 🧹 Faire disparaître un avis (gros risque → grosse suspicion)
-    if (interaction.isButton?.() && cid === 'ripoux_avis_clear') {
-      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Confrérie.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+    // 🔥 Régler la pression (niveau de recherche)
+    if (interaction.isButton?.() && cid === 'ripoux_heat_set') {
+      const db = loadDB();
+      if (!peutRipoux(interaction.member, db)) { await interaction.reply({ content: '🔒 Réservé à l\'indic et à la Confrérie.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const menu = new StringSelectMenuBuilder().setCustomId('ripoux_heat_select').setPlaceholder('Quel est le niveau de recherche actuel ?').addOptions(
+        { label: 'Calme', value: 'calme', emoji: '🟢', description: 'La loi vous laisse tranquilles' },
+        { label: 'Surveillés', value: 'surveilles', emoji: '🟡', description: 'Profil bas conseillé' },
+        { label: 'Recherchés activement', value: 'recherches', emoji: '🟠', description: 'La loi est sur vos traces' },
+        { label: 'Chasse à l\'homme', value: 'chasse', emoji: '🔴', description: 'Danger maximal' },
+      );
+      await interaction.reply({ content: '🔥 Indique le niveau de pression de la loi en ce moment :', components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+    if (interaction.isStringSelectMenu?.() && cid === 'ripoux_heat_select') {
       const db = loadDB(); const r = _ensure(db);
-      if (_estAuVert(r)) { await interaction.reply({ content: `🕳️ *${r.nom} est au vert — impossible de lui demander ce genre de faveur maintenant.*`, flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      r.heat = HEAT_NIVEAUX[interaction.values[0]] ?? r.heat;
+      saveDB(db);
+      await _refreshPanel(interaction.guild);
+      await interaction.update({ content: `🔥 Niveau de recherche mis à jour : ${_heatLabel(r.heat)}`, components: [] }).catch(() => {});
+      return true;
+    }
+
+    // 🧹 Faire disparaître un avis (gros risque pour la couverture)
+    if (interaction.isButton?.() && cid === 'ripoux_avis_clear') {
+      const db = loadDB(); const r = _ensure(db);
+      if (!peutRipoux(interaction.member, db)) { await interaction.reply({ content: '🔒 Réservé à l\'indic et à la Confrérie.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       if (!r.primes.length) { await interaction.reply({ content: '✅ Aucun avis de recherche à faire disparaître.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const menu = new StringSelectMenuBuilder().setCustomId('ripoux_avis_select').setPlaceholder('Quel dossier faire disparaître ?')
         .addOptions(r.primes.slice(0, 25).map(p => ({ label: `${p.cible}`.slice(0, 100), description: `${p.montant ? '$' + p.montant : 'prime ?'}${p.raison ? ' · ' + p.raison : ''}`.slice(0, 100), value: p.id })));
-      await interaction.reply({ content: '🧹 *Faire enterrer un dossier par l\'indic — il prendra de gros risques (sa nervosité grimpera).*', components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral }).catch(() => {});
+      await interaction.reply({ content: '🧹 *Faire enterrer un dossier depuis le bureau du shérif — gros risque pour ta couverture.*', components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral }).catch(() => {});
       return true;
     }
     if (interaction.isStringSelectMenu?.() && cid === 'ripoux_avis_select') {
       const db = loadDB(); const r = _ensure(db);
-      if (_estAuVert(r)) { await interaction.update({ content: `🕳️ *${r.nom} s'est mis au vert entre-temps.*`, components: [] }).catch(() => {}); return true; }
       const id = interaction.values[0];
       const prime = r.primes.find(p => p.id === id);
       r.primes = r.primes.filter(p => p.id !== id);
       r.heat = _clamp(r.heat - 18, 0, 100);
-      const auVert = _monterSuspicion(db, SUSPICION_AVIS);
+      r.exposition = _clamp(r.exposition + EXPO_AVIS, 0, EXPO_MAX);
       saveDB(db);
-      await _posterDossier(interaction.guild, `🧹 Dossier enterré — ${new Date().toLocaleDateString('fr-FR')}`, new EmbedBuilder().setColor(0x2E7D32).setAuthor({ name: `🎖️ ${r.nom}` }).setTitle('🧹 Un dossier a disparu').setDescription(`*« C'est fait. L'avis de recherche sur **${prime?.cible || '—'}** a disparu des registres du shérif. Mais j'ai pris un gros risque… faut que je me fasse oublier un temps. »*`).setFooter({ text: 'La Confrérie • Faveur dangereuse' }).setTimestamp());
+      await _posterDossier(interaction.guild, `🧹 Dossier enterré — ${new Date().toLocaleDateString('fr-FR')}`, new EmbedBuilder().setColor(0x2E7D32).setAuthor({ name: `🎖️ ${r.nom}` }).setTitle('🧹 Un dossier a disparu').setDescription(`*L'avis de recherche sur **${prime?.cible || '—'}** a disparu des registres du shérif. Une faveur risquée — la couverture en prend un coup.*`).setFooter({ text: 'La Confrérie • Faveur dangereuse' }).setTimestamp());
       await _refreshPanel(interaction.guild);
-      await interaction.update({ content: `✅ Avis sur **${prime?.cible || '—'}** effacé.${auVert ? `\n⚠️ *${r.nom} se met AU VERT — il a pris trop de risques.*` : ''}`, components: [] }).catch(() => {});
+      const alerte = r.exposition >= 85 ? '\n⚠️ *Ta couverture est très exposée maintenant — disparais un moment.*' : '';
+      await interaction.update({ content: `✅ Avis sur **${prime?.cible || '—'}** effacé.${alerte}`, components: [] }).catch(() => {});
       return true;
     }
 
-    // ⚙️ Config (renommer l'indic / réinitialiser la suspicion)
+    // ⚙️ Config : désigner le membre + nom de couverture + reset exposition
     if (interaction.isButton?.() && cid === 'ripoux_config') {
       if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Confrérie.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
-      const db = loadDB(); const r = _ensure(db);
-      const modal = new ModalBuilder().setCustomId('ripoux_config_modal').setTitle('⚙️ Réglages du Ripoux');
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom').setLabel('Nom de l\'indic').setStyle(TextInputStyle.Short).setRequired(true).setValue(r.nom).setMaxLength(60)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reset').setLabel('Taper OUI pour calmer le jeu (suspicion=0)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('laisser vide pour ne rien réinitialiser')),
+      const sel = new UserSelectMenuBuilder().setCustomId('ripoux_set_member').setPlaceholder('Désigner le membre qui joue le ripoux').setMinValues(1).setMaxValues(1);
+      const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('ripoux_set_nom').setLabel('✏️ Nom de couverture').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('ripoux_reset_expo').setLabel('🧊 Calmer le jeu (exposition 0)').setStyle(ButtonStyle.Secondary),
       );
+      await interaction.reply({ content: '⚙️ **Réglages du Ripoux**\nChoisis le membre qui incarne l\'indic, son nom de couverture, ou réinitialise son exposition.', components: [new ActionRowBuilder().addComponents(sel), row2], flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+    if (interaction.isUserSelectMenu?.() && cid === 'ripoux_set_member') {
+      const db = loadDB(); const r = _ensure(db);
+      r.userId = interaction.values[0]; saveDB(db);
+      await _refreshPanel(interaction.guild);
+      await interaction.update({ content: `✅ Indic désigné : <@${r.userId}>. Il peut maintenant faire ses rapports.`, components: [] }).catch(() => {});
+      return true;
+    }
+    if (interaction.isButton?.() && cid === 'ripoux_set_nom') {
+      const db = loadDB(); const r = _ensure(db);
+      const modal = new ModalBuilder().setCustomId('ripoux_nom_modal').setTitle('✏️ Nom de couverture');
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom').setLabel('Nom RP de l\'indic').setStyle(TextInputStyle.Short).setRequired(true).setValue(r.nom).setMaxLength(60)));
       await interaction.showModal(modal).catch(() => {});
       return true;
     }
-    if (interaction.isModalSubmit?.() && cid === 'ripoux_config_modal') {
+    if (interaction.isModalSubmit?.() && cid === 'ripoux_nom_modal') {
       const db = loadDB(); const r = _ensure(db);
       const nom = interaction.fields.getTextInputValue('nom').trim();
-      if (nom) r.nom = nom.slice(0, 60);
-      if (/^oui$/i.test((interaction.fields.getTextInputValue('reset') || '').trim())) { r.suspicion = 0; r.silentUntil = 0; }
-      saveDB(db);
+      if (nom) { r.nom = nom.slice(0, 60); saveDB(db); }
       await _refreshPanel(interaction.guild);
-      await interaction.reply({ content: `⚙️ Réglages enregistrés. Indic : **${r.nom}**.`, flags: MessageFlags.Ephemeral }).catch(() => {});
+      await interaction.reply({ content: `⚙️ Nom de couverture : **${r.nom}**.`, flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+    if (interaction.isButton?.() && cid === 'ripoux_reset_expo') {
+      const db = loadDB(); const r = _ensure(db);
+      r.exposition = 0; saveDB(db);
+      await _refreshPanel(interaction.guild);
+      await interaction.update({ content: '🧊 Exposition réinitialisée — la couverture est de nouveau solide.', components: [] }).catch(() => {});
       return true;
     }
 
