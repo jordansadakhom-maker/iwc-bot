@@ -627,14 +627,21 @@ async function updateDashboard(guild) {
   const members = Object.values(db.members); const contrats = db.contrats || [];
   const alertes = members.filter(m => m.status !== 'parti' && daysSince(m.lastActivity) > 7);
   const nextSess = (db.sessions || []).filter(s => s.status === 'planifiee' && new Date(s.date) > new Date()).sort((a, b) => new Date(a.date) - new Date(b.date))[0];
-  const embed = new EmbedBuilder().setColor(0x8B1A1A).setTitle('🐺 IRON WOLF COMPANY — TABLEAU DE BORD').setDescription('*Mise à jour automatique toutes les heures*')
+  const contratsEnCours = contrats.filter(c => !['Honoré', 'Abandonné'].includes(c.suivi || '') && c.status !== 'refuse');
+  const contratsHonores = contrats.filter(c => (c.suivi || '') === 'Honoré');
+  const echeanceProche = contratsEnCours.filter(c => { if (!c.dateEcheance) return false; const d = new Date(c.dateEcheance); if (isNaN(d)) return false; return (d - new Date()) / 86400000 <= 2; });
+  const embed = new EmbedBuilder().setColor(0x8B1A1A).setTitle('🐺 IRON WOLF COMPANY — TABLEAU DE BORD').setDescription('*Mise à jour automatique toutes les 5 minutes*')
     .addFields(
+      { name: '💰 TRÉSORERIE', value: [`🏦 Coffre commun : **$${(db.coffre || 0).toLocaleString('fr-FR')}**`, `🏁 Contrats honorés : **${contratsHonores.length}**`].join('\n'), inline: true },
       { name: '👥 MEMBRES', value: [`✅ Actifs : **${members.filter(m => m.status === 'actif').length}**`, `⚠️ Absents : **${members.filter(m => m.status === 'absent').length}**`, `❌ Inactifs : **${members.filter(m => m.status === 'inactif').length}**`, `👁️ Total : **${members.filter(m => m.status !== 'parti').length}**`].join('\n'), inline: true },
       { name: '🎯 OPÉRATIONS', value: [`🟢 En cours : **${(db.operations || []).filter(o => o.status === 'en_cours').length}**`, `🟡 Préparation : **${(db.operations || []).filter(o => o.status === 'preparation').length}**`, `✅ Terminées : **${(db.operations || []).filter(o => o.status === 'terminee').length}**`].join('\n'), inline: true },
+      { name: '📜 CONTRATS', value: [`📋 En cours : **${contratsEnCours.length}**`, `🟡 En attente : **${contrats.filter(c => c.status === 'en_attente').length}**`, `✅ Signés : **${contrats.filter(c => c.status === 'signe').length}**`].join('\n'), inline: true },
       { name: '📝 RECRUTEMENT', value: [`📥 En attente : **${(db.candidatures || []).filter(c => ['reçue', 'examen'].includes(c.status)).length}**`, `✅ Acceptés : **${(db.candidatures || []).filter(c => c.status === 'acceptee').length}**`].join('\n'), inline: true },
-      { name: '📜 CONTRATS', value: [`🟡 En attente : **${contrats.filter(c => c.status === 'en_attente').length}**`, `✅ Signés : **${contrats.filter(c => c.status === 'signe').length}**`, `❌ Refusés : **${contrats.filter(c => c.status === 'refuse').length}**`].join('\n'), inline: true },
       { name: '📅 PROCHAINE SESSION', value: nextSess ? `**${nextSess.name}**\n📍 ${nextSess.lieu || '—'}\n🗓️ ${fmtShort(nextSess.date)}` : '*Aucune session planifiée*', inline: true },
-      { name: alertes.length > 0 ? `⚠️ ALERTES (${alertes.length})` : '✅ AUCUNE ALERTE', value: alertes.length > 0 ? alertes.slice(0, 5).map(m => `→ **${m.name}** — ${daysSince(m.lastActivity)}j`).join('\n') : '*Tous les membres sont actifs*', inline: true },
+      { name: alertes.length > 0 || echeanceProche.length > 0 ? '⚠️ ALERTES' : '✅ AUCUNE ALERTE', value: [
+        ...(echeanceProche.length > 0 ? [`⏰ **${echeanceProche.length}** contrat(s) à échéance ≤ 2j`] : []),
+        ...(alertes.length > 0 ? alertes.slice(0, 5).map(m => `→ **${m.name}** inactif ${daysSince(m.lastActivity)}j`) : []),
+      ].join('\n') || '*Tout est en ordre, cow-boy.*', inline: false },
     ).setFooter({ text: `Dernière MàJ : ${new Date().toLocaleString('fr-FR')} • IWC 1895` });
   try {
     const msgs = await ch.messages.fetch({ limit: 50 }).catch(() => null);
@@ -4920,34 +4927,25 @@ function _planningContratsEmbed(db) {
   const now = new Date();
   const joursEch = c => { if (!c.dateEcheance) return Infinity; const d = new Date(c.dateEcheance); if (isNaN(d.getTime())) return Infinity; return Math.round((Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())) / 86400000); };
   const stadeOf = c => c.suivi || _suiviDepuisStatut(c);
-  const stadeEmoji = { 'En attente': '🟡', 'En cours': '🔵', 'Validé': '✅', 'Honoré': '🏁', 'Abandonné': '✖️' };
-  const nomClient = c => c.clientNom || c.employeurNom || c.commanditaire || c.clientIC || '—';
-  const objetCourt = c => (c.objet || '—').replace(/\s+/g, ' ').slice(0, 40);
-  const dateFr = c => { if (!c.dateEcheance) return null; const d = new Date(c.dateEcheance); return isNaN(d.getTime()) ? String(c.dateEcheance).slice(0, 12) : d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }); };
-  const cd = c => { const j = joursEch(c); if (j === Infinity) return ''; if (j < 0) return ` · ⏰ retard ${Math.abs(j)}j`; if (j === 0) return " · ⏰ aujourd'hui"; if (j === 1) return ' · ⏰ demain'; if (j <= 7) return ` · ⏰ ${j}j`; return ` · 🗓️ ${j}j`; };
-  const ligne = c => { const dt = dateFr(c); return `${stadeEmoji[stadeOf(c)] || '•'} \`${c.id}\` — **${nomClient(c)}** · ${objetCourt(c)}${dt ? ` · 📅 ${dt}` : ''}${cd(c)}`; };
+  const etatTxt = { 'En attente': 'attente', 'En cours': 'en cours', 'Validé': 'validé', 'Honoré': 'honoré', 'Abandonné': 'abandon' };
+  const nomClient = c => (c.clientNom || c.employeurNom || c.commanditaire || c.clientIC || '—');
+  const echTxt = c => { const j = joursEch(c); if (j === Infinity) return 'sans date'; if (j < 0) return `RETARD ${Math.abs(j)}j`; if (j === 0) return "auj."; if (j === 1) return 'demain'; return `${j} jours`; };
   const actifs = (db.contrats || []).filter(c => !['Honoré', 'Abandonné'].includes(stadeOf(c)));
   actifs.sort((a, b) => joursEch(a) - joursEch(b));
-  const retard  = actifs.filter(c => { const j = joursEch(c); return j !== Infinity && j < 0; });
-  const proche  = actifs.filter(c => { const j = joursEch(c); return j >= 0 && j <= 1; });
-  const semaine = actifs.filter(c => { const j = joursEch(c); return j >= 2 && j <= 7; });
-  const avenir  = actifs.filter(c => { const j = joursEch(c); return j > 7 && j !== Infinity; });
-  const sansEch = actifs.filter(c => joursEch(c) === Infinity);
-  const bloc = (titre, arr) => arr.length ? { name: `${titre} (${arr.length})`, value: arr.slice(0, 10).map(ligne).join('\n').slice(0, 1024), inline: false } : null;
-  const fields = [
-    bloc('🔴 EN RETARD', retard),
-    bloc('🔥 AUJOURD’HUI / DEMAIN', proche),
-    bloc('📅 CETTE SEMAINE', semaine),
-    bloc('🗓️ À VENIR', avenir),
-    bloc('♾️ SANS ÉCHÉANCE', sansEch),
-  ].filter(Boolean);
+  // Tableau ALIGNÉ en police fixe (code-block) → colonnes nettes : Échéance · État · Réf · Client · Objet
+  const pad = (s, n) => { s = String(s ?? '').replace(/\s+/g, ' '); return s.length > n ? s.slice(0, n - 1) + '…' : s.padEnd(n); };
+  const entete = `${pad('ÉCHÉANCE', 11)} ${pad('ÉTAT', 9)} ${pad('RÉF', 11)} ${pad('CLIENT', 16)} OBJET`;
+  const lignes = actifs.slice(0, 25).map(c =>
+    `${pad(echTxt(c), 11)} ${pad(etatTxt[stadeOf(c)] || '?', 9)} ${pad(c.id, 11)} ${pad(nomClient(c), 16)} ${pad(c.objet || '—', 24)}`);
+  const reste = actifs.length > 25 ? `\n… +${actifs.length - 25} autre(s) — voir /contrat-suivi` : '';
+  const table = actifs.length
+    ? '```\n' + entete + '\n' + '─'.repeat(Math.min(entete.length + 24, 78)) + '\n' + lignes.join('\n') + reste + '\n```'
+    : '```\nAucune affaire en cours, cow-boy. Le tableau est propre.\n```';
   const e = new EmbedBuilder()
     .setColor(0x8B5A2B)
     .setTitle('📜 REGISTRE DES AFFAIRES — TABLEAU DES ÉCHÉANCES')
-    .setDescription('```\n  IRON WOLF COMPANY · BUREAU DES CONTRATS · TEXAS \n```\nLes affaires en cours, classées par échéance. Le secrétariat tient ce registre à jour à mesure que les contrats avancent.\n\n🟡 *en attente* · 🔵 *en cours* · ✅ *à encaisser*');
-  if (fields.length) e.addFields(fields);
-  else e.addFields({ name: '— Registre vide —', value: "*Aucune affaire en cours, cow-boy. Le tableau est propre.*", inline: false });
-  e.setFooter({ text: `Iron Wolf Company • ${actifs.length} affaire(s) en cours • à jour le ${fmtShort(new Date())}` }).setTimestamp();
+    .setDescription(`*Iron Wolf Company · Bureau des contrats · Texas*\nClassé par échéance — les plus **urgents en haut**.\n${table}`)
+    .setFooter({ text: `Iron Wolf Company • ${actifs.length} affaire(s) en cours • à jour le ${fmtShort(new Date())}` }).setTimestamp();
   return e;
 }
 // Reformule un brouillon de contrat en contrat propre via l'IA
