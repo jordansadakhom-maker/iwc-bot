@@ -7733,7 +7733,7 @@ async function _setupGradesIllegalPanel(guild) {
   } catch (e) { console.log('⚠️ _setupGradesIllegalPanel:', e.message); }
 }
 
-// Panneau « Contacter la compagnie » (message libre) — builder réutilisable
+// Panneau UNIFIÉ « Nous contacter / Rendez-vous » — un seul point d'entrée client (2 boutons)
 function _rdvClientPayload() {
   const embed = new EmbedBuilder()
     .setColor(0xC8A45C)
@@ -7741,37 +7741,41 @@ function _rdvClientPayload() {
     .setDescription([
       '```',
       '╔═══════════════════════════════╗',
-      '║      ✉  NOUS CONTACTER  ✉      ║',
+      '║   ✉  NOUS CONTACTER / RDV  ✉   ║',
       '╚═══════════════════════════════╝',
       '```',
       '*Un besoin ? Protection, escorte, enquête, négociation, contrat… ou une affaire plus discrète ?*',
       '',
-      '📨 **Contactez la compagnie** en cliquant ci-dessous.',
-      'Expliquez-nous votre demande **avec vos propres mots** — votre affaire, vos conditions, ce que vous cherchez.',
-      'La Direction lit chaque message et **vous répond en personne**, en toute discrétion.',
-      '',
-      '*(Pour réserver directement une prestation avec un créneau, utilisez plutôt le bouton « 🤝 Besoin de nos services » du panneau juste en dessous.)*',
+      '✉️ **Envoyer un télégramme** — exposez votre demande **avec vos propres mots** (votre affaire, vos conditions). La Direction lit chaque message et **vous répond en personne**, en toute discrétion.',
+      '🤝 **Réserver une prestation** — choisissez directement un **service et un créneau** (lieu, date, heure).',
       '',
       '— *« La force est dans l\'ombre. »*',
     ].join('\n'))
     .setFooter({ text: 'Iron Wolf Company · Bureau de Saint-Denis' });
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('rdvclient_demande').setLabel('Contacter la compagnie').setEmoji('📨').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('rdvclient_demande').setLabel('Envoyer un télégramme').setEmoji('✉️').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('rdvp_book').setLabel('Réserver une prestation').setEmoji('🤝').setStyle(ButtonStyle.Success),
   );
   return { embeds: [embed], components: [row] };
 }
 
-// Met à jour EN PLACE les panneaux du salon rendez-vous-client (nouveaux textes/boutons)
+// Fusionne les panneaux du salon rendez-vous-client en UN SEUL panneau unifié
 async function _majPanneauxRdvClient(guild) {
   try {
     const ch = guild.channels.cache.get('1512171267560702013'); if (!ch?.messages) return;
     const me = guild.client.user.id;
     const msgs = await ch.messages.fetch({ limit: 30 }).catch(() => null); if (!msgs) return;
     const aBouton = (m, id) => m.components?.some(r => r.components?.some(c => c.customId === id));
-    const tele = [...msgs.values()].find(m => m.author.id === me && aBouton(m, 'rdvclient_demande'));
-    const book = [...msgs.values()].find(m => m.author.id === me && aBouton(m, 'rdvp_book'));
-    if (tele) await tele.edit(_rdvClientPayload()).catch(() => {});
-    if (book && rdvplus.panelPayload) await book.edit(rdvplus.panelPayload()).catch(() => {});
+    // Le panneau unifié = celui qui porte le bouton « télégramme »
+    const avecTele = [...msgs.values()].filter(m => m.author.id === me && aBouton(m, 'rdvclient_demande'));
+    const unifie = avecTele[0] || null;
+    for (const m of avecTele.slice(1)) await m.delete().catch(() => {}); // dédoublonne
+    // Supprime l'ancien panneau séparé « Besoin de nos services » (rdvp_book seul, sans télégramme)
+    for (const m of msgs.values()) {
+      if (m.author.id === me && aBouton(m, 'rdvp_book') && !aBouton(m, 'rdvclient_demande')) await m.delete().catch(() => {});
+    }
+    if (unifie) await unifie.edit(_rdvClientPayload()).catch(() => {});
+    else await ch.send(_rdvClientPayload()).catch(() => {});
   } catch (e) { console.log('⚠️ _majPanneauxRdvClient:', e.message); }
 }
 

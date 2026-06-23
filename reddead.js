@@ -16,18 +16,18 @@ const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 // Salon Far West (overridable via .env). ID demandé par la Direction.
 const RED_DEAD_CHANNEL_ID = process.env.RED_DEAD_CHANNEL_ID || '1508756424862203988';
 
-// Modèle Gemini d'édition d'image. Overridable via .env (GEMINI_IMAGE_MODEL),
-// p. ex. « gemini-3-pro-image-preview » (Nano Banana Pro) pour la meilleure qualité.
-// Par défaut : « gemini-2.5-flash-image » (Nano Banana), le plus économique.
-const GEMINI_MODELS = [process.env.GEMINI_IMAGE_MODEL, 'gemini-2.5-flash-image']
+// Modèle Gemini d'édition d'image. Overridable via .env (GEMINI_IMAGE_MODEL).
+// Par défaut : Nano Banana PRO (meilleur réalisme), avec repli auto sur Nano Banana flash
+// si le Pro n'est pas disponible sur la clé — donc aucun risque de panne.
+const GEMINI_MODELS = [process.env.GEMINI_IMAGE_MODEL, 'gemini-3-pro-image-preview', 'gemini-2.5-flash-image']
   .filter((m, i, a) => m && a.indexOf(m) === i);
 
 const PROMPT_FARWEST = [
-  "Transforme cette capture d'écran du jeu vidéo Red Dead Redemption en une image ULTRA-RÉALISTE et CINÉMATOGRAPHIQUE, comme un plan de film western haut de gamme ou une photo photoréaliste.",
-  "Garde EXACTEMENT la même scène : mêmes personnages, mêmes visages, mêmes poses, même décor, même cadrage et même composition.",
-  "Style recherché : éclairage dramatique en clair-obscur, forte profondeur, contraste marqué entre une lumière chaude et dorée (bougie, lanterne, feu, flamme) et une nuit froide et bleutée (clair de lune).",
-  "Ambiance atmosphérique : brume, fumée, poussière en suspension, halos de lumière, ombres profondes et riches, hautes lumières chaudes et lumineuses.",
-  "Rendu photoréaliste : peau, barbe, tissus et matières très détaillés, grain de cinéma subtil, étalonnage colorimétrique digne d'un film (couleurs riches, noirs profonds), netteté élevée et léger flou d'arrière-plan (profondeur de champ).",
+  "Transforme cette capture d'écran du jeu Red Dead Redemption en une VRAIE PHOTOGRAPHIE PHOTORÉALISTE, comme prise par un appareil photo réel — PAS une peinture, PAS une illustration, PAS un rendu de jeu vidéo.",
+  "Garde EXACTEMENT la même scène : mêmes personnages, mêmes visages et expressions, mêmes poses, mêmes vêtements, même décor, même cadrage et même composition. N'ajoute, ne retire et ne déplace AUCUN élément.",
+  "Rends-la crédible et naturelle : lumière réaliste et cohérente avec la scène (soleil, lanterne, feu ou clair de lune selon le contexte), couleurs naturelles et justes, contraste modéré — évite tout étalonnage exagéré ou look « cinéma » artificiel.",
+  "Photoréalisme des détails : peau avec pores et imperfections, barbe et cheveux fins, tissus, cuir et métal aux matières réalistes, micro-grain photographique subtil, profondeur de champ naturelle, netteté réaliste (ni sur-lissé, ni sur-saturé).",
+  "Ambiance western de la fin du XIXᵉ siècle, sobre et crédible (poussière ou légère brume seulement si la scène s'y prête).",
   "Retire impérativement tous les éléments d'interface du jeu : ATH/HUD, textes à l'écran, menus, mini-carte, icônes, jauges, sous-titres, filigranes.",
   "Ne réponds qu'avec l'image éditée, sans texte.",
 ].join(' ');

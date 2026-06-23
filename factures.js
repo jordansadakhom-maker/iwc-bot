@@ -42,6 +42,42 @@ function _factureEmbed(f) {
   return e;
 }
 
+// Post épinglé « 📊 BILAN » : vue d'ensemble des factures
+function _bilanEmbed(db) {
+  const facs = (db.factures || []).filter(f => f.numero !== 'FAC-000');
+  const total = facs.reduce((s, f) => s + (parseFloat(f.montant) || 0), 0);
+  const now = new Date();
+  const moisFacs = facs.filter(f => { const d = new Date(f.createdAt); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); });
+  const totalMois = moisFacs.reduce((s, f) => s + (parseFloat(f.montant) || 0), 0);
+  const dernieres = [...facs].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
+  return new EmbedBuilder().setColor(0x3BA55D).setTitle('📊 BILAN DES FACTURES')
+    .setDescription('*Vue d\'ensemble — mise à jour automatiquement à chaque facture.*')
+    .addFields(
+      { name: '🧾 Factures émises', value: `**${facs.length}**`, inline: true },
+      { name: '💰 Total facturé', value: `**$${_euros(total)}**`, inline: true },
+      { name: '📅 Ce mois-ci', value: `**$${_euros(totalMois)}** · ${moisFacs.length}`, inline: true },
+      { name: '🕘 Dernières factures', value: dernieres.length ? dernieres.map(f => `• ${f.numero} · ${_nomPropre(f.clientNom) || 'Client'} · $${_euros(f.montant)}`).join('\n') : '*Aucune facture pour l\'instant.*', inline: false },
+    ).setFooter({ text: `Iron Wolf Company • à jour le ${new Date().toLocaleDateString('fr-FR')}` }).setTimestamp();
+}
+async function _majBilan(guild) {
+  try {
+    const forum = _ch(guild, FACTURES_FORUM);
+    if (!forum || forum.type !== 15 || !forum.threads?.create) return;
+    const db = loadDB();
+    let th = null;
+    if (db.facturesBilanThreadId) th = await guild.channels.fetch(db.facturesBilanThreadId).catch(() => null);
+    if (!th) { const act = await forum.threads.fetchActive().catch(() => null); if (act?.threads) th = [...act.threads.values()].find(t => (t.name || '').includes('BILAN DES FACTURES')) || null; }
+    if (th) {
+      const starter = await th.fetchStarterMessage().catch(() => null);
+      if (starter) await starter.edit({ embeds: [_bilanEmbed(db)] }).catch(() => {});
+      if (db.facturesBilanThreadId !== th.id) { db.facturesBilanThreadId = th.id; saveDB(db); }
+      return;
+    }
+    const post = await forum.threads.create({ name: '📊 BILAN DES FACTURES (ne pas supprimer)', message: { embeds: [_bilanEmbed(db)] } }).catch(() => null);
+    if (post) { try { await post.pin(); } catch {} db.facturesBilanThreadId = post.id; saveDB(db); }
+  } catch (e) { console.log('⚠️ factures _majBilan:', e.message); }
+}
+
 // Cœur : crée le post-facture dans le forum
 async function creerFacture(guild, data) {
   const forum = _ch(guild, FACTURES_FORUM);
@@ -59,6 +95,7 @@ async function creerFacture(guild, data) {
   const post = await forum.threads.create({ name: titre, message: { embeds: [_factureEmbed(f)] } }).catch(() => null);
   if (post) f.threadId = post.id;
   db.factures.push(f); saveDB(db);
+  _majBilan(guild).catch(() => {}); // rafraîchit le bilan épinglé
   return { f, post };
 }
 
@@ -89,6 +126,8 @@ async function installerPanel(guild) {
     await forum.permissionOverwrites.edit(guild.roles.everyone, { CreatePublicThreads: false, CreatePrivateThreads: false, SendMessages: false, SendMessagesInThreads: false });
     if (guild.members.me) await forum.permissionOverwrites.edit(guild.members.me, { ViewChannel: true, CreatePublicThreads: true, SendMessages: true, SendMessagesInThreads: true });
   } catch (e) { console.log('⚠️ verrou forum factures (permissions bot ?):', e.message); }
+  // 2b) Post épinglé « 📊 BILAN » (créé/rafraîchi à chaque démarrage)
+  await _majBilan(guild).catch(() => {});
   // 3) Poster l'exemple (idempotent)
   const act2 = await forum.threads?.fetchActive?.().catch(() => null);
   if (act2?.threads && [...act2.threads.values()].some(t => (t.name || '').includes('EXEMPLE'))) return;
