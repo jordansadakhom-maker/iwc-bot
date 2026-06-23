@@ -7,11 +7,12 @@
 //   • Bouton 📤 Export : génère un fichier récap (factures + contrats).
 //   Lecture seule : ne modifie ni les contrats, ni le coffre.
 // ───────────────────────────────────────────────────────────────────────────
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder, MessageFlags } = require('discord.js');
 
 let dbMod = {};
 try { dbMod = require('./db'); } catch { dbMod = {}; }
 const loadDB = dbMod.loadDB || (() => ({}));
+const saveDB = dbMod.saveDB || (() => {});
 
 const DIRECTION_ROLES = ['Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'];
 function estDirection(m) { try { return !!m?.roles?.cache?.some(r => DIRECTION_ROLES.some(n => r.name.includes(n))); } catch { return false; } }
@@ -77,11 +78,50 @@ function bilanEmbed(db, jours) {
 
 function _bilanRow(jours) {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('compta_p::7').setLabel('7 jours').setStyle(jours === 7 ? ButtonStyle.Primary : ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('compta_p::30').setLabel('30 jours').setStyle(jours === 30 ? ButtonStyle.Primary : ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('compta_p::0').setLabel('Tout').setStyle(!jours ? ButtonStyle.Primary : ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('compta_p::7').setLabel('7 jours').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('compta_p::30').setLabel('30 jours').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('compta_p::0').setLabel('Tout').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('compta_export').setLabel('Exporter').setEmoji('📤').setStyle(ButtonStyle.Success),
   );
+}
+// Lignes de boutons du PANNEAU permanent (avec encaissement de contrat)
+function _panelRows() {
+  return [
+    _bilanRow(30),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('compta_encaisser').setLabel('Encaisser un contrat').setEmoji('💵').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('compta_refresh').setLabel('Rafraîchir').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
+    ),
+  ];
+}
+// Contrats encaissables (travail fait / en cours, pas encore honoré ni abandonné)
+function _encaissables(db) {
+  return (db.contrats || []).filter(c => !['Honoré', 'Abandonné'].includes(_suivi(c)) && !c.remuVerseAuCoffre);
+}
+function _montantDetecte(s) { const m = String(s || '').replace(/\s/g, '').match(/(\d[\d.]*)/); return m ? (parseInt(m[1].replace(/\./g, ''), 10) || 0) : 0; }
+
+// Panneau permanent : (ré)installe dans un salon et mémorise la référence
+async function installerPanel(guild, channel) {
+  try {
+    const ch = channel || (loadDB().comptaPanel?.channelId ? await guild.channels.fetch(loadDB().comptaPanel.channelId).catch(() => null) : null);
+    if (!ch?.send) return null;
+    const db = loadDB();
+    const payload = { embeds: [bilanEmbed(db, 30)], components: _panelRows() };
+    const msgs = await ch.messages.fetch({ limit: 30 }).catch(() => null);
+    let panel = msgs ? [...msgs.values()].find(m => m.author?.id === guild.client.user.id && (m.embeds?.[0]?.title || '').includes('BILAN COMPTABLE')) : null;
+    if (panel) await panel.edit(payload).catch(() => {});
+    else panel = await ch.send(payload).catch(() => null);
+    if (panel) { try { await panel.pin(); } catch {} const d = loadDB(); d.comptaPanel = { channelId: ch.id, messageId: panel.id }; saveDB(d); }
+    return panel;
+  } catch { return null; }
+}
+async function refreshPanel(client) {
+  const ref = loadDB().comptaPanel; if (!ref?.channelId || !ref?.messageId) return;
+  try {
+    const ch = await client.channels.fetch(ref.channelId).catch(() => null); if (!ch) return;
+    const msg = await ch.messages.fetch(ref.messageId).catch(() => null); if (!msg) return;
+    await msg.edit({ embeds: [bilanEmbed(loadDB(), 30)], components: _panelRows() }).catch(() => {});
+  } catch {}
 }
 
 function _exportTexte(db) {
@@ -124,17 +164,45 @@ function _exportTexte(db) {
 
 async function routeInteraction(interaction) {
   try {
+    // /compta → installe (ou rafraîchit) le PANNEAU permanent dans le salon courant
     if (interaction.isChatInputCommand?.() && interaction.commandName === 'compta') {
       if (!estDirection(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
-      const db = loadDB();
-      await interaction.reply({ embeds: [bilanEmbed(db, 30)], components: [_bilanRow(30)], flags: MessageFlags.Ephemeral }).catch(() => {});
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const panel = await installerPanel(interaction.guild, interaction.channel);
+      await interaction.editReply({ content: panel ? '✅ Panneau **comptabilité** installé ici (épinglé). Il se met à jour tout seul à chaque contrat honoré / facture.' : "❌ Impossible d'installer le panneau ici (vérifie mes permissions d'écriture)." }).catch(() => {});
       return true;
     }
+    if (interaction.isButton?.() && interaction.customId === 'compta_refresh') {
+      if (!estDirection(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      await interaction.update({ embeds: [bilanEmbed(loadDB(), 30)], components: _panelRows() }).catch(() => {});
+      return true;
+    }
+    // Période → vue ÉPHÉMÈRE (ne modifie pas le panneau partagé)
     if (interaction.isButton?.() && interaction.customId.startsWith('compta_p::')) {
       if (!estDirection(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const jours = parseInt(interaction.customId.split('::')[1], 10) || 0;
-      const db = loadDB();
-      await interaction.update({ embeds: [bilanEmbed(db, jours)], components: [_bilanRow(jours)] }).catch(() => {});
+      await interaction.reply({ embeds: [bilanEmbed(loadDB(), jours)], flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+    // Encaisser un contrat → sélection puis modal de montant (réutilise le flux d'honoraire existant)
+    if (interaction.isButton?.() && interaction.customId === 'compta_encaisser') {
+      if (!estDirection(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const enc = _encaissables(loadDB());
+      if (!enc.length) { await interaction.reply({ content: 'Aucun contrat à encaisser pour le moment. ✅', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const opts = enc.slice(0, 25).map(c => ({ label: `${c.id} · ${_clientNom(c).replace(/<@!?\d+>/g, '').trim()}`.slice(0, 100), description: `${_suivi(c)} · ${_montant(c) ? '$' + _eur(_montant(c)) : 'montant à saisir'} · ${(c.objet || '').slice(0, 50)}`.slice(0, 100), value: String(c.id) }));
+      const sel = new StringSelectMenuBuilder().setCustomId('compta_enc_sel').setPlaceholder('Choisis le contrat à encaisser…').addOptions(opts);
+      await interaction.reply({ content: '💵 Quel contrat encaisser ? *(tout est déjà rempli, je m\'occupe du reste : coffre + facture + bilan)*', components: [new ActionRowBuilder().addComponents(sel)], flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+    if (interaction.isStringSelectMenu?.() && interaction.customId === 'compta_enc_sel') {
+      if (!estDirection(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const ref = interaction.values[0];
+      const c = (loadDB().contrats || []).find(x => String(x.id) === ref);
+      // On ouvre EXACTEMENT le modal d'honoraire géré par index.js (csuivi_montant::ref) → coffre + facture
+      const det = c ? _montant(c) : 0;
+      const modal = new ModalBuilder().setCustomId(`csuivi_montant::${ref}`).setTitle(`Encaisser ${ref}`.slice(0, 45));
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('montant').setLabel('Montant à verser au coffre ($)').setStyle(TextInputStyle.Short).setRequired(true).setValue(det ? String(det) : '').setPlaceholder('Ex : 1500')));
+      await interaction.showModal(modal).catch(() => {});
       return true;
     }
     if (interaction.isButton?.() && interaction.customId === 'compta_export') {
@@ -149,4 +217,4 @@ async function routeInteraction(interaction) {
   } catch (e) { console.log('❌ comptabilite routeInteraction:', e.message); return true; }
 }
 
-module.exports = { comptaCommands, routeInteraction, bilanEmbed };
+module.exports = { comptaCommands, routeInteraction, bilanEmbed, installerPanel, refreshPanel };
