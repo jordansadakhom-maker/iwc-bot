@@ -3986,6 +3986,7 @@ client.once('clientReady', async () => {
     for (const g of client.guilds.cache.values()) await checkAgenda(g).catch(() => {});
     for (const g of client.guilds.cache.values()) await rdvplus.checkRappelsClients?.(g).catch(() => {});
     for (const g of client.guilds.cache.values()) await checkRappelsRdvClients(g).catch(() => {});
+    for (const g of client.guilds.cache.values()) await medical.checkRappelsMedicaux?.(g).catch(() => {});
     for (const g of client.guilds.cache.values()) await nettoyerAgendaPasses(g).catch(() => {});
   });
   // (Import Notion automatique RETIRÉ : il réimportait chaque minute les contrats supprimés après un reset.
@@ -5360,7 +5361,7 @@ async function buildMembresDiscordMap(guild) {
 
 async function _handleVersion(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const BOT_VERSION = '5.6 (23 juin — RDV client plus clair + ping Hommes de main au recrutement)'; const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
+  const BOT_VERSION = '5.7 (23 juin — suivi médical : alertes, rappels RDV, vue par statut)'; const uptime = Math.floor(process.uptime()); const h = Math.floor(uptime / 3600); const m = Math.floor((uptime % 3600) / 60); const s = uptime % 60;
   let notionOk = false;
   try { const r = await fetch('https://api.notion.com/v1/users/me', { headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28' } }); notionOk = r.ok; } catch {}
   const db = loadDB();

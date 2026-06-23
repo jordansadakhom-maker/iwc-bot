@@ -64,10 +64,10 @@ function _embedFiche(f, gm) {
     .addFields(
       { name: 'État', value: _clip(st.label, 100), inline: true },
       { name: 'Test d\'aptitude', value: f.testValide ? `✅ Validé${f.testDate ? ` (${_dateFR(f.testDate)})` : ''}` : '❌ Non validé', inline: true },
-      { name: 'Prochain RDV', value: _clip(f.prochainRdv || '—', 200), inline: true },
+      { name: 'Prochain RDV', value: _clip((f.prochainRdv || '—') + (f.prochainRdvAt ? ' ⏰' : ''), 200), inline: true },
       { name: '📝 Notes', value: _clip(f.notes || '*Aucune note*', 1000), inline: false },
     );
-  if (f.historique?.length) e.addFields({ name: '🕓 Historique', value: _clip(f.historique.slice(-5).reverse().map(h => `• \`${_clip(h.date, 40)}\` ${_clip(h.action, 120)}${h.par ? ` — *${_clip(h.par, 60)}*` : ''}`).join('\n'), 1000), inline: false });
+  if (f.historique?.length) e.addFields({ name: '🕓 Historique', value: _clip(f.historique.slice(-8).reverse().map(h => `• \`${_clip(h.date, 40)}\` ${_clip(h.action, 120)}${h.par ? ` — *${_clip(h.par, 60)}*` : ''}`).join('\n'), 1024), inline: false });
   if (gm?.user) e.setThumbnail(gm.user.displayAvatarURL());
   e.setFooter({ text: _clip(f.majPar ? `Dernière mise à jour par ${f.majPar}` : 'Dossier médical confidentiel', 200) });
   return e;
@@ -155,6 +155,69 @@ function _actions(id) {
       new ButtonBuilder().setCustomId(`med_aptitude::${id}`).setLabel('Rédiger le test d\'aptitude').setEmoji('🧪').setStyle(ButtonStyle.Primary),
     ),
   ];
+}
+
+// ── Alerte quand un membre devient INAPTE ou EN OBSERVATION (prévient le médecin) ──
+async function _alerteStatut(guild, id, f) {
+  try {
+    if (f.statut !== 'inapte' && f.statut !== 'observation') return;
+    const ch = _ch(guild, MEDICAL_CHANNEL); if (!ch) return;
+    const gm = await guild.members.fetch(id).catch(() => null);
+    const st = STATUTS[f.statut] || STATUTS.non_teste;
+    const e = new EmbedBuilder().setColor(st.couleur)
+      .setTitle(`🚨 Alerte médicale — ${st.label}`)
+      .setDescription(`${gm ? `**${_clip(gm.displayName, 80)}** (<@${id}>)` : `<@${id}>`} est désormais **${st.label.replace(/^\S+\s/, '')}**.`)
+      .addFields(
+        { name: "Test d'aptitude", value: f.testValide ? '✅ Validé' : '❌ Non validé', inline: true },
+        { name: 'Mis à jour par', value: _clip(f.majPar || '—', 60), inline: true },
+        ...(f.prochainRdv ? [{ name: 'Prochain RDV', value: _clip(f.prochainRdv, 100), inline: true }] : []),
+      )
+      .setFooter({ text: 'Iron Wolf Company · Suivi médical' }).setTimestamp();
+    if (f.notes) e.addFields({ name: '📝 Notes', value: _clip(f.notes, 500), inline: false });
+    const ping = `<@&${ROLE_MEDECIN}>`;
+    if (ch.type === 15 && ch.threads?.create) {
+      await ch.threads.create({ name: `🚨 ${st.label} — ${(gm?.displayName || id)}`.slice(0, 100), message: { content: ping, embeds: [e], allowedMentions: { roles: [ROLE_MEDECIN] } } }).catch(() => {});
+    } else if (ch.send) {
+      await ch.send({ content: ping, embeds: [e], allowedMentions: { roles: [ROLE_MEDECIN] } }).catch(() => {});
+    }
+  } catch {}
+}
+// Extrait une date/heure d'un texte libre de RDV (best-effort) → timestamp ms ou null
+function _parseRdvDate(txt) {
+  if (!txt) return null;
+  const s = String(txt);
+  const dm = s.match(/(\d{1,2})\s*[\/\-.]\s*(\d{1,2})(?:\s*[\/\-.]\s*(\d{2,4}))?/);
+  if (!dm) return null;
+  const jour = parseInt(dm[1], 10); const mois = parseInt(dm[2], 10) - 1;
+  let annee = dm[3] ? parseInt(dm[3], 10) : new Date().getFullYear();
+  if (annee < 100) annee += 2000;
+  const hm = s.match(/(\d{1,2})\s*[h:]\s*(\d{0,2})/i);
+  const hh = hm ? parseInt(hm[1], 10) : 12; const mn = (hm && hm[2]) ? parseInt(hm[2], 10) : 0;
+  const d = new Date(annee, mois, jour, hh, mn, 0);
+  return isNaN(d.getTime()) ? null : d.getTime();
+}
+// Rappel MP au médecin ~1h avant un RDV médical dont la date est connue
+async function checkRappelsMedicaux(guild) {
+  try {
+    const db = loadDB(); const sm = db.suiviMedical || {}; let changed = false;
+    const role = guild.roles.cache.get(ROLE_MEDECIN);
+    const docs = role ? [...role.members.values()].filter(m => !m.user.bot) : [];
+    for (const id of Object.keys(sm)) {
+      const f = sm[id];
+      if (!f.prochainRdvAt) continue;
+      const mins = Math.floor((f.prochainRdvAt - Date.now()) / 60000);
+      if (mins > 2 && mins <= 60 && !f.sentRappelMed) {
+        const gm = await guild.members.fetch(id).catch(() => null);
+        const e = new EmbedBuilder().setColor(0x2ECC71).setTitle('🩺 Rappel — RDV médical dans 1 heure')
+          .setDescription(`Rendez-vous avec ${gm ? `**${gm.displayName}**` : `<@${id}>`}\n📅 ${_clip(f.prochainRdv || '—', 100)}`)
+          .setFooter({ text: 'Iron Wolf Company · Secrétariat médical' }).setTimestamp();
+        for (const doc of docs) await doc.send({ embeds: [e] }).catch(() => {});
+        f.sentRappelMed = true; changed = true;
+      }
+      if (mins < -120) { f.sentRappelMed = false; f.prochainRdvAt = null; changed = true; }
+    }
+    if (changed) saveDB(db);
+  } catch (e) { console.log('❌ checkRappelsMedicaux:', e.message); }
 }
 
 async function installerPanel(guild) {
@@ -281,8 +344,18 @@ async function routeInteraction(interaction) {
       const db = loadDB(); const sm = db.suiviMedical || {};
       const ids = Object.keys(sm);
       if (!ids.length) { await interaction.editReply({ content: 'Aucun dossier médical pour le moment. Ouvre-en un via **Ouvrir un dossier**.' }).catch(() => {}); return true; }
-      const lignes = ids.slice(0, 40).map(id => { const f = sm[id]; const st = STATUTS[f.statut] || STATUTS.non_teste; return `${st.label.split(' ')[0]} <@${id}> — ${st.label.replace(/^[^ ]+ /, '')}${f.testValide ? ' · 🧪✅' : ''}${f.prochainRdv ? ` · 📅 ${f.prochainRdv}` : ''}`; });
-      const e = new EmbedBuilder().setColor(0x2ECC71).setTitle('📋 Suivi médical — vue d\'ensemble').setDescription(lignes.join('\n').slice(0, 4000)).setFooter({ text: `${ids.length} dossier(s)` });
+      // Regroupé par statut (inapte/observation d'abord = ce qui demande de l'attention)
+      const ordre = ['inapte', 'observation', 'apte', 'non_teste'];
+      const ligne = id => { const f = sm[id]; return `<@${id}>${f.testValide ? ' · 🧪✅' : ' · 🧪✗'}${f.prochainRdv ? ` · 📅 ${_clip(f.prochainRdv, 40)}${f.prochainRdvAt ? '⏰' : ''}` : ''}`; };
+      const e = new EmbedBuilder().setColor(0x2ECC71).setTitle('📋 Suivi médical — vue d\'ensemble');
+      const cnt = {};
+      for (const st of ordre) {
+        const grp = ids.filter(id => (sm[id].statut || 'non_teste') === st);
+        cnt[st] = grp.length;
+        if (grp.length) e.addFields({ name: `${(STATUTS[st] || STATUTS.non_teste).label} (${grp.length})`, value: _clip(grp.slice(0, 25).map(ligne).join('\n'), 1024), inline: false });
+      }
+      e.setDescription(`👥 **${ids.length}** dossier(s) · ✅ ${cnt.apte || 0} apte(s) · ⚠️ ${cnt.observation || 0} en observation · ❌ ${cnt.inapte || 0} inapte(s)`);
+      e.setFooter({ text: '🧪 = test d\'aptitude · 📅 = prochain RDV · ⏰ = rappel auto activé' });
       await interaction.editReply({ embeds: [e] }).catch(() => {});
       return true;
     }
@@ -295,6 +368,7 @@ async function routeInteraction(interaction) {
       const db = loadDB(); const f = _fiche(db, id);
       f.statut = statut; f.majPar = interaction.member?.displayName || interaction.user.username; f.majAt = Date.now();
       _log(f, `Statut → ${STATUTS[statut].label}`, f.majPar); saveDB(db);
+      await _alerteStatut(interaction.guild, id, f); // alerte si inapte / observation
       await _afficherFiche(interaction, id, true);
       return true;
     }
@@ -317,7 +391,7 @@ async function routeInteraction(interaction) {
       const id = cid.split('::')[1];
       const db = loadDB(); const f = _fiche(db, id);
       const modal = new ModalBuilder().setCustomId(`med_rdv_modal::${id}`).setTitle('📅 Prochain RDV médical');
-      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('rdv').setLabel('Date / créneau du RDV').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80).setValue(_clip(f.prochainRdv || '', 80)).setPlaceholder('ex : Samedi 14h au cabinet d\'Armadillo')));
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('rdv').setLabel('Date / créneau du RDV').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80).setValue(_clip(f.prochainRdv || '', 80)).setPlaceholder('ex : 28/06 14h — cabinet de Blackwater')));
       await interaction.showModal(modal).catch(() => {});
       return true;
     }
@@ -326,8 +400,9 @@ async function routeInteraction(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       const db = loadDB(); const f = _fiche(db, id);
       const v = (interaction.fields.getTextInputValue('rdv') || '').trim();
-      f.prochainRdv = v || null; f.majPar = interaction.member?.displayName || interaction.user.username; f.majAt = Date.now();
-      _log(f, v ? `RDV fixé : ${v}` : 'RDV retiré', f.majPar); saveDB(db);
+      f.prochainRdv = v || null; f.prochainRdvAt = v ? _parseRdvDate(v) : null; f.sentRappelMed = false;
+      f.majPar = interaction.member?.displayName || interaction.user.username; f.majAt = Date.now();
+      _log(f, v ? `RDV fixé : ${v}${f.prochainRdvAt ? ' (rappel auto activé)' : ''}` : 'RDV retiré', f.majPar); saveDB(db);
       const gm = await interaction.guild.members.fetch(id).catch(() => null);
       // On prévient LE MÉDECIN (c'est nous qui prenons rendez-vous avec elle)
       let notif = '';
@@ -449,6 +524,7 @@ async function routeInteraction(interaction) {
       f.testValide = true; f.testDate = Date.now();
       f.majPar = interaction.member?.displayName || interaction.user.username; f.majAt = Date.now();
       _log(f, `Test d'aptitude rédigé — ${input.verdict}`, f.majPar); saveDB(db);
+      await _alerteStatut(interaction.guild, id, f); // alerte si le verdict rend inapte / en observation
       await interaction.editReply({ content: posted ? `✅ Test d'aptitude de **${input.patient}** rédigé et posté dans le forum. Statut → **${f.statut}**, test validé.` : '⚠️ Test généré mais impossible de le poster (vérifie les permissions du bot sur le forum).' }).catch(() => {});
       return true;
     }
@@ -501,4 +577,4 @@ async function installerPanelDemande(channel) {
   return true;
 }
 
-module.exports = { installerPanel, installerExemple, installerPanelDemande, routeInteraction, MEDICAL_CHANNEL, ROLE_MEDECIN };
+module.exports = { installerPanel, installerExemple, installerPanelDemande, routeInteraction, checkRappelsMedicaux, MEDICAL_CHANNEL, ROLE_MEDECIN };
