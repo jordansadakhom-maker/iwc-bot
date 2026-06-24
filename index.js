@@ -100,6 +100,9 @@ catch (e) { console.log('⚠️ reseau non chargé:', e.message); }
 let ripoux = {};
 try { ripoux = require('./ripoux'); console.log('✅ Module ripoux (Le Ripoux — indic dans la loi) chargé'); }
 catch (e) { console.log('⚠️ ripoux non chargé:', e.message); }
+let evenements = {};
+try { evenements = require('./evenements'); console.log('✅ Module evenements chargé'); }
+catch (e) { console.log('⚠️ evenements non chargé:', e.message); }
 
 let factures = {};
 try { factures = require('./factures'); console.log('✅ Module factures (Facturation) chargé'); }
@@ -503,7 +506,7 @@ const SLASH_COMMANDS = [
 ].map(c => c.toJSON());
 
 async function registerSlashCommands(guild) {
-  const cmds = [...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || []), ...(operations.operationsCommands || []), ...(rumeurs.rumeursCommands || []), ...(inventaire.inventaireCommands || []), ...(diagnostic.diagnosticCommands || []), ...(absences.absencesCommands || []), ...(repertoire.repertoireCommands || []), ...(monitoring.monitoringCommands || []), ...(telegramme.telegrammeCommands || []), ...(tableaubord.tableauCommands || []), ...(traque.traqueCommands || []), ...(comptabilite.comptaCommands || [])];
+  const cmds = [...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || []), ...(operations.operationsCommands || []), ...(rumeurs.rumeursCommands || []), ...(inventaire.inventaireCommands || []), ...(diagnostic.diagnosticCommands || []), ...(absences.absencesCommands || []), ...(repertoire.repertoireCommands || []), ...(monitoring.monitoringCommands || []), ...(telegramme.telegrammeCommands || []), ...(tableaubord.tableauCommands || []), ...(traque.traqueCommands || []), ...(comptabilite.comptaCommands || []), ...(evenements.evenementsCommands || [])];
   try {
     const noms = cmds.map(c => c?.name || c?.toJSON?.()?.name).filter(Boolean);
     client._cmdNames = noms;
@@ -2939,6 +2942,7 @@ client.on('interactionCreate', async interaction => {
   if (await comptabilite.routeInteraction?.(interaction)) return;
   if (await reseau.routeInteraction?.(interaction)) return;
   if (await ripoux.routeInteraction?.(interaction)) return;
+  if (await evenements.routeInteraction?.(interaction)) return;
   if (await factures.routeInteraction?.(interaction)) return;
   if (await medical.routeInteraction?.(interaction)) return;
 
