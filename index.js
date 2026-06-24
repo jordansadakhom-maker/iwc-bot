@@ -2789,6 +2789,7 @@ client.on('messageCreate', async message => {
         new ButtonBuilder().setCustomId(`note_rens::${message.id}`).setLabel('Verser au carnet').setEmoji('🕵️').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(`note_contrat::${message.id}`).setLabel('En faire un contrat').setEmoji('📜').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(`note_avis::${message.id}`).setLabel('Avis de recherche').setEmoji('🎯').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(`note_carte::${message.id}`).setLabel('Ajouter à la carte').setEmoji('📍').setStyle(ButtonStyle.Secondary),
       );
       await message.reply({ content: '🗂️ **Que faire de ce rapport ?** *(Direction)*', components: [triageRow], allowedMentions: { repliedUser: false } });
     } catch (e) { console.log('⚠️ Boutons tri note:', e.message); }
@@ -3484,7 +3485,7 @@ client.on('interactionCreate', async interaction => {
     // ── Boutons du brouillon de contrat (note → contrat) ──
     if (interaction.customId.startsWith('dc_')) return _gererBoutonBrouillon(interaction);
     // ── Tri d'un rapport de terrain : carnet / contrat / avis de recherche (Direction) ──
-    if (interaction.customId.startsWith('note_rens::') || interaction.customId.startsWith('note_contrat::') || interaction.customId.startsWith('note_avis::')) {
+    if (interaction.customId.startsWith('note_rens::') || interaction.customId.startsWith('note_contrat::') || interaction.customId.startsWith('note_avis::') || interaction.customId.startsWith('note_carte::')) {
       return _gererTriageNote(interaction);
     }
     if (interaction.customId.startsWith('engagement_signer_'))  return _ouvrirModalEngagement(interaction);
@@ -9328,6 +9329,18 @@ async function _gererTriageNote(interaction) {
     }
     try { return await traque.ouvrirModalAvis(interaction, { cible, signalement }); }
     catch (e) { console.log('⚠️ note→avis:', e.message); return interaction.reply({ content: '⚠️ Impossible d\'ouvrir le formulaire d\'avis.', flags: MessageFlags.Ephemeral }).catch(() => {}); }
+  }
+
+  // ── 📍 Ajouter à la carte : ouvrir l'ajout d'un lieu pré-rempli (reply = première réponse) ──
+  if (action === 'note_carte') {
+    let lieu = '', notes = '';
+    if (msg) {
+      lieu = _champEmbed(msg, ['lieu', 'position', 'endroit', 'secteur']) || '';
+      const t = await _lireTexteNote(msg);
+      notes = (t || '').replace(/\s+/g, ' ').slice(0, 480);
+    }
+    try { return await carte.ouvrirAjout(interaction, { lieu, notes }); }
+    catch (e) { console.log('⚠️ note→carte:', e.message); return interaction.reply({ content: '⚠️ Impossible d\'ouvrir l\'ajout à la carte.', flags: MessageFlags.Ephemeral }).catch(() => {}); }
   }
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });

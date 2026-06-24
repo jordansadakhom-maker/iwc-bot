@@ -12,6 +12,8 @@ const loadDB = dbMod.loadDB || (() => ({}));
 const saveDB = dbMod.saveDB || (() => {});
 
 const CARTE_CHANNEL_ID = process.env.CARTE_CHANNEL_ID || '1519308989119074435';
+// Pré-remplissage temporaire de l'ajout d'un lieu (ex : depuis une note de terrain), par utilisateur
+const _addPrefill = new Map();
 
 const TYPES = [
   { key: 'recolte', label: 'Lieu de récolte', emoji: '🌿' },
@@ -152,6 +154,12 @@ function _formModal(customId, type, p) {
   return modal;
 }
 
+// Démarre l'ajout d'un lieu en pré-remplissant le formulaire (ex : depuis une note de terrain)
+async function ouvrirAjout(interaction, prefill) {
+  if (prefill && (prefill.lieu || prefill.notes || prefill.nom)) _addPrefill.set(interaction.user.id, prefill);
+  const row = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('carte_type_sel').setPlaceholder('Type de lieu…').addOptions(TYPES.map(t => ({ label: t.label, value: t.key, emoji: t.emoji }))));
+  await interaction.reply({ content: '➕ **Ajouter ce lieu à la carte** — c\'est quoi ?', components: [row], flags: MessageFlags.Ephemeral });
+}
 async function routeInteraction(interaction) {
   try {
     const id = interaction.customId || '';
@@ -167,7 +175,8 @@ async function routeInteraction(interaction) {
     }
     if (interaction.isStringSelectMenu?.() && id.startsWith('carte_niv_sel::')) {
       const type = id.split('::')[1], niveau = interaction.values[0];
-      await interaction.showModal(_formModal(`carte_modal::${type}::${niveau}`, type, null)); return true;
+      const pre = _addPrefill.get(interaction.user.id) || null; // pré-rempli si lancé depuis une note
+      await interaction.showModal(_formModal(`carte_modal::${type}::${niveau}`, type, pre)); return true;
     }
     if (interaction.isModalSubmit?.() && id.startsWith('carte_modal::')) {
       const [, type, niveau] = id.split('::');
@@ -177,6 +186,7 @@ async function routeInteraction(interaction) {
       region = REGIONS.find(r => region && (r.toLowerCase().includes(region.toLowerCase()) || region.toLowerCase().includes(r.toLowerCase()))) || (region ? region.slice(0, 40) : 'Autre');
       const db = loadDB(); _ensure(db).points.push({ id: _id(), type, niveau, nom, region, lieu: (interaction.fields.getTextInputValue('lieu') || '').trim().slice(0, 200), notes: (interaction.fields.getTextInputValue('notes') || '').trim().slice(0, 500), parId: interaction.user.id, parNom: interaction.member?.displayName || interaction.user.username, createdAt: new Date().toISOString() });
       saveDB(db);
+      _addPrefill.delete(interaction.user.id); // pré-remplissage consommé
       await installerPanel(interaction.guild).catch(() => {});
       await interaction.reply({ content: `✅ Lieu ajouté : ${_type(type).emoji} **${nom}** · 📍 ${region} · ${_niv(niveau).emoji} ${_niv(niveau).label}.`, flags: MessageFlags.Ephemeral }); return true;
     }
@@ -386,4 +396,4 @@ if(mapImg.complete)load();else{mapImg.onload=load;mapImg.onerror=load;}
 </script></body></html>`;
 }
 
-module.exports = { init, installerPanel, routeInteraction, onMessage, capterCarteFond, httpHandle, CARTE_CHANNEL_ID };
+module.exports = { init, installerPanel, routeInteraction, onMessage, capterCarteFond, httpHandle, ouvrirAjout, CARTE_CHANNEL_ID };
