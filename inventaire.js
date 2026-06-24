@@ -604,9 +604,16 @@ async function routeInteraction(interaction) {
       const ph = action === 'add' ? "Choisis l'objet à réapprovisionner…" : action === 'remove' ? "Choisis l'objet à retirer…" : "Choisis l'objet à corriger…";
       const select = new StringSelectMenuBuilder().setCustomId(`invsel::${action}`).setPlaceholder(ph).addOptions(opts);
       const comps = [new ActionRowBuilder().addComponents(select)];
-      if (action === 'add') comps.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("inv_new").setLabel("Nouvel objet (absent de la liste)").setEmoji("🆕").setStyle(ButtonStyle.Secondary)));
-      const verbe = action === 'add' ? "➕ **Ajouter** au coffre" : action === 'remove' ? "➖ **Retirer** du coffre" : "✏️ **Corriger** (uniquement en cas d'erreur)";
-      await interaction.reply({ content: `${verbe}\nChoisis l'objet dans le menu, puis indique la **quantité**.`, components: comps, flags: MessageFlags.Ephemeral }).catch(() => {});
+      const retour = new ButtonBuilder().setCustomId("inv_back").setLabel("Retour").setEmoji("↩️").setStyle(ButtonStyle.Secondary);
+      if (action === 'add') comps.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("inv_new").setLabel("Nouvel objet (absent de la liste)").setEmoji("🆕").setStyle(ButtonStyle.Secondary), retour));
+      else comps.push(new ActionRowBuilder().addComponents(retour));
+      // Le menu s'affiche DIRECTEMENT sous le coffre (on édite le panneau), pas en bas du salon
+      await interaction.update({ components: comps }).catch(() => {});
+      return true;
+    }
+    // Retour : referme le menu et restaure les boutons du coffre
+    if (interaction.isButton?.() && interaction.customId === "inv_back") {
+      await interaction.update({ embeds: [_boardEmbed(_ensure(loadDB()))], components: [_boardButtons()] }).catch(() => {});
       return true;
     }
     // Nouvel objet (absent du coffre) → formulaire complet
@@ -633,9 +640,10 @@ async function routeInteraction(interaction) {
       if (fromMsg) await interaction.deferUpdate().catch(() => {}); else await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       const action = interaction.customId.split("::")[1];
       const pend = _pendingMov.get(interaction.user.id); _pendingMov.delete(interaction.user.id);
-      if (!pend) { await interaction.editReply({ content: "⏳ Sélection expirée — relance via le bouton du tableau.", components: [], embeds: [] }).catch(() => {}); return true; }
+      const _fb = async (txt) => { if (fromMsg) { await _refreshBoard(interaction.client, _ensure(loadDB())).catch(() => {}); await interaction.followUp({ content: txt, flags: MessageFlags.Ephemeral }).catch(() => {}); } else { await interaction.editReply({ content: txt, components: [], embeds: [] }).catch(() => {}); } };
+      if (!pend) { await _fb("⏳ Sélection expirée — relance via le bouton du tableau."); return true; }
       const qte = parseInt(((interaction.fields.getTextInputValue("qte") || "").replace(/[^0-9]/g, "")), 10);
-      if (!Number.isFinite(qte) || qte < 0 || (action !== 'set' && qte <= 0)) { await interaction.editReply({ content: "❌ Quantité invalide (mets un nombre, ex : 5). Relance via le bouton du tableau.", components: [], embeds: [] }).catch(() => {}); return true; }
+      if (!Number.isFinite(qte) || qte < 0 || (action !== 'set' && qte <= 0)) { await _fb("❌ Quantité invalide (mets un nombre, ex : 5). Relance via le bouton du tableau."); return true; }
       const db = loadDB(); const inv = _ensure(db);
       const { existante, avant, apres } = _applyMov(inv, action, pend.cat, pend.nom, qte);
       _journalAdd(inv, interaction.user.id, `${action === 'add' ? "Ajout" : action === 'remove' ? "Retrait" : "Correction"} : ${action === 'set' ? "" : qte + " × "}${existante} (${pend.cat}) → ${apres}`);
@@ -647,7 +655,9 @@ async function routeInteraction(interaction) {
       else { const mot = action === 'add' ? "a rangé" : "a sorti"; const fin = action === 'add' ? "total" : "reste"; logTxt = `📦 ${who} ${mot} **${qte} × ${existante}** *(${pend.cat})* · ${fin} : **${apres}**.`; }
       await _log(interaction.client, inv, logTxt);
       await _checkSeuils(interaction.client, inv, { [_norm(existante)]: { avant, apres } });
-      await interaction.editReply({ content: `✅ **${action === 'add' ? "Ajouté" : action === 'remove' ? "Retiré" : "Corrigé"}** : ${existante} — ${avant} → **${apres}** *(${pend.cat})*.`, components: [], embeds: [] }).catch(() => {});
+      const okTxt = `✅ **${action === 'add' ? "Ajouté" : action === 'remove' ? "Retiré" : "Corrigé"}** : ${existante} — ${avant} → **${apres}** *(${pend.cat})*.`;
+      if (fromMsg) await interaction.followUp({ content: okTxt, flags: MessageFlags.Ephemeral }).catch(() => {});
+      else await interaction.editReply({ content: okTxt, components: [], embeds: [] }).catch(() => {});
       return true;
     }
 
