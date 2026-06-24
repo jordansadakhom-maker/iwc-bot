@@ -95,17 +95,18 @@ function _bilanRow(jours) {
 }
 // Lignes de boutons du PANNEAU permanent (avec encaissement de contrat)
 function _panelRows() {
+  const n = _encaissables(loadDB()).length;
   return [
     _bilanRow(30),
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('compta_encaisser').setLabel('Encaisser un contrat (payé → coffre)').setEmoji('💵').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('compta_encaisser').setLabel(n ? `Encaisser un contrat (${n} en attente)` : 'Encaisser un contrat (payé → coffre)').setEmoji('💵').setStyle(n ? ButtonStyle.Primary : ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('compta_refresh').setLabel('Rafraîchir le bilan').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
     ),
   ];
 }
-// Contrats encaissables (travail fait / en cours, pas encore honoré ni abandonné)
+// Contrats encaissables = à l'étape ✅ Validé, pas encore honorés (cohérent avec le compteur « À encaisser »)
 function _encaissables(db) {
-  return (db.contrats || []).filter(c => !['Honoré', 'Abandonné'].includes(_suivi(c)) && !c.remuVerseAuCoffre);
+  return (db.contrats || []).filter(c => _suivi(c) === 'Validé' && !c.remuVerseAuCoffre);
 }
 function _montantDetecte(s) { const m = String(s || '').replace(/\s/g, '').match(/(\d[\d.]*)/); return m ? (parseInt(m[1].replace(/\./g, ''), 10) || 0) : 0; }
 

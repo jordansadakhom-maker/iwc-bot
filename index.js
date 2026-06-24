@@ -4493,12 +4493,15 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
       modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('montant').setLabel('Montant à verser au coffre ($)').setStyle(TextInputStyle.Short).setRequired(true).setValue(detecte ? String(detecte) : '').setPlaceholder('Ex : 1500')));
       return interaction.showModal(modal);
     }
-    c.suivi = stage; saveDB(dbX);
+    c.suivi = stage;
+    if (stage === 'Validé') { c.valideAt = new Date().toISOString(); delete c.rappelEncaisse48; }
+    saveDB(dbX);
     _majContratForum(interaction.guild, c).catch(() => {});
     _setContratSuiviNotion(c, stage).catch(() => {});
     ajouterJournalIC(interaction.guild, { type: 'contrat', emoji: '📜', titre: `Contrat ${c.id} → ${stage}`, description: String(c.objet || c.clientNom || c.commanditaire || '').slice(0, 200), auteur: interaction.user.username }).catch(() => {});
     _updateContratPanel(interaction.client).catch(() => {});
     _updatePlanningContrats(interaction.client).catch(() => {});
+    if (stage === 'Validé') _alerteContratAEncaisser(interaction.guild, c).catch(() => {});
     return interaction.update(_contratSuiviPayload(c, `✅ Étape mise à jour : **${stage}** — synchronisé dans Notion.`));
   }
   if (interaction.isModalSubmit() && interaction.customId.startsWith('csuivi_montant::')) {
@@ -4825,6 +4828,7 @@ client.once('clientReady', async () => {
       } catch {}
       await notionV4.checkRecrutementSuivi?.(g).catch(() => {});
       await notionV4.checkEcheancesContrats?.(g).catch(() => {});
+      await _checkContratsAEncaisser(g).catch(() => {});
       try {
         const db = loadDB(); const demain = new Date(); demain.setDate(demain.getDate() + 1); const ds = demain.toISOString().split('T')[0];
         for (const ct of (db.contrats || [])) {
@@ -5292,6 +5296,45 @@ function _suiviDepuisStatut(c) {
   if (s === 'refuse' || s === 'echouee') return 'Abandonné';
   if (s === 'reussie') return 'Validé';
   return 'En attente';
+}
+// Alerte « contrat à encaisser » → salon comptabilité, avec bouton d'encaissement direct
+async function _alerteContratAEncaisser(guild, c, rappel) {
+  try {
+    const chId = loadDB().comptaPanel?.channelId || '1518922581720170608';
+    const ch = guild.channels.cache.get(chId) || await guild.channels.fetch(chId).catch(() => null);
+    if (!ch?.send) return;
+    const montant = _montantDetecte(c.remuneration);
+    const titre = rappel ? `⏰ Rappel — contrat à encaisser (${c.id})` : `💵 Contrat à encaisser — ${c.id}`;
+    const desc = rappel
+      ? `Le contrat **${c.id}** est ✅ Validé depuis plus de **48h** et n'a toujours pas été encaissé.`
+      : `Le contrat **${c.id}** vient de passer en ✅ **Validé** : le travail est fait, il reste à **encaisser le paiement**.`;
+    const embed = new EmbedBuilder().setColor(rappel ? 0xE67E22 : 0xC9A227).setTitle(titre).setDescription(desc)
+      .addFields(
+        { name: '👤 Client', value: (String(c.clientNom || c.commanditaire || '—').replace(/<@!?\d+>/g, '').trim() || '—').slice(0, 256), inline: true },
+        { name: '📋 Objet', value: String(c.objet || '—').slice(0, 256), inline: true },
+        { name: '💰 Montant attendu', value: montant ? `$${montant.toLocaleString('fr-FR')}` : '*(à préciser)*', inline: true },
+      )
+      .setFooter({ text: 'IWC • Comptabilité' }).setTimestamp();
+    const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`csuivi::honore::${c.id}`).setLabel('💵 Encaisser maintenant').setStyle(ButtonStyle.Success));
+    await ch.send({ content: getContratMention(guild), embeds: [embed], components: [row] }).catch(() => {});
+  } catch (e) { console.log('❌ _alerteContratAEncaisser:', e.message); }
+}
+// Rappel automatique : contrat ✅ Validé non encaissé depuis 48h
+async function _checkContratsAEncaisser(guild) {
+  try {
+    const db = loadDB(); const now = Date.now(); let changed = false;
+    for (const c of (db.contrats || [])) {
+      const suivi = c.suivi || _suiviDepuisStatut(c);
+      if (suivi !== 'Validé' || c.remuVerseAuCoffre) continue;
+      const base = c.valideAt ? new Date(c.valideAt).getTime() : null;
+      if (!base) continue;
+      if ((now - base) / 3600000 >= 48 && !c.rappelEncaisse48) {
+        await _alerteContratAEncaisser(guild, c, true);
+        c.rappelEncaisse48 = true; changed = true;
+      }
+    }
+    if (changed) saveDB(db);
+  } catch (e) { console.log('❌ _checkContratsAEncaisser:', e.message); }
 }
 function _contratSuiviPayload(c, note) {
   const stade = c.suivi || _suiviDepuisStatut(c);
