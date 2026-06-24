@@ -912,7 +912,162 @@ async function installerTresorerie(guild) {
     // Dossiers principaux (Entrées / Sorties) créés tout de suite
     await _tresorerieForumThread(forum, { type: 'tresorerie', titre: 'Entrée' }).catch(() => {});
     await _tresorerieForumThread(forum, { type: 'tresorerie', titre: 'Sortie' }).catch(() => {});
+    await _majBilanTresorerie(guild).catch(() => {});
   } catch (e) { console.log('❌ installerTresorerie:', e.message); }
+}
+
+// ── Trésorerie : postes détaillés (rentabilité par activité) ──
+const POSTES_ENTREE = [
+  { key: 'contrats', emoji: '📜', label: 'Contrats', re: /contrat|honor|mission|client|prestation/i },
+  { key: 'primes',   emoji: '🎯', label: 'Primes & butins', re: /prime|butin|braquage|vol|hold[- ]?up|cambriol|chasse|pillage|rançon/i },
+  { key: 'dons',     emoji: '🤝', label: 'Dons & cotisations', re: /don|cotis|contribution|appoint|renfort/i },
+  { key: 'autre_e',  emoji: '💰', label: 'Autres entrées', re: /.*/ },
+];
+const POSTES_SORTIE = [
+  { key: 'materiel',   emoji: '🔫', label: 'Matériel & armes', re: /arme|munition|mat[ée]riel|[ée]quipement|stock|fourniture|cartouche/i },
+  { key: 'soins',      emoji: '🩹', label: 'Soins & médical', re: /soin|m[ée]dic|docteur|panseur|rem[èe]de|tonic|pansement/i },
+  { key: 'salaires',   emoji: '💵', label: 'Salaires & parts', re: /salaire|paie|paye|\bpart\b|r[ée]mun|solde d|prime d.?[ée]quipe/i },
+  { key: 'logistique', emoji: '🐴', label: 'Logistique & planques', re: /cheval|chariot|logist|transport|monture|[ée]curie|saloon|planque|loyer|campement|ravitaill/i },
+  { key: 'autre_s',    emoji: '💸', label: 'Autres sorties', re: /.*/ },
+];
+function _posteTreso(sens, text) {
+  const arr = sens === 'sortie' ? POSTES_SORTIE : POSTES_ENTREE;
+  const t = String(text || '');
+  return arr.find(p => p.re.test(t)) || arr[arr.length - 1];
+}
+// Extrait un montant ($) d'un texte ("+$1 500", "$1,500", "1500 $"…)
+function _parseMontant(s) {
+  if (s == null) return 0;
+  const m = String(s).replace(/ /g, ' ').match(/([0-9]{1,3}(?:[ .,][0-9]{3})+|[0-9]+)/);
+  if (!m) return 0;
+  const v = parseInt(m[1].replace(/[ .,]/g, ''), 10);
+  return isNaN(v) ? 0 : v;
+}
+const _fmtTreso = n => `$${Math.round(n || 0).toLocaleString('fr-FR')}`;
+function _bilanTresoEmbed(db) {
+  const led = Array.isArray(db.tresorerieLedger) ? db.tresorerieLedger : [];
+  const solde = db.coffre || 0;
+  const sum = arr => arr.reduce((s, m) => s + (m.montant || 0), 0);
+  const entrees = led.filter(m => m.sens === 'entree');
+  const sorties = led.filter(m => m.sens === 'sortie');
+  const totalE = sum(entrees), totalS = sum(sorties);
+  const now = new Date(); const mois = now.getMonth(), an = now.getFullYear();
+  const ceMois = led.filter(m => { const d = new Date(m.date); return d.getMonth() === mois && d.getFullYear() === an; });
+  const eMois = sum(ceMois.filter(m => m.sens === 'entree'));
+  const sMois = sum(ceMois.filter(m => m.sens === 'sortie'));
+  const netMois = eMois - sMois;
+  const net = totalE - totalS;
+  const topPostes = (arr) => {
+    const map = {};
+    arr.forEach(m => { const k = m.posteLabel || 'Autres'; map[k] = (map[k] || 0) + (m.montant || 0); });
+    return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  };
+  const embed = new EmbedBuilder()
+    .setColor(netMois >= 0 ? 0x2ECC71 : 0xE74C3C)
+    .setTitle('📊 Bilan de la trésorerie')
+    .setDescription(`🏦 **Solde du coffre : ${_fmtTreso(solde)}**\n*Mis à jour automatiquement à chaque mouvement.*`)
+    .addFields(
+      { name: '📥 Entrées (cumul)', value: _fmtTreso(totalE), inline: true },
+      { name: '📤 Sorties (cumul)', value: _fmtTreso(totalS), inline: true },
+      { name: '⚖️ Résultat', value: `${net >= 0 ? '🟢 +' : '🔴 '}${_fmtTreso(net)}`, inline: true },
+      { name: '📆 Ce mois-ci', value: `📥 ${_fmtTreso(eMois)}  ·  📤 ${_fmtTreso(sMois)}  ·  **Net : ${netMois >= 0 ? '🟢 +' : '🔴 '}${_fmtTreso(netMois)}**`, inline: false },
+    );
+  const tE = topPostes(entrees); if (tE.length) embed.addFields({ name: '🏆 D\'où vient l\'argent', value: tE.map(([k, v]) => `• ${k} — **${_fmtTreso(v)}**`).join('\n'), inline: true });
+  const tS = topPostes(sorties); if (tS.length) embed.addFields({ name: '🔻 Où il part', value: tS.map(([k, v]) => `• ${k} — **${_fmtTreso(v)}**`).join('\n'), inline: true });
+  embed.setFooter({ text: `${led.length} mouvement(s) enregistré(s) • maj ${new Date().toLocaleString('fr-FR')}` }).setTimestamp();
+  return embed;
+}
+function _bilanTresoRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('treso_add_entree').setLabel('Entrée').setEmoji('💵').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('treso_add_sortie').setLabel('Sortie').setEmoji('💸').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('treso_refresh').setLabel('Actualiser').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
+  );
+}
+// (Re)construit le post épinglé « 📊 Bilan de la trésorerie » et le tient à jour en place
+async function _majBilanTresorerie(guild) {
+  try {
+    const db = loadDB();
+    const fid = db.tresorerieForumId || TRESORERIE_FORUM_ID;
+    const forum = guild.channels.cache.get(fid) || await guild.channels.fetch(fid).catch(() => null);
+    if (!forum || forum.type !== 15 || !forum.threads?.create) return;
+    const embed = _bilanTresoEmbed(db); const row = _bilanTresoRow();
+    let thread = null;
+    if (db.tresorerieBilan?.threadId) thread = await guild.channels.fetch(db.tresorerieBilan.threadId).catch(() => null);
+    if (!thread) {
+      const act = await forum.threads.fetchActive().catch(() => null);
+      thread = act?.threads ? [...act.threads.values()].find(t => (t.name || '').includes('Bilan')) : null;
+    }
+    if (!thread) {
+      const opts = { name: '📊 Bilan de la trésorerie', message: { embeds: [embed], components: [row] } };
+      const tag = (forum.availableTags || []).find(t => (t.name || '').includes('💰'));
+      if (tag) opts.appliedTags = [tag.id];
+      thread = await forum.threads.create(opts).catch(() => null) || await forum.threads.create({ name: opts.name, message: { embeds: [embed], components: [row] } }).catch(() => null);
+      if (thread) {
+        const starter = await thread.fetchStarterMessage().catch(() => null);
+        const d = loadDB(); d.tresorerieBilan = { threadId: thread.id, messageId: starter?.id || null }; saveDB(d);
+        try { await thread.pin(); } catch {}
+      }
+      return;
+    }
+    let msg = null;
+    if (db.tresorerieBilan?.messageId) msg = await thread.messages.fetch(db.tresorerieBilan.messageId).catch(() => null);
+    if (!msg) msg = await thread.fetchStarterMessage().catch(() => null);
+    if (msg && msg.author?.id === guild.client.user.id) {
+      await msg.edit({ embeds: [embed], components: [row] }).catch(() => {});
+      if (db.tresorerieBilan?.messageId !== msg.id) { const d = loadDB(); d.tresorerieBilan = { threadId: thread.id, messageId: msg.id }; saveDB(d); }
+    } else {
+      const m = await thread.send({ embeds: [embed], components: [row] }).catch(() => null);
+      if (m) { const d = loadDB(); d.tresorerieBilan = { threadId: thread.id, messageId: m.id }; saveDB(d); }
+    }
+  } catch (e) { console.log('❌ _majBilanTresorerie:', e.message); }
+}
+// Enregistre un mouvement dans le registre persistant (fiable, anti-doublon de calcul)
+function _ledgerAjouter(entry, sens, montant, poste) {
+  if (sens === 'mouvement' || !(montant > 0)) return;
+  const d = loadDB(); if (!Array.isArray(d.tresorerieLedger)) d.tresorerieLedger = [];
+  d.tresorerieLedger.push({ sens, montant, posteKey: poste?.key || null, posteLabel: poste?.label || null, motif: String(entry.description || entry.titre || '').slice(0, 200), auteur: entry.auteur || '—', date: new Date().toISOString() });
+  if (d.tresorerieLedger.length > 1000) d.tresorerieLedger = d.tresorerieLedger.slice(-1000);
+  saveDB(d);
+}
+// Boutons + modales de saisie rapide (Entrée / Sortie / Actualiser)
+async function routeTresorerieInteraction(interaction) {
+  try {
+    const id = interaction.customId || '';
+    if (interaction.isButton?.() && (id === 'treso_add_entree' || id === 'treso_add_sortie')) {
+      if (!isMembre(interaction.member)) { await interaction.reply({ content: '🔒 Réservé aux membres de la Confrérie.', flags: MessageFlags.Ephemeral }); return true; }
+      const sortie = id === 'treso_add_sortie';
+      const modal = new ModalBuilder().setCustomId(sortie ? 'treso_modal_sortie' : 'treso_modal_entree').setTitle(sortie ? '💸 Nouvelle sortie' : '💵 Nouvelle entrée');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('montant').setLabel('Montant ($)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex : 1500')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('motif').setLabel('Motif').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder(sortie ? 'Ex : Munitions, soins, salaires…' : 'Ex : Contrat Bill, prime, don…')),
+      );
+      await interaction.showModal(modal); return true;
+    }
+    if (interaction.isButton?.() && id === 'treso_refresh') {
+      await interaction.deferUpdate().catch(() => {});
+      await _majBilanTresorerie(interaction.guild).catch(() => {});
+      return true;
+    }
+    if (interaction.isModalSubmit?.() && (id === 'treso_modal_entree' || id === 'treso_modal_sortie')) {
+      const sortie = id === 'treso_modal_sortie';
+      const montant = _parseMontant(interaction.fields.getTextInputValue('montant'));
+      const motif = (interaction.fields.getTextInputValue('motif') || '').trim().slice(0, 200);
+      if (!(montant > 0)) { await interaction.reply({ content: '❌ Montant invalide. Indique un nombre, ex : 1500.', flags: MessageFlags.Ephemeral }); return true; }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const dbX = loadDB(); if (typeof dbX.coffre !== 'number') dbX.coffre = 0;
+      dbX.coffre = Math.max(0, dbX.coffre + (sortie ? -montant : montant));
+      const solde = dbX.coffre; saveDB(dbX);
+      const auteur = interaction.member?.displayName || interaction.user.username;
+      const emoji = sortie ? '💸' : '💵';
+      const titre = sortie ? `Sortie — ${motif}` : `Entrée — ${motif}`;
+      await ajouterJournalIC(interaction.guild, { type: 'tresorerie', emoji, titre, description: `${sortie ? '-' : '+'}${_fmtTreso(montant)} · ${motif} · par ${auteur}`, auteur, montant }).catch(() => {});
+      try { _syncTransactionNotion?.({ type: sortie ? 'Sortie' : 'Entrée', coffre: 'legal', montant, objet: motif, responsable: auteur, solde, date: new Date().toISOString(), discordId: interaction.user.id, userId: interaction.user.id }); } catch {}
+      await interaction.editReply({ content: `✅ ${sortie ? '💸 Sortie' : '💵 Entrée'} enregistrée : **${_fmtTreso(montant)}** (${motif}).\n🏦 Nouveau solde du coffre : **${_fmtTreso(solde)}**.` }).catch(() => {});
+      return true;
+    }
+  } catch (e) { console.log('❌ routeTresorerieInteraction:', e.message); try { if (!interaction.replied && !interaction.deferred) await interaction.reply({ content: '❌ Erreur lors de la saisie.', flags: MessageFlags.Ephemeral }); } catch {} return true; }
+  return false;
 }
 async function ajouterJournalIC(guild, entry) {
   try {
@@ -931,8 +1086,18 @@ async function ajouterJournalIC(guild, entry) {
       if (tfid) {
         const tf = guild.channels.cache.get(tfid) || await guild.channels.fetch(tfid).catch(() => null);
         if (tf && tf.type === 15 && tf.threads?.create) {
+          const cat = _tresoCat(entry);
+          const sens = cat.key === 'sorties' ? 'sortie' : cat.key === 'entrees' ? 'entree' : 'mouvement';
+          const montant = entry.montant != null ? Number(entry.montant) : _parseMontant(`${entry.titre} ${entry.description}`);
+          const poste = sens === 'mouvement' ? null : _posteTreso(sens, `${entry.titre || ''} ${entry.description || ''} ${entry.poste || ''}`);
+          if (poste) embed.addFields({ name: '🏷️ Poste', value: `${poste.emoji} ${poste.label}`, inline: true });
           const thread = await _tresorerieForumThread(tf, entry);
-          if (thread) { await thread.send({ embeds: [embed], allowedMentions: { parse: [] } }).catch(() => {}); return; }
+          if (thread) {
+            await thread.send({ embeds: [embed], allowedMentions: { parse: [] } }).catch(() => {});
+            _ledgerAjouter(entry, sens, montant, poste);
+            await _majBilanTresorerie(guild).catch(() => {});
+            return;
+          }
         }
       }
     }
@@ -3116,6 +3281,7 @@ client.on('interactionCreate', async interaction => {
   if (await comptabilite.routeInteraction?.(interaction)) return;
   if (await reseau.routeInteraction?.(interaction)) return;
   if (await ripoux.routeInteraction?.(interaction)) return;
+  if (await routeTresorerieInteraction(interaction)) return;
   if (await evenements.routeInteraction?.(interaction)) return;
   if (await factures.routeInteraction?.(interaction)) return;
   if (await medical.routeInteraction?.(interaction)) return;

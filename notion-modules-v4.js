@@ -235,6 +235,8 @@ async function checkRecrutementSuivi(guild) {
     if (!db.recrutSuivi) db.recrutSuivi = {};
 
     const logsCh = getChById(guild, 'LOGS', 'logs');
+    // Les rappels de recrutement vont dans le journal de bord (pas dans les logs/patch note)
+    const rappelCh = guild.channels.cache.get('1508756535407542372') || logsCh;
 
     // ── Rappel Direction : candidature en attente > 24h ──
     const enAttente = (db.candidatures || []).filter(c => c.status === 'reçue');
@@ -244,7 +246,7 @@ async function checkRecrutementSuivi(guild) {
       const key72  = `rappel_72h_${c.id}`;
 
       if (heures >= 24 && !db.recrutSuivi[key24]) {
-        if (logsCh) await logsCh.send({ embeds: [new EmbedBuilder()
+        if (rappelCh) await rappelCh.send({ embeds: [new EmbedBuilder()
           .setColor(0xFFA500)
           .setTitle(`⏰ Rappel recrutement — ${c.nomPerso}`)
           .setDescription(`La candidature de **${c.nomPerso}** attend une décision depuis **${heures}h**.`)
@@ -263,7 +265,7 @@ async function checkRecrutementSuivi(guild) {
           .filter(r => ['Concepteur', 'Fléau', 'Fondateur'].some(n => r.name.includes(n)))
           .map(r => `<@&${r.id}>`).join(' ');
 
-        if (logsCh) await logsCh.send({
+        if (rappelCh) await rappelCh.send({
           content: `${mention} — ⚠️ Candidature sans réponse depuis 72h`,
           embeds: [new EmbedBuilder()
             .setColor(0xED4245)
