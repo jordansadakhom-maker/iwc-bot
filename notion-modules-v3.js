@@ -762,8 +762,13 @@ async function creerRenseignement(guild, { info, source, cible, fiabilite, rappo
   const payload = { embeds: [_rapportEnAttenteEmbed(rapport)], components: [_rapportBoutons(rapport)] };
   try {
     if (ch.type === 15 && ch.threads?.create) {
-      // Forum → un fil par renseignement
-      await ch.threads.create({ name: `🕵️ ${rapport.cible !== '—' ? rapport.cible : rapport.id}`.slice(0, 100), message: payload }).catch(() => {});
+      // Forum → un fil par renseignement (avec repli si une étiquette est obligatoire)
+      const titre = `🕵️ ${rapport.cible !== '—' ? rapport.cible : rapport.id}`.slice(0, 100);
+      let post = await ch.threads.create({ name: titre, message: payload }).catch(() => null);
+      if (!post && (ch.availableTags || []).length) {
+        const tagId = ch.availableTags[0].id;
+        post = await ch.threads.create({ name: titre, message: payload, appliedTags: [tagId] }).catch(() => null);
+      }
     } else if (ch.send) {
       await ch.send(payload).catch(() => {});
     }

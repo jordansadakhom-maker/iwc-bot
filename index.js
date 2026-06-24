@@ -9254,7 +9254,8 @@ async function _gererBoutonBrouillon(interaction) {
       let dest = interaction.guild.channels.cache.get('1508756442730074222');
       if (!dest) dest = await interaction.guild.channels.fetch('1508756442730074222').catch(() => null);
       if (dest && dest.type === 15 && dest.threads?.create) {
-        const post = await dest.threads.create({ name: titre, message: { embeds: [embed] } }).catch(() => null);
+        let post = await dest.threads.create({ name: titre, message: { embeds: [embed] } }).catch(() => null);
+        if (!post && (dest.availableTags || []).length) post = await dest.threads.create({ name: titre, message: { embeds: [embed] }, appliedTags: [dest.availableTags[0].id] }).catch(() => null);
         if (post) { salonOK = true; publishedMsgId = post.id; publishedChannelId = dest.id; }
       } else if (dest && dest.send) {
         const sent = await dest.send({ embeds: [embed] }).catch(() => null);
