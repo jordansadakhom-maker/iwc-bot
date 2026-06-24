@@ -5156,6 +5156,8 @@ http.createServer(async (req, res) => {
     return;
   }
 
+  if (await carte.httpHandle?.(req, res, client)) return;
+
   res.writeHead(404); res.end('Not found');
 }).listen(PORT, () => console.log(`🌐 Serveur keepalive en écoute sur le port ${PORT}`));
 

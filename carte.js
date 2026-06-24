@@ -86,6 +86,17 @@ function _caseToXY(caseStr, W, H) {
   if (col < 0 || col >= COLS || row < 0 || row >= ROWS) return null;
   return { x: Math.round((col + 0.5) * (W / COLS)), y: Math.round((row + 0.5) * (H / ROWS)) };
 }
+// Position d'un point en POURCENTAGE (web + rendu). x/y prioritaires, sinon la case.
+function _ptPct(p) {
+  if (typeof p.x === 'number' && typeof p.y === 'number') return { x: p.x, y: p.y };
+  if (!p.case) return null;
+  const m = String(p.case).trim().match(/^([A-La-l])\s*(\d{1,2})$/);
+  if (!m) return null;
+  const col = m[1].toUpperCase().charCodeAt(0) - 65, row = parseInt(m[2], 10) - 1;
+  if (col < 0 || col >= COLS || row < 0 || row >= ROWS) return null;
+  return { x: (col + 0.5) / COLS * 100, y: (row + 0.5) / ROWS * 100 };
+}
+function _ptXY(p, W, H) { const pc = _ptPct(p); return pc ? { x: Math.round(pc.x / 100 * W), y: Math.round(pc.y / 100 * H) } : null; }
 function _setPx(img, x, y, c) { if (x < 0 || y < 0 || x >= img.bitmap.width || y >= img.bitmap.height) return; const i = (img.bitmap.width * y + x) << 2; img.bitmap.data[i] = c[0]; img.bitmap.data[i + 1] = c[1]; img.bitmap.data[i + 2] = c[2]; img.bitmap.data[i + 3] = 255; }
 function _marker(img, cx, cy, r, col) {
   for (let y = -r - 2; y <= r + 2; y++) for (let x = -r - 2; x <= r + 2; x++) { const d = x * x + y * y; if (d <= r * r) _setPx(img, cx + x, cy + y, col); else if (d <= (r + 2) * (r + 2)) _setPx(img, cx + x, cy + y, [255, 255, 255]); }
@@ -114,7 +125,7 @@ async function _renderMap(guild, points, opts = {}) {
   const rad = Math.max(12, Math.round(W / 120));
   const legend = []; let n = 0;
   for (const p of points) {
-    n++; const xy = _caseToXY(p.case, W, H); legend.push({ n, p, placed: !!xy });
+    n++; const xy = _ptXY(p, W, H); legend.push({ n, p, placed: !!xy });
     if (!xy) continue;
     _marker(img, xy.x, xy.y, rad, _type(p.type).col);
     if (fNum) img.print(fNum, xy.x - (n > 9 ? 9 : 4), xy.y - 9, String(n));
@@ -142,8 +153,9 @@ function _panelEmbed(db) {
 }
 function _panelRows() {
   return [new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('carte_add').setLabel('Ajouter un point').setEmoji('➕').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('carte_web').setLabel('Ouvrir la carte (cliquable)').setEmoji('🌐').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId('carte_view').setLabel('Consulter').setEmoji('🔍').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('carte_add').setLabel('Ajouter (Discord)').setEmoji('➕').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('carte_grille').setLabel('Grille').setEmoji('🧭').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('carte_manage').setLabel('Gérer').setEmoji('🛠️').setStyle(ButtonStyle.Secondary),
   )];
@@ -248,6 +260,15 @@ async function routeInteraction(interaction) {
       const e = new EmbedBuilder().setColor(0x8B5A2B).setTitle('🧭 Carte quadrillée').setDescription('Repère ta **case** (colonne A–L + ligne 1–8) pour ajouter un point au bon endroit.').setImage('attachment://grille.png');
       return interaction.editReply({ embeds: [e], files: [new AttachmentBuilder(rendered.buf, { name: 'grille.png' })] });
     }
+    // 🌐 Carte web cliquable : génère un lien personnel selon l'accréditation
+    if (interaction.isButton?.() && id === 'carte_web') {
+      const { tok, level } = creerToken(interaction.member);
+      const base = (process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL || process.env.BASE_URL || '').replace(/\/$/, '');
+      if (!base) { await interaction.reply({ content: '⚠️ L\'URL publique du bot n\'est pas configurée. Demande à la Direction d\'ajouter la variable **RENDER_EXTERNAL_URL** (ou **PUBLIC_URL**) sur l\'hébergement.', flags: MessageFlags.Ephemeral }); return true; }
+      const niv = _niv(level);
+      await interaction.reply({ content: `🌐 **Ta carte interactive** — accès ${niv.emoji} **${niv.label}**\n${base}/carte?k=${tok}\n\n🖱️ *Clique sur la carte pour ajouter un point. Lien personnel, valable 24h.*`, flags: MessageFlags.Ephemeral });
+      return true;
+    }
     // ── Gérer (Direction) : modifier / supprimer ──
     if (interaction.isButton?.() && id === 'carte_manage') {
       if (!_isDirection(interaction.member)) { await interaction.reply({ content: '🔒 La gestion des points est réservée à la Direction.', flags: MessageFlags.Ephemeral }); return true; }
@@ -309,4 +330,119 @@ async function onMessage(message) {
   } catch { return false; }
 }
 
-module.exports = { init, installerPanel, routeInteraction, onMessage, capterCarteFond, CARTE_CHANNEL_ID };
+// ── Carte web cliquable (servie par le serveur HTTP du bot) ──────
+function _rndTok() { return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2, 8); }
+function creerToken(member) {
+  const level = _isDirection(member) ? 'confidentiel' : (_isMembre(member) ? 'membre' : 'public');
+  const db = loadDB(); const c = _ensure(db); if (!c.tokens) c.tokens = {};
+  const now = Date.now();
+  for (const [t, v] of Object.entries(c.tokens)) if (!v?.exp || v.exp < now) delete c.tokens[t];
+  const tok = _rndTok();
+  c.tokens[tok] = { level, userId: member.id, exp: now + 24 * 3600 * 1000 };
+  saveDB(db);
+  return { tok, level };
+}
+function _tokInfo(tok) { const v = (loadDB().carte?.tokens || {})[tok]; if (!v || (v.exp && v.exp < Date.now())) return null; return v; }
+function _canSee(level, niveau) {
+  if (niveau === 'confidentiel') return level === 'confidentiel';
+  if (niveau === 'membre') return level === 'membre' || level === 'confidentiel';
+  return true;
+}
+function _niveauxAutorises(level) { return NIVEAUX.filter(n => _canSee(level, n.key)); }
+
+async function httpHandle(req, res, client) {
+  let u; try { u = new URL(req.url, 'http://x'); } catch { return false; }
+  if (!u.pathname.startsWith('/carte')) return false;
+  try {
+    const tok = u.searchParams.get('k') || '';
+    const info = _tokInfo(tok); const level = info?.level || null;
+    const guild = client.guilds.cache.first();
+    if (u.pathname === '/carte/image') {
+      if (!level) { res.writeHead(403); res.end('expired'); return true; }
+      const buf = guild ? await _baseMapBuffer(guild) : null;
+      if (!buf) { res.writeHead(404); res.end('no map'); return true; }
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' }); res.end(buf); return true;
+    }
+    if (u.pathname === '/carte/data') {
+      if (!level) { res.writeHead(403, { 'Content-Type': 'application/json' }); res.end('{"error":"expired"}'); return true; }
+      const pts = (loadDB().carte?.points || []).filter(p => _canSee(level, p.niveau)).map(p => { const pc = _ptPct(p); return { id: p.id, type: p.type, niveau: p.niveau, nom: p.nom, lieu: p.lieu || '', notes: p.notes || '', region: p.region || '', x: pc ? pc.x : null, y: pc ? pc.y : null }; });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ level, types: TYPES.map(t => ({ key: t.key, label: t.label, emoji: t.emoji })), niveaux: _niveauxAutorises(level), points: pts }));
+      return true;
+    }
+    if (u.pathname === '/carte/add' && req.method === 'POST') {
+      if (!level) { res.writeHead(403); res.end('{}'); return true; }
+      let body = ''; req.on('data', d => body += d); req.on('end', () => {
+        try {
+          const d = JSON.parse(body || '{}');
+          const nom = String(d.nom || '').trim().slice(0, 100); if (!nom) { res.writeHead(400); res.end('{"error":"nom"}'); return; }
+          const x = Math.max(0, Math.min(100, Number(d.x))); const y = Math.max(0, Math.min(100, Number(d.y)));
+          if (!isFinite(x) || !isFinite(y)) { res.writeHead(400); res.end('{"error":"xy"}'); return; }
+          const type = TYPES.find(t => t.key === d.type) ? d.type : 'autre';
+          let niveau = ['public', 'membre', 'confidentiel'].includes(d.niveau) ? d.niveau : 'public';
+          if (!_canSee(level, niveau)) niveau = level; // ne peut pas créer un point qu'il ne verrait pas
+          const db = loadDB(); const c = _ensure(db);
+          c.points.push({ id: _id(), type, niveau, nom, region: String(d.region || '').slice(0, 40), case: '', x, y, lieu: String(d.lieu || '').slice(0, 200), notes: String(d.notes || '').slice(0, 500), parId: info.userId, parNom: '(carte web)', createdAt: new Date().toISOString() });
+          saveDB(db);
+          res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}');
+          if (guild) installerPanel(guild).catch(() => {});
+        } catch { res.writeHead(500); res.end('{}'); }
+      });
+      return true;
+    }
+    if (u.pathname === '/carte/del' && req.method === 'POST') {
+      if (level !== 'confidentiel') { res.writeHead(403); res.end('{}'); return true; }
+      let body = ''; req.on('data', d => body += d); req.on('end', () => {
+        try { const d = JSON.parse(body || '{}'); const db = loadDB(); const c = _ensure(db); c.points = c.points.filter(p => p.id !== d.id); saveDB(db); res.writeHead(200); res.end('{"ok":true}'); if (guild) installerPanel(guild).catch(() => {}); }
+        catch { res.writeHead(500); res.end('{}'); }
+      });
+      return true;
+    }
+    if (u.pathname === '/carte') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(level ? _pageHTML(tok, level) : '<!doctype html><meta charset="utf-8"><body style="font-family:sans-serif;background:#1a1410;color:#e8d8c0;text-align:center;padding:60px"><h2>🔒 Lien expiré ou invalide</h2><p>Génère un nouveau lien depuis Discord (bouton « 🌐 Ouvrir la carte »).</p></body>');
+      return true;
+    }
+    res.writeHead(404); res.end('not found'); return true;
+  } catch (e) { console.log('❌ carte httpHandle:', e.message); try { res.writeHead(500); res.end('err'); } catch {} return true; }
+}
+
+function _pageHTML(tok, level) {
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Carte — La Confrérie</title><style>
+*{box-sizing:border-box}body{margin:0;font-family:Georgia,serif;background:#15110c;color:#e8d8c0}
+header{padding:10px 16px;background:#241a12;border-bottom:1px solid #4a3826;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+header b{color:#d9a441}.lvl{font-size:13px;opacity:.85}
+.hint{font-size:13px;opacity:.8;margin-left:auto}
+#wrap{position:relative;width:100%;max-width:2000px;margin:0 auto}
+#map{display:block;width:100%;height:auto;cursor:crosshair}
+.pin{position:absolute;transform:translate(-50%,-50%);width:22px;height:22px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 4px #000;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px}
+.pop{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#241a12;border:1px solid #5a4632;border-radius:10px;padding:16px;width:330px;max-width:92vw;z-index:50;box-shadow:0 8px 40px #000a}
+.pop h3{margin:0 0 8px;color:#d9a441}.pop label{display:block;font-size:12px;margin:8px 0 2px;opacity:.85}
+.pop input,.pop select,.pop textarea{width:100%;padding:7px;background:#15110c;color:#e8d8c0;border:1px solid #5a4632;border-radius:6px;font-family:inherit}
+.pop .row{display:flex;gap:8px;margin-top:12px}.pop button{flex:1;padding:9px;border:0;border-radius:6px;cursor:pointer;font-weight:bold}
+.bok{background:#3a7d3a;color:#fff}.bno{background:#5a4632;color:#e8d8c0}.bdel{background:#a33;color:#fff}
+#mask{position:fixed;inset:0;background:#0008;z-index:40;display:none}
+.tag{font-size:11px;padding:2px 6px;border-radius:10px;background:#3a2c1e;margin-right:4px}
+</style></head><body>
+<header><b>🗺️ Carte — La Confrérie</b><span class="lvl">Accès : ${level === 'confidentiel' ? '🔴 Confidentiel' : level === 'membre' ? '🟡 Membre' : '🟢 Public'}</span><span class="hint">🖱️ Clique sur la carte pour ajouter un point</span></header>
+<div id="wrap"><img id="map" src="/carte/image?k=${tok}" alt="carte"></div>
+<div id="mask"></div>
+<script>
+var TOK=${JSON.stringify(tok)},LVL=${JSON.stringify(level)},DATA={types:[],niveaux:[],points:[]};
+var wrap=document.getElementById('wrap'),mapImg=document.getElementById('map'),mask=document.getElementById('mask');
+function esc(s){var d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;}
+function colorFor(t){var m={recolte:'#3ca03c',vendeur:'#2870c8',illegal:'#c82828',chasse:'#965a28',peche:'#28a0b4',planque:'#783ca0',autre:'#5a5a5a'};return m[t]||'#5a5a5a';}
+function emojiFor(t){var o=DATA.types.find(function(x){return x.key===t;});return o?o.emoji:'📌';}
+function load(){fetch('/carte/data?k='+TOK).then(function(r){return r.json();}).then(function(j){if(j.error){document.body.innerHTML='<h2 style=text-align:center;margin-top:60px>Lien expiré</h2>';return;}DATA=j;render();});}
+function render(){document.querySelectorAll('.pin').forEach(function(p){p.remove();});DATA.points.forEach(function(p){if(p.x==null)return;var d=document.createElement('div');d.className='pin';d.style.left=p.x+'%';d.style.top=p.y+'%';d.style.background=colorFor(p.type);d.textContent=emojiFor(p.type);d.title=p.nom+(p.lieu?(' — '+p.lieu):'');d.onclick=function(e){e.stopPropagation();showInfo(p);};wrap.appendChild(d);});}
+function closePop(){var e=document.querySelector('.pop');if(e)e.remove();mask.style.display='none';}
+mask.onclick=closePop;
+function showInfo(p){closePop();mask.style.display='block';var n=DATA.niveaux.find(function(x){return x.key===p.niveau;});var box=document.createElement('div');box.className='pop';var del=(LVL==='confidentiel')?'<button class=bdel id=bdel>🗑️ Supprimer</button>':'';box.innerHTML='<h3>'+emojiFor(p.type)+' '+esc(p.nom)+'</h3><div><span class=tag>'+esc((DATA.types.find(function(x){return x.key===p.type;})||{}).label||p.type)+'</span><span class=tag>'+esc(n?n.label:p.niveau)+'</span></div>'+(p.region?'<p>📍 '+esc(p.region)+'</p>':'')+(p.lieu?'<p>'+esc(p.lieu)+'</p>':'')+(p.notes?'<p>📝 '+esc(p.notes)+'</p>':'')+'<div class=row>'+del+'<button class=bno id=bclose>Fermer</button></div>';document.body.appendChild(box);document.getElementById('bclose').onclick=closePop;if(del)document.getElementById('bdel').onclick=function(){fetch('/carte/del?k='+TOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:p.id})}).then(function(){closePop();load();});};}
+mapImg.addEventListener('click',function(e){var r=mapImg.getBoundingClientRect();var x=(e.clientX-r.left)/r.width*100;var y=(e.clientY-r.top)/r.height*100;showAdd(x,y);});
+function showAdd(x,y){closePop();mask.style.display='block';var topts=DATA.types.map(function(t){return '<option value='+t.key+'>'+t.emoji+' '+t.label+'</option>';}).join('');var nopts=DATA.niveaux.map(function(n){return '<option value='+n.key+'>'+n.label+'</option>';}).join('');var box=document.createElement('div');box.className='pop';box.innerHTML='<h3>➕ Nouveau point</h3><label>Type</label><select id=f_type>'+topts+'</select><label>Niveau d\\'accès</label><select id=f_niv>'+nopts+'</select><label>Nom *</label><input id=f_nom placeholder="Ex: Champ de coca"><label>Lieu précis</label><input id=f_lieu placeholder="Ex: au nord de Valentine"><label>Notes</label><textarea id=f_notes rows=2></textarea><div class=row><button class=bok id=fadd>Placer ici</button><button class=bno id=fcancel>Annuler</button></div>';document.body.appendChild(box);document.getElementById('fcancel').onclick=closePop;document.getElementById('fadd').onclick=function(){var nom=document.getElementById('f_nom').value.trim();if(!nom){alert('Le nom est obligatoire');return;}fetch('/carte/add?k='+TOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({x:x,y:y,type:document.getElementById('f_type').value,niveau:document.getElementById('f_niv').value,nom:nom,lieu:document.getElementById('f_lieu').value,notes:document.getElementById('f_notes').value})}).then(function(r){return r.json();}).then(function(){closePop();load();});};}
+if(mapImg.complete)load();else mapImg.onload=load;mapImg.onerror=load;
+</script></body></html>`;
+}
+
+module.exports = { init, installerPanel, routeInteraction, onMessage, capterCarteFond, httpHandle, CARTE_CHANNEL_ID };
