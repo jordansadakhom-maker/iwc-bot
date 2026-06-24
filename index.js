@@ -1688,6 +1688,16 @@ async function autoSetup(guild) {
         .setFooter({ text: 'Iron Wolf Company • Recrutement interne' });
       const sent = await recintCh.send({ embeds: [e] }).catch(() => null); if (sent) await sent.pin().catch(() => {});
     } catch {} })(); } }
+  // En-tête #demandes (boîte de réception des demandes clients)
+  { const demCh = guild.channels.cache.get('1512175624176009348');
+    if (demCh?.messages) { (async () => { try {
+      const me = client.user.id; const msgs = await demCh.messages.fetch({ limit: 20 }).catch(() => null);
+      if (msgs && [...msgs.values()].some(m => m.author.id === me && (m.embeds?.[0]?.title || '').includes('DEMANDES CLIENTS'))) return;
+      const e = new EmbedBuilder().setColor(0xC8A45C).setTitle('📥 DEMANDES CLIENTS')
+        .setDescription(['*La boîte de réception des télégrammes envoyés par les clients.*', '', 'Chaque demande arrive ici en **carte** avec ses boutons :', '📅 **Fixer le rendez-vous**  ·  💬 **Répondre au client**  ·  ❌ **Décliner**', '', '*L\'équipe est pinguée à chaque nouvelle demande — traitez-les ici.*'].join('\n'))
+        .setFooter({ text: 'Iron Wolf Company • Demandes clients' });
+      const sent = await demCh.send({ embeds: [e] }).catch(() => null); if (sent) await sent.pin().catch(() => {});
+    } catch {} })(); } }
   // Suivi médical — panneau du salon privé
   medical.installerPanel?.(guild).then(() => console.log('🩺 Panneau Suivi médical installé')).catch(() => {});
   medical.installerExemple?.(guild).then(() => console.log('🩺 Exemple test d\'aptitude posté')).catch(() => {});
