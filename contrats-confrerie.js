@@ -130,6 +130,11 @@ function buildContratEmbed(contrat) {
   // Signature (anonyme : on n'affiche jamais qui a signé sur la fiche publique)
   if (contrat.signe) e.addFields({ name: '🖋️ Signature', value: `✅ Signé${contrat.signeAt ? ' le ' + fmtDate(contrat.signeAt) : ''}`, inline: true });
   else if (contrat.signataireId) e.addFields({ name: '🖋️ Signature', value: '⏳ Envoyé — en attente', inline: true });
+  // Infos complémentaires cumulées (notes datées ajoutées à la mission)
+  if (Array.isArray(contrat.infos) && contrat.infos.length) {
+    const txt = contrat.infos.slice(-8).map(i => `• ${String(i.texte || '').replace(/\s+/g, ' ')}${i.date ? ` *(${fmtDate(i.date)})*` : ''}`).join('\n').slice(0, 1024);
+    e.addFields({ name: `📌 Infos complémentaires (${contrat.infos.length})`, value: txt || '—', inline: false });
+  }
   return e;
 }
 
@@ -148,11 +153,13 @@ function buildContratButtons(contrat) {
       new ButtonBuilder().setCustomId(`cc_fail::${contrat.id}`).setLabel('💀 Mission échouée').setStyle(ButtonStyle.Danger),
     ));
   }
-  // Signature par une personne (via son ID Discord, en MP) — tant que le contrat est ouvert
+  // Signature + édition + ajout d'infos — tant que le contrat est ouvert
   if (['propose', 'actif'].includes(contrat.status)) {
     const label = contrat.signe ? '✅ Signé' : (contrat.signataireId ? '✍️ Relancer la signature' : '✍️ Faire signer');
     rows.push(new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`cc_sign::${contrat.id}`).setLabel(label).setEmoji('🖋️').setStyle(ButtonStyle.Secondary).setDisabled(!!contrat.signe),
+      new ButtonBuilder().setCustomId(`cc_edit::${contrat.id}`).setLabel('Modifier').setEmoji('✏️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`cc_addinfo::${contrat.id}`).setLabel('Ajouter une info').setEmoji('➕').setStyle(ButtonStyle.Secondary),
     ));
   }
   return rows; // vide si contrat clôturé
@@ -652,6 +659,69 @@ async function onDoSign(interaction, accepte) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// MODIFIER LE CONTRAT (tous les champs) + AJOUTER UNE INFO (notes datées)
+// ═══════════════════════════════════════════════════════════════
+async function onEdit(interaction) {
+  if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+  const id = interaction.customId.split('::')[1];
+  const c = findContrat(loadDB(), id);
+  if (!c) return interaction.reply({ content: '❌ Contrat introuvable.', flags: MessageFlags.Ephemeral });
+  const modal = new ModalBuilder().setCustomId(`cc_edit_modal::${id}`).setTitle(`✏️ Modifier ${id}`.slice(0, 45));
+  const champ = (cid, label, val, style, req, max) => { const t = new TextInputBuilder().setCustomId(cid).setLabel(label).setStyle(style).setRequired(!!req); if (max) t.setMaxLength(max); if (val) t.setValue(String(val).slice(0, max || 100)); return new ActionRowBuilder().addComponents(t); };
+  modal.addComponents(
+    champ('commanditaire', 'Commanditaire (vide = anonyme)', c.commanditaire, TextInputStyle.Short, false, 100),
+    champ('objet', 'Objet de la mission', c.objet, TextInputStyle.Short, true, 200),
+    champ('remuneration', 'Prime / Rémunération', c.remuneration, TextInputStyle.Short, true, 200),
+    champ('echeance', 'Échéance (JJ/MM/AAAA ou texte)', c.echeanceTexte || (c.dateEcheance ? fmtDate(c.dateEcheance) : ''), TextInputStyle.Short, false, 60),
+    champ('details', 'Consignes / détails', c.details, TextInputStyle.Paragraph, false, 900),
+  );
+  return interaction.showModal(modal);
+}
+async function onEditSubmit(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const id = interaction.customId.split('::')[1];
+  const db = loadDB();
+  const c = findContrat(db, id);
+  if (!c) return interaction.editReply({ content: '❌ Contrat introuvable.' });
+  c.commanditaire = (interaction.fields.getTextInputValue('commanditaire') || '').trim();
+  c.confidentiel = c.commanditaire.length === 0; // anonyme ⇒ confidentiel
+  c.objet = (interaction.fields.getTextInputValue('objet') || '').trim();
+  c.remuneration = (interaction.fields.getTextInputValue('remuneration') || '').trim();
+  const ech = (interaction.fields.getTextInputValue('echeance') || '').trim();
+  c.dateEcheance = parseDateFR(ech);
+  c.echeanceTexte = ech || null;
+  c.details = (interaction.fields.getTextInputValue('details') || '').trim();
+  saveDB(db); await _persistNow();
+  await rafraichirFiche(interaction.guild, c).catch(() => {});
+  return interaction.editReply({ content: `✅ Contrat **${id}** mis à jour.` });
+}
+async function onAddInfo(interaction) {
+  if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+  const id = interaction.customId.split('::')[1];
+  const c = findContrat(loadDB(), id);
+  if (!c) return interaction.reply({ content: '❌ Contrat introuvable.', flags: MessageFlags.Ephemeral });
+  const modal = new ModalBuilder().setCustomId(`cc_addinfo_modal::${id}`).setTitle('➕ Ajouter une info');
+  modal.addComponents(new ActionRowBuilder().addComponents(
+    new TextInputBuilder().setCustomId('info').setLabel('Information à ajouter à la mission').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500).setPlaceholder('Nouveau repère, mise à jour, contact, danger...'),
+  ));
+  return interaction.showModal(modal);
+}
+async function onAddInfoSubmit(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const id = interaction.customId.split('::')[1];
+  const db = loadDB();
+  const c = findContrat(db, id);
+  if (!c) return interaction.editReply({ content: '❌ Contrat introuvable.' });
+  const txt = (interaction.fields.getTextInputValue('info') || '').trim();
+  if (!txt) return interaction.editReply({ content: '❌ Information vide.' });
+  if (!Array.isArray(c.infos)) c.infos = [];
+  c.infos.push({ texte: txt.slice(0, 500), date: new Date().toISOString(), parId: interaction.user.id, par: interaction.member?.displayName || interaction.user.username });
+  saveDB(db); await _persistNow();
+  await rafraichirFiche(interaction.guild, c).catch(() => {});
+  return interaction.editReply({ content: `✅ Info ajoutée au contrat **${id}**.` });
+}
+
+// ═══════════════════════════════════════════════════════════════
 // MES CONTRATS
 // ═══════════════════════════════════════════════════════════════
 async function onMine(interaction) {
@@ -729,6 +799,8 @@ async function routeInteraction(interaction) {
       if (id.startsWith('cc_sign::')) { await onFaireSigner(interaction); return true; }
       if (id.startsWith('cc_dosign::')) { await onDoSign(interaction, true); return true; }
       if (id.startsWith('cc_norefuse::')) { await onDoSign(interaction, false); return true; }
+      if (id.startsWith('cc_edit::')) { await onEdit(interaction); return true; }
+      if (id.startsWith('cc_addinfo::')) { await onAddInfo(interaction); return true; }
     }
     if (interaction.isStringSelectMenu?.()) {
       if (interaction.customId === 'cc_type') { await onTypeSelect(interaction); return true; }
@@ -739,6 +811,8 @@ async function routeInteraction(interaction) {
     }
     if (interaction.isModalSubmit?.()) {
       if (interaction.customId.startsWith('cc_sign_modal::')) { await onSignModalSubmit(interaction); return true; }
+      if (interaction.customId.startsWith('cc_edit_modal::')) { await onEditSubmit(interaction); return true; }
+      if (interaction.customId.startsWith('cc_addinfo_modal::')) { await onAddInfoSubmit(interaction); return true; }
       if (interaction.customId.startsWith('cc_modal::')) { await onModalSubmit(interaction); return true; }
     }
   } catch (e) {
