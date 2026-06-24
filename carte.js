@@ -263,8 +263,8 @@ async function routeInteraction(interaction) {
     // 🌐 Carte web cliquable : génère un lien personnel selon l'accréditation
     if (interaction.isButton?.() && id === 'carte_web') {
       const { tok, level } = creerToken(interaction.member);
-      const base = (process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL || process.env.BASE_URL || '').replace(/\/$/, '');
-      if (!base) { await interaction.reply({ content: '⚠️ L\'URL publique du bot n\'est pas configurée. Demande à la Direction d\'ajouter la variable **RENDER_EXTERNAL_URL** (ou **PUBLIC_URL**) sur l\'hébergement.', flags: MessageFlags.Ephemeral }); return true; }
+      const base = (process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL || process.env.BASE_URL || loadDB().carte?.baseUrl || '').replace(/\/$/, '');
+      if (!base) { await interaction.reply({ content: '⚠️ L\'URL publique du bot n\'est pas encore connue. Ouvre une fois l\'adresse du bot dans un navigateur (la page d\'accueil Render), puis re-clique sur **🌐 Ouvrir la carte**. *(Le bot la détecte tout seul à la première visite.)*', flags: MessageFlags.Ephemeral }); return true; }
       const niv = _niv(level);
       await interaction.reply({ content: `🌐 **Ta carte interactive** — accès ${niv.emoji} **${niv.label}**\n${base}/carte?k=${tok}\n\n🖱️ *Clique sur la carte pour ajouter un point. Lien personnel, valable 24h.*`, flags: MessageFlags.Ephemeral });
       return true;

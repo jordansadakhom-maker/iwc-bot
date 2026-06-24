@@ -5060,6 +5060,17 @@ http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
+  // Capture auto de l'URL publique (sert à générer les liens de la carte web — aucune config requise)
+  try {
+    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    if (host && !/^(localhost|127\.|0\.0\.0\.0)/.test(host)) {
+      const proto = String(req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim();
+      const base = `${proto}://${host}`;
+      const d = loadDB(); if (!d.carte) d.carte = {};
+      if (d.carte.baseUrl !== base) { d.carte.baseUrl = base; saveDB(d); }
+    }
+  } catch {}
+
   // Keepalive
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
