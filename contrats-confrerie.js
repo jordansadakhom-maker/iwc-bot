@@ -24,8 +24,12 @@ const CH_JOURNAL           = '1508756535407542372';
 // ─── Rôles Direction (permissions + ping) ───
 const DIRECTION_ROLE_NAMES = ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'];
 
-// ─── Rôles de la Confrérie : EXCLUS de la liste « Faire signer » (on n'y propose que des invités) ───
+// ─── Rôles internes : EXCLUS de la liste « Faire signer » (on n'y propose que des invités externes) ───
+// Confrérie (pôle illégal)…
 const CONFRERIE_ROLE_NAMES = ['concepteur', 'fléau', 'fleau', 'exécuteur', 'éxécuteur', 'executeur', 'execu', 'condamné', 'condamne', 'maudit', 'confrérie', 'confrerie', 'ombre'];
+// …et Iron Wolf Company (pôle légal) — les membres internes ne sont jamais des clients à faire signer.
+const IWC_ROLE_NAMES = ['conseil', 'directeur', 'officier', 'agent', 'opérateur', 'operateur', 'recrue', 'iron wolf', 'fondateur'];
+const MEMBRE_INTERNE_ROLE_NAMES = [...CONFRERIE_ROLE_NAMES, ...IWC_ROLE_NAMES];
 // ─── Rôle des invités (clients externes) : SEULE population proposée à la signature ───
 const INVITE_ROLE_MATCH = 'visiteur';
 
@@ -296,9 +300,9 @@ function listerInvites(guild) {
     const roles = m.roles.cache;
     const estInvite = roles.some(r => r.name.toLowerCase().includes(INVITE_ROLE_MATCH));
     if (!estInvite) continue;
-    // Sécurité : si quelqu'un cumule Visiteur + un rôle Confrérie, on l'écarte quand même
-    const estConfrerie = roles.some(r => CONFRERIE_ROLE_NAMES.some(n => r.name.toLowerCase().includes(n)));
-    if (estConfrerie) continue;
+    // Sécurité : si quelqu'un cumule Visiteur + un rôle interne (Confrérie ou Iron Wolf), on l'écarte
+    const estInterne = roles.some(r => MEMBRE_INTERNE_ROLE_NAMES.some(n => r.name.toLowerCase().includes(n)));
+    if (estInterne) continue;
     const pseudo = (m.displayName || m.user.username || '').trim();
     const aNomRP = pseudo.split(/\s+/).filter(Boolean).length >= 2; // prénom + nom RP renseigné
     out.push({ id: m.id, pseudo: pseudo || m.user.username, username: m.user.username, aNomRP });

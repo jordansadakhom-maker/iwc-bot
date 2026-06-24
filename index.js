@@ -748,7 +748,10 @@ async function updateDashboard(guild) {
   try {
     const msgs = await ch.messages.fetch({ limit: 50 }).catch(() => null);
     if (msgs) {
-      const botMsgs = [...msgs.values()].filter(m => m.author.id === ch.guild.members.me?.id && m.embeds?.length > 0).sort((a, b) => b.createdTimestamp - a.createdTimestamp);
+      // ⚠️ Ce salon sert AUSSI de journal de bord : on ne cible QUE les anciens tableaux de bord
+      // (même titre), jamais les logs. Avant, on supprimait tous les embeds du bot → le journal
+      // était vidé à chaque lancement (« redémarrage » du journal de bord).
+      const botMsgs = [...msgs.values()].filter(m => m.author.id === ch.guild.members.me?.id && (m.embeds?.[0]?.title || '').includes('TABLEAU DE BORD')).sort((a, b) => b.createdTimestamp - a.createdTimestamp);
       for (let i = 1; i < botMsgs.length; i++) await botMsgs[i].delete().catch(() => {});
       if (botMsgs.length > 0) {
         try { await botMsgs[0].edit({ embeds: [embed] }); db.dashboardMsgId = botMsgs[0].id; saveDB(db); return; }
