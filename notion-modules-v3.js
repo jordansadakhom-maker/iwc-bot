@@ -694,6 +694,39 @@ async function _majCarnetRenseignements(guild) {
     const sent = await ch.send({ embeds: [embed] }).catch(() => null); if (sent) await sent.pin().catch(() => {});
   } catch (e) { console.log('⚠️ carnet renseignements:', e.message); }
 }
+// ── Re-publication des rapports en attente supprimés du salon (ex : après un nettoyage) ──
+function _rapportEnAttenteEmbed(r) {
+  return new EmbedBuilder().setColor(0xFFA500).setTitle(`🆕 Rapport \`${r.id}\` — À vérifier`).addFields(
+    { name: '🕵️ Source', value: r.source || '—', inline: true },
+    { name: '🎯 Cible / Lieu', value: r.cible || '—', inline: true },
+    { name: '📋 Fiabilité déclarée', value: r.fiabilite || '—', inline: true },
+    { name: '📝 Information', value: (r.info || '—').slice(0, 800) },
+    { name: '👤 Rapporteur', value: r.rapporteurId ? `<@${r.rapporteurId}>` : (r.rapporteur || '—'), inline: true },
+    { name: '📌 Statut', value: '🆕 En attente de validation', inline: true },
+  ).setFooter({ text: 'IWC • Réseau Informateurs — Confidentiel' }).setTimestamp(new Date(r.createdAt || Date.now()));
+}
+function _rapportBoutons(r) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`info_confirmer_${r.id}`).setLabel('✅ Confirmer').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`info_infirmer_${r.id}`).setLabel('❌ Infirmer').setStyle(ButtonStyle.Danger),
+  );
+}
+async function republierRapportsManquants(guild) {
+  try {
+    const ch = getCh(guild, 'informateurs'); if (!ch?.messages?.fetch) return;
+    const db = loadDB();
+    const pending = (db.informateurs || []).filter(r => (r.statut || 'nouveau') === 'nouveau');
+    if (!pending.length) return;
+    const msgs = await ch.messages.fetch({ limit: 100 }).catch(() => null);
+    const present = new Set();
+    if (msgs) for (const m of msgs.values()) { const t = `${m.embeds?.[0]?.title || ''} ${m.embeds?.[0]?.footer?.text || ''}`; const mm = t.match(/INFO-\d+/); if (mm) present.add(mm[0]); }
+    for (const r of pending) {
+      if (present.has(r.id)) continue;
+      await ch.send({ embeds: [_rapportEnAttenteEmbed(r)], components: [_rapportBoutons(r)] }).catch(() => {});
+      await new Promise(res => setTimeout(res, 300));
+    }
+  } catch (e) { console.log('⚠️ republierRapportsManquants:', e.message); }
+}
 // ── Validation Direction : Confirmer / Infirmer un rapport ──
 async function handleInformateurConfirmer(interaction) {
   return _traiterValidationInfo(interaction, 'confirme');
@@ -831,7 +864,7 @@ module.exports = {
   checkInactivite, JOURS_INACTIF,
   updateHierarchieEmbed, handleHierarchieCommand, handleGradeSetCommand, handleGradePanelButton, handleGradeMembreSelect, handleGradeGradeSelect, handleGradeMajButton, handleGradeUp, handleGradeDown, handleGradeFiche, handleGradeEligibles, showGradeMembre, GRADES_LEGAL, GRADES_ILLEGAL, ROLES,
   setupAffairesPanel, handleAffaireNouvelleButton, handleAffaireModal, handleAffaireVote, handleAffaireDetail, postResumeAffaires, handleAffairesResumeButton, checkAffairesTimeout,
-  setupInformateursPanel, handleInformateurRapportButton, handleInformateurModal, handleInformateurHistorique, handleInformateurMessage, handleInformateurConfirmer, handleInformateurInfirmer, majCarnetRenseignements: _majCarnetRenseignements,
+  setupInformateursPanel, handleInformateurRapportButton, handleInformateurModal, handleInformateurHistorique, handleInformateurMessage, handleInformateurConfirmer, handleInformateurInfirmer, majCarnetRenseignements: _majCarnetRenseignements, republierRapportsManquants,
   handlePlanningScreenshot, handlePlansMessage,
   getMentionPole, updateNotionStatutPole,
   syncOperationTermineeNotion, syncAbsenceNotion,
