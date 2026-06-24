@@ -130,9 +130,12 @@ function buildContratEmbed(contrat) {
   // Signature (anonyme : on n'affiche jamais qui a signé sur la fiche publique)
   if (contrat.signe) e.addFields({ name: '🖋️ Signature', value: `✅ Signé${contrat.signeAt ? ' le ' + fmtDate(contrat.signeAt) : ''}`, inline: true });
   else if (contrat.signataireId) e.addFields({ name: '🖋️ Signature', value: '⏳ Envoyé — en attente', inline: true });
-  // Infos complémentaires cumulées (notes datées ajoutées à la mission)
+  // Infos complémentaires cumulées (notes datées ajoutées à la mission par la Direction ou les agents)
   if (Array.isArray(contrat.infos) && contrat.infos.length) {
-    const txt = contrat.infos.slice(-8).map(i => `• ${String(i.texte || '').replace(/\s+/g, ' ')}${i.date ? ` *(${fmtDate(i.date)})*` : ''}`).join('\n').slice(0, 1024);
+    const txt = contrat.infos.slice(-8).map(i => {
+      const meta = [i.par, i.date ? fmtDate(i.date) : null].filter(Boolean).join(' · ');
+      return `• ${String(i.texte || '').replace(/\s+/g, ' ')}${meta ? ` *(${meta})*` : ''}`;
+    }).join('\n').slice(0, 1024);
     e.addFields({ name: `📌 Infos complémentaires (${contrat.infos.length})`, value: txt || '—', inline: false });
   }
   return e;
@@ -696,10 +699,12 @@ async function onEditSubmit(interaction) {
   return interaction.editReply({ content: `✅ Contrat **${id}** mis à jour.` });
 }
 async function onAddInfo(interaction) {
-  if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
   const id = interaction.customId.split('::')[1];
   const c = findContrat(loadDB(), id);
   if (!c) return interaction.reply({ content: '❌ Contrat introuvable.', flags: MessageFlags.Ephemeral });
+  // Direction OU un agent assigné à ce contrat peut enrichir la mission
+  const autorise = isDirection(interaction.member) || (c.agents || []).includes(interaction.user.id);
+  if (!autorise) return interaction.reply({ content: '❌ Réservé à la Direction et aux agents assignés à ce contrat.', flags: MessageFlags.Ephemeral });
   const modal = new ModalBuilder().setCustomId(`cc_addinfo_modal::${id}`).setTitle('➕ Ajouter une info');
   modal.addComponents(new ActionRowBuilder().addComponents(
     new TextInputBuilder().setCustomId('info').setLabel('Information à ajouter à la mission').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500).setPlaceholder('Nouveau repère, mise à jour, contact, danger...'),
@@ -712,6 +717,8 @@ async function onAddInfoSubmit(interaction) {
   const db = loadDB();
   const c = findContrat(db, id);
   if (!c) return interaction.editReply({ content: '❌ Contrat introuvable.' });
+  const autorise = isDirection(interaction.member) || (c.agents || []).includes(interaction.user.id);
+  if (!autorise) return interaction.editReply({ content: '❌ Réservé à la Direction et aux agents assignés à ce contrat.' });
   const txt = (interaction.fields.getTextInputValue('info') || '').trim();
   if (!txt) return interaction.editReply({ content: '❌ Information vide.' });
   if (!Array.isArray(c.infos)) c.infos = [];
