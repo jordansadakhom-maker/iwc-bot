@@ -85,10 +85,32 @@ async function _refreshPanel(guild) {
   } catch {}
 }
 
+// Crée les étiquettes de catégorie dans le forum (en gardant les existantes)
+async function _assurerEtiquettes(forum) {
+  try {
+    if (!forum?.setAvailableTags) return;
+    const clean = s => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const existing = forum.availableTags || [];
+    const voulu = [
+      { name: '🔍 Enquête', kw: 'enquete' },
+      { name: '📜 Avis de recherche', kw: 'avis' },
+      { name: '🤝 Deal / Info', kw: 'deal' },
+      { name: '⚠️ Urgent', kw: 'urgent' },
+    ];
+    const manquants = voulu.filter(v => !existing.some(t => clean(t.name).includes(v.kw)));
+    if (!manquants.length || existing.length + manquants.length > 20) return;
+    const merged = [
+      ...existing.map(t => { const o = { name: t.name, moderated: !!t.moderated }; if (t.id) o.id = t.id; if (t.emoji && (t.emoji.id || t.emoji.name)) o.emoji = { id: t.emoji.id || null, name: t.emoji.name || null }; return o; }),
+      ...manquants.map(v => ({ name: v.name })),
+    ];
+    await forum.setAvailableTags(merged).catch(e => console.log('⚠️ ripoux setAvailableTags:', e.message));
+  } catch {}
+}
 async function installerPanel(guild) {
   try {
     const forum = _ch(guild, FORUM_RIPOUX);
     if (!forum || forum.type !== 15 || !forum.threads?.create) return;
+    await _assurerEtiquettes(forum);
     const db = loadDB(); const r = _ensure(db);
     let existing = null;
     if (r.panelThreadId) existing = await guild.channels.fetch(r.panelThreadId).catch(() => null);

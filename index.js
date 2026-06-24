@@ -472,6 +472,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('profil').setDescription('👤 Affiche le profil d\'un membre').addUserOption(o => o.setName('membre').setDescription('Membre (optionnel)').setRequired(false)),
   new SlashCommandBuilder().setName('moi').setDescription('🏅 Mon profil RP : grade, ancienneté, mes contrats et mes rendez-vous'),
   new SlashCommandBuilder().setName('journal-salon').setDescription('📒 Définir CE salon comme journal des informations (Direction)'),
+  new SlashCommandBuilder().setName('tresorerie-installer').setDescription('💰 Créer le forum trésorerie (Entrées/Sorties classées) (Direction)'),
   new SlashCommandBuilder().setName('bilan').setDescription('📊 Résumé trésorerie 7 derniers jours').addStringOption(o => o.setName('coffre').setDescription('Quel coffre ?').setRequired(false).addChoices({ name: '⚖️ Légal', value: 'legal' }, { name: '🔒 Illégal', value: 'illegal' })),
   new SlashCommandBuilder().setName('rdv').setDescription('📅 Créer un rendez-vous'),
   new SlashCommandBuilder().setName('agenda').setDescription('📅 Voir ou créer un RDV')
@@ -853,20 +854,62 @@ async function _journalForumThread(forum, type) {
     return post;
   } catch { return null; }
 }
+// ── Trésorerie : forum dédié (Entrées / Sorties classées), séparé du journal ──
+const TRESO_CATS = {
+  entree: { key: 'entrees', emoji: '📥', label: 'Entrées' },
+  sortie: { key: 'sorties', emoji: '📤', label: 'Sorties' },
+  mouvement: { key: 'mouvements', emoji: '💰', label: 'Mouvements' },
+};
+function _tresoCat(entry) {
+  const t = `${entry.emoji || ''} ${entry.titre || ''} ${entry.description || ''}`.toLowerCase();
+  if (/entr[ée]e|encaiss|honor|recette|gain|\+\s*\$|💵/.test(t)) return TRESO_CATS.entree;
+  if (/sortie|d[ée]pense|retrait|achat|paiement|frais|-\s*\$|💸/.test(t)) return TRESO_CATS.sortie;
+  return TRESO_CATS.mouvement;
+}
+async function _tresorerieForumThread(forum, entry) {
+  try {
+    const cat = _tresoCat(entry);
+    const db = loadDB(); if (!db.tresorerieForumPosts) db.tresorerieForumPosts = {};
+    const tid = db.tresorerieForumPosts[cat.key];
+    if (tid) { const t = await forum.guild.channels.fetch(tid).catch(() => null); if (t) return t; }
+    const act = await forum.threads.fetchActive().catch(() => null);
+    const existing = act?.threads ? [...act.threads.values()].find(t => (t.name || '').includes(cat.label)) : null;
+    if (existing) { db.tresorerieForumPosts[cat.key] = existing.id; saveDB(db); return existing; }
+    const intro = new EmbedBuilder().setColor(0xB8860B).setTitle(`${cat.emoji} ${cat.label}`).setDescription('*Trésorerie automatique de la Confrérie — tous les mouvements de cette catégorie arrivent ici.*');
+    const opts = { name: `${cat.emoji} ${cat.label}`, message: { embeds: [intro] } };
+    const tag = (forum.availableTags || []).find(t => (t.name || '').includes(cat.emoji));
+    if (tag) opts.appliedTags = [tag.id];
+    let post = await forum.threads.create(opts).catch(() => null);
+    if (!post) post = await forum.threads.create({ name: opts.name, message: { embeds: [intro] } }).catch(() => null);
+    if (post) { db.tresorerieForumPosts[cat.key] = post.id; saveDB(db); try { await post.pin(); } catch {} }
+    return post;
+  } catch { return null; }
+}
 async function ajouterJournalIC(guild, entry) {
   try {
-    const jid = loadDB().journalChannelId;
-    const ch = (jid && guild.channels.cache.get(jid)) || guild.channels.cache.get(SALON_HARDCODED.JOURNAL_DE_BORD) || getChById(guild, 'JOURNAL_DE_BORD', 'journal-de-bord', 'journal');
-    if (!ch) return;
     const emojiMap = { operation: '🎯', contrat: '📜', recrutement: '🐺', tresorerie: '💰', promotion: '⬆️', autre: '📋' };
     const emoji = entry.emoji || emojiMap[entry.type] || '📋';
     const embed = new EmbedBuilder()
-      .setColor(0x8B1A1A)
+      .setColor(entry.type === 'tresorerie' ? 0xB8860B : 0x8B1A1A)
       .setTitle(`${emoji} ${entry.titre}`)
       .setDescription(entry.description || '')
       .addFields({ name: '✍️ Auteur', value: entry.auteur || '—', inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true })
-      .setFooter({ text: `IWC • Journal IC • ${new Date().toLocaleString('fr-FR')}` })
+      .setFooter({ text: `IWC • ${entry.type === 'tresorerie' ? 'Trésorerie' : 'Journal IC'} • ${new Date().toLocaleString('fr-FR')}` })
       .setTimestamp();
+    // Trésorerie → forum dédié (JAMAIS dans le journal) si configuré
+    if (entry.type === 'tresorerie') {
+      const tfid = loadDB().tresorerieForumId;
+      if (tfid) {
+        const tf = guild.channels.cache.get(tfid) || await guild.channels.fetch(tfid).catch(() => null);
+        if (tf && tf.type === 15 && tf.threads?.create) {
+          const thread = await _tresorerieForumThread(tf, entry);
+          if (thread) { await thread.send({ embeds: [embed], allowedMentions: { parse: [] } }).catch(() => {}); return; }
+        }
+      }
+    }
+    const jid = loadDB().journalChannelId;
+    const ch = (jid && guild.channels.cache.get(jid)) || guild.channels.cache.get(SALON_HARDCODED.JOURNAL_DE_BORD) || getChById(guild, 'JOURNAL_DE_BORD', 'journal-de-bord', 'journal');
+    if (!ch) return;
     // FORUM → on poste dans le dossier de la bonne catégorie ; sinon salon texte classique
     if (ch.type === 15 && ch.threads?.create) {
       const thread = await _journalForumThread(ch, entry.type);
@@ -1325,6 +1368,33 @@ async function handleSlashCommand(interaction) {
     const dbj = loadDB(); dbj.journalChannelId = cible; saveDB(dbj);
     const estForum = interaction.channel?.isThread?.() || interaction.channel?.type === 15;
     return interaction.reply({ content: `✅ Salon des informations défini${estForum ? ' (**forum** — un dossier sera créé par catégorie : Contrats, Trésorerie, Opérations, Recrutement, Divers)' : ''}. Toutes les infos arriveront ici ; le tableau de bord reste séparé.`, flags: MessageFlags.Ephemeral });
+  }
+  if (commandName === 'tresorerie-installer') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const dbt = loadDB();
+    let forum = dbt.tresorerieForumId ? (guild.channels.cache.get(dbt.tresorerieForumId) || await guild.channels.fetch(dbt.tresorerieForumId).catch(() => null)) : null;
+    if (forum && forum.type === 15) {
+      return interaction.editReply({ content: `✅ Le forum trésorerie existe déjà : <#${forum.id}>. Tous les mouvements (📥 entrées / 📤 sorties) y sont classés automatiquement, **jamais dans le journal**.` });
+    }
+    const parentId = interaction.channel?.isThread?.() ? interaction.channel.parentId : interaction.channel?.parentId;
+    try {
+      forum = await guild.channels.create({
+        name: '💰-trésorerie',
+        type: ChannelType.GuildForum,
+        parent: parentId || null,
+        topic: 'Trésorerie de la Confrérie — entrées et sorties classées automatiquement par dossier.',
+        reason: 'Forum trésorerie (séparé du journal) — /tresorerie-installer',
+      });
+    } catch (e) {
+      return interaction.editReply({ content: `❌ Impossible de créer le forum : ${e.message}` });
+    }
+    dbt.tresorerieForumId = forum.id; dbt.tresorerieForumPosts = {}; saveDB(dbt);
+    try { await forum.setAvailableTags([{ name: '📥 Entrée' }, { name: '📤 Sortie' }, { name: '💰 Mouvement' }]).catch(() => {}); } catch {}
+    // Crée tout de suite les 2 dossiers principaux (Entrées / Sorties)
+    await _tresorerieForumThread(forum, { type: 'tresorerie', titre: 'Entrée' }).catch(() => {});
+    await _tresorerieForumThread(forum, { type: 'tresorerie', titre: 'Sortie' }).catch(() => {});
+    return interaction.editReply({ content: `✅ Forum trésorerie créé : <#${forum.id}>\n📥 **Entrées** et 📤 **Sorties** y sont classées automatiquement (un dossier par catégorie). À partir de maintenant, **rien côté trésorerie n'ira dans le journal**.` });
   }
   if (commandName === 'fiche') {
     if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral });
