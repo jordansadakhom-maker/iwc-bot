@@ -103,6 +103,9 @@ catch (e) { console.log('⚠️ ripoux non chargé:', e.message); }
 let evenements = {};
 try { evenements = require('./evenements'); console.log('✅ Module evenements chargé'); }
 catch (e) { console.log('⚠️ evenements non chargé:', e.message); }
+let carte = {};
+try { carte = require('./carte'); console.log('✅ Module carte (carte interactive) chargé'); }
+catch (e) { console.log('⚠️ carte non chargé:', e.message); }
 
 let factures = {};
 try { factures = require('./factures'); console.log('✅ Module factures (Facturation) chargé'); }
@@ -2123,6 +2126,8 @@ async function autoSetup(guild) {
   ripoux.installerPanel?.(guild).then(() => console.log('🎖️ Panneau Le Ripoux installé')).catch(() => {});
   installerTresorerie(guild).then(() => console.log('💰 Forum trésorerie prêt (étiquettes + dossiers)')).catch(() => {});
   _installerPanelCoffreIllegal(guild).then(() => console.log('🔒 Panneau coffre illégal (boutons) installé')).catch(() => {});
+  try { carte.init?.({ isMembre, isDirection }); } catch {}
+  carte.installerPanel?.(guild).then(() => console.log('🗺️ Panneau carte interactive installé')).catch(() => {});
   _assurerEtiquettesContrats(guild).then(() => console.log('🏷️ Étiquettes contrats prêtes (type + statut)')).catch(() => {});
   _assurerEtiquettesOperations(guild).then(() => console.log('🏷️ Étiquettes opérations prêtes (pôle + statut)')).catch(() => {});
   // Regroupement des forums sous « 📋 Forums » — une seule fois (respecte les déplacements manuels ultérieurs)
@@ -3363,6 +3368,7 @@ client.on('interactionCreate', async interaction => {
   if (await reseau.routeInteraction?.(interaction)) return;
   if (await ripoux.routeInteraction?.(interaction)) return;
   if (await routeTresorerieInteraction(interaction)) return;
+  if (await carte.routeInteraction?.(interaction)) return;
   if (await evenements.routeInteraction?.(interaction)) return;
   if (await factures.routeInteraction?.(interaction)) return;
   if (await medical.routeInteraction?.(interaction)) return;
@@ -4398,7 +4404,17 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     try {
       const cExist = (loadDB().repertoire?.contacts || []).find(c => _normNom(c.nom) === _normNom(contrat.clientNom));
       if (cExist) { const dbL = loadDB(); const cc = (dbL.contrats || []).find(x => x.id === contrat.id); if (cc) { cc.contactId = cExist.id; saveDB(dbL); } repertoire.rafraichirFicheContact?.(guild, cExist.id).catch(() => {}); }
-      else { const nc = await repertoire.ajouterContactAuto?.(guild, { nom: contrat.clientNom, notes: `Client — contrat ${contrat.id}` }); if (nc) { const dbL = loadDB(); const cc = (dbL.contrats || []).find(x => x.id === contrat.id); if (cc) { cc.contactId = nc.id; saveDB(dbL); } } }
+      else {
+        const notesAuto = [
+          `Client de la Compagnie (fiche créée automatiquement via un contrat).`,
+          `Premier contrat : ${contrat.id} — ${contrat.objet || '—'}`,
+          `Rémunération : ${contrat.remuneration || contrat.prime || '—'}`,
+          contrat.echeanceTexte ? `Échéance : ${contrat.echeanceTexte}` : '',
+          contrat.details ? `Détails : ${String(contrat.details).slice(0, 200)}` : '',
+        ].filter(Boolean).join('\n');
+        const nc = await repertoire.ajouterContactAuto?.(guild, { nom: contrat.clientNom, relation: 'Affaire / professionnelle', secteur: '', metier: '', notes: notesAuto, creeParNom: contrat.emetteurIC || contrat.emetteurNom || 'Secrétariat' });
+        if (nc) { const dbL = loadDB(); const cc = (dbL.contrats || []).find(x => x.id === contrat.id); if (cc) { cc.contactId = nc.id; saveDB(dbL); } }
+      }
     } catch {}
     await interaction.editReply({ content: dmOk ? `✅ Contrat **${contratId}** envoyé au client en message privé (avec boutons Accepter/Refuser).` : `✅ Contrat **${contratId}** posté dans #contrats (MP du client fermés).` }).catch(() => {});
     return;
@@ -8720,6 +8736,7 @@ global._syncCandidatureNotion = _syncCandidatureNotion;
 global._syncAffaireNotion = _syncAffaireNotion;
 global._syncSurnomNotion = _syncSurnomNotion;
 global.ajouterJournalIC = ajouterJournalIC;
+global.reformulerRP = _reformulerRP;
 global.envoyerDMRecap = envoyerDMRecap;
 global.getChById = getChById;
 global.sendLog = sendLog;

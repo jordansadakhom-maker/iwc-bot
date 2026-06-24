@@ -643,8 +643,11 @@ async function handleInformateurMessage(message) {
   if (!source && !info) { await message.react('👁️').catch(() => {}); return; }
   await message.react('✅').catch(() => {});
   const estConfirmee = fiabilite?.toLowerCase().includes('confirm') && !fiabilite?.toLowerCase().includes('non');
+  // Retranscription RP du renseignement (même style que le salon de reformulation)
+  let infoTxt = info || message.content.slice(0, 500);
+  try { if (typeof global.reformulerRP === 'function' && infoTxt) { const rp = await global.reformulerRP(infoTxt); if (rp) infoTxt = rp; } } catch {}
   const db = loadDB(); if (!db.informateurs) db.informateurs = [];
-  const rapport = { id: `INFO-${Date.now().toString().slice(-5)}`, source: source || '—', cible: cible || '—', info: info || message.content.slice(0, 500), fiabilite: fiabilite || '—', statut: 'nouveau', rapporteurId: message.author.id, rapporteur: message.author.username, createdAt: new Date().toISOString() };
+  const rapport = { id: `INFO-${Date.now().toString().slice(-5)}`, source: source || '—', cible: cible || '—', info: infoTxt, fiabilite: fiabilite || '—', statut: 'nouveau', rapporteurId: message.author.id, rapporteur: message.author.username, createdAt: new Date().toISOString() };
   db.informateurs.push(rapport); saveDB(db);
   await _archiverRapportNotion(rapport);
   // Poster avec boutons de validation Direction
