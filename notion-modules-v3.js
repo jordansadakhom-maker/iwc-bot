@@ -664,6 +664,36 @@ async function _archiverRapportNotion(rapport) {
     await fetch('https://api.notion.com/v1/pages', { method: 'POST', headers: { 'Authorization': `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: { database_id: NOTION_INFOS_DB }, properties: { 'Source': { title: [{ text: { content: rapport.source } }] }, 'Cible': { rich_text: [{ text: { content: rapport.cible } }] }, 'Information': { rich_text: [{ text: { content: rapport.info.slice(0, 2000) } }] }, 'Fiabilité': { select: { name: rapport.fiabilite === 'Confirmée' ? '✅ Confirmée' : '⚠️ Non confirmée' } }, 'Statut': { select: { name: '🆕 Nouveau' } }, 'Date': { date: { start: new Date().toISOString().split('T')[0] } }, 'Rapporteur': { rich_text: [{ text: { content: rapport.rapporteur } }] } } }) });
   } catch (e) { console.log('❌ Informateur Notion error:', e.message); }
 }
+// ── Carnet de renseignements : noms de code + compilation auto des rapports confirmés ──
+const CODENOMS_INDIC = ["Le Corbeau", "L'Ombre", "Le Renard", "Le Faucon", "Le Serpent", "Le Coyote", "Le Spectre", "La Vipère", "Le Hibou", "Le Vautour", "Le Loup Gris", "Le Scorpion", "Le Furet", "Le Lynx", "Le Blaireau", "Le Chacal", "La Chouette", "Le Caïman"];
+function _codeNomInformateur(db, key) {
+  if (!key) return 'Source anonyme';
+  if (!db.informateursCodes) db.informateursCodes = {};
+  if (db.informateursCodes[key]) return db.informateursCodes[key];
+  const used = new Set(Object.values(db.informateursCodes));
+  const libre = CODENOMS_INDIC.find(c => !used.has(c)) || `Indic n°${Object.keys(db.informateursCodes).length + 1}`;
+  db.informateursCodes[key] = libre;
+  return libre;
+}
+async function _majCarnetRenseignements(guild) {
+  try {
+    const ch = getCh(guild, 'informateurs'); if (!ch?.messages) return;
+    const db = loadDB();
+    const confirmes = (db.informateurs || []).filter(r => r.statut === 'confirme').slice(-25).reverse();
+    const lignes = confirmes.length
+      ? confirmes.map(r => { const code = _codeNomInformateur(db, r.rapporteurId || r.rapporteur); return `🔴 \`${r.id}\` — **${r.cible}** · ${String(r.info || '').replace(/\s+/g, ' ').slice(0, 90)}… *(${code} · ${fmtShort(r.createdAt)})*`; }).join('\n')
+      : '*Aucun renseignement confirmé pour l\'instant.*';
+    saveDB(db); // d'éventuels noms de code viennent d'être attribués
+    const embed = new EmbedBuilder().setColor(0x6B0000).setTitle('📓 CARNET DE RENSEIGNEMENTS')
+      .setDescription(['*Renseignements **confirmés** par la Direction. Les sources sont protégées par un **nom de code**.*', '', lignes].join('\n').slice(0, 4000))
+      .setFooter({ text: `La Confrérie • ${confirmes.length} renseignement(s) confirmé(s)` }).setTimestamp();
+    const me = guild.client.user.id;
+    const msgs = await ch.messages.fetch({ limit: 30 }).catch(() => null);
+    const existing = msgs ? [...msgs.values()].find(m => m.author?.id === me && (m.embeds?.[0]?.title || '').includes('CARNET DE RENSEIGNEMENTS')) : null;
+    if (existing) { await existing.edit({ embeds: [embed] }).catch(() => {}); return; }
+    const sent = await ch.send({ embeds: [embed] }).catch(() => null); if (sent) await sent.pin().catch(() => {});
+  } catch (e) { console.log('⚠️ carnet renseignements:', e.message); }
+}
 // ── Validation Direction : Confirmer / Infirmer un rapport ──
 async function handleInformateurConfirmer(interaction) {
   return _traiterValidationInfo(interaction, 'confirme');
@@ -695,6 +725,8 @@ async function _traiterValidationInfo(interaction, decision) {
   await interaction.update({ embeds: [embed], components: [] });
   // Si confirmé → alerter la Direction
   if (confirme) await _alerterDirection(interaction.guild, rapport, rapport.rapporteurId);
+  // Met à jour le carnet de renseignements épinglé (confirmés uniquement, sources en noms de code)
+  await _majCarnetRenseignements(interaction.guild).catch(() => {});
 }
 async function _alerterDirection(guild, rapport, rapporteurId) {
   const logsCh = guild.channels.cache.get('1508756535407542372') || _journalCh(guild); if (!logsCh) return;
