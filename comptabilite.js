@@ -261,7 +261,13 @@ async function routeInteraction(interaction) {
       if (!enc.length) { await interaction.reply({ content: 'Aucun contrat à encaisser pour le moment. ✅', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const opts = enc.slice(0, 25).map(c => ({ label: `${c.id} · ${_clientNom(c).replace(/<@!?\d+>/g, '').trim()}`.slice(0, 100), description: `${_suivi(c)} · ${_montant(c) ? '$' + _eur(_montant(c)) : 'montant à saisir'} · ${(c.objet || '').slice(0, 50)}`.slice(0, 100), value: String(c.id) }));
       const sel = new StringSelectMenuBuilder().setCustomId('compta_enc_sel').setPlaceholder('Choisis le contrat à encaisser…').addOptions(opts);
-      await interaction.reply({ content: '💵 Quel contrat encaisser ? *(tout est déjà rempli, je m\'occupe du reste : coffre + facture + bilan)*', components: [new ActionRowBuilder().addComponents(sel)], flags: MessageFlags.Ephemeral }).catch(() => {});
+      const retourRow = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('compta_enc_back').setLabel('Retour').setEmoji('↩️').setStyle(ButtonStyle.Secondary));
+      // Le menu s'affiche DIRECTEMENT sous le bilan (on édite le panneau), pas en bas du salon
+      await interaction.update({ embeds: [bilanEmbed(loadDB(), 30)], components: [new ActionRowBuilder().addComponents(sel), retourRow] }).catch(() => {});
+      return true;
+    }
+    if (interaction.isButton?.() && interaction.customId === 'compta_enc_back') {
+      await interaction.update({ embeds: [bilanEmbed(loadDB(), 30)], components: _panelRows() }).catch(() => {});
       return true;
     }
     if (interaction.isStringSelectMenu?.() && interaction.customId === 'compta_enc_sel') {
