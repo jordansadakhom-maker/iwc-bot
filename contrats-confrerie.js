@@ -177,23 +177,36 @@ function buildContratButtons(contrat) {
   return rows; // vide si contrat clôturé
 }
 
-// ─── Embed envoyé EN MP à la personne pour signature (anonyme : pas de commanditaire) ───
+// ─── Parchemin envoyé EN MP à la personne pour signature (style Far West 1904, anonyme) ───
 function buildSignatureEmbed(contrat) {
   const r = riskOf(contrat);
   const e = new EmbedBuilder()
-    .setColor(r.couleur)
-    .setTitle('🖋️ CONTRAT À SIGNER — La Confrérie')
-    .setDescription('*Un contrat vous est proposé. Lisez les termes, puis signez si vous acceptez.*\n*Discrétion absolue — ce document reste entre vos mains.*')
+    .setColor(0xC9A66B) // teinte parchemin / sépia
+    .setTitle('📜 ⸺  CONTRAT DE LA CONFRÉRIE  ⸺ 📜')
+    .setDescription([
+      '```',
+      '  ════════════════════════════════════════',
+      '        ✦   EN L\'AN DE GRÂCE  1904   ✦',
+      '  ════════════════════════════════════════',
+      '```',
+      '*Il vous est mandé, par le présent parchemin, un pacte scellé dans l\'ombre.*',
+      '*Lisez-en les termes avec soin, étranger. Si votre parole est donnée,*',
+      '*apposez votre marque au bas de ce document.*',
+      '',
+      '🕯️ *Discrétion absolue — ce papier ne quitte point vos mains.*',
+    ].join('\n'))
     .addFields(
-      { name: '🆔 Référence', value: `\`${contrat.id}\``, inline: true },
-      { name: '🎯 Type', value: `${emojiType(contrat.typeMission)} ${contrat.typeMission || '—'}`, inline: true },
-      { name: '⚠️ Risque', value: `${r.emoji} ${r.label}`, inline: true },
-      { name: '💰 Prime', value: `${contrat.remuneration || '—'}`, inline: true },
-      { name: '📅 Échéance', value: contrat.dateEcheance ? fmtDate(contrat.dateEcheance) : (contrat.echeanceTexte || 'Aucune'), inline: true },
-      { name: '📋 Objet', value: contrat.objet || '—', inline: false },
+      { name: '⚜️ Référence du pacte', value: `\`${contrat.id}\``, inline: true },
+      { name: '🎯 Nature de la besogne', value: `${emojiType(contrat.typeMission)} ${contrat.typeMission || '—'}`, inline: true },
+      { name: '⚠️ Péril encouru', value: `${r.emoji} ${r.label}`, inline: true },
+      { name: '💰 Récompense promise', value: `${contrat.remuneration || '—'}`, inline: true },
+      { name: '📅 Terme échu le', value: contrat.dateEcheance ? fmtDate(contrat.dateEcheance) : (contrat.echeanceTexte || 'À votre convenance'), inline: true },
+      { name: '​', value: '​', inline: true },
+      { name: '📋 Objet du contrat', value: contrat.objet || '—', inline: false },
     )
-    .setFooter({ text: 'La Confrérie • Contrat confidentiel — signez pour accepter' });
-  if (contrat.details) e.addFields({ name: '📝 Consignes', value: contrat.details.slice(0, 1000) });
+    .setFooter({ text: '✒️ La Confrérie — scellé à la cire noire • Document confidentiel' });
+  if (contrat.details) e.addFields({ name: '🪶 Consignes & clauses', value: contrat.details.slice(0, 1000) });
+  e.addFields({ name: '​', value: '*« Que votre signature vous engage, et que l\'ombre vous garde. »*\n— ✒️ **La Confrérie**, an 1904' });
   return e;
 }
 
@@ -716,8 +729,8 @@ async function onSignPick(interaction) {
   const user = await interaction.client.users.fetch(uid).catch(() => null);
   if (!user) return interaction.editReply({ content: '❌ Utilisateur introuvable.', components: [] });
   const btn = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`cc_dosign::${id}`).setLabel('✍️ Signer ce contrat').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`cc_norefuse::${id}`).setLabel('❌ Refuser').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`cc_dosign::${id}`).setLabel('Apposer ma marque').setEmoji('✒️').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`cc_norefuse::${id}`).setLabel('Décliner').setEmoji('✖️').setStyle(ButtonStyle.Danger),
   );
   const dm = await user.send({ embeds: [buildSignatureEmbed(c)], components: [btn] }).catch(() => null);
   if (!dm) return interaction.editReply({ content: `⚠️ Impossible d'envoyer le MP à <@${uid}> (ses messages privés sont fermés, ou le bot n'a aucun serveur en commun avec cette personne).`, components: [] });
@@ -739,7 +752,7 @@ async function onDoSign(interaction, accepte) {
   if (accepte) { c.signe = true; c.signeAt = new Date().toISOString(); c.signeParId = interaction.user.id; }
   else { c.signe = false; c.signatureRefuseeAt = new Date().toISOString(); }
   saveDB(db);
-  const txt = accepte ? '✅ Tu as **signé** le contrat. La Confrérie a bien reçu ton accord.' : '❌ Tu as **refusé** de signer. C\'est noté.';
+  const txt = accepte ? '✒️ *Votre marque est apposée au bas du parchemin.* La Confrérie a reçu votre parole — qu\'elle vous engage.' : '🚫 *Vous avez décliné de sceller ce pacte.* C\'est entendu.';
   try { await interaction.update({ embeds: interaction.message.embeds, components: [], content: txt }); } // accusé de réception (< 3 s) d'abord
   catch { try { await interaction.reply({ content: txt, flags: MessageFlags.Ephemeral }); } catch {} }
   await _persistNow(); // puis on attend la sauvegarde durable
