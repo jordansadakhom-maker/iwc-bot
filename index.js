@@ -240,6 +240,48 @@ async function _reposterCommeMembre(channel, member, user, content) {
 }
 
 // Panneau permanent dans #agenda : un bouton « Nouveau rendez-vous » plutôt qu'une commande.
+// ── RDV depuis une PHOTO : l'IA lit une capture déposée dans #agenda ──
+const _agendaPhotoDrafts = new Map();
+function _agendaPhotoCleanup() { const now = Date.now(); for (const [k, v] of _agendaPhotoDrafts) if (now - (v.at || 0) > 3600000) _agendaPhotoDrafts.delete(k); }
+async function _agendaPhotoExtract(b64, mt) {
+  const key = process.env.ANTHROPIC_API_KEY; if (!key) return null;
+  const prompt = `Tu analyses une capture d'écran (planning, calendrier, affiche ou message) annonçant un RENDEZ-VOUS ou un événement, pour un serveur RP western. Extrais les informations VISIBLES. Réponds STRICTEMENT en JSON, sans texte autour :
+{"titre":"intitulé court du RDV/événement","date":"JJ/MM/AAAA (utilise l'année en cours si elle n'est pas écrite)","heure":"ex: 21h00","lieu":"lieu si mentionné, sinon vide","notes":"détails utiles (participants, ordre du jour…), sinon vide"}
+Mets une chaîne vide pour toute info absente. N'invente rien.`;
+  const body = (model) => JSON.stringify({ model, max_tokens: 600, messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: mt || 'image/png', data: b64 } }, { type: 'text', text: prompt }] }] });
+  const call = async (model) => {
+    try {
+      const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' }, body: body(model) });
+      if (!r.ok) return null;
+      const d = await r.json();
+      const t = (d?.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim().replace(/^```json/i, '').replace(/```$/i, '').trim();
+      const m = t.match(/\{[\s\S]*\}/); if (!m) return null;
+      const o = JSON.parse(m[0]); return (o && typeof o === 'object') ? o : null;
+    } catch { return null; }
+  };
+  return (await call('claude-sonnet-4-6')) || (await call('claude-haiku-4-5-20251001'));
+}
+async function _agendaPhotoOnMessage(message) {
+  try {
+    if (!message.guild || message.author?.bot || message.webhookId) return false;
+    const ag = getAgendaCh(message.guild); if (!ag || message.channelId !== ag.id) return false;
+    const img = message.attachments ? [...message.attachments.values()].find(a => (a.contentType || '').startsWith('image') || /\.(png|jpe?g|webp)(\?|$)/i.test(a.url || '')) : null;
+    if (!img) return false;
+    if (!process.env.ANTHROPIC_API_KEY) return false;
+    const wait = await message.channel.send({ content: '🔎 Je lis la capture pour préparer le rendez-vous…', allowedMentions: { parse: [] } }).catch(() => null);
+    let buf = null; try { const r = await fetch(img.url); if (r.ok) buf = Buffer.from(await r.arrayBuffer()); } catch {}
+    const data = buf ? await _agendaPhotoExtract(buf.toString('base64'), img.contentType || 'image/png') : null;
+    if (!data || (!data.titre && !data.date)) { if (wait) await wait.edit('🤔 Je n\'ai pas réussi à lire les infos du rendez-vous sur cette image. Utilise le bouton **« Nouveau rendez-vous »** pour le saisir à la main.').catch(() => {}); return true; }
+    _agendaPhotoCleanup();
+    const id = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    _agendaPhotoDrafts.set(id, { titre: data.titre || '', date: data.date || '', heure: data.heure || '', lieu: data.lieu || '', notes: data.notes || '', sourceMsgId: message.id, channelId: message.channelId, at: Date.now() });
+    const recap = [`📅 **${data.titre || '(titre à préciser)'}**`, `🗓️ ${data.date || '—'}${data.heure ? ' · 🕐 ' + data.heure : ''}`, data.lieu ? `📍 ${data.lieu}` : null, data.notes ? `📝 ${String(data.notes).slice(0, 200)}` : null].filter(Boolean).join('\n');
+    const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`agenda_photo_go::${id}`).setLabel('Créer ce rendez-vous').setEmoji('✅').setStyle(ButtonStyle.Success));
+    const payload = { content: `✉️ **J'ai lu la capture — rendez-vous proposé :**\n${recap}\n\n*Tu pourras vérifier/compléter, puis choisir qui prévenir.*`, components: [row], allowedMentions: { parse: [] } };
+    if (wait) await wait.edit(payload).catch(() => {}); else await message.channel.send(payload).catch(() => {});
+    return true;
+  } catch (e) { console.log('⚠️ agenda photo:', e.message); return false; }
+}
 function _agendaPanelPayload(appts) {
   const now = new Date(); const minuit = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const up = (appts || [])
@@ -252,7 +294,10 @@ function _agendaPanelPayload(appts) {
     .setDescription('Clique sur le bouton ci-dessous pour **fixer un rendez-vous** à l\'agenda.\nChoisis le **lieu**, la **date** et l\'**heure** — l\'équipe concernée est prévenue automatiquement.')
     .addFields({ name: '📆 Prochains rendez-vous', value: liste.slice(0, 1024), inline: false })
     .setFooter({ text: `Iron Wolf Company · Agenda · à jour le ${fmtShort(new Date())}` });
-  const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('agenda_panel_creer').setLabel('Nouveau rendez-vous').setEmoji('📅').setStyle(ButtonStyle.Success));
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('agenda_panel_creer').setLabel('Nouveau rendez-vous').setEmoji('📅').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('agenda_rdv_photo').setLabel('RDV depuis une photo').setEmoji('📸').setStyle(ButtonStyle.Secondary),
+  );
   return { embeds: [e], components: [row] };
 }
 async function _installerPanelAgenda(guild) {
@@ -2287,6 +2332,7 @@ client.on('messageCreate', async message => {
   } catch (e) { console.log('⚠️ reformulation RP:', e.message); }
   // Conversations sur télégrammes : relais MP ↔ fil (avant tout le reste)
   try { if (await telegramme.onMessage?.(message)) return; } catch {}
+  try { if (await _agendaPhotoOnMessage(message)) return; } catch {}
   try { if (await inventaire.onMessage?.(message)) return; } catch {}
   try { if (await comptabilite.onMessage?.(message)) return; } catch {}
   try { if (await traque.onMessage?.(message)) return; } catch {}
@@ -3004,6 +3050,27 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId === 'btn_grade_panel')            return notionV3.handleGradePanelButton?.(interaction);
     if (interaction.customId === 'btn_agenda_nouveau')         return notionV3.handleAgendaNouveauButton?.(interaction);
     if (interaction.customId === 'agenda_panel_creer')         return _ouvrirModalAgendaSimple(interaction);
+    if (interaction.customId === 'agenda_rdv_photo')           return interaction.reply({ content: '📸 **RDV depuis une photo** — glisse simplement une **capture** (planning, affiche, message annonçant un RDV) **dans ce salon**. Je lis les infos, je te propose le rendez-vous à valider, puis tu choisis qui prévenir.', flags: MessageFlags.Ephemeral });
+    if (interaction.customId.startsWith('agenda_photo_go::')) {
+      const pid = interaction.customId.split('::')[1];
+      const d = _agendaPhotoDrafts.get(pid);
+      if (!d) return interaction.reply({ content: '⌛ Cette lecture a expiré — redépose la photo dans le salon.', flags: MessageFlags.Ephemeral });
+      const lieu = (d.lieu || 'Autre').trim() || 'Autre';
+      const modal = new ModalBuilder().setCustomId(`modal_agenda_simple_${encodeURIComponent(lieu)}`).setTitle('📅 Vérifier le rendez-vous');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('titre').setLabel('Titre du RDV').setStyle(TextInputStyle.Short).setRequired(true).setValue((d.titre || '').slice(0, 100))),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('date').setLabel('Date (JJ/MM/AAAA)').setStyle(TextInputStyle.Short).setRequired(true).setValue((d.date || '').slice(0, 20))),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('heure').setLabel('Heure').setStyle(TextInputStyle.Short).setRequired(true).setValue((d.heure || '').slice(0, 20))),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('lieu_detail').setLabel('Lieu (détail, optionnel)').setStyle(TextInputStyle.Short).setRequired(false).setValue((d.lieu || '').slice(0, 100))),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('notes').setLabel('Notes / Ordre du jour (optionnel)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(400).setValue((d.notes || '').slice(0, 400))),
+      );
+      await interaction.showModal(modal).catch(() => {});
+      // Nettoyage : on retire la proposition + la capture source pour garder #agenda propre
+      try { await interaction.message?.delete?.(); } catch {}
+      try { const ch = await interaction.client.channels.fetch(d.channelId).catch(() => null); if (ch && d.sourceMsgId) { const sm = await ch.messages.fetch(d.sourceMsgId).catch(() => null); if (sm) await sm.delete().catch(() => {}); } } catch {}
+      _agendaPhotoDrafts.delete(pid);
+      return;
+    }
     if (interaction.customId === 'btn_hierarchie_refresh')     { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); await notionV3.updateHierarchieEmbed?.(interaction.guild); return interaction.editReply({ content: '✅ Hiérarchie mise à jour.' }); }
     if (interaction.customId === 'btn_affaire_nouvelle') {
       const modal = new ModalBuilder().setCustomId('modal_affaire').setTitle('📋 Soumettre une affaire');
