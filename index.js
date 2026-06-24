@@ -2068,6 +2068,7 @@ async function autoSetup(guild) {
       new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('cexp_open').setLabel('Contrat express').setEmoji('⚡').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('cc_new').setLabel('Contrat Confrérie').setEmoji('🐺').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('contrat_from_contact').setLabel('Depuis un contact').setEmoji('📇').setStyle(ButtonStyle.Primary),
       ),
       new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('csuivi_open').setLabel('Gérer les contrats').setEmoji('🎮').setStyle(ButtonStyle.Primary),
@@ -4393,8 +4394,59 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const ch = guild.channels.cache.get(SALON_HARDCODED.CONTRATS) || guild.channels.cache.get(CH.CONTRATS);
     if (ch) await ch.send({ content: dmOk ? `📤 Contrat **${contratId}** envoyé en privé à <@${contrat.userId}>. *(boutons de secours ci-dessous si besoin)*` : `<@${contrat.userId}> — Iron Wolf Company vous soumet un contrat. *(vos MP semblent fermés — répondez ici)*`, embeds: [embed], components: [row] });
     _posterContratForum(guild, contrat, embed).catch(() => {});
+    // Auto-ajout au répertoire si le client RP n'y est pas + lien historique
+    try {
+      const cExist = (loadDB().repertoire?.contacts || []).find(c => _normNom(c.nom) === _normNom(contrat.clientNom));
+      if (cExist) { const dbL = loadDB(); const cc = (dbL.contrats || []).find(x => x.id === contrat.id); if (cc) { cc.contactId = cExist.id; saveDB(dbL); } repertoire.rafraichirFicheContact?.(guild, cExist.id).catch(() => {}); }
+      else { const nc = await repertoire.ajouterContactAuto?.(guild, { nom: contrat.clientNom, notes: `Client — contrat ${contrat.id}` }); if (nc) { const dbL = loadDB(); const cc = (dbL.contrats || []).find(x => x.id === contrat.id); if (cc) { cc.contactId = nc.id; saveDB(dbL); } } }
+    } catch {}
     await interaction.editReply({ content: dmOk ? `✅ Contrat **${contratId}** envoyé au client en message privé (avec boutons Accepter/Refuser).` : `✅ Contrat **${contratId}** posté dans #contrats (MP du client fermés).` }).catch(() => {});
     return;
+  }
+
+  // ── 📇 Créer un contrat depuis une fiche du répertoire ──
+  if (interaction.isButton() && interaction.customId === 'contrat_from_contact') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    const options = _contactSelectOptions(loadDB());
+    if (!options.length) return interaction.reply({ content: "📇 Aucun contact dans le répertoire pour l'instant. Crée une fiche dans le salon répertoire, puis reviens.", flags: MessageFlags.Ephemeral });
+    const menu = new StringSelectMenuBuilder().setCustomId('contrat_contact_sel').setPlaceholder('📇 Choisis le client dans le répertoire…').addOptions(options);
+    return interaction.reply({ content: '📇 **Contrat depuis un contact** — choisis la personne, le formulaire sera pré-rempli :', components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral });
+  }
+  if (interaction.isStringSelectMenu() && interaction.customId === 'contrat_contact_sel') {
+    const c = (loadDB().repertoire?.contacts || []).find(x => String(x.id) === interaction.values[0]);
+    if (!c) return interaction.reply({ content: "❌ Contact introuvable.", flags: MessageFlags.Ephemeral });
+    const infos = [c.telegramme ? `📟 Télégramme : ${c.telegramme}` : '', c.affiliation ? `🪪 ${c.affiliation}` : '', c.secteur ? `📍 ${c.secteur}` : '', c.notes ? `📝 ${c.notes}` : ''].filter(Boolean).join('\n').slice(0, 800);
+    const modal = new ModalBuilder().setCustomId(`contrat_contact_modal::${c.id}`).setTitle(`📇 Contrat — ${String(c.nom).slice(0, 30)}`);
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('client_nom').setLabel('Client (pré-rempli)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(c.nom || '').slice(0, 100))),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objet').setLabel('Objet de la mission').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Escorte, protection, livraison…')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prime').setLabel('Rémunération').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 1500$')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('echeance').setLabel('Échéance (optionnel)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: 30/08/2026')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Détails / infos contact').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setValue(infos)),
+    );
+    return interaction.showModal(modal);
+  }
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('contrat_contact_modal::')) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const contactId = interaction.customId.split('::')[1];
+    const c = (loadDB().repertoire?.contacts || []).find(x => String(x.id) === contactId) || {};
+    if (!db.contrats) db.contrats = [];
+    const contratId = 'IWC-CT-' + Date.now().toString().slice(-5);
+    const echRaw = (interaction.fields.getTextInputValue('echeance') || '').trim();
+    let dateEcheance = null;
+    const _mIso = echRaw.match(/(\d{4})-(\d{2})-(\d{2})/); const _mFr = echRaw.match(/(\d{1,2})[\/.](\d{1,2})[\/.](\d{2,4})/);
+    if (_mIso) dateEcheance = _mIso[0];
+    else if (_mFr) { const _y = _mFr[3].length === 2 ? '20' + _mFr[3] : _mFr[3]; dateEcheance = `${_y}-${String(_mFr[2]).padStart(2, '0')}-${String(_mFr[1]).padStart(2, '0')}`; }
+    const emetteurIC = db.members[interaction.user.id]?.name || interaction.user.username;
+    const contrat = { id: contratId, type: 'externe', contactId, clientNom: interaction.fields.getTextInputValue('client_nom').trim(), emetteurIC, emetteurId: interaction.user.id, emetteurNom: interaction.user.username, objet: interaction.fields.getTextInputValue('objet'), remuneration: interaction.fields.getTextInputValue('prime'), details: interaction.fields.getTextInputValue('details') || '', echeanceTexte: echRaw, dateEcheance, status: 'signe', suivi: 'En cours', createdAt: new Date().toISOString() };
+    db.contrats.push(contrat); saveDB(db);
+    _syncContratNotion(contrat, 'signe').catch(() => {});
+    _posterContratForum(guild, contrat).catch(() => {});
+    _updateContratPanel(interaction.client).catch(() => {});
+    _updatePlanningContrats(interaction.client).catch(() => {});
+    ajouterJournalIC(guild, { type: 'contrat', emoji: '📇', titre: `Contrat ${contratId} — ${contrat.clientNom}`, description: String(contrat.objet || '').slice(0, 200), auteur: emetteurIC }).catch(() => {});
+    if (c.id) repertoire.rafraichirFicheContact?.(guild, c.id).catch(() => {});
+    return interaction.editReply({ content: `✅ Contrat **${contratId}** créé pour **${contrat.clientNom}** (depuis le répertoire) et enregistré en *En cours*.\n📇 La fiche du contact est mise à jour avec l'historique.` });
   }
 
   if (interaction.isButton() && interaction.customId === 'csuivi_open') {
@@ -5745,6 +5797,16 @@ async function _exempleOperationForum(guild) {
   let post = await forum.threads.create(optsO).catch(() => null);
   if (!post) post = await forum.threads.create({ name: '🎯 EXEMPLE — Opération (ne pas supprimer)', message: { embeds: [e] } }).catch(() => null);
   if (post?.pin) await post.pin().catch(() => {});
+}
+function _normNom(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, ''); }
+function _contactSelectOptions(db, max = 25) {
+  const contacts = (db.repertoire?.contacts || []).slice();
+  contacts.sort((a, b) => (b.fiabilite || 0) - (a.fiabilite || 0) || String(a.nom || '').localeCompare(String(b.nom || '')));
+  return contacts.slice(0, max).map(c => {
+    const emo = { 'Allié': '🤝', 'Client': '💼', 'Ennemi': '⚔️', 'Neutre': '➖' }[c.type] || '📇';
+    const desc = [c.affiliation || c.type, c.telegramme ? `📟 ${c.telegramme}` : '', c.fiabilite ? '⭐'.repeat(Math.min(5, c.fiabilite)) : ''].filter(Boolean).join(' · ').slice(0, 100);
+    return { label: String(c.nom || 'Contact').slice(0, 100), value: String(c.id), description: desc || undefined, emoji: emo };
+  }).filter(o => o.label && o.value);
 }
 async function _posterContratForum(guild, contrat, embed) {
   try {

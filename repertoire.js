@@ -172,6 +172,18 @@ const C_AFFILIATIONS = ["Civil", "Loi", "Hors-la-loi", "Loups de Fer", "Cartel",
 const C_RELATIONS = ["Amicale", "Professionnelle", "Affaire", "Tendue", "Hostile"];
 const C_STATUTS = ["Vivant", "Disparu", "Recherché", "Décédé"];
 
+function _histoContratsContact(d) {
+  try {
+    const db = loadDB();
+    const nom = _norm(d.nomsurnom);
+    const cs = (db.contrats || []).filter(c => (d.id && c.contactId === d.id) || (nom && nom.length > 2 && _norm(c.clientNom || c.commanditaire || '') === nom));
+    if (!cs.length) return '';
+    const honores = cs.filter(c => c.suivi === 'Honoré' || c.remuVerseAuCoffre);
+    const total = honores.reduce((s, c) => s + (parseFloat(c.remuVerseAuCoffre) || 0), 0);
+    const recents = cs.slice(-3).map(c => `• \`${c.id}\` — ${(c.objet || c.typeMission || 'contrat')}`.slice(0, 90)).join("\n");
+    return `\n\n📜 **Historique contrats** — ${cs.length} (${honores.length} honoré${honores.length > 1 ? 's' : ''}) · 💰 $${total.toLocaleString('fr-FR')} encaissés\n${recents}`;
+  } catch { return ''; }
+}
 function _richFiche(d) {
   const v = (x, def) => (x && String(x).trim()) ? String(x).trim() : (def || "—");
   return [
@@ -190,7 +202,7 @@ function _richFiche(d) {
     ``,
     `📝 **Notes**`,
     v(d.notes, "—"),
-  ].join("\n");
+  ].join("\n") + _histoContratsContact(d);
 }
 function _contactFormModal() {
   const m = new ModalBuilder().setCustomId("contact_form").setTitle("🎴 Nouvelle fiche de contact");
@@ -806,4 +818,37 @@ async function traiterRapportTerrain(guild, texte, sourceLabel) {
   } catch (e) { console.log('❌ traiterRapportTerrain:', e.message); return null; }
 }
 
-module.exports = { repertoireCommands, routeInteraction, installerPanelContact, onMessage, traiterRapportTerrain };
+// Liste des contacts (pour les sélecteurs ailleurs : contrats, RDV…)
+function listerContacts() { try { return (_ensure(loadDB()).contacts || []); } catch { return []; } }
+function getContact(id) { try { return (_ensure(loadDB()).contacts || []).find(c => String(c.id) === String(id)) || null; } catch { return null; } }
+// Re-rend la fiche forum d'un contact (ex. après un nouveau contrat → met à jour l'historique)
+async function rafraichirFicheContact(guild, contactId) {
+  try {
+    const rep = _ensure(loadDB());
+    const c = (rep.contacts || []).find(x => String(x.id) === String(contactId));
+    if (!c || !c.ficheRefs?.threadId) return;
+    const d = { nomsurnom: c.nom, telegramme: c.telegramme, metier: c.metier, secteur: c.secteur, affiliation: c.affiliation, relation: c.relation, fiabilite: c.fiabilite, statut: c.statut, dernierContact: c.dernierContact, creeParNom: c.creeParNom, notes: c.notes, id: c.id };
+    const fiche = _richFiche(d);
+    const th = await guild.channels.fetch(c.ficheRefs.threadId).catch(() => null);
+    if (!th) return;
+    const msg = await th.fetchStarterMessage().catch(() => null) || (c.ficheRefs.msgId ? await th.messages.fetch(c.ficheRefs.msgId).catch(() => null) : null);
+    if (msg) await msg.edit({ content: fiche.slice(0, 1900), components: [_ficheRow(c.id)] }).catch(() => {});
+  } catch {}
+}
+// Ajoute un contact automatiquement (ex. nouveau client de contrat) s'il n'existe pas déjà
+async function ajouterContactAuto(guild, data) {
+  try {
+    const db = loadDB(); const rep = _ensure(db);
+    const nom = (data.nom || '').trim(); if (!nom || _norm(nom).length < 2) return null;
+    const existe = (rep.contacts || []).find(c => _norm(c.nom) === _norm(nom));
+    if (existe) return existe;
+    const contactId = _id();
+    const d = { nomsurnom: nom, telegramme: data.telegramme || '', metier: data.metier || '', secteur: data.secteur || '', affiliation: data.affiliation || '', relation: data.relation || 'Affaire / professionnelle', fiabilite: '', statut: '', notes: data.notes || 'Ajouté automatiquement depuis un contrat.', creeParNom: data.creeParNom || 'Système', id: contactId };
+    let refs = null;
+    try { const r = await _publierFiche({ guild }, d, _richFiche(d), contactId, null, {}); refs = r?.refs || null; } catch {}
+    const contact = { id: contactId, nom, type: _deriveType(d), telegramme: d.telegramme, fiabilite: 0, notes: d.notes, metier: d.metier, secteur: d.secteur, affiliation: d.affiliation, relation: d.relation, statut: d.statut, creeParNom: d.creeParNom, par: null, maj: Date.now(), ficheRefs: refs };
+    rep.contacts.push(contact); persist(db);
+    return contact;
+  } catch { return null; }
+}
+module.exports = { repertoireCommands, routeInteraction, installerPanelContact, onMessage, traiterRapportTerrain, listerContacts, getContact, rafraichirFicheContact, ajouterContactAuto };
