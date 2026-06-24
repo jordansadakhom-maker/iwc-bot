@@ -230,6 +230,22 @@ async function envoyerBriefings(guild, contrat) {
   }
 }
 
+// ─── Rafraîchit les fiches des contrats encore ouverts (propose/actif) ───
+// Appelé au démarrage : permet aux contrats déjà postés d'afficher les nouveaux
+// boutons (ex : « ✍️ Faire signer ») sans aucune action manuelle. N'édite QUE
+// les messages existants — ne supprime jamais un contrat.
+async function rafraichirContratsOuverts(guild) {
+  try {
+    const db = loadDB();
+    const ouverts = (db.contrats || []).filter(c => c.cc && ['propose', 'actif'].includes(c.status) && c.msgId);
+    for (const c of ouverts) {
+      await rafraichirFiche(guild, c).catch(() => {});
+      await new Promise(r => setTimeout(r, 250)); // anti rate-limit
+    }
+    if (ouverts.length) console.log(`🔄 ${ouverts.length} contrat(s) Confrérie rafraîchi(s) (boutons à jour)`);
+  } catch (e) { console.log('⚠️ rafraichirContratsOuverts:', e.message); }
+}
+
 // ─── Mise à jour de la fiche déjà postée ───
 async function rafraichirFiche(guild, contrat) {
   // 1) Message principal dans #contrats
@@ -736,7 +752,7 @@ async function routeInteraction(interaction) {
   return false;
 }
 
-module.exports = { routeInteraction, checkEcheances, postPanel };
+module.exports = { routeInteraction, checkEcheances, postPanel, rafraichirContratsOuverts };
 
 /* ═══════════════════════════════════════════════════════════════
    BRANCHEMENT DANS index.js (3 ajouts) :

@@ -4903,6 +4903,7 @@ client.once('clientReady', async () => {
     await registerSlashCommands(guild).catch(e => console.log('registerSlashCommands error:', e.message));
     await autoSetup(guild).catch(e => console.log('autoSetup error:', e.message));
     await traque.ensureWantedPanel?.(guild).catch(() => {});
+    await contratsConf.rafraichirContratsOuverts?.(guild).catch(() => {});
     await buildMembresDiscordMap(guild).catch(() => {});
     await _cacheInvites(guild).catch(() => {});
   }
