@@ -285,6 +285,31 @@ async function _agendaPhotoOnMessage(message) {
     return true;
   } catch (e) { console.log('⚠️ agenda photo:', e.message); return false; }
 }
+// ── /moi : profil RP personnel + mes contrats / mes rendez-vous ──
+async function _handleMoi(interaction) {
+  const db = loadDB(); const uid = interaction.user.id;
+  const m = db.members[uid] || {};
+  const contrats = (db.contrats || []).filter(c => c.emetteurId === uid || c.userId === uid);
+  const honores = contrats.filter(c => (c.suivi || '') === 'Honoré').length;
+  const ops = (db.operations || []).filter(o => Array.isArray(o.participants) && o.participants.some(p => p === uid || p === (interaction.member?.displayName) || p === m.name)).length;
+  const statutMap = { actif: '✅ Actif', absent: '⚠️ Absent', inactif: '💤 Inactif', visiteur: '👁️ Visiteur', parti: '🚪 Parti' };
+  const e = new EmbedBuilder().setColor(0x8B5A2B).setTitle(`🏅 ${m.name || interaction.member?.displayName || interaction.user.username} — Profil`)
+    .setThumbnail(interaction.user.displayAvatarURL?.() || null)
+    .addFields(
+      { name: '🎖️ Grade', value: m.rang || '—', inline: true },
+      { name: '📋 Statut', value: statutMap[m.status] || '—', inline: true },
+      { name: '📅 Ancienneté', value: m.joinedAt ? `${daysSince(m.joinedAt)} j (${fmtShort(m.joinedAt)})` : '—', inline: true },
+      { name: '📜 Contrats', value: `${contrats.length}${honores ? ` · 🏁 ${honores} honoré${honores > 1 ? 's' : ''}` : ''}`, inline: true },
+      { name: '🎯 Opérations', value: `${ops}`, inline: true },
+      { name: '⚡ Dernière activité', value: m.lastActivity ? fmtShort(m.lastActivity) : '—', inline: true },
+    )
+    .setFooter({ text: 'Iron Wolf Company • Profil personnel' });
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('moi_contrats').setLabel('Mes contrats').setEmoji('📜').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('moi_rdv').setLabel('Mes rendez-vous').setEmoji('📅').setStyle(ButtonStyle.Secondary),
+  );
+  return interaction.reply({ embeds: [e], components: [row], flags: MessageFlags.Ephemeral });
+}
 function _agendaPanelPayload(appts) {
   const now = new Date(); const minuit = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const up = (appts || [])
@@ -445,6 +470,7 @@ const SLASH_COMMANDS = [
       .addChoices({ name: 'Tous', value: 'tous' }, { name: 'Actifs', value: 'actif' }, { name: 'Refusés', value: 'refuse' }, { name: 'Expirés', value: 'expire' }))
     .addIntegerOption(o => o.setName('page').setDescription('Numéro de page').setRequired(false)),
   new SlashCommandBuilder().setName('profil').setDescription('👤 Affiche le profil d\'un membre').addUserOption(o => o.setName('membre').setDescription('Membre (optionnel)').setRequired(false)),
+  new SlashCommandBuilder().setName('moi').setDescription('🏅 Mon profil RP : grade, ancienneté, mes contrats et mes rendez-vous'),
   new SlashCommandBuilder().setName('bilan').setDescription('📊 Résumé trésorerie 7 derniers jours').addStringOption(o => o.setName('coffre').setDescription('Quel coffre ?').setRequired(false).addChoices({ name: '⚖️ Légal', value: 'legal' }, { name: '🔒 Illégal', value: 'illegal' })),
   new SlashCommandBuilder().setName('rdv').setDescription('📅 Créer un rendez-vous'),
   new SlashCommandBuilder().setName('agenda').setDescription('📅 Voir ou créer un RDV')
@@ -1256,6 +1282,7 @@ async function handleSlashCommand(interaction) {
     await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('🏦 Coffre commun — IWC').addFields({ name: '💰 Solde', value: `**$${solde.toLocaleString('fr-FR')}**`, inline: false }).setFooter({ text: `IWC • ${fmtShort(new Date())}` })], flags: isDirection(interaction.member) ? undefined : MessageFlags.Ephemeral });
     return;
   }
+  if (commandName === 'moi') return _handleMoi(interaction);
   if (commandName === 'fiche') {
     if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral });
     const membreOpt = interaction.options.getUser('membre');
@@ -3053,6 +3080,25 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId.startsWith('engagement_signer_'))  return _ouvrirModalEngagement(interaction);
     if (interaction.customId === 'btn_grade_panel')            return notionV3.handleGradePanelButton?.(interaction);
     if (interaction.customId === 'btn_agenda_nouveau')         return notionV3.handleAgendaNouveauButton?.(interaction);
+    if (interaction.customId === 'moi_contrats') {
+      const dbm = loadDB(); const uid = interaction.user.id;
+      const mine = (dbm.contrats || []).filter(c => c.emetteurId === uid || c.userId === uid).slice(-15).reverse();
+      const stade = c => c.suivi || _suiviDepuisStatut(c);
+      const lignes = mine.length ? mine.map(c => `• \`${c.id}\` — ${(c.clientNom || c.employeurNom || c.commanditaire || '—')} · ${(c.objet || '—').replace(/\s+/g, ' ').slice(0, 40)} · **${stade(c)}**`).join('\n') : '*Aucun contrat à ton nom pour l\'instant.*';
+      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('📜 Mes contrats').setDescription(lignes.slice(0, 4000))], flags: MessageFlags.Ephemeral });
+    }
+    if (interaction.customId === 'moi_rdv') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      let appts = []; try { appts = await notionQueryAgenda(); } catch {}
+      const dbm = loadDB(); const m = dbm.members[interaction.user.id] || {};
+      const nom = (m.name || interaction.member?.displayName || interaction.user.username || '').toLowerCase();
+      const now = new Date(); const minuit = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const up = (appts || []).filter(a => { if (!a.date || a.statut === 'Annulé') return false; const d = new Date(a.date); return !isNaN(d) && d >= minuit; }).sort((a, b) => new Date(a.date) - new Date(b.date));
+      const mine = up.filter(a => (a.participants || []).join(' ').toLowerCase().includes(nom));
+      const arr = (mine.length ? mine : up).slice(0, 10);
+      const liste = arr.length ? arr.map(a => `📅 **${a.titre}** — ${fmtShort(a.date)}${a.heure ? ' · ' + a.heure : ''} · 📍 ${a.lieu || '—'}`).join('\n') : '*Aucun rendez-vous à venir.*';
+      return interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x8B5A2A).setTitle(mine.length ? '📅 Mes rendez-vous' : '📅 Prochains rendez-vous (agenda)').setDescription(liste.slice(0, 4000))] });
+    }
     if (interaction.customId === 'agenda_panel_creer')         return _ouvrirModalAgendaSimple(interaction);
     if (interaction.customId === 'agenda_rdv_photo')           return interaction.reply({ content: '📸 **RDV depuis une photo** — glisse simplement une **capture** (planning, affiche, message annonçant un RDV) **dans ce salon**. Je lis les infos, je te propose le rendez-vous à valider, puis tu choisis qui prévenir.', flags: MessageFlags.Ephemeral });
     if (interaction.customId.startsWith('agenda_photo_go::')) {
