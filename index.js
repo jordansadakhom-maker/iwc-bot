@@ -826,9 +826,37 @@ async function envoyerRapportDirection(guild) {
 }
 
 // ── [CORRECTION] Journal IC → poste dans #journal-de-bord ──
+// Journal en FORUM : un dossier (post) par catégorie
+const JOURNAL_CATS = {
+  contrat: { key: 'contrats', emoji: '📜', label: 'Contrats' },
+  tresorerie: { key: 'tresorerie', emoji: '💰', label: 'Trésorerie' },
+  operation: { key: 'operations', emoji: '🎯', label: 'Opérations' },
+  recrutement: { key: 'recrutement', emoji: '🐺', label: 'Recrutement & Grades' },
+  promotion: { key: 'recrutement', emoji: '🐺', label: 'Recrutement & Grades' },
+};
+function _journalCat(type) { return JOURNAL_CATS[type] || { key: 'divers', emoji: '📅', label: 'Divers' }; }
+async function _journalForumThread(forum, type) {
+  try {
+    const cat = _journalCat(type);
+    const db = loadDB(); if (!db.journalForumPosts) db.journalForumPosts = {};
+    const tid = db.journalForumPosts[cat.key];
+    if (tid) { const t = await forum.guild.channels.fetch(tid).catch(() => null); if (t) return t; }
+    const act = await forum.threads.fetchActive().catch(() => null);
+    const existing = act?.threads ? [...act.threads.values()].find(t => (t.name || '').includes(cat.label)) : null;
+    if (existing) { db.journalForumPosts[cat.key] = existing.id; saveDB(db); return existing; }
+    const intro = new EmbedBuilder().setColor(0x2C3E50).setTitle(`${cat.emoji} ${cat.label}`).setDescription('*Journal automatique de la Confrérie — toutes les infos de cette catégorie arrivent ici.*');
+    const opts = { name: `${cat.emoji} ${cat.label}`, message: { embeds: [intro] } };
+    if (forum.availableTags?.length) opts.appliedTags = [forum.availableTags[0].id];
+    let post = await forum.threads.create(opts).catch(() => null);
+    if (!post) post = await forum.threads.create({ name: opts.name, message: { embeds: [intro] } }).catch(() => null);
+    if (post) { db.journalForumPosts[cat.key] = post.id; saveDB(db); try { await post.pin(); } catch {} }
+    return post;
+  } catch { return null; }
+}
 async function ajouterJournalIC(guild, entry) {
   try {
-    const ch = guild.channels.cache.get(SALON_HARDCODED.JOURNAL_DE_BORD) || getChById(guild, 'JOURNAL_DE_BORD', 'journal-de-bord', 'journal');
+    const jid = loadDB().journalChannelId;
+    const ch = (jid && guild.channels.cache.get(jid)) || guild.channels.cache.get(SALON_HARDCODED.JOURNAL_DE_BORD) || getChById(guild, 'JOURNAL_DE_BORD', 'journal-de-bord', 'journal');
     if (!ch) return;
     const emojiMap = { operation: '🎯', contrat: '📜', recrutement: '🐺', tresorerie: '💰', promotion: '⬆️', autre: '📋' };
     const emoji = entry.emoji || emojiMap[entry.type] || '📋';
@@ -839,6 +867,12 @@ async function ajouterJournalIC(guild, entry) {
       .addFields({ name: '✍️ Auteur', value: entry.auteur || '—', inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true })
       .setFooter({ text: `IWC • Journal IC • ${new Date().toLocaleString('fr-FR')}` })
       .setTimestamp();
+    // FORUM → on poste dans le dossier de la bonne catégorie ; sinon salon texte classique
+    if (ch.type === 15 && ch.threads?.create) {
+      const thread = await _journalForumThread(ch, entry.type);
+      if (thread) await thread.send({ embeds: [embed], allowedMentions: { parse: [] } }).catch(() => {});
+      return;
+    }
     await ch.send({ embeds: [embed] });
   } catch (e) { console.log('❌ ajouterJournalIC error:', e.message); }
 }
@@ -1286,8 +1320,11 @@ async function handleSlashCommand(interaction) {
   if (commandName === 'moi') return _handleMoi(interaction);
   if (commandName === 'journal-salon') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral });
-    const dbj = loadDB(); dbj.journalChannelId = interaction.channelId; saveDB(dbj);
-    return interaction.reply({ content: `✅ Ce salon est désormais le **journal des informations** : contrats, trésorerie, opérations, recrutement, promotions, arrivées/départs… arriveront ici. Le tableau de bord reste dans son salon.`, flags: MessageFlags.Ephemeral });
+    // Si lancé dans un post de forum, on enregistre le FORUM parent (pas le fil)
+    const cible = interaction.channel?.isThread?.() && interaction.channel.parentId ? interaction.channel.parentId : interaction.channelId;
+    const dbj = loadDB(); dbj.journalChannelId = cible; saveDB(dbj);
+    const estForum = interaction.channel?.isThread?.() || interaction.channel?.type === 15;
+    return interaction.reply({ content: `✅ Salon des informations défini${estForum ? ' (**forum** — un dossier sera créé par catégorie : Contrats, Trésorerie, Opérations, Recrutement, Divers)' : ''}. Toutes les infos arriveront ici ; le tableau de bord reste séparé.`, flags: MessageFlags.Ephemeral });
   }
   if (commandName === 'fiche') {
     if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral });
