@@ -7,7 +7,10 @@ const {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   StringSelectMenuBuilder, MessageFlags,
 } = require('discord.js');
-const { loadDB, saveDB } = require('./db');
+const { loadDB, saveDB, sauvegarderSurGitHub } = require('./db');
+// Sauvegarde Gist immédiate : sur Render le disque est éphémère. Sans push immédiat, un rapport
+// d'informateur créé puis « validé » 2-4h plus tard est perdu au redéploiement → « Rapport introuvable ».
+function _persistNow() { try { if (typeof sauvegarderSurGitHub === 'function') return sauvegarderSurGitHub().catch(() => {}); } catch {} return Promise.resolve(); }
 let notionExtra = {};
 try { notionExtra = require('./notion-extra'); } catch {}
 let relais = {}; try { relais = require('./relais'); } catch {}
@@ -618,7 +621,7 @@ async function handleInformateurModal(interaction) {
   const fiabiliteRaw = interaction.fields.getTextInputValue('fiabilite').toLowerCase(); const estConfirmee = fiabiliteRaw.includes('confirm') && !fiabiliteRaw.includes('non'); const fiabilite = estConfirmee ? 'Confirmée' : 'Non confirmée';
   const db = loadDB(); if (!db.informateurs) db.informateurs = [];
   const rapport = { id: `INFO-${Date.now().toString().slice(-5)}`, source, cible, info: information, fiabilite, statut: 'nouveau', rapporteurId: interaction.user.id, rapporteur: interaction.user.username, createdAt: new Date().toISOString() };
-  db.informateurs.push(rapport); saveDB(db);
+  db.informateurs.push(rapport); saveDB(db); await _persistNow();
   await _archiverRapportNotion(rapport);
   const infosCh = getCh(interaction.guild, 'informateurs');
   if (infosCh) await infosCh.send({
@@ -649,7 +652,7 @@ async function handleInformateurMessage(message) {
   try { if (typeof global.reformulerRP === 'function' && infoTxt) { const rp = await global.reformulerRP(infoTxt); if (rp) infoTxt = rp; } } catch {}
   const db = loadDB(); if (!db.informateurs) db.informateurs = [];
   const rapport = { id: `INFO-${Date.now().toString().slice(-5)}`, source: source || '—', cible: cible || '—', info: infoTxt, fiabilite: fiabilite || '—', statut: 'nouveau', rapporteurId: message.author.id, rapporteur: message.author.username, createdAt: new Date().toISOString() };
-  db.informateurs.push(rapport); saveDB(db);
+  db.informateurs.push(rapport); saveDB(db); await _persistNow();
   await _archiverRapportNotion(rapport);
   // Poster avec boutons de validation Direction
   const infosCh2 = getCh(message.guild, 'informateurs');
@@ -752,7 +755,7 @@ async function creerRenseignement(guild, { info, source, cible, fiabilite, rappo
     rapporteur: rapporteur || '—',
     createdAt: new Date().toISOString(),
   };
-  db.informateurs.push(rapport); saveDB(db);
+  db.informateurs.push(rapport); saveDB(db); await _persistNow();
   try { await _archiverRapportNotion(rapport); } catch {}
   // Salon cible : ID explicite (peut être un forum) sinon salon Informateurs par nom
   let ch = null;
@@ -784,18 +787,18 @@ async function handleInformateurInfirmer(interaction) {
 }
 async function _traiterValidationInfo(interaction, decision) {
   const estDir = interaction.member?.roles?.cache?.some(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'].some(n => r.name.includes(n)));
-  if (!estDir) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+  if (!estDir) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {});
   const rapId = interaction.customId.replace(decision === 'confirme' ? 'info_confirmer_' : 'info_infirmer_', '');
   const db = loadDB();
   const rapport = (db.informateurs || []).find(r => r.id === rapId);
-  if (!rapport) return interaction.reply({ content: '❌ Rapport introuvable.', flags: MessageFlags.Ephemeral });
+  if (!rapport) return interaction.reply({ content: '❌ Rapport introuvable (il a peut-être été perdu lors d\'un redémarrage avant cette correction). Demande au rapporteur de le resoumettre.', flags: MessageFlags.Ephemeral }).catch(() => {});
   if (rapport.statut && rapport.statut !== 'nouveau') {
-    return interaction.reply({ content: `❌ Rapport déjà traité (${rapport.statut}).`, flags: MessageFlags.Ephemeral });
+    return interaction.reply({ content: `❌ Rapport déjà traité (${rapport.statut}).`, flags: MessageFlags.Ephemeral }).catch(() => {});
   }
   rapport.statut = decision;
   rapport.valideePar = interaction.user.username;
   rapport.valideeAt = new Date().toISOString();
-  saveDB(db);
+  saveDB(db); await _persistNow();
   // Sync Notion
   if (global._syncInformateurNotion) global._syncInformateurNotion(rapport, decision, interaction.user.username).catch(() => {});
   const confirme = decision === 'confirme';
@@ -803,7 +806,7 @@ async function _traiterValidationInfo(interaction, decision) {
     .setColor(confirme ? 0xED4245 : 0x555555)
     .setTitle(`${confirme ? '🔴 Confirmé' : '⬛ Infirmé'} — Rapport ${rapId}`)
     .spliceFields(-1, 1, { name: '📌 Statut', value: confirme ? `🔴 Confirmé par ${interaction.user.username}` : `⬛ Infirmé par ${interaction.user.username}`, inline: false });
-  await interaction.update({ embeds: [embed], components: [] });
+  await interaction.update({ embeds: [embed], components: [] }).catch(() => {});
   // Si confirmé → alerter la Direction
   if (confirme) await _alerterDirection(interaction.guild, rapport, rapport.rapporteurId);
   // Met à jour le carnet de renseignements épinglé (confirmés uniquement, sources en noms de code)
