@@ -730,6 +730,32 @@ async function republierRapportsManquants(guild) {
     }
   } catch (e) { console.log('⚠️ republierRapportsManquants:', e.message); }
 }
+// ── Création programmée d'un renseignement (ex : depuis une note du micro de terrain) ──
+// Pousse un rapport « à vérifier » dans le salon Informateurs avec les boutons Confirmer/Infirmer.
+async function creerRenseignement(guild, { info, source, cible, fiabilite, rapporteurId, rapporteur } = {}) {
+  if (!guild) return null;
+  let infoTxt = String(info || '').trim();
+  if (!infoTxt) return null;
+  // Retranscription RP (même style que le réseau d'informateurs)
+  try { if (typeof global.reformulerRP === 'function') { const rp = await global.reformulerRP(infoTxt.slice(0, 1500)); if (rp) infoTxt = rp; } } catch {}
+  const db = loadDB(); if (!db.informateurs) db.informateurs = [];
+  const rapport = {
+    id: `INFO-${Date.now().toString().slice(-5)}`,
+    source: source || '—',
+    cible: cible || '—',
+    info: infoTxt,
+    fiabilite: fiabilite || 'À vérifier',
+    statut: 'nouveau',
+    rapporteurId: rapporteurId || null,
+    rapporteur: rapporteur || '—',
+    createdAt: new Date().toISOString(),
+  };
+  db.informateurs.push(rapport); saveDB(db);
+  try { await _archiverRapportNotion(rapport); } catch {}
+  const ch = getCh(guild, 'informateurs');
+  if (ch) await ch.send({ embeds: [_rapportEnAttenteEmbed(rapport)], components: [_rapportBoutons(rapport)] }).catch(() => {});
+  return rapport.id;
+}
 // ── Validation Direction : Confirmer / Infirmer un rapport ──
 async function handleInformateurConfirmer(interaction) {
   return _traiterValidationInfo(interaction, 'confirme');
@@ -867,7 +893,7 @@ module.exports = {
   checkInactivite, JOURS_INACTIF,
   updateHierarchieEmbed, handleHierarchieCommand, handleGradeSetCommand, handleGradePanelButton, handleGradeMembreSelect, handleGradeGradeSelect, handleGradeMajButton, handleGradeUp, handleGradeDown, handleGradeFiche, handleGradeEligibles, showGradeMembre, GRADES_LEGAL, GRADES_ILLEGAL, ROLES,
   setupAffairesPanel, handleAffaireNouvelleButton, handleAffaireModal, handleAffaireVote, handleAffaireDetail, postResumeAffaires, handleAffairesResumeButton, checkAffairesTimeout,
-  setupInformateursPanel, handleInformateurRapportButton, handleInformateurModal, handleInformateurHistorique, handleInformateurMessage, handleInformateurConfirmer, handleInformateurInfirmer, majCarnetRenseignements: _majCarnetRenseignements, republierRapportsManquants,
+  setupInformateursPanel, handleInformateurRapportButton, handleInformateurModal, handleInformateurHistorique, handleInformateurMessage, handleInformateurConfirmer, handleInformateurInfirmer, majCarnetRenseignements: _majCarnetRenseignements, republierRapportsManquants, creerRenseignement,
   handlePlanningScreenshot, handlePlansMessage,
   getMentionPole, updateNotionStatutPole,
   syncOperationTermineeNotion, syncAbsenceNotion,

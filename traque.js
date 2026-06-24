@@ -288,6 +288,10 @@ function modalCreation(def, sid) {
   );
   return m;
 }
+// Ouvre le formulaire d'avis de recherche pré-rempli (ex : depuis une note du micro de terrain)
+async function ouvrirModalAvis(interaction, def) {
+  await interaction.showModal(modalCreation(def || {}));
+}
 function parseDanger(txt) {
   const s = String(txt || '').toLowerCase();
   if (s.includes('extr')) return 'extreme';
@@ -327,10 +331,14 @@ async function handleCreateModal(interaction) {
   // On récupère la photo en mémoire pour la réuploader DANS l'avis (elle survivra à la suppression du signalement)
   let photoBuf = null;
   if (t.photo) photoBuf = await _imageBytes(t.photo);
+  // L'avis doit toujours atterrir dans le salon des avis de recherche, même si le modal a été ouvert ailleurs (ex : depuis une note du micro de terrain)
+  let targetCh = interaction.channel;
+  try { if (db.wantedChannelId) { const wc = await interaction.guild.channels.fetch(db.wantedChannelId).catch(() => null); if (wc && wc.send) targetCh = wc; } } catch {}
+  if (targetCh) t.channelId = targetCh.id;
   const posterEmbed = buildPoster(t);
   const posterPayload = { content: `<@&${ROLE_CONFRERIE}> — 🎯 **Nouvel avis de recherche.** La traque est ouverte.`, embeds: [posterEmbed], components: buildBoutons(t), allowedMentions: { roles: [ROLE_CONFRERIE] } };
   if (photoBuf) { posterEmbed.setThumbnail('attachment://wanted.png'); posterPayload.files = [new AttachmentBuilder(photoBuf, { name: 'wanted.png' })]; }
-  const sent = await interaction.channel.send(posterPayload).catch(() => null);
+  const sent = await targetCh.send(posterPayload).catch(() => null);
   if (sent) {
     t.messageId = sent.id;
     // La photo de l'avis pointe désormais sur SA propre pièce jointe (indépendante du signalement supprimé)
@@ -724,4 +732,4 @@ async function routeInteraction(interaction) {
   return false;
 }
 
-module.exports = { traqueCommands, routeInteraction, onMessage, ensureWantedPanel, refreshAvisById };
+module.exports = { traqueCommands, routeInteraction, onMessage, ensureWantedPanel, refreshAvisById, ouvrirModalAvis };

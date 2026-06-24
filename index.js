@@ -2772,6 +2772,15 @@ client.on('messageCreate', async message => {
   // ── Note du micro de terrain → réaction 📜 (contrat) + RÉSUMÉ automatique ──
   if (message.webhookId && (message.embeds?.[0]?.title || '').includes('Rapport de terrain')) {
     try { await message.react('📜'); } catch (e) { console.log('⚠️ Réaction note:', e.message); }
+    // ── Tri 1-clic du rapport (Direction) : carnet de renseignements · contrat · avis de recherche ──
+    try {
+      const triageRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`note_rens::${message.id}`).setLabel('Verser au carnet').setEmoji('🕵️').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`note_contrat::${message.id}`).setLabel('En faire un contrat').setEmoji('📜').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`note_avis::${message.id}`).setLabel('Avis de recherche').setEmoji('🎯').setStyle(ButtonStyle.Danger),
+      );
+      await message.reply({ content: '🗂️ **Que faire de ce rapport ?** *(Direction)*', components: [triageRow], allowedMentions: { repliedUser: false } });
+    } catch (e) { console.log('⚠️ Boutons tri note:', e.message); }
     // ── Longue scène (fichier .txt joint) → conversation COMPLÈTE dans un FIL sous le rapport ──
     // Le salon reste propre : seul le rapport y apparaît, le détail est dans le fil (lisible sans télécharger).
     (async () => {
@@ -3478,6 +3487,10 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId.startsWith('menu_')) return _gererBoutonMenu(interaction);
     // ── Boutons du brouillon de contrat (note → contrat) ──
     if (interaction.customId.startsWith('dc_')) return _gererBoutonBrouillon(interaction);
+    // ── Tri d'un rapport de terrain : carnet / contrat / avis de recherche (Direction) ──
+    if (interaction.customId.startsWith('note_rens::') || interaction.customId.startsWith('note_contrat::') || interaction.customId.startsWith('note_avis::')) {
+      return _gererTriageNote(interaction);
+    }
     if (interaction.customId.startsWith('engagement_signer_'))  return _ouvrirModalEngagement(interaction);
     if (interaction.customId === 'btn_grade_panel')            return notionV3.handleGradePanelButton?.(interaction);
     if (interaction.customId === 'btn_agenda_nouveau')         return notionV3.handleAgendaNouveauButton?.(interaction);
@@ -9034,6 +9047,16 @@ async function _lireTexteNote(message) {
   return message.content || '';
 }
 
+// Lit la valeur d'un champ d'embed dont le nom contient l'un des mots donnés (insensible à la casse)
+function _champEmbed(message, mots) {
+  const fields = message?.embeds?.[0]?.fields || [];
+  for (const f of fields) {
+    const n = (f.name || '').toLowerCase();
+    if (mots.some(m => n.includes(m))) return (f.value || '').replace(/[*_`>]/g, '').trim() || null;
+  }
+  return null;
+}
+
 // Demande à l'IA d'extraire les infos d'un contrat depuis une note
 async function _analyserNoteContrat(texte) {
   if (!process.env.ANTHROPIC_API_KEY) return null;
@@ -9269,6 +9292,64 @@ async function _validerModalBrouillon(interaction) {
   d.contact = interaction.fields.getTextInputValue('contact') || '';
   _draftStore.set(id, d);
   await interaction.update({ embeds: [_embedBrouillonContrat(d, null)], components: _rowsBrouillonContrat(id, d.type) }).catch(() => {});
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  TRI D'UN RAPPORT DE TERRAIN — 3 boutons sous chaque note
+//  • Verser au carnet de renseignements  • En faire un contrat  • Avis de recherche
+// ═══════════════════════════════════════════════════════════════
+async function _gererTriageNote(interaction) {
+  // Réservé à la Direction (mêmes droits que la réaction 📜 note→contrat)
+  if (!isDirection(interaction.member)) {
+    return interaction.reply({ content: '❌ Le tri des rapports est réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {});
+  }
+  const [action, msgId] = interaction.customId.split('::');
+  const msg = msgId ? await interaction.channel.messages.fetch(msgId).catch(() => null) : null;
+
+  // ── 🎯 Avis de recherche : ouvrir le formulaire pré-rempli (showModal = première réponse) ──
+  if (action === 'note_avis') {
+    let cible = '', signalement = '';
+    if (msg) {
+      const texte = await _lireTexteNote(msg);
+      signalement = (texte || '').replace(/\s+/g, ' ').slice(0, 480);
+      cible = _champEmbed(msg, ['cible', 'identité', 'identite', 'personne', 'nom']) || '';
+    }
+    try { return await traque.ouvrirModalAvis(interaction, { cible, signalement }); }
+    catch (e) { console.log('⚠️ note→avis:', e.message); return interaction.reply({ content: '⚠️ Impossible d\'ouvrir le formulaire d\'avis.', flags: MessageFlags.Ephemeral }).catch(() => {}); }
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  if (!msg) return interaction.editReply({ content: '⚠️ Rapport introuvable (message supprimé ?).' }).catch(() => {});
+  const texte = await _lireTexteNote(msg);
+  if (!texte || texte.length < 5) return interaction.editReply({ content: '⚠️ Ce rapport est vide, rien à traiter.' }).catch(() => {});
+  const agent = msg.embeds?.[0]?.author?.name || interaction.user.username;
+
+  // ── 🕵️ Verser au carnet de renseignements ──
+  if (action === 'note_rens') {
+    const lieu = _champEmbed(msg, ['lieu', 'position', 'endroit', 'secteur']) || '—';
+    let rid = null;
+    try { rid = await notionV3.creerRenseignement?.(interaction.guild, { info: texte, source: agent, cible: lieu, rapporteurId: interaction.user.id, rapporteur: interaction.user.username }); }
+    catch (e) { console.log('⚠️ note→renseignement:', e.message); }
+    return interaction.editReply({ content: rid
+      ? `🕵️ Renseignement \`${rid}\` versé au **carnet** — en attente de validation par la Direction dans le salon Informateurs.`
+      : '⚠️ Impossible de créer le renseignement (salon Informateurs introuvable ?).' }).catch(() => {});
+  }
+
+  // ── 📜 En faire un contrat (analyse IA + brouillon à valider) ──
+  if (action === 'note_contrat') {
+    if (transcriptionHallucinee(texte)) {
+      return interaction.editReply({ content: '🌫️ Cette note semble brouillée (silence/bruit) — rien d\'exploitable pour un contrat.' }).catch(() => {});
+    }
+    const analyse = await _analyserNoteContrat(texte);
+    if (!analyse) return interaction.editReply({ content: '⚠️ Analyse impossible (IA indisponible ou clé manquante).' }).catch(() => {});
+    const type = (analyse.type === 'illegal') ? 'illegal' : 'legal';
+    const id = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    _draftStore.set(id, { type, cible: analyse.cible || '?', lieu: analyse.lieu || '', motif: analyse.motif || '', contact: analyse.contact || '', userId: interaction.user.id });
+    await interaction.channel.send({ embeds: [_embedBrouillonContrat(_draftStore.get(id), analyse.confiance)], components: _rowsBrouillonContrat(id, type) }).catch(() => {});
+    return interaction.editReply({ content: analyse.est_contrat
+      ? '📜 Brouillon de contrat généré sous le rapport — vérifie, ajuste le type si besoin, puis valide.'
+      : '📜 La note ne ressemblait pas clairement à un contrat : un brouillon vide a été créé, édite-le avant de valider.' }).catch(() => {});
+  }
 }
 
 async function _runDiagnostic(interaction) {
