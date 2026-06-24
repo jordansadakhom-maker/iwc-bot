@@ -1067,8 +1067,72 @@ async function routeTresorerieInteraction(interaction) {
       await interaction.editReply({ content: `✅ ${sortie ? '💸 Sortie' : '💵 Entrée'} enregistrée : **${_fmtTreso(montant)}** (${motif}).\n🏦 Nouveau solde du coffre : **${_fmtTreso(solde)}**.` }).catch(() => {});
       return true;
     }
+    // ── #coffre-illegal : panneau à boutons (même coffre commun, style Confrérie) ──
+    if (interaction.isButton?.() && (id === 'cilleg_entree' || id === 'cilleg_sortie')) {
+      if (!isMembre(interaction.member)) { await interaction.reply({ content: '🔒 Réservé aux membres de la Confrérie.', flags: MessageFlags.Ephemeral }); return true; }
+      const sortie = id === 'cilleg_sortie';
+      const modal = new ModalBuilder().setCustomId(sortie ? 'cilleg_modal_sortie' : 'cilleg_modal_entree').setTitle(sortie ? '💸 Sortie — Confrérie' : '💵 Entrée — Confrérie');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('montant').setLabel('Montant ($)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex : 1500')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('motif').setLabel('Motif').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder(sortie ? 'Ex : Armes, planque, parts…' : 'Ex : Braquage, butin, rançon…')),
+      );
+      await interaction.showModal(modal); return true;
+    }
+    if (interaction.isButton?.() && id === 'cilleg_refresh') {
+      await interaction.deferUpdate().catch(() => {});
+      await _installerPanelCoffreIllegal(interaction.guild).catch(() => {});
+      return true;
+    }
+    if (interaction.isModalSubmit?.() && (id === 'cilleg_modal_entree' || id === 'cilleg_modal_sortie')) {
+      const sortie = id === 'cilleg_modal_sortie';
+      const montant = _parseMontant(interaction.fields.getTextInputValue('montant'));
+      const motif = (interaction.fields.getTextInputValue('motif') || '').trim().slice(0, 200);
+      if (!(montant > 0)) { await interaction.reply({ content: '❌ Montant invalide. Indique un nombre, ex : 1500.', flags: MessageFlags.Ephemeral }); return true; }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const dbX = loadDB(); if (typeof dbX.coffre !== 'number') dbX.coffre = 0;
+      dbX.coffre = Math.max(0, dbX.coffre + (sortie ? -montant : montant));
+      const solde = dbX.coffre; saveDB(dbX);
+      const auteur = interaction.member?.displayName || interaction.user.username;
+      const emoji = sortie ? '💸' : '💵';
+      const titre = sortie ? 'Sortie — Coffre Illégal' : 'Entrée — Coffre Illégal';
+      await ajouterJournalIC(interaction.guild, { type: 'tresorerie', emoji, titre, description: `${sortie ? '-' : '+'}${_fmtTreso(montant)} · ${motif} · par ${auteur}`, auteur, montant }).catch(() => {});
+      try { _syncTransactionNotion?.({ type: sortie ? 'Sortie' : 'Entrée', coffre: 'illegal', montant, objet: motif, responsable: auteur, solde, date: new Date().toISOString(), discordId: interaction.user.id, userId: interaction.user.id }); } catch {}
+      await interaction.editReply({ content: `✅ ${sortie ? '💸 Sortie' : '💵 Entrée'} (Confrérie) enregistrée : **${_fmtTreso(montant)}** (${motif}).\n🏦 Nouveau solde du coffre commun : **${_fmtTreso(solde)}**.` }).catch(() => {});
+      return true;
+    }
   } catch (e) { console.log('❌ routeTresorerieInteraction:', e.message); try { if (!interaction.replied && !interaction.deferred) await interaction.reply({ content: '❌ Erreur lors de la saisie.', flags: MessageFlags.Ephemeral }); } catch {} return true; }
   return false;
+}
+const COFFRE_ILLEGAL_ID = '1508756490432024636';
+function _coffreIllegalEmbed(db) {
+  const solde = db.coffre || 0;
+  const fmt = n => `$${Math.round(n || 0).toLocaleString('fr-FR')}`;
+  return new EmbedBuilder().setColor(0x8B1A1A)
+    .setAuthor({ name: '🔒 La Confrérie • Trésorerie' })
+    .setTitle('🔒 Trésorerie — La Confrérie')
+    .setDescription('Enregistre chaque mouvement via les boutons ci-dessous.\n🔄 Synchronisé avec le coffre commun et le forum 💰 Trésorerie.')
+    .addFields({ name: '🏦 Coffre commun', value: `**${fmt(solde)}**`, inline: false })
+    .setFooter({ text: `La Confrérie • Trésorerie • ${new Date().toLocaleString('fr-FR')}` }).setTimestamp();
+}
+function _coffreIllegalRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('cilleg_entree').setLabel('Entrée').setEmoji('💵').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('cilleg_sortie').setLabel('Sortie').setEmoji('💸').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('cilleg_refresh').setLabel('Actualiser').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
+  );
+}
+async function _installerPanelCoffreIllegal(guild) {
+  try {
+    const ch = guild.channels.cache.get(COFFRE_ILLEGAL_ID) || await guild.channels.fetch(COFFRE_ILLEGAL_ID).catch(() => null);
+    if (!ch?.send) return;
+    const db = loadDB();
+    const payload = { embeds: [_coffreIllegalEmbed(db)], components: [_coffreIllegalRow()] };
+    let msg = null;
+    if (db.coffreIllegalPanelId) msg = await ch.messages.fetch(db.coffreIllegalPanelId).catch(() => null);
+    if (!msg) { const msgs = await ch.messages.fetch({ limit: 20 }).catch(() => null); msg = msgs ? [...msgs.values()].find(m => m.author?.id === guild.client.user.id && (m.embeds?.[0]?.title || '').includes('La Confrérie')) : null; }
+    if (msg) { await msg.edit(payload).catch(() => {}); if (db.coffreIllegalPanelId !== msg.id) { const d = loadDB(); d.coffreIllegalPanelId = msg.id; saveDB(d); } }
+    else { const sent = await ch.send(payload).catch(() => null); if (sent) { try { await sent.pin(); } catch {} const d = loadDB(); d.coffreIllegalPanelId = sent.id; saveDB(d); } }
+  } catch (e) { console.log('❌ _installerPanelCoffreIllegal:', e.message); }
 }
 async function ajouterJournalIC(guild, entry) {
   try {
@@ -1098,6 +1162,7 @@ async function ajouterJournalIC(guild, entry) {
             _ledgerAjouter(entry, sens, montant, poste);
             await _majBilanTresorerie(guild).catch(() => {});
             try { await notionModules.rafraichirPanelCoffre?.(guild); } catch {}
+            try { await _installerPanelCoffreIllegal(guild); } catch {}
             return;
           }
         }
@@ -2056,6 +2121,7 @@ async function autoSetup(guild) {
   reseau.installerPanel?.(guild).then(() => console.log('🕵️ Panneau Le Réseau installé')).catch(() => {});
   ripoux.installerPanel?.(guild).then(() => console.log('🎖️ Panneau Le Ripoux installé')).catch(() => {});
   installerTresorerie(guild).then(() => console.log('💰 Forum trésorerie prêt (étiquettes + dossiers)')).catch(() => {});
+  _installerPanelCoffreIllegal(guild).then(() => console.log('🔒 Panneau coffre illégal (boutons) installé')).catch(() => {});
   _assurerEtiquettesContrats(guild).then(() => console.log('🏷️ Étiquettes contrats prêtes (type + statut)')).catch(() => {});
   _assurerEtiquettesOperations(guild).then(() => console.log('🏷️ Étiquettes opérations prêtes (pôle + statut)')).catch(() => {});
   // Regroupement des forums sous « 📋 Forums » — une seule fois (respecte les déplacements manuels ultérieurs)
