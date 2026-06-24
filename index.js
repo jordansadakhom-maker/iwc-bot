@@ -2140,6 +2140,7 @@ async function autoSetup(guild) {
   carte.installerPanel?.(guild).then(() => console.log('🗺️ Panneau carte interactive installé')).catch(() => {});
   _assurerEtiquettesContrats(guild).then(() => console.log('🏷️ Étiquettes contrats prêtes (type + statut)')).catch(() => {});
   _assurerEtiquettesOperations(guild).then(() => console.log('🏷️ Étiquettes opérations prêtes (pôle + statut)')).catch(() => {});
+  _assurerEtiquettesAgenda(guild).then(() => console.log('🏷️ Étiquettes agenda prêtes (type + statut)')).catch(() => {});
   // Regroupement des forums sous « 📋 Forums » — une seule fois (respecte les déplacements manuels ultérieurs)
   if (!loadDB().forumsCategoryId) _rangerForums(guild).then(r => console.log(`📋 Forums rangés : ${r.moved} déplacé(s)`)).catch(() => {});
   { const evtCh = guild.channels.cache.get('1519247268367171751'); if (evtCh) evenements.installerPanel?.(guild, evtCh).then(() => console.log('🎉 Panneau événements installé')).catch(() => {}); }
@@ -2310,9 +2311,27 @@ async function nettoyerAgendaPasses(guild) {
     let changed = false;
     for (const p of db.agendaPosts) {
       if (!p || !p.expireAt || now < p.expireAt) { restants.push(p); continue; }
-      const ch = await guild.channels.fetch(p.channelId).catch(() => null);
-      if (ch) { const m = await ch.messages.fetch(p.messageId).catch(() => null); if (m) await m.delete().catch(() => {}); }
-      changed = true; // post arrivé à échéance → retiré de la liste
+      try {
+        if (p.forum && p.threadId) {
+          // Post de forum : on bascule l'étiquette 🟢 À venir → ✅ Passé puis on archive le fil (on garde l'historique)
+          const th = await guild.channels.fetch(p.threadId).catch(() => null);
+          if (th && th.setAppliedTags) {
+            const forum = th.parent || await guild.channels.fetch(AGENDA_FORUM_ID).catch(() => null);
+            const tags = forum?.availableTags || [];
+            const idVenir = tags.find(t => (t.name || '').toLowerCase().includes('venir'))?.id;
+            const idPasse = tags.find(t => (t.name || '').toLowerCase().includes('passe'))?.id;
+            let ids = (th.appliedTags || []).filter(id => id !== idVenir);
+            if (idPasse && !ids.includes(idPasse)) ids.push(idPasse);
+            await th.setAppliedTags(ids.slice(0, 5)).catch(() => {});
+            await th.setArchived?.(true).catch(() => {});
+          }
+        } else if (p.channelId && p.messageId) {
+          // Ancien comportement (message dans #agenda) : suppression
+          const ch = await guild.channels.fetch(p.channelId).catch(() => null);
+          if (ch) { const m = await ch.messages.fetch(p.messageId).catch(() => null); if (m) await m.delete().catch(() => {}); }
+        }
+      } catch {}
+      changed = true; // post arrivé à échéance → retiré de la liste de suivi
     }
     if (changed) { db.agendaPosts = restants; saveDB(db); }
   } catch (e) { console.log('❌ nettoyerAgendaPasses:', e.message); }
@@ -4224,11 +4243,13 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
         const rowAgenda = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId(`rdvclient_repondre_${rdvId}`).setLabel('💬 Répondre au client').setStyle(ButtonStyle.Primary),
         );
-        await agendaCh.send({
+        await posterRdvForum(interaction.guild, {
+          titre: `RDV CLIENT — ${rdv.nom || 'Client'}`,
           content: `${ping.content ? ping.content + ' — ' : ''}📅 **RDV client fixé** : ${dateRdv} à ${heure}`,
-          embeds: [embedAgenda],
+          embed: embedAgenda,
           components: [rowAgenda],
           allowedMentions: { roles: ping.ids },
+          type: 'client',
         }).catch(() => {});
       }
     } catch (e) { console.log('❌ post RDV client #agenda:', e.message); }
@@ -5940,6 +5961,87 @@ async function _assurerEtiquettesContrats(guild) {
   } catch (e) { console.log('❌ _assurerEtiquettesContrats:', e.message); }
 }
 // Étiquettes du forum des opérations (pôle + statut) + (re)catégorisation des posts
+// ════════ FORUM AGENDA : chaque RDV = un post de forum avec étiquettes (Type + Statut) ════════
+const AGENDA_FORUM_ID = '1519485624636407879';
+// Crée/complète les étiquettes du forum agenda (Type : Client/Médical/Réunion/Briefing/Recrutement/Autre + Statut)
+async function _assurerEtiquettesAgenda(guild) {
+  try {
+    let forum = guild.channels.cache.get(AGENDA_FORUM_ID);
+    try { forum = await guild.channels.fetch(AGENDA_FORUM_ID) || forum; } catch {}
+    if (!forum || forum.type !== 15 || !forum.setAvailableTags) return;
+    const clean = s => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const existing = forum.availableTags || [];
+    const voulu = [
+      { name: '🤝 Client', emoji: '🤝' },
+      { name: '🩺 Médical', emoji: '🩺' },
+      { name: '📜 Réunion', emoji: '📜' },
+      { name: '🎯 Briefing', emoji: '🎯' },
+      { name: '📝 Recrutement', emoji: '📝' },
+      { name: '📋 Autre', emoji: '📋' },
+      { name: '🟢 À venir', kw: 'venir' },
+      { name: '✅ Passé', kw: 'passe' },
+      { name: '✖️ Annulé', kw: 'annule' },
+    ];
+    const has = v => existing.some(t => v.emoji ? (t.name || '').includes(v.emoji) : clean(t.name).includes(v.kw));
+    const manquants = voulu.filter(v => !has(v));
+    if (manquants.length && existing.length + manquants.length <= 20) {
+      const merged = [
+        ...existing.map(t => { const o = { name: t.name, moderated: !!t.moderated }; if (t.id) o.id = t.id; if (t.emoji && (t.emoji.id || t.emoji.name)) o.emoji = { id: t.emoji.id || null, name: t.emoji.name || null }; return o; }),
+        ...manquants.map(v => ({ name: v.name })),
+      ];
+      await forum.setAvailableTags(merged).catch(e => console.log('⚠️ agenda setAvailableTags:', e.message));
+    }
+  } catch (e) { console.log('❌ _assurerEtiquettesAgenda:', e.message); }
+}
+// Devine l'emoji d'étiquette « Type » d'un RDV à partir de son intitulé / contenu
+function _typeRdvEmoji(texte) {
+  const t = (texte || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  if (/medic|medec|sant|soin|infirm/.test(t)) return '🩺';
+  if (/client/.test(t)) return '🤝';
+  if (/recrut|entretien|candidat/.test(t)) return '📝';
+  if (/briefing|debrief|operation/.test(t)) return '🎯';
+  if (/reunion|conseil|direction|assemble|meeting|convocation/.test(t)) return '📜';
+  return '📋';
+}
+// Poste un RDV comme POST DE FORUM (étiquette Type + 🟢 À venir). Repli sur #agenda si le forum est indispo.
+// Si rdvId + dateISO sont fournis → enregistre l'expiration pour basculer l'étiquette en « Passé » le moment venu.
+async function posterRdvForum(guild, { titre, content, embed, embeds, components, type, texteType, allowedMentions, rdvId, dateISO, heure } = {}) {
+  const corpsEmbeds = embeds || (embed ? [embed] : []);
+  const calcExpire = () => {
+    if (!dateISO) return null;
+    const hm = (heure || '').match(/(\d{1,2})\s*[h:]\s*(\d{0,2})/i);
+    const d = new Date(dateISO + 'T' + (hm ? `${String(hm[1]).padStart(2, '0')}:${(hm[2] || '00').padStart(2, '0')}` : '23:59') + ':00');
+    return isNaN(d.getTime()) ? (Date.now() + 30 * 86400000) : (d.getTime() + 90 * 60000); // 1h30 après l'heure
+  };
+  const enregistrer = (entry) => { try { const db = loadDB(); if (!Array.isArray(db.agendaPosts)) db.agendaPosts = []; db.agendaPosts.push(entry); saveDB(db); } catch {} };
+  let forum = guild.channels.cache.get(AGENDA_FORUM_ID);
+  try { forum = await guild.channels.fetch(AGENDA_FORUM_ID) || forum; } catch {}
+  if (forum && forum.type === 15 && forum.threads?.create) {
+    const tags = forum.availableTags || [];
+    const typeEmoji = type ? ({ client: '🤝', medical: '🩺', reunion: '📜', briefing: '🎯', recrutement: '📝', autre: '📋' }[type] || '📋') : _typeRdvEmoji(texteType || titre);
+    const applied = [];
+    const tType = tags.find(t => (t.name || '').includes(typeEmoji)); if (tType) applied.push(tType.id);
+    const tVenir = tags.find(t => (t.name || '').toLowerCase().includes('venir')); if (tVenir) applied.push(tVenir.id);
+    const msg = { content: content || undefined, embeds: corpsEmbeds, components: components || [] };
+    if (allowedMentions) msg.allowedMentions = allowedMentions;
+    const opts = { name: (titre || 'Rendez-vous').slice(0, 90), message: msg };
+    if (applied.length) opts.appliedTags = applied.slice(0, 5);
+    let post = await forum.threads.create(opts).catch(() => null);
+    if (!post && applied.length) { delete opts.appliedTags; post = await forum.threads.create(opts).catch(() => null); } // repli sans étiquettes
+    if (post) {
+      if (rdvId && dateISO) enregistrer({ id: rdvId, threadId: post.id, forum: true, expireAt: calcExpire() });
+      return { thread: post, forum: true };
+    }
+  }
+  // Repli : ancien comportement dans #agenda
+  const ag = getAgendaCh(guild);
+  if (ag?.send) {
+    const m = await ag.send({ content: content || undefined, embeds: corpsEmbeds, components: components || [], allowedMentions: allowedMentions || undefined }).catch(() => null);
+    if (m && rdvId && dateISO) enregistrer({ id: rdvId, channelId: ag.id, messageId: m.id, expireAt: calcExpire() });
+    if (m) return { message: m, forum: false };
+  }
+  return null;
+}
 async function _assurerEtiquettesOperations(guild) {
   try {
     let forum = guild.channels.cache.get('1518349707686973470');
@@ -7209,18 +7311,13 @@ async function _validerModalAgendaSimple(interaction) {
       }
     }
   } catch {}
-  // Tous les RDV vont dans le même salon #agenda (plus de séparation légal/illégal)
-  const agendaCh = getAgendaCh(interaction.guild);
-  const rdvMsg = agendaCh ? await agendaCh.send({ content: `${pingContent ? pingContent + ' — ' : ''}📅 **${titre}** · ${heure} à ${lieu}`, embeds: [embed], allowedMentions: { parse: [], roles: mentionRoles, users: mentionUsers } }).catch(() => null) : null;
-  // On mémorise le post pour pouvoir l'effacer automatiquement une fois la date/heure passée (salon propre)
-  if (rdvMsg) {
-    const hm = (heure || '').match(/(\d{1,2})\s*[h:]\s*(\d{0,2})/i);
-    const dateRdv = new Date(dateISO + 'T' + (hm ? `${String(hm[1]).padStart(2, '0')}:${(hm[2] || '00').padStart(2, '0')}` : '23:59') + ':00');
-    const expireAt = isNaN(dateRdv.getTime()) ? (Date.now() + 30 * 86400000) : (dateRdv.getTime() + 90 * 60000); // 1h30 après l'heure du RDV
-    if (!Array.isArray(db.agendaPosts)) db.agendaPosts = [];
-    db.agendaPosts.push({ id: rdvId, channelId: agendaCh.id, messageId: rdvMsg.id, expireAt });
-    saveDB(db);
-  }
+  // Chaque RDV devient un post de forum (étiquettes Type + 🟢 À venir). posterRdvForum gère l'expiration
+  // (bascule de l'étiquette en ✅ Passé + archivage du fil une fois la date/heure dépassée).
+  await posterRdvForum(interaction.guild, {
+    titre, content: `${pingContent ? pingContent + ' — ' : ''}📅 **${titre}** · ${heure} à ${lieu}`,
+    embed, allowedMentions: { parse: [], roles: mentionRoles, users: mentionUsers },
+    texteType: `${titre} ${lieu}`, rdvId, dateISO, heure,
+  }).catch(() => {});
   const salonLabel = '#agenda';
   const confirmMsg = await interaction.editReply({ content: photoUrl ? '✅ RDV créé avec photo de repérage !' : `✅ RDV créé et posté dans ${salonLabel} !`, embeds: [], components: [] });
   // Confirmation éphémère : on la retire au bout de quelques secondes pour ne pas encombrer le salon
@@ -7742,9 +7839,12 @@ async function _validerModalRdvIndividuel(interaction) {
     .setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` }).setTimestamp();
   if (notes) embed.addFields({ name: '📋 Ordre du jour', value: notes });
   // Tous les RDV dans le même salon #agenda (plus de séparation légal/illégal)
-  const agendaCh = getAgendaCh(interaction.guild);
   const mentionsMembres = pending.ids.map(id => `<@${id}>`).join(' ');
-  if (agendaCh) await agendaCh.send({ content: `${mentionsMembres} — 📅 Convocation : **${titre}** · ${heure} à ${lieu}`, embeds: [embed] }).catch(() => {});
+  await posterRdvForum(interaction.guild, {
+    titre, content: `${mentionsMembres} — 📅 Convocation : **${titre}** · ${heure} à ${lieu}`,
+    embed, allowedMentions: { users: pending.ids }, texteType: `${titre} ${notes || ''}`, type: 'reunion',
+    rdvId, dateISO, heure,
+  }).catch(() => {});
   for (const uid of pending.ids) { await envoyerDMRecap(interaction.guild, uid, 'rdv', { titre, date: dateCapital, heure, lieu, notes }).catch(() => {}); }
   delete db._rdvPending[pendingId]; saveDB(db);
   if (process.env.NOTION_TOKEN && process.env.NOTION_AGENDA_DB_ID) {
@@ -7808,11 +7908,13 @@ async function _validerModalRdv(interaction) {
     .addFields({ name: '🆔 Référence', value: '`' + rdvId + '`', inline: true }, { name: '📅 Date', value: dateCapital, inline: true }, { name: '🕐 Heure', value: `**${heure}**`, inline: true }, { name: '📍 Lieu', value: lieu, inline: true }, { name: '👥 Destinataires', value: poleCfg.label, inline: true }, { name: '✍️ Convoqué par', value: emetteurIC, inline: true })
     .setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` }).setTimestamp();
   if (notes) embed.addFields({ name: '📋 Ordre du jour', value: notes });
-  // Poster dans le bon salon selon le pôle
-  // Tous les RDV dans le même salon #agenda (plus de séparation légal/illégal)
-  const agendaCh = getAgendaCh(interaction.guild);
+  if (photoUrl) embed.setImage(photoUrl); // la photo de repérage est intégrée directement à la fiche du forum
+  // Chaque convocation = un post de forum (étiquette Réunion + 🟢 À venir), avec bascule auto en Passé
   let mention = ''; if (poleCfg.roleId) mention = `<@&${poleCfg.roleId}>`; else if (pole === 'direction') mention = getMention(interaction.guild); else mention = `<@&${ROLE_POLE_LEGAL}> <@&${ROLE_POLE_ILLEGAL}>`;
-  if (agendaCh) await agendaCh.send({ content: `${mention} — 📅 **${titre}** · ${heure} à ${lieu}`, embeds: [embed] }).catch(() => {});
+  await posterRdvForum(interaction.guild, {
+    titre, content: `${mention} — 📅 **${titre}** · ${heure} à ${lieu}`,
+    embed, texteType: `${titre} ${notes || ''}`, type: 'reunion', rdvId, dateISO, heure,
+  }).catch(() => {});
   if (poleCfg.roleId) {
     const roleMembers = interaction.guild.members.cache.filter(m => m.roles.cache.has(poleCfg.roleId) && !m.user.bot);
     for (const [uid] of roleMembers) { await envoyerDMRecap(interaction.guild, uid, 'rdv', { titre, date: dateCapital, heure, lieu }).catch(() => {}); }
@@ -7879,17 +7981,7 @@ async function _validerModalRdv(interaction) {
     });
   } catch {}
 
-  // Si photo → mettre à jour l'embed dans #agenda avec la photo
-  if (photoUrl && agendaCh) {
-    try {
-      const msgs = await agendaCh.messages.fetch({ limit: 5 });
-      const rdvMsg = msgs.find(m => m.author.id === interaction.client.user.id && m.embeds[0]?.title?.includes(titre.toUpperCase()));
-      if (rdvMsg) {
-        const newEmbed = EmbedBuilder.from(rdvMsg.embeds[0]).setImage(photoUrl);
-        await rdvMsg.edit({ embeds: [newEmbed] });
-      }
-    } catch {}
-  }
+  // (La photo de repérage est désormais intégrée à l'embed AVANT publication dans le forum.)
 
   await interaction.editReply({
     content: photoUrl ? `✅ RDV **${titre}** posté avec photo dans ${salonLabel} !` : `✅ RDV **${titre}** planifié dans ${salonLabel} !`,

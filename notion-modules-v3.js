@@ -785,13 +785,41 @@ async function handleInformateurConfirmer(interaction) {
 async function handleInformateurInfirmer(interaction) {
   return _traiterValidationInfo(interaction, 'infirme');
 }
+// Reconstruit un rapport à partir de l'embed du message (pour les rapports créés avant le correctif
+// de persistance, ou perdus à un redémarrage : on peut quand même les valider sans les resoumettre).
+function _reconstruireRapportDepuisEmbed(message, rapId) {
+  try {
+    const e = message?.embeds?.[0]; if (!e) return null;
+    const champ = (...mots) => { const f = (e.fields || []).find(f => mots.some(n => (f.name || '').toLowerCase().includes(n))); return f ? String(f.value || '').trim() : null; };
+    const rapMention = champ('rapporteur') || '';
+    const rapporteurId = (rapMention.match(/<@!?(\d+)>/) || [])[1] || null;
+    return {
+      id: rapId,
+      source: champ('source') || '—',
+      cible: champ('cible', 'lieu') || '—',
+      info: champ('information', 'info') || '—',
+      fiabilite: (champ('fiabilité', 'fiabilite') || '—').replace(/[✅⚠️]/g, '').trim() || '—',
+      statut: 'nouveau',
+      rapporteurId,
+      rapporteur: rapMention.replace(/<@!?\d+>/g, '').trim() || '—',
+      createdAt: new Date().toISOString(),
+      reconstruit: true,
+    };
+  } catch { return null; }
+}
 async function _traiterValidationInfo(interaction, decision) {
   const estDir = interaction.member?.roles?.cache?.some(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'].some(n => r.name.includes(n)));
   if (!estDir) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {});
   const rapId = interaction.customId.replace(decision === 'confirme' ? 'info_confirmer_' : 'info_infirmer_', '');
   const db = loadDB();
-  const rapport = (db.informateurs || []).find(r => r.id === rapId);
-  if (!rapport) return interaction.reply({ content: '❌ Rapport introuvable (il a peut-être été perdu lors d\'un redémarrage avant cette correction). Demande au rapporteur de le resoumettre.', flags: MessageFlags.Ephemeral }).catch(() => {});
+  let rapport = (db.informateurs || []).find(r => r.id === rapId);
+  if (!rapport) {
+    // Absent de la base (rapport d'avant le correctif, ou perdu) → on le reconstruit depuis l'embed
+    rapport = _reconstruireRapportDepuisEmbed(interaction.message, rapId);
+    if (!rapport) return interaction.reply({ content: '❌ Rapport introuvable et impossible à reconstruire. Demande au rapporteur de le resoumettre.', flags: MessageFlags.Ephemeral }).catch(() => {});
+    if (!db.informateurs) db.informateurs = [];
+    db.informateurs.push(rapport);
+  }
   if (rapport.statut && rapport.statut !== 'nouveau') {
     return interaction.reply({ content: `❌ Rapport déjà traité (${rapport.statut}).`, flags: MessageFlags.Ephemeral }).catch(() => {});
   }
