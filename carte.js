@@ -152,13 +152,18 @@ function _panelEmbed(db) {
     .setFooter({ text: 'La Confrérie • Carte • rien ne se perd' });
 }
 function _panelRows() {
-  return [new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('carte_web').setLabel('Ouvrir la carte (cliquable)').setEmoji('🌐').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('carte_view').setLabel('Consulter').setEmoji('🔍').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('carte_add').setLabel('Ajouter (Discord)').setEmoji('➕').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('carte_grille').setLabel('Grille').setEmoji('🧭').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('carte_manage').setLabel('Gérer').setEmoji('🛠️').setStyle(ButtonStyle.Secondary),
-  )];
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('carte_web').setLabel('Ouvrir la carte (cliquable)').setEmoji('🌐').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('carte_view').setLabel('Consulter').setEmoji('🔍').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('carte_add').setLabel('Ajouter (Discord)').setEmoji('➕').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('carte_grille').setLabel('Grille').setEmoji('🧭').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('carte_manage').setLabel('Gérer').setEmoji('🛠️').setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('carte_seturl').setLabel('Définir l\'URL du bot (Direction)').setEmoji('⚙️').setStyle(ButtonStyle.Secondary),
+    ),
+  ];
 }
 async function installerPanel(guild) {
   try {
@@ -263,11 +268,26 @@ async function routeInteraction(interaction) {
     // 🌐 Carte web cliquable : génère un lien personnel selon l'accréditation
     if (interaction.isButton?.() && id === 'carte_web') {
       const { tok, level } = creerToken(interaction.member);
-      const base = (process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL || process.env.BASE_URL || loadDB().carte?.baseUrl || '').replace(/\/$/, '');
+      const envHost = process.env.RENDER_EXTERNAL_HOSTNAME ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` : '';
+      const base = (process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL || process.env.BASE_URL || envHost || loadDB().carte?.baseUrl || '').replace(/\/$/, '');
       if (!base) { await interaction.reply({ content: '⚠️ L\'URL publique du bot n\'est pas encore connue. Ouvre une fois l\'adresse du bot dans un navigateur (la page d\'accueil Render), puis re-clique sur **🌐 Ouvrir la carte**. *(Le bot la détecte tout seul à la première visite.)*', flags: MessageFlags.Ephemeral }); return true; }
       const niv = _niv(level);
       await interaction.reply({ content: `🌐 **Ta carte interactive** — accès ${niv.emoji} **${niv.label}**\n${base}/carte?k=${tok}\n\n🖱️ *Clique sur la carte pour ajouter un point. Lien personnel, valable 24h.*`, flags: MessageFlags.Ephemeral });
       return true;
+    }
+    // ⚙️ Définir l'URL publique du bot à la main (Direction) — fiable à 100 %
+    if (interaction.isButton?.() && id === 'carte_seturl') {
+      if (!_isDirection(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return true; }
+      const modal = new ModalBuilder().setCustomId('carte_url_modal').setTitle('🌐 URL publique du bot');
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('url').setLabel('Adresse complète (https://…)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('https://mon-bot.onrender.com').setValue(loadDB().carte?.baseUrl || '')));
+      await interaction.showModal(modal); return true;
+    }
+    if (interaction.isModalSubmit?.() && id === 'carte_url_modal') {
+      if (!_isDirection(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return true; }
+      let url = (interaction.fields.getTextInputValue('url') || '').trim().replace(/\s+/g, '').replace(/\/$/, '');
+      if (!/^https:\/\/[a-z0-9.-]+\.[a-z]{2,}/i.test(url)) { await interaction.reply({ content: '❌ URL invalide. Elle doit ressembler à `https://mon-bot.onrender.com`.', flags: MessageFlags.Ephemeral }); return true; }
+      const db = loadDB(); _ensure(db); db.carte.baseUrl = url; saveDB(db);
+      await interaction.reply({ content: `✅ URL enregistrée : ${url}\nClique maintenant sur **🌐 Ouvrir la carte (cliquable)**.`, flags: MessageFlags.Ephemeral }); return true;
     }
     // ── Gérer (Direction) : modifier / supprimer ──
     if (interaction.isButton?.() && id === 'carte_manage') {
