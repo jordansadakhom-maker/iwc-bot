@@ -281,6 +281,14 @@ async function majForum(guild, contrat) {
   } catch (e) { console.log('⚠️ majForum contrat:', e.message); }
 }
 
+// Récupère le fil de forum d'un contrat — pour y poster l'activité de la mission (ex : signature)
+async function forumThread(guild, contrat) {
+  try {
+    if (!guild || !contrat.forumThreadId) return null;
+    return await guild.channels.fetch(contrat.forumThreadId).catch(() => null);
+  } catch { return null; }
+}
+
 // ─── Notion (réutilise la synchro existante d'index.js) ───
 function syncNotion(contrat, statutTexte) {
   try {
@@ -652,12 +660,15 @@ async function onDoSign(interaction, accepte) {
   await _persistNow(); // puis on attend la sauvegarde durable
   const guild = interaction.guild || interaction.client.guilds.cache.get(c.guildId);
   if (guild) {
-    const jc = journalCh(guild);
-    if (jc) await jc.send({ embeds: [new EmbedBuilder()
+    const embedSig = new EmbedBuilder()
       .setColor(accepte ? 0x57F287 : 0xED4245)
       .setTitle(`${accepte ? '🖋️ Contrat signé' : '❌ Signature refusée'} — ${c.id}`)
       .setDescription(`<@${interaction.user.id}> a **${accepte ? 'signé' : 'refusé de signer'}** le contrat **${c.id}** (${emojiType(c.typeMission)} ${c.typeMission}).`)
-      .setFooter({ text: 'La Confrérie • Signature' }).setTimestamp()] }).catch(() => {});
+      .setFooter({ text: 'La Confrérie • Signature' }).setTimestamp();
+    // L'alerte de signature est postée dans le FIL DU FORUM du contrat (avec l'activité de la mission),
+    // et non plus dans le journal de bord. Repli sur le journal si le fil est introuvable → jamais perdue.
+    const cible = (await forumThread(guild, c)) || journalCh(guild);
+    if (cible) await cible.send({ embeds: [embedSig] }).catch(() => {});
     await rafraichirFiche(guild, c).catch(() => {});
   }
 }
