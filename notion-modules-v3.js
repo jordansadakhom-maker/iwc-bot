@@ -798,15 +798,16 @@ async function _traiterValidationInfo(interaction, decision) {
   rapport.statut = decision;
   rapport.valideePar = interaction.user.username;
   rapport.valideeAt = new Date().toISOString();
-  saveDB(db); await _persistNow();
-  // Sync Notion
-  if (global._syncInformateurNotion) global._syncInformateurNotion(rapport, decision, interaction.user.username).catch(() => {});
+  saveDB(db); // écriture locale instantanée
   const confirme = decision === 'confirme';
   const embed = EmbedBuilder.from(interaction.message.embeds[0])
     .setColor(confirme ? 0xED4245 : 0x555555)
     .setTitle(`${confirme ? '🔴 Confirmé' : '⬛ Infirmé'} — Rapport ${rapId}`)
     .spliceFields(-1, 1, { name: '📌 Statut', value: confirme ? `🔴 Confirmé par ${interaction.user.username}` : `⬛ Infirmé par ${interaction.user.username}`, inline: false });
-  await interaction.update({ embeds: [embed], components: [] }).catch(() => {});
+  await interaction.update({ embeds: [embed], components: [] }).catch(() => {}); // accusé de réception (< 3 s) AVANT toute opération réseau lente
+  await _persistNow(); // PUIS sauvegarde Gist durable (peut prendre quelques s) — l'accusé est déjà parti, plus de risque de 10062
+  // Sync Notion (best effort)
+  if (global._syncInformateurNotion) global._syncInformateurNotion(rapport, decision, interaction.user.username).catch(() => {});
   // Si confirmé → alerter la Direction
   if (confirme) await _alerterDirection(interaction.guild, rapport, rapport.rapporteurId);
   // Met à jour le carnet de renseignements épinglé (confirmés uniquement, sources en noms de code)
