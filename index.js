@@ -4439,6 +4439,8 @@ client.once('clientReady', async () => {
   cron.schedule('0 4 * * *', async () => { for (const g of client.guilds.cache.values()) await _syncRegistreForum(g).catch(() => {}); }, { timezone: 'Europe/Paris' });
   // Le Ripoux : fuite spontanée + décroissance suspicion/heat (13h, décalé du Réseau)
   cron.schedule('0 13 * * *', async () => { try { await ripoux.tickQuotidien?.(client); } catch (e) { console.log('⚠️ ripoux tick:', e.message); } }, { timezone: 'Europe/Paris' });
+  // Télégrammes : relance de confirmation de clôture après 3 jours sans réponse (10h)
+  cron.schedule('0 10 * * *', async () => { try { await telegramme.verifierInactivite?.(client); } catch (e) { console.log('⚠️ télégramme inactivité:', e.message); } }, { timezone: 'Europe/Paris' });
 
   // [CORRECTION] Résumés hebdo → #journal-de-bord via ajouterJournalIC
   cron.schedule('0 8 * * 1', async () => {

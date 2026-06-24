@@ -46,6 +46,7 @@ function _logMsg(conv, from, name, content, opts = {}) {
   if (!Array.isArray(conv.messages)) conv.messages = [];
   conv.messages.push({ from, name: (name || '—').slice(0, 80), content: (content || '').slice(0, 2000), files: opts.files || 0, at: Date.now() });
   if (conv.messages.length > 300) conv.messages = conv.messages.slice(-300);
+  conv.lastActivityAt = Date.now(); // pour la relance auto d'inactivité
 }
 
 // Correction orthographique d'un message (silencieux si pas de clé ; renvoie l'original en cas d'échec).
@@ -214,7 +215,7 @@ async function ouvrirConversation(message, { rdvId, demandeurId, nomRP }) {
     store[rdvId] = {
       rdvId, demandeurId, nomRP: nomRP || 'Client',
       threadId: thread.id, parentChannelId: message.channel.id, msgId: message.id,
-      status: 'ouvert', createdAt: Date.now(),
+      status: 'ouvert', createdAt: Date.now(), lastActivityAt: Date.now(),
     };
     const initial = (message.embeds?.[0]?.description || (message.embeds?.[0]?.fields || []).map(f => `${f.name}: ${f.value}`).join(' · ') || message.content || '').replace(/\s+/g, ' ').trim();
     if (initial) _logMsg(store[rdvId], 'client', nomRP || 'Client', initial.slice(0, 1000));
@@ -352,13 +353,21 @@ async function routeInteraction(interaction) {
     const isClose = interaction.customId?.startsWith('tg_close::');
     const isReopen = interaction.customId?.startsWith('tg_reopen::');
     const isPurge = interaction.customId?.startsWith('tg_purge::');
-    if (!isClose && !isReopen && !isPurge) return false;
+    const isKeep = interaction.customId?.startsWith('tg_keep::');
+    if (!isClose && !isReopen && !isPurge && !isKeep) return false;
 
     if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à l\'équipe.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
     const rdvId = interaction.customId.split('::')[1];
     const db = loadDB(); const store = _store(db);
     const conv = store[rdvId];
     if (!conv) { await interaction.reply({ content: '⚠️ Conversation introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+
+    // ─── GARDER OUVERT (réponse à la relance d'inactivité) ───
+    if (isKeep) {
+      conv.lastActivityAt = Date.now(); conv.relanceAt = null; persist(db);
+      await interaction.update({ content: `✅ Conversation gardée ouverte par <@${interaction.user.id}>.`, components: [] }).catch(() => { interaction.deferUpdate?.().catch(() => {}); });
+      return true;
+    }
 
     // ─── CLASSER : retirer la conversation du salon (le récap reste archivé dans le registre) ───
     if (isPurge) {
@@ -424,4 +433,27 @@ const telegrammeCommands = [
   new SlashCommandBuilder().setName('registre-telegrammes-installer').setDescription('📜 Faire de CE salon le registre des télégrammes clôturés (équipe)'),
 ];
 
-module.exports = { ouvrirConversation, onMessage, routeInteraction, telegrammeCommands };
+// Relance auto : conversations ouvertes sans activité depuis 3 jours → confirmation de clôture
+async function verifierInactivite(client) {
+  try {
+    const db = loadDB(); const store = _store(db); const now = Date.now();
+    const SEUIL = 3 * 86400000; let changed = false;
+    for (const [rdvId, conv] of Object.entries(store)) {
+      if (!conv || conv.status !== 'ouvert') continue;
+      const last = conv.lastActivityAt || conv.createdAt || 0;
+      if (now - last < SEUIL) continue;                          // encore récent
+      if (conv.relanceAt && now - conv.relanceAt < SEUIL) continue; // déjà relancé récemment
+      const thread = await client.channels.fetch(conv.threadId).catch(() => null);
+      if (!thread) continue;
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`tg_close::${rdvId}`).setLabel('🔒 Clôturer').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(`tg_keep::${rdvId}`).setLabel('Garder ouvert').setStyle(ButtonStyle.Secondary),
+      );
+      await thread.send({ content: '⏳ **Ce télégramme dort depuis 3 jours sans réponse.** On le clôture pour garder le salon propre, ou on le garde ouvert ?', components: [row] }).catch(() => {});
+      conv.relanceAt = now; changed = true;
+    }
+    if (changed) persist(db);
+  } catch (e) { console.log('⚠️ telegramme verifierInactivite:', e.message); }
+}
+
+module.exports = { ouvrirConversation, onMessage, routeInteraction, telegrammeCommands, verifierInactivite };
