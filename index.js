@@ -236,7 +236,7 @@ async function _reposterCommeMembre(channel, member, user, content) {
       content: content.slice(0, 2000),
       username: ((member?.displayName || user?.username || 'Inconnu')).slice(0, 80),
       avatarURL: member?.displayAvatarURL?.() || user?.displayAvatarURL?.() || undefined,
-      allowedMentions: { parse: [] },
+      allowedMentions: { parse: ['users', 'roles'] },
     }).catch(() => {});
     return true;
   } catch { return false; }
@@ -2049,6 +2049,7 @@ async function autoSetup(guild) {
   ripoux.installerPanel?.(guild).then(() => console.log('🎖️ Panneau Le Ripoux installé')).catch(() => {});
   installerTresorerie(guild).then(() => console.log('💰 Forum trésorerie prêt (étiquettes + dossiers)')).catch(() => {});
   _assurerEtiquettesContrats(guild).then(() => console.log('🏷️ Étiquettes contrats prêtes (type + statut)')).catch(() => {});
+  _assurerEtiquettesOperations(guild).then(() => console.log('🏷️ Étiquettes opérations prêtes (pôle + statut)')).catch(() => {});
   { const evtCh = guild.channels.cache.get('1519247268367171751'); if (evtCh) evenements.installerPanel?.(guild, evtCh).then(() => console.log('🎉 Panneau événements installé')).catch(() => {}); }
   notionV3.republierRapportsManquants?.(guild).then(() => notionV3.majCarnetRenseignements?.(guild)).then(() => console.log('📓 Carnet de renseignements installé')).catch(() => {});
   // Rumeurs RP dans le même salon que Le Réseau (choix : les deux ensemble)
@@ -2782,9 +2783,10 @@ client.on('messageCreate', async message => {
         const rdv = rdvs[rdvs.length - 1]; // la plus récente
         const salonDemandes = client.channels.cache.get('1512175624176009348');
         if (salonDemandes) {
-          const operateur = salonDemandes.guild.roles.cache.find(r => r.name.includes('Opérateur') || r.name.includes('Operateur'));
-          const ping = operateur ? `<@&${operateur.id}>` : '';
-          const mentionIds = operateur ? [operateur.id] : [];
+          const PING_DEMANDE = ['1508459187456442561', '1508290255055229019']; // Opérateur + Officier de terrain
+          let mentionIds = PING_DEMANDE.filter(id => salonDemandes.guild.roles.cache.has(id));
+          if (!mentionIds.length) { const op = salonDemandes.guild.roles.cache.find(r => r.name.includes('Opérateur') || r.name.includes('Operateur') || r.name.includes('Officier')); if (op) mentionIds = [op.id]; }
+          const ping = mentionIds.map(id => `<@&${id}>`).join(' ');
           const embed = new EmbedBuilder()
             .setColor(0x5865F2)
             .setAuthor({ name: `💬 Réponse de ${rdv.nom}` })
@@ -4830,6 +4832,7 @@ client.once('clientReady', async () => {
       await notionV4.checkRecrutementSuivi?.(g).catch(() => {});
       await notionV4.checkEcheancesContrats?.(g).catch(() => {});
       await _checkContratsAEncaisser(g).catch(() => {});
+      await _syncEtiquettesOperations(g).catch(() => {});
       try {
         const db = loadDB(); const demain = new Date(); demain.setDate(demain.getDate() + 1); const ds = demain.toISOString().split('T')[0];
         for (const ct of (db.contrats || [])) {
@@ -5753,6 +5756,54 @@ async function _assurerEtiquettesContrats(guild) {
     const db = loadDB();
     for (const c of (db.contrats || []).slice(0, 60)) { if (c.ficheForumThreadId) await _majContratForum(guild, c).catch(() => {}); }
   } catch (e) { console.log('❌ _assurerEtiquettesContrats:', e.message); }
+}
+// Étiquettes du forum des opérations (pôle + statut) + (re)catégorisation des posts
+async function _assurerEtiquettesOperations(guild) {
+  try {
+    let forum = guild.channels.cache.get('1518349707686973470');
+    try { forum = await guild.channels.fetch('1518349707686973470') || forum; } catch {}
+    if (!forum || forum.type !== 15 || !forum.setAvailableTags) return;
+    const clean = s => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const existing = forum.availableTags || [];
+    const voulu = [
+      { name: '⚖️ Légal', emoji: '⚖️' },
+      { name: '🔒 Illégal', emoji: '🔒' },
+      { name: '🟡 Préparation', kw: 'preparation' },
+      { name: '🟢 En cours', kw: 'cours' },
+      { name: '🏁 Terminée', kw: 'terminee' },
+      { name: '✖️ Annulée', kw: 'annulee' },
+    ];
+    const has = v => existing.some(t => v.emoji ? (t.name || '').includes(v.emoji) : clean(t.name).includes(v.kw));
+    const manquants = voulu.filter(v => !has(v));
+    if (manquants.length && existing.length + manquants.length <= 20) {
+      const merged = [
+        ...existing.map(t => { const o = { name: t.name, moderated: !!t.moderated }; if (t.id) o.id = t.id; if (t.emoji && (t.emoji.id || t.emoji.name)) o.emoji = { id: t.emoji.id || null, name: t.emoji.name || null }; return o; }),
+        ...manquants.map(v => ({ name: v.name })),
+      ];
+      await forum.setAvailableTags(merged).catch(e => console.log('⚠️ operations setAvailableTags:', e.message));
+    }
+    await _syncEtiquettesOperations(guild, forum);
+  } catch (e) { console.log('❌ _assurerEtiquettesOperations:', e.message); }
+}
+async function _syncEtiquettesOperations(guild, forum) {
+  try {
+    forum = forum || guild.channels.cache.get('1518349707686973470');
+    if (!forum || !forum.availableTags?.length) return;
+    const clean = s => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const byKw = kw => forum.availableTags.find(t => clean(t.name).includes(kw))?.id;
+    const byEmoji = e => forum.availableTags.find(t => (t.name || '').includes(e))?.id;
+    const statutKw = { preparation: 'preparation', en_cours: 'cours', terminee: 'terminee', annulee: 'annulee' };
+    const db = loadDB();
+    for (const op of (db.operations || []).slice(-40)) {
+      const thId = op.threadId || op.channelId; if (!thId) continue;
+      const th = await guild.channels.fetch(thId).catch(() => null);
+      if (!th || !th.setAppliedTags) continue;
+      const ids = [];
+      const pole = byEmoji(op.pole === 'legal' ? '⚖️' : '🔒'); if (pole) ids.push(pole);
+      const st = byKw(statutKw[op.status] || 'preparation'); if (st) ids.push(st);
+      if (ids.length) await th.setAppliedTags([...new Set(ids)].slice(0, 5)).catch(() => {});
+    }
+  } catch (e) { console.log('❌ _syncEtiquettesOperations:', e.message); }
 }
 async function _installerPlanningContrats(guild) {
   try {
