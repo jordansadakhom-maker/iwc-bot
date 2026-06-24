@@ -95,10 +95,13 @@ async function _baseMapBuffer(guild) {
     const msg = await ch.messages.fetch(id).catch(() => null);
     const att = msg ? [...msg.attachments.values()].find(_estImage) : null;
     if (!att) return null;
-    const r = await fetch(att.url); if (!r.ok) return null;
+    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 8000);
+    const r = await fetch(att.url, { signal: ctrl.signal }).catch(() => null); clearTimeout(t);
+    if (!r || !r.ok) return null;
     return Buffer.from(await r.arrayBuffer());
   } catch { return null; }
 }
+function _timeout(ms) { return new Promise(r => setTimeout(() => r(null), ms)); }
 function _caseToXY(caseStr, W, H) {
   if (!caseStr) return null;
   const m = String(caseStr).trim().match(/^([A-La-l])\s*(\d{1,2})$/);
@@ -132,6 +135,7 @@ async function _renderMap(guild, points, opts = {}) {
   if (!Jimp) return null;
   const base = await _baseMapBuffer(guild); if (!base) return null;
   let img; try { img = await Jimp.read(base); } catch { return null; }
+  try { if (img.bitmap.width > 1280) img.scaleToFit(1280, 1280); } catch {}
   const W = img.bitmap.width, H = img.bitmap.height;
   _drawGrid(img);
   // étiquettes de grille (A–L en haut, 1–8 à gauche)
@@ -151,7 +155,8 @@ async function _renderMap(guild, points, opts = {}) {
     _marker(img, xy.x, xy.y, rad, _type(p.type).col);
     if (fNum) img.print(fNum, xy.x - (n > 9 ? 9 : 4), xy.y - 9, String(n));
   }
-  const buf = await img.getBufferAsync(Jimp.MIME_PNG).catch(() => null);
+  try { img.quality(82); } catch {}
+  const buf = await img.getBufferAsync(Jimp.MIME_JPEG).catch(() => null);
   return buf ? { buf, legend } : null;
 }
 
@@ -209,11 +214,11 @@ async function _consulter(interaction, typeKey) {
   if (typeKey && typeKey !== 'tout') pts = pts.filter(p => p.type === typeKey);
   if (!pts.length) return interaction.editReply({ content: '📭 Aucun point accessible pour ce filtre.' });
   const titre = typeKey && typeKey !== 'tout' ? `${_type(typeKey).emoji} ${_type(typeKey).label}` : '🗺️ Carte — points accessibles';
-  const rendered = await _renderMap(interaction.guild, pts).catch(() => null);
+  const rendered = await Promise.race([_renderMap(interaction.guild, pts), _timeout(13000)]);
   if (rendered) {
     const num = rendered.legend.map(L => `**${L.n}.** ${_type(L.p.type).emoji} ${L.p.nom}${L.p.case ? ` \`${L.p.case.toUpperCase()}\`` : ' *(sans case)*'} ${_niv(L.p.niveau).emoji}`).join('\n').slice(0, 3900);
-    const e = new EmbedBuilder().setColor(0x8B5A2B).setTitle(titre).setDescription(num).setImage('attachment://carte.png').setFooter({ text: `La Confrérie • ${pts.length} point(s) · selon ton accréditation` });
-    return interaction.editReply({ embeds: [e], files: [new AttachmentBuilder(rendered.buf, { name: 'carte.png' })] });
+    const e = new EmbedBuilder().setColor(0x8B5A2B).setTitle(titre).setDescription(num).setImage('attachment://carte.jpg').setFooter({ text: `La Confrérie • ${pts.length} point(s) · selon ton accréditation` });
+    return interaction.editReply({ embeds: [e], files: [new AttachmentBuilder(rendered.buf, { name: 'carte.jpg' })] });
   }
   // Repli texte si pas d'image
   const e = new EmbedBuilder().setColor(0x8B5A2B).setTitle(titre).setDescription(_legendeTexte(pts)).setFooter({ text: `La Confrérie • ${pts.length} point(s) · selon ton accréditation` });
@@ -269,9 +274,9 @@ async function routeInteraction(interaction) {
       // Sinon : placement guidé (colonne + ligne sur la carte quadrillée)
       _purgeDrafts(); _drafts.set(interaction.user.id, { ...draft, at: Date.now() });
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
-      const rendered = await _renderMap(interaction.guild, []).catch(() => null);
+      const rendered = await Promise.race([_renderMap(interaction.guild, []), _timeout(13000)]);
       const payload = { content: `➕ **${nom}** — choisis sa **position** (colonne + ligne) puis **Placer ici** :`, components: _placementRows(_drafts.get(interaction.user.id)) };
-      if (rendered) { payload.embeds = [new EmbedBuilder().setColor(0x8B5A2B).setImage('attachment://grille.png')]; payload.files = [new AttachmentBuilder(rendered.buf, { name: 'grille.png' })]; }
+      if (rendered) { payload.embeds = [new EmbedBuilder().setColor(0x8B5A2B).setImage('attachment://grille.jpg')]; payload.files = [new AttachmentBuilder(rendered.buf, { name: 'grille.jpg' })]; }
       await interaction.editReply(payload); return true;
     }
     if (interaction.isStringSelectMenu?.() && (id === 'carte_col' || id === 'carte_row')) {
@@ -300,10 +305,10 @@ async function routeInteraction(interaction) {
     }
     if (interaction.isButton?.() && id === 'carte_grille') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
-      const rendered = await _renderMap(interaction.guild, []).catch(() => null);
+      const rendered = await Promise.race([_renderMap(interaction.guild, []), _timeout(13000)]);
       if (!rendered) return interaction.editReply({ content: 'ℹ️ Aucune carte de fond trouvée. Poste une image de la carte dans ce salon, puis réessaie.' });
-      const e = new EmbedBuilder().setColor(0x8B5A2B).setTitle('🧭 Carte quadrillée').setDescription('Repère ta **case** (colonne A–L + ligne 1–8) pour ajouter un point au bon endroit.').setImage('attachment://grille.png');
-      return interaction.editReply({ embeds: [e], files: [new AttachmentBuilder(rendered.buf, { name: 'grille.png' })] });
+      const e = new EmbedBuilder().setColor(0x8B5A2B).setTitle('🧭 Carte quadrillée').setDescription('Repère ta **case** (colonne A–L + ligne 1–8) pour ajouter un point au bon endroit.').setImage('attachment://grille.jpg');
+      return interaction.editReply({ embeds: [e], files: [new AttachmentBuilder(rendered.buf, { name: 'grille.jpg' })] });
     }
     // 🌐 Carte web cliquable : génère un lien personnel selon l'accréditation
     if (interaction.isButton?.() && id === 'carte_web') {
