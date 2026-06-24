@@ -12,7 +12,9 @@ const {
 const { loadDB, saveDB, sauvegarderSurGitHub } = require('./db');
 // Sauvegarde immédiate sur GitHub : sur Render le disque est éphémère — sans ça, un contrat créé
 // est perdu au prochain redéploiement (d'où « Contrat introuvable » au moment de valider).
-function _persistNow() { try { if (typeof sauvegarderSurGitHub === 'function') sauvegarderSurGitHub().catch(() => {}); } catch {} }
+// Renvoie la promesse pour pouvoir l'ATTENDRE dans les étapes critiques (sinon un redéploiement
+// peut tuer le process avant la fin de la sauvegarde Gist → « Contrat introuvable » au prochain clic).
+function _persistNow() { try { if (typeof sauvegarderSurGitHub === 'function') return sauvegarderSurGitHub().catch(() => {}); } catch {} return Promise.resolve(); }
 
 // ─── Salons (IDs figés du serveur) ───
 const CH_CONTRATS          = '1508756442730074222';
@@ -424,7 +426,7 @@ async function onModalSubmit(interaction) {
   });
   contrat.msgId = sent.id;
   contrat.channelId = ch.id;
-  saveDB(db); _persistNow();
+  saveDB(db); await _persistNow(); // ATTENDRE la sauvegarde Gist : le contrat survit à un redéploiement immédiat
   posterForum(interaction.guild, contrat).catch(() => {});
   await interaction.editReply({ content: `✅ Contrat **${contrat.id}** créé${confidentiel ? ' *(anonyme & confidentiel)*' : ''}.` });
 }
@@ -442,7 +444,7 @@ async function onAccept(interaction) {
   c.acceptedAt = new Date().toISOString();
   c.acceptePar = db.members?.[interaction.user.id]?.name || interaction.user.username;
   await interaction.update({ embeds: [buildContratEmbed(c)], components: buildContratButtons(c) }); // accusé de réception d'abord
-  saveDB(db); _persistNow(); syncNotion(c, '🟢 En cours');                                          // puis travail lent
+  saveDB(db); await _persistNow(); syncNotion(c, '🟢 En cours');                                     // puis travail lent
   const jc = journalCh(interaction.guild);
   if (jc) await jc.send({ embeds: [new EmbedBuilder().setColor(0x2ECC71).setTitle(`🟢 Contrat validé — ${c.id}`).setDescription(`**${c.typeMission}** · validé par ${c.acceptePar}`).setFooter({ text: 'La Confrérie • Contrats' }).setTimestamp()] }).catch(() => {});
 }
@@ -455,7 +457,7 @@ async function onRefuse(interaction) {
   c.status = 'refuse';
   c.closedAt = new Date().toISOString();
   await interaction.update({ embeds: [buildContratEmbed(c)], components: [] }); // accusé de réception d'abord
-  saveDB(db); _persistNow(); syncNotion(c, '⛔ Refusé');
+  saveDB(db); await _persistNow(); syncNotion(c, '⛔ Refusé');
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -483,7 +485,7 @@ async function onAssignGo(interaction) {
   if (!c.agentsStatus) c.agentsStatus = {};
   for (const uid of c.agents) { if (!c.agentsStatus[uid]) c.agentsStatus[uid] = 'attente'; }
   await interaction.update({ content: `✅ ${interaction.values.length} agent(s) assigné(s) au contrat **${id}**. Briefings envoyés — ils doivent **accepter ou refuser**.`, components: [] }); // accusé de réception d'abord
-  saveDB(db); _persistNow();
+  saveDB(db); await _persistNow(); // ATTENDRE la sauvegarde : sinon un redémarrage avant la fin = « Contrat introuvable » au clic de l'agent
   await envoyerBriefings(interaction.guild, c);
   await rafraichirFiche(interaction.guild, c);
   const jc = journalCh(interaction.guild);
@@ -502,12 +504,13 @@ async function onAgentReponse(interaction, accepte) {
   if (!(c.agents || []).includes(uid)) return interaction.reply({ content: "❌ Tu n'es pas assigné à ce contrat.", flags: MessageFlags.Ephemeral });
   if (!c.agentsStatus) c.agentsStatus = {};
   c.agentsStatus[uid] = accepte ? 'accepte' : 'refuse';
-  saveDB(db); _persistNow();
+  saveDB(db);
   const txt = accepte
     ? '✅ Tu as **accepté** la mission. La Confrérie compte sur toi.'
     : "⛔ Tu as **refusé** la mission. C'est noté.";
-  try { await interaction.update({ embeds: interaction.message.embeds, components: [], content: txt }); }
+  try { await interaction.update({ embeds: interaction.message.embeds, components: [], content: txt }); } // accusé de réception (< 3 s) d'abord
   catch { try { await interaction.reply({ content: txt, flags: MessageFlags.Ephemeral }); } catch {} }
+  await _persistNow(); // puis on attend la sauvegarde durable (l'accusé est déjà parti)
   // Retrouver le serveur : un agent peut cliquer depuis ses MP, où interaction.guild est null
   const guild = interaction.guild || interaction.client.guilds.cache.get(c.guildId);
   if (guild) {
@@ -546,7 +549,7 @@ async function cloturer(interaction, succes) {
     c.honoreAt = new Date().toISOString();
   }
   await interaction.update({ embeds: [buildContratEmbed(c)], components: [] }); // accusé de réception d'abord
-  saveDB(db); _persistNow(); syncNotion(c, succes ? '✅ Réussie' : '💀 Échouée');
+  saveDB(db); await _persistNow(); syncNotion(c, succes ? '✅ Réussie' : '💀 Échouée');
   await archiver(interaction.guild, c);
   // Facture : un contrat Confrérie réussi est aussi répertorié dans le forum factures
   if (succes) {
@@ -601,7 +604,7 @@ async function onSignModalSubmit(interaction) {
   c.signataireId = uid;
   c.signatureEnvoyeeAt = new Date().toISOString();
   c.signe = false;
-  saveDB(db); _persistNow();
+  saveDB(db); await _persistNow();
   await rafraichirFiche(interaction.guild, c).catch(() => {});
   return interaction.editReply({ content: `✅ Contrat **${c.id}** envoyé en MP à <@${uid}> pour signature. Tu seras prévenu dès qu'il signe.` });
 }
@@ -615,10 +618,11 @@ async function onDoSign(interaction, accepte) {
   if (c.signe) return interaction.reply({ content: 'ℹ️ Ce contrat est déjà signé.', flags: MessageFlags.Ephemeral });
   if (accepte) { c.signe = true; c.signeAt = new Date().toISOString(); c.signeParId = interaction.user.id; }
   else { c.signe = false; c.signatureRefuseeAt = new Date().toISOString(); }
-  saveDB(db); _persistNow();
+  saveDB(db);
   const txt = accepte ? '✅ Tu as **signé** le contrat. La Confrérie a bien reçu ton accord.' : '❌ Tu as **refusé** de signer. C\'est noté.';
-  try { await interaction.update({ embeds: interaction.message.embeds, components: [], content: txt }); }
+  try { await interaction.update({ embeds: interaction.message.embeds, components: [], content: txt }); } // accusé de réception (< 3 s) d'abord
   catch { try { await interaction.reply({ content: txt, flags: MessageFlags.Ephemeral }); } catch {} }
+  await _persistNow(); // puis on attend la sauvegarde durable
   const guild = interaction.guild || interaction.client.guilds.cache.get(c.guildId);
   if (guild) {
     const jc = journalCh(guild);
