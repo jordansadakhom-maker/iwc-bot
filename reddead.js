@@ -23,9 +23,31 @@ const GEMINI_MODELS = ['gemini-3-pro-image-preview', process.env.GEMINI_IMAGE_MO
   .filter((m, i, a) => m && a.indexOf(m) === i);
 // Nom lisible du modèle (pour afficher ce qui a réellement produit l'image)
 function _nomModele(m) {
+  if (/gpt-image/.test(m || '')) return 'OpenAI gpt-image-1';
   if (/3-pro-image/.test(m || '')) return 'Nano Banana Pro';
   if (/flash-image/.test(m || '')) return 'Nano Banana';
   return m || '—';
+}
+// OpenAI gpt-image-1 (édition d'image) — moteur principal si OPENAI_API_KEY est défini
+async function _callOpenAI(buf, mt) {
+  const key = process.env.OPENAI_API_KEY; if (!key) return null;
+  try {
+    const ext = mt === 'image/jpeg' ? 'jpg' : mt === 'image/webp' ? 'webp' : 'png';
+    const form = new FormData();
+    form.append('model', 'gpt-image-1');
+    form.append('prompt', PROMPT_FARWEST);
+    form.append('size', 'auto');
+    form.append('quality', 'high');
+    form.append('image', new Blob([buf], { type: mt || 'image/png' }), `capture.${ext}`);
+    const resp = await fetch('https://api.openai.com/v1/images/edits', {
+      method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form,
+    });
+    if (!resp.ok) { const t = await resp.text().catch(() => ''); console.log(`❌ reddead OpenAI HTTP ${resp.status}: ${t.slice(0, 200)}`); return null; }
+    const data = await resp.json();
+    const b64 = data?.data?.[0]?.b64_json;
+    if (!b64) { console.log('⚠️ reddead OpenAI : aucune image dans la réponse'); return null; }
+    return { b64, mt: 'image/png', model: 'gpt-image-1' };
+  } catch (e) { console.log('❌ reddead OpenAI exception:', e.message); return null; }
 }
 
 const PROMPT_FARWEST = [
@@ -104,7 +126,12 @@ async function _callGemini(model, b64, mt, withModalities) {
 }
 
 // Repeint une image : essaie chaque modèle, puis avec responseModalities en repli.
-async function _transformer(b64, mt) {
+async function _transformer(buf, mt) {
+  // 1) OpenAI gpt-image-1 (le plus travaillé) si la clé est définie
+  const oa = await _callOpenAI(buf, mt);
+  if (oa) return oa;
+  // 2) Repli Gemini (Nano Banana Pro puis flash) — aucune panne si OpenAI absent/échoue
+  const b64 = buf.toString('base64');
   for (const model of GEMINI_MODELS) {
     let img = await _callGemini(model, b64, mt, false);
     if (!img) img = await _callGemini(model, b64, mt, true);
@@ -126,8 +153,8 @@ async function onMessage(message) {
     if (!_isRedDeadChannel(message.channel)) return false;
     const atts = message.attachments ? [...message.attachments.values()].filter(_estImage).slice(0, 4) : [];
     if (!atts.length) return false;
-    // Pas de clé image → on ne touche à rien (l'utilisateur garde sa capture telle quelle).
-    if (!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY)) return false;
+    // Pas de clé image (ni OpenAI ni Gemini) → on ne touche à rien (l'utilisateur garde sa capture).
+    if (!(process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY)) return false;
 
     const auteur = message.member?.displayName || message.author.username;
     const cap = (message.content || '').trim().slice(0, 250);
@@ -142,7 +169,7 @@ async function onMessage(message) {
       if (!buf) buf = await _imageBytes(a.url);
       if (!buf) continue;
       const mt = _sniffMt(buf) || _cleanMt(a.contentType);
-      const img = await _transformer(buf.toString('base64'), mt);
+      const img = await _transformer(buf, mt);
       if (img && img.b64) { try { outBufs.push(Buffer.from(img.b64, 'base64')); modelUtilise = img.model || modelUtilise; } catch {} }
     }
 
