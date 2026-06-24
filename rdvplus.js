@@ -394,30 +394,32 @@ async function routeInteraction(interaction) {
       const store = _store(loadDB()); const rdv = store.rdvs[rdvId];
       if (!rdv) { await interaction.reply({ content: '⚠️ Demande introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       if (interaction.user.id !== rdv.clientId) { await interaction.reply({ content: '🔒 Seul l\'auteur de la demande peut ajouter une photo.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
-      await interaction.reply({ content: '📎 **Envoie maintenant ta photo** (en pièce jointe) ici même, dans ce salon. Tu as 2 minutes — ton message sera nettoyé automatiquement après.', flags: MessageFlags.Ephemeral }).catch(() => {});
-      const ch = interaction.channel;
-      if (!ch || typeof ch.createMessageCollector !== 'function') { await interaction.followUp({ content: '⚠️ Impossible d\'attendre une photo dans ce salon.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
-      const collector = ch.createMessageCollector({ filter: (m) => m.author.id === interaction.user.id && m.attachments.size > 0, time: 120000, max: 1 });
+      // Photo demandée EN MESSAGE PRIVÉ → rien ne transite par le salon public (confidentiel)
+      let dm = null;
+      try { dm = await interaction.user.createDM(); } catch {}
+      if (!dm || typeof dm.createMessageCollector !== 'function') { await interaction.reply({ content: '⚠️ Je n\'arrive pas à t\'écrire en privé (tes MP sont sûrement fermés). Ouvre tes MP puis réessaie.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      await dm.send('📎 **Envoie-moi ici, en message privé, la photo du lieu** (en pièce jointe). Tu as 2 minutes.').catch(() => {});
+      await interaction.reply({ content: '📬 Je t\'ai écrit **en message privé** pour la photo — envoie-la là, en toute discrétion.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      const collector = dm.createMessageCollector({ filter: (m) => m.author.id === interaction.user.id && m.attachments.size > 0, time: 120000, max: 1 });
       collector.on('collect', async (m) => {
         try {
           const att = m.attachments.first();
           const estImage = (att?.contentType || '').startsWith('image/') || /\.(png|jpe?g|gif|webp)(\?|$)/i.test(att?.url || '');
-          if (!att || !estImage) { await interaction.followUp({ content: '⚠️ Ce n\'est pas une image — réessaie avec une photo.', flags: MessageFlags.Ephemeral }).catch(() => {}); await m.delete().catch(() => {}); return; }
+          if (!att || !estImage) { await dm.send('⚠️ Ce n\'est pas une image — reclique sur « Ajouter une photo » pour réessayer.').catch(() => {}); return; }
           const db2 = loadDB(); const store2 = _store(db2); const rdv2 = store2.rdvs[rdvId];
           if (!rdv2) return;
           rdv2.photo = 'attachment://lieu.png'; store2.rdvs[rdvId] = rdv2; _persist(db2);
-          // On recopie l'image SUR le télégramme : elle y reste même après suppression du message d'origine
+          // On recopie l'image SUR le télégramme (salon staff) : elle y reste de façon permanente
           try {
             const tch = await interaction.client.channels.fetch(rdv2.channelId).catch(() => null);
             const tmsg = tch && await tch.messages.fetch(rdv2.msgId).catch(() => null);
             if (tmsg) await tmsg.edit({ embeds: [_embedRdv(rdv2)], files: [new AttachmentBuilder(att.url, { name: 'lieu.png' })], components: _boutonsTelegramme(rdv2) }).catch(() => {});
           } catch {}
-          await m.delete().catch(() => {});
-          await interaction.followUp({ content: '✅ Photo ajoutée à ta demande.', flags: MessageFlags.Ephemeral }).catch(() => {});
+          await dm.send('✅ Photo bien reçue et ajoutée à ta demande. Merci !').catch(() => {});
         } catch {}
       });
       collector.on('end', async (collected) => {
-        if (collected.size === 0) { await interaction.followUp({ content: '⏱️ Temps écoulé — aucune photo reçue. Tu pourras réessayer plus tard.', flags: MessageFlags.Ephemeral }).catch(() => {}); }
+        if (collected.size === 0) { try { await dm.send('⏱️ Temps écoulé — aucune photo reçue. Reclique sur « Ajouter une photo » quand tu veux.'); } catch {} }
       });
       return true;
     }
