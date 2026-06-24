@@ -125,6 +125,9 @@ function buildContratEmbed(contrat) {
     )
     .setFooter({ text: `La Confrérie • Contrat clandestin${confid ? ' • CONFIDENTIEL' : ''}` })
     .setTimestamp(new Date(contrat.createdAt || Date.now()));
+  // Signature (anonyme : on n'affiche jamais qui a signé sur la fiche publique)
+  if (contrat.signe) e.addFields({ name: '🖋️ Signature', value: `✅ Signé${contrat.signeAt ? ' le ' + fmtDate(contrat.signeAt) : ''}`, inline: true });
+  else if (contrat.signataireId) e.addFields({ name: '🖋️ Signature', value: '⏳ Envoyé — en attente', inline: true });
   return e;
 }
 
@@ -143,7 +146,34 @@ function buildContratButtons(contrat) {
       new ButtonBuilder().setCustomId(`cc_fail::${contrat.id}`).setLabel('💀 Mission échouée').setStyle(ButtonStyle.Danger),
     ));
   }
+  // Signature par une personne (via son ID Discord, en MP) — tant que le contrat est ouvert
+  if (['propose', 'actif'].includes(contrat.status)) {
+    const label = contrat.signe ? '✅ Signé' : (contrat.signataireId ? '✍️ Relancer la signature' : '✍️ Faire signer');
+    rows.push(new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`cc_sign::${contrat.id}`).setLabel(label).setEmoji('🖋️').setStyle(ButtonStyle.Secondary).setDisabled(!!contrat.signe),
+    ));
+  }
   return rows; // vide si contrat clôturé
+}
+
+// ─── Embed envoyé EN MP à la personne pour signature (anonyme : pas de commanditaire) ───
+function buildSignatureEmbed(contrat) {
+  const r = riskOf(contrat);
+  const e = new EmbedBuilder()
+    .setColor(r.couleur)
+    .setTitle('🖋️ CONTRAT À SIGNER — La Confrérie')
+    .setDescription('*Un contrat vous est proposé. Lisez les termes, puis signez si vous acceptez.*\n*Discrétion absolue — ce document reste entre vos mains.*')
+    .addFields(
+      { name: '🆔 Référence', value: `\`${contrat.id}\``, inline: true },
+      { name: '🎯 Type', value: `${emojiType(contrat.typeMission)} ${contrat.typeMission || '—'}`, inline: true },
+      { name: '⚠️ Risque', value: `${r.emoji} ${r.label}`, inline: true },
+      { name: '💰 Prime', value: `${contrat.remuneration || '—'}`, inline: true },
+      { name: '📅 Échéance', value: contrat.dateEcheance ? fmtDate(contrat.dateEcheance) : (contrat.echeanceTexte || 'Aucune'), inline: true },
+      { name: '📋 Objet', value: contrat.objet || '—', inline: false },
+    )
+    .setFooter({ text: 'La Confrérie • Contrat confidentiel — signez pour accepter' });
+  if (contrat.details) e.addFields({ name: '📝 Consignes', value: contrat.details.slice(0, 1000) });
+  return e;
 }
 
 // ─── Briefing privé envoyé en DM aux agents ───
@@ -534,6 +564,74 @@ async function cloturer(interaction, succes) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// SIGNATURE PAR UNE PERSONNE (via son ID Discord, en MP) — contrat anonyme
+// ═══════════════════════════════════════════════════════════════
+// 1) Direction clique « ✍️ Faire signer » → demande l'ID Discord
+async function onFaireSigner(interaction) {
+  if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+  const id = interaction.customId.split('::')[1];
+  const db = loadDB();
+  const c = findContrat(db, id);
+  if (!c) return interaction.reply({ content: '❌ Contrat introuvable.', flags: MessageFlags.Ephemeral });
+  if (c.signe) return interaction.reply({ content: '✅ Ce contrat est déjà signé.', flags: MessageFlags.Ephemeral });
+  const modal = new ModalBuilder().setCustomId(`cc_sign_modal::${id}`).setTitle('✍️ Faire signer le contrat');
+  modal.addComponents(new ActionRowBuilder().addComponents(
+    new TextInputBuilder().setCustomId('discord_id').setLabel('ID Discord de la personne').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex : 123456789012345678').setValue(c.signataireId || ''),
+  ));
+  return interaction.showModal(modal);
+}
+// 2) Soumission de l'ID → on envoie le contrat en MP avec un bouton « Signer »
+async function onSignModalSubmit(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const id = interaction.customId.split('::')[1];
+  const db = loadDB();
+  const c = findContrat(db, id);
+  if (!c) return interaction.editReply({ content: '❌ Contrat introuvable.' });
+  if (c.signe) return interaction.editReply({ content: '✅ Ce contrat est déjà signé.' });
+  const uid = (interaction.fields.getTextInputValue('discord_id') || '').replace(/[^0-9]/g, '').trim();
+  if (uid.length < 15) return interaction.editReply({ content: '❌ ID Discord invalide. Colle l\'identifiant numérique (clic droit sur la personne → Copier l\'identifiant).' });
+  const user = await interaction.client.users.fetch(uid).catch(() => null);
+  if (!user) return interaction.editReply({ content: '❌ Utilisateur introuvable pour cet ID.' });
+  const btn = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`cc_dosign::${id}`).setLabel('✍️ Signer ce contrat').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`cc_norefuse::${id}`).setLabel('❌ Refuser').setStyle(ButtonStyle.Danger),
+  );
+  const dm = await user.send({ embeds: [buildSignatureEmbed(c)], components: [btn] }).catch(() => null);
+  if (!dm) return interaction.editReply({ content: `⚠️ Impossible d'envoyer le MP à <@${uid}> (ses messages privés sont fermés, ou le bot n'a aucun serveur en commun avec cette personne).` });
+  c.signataireId = uid;
+  c.signatureEnvoyeeAt = new Date().toISOString();
+  c.signe = false;
+  saveDB(db); _persistNow();
+  await rafraichirFiche(interaction.guild, c).catch(() => {});
+  return interaction.editReply({ content: `✅ Contrat **${c.id}** envoyé en MP à <@${uid}> pour signature. Tu seras prévenu dès qu'il signe.` });
+}
+// 3) La personne clique « Signer » (depuis son MP) → on enregistre la signature
+async function onDoSign(interaction, accepte) {
+  const id = interaction.customId.split('::')[1];
+  const db = loadDB();
+  const c = findContrat(db, id);
+  if (!c) return interaction.reply({ content: '❌ Contrat introuvable.', flags: MessageFlags.Ephemeral });
+  if (c.signataireId && interaction.user.id !== c.signataireId) return interaction.reply({ content: '❌ Ce contrat ne t\'est pas destiné.', flags: MessageFlags.Ephemeral });
+  if (c.signe) return interaction.reply({ content: 'ℹ️ Ce contrat est déjà signé.', flags: MessageFlags.Ephemeral });
+  if (accepte) { c.signe = true; c.signeAt = new Date().toISOString(); c.signeParId = interaction.user.id; }
+  else { c.signe = false; c.signatureRefuseeAt = new Date().toISOString(); }
+  saveDB(db); _persistNow();
+  const txt = accepte ? '✅ Tu as **signé** le contrat. La Confrérie a bien reçu ton accord.' : '❌ Tu as **refusé** de signer. C\'est noté.';
+  try { await interaction.update({ embeds: interaction.message.embeds, components: [], content: txt }); }
+  catch { try { await interaction.reply({ content: txt, flags: MessageFlags.Ephemeral }); } catch {} }
+  const guild = interaction.guild || interaction.client.guilds.cache.get(c.guildId);
+  if (guild) {
+    const jc = journalCh(guild);
+    if (jc) await jc.send({ embeds: [new EmbedBuilder()
+      .setColor(accepte ? 0x57F287 : 0xED4245)
+      .setTitle(`${accepte ? '🖋️ Contrat signé' : '❌ Signature refusée'} — ${c.id}`)
+      .setDescription(`<@${interaction.user.id}> a **${accepte ? 'signé' : 'refusé de signer'}** le contrat **${c.id}** (${emojiType(c.typeMission)} ${c.typeMission}).`)
+      .setFooter({ text: 'La Confrérie • Signature' }).setTimestamp()] }).catch(() => {});
+    await rafraichirFiche(guild, c).catch(() => {});
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // MES CONTRATS
 // ═══════════════════════════════════════════════════════════════
 async function onMine(interaction) {
@@ -608,6 +706,9 @@ async function routeInteraction(interaction) {
       if (id.startsWith('cc_fail::')) { await cloturer(interaction, false); return true; }
       if (id.startsWith('cc_agok::')) { await onAgentReponse(interaction, true); return true; }
       if (id.startsWith('cc_agno::')) { await onAgentReponse(interaction, false); return true; }
+      if (id.startsWith('cc_sign::')) { await onFaireSigner(interaction); return true; }
+      if (id.startsWith('cc_dosign::')) { await onDoSign(interaction, true); return true; }
+      if (id.startsWith('cc_norefuse::')) { await onDoSign(interaction, false); return true; }
     }
     if (interaction.isStringSelectMenu?.()) {
       if (interaction.customId === 'cc_type') { await onTypeSelect(interaction); return true; }
@@ -617,6 +718,7 @@ async function routeInteraction(interaction) {
       if (interaction.customId.startsWith('cc_assign_go::')) { await onAssignGo(interaction); return true; }
     }
     if (interaction.isModalSubmit?.()) {
+      if (interaction.customId.startsWith('cc_sign_modal::')) { await onSignModalSubmit(interaction); return true; }
       if (interaction.customId.startsWith('cc_modal::')) { await onModalSubmit(interaction); return true; }
     }
   } catch (e) {
