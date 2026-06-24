@@ -6146,6 +6146,36 @@ function _ficheMembreEmbed(guildMember, db) {
 }
 // Forum registre — un post par membre (réutilise le dossier /fiche)
 const FORUM_REGISTRE = '1518409832892469450';
+// Étiquettes du registre (pôle + statut) — créées sans toucher aux existantes
+async function _assurerEtiquettesRegistre(forum) {
+  try {
+    if (!forum?.setAvailableTags) return;
+    const existing = forum.availableTags || [];
+    const voulu = [
+      { name: '⚖️ Légal', emoji: '⚖️' },
+      { name: '🔒 Illégal', emoji: '🔒' },
+      { name: '✅ Actif', emoji: '✅' },
+      { name: '⚠️ Absent', emoji: '⚠️' },
+    ];
+    const manquants = voulu.filter(v => !existing.some(t => (t.name || '').includes(v.emoji)));
+    if (!manquants.length || existing.length + manquants.length > 20) return;
+    const merged = [
+      ...existing.map(t => { const o = { name: t.name, moderated: !!t.moderated }; if (t.id) o.id = t.id; if (t.emoji && (t.emoji.id || t.emoji.name)) o.emoji = { id: t.emoji.id || null, name: t.emoji.name || null }; return o; }),
+      ...manquants.map(v => ({ name: v.name })),
+    ];
+    await forum.setAvailableTags(merged).catch(e => console.log('⚠️ registre setAvailableTags:', e.message));
+  } catch {}
+}
+function _tagsRegistre(forum, m) {
+  const tags = forum.availableTags || []; if (!tags.length) return [];
+  const byEmoji = e => tags.find(t => (t.name || '').includes(e))?.id;
+  const ids = [];
+  if (m.pole === 'legal') { const x = byEmoji('⚖️'); if (x) ids.push(x); }
+  else if (m.pole === 'illegal') { const x = byEmoji('🔒'); if (x) ids.push(x); }
+  const st = m.status === 'absent' ? byEmoji('⚠️') : (m.status === 'inactif' ? null : byEmoji('✅'));
+  if (st) ids.push(st);
+  return [...new Set(ids)].slice(0, 5);
+}
 async function _posterOuMajFiche(guild, forum, gm, db) {
   const id = gm.id;
   if (!db.ficheForumPosts) db.ficheForumPosts = {};
@@ -6153,17 +6183,23 @@ async function _posterOuMajFiche(guild, forum, gm, db) {
   const cand = (db.candidatures || []).find(c => c.userId === id && c.status === 'acceptee');
   const perso = (cand && cand.nomPerso) || (db.members[id] && db.members[id].nomRP) || gm.displayName || gm.user.username;
   const titre = `🪪 ${perso}`.slice(0, 100);
+  const m = (db.members && db.members[id]) || {};
+  const tagIds = _tagsRegistre(forum, m);
   const existingId = db.ficheForumPosts[id];
   if (existingId) {
     const thread = await guild.channels.fetch(existingId).catch(() => null);
     if (thread && thread.fetchStarterMessage) {
       if (thread.archived && thread.setArchived) await thread.setArchived(false).catch(() => {});
       const starter = await thread.fetchStarterMessage().catch(() => null);
+      if (tagIds.length && thread.setAppliedTags) await thread.setAppliedTags(tagIds).catch(() => {});
       if (starter) { await starter.edit({ embeds: [embed] }).catch(() => {}); return 'updated'; }
     }
     if (thread) return 'updated'; // existe → pas de doublon
   }
-  const post = await forum.threads.create({ name: titre, message: { embeds: [embed] } }).catch(() => null);
+  const opts = { name: titre, message: { embeds: [embed] } };
+  if (tagIds.length) opts.appliedTags = tagIds;
+  let post = await forum.threads.create(opts).catch(() => null);
+  if (!post) post = await forum.threads.create({ name: titre, message: { embeds: [embed] } }).catch(() => null);
   if (post) { db.ficheForumPosts[id] = post.id; return 'created'; }
   return null;
 }
@@ -6171,6 +6207,7 @@ async function _syncRegistreForum(guild) {
   try {
     const forum = guild.channels.cache.get(FORUM_REGISTRE);
     if (!forum || forum.type !== 15 || !forum.threads?.create) return;
+    await _assurerEtiquettesRegistre(forum);
     const db = loadDB();
     if (!db.ficheForumPosts) db.ficheForumPosts = {};
     // 1) DÉDOUBLONNAGE : on scanne les posts existants (actifs + archivés), on garde 1 seul post par membre, on supprime les doublons.
