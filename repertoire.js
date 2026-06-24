@@ -317,7 +317,10 @@ function _panelContactEmbed() {
     .setFooter({ text: "Iron Wolf Company • Le Carnet" });
 }
 function _panelContactButtons() {
-  return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("contact_new").setLabel("Nouvelle fiche").setEmoji("🎴").setStyle(ButtonStyle.Success));
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("contact_new").setLabel("Nouvelle fiche").setEmoji("🎴").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("rep_search").setLabel("Rechercher").setEmoji("🔎").setStyle(ButtonStyle.Primary),
+  );
 }
 async function installerPanelContact(guild) {
   try {
@@ -325,7 +328,8 @@ async function installerPanelContact(guild) {
     if (!ch || typeof ch.send !== "function") return;
     const uid = guild.client?.user?.id;
     const msgs = await ch.messages.fetch({ limit: 20 }).catch(() => null);
-    if (msgs && msgs.find(m => m.author.id === uid && (m.embeds?.[0]?.title || "").includes("NOUVELLE FICHE DE CONTACT"))) return;
+    const panel = msgs ? [...msgs.values()].find(m => m.author.id === uid && (m.embeds?.[0]?.title || "").includes("NOUVELLE FICHE DE CONTACT")) : null;
+    if (panel) { await panel.edit({ embeds: [_panelContactEmbed()], components: [_panelContactButtons()] }).catch(() => {}); return; } // maj en place (ajoute le bouton 🔎)
     const sent = await ch.send({ embeds: [_panelContactEmbed()], components: [_panelContactButtons()] }).catch(() => null);
     if (sent) await sent.pin().catch(() => {});
   } catch (e) { console.log("⚠️ install panneau contact:", e.message); }

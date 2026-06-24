@@ -1662,6 +1662,8 @@ async function autoSetup(guild) {
   // Le Réseau — panneau du salon informateur
   reseau.installerPanel?.(guild).then(() => console.log('🕵️ Panneau Le Réseau installé')).catch(() => {});
   ripoux.installerPanel?.(guild).then(() => console.log('🎖️ Panneau Le Ripoux installé')).catch(() => {});
+  // Rumeurs RP dans le même salon que Le Réseau (choix : les deux ensemble)
+  { const dbR = loadDB(); if (dbR.rumeursChannelId !== '1517785774211207288') { dbR.rumeursChannelId = '1517785774211207288'; saveDB(dbR); } }
   // Facturation — panneau du salon factures
   factures.installerPanel?.(guild).then(() => console.log('🧾 Panneau Facturation installé')).catch(() => {});
   // Panneau « Bilan comptable » dans le salon comptabilité dédié
