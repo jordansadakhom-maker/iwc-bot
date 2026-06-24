@@ -7182,13 +7182,23 @@ async function _handleRdvModeSelect(interaction) {
     });
   } else {
     const db = loadDB();
+    const statutEmoji = { actif: '✅', absent: '⚠️', inactif: '💤', visiteur: '👁️' };
+    const statutTxt = { actif: 'Présent', absent: 'Absent', inactif: 'Inactif', visiteur: 'Visiteur' };
+    const prio = { actif: 0, visiteur: 1, inactif: 2, absent: 3 };
     const membres = Object.entries(db.members || {})
       .filter(([, m]) => m.name && m.status !== 'parti')
-      .map(([id, m]) => ({
-        label: String(m.name || m.username || id).slice(0, 100),
-        value: String(id).slice(0, 100),
-        description: m.username ? String(m.username).slice(0, 100) : undefined,
-      }))
+      .sort((a, b) => (prio[a[1].status] ?? 1) - (prio[b[1].status] ?? 1) || String(a[1].name || '').localeCompare(String(b[1].name || '')))
+      .map(([id, m]) => {
+        const emo = statutEmoji[m.status] || '✅';
+        const poleTxt = m.pole === 'illegal' ? '🔒 Illégal' : m.pole === 'legal' ? '⚖️ Légal' : '';
+        const desc = [statutTxt[m.status] || 'Présent', poleTxt].filter(Boolean).join(' · ');
+        return {
+          label: String(m.name || m.username || id).slice(0, 100),
+          value: String(id).slice(0, 100),
+          description: desc.slice(0, 100) || undefined,
+          emoji: emo,
+        };
+      })
       .filter(o => o.label.length > 0 && o.value.length > 0)
       .slice(0, 25);
     if (!membres.length) { await interaction.update({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('❌ Aucun membre IC enregistré')], components: [] }); return; }

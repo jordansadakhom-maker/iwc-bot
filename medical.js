@@ -379,7 +379,13 @@ async function routeInteraction(interaction) {
       const role = interaction.guild.roles.cache.get(ROLE_CONFRERIE);
       const membres = role ? [...role.members.values()].filter(m => !m.user.bot) : [];
       if (!membres.length) { await interaction.editReply({ content: '⚠️ Aucun membre de la Confrérie trouvé (vérifie le rôle).' }).catch(() => {}); return true; }
-      const options = membres.slice(0, 25).map(m => ({ label: m.displayName.slice(0, 100), value: m.id }));
+      const dbM = loadDB();
+      const statutEmoji = { actif: '✅', absent: '⚠️', inactif: '💤', visiteur: '👁️' };
+      const statutTxt = { actif: 'Présent', absent: 'Absent', inactif: 'Inactif', visiteur: 'Visiteur' };
+      const options = membres.slice(0, 25).map(m => {
+        const mm = (dbM.members && dbM.members[m.id]) || {};
+        return { label: m.displayName.slice(0, 100), value: m.id, description: (statutTxt[mm.status] || 'Présent'), emoji: statutEmoji[mm.status] || '✅' };
+      });
       const row = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('med_pick').setPlaceholder('Choisis un membre de la Confrérie').addOptions(options));
       await interaction.editReply({ content: `🩺 Dossier médical — choisis un membre de la **Confrérie**${membres.length > 25 ? ' *(25 premiers affichés)*' : ''} :`, components: [row] }).catch(() => {});
       return true;
