@@ -471,6 +471,7 @@ const SLASH_COMMANDS = [
     .addIntegerOption(o => o.setName('page').setDescription('Numéro de page').setRequired(false)),
   new SlashCommandBuilder().setName('profil').setDescription('👤 Affiche le profil d\'un membre').addUserOption(o => o.setName('membre').setDescription('Membre (optionnel)').setRequired(false)),
   new SlashCommandBuilder().setName('moi').setDescription('🏅 Mon profil RP : grade, ancienneté, mes contrats et mes rendez-vous'),
+  new SlashCommandBuilder().setName('journal-salon').setDescription('📒 Définir CE salon comme journal des informations (Direction)'),
   new SlashCommandBuilder().setName('bilan').setDescription('📊 Résumé trésorerie 7 derniers jours').addStringOption(o => o.setName('coffre').setDescription('Quel coffre ?').setRequired(false).addChoices({ name: '⚖️ Légal', value: 'legal' }, { name: '🔒 Illégal', value: 'illegal' })),
   new SlashCommandBuilder().setName('rdv').setDescription('📅 Créer un rendez-vous'),
   new SlashCommandBuilder().setName('agenda').setDescription('📅 Voir ou créer un RDV')
@@ -601,7 +602,7 @@ function isOfficierOuDirection(member) {
 // #journal-de-bord = destination pour TOUS les logs IC
 async function getLogsCh(guild) {
   // Journal de bord = destination de TOUS les logs/alertes (inactivité comprise)
-  const JOURNAL_ID = '1508756535407542372';
+  const JOURNAL_ID = (loadDB().journalChannelId) || '1508756535407542372';
   let journalCh = guild.channels.cache.get(JOURNAL_ID);
   if (!journalCh) journalCh = await guild.channels.fetch(JOURNAL_ID).catch(() => null);
   if (journalCh) return journalCh;
@@ -610,7 +611,7 @@ async function getLogsCh(guild) {
   if (!ch) ch = await guild.channels.fetch(CH.LOGS).catch(() => null);
   return ch;
 }
-function getJournalCh(guild) { return guild.channels.cache.get('1508756535407542372') || null; }
+function getJournalCh(guild) { const id = loadDB().journalChannelId || '1508756535407542372'; return guild.channels.cache.get(id) || guild.channels.cache.get('1508756535407542372') || null; }
 
 async function sendToThread(guild, threadId, payload) {
   try {
@@ -1283,6 +1284,11 @@ async function handleSlashCommand(interaction) {
     return;
   }
   if (commandName === 'moi') return _handleMoi(interaction);
+  if (commandName === 'journal-salon') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    const dbj = loadDB(); dbj.journalChannelId = interaction.channelId; saveDB(dbj);
+    return interaction.reply({ content: `✅ Ce salon est désormais le **journal des informations** : contrats, trésorerie, opérations, recrutement, promotions, arrivées/départs… arriveront ici. Le tableau de bord reste dans son salon.`, flags: MessageFlags.Ephemeral });
+  }
   if (commandName === 'fiche') {
     if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral });
     const membreOpt = interaction.options.getUser('membre');
