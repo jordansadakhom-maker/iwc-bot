@@ -855,6 +855,8 @@ async function _journalForumThread(forum, type) {
   } catch { return null; }
 }
 // ── Trésorerie : forum dédié (Entrées / Sorties classées), séparé du journal ──
+// ID du forum trésorerie créé par la Direction. Surchargé par /tresorerie-installer.
+const TRESORERIE_FORUM_ID = '1519271434374090772';
 const TRESO_CATS = {
   entree: { key: 'entrees', emoji: '📥', label: 'Entrées' },
   sortie: { key: 'sorties', emoji: '📤', label: 'Sorties' },
@@ -885,6 +887,33 @@ async function _tresorerieForumThread(forum, entry) {
     return post;
   } catch { return null; }
 }
+// Installe le forum trésorerie : étiquettes + dossiers Entrées/Sorties (idempotent, sans rien casser)
+async function installerTresorerie(guild) {
+  try {
+    const db = loadDB();
+    const id = db.tresorerieForumId || TRESORERIE_FORUM_ID;
+    const forum = guild.channels.cache.get(id) || await guild.channels.fetch(id).catch(() => null);
+    if (!forum || forum.type !== 15 || !forum.threads?.create) return;
+    if (db.tresorerieForumId !== forum.id) { db.tresorerieForumId = forum.id; saveDB(db); }
+    // Étiquettes (sans toucher aux existantes)
+    if (forum.setAvailableTags) {
+      const clean = s => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+      const existing = forum.availableTags || [];
+      const voulu = [{ name: '📥 Entrée', kw: 'entree' }, { name: '📤 Sortie', kw: 'sortie' }, { name: '💰 Mouvement', kw: 'mouvement' }];
+      const manquants = voulu.filter(v => !existing.some(t => clean(t.name).includes(v.kw)));
+      if (manquants.length && existing.length + manquants.length <= 20) {
+        const merged = [
+          ...existing.map(t => { const o = { name: t.name, moderated: !!t.moderated }; if (t.id) o.id = t.id; if (t.emoji && (t.emoji.id || t.emoji.name)) o.emoji = { id: t.emoji.id || null, name: t.emoji.name || null }; return o; }),
+          ...manquants.map(v => ({ name: v.name })),
+        ];
+        await forum.setAvailableTags(merged).catch(e => console.log('⚠️ trésorerie setAvailableTags:', e.message));
+      }
+    }
+    // Dossiers principaux (Entrées / Sorties) créés tout de suite
+    await _tresorerieForumThread(forum, { type: 'tresorerie', titre: 'Entrée' }).catch(() => {});
+    await _tresorerieForumThread(forum, { type: 'tresorerie', titre: 'Sortie' }).catch(() => {});
+  } catch (e) { console.log('❌ installerTresorerie:', e.message); }
+}
 async function ajouterJournalIC(guild, entry) {
   try {
     const emojiMap = { operation: '🎯', contrat: '📜', recrutement: '🐺', tresorerie: '💰', promotion: '⬆️', autre: '📋' };
@@ -898,7 +927,7 @@ async function ajouterJournalIC(guild, entry) {
       .setTimestamp();
     // Trésorerie → forum dédié (JAMAIS dans le journal) si configuré
     if (entry.type === 'tresorerie') {
-      const tfid = loadDB().tresorerieForumId;
+      const tfid = loadDB().tresorerieForumId || TRESORERIE_FORUM_ID;
       if (tfid) {
         const tf = guild.channels.cache.get(tfid) || await guild.channels.fetch(tfid).catch(() => null);
         if (tf && tf.type === 15 && tf.threads?.create) {
@@ -1373,9 +1402,11 @@ async function handleSlashCommand(interaction) {
     if (!isDirection(interaction.member)) return interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral });
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const dbt = loadDB();
-    let forum = dbt.tresorerieForumId ? (guild.channels.cache.get(dbt.tresorerieForumId) || await guild.channels.fetch(dbt.tresorerieForumId).catch(() => null)) : null;
+    const existId = dbt.tresorerieForumId || TRESORERIE_FORUM_ID;
+    let forum = existId ? (guild.channels.cache.get(existId) || await guild.channels.fetch(existId).catch(() => null)) : null;
     if (forum && forum.type === 15) {
-      return interaction.editReply({ content: `✅ Le forum trésorerie existe déjà : <#${forum.id}>. Tous les mouvements (📥 entrées / 📤 sorties) y sont classés automatiquement, **jamais dans le journal**.` });
+      await installerTresorerie(guild).catch(() => {});
+      return interaction.editReply({ content: `✅ Forum trésorerie configuré : <#${forum.id}>.\n📥 **Entrées**, 📤 **Sorties** et 💰 **Mouvements** : étiquettes + dossiers créés. Tout y est classé automatiquement, **jamais dans le journal**.` });
     }
     const parentId = interaction.channel?.isThread?.() ? interaction.channel.parentId : interaction.channel?.parentId;
     try {
@@ -1850,6 +1881,7 @@ async function autoSetup(guild) {
   // Le Réseau — panneau du salon informateur
   reseau.installerPanel?.(guild).then(() => console.log('🕵️ Panneau Le Réseau installé')).catch(() => {});
   ripoux.installerPanel?.(guild).then(() => console.log('🎖️ Panneau Le Ripoux installé')).catch(() => {});
+  installerTresorerie(guild).then(() => console.log('💰 Forum trésorerie prêt (étiquettes + dossiers)')).catch(() => {});
   { const evtCh = guild.channels.cache.get('1519247268367171751'); if (evtCh) evenements.installerPanel?.(guild, evtCh).then(() => console.log('🎉 Panneau événements installé')).catch(() => {}); }
   notionV3.republierRapportsManquants?.(guild).then(() => notionV3.majCarnetRenseignements?.(guild)).then(() => console.log('📓 Carnet de renseignements installé')).catch(() => {});
   // Rumeurs RP dans le même salon que Le Réseau (choix : les deux ensemble)
