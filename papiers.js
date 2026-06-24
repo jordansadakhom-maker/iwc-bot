@@ -536,6 +536,16 @@ async function gererInteractionPapiers(interaction) {
       return;
     }
 
+    // 1b) Boutons du panneau Papiers → ouvrir le bon formulaire
+    if (interaction.isButton?.() && interaction.customId?.startsWith('papier_open_')) {
+      if (!estMembre(interaction.member)) return interaction.reply({ content: '🔒 Réservé aux membres de la Compagnie.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      const type = interaction.customId.replace('papier_open_', '');
+      if (type === 'wanted' && !estDirection(interaction.member)) return interaction.reply({ content: '🔒 Émettre un avis de recherche est réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      const modal = buildModal(type);
+      if (modal) return interaction.showModal(modal).catch(e => console.log('⚠️ papiers showModal (bouton):', e.message));
+      return;
+    }
+
     // 2) Soumission des formulaires
     if (interaction.isModalSubmit?.() && interaction.customId?.startsWith('papier_modal_')) {
       const type = interaction.customId.replace('papier_modal_', '');
@@ -886,6 +896,42 @@ async function deployerPapiers(client) {
   } catch (e) { console.log('❌ papiers AUTO_DEPLOY:', e.message); }
 }
 
+// ─── Panneau « 📜 PAPIERS » : un bouton par document (fini les 8 commandes) ───
+function _panelPapiersPayload() {
+  const e = new EmbedBuilder().setColor(COL.sepia).setTitle('📜 PAPIERS — IRON WOLF COMPANY')
+    .setDescription([
+      '*Tous les documents officiels de la Compagnie, en un clic.*',
+      '',
+      'Choisis un document ci-dessous, remplis le formulaire — il est généré puis archivé ici.',
+    ].join('\n'))
+    .setFooter({ text: 'Iron Wolf Company • Registre des papiers' });
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('papier_open_recu').setLabel('Reçu').setEmoji('🧾').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('papier_open_dette').setLabel('Dette').setEmoji('📜').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('papier_open_casier').setLabel('Casier').setEmoji('🗂️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('papier_open_carte').setLabel('Carte').setEmoji('🎴').setStyle(ButtonStyle.Secondary),
+  );
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('papier_open_ordre').setLabel('Ordre de mission').setEmoji('🎖️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('papier_open_billet').setLabel('Billet').setEmoji('🃏').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('papier_open_wanted').setLabel('Avis de recherche').setEmoji('🔫').setStyle(ButtonStyle.Danger),
+  );
+  return { embeds: [e], components: [row1, row2] };
+}
+async function installerPanelPapiers(client) {
+  try {
+    const ch = await client.channels.fetch(CONFIG.REGISTRE_CHANNEL_ID).catch(() => null);
+    if (!ch?.messages) return;
+    const me = client.user.id;
+    const msgs = await ch.messages.fetch({ limit: 30 }).catch(() => null);
+    const panel = msgs ? [...msgs.values()].find(m => m.author.id === me && (m.embeds?.[0]?.title || '').includes('PAPIERS — IRON WOLF COMPANY')) : null;
+    const payload = _panelPapiersPayload();
+    if (panel) { await panel.edit(payload).catch(() => {}); return; }
+    const sent = await ch.send(payload).catch(() => null);
+    if (sent) await sent.pin().catch(() => {});
+  } catch (e) { console.log('⚠️ papiers installerPanel:', e.message); }
+}
+
 // ─────────────────────────────── INIT ──────────────────────────────────────
 function initPapiers(client) {
   // Écouteur dédié : ne gère QUE les interactions « papier_ » et les 8 commandes.
@@ -896,7 +942,10 @@ function initPapiers(client) {
     if (client.isReady()) deployerPapiers(client);
     else client.once('clientReady', () => deployerPapiers(client));
   }
-  console.log('📜 Module Papiers RP chargé (8 commandes).');
+  // Panneau à boutons dans le salon registre (créé/maj au démarrage)
+  if (client.isReady()) installerPanelPapiers(client);
+  else client.once('clientReady', () => installerPanelPapiers(client));
+  console.log('📜 Module Papiers RP chargé (8 commandes + panneau).');
 }
 
 module.exports = { initPapiers, papiersCommands };

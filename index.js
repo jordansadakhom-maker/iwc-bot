@@ -1668,6 +1668,26 @@ async function autoSetup(guild) {
   factures.installerPanel?.(guild).then(() => console.log('🧾 Panneau Facturation installé')).catch(() => {});
   // Panneau « Bilan comptable » dans le salon comptabilité dédié
   { const comptaCh = guild.channels.cache.get('1518922581720170608'); if (comptaCh) comptabilite.installerPanel?.(guild, comptaCh).then(() => console.log('📊 Panneau comptabilité installé')).catch(() => {}); }
+  // Panneau d'accueil #informateurs/#plans (dépôt d'infos → carnet de renseignements)
+  { const plansCh = guild.channels.cache.get('1509255294184853524');
+    if (plansCh?.messages) { (async () => { try {
+      const me = client.user.id; const msgs = await plansCh.messages.fetch({ limit: 20 }).catch(() => null);
+      if (msgs && [...msgs.values()].some(m => m.author.id === me && (m.embeds?.[0]?.title || '').includes('RENSEIGNEMENTS'))) return;
+      const e = new EmbedBuilder().setColor(0x2B2118).setTitle('🕵️ RENSEIGNEMENTS & PLANS')
+        .setDescription(['*Le carnet de renseignements de la Confrérie.*', '', '📝 **Dépose ici ce que tu apprends** : noms, lieux, mouvements, dettes, opportunités, plans en préparation.', 'Le bot enregistre l\'info automatiquement pour qu\'on la retrouve.', '', '*Plus on partage, plus on est forts — et discrets.*'].join('\n'))
+        .setFooter({ text: 'La Confrérie • Renseignements' });
+      const sent = await plansCh.send({ embeds: [e] }).catch(() => null); if (sent) await sent.pin().catch(() => {});
+    } catch {} })(); } }
+  // En-tête #recrutement-interne (vote du staff)
+  { const recintCh = guild.channels.cache.get('1509254315712188438');
+    if (recintCh?.messages) { (async () => { try {
+      const me = client.user.id; const msgs = await recintCh.messages.fetch({ limit: 20 }).catch(() => null);
+      if (msgs && [...msgs.values()].some(m => m.author.id === me && (m.embeds?.[0]?.title || '').includes('RECRUTEMENT INTERNE'))) return;
+      const e = new EmbedBuilder().setColor(0x3B82F6).setTitle('🗳️ RECRUTEMENT INTERNE — VOTE DU STAFF')
+        .setDescription(['*Les dossiers des candidats arrivent ici pour décision.*', '', 'Pour chaque dossier, réagis :', '✅ **Accepter**  ·  ❌ **Refuser**  ·  🤔 **À revoir**', '', '*La décision se prend ensemble.*'].join('\n'))
+        .setFooter({ text: 'Iron Wolf Company • Recrutement interne' });
+      const sent = await recintCh.send({ embeds: [e] }).catch(() => null); if (sent) await sent.pin().catch(() => {});
+    } catch {} })(); } }
   // Suivi médical — panneau du salon privé
   medical.installerPanel?.(guild).then(() => console.log('🩺 Panneau Suivi médical installé')).catch(() => {});
   medical.installerExemple?.(guild).then(() => console.log('🩺 Exemple test d\'aptitude posté')).catch(() => {});
