@@ -805,7 +805,10 @@ async function onMessage(message) {
     await message.react("✅").catch(() => {});
     // Un seul « Coffre mis à jour » : on retire les récaps précédents avant de poster le nouveau
     await _purgerRecapsPrecedents(message.channel, message.client.user.id);
-    await message.channel.send({ embeds: [_recapEmbed('replace', lignes)], allowedMentions: { parse: [] } }).catch(() => {});
+    const recapMsg = await message.channel.send({ embeds: [_recapEmbed('replace', lignes)], allowedMentions: { parse: [] } }).catch(() => null);
+    // Le détail complet (avant → après) est déjà archivé dans le fil 📦 Journal du coffre :
+    // ce récap dans le salon n'est qu'un aperçu → on le retire automatiquement après quelques secondes.
+    if (recapMsg) setTimeout(() => { recapMsg.delete().catch(() => {}); }, 10000);
     return true;
   } catch { return false; }
 }
