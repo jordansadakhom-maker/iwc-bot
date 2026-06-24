@@ -420,6 +420,49 @@ async function onRiskSelect(interaction) {
 }
 // Poste le contrat Confrérie en POST de forum catégorisé (salon partagé des contrats)
 const FORUM_CONTRATS = '1518392786301227250';
+// ─── Fiche de renseignement : modèle complet posté dans le fil du contrat, à compléter par les agents ───
+function buildFicheRenseignementEmbed(contrat) {
+  return new EmbedBuilder()
+    .setColor(0x8B1A1A)
+    .setTitle(`🗂️ FICHE DE RENSEIGNEMENT — ${contrat.id}`)
+    .setDescription([
+      '*Centralisez ici tout ce qu\'on sait sur la cible. Chaque détail peut faire la différence sur le terrain.*',
+      '*Copiez le **modèle** juste en dessous, complétez-le et postez-le dans ce fil. Joignez vos photos & captures.*',
+    ].join('\n'))
+    .addFields(
+      { name: '🎯 Cible / Sujet', value: '*Nom(s), surnom(s), fonction, description générale.*' },
+      { name: '👁️ Signes distinctifs', value: '*Tenue habituelle, marque/signe, cicatrices, accent, tics…*\n> ex : long manteau beige · bandana noir · ceinturon argenté gravé d\'un serpent' },
+      { name: '🔫 Armement', value: '*Armes observées.*\n> ex : revolver · fusils' },
+      { name: '👥 Effectifs / organisation', value: '*Nombre, hiérarchie, complices connus.*\n> ex : bande de 5 à 6 personnes' },
+      { name: '📍 Lieux fréquentés / repaires', value: '*Planques, points de RDV, zones d\'activité (joindre une carte si possible).*' },
+      { name: '🐴 Montures / déplacements', value: '*Chevaux, attelages, itinéraires, horaires de passage.*' },
+      { name: '🤝 Relations', value: '*Alliés, ennemis, indics, protections (loi, autres gangs…).*' },
+      { name: '⏰ Habitudes / vulnérabilités', value: '*Routines, points faibles, moments propices à l\'action.*' },
+      { name: '📸 Preuves', value: '*Photos, captures, témoignages — déposez-les directement dans ce fil.*' },
+    )
+    .setFooter({ text: 'La Confrérie • Renseignement de terrain — Confidentiel' });
+}
+const FICHE_RENSEIGNEMENT_MODELE = [
+  '```',
+  '🗂️ FICHE DE RENSEIGNEMENT',
+  '━━━━━━━━━━━━━━━━━━━━━━━',
+  '🎯 CIBLE / SUJET : ',
+  '',
+  '👁️ SIGNES DISTINCTIFS :',
+  '• Tenue : ',
+  '• Signe distinctif : ',
+  '• Particularités : ',
+  '',
+  '🔫 ARMEMENT : ',
+  '👥 EFFECTIFS / ORGANISATION : ',
+  '📍 LIEUX FRÉQUENTÉS / REPAIRES : ',
+  '🐴 MONTURES / DÉPLACEMENTS : ',
+  '🤝 ALLIÉS / 🗡️ ENNEMIS : ',
+  '⏰ HABITUDES / HORAIRES : ',
+  '📸 PREUVES / PHOTOS : ',
+  '📝 NOTES : ',
+  '```',
+].join('\n');
 async function posterForum(guild, contrat) {
   try {
     const forum = guild.channels.cache.get(FORUM_CONTRATS);
@@ -440,6 +483,9 @@ async function posterForum(guild, contrat) {
       const db = loadDB(); const c = findContrat(db, contrat.id);
       if (c) { c.forumThreadId = post.id; c.forumMsgId = starter?.id || null; saveDB(db); }
       contrat.forumThreadId = post.id; contrat.forumMsgId = starter?.id || null;
+      // Fiche de renseignement à compléter : un guide stylé + un modèle copiable, postés dans le fil
+      await post.send({ embeds: [buildFicheRenseignementEmbed(contrat)] }).catch(() => {});
+      await post.send({ content: FICHE_RENSEIGNEMENT_MODELE }).catch(() => {});
     }
   } catch (e) { console.log('⚠️ post contrat Confrérie forum:', e.message); }
 }
