@@ -24,6 +24,11 @@ const CH_JOURNAL           = '1508756535407542372';
 // ─── Rôles Direction (permissions + ping) ───
 const DIRECTION_ROLE_NAMES = ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'];
 
+// ─── Rôles de la Confrérie : EXCLUS de la liste « Faire signer » (on n'y propose que des invités) ───
+const CONFRERIE_ROLE_NAMES = ['concepteur', 'fléau', 'fleau', 'exécuteur', 'éxécuteur', 'executeur', 'execu', 'condamné', 'condamne', 'maudit', 'confrérie', 'confrerie', 'ombre'];
+// ─── Rôle des invités (clients externes) : SEULE population proposée à la signature ───
+const INVITE_ROLE_MATCH = 'visiteur';
+
 // ─── Types de mission (clandestins) ───
 const TYPES_MISSION = [
   { label: 'Contrebande',           value: 'Contrebande',           emoji: '📦' },
@@ -279,6 +284,27 @@ async function majForum(guild, contrat) {
       : await thread.fetchStarterMessage?.().catch(() => null);
     if (starter) await starter.edit({ embeds: [buildContratEmbed(contrat)] }).catch(() => {});
   } catch (e) { console.log('⚠️ majForum contrat:', e.message); }
+}
+
+// Liste les INVITÉS (rôle Visiteur) éligibles à la signature d'un contrat.
+// On exclut les bots et les membres de la Confrérie. On n'exclut PAS ceux sans nom RP :
+// on les garde, mais on signale (aNomRP) et on remonte d'abord ceux qui ont un vrai prénom + nom.
+function listerInvites(guild) {
+  const out = [];
+  for (const m of guild.members.cache.values()) {
+    if (m.user.bot) continue;
+    const roles = m.roles.cache;
+    const estInvite = roles.some(r => r.name.toLowerCase().includes(INVITE_ROLE_MATCH));
+    if (!estInvite) continue;
+    // Sécurité : si quelqu'un cumule Visiteur + un rôle Confrérie, on l'écarte quand même
+    const estConfrerie = roles.some(r => CONFRERIE_ROLE_NAMES.some(n => r.name.toLowerCase().includes(n)));
+    if (estConfrerie) continue;
+    const pseudo = (m.displayName || m.user.username || '').trim();
+    const aNomRP = pseudo.split(/\s+/).filter(Boolean).length >= 2; // prénom + nom RP renseigné
+    out.push({ id: m.id, pseudo: pseudo || m.user.username, username: m.user.username, aNomRP });
+  }
+  out.sort((a, b) => (Number(b.aNomRP) - Number(a.aNomRP)) || a.pseudo.localeCompare(b.pseudo));
+  return out;
 }
 
 // Récupère le fil de forum d'un contrat — pour y poster l'activité de la mission (ex : signature)
@@ -603,24 +629,33 @@ async function cloturer(interaction, succes) {
 // ═══════════════════════════════════════════════════════════════
 // SIGNATURE PAR UNE PERSONNE (via son ID Discord, en MP) — contrat anonyme
 // ═══════════════════════════════════════════════════════════════
-// 1) Direction clique « ✍️ Faire signer » → menu de sélection de la personne (aucun ID à copier)
+// 1) Direction clique « ✍️ Faire signer » → menu des INVITÉS (rôle Visiteur), aucun ID à copier
 async function onFaireSigner(interaction) {
   if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
   const id = interaction.customId.split('::')[1];
-  const db = loadDB();
-  const c = findContrat(db, id);
+  const c = findContrat(loadDB(), id);
   if (!c) return interaction.reply({ content: '❌ Contrat introuvable.', flags: MessageFlags.Ephemeral });
   if (c.signe) return interaction.reply({ content: '✅ Ce contrat est déjà signé.', flags: MessageFlags.Ephemeral });
-  const menu = new UserSelectMenuBuilder()
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  try { await interaction.guild.members.fetch(); } catch {} // s'assurer que tous les membres sont en cache
+  const invites = listerInvites(interaction.guild);
+  if (!invites.length) return interaction.editReply({ content: '❌ Aucun **invité** (rôle Visiteur) trouvé. Vérifie que la personne a bien le rôle Visiteur sur le serveur.' });
+  const tronque = invites.length > 25;
+  const options = invites.slice(0, 25).map(v => ({
+    label: v.pseudo.slice(0, 100),
+    value: v.id,
+    description: (v.aNomRP ? '🎭 Nom RP renseigné' : '👤 Pseudo sans nom RP complet') + ` · @${v.username}`.slice(0, 100),
+    default: v.id === c.signataireId,
+  }));
+  const menu = new StringSelectMenuBuilder()
     .setCustomId(`cc_sign_pick::${id}`)
-    .setPlaceholder('Choisis la personne qui doit signer...')
-    .setMinValues(1)
-    .setMaxValues(1);
-  if (c.signataireId) { try { menu.setDefaultUsers([c.signataireId]); } catch {} }
-  return interaction.reply({ content: `✍️ **Faire signer — contrat ${id}**\nSélectionne la personne dans la liste : elle recevra le contrat en MP avec un bouton pour signer.`, components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral });
+    .setPlaceholder('Choisis l\'invité qui doit signer...')
+    .setMinValues(1).setMaxValues(1)
+    .addOptions(options);
+  return interaction.editReply({ content: `✍️ **Faire signer — contrat ${id}**\nSélectionne l'invité (rôle **Visiteur**) qui recevra le contrat en MP${tronque ? `\n*(${invites.length} invités trouvés — 25 premiers affichés, ceux avec un nom RP en tête)*` : ''} :`, components: [new ActionRowBuilder().addComponents(menu)] });
 }
-// 2) Sélection de la personne → on envoie le contrat en MP avec un bouton « Signer »
-async function onSignUserSelect(interaction) {
+// 2) Sélection de l'invité → on envoie le contrat en MP avec un bouton « Signer »
+async function onSignPick(interaction) {
   await interaction.deferUpdate();
   const id = interaction.customId.split('::')[1];
   const db = loadDB();
@@ -824,10 +859,10 @@ async function routeInteraction(interaction) {
     if (interaction.isStringSelectMenu?.()) {
       if (interaction.customId === 'cc_type') { await onTypeSelect(interaction); return true; }
       if (interaction.customId.startsWith('cc_risk::')) { await onRiskSelect(interaction); return true; }
+      if (interaction.customId.startsWith('cc_sign_pick::')) { await onSignPick(interaction); return true; }
     }
     if (interaction.isUserSelectMenu?.()) {
       if (interaction.customId.startsWith('cc_assign_go::')) { await onAssignGo(interaction); return true; }
-      if (interaction.customId.startsWith('cc_sign_pick::')) { await onSignUserSelect(interaction); return true; }
     }
     if (interaction.isModalSubmit?.()) {
       if (interaction.customId.startsWith('cc_edit_modal::')) { await onEditSubmit(interaction); return true; }
