@@ -84,7 +84,7 @@ const SALON_IDS = {
   LOGS:                '1509695000441786608', // #logs
   DOSSIER_RECRUTEMENT: '1509337860724228137', // #dossier-recrutement
   RECRUTEMENT_INTERNE: '1509254315712188438', // #recrutement-interne
-  DASHBOARD:           '1508756535407542372', // #dashboard
+  DASHBOARD:           '1518042088879423640', // #dashboard (salon dédié, séparé du journal de bord)
 
   // Illégal
   COFFRE_ILLEGAL:      '1508756490432024636', // #coffre-illegal

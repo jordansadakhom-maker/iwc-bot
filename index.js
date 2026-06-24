@@ -476,7 +476,6 @@ const SLASH_COMMANDS = [
     .addStringOption(o => o.setName('statut').setDescription('Filtrer par statut').setRequired(false)
       .addChoices({ name: 'Tous', value: 'tous' }, { name: 'Actifs', value: 'actif' }, { name: 'Refusés', value: 'refuse' }, { name: 'Expirés', value: 'expire' }))
     .addIntegerOption(o => o.setName('page').setDescription('Numéro de page').setRequired(false)),
-  new SlashCommandBuilder().setName('profil').setDescription('👤 Affiche le profil d\'un membre').addUserOption(o => o.setName('membre').setDescription('Membre (optionnel)').setRequired(false)),
   new SlashCommandBuilder().setName('moi').setDescription('🏅 Mon profil RP : grade, ancienneté, mes contrats et mes rendez-vous'),
   new SlashCommandBuilder().setName('journal-salon').setDescription('📒 Définir CE salon comme journal des informations (Direction)'),
   new SlashCommandBuilder().setName('tresorerie-installer').setDescription('💰 Créer le forum trésorerie (Entrées/Sorties classées) (Direction)'),
@@ -521,7 +520,6 @@ const SLASH_COMMANDS = [
         { name: '✅ Clôturé', value: 'Clôturé' },
       )),
   new SlashCommandBuilder().setName('installer-menu').setDescription('🎛️ Installer le menu principal + Commencer ici dans leurs salons (Direction)'),
-  new SlashCommandBuilder().setName('mon-dossier').setDescription('📋 Voir ton parcours et ta progression vers le grade suivant'),
   new SlashCommandBuilder().setName('mon-journal').setDescription('📖 Voir et écrire le journal de ton personnage'),
   new SlashCommandBuilder().setName('ma-fiche').setDescription('✏️ Voir et modifier ta fiche de personnage'),
   new SlashCommandBuilder().setName('guide-membres').setDescription('📣 Envoyer à chaque membre le guide des outils perso (Direction)'),
@@ -1354,7 +1352,7 @@ async function handleSlashCommand(interaction) {
     return;
   }
 
-  if (commandName === 'mon-dossier') return _handleMonDossier(interaction);
+  // /mon-dossier retiré (limite 100 commandes Discord) — toujours dispo via le bouton « 📋 Mon dossier » du menu
   if (commandName === 'mon-journal') return _handleJournalVoir(interaction);
   if (commandName === 'ma-fiche')    return _handleMaFiche(interaction);
   if (commandName === 'guide-membres') return _handleGuideMembres(interaction);
@@ -1601,7 +1599,7 @@ async function handleSlashCommand(interaction) {
   if (commandName === 'registre') { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); }
   if (commandName === 'registre')         return _handleRegistre(interaction);
   if (commandName === 'op')               return _handleOpDetail(interaction);
-  if (commandName === 'profil')            return handleProfilEnhanced(interaction);
+  // /profil retiré (limite 100 commandes Discord) — toujours dispo via le bouton « Mon profil » du menu (menu_profil)
   if (commandName === 'bilan')             { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleBilanCommand?.(interaction); }
   if (commandName === 'rdv')               { if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral }); return _ouvrirMenuRdvSlash(interaction); }
   if (commandName === 'agenda') { if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral }); }
@@ -9873,7 +9871,7 @@ function _embedGuideMembre() {
       'Tape **`/mon-journal`** → clique **« ➕ Ajouter une entrée »** → raconte ce que vit ton personnage. Tu construis son background au fil du temps.',
       '',
       '📋 **Suis ta progression**',
-      'Tape **`/mon-dossier`** → vois ton grade, ton ancienneté et ta progression vers le grade suivant.',
+      'Ouvre le **menu principal** → bouton **« 📋 Mon dossier »** → vois ton grade, ton ancienneté et ta progression vers le grade suivant.',
       '',
       '💡 Tu peux aussi tout faire depuis le **menu principal** (les boutons) !',
     ].join('\n'))
