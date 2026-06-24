@@ -2050,33 +2050,24 @@ async function autoSetup(guild) {
     // La liste vivante des contrats est dans le tableau de #planning (plus de récap ici).
     const embed = new EmbedBuilder().setColor(0x2C3E50).setTitle('📜 LES CONTRATS — IRON WOLF COMPANY')
       .setDescription([
-        '*Le bureau des contrats : on lance et on gère tout ici. Le suivi vivant (échéances) est dans le tableau de #planning.*',
+        '*Le bureau des contrats : on crée et on suit tout ici. Les échéances en cours sont dans #planning.*',
         '',
-        '__**Créer un contrat**__',
-        '📤 **Proposer à un client** — on offre nos services (le client reçoit le contrat en MP : accepter / refuser / contre-offre).',
-        '📥 **Une entreprise nous engage** — on est l\'employé : on saisit l\'employeur et ses conditions.',
-        '⚡ **Express** — mini-formulaire (client, prestation, montant), reformulé par l\'IA puis validé par vote.',
-        '🐺 **Confrérie** — contrats clandestins (briefing privé des agents).',
-        '',
-        '__**Gérer**__',
-        '🎮 **Gérer les contrats** — faire avancer une étape, honorer, encaisser au coffre.',
-        '🗂️ **Mes contrats** — tes contrats Confrérie assignés.',
+        '🟩 **Créer** — 📤 Proposer · 📥 On nous engage · ⚡ Express · 🐺 Confrérie · 📇 Depuis un contact',
+        '🟦 **Gérer** — 🎮 Suivi & encaissement · 🗂️ Mes contrats · 📅 RDV',
       ].join('\n'))
       .setFooter({ text: 'Iron Wolf Company • Secrétariat officiel' });
     const rows = [
       new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('open_contrat_offre').setLabel('Proposer à un client').setEmoji('📤').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('open_contrat_emploi').setLabel('Une entreprise nous engage').setEmoji('📥').setStyle(ButtonStyle.Success),
-      ),
-      new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('cexp_open').setLabel('Contrat express').setEmoji('⚡').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('cc_new').setLabel('Contrat Confrérie').setEmoji('🐺').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('open_contrat_offre').setLabel('Proposer').setEmoji('📤').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('open_contrat_emploi').setLabel('On nous engage').setEmoji('📥').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('cexp_open').setLabel('Express').setEmoji('⚡').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('cc_new').setLabel('Confrérie').setEmoji('🐺').setStyle(ButtonStyle.Danger),
         new ButtonBuilder().setCustomId('contrat_from_contact').setLabel('Depuis un contact').setEmoji('📇').setStyle(ButtonStyle.Primary),
       ),
       new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('csuivi_open').setLabel('Gérer les contrats').setEmoji('🎮').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('cc_mine').setLabel('Mes contrats').setEmoji('🗂️').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('btn_rdv_creer_contrat_panel').setLabel('Planifier un RDV').setEmoji('📅').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('btn_rdv_creer_contrat_panel').setLabel('RDV').setEmoji('📅').setStyle(ButtonStyle.Secondary),
       ),
     ];
     // Nettoyage : supprimer les anciens panneaux qui faisaient doublon
