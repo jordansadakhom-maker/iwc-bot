@@ -2831,26 +2831,10 @@ client.on('messageCreate', async message => {
         await message.reply({ embeds: [emb], allowedMentions: { repliedUser: false } }).catch(() => {});
       } catch (e) { console.log('❌ Auto-résumé:', e.message); }
     })();
-    // ── Renseignement : un télégramme ou un nom/prénom entendu → fiche de contact auto ──
-    (async () => {
-      try {
-        const texte = await _lireTexteNote(message);
-        if ((texte || '').length < 15) return;
-        const agent = message.embeds?.[0]?.author?.name || '';
-        const res = await repertoire.traiterRapportTerrain?.(message.guild, texte, agent);
-        if (!res) return;
-        const parts = [];
-        if (res.crees?.length) parts.push(`🆕 **${res.crees.length}** fiche(s) créée(s) : ${res.crees.join(', ')}`);
-        if (res.majs?.length) parts.push(`✏️ **${res.majs.length}** fiche(s) complétée(s) : ${res.majs.join(', ')}`);
-        if (!parts.length) return;
-        const emb = new EmbedBuilder()
-          .setColor(0x6B4F2A)
-          .setTitle('📇 Répertoire mis à jour')
-          .setDescription(parts.join('\n').slice(0, 4000) + '\n\n*Vérifiable et modifiable dans le forum des contacts.*')
-          .setFooter({ text: `${agent || 'Micro de terrain'} • renseignement automatique` });
-        await message.reply({ embeds: [emb], allowedMentions: { repliedUser: false } }).catch(() => {});
-      } catch (e) { console.log('❌ Auto-contacts:', e.message); }
-    })();
+    // ── Renseignement automatique DÉSACTIVÉ ──
+    // Avant, chaque note créait une fiche de contact pour TOUTES les personnes citées
+    // (tout le groupe RP). Trop bruyant → on ne le fait plus automatiquement.
+    // Le tri se fait désormais à la main via le bouton « Verser au carnet » sous le rapport.
     // on continue (pas de return)
   }
 
@@ -9262,12 +9246,25 @@ async function _gererBoutonBrouillon(interaction) {
 
     const embed = illegal ? _embedContratIllegalFinal(d, ref, d.userId) : _embedContratLegalFinal(d, ref, d.userId);
 
-    // Publier dans le salon du brouillon
-    let salonOK = false; let publishedMsgId = null;
-    try { const sent = await interaction.channel.send({ embeds: [embed] }); salonOK = true; publishedMsgId = sent.id; } catch (e) { console.log('⚠️ Publication contrat:', e.message); }
+    // Publier dans le forum #contrats (gère forum → fil, ou salon texte → message) ; repli sur le salon du brouillon
+    let salonOK = false; let publishedMsgId = null; let publishedChannelId = interaction.channel.id;
+    try {
+      const cible = (d.cible || '?').slice(0, 60);
+      const titre = `${ref} — ${cible}`.slice(0, 100);
+      let dest = interaction.guild.channels.cache.get('1508756442730074222');
+      if (!dest) dest = await interaction.guild.channels.fetch('1508756442730074222').catch(() => null);
+      if (dest && dest.type === 15 && dest.threads?.create) {
+        const post = await dest.threads.create({ name: titre, message: { embeds: [embed] } }).catch(() => null);
+        if (post) { salonOK = true; publishedMsgId = post.id; publishedChannelId = dest.id; }
+      } else if (dest && dest.send) {
+        const sent = await dest.send({ embeds: [embed] }).catch(() => null);
+        if (sent) { salonOK = true; publishedMsgId = sent.id; publishedChannelId = dest.id; }
+      }
+      if (!salonOK) { const sent = await interaction.channel.send({ embeds: [embed] }); salonOK = true; publishedMsgId = sent.id; }
+    } catch (e) { console.log('⚠️ Publication contrat:', e.message); }
 
     db.missions = db.missions || {};
-    db.missions[ref] = { messageId: publishedMsgId, channelId: interaction.channel.id, cible: d.cible, type: d.type, statut: 'En attente', createdAt: new Date().toISOString() };
+    db.missions[ref] = { messageId: publishedMsgId, channelId: publishedChannelId, cible: d.cible, type: d.type, statut: 'En attente', createdAt: new Date().toISOString() };
     saveDB(db);
 
     // Archiver Notion (optionnel)
@@ -9338,15 +9335,15 @@ async function _gererTriageNote(interaction) {
   if (!texte || texte.length < 5) return interaction.editReply({ content: '⚠️ Ce rapport est vide, rien à traiter.' }).catch(() => {});
   const agent = msg.embeds?.[0]?.author?.name || interaction.user.username;
 
-  // ── 🕵️ Verser au carnet de renseignements ──
+  // ── 🕵️ Verser au carnet de renseignements (forum répertoire) ──
   if (action === 'note_rens') {
     const lieu = _champEmbed(msg, ['lieu', 'position', 'endroit', 'secteur']) || '—';
     let rid = null;
-    try { rid = await notionV3.creerRenseignement?.(interaction.guild, { info: texte, source: agent, cible: lieu, rapporteurId: interaction.user.id, rapporteur: interaction.user.username }); }
+    try { rid = await notionV3.creerRenseignement?.(interaction.guild, { info: texte, source: agent, cible: lieu, rapporteurId: interaction.user.id, rapporteur: interaction.user.username, channelId: '1517505221629050901' }); }
     catch (e) { console.log('⚠️ note→renseignement:', e.message); }
     return interaction.editReply({ content: rid
-      ? `🕵️ Renseignement \`${rid}\` versé au **carnet** — en attente de validation par la Direction dans le salon Informateurs.`
-      : '⚠️ Impossible de créer le renseignement (salon Informateurs introuvable ?).' }).catch(() => {});
+      ? `🕵️ Renseignement \`${rid}\` versé au **carnet** — en attente de validation par la Direction.`
+      : '⚠️ Impossible de créer le renseignement (salon introuvable ?).' }).catch(() => {});
   }
 
   // ── 📜 En faire un contrat (analyse IA + brouillon à valider) ──

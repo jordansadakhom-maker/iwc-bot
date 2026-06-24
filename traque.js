@@ -333,8 +333,10 @@ async function handleCreateModal(interaction) {
   let photoBuf = null;
   if (t.photo) photoBuf = await _imageBytes(t.photo);
   // L'avis doit toujours atterrir dans le salon des avis de recherche, même si le modal a été ouvert ailleurs (ex : depuis une note du micro de terrain)
-  let targetCh = interaction.channel;
-  try { if (db.wantedChannelId) { const wc = await interaction.guild.channels.fetch(db.wantedChannelId).catch(() => null); if (wc && wc.send) targetCh = wc; } } catch {}
+  let targetCh = null;
+  try { if (db.wantedChannelId) targetCh = await interaction.guild.channels.fetch(db.wantedChannelId).catch(() => null); } catch {}
+  if (!targetCh || !targetCh.send) targetCh = _findWantedChannel(interaction.guild);
+  if (!targetCh || !targetCh.send) targetCh = interaction.channel;
   if (targetCh) t.channelId = targetCh.id;
   const posterEmbed = buildPoster(t);
   const posterPayload = { content: `<@&${ROLE_CONFRERIE}> — 🎯 **Nouvel avis de recherche.** La traque est ouverte.`, embeds: [posterEmbed], components: buildBoutons(t), allowedMentions: { roles: [ROLE_CONFRERIE] } };

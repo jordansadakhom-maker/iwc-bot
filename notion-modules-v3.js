@@ -732,8 +732,9 @@ async function republierRapportsManquants(guild) {
   } catch (e) { console.log('⚠️ republierRapportsManquants:', e.message); }
 }
 // ── Création programmée d'un renseignement (ex : depuis une note du micro de terrain) ──
-// Pousse un rapport « à vérifier » dans le salon Informateurs avec les boutons Confirmer/Infirmer.
-async function creerRenseignement(guild, { info, source, cible, fiabilite, rapporteurId, rapporteur } = {}) {
+// Pousse un rapport « à vérifier » avec les boutons Confirmer/Infirmer.
+// channelId optionnel : salon cible précis (gère salon texte ET forum) ; sinon salon Informateurs.
+async function creerRenseignement(guild, { info, source, cible, fiabilite, rapporteurId, rapporteur, channelId } = {}) {
   if (!guild) return null;
   let infoTxt = String(info || '').trim();
   if (!infoTxt) return null;
@@ -753,8 +754,20 @@ async function creerRenseignement(guild, { info, source, cible, fiabilite, rappo
   };
   db.informateurs.push(rapport); saveDB(db);
   try { await _archiverRapportNotion(rapport); } catch {}
-  const ch = getCh(guild, 'informateurs');
-  if (ch) await ch.send({ embeds: [_rapportEnAttenteEmbed(rapport)], components: [_rapportBoutons(rapport)] }).catch(() => {});
+  // Salon cible : ID explicite (peut être un forum) sinon salon Informateurs par nom
+  let ch = null;
+  if (channelId) { ch = guild.channels.cache.get(channelId) || await guild.channels.fetch(channelId).catch(() => null); }
+  if (!ch) ch = getCh(guild, 'informateurs');
+  if (!ch) return rapport.id;
+  const payload = { embeds: [_rapportEnAttenteEmbed(rapport)], components: [_rapportBoutons(rapport)] };
+  try {
+    if (ch.type === 15 && ch.threads?.create) {
+      // Forum → un fil par renseignement
+      await ch.threads.create({ name: `🕵️ ${rapport.cible !== '—' ? rapport.cible : rapport.id}`.slice(0, 100), message: payload }).catch(() => {});
+    } else if (ch.send) {
+      await ch.send(payload).catch(() => {});
+    }
+  } catch (e) { console.log('⚠️ creerRenseignement envoi:', e.message); }
   return rapport.id;
 }
 // ── Validation Direction : Confirmer / Infirmer un rapport ──
