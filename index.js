@@ -2768,6 +2768,7 @@ client.on('messageCreate', async message => {
   try { if (await reddead.onMessage?.(message)) return; } catch {}
   // Répertoire : image déposée dans le fil d'une fiche → devient le portrait du contact
   try { if (await repertoire.onMessage?.(message)) return; } catch {}
+  try { await carte.onMessage?.(message); } catch {}
   // ── Note du micro de terrain → réaction 📜 (contrat) + RÉSUMÉ automatique ──
   if (message.webhookId && (message.embeds?.[0]?.title || '').includes('Rapport de terrain')) {
     try { await message.react('📜'); } catch (e) { console.log('⚠️ Réaction note:', e.message); }
