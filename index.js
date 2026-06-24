@@ -1096,6 +1096,7 @@ async function ajouterJournalIC(guild, entry) {
             await thread.send({ embeds: [embed], allowedMentions: { parse: [] } }).catch(() => {});
             _ledgerAjouter(entry, sens, montant, poste);
             await _majBilanTresorerie(guild).catch(() => {});
+            try { await notionModules.rafraichirPanelCoffre?.(guild); } catch {}
             return;
           }
         }
@@ -3717,6 +3718,7 @@ client.on('interactionCreate', async interaction => {
       const dbC = loadDB(); dbC.coffre = 0; if (dbC.coffres) { dbC.coffres.legal = 0; dbC.coffres.illegal = 0; } saveDB(dbC);
       await sauvegarderSurGitHub().catch(() => {});
       try { await notionModules.setupTresorButton?.(interaction.guild); } catch {}
+      try { await _majBilanTresorerie(interaction.guild); } catch {}
       return interaction.update({ content: '🗑️ **Coffre remis à 0 $.** Sauvegardé (Gist) — ça tiendra au redémarrage. ✅', components: [] });
     }
     if (interaction.customId === 'btn_dashboard_refresh')     { return notionModules.handleDashboard?.(interaction); }

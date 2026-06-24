@@ -485,31 +485,44 @@ async function setupTresorButton(guild) {
 
 function _tresorEmbed() {
   const db = loadDB(); const solde = db.coffre || 0;
-  const tx = db.transactions || [];
-  const dateMs = t => new Date(t.date || t.createdAt || 0).getTime();
-  const estEntree = t => (t.type || '').toLowerCase().startsWith('entr');
+  // Registre commun avec le forum 💰 Trésorerie (mêmes chiffres des deux côtés)
+  const led = Array.isArray(db.tresorerieLedger) ? db.tresorerieLedger : [];
+  const dateMs = t => new Date(t.date || 0).getTime();
+  const estEntree = t => t.sens === 'entree';
   const now = Date.now();
-  const recent = tx.filter(t => dateMs(t) >= now - 7 * 86400000);
+  const recent = led.filter(t => dateMs(t) >= now - 7 * 86400000);
   const sum = arr => arr.reduce((s, t) => s + (Number(t.montant) || 0), 0);
   const entrees7 = sum(recent.filter(estEntree));
-  const sorties7 = sum(recent.filter(t => !estEntree(t)));
+  const sorties7 = sum(recent.filter(t => t.sens === 'sortie'));
   const net = entrees7 - sorties7;
   // Top contributeurs (entrées) sur 30 jours
   const contrib = {};
-  for (const t of tx) { if (dateMs(t) < now - 30 * 86400000 || !estEntree(t)) continue; const who = t.par || t.responsable || '—'; contrib[who] = (contrib[who] || 0) + (Number(t.montant) || 0); }
+  for (const t of led) { if (dateMs(t) < now - 30 * 86400000 || t.sens !== 'entree') continue; const who = t.auteur || '—'; contrib[who] = (contrib[who] || 0) + (Number(t.montant) || 0); }
   const top = Object.entries(contrib).sort((a, b) => b[1] - a[1]).slice(0, 3);
   const fmt = n => `$${Math.round(Number(n) || 0).toLocaleString('fr-FR')}`;
   return new EmbedBuilder().setColor(0x8B1A1A).setTitle('💰 Trésorerie — Iron Wolf Company')
-    .setDescription('Enregistrez chaque mouvement financier via le bouton ci-dessous.\nToute transaction est archivée automatiquement dans Notion.')
+    .setDescription('Enregistrez chaque mouvement financier via le bouton ci-dessous.\n🔄 Synchronisé en temps réel avec le forum **💰 Trésorerie**.')
     .addFields(
       { name: '🏦 Coffre commun', value: `**${fmt(solde)}**`, inline: false },
       { name: '📊 7 derniers jours', value: `📈 Entrées : **${fmt(entrees7)}**\n📉 Sorties : **${fmt(sorties7)}**\n${net >= 0 ? '🟢' : '🔴'} Net : **${fmt(net)}**`, inline: true },
       { name: '🏅 Top contributeurs (30j)', value: top.length ? top.map(([w, s], i) => `${['🥇', '🥈', '🥉'][i]} ${w} — ${fmt(s)}`).join('\n') : '*Aucune entrée récente*', inline: true },
     )
-    .setFooter({ text: `IWC • Trésorerie automatique • Mis à jour le ${new Date().toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` }).setTimestamp();
+    .setFooter({ text: `IWC • Trésorerie synchronisée • Mis à jour le ${new Date().toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` }).setTimestamp();
 }
 function _tresorRow() {
   return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_nouvelle_transaction').setLabel('💰 Nouvelle Transaction').setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId('btn_solde').setLabel('📊 Voir le solde').setStyle(ButtonStyle.Secondary), new ButtonBuilder().setCustomId('btn_coffre_reset').setLabel('🗑️ Coffre à 0').setStyle(ButtonStyle.Danger), new ButtonBuilder().setCustomId('btn_tresor_config').setLabel('⚙️').setStyle(ButtonStyle.Secondary));
+}
+
+// Rafraîchit le panneau #coffre-entreprise en place (sync depuis n'importe quel mouvement)
+async function rafraichirPanelCoffre(guild) {
+  try {
+    const db = loadDB();
+    if (!db.tresorButtonMsgId) return;
+    const ch = guild.channels.cache.find(c => c.name?.includes('coffre-entreprise'));
+    if (!ch) return;
+    const msg = await ch.messages.fetch(db.tresorButtonMsgId).catch(() => null);
+    if (msg) await msg.edit({ embeds: [_tresorEmbed()], components: [_tresorRow()] }).catch(() => {});
+  } catch {}
 }
 
 async function handleSoldeButton(interaction) {
@@ -764,7 +777,7 @@ async function checkAlerteCoffre(guild) {
 }
 
 module.exports = {
-  handleTresorCommand, handleTresorFlow, handleTresorModal, handleSoldeButton, setupTresorButton,
+  handleTresorCommand, handleTresorFlow, handleTresorModal, handleSoldeButton, setupTresorButton, rafraichirPanelCoffre,
   handleTresorValidation, handleTresorConfigButton, handleTresorConfigSelect,
   nettoyerTransactionsFantôomes,
   ajouterJournalIC: _ajouterJournalIC,
