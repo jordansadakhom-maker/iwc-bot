@@ -473,6 +473,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('moi').setDescription('🏅 Mon profil RP : grade, ancienneté, mes contrats et mes rendez-vous'),
   new SlashCommandBuilder().setName('journal-salon').setDescription('📒 Définir CE salon comme journal des informations (Direction)'),
   new SlashCommandBuilder().setName('tresorerie-installer').setDescription('💰 Créer le forum trésorerie (Entrées/Sorties classées) (Direction)'),
+  new SlashCommandBuilder().setName('ranger-forums').setDescription('📋 Ranger tous les forums dans une catégorie dédiée (Direction)'),
   new SlashCommandBuilder().setName('bilan').setDescription('📊 Résumé trésorerie 7 derniers jours').addStringOption(o => o.setName('coffre').setDescription('Quel coffre ?').setRequired(false).addChoices({ name: '⚖️ Légal', value: 'legal' }, { name: '🔒 Illégal', value: 'illegal' })),
   new SlashCommandBuilder().setName('rdv').setDescription('📅 Créer un rendez-vous'),
   new SlashCommandBuilder().setName('agenda').setDescription('📅 Voir ou créer un RDV')
@@ -1593,6 +1594,13 @@ async function handleSlashCommand(interaction) {
     await _tresorerieForumThread(forum, { type: 'tresorerie', titre: 'Sortie' }).catch(() => {});
     return interaction.editReply({ content: `✅ Forum trésorerie créé : <#${forum.id}>\n📥 **Entrées** et 📤 **Sorties** y sont classées automatiquement (un dossier par catégorie). À partir de maintenant, **rien côté trésorerie n'ira dans le journal**.` });
   }
+  if (commandName === 'ranger-forums') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const r = await _rangerForums(guild);
+    if (!r.ok) return interaction.editReply({ content: '❌ Impossible de créer/trouver la catégorie. Vérifie que j\'ai la permission **Gérer les salons**.' });
+    return interaction.editReply({ content: `✅ Forums regroupés dans **${r.cat.name}** (${r.moved} déplacé(s)) :\n${(r.noms || []).join('\n').slice(0, 1500)}\n\n🔒 *Les permissions de chaque forum sont conservées — rien n'est exposé.*` });
+  }
   if (commandName === 'fiche') {
     if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral });
     const membreOpt = interaction.options.getUser('membre');
@@ -2050,6 +2058,8 @@ async function autoSetup(guild) {
   installerTresorerie(guild).then(() => console.log('💰 Forum trésorerie prêt (étiquettes + dossiers)')).catch(() => {});
   _assurerEtiquettesContrats(guild).then(() => console.log('🏷️ Étiquettes contrats prêtes (type + statut)')).catch(() => {});
   _assurerEtiquettesOperations(guild).then(() => console.log('🏷️ Étiquettes opérations prêtes (pôle + statut)')).catch(() => {});
+  // Regroupement des forums sous « 📋 Forums » — une seule fois (respecte les déplacements manuels ultérieurs)
+  if (!loadDB().forumsCategoryId) _rangerForums(guild).then(r => console.log(`📋 Forums rangés : ${r.moved} déplacé(s)`)).catch(() => {});
   { const evtCh = guild.channels.cache.get('1519247268367171751'); if (evtCh) evenements.installerPanel?.(guild, evtCh).then(() => console.log('🎉 Panneau événements installé')).catch(() => {}); }
   notionV3.republierRapportsManquants?.(guild).then(() => notionV3.majCarnetRenseignements?.(guild)).then(() => console.log('📓 Carnet de renseignements installé')).catch(() => {});
   // Rumeurs RP dans le même salon que Le Réseau (choix : les deux ensemble)
@@ -5804,6 +5814,36 @@ async function _syncEtiquettesOperations(guild, forum) {
       if (ids.length) await th.setAppliedTags([...new Set(ids)].slice(0, 5)).catch(() => {});
     }
   } catch (e) { console.log('❌ _syncEtiquettesOperations:', e.message); }
+}
+// Regroupe tous les forums sous une catégorie « 📋 Forums » SANS toucher aux permissions
+const FORUMS_A_RANGER = [
+  '1519271434374090772', // 💰 Trésorerie
+  '1518392786301227250', // 📜 Contrats
+  '1518349707686973470', // 🎯 Opérations
+  '1518409832892469450', // 🗂️ Registre
+  '1519114962738348102', // 🎖️ Ripoux
+];
+async function _rangerForums(guild) {
+  try {
+    const db = loadDB();
+    let cat = db.forumsCategoryId ? (guild.channels.cache.get(db.forumsCategoryId) || await guild.channels.fetch(db.forumsCategoryId).catch(() => null)) : null;
+    if (!cat) cat = guild.channels.cache.find(c => c.type === 4 && /forums/i.test(c.name || ''));
+    if (!cat) cat = await guild.channels.create({ name: '📋 Forums', type: ChannelType.GuildCategory, reason: 'Regroupement des forums' }).catch(() => null);
+    if (!cat) return { ok: false, moved: 0, noms: [] };
+    if (db.forumsCategoryId !== cat.id) { db.forumsCategoryId = cat.id; saveDB(db); }
+    const ids = [...FORUMS_A_RANGER];
+    const jid = loadDB().journalChannelId; if (jid && !ids.includes(jid)) { const jc = guild.channels.cache.get(jid); if (jc && jc.type === 15) ids.push(jid); }
+    let moved = 0; const noms = [];
+    for (const id of ids) {
+      const ch = guild.channels.cache.get(id) || await guild.channels.fetch(id).catch(() => null);
+      if (!ch || ch.type !== 15) continue;
+      if (ch.parentId === cat.id) { noms.push(`✓ #${ch.name}`); continue; }
+      // lockPermissions:false → on conserve les permissions propres du forum (confidentialité intacte)
+      const ok = await ch.setParent(cat.id, { lockPermissions: false, reason: 'Regroupement des forums' }).then(() => true).catch(e => { console.log('⚠️ ranger-forums setParent', ch.name, e.message); return false; });
+      if (ok) { moved++; noms.push(`→ #${ch.name}`); }
+    }
+    return { ok: true, moved, cat, noms };
+  } catch (e) { console.log('❌ _rangerForums:', e.message); return { ok: false, moved: 0, noms: [] }; }
 }
 async function _installerPlanningContrats(guild) {
   try {
