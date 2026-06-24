@@ -86,6 +86,10 @@ let traque = {};
 try { traque = require('./traque'); console.log('✅ Module traque (avis de recherche) chargé'); }
 catch (e) { console.log('⚠️ traque non chargé:', e.message); }
 
+let relais = {};
+try { relais = require('./relais'); console.log('✅ Module relais (inter-serveurs) chargé'); }
+catch (e) { console.log('⚠️ relais non chargé:', e.message); }
+
 let tenue = {};
 try { tenue = require('./tenue'); console.log('✅ Module tenue (Le Vestiaire) chargé'); }
 catch (e) { console.log('⚠️ tenue non chargé:', e.message); }
@@ -477,6 +481,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('journal-salon').setDescription('📒 Définir CE salon comme journal des informations (Direction)'),
   new SlashCommandBuilder().setName('tresorerie-installer').setDescription('💰 Créer le forum trésorerie (Entrées/Sorties classées) (Direction)'),
   new SlashCommandBuilder().setName('ranger-forums').setDescription('📋 Ranger tous les forums dans une catégorie dédiée (Direction)'),
+  new SlashCommandBuilder().setName('relais').setDescription('🛰️ Recopier les affiches vers un autre serveur Discord (Direction)'),
   new SlashCommandBuilder().setName('bilan').setDescription('📊 Résumé trésorerie 7 derniers jours').addStringOption(o => o.setName('coffre').setDescription('Quel coffre ?').setRequired(false).addChoices({ name: '⚖️ Légal', value: 'legal' }, { name: '🔒 Illégal', value: 'illegal' })),
   new SlashCommandBuilder().setName('rdv').setDescription('📅 Créer un rendez-vous'),
   new SlashCommandBuilder().setName('agenda').setDescription('📅 Voir ou créer un RDV')
@@ -1669,6 +1674,10 @@ async function handleSlashCommand(interaction) {
     if (!r.ok) return interaction.editReply({ content: '❌ Impossible de créer/trouver la catégorie. Vérifie que j\'ai la permission **Gérer les salons**.' });
     return interaction.editReply({ content: `✅ Forums regroupés dans **${r.cat.name}** (${r.moved} déplacé(s)) :\n${(r.noms || []).join('\n').slice(0, 1500)}\n\n🔒 *Les permissions de chaque forum sont conservées — rien n'est exposé.*` });
   }
+  if (commandName === 'relais') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    return relais.handleCommand?.(interaction);
+  }
   if (commandName === 'fiche') {
     if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral });
     const membreOpt = interaction.options.getUser('membre');
@@ -2769,6 +2778,8 @@ client.on('messageCreate', async message => {
   // Répertoire : image déposée dans le fil d'une fiche → devient le portrait du contact
   try { if (await repertoire.onMessage?.(message)) return; } catch {}
   try { await carte.onMessage?.(message); } catch {}
+  // ── Relais inter-serveurs : recopie des annonces / patch-notes vers l'autre serveur (no-op si non configuré) ──
+  try { await relais.mirrorMessage?.(message); } catch {}
   // ── Note du micro de terrain → réaction 📜 (contrat) + RÉSUMÉ automatique ──
   if (message.webhookId && (message.embeds?.[0]?.title || '').includes('Rapport de terrain')) {
     try { await message.react('📜'); } catch (e) { console.log('⚠️ Réaction note:', e.message); }
@@ -3373,6 +3384,7 @@ client.on('interactionCreate', async interaction => {
   if (await parrainage.routeInteraction?.(interaction)) return;
   if (await tableaubord.routeInteraction?.(interaction)) return;
   if (await traque.routeInteraction?.(interaction)) return;
+  if (await relais.routeInteraction?.(interaction)) return;
   if (await tenue.routeInteraction?.(interaction)) return;
   if (await comptabilite.routeInteraction?.(interaction)) return;
   if (await reseau.routeInteraction?.(interaction)) return;
@@ -5877,6 +5889,8 @@ async function _posterContratForum(guild, contrat, embed) {
       contrat.ficheForumThreadId = post.id; contrat.ficheForumChannelId = forum.id;
       try { const db = loadDB(); const c = (db.contrats || []).find(x => String(x.id) === String(contrat.id)); if (c) { c.ficheForumThreadId = post.id; c.ficheForumChannelId = forum.id; saveDB(db); } } catch {}
     }
+    // Relais inter-serveurs : recopie du contrat publié (no-op si non configuré)
+    try { await relais.relayer?.('contrats', { content: resume, embeds: embed ? [embed] : [], username: 'La Confrérie • Contrats' }); } catch {}
   } catch (e) { console.log('⚠️ post contrat forum:', e.message); }
 }
 // Re-synchronise le post de forum d'un contrat IWC quand son statut change (signé / refusé / honoré / étape)

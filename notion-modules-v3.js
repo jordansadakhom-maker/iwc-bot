@@ -10,6 +10,7 @@ const {
 const { loadDB, saveDB } = require('./db');
 let notionExtra = {};
 try { notionExtra = require('./notion-extra'); } catch {}
+let relais = {}; try { relais = require('./relais'); } catch {}
 const JOURS_INACTIF = 5;
 const ROLES = {
   LE_CONSEIL:    '1508289999035039875',
@@ -789,6 +790,18 @@ async function _traiterValidationInfo(interaction, decision) {
   if (confirme) await _alerterDirection(interaction.guild, rapport, rapport.rapporteurId);
   // Met à jour le carnet de renseignements épinglé (confirmés uniquement, sources en noms de code)
   await _majCarnetRenseignements(interaction.guild).catch(() => {});
+  // Relais inter-serveurs : recopie du renseignement confirmé (source protégée par nom de code) — no-op si non configuré
+  if (confirme) try {
+    const db2 = loadDB();
+    const code = _codeNomInformateur(db2, rapport.rapporteurId || rapport.rapporteur);
+    saveDB(db2);
+    const relEmbed = new EmbedBuilder().setColor(0x6B0000)
+      .setTitle(`🕵️ Renseignement confirmé — ${(rapport.cible || '—').slice(0, 200)}`)
+      .setDescription(String(rapport.info || '—').slice(0, 1500))
+      .addFields({ name: '🎯 Cible / Lieu', value: (rapport.cible || '—').slice(0, 200), inline: true }, { name: '🔖 Source', value: code, inline: true })
+      .setFooter({ text: 'La Confrérie • Renseignement confirmé' }).setTimestamp();
+    await relais.relayer?.('carnet', { embeds: [relEmbed], username: 'La Confrérie • Renseignements' });
+  } catch (e) { console.log('⚠️ relais carnet:', e.message); }
 }
 async function _alerterDirection(guild, rapport, rapporteurId) {
   const logsCh = guild.channels.cache.get('1508756535407542372') || _journalCh(guild); if (!logsCh) return;

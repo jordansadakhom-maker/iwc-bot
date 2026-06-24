@@ -10,6 +10,7 @@ const {
   StringSelectMenuBuilder, SlashCommandBuilder, MessageFlags, AttachmentBuilder, ChannelType,
 } = require('discord.js');
 const { loadDB, saveDB, sauvegarderSurGitHub } = require('./db');
+let relais = {}; try { relais = require('./relais'); } catch {}
 
 const CH_JOURNAL = '1508756535407542372';
 const CH_ELEMENT_OPS = '1518349707686973470'; // #élément-opérations : on y archive les avis clôturés
@@ -369,6 +370,8 @@ async function handleCreateModal(interaction) {
   db.traques.push(t);
   if (sid && db._signalements) delete db._signalements[sid];
   saveDB(db);
+  // Relais inter-serveurs : recopie de l'affiche vers l'autre serveur (no-op si non configuré)
+  try { await relais.relayer?.('avis', { content: `🎯 **Avis de recherche — ${t.cible}**`, embeds: [EmbedBuilder.from(posterEmbed)], files: photoBuf ? [{ buffer: photoBuf, name: 'wanted.png' }] : [], username: 'La Confrérie • Avis de recherche' }); } catch {}
   sauvegarderSurGitHub?.().catch(() => {}); // sauvegarde immédiate : l'avis survit à un redémarrage
   const jc = journalCh(interaction.guild);
   if (jc) await jc.send({ embeds: [new EmbedBuilder().setColor(0xE67E22).setTitle(`🎯 Avis de recherche lancé — ${t.cible}`).setDescription(`Prime : **${t.prime}** · Dangerosité : ${dangerLabel(t.dangerosite)}\nLancé par ${t.createdBy}`).setFooter({ text: `IWC • ${t.id}` }).setTimestamp()] }).catch(() => {});
