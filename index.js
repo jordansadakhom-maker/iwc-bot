@@ -2048,6 +2048,7 @@ async function autoSetup(guild) {
   reseau.installerPanel?.(guild).then(() => console.log('🕵️ Panneau Le Réseau installé')).catch(() => {});
   ripoux.installerPanel?.(guild).then(() => console.log('🎖️ Panneau Le Ripoux installé')).catch(() => {});
   installerTresorerie(guild).then(() => console.log('💰 Forum trésorerie prêt (étiquettes + dossiers)')).catch(() => {});
+  _assurerEtiquettesContrats(guild).then(() => console.log('🏷️ Étiquettes contrats prêtes (type + statut)')).catch(() => {});
   { const evtCh = guild.channels.cache.get('1519247268367171751'); if (evtCh) evenements.installerPanel?.(guild, evtCh).then(() => console.log('🎉 Panneau événements installé')).catch(() => {}); }
   notionV3.republierRapportsManquants?.(guild).then(() => notionV3.majCarnetRenseignements?.(guild)).then(() => console.log('📓 Carnet de renseignements installé')).catch(() => {});
   // Rumeurs RP dans le même salon que Le Réseau (choix : les deux ensemble)
@@ -5721,6 +5722,37 @@ async function _majContratForum(guild, contrat) {
       }
     } catch {}
   } catch (e) { console.log('⚠️ maj contrat forum:', e.message); }
+}
+// Crée les étiquettes du forum des contrats (type + statut) sans toucher aux existantes,
+// puis (re)catégorise les contrats déjà publiés pour qu'on distingue chaque étape.
+async function _assurerEtiquettesContrats(guild) {
+  try {
+    let forum = guild.channels.cache.get(FORUM_CONTRATS);
+    try { forum = await guild.channels.fetch(FORUM_CONTRATS) || forum; } catch {}
+    if (!forum || forum.type !== 15 || !forum.setAvailableTags) return;
+    const clean = s => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const existing = forum.availableTags || [];
+    const voulu = [
+      { name: '🤝 Prestation', kw: 'prestation' },
+      { name: '💼 Employeur', kw: 'employeur' },
+      { name: '🔒 Confrérie', kw: 'confrerie' },
+      { name: '🟡 En attente', kw: 'attente' },
+      { name: '🔵 En cours', kw: 'cours' },
+      { name: '✅ Validé — à encaisser', kw: 'valide' },
+      { name: '🏁 Honoré', kw: 'honore' },
+      { name: '✖️ Abandonné', kw: 'abandonne' },
+    ];
+    const manquants = voulu.filter(v => !existing.some(t => clean(t.name).includes(v.kw)));
+    if (!manquants.length || existing.length + manquants.length > 20) return;
+    const merged = [
+      ...existing.map(t => { const o = { name: t.name, moderated: !!t.moderated }; if (t.id) o.id = t.id; if (t.emoji && (t.emoji.id || t.emoji.name)) o.emoji = { id: t.emoji.id || null, name: t.emoji.name || null }; return o; }),
+      ...manquants.map(v => ({ name: v.name })),
+    ];
+    await forum.setAvailableTags(merged).catch(e => console.log('⚠️ contrats setAvailableTags:', e.message));
+    // Re-catégorise les contrats déjà publiés (une seule fois, à la création des étiquettes)
+    const db = loadDB();
+    for (const c of (db.contrats || []).slice(0, 60)) { if (c.ficheForumThreadId) await _majContratForum(guild, c).catch(() => {}); }
+  } catch (e) { console.log('❌ _assurerEtiquettesContrats:', e.message); }
 }
 async function _installerPlanningContrats(guild) {
   try {
