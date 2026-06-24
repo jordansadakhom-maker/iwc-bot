@@ -29,13 +29,12 @@ function _nomModele(m) {
 }
 
 const PROMPT_FARWEST = [
-  "Transforme cette capture d'écran du jeu Red Dead Redemption en une VRAIE PHOTOGRAPHIE PHOTORÉALISTE, comme prise par un appareil photo réel — PAS une peinture, PAS une illustration, PAS un rendu de jeu vidéo.",
-  "Garde EXACTEMENT la même scène : mêmes personnages, mêmes visages et expressions, mêmes poses, mêmes vêtements, même décor, même cadrage et même composition. N'ajoute, ne retire et ne déplace AUCUN élément.",
-  "Rends-la crédible et naturelle : lumière réaliste et cohérente avec la scène (soleil, lanterne, feu ou clair de lune selon le contexte), couleurs naturelles et justes, contraste modéré — évite tout étalonnage exagéré ou look « cinéma » artificiel.",
-  "Photoréalisme des détails : peau avec pores et imperfections, barbe et cheveux fins, tissus, cuir et métal aux matières réalistes, micro-grain photographique subtil, profondeur de champ naturelle, netteté réaliste (ni sur-lissé, ni sur-saturé).",
-  "Ambiance western de la fin du XIXᵉ siècle, sobre et crédible (poussière ou légère brume seulement si la scène s'y prête).",
+  "Transforme cette capture d'écran de jeu vidéo (Red Dead Redemption) en une PHOTOGRAPHIE 100% RÉALISTE, indiscernable d'un vrai cliché pris par un appareil photo professionnel. Objectif : le réalisme le plus POUSSÉ possible.",
+  "Garde EXACTEMENT la même scène : mêmes personnages, mêmes visages et expressions, mêmes poses, mêmes vêtements, même décor, même cadrage, même composition et mêmes couleurs d'ensemble. N'ajoute, ne retire, ne déplace RIEN.",
+  "Élimine totalement l'aspect « jeu vidéo / image de synthèse » : textures parfaitement réalistes — peau avec pores, grain et imperfections, poils et barbe, tissus aux fibres et à l'usure visibles, cuir, métal, bois, poussière — micro-détails partout.",
+  "Optique d'un vrai appareil : exposition naturelle et crédible, balance des couleurs réaliste, profondeur de champ optique, micro-grain photographique fin, netteté réaliste. SURTOUT PAS de look peinture, illustration, dessin, HDR exagéré ni sur-saturation.",
   "Retire impérativement tous les éléments d'interface du jeu : ATH/HUD, textes à l'écran, menus, mini-carte, icônes, jauges, sous-titres, filigranes.",
-  "Ne réponds qu'avec l'image éditée, sans texte.",
+  "Ne réponds qu'avec l'image éditée, sans aucun texte.",
 ].join(' ');
 
 async function _imageBytes(url) {
@@ -133,7 +132,7 @@ async function onMessage(message) {
     const auteur = message.member?.displayName || message.author.username;
     const cap = (message.content || '').trim().slice(0, 250);
     const plur = atts.length > 1 ? `les ${atts.length} clichés` : 'le cliché';
-    const wait = await message.channel.send({ content: `🎨 Le photographe développe ${plur} façon Far West…`, allowedMentions: { parse: [] } }).catch(() => null);
+    const wait = await message.channel.send({ content: `📸 Retouche photoréaliste de ${plur}…`, allowedMentions: { parse: [] } }).catch(() => null);
 
     // Repeindre chaque image
     const outBufs = [];
@@ -153,8 +152,8 @@ async function onMessage(message) {
     const files = outBufs.map((b, i) => new AttachmentBuilder(b, { name: `farwest_${i}.png` }));
     const e = new EmbedBuilder()
       .setColor(0x8B5A2B)
-      .setTitle('🤠 Cliché du Far West')
-      .setDescription("*Capture sublimée par l'IA — rendu cinématographique de l'Ouest.*")
+      .setTitle('📸 Photo retravaillée')
+      .setDescription("*Capture retravaillée par l'IA — rendu photoréaliste.*")
       .setImage('attachment://farwest_0.png')
       .setFooter({ text: `Salon Far West • rendu ${_nomModele(modelUtilise)} • partagé par ${auteur}` })
       .setTimestamp();
