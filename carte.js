@@ -44,6 +44,27 @@ function _peutVoir(member, niveau) {
 function _ensure(db) { if (!db.carte) db.carte = {}; if (!Array.isArray(db.carte.points)) db.carte.points = []; return db.carte; }
 function _id() { return 'PT-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
 
+// Brouillons de placement (en mémoire) : userId -> { type, niveau, nom, region, lieu, notes, col, row, at }
+const _drafts = new Map();
+function _purgeDrafts() { const now = Date.now(); for (const [k, v] of _drafts) if (now - (v.at || 0) > 3600000) _drafts.delete(k); }
+function _pushPoint(member, d, caseStr) {
+  const db = loadDB(); const c = _ensure(db);
+  c.points.push({ id: _id(), type: d.type, niveau: d.niveau, nom: d.nom, region: d.region || 'Autre', case: caseStr || '', lieu: d.lieu || '', notes: d.notes || '', parId: member.id, parNom: member.displayName || member.user?.username || '—', createdAt: new Date().toISOString() });
+  saveDB(db);
+}
+function _placementRows(d) {
+  const cols = Array.from({ length: COLS }, (_, i) => String.fromCharCode(65 + i));
+  const rowsN = Array.from({ length: ROWS }, (_, i) => String(i + 1));
+  return [
+    new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('carte_col').setPlaceholder(d.col ? `Colonne : ${d.col}` : 'Colonne (A–L)…').addOptions(cols.map(c => ({ label: 'Colonne ' + c, value: c, default: d.col === c })))),
+    new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('carte_row').setPlaceholder(d.row ? `Ligne : ${d.row}` : 'Ligne (1–8)…').addOptions(rowsN.map(r => ({ label: 'Ligne ' + r, value: r, default: d.row === r })))),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('carte_place').setLabel('Placer ici').setEmoji('✅').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('carte_place_none').setLabel('Sans position').setEmoji('📍').setStyle(ButtonStyle.Secondary),
+    ),
+  ];
+}
+
 // ── Image de fond ───────────────────────────────────────────────
 function _estImage(a) { return (a.contentType || '').startsWith('image') || /\.(png|jpe?g|webp)(\?|$)/i.test(a.url || a.name || ''); }
 async function capterCarteFond(guild, message) {
@@ -143,27 +164,21 @@ function _panelEmbed(db) {
     .setDescription([
       '*Le registre des lieux qui comptent — affichés directement sur la carte.*', '',
       '**Comment ça marche**',
-      '➕ **Ajouter** — type → niveau d\'accès → nom + **case** (ex: `F4`) + détails.',
+      '➕ **Ajouter** — type → niveau → infos → **choisis la position** (colonne + ligne) sur la carte.',
       '🔍 **Consulter** — la carte s\'affiche avec les marqueurs que ton accréditation permet.',
-      '🧭 **Grille** — affiche la carte quadrillée pour trouver ta case.', '',
+      '🧭 **Voir la grille** — la carte quadrillée pour repérer les cases.', '',
       '🟢 Public · 🟡 Membre · 🔴 Confidentiel (Direction)', '',
       `📊 **${pts.length} point(s)** :`, lignes,
     ].join('\n'))
     .setFooter({ text: 'La Confrérie • Carte • rien ne se perd' });
 }
 function _panelRows() {
-  return [
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('carte_web').setLabel('Ouvrir la carte (cliquable)').setEmoji('🌐').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('carte_view').setLabel('Consulter').setEmoji('🔍').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('carte_add').setLabel('Ajouter (Discord)').setEmoji('➕').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('carte_grille').setLabel('Grille').setEmoji('🧭').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('carte_manage').setLabel('Gérer').setEmoji('🛠️').setStyle(ButtonStyle.Secondary),
-    ),
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('carte_seturl').setLabel('Définir l\'URL du bot (Direction)').setEmoji('⚙️').setStyle(ButtonStyle.Secondary),
-    ),
-  ];
+  return [new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('carte_add').setLabel('Ajouter un point').setEmoji('➕').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('carte_view').setLabel('Consulter').setEmoji('🔍').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('carte_grille').setLabel('Voir la grille').setEmoji('🧭').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('carte_manage').setLabel('Gérer').setEmoji('🛠️').setStyle(ButtonStyle.Secondary),
+  )];
 }
 async function installerPanel(guild) {
   try {
@@ -244,11 +259,36 @@ async function routeInteraction(interaction) {
       const nom = (interaction.fields.getTextInputValue('nom') || '').trim().slice(0, 100);
       if (!nom) { await interaction.reply({ content: '❌ Le nom est obligatoire.', flags: MessageFlags.Ephemeral }); return true; }
       const caseStr = (interaction.fields.getTextInputValue('case') || '').trim().toUpperCase().replace(/\s+/g, '');
-      const point = { id: _id(), type, niveau, nom, region: (interaction.fields.getTextInputValue('region') || '').trim().slice(0, 40) || 'Autre', case: /^[A-L]\d{1,2}$/.test(caseStr) ? caseStr : '', lieu: (interaction.fields.getTextInputValue('lieu') || '').trim().slice(0, 200), notes: (interaction.fields.getTextInputValue('notes') || '').trim().slice(0, 500), parId: interaction.user.id, parNom: interaction.member?.displayName || interaction.user.username, createdAt: new Date().toISOString() };
-      const db = loadDB(); _ensure(db).points.push(point); saveDB(db);
+      const draft = { type, niveau, nom, region: (interaction.fields.getTextInputValue('region') || '').trim().slice(0, 40) || 'Autre', lieu: (interaction.fields.getTextInputValue('lieu') || '').trim().slice(0, 200), notes: (interaction.fields.getTextInputValue('notes') || '').trim().slice(0, 500) };
+      // Case déjà tapée → on enregistre direct
+      if (/^[A-L]\d{1,2}$/.test(caseStr)) {
+        _pushPoint(interaction.member, draft, caseStr);
+        await installerPanel(interaction.guild).catch(() => {});
+        await interaction.reply({ content: `✅ Point ajouté : ${_type(type).emoji} **${nom}** (case \`${caseStr}\`) · ${_niv(niveau).emoji} ${_niv(niveau).label}.`, flags: MessageFlags.Ephemeral }); return true;
+      }
+      // Sinon : placement guidé (colonne + ligne sur la carte quadrillée)
+      _purgeDrafts(); _drafts.set(interaction.user.id, { ...draft, at: Date.now() });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const rendered = await _renderMap(interaction.guild, []).catch(() => null);
+      const payload = { content: `➕ **${nom}** — choisis sa **position** (colonne + ligne) puis **Placer ici** :`, components: _placementRows(_drafts.get(interaction.user.id)) };
+      if (rendered) { payload.embeds = [new EmbedBuilder().setColor(0x8B5A2B).setImage('attachment://grille.png')]; payload.files = [new AttachmentBuilder(rendered.buf, { name: 'grille.png' })]; }
+      await interaction.editReply(payload); return true;
+    }
+    if (interaction.isStringSelectMenu?.() && (id === 'carte_col' || id === 'carte_row')) {
+      const d = _drafts.get(interaction.user.id);
+      if (!d) { await interaction.update({ content: '⏱️ Session expirée — relance ➕ Ajouter.', components: [], embeds: [], files: [] }); return true; }
+      if (id === 'carte_col') d.col = interaction.values[0]; else d.row = interaction.values[0];
+      await interaction.update({ content: `📍 Position : **${d.col || '?'}${d.row || '?'}** — ajuste si besoin, puis **Placer ici**.`, components: _placementRows(d) }); return true;
+    }
+    if (interaction.isButton?.() && (id === 'carte_place' || id === 'carte_place_none')) {
+      const d = _drafts.get(interaction.user.id);
+      if (!d) { await interaction.update({ content: '⏱️ Session expirée.', components: [], embeds: [], files: [] }); return true; }
+      if (id === 'carte_place' && (!d.col || !d.row)) { await interaction.reply({ content: '❌ Choisis d\'abord une **colonne** ET une **ligne** (ou « Sans position »).', flags: MessageFlags.Ephemeral }); return true; }
+      const caseStr = id === 'carte_place' ? d.col + d.row : '';
+      _pushPoint(interaction.member, d, caseStr); _drafts.delete(interaction.user.id);
       await installerPanel(interaction.guild).catch(() => {});
-      const warn = !point.case ? '\n⚠️ Pas de case valide (A–L + 1–8) → le point existe mais n\'est pas dessiné sur la carte. Tu peux corriger via 🛠️ Gérer.' : '';
-      await interaction.reply({ content: `✅ Point ajouté : ${_type(type).emoji} **${nom}**${point.case ? ` (case \`${point.case}\`)` : ''} · ${_niv(niveau).emoji} ${_niv(niveau).label}.${warn}`, flags: MessageFlags.Ephemeral }); return true;
+      const txt = caseStr ? `✅ **${d.nom}** placé en case \`${caseStr}\` · ${_niv(d.niveau).emoji} ${_niv(d.niveau).label}. (🔍 Consulter pour le voir sur la carte)` : `✅ **${d.nom}** enregistré (sans position). Tu peux lui donner une case via 🛠️ Gérer.`;
+      await interaction.update({ content: txt, components: [], embeds: [], files: [] }); return true;
     }
     if (interaction.isButton?.() && id === 'carte_view') {
       const row = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('carte_view_sel').setPlaceholder('Filtrer par type…').addOptions([{ label: 'Tout afficher', value: 'tout', emoji: '🗺️' }, ...TYPES.map(t => ({ label: t.label, value: t.key, emoji: t.emoji }))]));
