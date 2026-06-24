@@ -7363,12 +7363,14 @@ async function _handleRdvPoleSelect(interaction) {
     const membresComm = interaction.guild.members.cache.filter(m =>
       !m.user.bot && m.roles.cache.some(r => /visiteur|communaut/i.test(r.name))
     );
-    if (!membresComm.size) {
-      return interaction.update({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('🤝 Communauté / Visiteur').setDescription('Aucun membre avec un rôle **Visiteur** ou **Communauté** trouvé sur le serveur.')], components: [] });
+    const memberOpts = [...membresComm.values()].slice(0, 15).map(m => ({ label: (m.displayName || m.user.username).slice(0, 100), value: m.id, description: `@${m.user.username}`.slice(0, 100), emoji: '🤝' }));
+    const contactOpts = _contactSelectOptions(loadDB(), 10).map(o => ({ label: o.label, value: `contact::${o.value}`, description: o.description, emoji: '📇' }));
+    const options = [...memberOpts, ...contactOpts].slice(0, 25);
+    if (!options.length) {
+      return interaction.update({ embeds: [new EmbedBuilder().setColor(0xED4245).setTitle('🤝 Communauté / Visiteur').setDescription('Aucun membre **Visiteur/Communauté** ni **contact** au répertoire. Crée une fiche contact d\'abord.')], components: [] });
     }
-    const options = [...membresComm.values()].slice(0, 25).map(m => ({ label: (m.displayName || m.user.username).slice(0, 100), value: m.id, description: `@${m.user.username}`.slice(0, 100), emoji: '🤝' }));
     return interaction.update({
-      embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('🤝 Rendez-vous Communauté').setDescription('**Personne à convoquer** — choisis qui recevra ce rendez-vous.')],
+      embeds: [new EmbedBuilder().setColor(0x2C3E50).setTitle('🤝 Rendez-vous Communauté').setDescription('**Personne à convoquer** — membre visiteur 🤝 ou contact du répertoire 📇.')],
       components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`rdv_comm_person_${typeRdv}`).setPlaceholder('Choisir la personne...').addOptions(options))],
     });
   }
@@ -7621,8 +7623,15 @@ async function _validerModalRdvCommunaute(interaction) {
   const db = loadDB();
   const emetteurIC = db.members[interaction.user.id]?.name || interaction.user.username;
 
-  const personne = await interaction.guild.members.fetch(personId).catch(() => null);
-  const personLabel = personne ? (personne.displayName || personne.user.username) : 'Invité';
+  let personne = null; let personLabel = 'Invité'; let estContact = false;
+  if (personId.startsWith('contact::')) {
+    estContact = true;
+    const c = (loadDB().repertoire?.contacts || []).find(x => String(x.id) === personId.slice(9));
+    personLabel = c?.nom || 'Contact';
+  } else {
+    personne = await interaction.guild.members.fetch(personId).catch(() => null);
+    personLabel = personne ? (personne.displayName || personne.user.username) : 'Invité';
+  }
 
   const embed = new EmbedBuilder().setColor(0x8B5A2A).setTitle(`🤝 ${titre.toUpperCase()}`)
     .setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   IRON WOLF COMPANY — INVITATION\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
@@ -7640,7 +7649,8 @@ async function _validerModalRdvCommunaute(interaction) {
   // Poster dans l'agenda communauté dédié + ping la personne
   const agendaComm = interaction.guild.channels.cache.get('1512717271313944678');
   if (agendaComm) {
-    await agendaComm.send({ content: `<@${personId}> — 🤝 **${titre}** · ${heure} à ${lieu}`, embeds: [embed], allowedMentions: { users: [personId] } }).catch(() => {});
+    const tete = estContact ? `📇 **${personLabel}** — 🤝 **${titre}** · ${heure} à ${lieu}` : `<@${personId}> — 🤝 **${titre}** · ${heure} à ${lieu}`;
+    await agendaComm.send({ content: tete, embeds: [embed], allowedMentions: estContact ? { parse: [] } : { users: [personId] } }).catch(() => {});
   }
 
   // Archiver dans Notion (agenda)
