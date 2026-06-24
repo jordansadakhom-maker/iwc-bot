@@ -595,7 +595,7 @@ async function cloturer(interaction, succes) {
 // ═══════════════════════════════════════════════════════════════
 // SIGNATURE PAR UNE PERSONNE (via son ID Discord, en MP) — contrat anonyme
 // ═══════════════════════════════════════════════════════════════
-// 1) Direction clique « ✍️ Faire signer » → demande l'ID Discord
+// 1) Direction clique « ✍️ Faire signer » → menu de sélection de la personne (aucun ID à copier)
 async function onFaireSigner(interaction) {
   if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
   const id = interaction.customId.split('::')[1];
@@ -603,36 +603,37 @@ async function onFaireSigner(interaction) {
   const c = findContrat(db, id);
   if (!c) return interaction.reply({ content: '❌ Contrat introuvable.', flags: MessageFlags.Ephemeral });
   if (c.signe) return interaction.reply({ content: '✅ Ce contrat est déjà signé.', flags: MessageFlags.Ephemeral });
-  const modal = new ModalBuilder().setCustomId(`cc_sign_modal::${id}`).setTitle('✍️ Faire signer le contrat');
-  modal.addComponents(new ActionRowBuilder().addComponents(
-    new TextInputBuilder().setCustomId('discord_id').setLabel('ID Discord de la personne').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex : 123456789012345678').setValue(c.signataireId || ''),
-  ));
-  return interaction.showModal(modal);
+  const menu = new UserSelectMenuBuilder()
+    .setCustomId(`cc_sign_pick::${id}`)
+    .setPlaceholder('Choisis la personne qui doit signer...')
+    .setMinValues(1)
+    .setMaxValues(1);
+  if (c.signataireId) { try { menu.setDefaultUsers([c.signataireId]); } catch {} }
+  return interaction.reply({ content: `✍️ **Faire signer — contrat ${id}**\nSélectionne la personne dans la liste : elle recevra le contrat en MP avec un bouton pour signer.`, components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral });
 }
-// 2) Soumission de l'ID → on envoie le contrat en MP avec un bouton « Signer »
-async function onSignModalSubmit(interaction) {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+// 2) Sélection de la personne → on envoie le contrat en MP avec un bouton « Signer »
+async function onSignUserSelect(interaction) {
+  await interaction.deferUpdate();
   const id = interaction.customId.split('::')[1];
   const db = loadDB();
   const c = findContrat(db, id);
-  if (!c) return interaction.editReply({ content: '❌ Contrat introuvable.' });
-  if (c.signe) return interaction.editReply({ content: '✅ Ce contrat est déjà signé.' });
-  const uid = (interaction.fields.getTextInputValue('discord_id') || '').replace(/[^0-9]/g, '').trim();
-  if (uid.length < 15) return interaction.editReply({ content: '❌ ID Discord invalide. Colle l\'identifiant numérique (clic droit sur la personne → Copier l\'identifiant).' });
+  if (!c) return interaction.editReply({ content: '❌ Contrat introuvable.', components: [] });
+  if (c.signe) return interaction.editReply({ content: '✅ Ce contrat est déjà signé.', components: [] });
+  const uid = interaction.values[0];
   const user = await interaction.client.users.fetch(uid).catch(() => null);
-  if (!user) return interaction.editReply({ content: '❌ Utilisateur introuvable pour cet ID.' });
+  if (!user) return interaction.editReply({ content: '❌ Utilisateur introuvable.', components: [] });
   const btn = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`cc_dosign::${id}`).setLabel('✍️ Signer ce contrat').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`cc_norefuse::${id}`).setLabel('❌ Refuser').setStyle(ButtonStyle.Danger),
   );
   const dm = await user.send({ embeds: [buildSignatureEmbed(c)], components: [btn] }).catch(() => null);
-  if (!dm) return interaction.editReply({ content: `⚠️ Impossible d'envoyer le MP à <@${uid}> (ses messages privés sont fermés, ou le bot n'a aucun serveur en commun avec cette personne).` });
+  if (!dm) return interaction.editReply({ content: `⚠️ Impossible d'envoyer le MP à <@${uid}> (ses messages privés sont fermés, ou le bot n'a aucun serveur en commun avec cette personne).`, components: [] });
   c.signataireId = uid;
   c.signatureEnvoyeeAt = new Date().toISOString();
   c.signe = false;
   saveDB(db); await _persistNow();
   await rafraichirFiche(interaction.guild, c).catch(() => {});
-  return interaction.editReply({ content: `✅ Contrat **${c.id}** envoyé en MP à <@${uid}> pour signature. Tu seras prévenu dès qu'il signe.` });
+  return interaction.editReply({ content: `✅ Contrat **${c.id}** envoyé en MP à <@${uid}> pour signature. Tu seras prévenu dès qu'il signe.`, components: [] });
 }
 // 3) La personne clique « Signer » (depuis son MP) → on enregistre la signature
 async function onDoSign(interaction, accepte) {
@@ -815,9 +816,9 @@ async function routeInteraction(interaction) {
     }
     if (interaction.isUserSelectMenu?.()) {
       if (interaction.customId.startsWith('cc_assign_go::')) { await onAssignGo(interaction); return true; }
+      if (interaction.customId.startsWith('cc_sign_pick::')) { await onSignUserSelect(interaction); return true; }
     }
     if (interaction.isModalSubmit?.()) {
-      if (interaction.customId.startsWith('cc_sign_modal::')) { await onSignModalSubmit(interaction); return true; }
       if (interaction.customId.startsWith('cc_edit_modal::')) { await onEditSubmit(interaction); return true; }
       if (interaction.customId.startsWith('cc_addinfo_modal::')) { await onAddInfoSubmit(interaction); return true; }
       if (interaction.customId.startsWith('cc_modal::')) { await onModalSubmit(interaction); return true; }
