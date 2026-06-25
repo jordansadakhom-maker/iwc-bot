@@ -45,6 +45,29 @@ async function genererImageContrat(contrat) {
     return await parcheminImg.genererParchemin(blocks, { width: 760 });
   } catch { return null; }
 }
+// Génère l'ORDRE DE MISSION (briefing reçu par les agents) sous forme d'image parchemin.
+async function genererImageBriefing(contrat) {
+  try {
+    const r = riskOf(contrat);
+    const blocks = [
+      { type: 'title', text: 'ORDRE DE MISSION' },
+      { type: 'subtitle', text: "La Confrérie — en l'an de grâce 1904" },
+      { type: 'rule' },
+      { type: 'field', label: 'Référence du pacte', value: contrat.id },
+      { type: 'field', label: 'Nature de la besogne', value: contrat.typeMission || '—' },
+      { type: 'field', label: 'Péril encouru', value: r.label },
+      { type: 'field', label: 'Commanditaire', value: contrat.commanditaire ? contrat.commanditaire : 'Anonyme' },
+      { type: 'field', label: 'Récompense promise', value: `${contrat.remuneration || '—'} (prime ${r.prime})` },
+      { type: 'field', label: 'Terme échu le', value: contrat.dateEcheance ? fmtDate(contrat.dateEcheance) : (contrat.echeanceTexte || 'À votre convenance') },
+      { type: 'rule' },
+      { type: 'para', label: 'Objet du contrat', text: contrat.objet || '—' },
+      ...(contrat.details ? [{ type: 'para', label: 'Consignes & clauses', text: contrat.details }] : []),
+      { type: 'rule' },
+      { type: 'quote', text: "« Que ta lame soit sûre, et que l'ombre te garde. » — La Confrérie, an 1904" },
+    ];
+    return await parcheminImg.genererParchemin(blocks, { width: 760 });
+  } catch { return null; }
+}
 const { loadDB, saveDB, sauvegarderSurGitHub } = require('./db');
 const parcheminImg = require('./parchemin-image'); // génération d'image « texte gravé sur parchemin »
 // Sauvegarde immédiate sur GitHub : sur Render le disque est éphémère — sans ça, un contrat créé
@@ -298,7 +321,11 @@ async function envoyerBriefings(guild, contrat) {
     try {
       const m = await guild.members.fetch(userId).catch(() => null);
       if (m) {
-        const dm = await m.send({ embeds: [buildBriefingEmbed(contrat)], components: buildBriefingButtons(contrat), files: [parcheminFichier()].filter(Boolean) }).catch(() => null);
+        // Ordre de mission en IMAGE parchemin (texte gravé) ; repli sur l'embed si génération KO
+        const imgB = await genererImageBriefing(contrat).catch(() => null);
+        const dm = imgB
+          ? await m.send({ content: "📜 *Frère, un ordre de mission t'est confié. Lis-le, puis réponds.*", files: [new AttachmentBuilder(imgB, { name: `mission-${contrat.id}.png` })], components: buildBriefingButtons(contrat) }).catch(() => null)
+          : await m.send({ embeds: [buildBriefingEmbed(contrat)], components: buildBriefingButtons(contrat), files: [parcheminFichier()].filter(Boolean) }).catch(() => null);
         if (dm) dmOk = true;
       }
     } catch {}
