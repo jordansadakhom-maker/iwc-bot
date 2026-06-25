@@ -340,8 +340,11 @@ async function envoyerBriefings(guild, contrat) {
     try {
       const m = await guild.members.fetch(userId).catch(() => null);
       if (m) {
-        // Version conservée : ordre de mission en embed parchemin (image en dessous)
-        const dm = await m.send({ embeds: [buildBriefingEmbed(contrat)], components: buildBriefingButtons(contrat), files: [parcheminFichier()].filter(Boolean) }).catch(() => null);
+        // Ordre de mission gravé SUR le parchemin (image) ; repli sur l'embed si génération KO
+        const imgB = await genererImageBriefing(contrat).catch(() => null);
+        const dm = imgB
+          ? await m.send({ content: "📜 *Frère, un ordre de mission t'est confié. Lis-le, puis réponds.*", files: [new AttachmentBuilder(imgB, { name: `mission-${contrat.id}.png` })], components: buildBriefingButtons(contrat) }).catch(() => null)
+          : await m.send({ embeds: [buildBriefingEmbed(contrat)], components: buildBriefingButtons(contrat), files: [parcheminFichier()].filter(Boolean) }).catch(() => null);
         if (dm) dmOk = true;
       }
     } catch {}
@@ -778,23 +781,28 @@ async function cloturer(interaction, succes) {
   }
   const jc = journalCh(interaction.guild);
   if (jc) await jc.send({ embeds: [new EmbedBuilder().setColor(succes ? 0x57F287 : 0xED4245).setTitle(`${succes ? '✅' : '💀'} Contrat ${succes ? 'réussi' : 'échoué'} — ${c.id}`).setDescription(`**${c.typeMission}** · clôturé par ${c.clôturePar}`).setFooter({ text: 'La Confrérie • Contrats' }).setTimestamp()] }).catch(() => {});
-  // prévenir les agents — fin de mission en embed parchemin (version conservée)
+  // prévenir les agents — fin de mission gravée SUR le parchemin (image) ; repli embed si génération KO
+  const imgFin = await genererImageFinMission(c, succes).catch(() => null);
   for (const userId of (c.agents || [])) {
     try {
       const m = await interaction.guild.members.fetch(userId).catch(() => null);
       if (!m) continue;
-      await m.send({ embeds: [new EmbedBuilder()
-        .setColor(0xC9A66B)
-        .setTitle(`📜 ⸺  ${succes ? 'MISSION ACCOMPLIE' : 'MISSION ÉCHOUÉE'}  ⸺ 📜`)
-        .setDescription([
-          `*Concernant le pacte \`${c.id}\` (${emojiType(c.typeMission)} ${c.typeMission})…*`,
-          '',
-          succes
-            ? '✒️ *Belle besogne, frère. La Confrérie n\'oublie jamais les siens — ta part te reviendra.*'
-            : '🩸 *La besogne a tourné court. On en tire les leçons, et l\'on remet l\'ouvrage sur le métier.*',
-        ].join('\n'))
-        .setFooter({ text: '✒️ La Confrérie — an 1904 • Confidentiel' })
-        .setImage(PARCHEMIN_IMG)], files: [parcheminFichier()].filter(Boolean) }).catch(() => {});
+      if (imgFin) {
+        await m.send({ files: [new AttachmentBuilder(imgFin, { name: `fin-${c.id}.png` })] }).catch(() => {});
+      } else {
+        await m.send({ embeds: [new EmbedBuilder()
+          .setColor(0xC9A66B)
+          .setTitle(`📜 ⸺  ${succes ? 'MISSION ACCOMPLIE' : 'MISSION ÉCHOUÉE'}  ⸺ 📜`)
+          .setDescription([
+            `*Concernant le pacte \`${c.id}\` (${emojiType(c.typeMission)} ${c.typeMission})…*`,
+            '',
+            succes
+              ? '✒️ *Belle besogne, frère. La Confrérie n\'oublie jamais les siens — ta part te reviendra.*'
+              : '🩸 *La besogne a tourné court. On en tire les leçons, et l\'on remet l\'ouvrage sur le métier.*',
+          ].join('\n'))
+          .setFooter({ text: '✒️ La Confrérie — an 1904 • Confidentiel' })
+          .setImage(PARCHEMIN_IMG)], files: [parcheminFichier()].filter(Boolean) }).catch(() => {});
+      }
     } catch {}
   }
 }
@@ -842,8 +850,11 @@ async function onSignPick(interaction) {
     new ButtonBuilder().setCustomId(`cc_dosign::${id}`).setLabel('Apposer ma marque').setEmoji('✒️').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`cc_norefuse::${id}`).setLabel('Décliner').setEmoji('✖️').setStyle(ButtonStyle.Danger),
   );
-  // Version conservée : contrat en embed parchemin (image en dessous)
-  const dm = await user.send({ embeds: [buildSignatureEmbed(c)], components: [btn], files: [parcheminFichier()].filter(Boolean) }).catch(() => null);
+  // Contrat gravé SUR le parchemin (image) ; repli sur l'embed si la génération échoue
+  const imgBuf = await genererImageContrat(c).catch(() => null);
+  const dm = imgBuf
+    ? await user.send({ content: '📜 *Un pacte vous est proposé. Lisez-en les termes, puis tranchez.*', files: [new AttachmentBuilder(imgBuf, { name: `contrat-${c.id}.png` })], components: [btn] }).catch(() => null)
+    : await user.send({ embeds: [buildSignatureEmbed(c)], components: [btn], files: [parcheminFichier()].filter(Boolean) }).catch(() => null);
   if (!dm) return interaction.editReply({ content: `⚠️ Impossible d'envoyer le MP à <@${uid}> (ses messages privés sont fermés, ou le bot n'a aucun serveur en commun avec cette personne).`, components: [] });
   c.signataireId = uid;
   c.signatureEnvoyeeAt = new Date().toISOString();
