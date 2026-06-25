@@ -175,6 +175,14 @@ opsEtapes.init?.({
 });
 // Hook appelé par les contrats Confrérie : crée l'opération par étapes quand un contrat est validé.
 global.creerOpDepuisContrat = (guild, contrat, opts) => opsEtapes.creerOperationDepuisContrat?.(guild, contrat, opts);
+// Contrats légaux (offre/emploi) : à la signature, ouvre l'opération à préparer (pôle légal, étapes adaptées au type de mission).
+function _opAutoDepuisContrat(gd, contrat, userId) {
+  try {
+    if (!gd || !contrat) return;
+    const p = global.creerOpDepuisContrat?.(gd, contrat, { pole: 'legal', parId: userId || null });
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  } catch {}
+}
 
 const {
   CH, PARTICIPANTS_MAP, CONTRAT_ROLES, JUNE_MCCALL_ID,
@@ -477,7 +485,6 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('stats').setDescription('Affiche les statistiques de la Compagnie'),
   new SlashCommandBuilder().setName('solde').setDescription('Affiche les soldes des coffres'),
   new SlashCommandBuilder().setName('fiche').setDescription("Affiche le dossier complet d'un membre").addUserOption(o => o.setName('membre').setDescription('Membre dont tu veux le dossier complet').setRequired(false)).addStringOption(o => o.setName('nom').setDescription('Ou recherche par nom de personnage').setRequired(false)),
-  new SlashCommandBuilder().setName('ops').setDescription('Liste les opérations actives'),
   new SlashCommandBuilder().setName('absent').setDescription('🟡 Déclarer une absence'),
   new SlashCommandBuilder().setName('notes').setDescription('🕵️ Voir les dernières notes de terrain')
     .addStringOption(o => o.setName('filtre').setDescription('Filtrer par catégorie ou agent').setRequired(false))
@@ -508,7 +515,6 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('agenda').setDescription('📅 Voir ou créer un RDV')
     .addSubcommand(s => s.setName('voir').setDescription('Voir les prochains RDV'))
     .addSubcommand(s => s.setName('creer').setDescription('Créer un nouveau RDV dans Notion')),
-  new SlashCommandBuilder().setName('op-programmer').setDescription('🕐 Programmer une opération avec lancement automatique (Direction)'),
   new SlashCommandBuilder().setName('setup-serveur').setDescription('🔧 Réorganiser la structure du serveur Discord (Fondateur uniquement)'),
   new SlashCommandBuilder().setName('aide').setDescription('📖 Guide des commandes disponibles'),
   new SlashCommandBuilder().setName('patch').setDescription('Deployer le patch note'),
@@ -558,7 +564,10 @@ const SLASH_COMMANDS = [
     .addUserOption(o => o.setName('filleul').setDescription('Le filleul (nouveau)').setRequired(true)),
   new SlashCommandBuilder().setName('mon-parrainage').setDescription('🤝 Voir ton parrain et tes filleuls'),
   new SlashCommandBuilder().setName('registre').setDescription('📋 Liste des membres actifs (Direction)').addStringOption(o => o.setName('pole').setDescription('Filtrer par pôle').setRequired(false).addChoices({ name: 'Tous', value: 'tous' }, { name: '⚖️ Légal', value: 'legal' }, { name: '🔒 Illégal', value: 'illegal' })).addIntegerOption(o => o.setName('page').setDescription('Page').setRequired(false)),
-  new SlashCommandBuilder().setName('op').setDescription('🎯 Détail d\'une opération').addStringOption(o => o.setName('id').setDescription('ID de l\'opération').setRequired(false)),
+  new SlashCommandBuilder().setName('op').setDescription('🎯 Opérations : détail, liste, programmer')
+    .addSubcommand(s => s.setName('detail').setDescription('🔍 Détail d\'une opération').addStringOption(o => o.setName('id').setDescription('ID de l\'opération').setRequired(false)))
+    .addSubcommand(s => s.setName('liste').setDescription('📋 Opérations en cours et en préparation'))
+    .addSubcommand(s => s.setName('programmer').setDescription('🕐 Programmer une opération à lancement automatique (Direction)')),
 ].map(c => c.toJSON());
 
 async function registerSlashCommands(guild) {
@@ -1620,7 +1629,21 @@ async function handleSlashCommand(interaction) {
   }
   if (commandName === 'registre') { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); }
   if (commandName === 'registre')         return _handleRegistre(interaction);
-  if (commandName === 'op')               return _handleOpDetail(interaction);
+  if (commandName === 'op') {
+    const sub = interaction.options.getSubcommand(false);
+    if (sub === 'liste') {
+      if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral });
+      const opsActives = (db.operations || []).filter(o => ['preparation', 'en_cours'].includes(o.status));
+      if (!opsActives.length) { await interaction.reply({ content: '*Aucune opération en cours ou en préparation.*', flags: MessageFlags.Ephemeral }); return; }
+      await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('🎯 Opérations actives — IWC').setDescription(opsActives.map(o => [`**${o.name}** — ${o.status === 'en_cours' ? '🟢 En cours' : '🟡 Préparation'}`, `📍 ${o.lieu || '—'} · 👥 ${(o.participants || []).join(', ') || 'Aucun'}`].join('\n')).join('\n\n')).setFooter({ text: `IWC • ${fmtShort(new Date())}` })] });
+      return;
+    }
+    if (sub === 'programmer') {
+      if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+      return _ouvrirModalOpProgrammee(interaction);
+    }
+    return _handleOpDetail(interaction); // sous-commande « detail » (par défaut)
+  }
   // /profil retiré (limite 100 commandes Discord) — toujours dispo via le bouton « Mon profil » du menu (menu_profil)
   if (commandName === 'bilan')             { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionModules.handleBilanCommand?.(interaction); }
   if (commandName === 'rdv')               { if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral }); return _ouvrirMenuRdvSlash(interaction); }
@@ -1631,7 +1654,6 @@ async function handleSlashCommand(interaction) {
     if (subCmd === 'rdv') return _ouvrirMenuRdvSlash(interaction);
     return notionV3.handleAgendaCommand?.(interaction);
   }
-  if (commandName === 'op-programmer')     { if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return _ouvrirModalOpProgrammee(interaction); }
   if (commandName === 'op-creer')          return _ouvrirModalOpCreer(interaction);
   if (commandName === 'setup-serveur')     return _handleSetupServeur(interaction);
   if (commandName === 'aide')              return _handleAide(interaction);
@@ -1717,14 +1739,6 @@ async function handleSlashCommand(interaction) {
     await interaction.reply({ embeds: [new EmbedBuilder().setColor(cand.type === 'illegal' ? 0x8B1A1A : 0x3B82F6).setTitle(`👤 Fiche — ${cand.nomPerso}`).addFields({ name: '🎭 Personnage', value: cand.nomPerso, inline: true }, { name: '🎂 Âge', value: cand.agePerso || '—', inline: true }, { name: '⚖️ Pôle', value: cand.type === 'illegal' ? '🔪 Illégal' : '⚖️ Légal', inline: true }, { name: '💼 Métier', value: cand.metier || cand.specialite || '—', inline: true }, { name: '🕐 Disponibilités', value: cand.dispos || '—', inline: true }, { name: '📅 Entrée', value: fmtShort(cand.acceptedAt), inline: true }, { name: '📖 Background', value: (cand.background || '—').slice(0, 500) + ((cand.background?.length || 0) > 500 ? '...' : '') }).setFooter({ text: 'IWC • Fiche personnage' })], flags: MessageFlags.Ephemeral });
     return;
   }
-  if (commandName === 'ops') {
-    if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral });
-    const opsActives = (db.operations || []).filter(o => ['preparation', 'en_cours'].includes(o.status));
-    if (!opsActives.length) { await interaction.reply({ content: '*Aucune opération en cours ou en préparation.*', flags: MessageFlags.Ephemeral }); return; }
-    await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('🎯 Opérations actives — IWC').setDescription(opsActives.map(o => [`**${o.name}** — ${o.status === 'en_cours' ? '🟢 En cours' : '🟡 Préparation'}`, `📍 ${o.lieu || '—'} · 👥 ${(o.participants || []).join(', ') || 'Aucun'}`].join('\n')).join('\n\n')).setFooter({ text: `IWC • ${fmtShort(new Date())}` })] });
-    return;
-  }
-
   if (commandName === 'synthese') {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     if (!process.env.ANTHROPIC_API_KEY) {
@@ -4777,6 +4791,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     if (contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Déjà traité.', flags: MessageFlags.Ephemeral }); return; }
     const gd = guild || interaction.client.guilds.cache.first(); // bouton cliquable en MP → guild peut être null
     contrat.status = 'signe'; contrat.signedAt = new Date().toISOString(); saveDB(db);
+    _opAutoDepuisContrat(gd, contrat, interaction.user.id); // → opération à préparer (étapes adaptées au type)
     _majContratForum(gd, contrat).catch(() => {});
     await notionExtra.ajouterContratNotion?.(contrat);
     const clientIC = db.members[interaction.user.id]?.name || interaction.user.username;
@@ -4870,6 +4885,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
       // On applique les nouvelles modalités et le contrat est conclu
       contrat.objet = co.objet; contrat.prime = co.prime; contrat.remuneration = co.prime; contrat.echeanceTexte = co.echeance || contrat.echeanceTexte;
       contrat.status = 'signe'; contrat.signedAt = new Date().toISOString(); saveDB(db);
+      _opAutoDepuisContrat(gd || interaction.guild, contrat, interaction.user.id); // → opération à préparer
       _majContratForum(gd || interaction.guild, contrat).catch(() => {});
       _syncContratNotion(contrat, 'signe', contrat.clientNom).catch(() => {});
       if (gd) await ajouterJournalIC(gd, { type: 'contrat', titre: `Contrat conclu (contre-offre) — ${contratId}`, description: `Client : **${contrat.clientNom}** · Prime : ${contrat.prime}`, auteur: interaction.user.username }).catch(() => {});
@@ -4944,6 +4960,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     if (!contrat || contrat.status !== 'en_attente') { await interaction.reply({ content: '❌ Contrat introuvable ou déjà traité.', flags: MessageFlags.Ephemeral }); return; }
     if (!isDirection(interaction.member)) { await interaction.reply({ content: '❌ Seule la Direction peut signer.', flags: MessageFlags.Ephemeral }); return; }
     contrat.status = 'signe'; contrat.signedAt = new Date().toISOString(); contrat.signedBy = interaction.user.username; saveDB(db);
+    _opAutoDepuisContrat(interaction.guild, contrat, interaction.user.id); // → opération à préparer (étapes adaptées au type)
     _majContratForum(interaction.guild, contrat).catch(() => {});
     await notionExtra.ajouterContratNotion?.(contrat);
     const signataireDirIC = db.members[interaction.user.id]?.name || interaction.user.username;
@@ -6857,7 +6874,7 @@ async function _handlePatchDeploy(interaction) {
     .setTitle('\ud83d\uDC3A IWC Bot \u2014 Mise \u00e0 jour \u00b7 Version 8.0')
     .setDescription('*D\u00e9ploy\u00e9 le **' + dateStr + '** \u2014 Les contrats d\u00e9clenchent d\u00e9sormais de vraies op\u00e9rations, pr\u00e9par\u00e9es \u00e9tape par \u00e9tape.*')
     .addFields(
-      { name: '\uD83C\udfac OP\u00c9RATIONS PAR \u00c9TAPES (NOUVEAU)', value: '\u2192 Quand la **Direction valide un contrat** Confr\u00e9rie, une **op\u00e9ration s\'ouvre automatiquement** dans le salon des op\u00e9rations\n\u2192 Elle est **cat\u00e9goris\u00e9e** d\'apr\u00e8s le type de mission du contrat\n\u2192 Un **fil d\u00e9di\u00e9** est cr\u00e9\u00e9 avec un panneau de pr\u00e9paration', inline: false },
+      { name: '\uD83C\udfac OP\u00c9RATIONS PAR \u00c9TAPES (NOUVEAU)', value: '\u2192 Quand un **contrat est valid\u00e9/sign\u00e9** (Confr\u00e9rie **ou** client/employeur), une **op\u00e9ration s\'ouvre automatiquement** dans le salon des op\u00e9rations\n\u2192 Elle est **cat\u00e9goris\u00e9e** d\'apr\u00e8s le type de mission du contrat\n\u2192 Un **fil d\u00e9di\u00e9** est cr\u00e9\u00e9 avec un panneau de pr\u00e9paration', inline: false },
       { name: '\ud83e\ude9c 5 \u00c9TAPES ADAPT\u00c9ES AU CONTRAT', value: '\u2192 **Chaque type de contrat a son propre sc\u00e9nario** : Contrebande, Sabotage, Vol organis\u00e9, \u00c9limination, Extorsion, Espionnage, Protection, Chasseur de primes, R\u00e9cup\u00e9ration de dette\u2026 (+ mod\u00e8le g\u00e9n\u00e9rique)\n\u2192 Ex. Vol : *Rep\u00e9rage \u2192 Plan du coup \u2192 \u00c9quipe \u2192 Ex\u00e9cution \u2192 Partage & \u00e9coulement*\n\u2192 Chaque \u00e9tape se **remplit** (champs adapt\u00e9s) puis se **valide** (Direction), **dans l\'ordre**', inline: false },
     )
     .setFooter({ text: 'IWC Bot v8.0 \u00b7 1/2' });
@@ -6867,7 +6884,8 @@ async function _handlePatchDeploy(interaction) {
     .addFields(
       { name: '\ud83d\udcf7 PHOTOS & INFOS DANS CHAQUE \u00c9TAPE', value: '\u2192 Bouton **\u00ab \ud83d\udcf7 Ajouter une photo \u00bb** : envoie l\'image dans le fil, elle est rattach\u00e9e \u00e0 l\'\u00e9tape (rep\u00e9rage, preuve de capture\u2026)\n\u2192 Champs adapt\u00e9s : position, **nombre de cibles + gardes**, itin\u00e9raire, r\u00f4les, issue, prime encaiss\u00e9e\u2026', inline: false },
       { name: '\ud83d\udcc4 DOSSIER D\'OP\u00c9RATION AUTOMATIQUE', value: '\u2192 Une fois **toutes les \u00e9tapes valid\u00e9es**, un **dossier complet** est g\u00e9n\u00e9r\u00e9 : **fichier .md t\u00e9l\u00e9chargeable** + r\u00e9capitulatif post\u00e9 dans le fil\n\u2192 Tout est compil\u00e9 : \u00e9tapes, photos, comptes-rendus, prime', inline: false },
-      { name: '\uD83C\udfac LANCER SUR UN CONTRAT EXISTANT', value: '\u2192 Bouton **\u00ab Lancer l\'op\u00e9ration \u00bb** ajout\u00e9 sur la fiche d\'un contrat **d\u00e9j\u00e0 actif** : ouvre l\'op\u00e9ration sans recr\u00e9er le contrat', inline: false },
+      { name: '\uD83C\udfac LANCER SUR UN CONTRAT EXISTANT', value: '\u2192 Bouton **\u00ab Lancer l\'op\u00e9ration \u00bb** ajout\u00e9 sur la fiche d\'un contrat Confr\u00e9rie **d\u00e9j\u00e0 actif** : ouvre l\'op\u00e9ration sans recr\u00e9er le contrat', inline: false },
+      { name: '\ud83e\uddf9 COMMANDES R\u00c9ORGANIS\u00c9ES', value: '\u2192 Op\u00e9rations regroup\u00e9es sous **`/op`** : `/op detail` \u00b7 `/op liste` \u00b7 `/op programmer`\n\u2192 Place lib\u00e9r\u00e9e pour de futures commandes (limite Discord de 100)', inline: false },
     )
     .setFooter({ text: 'IWC Bot v8.0 \u00b7 2/2 \u00b7 La force est dans l\'ombre. \u2014 La Compagnie' })
     .setTimestamp();
@@ -6908,11 +6926,11 @@ async function _handleAide(interaction) {
   embed.addFields({ name: '🟡 Absences', value: '`/absent [durée]` · `/retour` · `/avertissements`', inline: false });
   embed.addFields({ name: '📜 Contrats', value: '`/contrats` — Tes contrats en cours', inline: false });
   embed.addFields({ name: '🕵️ Renseignement', value: '`/notes` — Dernières notes de terrain\n`/synthese [sujet]` — Synthèse IA sur une personne/lieu\n`/stats-agent` — Statistiques par agent', inline: false });
-  if (isLeg || isDir) embed.addFields({ name: '⚖️ Pôle Légal', value: '`/solde` · `/stats` · `/ops` · `/op`', inline: false });
-  if (isIll || isDir) embed.addFields({ name: '🔒 Confrérie', value: '`/solde` · `/stats` · `/ops`', inline: false });
-  if (isDir) embed.addFields({ name: '🎖️ Direction', value: '`/promo` · `/retro` · `/grade-set` · `/avertir` · `/annuler-absence`\n`/dashboard` · `/bilan` · `/contrats-archives` · `/rapport`\n`/contrats-sync` · `/notion-test` · `/synchroniser` · `/purge` · `/sync` · `/version`', inline: false });
+  if (isLeg || isDir) embed.addFields({ name: '⚖️ Pôle Légal', value: '`/solde` · `/stats` · `/op liste` · `/op detail`', inline: false });
+  if (isIll || isDir) embed.addFields({ name: '🔒 Confrérie', value: '`/solde` · `/stats` · `/op liste`', inline: false });
+  if (isDir) embed.addFields({ name: '🎖️ Direction', value: '`/promo` · `/retro` · `/avertir` · `/annuler-absence`\n`/dashboard` · `/bilan` · `/contrats-archives` · `/rapport`\n`/contrats-sync` · `/notion-test` · `/synchroniser` · `/purge` · `/sync` · `/version`', inline: false });
   if (isDir) embed.addFields({ name: '🤝 RDV Client', value: '`/panel-rdv-client` — Installer le panneau\n`/rdv-nettoyer` — Nettoyer les vieux télégrammes', inline: false });
-  if (isFleau) embed.addFields({ name: '💀 Fléau & Concepteur', value: '`/op-programmer` · `/patch` · ⚙️ config coffre', inline: false });
+  if (isFleau) embed.addFields({ name: '💀 Fléau & Concepteur', value: '`/op programmer` · `/patch` · ⚙️ config coffre', inline: false });
   embed.addFields({ name: '🎙️ Micro de terrain', value: 'Programme PC : capture les voix RP et les envoie ici en rapports', inline: false });
   embed.addFields({ name: '🤖 Automatismes', value: 'Trésorerie · Fiches · Identité IC · Plans · Rappels RDV · Absences auto · Briefing 20h · Archivage', inline: false });
   embed.setFooter({ text: 'IWC Bot • Commandes adaptées à ton rôle' });
@@ -7169,8 +7187,8 @@ async function setupCommandesSlash(guild) {
     if (botMsgs.size >= 4) { console.log('✅ #commandes-slash déjà à jour — skip'); return; }
     for (const [, m] of botMsgs) await m.delete().catch(() => {});
     const e1 = new EmbedBuilder().setColor(0x3B82F6).setTitle('📖 COMMANDES — Membres').setDescription('*Commandes accessibles à tous les membres IWC.*').addFields({ name: '👤 Profil & Identité', value: '`/profil` · `/fiche` · `/hierarchie` · `/registre`', inline: false }, { name: '📅 Agenda & RDV', value: '`/rdv` · `/agenda creer` · `/agenda voir`', inline: false }, { name: '🟡 Absences', value: '`/absent [durée]` · `/retour` · `/avertissements`', inline: false }, { name: '📜 Contrats', value: '`/contrats` — Tes contrats en cours', inline: false }, { name: '📊 Stats & Info', value: '`/stats` · `/solde` · `/journal` · `/aide`', inline: false }).setFooter({ text: 'IWC Bot • Commandes membres' });
-    const e2 = new EmbedBuilder().setColor(0x8B1A1A).setTitle('🎖️ COMMANDES — Direction').setDescription('*Réservées à la Direction.*').addFields({ name: '⚙️ Gestion membres', value: '`/promo` · `/retro` · `/grade-set` · `/avertir` · `/annuler-absence`', inline: false }, { name: '💰 Trésorerie', value: '`/bilan` · `/contrats-archives` · ⚙️ dans coffre-entreprise', inline: false }, { name: '🎯 Opérations', value: '`/op-programmer` — Lancement automatique', inline: false }, { name: '📊 Rapports', value: '`/dashboard` · `/rapport` · `/stats`', inline: false }, { name: '🛠️ Administration', value: '`/purge` · `/sync` · `/version`', inline: false }).setFooter({ text: 'IWC Bot • Commandes Direction' });
-    const e3 = new EmbedBuilder().setColor(0xED4245).setTitle('💀 COMMANDES — Fléau & Concepteur').addFields({ name: '⚙️ Configuration', value: '`/op-programmer` · `/patch` · `/rapport` (auto vendredi 20h)', inline: false }).setFooter({ text: 'IWC Bot • Fléau & Concepteur' });
+    const e2 = new EmbedBuilder().setColor(0x8B1A1A).setTitle('🎖️ COMMANDES — Direction').setDescription('*Réservées à la Direction.*').addFields({ name: '⚙️ Gestion membres', value: '`/promo` · `/retro` · `/avertir` · `/annuler-absence`', inline: false }, { name: '💰 Trésorerie', value: '`/bilan` · `/contrats-archives` · ⚙️ dans coffre-entreprise', inline: false }, { name: '🎯 Opérations', value: '`/op programmer` — Lancement automatique · `/op liste` · `/operation`', inline: false }, { name: '📊 Rapports', value: '`/dashboard` · `/rapport` · `/stats`', inline: false }, { name: '🛠️ Administration', value: '`/purge` · `/sync` · `/version`', inline: false }).setFooter({ text: 'IWC Bot • Commandes Direction' });
+    const e3 = new EmbedBuilder().setColor(0xED4245).setTitle('💀 COMMANDES — Fléau & Concepteur').addFields({ name: '⚙️ Configuration', value: '`/op programmer` · `/patch` · `/rapport` (auto vendredi 20h)', inline: false }).setFooter({ text: 'IWC Bot • Fléau & Concepteur' });
     const e4 = new EmbedBuilder().setColor(0x555555).setTitle('🤖 AUTOMATISMES — Le bot fait ça tout seul').addFields({ name: '📖 Journal de bord', value: 'Ops, contrats, promos, recrutements → **#journal-de-bord** auto\nRésumé hebdo chaque lundi à 9h', inline: false }, { name: '💰 Trésorerie', value: 'Bouton 💰 → validation Direction si > limite', inline: false }, { name: '🟡 Absences', value: 'Rôle Absent → permissions bloquées → levée auto + DM', inline: false }, { name: '⏰ Rappels', value: 'Rappels 24h + 1h avant RDV Notion · Rappel 30min avant op', inline: false }, { name: '🎭 Identité IC', value: 'Bouton ✏️ dans #surnom-pseudo → Notion auto', inline: false }).setFooter({ text: 'IWC Bot • Automatismes' });
     await ch.send({ embeds: [e1] }); await ch.send({ embeds: [e2] }); await ch.send({ embeds: [e3] }); await ch.send({ embeds: [e4] });
     console.log('✅ Commandes slash postées');
@@ -10290,7 +10308,7 @@ async function _definirDescriptionsSalons(guild) {
       [['formation'], "🎓 Formations et entraînements des membres. Consulte les sessions ici."],
       [['grade'], "🎖️ Tes grades et promotions. Mis à jour automatiquement selon tes rôles."],
       [['surnompseudo'], "✏️ Définis ton nom RP ici avec la commande /nom. Ton surnom serveur doit être ton nom de personnage."],
-      [['operations'], "🎯 Opérations en cours et à venir. La Direction crée les opérations avec /op-creer ; consulte avec /ops."],
+      [['operations'], "🎯 Opérations en cours et à venir. La Direction crée les opérations avec /operation ; consulte avec /op liste."],
       [['informateurs'], "🕵️ Gestion des informateurs et de leurs renseignements (Direction). Usage interne."],
       [['plans'], "🗺️ Partage ici les plans et photos de repérage. Les images sont archivées automatiquement dans Notion."],
       [['affaires'], "⚔️ Affaires soumises au vote de la Direction. Utilise /affaire pour en proposer une."],

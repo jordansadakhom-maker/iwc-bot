@@ -70,6 +70,12 @@ const CATEGORIES = {
   'Protection':            { emoji: '🛡️',  pole: 'legal'   },
   'Chasseur de primes':    { emoji: '🎯',  pole: 'legal'   },
   'Récupération de dette': { emoji: '⛓️',  pole: 'illegal' },
+  // ── Contrats légaux (Iron Wolf Company) — pôle légal ──
+  'Protection rapprochée':   { emoji: '🛡️', pole: 'legal' },
+  'Escorte de convoi':       { emoji: '🐎', pole: 'legal' },
+  'Surveillance / Filature': { emoji: '👁️', pole: 'legal' },
+  'Chasse de prime':         { emoji: '🎯', pole: 'legal' },
+  'Intervention armée':      { emoji: '⚔️', pole: 'legal' },
   'Autre':                 { emoji: '❓',  pole: 'illegal' },
 };
 function _categorie(typeMission) { return CATEGORIES[typeMission] || { emoji: '🎯', pole: 'illegal' }; }
@@ -330,6 +336,59 @@ const STEP_TEMPLATES = {
     ] },
   ],
 
+  // ─── 🐎 Escorte de convoi (légal) ───
+  'Escorte de convoi': [
+    { key: 'reperage', label: '🔍 Reconnaissance du trajet', photo: true, intro: 'Étudier le trajet et ses dangers.', champs: [
+      C('depart', 'Point de départ', 'short', true, 120, 'Ex : Valentine'),
+      C('destination', 'Destination', 'short', true, 120, 'Ex : Saint-Denis'),
+      C('itineraire', 'Itinéraire prévu', 'para', true, 500, 'Routes, gués, relais…'),
+      C('risques', 'Zones à risque', 'para', false, 400, 'Embuscades possibles, passages étroits…'),
+    ] },
+    { key: 'plan', label: '🗺️ Plan d\'escorte', photo: true, intro: 'Formation et réaction en cas d\'attaque.', champs: [
+      C('formation', 'Formation / positions', 'para', true, 500, 'Tête, flancs, arrière-garde…'),
+      C('controles', 'Points de contrôle / haltes', 'para', false, 400, 'Où s\'arrêter, vérifier…'),
+      C('riposte', 'Plan en cas d\'attaque', 'para', false, 400, 'Repli, riposte, signal…'),
+      C('horaire', 'Départ prévu', 'short', false, 80, 'Ex : 22/06 à 9h'),
+    ] },
+    _equipe('Tête de convoi, flancs, arrière-garde, éclaireur…'),
+    { key: 'execution', label: '🐎 Escorte', photo: 'req', intro: 'Le convoi en mouvement.', champs: [
+      C('deroulement', 'Déroulement du convoi', 'para', true, 700, 'Compte-rendu du trajet…'),
+      C('incidents', 'Incidents / attaques', 'para', false, 500, 'Ce qui s\'est passé'),
+    ] },
+    { key: 'bilan', label: '💰 Bilan & paiement', photo: true, intro: 'Livraison et règlement.', champs: [
+      C('etat', 'Cargaison / protégé livré intact ?', 'short', true, 120, 'Ex : oui, sans perte'),
+      C('pertes', 'Pertes / dégâts', 'para', false, 400, 'Blessés, marchandise abîmée…'),
+      C('paiement', 'Paiement encaissé ($)', 'short', true, 80, 'Ex : 2000$'),
+    ] },
+  ],
+
+  // ─── ⚔️ Intervention armée (légal) ───
+  'Intervention armée': [
+    { key: 'reperage', label: '🔍 Repérage', photo: 'req', intro: 'Reconnaître la cible et l\'opposition.', champs: [
+      C('cible', 'Cible / lieu de l\'intervention', 'short', true, 140, 'Ex : camp hors-la-loi au nord'),
+      C('position', 'Position', 'short', true, 120, 'Lieu exact'),
+      C('ennemis', 'Opposition (nombre, armement)', 'short', true, 100, 'Ex : ~6 hommes armés'),
+      C('defenses', 'Défenses / obstacles', 'para', false, 400, 'Barricades, guetteurs, terrain…'),
+    ] },
+    { key: 'plan', label: '🗺️ Plan d\'assaut', photo: true, intro: 'Entrée, manœuvre, repli.', champs: [
+      C('entree', 'Point d\'entrée / approche', 'short', true, 140, 'Par où attaquer'),
+      C('manoeuvre', 'Manœuvre / plan d\'assaut', 'para', true, 500, 'Qui fait quoi, dans quel ordre…'),
+      C('repli', 'Repli / extraction', 'para', false, 400, 'Comment se retirer'),
+      C('equipement', 'Équipement / armement', 'para', false, 400, 'Armes, munitions, dynamite…'),
+    ] },
+    _equipe('Assaut, couverture, soutien, repli…'),
+    { key: 'execution', label: '⚔️ Assaut', photo: 'req', intro: 'L\'intervention elle-même.', champs: [
+      C('issue', 'Objectif atteint ?', 'short', true, 120, 'Ex : zone sécurisée'),
+      C('deroulement', 'Déroulement de l\'assaut', 'para', true, 700, 'Compte-rendu…'),
+      C('pertes', 'Pertes / blessés', 'para', false, 400, 'De notre côté et en face'),
+    ] },
+    { key: 'bilan', label: '💰 Bilan & prime', photo: true, intro: 'Situation finale et règlement.', champs: [
+      C('situation', 'Situation finale', 'short', true, 120, 'Ex : cible neutralisée, otages libérés'),
+      C('bilan', 'Bilan / butin récupéré', 'para', false, 400, 'Ce qui a été obtenu'),
+      C('prime', 'Prime encaissée ($)', 'short', true, 80, 'Ex : 3500$'),
+    ] },
+  ],
+
   // ─── ❓ Modèle GÉNÉRIQUE par défaut (« Autre » et types inconnus) ───
   _default: [
     { key: 'reperage', label: '🔍 Repérage / Reconnaissance', photo: 'req', intro: 'Observer la situation avant d\'agir.', champs: [
@@ -357,6 +416,11 @@ const STEP_TEMPLATES = {
     ] },
   ],
 };
+
+// Alias : certains contrats légaux réutilisent un scénario déjà défini
+STEP_TEMPLATES['Protection rapprochée']   = STEP_TEMPLATES['Protection'];
+STEP_TEMPLATES['Surveillance / Filature'] = STEP_TEMPLATES['Espionnage'];
+STEP_TEMPLATES['Chasse de prime']         = STEP_TEMPLATES['Chasseur de primes'];
 
 function _defs(cat) { return STEP_TEMPLATES[cat] || STEP_TEMPLATES._default; }
 
@@ -484,7 +548,7 @@ async function creerOperationDepuisContrat(guild, contrat, opts = {}) {
     guildId: guild.id,
     categorie: contrat.typeMission || 'Autre',
     emoji: cat.emoji,
-    pole: cat.pole,
+    pole: opts.pole || cat.pole,
     cible: contrat.objet || contrat.commanditaire || 'Mission',
     risque: contrat.risque || null,
     remuneration: contrat.remuneration || '—',
