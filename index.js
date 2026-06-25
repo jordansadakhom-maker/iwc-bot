@@ -3390,6 +3390,7 @@ function _planEphClose(interaction, delay, finalPass) {
   }, delay);
   _ephCleanup.set(uid, { timer });
 }
+client.on('threadCreate', thread => { try { journaux.onThreadCreate?.(thread); } catch {} });
 client.on('interactionCreate', interaction => {
   try {
     if (!interaction?.user) return;
