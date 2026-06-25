@@ -2645,17 +2645,30 @@ client.on('messageReactionAdd', async (reaction, user) => {
     if (isAccept) {
       // ⚠️ Le rôle N'EST PAS donné automatiquement : la Direction gère l'arrivée en jeu, puis attribue le rôle via les boutons.
       cand.status = 'acceptee'; cand.acceptedAt = new Date().toISOString(); cand.roleAttribue = false; saveDB(db);
-      await archiverCandidatureNotion(cand, 'acceptee', user.username); await ajouterMembreNotion(cand, cand.type);
-      _syncCandidatureNotion(cand, 'acceptee', user.username).catch(() => {});
-      notionV5.archiverThreadCandidature?.(guild, cand, 'acceptee', user.username).catch(() => {});
-      await notionExtra.creerFichePersonnageNotion?.(cand); notionExtra.planifierRappelFiche?.(guild, cand);
-      await sendLog(guild, 'CANDIDATURE_ACCEPTEE', { userId: cand.userId, nomPerso: cand.nomPerso, type: isIllegal ? '🔪 Illégal' : '⚖️ Légal', validePar: user.username });
+      // Les synchros Notion sont isolées : si l'une échoue, l'acceptation (confirmation + boutons + DM) DOIT quand même aboutir.
+      try { await archiverCandidatureNotion(cand, 'acceptee', user.username); } catch (e) { console.log('⚠️ archiverCandidatureNotion:', e.message); }
+      try { await ajouterMembreNotion(cand, cand.type); } catch (e) { console.log('⚠️ ajouterMembreNotion:', e.message); }
+      try { _syncCandidatureNotion(cand, 'acceptee', user.username).catch(() => {}); } catch {}
+      try { notionV5.archiverThreadCandidature?.(guild, cand, 'acceptee', user.username).catch(() => {}); } catch {}
+      try { await notionExtra.creerFichePersonnageNotion?.(cand); } catch (e) { console.log('⚠️ creerFichePersonnageNotion:', e.message); }
+      try { notionExtra.planifierRappelFiche?.(guild, cand); } catch {}
+      try { await sendLog(guild, 'CANDIDATURE_ACCEPTEE', { userId: cand.userId, nomPerso: cand.nomPerso, type: isIllegal ? '🔪 Illégal' : '⚖️ Légal', validePar: user.username }); } catch {}
       try { await reaction.message.edit({ embeds: [EmbedBuilder.from(reaction.message.embeds[0]).setColor(0xF1C40F).setTitle(`✅ VALIDÉ — ${cand.nomPerso} (rôle à attribuer)`)] }); } catch {}
       const rowRole = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`rec_role_ok::${cand.userId}::${isIllegal ? 1 : 0}`).setLabel('Donner le rôle de recrue').setEmoji('✅').setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId(`rec_role_no::${cand.userId}`).setLabel('Ne pas donner le rôle').setEmoji('❌').setStyle(ButtonStyle.Danger),
       );
       await reaction.message.channel.send({ content: `✅ **${cand.nomPerso}** est **validé** par le vote (${VOTES_REQUIS} voix). \n👉 Gérez son arrivée **en jeu**, puis cliquez pour **lui attribuer le rôle** (ou non) :`, components: [rowRole] }).catch(() => {});
+      // 📨 Dès l'acceptation : on envoie au candidat le LIEN pour nous adresser un télégramme.
+      try {
+        if (member) {
+          const lienTg = `https://discord.com/channels/${guild.id}/1512171267560702013`;
+          const eAcc = isIllegal
+            ? new EmbedBuilder().setColor(0x8B1A1A).setTitle('🔪 Demande acceptée — La Confrérie').setDescription(`Ta demande est **acceptée**.\n\n📨 **Pour la suite, envoie-nous un télégramme** : rends-toi dans le salon ci-dessous et clique sur **« ✉ Envoyer un télégramme »**.\n${lienTg}\n\n*Discrétion absolue.*\n— La Direction`).setFooter({ text: 'La Confrérie • Confidentiel' })
+            : new EmbedBuilder().setColor(0x3B82F6).setTitle('⚖️ Candidature acceptée — Iron Wolf Company').setDescription(`Ta candidature est **acceptée** ! 🎉\n\n📨 **Pour la suite, envoie-nous un télégramme** : rends-toi dans le salon ci-dessous et clique sur **« ✉ Envoyer un télégramme »**.\n${lienTg}\n\n— La Direction`).setFooter({ text: 'Iron Wolf Company • Légal' });
+          await member.send({ embeds: [eAcc] }).catch(() => {});
+        }
+      } catch (e) { console.log('⚠️ DM acceptation/télégramme:', e.message); }
     } else {
       cand.status = 'refusee'; cand.refusedAt = new Date().toISOString(); saveDB(db);
       _syncCandidatureNotion(cand, 'refusee', user.username).catch(() => {});
