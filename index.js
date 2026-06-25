@@ -3393,6 +3393,7 @@ client.on('interactionCreate', interaction => {
 });
 
 client.on('interactionCreate', async interaction => {
+ try {
   const guild = interaction.guild; const db = loadDB();
   if (await contratsConf.routeInteraction?.(interaction)) return;
   if (await operations.routeInteraction?.(interaction)) return;
@@ -4931,6 +4932,11 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     await archiverContratReponses(guild, contrat, 'refuse', _embedEmploiRefuse);
     return;
   }
+ } catch (e) {
+   // Erreurs Discord bénignes : clic arrivé trop tard (10062), message disparu (10008),
+   // interaction déjà traitée (40060) → on ignore. Le reste est loggé sans faire planter le bot.
+   if (![10062, 10008, 40060].includes(e?.code)) console.log('⚠️ interactionCreate (non bloquant):', e?.message);
+ }
 }); // fin interactionCreate
 
 client.once('clientReady', async () => {
