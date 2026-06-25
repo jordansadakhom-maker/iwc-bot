@@ -20,12 +20,15 @@ function getSharp() {
   try { _sharp = require('sharp'); } catch (e) { console.log('⚠️ parchemin-image: sharp indisponible →', e.message); _sharp = null; }
   return _sharp;
 }
-let _texB64 = null;
+let _tex = null; // { b64, w, h } — dimensions lues dans l'en-tête PNG pour s'adapter à TOUT format d'image
 function texture() {
-  if (_texB64 !== null) return _texB64;
-  try { _texB64 = fs.readFileSync(path.join(__dirname, 'assets', 'parchemin.png')).toString('base64'); }
-  catch { _texB64 = ''; }
-  return _texB64;
+  if (_tex !== null) return _tex;
+  try {
+    const buf = fs.readFileSync(path.join(__dirname, 'assets', 'parchemin.png'));
+    const w = buf.readUInt32BE(16), h = buf.readUInt32BE(20); // IHDR : largeur @16, hauteur @20
+    _tex = { b64: buf.toString('base64'), w: w || 500, h: h || 500 };
+  } catch { _tex = { b64: '', w: 500, h: 500 }; }
+  return _tex;
 }
 const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -50,12 +53,13 @@ function wrap(txt, maxWidth, fontSize) {
 // Silhouette ROULEAU : canvas au format du parchemin, texte dans la zone papier, auto-fit.
 async function genererParchemin(blocks, opts = {}) {
   const sharp = getSharp();
-  if (!sharp || !texture()) return null;
+  const tex = texture();
+  if (!sharp || !tex.b64) return null;
   const W = opts.width || 760;
-  const H = Math.round(W * 511 / 360); // ratio de l'image rouleau (360×511)
+  const H = Math.round(W * tex.h / tex.w); // canvas calé sur le ratio RÉEL de la texture (pas de déformation)
   // Zone d'écriture (insets pour rester sur le « papier », à l'écart des bords déchirés)
-  const ML = Math.round(W * 0.17), MR = Math.round(W * 0.17);
-  const topInset = Math.round(H * 0.115), bottomInset = Math.round(H * 0.10);
+  const ML = Math.round(W * 0.15), MR = Math.round(W * 0.15);
+  const topInset = Math.round(H * 0.13), bottomInset = Math.round(H * 0.11);
   const innerW = W - ML - MR;
   const writableH = H - topInset - bottomInset;
   const INK = '#3a2a16', INK2 = '#5e4526';
@@ -100,7 +104,7 @@ async function genererParchemin(blocks, opts = {}) {
   const { els } = layout(scale);
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
-    <image href="data:image/png;base64,${texture()}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid meet"/>
+    <image href="data:image/png;base64,${tex.b64}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid meet"/>
     ${els.join('\n')}
   </svg>`;
   try { return await sharp(Buffer.from(svg)).png().toBuffer(); }

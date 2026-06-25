@@ -45,6 +45,25 @@ async function genererImageContrat(contrat) {
     return await parcheminImg.genererParchemin(blocks, { width: 760 });
   } catch { return null; }
 }
+// Génère la FIN DE MISSION (réussie/échouée) sous forme d'image parchemin.
+async function genererImageFinMission(contrat, succes) {
+  try {
+    const blocks = [
+      { type: 'title', text: succes ? 'MISSION ACCOMPLIE' : 'MISSION ÉCHOUÉE' },
+      { type: 'subtitle', text: "La Confrérie — en l'an de grâce 1904" },
+      { type: 'rule' },
+      { type: 'field', label: 'Référence du pacte', value: contrat.id },
+      { type: 'field', label: 'Nature de la besogne', value: contrat.typeMission || '—' },
+      { type: 'rule' },
+      { type: 'para', text: succes
+        ? "Belle besogne, frère. La Confrérie n'oublie jamais les siens — ta part te reviendra."
+        : "La besogne a tourné court. On en tire les leçons, et l'on remet l'ouvrage sur le métier." },
+      { type: 'rule' },
+      { type: 'quote', text: '— La Confrérie, an 1904' },
+    ];
+    return await parcheminImg.genererParchemin(blocks, { width: 760 });
+  } catch { return null; }
+}
 // Génère l'ORDRE DE MISSION (briefing reçu par les agents) sous forme d'image parchemin.
 async function genererImageBriefing(contrat) {
   try {
@@ -762,27 +781,28 @@ async function cloturer(interaction, succes) {
   }
   const jc = journalCh(interaction.guild);
   if (jc) await jc.send({ embeds: [new EmbedBuilder().setColor(succes ? 0x57F287 : 0xED4245).setTitle(`${succes ? '✅' : '💀'} Contrat ${succes ? 'réussi' : 'échoué'} — ${c.id}`).setDescription(`**${c.typeMission}** · clôturé par ${c.clôturePar}`).setFooter({ text: 'La Confrérie • Contrats' }).setTimestamp()] }).catch(() => {});
-  // prévenir les agents
+  // prévenir les agents — fin de mission en IMAGE parchemin (repli sur l'embed si génération KO)
+  const imgFin = await genererImageFinMission(c, succes).catch(() => null);
   for (const userId of (c.agents || [])) {
     try {
       const m = await interaction.guild.members.fetch(userId).catch(() => null);
-      if (m) await m.send({ embeds: [new EmbedBuilder()
-        .setColor(0xC9A66B) // parchemin
-        .setTitle(`📜 ⸺  ${succes ? 'MISSION ACCOMPLIE' : 'MISSION ÉCHOUÉE'}  ⸺ 📜`)
-        .setDescription([
-          '```',
-          '  ════════════════════════════════════════',
-          '        ✦   EN L\'AN DE GRÂCE  1904   ✦',
-          '  ════════════════════════════════════════',
-          '```',
-          `*Concernant le pacte \`${c.id}\` (${emojiType(c.typeMission)} ${c.typeMission})…*`,
-          '',
-          succes
-            ? '✒️ *Belle besogne, frère. La Confrérie n\'oublie jamais les siens — ta part te reviendra.*'
-            : '🩸 *La besogne a tourné court. On en tire les leçons, et l\'on remet l\'ouvrage sur le métier.*',
-        ].join('\n'))
-        .setFooter({ text: '✒️ La Confrérie — an 1904 • Confidentiel' })
-        .setImage(PARCHEMIN_IMG)], files: [parcheminFichier()].filter(Boolean) }).catch(() => {});
+      if (!m) continue;
+      if (imgFin) {
+        await m.send({ files: [new AttachmentBuilder(imgFin, { name: `fin-${c.id}.png` })] }).catch(() => {});
+      } else {
+        await m.send({ embeds: [new EmbedBuilder()
+          .setColor(0xC9A66B)
+          .setTitle(`📜 ⸺  ${succes ? 'MISSION ACCOMPLIE' : 'MISSION ÉCHOUÉE'}  ⸺ 📜`)
+          .setDescription([
+            `*Concernant le pacte \`${c.id}\` (${emojiType(c.typeMission)} ${c.typeMission})…*`,
+            '',
+            succes
+              ? '✒️ *Belle besogne, frère. La Confrérie n\'oublie jamais les siens — ta part te reviendra.*'
+              : '🩸 *La besogne a tourné court. On en tire les leçons, et l\'on remet l\'ouvrage sur le métier.*',
+          ].join('\n'))
+          .setFooter({ text: '✒️ La Confrérie — an 1904 • Confidentiel' })
+          .setImage(PARCHEMIN_IMG)], files: [parcheminFichier()].filter(Boolean) }).catch(() => {});
+      }
     } catch {}
   }
 }
