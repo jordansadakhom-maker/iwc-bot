@@ -14,14 +14,16 @@ const norm = s => (s || '')
   .normalize('NFD').replace(/[̀-ͯ]/g, '')
   .toLowerCase().replace(/[^a-z0-9]/g, '');
 
-// Plan : ordre = priorité. Le 1er bloc dont un motif matche gagne (donc ARCHIVES avant LE BUREAU
-// pour que « coffre-illegal » parte en archives et non au bureau).
+// Plan : ordre = priorité. Le 1er bloc dont un motif matche gagne.
+// Regroupement par FONCTION (plus de séparation Légal/Illégal). Les vocaux sont regroupés
+// par TYPE (voir categoriePour), peu importe leur nom.
 const PLAN = [
-  { cat: '📦 ARCHIVES', motifs: ['illegal', 'ombre', 'maudit', 'condamne', 'executeur', 'fleau', 'concepteur'] },
-  { cat: '🗂️ LE BUREAU', motifs: ['contrat', 'operation', 'element', 'wanted', 'bandit', 'comptabilit', 'coffreentreprise', 'medical', 'medic', 'telegramme', 'rendezvous'] },
-  { cat: '🛠️ DIRECTION / STAFF', motifs: ['conversationdirection', 'tableaudebord', 'dashboard', 'registredesmembres', 'registreengagement', 'registre', 'dossierrecrutement', 'recrutementinterne', 'patchnote', 'journaldebord', 'logs', 'vocdirection', 'conseilvocal'] },
-  { cat: '🐺 LA CONFRÉRIE', motifs: ['histoireiwc', 'fichepersonnage', 'fichespersonnages', 'surnompseudo', 'agenda', 'planning', 'affaire', 'informateur', 'plans', 'rumeur', 'notes', 'formation', 'discussionrp', 'grade', 'absence', 'contactsrepertoire', 'contact'] },
-  { cat: '🎙️ VOCAUX', motifs: ['vocal', 'voix'] },
+  { cat: '🔒 DIRECTION / STAFF', motifs: ['affaire', 'background', 'dossierrecrutement', 'recrutementinterne', 'conversationdirection', 'registre', 'tableaudebord', 'dashboard', 'journaldebord', 'patchnote', 'logs'] },
+  { cat: '🛠️ OUTILS & GESTION',  motifs: ['contrat', 'operation', 'plans', 'informateur', 'coffre', 'comptabilit', 'facture', 'wanted', 'avisrecherche', 'traque', 'element', 'bandit', 'medical', 'medic', 'telegramme', 'rendezvous', 'rdv', 'repertoire', 'contact', 'inventaire', 'agenda', 'rumeur', 'absence', 'commandeslash'] },
+  { cat: '📢 ACCUEIL & COMMUNAUTÉ', motifs: ['annonce', 'reglement', 'arrivee', 'evenement', 'accueil', 'presentation', 'discussionhrp', 'parlotehrp', 'suggestion', 'idee', 'screenshot', 'clip', 'tempsfort', 'lore', 'univers', 'planning'] },
+  { cat: '🎭 ROLEPLAY',          motifs: ['discussionrp', 'parlote', 'histoire', 'fichepersonnage', 'fichespersonnages', 'surnompseudo'] },
+  { cat: '🐺 HIÉRARCHIE & IDENTITÉ', motifs: ['hierarchie', 'grade', 'formation'] },
+  { cat: '🎙️ VOCAUX',           motifs: ['vocal', 'voix'] },
 ];
 
 const TYPES_DEPLACABLES = new Set([
@@ -32,6 +34,8 @@ const TYPES_DEPLACABLES = new Set([
 function categoriePour(ch) {
   const n = norm(ch.name);
   if (NE_PAS_BOUGER.includes(n)) return null;
+  // Tous les salons vocaux/scène → regroupés dans VOCAUX, quel que soit leur nom
+  if (ch.type === ChannelType.GuildVoice || ch.type === ChannelType.GuildStageVoice) return '🎙️ VOCAUX';
   for (const bloc of PLAN) {
     if (bloc.motifs.some(m => n.includes(m))) return bloc.cat;
   }
