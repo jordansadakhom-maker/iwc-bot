@@ -488,8 +488,6 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('promo').setDescription('Ouvre la gestion du grade d\'un membre (Concepteur/Fléau)').addUserOption(o => o.setName('membre').setDescription('Membre').setRequired(true)),
   new SlashCommandBuilder().setName('tresor').setDescription('💰 Enregistrer une transaction'),
   new SlashCommandBuilder().setName('dashboard').setDescription('🐺 Tableau de bord complet de la faction'),
-  new SlashCommandBuilder().setName('suivi').setDescription('📋 Vue globale : candidatures, contrats, opérations, RDV, trésorerie (Direction)'),
-  new SlashCommandBuilder().setName('grade-set').setDescription('🎖️ Attribuer un grade à un membre (Direction)'),
   new SlashCommandBuilder().setName('hierarchie').setDescription('⚔️ Afficher le tableau hiérarchique'),
   new SlashCommandBuilder().setName('affaire').setDescription('📋 Soumettre une affaire à la Direction'),
   new SlashCommandBuilder().setName('journal').setDescription('📖 Journal IC de la Compagnie')
@@ -511,7 +509,6 @@ const SLASH_COMMANDS = [
     .addSubcommand(s => s.setName('voir').setDescription('Voir les prochains RDV'))
     .addSubcommand(s => s.setName('creer').setDescription('Créer un nouveau RDV dans Notion')),
   new SlashCommandBuilder().setName('op-programmer').setDescription('🕐 Programmer une opération avec lancement automatique (Direction)'),
-  new SlashCommandBuilder().setName('op-creer').setDescription('🎯 Créer une nouvelle opération (Direction)'),
   new SlashCommandBuilder().setName('setup-serveur').setDescription('🔧 Réorganiser la structure du serveur Discord (Fondateur uniquement)'),
   new SlashCommandBuilder().setName('aide').setDescription('📖 Guide des commandes disponibles'),
   new SlashCommandBuilder().setName('patch').setDescription('Deployer le patch note'),
@@ -572,9 +569,10 @@ async function registerSlashCommands(guild) {
     const vus = new Set(); const doublons = [];
     for (const n of noms) { if (vus.has(n)) { if (!doublons.includes(n)) doublons.push(n); } else vus.add(n); }
     if (doublons.length) { console.log('❌ Commandes en double:', doublons.join(', ')); try { monitoring.logTech?.(client, 'error', '❌ Commandes en double', 'Discord rejette TOUT le lot tant que ce n\'est pas corrigé :\n' + doublons.join(', ')); } catch {} }
-    if (cmds.length > 100) { console.log(`❌ Trop de commandes (${cmds.length}/100) — Discord va en refuser.`); try { monitoring.logTech?.(client, 'error', '❌ Limite de commandes dépassée', `${cmds.length}/100 commandes — Discord rejette le surplus, il faut en retirer.`); } catch {} }
-    await guild.commands.set(cmds);
-    console.log('✅ Slash commands enregistrées (+ modules + monitoring)');
+    let aEnvoyer = cmds;
+    if (cmds.length > 100) { console.log(`❌ Trop de commandes (${cmds.length}/100) — j'envoie seulement les 100 premières pour éviter que Discord rejette TOUT le lot.`); try { monitoring.logTech?.(client, 'error', '❌ Limite de commandes dépassée', `${cmds.length}/100 commandes — les ${cmds.length - 100} dernières ne sont PAS enregistrées (lot tronqué à 100). Il faut en retirer.`); } catch {} aEnvoyer = cmds.slice(0, 100); }
+    await guild.commands.set(aEnvoyer);
+    console.log(`✅ Slash commands enregistrées : ${aEnvoyer.length}/100 (+ modules + monitoring)`);
   }
   catch (e) { console.log('❌ Slash commands error:', e.message); try { monitoring.logTech?.(client, 'error', '❌ Échec d\'enregistrement des commandes', e.message); } catch {} }
 }
