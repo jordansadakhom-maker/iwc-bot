@@ -54,6 +54,10 @@ let opsEtapes = {};
 try { opsEtapes = require('./operations-etapes'); console.log('✅ Module opérations-étapes chargé'); }
 catch (e) { console.log('⚠️ operations-etapes non chargé:', e.message); }
 
+let resumePhoto = {};
+try { resumePhoto = require('./resume-photo'); console.log('✅ Module résumé-photo chargé'); }
+catch (e) { console.log('⚠️ resume-photo non chargé:', e.message); }
+
 let comptabilite = {};
 try { comptabilite = require('./comptabilite'); console.log('✅ Module comptabilité chargé'); }
 catch (e) { console.log('⚠️ comptabilite non chargé:', e.message); }
@@ -2839,6 +2843,7 @@ client.on('messageCreate', async message => {
   // Conversations sur télégrammes : relais MP ↔ fil (avant tout le reste)
   try { if (await telegramme.onMessage?.(message)) return; } catch {}
   try { if (await _agendaPhotoOnMessage(message)) return; } catch {}
+  try { if (await resumePhoto.onMessage?.(message)) return; } catch {}
   try { if (await inventaire.onMessage?.(message)) return; } catch {}
   try { if (await comptabilite.onMessage?.(message)) return; } catch {}
   try { if (await traque.onMessage?.(message)) return; } catch {}
