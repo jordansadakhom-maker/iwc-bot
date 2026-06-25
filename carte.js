@@ -85,9 +85,10 @@ function _panelEmbed(db) {
     .setDescription([
       '*Tous les lieux utiles, classés et conservés — récoltes, vendeurs, coups, chasse, pêche, planques.*',
       '',
-      '**➕ Ajouter** — enregistre un lieu (type · accès · région · notes).',
+      '**🌐 Ouvrir la carte cliquable** — la carte interactive : clique dessus pour poser/voir des points.',
+      '**🗺️ Voir la carte** — l\'image de la carte en référence (ici dans Discord).',
       '**🔍 Consulter** — la liste des lieux que ton **accréditation** te permet de voir.',
-      '**🗺️ Voir la carte** — l\'image de la carte en référence.',
+      '**➕ Ajouter** — enregistre un lieu (type · accès · région · notes).',
       '**🛠️ Gérer** — *(Direction)* modifier ou supprimer un lieu.',
       '',
       '__Niveaux d\'accès__ : 🟢 Public · 🟡 Membre · 🔴 Confidentiel (Direction)',
@@ -99,8 +100,11 @@ function _panelRows() {
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('carte_web').setLabel('Ouvrir la carte cliquable').setEmoji('🌐').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('carte_seemap').setLabel('Voir la carte').setEmoji('🗺️').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('carte_view').setLabel('Consulter').setEmoji('🔍').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('carte_add').setLabel('Ajouter (Discord)').setEmoji('➕').setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('carte_add').setLabel('Ajouter').setEmoji('➕').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('carte_manage').setLabel('Gérer').setEmoji('🛠️').setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder().addComponents(
@@ -208,7 +212,7 @@ async function routeInteraction(interaction) {
     // 🌐 Carte web cliquable
     if (interaction.isButton?.() && id === 'carte_web') {
       const base = _baseUrl();
-      if (!base) { await interaction.reply({ content: '⚠️ L\'adresse web du bot n\'est pas encore connue. La Direction peut la définir via **⚙️ Définir l\'adresse du bot** (en bas du panneau).', flags: MessageFlags.Ephemeral }); return true; }
+      if (!base) { await interaction.reply({ content: '⚠️ L\'adresse web du bot n\'est pas encore connue.\n• La Direction peut la définir via **⚙️ Définir l\'adresse du bot** (en bas du panneau).\n• En attendant, utilise **🗺️ Voir la carte** pour afficher l\'image de référence.', flags: MessageFlags.Ephemeral }); return true; }
       const { tok, level } = creerToken(interaction.member); const niv = _niv(level);
       await interaction.reply({ content: `🌐 **Carte cliquable** — accès ${niv.emoji} **${niv.label}**\n${base}/carte?k=${tok}\n\n🖱️ *Clique sur la carte pour poser un point. Lien personnel, valable 24h.*`, flags: MessageFlags.Ephemeral }); return true;
     }
