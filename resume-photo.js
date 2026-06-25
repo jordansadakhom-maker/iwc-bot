@@ -94,4 +94,39 @@ async function onMessage(message) {
   } catch (e) { console.log('⚠️ resume-photo onMessage:', e.message); return false; }
 }
 
-module.exports = { onMessage, SALON_RESUME };
+// ── Panneau permanent (posté + épinglé une seule fois, idempotent) ──
+const _TITRE_PANNEAU = '📸 RÉSUMÉ AUTOMATIQUE DE PHOTOS';
+function _panneauEmbed() {
+  return new EmbedBuilder()
+    .setColor(0xC9A66B)
+    .setTitle(_TITRE_PANNEAU)
+    .setDescription([
+      '*Poste une **photo** dans ce salon — j\'en rédige automatiquement un **résumé**.*',
+      '',
+      '**Comment ça marche :**',
+      '1️⃣ Envoie une (ou plusieurs) **photo(s)** ici.',
+      '2️⃣ Je la lis (🔍) puis je réponds, juste en dessous, avec un encadré **« 📝 Résumé »**.',
+      '',
+      '✅ Aucune commande à taper. La photo reste en place, le résumé s\'ajoute dessous.',
+    ].join('\n'))
+    .setFooter({ text: 'Résumé rédigé par l\'IA d\'après l\'image' });
+}
+function _estPanneau(m, botId) {
+  return m.author?.id === botId && (m.embeds?.[0]?.title || '').includes('RÉSUMÉ AUTOMATIQUE');
+}
+async function installerPanneau(client) {
+  try {
+    const ch = await client.channels.fetch(SALON_RESUME).catch(() => null);
+    if (!ch || typeof ch.send !== 'function') return; // salon introuvable, ou forum (pas de panneau épinglé)
+    const botId = client.user.id;
+    // Idempotent : si le panneau existe déjà (épinglé ou récent), on ne le redouble pas.
+    let exists = null;
+    try { const pins = await ch.messages.fetchPinned().catch(() => null); if (pins) exists = pins.find(m => _estPanneau(m, botId)); } catch {}
+    if (!exists) { const recent = await ch.messages.fetch({ limit: 30 }).catch(() => null); if (recent) exists = recent.find(m => _estPanneau(m, botId)); }
+    if (exists) return; // déjà en place
+    const m = await ch.send({ embeds: [_panneauEmbed()] }).catch(() => null);
+    if (m) await m.pin().catch(() => {});
+  } catch (e) { console.log('⚠️ resume-photo installerPanneau:', e.message); }
+}
+
+module.exports = { onMessage, installerPanneau, SALON_RESUME };
