@@ -172,6 +172,7 @@ const {
 // apparaît ainsi juste sous le panneau). Repérés par un marqueur de titre, re-postés en bas.
 stickyPanel.register(SALON_HARDCODED.CONTRATS, 'les contrats');
 stickyPanel.register(SALON_HARDCODED.OPERATIONS, 'centre des opérations');
+stickyPanel.register('1519611763866337420', 'visiteurs'); // salon d'accueil visiteurs
 
 function getChById(guild, salonKey, ...fallbackNames) {
   // D'abord chercher dans SALON_IDS (config.js)
@@ -2196,6 +2197,7 @@ async function autoSetup(guild) {
   _installerPanelAgenda(guild).then(() => console.log('📅 Panneau agenda installé')).catch(() => {});
   _setupComptaChannel(guild).then(() => console.log('💰 Salon comptabilité prêt')).catch(() => {});
   _majPanneauxRdvClient(guild).then(() => console.log('📨 Panneaux RDV client à jour')).catch(() => {});
+  _installerPanelVisiteurs(guild).then(() => console.log('👋 Panneau visiteurs installé')).catch(() => {});
   _setupGradesIllegalPanel(guild).then(() => console.log('🕯️ Panneau grades de l\'ombre à jour')).catch(() => {});
   checkAutoPatchNote(guild).catch(() => {});
   _verrouillerVocalRP(guild).then(() => console.log('🔇 Salon vocal RP verrouillé (parole bloquée)')).catch(() => {});
@@ -8775,6 +8777,58 @@ async function _majPanneauxRdvClient(guild) {
     if (unifie) await unifie.edit(_rdvClientPayload()).catch(() => {});
     else await ch.send(_rdvClientPayload()).catch(() => {});
   } catch (e) { console.log('⚠️ _majPanneauxRdvClient:', e.message); }
+}
+
+// ── Salon VISITEURS (1519611763866337420) : panneau d'accueil clair + 2 boutons fonctionnels ──
+const SALON_VISITEURS = '1519611763866337420';
+function _panneauVisiteursPayload() {
+  const embed = new EmbedBuilder()
+    .setColor(0xC8A45C)
+    .setTitle('👋  BIENVENUE — ESPACE VISITEURS  🐺')
+    .setDescription([
+      '```',
+      '╔═══════════════════════════════════╗',
+      '║   IRON WOLF COMPANY — NOS SERVICES ║',
+      '╚═══════════════════════════════════╝',
+      '```',
+      "*Vous n'êtes pas (encore) membre de la Confrérie ? Vous êtes au bon endroit pour faire appel à nous : protection, escorte, enquête, négociation, contrat… ou une affaire plus discrète.*",
+      '',
+      '__**① Présentez-vous**__',
+      "Mettez votre **Prénom + Nom** en pseudo sur le serveur — *clic droit sur votre nom → « Modifier le pseudo »*. C'est ainsi qu'on vous reconnaît et qu'on rédige votre contrat à votre nom.",
+      '',
+      '__**② Exposez votre besoin**__',
+      '✉️ **Envoyer un télégramme** — décrivez votre affaire **avec vos mots** (besoin, conditions). La Direction lit chaque message et **vous répond en personne**.',
+      '🤝 **Réserver une prestation** — choisissez directement un **service et un créneau** (lieu, date, heure).',
+      '',
+      '__**③ Recevez votre contrat à signer**__',
+      'La Direction vous recontacte, puis vous **recevez le contrat directement en message privé** : vous pouvez **signer ✍️, refuser, ou proposer une contre-offre**.',
+      '⚠️ *Gardez vos **MP ouverts** (Paramètres du serveur → Confidentialité) pour recevoir le contrat.*',
+      '',
+      '— *« La force est dans l\'ombre. »*',
+    ].join('\n'))
+    .setFooter({ text: 'Iron Wolf Company · Bureau de Saint-Denis' });
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('rdvclient_demande').setLabel('Envoyer un télégramme').setEmoji('✉️').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('rdvp_book').setLabel('Réserver une prestation').setEmoji('🤝').setStyle(ButtonStyle.Success),
+  );
+  return { embeds: [embed], components: [row] };
+}
+
+async function _installerPanelVisiteurs(guild) {
+  try {
+    const ch = guild.channels.cache.get(SALON_VISITEURS); if (!ch?.messages) return;
+    const me = guild.client.user.id;
+    const msgs = await ch.messages.fetch({ limit: 50 }).catch(() => null);
+    let panneau = null;
+    if (msgs) {
+      // Garde UN panneau (par titre), le réédite ; nettoie les autres messages du bot (déclutter).
+      const mesMsgs = [...msgs.values()].filter(m => m.author.id === me);
+      panneau = mesMsgs.find(m => (m.embeds?.[0]?.title || '').includes('VISITEURS')) || null;
+      for (const m of mesMsgs) { if (m.id !== panneau?.id) await m.delete().catch(() => {}); }
+    }
+    if (panneau) await panneau.edit(_panneauVisiteursPayload()).catch(() => {});
+    else { const sent = await ch.send(_panneauVisiteursPayload()).catch(() => null); if (sent) { try { await sent.pin(); } catch {} } }
+  } catch (e) { console.log('⚠️ _installerPanelVisiteurs:', e.message); }
 }
 
 // Patch notes AUTOMATIQUES : on accumule chaque nouvelle version vue ; à partir de 5, on publie un récap
