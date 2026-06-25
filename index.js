@@ -2075,6 +2075,7 @@ async function autoSetup(guild) {
         '📥 **Une entreprise nous engage** — on est l\'employé : on saisit l\'employeur et ses conditions.',
         '⚡ **Express** — mini-formulaire (client, prestation, montant), reformulé par l\'IA puis validé par vote.',
         '🐺 **Confrérie** — contrats clandestins (briefing privé des agents).',
+        '📇 **Depuis un contact** / 🔎 **Chercher un contact** — créer le contrat à partir d\'une fiche du répertoire (recherche par nom).',
         '',
         '__**Gérer**__',
         '🎮 **Gérer les contrats** — faire avancer une étape, honorer, encaisser au coffre.',
@@ -2090,6 +2091,7 @@ async function autoSetup(guild) {
         new ButtonBuilder().setCustomId('cexp_open').setLabel('Contrat express').setEmoji('⚡').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('cc_new').setLabel('Contrat Confrérie').setEmoji('🐺').setStyle(ButtonStyle.Danger),
         new ButtonBuilder().setCustomId('contrat_from_contact').setLabel('Depuis un contact').setEmoji('📇').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('contrat_contact_search').setLabel('Chercher un contact').setEmoji('🔎').setStyle(ButtonStyle.Primary),
       ),
       new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('csuivi_open').setLabel('Gérer les contrats').setEmoji('🎮').setStyle(ButtonStyle.Primary),
@@ -4482,6 +4484,23 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const menu = new StringSelectMenuBuilder().setCustomId('contrat_contact_sel').setPlaceholder('📇 Choisis le client dans le répertoire…').addOptions(options);
     return interaction.reply({ content: '📇 **Contrat depuis un contact** — choisis la personne, le formulaire sera pré-rempli :', components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral });
   }
+  // 🔎 Recherche d'un contact par nom (au-delà des 25 de la liste déroulante)
+  if (interaction.isButton() && interaction.customId === 'contrat_contact_search') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    const modal = new ModalBuilder().setCustomId('contrat_contact_search_modal').setTitle('🔎 Chercher un contact');
+    modal.addComponents(new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('q').setLabel('Nom (ou télégramme, affiliation…)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Callahan').setMaxLength(60)
+    ));
+    return interaction.showModal(modal);
+  }
+  if (interaction.isModalSubmit() && interaction.customId === 'contrat_contact_search_modal') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    const q = (interaction.fields.getTextInputValue('q') || '').trim();
+    const options = _contactSelectOptions(loadDB(), 25, q);
+    if (!options.length) return interaction.reply({ content: `🔎 Aucun contact ne correspond à « ${q} ». Vérifie l'orthographe, ou crée la fiche dans le salon répertoire.`, flags: MessageFlags.Ephemeral });
+    const menu = new StringSelectMenuBuilder().setCustomId('contrat_contact_sel').setPlaceholder('📇 Choisis le client…').addOptions(options);
+    return interaction.reply({ content: `🔎 **${options.length} résultat(s)** pour « ${q} » — choisis le client, le formulaire sera pré-rempli :`, components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral });
+  }
   if (interaction.isStringSelectMenu() && interaction.customId === 'contrat_contact_sel') {
     const c = (loadDB().repertoire?.contacts || []).find(x => String(x.id) === interaction.values[0]);
     if (!c) return interaction.reply({ content: "❌ Contact introuvable.", flags: MessageFlags.Ephemeral });
@@ -5888,8 +5907,10 @@ async function _exempleOperationForum(guild) {
   if (post?.pin) await post.pin().catch(() => {});
 }
 function _normNom(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, ''); }
-function _contactSelectOptions(db, max = 25) {
-  const contacts = (db.repertoire?.contacts || []).slice();
+function _contactSelectOptions(db, max = 25, query = '') {
+  const q = (query || '').toLowerCase().trim();
+  let contacts = (db.repertoire?.contacts || []).slice();
+  if (q) contacts = contacts.filter(c => [c.nom, c.telegramme, c.affiliation, c.secteur, c.type, c.notes].filter(Boolean).some(v => String(v).toLowerCase().includes(q)));
   contacts.sort((a, b) => (b.fiabilite || 0) - (a.fiabilite || 0) || String(a.nom || '').localeCompare(String(b.nom || '')));
   return contacts.slice(0, max).map(c => {
     const emo = { 'Allié': '🤝', 'Client': '💼', 'Ennemi': '⚔️', 'Neutre': '➖' }[c.type] || '📇';
