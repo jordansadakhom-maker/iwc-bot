@@ -12,12 +12,13 @@ const cron = require('node-cron');
 
 const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub } = require('./db');
 // Version du bot (sert au /version ET à la génération auto des patch notes)
-const BOT_VERSION = '7.8 (23 juin — contrats Confrérie : fiche du forum #contrats-réponses synchronisée (agents/statut/échéance) + facture générée à la réussite)';
+const BOT_VERSION = '7.9 (25 juin — annonces & sondages (catégories RP + rappels), recherche de contact, panneaux collants, espace visiteurs, carte)';
 const { initPapiers, papiersCommands } = require('./papiers');
 const securite = require('./securite');
 const securitePlus = require('./securite-plus');
 const stickyPanel = require('./sticky-panel');
 let annonces = {}; try { annonces = require('./annonces'); console.log('✅ Module annonces/sondages chargé'); } catch (e) { console.log('⚠️ annonces non chargé:', e.message); }
+let journaux = {}; try { journaux = require('./journaux'); console.log('✅ Module journaux chargé'); } catch (e) { console.log('⚠️ journaux non chargé:', e.message); }
 const rdvplus = require('./rdvplus');
 const reorg = require('./reorg');
 
@@ -550,7 +551,7 @@ const SLASH_COMMANDS = [
 ].map(c => c.toJSON());
 
 async function registerSlashCommands(guild) {
-  const cmds = [...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || []), ...(operations.operationsCommands || []), ...(rumeurs.rumeursCommands || []), ...(inventaire.inventaireCommands || []), ...(diagnostic.diagnosticCommands || []), ...(absences.absencesCommands || []), ...(repertoire.repertoireCommands || []), ...(monitoring.monitoringCommands || []), ...(telegramme.telegrammeCommands || []), ...(tableaubord.tableauCommands || []), ...(traque.traqueCommands || []), ...(comptabilite.comptaCommands || []), ...(evenements.evenementsCommands || []), ...(annonces.annoncesCommands || [])];
+  const cmds = [...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || []), ...(operations.operationsCommands || []), ...(rumeurs.rumeursCommands || []), ...(inventaire.inventaireCommands || []), ...(diagnostic.diagnosticCommands || []), ...(absences.absencesCommands || []), ...(repertoire.repertoireCommands || []), ...(monitoring.monitoringCommands || []), ...(telegramme.telegrammeCommands || []), ...(tableaubord.tableauCommands || []), ...(traque.traqueCommands || []), ...(comptabilite.comptaCommands || []), ...(evenements.evenementsCommands || []), ...(annonces.annoncesCommands || []), ...(journaux.journauxCommands || [])];
   try {
     const noms = cmds.map(c => c?.name || c?.toJSON?.()?.name).filter(Boolean);
     client._cmdNames = noms;
@@ -2821,6 +2822,7 @@ client.on('messageCreate', async message => {
   // Répertoire : image déposée dans le fil d'une fiche → devient le portrait du contact
   try { if (await repertoire.onMessage?.(message)) return; } catch {}
   try { await carte.onMessage?.(message); } catch {}
+  try { await journaux.onMessage?.(message); } catch {}
   // ── Relais inter-serveurs : recopie des annonces / patch-notes vers l'autre serveur (no-op si non configuré) ──
   try { await relais.mirrorMessage?.(message); } catch {}
   // ── Note du micro de terrain → réaction 📜 (contrat) + RÉSUMÉ automatique ──
@@ -3422,6 +3424,7 @@ client.on('interactionCreate', async interaction => {
   if (await carte.routeInteraction?.(interaction)) return;
   if (await evenements.routeInteraction?.(interaction)) return;
   if (await annonces.routeInteraction?.(interaction)) return;
+  if (await journaux.routeInteraction?.(interaction)) return;
   if (await factures.routeInteraction?.(interaction)) return;
   if (await medical.routeInteraction?.(interaction)) return;
 
@@ -6837,36 +6840,40 @@ async function _handlePatchDeploy(interaction) {
   const embed1 = new EmbedBuilder()
     .setColor(0xC9A227)
     .setAuthor({ name: 'Iron Wolf Company \u00b7 IWC Setup', iconURL: interaction.guild.iconURL() || undefined })
-    .setTitle('\uD83D\uDC3A IWC Bot \u2014 Mise \u00e0 jour \u00b7 Version 6.3')
-    .setDescription('*D\u00e9ploy\u00e9 le **' + dateStr + '** \u2014 Coffre, Comptabilit\u00e9, Suivi m\u00e9dical & Recrutement*')
+    .setTitle('\uD83D\uDC3A IWC Bot \u2014 Mise \u00e0 jour \u00b7 Version 7.9')
+    .setDescription('*D\u00e9ploy\u00e9 le **' + dateStr + '** \u2014 Annonces & sondages, recherche de contact, panneaux collants*')
     .addFields(
-      { name: '\uD83D\udcb0 COMPTABILIT\u00c9 (NOUVEAU)', value: '\u2192 **/compta** installe un panneau permanent qui se met \u00e0 jour tout seul\n\u2192 Tr\u00e9sorerie, chiffre d\'affaires, contrats \u00e0 encaisser, retards, top clients\n\u2192 **\uD83D\udcb5 Encaisser un contrat** : on choisit le contrat \u2192 coffre + facture auto\n\u2192 **\uD83D\uddbc\uFE0F Capture de paiement** : l\'IA lit le montant, tu valides \u2192 coffre\n\u2192 **\uD83D\udce4 Export** comptable en fichier', inline: false },
-      { name: '\uD83D\udce6 COFFRE COMMUN (REFAIT)', value: '\u2192 Tableau unique auto-r\u00e9par\u00e9, jamais en double\n\u2192 **\u2795 Ajouter / \u2796 Retirer** : on choisit l\'objet (avec sa cat\u00e9gorie) + la quantit\u00e9\n\u2192 **\uD83D\udcf8 Photo** : le coffre devient exactement la photo, mise \u00e0 jour directe + r\u00e9cap avant\u2192apr\u00e8s\n\u2192 Lecture IA des captures plus pr\u00e9cise', inline: false },
+      { name: '\uD83D\udce2 ANNONCES (NOUVEAU)', value: '\u2192 **/annonce-installer** pose un panneau \u00ab Cr\u00e9er une annonce \u00bb dans le salon\n\u2192 Choix d\'une **cat\u00e9gorie RP** (\u00c9v\u00e9nement, Braquage, R\u00e9union, Conflit, Soir\u00e9e, Info\u2026)\n\u2192 Titre, message, **date & heure** optionnelles, r\u00f4le \u00e0 pinger\n\u2192 **\u23f0 Rappels automatiques 1 h et/ou 30 min avant** l\'\u00e9v\u00e9nement', inline: false },
+      { name: '\uD83D\udcca SONDAGES (NOUVEAU)', value: '\u2192 **/sondage-installer** pose un panneau \u00ab Cr\u00e9er un sondage \u00bb\n\u2192 Une question + 2 \u00e0 10 r\u00e9ponses + une dur\u00e9e \u2192 **vrai sondage Discord** (vote int\u00e9gr\u00e9, r\u00e9sultats auto)\n\u2192 Ping des membres, **sans aucune commande \u00e0 taper**', inline: false },
     )
-    .setFooter({ text: 'IWC Bot v6.3 \u00b7 1/3' });
+    .setFooter({ text: 'IWC Bot v7.9 \u00b7 1/3' });
 
   const embed2 = new EmbedBuilder()
     .setColor(0x2ECC71)
     .addFields(
-      { name: '\uD83E\ude7a SUIVI M\u00c9DICAL (AM\u00c9LIOR\u00c9)', value: '\u2192 Alerte automatique quand un membre passe **Inapte** ou **En observation**\n\u2192 Rappels de RDV m\u00e9dicaux en MP au m\u00e9decin ~1h avant\n\u2192 Vue d\'ensemble regroup\u00e9e par statut + historique d\u00e9taill\u00e9\n\u2192 Test d\'aptitude en 2 \u00e9tapes (bug corrig\u00e9)', inline: false },
-      { name: '\uD83E\udd1d RENDEZ-VOUS CLIENT (PLUS CLAIR)', value: '\u2192 **\uD83D\udce8 Contacter la compagnie** \u2014 exposer sa demande librement\n\u2192 **\uD83E\udd1d Besoin de nos services** \u2014 r\u00e9server une prestation (lieu + cr\u00e9neau)\n\u2192 Textes des panneaux clarifi\u00e9s', inline: false },
-      { name: '\uD83C\udfaf OP\u00c9RATIONS & AVIS DE RECHERCHE', value: '\u2192 Avis cl\u00f4tur\u00e9 \u2192 archiv\u00e9 dans #\u00e9l\u00e9ment-op\u00e9rations (+ photo de capture)\n\u2192 Liaison **op\u00e9ration \u2194 avis de recherche** dans les deux sens\n\u2192 Agenda : RDV auto-effac\u00e9s une fois pass\u00e9s \u00b7 choix du ping (Confr\u00e9rie ou membre)', inline: false },
+      { name: '\uD83D\udd0e CONTRATS \u2014 RECHERCHE DE CONTACT', value: '\u2192 Nouveau bouton **\uD83D\udd0e Chercher un contact** dans #contrats\n\u2192 Tape un nom \u2192 le bot trouve la fiche du r\u00e9pertoire (**au-del\u00e0 des 25** de la liste) et **pr\u00e9-remplit** le contrat\n\u2192 Accessible \u00e0 **tous les membres** qui cr\u00e9ent un contrat', inline: false },
+      { name: '\uD83C\udfaf CONTRATS CONFR\u00c9RIE', value: '\u2192 Nouveau type de mission : **Chasseur de primes**', inline: false },
+      { name: '\uD83D\udccc PANNEAUX TOUJOURS EN BAS', value: '\u2192 Dans **#contrats** et **#op\u00e9rations**, le panneau d\'actions reste coll\u00e9 en bas du salon\n\u2192 Le menu d\u00e9roulant appara\u00eet ainsi **juste sous le panneau** (plus besoin de le chercher)', inline: false },
     )
-    .setFooter({ text: 'IWC Bot v6.3 \u00b7 2/3' });
+    .setFooter({ text: 'IWC Bot v7.9 \u00b7 2/3' });
 
   const embed3 = new EmbedBuilder()
     .setColor(0x2C3E50)
     .addFields(
-      { name: '\uD83D\uDC3A RECRUTEMENT', value: '\u2192 Candidatures : ping **Direction + Officier de Terrain**\n\u2192 \u00c0 l\'acceptation : le nouveau membre est redirig\u00e9 en MP pour nous joindre', inline: false },
-      { name: '\uD83D\uDC1B CORRECTIONS', value: '\u2192 Panneau #contrats : \u00ab Recevoir nos conditions \u00bb (corrig\u00e9)\n\u2192 Salon planning : fini les reposts en boucle\n\u2192 Messages \u00e9pingl\u00e9s inutiles supprim\u00e9s automatiquement\n\u2192 Stabilit\u00e9 g\u00e9n\u00e9rale (gestion d\'erreurs renforc\u00e9e)', inline: false },
+      { name: '\uD83D\udc4b ESPACE VISITEURS', value: '\u2192 Annonce d\'accueil claire qui explique la marche \u00e0 suivre et **renvoie vers le salon de prise de RDV**\n\u2192 Le client met son **nom + pr\u00e9nom**, puis re\u00e7oit son **contrat \u00e0 signer en MP**', inline: false },
+      { name: '\uD83D\uddfa\ufe0f CARTE', value: '\u2192 Bouton **\u00ab Voir la carte \u00bb** ajout\u00e9, panneau remis d\'\u00e9querre (tous les boutons fonctionnent)', inline: false },
+      { name: '\uD83D\uDC1B STABILIT\u00c9', value: '\u2192 Erreurs \u00ab interaction inconnue \u00bb corrig\u00e9es (plus de plantage sur un clic tardif)\n\u2192 Gestion d\'erreurs renforc\u00e9e sur l\'ensemble des boutons et menus', inline: false },
     )
-    .setFooter({ text: 'IWC Bot v6.3 \u00b7 3/3 \u00b7 La force est dans l\'ombre. \u2014 La Compagnie' })
+    .addFields(
+      { name: '\ud83d\udcf0 JOURNAUX (NOUVEAU)', value: '\u2192 **/journal-installer** d\u00e9clare un salon comme journal (r\u00e9gion + r\u00f4le lecteur)\n\u2192 Tu postes une **photo** dans ce salon \u2192 le bot la transforme en **parution propre** (en-t\u00eate r\u00e9gion + date) et **pr\u00e9vient les lecteurs**\n\u2192 Pens\u00e9 pour le Journal du Texas / de Louisiane', inline: false },
+    )
+    .setFooter({ text: 'IWC Bot v7.9 \u00b7 3/3 \u00b7 La force est dans l\'ombre. \u2014 La Compagnie' })
     .setTimestamp();
 
   await patchCh.send({ embeds: [embed1] });
   await patchCh.send({ embeds: [embed2] });
   await patchCh.send({ embeds: [embed3] });
-  await interaction.editReply({ content: '\u2705 Patch note v6.3 post\u00e9 dans ' + patchCh + ' (3 embeds).' });
+  await interaction.editReply({ content: '\u2705 Patch note v7.9 post\u00e9 dans ' + patchCh + ' (3 encadr\u00e9s).' });
 }
 async function _handlePurge(interaction) {
   if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
