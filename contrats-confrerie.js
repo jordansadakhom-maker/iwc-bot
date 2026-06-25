@@ -22,7 +22,31 @@ async function rp1904(txt) {
   try { if (typeof global.reformulerRP === 'function') { const r = await global.reformulerRP(s.slice(0, 1500)); if (r) return r; } } catch {}
   return s;
 }
+// Génère le contrat sous forme d'IMAGE « parchemin » (texte gravé à l'encre par-dessus la texture).
+// Renvoie un Buffer PNG, ou null si sharp est indisponible → l'appelant retombe sur l'embed classique.
+async function genererImageContrat(contrat) {
+  try {
+    const r = riskOf(contrat);
+    const blocks = [
+      { type: 'title', text: 'CONTRAT DE LA CONFRÉRIE' },
+      { type: 'subtitle', text: "En l'an de grâce 1904" },
+      { type: 'rule' },
+      { type: 'field', label: 'Référence du pacte', value: contrat.id },
+      { type: 'field', label: 'Nature de la besogne', value: contrat.typeMission || '—' },
+      { type: 'field', label: 'Péril encouru', value: r.label },
+      { type: 'field', label: 'Récompense promise', value: contrat.remuneration || '—' },
+      { type: 'field', label: 'Terme échu le', value: contrat.dateEcheance ? fmtDate(contrat.dateEcheance) : (contrat.echeanceTexte || 'À votre convenance') },
+      { type: 'rule' },
+      { type: 'para', label: 'Objet du contrat', text: contrat.objet || '—' },
+      ...(contrat.details ? [{ type: 'para', label: 'Consignes & clauses', text: contrat.details }] : []),
+      { type: 'rule' },
+      { type: 'quote', text: "« Que votre signature vous engage, et que l'ombre vous garde. » — La Confrérie, an 1904" },
+    ];
+    return await parcheminImg.genererParchemin(blocks, { width: 820 });
+  } catch { return null; }
+}
 const { loadDB, saveDB, sauvegarderSurGitHub } = require('./db');
+const parcheminImg = require('./parchemin-image'); // génération d'image « texte gravé sur parchemin »
 // Sauvegarde immédiate sur GitHub : sur Render le disque est éphémère — sans ça, un contrat créé
 // est perdu au prochain redéploiement (d'où « Contrat introuvable » au moment de valider).
 // Renvoie la promesse pour pouvoir l'ATTENDRE dans les étapes critiques (sinon un redéploiement
@@ -779,7 +803,18 @@ async function onSignPick(interaction) {
     new ButtonBuilder().setCustomId(`cc_dosign::${id}`).setLabel('Apposer ma marque').setEmoji('✒️').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`cc_norefuse::${id}`).setLabel('Décliner').setEmoji('✖️').setStyle(ButtonStyle.Danger),
   );
-  const dm = await user.send({ embeds: [buildSignatureEmbed(c)], components: [btn], files: [parcheminFichier()].filter(Boolean) }).catch(() => null);
+  // On envoie le contrat comme IMAGE parchemin (texte gravé) ; si la génération échoue → embed classique
+  const imgBuf = await genererImageContrat(c).catch(() => null);
+  let dm;
+  if (imgBuf) {
+    dm = await user.send({
+      content: '📜 *Un pacte vous est proposé. Lisez-en les termes, puis tranchez.*',
+      files: [new AttachmentBuilder(imgBuf, { name: `contrat-${c.id}.png` })],
+      components: [btn],
+    }).catch(() => null);
+  } else {
+    dm = await user.send({ embeds: [buildSignatureEmbed(c)], components: [btn], files: [parcheminFichier()].filter(Boolean) }).catch(() => null);
+  }
   if (!dm) return interaction.editReply({ content: `⚠️ Impossible d'envoyer le MP à <@${uid}> (ses messages privés sont fermés, ou le bot n'a aucun serveur en commun avec cette personne).`, components: [] });
   c.signataireId = uid;
   c.signatureEnvoyeeAt = new Date().toISOString();
