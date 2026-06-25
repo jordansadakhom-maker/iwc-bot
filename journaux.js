@@ -117,7 +117,29 @@ async function _reupload(imgs) {
 
 const journauxCommands = [
   new SlashCommandBuilder().setName('journal-installer').setDescription('📰 Déclarer CE salon comme journal (une ou plusieurs régions + rôle lecteur) — Direction'),
+  new SlashCommandBuilder().setName('article').setDescription('📝 Rédiger un article de presse (IA) et le publier dans le journal — Direction')
+    .addStringOption(o => o.setName('sujet').setDescription("De quoi parle l'article ?").setRequired(true))
+    .addStringOption(o => o.setName('region').setDescription('Région du journal (défaut : celle du salon)').setRequired(false)
+      .addChoices({ name: '🤠 Texas', value: 'texas' }, { name: '⚜️ Louisiane', value: 'louisiane' }, { name: '📰 Autre', value: 'autre' })),
 ];
+
+// Rédaction d'un article de presse par l'IA (ton western 1899).
+async function _redigerArticle(sujet, regionLabel) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+  const prompt = `Tu es journaliste pour « ${regionLabel} », un journal de l'Ouest américain en 1899. Rédige un ARTICLE DE PRESSE en français, d'un ton western d'époque sobre et crédible, à partir du sujet ci-dessous.\nFormat : la PREMIÈRE LIGNE est un titre accrocheur en gras (**Titre**), puis 2 à 4 courts paragraphes. Pas de listes, pas de guillemets superflus. Reste immersif et plausible, n'invente pas de faits extravagants.\n\nSujet : ${sujet}`;
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 800, messages: [{ role: 'user', content: prompt }] }),
+    });
+    if (!resp.ok) { const b = await resp.text().catch(() => ''); console.log(`❌ article HTTP ${resp.status}: ${b.slice(0, 200)}`); return null; }
+    const data = await resp.json();
+    const txt = (data?.content || []).filter(c => c.type === 'text').map(c => c.text).join('').trim();
+    return txt || null;
+  } catch (e) { console.log('❌ article exception:', e.message); return null; }
+}
 
 async function routeInteraction(interaction) {
   try {
@@ -130,6 +152,26 @@ async function routeInteraction(interaction) {
       _drafts.set(interaction.user.id, d);
       const note = enFil ? '\n\n*(Tu es dans un fil : c\'est le **salon-forum parent** qui sera déclaré comme journal.)*' : '';
       await interaction.reply({ content: _cfgText(d) + note, components: _cfgRows(d), flags: MessageFlags.Ephemeral }); return true;
+    }
+
+    if (interaction.isChatInputCommand?.() && interaction.commandName === 'article') {
+      if (!estGestion(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return true; }
+      if (!process.env.ANTHROPIC_API_KEY) { await interaction.reply({ content: '⚠️ Clé IA absente — impossible de rédiger l\'article.', flags: MessageFlags.Ephemeral }); return true; }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const sujet = (interaction.options.getString('sujet') || '').trim();
+      const enFil = !!interaction.channel?.isThread?.();
+      const targetId = enFil ? interaction.channel.parentId : interaction.channelId;
+      const cfg = _store(loadDB())[targetId] || null;
+      const regionKey = interaction.options.getString('region') || _regionsOf(cfg)[0] || 'autre';
+      const article = await _redigerArticle(sujet, _reg(regionKey).label);
+      if (!article) { await interaction.editReply({ content: '❌ Je n\'ai pas réussi à rédiger l\'article. Réessaie.' }); return true; }
+      const auteur = interaction.member?.displayName || interaction.user.username;
+      const { embed } = _editionEmbed({ regions: [regionKey] }, auteur, article, null);
+      const { content, allowedMentions } = _pingFor(cfg || {});
+      const sent = await interaction.channel.send({ content, embeds: [embed], allowedMentions }).catch(() => null);
+      if (sent) await sent.react('📰').catch(() => {});
+      await interaction.editReply({ content: sent ? '✅ Article publié dans ce salon.' : '⚠️ Article rédigé mais je n\'ai pas pu le poster ici (permissions ?).' });
+      return true;
     }
 
     const id = interaction.customId || '';

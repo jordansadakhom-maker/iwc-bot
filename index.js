@@ -207,6 +207,8 @@ async function _crediterCoffrePrime({ guild, montant, objet, responsable, respon
   } catch (e) { console.log('⚠️ _crediterCoffrePrime:', e.message); return null; }
 }
 global.crediterCoffrePrime = (args) => _crediterCoffrePrime(args || {});
+// Ouvre le formulaire d'avis de recherche pré-rempli (depuis une opération « Chasse à la prime »).
+global.ouvrirAvisRecherche = (interaction, def) => traque.ouvrirModalAvis?.(interaction, def);
 
 const {
   CH, PARTICIPANTS_MAP, CONTRAT_ROLES, JUNE_MCCALL_ID,
