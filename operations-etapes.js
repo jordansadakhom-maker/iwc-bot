@@ -513,6 +513,7 @@ function _boutons(op) {
     const row2 = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`opx_doc::${op.id}`).setLabel(termine ? '📄 Régénérer le dossier' : '📄 Dossier (brouillon)').setStyle(ButtonStyle.Secondary),
     );
+    if (termine) row2.addComponents(new ButtonBuilder().setCustomId(`opx_recit::${op.id}`).setLabel('📜 Compte-rendu RP').setStyle(ButtonStyle.Secondary));
     if (!termine) row2.addComponents(new ButtonBuilder().setCustomId(`opx_cancel::${op.id}`).setLabel('🗑️ Annuler l\'opération').setStyle(ButtonStyle.Danger));
     rows.push(row2);
   }
@@ -678,6 +679,109 @@ async function _posterDossier(guild, op) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  PRIME → COFFRE (à l'achèvement, via le hook global de index.js)
+// ═══════════════════════════════════════════════════════════════
+function _montant(s) { const m = String(s || '').replace(/\s/g, '').match(/(\d[\d.]*)/); return m ? (parseInt(m[1].replace(/\./g, ''), 10) || 0) : 0; }
+async function _crediterPrime(guild, op) {
+  try {
+    if (op.primeVerseeCoffre) return;
+    const defs = _defs(op.categorie);
+    const bilan = op.etapes[op.etapes.length - 1];
+    const bdef = defs[defs.length - 1] || { champs: [] };
+    // Champ « montant » du bilan selon le scénario : prime / paiement / commission / montant
+    let raw = null;
+    for (const id of ['prime', 'paiement', 'commission', 'montant']) {
+      if (bilan?.champs?.[id]) { raw = bilan.champs[id]; break; }
+    }
+    if (raw == null) for (const c of bdef.champs) { const v = bilan?.champs?.[c.id]; if (v && /(\$|prime|paiement|commission|montant)/i.test(c.label + ' ' + v)) { raw = v; break; } }
+    const montant = _montant(raw);
+    if (!montant) return;
+    if (typeof global.crediterCoffrePrime !== 'function') return;
+    const solde = await global.crediterCoffrePrime({
+      guild, montant, pole: op.pole,
+      objet: `Opération ${op.id} — ${op.categorie} (${_clip(op.cible, 60)})`,
+      responsable: 'Opération', responsableId: op.createurId || null,
+    });
+    const d2 = loadDB(); const o2 = _find(d2, op.id); if (o2) { o2.primeVerseeCoffre = montant; _persist(d2); }
+    op.primeVerseeCoffre = montant;
+    const ch = await guild.channels.fetch(op.threadId || op.channelId).catch(() => null);
+    if (ch?.send) await ch.send({ content: `💰 **Prime versée au coffre** : +$${montant.toLocaleString('fr-FR')}${solde != null ? ` · nouveau solde : **$${solde.toLocaleString('fr-FR')}**` : ''}.`, allowedMentions: { parse: [] } }).catch(() => {});
+  } catch (e) { console.log('⚠️ crédit prime opération:', e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  COMPTE-RENDU RP (IA) — généré à partir des étapes validées
+// ═══════════════════════════════════════════════════════════════
+async function _recitRP(op) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+  const defs = _defs(op.categorie);
+  const faits = [];
+  op.etapes.forEach((et, i) => {
+    const def = defs[i]; if (!def) return;
+    const parts = [];
+    for (const c of def.champs) { const v = et.champs && et.champs[c.id]; if (v && String(v).trim()) parts.push(`${c.label} : ${v}`); }
+    if ((et.photos || []).length) parts.push(`${et.photos.length} photo(s)`);
+    if (parts.length) faits.push(`• ${def.label} — ${parts.join(' ; ')}`);
+  });
+  const contenu = [
+    `Type de mission : ${op.categorie}`,
+    `Objet / cible : ${op.cible}`,
+    op.remuneration ? `Prime : ${op.remuneration}` : null,
+    '', 'Déroulé (étapes) :', ...faits,
+  ].filter(Boolean).join('\n');
+  const prompt = `Tu es le chroniqueur de la Iron Wolf Company et de La Confrérie, dans l'Ouest américain de 1899. À partir des FAITS ci-dessous, rédige un COMPTE-RENDU d'opération immersif, à la troisième personne, en français, d'un ton western sobre et crédible (sans fioritures excessives). 1 à 3 courts paragraphes. Reste FIDÈLE aux faits, n'invente aucun détail majeur. Ne mets ni titre, ni listes, ni guillemets : seulement un texte suivi.\n\nFAITS :\n${contenu}`;
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 900, messages: [{ role: 'user', content: prompt }] }),
+    });
+    if (!resp.ok) { const b = await resp.text().catch(() => ''); console.log(`❌ récit op HTTP ${resp.status}: ${b.slice(0, 200)}`); return null; }
+    const data = await resp.json();
+    const txt = (data?.content || []).filter(c => c.type === 'text').map(c => c.text).join('').trim();
+    return txt || null;
+  } catch (e) { console.log('❌ récit op exception:', e.message); return null; }
+}
+async function _genererEtPosterRecit(guild, op) {
+  try {
+    const recit = await _recitRP(op);
+    if (!recit) return;
+    const d2 = loadDB(); const o2 = _find(d2, op.id); if (o2) { o2.recit = recit; _persist(d2); }
+    const ch = await guild.channels.fetch(op.threadId || op.channelId).catch(() => null);
+    if (ch?.send) {
+      const e = new EmbedBuilder().setColor(COL.or)
+        .setTitle(`📜 Compte-rendu d'opération — « ${_clip(op.cible, 60)} »`)
+        .setDescription(recit.slice(0, 4000))
+        .setFooter({ text: `Récit RP rédigé par l'IA d'après les étapes · ${op.id}` });
+      await ch.send({ embeds: [e], allowedMentions: { parse: [] } }).catch(() => {});
+    }
+  } catch (e) { console.log('⚠️ récit op:', e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  TABLEAU DE SUIVI DES OPÉRATIONS (toutes les préparations)
+// ═══════════════════════════════════════════════════════════════
+function tableauEmbed() {
+  const db = loadDB();
+  const preps = (db.preparations || []).filter(o => o.status !== 'annulee');
+  const e = new EmbedBuilder().setColor(COL.or).setTitle('🗂️ SUIVI DES OPÉRATIONS').setTimestamp();
+  if (!preps.length) { e.setDescription('*Aucune opération en préparation pour l\'instant.*'); return e; }
+  preps.sort((a, b) => (a.status === 'termine' ? 1 : 0) - (b.status === 'termine' ? 1 : 0));
+  const lignes = preps.slice(0, 25).map(op => {
+    const total = (op.etapes || []).length;
+    const done = (op.etapes || []).filter(x => x.valide).length;
+    const bar = '🟩'.repeat(done) + '⬜'.repeat(Math.max(0, total - done));
+    const st = op.status === 'termine' ? '✅ Terminée' : '🟡 En préparation';
+    const prime = op.primeVerseeCoffre ? ` · 💰 +$${Number(op.primeVerseeCoffre).toLocaleString('fr-FR')}` : '';
+    return `${op.emoji || '🎯'} **${_clip(op.cible, 48)}** — *${op.categorie}*\n${bar} ${done}/${total} · ${st} · contrat \`${op.contratId || '—'}\`${prime}`;
+  });
+  e.setDescription(lignes.join('\n\n').slice(0, 4000));
+  e.setFooter({ text: `${preps.length} opération(s) · /op suivi` });
+  return e;
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  ROUTEUR D'INTERACTIONS  (préfixe opx_ )
 // ═══════════════════════════════════════════════════════════════
 async function routeInteraction(interaction) {
@@ -784,7 +888,24 @@ async function routeInteraction(interaction) {
       _persist(db);
       await interaction.reply({ content: fini ? `✅ Étape ${idx + 1} validée. **Toutes les étapes sont validées** — je génère le dossier.` : `✅ Étape ${idx + 1} validée. L'étape ${idx + 2} est déverrouillée.`, flags: MessageFlags.Ephemeral }).catch(() => {});
       await _refreshPanel(interaction.guild, op);
-      if (fini) { op.dossierGenere = true; _persist(db); await _posterDossier(interaction.guild, op).catch(() => {}); }
+      if (fini) {
+        op.dossierGenere = true; _persist(db);
+        await _posterDossier(interaction.guild, op).catch(() => {});
+        await _crediterPrime(interaction.guild, op).catch(() => {});       // 💰 prime → coffre
+        await _genererEtPosterRecit(interaction.guild, op).catch(() => {}); // 📜 compte-rendu RP
+      }
+      return true;
+    }
+
+    // ── (Re)générer le compte-rendu RP ──
+    if (interaction.isButton?.() && cid.startsWith('opx_recit::')) {
+      const id = cid.split('::')[1];
+      const db = loadDB();
+      const op = _find(db, id);
+      if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      await _genererEtPosterRecit(interaction.guild, op).catch(() => {});
+      await interaction.editReply({ content: '📜 Compte-rendu RP généré dans le fil.' }).catch(() => {});
       return true;
     }
 
@@ -823,4 +944,4 @@ async function routeInteraction(interaction) {
   }
 }
 
-module.exports = { init, routeInteraction, creerOperationDepuisContrat, STEP_TEMPLATES };
+module.exports = { init, routeInteraction, creerOperationDepuisContrat, tableauEmbed, STEP_TEMPLATES };
