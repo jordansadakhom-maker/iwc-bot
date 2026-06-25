@@ -7,8 +7,13 @@
 const {
   EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  StringSelectMenuBuilder, UserSelectMenuBuilder, MessageFlags,
+  StringSelectMenuBuilder, UserSelectMenuBuilder, MessageFlags, AttachmentBuilder,
 } = require('discord.js');
+const path = require('path');
+// Texture parchemin jointe aux MP (contrat/briefing/fin de mission) : fichier local du dépôt →
+// lien permanent (les liens cdn.discordapp.com expirent au bout de ~24h). Référencée via attachment://.
+const PARCHEMIN_IMG = 'attachment://parchemin.png';
+function parcheminFichier() { try { return new AttachmentBuilder(path.join(__dirname, 'assets', 'parchemin.png'), { name: 'parchemin.png' }); } catch { return null; } }
 const { loadDB, saveDB, sauvegarderSurGitHub } = require('./db');
 // Sauvegarde immédiate sur GitHub : sur Render le disque est éphémère — sans ça, un contrat créé
 // est perdu au prochain redéploiement (d'où « Contrat introuvable » au moment de valider).
@@ -207,6 +212,7 @@ function buildSignatureEmbed(contrat) {
     .setFooter({ text: '✒️ La Confrérie — scellé à la cire noire • Document confidentiel' });
   if (contrat.details) e.addFields({ name: '🪶 Consignes & clauses', value: contrat.details.slice(0, 1000) });
   e.addFields({ name: '​', value: '*« Que votre signature vous engage, et que l\'ombre vous garde. »*\n— ✒️ **La Confrérie**, an 1904' });
+  e.setImage(PARCHEMIN_IMG);
   return e;
 }
 
@@ -238,6 +244,7 @@ function buildBriefingEmbed(contrat) {
     .setFooter({ text: '✒️ La Confrérie — scellé à la cire noire • Ordre confidentiel' });
   if (contrat.details) e.addFields({ name: '🪶 Consignes & clauses', value: contrat.details.slice(0, 1000) });
   e.addFields({ name: '​', value: '*« Que ta lame soit sûre, et que l\'ombre te garde. »*\n— ✒️ **La Confrérie**, an 1904' });
+  e.setImage(PARCHEMIN_IMG);
   return e;
 }
 
@@ -259,7 +266,7 @@ async function envoyerBriefings(guild, contrat) {
     try {
       const m = await guild.members.fetch(userId).catch(() => null);
       if (m) {
-        const dm = await m.send({ embeds: [buildBriefingEmbed(contrat)], components: buildBriefingButtons(contrat) }).catch(() => null);
+        const dm = await m.send({ embeds: [buildBriefingEmbed(contrat)], components: buildBriefingButtons(contrat), files: [parcheminFichier()].filter(Boolean) }).catch(() => null);
         if (dm) dmOk = true;
       }
     } catch {}
@@ -713,7 +720,8 @@ async function cloturer(interaction, succes) {
             ? '✒️ *Belle besogne, frère. La Confrérie n\'oublie jamais les siens — ta part te reviendra.*'
             : '🩸 *La besogne a tourné court. On en tire les leçons, et l\'on remet l\'ouvrage sur le métier.*',
         ].join('\n'))
-        .setFooter({ text: '✒️ La Confrérie — an 1904 • Confidentiel' })] }).catch(() => {});
+        .setFooter({ text: '✒️ La Confrérie — an 1904 • Confidentiel' })
+        .setImage(PARCHEMIN_IMG)], files: [parcheminFichier()].filter(Boolean) }).catch(() => {});
     } catch {}
   }
 }
@@ -761,7 +769,7 @@ async function onSignPick(interaction) {
     new ButtonBuilder().setCustomId(`cc_dosign::${id}`).setLabel('Apposer ma marque').setEmoji('✒️').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`cc_norefuse::${id}`).setLabel('Décliner').setEmoji('✖️').setStyle(ButtonStyle.Danger),
   );
-  const dm = await user.send({ embeds: [buildSignatureEmbed(c)], components: [btn] }).catch(() => null);
+  const dm = await user.send({ embeds: [buildSignatureEmbed(c)], components: [btn], files: [parcheminFichier()].filter(Boolean) }).catch(() => null);
   if (!dm) return interaction.editReply({ content: `⚠️ Impossible d'envoyer le MP à <@${uid}> (ses messages privés sont fermés, ou le bot n'a aucun serveur en commun avec cette personne).`, components: [] });
   c.signataireId = uid;
   c.signatureEnvoyeeAt = new Date().toISOString();
