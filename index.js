@@ -12,12 +12,13 @@ const cron = require('node-cron');
 
 const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub } = require('./db');
 // Version du bot (sert au /version ET à la génération auto des patch notes)
-const BOT_VERSION = '7.8 (23 juin — contrats Confrérie : fiche du forum #contrats-réponses synchronisée (agents/statut/échéance) + facture générée à la réussite)';
+const BOT_VERSION = '8.0 (25 juin — opérations par étapes : un contrat validé ouvre une opération catégorisée (Repérage → Plan → Équipe → Exécution → Bilan), étapes validables avec photos, dossier .md auto)';
 const { initPapiers, papiersCommands } = require('./papiers');
 const securite = require('./securite');
 const securitePlus = require('./securite-plus');
 const stickyPanel = require('./sticky-panel');
 let annonces = {}; try { annonces = require('./annonces'); console.log('✅ Module annonces/sondages chargé'); } catch (e) { console.log('⚠️ annonces non chargé:', e.message); }
+let journaux = {}; try { journaux = require('./journaux'); console.log('✅ Module journaux chargé'); } catch (e) { console.log('⚠️ journaux non chargé:', e.message); }
 const rdvplus = require('./rdvplus');
 const reorg = require('./reorg');
 
@@ -48,6 +49,10 @@ catch (e) { console.log('⚠️ notion-modules-v5 non chargé:', e.message); }
 let operations = {};
 try { operations = require('./operations'); console.log('✅ Module opérations chargé'); }
 catch (e) { console.log('⚠️ operations non chargé:', e.message); }
+
+let opsEtapes = {};
+try { opsEtapes = require('./operations-etapes'); console.log('✅ Module opérations-étapes chargé'); }
+catch (e) { console.log('⚠️ operations-etapes non chargé:', e.message); }
 
 let comptabilite = {};
 try { comptabilite = require('./comptabilite'); console.log('✅ Module comptabilité chargé'); }
@@ -160,6 +165,16 @@ operations.init?.({
     try { await ajouterJournalIC(guild, { type: 'operation', titre: `Nouvelle opération — ${op.name}`, description: `📍 ${op.lieu} · Objectif : ${op.objectif} · Pôle : ${op.pole === 'legal' ? '⚖️ Légal' : '🔪 Illégal'}`, auteur: 'Commandement' }); } catch {}
   },
 });
+
+opsEtapes.init?.({
+  poleRoleId: (guild, pole) => _poleRoleId(guild, pole),
+  journalHook: async (guild, op) => {
+    try { await sendLog(guild, 'OPERATION', { nom: op.cible, lieu: '—', equipe: op.categorie, statut: '🟡 Préparation (étapes)' }); } catch {}
+    try { await ajouterJournalIC(guild, { type: 'operation', titre: `Opération à préparer — ${op.cible}`, description: `${op.emoji} ${op.categorie} · issue du contrat ${op.contratId}`, auteur: 'Commandement' }); } catch {}
+  },
+});
+// Hook appelé par les contrats Confrérie : crée l'opération par étapes quand un contrat est validé.
+global.creerOpDepuisContrat = (guild, contrat, opts) => opsEtapes.creerOperationDepuisContrat?.(guild, contrat, opts);
 
 const {
   CH, PARTICIPANTS_MAP, CONTRAT_ROLES, JUNE_MCCALL_ID,
@@ -550,7 +565,7 @@ const SLASH_COMMANDS = [
 ].map(c => c.toJSON());
 
 async function registerSlashCommands(guild) {
-  const cmds = [...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || []), ...(operations.operationsCommands || []), ...(rumeurs.rumeursCommands || []), ...(inventaire.inventaireCommands || []), ...(diagnostic.diagnosticCommands || []), ...(absences.absencesCommands || []), ...(repertoire.repertoireCommands || []), ...(monitoring.monitoringCommands || []), ...(telegramme.telegrammeCommands || []), ...(tableaubord.tableauCommands || []), ...(traque.traqueCommands || []), ...(comptabilite.comptaCommands || []), ...(evenements.evenementsCommands || []), ...(annonces.annoncesCommands || [])];
+  const cmds = [...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || []), ...(operations.operationsCommands || []), ...(rumeurs.rumeursCommands || []), ...(inventaire.inventaireCommands || []), ...(diagnostic.diagnosticCommands || []), ...(absences.absencesCommands || []), ...(repertoire.repertoireCommands || []), ...(monitoring.monitoringCommands || []), ...(telegramme.telegrammeCommands || []), ...(tableaubord.tableauCommands || []), ...(traque.traqueCommands || []), ...(comptabilite.comptaCommands || []), ...(evenements.evenementsCommands || []), ...(annonces.annoncesCommands || []), ...(journaux.journauxCommands || [])];
   try {
     const noms = cmds.map(c => c?.name || c?.toJSON?.()?.name).filter(Boolean);
     client._cmdNames = noms;
@@ -2821,6 +2836,7 @@ client.on('messageCreate', async message => {
   // Répertoire : image déposée dans le fil d'une fiche → devient le portrait du contact
   try { if (await repertoire.onMessage?.(message)) return; } catch {}
   try { await carte.onMessage?.(message); } catch {}
+  try { await journaux.onMessage?.(message); } catch {}
   // ── Relais inter-serveurs : recopie des annonces / patch-notes vers l'autre serveur (no-op si non configuré) ──
   try { await relais.mirrorMessage?.(message); } catch {}
   // ── Note du micro de terrain → réaction 📜 (contrat) + RÉSUMÉ automatique ──
@@ -3388,6 +3404,7 @@ function _planEphClose(interaction, delay, finalPass) {
   }, delay);
   _ephCleanup.set(uid, { timer });
 }
+client.on('threadCreate', thread => { try { journaux.onThreadCreate?.(thread); } catch {} });
 client.on('interactionCreate', interaction => {
   try {
     if (!interaction?.user) return;
@@ -3400,6 +3417,7 @@ client.on('interactionCreate', async interaction => {
  try {
   const guild = interaction.guild; const db = loadDB();
   if (await contratsConf.routeInteraction?.(interaction)) return;
+  if (await opsEtapes.routeInteraction?.(interaction)) return;
   if (await operations.routeInteraction?.(interaction)) return;
   if (await rumeurs.routeInteraction?.(interaction)) return;
   if (await inventaire.routeInteraction?.(interaction)) return;
@@ -3422,6 +3440,7 @@ client.on('interactionCreate', async interaction => {
   if (await carte.routeInteraction?.(interaction)) return;
   if (await evenements.routeInteraction?.(interaction)) return;
   if (await annonces.routeInteraction?.(interaction)) return;
+  if (await journaux.routeInteraction?.(interaction)) return;
   if (await factures.routeInteraction?.(interaction)) return;
   if (await medical.routeInteraction?.(interaction)) return;
 
@@ -6837,36 +6856,27 @@ async function _handlePatchDeploy(interaction) {
   const embed1 = new EmbedBuilder()
     .setColor(0xC9A227)
     .setAuthor({ name: 'Iron Wolf Company \u00b7 IWC Setup', iconURL: interaction.guild.iconURL() || undefined })
-    .setTitle('\uD83D\uDC3A IWC Bot \u2014 Mise \u00e0 jour \u00b7 Version 6.3')
-    .setDescription('*D\u00e9ploy\u00e9 le **' + dateStr + '** \u2014 Coffre, Comptabilit\u00e9, Suivi m\u00e9dical & Recrutement*')
+    .setTitle('\ud83d\uDC3A IWC Bot \u2014 Mise \u00e0 jour \u00b7 Version 8.0')
+    .setDescription('*D\u00e9ploy\u00e9 le **' + dateStr + '** \u2014 Les contrats d\u00e9clenchent d\u00e9sormais de vraies op\u00e9rations, pr\u00e9par\u00e9es \u00e9tape par \u00e9tape.*')
     .addFields(
-      { name: '\uD83D\udcb0 COMPTABILIT\u00c9 (NOUVEAU)', value: '\u2192 **/compta** installe un panneau permanent qui se met \u00e0 jour tout seul\n\u2192 Tr\u00e9sorerie, chiffre d\'affaires, contrats \u00e0 encaisser, retards, top clients\n\u2192 **\uD83D\udcb5 Encaisser un contrat** : on choisit le contrat \u2192 coffre + facture auto\n\u2192 **\uD83D\uddbc\uFE0F Capture de paiement** : l\'IA lit le montant, tu valides \u2192 coffre\n\u2192 **\uD83D\udce4 Export** comptable en fichier', inline: false },
-      { name: '\uD83D\udce6 COFFRE COMMUN (REFAIT)', value: '\u2192 Tableau unique auto-r\u00e9par\u00e9, jamais en double\n\u2192 **\u2795 Ajouter / \u2796 Retirer** : on choisit l\'objet (avec sa cat\u00e9gorie) + la quantit\u00e9\n\u2192 **\uD83D\udcf8 Photo** : le coffre devient exactement la photo, mise \u00e0 jour directe + r\u00e9cap avant\u2192apr\u00e8s\n\u2192 Lecture IA des captures plus pr\u00e9cise', inline: false },
+      { name: '\uD83C\udfac OP\u00c9RATIONS PAR \u00c9TAPES (NOUVEAU)', value: '\u2192 Quand la **Direction valide un contrat** Confr\u00e9rie, une **op\u00e9ration s\'ouvre automatiquement** dans le salon des op\u00e9rations\n\u2192 Elle est **cat\u00e9goris\u00e9e** d\'apr\u00e8s le type de mission du contrat\n\u2192 Un **fil d\u00e9di\u00e9** est cr\u00e9\u00e9 avec un panneau de pr\u00e9paration', inline: false },
+      { name: '\ud83e\ude9c 5 \u00c9TAPES ADAPT\u00c9ES AU CONTRAT', value: '\u2192 **Chaque type de contrat a son propre sc\u00e9nario** : Contrebande, Sabotage, Vol organis\u00e9, \u00c9limination, Extorsion, Espionnage, Protection, Chasseur de primes, R\u00e9cup\u00e9ration de dette\u2026 (+ mod\u00e8le g\u00e9n\u00e9rique)\n\u2192 Ex. Vol : *Rep\u00e9rage \u2192 Plan du coup \u2192 \u00c9quipe \u2192 Ex\u00e9cution \u2192 Partage & \u00e9coulement*\n\u2192 Chaque \u00e9tape se **remplit** (champs adapt\u00e9s) puis se **valide** (Direction), **dans l\'ordre**', inline: false },
     )
-    .setFooter({ text: 'IWC Bot v6.3 \u00b7 1/3' });
+    .setFooter({ text: 'IWC Bot v8.0 \u00b7 1/2' });
 
   const embed2 = new EmbedBuilder()
     .setColor(0x2ECC71)
     .addFields(
-      { name: '\uD83E\ude7a SUIVI M\u00c9DICAL (AM\u00c9LIOR\u00c9)', value: '\u2192 Alerte automatique quand un membre passe **Inapte** ou **En observation**\n\u2192 Rappels de RDV m\u00e9dicaux en MP au m\u00e9decin ~1h avant\n\u2192 Vue d\'ensemble regroup\u00e9e par statut + historique d\u00e9taill\u00e9\n\u2192 Test d\'aptitude en 2 \u00e9tapes (bug corrig\u00e9)', inline: false },
-      { name: '\uD83E\udd1d RENDEZ-VOUS CLIENT (PLUS CLAIR)', value: '\u2192 **\uD83D\udce8 Contacter la compagnie** \u2014 exposer sa demande librement\n\u2192 **\uD83E\udd1d Besoin de nos services** \u2014 r\u00e9server une prestation (lieu + cr\u00e9neau)\n\u2192 Textes des panneaux clarifi\u00e9s', inline: false },
-      { name: '\uD83C\udfaf OP\u00c9RATIONS & AVIS DE RECHERCHE', value: '\u2192 Avis cl\u00f4tur\u00e9 \u2192 archiv\u00e9 dans #\u00e9l\u00e9ment-op\u00e9rations (+ photo de capture)\n\u2192 Liaison **op\u00e9ration \u2194 avis de recherche** dans les deux sens\n\u2192 Agenda : RDV auto-effac\u00e9s une fois pass\u00e9s \u00b7 choix du ping (Confr\u00e9rie ou membre)', inline: false },
+      { name: '\ud83d\udcf7 PHOTOS & INFOS DANS CHAQUE \u00c9TAPE', value: '\u2192 Bouton **\u00ab \ud83d\udcf7 Ajouter une photo \u00bb** : envoie l\'image dans le fil, elle est rattach\u00e9e \u00e0 l\'\u00e9tape (rep\u00e9rage, preuve de capture\u2026)\n\u2192 Champs adapt\u00e9s : position, **nombre de cibles + gardes**, itin\u00e9raire, r\u00f4les, issue, prime encaiss\u00e9e\u2026', inline: false },
+      { name: '\ud83d\udcc4 DOSSIER D\'OP\u00c9RATION AUTOMATIQUE', value: '\u2192 Une fois **toutes les \u00e9tapes valid\u00e9es**, un **dossier complet** est g\u00e9n\u00e9r\u00e9 : **fichier .md t\u00e9l\u00e9chargeable** + r\u00e9capitulatif post\u00e9 dans le fil\n\u2192 Tout est compil\u00e9 : \u00e9tapes, photos, comptes-rendus, prime', inline: false },
+      { name: '\uD83C\udfac LANCER SUR UN CONTRAT EXISTANT', value: '\u2192 Bouton **\u00ab Lancer l\'op\u00e9ration \u00bb** ajout\u00e9 sur la fiche d\'un contrat **d\u00e9j\u00e0 actif** : ouvre l\'op\u00e9ration sans recr\u00e9er le contrat', inline: false },
     )
-    .setFooter({ text: 'IWC Bot v6.3 \u00b7 2/3' });
-
-  const embed3 = new EmbedBuilder()
-    .setColor(0x2C3E50)
-    .addFields(
-      { name: '\uD83D\uDC3A RECRUTEMENT', value: '\u2192 Candidatures : ping **Direction + Officier de Terrain**\n\u2192 \u00c0 l\'acceptation : le nouveau membre est redirig\u00e9 en MP pour nous joindre', inline: false },
-      { name: '\uD83D\uDC1B CORRECTIONS', value: '\u2192 Panneau #contrats : \u00ab Recevoir nos conditions \u00bb (corrig\u00e9)\n\u2192 Salon planning : fini les reposts en boucle\n\u2192 Messages \u00e9pingl\u00e9s inutiles supprim\u00e9s automatiquement\n\u2192 Stabilit\u00e9 g\u00e9n\u00e9rale (gestion d\'erreurs renforc\u00e9e)', inline: false },
-    )
-    .setFooter({ text: 'IWC Bot v6.3 \u00b7 3/3 \u00b7 La force est dans l\'ombre. \u2014 La Compagnie' })
+    .setFooter({ text: 'IWC Bot v8.0 \u00b7 2/2 \u00b7 La force est dans l\'ombre. \u2014 La Compagnie' })
     .setTimestamp();
 
   await patchCh.send({ embeds: [embed1] });
   await patchCh.send({ embeds: [embed2] });
-  await patchCh.send({ embeds: [embed3] });
-  await interaction.editReply({ content: '\u2705 Patch note v6.3 post\u00e9 dans ' + patchCh + ' (3 embeds).' });
+  await interaction.editReply({ content: '\u2705 Patch note v8.0 post\u00e9 dans ' + patchCh + ' (2 encadr\u00e9s).' });
 }
 async function _handlePurge(interaction) {
   if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
