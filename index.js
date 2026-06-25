@@ -15,6 +15,7 @@ const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub 
 const BOT_VERSION = '7.8 (23 juin — contrats Confrérie : fiche du forum #contrats-réponses synchronisée (agents/statut/échéance) + facture générée à la réussite)';
 const { initPapiers, papiersCommands } = require('./papiers');
 const securite = require('./securite');
+const securitePlus = require('./securite-plus');
 const rdvplus = require('./rdvplus');
 const reorg = require('./reorg');
 
@@ -148,6 +149,7 @@ const client = new Client({
 });
 initPapiers(client);
 securite.initSecurite(client);
+securitePlus.initSecuritePlus(client);
 operations.init?.({
   creerOperationNotion: (op) => notionExtra.creerOperationNotion?.(op),
   poleRoleId: (guild, pole) => _poleRoleId(guild, pole),
@@ -2754,6 +2756,8 @@ client.on('messageCreate', async message => {
   try {
     if (message.type === 6 /* ChannelPinnedMessage */) { await message.delete().catch(() => {}); return; }
   } catch {}
+  // Sécurité+ : anti-spam / anti-scam (ne consomme le message QUE s'il a été supprimé)
+  try { if (await securitePlus.onMessage(message)) return; } catch {}
   // Réinitialisation du registre (sans commande slash, pour ne pas dépasser la limite Discord) :
   // un responsable tape « !reset-registre » → confirmation par boutons.
   try {
