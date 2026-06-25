@@ -2,8 +2,13 @@
 // parchemin-image.js — Génère une image « document parchemin » avec le texte
 // gravé À L'ENCRE par-dessus la texture (sharp + SVG). Discord ne permet pas de
 // texte sur image dans un embed → on fabrique donc une vraie image à envoyer.
-// sharp est chargé de façon paresseuse : si absent (échec d'install), on renvoie
-// null et l'appelant retombe sur l'embed classique — jamais de crash.
+//
+// Mode ROULEAU : on garde la silhouette du parchemin (fond transparent), le texte
+// est contraint à la zone « papier » centrale, et la taille de police s'ajuste
+// automatiquement (auto-fit) si le contrat est long, pour ne jamais déborder.
+//
+// sharp est chargé de façon paresseuse : si absent, on renvoie null et l'appelant
+// retombe sur l'embed classique — jamais de crash.
 // ═══════════════════════════════════════════════════════════════
 const fs = require('fs');
 const path = require('path');
@@ -18,7 +23,7 @@ function getSharp() {
 let _texB64 = null;
 function texture() {
   if (_texB64 !== null) return _texB64;
-  try { _texB64 = fs.readFileSync(path.join(__dirname, 'assets', 'parchemin-page.png')).toString('base64'); }
+  try { _texB64 = fs.readFileSync(path.join(__dirname, 'assets', 'parchemin.png')).toString('base64'); }
   catch { _texB64 = ''; }
   return _texB64;
 }
@@ -26,7 +31,7 @@ const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g,
 
 // Découpe un texte en lignes selon une largeur max (approx : largeur moyenne d'un caractère ≈ 0.52 × taille)
 function wrap(txt, maxWidth, fontSize) {
-  const cpl = Math.max(8, Math.floor(maxWidth / (fontSize * 0.52)));
+  const cpl = Math.max(6, Math.floor(maxWidth / (fontSize * 0.52)));
   const out = [];
   for (const para of String(txt || '').split(/\n/)) {
     if (!para.trim()) { out.push(''); continue; }
@@ -42,48 +47,60 @@ function wrap(txt, maxWidth, fontSize) {
   return out;
 }
 
-// blocks : [{type:'title'|'subtitle'|'rule'|'field'|'para'|'quote'|'gap', ...}]
+// Silhouette ROULEAU : canvas au format du parchemin, texte dans la zone papier, auto-fit.
 async function genererParchemin(blocks, opts = {}) {
   const sharp = getSharp();
   if (!sharp || !texture()) return null;
-  const W = opts.width || 820;
-  const ML = 92, MR = 92;
+  const W = opts.width || 760;
+  const H = Math.round(W * 511 / 360); // ratio de l'image rouleau (360×511)
+  // Zone d'écriture (insets pour rester sur le « papier », à l'écart des bords déchirés)
+  const ML = Math.round(W * 0.17), MR = Math.round(W * 0.17);
+  const topInset = Math.round(H * 0.115), bottomInset = Math.round(H * 0.10);
   const innerW = W - ML - MR;
+  const writableH = H - topInset - bottomInset;
   const INK = '#3a2a16', INK2 = '#5e4526';
   const FONT = "Georgia,'DejaVu Serif','Times New Roman',serif";
-  let y = 92;
-  const els = [];
-  const T = (txt, { x = W / 2, size = 22, color = INK, weight = 'normal', italic = false, anchor = 'middle', spacing = 0 } = {}) =>
-    els.push(`<text x="${x}" y="${y}" font-family="${FONT}" font-size="${size}" fill="${color}" font-weight="${weight}" font-style="${italic ? 'italic' : 'normal'}" text-anchor="${anchor}"${spacing ? ` letter-spacing="${spacing}"` : ''}>${esc(txt)}</text>`);
 
-  for (const b of blocks) {
-    if (b.type === 'gap') { y += b.h || 18; continue; }
-    if (b.type === 'title') { y += 10; T(b.text, { size: 33, weight: 'bold', spacing: 1 }); y += 12; continue; }
-    if (b.type === 'subtitle') { y += 28; T(b.text, { size: 18, italic: true, color: INK2, spacing: 3 }); continue; }
-    if (b.type === 'rule') { y += 28; els.push(`<line x1="${ML + 30}" y1="${y}" x2="${W - MR - 30}" y2="${y}" stroke="${INK2}" stroke-width="1.4" opacity="0.7"/>`); T('✦', { y, size: 15, color: INK2 }); y += 14; continue; }
-    if (b.type === 'field') {
-      y += 32; T(b.label.toUpperCase(), { x: ML, size: 14, weight: 'bold', color: INK2, anchor: 'start', spacing: 1 });
-      y += 25;
-      for (const ln of wrap(b.value || '—', innerW, 21)) { T(ln, { x: ML, size: 21, color: INK, anchor: 'start' }); y += 28; }
-      continue;
+  // Construit les éléments SVG pour une échelle donnée ; renvoie { els, bottom }.
+  function layout(scale) {
+    let y = topInset;
+    const els = [];
+    const T = (txt, { x = W / 2, size = 22, color = INK, weight = 'normal', italic = false, anchor = 'middle', spacing = 0 } = {}) =>
+      els.push(`<text x="${x}" y="${Math.round(y)}" font-family="${FONT}" font-size="${(size * scale).toFixed(1)}" fill="${color}" font-weight="${weight}" font-style="${italic ? 'italic' : 'normal'}" text-anchor="${anchor}"${spacing ? ` letter-spacing="${(spacing * scale).toFixed(2)}"` : ''}>${esc(txt)}</text>`);
+    const adv = px => { y += px * scale; };
+    for (const b of blocks) {
+      if (b.type === 'gap') { adv(b.h || 16); continue; }
+      if (b.type === 'title') { adv(8); T(b.text, { size: 30, weight: 'bold', spacing: 1 }); adv(10); continue; }
+      if (b.type === 'subtitle') { adv(24); T(b.text, { size: 16, italic: true, color: INK2, spacing: 2 }); continue; }
+      if (b.type === 'rule') { adv(22); els.push(`<line x1="${ML + 20}" y1="${Math.round(y)}" x2="${W - MR - 20}" y2="${Math.round(y)}" stroke="${INK2}" stroke-width="${(1.3 * scale).toFixed(2)}" opacity="0.65"/>`); T('✦', { y, size: 13, color: INK2 }); adv(12); continue; }
+      if (b.type === 'field') {
+        adv(26); T(b.label.toUpperCase(), { x: ML, size: 13, weight: 'bold', color: INK2, anchor: 'start', spacing: 1 }); adv(22);
+        for (const ln of wrap(b.value || '—', innerW, 19 * scale)) { T(ln, { x: ML, size: 19, color: INK, anchor: 'start' }); adv(25); }
+        continue;
+      }
+      if (b.type === 'para') {
+        adv(22);
+        if (b.label) { T(b.label.toUpperCase(), { x: ML, size: 13, weight: 'bold', color: INK2, anchor: 'start', spacing: 1 }); adv(22); }
+        for (const ln of wrap(b.text || '—', innerW, 18 * scale)) { T(ln, { x: ML, size: 18, color: INK, anchor: 'start' }); adv(24); }
+        continue;
+      }
+      if (b.type === 'quote') {
+        adv(26);
+        for (const ln of wrap(b.text || '', innerW, 16 * scale)) { T(ln, { size: 16, italic: true, color: INK2 }); adv(22); }
+        continue;
+      }
     }
-    if (b.type === 'para') {
-      y += 26;
-      if (b.label) { T(b.label.toUpperCase(), { x: ML, size: 14, weight: 'bold', color: INK2, anchor: 'start', spacing: 1 }); y += 25; }
-      for (const ln of wrap(b.text || '—', innerW, 20)) { T(ln, { x: ML, size: 20, color: INK, anchor: 'start' }); y += 27; }
-      continue;
-    }
-    if (b.type === 'quote') {
-      y += 32;
-      for (const ln of wrap(b.text || '', innerW, 18)) { T(ln, { size: 18, italic: true, color: INK2 }); y += 25; }
-      continue;
-    }
+    return { els, bottom: y };
   }
-  y += 84;
-  const H = Math.max(opts.minHeight || 560, Math.round(y));
+
+  // Pass 1 (échelle 1) → mesure ; si ça déborde la zone papier, on réduit la police (jusqu'à 0,55).
+  let scale = 1;
+  const mesure = layout(1).bottom - topInset;
+  if (mesure > writableH) scale = Math.max(0.55, writableH / mesure);
+  const { els } = layout(scale);
+
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
-    <image href="data:image/png;base64,${texture()}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>
-    <rect x="36" y="36" width="${W - 72}" height="${H - 72}" fill="none" stroke="#5e452655" stroke-width="2"/>
+    <image href="data:image/png;base64,${texture()}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid meet"/>
     ${els.join('\n')}
   </svg>`;
   try { return await sharp(Buffer.from(svg)).png().toBuffer(); }

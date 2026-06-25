@@ -42,7 +42,7 @@ async function genererImageContrat(contrat) {
       { type: 'rule' },
       { type: 'quote', text: "« Que votre signature vous engage, et que l'ombre vous garde. » — La Confrérie, an 1904" },
     ];
-    return await parcheminImg.genererParchemin(blocks, { width: 820 });
+    return await parcheminImg.genererParchemin(blocks, { width: 760 });
   } catch { return null; }
 }
 const { loadDB, saveDB, sauvegarderSurGitHub } = require('./db');
