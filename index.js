@@ -172,7 +172,6 @@ const {
 // apparaît ainsi juste sous le panneau). Repérés par un marqueur de titre, re-postés en bas.
 stickyPanel.register(SALON_HARDCODED.CONTRATS, 'les contrats');
 stickyPanel.register(SALON_HARDCODED.OPERATIONS, 'centre des opérations');
-stickyPanel.register('1519611763866337420', 'visiteurs'); // salon d'accueil visiteurs
 
 function getChById(guild, salonKey, ...fallbackNames) {
   // D'abord chercher dans SALON_IDS (config.js)
@@ -8796,9 +8795,8 @@ function _panneauVisiteursPayload() {
       '__**① Présentez-vous**__',
       "Mettez votre **Prénom + Nom** en pseudo sur le serveur — *clic droit sur votre nom → « Modifier le pseudo »*. C'est ainsi qu'on vous reconnaît et qu'on rédige votre contrat à votre nom.",
       '',
-      '__**② Exposez votre besoin**__',
-      '✉️ **Envoyer un télégramme** — décrivez votre affaire **avec vos mots** (besoin, conditions). La Direction lit chaque message et **vous répond en personne**.',
-      '🤝 **Réserver une prestation** — choisissez directement un **service et un créneau** (lieu, date, heure).',
+      '__**② Prenez rendez-vous**__',
+      '➡️ Rendez-vous dans <#1512171267560702013> pour **exposer votre besoin** (avec vos propres mots) ou **réserver une prestation** (service + créneau). La Direction lit chaque demande et **vous répond en personne**.',
       '',
       '__**③ Recevez votre contrat à signer**__',
       'La Direction vous recontacte, puis vous **recevez le contrat directement en message privé** : vous pouvez **signer ✍️, refuser, ou proposer une contre-offre**.',
@@ -8807,11 +8805,7 @@ function _panneauVisiteursPayload() {
       '— *« La force est dans l\'ombre. »*',
     ].join('\n'))
     .setFooter({ text: 'Iron Wolf Company · Bureau de Saint-Denis' });
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('rdvclient_demande').setLabel('Envoyer un télégramme').setEmoji('✉️').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('rdvp_book').setLabel('Réserver une prestation').setEmoji('🤝').setStyle(ButtonStyle.Success),
-  );
-  return { embeds: [embed], components: [row] };
+  return { embeds: [embed], components: [] }; // annonce seule, pas de boutons (le RDV se prend dans le salon dédié)
 }
 
 async function _installerPanelVisiteurs(guild) {
