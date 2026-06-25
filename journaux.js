@@ -34,6 +34,19 @@ function _store(db) { if (!db.journaux) db.journaux = {}; return db.journaux; }
 const _estImage = a => (a.contentType || '').startsWith('image') || /\.(png|jpe?g|webp|gif)(\?|$)/i.test(a.url || a.name || '');
 
 const _drafts = new Map();
+// Récupère le brouillon de config ; le RECONSTRUIT s'il a été perdu (clic tardif,
+// redémarrage du bot…) pour que le panneau ne « disparaisse » jamais en pleine config.
+function _draftFor(interaction) {
+  let d = _drafts.get(interaction.user.id);
+  if (!d) {
+    const enFil = !!interaction.channel?.isThread?.();
+    const targetId = enFil ? interaction.channel.parentId : interaction.channelId;
+    const existing = _store(loadDB())[targetId] || null;
+    d = { channelId: targetId, regions: _regionsOf(existing), roleId: existing?.roleId || null, at: Date.now() };
+  }
+  _drafts.set(interaction.user.id, d);
+  return d;
+}
 
 function _cfgRows(d) {
   const sel = _regionsOf(d);
@@ -41,6 +54,7 @@ function _cfgRows(d) {
     .setMinValues(1).setMaxValues(Object.keys(REGIONS).length)
     .addOptions(Object.entries(REGIONS).map(([k, v]) => ({ label: v.label, value: k, emoji: v.emoji, default: sel.includes(k) })));
   const roleSel = new RoleSelectMenuBuilder().setCustomId('jrn_role').setPlaceholder('👥 Rôle prévenu à chaque parution (optionnel)').setMinValues(0).setMaxValues(1);
+  if (d?.roleId) { try { roleSel.setDefaultRoles(d.roleId); } catch {} } // conserve le rôle choisi quand le panneau se rafraîchit
   const btns = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('jrn_save').setLabel('Activer ce salon comme journal').setEmoji('✅').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId('jrn_off').setLabel('Désactiver').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
@@ -112,7 +126,7 @@ async function routeInteraction(interaction) {
       const enFil = !!interaction.channel?.isThread?.();
       const targetId = enFil ? interaction.channel.parentId : interaction.channelId;
       const existing = _store(loadDB())[targetId] || null;
-      const d = { channelId: targetId, region: existing?.region || null, roleId: existing?.roleId || null, at: Date.now() };
+      const d = { channelId: targetId, regions: _regionsOf(existing), roleId: existing?.roleId || null, at: Date.now() };
       _drafts.set(interaction.user.id, d);
       const note = enFil ? '\n\n*(Tu es dans un fil : c\'est le **salon-forum parent** qui sera déclaré comme journal.)*' : '';
       await interaction.reply({ content: _cfgText(d) + note, components: _cfgRows(d), flags: MessageFlags.Ephemeral }); return true;
@@ -122,18 +136,18 @@ async function routeInteraction(interaction) {
     if (!id.startsWith('jrn_')) return false;
 
     if (interaction.isStringSelectMenu() && id === 'jrn_region') {
-      const d = _drafts.get(interaction.user.id); if (!d) { await interaction.update({ content: '⌛ Expiré, relance /journal-installer.', components: [] }); return true; }
+      const d = _draftFor(interaction);
       d.regions = interaction.values; delete d.region; _drafts.set(interaction.user.id, d);
       await interaction.update({ content: _cfgText(d), components: _cfgRows(d) }); return true;
     }
     if (interaction.isRoleSelectMenu?.() && id === 'jrn_role') {
-      const d = _drafts.get(interaction.user.id); if (!d) { await interaction.update({ content: '⌛ Expiré, relance /journal-installer.', components: [] }); return true; }
+      const d = _draftFor(interaction);
       d.roleId = interaction.values[0] || null; _drafts.set(interaction.user.id, d);
       await interaction.update({ content: _cfgText(d), components: _cfgRows(d) }); return true;
     }
     if (interaction.isButton() && id === 'jrn_save') {
       if (!estGestion(interaction.member)) { await interaction.update({ content: '🔒 Réservé à la Direction.', components: [] }); return true; }
-      const d = _drafts.get(interaction.user.id); if (!d) { await interaction.update({ content: '⌛ Expiré, relance /journal-installer.', components: [] }); return true; }
+      const d = _draftFor(interaction);
       const regs = _regionsOf(d);
       if (!regs.length) { await interaction.update({ content: '⚠️ Choisis d\'abord **au moins une région**.\n\n' + _cfgText(d), components: _cfgRows(d) }); return true; }
       const db = loadDB(); _store(db)[d.channelId] = { regions: regs, roleId: d.roleId || null }; saveDB(db);
