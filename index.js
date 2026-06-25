@@ -4486,7 +4486,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
   }
   // 🔎 Recherche d'un contact par nom (au-delà des 25 de la liste déroulante)
   if (interaction.isButton() && interaction.customId === 'contrat_contact_search') {
-    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    if (!isMembre(interaction.member)) return interaction.reply({ content: "❌ Réservé aux membres de la Confrérie.", flags: MessageFlags.Ephemeral });
     const modal = new ModalBuilder().setCustomId('contrat_contact_search_modal').setTitle('🔎 Chercher un contact');
     modal.addComponents(new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('q').setLabel('Nom (ou télégramme, affiliation…)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Callahan').setMaxLength(60)
@@ -4494,7 +4494,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     return interaction.showModal(modal);
   }
   if (interaction.isModalSubmit() && interaction.customId === 'contrat_contact_search_modal') {
-    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    if (!isMembre(interaction.member)) return interaction.reply({ content: "❌ Réservé aux membres de la Confrérie.", flags: MessageFlags.Ephemeral });
     const q = (interaction.fields.getTextInputValue('q') || '').trim();
     const options = _contactSelectOptions(loadDB(), 25, q);
     if (!options.length) return interaction.reply({ content: `🔎 Aucun contact ne correspond à « ${q} ». Vérifie l'orthographe, ou crée la fiche dans le salon répertoire.`, flags: MessageFlags.Ephemeral });
