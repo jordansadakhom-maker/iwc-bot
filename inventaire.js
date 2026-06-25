@@ -69,7 +69,7 @@ function _boardEmbed(inv) {
     e.addFields({ name: `${CAT_EMOJI[c]} ${c} (${per[c]})`, value: val, inline: false });
   }
   if (inv.photoMsg) e.addFields({ name: "📷 Photo du coffre", value: "Dernière(s) capture(s) épinglée(s) dans ce salon.", inline: false });
-  e.addFields({ name: "🛠️ Comment gérer le coffre", value: "➕ **Ajouter** — choisis l'objet (ou « 🆕 Nouvel objet ») puis le **nombre à faire ENTRER**\n➖ **Retirer** — choisis l'objet puis le **nombre à faire SORTIR**\n✏️ **Corriger** — *seulement en cas d'erreur* : remets la **quantité exacte** (0 = supprimer)\n📷 *Tu peux aussi déposer une photo du coffre : je la lis et le coffre devient exactement la photo.*", inline: false });
+  e.addFields({ name: "🛠️ Comment gérer le coffre", value: "➕ **Ajouter** — choisis l'objet (ou « 🆕 Nouvel objet ») puis le **nombre à faire ENTRER**\n➖ **Retirer** — choisis l'objet puis le **nombre à faire SORTIR**\n✏️ **Corriger** — *seulement en cas d'erreur* : remets la **quantité exacte** (0 = supprimer)\n📷 *Tu peux aussi déposer une photo : je lis les objets puis tu choisis **➕ Ajouter au stock** (par défaut, n'enlève rien) ou **📸 = toute la photo** pour un inventaire complet.*", inline: false });
   e.setFooter({ text: "Mouvements dans le fil « 📦 Journal du coffre » · mis à jour automatiquement" });
   return e;
 }
@@ -386,17 +386,19 @@ function _proposalEmbed(items) {
   let desc = CATS.filter(c => lignes[c]).map(c => `${CAT_EMOJI[c]} **${c}**\n${lignes[c].join("\n")}`).join("\n\n") || "*(aucun objet lu)*";
   if (desc.length > 3600) desc = desc.slice(0, 3600) + "\n…";
   return new EmbedBuilder().setColor(0xC9A66B).setTitle("📷 Lecture de la capture du coffre")
-    .setDescription("Voici ce que j'ai lu sur la photo. **Vérifie bien les quantités**, puis valide :\n\n" + desc +
+    .setDescription("Voici ce que j'ai lu sur la photo. **Vérifie bien les quantités**, puis choisis :\n\n" + desc +
       "\n\n**Que faire de cette lecture ?**\n" +
-      "📸 **Le coffre = la photo** — le coffre devient EXACTEMENT cette liste *(la photo montre TOUT le coffre)*\n" +
-      "✏️ **Corriger / ajouter un objet** — rectifier une ligne mal lue, **ou ajouter un objet que la photo n'a pas bien vu**\n" +
+      "➕ **Ajouter au stock** — j'**AJOUTE** ces objets à ce qui est déjà dans le coffre *(le choix normal pour un réapprovisionnement — rien n'est retiré)*\n" +
+      "📸 **Le coffre = toute la photo** — ⚠️ le coffre devient **EXACTEMENT** cette liste : à utiliser **uniquement** si la photo montre **TOUT** le coffre *(tout ce qui n'y figure pas sera retiré)*\n" +
+      "✏️ **Corriger un objet** — rectifier une ligne mal lue avant de valider\n" +
       "❌ **Annuler** — ne rien changer")
-    .setFooter({ text: "Astuce : si l'IA a raté/mal lu un objet, clique « Corriger / ajouter » avant de valider." });
+    .setFooter({ text: "Par défaut : ➕ Ajouter (n'enlève rien). N'utilise « = toute la photo » que pour un inventaire complet." });
 }
 function _proposalRow() {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("invp_replace").setLabel("Le coffre = la photo").setEmoji("📸").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId("invp_edit").setLabel("Corriger / ajouter un objet").setEmoji("✏️").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("invp_add").setLabel("Ajouter au stock").setEmoji("➕").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("invp_replace").setLabel("Le coffre = toute la photo").setEmoji("📸").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("invp_edit").setLabel("Corriger un objet").setEmoji("✏️").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("invp_cancel").setLabel("Annuler").setEmoji("❌").setStyle(ButtonStyle.Secondary),
   );
 }
@@ -462,18 +464,6 @@ function _recapEmbed(mode, lignes) {
     .setDescription(_recapDiff(lignes).slice(0, 4000))
     .setFooter({ text: `${lignes.length} changement(s) · une erreur ? ✏️ Corriger sur le tableau` });
 }
-// Met à jour le coffre DIRECTEMENT d'après une photo (le coffre = la photo), sans étape de
-// proposition. Journalise le détail avant→après et renvoie les lignes de changement.
-async function _majParPhoto(client, inv, db, items, byId) {
-  const { lignes, changes } = _appliquer(inv, items, 'replace');
-  _journalAdd(inv, byId, `📷 Coffre mis à jour par photo (${items.length} lu(s) · ${lignes.length} changement(s))`);
-  persist(db);
-  await _refreshBoard(client, inv);
-  await _log(client, inv, `📷 <@${byId}> a mis à jour le coffre par photo :\n${_recapDiff(lignes)}`);
-  await _checkSeuils(client, inv, changes);
-  return lignes;
-}
-
 const inventaireCommands = [
   new SlashCommandBuilder().setName("inventaire-installer").setDescription("📦 Poser le tableau du coffre commun dans CE salon (Direction)"),
   new SlashCommandBuilder().setName("inventaire-photo").setDescription("📷 Lire une ou plusieurs captures du coffre en jeu")
@@ -528,9 +518,10 @@ async function routeInteraction(interaction) {
       await _refreshBoard(interaction.client, inv);
       const items = await _lireImages(atts);
       if (!items || !items.length) { await interaction.editReply({ content: "📷 Capture(s) épinglée(s) ✅. Mais je n'ai pas réussi à lire d'objets dessus (peu net, ou clé IA absente) — saisis avec les boutons." }).catch(() => {}); return true; }
-      // Mise à jour DIRECTE du coffre (le coffre = la photo), sans étape de proposition
-      const lignes = await _majParPhoto(interaction.client, inv, db, items, interaction.user.id);
-      await interaction.editReply({ content: `✅ Coffre **mis à jour d'après la photo** — ${lignes.length} changement(s). Détail dans le fil 📦 Journal du coffre. Une erreur ? **✏️ Corriger** sur le tableau.` }).catch(() => {});
+      // On NE remplace PAS automatiquement (risque d'effacer ce que la photo ne montre pas).
+      // On propose : ➕ Ajouter (par défaut) ou 📸 = toute la photo.
+      await _proposer(ch, items, interaction.user.id, db, inv);
+      await interaction.editReply({ content: `📷 Capture(s) lue(s) ✅ — **${items.length} objet(s) détecté(s)**. J'ai posté un récap dans <#${ch.id}> : clique **➕ Ajouter au stock** (par défaut, n'enlève rien) ou **📸 Le coffre = toute la photo** si la capture montre tout le coffre.` }).catch(() => {});
       return true;
     }
 
@@ -800,15 +791,11 @@ async function onMessage(message) {
     inv.photoMsg = message.id; persist(db);
     const items = await _lireImages(imgs);
     if (!items || !items.length) { await message.reply({ content: "📷 Je n'ai pas réussi à lire d'objets sur cette/ces image(s). Essaie une capture plus nette, ou les boutons du tableau.", allowedMentions: { parse: [] } }).catch(() => {}); return true; }
-    // Mise à jour DIRECTE : le coffre devient exactement la photo (pas d'étape de proposition).
-    const lignes = await _majParPhoto(message.client, inv, db, items, message.author.id);
+    // On NE remplace PAS automatiquement (sinon tout ce que la photo ne montre pas est effacé).
+    // On propose : ➕ Ajouter (par défaut, n'enlève rien) ou 📸 = toute la photo.
     await message.react("✅").catch(() => {});
-    // Un seul « Coffre mis à jour » : on retire les récaps précédents avant de poster le nouveau
     await _purgerRecapsPrecedents(message.channel, message.client.user.id);
-    const recapMsg = await message.channel.send({ embeds: [_recapEmbed('replace', lignes)], allowedMentions: { parse: [] } }).catch(() => null);
-    // Le détail complet (avant → après) est déjà archivé dans le fil 📦 Journal du coffre :
-    // ce récap dans le salon n'est qu'un aperçu → on le retire automatiquement après quelques secondes.
-    if (recapMsg) setTimeout(() => { recapMsg.delete().catch(() => {}); }, 10000);
+    await _proposer(message.channel, items, message.author.id, db, inv);
     return true;
   } catch { return false; }
 }
