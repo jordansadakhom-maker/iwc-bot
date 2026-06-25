@@ -8780,6 +8780,7 @@ async function _majPanneauxRdvClient(guild) {
 
 // ── Salon VISITEURS (1519611763866337420) : panneau d'accueil clair + 2 boutons fonctionnels ──
 const SALON_VISITEURS = '1519611763866337420';
+const ROLE_VISITEUR = '1508756369258578070'; // rôle Visiteur (pour le ping de l'annonce)
 function _panneauVisiteursPayload() {
   const embed = new EmbedBuilder()
     .setColor(0xC8A45C)
@@ -8805,21 +8806,27 @@ function _panneauVisiteursPayload() {
       '— *« La force est dans l\'ombre. »*',
     ].join('\n'))
     .setFooter({ text: 'Iron Wolf Company · Bureau de Saint-Denis' });
-  return { embeds: [embed], components: [] }; // annonce seule, pas de boutons (le RDV se prend dans le salon dédié)
+  // Ping des visiteurs en tête de l'annonce (ne notifie qu'au 1er envoi, jamais sur une édition)
+  return { content: `<@&${ROLE_VISITEUR}>`, embeds: [embed], components: [], allowedMentions: { roles: [ROLE_VISITEUR] } };
 }
 
 async function _installerPanelVisiteurs(guild) {
   try {
     const ch = guild.channels.cache.get(SALON_VISITEURS); if (!ch?.messages) return;
     const me = guild.client.user.id;
+    const db = loadDB();
     const msgs = await ch.messages.fetch({ limit: 50 }).catch(() => null);
-    let panneau = null;
-    if (msgs) {
-      // Garde UN panneau (par titre), le réédite ; nettoie les autres messages du bot (déclutter).
-      const mesMsgs = [...msgs.values()].filter(m => m.author.id === me);
-      panneau = mesMsgs.find(m => (m.embeds?.[0]?.title || '').includes('VISITEURS')) || null;
-      for (const m of mesMsgs) { if (m.id !== panneau?.id) await m.delete().catch(() => {}); }
+    const mesMsgs = msgs ? [...msgs.values()].filter(m => m.author.id === me) : [];
+    let panneau = mesMsgs.find(m => (m.embeds?.[0]?.title || '').includes('VISITEURS')) || null;
+    // 1re mise en ligne de cette annonce : on (re)poste à neuf pour PINGER les visiteurs UNE seule fois.
+    if (!db.visiteursAnnoncePing) {
+      for (const m of mesMsgs) await m.delete().catch(() => {});
+      const sent = await ch.send(_panneauVisiteursPayload()).catch(() => null);
+      if (sent) { try { await sent.pin(); } catch {} db.visiteursAnnoncePing = true; saveDB(db); }
+      return;
     }
+    // Ensuite : on édite le panneau (mention visible, AUCUN re-ping au redémarrage) et on déclutter.
+    for (const m of mesMsgs) { if (m.id !== panneau?.id) await m.delete().catch(() => {}); }
     if (panneau) await panneau.edit(_panneauVisiteursPayload()).catch(() => {});
     else { const sent = await ch.send(_panneauVisiteursPayload()).catch(() => null); if (sent) { try { await sent.pin(); } catch {} } }
   } catch (e) { console.log('⚠️ _installerPanelVisiteurs:', e.message); }
