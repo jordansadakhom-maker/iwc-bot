@@ -16,6 +16,7 @@ const BOT_VERSION = '7.8 (23 juin — contrats Confrérie : fiche du forum #cont
 const { initPapiers, papiersCommands } = require('./papiers');
 const securite = require('./securite');
 const securitePlus = require('./securite-plus');
+const stickyPanel = require('./sticky-panel');
 const rdvplus = require('./rdvplus');
 const reorg = require('./reorg');
 
@@ -166,6 +167,11 @@ const {
   NOTION_RECRUTEMENT_DB, NOTION_MEMBRES_DB_ID: NOTION_MEMBRES_DB,
   SALON_IDS, SALON_HARDCODED, NOTION_TRANSACTIONS_DB, _getPole,
 } = require('./config');
+
+// Panneaux « collants » : restent toujours en bas de leur salon (le menu déroulant éphémère
+// apparaît ainsi juste sous le panneau). Repérés par un marqueur de titre, re-postés en bas.
+stickyPanel.register(SALON_HARDCODED.CONTRATS, 'les contrats');
+stickyPanel.register(SALON_HARDCODED.OPERATIONS, 'centre des opérations');
 
 function getChById(guild, salonKey, ...fallbackNames) {
   // D'abord chercher dans SALON_IDS (config.js)
@@ -2758,6 +2764,8 @@ client.on('messageCreate', async message => {
   } catch {}
   // Sécurité+ : anti-spam / anti-scam (ne consomme le message QUE s'il a été supprimé)
   try { if (await securitePlus.onMessage(message)) return; } catch {}
+  // Panneaux collants : on garde le panneau en bas du salon (ne consomme rien)
+  try { stickyPanel.onMessage(message); } catch {}
   // Réinitialisation du registre (sans commande slash, pour ne pas dépasser la limite Discord) :
   // un responsable tape « !reset-registre » → confirmation par boutons.
   try {
