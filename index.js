@@ -2763,7 +2763,11 @@ Transforme-la en RAPPORT DE TERRAIN clair, concis et bien structuré.
 Transcription : "${transcription}"
 
 Réponds UNIQUEMENT en JSON valide, sans markdown, ce format exact :
-{"resume":"1 phrase qui résume l'essentiel","details":"les faits reformulés proprement et brièvement en français correct. Si plusieurs personnes parlent, structure par tirets courts (- ...). Reste factuel et synthétique.","personnes":["noms cités"],"lieu":"lieu si mentionné sinon vide","categories":["mots parmi: Armes, Violence, Trafic, Alliance, Argent, Bétail, Loi, Danger"],"menace":"un seul mot parmi: faible, moyen, eleve"}
+{"resume":"1 phrase qui résume l'essentiel","details":"les faits reformulés proprement et brièvement en français correct. Si plusieurs personnes parlent, structure par tirets courts (- ...). Reste factuel et synthétique.","personnes":["noms cités"],"lieu":"lieu si mentionné sinon vide","categories":["mots parmi: Armes, Violence, Trafic, Alliance, Argent, Bétail, Loi, Danger"],"menace":"un seul mot parmi: faible, moyen, eleve","importance":"un seul mot: importante ou note","destination":"un seul mot: avis, contrat, carnet, carte ou aucune"}
+Règles pour "importance" et "destination" :
+- "importante" = renseignement exploitable (cible à traquer, contrat/opportunité, menace sérieuse, mouvement notable). "note" = anecdotique, bavardage, rien d'actionnable.
+- "destination" = où classer l'info : "avis" (une personne à rechercher/traquer), "contrat" (mission/opportunité à confier), "carnet" (renseignement à archiver), "carte" (un lieu notable à marquer), "aucune" (si c'est juste une note sans suite).
+- Si "importance" vaut "note", mets "destination":"aucune".
 Si la transcription est incompréhensible ou vide, mets resume="(inaudible)".`;
 
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
@@ -2802,6 +2806,20 @@ Si la transcription est incompréhensible ou vide, mets resume="(inaudible)".`;
     console.log('⚠️ Rapport IA échec:', e.message);
     return null;
   }
+}
+
+// Rangée de tri 1-clic attachée à un rapport de terrain important.
+// `reco` = destination conseillée (avis / contrat / carnet / carte) → bouton mis en avant.
+function _triRowRapport(msgId, reco) {
+  const defs = [
+    { key: 'carnet',  cid: 'note_rens',    label: '🕵️ Carnet' },
+    { key: 'contrat', cid: 'note_contrat', label: '📜 Contrat' },
+    { key: 'avis',    cid: 'note_avis',    label: '🎯 Avis de recherche' },
+    { key: 'carte',   cid: 'note_carte',   label: '📍 Carte' },
+  ];
+  const row = new ActionRowBuilder();
+  for (const d of defs) row.addComponents(new ButtonBuilder().setCustomId(`${d.cid}::${msgId}`).setLabel(d.label).setStyle(d.key === reco ? ButtonStyle.Primary : ButtonStyle.Secondary));
+  return row;
 }
 
 // Salon vocal RP « écoute seule » : on coupe le micro (server-mute) à l'entrée — impossible de se démute.
@@ -3049,6 +3067,9 @@ client.on('messageCreate', async message => {
         const rapport = await genererRapportIA(transcriptionBrute, agent, lieu);
 
         let embed;
+        let importantReco = false; // l'IA juge l'info importante (→ rapport + tri) ou non (→ simple note)
+        let destKeyReco = '';      // destination conseillée : avis / contrat / carnet / carte
+        const _DEST_LABEL = { avis: '🎯 Avis de recherche', contrat: '📜 Contrat', carnet: '🕵️ Carnet de renseignements', carte: '📍 Carte' };
         if (rapport && rapport.resume && rapport.resume !== '(inaudible)') {
           // Catégories IA -> emojis
           const catEmoji = { Armes: '🔫 Armes', Violence: '🩸 Violence', Trafic: '🥃 Trafic', Alliance: '🤝 Alliance', Argent: '💰 Argent', 'Bétail': '🐎 Bétail', Loi: '👮 Loi', Danger: '🔥 Danger' };
@@ -3062,9 +3083,13 @@ client.on('messageCreate', async message => {
           else if (catsR.includes('🩸 Violence') || catsR.includes('🔫 Armes') || catsR.includes('🔥 Danger')) {
             if (priorite === 'normale') priorite = 'importante';
           }
+          importantReco = (String(rapport.importance || '').toLowerCase() === 'importante') || priorite === 'urgente' || priorite === 'importante';
+          destKeyReco = String(rapport.destination || '').toLowerCase();
+          if (!_DEST_LABEL[destKeyReco]) destKeyReco = '';
+          const recoLabel = importantReco ? (_DEST_LABEL[destKeyReco] || '🕵️ Carnet de renseignements') : null;
           embed = new EmbedBuilder()
             .setColor(colors[priorite] || colors.normale)
-            .setTitle('📋 RAPPORT DE TERRAIN')
+            .setTitle(importantReco ? '📋 RAPPORT DE TERRAIN' : '📝 NOTE DE TERRAIN')
             .setAuthor({ name: `🕵️ ${agent} · ${heure} · ${dateStr}` })
             .setDescription(`*${rapport.resume}*`)
             .addFields(
@@ -3073,9 +3098,10 @@ client.on('messageCreate', async message => {
               ...(lieuFinal ? [{ name: '📍 Lieu', value: lieuFinal, inline: true }] : []),
               ...(menaceAffiche ? [{ name: '⚠️ Menace', value: menaceAffiche, inline: true }] : []),
               ...(catsR.length ? [{ name: '🏷️ Catégories', value: catsR.join('  '), inline: false }] : []),
+              ...(recoLabel ? [{ name: '📌 Classement conseillé', value: `${recoLabel}${destKeyReco ? '' : ' *(par défaut)*'}`, inline: false }] : []),
               { name: '🎙️ Transcription complète', value: ((transcriptionBrute || '—').length > 980 ? '🎙️ *Transcription intégrale postée ci-dessous ⬇️*' : ('||' + (transcriptionBrute || '—') + '||')) },
             )
-            .setFooter({ text: `IWC · Renseignement · Priorité : ${priorite}` })
+            .setFooter({ text: importantReco ? `IWC · Renseignement · Priorité : ${priorite}` : `IWC · Note de terrain · Priorité : ${priorite}` })
             .setTimestamp();
           if (rapport.lieu) lieu = rapport.lieu;
         } else {
@@ -3200,7 +3226,11 @@ client.on('messageCreate', async message => {
           }
           destNote = thread;
         }
-        await destNote.send({ embeds: [embed] });
+        const sentRapport = await destNote.send({ embeds: [embed] });
+        // ── Info importante : tri 1-clic rattaché au rapport (destination conseillée mise en avant) ──
+        if (sentRapport && importantReco) {
+          try { await sentRapport.edit({ components: [_triRowRapport(sentRapport.id, destKeyReco)] }); } catch (e) { console.log('⚠️ tri rapport:', e.message); }
+        }
         // ── Transcription COMPLÈTE sans coupure (un champ Discord est limité à 1024 caractères) ──
         // Au-delà de ~980 caractères, on poste l'intégralité en messages complémentaires (spoiler), par blocs de 1850.
         const _txtComplet = (transcriptionBrute || '').trim();
