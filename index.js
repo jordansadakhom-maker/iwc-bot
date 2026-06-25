@@ -12,7 +12,7 @@ const cron = require('node-cron');
 
 const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub } = require('./db');
 // Version du bot (sert au /version ET à la génération auto des patch notes)
-const BOT_VERSION = '7.9 (25 juin — annonces & sondages (catégories RP + rappels), recherche de contact, panneaux collants, espace visiteurs, carte)';
+const BOT_VERSION = '8.0 (25 juin — opérations par étapes : un contrat validé ouvre une opération catégorisée (Repérage → Plan → Équipe → Exécution → Bilan), étapes validables avec photos, dossier .md auto)';
 const { initPapiers, papiersCommands } = require('./papiers');
 const securite = require('./securite');
 const securitePlus = require('./securite-plus');
@@ -49,6 +49,10 @@ catch (e) { console.log('⚠️ notion-modules-v5 non chargé:', e.message); }
 let operations = {};
 try { operations = require('./operations'); console.log('✅ Module opérations chargé'); }
 catch (e) { console.log('⚠️ operations non chargé:', e.message); }
+
+let opsEtapes = {};
+try { opsEtapes = require('./operations-etapes'); console.log('✅ Module opérations-étapes chargé'); }
+catch (e) { console.log('⚠️ operations-etapes non chargé:', e.message); }
 
 let comptabilite = {};
 try { comptabilite = require('./comptabilite'); console.log('✅ Module comptabilité chargé'); }
@@ -161,6 +165,16 @@ operations.init?.({
     try { await ajouterJournalIC(guild, { type: 'operation', titre: `Nouvelle opération — ${op.name}`, description: `📍 ${op.lieu} · Objectif : ${op.objectif} · Pôle : ${op.pole === 'legal' ? '⚖️ Légal' : '🔪 Illégal'}`, auteur: 'Commandement' }); } catch {}
   },
 });
+
+opsEtapes.init?.({
+  poleRoleId: (guild, pole) => _poleRoleId(guild, pole),
+  journalHook: async (guild, op) => {
+    try { await sendLog(guild, 'OPERATION', { nom: op.cible, lieu: '—', equipe: op.categorie, statut: '🟡 Préparation (étapes)' }); } catch {}
+    try { await ajouterJournalIC(guild, { type: 'operation', titre: `Opération à préparer — ${op.cible}`, description: `${op.emoji} ${op.categorie} · issue du contrat ${op.contratId}`, auteur: 'Commandement' }); } catch {}
+  },
+});
+// Hook appelé par les contrats Confrérie : crée l'opération par étapes quand un contrat est validé.
+global.creerOpDepuisContrat = (guild, contrat, opts) => opsEtapes.creerOperationDepuisContrat?.(guild, contrat, opts);
 
 const {
   CH, PARTICIPANTS_MAP, CONTRAT_ROLES, JUNE_MCCALL_ID,
@@ -3403,6 +3417,7 @@ client.on('interactionCreate', async interaction => {
  try {
   const guild = interaction.guild; const db = loadDB();
   if (await contratsConf.routeInteraction?.(interaction)) return;
+  if (await opsEtapes.routeInteraction?.(interaction)) return;
   if (await operations.routeInteraction?.(interaction)) return;
   if (await rumeurs.routeInteraction?.(interaction)) return;
   if (await inventaire.routeInteraction?.(interaction)) return;
@@ -6841,40 +6856,27 @@ async function _handlePatchDeploy(interaction) {
   const embed1 = new EmbedBuilder()
     .setColor(0xC9A227)
     .setAuthor({ name: 'Iron Wolf Company \u00b7 IWC Setup', iconURL: interaction.guild.iconURL() || undefined })
-    .setTitle('\uD83D\uDC3A IWC Bot \u2014 Mise \u00e0 jour \u00b7 Version 7.9')
-    .setDescription('*D\u00e9ploy\u00e9 le **' + dateStr + '** \u2014 Annonces & sondages, recherche de contact, panneaux collants*')
+    .setTitle('\ud83d\uDC3A IWC Bot \u2014 Mise \u00e0 jour \u00b7 Version 8.0')
+    .setDescription('*D\u00e9ploy\u00e9 le **' + dateStr + '** \u2014 Les contrats d\u00e9clenchent d\u00e9sormais de vraies op\u00e9rations, pr\u00e9par\u00e9es \u00e9tape par \u00e9tape.*')
     .addFields(
-      { name: '\uD83D\udce2 ANNONCES (NOUVEAU)', value: '\u2192 **/annonce-installer** pose un panneau \u00ab Cr\u00e9er une annonce \u00bb dans le salon\n\u2192 Choix d\'une **cat\u00e9gorie RP** (\u00c9v\u00e9nement, Braquage, R\u00e9union, Conflit, Soir\u00e9e, Info\u2026)\n\u2192 Titre, message, **date & heure** optionnelles, r\u00f4le \u00e0 pinger\n\u2192 **\u23f0 Rappels automatiques 1 h et/ou 30 min avant** l\'\u00e9v\u00e9nement', inline: false },
-      { name: '\uD83D\udcca SONDAGES (NOUVEAU)', value: '\u2192 **/sondage-installer** pose un panneau \u00ab Cr\u00e9er un sondage \u00bb\n\u2192 Une question + 2 \u00e0 10 r\u00e9ponses + une dur\u00e9e \u2192 **vrai sondage Discord** (vote int\u00e9gr\u00e9, r\u00e9sultats auto)\n\u2192 Ping des membres, **sans aucune commande \u00e0 taper**', inline: false },
+      { name: '\uD83C\udfac OP\u00c9RATIONS PAR \u00c9TAPES (NOUVEAU)', value: '\u2192 Quand la **Direction valide un contrat** Confr\u00e9rie, une **op\u00e9ration s\'ouvre automatiquement** dans le salon des op\u00e9rations\n\u2192 Elle est **cat\u00e9goris\u00e9e** d\'apr\u00e8s le type de mission du contrat (Chasse \u00e0 la prime, Contrebande, Sabotage, Vol, \u00c9limination\u2026)\n\u2192 Un **fil d\u00e9di\u00e9** est cr\u00e9\u00e9 avec un panneau de pr\u00e9paration', inline: false },
+      { name: '\ud83e\ude9c 5 \u00c9TAPES \u00c0 PR\u00c9PARER & VALIDER', value: '**1. \ud83d\udd0d Rep\u00e9rage** \u00b7 **2. \ud83d\uddfa\ufe0f Plan d\'approche** \u00b7 **3. \ud83d\udc65 Constitution de l\'\u00e9quipe** \u00b7 **4. \uD83C\udfaf Ex\u00e9cution** \u00b7 **5. \ud83d\udcb0 Bilan & prime**\n\u2192 Chaque \u00e9tape se **remplit** (formulaire) puis se **valide** (Direction)\n\u2192 Les \u00e9tapes se **d\u00e9verrouillent dans l\'ordre** \u2014 pas de saut possible', inline: false },
     )
-    .setFooter({ text: 'IWC Bot v7.9 \u00b7 1/3' });
+    .setFooter({ text: 'IWC Bot v8.0 \u00b7 1/2' });
 
   const embed2 = new EmbedBuilder()
     .setColor(0x2ECC71)
     .addFields(
-      { name: '\uD83D\udd0e CONTRATS \u2014 RECHERCHE DE CONTACT', value: '\u2192 Nouveau bouton **\uD83D\udd0e Chercher un contact** dans #contrats\n\u2192 Tape un nom \u2192 le bot trouve la fiche du r\u00e9pertoire (**au-del\u00e0 des 25** de la liste) et **pr\u00e9-remplit** le contrat\n\u2192 Accessible \u00e0 **tous les membres** qui cr\u00e9ent un contrat', inline: false },
-      { name: '\uD83C\udfaf CONTRATS CONFR\u00c9RIE', value: '\u2192 Nouveau type de mission : **Chasseur de primes**', inline: false },
-      { name: '\uD83D\udccc PANNEAUX TOUJOURS EN BAS', value: '\u2192 Dans **#contrats** et **#op\u00e9rations**, le panneau d\'actions reste coll\u00e9 en bas du salon\n\u2192 Le menu d\u00e9roulant appara\u00eet ainsi **juste sous le panneau** (plus besoin de le chercher)', inline: false },
+      { name: '\ud83d\udcf7 PHOTOS & INFOS DANS CHAQUE \u00c9TAPE', value: '\u2192 Bouton **\u00ab \ud83d\udcf7 Ajouter une photo \u00bb** : envoie l\'image dans le fil, elle est rattach\u00e9e \u00e0 l\'\u00e9tape (rep\u00e9rage, preuve de capture\u2026)\n\u2192 Champs adapt\u00e9s : position, **nombre de cibles + gardes**, itin\u00e9raire, r\u00f4les, issue, prime encaiss\u00e9e\u2026', inline: false },
+      { name: '\ud83d\udcc4 DOSSIER D\'OP\u00c9RATION AUTOMATIQUE', value: '\u2192 Une fois **toutes les \u00e9tapes valid\u00e9es**, un **dossier complet** est g\u00e9n\u00e9r\u00e9 : **fichier .md t\u00e9l\u00e9chargeable** + r\u00e9capitulatif post\u00e9 dans le fil\n\u2192 Tout est compil\u00e9 : \u00e9tapes, photos, comptes-rendus, prime', inline: false },
+      { name: '\uD83C\udfac LANCER SUR UN CONTRAT EXISTANT', value: '\u2192 Bouton **\u00ab Lancer l\'op\u00e9ration \u00bb** ajout\u00e9 sur la fiche d\'un contrat **d\u00e9j\u00e0 actif** : ouvre l\'op\u00e9ration sans recr\u00e9er le contrat', inline: false },
     )
-    .setFooter({ text: 'IWC Bot v7.9 \u00b7 2/3' });
-
-  const embed3 = new EmbedBuilder()
-    .setColor(0x2C3E50)
-    .addFields(
-      { name: '\uD83D\udc4b ESPACE VISITEURS', value: '\u2192 Annonce d\'accueil claire qui explique la marche \u00e0 suivre et **renvoie vers le salon de prise de RDV**\n\u2192 Le client met son **nom + pr\u00e9nom**, puis re\u00e7oit son **contrat \u00e0 signer en MP**', inline: false },
-      { name: '\uD83D\uddfa\ufe0f CARTE', value: '\u2192 Bouton **\u00ab Voir la carte \u00bb** ajout\u00e9, panneau remis d\'\u00e9querre (tous les boutons fonctionnent)', inline: false },
-      { name: '\uD83D\uDC1B STABILIT\u00c9', value: '\u2192 Erreurs \u00ab interaction inconnue \u00bb corrig\u00e9es (plus de plantage sur un clic tardif)\n\u2192 Gestion d\'erreurs renforc\u00e9e sur l\'ensemble des boutons et menus', inline: false },
-    )
-    .addFields(
-      { name: '\ud83d\udcf0 JOURNAUX (NOUVEAU)', value: '\u2192 **/journal-installer** d\u00e9clare un salon comme journal (r\u00e9gion + r\u00f4le lecteur)\n\u2192 Tu postes une **photo** dans ce salon \u2192 le bot la transforme en **parution propre** (en-t\u00eate r\u00e9gion + date) et **pr\u00e9vient les lecteurs**\n\u2192 Pens\u00e9 pour le Journal du Texas / de Louisiane', inline: false },
-    )
-    .setFooter({ text: 'IWC Bot v7.9 \u00b7 3/3 \u00b7 La force est dans l\'ombre. \u2014 La Compagnie' })
+    .setFooter({ text: 'IWC Bot v8.0 \u00b7 2/2 \u00b7 La force est dans l\'ombre. \u2014 La Compagnie' })
     .setTimestamp();
 
   await patchCh.send({ embeds: [embed1] });
   await patchCh.send({ embeds: [embed2] });
-  await patchCh.send({ embeds: [embed3] });
-  await interaction.editReply({ content: '\u2705 Patch note v7.9 post\u00e9 dans ' + patchCh + ' (3 encadr\u00e9s).' });
+  await interaction.editReply({ content: '\u2705 Patch note v8.0 post\u00e9 dans ' + patchCh + ' (2 encadr\u00e9s).' });
 }
 async function _handlePurge(interaction) {
   if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });

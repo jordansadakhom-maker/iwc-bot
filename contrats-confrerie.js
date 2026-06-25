@@ -241,6 +241,7 @@ function buildContratButtons(contrat) {
   } else if (contrat.status === 'actif') {
     rows.push(new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`cc_assign::${contrat.id}`).setLabel('🎯 Assigner des agents').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`cc_lancerop::${contrat.id}`).setLabel(contrat.operationId ? '🗂️ Opération créée' : '🎬 Lancer l\'opération').setStyle(contrat.operationId ? ButtonStyle.Secondary : ButtonStyle.Primary).setDisabled(!!contrat.operationId),
       new ButtonBuilder().setCustomId(`cc_done::${contrat.id}`).setLabel('🏁 Mission réussie').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`cc_fail::${contrat.id}`).setLabel('💀 Mission échouée').setStyle(ButtonStyle.Danger),
     ));
@@ -669,6 +670,37 @@ async function onAccept(interaction) {
   saveDB(db); await _persistNow(); syncNotion(c, '🟢 En cours');                                     // puis travail lent
   const jc = journalCh(interaction.guild);
   if (jc) await jc.send({ embeds: [new EmbedBuilder().setColor(0x2ECC71).setTitle(`🟢 Contrat validé — ${c.id}`).setDescription(`**${c.typeMission}** · validé par ${c.acceptePar}`).setFooter({ text: 'La Confrérie • Contrats' }).setTimestamp()] }).catch(() => {});
+  // → À la validation Direction : ouverture automatique de l'opération à préparer (étapes).
+  try {
+    if (typeof global.creerOpDepuisContrat === 'function') {
+      await global.creerOpDepuisContrat(interaction.guild, c, { parId: interaction.user.id });
+      const dbR = loadDB(); const cR = findContrat(dbR, c.id);
+      if (cR) { await rafraichirFiche(interaction.guild, cR).catch(() => {}); await majForum(interaction.guild, cR).catch(() => {}); }
+    }
+  } catch (e) { console.log('⚠️ création opération depuis contrat:', e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LANCER MANUELLEMENT L'OPÉRATION (pour un contrat déjà actif)
+// ═══════════════════════════════════════════════════════════════
+async function onLancerOp(interaction) {
+  if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+  const id = interaction.customId.split('::')[1];
+  const db = loadDB();
+  const c = findContrat(db, id);
+  if (!c || c.status !== 'actif') return interaction.reply({ content: '❌ Contrat introuvable ou non actif.', flags: MessageFlags.Ephemeral });
+  if (c.operationId) return interaction.reply({ content: `ℹ️ Une opération est déjà liée à ce contrat (\`${c.operationId}\`).`, flags: MessageFlags.Ephemeral });
+  if (typeof global.creerOpDepuisContrat !== 'function') return interaction.reply({ content: '⚠️ Module opérations indisponible.', flags: MessageFlags.Ephemeral });
+  await interaction.reply({ content: '⏳ Ouverture de l\'opération à préparer…', flags: MessageFlags.Ephemeral });
+  let op = null;
+  try { op = await global.creerOpDepuisContrat(interaction.guild, c, { parId: interaction.user.id }); } catch (e) { console.log('⚠️ onLancerOp:', e.message); }
+  if (op?.id) {
+    const dbR = loadDB(); const cR = findContrat(dbR, id);
+    if (cR) { await rafraichirFiche(interaction.guild, cR).catch(() => {}); await majForum(interaction.guild, cR).catch(() => {}); }
+    await interaction.editReply({ content: `✅ Opération **${op.id}** ouverte dans le salon des opérations — préparez-la étape par étape (Repérage → Bilan).` }).catch(() => {});
+  } else {
+    await interaction.editReply({ content: '⚠️ Impossible d\'ouvrir l\'opération.' }).catch(() => {});
+  }
 }
 async function onRefuse(interaction) {
   if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
@@ -1035,6 +1067,7 @@ async function routeInteraction(interaction) {
       if (id.startsWith('cc_accept::')) { await onAccept(interaction); return true; }
       if (id.startsWith('cc_refuse::')) { await onRefuse(interaction); return true; }
       if (id.startsWith('cc_assign::')) { await onAssign(interaction); return true; }
+      if (id.startsWith('cc_lancerop::')) { await onLancerOp(interaction); return true; }
       if (id.startsWith('cc_done::')) { await cloturer(interaction, true); return true; }
       if (id.startsWith('cc_fail::')) { await cloturer(interaction, false); return true; }
       if (id.startsWith('cc_agok::')) { await onAgentReponse(interaction, true); return true; }
