@@ -226,12 +226,12 @@ Message : "${texte}"`;
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 700, messages: [{ role: 'user', content: prompt }] }),
     });
-    if (!resp.ok) return null;
+    if (!resp.ok) { console.log('⚠️ _reformulerRP HTTP', resp.status, (await resp.text().catch(() => '')).slice(0, 250)); return null; }
     const data = await resp.json();
     let txt = (data?.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
     txt = txt.replace(/^["«»\s]+|["«»\s]+$/g, '').trim();
     return txt && txt.length > 1 ? txt.slice(0, 1900) : null;
-  } catch { return null; }
+  } catch (e) { console.log('⚠️ _reformulerRP error:', e.message); return null; }
 }
 async function _reposterCommeMembre(channel, member, user, content) {
   try {
@@ -2777,11 +2777,18 @@ client.on('messageCreate', async message => {
     if (message.channel?.id === SALON_RP_REFORMULATION && !message.author?.bot && !message.webhookId && message.guild) {
       const brut = (message.content || '').trim();
       const skip = !brut || brut.length < 2 || message.attachments.size > 0 || /^[\/!.]/.test(brut) || /^https?:\/\//i.test(brut);
-      if (!skip && process.env.ANTHROPIC_API_KEY) {
+      if (!skip && !process.env.ANTHROPIC_API_KEY) {
+        console.log('⚠️ Salon RP: ANTHROPIC_API_KEY absente → reformulation impossible (configure la clé sur Render).');
+      } else if (!skip) {
         const reformule = await _reformulerRP(brut);
-        if (reformule && _norm2(reformule) !== _norm2(brut)) {
+        if (!reformule) {
+          console.log('⚠️ Salon RP: reformulation vide/échouée (voir log _reformulerRP juste au-dessus — clé/quota/modèle ?).');
+        } else if (_norm2(reformule) === _norm2(brut)) {
+          console.log('ℹ️ Salon RP: reformulation identique à l\'original → message laissé tel quel.');
+        } else {
           const ok = await _reposterCommeMembre(message.channel, message.member, message.author, reformule);
           if (ok) { await message.delete().catch(() => {}); return; }
+          console.log('⚠️ Salon RP: repost via webhook échoué → vérifie la permission « Gérer les webhooks » du bot dans ce salon.');
         }
       }
     }
