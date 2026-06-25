@@ -187,6 +187,26 @@ function _opAutoDepuisContrat(gd, contrat, userId) {
     if (p && typeof p.catch === 'function') p.catch(() => {});
   } catch {}
 }
+// Prime d'une opération terminée → crédit du coffre commun (+ journal + Notion).
+// Appelé par operations-etapes.js via global.crediterCoffrePrime.
+async function _crediterCoffrePrime({ guild, montant, objet, responsable, responsableId, pole }) {
+  try {
+    montant = parseInt(montant, 10) || 0;
+    if (!guild || montant <= 0) return null;
+    const dbX = loadDB();
+    if (typeof dbX.coffre !== 'number') dbX.coffre = 0;
+    dbX.coffre += montant;
+    const solde = dbX.coffre;
+    saveDB(dbX);
+    const obj = (objet || 'Opération').slice(0, 200);
+    try { await ajouterJournalIC(guild, { type: 'tresorerie', emoji: '💵', titre: 'Entrée — Coffre', description: `${obj} · +$${montant.toLocaleString('fr-FR')}`.slice(0, 300), auteur: responsable || 'Opération' }); } catch {}
+    try { await notionExtra.enregistrerTransactionNotion?.({ type: 'Entrée', coffre: 'Coffre', montant, objet: obj, responsable: responsable || 'Opération', solde }); } catch {}
+    try { _syncTransactionNotion({ type: 'Entrée', coffre: pole === 'illegal' ? 'illegal' : 'legal', montant, objet: obj, responsable: responsable || 'Opération', solde, date: new Date().toISOString(), discordId: responsableId || null, userId: responsableId || null }).catch(() => {}); } catch {}
+    try { comptabilite.refreshPanel?.(guild.client).catch(() => {}); } catch {}
+    return solde;
+  } catch (e) { console.log('⚠️ _crediterCoffrePrime:', e.message); return null; }
+}
+global.crediterCoffrePrime = (args) => _crediterCoffrePrime(args || {});
 
 const {
   CH, PARTICIPANTS_MAP, CONTRAT_ROLES, JUNE_MCCALL_ID,
@@ -568,9 +588,10 @@ const SLASH_COMMANDS = [
     .addUserOption(o => o.setName('filleul').setDescription('Le filleul (nouveau)').setRequired(true)),
   new SlashCommandBuilder().setName('mon-parrainage').setDescription('🤝 Voir ton parrain et tes filleuls'),
   new SlashCommandBuilder().setName('registre').setDescription('📋 Liste des membres actifs (Direction)').addStringOption(o => o.setName('pole').setDescription('Filtrer par pôle').setRequired(false).addChoices({ name: 'Tous', value: 'tous' }, { name: '⚖️ Légal', value: 'legal' }, { name: '🔒 Illégal', value: 'illegal' })).addIntegerOption(o => o.setName('page').setDescription('Page').setRequired(false)),
-  new SlashCommandBuilder().setName('op').setDescription('🎯 Opérations : détail, liste, programmer')
+  new SlashCommandBuilder().setName('op').setDescription('🎯 Opérations : détail, liste, suivi, programmer')
     .addSubcommand(s => s.setName('detail').setDescription('🔍 Détail d\'une opération').addStringOption(o => o.setName('id').setDescription('ID de l\'opération').setRequired(false)))
     .addSubcommand(s => s.setName('liste').setDescription('📋 Opérations en cours et en préparation'))
+    .addSubcommand(s => s.setName('suivi').setDescription('🗂️ Tableau de suivi des opérations par étapes (avancement)'))
     .addSubcommand(s => s.setName('programmer').setDescription('🕐 Programmer une opération à lancement automatique (Direction)')),
 ].map(c => c.toJSON());
 
@@ -1641,6 +1662,12 @@ async function handleSlashCommand(interaction) {
       if (!opsActives.length) { await interaction.reply({ content: '*Aucune opération en cours ou en préparation.*', flags: MessageFlags.Ephemeral }); return; }
       await interaction.reply({ embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('🎯 Opérations actives — IWC').setDescription(opsActives.map(o => [`**${o.name}** — ${o.status === 'en_cours' ? '🟢 En cours' : '🟡 Préparation'}`, `📍 ${o.lieu || '—'} · 👥 ${(o.participants || []).join(', ') || 'Aucun'}`].join('\n')).join('\n\n')).setFooter({ text: `IWC • ${fmtShort(new Date())}` })] });
       return;
+    }
+    if (sub === 'suivi') {
+      if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Commande réservée aux membres IWC.', flags: MessageFlags.Ephemeral });
+      const embed = opsEtapes.tableauEmbed ? opsEtapes.tableauEmbed() : null;
+      if (!embed) return interaction.reply({ content: 'ℹ️ Suivi des opérations indisponible.', flags: MessageFlags.Ephemeral });
+      return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
     if (sub === 'programmer') {
       if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
