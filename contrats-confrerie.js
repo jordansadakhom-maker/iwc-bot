@@ -121,6 +121,7 @@ const TYPES_MISSION = [
   { label: 'Extorsion / Racket',    value: 'Extorsion',             emoji: '✊' },
   { label: 'Espionnage / Filature', value: 'Espionnage',            emoji: '👁️' },
   { label: 'Protection',            value: 'Protection',            emoji: '🛡️' },
+  { label: 'Chasseur de primes',    value: 'Chasseur de primes',    emoji: '🎯' },
   { label: 'Récupération de dette', value: 'Récupération de dette', emoji: '⛓️' },
   { label: 'Autre (à préciser)',    value: 'Autre',                 emoji: '❓' },
 ];
