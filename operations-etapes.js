@@ -514,6 +514,7 @@ function _boutons(op) {
       new ButtonBuilder().setCustomId(`opx_doc::${op.id}`).setLabel(termine ? '📄 Régénérer le dossier' : '📄 Dossier (brouillon)').setStyle(ButtonStyle.Secondary),
     );
     if (termine) row2.addComponents(new ButtonBuilder().setCustomId(`opx_recit::${op.id}`).setLabel('📜 Compte-rendu RP').setStyle(ButtonStyle.Secondary));
+    if (['Chasseur de primes', 'Chasse de prime'].includes(op.categorie)) row2.addComponents(new ButtonBuilder().setCustomId(`opx_avis::${op.id}`).setLabel('🎯 Avis de recherche').setStyle(ButtonStyle.Secondary));
     if (!termine) row2.addComponents(new ButtonBuilder().setCustomId(`opx_cancel::${op.id}`).setLabel('🗑️ Annuler l\'opération').setStyle(ButtonStyle.Danger));
     rows.push(row2);
   }
@@ -564,6 +565,7 @@ async function creerOperationDepuisContrat(guild, contrat, opts = {}) {
   // mémorise le lien côté contrat (dans la même sauvegarde)
   const c = (db.contrats || []).find(x => x.id === contrat.id);
   if (c) c.operationId = op.id;
+  op.agents = Array.isArray(c?.agents) ? c.agents.slice() : []; // agents assignés (contrats Confrérie) → à prévenir
   db.preparations.push(op);
   _persist(db);
 
@@ -597,6 +599,12 @@ async function creerOperationDepuisContrat(guild, contrat, opts = {}) {
       }
     }
   } catch (e) { console.log('⚠️ post opération-étapes:', e.message); }
+
+  // Rappel aux agents assignés : ils sont prévenus dans le fil qu'ils doivent préparer l'opération.
+  if (op.agents.length && op.threadId) {
+    const th = await guild.channels.fetch(op.threadId).catch(() => null);
+    if (th?.send) await th.send({ content: `👥 ${op.agents.map(a => `<@${a}>`).join(' ')} — vous êtes **assignés** à cette mission. Préparez l'opération **étape par étape** sur le panneau ci-dessus.`, allowedMentions: { users: op.agents.slice(0, 50) } }).catch(() => {});
+  }
 
   _persist(db);
   try { if (typeof _inj.journalHook === 'function') await _inj.journalHook(guild, op); } catch {}
@@ -893,7 +901,27 @@ async function routeInteraction(interaction) {
         await _posterDossier(interaction.guild, op).catch(() => {});
         await _crediterPrime(interaction.guild, op).catch(() => {});       // 💰 prime → coffre
         await _genererEtPosterRecit(interaction.guild, op).catch(() => {}); // 📜 compte-rendu RP
+        if ((op.agents || []).length) { // 🔔 rappel aux agents : mission terminée
+          const ch = await interaction.guild.channels.fetch(op.threadId || op.channelId).catch(() => null);
+          if (ch?.send) await ch.send({ content: `✅ ${op.agents.map(a => `<@${a}>`).join(' ')} — **opération terminée**, beau travail. Le dossier et le compte-rendu sont ci-dessus.`, allowedMentions: { users: op.agents.slice(0, 50) } }).catch(() => {});
+        }
       }
+      return true;
+    }
+
+    // ── Créer un avis de recherche pré-rempli (missions de prime) ──
+    if (interaction.isButton?.() && cid.startsWith('opx_avis::')) {
+      const id = cid.split('::')[1];
+      const db = loadDB();
+      const op = _find(db, id);
+      if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      if (typeof global.ouvrirAvisRecherche !== 'function') { await interaction.reply({ content: '⚠️ Module avis de recherche indisponible.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      // Pré-remplit le signalement à partir de l'étape de repérage
+      const defs = _defs(op.categorie);
+      const rep = op.etapes[0];
+      const parts = [];
+      if (rep?.champs && defs[0]) for (const c of defs[0].champs) { const v = rep.champs[c.id]; if (v && String(v).trim()) parts.push(`${c.label} : ${v}`); }
+      await global.ouvrirAvisRecherche(interaction, { cible: op.cible, signalement: parts.join(' · ').slice(0, 500) });
       return true;
     }
 
