@@ -4,9 +4,12 @@
 //  Déclenché AUTOMATIQUEMENT quand la Direction VALIDE un contrat Confrérie :
 //  une « opération » catégorisée d'après le type de mission du contrat est
 //  ouverte dans #operations, sous forme d'un fil dédié contenant un panneau
-//  d'étapes à préparer puis valider une par une :
-//      1. 🔍 Repérage      2. 🗺️ Plan d'approche   3. 👥 Constitution d'équipe
-//      4. 🎯 Exécution     5. 💰 Bilan & prime
+//  d'étapes à préparer puis valider une par une.
+//
+//  ⚙️ Les ÉTAPES sont ADAPTÉES au type de contrat (chaque catégorie a son
+//  propre scénario : Contrebande, Sabotage, Vol, Élimination, Extorsion,
+//  Espionnage, Protection, Chasseur de primes, Récupération de dette…), avec
+//  un modèle GÉNÉRIQUE par défaut (« Autre »).
 //
 //  Chaque étape porte des champs (formulaire) + des photos (collectées dans le
 //  fil) et un bouton « ✅ Valider l'étape » (Direction). Les étapes se
@@ -72,60 +75,290 @@ const CATEGORIES = {
 function _categorie(typeMission) { return CATEGORIES[typeMission] || { emoji: '🎯', pole: 'illegal' }; }
 
 // ═══════════════════════════════════════════════════════════════
-//  DÉFINITION DES ÉTAPES (5)
-//  champs : max 5 par étape (limite des formulaires Discord)
-//  type : 'short' | 'para'   ·   req : obligatoire pour valider
-//  photo : 'req' (photo obligatoire) | true (photo proposée) | false
+//  MODÈLES D'ÉTAPES PAR TYPE DE CONTRAT
+//  champ : { id, label, type:'short'|'para', req:bool, max, ph }
+//  étape : { key, label, intro, photo:'req'|true|false, champs:[...] (≤4) }
 // ═══════════════════════════════════════════════════════════════
-const STEP_DEFS = [
-  {
-    key: 'reperage', label: '🔍 Repérage / Reconnaissance', photo: 'req',
-    intro: 'Localiser et observer la cible avant toute action.',
-    champs: [
-      { id: 'position',  label: 'Dernière position connue',          type: 'short', req: true,  max: 120, ph: 'Ex : ferme à l\'est de Valentine' },
-      { id: 'effectif',  label: 'Cibles + gardes / escorte (nombre)', type: 'short', req: true,  max: 80,  ph: 'Ex : 1 cible + 3 hommes armés' },
-      { id: 'habitudes', label: 'Habitudes / horaires observés',      type: 'para',  req: false, max: 500, ph: 'Déplacements, routines, points faibles…' },
-      { id: 'notes',     label: 'Notes de repérage',                  type: 'para',  req: false, max: 500, ph: 'Terrain, accès, dangers…' },
-    ],
-  },
-  {
-    key: 'plan', label: '🗺️ Plan d\'approche', photo: true,
-    intro: 'Définir comment on entre, on agit, on se replie.',
-    champs: [
-      { id: 'ralliement', label: 'Point de ralliement',            type: 'short', req: true,  max: 120, ph: 'Ex : vieux moulin au nord' },
-      { id: 'itineraire', label: 'Itinéraire (approche + repli)',   type: 'para',  req: true,  max: 600, ph: 'Chemin d\'approche, plan B, repli…' },
-      { id: 'equipement', label: 'Équipement / matériel',           type: 'para',  req: false, max: 400, ph: 'Armes, chevaux, dynamite, déguisements…' },
-      { id: 'horaire',    label: 'Heure d\'intervention prévue',     type: 'short', req: false, max: 80,  ph: 'Ex : 22/06 à 21h' },
-    ],
-  },
-  {
+function C(id, label, type, req, max, ph) { return { id, label, type, req, max, ph }; }
+
+// Étape « équipe » commune (placeholder de rôles adaptable)
+function _equipe(rolesPh) {
+  return {
     key: 'equipe', label: '👥 Constitution de l\'équipe', photo: false,
     intro: 'Réunir et répartir les membres de l\'opération.',
     champs: [
-      { id: 'effectif',     label: 'Effectif requis (nombre)',       type: 'short', req: true,  max: 40,  ph: 'Ex : 4 membres' },
-      { id: 'roles',        label: 'Rôles assignés (qui fait quoi)',  type: 'para',  req: true,  max: 600, ph: 'Guetteur, tireur, conducteur, négociateur…' },
-      { id: 'participants', label: 'Membres confirmés',               type: 'para',  req: false, max: 500, ph: 'Liste des frères engagés' },
+      C('effectif', 'Effectif requis (nombre)', 'short', true, 40, 'Ex : 4 membres'),
+      C('roles', 'Rôles assignés (qui fait quoi)', 'para', true, 600, rolesPh || 'Qui tient quel rôle…'),
+      C('participants', 'Membres confirmés', 'para', false, 500, 'Liste des frères engagés'),
     ],
-  },
-  {
-    key: 'execution', label: '🎯 Exécution', photo: 'req',
-    intro: 'L\'action elle-même : ce qui s\'est réellement passé.',
-    champs: [
-      { id: 'issue',       label: 'Issue / résultat',               type: 'short', req: true,  max: 120, ph: 'Ex : cible capturée vivante' },
-      { id: 'deroulement', label: 'Déroulement de l\'action',        type: 'para',  req: true,  max: 700, ph: 'Compte-rendu de l\'intervention…' },
-      { id: 'pertes',      label: 'Pertes / incidents',              type: 'para',  req: false, max: 400, ph: 'Blessés, imprévus, témoins…' },
-    ],
-  },
-  {
-    key: 'bilan', label: '💰 Bilan & prime', photo: true,
-    intro: 'Remise, encaissement et bilan final.',
-    champs: [
-      { id: 'lieuRemise', label: 'Lieu de remise',          type: 'short', req: false, max: 120, ph: 'Ex : arrière-salle du saloon de Rhodes' },
-      { id: 'prime',      label: 'Prime encaissée ($)',      type: 'short', req: true,  max: 80,  ph: 'Ex : 3000$' },
-      { id: 'bilan',      label: 'Bilan final / butin',      type: 'para',  req: false, max: 600, ph: 'Ce qui a été récupéré, répartition…' },
-    ],
-  },
-];
+  };
+}
+
+const STEP_TEMPLATES = {
+  // ─── 🎯 Chasseur de primes ───
+  'Chasseur de primes': [
+    { key: 'reperage', label: '🔍 Repérage de la cible', photo: 'req', intro: 'Localiser et observer la cible avant toute action.', champs: [
+      C('position', 'Dernière position connue', 'short', true, 120, 'Ex : ferme à l\'est de Valentine'),
+      C('effectif', 'Cible + gardes / escorte (nombre)', 'short', true, 80, 'Ex : 1 cible + 3 hommes armés'),
+      C('habitudes', 'Habitudes / horaires observés', 'para', false, 500, 'Déplacements, routines, points faibles…'),
+      C('notes', 'Notes de repérage', 'para', false, 500, 'Terrain, accès, dangers…'),
+    ] },
+    { key: 'plan', label: '🗺️ Plan d\'approche', photo: true, intro: 'Comment on approche, on capture, on se replie.', champs: [
+      C('ralliement', 'Point de ralliement', 'short', true, 120, 'Ex : vieux moulin au nord'),
+      C('itineraire', 'Approche + repli', 'para', true, 600, 'Chemin d\'approche, plan B, repli…'),
+      C('equipement', 'Équipement (lasso, armes, chevaux…)', 'para', false, 400, 'Pour ramener la cible vivante de préférence'),
+      C('horaire', 'Heure d\'intervention prévue', 'short', false, 80, 'Ex : 22/06 à 21h'),
+    ] },
+    _equipe('Pisteur, tireur, rabatteur, escorte…'),
+    { key: 'execution', label: '🎯 Capture', photo: 'req', intro: 'La capture elle-même : preuve à l\'appui.', champs: [
+      C('issue', 'Issue (capturé vivant / mort)', 'short', true, 120, 'Ex : capturé vivant'),
+      C('deroulement', 'Déroulement de la capture', 'para', true, 700, 'Compte-rendu de l\'intervention…'),
+      C('pertes', 'Pertes / incidents', 'para', false, 400, 'Blessés, fuite, témoins…'),
+    ] },
+    { key: 'bilan', label: '💰 Livraison & prime', photo: true, intro: 'Remise de la cible et encaissement.', champs: [
+      C('lieuRemise', 'Lieu de remise (shérif / commanditaire)', 'short', false, 120, 'Ex : bureau du shérif de Rhodes'),
+      C('prime', 'Prime encaissée ($)', 'short', true, 80, 'Ex : 3000$'),
+      C('bilan', 'Bilan final', 'para', false, 600, 'Répartition, suites…'),
+    ] },
+  ],
+
+  // ─── 📦 Contrebande ───
+  'Contrebande': [
+    { key: 'marchandise', label: '📦 Marchandise & repérage', photo: true, intro: 'Identifier la cargaison et la route.', champs: [
+      C('cargaison', 'Nature de la cargaison', 'short', true, 120, 'Ex : caisses d\'alcool, armes, opium…'),
+      C('depart', 'Point de départ / récupération', 'short', true, 120, 'Ex : entrepôt de Van Horn'),
+      C('destination', 'Destination', 'short', true, 120, 'Ex : Saint-Denis'),
+      C('quantite', 'Quantité / valeur estimée', 'short', false, 100, 'Ex : 12 caisses ~ 4000$'),
+    ] },
+    { key: 'route', label: '🗺️ Route & couverture', photo: true, intro: 'Tracer le trajet et éviter la loi.', champs: [
+      C('itineraire', 'Itinéraire prévu', 'para', true, 600, 'Chemins, gués, planques…'),
+      C('controles', 'Points de contrôle / patrouilles à éviter', 'para', false, 400, 'Postes de loi, péages, milices…'),
+      C('couverture', 'Couverture (déguisement, faux papiers)', 'para', false, 400, 'Comment passer inaperçu…'),
+      C('horaire', 'Fenêtre / horaire', 'short', false, 80, 'Ex : nuit du 22/06'),
+    ] },
+    _equipe('Convoyeur, éclaireur, guetteur, chargement…'),
+    { key: 'execution', label: '🚚 Acheminement', photo: 'req', intro: 'Le transport effectif de la marchandise.', champs: [
+      C('deroulement', 'Déroulement du transport', 'para', true, 700, 'Compte-rendu du trajet…'),
+      C('incidents', 'Contrôles / incidents rencontrés', 'para', false, 500, 'Patrouilles, pertes, avaries…'),
+    ] },
+    { key: 'bilan', label: '💰 Livraison & paiement', photo: true, intro: 'Remise au destinataire et paiement.', champs: [
+      C('destinataire', 'Destinataire / acheteur', 'short', false, 120, 'À qui la marchandise est remise'),
+      C('lieuRemise', 'Lieu de remise', 'short', false, 120, 'Ex : arrière-salle du saloon'),
+      C('paiement', 'Paiement encaissé ($)', 'short', true, 80, 'Ex : 4000$'),
+    ] },
+  ],
+
+  // ─── 🧨 Sabotage ───
+  'Sabotage': [
+    { key: 'reperage', label: '🔍 Repérage de la cible', photo: 'req', intro: 'Repérer ce qui doit être saboté.', champs: [
+      C('cible', 'Cible à saboter (structure, matériel…)', 'short', true, 140, 'Ex : pont, voie ferrée, dépôt…'),
+      C('position', 'Position / accès', 'short', true, 120, 'Ex : nord de Annesburg'),
+      C('surveillance', 'Surveillance présente', 'para', false, 400, 'Gardes, rondes, chiens…'),
+      C('notes', 'Notes de repérage', 'para', false, 400, 'Points faibles, matériaux…'),
+    ] },
+    { key: 'plan', label: '🧨 Plan de sabotage', photo: true, intro: 'Méthode, matériel, accès et repli.', champs: [
+      C('methode', 'Méthode (explosifs, feu, mécanique…)', 'short', true, 120, 'Ex : charge de dynamite'),
+      C('materiel', 'Matériel nécessaire', 'para', false, 400, 'Dynamite, outils, accélérateur…'),
+      C('acces', 'Point d\'accès + repli', 'para', true, 500, 'Entrée discrète, sortie, plan B…'),
+      C('horaire', 'Horaire prévu', 'short', false, 80, 'Ex : 03h du matin'),
+    ] },
+    _equipe('Poseur, guetteur, diversion, repli…'),
+    { key: 'execution', label: '💥 Exécution', photo: 'req', intro: 'Le sabotage et ses effets.', champs: [
+      C('deroulement', 'Déroulement de l\'action', 'para', true, 700, 'Compte-rendu…'),
+      C('degats', 'Dégâts causés', 'para', true, 400, 'Ce qui a été détruit / neutralisé'),
+      C('temoins', 'Témoins / incidents', 'para', false, 400, 'Vus ? poursuivis ?'),
+    ] },
+    { key: 'bilan', label: '💰 Bilan & prime', photo: true, intro: 'Résultat et encaissement.', champs: [
+      C('resultat', 'Objectif atteint ?', 'short', true, 120, 'Ex : voie ferrée hors service'),
+      C('prime', 'Prime encaissée ($)', 'short', true, 80, 'Ex : 2500$'),
+      C('traces', 'Traces laissées / suites', 'para', false, 400, 'Indices, soupçons…'),
+    ] },
+  ],
+
+  // ─── 💰 Vol organisé ───
+  'Vol organisé': [
+    { key: 'reperage', label: '🔍 Repérage de la cible', photo: 'req', intro: 'Étudier la cible du coup.', champs: [
+      C('cible', 'Cible (banque, train, diligence, coffre…)', 'short', true, 140, 'Ex : banque de Valentine'),
+      C('position', 'Position', 'short', true, 120, 'Lieu exact'),
+      C('gardes', 'Gardes / sécurité', 'short', true, 100, 'Ex : 2 gardes + shérif proche'),
+      C('horaires', 'Horaires / habitudes', 'para', false, 400, 'Ouverture, convois, relèves…'),
+    ] },
+    { key: 'plan', label: '🗺️ Plan du coup', photo: true, intro: 'Entrée, exécution, fuite.', champs: [
+      C('entree', 'Point d\'entrée / méthode', 'short', true, 140, 'Ex : par le toit, à l\'ouverture…'),
+      C('fuite', 'Itinéraire de fuite + planque', 'para', true, 500, 'Chemin de repli, planque…'),
+      C('materiel', 'Matériel (dynamite, chevaux…)', 'para', false, 400, 'Outils nécessaires'),
+      C('horaire', 'Horaire prévu', 'short', false, 80, 'Ex : 22/06 à 14h'),
+    ] },
+    _equipe('Perceur, guetteur, conducteur, couverture…'),
+    { key: 'execution', label: '💰 Exécution du vol', photo: 'req', intro: 'Le casse lui-même.', champs: [
+      C('deroulement', 'Déroulement', 'para', true, 700, 'Compte-rendu du coup…'),
+      C('butin', 'Butin saisi', 'short', true, 120, 'Ex : 5000$ + bijoux'),
+      C('complications', 'Complications', 'para', false, 400, 'Alerte, poursuite, pertes…'),
+    ] },
+    { key: 'bilan', label: '🪙 Partage & écoulement', photo: true, intro: 'Planque, partage, recel.', champs: [
+      C('planque', 'Lieu de planque', 'short', false, 120, 'Où le butin est mis à l\'abri'),
+      C('repartition', 'Répartition du butin', 'para', false, 500, 'Parts par membre / Confrérie'),
+      C('receleur', 'Receleur / écoulement', 'short', false, 120, 'À qui revendre'),
+    ] },
+  ],
+
+  // ─── 🗡️ Élimination ───
+  'Élimination': [
+    { key: 'reperage', label: '🔍 Repérage de la cible', photo: 'req', intro: 'Localiser et observer la cible.', champs: [
+      C('position', 'Dernière position connue', 'short', true, 120, 'Lieu exact'),
+      C('escorte', 'Escorte / gardes (nombre)', 'short', true, 100, 'Ex : cible + 2 gardes'),
+      C('habitudes', 'Habitudes / horaires', 'para', false, 400, 'Routines, lieux fréquentés…'),
+      C('notes', 'Notes de repérage', 'para', false, 400, 'Terrain, dangers…'),
+    ] },
+    { key: 'plan', label: '🗺️ Plan d\'approche', photo: true, intro: 'Méthode, arme, embuscade, repli.', champs: [
+      C('methode', 'Méthode (discrète / frontale)', 'short', true, 120, 'Ex : tir à distance'),
+      C('arme', 'Arme / moyen', 'short', false, 100, 'Ex : carabine, poison, couteau'),
+      C('embuscade', 'Point d\'embuscade + repli', 'para', true, 500, 'Où frapper, comment fuir…'),
+      C('horaire', 'Horaire prévu', 'short', false, 80, 'Ex : à l\'aube'),
+    ] },
+    _equipe('Tireur, guetteur, diversion, repli…'),
+    { key: 'execution', label: '🗡️ Exécution', photo: 'req', intro: 'L\'élimination, preuve à l\'appui.', champs: [
+      C('confirmation', 'Élimination confirmée ?', 'short', true, 120, 'Ex : confirmé'),
+      C('deroulement', 'Déroulement', 'para', true, 700, 'Compte-rendu…'),
+      C('temoins', 'Témoins / pertes', 'para', false, 400, 'Vus ? riposte ?'),
+    ] },
+    { key: 'bilan', label: '💰 Bilan & prime', photo: true, intro: 'Nettoyage et encaissement.', champs: [
+      C('nettoyage', 'Nettoyage / traces', 'para', false, 400, 'Corps, indices, alibi…'),
+      C('prime', 'Prime encaissée ($)', 'short', true, 80, 'Ex : 4000$'),
+      C('bilan', 'Bilan / suites', 'para', false, 400, 'Risques, représailles…'),
+    ] },
+  ],
+
+  // ─── ✊ Extorsion / Racket ───
+  'Extorsion': [
+    { key: 'cible', label: '🎯 Cible & levier', photo: false, intro: 'Qui pressuriser, et avec quel levier.', champs: [
+      C('cible', 'Cible (personne / commerce)', 'short', true, 140, 'Ex : saloon de Rhodes'),
+      C('position', 'Position / lieu', 'short', true, 120, 'Où la trouver'),
+      C('montant', 'Montant visé', 'short', true, 100, 'Ex : 500$ / semaine'),
+      C('levier', 'Levier / point de pression', 'para', false, 400, 'Dette, secret, menace crédible…'),
+    ] },
+    { key: 'approche', label: '🗺️ Approche & menace', photo: false, intro: 'Comment faire plier la cible.', champs: [
+      C('methode', 'Méthode (intimidation, démonstration…)', 'short', true, 140, 'Ex : visite musclée'),
+      C('message', 'Message à faire passer', 'para', true, 500, 'Ce qu\'on exige et les conséquences…'),
+      C('horaire', 'Quand', 'short', false, 80, 'Ex : à la fermeture'),
+    ] },
+    _equipe('Négociateur, gros bras, guetteur…'),
+    { key: 'execution', label: '💪 Mise sous pression', photo: 'req', intro: 'La confrontation et son issue.', champs: [
+      C('deroulement', 'Déroulement de la confrontation', 'para', true, 700, 'Compte-rendu…'),
+      C('reaction', 'Réaction de la cible', 'para', false, 400, 'Cède ? résiste ? prévient la loi ?'),
+    ] },
+    { key: 'bilan', label: '💰 Encaissement', photo: true, intro: 'Ce qui est obtenu et les suites.', champs: [
+      C('montant', 'Montant obtenu ($)', 'short', true, 80, 'Ex : 500$'),
+      C('periodicite', 'Récurrent ? (périodicité)', 'short', false, 100, 'Ex : chaque semaine'),
+      C('suites', 'Suites / risques', 'para', false, 400, 'Représailles, surveillance…'),
+    ] },
+  ],
+
+  // ─── 👁️ Espionnage / Filature ───
+  'Espionnage': [
+    { key: 'cible', label: '🎯 Cible & objectif', photo: false, intro: 'Qui surveiller et quoi obtenir.', champs: [
+      C('cible', 'Cible à surveiller', 'short', true, 140, 'Personne / groupe'),
+      C('objectif', 'Informations recherchées', 'para', true, 500, 'Ce qu\'on veut découvrir…'),
+      C('position', 'Position habituelle', 'short', false, 120, 'Où la trouver'),
+    ] },
+    { key: 'dispositif', label: '👁️ Dispositif de surveillance', photo: false, intro: 'Comment observer sans se faire voir.', champs: [
+      C('observation', 'Points d\'observation', 'para', true, 500, 'Planques, angles, relais…'),
+      C('moyens', 'Moyens (planque, taupe, contact…)', 'para', false, 400, 'Ressources mobilisées'),
+      C('discretion', 'Mesures de discrétion', 'para', false, 400, 'Déguisements, couverture…'),
+      C('horaires', 'Horaires de surveillance', 'short', false, 100, 'Ex : 18h-minuit'),
+    ] },
+    _equipe('Suiveurs, relais, planque…'),
+    { key: 'execution', label: '📋 Recueil d\'informations', photo: 'req', intro: 'Les observations rapportées.', champs: [
+      C('observations', 'Observations recueillies', 'para', true, 700, 'Faits, déplacements, échanges…'),
+      C('contacts', 'Contacts / rencontres notés', 'para', false, 500, 'Qui voit qui, où, quand'),
+    ] },
+    { key: 'bilan', label: '📑 Rapport & remise', photo: true, intro: 'Synthèse et remise du renseignement.', champs: [
+      C('synthese', 'Synthèse / conclusions', 'para', true, 600, 'Ce qu\'il faut retenir'),
+      C('destinataire', 'À qui remettre le rapport', 'short', false, 120, 'Commanditaire / Direction'),
+      C('prime', 'Prime encaissée ($)', 'short', false, 80, 'Ex : 1500$'),
+    ] },
+  ],
+
+  // ─── 🛡️ Protection ───
+  'Protection': [
+    { key: 'protege', label: '🎯 Protégé & menace', photo: false, intro: 'Qui / quoi protéger et contre quoi.', champs: [
+      C('protege', 'Protégé (personne / bien)', 'short', true, 140, 'Qui ou quoi est protégé'),
+      C('menace', 'Nature de la menace', 'para', true, 500, 'Qui menace, comment…'),
+      C('cadre', 'Durée / lieu de la mission', 'short', false, 120, 'Ex : convoi Valentine→Rhodes'),
+    ] },
+    { key: 'dispositif', label: '🗺️ Dispositif', photo: true, intro: 'Le plan de protection.', champs: [
+      C('itineraires', 'Itinéraires / positions sûrs', 'para', true, 500, 'Trajets, points de garde…'),
+      C('sensibles', 'Points sensibles', 'para', false, 400, 'Embuscades possibles, zones à risque'),
+      C('riposte', 'Plan en cas d\'attaque', 'para', false, 400, 'Repli, riposte, signal…'),
+      C('horaires', 'Horaires / relèves', 'short', false, 100, 'Tours de garde'),
+    ] },
+    _equipe('Garde rapprochée, éclaireur, arrière-garde…'),
+    { key: 'execution', label: '🛡️ Mission de protection', photo: false, intro: 'Le déroulé de la protection.', champs: [
+      C('deroulement', 'Déroulement', 'para', true, 700, 'Compte-rendu de la mission…'),
+      C('incidents', 'Incidents / attaques repoussées', 'para', false, 500, 'Ce qui s\'est passé'),
+    ] },
+    { key: 'bilan', label: '💰 Bilan & prime', photo: true, intro: 'État final et encaissement.', champs: [
+      C('etat', 'Protégé sain et sauf ?', 'short', true, 120, 'Ex : oui, sans incident'),
+      C('bilan', 'Bilan / pertes', 'para', false, 400, 'Blessés, dégâts…'),
+      C('prime', 'Prime encaissée ($)', 'short', true, 80, 'Ex : 2000$'),
+    ] },
+  ],
+
+  // ─── ⛓️ Récupération de dette ───
+  'Récupération de dette': [
+    { key: 'debiteur', label: '🔍 Débiteur & créance', photo: false, intro: 'Qui doit, combien, et où le trouver.', champs: [
+      C('debiteur', 'Débiteur (qui doit)', 'short', true, 140, 'Nom / description'),
+      C('montant', 'Montant dû', 'short', true, 100, 'Ex : 1200$'),
+      C('position', 'Position / lieu', 'short', true, 120, 'Où le trouver'),
+      C('solvabilite', 'Solvabilité / biens saisissables', 'para', false, 400, 'Peut-il payer ? quoi saisir ?'),
+    ] },
+    { key: 'approche', label: '🗺️ Approche', photo: false, intro: 'Méthode de recouvrement.', champs: [
+      C('methode', 'Méthode (rappel, pression, saisie…)', 'short', true, 140, 'Ex : pression musclée'),
+      C('leviers', 'Arguments / leviers', 'para', false, 400, 'Comment le faire payer…'),
+      C('horaire', 'Quand', 'short', false, 80, 'Ex : au petit matin'),
+    ] },
+    _equipe('Recouvreur, gros bras, guetteur…'),
+    { key: 'execution', label: '⛓️ Recouvrement', photo: 'req', intro: 'La récupération effective.', champs: [
+      C('deroulement', 'Déroulement', 'para', true, 700, 'Compte-rendu…'),
+      C('recupere', 'Montant / biens récupérés', 'short', true, 120, 'Ex : 1200$ ou cheval + selle'),
+      C('resistance', 'Résistance rencontrée', 'para', false, 400, 'Refus, fuite, bagarre…'),
+    ] },
+    { key: 'bilan', label: '💰 Remise & commission', photo: true, intro: 'Remise au créancier et part.', champs: [
+      C('remise', 'Remis au créancier', 'short', false, 120, 'Ce qui revient au commanditaire'),
+      C('commission', 'Commission encaissée ($)', 'short', true, 80, 'Notre part'),
+      C('reste', 'Reste dû / suites', 'para', false, 400, 'Solde, relance prévue…'),
+    ] },
+  ],
+
+  // ─── ❓ Modèle GÉNÉRIQUE par défaut (« Autre » et types inconnus) ───
+  _default: [
+    { key: 'reperage', label: '🔍 Repérage / Reconnaissance', photo: 'req', intro: 'Observer la situation avant d\'agir.', champs: [
+      C('position', 'Lieu / position', 'short', true, 120, 'Où ça se passe'),
+      C('effectif', 'Personnes en présence (nombre)', 'short', true, 80, 'Ex : cible + 3 hommes'),
+      C('habitudes', 'Habitudes / horaires observés', 'para', false, 500, 'Routines, points faibles…'),
+      C('notes', 'Notes de repérage', 'para', false, 500, 'Terrain, accès, dangers…'),
+    ] },
+    { key: 'plan', label: '🗺️ Plan d\'approche', photo: true, intro: 'Comment on entre, on agit, on se replie.', champs: [
+      C('ralliement', 'Point de ralliement', 'short', true, 120, 'Ex : vieux moulin au nord'),
+      C('itineraire', 'Itinéraire (approche + repli)', 'para', true, 600, 'Chemin d\'approche, plan B, repli…'),
+      C('equipement', 'Équipement / matériel', 'para', false, 400, 'Armes, chevaux, outils…'),
+      C('horaire', 'Heure d\'intervention prévue', 'short', false, 80, 'Ex : 22/06 à 21h'),
+    ] },
+    _equipe('Qui tient quel rôle…'),
+    { key: 'execution', label: '🎯 Exécution', photo: 'req', intro: 'L\'action elle-même : ce qui s\'est passé.', champs: [
+      C('issue', 'Issue / résultat', 'short', true, 120, 'Ex : objectif atteint'),
+      C('deroulement', 'Déroulement de l\'action', 'para', true, 700, 'Compte-rendu de l\'intervention…'),
+      C('pertes', 'Pertes / incidents', 'para', false, 400, 'Blessés, imprévus, témoins…'),
+    ] },
+    { key: 'bilan', label: '💰 Bilan & prime', photo: true, intro: 'Encaissement et bilan final.', champs: [
+      C('lieuRemise', 'Lieu de remise', 'short', false, 120, 'Ex : arrière-salle du saloon'),
+      C('prime', 'Prime encaissée ($)', 'short', true, 80, 'Ex : 3000$'),
+      C('bilan', 'Bilan final / butin', 'para', false, 600, 'Ce qui a été récupéré, répartition…'),
+    ] },
+  ],
+};
+
+function _defs(cat) { return STEP_TEMPLATES[cat] || STEP_TEMPLATES._default; }
 
 function genId() { return 'OP-' + Date.now().toString().slice(-6); }
 function _find(db, id) { return (db.preparations || []).find(o => o.id === id); }
@@ -133,8 +366,8 @@ function _currentIdx(op) {
   const i = (op.etapes || []).findIndex(e => !e.valide);
   return i === -1 ? (op.etapes || []).length : i;
 }
-function _newEtapes() {
-  return STEP_DEFS.map(s => ({ key: s.key, valide: false, valideePar: null, valideeAt: null, champs: {}, photos: [] }));
+function _newEtapes(cat) {
+  return _defs(cat).map(s => ({ key: s.key, valide: false, valideePar: null, valideeAt: null, champs: {}, photos: [] }));
 }
 
 // ── Vérifie les champs requis + photo d'une étape ──
@@ -159,6 +392,7 @@ function _resumeChamps(et, def) {
 //  PANNEAU D'ÉTAPES (embed + boutons)
 // ═══════════════════════════════════════════════════════════════
 function _embedPanel(op) {
+  const defs = _defs(op.categorie);
   const total = op.etapes.length;
   const done = op.etapes.filter(e => e.valide).length;
   const bar = '🟩'.repeat(done) + '⬜'.repeat(total - done);
@@ -170,7 +404,7 @@ function _embedPanel(op) {
     .setTitle(`${op.emoji} OPÉRATION — « ${_clip(op.cible, 70)} »`)
     .setDescription([
       '```', ' PRÉPARATION D\'OPÉRATION · IRON WOLF / CONFRÉRIE ', '```',
-      'Préparez la mission **étape par étape**. Chaque étape se remplit puis se **valide** ; la suivante se déverrouille ensuite. Une fois tout validé, le **dossier d\'opération** est généré.',
+      `Mission **${op.categorie}** — préparez-la **étape par étape**. Chaque étape se remplit puis se **valide** ; la suivante se déverrouille ensuite. Une fois tout validé, le **dossier d\'opération** est généré.`,
     ].join('\n'))
     .addFields(
       { name: 'Statut', value: termine ? '✅ Préparation terminée' : '🟡 En préparation', inline: true },
@@ -182,7 +416,7 @@ function _embedPanel(op) {
     );
 
   op.etapes.forEach((et, i) => {
-    const def = STEP_DEFS[i];
+    const def = defs[i] || { label: et.key, champs: [] };
     let icon;
     if (et.valide) icon = '✅';
     else if (i === cur) icon = '⏳';
@@ -257,7 +491,7 @@ async function creerOperationDepuisContrat(guild, contrat, opts = {}) {
     echeance: contrat.echeanceTexte || null,
     details: contrat.details || '',
     status: 'prep',
-    etapes: _newEtapes(),
+    etapes: _newEtapes(contrat.typeMission),
     createdAt: new Date().toISOString(),
     createurId: opts.parId || null,
   };
@@ -308,6 +542,7 @@ async function creerOperationDepuisContrat(guild, contrat, opts = {}) {
 //  DOSSIER D'OPÉRATION (fichier .md + embed récap)
 // ═══════════════════════════════════════════════════════════════
 function _genererMarkdown(op) {
+  const defs = _defs(op.categorie);
   const L = [];
   L.push(`# ${op.emoji} DOSSIER D'OPÉRATION`);
   L.push('');
@@ -324,10 +559,10 @@ function _genererMarkdown(op) {
   if (op.details) { L.push('> ' + String(op.details).replace(/\n/g, '\n> ')); L.push(''); }
   L.push('---');
   op.etapes.forEach((et, i) => {
-    const def = STEP_DEFS[i];
+    const def = defs[i] || { label: et.key, intro: '', champs: [] };
     L.push('');
     L.push(`## Étape ${i + 1} — ${def.label}`);
-    L.push(`*${def.intro}*`);
+    if (def.intro) L.push(`*${def.intro}*`);
     L.push('');
     L.push(`**Statut :** ${et.valide ? `✅ validée par ${et.valideePar || '—'} le ${_fmtDate(et.valideeAt)}` : '⬜ non validée'}`);
     for (const c of def.champs) {
@@ -347,6 +582,7 @@ function _genererMarkdown(op) {
 }
 
 function _embedDossier(op) {
+  const defs = _defs(op.categorie);
   const e = new EmbedBuilder()
     .setColor(COL.or)
     .setTitle(`📄 DOSSIER D'OPÉRATION — « ${_clip(op.cible, 70)} »`)
@@ -356,7 +592,7 @@ function _embedDossier(op) {
       { name: '🗂️ Pôle', value: op.pole === 'legal' ? '⚖️ Iron Wolf' : '🔪 Confrérie', inline: true },
     );
   op.etapes.forEach((et, i) => {
-    const def = STEP_DEFS[i];
+    const def = defs[i] || { label: et.key, champs: [] };
     let body = _resumeChamps(et, def);
     const ph = (et.photos || []).length;
     if (ph) body += `\n📷 ${ph} photo(s)`;
@@ -393,7 +629,7 @@ async function routeInteraction(interaction) {
       const op = _find(db, id);
       if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       if (idx !== _currentIdx(op)) { await interaction.reply({ content: '⛔ Cette étape n\'est pas l\'étape en cours.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
-      const def = STEP_DEFS[idx];
+      const def = _defs(op.categorie)[idx];
       const et = op.etapes[idx];
       const modal = new ModalBuilder().setCustomId(`opx_fillm::${id}::${idx}`).setTitle(_clip(`Étape ${idx + 1} · ${def.label.replace(/^[^ ]+ /, '')}`, 45));
       for (const c of def.champs) {
@@ -415,7 +651,7 @@ async function routeInteraction(interaction) {
       const db = loadDB();
       const op = _find(db, id);
       if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
-      const def = STEP_DEFS[idx];
+      const def = _defs(op.categorie)[idx];
       const et = op.etapes[idx];
       if (!et.champs) et.champs = {};
       for (const c of def.champs) {
@@ -472,7 +708,7 @@ async function routeInteraction(interaction) {
       const op = _find(db, id);
       if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       if (idx !== _currentIdx(op)) { await interaction.reply({ content: '⛔ Étape déjà validée ou verrouillée.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
-      const def = STEP_DEFS[idx];
+      const def = _defs(op.categorie)[idx];
       const et = op.etapes[idx];
       const manque = _manque(et, def);
       if (manque.length) { await interaction.reply({ content: `⛔ Impossible de valider l'étape ${idx + 1} — il manque :\n• ${manque.join('\n• ')}`, flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
@@ -523,4 +759,4 @@ async function routeInteraction(interaction) {
   }
 }
 
-module.exports = { init, routeInteraction, creerOperationDepuisContrat, STEP_DEFS };
+module.exports = { init, routeInteraction, creerOperationDepuisContrat, STEP_TEMPLATES };
