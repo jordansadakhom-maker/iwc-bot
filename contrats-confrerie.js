@@ -210,23 +210,34 @@ function buildSignatureEmbed(contrat) {
   return e;
 }
 
-// ─── Briefing privé envoyé en DM aux agents ───
+// ─── Briefing privé envoyé en DM aux agents (parchemin Far West 1904) ───
 function buildBriefingEmbed(contrat) {
   const r = riskOf(contrat);
   const e = new EmbedBuilder()
-    .setColor(r.couleur)
-    .setTitle(`🗡️ BRIEFING — Contrat ${contrat.id}`)
-    .setDescription('*Tu es assigné à ce contrat. Discrétion absolue. Ce message ne sort pas de tes mains.*')
+    .setColor(0xC9A66B) // teinte parchemin / sépia
+    .setTitle('📜 ⸺  ORDRE DE MISSION — LA CONFRÉRIE  ⸺ 📜')
+    .setDescription([
+      '```',
+      '  ════════════════════════════════════════',
+      '        ✦   EN L\'AN DE GRÂCE  1904   ✦',
+      '  ════════════════════════════════════════',
+      '```',
+      `*Frère, on te confie une besogne. Le pacte porte la référence \`${contrat.id}\`.*`,
+      '*Lis ces instructions, grave-les en mémoire, puis brûle ce papier.*',
+      '',
+      '🕯️ *Discrétion absolue — ce parchemin ne quitte point tes mains.*',
+    ].join('\n'))
     .addFields(
-      { name: '🎯 Type de mission', value: `${emojiType(contrat.typeMission)} ${contrat.typeMission || '—'}`, inline: true },
-      { name: '⚠️ Risque', value: `${r.emoji} ${r.label}`, inline: true },
-      { name: '📅 Échéance', value: contrat.dateEcheance ? fmtDate(contrat.dateEcheance) : (contrat.echeanceTexte || 'Aucune'), inline: true },
+      { name: '🎯 Nature de la besogne', value: `${emojiType(contrat.typeMission)} ${contrat.typeMission || '—'}`, inline: true },
+      { name: '⚠️ Péril encouru', value: `${r.emoji} ${r.label}`, inline: true },
+      { name: '📅 Terme échu le', value: contrat.dateEcheance ? fmtDate(contrat.dateEcheance) : (contrat.echeanceTexte || 'À votre convenance'), inline: true },
       { name: '👤 Commanditaire', value: contrat.commanditaire ? contrat.commanditaire : '🕶️ Anonyme', inline: false },
-      { name: '📋 Objet', value: contrat.objet || '—', inline: false },
-      { name: '💰 Prime', value: `${contrat.remuneration || '—'} *(prime ${r.prime})*`, inline: false },
+      { name: '📋 Objet du contrat', value: contrat.objet || '—', inline: false },
+      { name: '💰 Récompense promise', value: `${contrat.remuneration || '—'} *(prime ${r.prime})*`, inline: false },
     )
-    .setFooter({ text: 'La Confrérie • Briefing confidentiel' });
-  if (contrat.details) e.addFields({ name: '📝 Consignes', value: contrat.details.slice(0, 1000) });
+    .setFooter({ text: '✒️ La Confrérie — scellé à la cire noire • Ordre confidentiel' });
+  if (contrat.details) e.addFields({ name: '🪶 Consignes & clauses', value: contrat.details.slice(0, 1000) });
+  e.addFields({ name: '​', value: '*« Que ta lame soit sûre, et que l\'ombre te garde. »*\n— ✒️ **La Confrérie**, an 1904' });
   return e;
 }
 
@@ -685,7 +696,25 @@ async function cloturer(interaction, succes) {
   if (jc) await jc.send({ embeds: [new EmbedBuilder().setColor(succes ? 0x57F287 : 0xED4245).setTitle(`${succes ? '✅' : '💀'} Contrat ${succes ? 'réussi' : 'échoué'} — ${c.id}`).setDescription(`**${c.typeMission}** · clôturé par ${c.clôturePar}`).setFooter({ text: 'La Confrérie • Contrats' }).setTimestamp()] }).catch(() => {});
   // prévenir les agents
   for (const userId of (c.agents || [])) {
-    try { const m = await interaction.guild.members.fetch(userId).catch(() => null); if (m) await m.send({ embeds: [new EmbedBuilder().setColor(succes ? 0x57F287 : 0xED4245).setTitle(`${succes ? '✅ Mission accomplie' : '💀 Mission échouée'} — ${c.id}`).setDescription(succes ? 'Beau travail. La Confrérie n\'oublie pas les siens.' : 'La mission a échoué. On en tire les leçons.').setFooter({ text: 'La Confrérie' })] }).catch(() => {}); } catch {}
+    try {
+      const m = await interaction.guild.members.fetch(userId).catch(() => null);
+      if (m) await m.send({ embeds: [new EmbedBuilder()
+        .setColor(0xC9A66B) // parchemin
+        .setTitle(`📜 ⸺  ${succes ? 'MISSION ACCOMPLIE' : 'MISSION ÉCHOUÉE'}  ⸺ 📜`)
+        .setDescription([
+          '```',
+          '  ════════════════════════════════════════',
+          '        ✦   EN L\'AN DE GRÂCE  1904   ✦',
+          '  ════════════════════════════════════════',
+          '```',
+          `*Concernant le pacte \`${c.id}\` (${emojiType(c.typeMission)} ${c.typeMission})…*`,
+          '',
+          succes
+            ? '✒️ *Belle besogne, frère. La Confrérie n\'oublie jamais les siens — ta part te reviendra.*'
+            : '🩸 *La besogne a tourné court. On en tire les leçons, et l\'on remet l\'ouvrage sur le métier.*',
+        ].join('\n'))
+        .setFooter({ text: '✒️ La Confrérie — an 1904 • Confidentiel' })] }).catch(() => {});
+    } catch {}
   }
 }
 
