@@ -14,6 +14,14 @@ const path = require('path');
 // lien permanent (les liens cdn.discordapp.com expirent au bout de ~24h). Référencée via attachment://.
 const PARCHEMIN_IMG = 'attachment://parchemin.png';
 function parcheminFichier() { try { return new AttachmentBuilder(path.join(__dirname, 'assets', 'parchemin.png'), { name: 'parchemin.png' }); } catch { return null; } }
+// Reformulation IA façon Far West 1904 (réutilise global.reformulerRP : garde les faits/chiffres,
+// aucun anachronisme ni emoji). Repli sur le texte original si l'IA est indisponible → jamais de perte.
+async function rp1904(txt) {
+  const s = (txt || '').trim();
+  if (!s) return s;
+  try { if (typeof global.reformulerRP === 'function') { const r = await global.reformulerRP(s.slice(0, 1500)); if (r) return r; } } catch {}
+  return s;
+}
 const { loadDB, saveDB, sauvegarderSurGitHub } = require('./db');
 // Sauvegarde immédiate sur GitHub : sur Render le disque est éphémère — sans ça, un contrat créé
 // est perdu au prochain redéploiement (d'où « Contrat introuvable » au moment de valider).
@@ -554,6 +562,8 @@ async function onModalSubmit(interaction) {
     status: 'propose',
     createdAt: new Date().toISOString(),
   };
+  // Reformulation IA façon Far West 1904 du contenu narratif (objet + consignes), en parallèle
+  [contrat.objet, contrat.details] = await Promise.all([rp1904(contrat.objet), rp1904(contrat.details)]);
   db.contrats.push(contrat);
   saveDB(db); _persistNow();
   syncNotion(contrat, '🟡 Proposé');
@@ -841,6 +851,8 @@ async function onEditSubmit(interaction) {
   c.dateEcheance = parseDateFR(ech);
   c.echeanceTexte = ech || null;
   c.details = (interaction.fields.getTextInputValue('details') || '').trim();
+  // Reformulation IA façon Far West 1904 du contenu narratif modifié
+  [c.objet, c.details] = await Promise.all([rp1904(c.objet), rp1904(c.details)]);
   saveDB(db); await _persistNow();
   await rafraichirFiche(interaction.guild, c).catch(() => {});
   return interaction.editReply({ content: `✅ Contrat **${id}** mis à jour.` });
@@ -866,8 +878,9 @@ async function onAddInfoSubmit(interaction) {
   if (!c) return interaction.editReply({ content: '❌ Contrat introuvable.' });
   const autorise = isDirection(interaction.member) || (c.agents || []).includes(interaction.user.id);
   if (!autorise) return interaction.editReply({ content: '❌ Réservé à la Direction et aux agents assignés à ce contrat.' });
-  const txt = (interaction.fields.getTextInputValue('info') || '').trim();
+  let txt = (interaction.fields.getTextInputValue('info') || '').trim();
   if (!txt) return interaction.editReply({ content: '❌ Information vide.' });
+  txt = await rp1904(txt); // reformulation IA façon Far West 1904
   if (!Array.isArray(c.infos)) c.infos = [];
   c.infos.push({ texte: txt.slice(0, 500), date: new Date().toISOString(), parId: interaction.user.id, par: interaction.member?.displayName || interaction.user.username });
   saveDB(db); await _persistNow();
