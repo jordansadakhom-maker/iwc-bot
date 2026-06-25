@@ -18,11 +18,17 @@ const GESTION = ['Opérateur', 'Operateur', 'Concepteur', 'Fléau', 'fleau', 'Fo
 function estGestion(member) { try { return !!member?.roles?.cache?.some(r => GESTION.some(n => r.name.includes(n))); } catch { return false; } }
 
 const REGIONS = {
-  texas:     { label: 'Journal du Texas',     emoji: '🤠', color: 0xC0392B },
-  louisiane: { label: 'Journal de Louisiane', emoji: '⚜️', color: 0x8E44AD },
-  autre:     { label: 'Journal',              emoji: '📰', color: 0xC8A45C },
+  texas:     { label: 'Journal du Texas',     nom: 'Texas',     emoji: '🤠', color: 0xC0392B },
+  louisiane: { label: 'Journal de Louisiane', nom: 'Louisiane', emoji: '⚜️', color: 0x8E44AD },
+  autre:     { label: 'Journal',              nom: '',          emoji: '📰', color: 0xC8A45C },
 };
 const _reg = k => REGIONS[k] || REGIONS.autre;
+// Régions d'un journal (tolère l'ancien format à région unique « region »).
+function _regionsOf(src) {
+  if (Array.isArray(src?.regions) && src.regions.length) return src.regions;
+  if (src?.region) return [src.region];
+  return [];
+}
 
 function _store(db) { if (!db.journaux) db.journaux = {}; return db.journaux; }
 const _estImage = a => (a.contentType || '').startsWith('image') || /\.(png|jpe?g|webp|gif)(\?|$)/i.test(a.url || a.name || '');
@@ -30,9 +36,10 @@ const _estImage = a => (a.contentType || '').startsWith('image') || /\.(png|jpe?
 const _drafts = new Map();
 
 function _cfgRows(d) {
-  const regSel = new StringSelectMenuBuilder().setCustomId('jrn_region').setPlaceholder('Région du journal…').addOptions(
-    Object.entries(REGIONS).map(([k, v]) => ({ label: v.label, value: k, emoji: v.emoji, default: d?.region === k })),
-  );
+  const sel = _regionsOf(d);
+  const regSel = new StringSelectMenuBuilder().setCustomId('jrn_region').setPlaceholder('Région(s) du journal — tu peux en choisir plusieurs…')
+    .setMinValues(1).setMaxValues(Object.keys(REGIONS).length)
+    .addOptions(Object.entries(REGIONS).map(([k, v]) => ({ label: v.label, value: k, emoji: v.emoji, default: sel.includes(k) })));
   const roleSel = new RoleSelectMenuBuilder().setCustomId('jrn_role').setPlaceholder('👥 Rôle prévenu à chaque parution (optionnel)').setMinValues(0).setMaxValues(1);
   const btns = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('jrn_save').setLabel('Activer ce salon comme journal').setEmoji('✅').setStyle(ButtonStyle.Success),
@@ -41,13 +48,14 @@ function _cfgRows(d) {
   return [new ActionRowBuilder().addComponents(regSel), new ActionRowBuilder().addComponents(roleSel), btns];
 }
 function _cfgText(d) {
-  const r = _reg(d?.region);
+  const sel = _regionsOf(d);
+  const regTxt = sel.length ? sel.map(k => `${_reg(k).emoji} ${_reg(k).label}`).join(' · ') : '*à choisir*';
   return [
     '📰 **Configurer ce salon comme journal**',
-    `• Région : ${d?.region ? `${r.emoji} ${r.label}` : '*à choisir*'}`,
+    `• Région(s) : ${regTxt}`,
     `• Lecteurs prévenus : ${d?.roleId ? `<@&${d.roleId}>` : '*aucun*'}`,
     '',
-    'Choisis la **région** et (au choix) le **rôle à prévenir**, puis **Activer**.',
+    'Choisis **une ou plusieurs régions** et (au choix) le **rôle à prévenir**, puis **Activer**.',
     '',
     '_Forum : chaque nouvelle publication (fil) recevra une en-tête + un ping._',
     '_Salon texte : une photo postée devient une parution propre + un ping._',
@@ -56,14 +64,23 @@ function _cfgText(d) {
 
 // Embed d'une parution
 function _editionEmbed(cfg, auteur, legende, imageName) {
-  const r = _reg(cfg.region);
+  const regs = (_regionsOf(cfg).length ? _regionsOf(cfg) : ['autre']).map(_reg);
+  const color = regs[0]?.color || REGIONS.autre.color;
+  let titre;
+  if (regs.length === 1) {
+    titre = `${regs[0].emoji} ${regs[0].label.toUpperCase()}`;
+  } else {
+    const emojis = regs.map(r => r.emoji).join(' ');
+    const noms = regs.map(r => r.nom).filter(Boolean);
+    titre = noms.length ? `${emojis} JOURNAL — ${noms.join(' & ').toUpperCase()}` : `${emojis} JOURNAL`;
+  }
   let dateStr = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   dateStr = dateStr.charAt(0).toUpperCase() + dateStr.slice(1);
-  const e = new EmbedBuilder().setColor(r.color).setTitle(`${r.emoji} ${r.label.toUpperCase()}`)
+  const e = new EmbedBuilder().setColor(color).setTitle(titre)
     .setDescription(`🗓️ **${dateStr}**${legende ? `\n\n${String(legende).slice(0, 1500)}` : ''}`)
     .setFooter({ text: `Édition publiée par ${auteur}` }).setTimestamp(new Date());
   if (imageName) e.setImage(`attachment://${imageName}`);
-  return { embed: e, region: r, dateStr };
+  return { embed: e, regions: regs, dateStr };
 }
 function _pingFor(cfg) {
   return { content: cfg.roleId ? `<@&${cfg.roleId}> 📰 **Nouvelle parution !**` : '📰 **Nouvelle parution !**', allowedMentions: { roles: cfg.roleId ? [cfg.roleId] : [] } };
@@ -85,7 +102,7 @@ async function _reupload(imgs) {
 }
 
 const journauxCommands = [
-  new SlashCommandBuilder().setName('journal-installer').setDescription('📰 Déclarer CE salon comme journal (région + rôle lecteur) — Direction'),
+  new SlashCommandBuilder().setName('journal-installer').setDescription('📰 Déclarer CE salon comme journal (une ou plusieurs régions + rôle lecteur) — Direction'),
 ];
 
 async function routeInteraction(interaction) {
@@ -106,7 +123,7 @@ async function routeInteraction(interaction) {
 
     if (interaction.isStringSelectMenu() && id === 'jrn_region') {
       const d = _drafts.get(interaction.user.id); if (!d) { await interaction.update({ content: '⌛ Expiré, relance /journal-installer.', components: [] }); return true; }
-      d.region = interaction.values[0]; _drafts.set(interaction.user.id, d);
+      d.regions = interaction.values; delete d.region; _drafts.set(interaction.user.id, d);
       await interaction.update({ content: _cfgText(d), components: _cfgRows(d) }); return true;
     }
     if (interaction.isRoleSelectMenu?.() && id === 'jrn_role') {
@@ -117,11 +134,12 @@ async function routeInteraction(interaction) {
     if (interaction.isButton() && id === 'jrn_save') {
       if (!estGestion(interaction.member)) { await interaction.update({ content: '🔒 Réservé à la Direction.', components: [] }); return true; }
       const d = _drafts.get(interaction.user.id); if (!d) { await interaction.update({ content: '⌛ Expiré, relance /journal-installer.', components: [] }); return true; }
-      if (!d.region) { await interaction.update({ content: '⚠️ Choisis d\'abord une **région**.\n\n' + _cfgText(d), components: _cfgRows(d) }); return true; }
-      const db = loadDB(); _store(db)[d.channelId] = { region: d.region, roleId: d.roleId || null }; saveDB(db);
+      const regs = _regionsOf(d);
+      if (!regs.length) { await interaction.update({ content: '⚠️ Choisis d\'abord **au moins une région**.\n\n' + _cfgText(d), components: _cfgRows(d) }); return true; }
+      const db = loadDB(); _store(db)[d.channelId] = { regions: regs, roleId: d.roleId || null }; saveDB(db);
       _drafts.delete(interaction.user.id);
-      const r = _reg(d.region);
-      await interaction.update({ content: `✅ Salon activé comme **${r.emoji} ${r.label}**. ${d.roleId ? `Lecteurs prévenus : <@&${d.roleId}>.` : 'Aucun rôle prévenu.'}\n\nForum → nouvelle publication = parution automatique. Salon texte → poste une **photo**.`, components: [] }); return true;
+      const noms = regs.map(k => `${_reg(k).emoji} ${_reg(k).label}`).join(' · ');
+      await interaction.update({ content: `✅ Salon activé comme **${noms}**. ${d.roleId ? `Lecteurs prévenus : <@&${d.roleId}>.` : 'Aucun rôle prévenu.'}\n\nForum → nouvelle publication = parution automatique. Salon texte → poste une **photo**.`, components: [] }); return true;
     }
     if (interaction.isButton() && id === 'jrn_off') {
       if (!estGestion(interaction.member)) { await interaction.update({ content: '🔒 Réservé à la Direction.', components: [] }); return true; }
