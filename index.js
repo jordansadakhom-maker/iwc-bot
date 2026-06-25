@@ -2227,6 +2227,7 @@ async function autoSetup(guild) {
   medical.installerPanel?.(guild).then(() => console.log('🩺 Panneau Suivi médical installé')).catch(() => {});
   medical.installerExemple?.(guild).then(() => console.log('🩺 Exemple test d\'aptitude posté')).catch(() => {});
   inventaire.rafraichirBoardDemarrage?.(guild.client).then(() => console.log('📦 Board inventaire rafraîchi (boutons à jour)')).catch(() => {});
+  resumePhoto.installerPanneau?.(guild.client).then(() => console.log('📸 Panneau résumé-photo en place')).catch(() => {});
   _installerPanelAgenda(guild).then(() => console.log('📅 Panneau agenda installé')).catch(() => {});
   _setupComptaChannel(guild).then(() => console.log('💰 Salon comptabilité prêt')).catch(() => {});
   _majPanneauxRdvClient(guild).then(() => console.log('📨 Panneaux RDV client à jour')).catch(() => {});
