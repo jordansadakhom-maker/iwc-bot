@@ -442,6 +442,24 @@ function getAbsencesCh(guild, member) {
 
 // Archive un contrat signé/refusé dans #contrats-reponses avec un thread par contrat
 // Embed standard d'un contrat d'offre (réutilisé à l'envoi initial ET aux contre-offres)
+// Clients éligibles pour « Proposer un contrat » : membres VISITEUR ayant un nom + prénom RP,
+// hors Confrérie / membres internes (Iron Wolf).
+function _listerClientsEligibles(guild) {
+  const INTERNE = ['concepteur', 'fléau', 'fleau', 'exécuteur', 'éxécuteur', 'executeur', 'condamné', 'condamne', 'maudit', 'confrérie', 'confrerie', 'ombre', 'conseil', 'directeur', 'officier', 'agent', 'opérateur', 'operateur', 'recrue', 'iron wolf', 'fondateur'];
+  const out = [];
+  for (const m of guild.members.cache.values()) {
+    if (m.user.bot) continue;
+    const roles = m.roles.cache;
+    if (!roles.some(r => r.name.toLowerCase().includes('visiteur'))) continue;        // doit être Visiteur
+    if (roles.some(r => INTERNE.some(n => r.name.toLowerCase().includes(n)))) continue; // exclut la Confrérie / interne
+    const pseudo = (m.displayName || m.user.username || '').trim();
+    if (pseudo.split(/\s+/).filter(Boolean).length < 2) continue;                      // nom + prénom RP requis
+    out.push({ id: m.id, pseudo });
+  }
+  out.sort((a, b) => a.pseudo.localeCompare(b.pseudo));
+  return out;
+}
+
 // Parchemin générique pour les contrats client/engagement : image « texte gravé »
 // (réutilise parchemin-image, comme la Confrérie), repli sur le parchemin statique.
 let _parcheminImgMod = null; try { _parcheminImgMod = require('./parchemin-image'); } catch {}
@@ -2850,6 +2868,7 @@ function _triRowRapport(msgId, reco) {
     { key: 'carnet',  cid: 'note_rens',    label: '🕵️ Carnet' },
     { key: 'contrat', cid: 'note_contrat', label: '📜 Contrat' },
     { key: 'avis',    cid: 'note_avis',    label: '🎯 Avis de recherche' },
+    { key: 'op',      cid: 'note_op',      label: '⚙️ Lancer une opération' },
     { key: 'carte',   cid: 'note_carte',   label: '📍 Carte' },
   ];
   const row = new ActionRowBuilder();
@@ -2948,6 +2967,7 @@ client.on('messageCreate', async message => {
         new ButtonBuilder().setCustomId(`note_rens::${message.id}`).setLabel('Verser au carnet').setEmoji('🕵️').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(`note_contrat::${message.id}`).setLabel('En faire un contrat').setEmoji('📜').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(`note_avis::${message.id}`).setLabel('Avis de recherche').setEmoji('🎯').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(`note_op::${message.id}`).setLabel('Lancer une opération').setEmoji('⚙️').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(`note_carte::${message.id}`).setLabel('Ajouter à la carte').setEmoji('📍').setStyle(ButtonStyle.Secondary),
       );
       await message.reply({ content: '🗂️ **Que faire de ce rapport ?** *(Direction)*', components: [triageRow], allowedMentions: { repliedUser: false } });
@@ -3661,7 +3681,7 @@ client.on('interactionCreate', async interaction => {
     // ── Boutons du brouillon de contrat (note → contrat) ──
     if (interaction.customId.startsWith('dc_')) return _gererBoutonBrouillon(interaction);
     // ── Tri d'un rapport de terrain : carnet / contrat / avis de recherche (Direction) ──
-    if (interaction.customId.startsWith('note_rens::') || interaction.customId.startsWith('note_contrat::') || interaction.customId.startsWith('note_avis::') || interaction.customId.startsWith('note_carte::')) {
+    if (interaction.customId.startsWith('note_rens::') || interaction.customId.startsWith('note_contrat::') || interaction.customId.startsWith('note_avis::') || interaction.customId.startsWith('note_carte::') || interaction.customId.startsWith('note_op::')) {
       return _gererTriageNote(interaction);
     }
     if (interaction.customId.startsWith('engagement_signer_'))  return _ouvrirModalEngagement(interaction);
@@ -4524,19 +4544,26 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     return;
   }
 
-  // Après choix du type (offre) -> demander QUI est le client (membre réel → le MP fonctionne)
+  // Après choix du type (offre) -> demander QUI est le client (visiteurs avec nom+prénom RP, hors Confrérie)
   if (interaction.isStringSelectMenu() && interaction.customId === 'contrat_type_offre') {
     const typeMission = interaction.values[0];
-    const userSel = new UserSelectMenuBuilder()
+    try { await interaction.guild.members.fetch(); } catch {} // s'assurer que tous les visiteurs sont en cache
+    const clients = _listerClientsEligibles(interaction.guild);
+    if (!clients.length) {
+      await interaction.update({ content: `📤 **Type :** ${typeMission}\n\n⚠️ Aucun **visiteur avec un nom + prénom RP** trouvé. Le client doit d'abord renseigner son identité RP (et porter le rôle Visiteur). La Confrérie est exclue de cette liste.`, components: [] }).catch(() => {});
+      return;
+    }
+    const sel = new StringSelectMenuBuilder()
       .setCustomId(`contrat_offre_user::${typeMission}`)
-      .setPlaceholder('👤 Choisis le client (le membre qui recevra le contrat)')
-      .setMinValues(1).setMaxValues(1);
-    await interaction.update({ content: `📤 **Type :** ${typeMission}\n\n👤 **À qui envoie-t-on le contrat ?**\nChoisis le membre client ci-dessous — il recevra le contrat **en message privé** avec les boutons pour répondre.`, components: [new ActionRowBuilder().addComponents(userSel)] }).catch(() => {});
+      .setPlaceholder('👤 Choisis le client (visiteur)')
+      .addOptions(clients.slice(0, 25).map(c => ({ label: c.pseudo.slice(0, 100), value: c.id })));
+    const extra = clients.length > 25 ? `\n*(${clients.length} visiteurs éligibles — les 25 premiers sont listés.)*` : '';
+    await interaction.update({ content: `📤 **Type :** ${typeMission}\n\n👤 **À qui envoie-t-on le contrat ?**\nSeuls les **visiteurs avec un nom + prénom RP** apparaissent (la **Confrérie est exclue**). Il recevra le contrat **en MP**.${extra}`, components: [new ActionRowBuilder().addComponents(sel)] }).catch(() => {});
     return;
   }
 
   // Choix du client fait -> ouvrir le formulaire (avec échéance dédiée + « prime proposée »)
-  if (interaction.isUserSelectMenu?.() && interaction.customId.startsWith('contrat_offre_user::')) {
+  if (interaction.isStringSelectMenu?.() && interaction.customId.startsWith('contrat_offre_user::')) {
     const typeMission = interaction.customId.split('::')[1] || '';
     const clientId = interaction.values[0];
     const modal = new ModalBuilder().setCustomId(`contrat_offre_modal::${typeMission}::${clientId}`).setTitle('📤 Nos conditions — Contrat client');
@@ -9680,6 +9707,12 @@ async function _gererTriageNote(interaction) {
     }
     try { return await traque.ouvrirModalAvis(interaction, { cible, signalement }); }
     catch (e) { console.log('⚠️ note→avis:', e.message); return interaction.reply({ content: '⚠️ Impossible d\'ouvrir le formulaire d\'avis.', flags: MessageFlags.Ephemeral }).catch(() => {}); }
+  }
+
+  // ── ⚙️ Lancer une opération : démarre le flux de création (reply = première réponse) ──
+  if (action === 'note_op') {
+    try { return await operations.demarrerCreation(interaction); }
+    catch (e) { console.log('⚠️ note→opération:', e.message); return interaction.reply({ content: '⚠️ Impossible de lancer la création d\'opération.', flags: MessageFlags.Ephemeral }).catch(() => {}); }
   }
 
   // ── 📍 Ajouter à la carte : ouvrir l'ajout d'un lieu pré-rempli (reply = première réponse) ──

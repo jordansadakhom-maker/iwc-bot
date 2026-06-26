@@ -435,4 +435,10 @@ async function routeInteraction(interaction) {
   return false;
 }
 
-module.exports = { init, routeInteraction, postPanel, operationsCommands, refreshOpById };
+// Démarre le flux de création d'opération (réutilisé depuis le tri des notes de terrain).
+async function demarrerCreation(interaction) {
+  if (!isDirection(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return; }
+  await interaction.reply({ content: '🎯 **Nouvelle opération** — étape 1/2 : le type de mission.', components: [new ActionRowBuilder().addComponents(_menuType())], flags: MessageFlags.Ephemeral }).catch(() => {});
+}
+
+module.exports = { init, routeInteraction, postPanel, operationsCommands, refreshOpById, demarrerCreation };
