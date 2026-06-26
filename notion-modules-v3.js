@@ -612,26 +612,85 @@ async function handleInformateurRapportButton(interaction) {
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cible').setLabel('Cible / Lieu').setStyle(TextInputStyle.Short).setPlaceholder('Ex: Commissariat de Paleto Bay, Famille Moreau...').setRequired(true)),
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('information').setLabel('Information collectée').setStyle(TextInputStyle.Paragraph).setPlaceholder('Décris ce que tu as vu / entendu / appris...').setRequired(true).setMaxLength(4000)),
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('fiabilite').setLabel('Fiabilité (Confirmée / Non confirmée)').setStyle(TextInputStyle.Short).setPlaceholder('Confirmée  ou  Non confirmée').setRequired(true)),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('quand').setLabel('Quand / contexte (optionnel)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(200).setPlaceholder('Ex: hier soir vers 23h, près de la rivière…')),
   );
   await interaction.showModal(modal);
 }
+// Images (png/jpg/gif/webp) d'un message Discord → tableau d'URLs.
+function _imagesDe(message) {
+  try { return [...message.attachments.values()].filter(a => (a.contentType || '').startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(a.name || '')).map(a => a.url); } catch { return []; }
+}
+// Embed d'un rapport (réutilisé à la création et lors de l'ajout de photos).
+function _rapportEmbed(r) {
+  const estConfirmee = String(r.fiabilite || '').toLowerCase().includes('confirm') && !String(r.fiabilite || '').toLowerCase().includes('non');
+  const e = new EmbedBuilder().setColor(0xFFA500).setTitle(`🆕 Rapport \`${r.id}\` — À vérifier`)
+    .setDescription(`📝 **Information**\n${(r.info || '').slice(0, 4000)}`)
+    .addFields(
+      { name: '🕵️ Source', value: (r.source || '—').slice(0, 256), inline: true },
+      { name: '🎯 Cible / Lieu', value: (r.cible || '—').slice(0, 256), inline: true },
+      { name: '📋 Fiabilité déclarée', value: `${estConfirmee ? '✅' : '⚠️'} ${r.fiabilite || '—'}`.slice(0, 256), inline: true },
+    );
+  if (r.quand) e.addFields({ name: '🕐 Quand / contexte', value: String(r.quand).slice(0, 256), inline: true });
+  e.addFields(
+    { name: '👤 Rapporteur', value: r.rapporteurId ? `<@${r.rapporteurId}>` : (r.rapporteur || '—'), inline: true },
+    { name: '📌 Statut', value: '🆕 En attente de validation Direction', inline: true },
+  );
+  const photos = Array.isArray(r.photos) ? r.photos : [];
+  if (photos.length) { e.setImage(photos[0]); e.addFields({ name: '📷 Photos', value: `${photos.length} pièce(s) jointe(s)` + (photos.length > 1 ? ' — ' + photos.slice(1).map((u, i) => `[#${i + 2}](${u})`).join(' ') : ''), inline: false }); }
+  return e.setFooter({ text: 'IWC • Réseau Informateurs — Confidentiel' }).setTimestamp(new Date(r.createdAt || Date.now()));
+}
+function _rapportBoutons(id) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`info_confirmer_${id}`).setLabel('✅ Confirmer').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`info_infirmer_${id}`).setLabel('❌ Infirmer').setStyle(ButtonStyle.Danger),
+  );
+}
+// Poste le rapport + ouvre un fil « photos » et mémorise les identifiants.
+async function _posterRapport(guild, rapport) {
+  const infosCh = getCh(guild, 'informateurs');
+  if (!infosCh) return;
+  const sent = await infosCh.send({ embeds: [_rapportEmbed(rapport)], components: [_rapportBoutons(rapport.id)] }).catch(() => null);
+  if (!sent) return;
+  rapport.messageId = sent.id; rapport.channelId = infosCh.id;
+  try {
+    const th = await sent.startThread({ name: `📷 ${rapport.id} — photos & précisions`.slice(0, 100), autoArchiveDuration: 10080 }).catch(() => null);
+    if (th) { rapport.threadId = th.id; await th.send('📷 **Ajoute ici tes photos / preuves** (glisse les images dans ce fil) — elles seront rattachées au rapport automatiquement. Tu peux aussi écrire des précisions.').catch(() => {}); }
+  } catch {}
+  const db = loadDB(); const r = (db.informateurs || []).find(x => x.id === rapport.id); if (r) { Object.assign(r, { messageId: rapport.messageId, channelId: rapport.channelId, threadId: rapport.threadId }); saveDB(db); }
+}
+// Rattache les photos postées dans le fil d'un rapport.
+async function _attacherPhotoRapport(message) {
+  try {
+    const imgs = _imagesDe(message);
+    if (!imgs.length) return;
+    const db = loadDB();
+    const r = (db.informateurs || []).find(x => x.threadId && x.threadId === message.channel.id);
+    if (!r) return;
+    r.photos = Array.isArray(r.photos) ? r.photos : [];
+    r.photos.push(...imgs);
+    saveDB(db); await _persistNow();
+    // met à jour l'embed du rapport
+    try {
+      const ch = await message.guild.channels.fetch(r.channelId).catch(() => null);
+      const msg = ch && r.messageId ? await ch.messages.fetch(r.messageId).catch(() => null) : null;
+      if (msg) await msg.edit({ embeds: [_rapportEmbed(r)], components: [_rapportBoutons(r.id)] }).catch(() => {});
+    } catch {}
+    await message.react('📎').catch(() => {});
+    await message.channel.send(`✅ ${imgs.length} photo(s) ajoutée(s) au rapport \`${r.id}\`.`).then(m => setTimeout(() => m.delete().catch(() => {}), 6000)).catch(() => {});
+  } catch (e) { console.log('⚠️ _attacherPhotoRapport:', e.message); }
+}
+
 async function handleInformateurModal(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const source = interaction.fields.getTextInputValue('source'); const cible = interaction.fields.getTextInputValue('cible'); const information = interaction.fields.getTextInputValue('information');
   const fiabiliteRaw = interaction.fields.getTextInputValue('fiabilite').toLowerCase(); const estConfirmee = fiabiliteRaw.includes('confirm') && !fiabiliteRaw.includes('non'); const fiabilite = estConfirmee ? 'Confirmée' : 'Non confirmée';
+  const quand = (interaction.fields.getTextInputValue('quand') || '').trim();
   const db = loadDB(); if (!db.informateurs) db.informateurs = [];
-  const rapport = { id: `INFO-${Date.now().toString().slice(-5)}`, source, cible, info: information, fiabilite, statut: 'nouveau', rapporteurId: interaction.user.id, rapporteur: interaction.user.username, createdAt: new Date().toISOString() };
+  const rapport = { id: `INFO-${Date.now().toString().slice(-5)}`, source, cible, info: information, fiabilite, quand, photos: [], statut: 'nouveau', rapporteurId: interaction.user.id, rapporteur: interaction.user.username, createdAt: new Date().toISOString() };
   db.informateurs.push(rapport); saveDB(db); await _persistNow();
   await _archiverRapportNotion(rapport);
-  const infosCh = getCh(interaction.guild, 'informateurs');
-  if (infosCh) await infosCh.send({
-    embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle(`🆕 Rapport \`${rapport.id}\` — À vérifier`).setDescription(`📝 **Information**\n${information.slice(0, 4000)}`).addFields({ name: '🕵️ Source', value: source.slice(0, 256), inline: true }, { name: '🎯 Cible / Lieu', value: cible.slice(0, 256), inline: true }, { name: '📋 Fiabilité déclarée', value: `${estConfirmee ? '✅' : '⚠️'} ${fiabilite}`, inline: true }, { name: '👤 Rapporteur', value: `<@${interaction.user.id}>`, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: '📌 Statut', value: '🆕 En attente de validation Direction', inline: false }).setFooter({ text: 'IWC • Réseau Informateurs — Confidentiel' }).setTimestamp()],
-    components: [new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`info_confirmer_${rapport.id}`).setLabel('✅ Confirmer').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`info_infirmer_${rapport.id}`).setLabel('❌ Infirmer').setStyle(ButtonStyle.Danger),
-    )],
-  }).catch(() => {});
-  await interaction.editReply({ content: `✅ Rapport \`${rapport.id}\` soumis.\nLa Direction va le vérifier avant toute action.` });
+  await _posterRapport(interaction.guild, rapport);
+  await interaction.editReply({ content: `✅ Rapport \`${rapport.id}\` soumis.\n📷 Pour ajouter des **photos/preuves** : ouvre le fil **« ${rapport.id} — photos »** sous le rapport et glisse tes images dedans.\nLa Direction va le vérifier avant toute action.` });
 }
 async function handleInformateurHistorique(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -641,29 +700,24 @@ async function handleInformateurHistorique(interaction) {
 }
 async function handleInformateurMessage(message) {
   if (message.author.bot || !message.guild) return;
+  // Message dans un fil de rapport → on rattache les photos au rapport.
+  if (message.channel?.isThread?.()) { await _attacherPhotoRapport(message); return; }
   const lines = message.content.split('\n');
   const get = k => { const l = lines.find(l => l.toUpperCase().startsWith(k.toUpperCase())); return l ? l.split(':').slice(1).join(':').trim() : null; };
   const source = get('SOURCE'); const cible = get('CIBLE') || get('CIBLE / LIEU') || get('CIBLE/LIEU'); const info = get('INFORMATION') || get('INFO'); const fiabilite = get('FIABILITÉ') || get('FIABILITE');
+  const photos = _imagesDe(message);
+  // Un simple dépôt de photo (sans texte de rapport) → on ignore le parsing, on garde la réaction.
   if (!source && !info) { await message.react('👁️').catch(() => {}); return; }
   await message.react('✅').catch(() => {});
-  const estConfirmee = fiabilite?.toLowerCase().includes('confirm') && !fiabilite?.toLowerCase().includes('non');
   // Retranscription RP du renseignement (même style que le salon de reformulation)
   let infoTxt = info || message.content.slice(0, 500);
   try { if (typeof global.reformulerRP === 'function' && infoTxt) { const rp = await global.reformulerRP(infoTxt); if (rp) infoTxt = rp; } } catch {}
   const db = loadDB(); if (!db.informateurs) db.informateurs = [];
-  const rapport = { id: `INFO-${Date.now().toString().slice(-5)}`, source: source || '—', cible: cible || '—', info: infoTxt, fiabilite: fiabilite || '—', statut: 'nouveau', rapporteurId: message.author.id, rapporteur: message.author.username, createdAt: new Date().toISOString() };
+  const rapport = { id: `INFO-${Date.now().toString().slice(-5)}`, source: source || '—', cible: cible || '—', info: infoTxt, fiabilite: fiabilite || '—', photos, statut: 'nouveau', rapporteurId: message.author.id, rapporteur: message.author.username, createdAt: new Date().toISOString() };
   db.informateurs.push(rapport); saveDB(db); await _persistNow();
   await _archiverRapportNotion(rapport);
-  // Poster avec boutons de validation Direction
-  const infosCh2 = getCh(message.guild, 'informateurs');
-  if (infosCh2) await infosCh2.send({
-    embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle(`🆕 Rapport \`${rapport.id}\` — À vérifier`).addFields({ name: '🕵️ Source', value: rapport.source, inline: true }, { name: '🎯 Cible / Lieu', value: rapport.cible, inline: true }, { name: '📋 Fiabilité déclarée', value: rapport.fiabilite, inline: true }, { name: '📝 Information', value: rapport.info.slice(0, 800) }, { name: '👤 Rapporteur', value: `<@${message.author.id}>`, inline: true }, { name: '📌 Statut', value: '🆕 En attente de validation', inline: true }).setFooter({ text: 'IWC • Réseau Informateurs — Confidentiel' }).setTimestamp()],
-    components: [new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`info_confirmer_${rapport.id}`).setLabel('✅ Confirmer').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`info_infirmer_${rapport.id}`).setLabel('❌ Infirmer').setStyle(ButtonStyle.Danger),
-    )],
-  }).catch(() => {});
-  await message.reply({ embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle(`🆕 \`${rapport.id}\` enregistré`).setDescription('Rapport soumis. La Direction va le vérifier.').setFooter({ text: 'IWC • Informateurs — Confidentiel' })], allowedMentions: { repliedUser: false } }).then(m => setTimeout(() => m.delete().catch(() => {}), 8000)).catch(() => {});
+  await _posterRapport(message.guild, rapport);
+  await message.reply({ embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle(`🆕 \`${rapport.id}\` enregistré`).setDescription(`Rapport soumis. La Direction va le vérifier.${photos.length ? `\n📷 ${photos.length} photo(s) jointe(s).` : '\n📷 Tu peux ajouter des photos dans le fil du rapport.'}`).setFooter({ text: 'IWC • Informateurs — Confidentiel' })], allowedMentions: { repliedUser: false } }).then(m => setTimeout(() => m.delete().catch(() => {}), 8000)).catch(() => {});
 }
 async function _archiverRapportNotion(rapport) {
   if (!process.env.NOTION_TOKEN || !NOTION_INFOS_DB) return;

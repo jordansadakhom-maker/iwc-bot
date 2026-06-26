@@ -3562,9 +3562,9 @@ client.on('messageCreate', async message => {
     await sendLog(guild, 'ABSENCE', { userId: message.author.id, username: message.author.username }); return;
   }
 
-  // #informateurs avec ID hardcodé
+  // #informateurs avec ID hardcodé (salon + fils des rapports pour les photos)
   const infosCh = guild.channels.cache.get(SALON_HARDCODED.INFORMATEURS) || getChById(guild, 'INFORMATEURS', 'informateurs');
-  if (infosCh && message.channel.id === infosCh.id) { await notionV3.handleInformateurMessage?.(message); return; }
+  if (infosCh && (message.channel.id === infosCh.id || message.channel.parentId === infosCh.id)) { await notionV3.handleInformateurMessage?.(message); return; }
 
   const ficheCh = getChById(guild, 'FICHES_PERSONNAGES', 'fiches-personnages', 'fiches-perso', 'fiches');
   if (ficheCh && message.channel.id === ficheCh.id) { await notionModules.handleFichePersonnage?.(message); return; }
