@@ -381,6 +381,29 @@ async function routeInteraction(interaction) {
       return true;
     }
 
+    // ── Validation d'une fiche contact proposée (depuis un contrat) ──
+    if (interaction.isButton?.() && (interaction.customId.startsWith("rep_pcont_ok::") || interaction.customId.startsWith("rep_pcont_no::"))) {
+      if (!estDirection(interaction.member)) { await interaction.reply({ content: "🔒 Réservé à la Direction.", flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const id = interaction.customId.split("::")[1];
+      const ignore = interaction.customId.startsWith("rep_pcont_no::");
+      const db = loadDB(); const rep = _ensure(db);
+      const prop = rep.propositions ? rep.propositions[id] : null;
+      if (ignore) {
+        if (rep.propositions) delete rep.propositions[id];
+        persist(db);
+        await interaction.update({ content: "❌ Fiche **non créée** (ignorée).", embeds: [], components: [] }).catch(() => {});
+        return true;
+      }
+      if (!prop) { await interaction.update({ content: "⏳ Proposition expirée.", embeds: [], components: [] }).catch(() => {}); return true; }
+      const nc = await ajouterContactAuto(interaction.guild, { nom: prop.nom, relation: "Affaire / professionnelle", notes: prop.notes, creeParNom: prop.creeParNom }).catch(() => null);
+      const db2 = loadDB(); const rep2 = _ensure(db2);
+      if (rep2.propositions) delete rep2.propositions[id];
+      if (nc) { const cc = (db2.contrats || []).find(x => String(x.id) === String(prop.contratId)); if (cc) cc.contactId = nc.id; }
+      persist(db2);
+      await interaction.update({ content: nc ? `✅ Fiche contact **${nc.nom}** créée dans le répertoire.` : "⚠️ Création impossible.", embeds: [], components: [] }).catch(() => {});
+      return true;
+    }
+
     // ── Bouton Ajouter ──
     if (interaction.isButton?.() && interaction.customId === "rep_add") {
       await interaction.showModal(_formModal("repm::add", "➕ Nouveau contact")).catch(() => {});
@@ -851,4 +874,44 @@ async function ajouterContactAuto(guild, data) {
     return contact;
   } catch { return null; }
 }
-module.exports = { repertoireCommands, routeInteraction, installerPanelContact, onMessage, traiterRapportTerrain, listerContacts, getContact, rafraichirFicheContact, ajouterContactAuto };
+// Propose (au lieu de créer directement) une fiche contact à partir d'un contrat :
+// poste un message à VALIDER par la Direction. La fiche n'est créée qu'après confirmation.
+async function proposerContactContrat(guild, contrat) {
+  try {
+    const db = loadDB(); const rep = _ensure(db);
+    const nom = String(contrat.clientNom || '').trim();
+    if (!nom || _norm(nom).length < 2) return;
+    if ((rep.contacts || []).some(c => _norm(c.nom) === _norm(nom))) return;   // déjà fiché
+    if (!rep.propositions) rep.propositions = {};
+    if (rep.propositions[contrat.id]) return;                                   // déjà proposé
+    const notes = [
+      `Client de la Compagnie (proposé via le contrat ${contrat.id}).`,
+      `Objet : ${contrat.objet || '—'}`,
+      `Rémunération : ${contrat.remuneration || contrat.prime || '—'}`,
+      contrat.echeanceTexte ? `Échéance : ${contrat.echeanceTexte}` : '',
+    ].filter(Boolean).join('\n');
+    rep.propositions[contrat.id] = { nom, notes, creeParNom: contrat.emetteurIC || contrat.emetteurNom || 'Secrétariat', contratId: contrat.id, at: Date.now() };
+    persist(db);
+    let ch = guild.channels.cache.get(SALON_PANEL_CONTACT);
+    try { ch = await guild.channels.fetch(SALON_PANEL_CONTACT) || ch; } catch {}
+    if (!ch?.send) ch = guild.channels.cache.get(rep.channelId) || null;
+    if (!ch?.send) return;
+    const e = new EmbedBuilder().setColor(0xC9A66B)
+      .setTitle('📇 Fiche contact à valider')
+      .setDescription(`Un contrat vient d'être établi avec **${nom}**.\nVeux-tu **créer sa fiche** dans le répertoire ?\n\n*N'ajoute au carnet que les vrais contacts (télégramme, nom/prénom, métier, relations…).*`)
+      .addFields(
+        { name: '👤 Nom / prénom', value: nom, inline: true },
+        { name: '🤝 Relation', value: 'Affaire / professionnelle', inline: true },
+        { name: '📝 Infos du contrat', value: notes.slice(0, 1000), inline: false },
+      )
+      .setFooter({ text: `Contrat ${contrat.id} · à valider par la Direction` });
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`rep_pcont_ok::${contrat.id}`).setLabel('Créer la fiche').setEmoji('✅').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`rep_pcont_no::${contrat.id}`).setLabel('Ignorer').setEmoji('❌').setStyle(ButtonStyle.Secondary),
+    );
+    const m = await ch.send({ embeds: [e], components: [row] }).catch(() => null);
+    if (m) { const d2 = loadDB(); const r2 = _ensure(d2); if (r2.propositions?.[contrat.id]) { r2.propositions[contrat.id].msgId = m.id; r2.propositions[contrat.id].channelId = ch.id; persist(d2); } }
+  } catch (e) { console.log('⚠️ proposerContactContrat:', e.message); }
+}
+
+module.exports = { repertoireCommands, routeInteraction, installerPanelContact, onMessage, traiterRapportTerrain, listerContacts, getContact, rafraichirFicheContact, ajouterContactAuto, proposerContactContrat };

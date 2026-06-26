@@ -4645,15 +4645,8 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
       const cExist = (loadDB().repertoire?.contacts || []).find(c => _normNom(c.nom) === _normNom(contrat.clientNom));
       if (cExist) { const dbL = loadDB(); const cc = (dbL.contrats || []).find(x => x.id === contrat.id); if (cc) { cc.contactId = cExist.id; saveDB(dbL); } repertoire.rafraichirFicheContact?.(guild, cExist.id).catch(() => {}); }
       else {
-        const notesAuto = [
-          `Client de la Compagnie (fiche créée automatiquement via un contrat).`,
-          `Premier contrat : ${contrat.id} — ${contrat.objet || '—'}`,
-          `Rémunération : ${contrat.remuneration || contrat.prime || '—'}`,
-          contrat.echeanceTexte ? `Échéance : ${contrat.echeanceTexte}` : '',
-          contrat.details ? `Détails : ${String(contrat.details).slice(0, 200)}` : '',
-        ].filter(Boolean).join('\n');
-        const nc = await repertoire.ajouterContactAuto?.(guild, { nom: contrat.clientNom, relation: 'Affaire / professionnelle', secteur: '', metier: '', notes: notesAuto, creeParNom: contrat.emetteurIC || contrat.emetteurNom || 'Secrétariat' });
-        if (nc) { const dbL = loadDB(); const cc = (dbL.contrats || []).find(x => x.id === contrat.id); if (cc) { cc.contactId = nc.id; saveDB(dbL); } }
+        // Pas de création automatique : on PROPOSE la fiche, la Direction valide avant qu'elle entre au répertoire.
+        repertoire.proposerContactContrat?.(guild, contrat).catch(() => {});
       }
     } catch {}
     await interaction.editReply({ content: dmOk ? `✅ Contrat **${contratId}** envoyé au client en message privé (avec boutons Accepter/Refuser).` : `✅ Contrat **${contratId}** posté dans #contrats (MP du client fermés).` }).catch(() => {});
