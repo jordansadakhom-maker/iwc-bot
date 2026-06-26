@@ -620,6 +620,34 @@ async function handleInformateurRapportButton(interaction) {
 function _imagesDe(message) {
   try { return [...message.attachments.values()].filter(a => (a.contentType || '').startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(a.name || '')).map(a => a.url); } catch { return []; }
 }
+// 🔍 Analyse IA d'une photo : courte description utile au renseignement (ou null).
+async function _decrirePhoto(url) {
+  const apiKey = process.env.ANTHROPIC_API_KEY; if (!apiKey || !url) return null;
+  try {
+    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 12000);
+    const r = await fetch(url, { signal: ctrl.signal }).catch(() => null); clearTimeout(t);
+    if (!r || !r.ok) return null;
+    const buf = Buffer.from(await r.arrayBuffer());
+    let mt = (r.headers.get('content-type') || 'image/png').split(';')[0].trim().replace('image/jpg', 'image/jpeg');
+    if (!/^image\/(png|jpeg|gif|webp)$/.test(mt)) mt = 'image/png';
+    const prompt = "Tu observes une PHOTO jointe à un rapport d'informateur (univers western, ~1904). En UNE à DEUX phrases en français, décris ce qui est visible et UTILE pour le renseignement : personnes (nombre, tenue, armes), lieu/bâtiment, chevaux/véhicules, indices. Reste factuel, n'invente rien. Si rien d'exploitable, réponds exactement \"RIEN\".";
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 300, messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: mt, data: buf.toString('base64') } }, { type: 'text', text: prompt }] }] }),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const txt = (data?.content || []).filter(c => c.type === 'text').map(c => c.text).join('').trim();
+    if (!txt || /^RIEN\.?$/i.test(txt)) return null;
+    return txt.slice(0, 400);
+  } catch (e) { console.log('⚠️ _decrirePhoto:', e.message); return null; }
+}
+async function _analyserPhotos(urls) {
+  const out = [];
+  for (const u of (urls || []).slice(0, 4)) { const d = await _decrirePhoto(u); if (d) out.push(d); }
+  return out;
+}
 // Embed d'un rapport (réutilisé à la création et lors de l'ajout de photos).
 function _rapportEmbed(r) {
   const estConfirmee = String(r.fiabilite || '').toLowerCase().includes('confirm') && !String(r.fiabilite || '').toLowerCase().includes('non');
@@ -637,6 +665,7 @@ function _rapportEmbed(r) {
   );
   const photos = Array.isArray(r.photos) ? r.photos : [];
   if (photos.length) { e.setImage(photos[0]); e.addFields({ name: '📷 Photos', value: `${photos.length} pièce(s) jointe(s)` + (photos.length > 1 ? ' — ' + photos.slice(1).map((u, i) => `[#${i + 2}](${u})`).join(' ') : ''), inline: false }); }
+  if (Array.isArray(r.analysesPhotos) && r.analysesPhotos.length) { e.addFields({ name: '🔍 Analyse IA des photos', value: r.analysesPhotos.map(d => `• ${d}`).join('\n').slice(0, 1024), inline: false }); }
   return e.setFooter({ text: 'IWC • Réseau Informateurs — Confidentiel' }).setTimestamp(new Date(r.createdAt || Date.now()));
 }
 function _rapportBoutons(id) {
@@ -669,6 +698,10 @@ async function _attacherPhotoRapport(message) {
     r.photos = Array.isArray(r.photos) ? r.photos : [];
     r.photos.push(...imgs);
     saveDB(db); await _persistNow();
+    await message.react('🔍').catch(() => {});
+    // 🔍 Analyse IA des nouvelles photos
+    const desc = await _analyserPhotos(imgs);
+    if (desc.length) { const db2 = loadDB(); const r2 = (db2.informateurs || []).find(x => x.id === r.id); if (r2) { r2.analysesPhotos = Array.isArray(r2.analysesPhotos) ? r2.analysesPhotos : []; r2.analysesPhotos.push(...desc); saveDB(db2); await _persistNow(); Object.assign(r, { analysesPhotos: r2.analysesPhotos }); } }
     // met à jour l'embed du rapport
     try {
       const ch = await message.guild.channels.fetch(r.channelId).catch(() => null);
@@ -676,7 +709,7 @@ async function _attacherPhotoRapport(message) {
       if (msg) await msg.edit({ embeds: [_rapportEmbed(r)], components: [_rapportBoutons(r.id)] }).catch(() => {});
     } catch {}
     await message.react('📎').catch(() => {});
-    await message.channel.send(`✅ ${imgs.length} photo(s) ajoutée(s) au rapport \`${r.id}\`.`).then(m => setTimeout(() => m.delete().catch(() => {}), 6000)).catch(() => {});
+    await message.channel.send(`✅ ${imgs.length} photo(s) ajoutée(s) au rapport \`${r.id}\`.${desc.length ? `\n🔍 ${desc.join(' · ').slice(0, 800)}` : ''}`).then(m => setTimeout(() => m.delete().catch(() => {}), 12000)).catch(() => {});
   } catch (e) { console.log('⚠️ _attacherPhotoRapport:', e.message); }
 }
 
@@ -713,7 +746,8 @@ async function handleInformateurMessage(message) {
   let infoTxt = info || message.content.slice(0, 500);
   try { if (typeof global.reformulerRP === 'function' && infoTxt) { const rp = await global.reformulerRP(infoTxt); if (rp) infoTxt = rp; } } catch {}
   const db = loadDB(); if (!db.informateurs) db.informateurs = [];
-  const rapport = { id: `INFO-${Date.now().toString().slice(-5)}`, source: source || '—', cible: cible || '—', info: infoTxt, fiabilite: fiabilite || '—', photos, statut: 'nouveau', rapporteurId: message.author.id, rapporteur: message.author.username, createdAt: new Date().toISOString() };
+  const rapport = { id: `INFO-${Date.now().toString().slice(-5)}`, source: source || '—', cible: cible || '—', info: infoTxt, fiabilite: fiabilite || '—', photos, analysesPhotos: [], statut: 'nouveau', rapporteurId: message.author.id, rapporteur: message.author.username, createdAt: new Date().toISOString() };
+  if (photos.length) { try { rapport.analysesPhotos = await _analyserPhotos(photos); } catch {} } // 🔍 analyse IA des photos jointes
   db.informateurs.push(rapport); saveDB(db); await _persistNow();
   await _archiverRapportNotion(rapport);
   await _posterRapport(message.guild, rapport);
