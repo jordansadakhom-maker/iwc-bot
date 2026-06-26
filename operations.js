@@ -71,6 +71,7 @@ const TYPES = {
   esc:   { label: '🛡️ Escorte / convoi',            pole: 'legal' },
   pro:   { label: '💂 Protection rapprochée',        pole: 'legal' },
   pat:   { label: '🐎 Patrouille / reconnaissance',  pole: 'legal' },
+  surv:  { label: '👁️ Surveillance / Filature',      pole: 'legal' },
   secz:  { label: '🏰 Sécurisation de zone',         pole: 'legal' },
   prime: { label: '🎯 Chasse à la prime (mandat)',   pole: 'legal' },
   extr:  { label: '🔥 Extraction / sauvetage',       pole: 'legal' },
