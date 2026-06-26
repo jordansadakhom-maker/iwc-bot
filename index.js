@@ -12,7 +12,7 @@ const cron = require('node-cron');
 
 const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub } = require('./db');
 // Version du bot (sert au /version ET à la génération auto des patch notes)
-const BOT_VERSION = '8.0 (25 juin — opérations par étapes : un contrat validé ouvre une opération catégorisée (Repérage → Plan → Équipe → Exécution → Bilan), étapes validables avec photos, dossier .md auto)';
+const BOT_VERSION = '9.0 (26 juin — opérations bouclées (prime→coffre + compte-rendu RP + /op suivi), wanted enrichi (prime auto aux chasseurs, relance, carte, filtres), renseignement IA, journal-photo par région + alertes Confrérie, parchemin client/engagement, fix candidatures & inventaire)';
 const { initPapiers, papiersCommands } = require('./papiers');
 const securite = require('./securite');
 const securitePlus = require('./securite-plus');
@@ -6989,28 +6989,37 @@ async function _handlePatchDeploy(interaction) {
   const embed1 = new EmbedBuilder()
     .setColor(0xC9A227)
     .setAuthor({ name: 'Iron Wolf Company \u00b7 IWC Setup', iconURL: interaction.guild.iconURL() || undefined })
-    .setTitle('\ud83d\uDC3A IWC Bot \u2014 Mise \u00e0 jour \u00b7 Version 8.0')
-    .setDescription('*D\u00e9ploy\u00e9 le **' + dateStr + '** \u2014 Les contrats d\u00e9clenchent d\u00e9sormais de vraies op\u00e9rations, pr\u00e9par\u00e9es \u00e9tape par \u00e9tape.*')
+    .setTitle('\ud83d\uDC3A IWC Bot \u2014 Mise \u00e0 jour \u00b7 Version 9.0')
+    .setDescription('*D\u00e9ploy\u00e9 le **' + dateStr + '** \u2014 Op\u00e9rations boucl\u00e9es de bout en bout, wanted enrichi, renseignement plus intelligent.*')
     .addFields(
-      { name: '\uD83C\udfac OP\u00c9RATIONS PAR \u00c9TAPES (NOUVEAU)', value: '\u2192 Quand un **contrat est valid\u00e9/sign\u00e9** (Confr\u00e9rie **ou** client/employeur), une **op\u00e9ration s\'ouvre automatiquement** dans le salon des op\u00e9rations\n\u2192 Elle est **cat\u00e9goris\u00e9e** d\'apr\u00e8s le type de mission du contrat\n\u2192 Un **fil d\u00e9di\u00e9** est cr\u00e9\u00e9 avec un panneau de pr\u00e9paration', inline: false },
-      { name: '\ud83e\ude9c 5 \u00c9TAPES ADAPT\u00c9ES AU CONTRAT', value: '\u2192 **Chaque type de contrat a son propre sc\u00e9nario** : Contrebande, Sabotage, Vol organis\u00e9, \u00c9limination, Extorsion, Espionnage, Protection, Chasseur de primes, R\u00e9cup\u00e9ration de dette\u2026 (+ mod\u00e8le g\u00e9n\u00e9rique)\n\u2192 Ex. Vol : *Rep\u00e9rage \u2192 Plan du coup \u2192 \u00c9quipe \u2192 Ex\u00e9cution \u2192 Partage & \u00e9coulement*\n\u2192 Chaque \u00e9tape se **remplit** (champs adapt\u00e9s) puis se **valide** (Direction), **dans l\'ordre**', inline: false },
+      { name: '\uD83C\udfac OP\u00c9RATIONS PAR \u00c9TAPES', value: '\u2192 Tout **contrat valid\u00e9/sign\u00e9** (Confr\u00e9rie **ou** client/employeur) ouvre une **op\u00e9ration** dans un fil d\u00e9di\u00e9, **sc\u00e9nario adapt\u00e9 au type** (Rep\u00e9rage \u2192 Plan \u2192 \u00c9quipe \u2192 Ex\u00e9cution \u2192 Bilan)\n\u2192 Chaque \u00e9tape : champs + **photos** + validation Direction, **dans l\'ordre**', inline: false },
+      { name: '\ud83d\udcb0 PRIME \u2192 COFFRE & \ud83d\udcdc COMPTE-RENDU AUTO', value: '\u2192 \u00c0 la fin, la **prime est vers\u00e9e automatiquement au coffre** (+ facture + journal)\n\u2192 Un **dossier .md** + un **compte-rendu RP** (\u00e9crit par l\'IA) sont g\u00e9n\u00e9r\u00e9s\n\u2192 **`/op suivi`** : tableau d\'avancement de toutes les op\u00e9rations', inline: false },
     )
-    .setFooter({ text: 'IWC Bot v8.0 \u00b7 1/2' });
+    .setFooter({ text: 'IWC Bot v9.0 \u00b7 1/3' });
 
   const embed2 = new EmbedBuilder()
-    .setColor(0x2ECC71)
+    .setColor(0x8B1A1A)
     .addFields(
-      { name: '\ud83d\udcf7 PHOTOS & INFOS DANS CHAQUE \u00c9TAPE', value: '\u2192 Bouton **\u00ab \ud83d\udcf7 Ajouter une photo \u00bb** : envoie l\'image dans le fil, elle est rattach\u00e9e \u00e0 l\'\u00e9tape (rep\u00e9rage, preuve de capture\u2026)\n\u2192 Champs adapt\u00e9s : position, **nombre de cibles + gardes**, itin\u00e9raire, r\u00f4les, issue, prime encaiss\u00e9e\u2026', inline: false },
-      { name: '\ud83d\udcc4 DOSSIER D\'OP\u00c9RATION AUTOMATIQUE', value: '\u2192 Une fois **toutes les \u00e9tapes valid\u00e9es**, un **dossier complet** est g\u00e9n\u00e9r\u00e9 : **fichier .md t\u00e9l\u00e9chargeable** + r\u00e9capitulatif post\u00e9 dans le fil\n\u2192 Tout est compil\u00e9 : \u00e9tapes, photos, comptes-rendus, prime', inline: false },
-      { name: '\uD83C\udfac LANCER SUR UN CONTRAT EXISTANT', value: '\u2192 Bouton **\u00ab Lancer l\'op\u00e9ration \u00bb** ajout\u00e9 sur la fiche d\'un contrat Confr\u00e9rie **d\u00e9j\u00e0 actif** : ouvre l\'op\u00e9ration sans recr\u00e9er le contrat', inline: false },
-      { name: '\ud83e\uddf9 COMMANDES R\u00c9ORGANIS\u00c9ES', value: '\u2192 Op\u00e9rations regroup\u00e9es sous **`/op`** : `/op detail` \u00b7 `/op liste` \u00b7 `/op programmer`\n\u2192 Place lib\u00e9r\u00e9e pour de futures commandes (limite Discord de 100)', inline: false },
+      { name: '\uD83C\udfaf WANTED \u2014 AVIS DE RECHERCHE ENRICHIS', value: '\u2192 **Prime vers\u00e9e automatiquement aux chasseurs** \u00e0 la capture (r\u00e9partie sur leur portefeuille RP)\n\u2192 **Relance automatique** des avis dormants (ping Confr\u00e9rie)\n\u2192 La **derni\u00e8re position** est ajout\u00e9e \u00e0 la **carte**\n\u2192 **`/traques`** : filtres par dangerosit\u00e9 / prime / lieu', inline: false },
+      { name: '\ud83d\udd75\ufe0f RENSEIGNEMENT (TRANSCRIPTION)', value: '\u2192 L\'IA distingue l\'info **importante** (avec **destination conseill\u00e9e** + tri 1-clic) de la **simple note**\n\u2192 Avis de recherche **pr\u00e9-rempli** depuis une op\u00e9ration \u00ab Chasse \u00e0 la prime \u00bb', inline: false },
+      { name: '\ud83d\udcdd PRESSE \u2014 R\u00c9DACTEUR IA', value: '\u2192 **`/article`** : donne un sujet, l\'IA r\u00e9dige un **article de presse** mis en page dans le bon journal (Texas / Louisiane)', inline: false },
     )
-    .setFooter({ text: 'IWC Bot v8.0 \u00b7 2/2 \u00b7 La force est dans l\'ombre. \u2014 La Compagnie' })
+    .setFooter({ text: 'IWC Bot v9.0 \u00b7 2/3' });
+
+  const embed3 = new EmbedBuilder()
+    .setColor(0x2C3E50)
+    .addFields(
+      { name: '\ud83d\udcf0 JOURNAL-PHOTO INTELLIGENT', value: '\u2192 Poste une **photo** : l\'IA en fait un **r\u00e9sum\u00e9**, class\u00e9 par **r\u00e9gion** (\ud83e\udd20 Texas / \u269c\ufe0f Louisiane)\n\u2192 Si l\'info est **importante** : **ping de La Confr\u00e9rie** + **MP** (r\u00e9sum\u00e9 + photo + lien) \u00e0 chaque membre\n\u2192 Les **journaux** acceptent d\u00e9sormais **plusieurs r\u00e9gions**', inline: false },
+      { name: '\ud83d\udcdc PARCHEMIN & CANDIDATURES', value: '\u2192 Les contrats **client** et **engagement** sont d\u00e9sormais envoy\u00e9s **sur parchemin**\n\u2192 Candidatures : **vote \u00e0 3 fiabilis\u00e9** + **lien t\u00e9l\u00e9gramme** envoy\u00e9 d\u00e8s l\'acceptation', inline: false },
+      { name: '\ud83d\udce6 INVENTAIRE \u2014 PHOTO QUI AJOUTE', value: '\u2192 D\u00e9poser une photo **ajoute** d\u00e9sormais les objets (au lieu de risquer d\'en effacer) ; le remplacement total reste possible, sur choix explicite', inline: false },
+    )
+    .setFooter({ text: 'IWC Bot v9.0 \u00b7 3/3 \u00b7 La force est dans l\'ombre. \u2014 La Compagnie' })
     .setTimestamp();
 
   await patchCh.send({ embeds: [embed1] });
   await patchCh.send({ embeds: [embed2] });
-  await interaction.editReply({ content: '\u2705 Patch note v8.0 post\u00e9 dans ' + patchCh + ' (2 encadr\u00e9s).' });
+  await patchCh.send({ embeds: [embed3] });
+  await interaction.editReply({ content: '\u2705 Patch note v9.0 post\u00e9 dans ' + patchCh + ' (3 encadr\u00e9s).' });
 }
 async function _handlePurge(interaction) {
   if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
