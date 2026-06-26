@@ -74,6 +74,10 @@ let modetest = {};
 try { modetest = require('./modetest'); console.log('✅ Module mode-test chargé'); }
 catch (e) { console.log('⚠️ modetest non chargé:', e.message); }
 
+let accueil = {};
+try { accueil = require('./accueil'); console.log('✅ Module accueil chargé'); }
+catch (e) { console.log('⚠️ accueil non chargé:', e.message); }
+
 let comptabilite = {};
 try { comptabilite = require('./comptabilite'); console.log('✅ Module comptabilité chargé'); }
 catch (e) { console.log('⚠️ comptabilite non chargé:', e.message); }
@@ -2549,6 +2553,8 @@ client.on('guildMemberAdd', async member => {
   await sendLog(guild, 'ARRIVEE', { userId: member.id, username: member.user.username, accountAge: daysSince(member.user.createdAt), inviteur });
   await notionExtra.alerteCompteSuspect?.(guild, member);
   await envoyerDMRecap(guild, member.id, 'candidature', { message: '🐺 Bienvenue sur **Iron Wolf Company** !\n\nLis le **#règlement** et postule dans **#recrutement**.\n\n*La porte est ouverte une fois. Une seule.*\n— La Direction' }).catch(() => {});
+  // MP « comment nous contacter » : prendre RDV pour nos prestations / envoyer un télégramme
+  await accueil.envoyerAccueil?.(member).catch(() => {});
 });
 
 client.on('inviteCreate', invite => { try { const m = _inviteCache.get(invite.guild.id) || new Map(); m.set(invite.code, { uses: invite.uses || 0, inviterTag: invite.inviter?.username || null, inviterId: invite.inviter?.id || null }); _inviteCache.set(invite.guild.id, m); } catch {} });
@@ -3000,6 +3006,7 @@ function _posteCommandementRows() {
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('mt_toggle').setLabel('Mode Test (on/off)').setEmoji('🧪').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('mt_purge').setLabel('Purger les tests').setEmoji('🧹').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('relance_open').setLabel('Relancer un visiteur').setEmoji('📨').setStyle(ButtonStyle.Primary),
     ),
   ];
 }
@@ -3723,6 +3730,7 @@ client.on('interactionCreate', async interaction => {
   if (await _routePosteCommandement(interaction)) return;
   if (await direction.routeInteraction?.(interaction)) return;
   if (await modetest.routeInteraction?.(interaction)) return;
+  if (await accueil.routeInteraction?.(interaction)) return;
   if (await operations.routeInteraction?.(interaction)) return;
   if (await rumeurs.routeInteraction?.(interaction)) return;
   if (await inventaire.routeInteraction?.(interaction)) return;
