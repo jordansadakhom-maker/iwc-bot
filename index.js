@@ -2352,6 +2352,7 @@ async function autoSetup(guild) {
   inventaire.rafraichirBoardDemarrage?.(guild.client).then(() => console.log('📦 Board inventaire rafraîchi (boutons à jour)')).catch(() => {});
   resumePhoto.installerPanneau?.(guild.client).then(() => console.log('📸 Panneau résumé-photo en place')).catch(() => {});
   chiffrement.installerPanneau?.(guild.client).then(() => console.log('🔐 Panneau chiffrement en place')).catch(() => {});
+  _installerPosteCommandement(guild).then(() => console.log('🎖️ Poste de commandement Direction en place')).catch(() => {});
   _installerPanelAgenda(guild).then(() => console.log('📅 Panneau agenda installé')).catch(() => {});
   _setupComptaChannel(guild).then(() => console.log('💰 Salon comptabilité prêt')).catch(() => {});
   _majPanneauxRdvClient(guild).then(() => console.log('📨 Panneaux RDV client à jour')).catch(() => {});
@@ -2948,6 +2949,94 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     }
   } catch {}
 });
+
+// ═══════════════════════════════════════════════════════════════
+//  🎖️ POSTE DE COMMANDEMENT — panneau d'outils réservé à la Direction
+//  Salon haut-gradé : accès rapide en 1 clic au récap, suivi des opérations,
+//  export bilan, état sécurité et verrouillage. Réutilise les fonctions existantes.
+// ═══════════════════════════════════════════════════════════════
+const SALON_COMMANDEMENT = '1510712255514153101';
+function _posteCommandementEmbed() {
+  return new EmbedBuilder()
+    .setColor(0x2E5A88)
+    .setTitle('🎖️ POSTE DE COMMANDEMENT — DIRECTION')
+    .setDescription([
+      '*Outils de pilotage réservés aux haut-gradés. Tout est privé (réponses visibles de toi seul).*',
+      '',
+      '📊 **Récap** — ce qui demande ton attention maintenant.',
+      '🗂️ **Suivi opérations** — avancement de toutes les opérations.',
+      '📈 **Bilan (Google Sheet)** — export complet envoyé en MP.',
+      '🛡️ **Sécurité** — état du verrouillage anti-clonage/nuke.',
+      '🔒 **Verrouiller / 🔓 Déverrouiller** — kill switch *(Maître uniquement)*.',
+    ].join('\n'))
+    .setFooter({ text: 'Iron Wolf Company — État-major' });
+}
+function _posteCommandementRows() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('dir_recap').setLabel('Récap').setEmoji('📊').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('dir_suivi').setLabel('Suivi opérations').setEmoji('🗂️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('dir_bilan').setLabel('Bilan (Sheet)').setEmoji('📈').setStyle(ButtonStyle.Success),
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('dir_secu').setLabel('Sécurité').setEmoji('🛡️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('dir_verrou').setLabel('Verrouiller').setEmoji('🔒').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('dir_deverrou').setLabel('Déverrouiller').setEmoji('🔓').setStyle(ButtonStyle.Success),
+    ),
+  ];
+}
+async function _installerPosteCommandement(guild) {
+  try {
+    const ch = await guild.channels.fetch(SALON_COMMANDEMENT).catch(() => null);
+    if (!ch || typeof ch.send !== 'function') return;
+    const botId = guild.client.user.id;
+    let exists = null;
+    try { const pins = await ch.messages.fetchPinned().catch(() => null); if (pins) exists = pins.find(m => m.author?.id === botId && (m.embeds?.[0]?.title || '').includes('POSTE DE COMMANDEMENT')); } catch {}
+    if (!exists) { const recent = await ch.messages.fetch({ limit: 30 }).catch(() => null); if (recent) exists = recent.find(m => m.author?.id === botId && (m.embeds?.[0]?.title || '').includes('POSTE DE COMMANDEMENT')); }
+    if (exists) { await exists.edit({ embeds: [_posteCommandementEmbed()], components: _posteCommandementRows() }).catch(() => {}); return; }
+    const m = await ch.send({ embeds: [_posteCommandementEmbed()], components: _posteCommandementRows() }).catch(() => null);
+    if (m) await m.pin().catch(() => {});
+  } catch (e) { console.log('⚠️ poste de commandement:', e.message); }
+}
+async function _routePosteCommandement(interaction) {
+  if (!interaction.isButton?.()) return false;
+  const id = interaction.customId || '';
+  if (!id.startsWith('dir_')) return false;
+  // Tous les boutons sont réservés à la Direction
+  if (!isDirection(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+  try {
+    if (id === 'dir_recap') { await interaction.reply({ embeds: [_genererRecapEmbed(loadDB())], flags: MessageFlags.Ephemeral }); return true; }
+    if (id === 'dir_suivi') { await interaction.reply({ embeds: [_buildSuivi(loadDB())], flags: MessageFlags.Ephemeral }); return true; }
+    if (id === 'dir_secu') {
+      const v = securite.estVerrouille?.();
+      await interaction.reply({ content: v ? '🔒 **Système VERROUILLÉ** (sécurité active). Seul le Maître peut lever le verrou.' : '✅ **Système non verrouillé** — surveillance anti-clonage/nuke active.', flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (id === 'dir_bilan') {
+      if (!bilan.genererClasseur) { await interaction.reply({ content: '❌ Module bilan indisponible.', flags: MessageFlags.Ephemeral }); return true; }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const buf = await bilan.genererClasseur(loadDB(), interaction.guild);
+      const jour = new Date().toISOString().slice(0, 10);
+      const note = '📊 **Bilan de l\'organisation** — instantané à jour.\n\n📥 *Ouvre-le dans Google Sheets : Drive → clic droit → « Ouvrir avec » → Google Sheets.*';
+      let dmOk = false;
+      try { const dm = await interaction.user.createDM(); await dm.send({ content: note, files: [new AttachmentBuilder(Buffer.from(buf), { name: `bilan-iwc-${jour}.xlsx` })] }); dmOk = true; } catch {}
+      if (dmOk) await interaction.editReply({ content: '✅ Bilan envoyé en message privé. 📨' });
+      else await interaction.editReply({ content: note + '\n\n*(MP fermés — voici le fichier ici.)*', files: [new AttachmentBuilder(Buffer.from(buf), { name: `bilan-iwc-${jour}.xlsx` })] });
+      return true;
+    }
+    if (id === 'dir_verrou' || id === 'dir_deverrou') {
+      if (interaction.user.id !== securite.MAITRE) { await interaction.reply({ content: '🔒 Seul le Maître peut (dé)verrouiller le bot.', flags: MessageFlags.Ephemeral }); return true; }
+      if (id === 'dir_verrou') { await securite.verrouiller?.(interaction.guild, '🔒 Verrouillage manuel (poste de commandement).', {}); await interaction.reply({ content: '🔒 Bot **verrouillé**.', flags: MessageFlags.Ephemeral }); }
+      else { await securite.deverrouiller?.(interaction.user.id, interaction.guild); await interaction.reply({ content: '🔓 Bot **déverrouillé**.', flags: MessageFlags.Ephemeral }); }
+      return true;
+    }
+  } catch (e) {
+    if (![10062, 10008, 40060].includes(e?.code)) console.log('❌ poste commandement:', e.message);
+    try { if (interaction.isRepliable?.() && !interaction.replied && !interaction.deferred) await interaction.reply({ content: '❌ Erreur.', flags: MessageFlags.Ephemeral }); } catch {}
+    return true;
+  }
+  return false;
+}
 
 client.on('messageCreate', async message => {
   // 🔒 Verrouillage de sécurité : bot gelé → on ignore tout message hors Maître.
@@ -3613,6 +3702,7 @@ client.on('interactionCreate', async interaction => {
   if (await contratsConf.routeInteraction?.(interaction)) return;
   if (await opsEtapes.routeInteraction?.(interaction)) return;
   if (await chiffrement.routeInteraction?.(interaction)) return;
+  if (await _routePosteCommandement(interaction)) return;
   if (await operations.routeInteraction?.(interaction)) return;
   if (await rumeurs.routeInteraction?.(interaction)) return;
   if (await inventaire.routeInteraction?.(interaction)) return;
