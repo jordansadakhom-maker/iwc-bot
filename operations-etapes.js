@@ -22,7 +22,7 @@
 // ───────────────────────────────────────────────────────────────────────────
 const {
   EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, AttachmentBuilder,
+  ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, AttachmentBuilder, UserSelectMenuBuilder,
 } = require('discord.js');
 
 let dbMod = {};
@@ -54,6 +54,16 @@ function _salonOps(guild) {
     || null;
 }
 function _clip(s, n) { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+// Étiquettes de forum à appliquer (catégorise les opérations comme les contrats).
+function _cleanTag(s) { return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, ''); }
+function _appliedTags(forum, mots) {
+  try {
+    const tags = forum.availableTags || [];
+    const veut = (mots || []).map(_cleanTag).filter(Boolean);
+    return tags.filter(t => { const tn = _cleanTag(t.name); return veut.some(w => w && (tn.includes(w) || w.includes(tn))); }).map(t => t.id).slice(0, 5);
+  } catch { return []; }
+}
+function _assignes(op) { return [...new Set([...(op.membres || []), ...(op.agents || [])])]; }
 function _fmtDate(iso) {
   try { return new Date(iso).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
   catch { return '—'; }
@@ -476,6 +486,7 @@ function _embedPanel(op) {
       { name: 'Contrat lié', value: `\`${op.contratId || '—'}\``, inline: true },
       { name: '💰 Prime / rémunération', value: _clip(op.remuneration || '—', 80), inline: true },
       { name: '⚠️ Risque', value: op.risque ? String(op.risque) : '—', inline: true },
+      { name: '👥 Assignés', value: (_assignes(op).length ? _assignes(op).map(id => `<@${id}>`).join(' ') : '*personne*').slice(0, 1024), inline: false },
       { name: 'Avancement', value: `${bar}  **${done}/${total}**`, inline: false },
     );
 
@@ -515,7 +526,8 @@ function _boutons(op) {
     );
     if (termine) row2.addComponents(new ButtonBuilder().setCustomId(`opx_recit::${op.id}`).setLabel('📜 Compte-rendu RP').setStyle(ButtonStyle.Secondary));
     if (['Chasseur de primes', 'Chasse de prime'].includes(op.categorie)) row2.addComponents(new ButtonBuilder().setCustomId(`opx_avis::${op.id}`).setLabel('🎯 Avis de recherche').setStyle(ButtonStyle.Secondary));
-    if (!termine) row2.addComponents(new ButtonBuilder().setCustomId(`opx_cancel::${op.id}`).setLabel('🗑️ Annuler l\'opération').setStyle(ButtonStyle.Danger));
+    if (!termine) row2.addComponents(new ButtonBuilder().setCustomId(`opx_assign::${op.id}`).setLabel('👥 Assigner').setStyle(ButtonStyle.Primary));
+    if (!termine) row2.addComponents(new ButtonBuilder().setCustomId(`opx_cancel::${op.id}`).setLabel('🗑️ Annuler').setStyle(ButtonStyle.Danger));
     rows.push(row2);
   }
   return rows;
@@ -566,6 +578,7 @@ async function creerOperationDepuisContrat(guild, contrat, opts = {}) {
   const c = (db.contrats || []).find(x => x.id === contrat.id);
   if (c) c.operationId = op.id;
   op.agents = Array.isArray(c?.agents) ? c.agents.slice() : []; // agents assignés (contrats Confrérie) → à prévenir
+  op.membres = []; // personnes assignées manuellement sur l'opération (dès la 1re étape)
   db.preparations.push(op);
   _persist(db);
 
@@ -582,7 +595,12 @@ async function creerOperationDepuisContrat(guild, contrat, opts = {}) {
 
   try {
     if (opsCh && opsCh.type === 15 && opsCh.threads?.create) {
-      const post = await opsCh.threads.create({ name: `${op.emoji} ${_clip(op.cible, 70)}`.slice(0, 100), message: payload }).catch(() => null);
+      const nomFil = `${op.emoji} ${_clip(op.cible, 70)}`.slice(0, 100);
+      const tagsOp = _appliedTags(opsCh, [op.categorie, op.pole === 'legal' ? 'iron wolf' : 'confrerie', op.pole === 'legal' ? 'legal' : 'illegal', 'operation']);
+      const optsThread = { name: nomFil, message: payload };
+      if (tagsOp.length) optsThread.appliedTags = tagsOp;
+      let post = await opsCh.threads.create(optsThread).catch(() => null);
+      if (!post && tagsOp.length) post = await opsCh.threads.create({ name: nomFil, message: payload }).catch(() => null); // repli sans étiquettes
       if (post) {
         op.channelId = post.id; op.threadId = post.id;
         const starter = await post.fetchStarterMessage().catch(() => null);
@@ -946,6 +964,34 @@ async function routeInteraction(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       await _posterDossier(interaction.guild, op).catch(() => {});
       await interaction.editReply({ content: '📄 Dossier généré dans le fil.' }).catch(() => {});
+      return true;
+    }
+
+    // ── Assigner des membres à l'opération (UserSelect, dès la 1re étape) ──
+    if (interaction.isButton?.() && cid.startsWith('opx_assign::')) {
+      const id = cid.split('::')[1];
+      const db = loadDB();
+      const op = _find(db, id);
+      if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const menu = new UserSelectMenuBuilder().setCustomId(`opx_assignsel::${id}`).setPlaceholder('Choisis les membres à assigner…').setMinValues(0).setMaxValues(20);
+      await interaction.reply({ content: '👥 Sélectionne les membres à **assigner** à cette opération (ils seront prévenus dans le fil).', components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+    if (interaction.isUserSelectMenu?.() && cid.startsWith('opx_assignsel::')) {
+      const id = cid.split('::')[1];
+      const db = loadDB();
+      const op = _find(db, id);
+      if (!op) { await interaction.update({ content: '❌ Opération introuvable.', components: [] }).catch(() => {}); return true; }
+      const avant = new Set(op.membres || []);
+      op.membres = interaction.values || [];
+      _persist(db);
+      await interaction.update({ content: op.membres.length ? `✅ ${op.membres.length} membre(s) assigné(s) à l'opération.` : '✅ Assignation vidée.', components: [] }).catch(() => {});
+      await _refreshPanel(interaction.guild, op);
+      const nouveaux = op.membres.filter(x => !avant.has(x));
+      if (nouveaux.length && (op.threadId || op.channelId)) {
+        const ch = await interaction.guild.channels.fetch(op.threadId || op.channelId).catch(() => null);
+        if (ch?.send) await ch.send({ content: `👥 ${nouveaux.map(x => `<@${x}>`).join(' ')} — vous êtes **assignés** à cette opération. Préparez-la sur le panneau ci-dessus.`, allowedMentions: { users: nouveaux.slice(0, 25) } }).catch(() => {});
+      }
       return true;
     }
 
