@@ -442,6 +442,18 @@ function getAbsencesCh(guild, member) {
 
 // Archive un contrat signé/refusé dans #contrats-reponses avec un thread par contrat
 // Embed standard d'un contrat d'offre (réutilisé à l'envoi initial ET aux contre-offres)
+// Parchemin générique pour les contrats client/engagement : image « texte gravé »
+// (réutilise parchemin-image, comme la Confrérie), repli sur le parchemin statique.
+let _parcheminImgMod = null; try { _parcheminImgMod = require('./parchemin-image'); } catch {}
+async function _parcheminFichier(blocks, name) {
+  try {
+    if (_parcheminImgMod?.genererParchemin) {
+      const buf = await _parcheminImgMod.genererParchemin(blocks, { width: 760 });
+      if (buf) return new AttachmentBuilder(buf, { name: name || 'parchemin.png' });
+    }
+  } catch (e) { console.log('⚠️ parchemin contrat:', e.message); }
+  try { return new AttachmentBuilder(`${__dirname}/assets/parchemin.png`, { name: 'parchemin.png' }); } catch { return null; }
+}
 function _contratOffreEmbed(contrat) {
   const ech = contrat.echeanceTexte || (contrat.dateEcheance ? fmtShort(contrat.dateEcheance) : 'Aucune');
   const e = new EmbedBuilder().setColor(contrat.contreOffre ? 0xC9A227 : 0x2C3E50)
@@ -1495,9 +1507,19 @@ async function handleSlashCommand(interaction) {
         '**— La Direction, Iron Wolf Company**',
       ].join('\n'))
       .setFooter({ text: 'Iron Wolf Company • 1895 • Document officiel' });
+    const _parchEng = await _parcheminFichier([
+      { type: 'title', text: "CONTRAT D'ENGAGEMENT" },
+      { type: 'subtitle', text: 'Iron Wolf Company — Anno 1895' },
+      { type: 'rule' },
+      { type: 'field', label: 'Recrue', value: cible.username },
+      { type: 'rule' },
+      { type: 'para', label: 'Serment', text: "Je jure loyauté à l'Iron Wolf Company. Je connais les risques du métier et les accepte. Je garderai le silence sur ses affaires et tiendrai parole jusqu'au bout." },
+      { type: 'rule' },
+      { type: 'quote', text: 'Que la force reste dans l\'ombre. — La Direction' },
+    ], `engagement-${cible.id}.png`);
     try {
-      await cible.send({ embeds: [embedInvit], components: [row] });
-      return interaction.reply({ content: `✅ Contrat d'engagement envoyé en MP à **${cible.username}**. Il pourra le signer directement.`, flags: MessageFlags.Ephemeral });
+      await cible.send({ embeds: [embedInvit], components: [row], files: _parchEng ? [_parchEng] : [] });
+      return interaction.reply({ content: `✅ Contrat d'engagement (sur **parchemin** 📜) envoyé en MP à **${cible.username}**. Il pourra le signer directement.`, flags: MessageFlags.Ephemeral });
     } catch {
       return interaction.reply({ content: `⚠️ Impossible d'envoyer un MP à **${cible.username}** (ses messages privés sont peut-être fermés). Demande-lui d'ouvrir ses MP, ou je peux poster le contrat dans un salon à la place.`, flags: MessageFlags.Ephemeral });
     }
@@ -4553,13 +4575,29 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const row = _contratClientButtons(contratId);
     // 1) On envoie le contrat AU CLIENT par message privé, avec les boutons Accepter / Refuser :
     //    il accepte ou refuse directement via le bot, sans passer par le serveur.
+    // Parchemin « texte gravé » du contrat, joint au MP du client (comme la Confrérie).
+    const _parchOffre = await _parcheminFichier([
+      { type: 'title', text: 'CONTRAT DE PRESTATION' },
+      { type: 'subtitle', text: 'Iron Wolf Company — Anno 1899' },
+      { type: 'rule' },
+      { type: 'field', label: 'Référence', value: contrat.id },
+      ...(contrat.typeMission ? [{ type: 'field', label: 'Nature de la mission', value: contrat.typeMission }] : []),
+      ...(contrat.clientNom ? [{ type: 'field', label: 'Client', value: contrat.clientNom }] : []),
+      { type: 'field', label: 'Prime proposée', value: contrat.prime || contrat.remuneration || '—' },
+      { type: 'field', label: 'Échéance', value: contrat.echeanceTexte || (contrat.dateEcheance ? fmtShort(contrat.dateEcheance) : 'À convenir') },
+      { type: 'rule' },
+      { type: 'para', label: 'Objet du contrat', text: contrat.objet || '—' },
+      ...(contrat.details ? [{ type: 'para', label: 'Conditions', text: String(contrat.details).slice(0, 700) }] : []),
+      { type: 'rule' },
+      { type: 'quote', text: '« Votre signature vous engage, et votre parole vaut la vie. » — Iron Wolf Company, 1899' },
+    ], `contrat-${contrat.id}.png`);
     let dmOk = false;
     try {
       const m = await guild.members.fetch(contrat.userId).catch(() => null);
       if (m) {
         // L'embed du contrat doit rester en position 0 (le handler des boutons édite embeds[0]).
-        const intro = `📨 **Iron Wolf Company vous soumet un contrat.**\nLisez les termes ci-dessous, puis cliquez sur **✍️ J'accepte les termes** ou **❌ Refuser** — votre réponse nous parvient automatiquement.`;
-        await m.send({ content: intro, embeds: [embed], components: [row] });
+        const intro = `📨 **Iron Wolf Company vous soumet un contrat.**\nLe contrat est joint sur **parchemin** 📜. Lisez les termes ci-dessous, puis cliquez sur **✍️ J'accepte les termes** ou **❌ Refuser** — votre réponse nous parvient automatiquement.`;
+        await m.send({ content: intro, embeds: [embed], components: [row], files: _parchOffre ? [_parchOffre] : [] });
         dmOk = true;
       }
     } catch {}
