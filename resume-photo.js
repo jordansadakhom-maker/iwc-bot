@@ -13,14 +13,23 @@ const { EmbedBuilder } = require('discord.js');
 // Salon où l'on poste les photos à résumer (modifiable).
 const SALON_RESUME = '1519640462334365756';
 
-const PROMPT_RESUME = `Tu es un greffier méticuleux. On te montre une ou plusieurs images (souvent des captures d'un jeu Far West type Red Dead / RedM, parfois un document, une carte ou une scène).
-Rédige en FRANÇAIS un RÉSUMÉ clair et fidèle de ce que montre l'image, en 2 à 5 phrases bien tournées.
-- Décris la scène, les personnages, le lieu, l'action ou les informations visibles.
-- Si l'image contient du TEXTE lisible (affiche, lettre, panneau, message), restitue-en l'essentiel.
-- Reste fidèle : ne devine pas, n'invente rien que tu ne vois pas.
-- Ne mentionne pas que c'est une « capture d'écran » ni l'interface du jeu : va droit au contenu.
-- N'ajoute ni titre, ni puces, ni guillemets : seulement le résumé en texte courant.
-Si l'image est illisible ou vide, réponds exactement : RIEN.`;
+// Catégories par région (Texas / Louisiane) + repli.
+const REGIONS = {
+  texas:     { label: 'Texas',     emoji: '🤠', color: 0xC0392B },
+  louisiane: { label: 'Louisiane', emoji: '⚜️', color: 0x8E44AD },
+  autre:     { label: 'Autre',     emoji: '📰', color: 0xC8A45C },
+};
+// Rôles « gestion » à pinguer / prévenir en MP quand une annonce importante est repérée.
+const GESTION = ['Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier', 'Opérateur', 'Operateur'];
+function _gestionRoles(guild) { try { return [...guild.roles.cache.filter(r => GESTION.some(n => r.name.includes(n))).values()]; } catch { return []; } }
+
+const PROMPT_RESUME = `Tu es un greffier méticuleux. On te montre une ou plusieurs images (captures d'un jeu Far West type Red Dead / RedM : journaux, affiches, lettres, scènes).
+Analyse-les et réponds UNIQUEMENT en JSON valide, sans markdown, ce format EXACT :
+{"resume":"résumé clair et fidèle en 2 à 5 phrases en français, va droit au contenu (ne mentionne pas que c'est une capture ni l'interface du jeu)","region":"un seul mot: texas, louisiane ou autre","importante":true ou false}
+- "region" : l'État concerné par l'info si identifiable (Texas / Louisiane), sinon "autre".
+- "importante" : true si c'est une nouvelle NOTABLE pour la direction (conflit, attaque, braquage, événement majeur, menace, grosse opportunité, décision officielle) ; false si c'est anecdotique/ordinaire.
+- Reste fidèle, n'invente rien que tu ne vois pas.
+Si l'image est illisible ou vide, réponds {"resume":"RIEN","region":"autre","importante":false}.`;
 
 const _SUPPORTED_MT = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 function _cleanMt(mt) { let m = String(mt || 'image/png').split(';')[0].trim().toLowerCase(); if (m === 'image/jpg') m = 'image/jpeg'; return _SUPPORTED_MT.includes(m) ? m : 'image/png'; }
@@ -54,7 +63,11 @@ async function _resumeVision(blocks) {
     if (!resp.ok) { const b = await resp.text().catch(() => ''); console.log(`❌ resume-photo vision HTTP ${resp.status}: ${b.slice(0, 300)}`); return null; }
     const data = await resp.json();
     const txt = (data?.content || []).filter(c => c.type === 'text').map(c => c.text).join('').trim();
-    return txt || null;
+    if (!txt) return null;
+    let obj = null;
+    try { obj = JSON.parse(txt.replace(/```json|```/g, '').trim()); } catch {}
+    if (!obj || !obj.resume) obj = { resume: txt, region: 'autre', importante: false }; // repli : texte brut
+    return obj;
   } catch (e) { console.log('❌ resume-photo vision exception:', e.message); return null; }
 }
 
@@ -78,18 +91,52 @@ async function onMessage(message) {
     }
     if (!blocks.length) { await message.reactions?.removeAll?.().catch(() => {}); await message.react('⚠️').catch(() => {}); return true; }
 
-    const resume = await _resumeVision(blocks);
-    if (!resume || /^RIEN\.?$/i.test(resume.trim())) {
+    const res = await _resumeVision(blocks);
+    if (!res || !res.resume || /^RIEN\.?$/i.test(String(res.resume).trim())) {
       await message.react('⚠️').catch(() => {});
       return true;
     }
-    await message.react('✅').catch(() => {});
+    const region = REGIONS[String(res.region || '').toLowerCase()] || REGIONS.autre;
+    const important = res.importante === true || /^(true|oui|importante?)$/i.test(String(res.importante || ''));
+    await message.react(important ? '🚨' : '✅').catch(() => {});
+
     const embed = new EmbedBuilder()
-      .setColor(0xC9A66B)
-      .setTitle(`📝 Résumé de la photo${imgs.length > 1 ? `s (${imgs.length})` : ''}`)
-      .setDescription(resume.slice(0, 4000))
+      .setColor(important ? 0xED4245 : region.color)
+      .setTitle(`📝 Résumé — ${region.emoji} ${region.label}${imgs.length > 1 ? ` (${imgs.length} photos)` : ''}`)
+      .setDescription(String(res.resume).slice(0, 4000))
+      .addFields(
+        { name: '🗂️ Catégorie', value: `${region.emoji} ${region.label}`, inline: true },
+        { name: '📌 Importance', value: important ? '🚨 Importante' : '• Ordinaire', inline: true },
+      )
       .setFooter({ text: 'Résumé rédigé automatiquement par l\'IA d\'après l\'image' });
-    await message.reply({ embeds: [embed], allowedMentions: { parse: [] } }).catch(() => {});
+    const reply = await message.reply({ embeds: [embed], allowedMentions: { parse: [] } }).catch(() => null);
+
+    // ── Annonce IMPORTANTE → ping de la gestion dans le salon + MP (résumé + photo) ──
+    if (important) {
+      const roles = _gestionRoles(message.guild);
+      const lien = reply ? `https://discord.com/channels/${message.guild.id}/${message.channel.id}/${reply.id}` : null;
+      if (roles.length) {
+        await message.channel.send({
+          content: `🚨 ${roles.map(r => `<@&${r.id}>`).join(' ')} — **annonce journal importante** (${region.emoji} ${region.label}), à voir ci-dessus.`,
+          allowedMentions: { roles: roles.map(r => r.id) },
+        }).catch(() => {});
+      }
+      // MP aux gestionnaires (dédupliqués, plafonné) avec le résumé + la photo
+      const photoUrl = imgs[0]?.url || null;
+      const seen = new Set();
+      for (const r of roles) {
+        for (const mem of r.members.values()) {
+          if (mem.user.bot || seen.has(mem.id)) continue;
+          seen.add(mem.id);
+          if (seen.size > 25) break;
+          const dmE = EmbedBuilder.from(embed);
+          if (photoUrl) dmE.setImage(photoUrl);
+          if (lien) dmE.addFields({ name: '🔗 Voir dans le salon', value: `[Ouvrir le message](${lien})` });
+          mem.send({ content: `🚨 **Annonce journal importante** (${region.emoji} ${region.label}) :`, embeds: [dmE] }).catch(() => {});
+        }
+        if (seen.size > 25) break;
+      }
+    }
     return true;
   } catch (e) { console.log('⚠️ resume-photo onMessage:', e.message); return false; }
 }
@@ -101,11 +148,12 @@ function _panneauEmbed() {
     .setColor(0xC9A66B)
     .setTitle(_TITRE_PANNEAU)
     .setDescription([
-      '*Poste une **photo** dans ce salon — j\'en rédige automatiquement un **résumé**.*',
+      '*Poste une **photo** de presse/journal dans ce salon — j\'en rédige automatiquement un **résumé**, classé par **région**.*',
       '',
       '**Comment ça marche :**',
       '1️⃣ Envoie une (ou plusieurs) **photo(s)** ici.',
-      '2️⃣ Je la lis (🔍) puis je réponds, juste en dessous, avec un encadré **« 📝 Résumé »**.',
+      '2️⃣ Je la lis (🔍) puis je réponds avec un **« 📝 Résumé »** étiqueté **🤠 Texas** ou **⚜️ Louisiane**.',
+      '3️⃣ Si l\'info est **importante** 🚨, je **ping la direction** et je vous l\'envoie **en MP** (résumé + photo).',
       '',
       '✅ Aucune commande à taper. La photo reste en place, le résumé s\'ajoute dessous.',
     ].join('\n'))
