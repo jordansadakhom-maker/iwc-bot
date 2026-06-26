@@ -78,6 +78,14 @@ let accueil = {};
 try { accueil = require('./accueil'); console.log('✅ Module accueil chargé'); }
 catch (e) { console.log('⚠️ accueil non chargé:', e.message); }
 
+let automations = {};
+try { automations = require('./automations'); console.log('✅ Module automations chargé'); }
+catch (e) { console.log('⚠️ automations non chargé:', e.message); }
+
+let avis = {};
+try { avis = require('./avis'); console.log('✅ Module avis chargé'); }
+catch (e) { console.log('⚠️ avis non chargé:', e.message); }
+
 let comptabilite = {};
 try { comptabilite = require('./comptabilite'); console.log('✅ Module comptabilité chargé'); }
 catch (e) { console.log('⚠️ comptabilite non chargé:', e.message); }
@@ -3731,6 +3739,7 @@ client.on('interactionCreate', async interaction => {
   if (await direction.routeInteraction?.(interaction)) return;
   if (await modetest.routeInteraction?.(interaction)) return;
   if (await accueil.routeInteraction?.(interaction)) return;
+  if (await avis.routeInteraction?.(interaction)) return;
   if (await operations.routeInteraction?.(interaction)) return;
   if (await rumeurs.routeInteraction?.(interaction)) return;
   if (await inventaire.routeInteraction?.(interaction)) return;
@@ -5082,7 +5091,8 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     _syncTransactionNotion({ type: 'Entrée', coffre: 'legal', montant, objet: `Contrat ${c.id} honoré`, responsable: interaction.user.username, solde, date: new Date().toISOString(), discordId: interaction.user.id, userId: interaction.user.id }).catch(() => {});
     _updateContratPanel(interaction.client).catch(() => {});
     _updatePlanningContrats(interaction.client).catch(() => {});
-    return interaction.editReply({ content: `🏁 **Contrat ${c.id} honoré !**\n💰 **+$${montant.toLocaleString('fr-FR')}** versés au coffre commun.\n💼 Nouveau solde : **$${solde.toLocaleString('fr-FR')}**\n🧾 Facture créée dans le forum (trace écrite).\n📒 Étape passée à **Honoré** (Notion + journal de bord).` });
+    avis.demanderAvis?.(interaction.guild, c).catch(() => {}); // ⭐ demande d'avis au client
+    return interaction.editReply({ content: `🏁 **Contrat ${c.id} honoré !**\n💰 **+$${montant.toLocaleString('fr-FR')}** versés au coffre commun.\n💼 Nouveau solde : **$${solde.toLocaleString('fr-FR')}**\n🧾 Facture créée dans le forum (trace écrite).\n📒 Étape passée à **Honoré** (Notion + journal de bord).\n⭐ Un avis a été demandé au client en MP.` });
   }
   if (interaction.isButton() && interaction.customId.startsWith('signer_offre_')) {
     const contratId = interaction.customId.replace('signer_offre_', ''); const contrat = (db.contrats || []).find(c => c.id === contratId);
@@ -5412,6 +5422,11 @@ client.once('clientReady', async () => {
   cron.schedule('0 9 * * *',  async () => { for (const g of client.guilds.cache.values()) await postDailyAgenda(g).catch(() => {}); }, { timezone: 'Europe/Paris' });
   // ── Relance des avis de recherche dormants (chaque jour à 12h) ──
   cron.schedule('0 12 * * *', async () => { try { await traque.verifierDormants?.(client); } catch (e) { console.log('⚠️ relance avis dormants:', e.message); } }, { timezone: 'Europe/Paris' });
+
+  // ── Relance auto des visiteurs inactifs (tous les jours à 10h17) ──
+  cron.schedule('17 10 * * *', async () => { try { await automations.relancerInactifs?.(client); } catch (e) { console.log('⚠️ relance inactifs:', e.message); } }, { timezone: 'Europe/Paris' });
+  // ── Rappel des opérations bloquées (tous les jours à 9h23) ──
+  cron.schedule('23 9 * * *', async () => { try { await automations.rappelerOpsBloquees?.(client); } catch (e) { console.log('⚠️ rappel ops bloquées:', e.message); } }, { timezone: 'Europe/Paris' });
 
   // ── Briefing renseignement quotidien (20h) ──
   cron.schedule('0 20 * * *', async () => {
