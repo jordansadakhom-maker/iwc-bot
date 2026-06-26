@@ -21,6 +21,7 @@ const {
 
 let dbMod = {};
 try { dbMod = require('./db'); } catch { dbMod = {}; }
+let modetest = {}; try { modetest = require('./modetest'); } catch {}
 const loadDB = dbMod.loadDB || (() => ({}));
 const saveDB = dbMod.saveDB || (() => {});
 const backupGit = (typeof dbMod.sauvegarderSurGitHub === 'function') ? dbMod.sauvegarderSurGitHub : null;
@@ -378,6 +379,7 @@ async function routeInteraction(interaction) {
 
       const db = loadDB();
       if (!db.operations) db.operations = [];
+      if (modetest.estActif?.()) op.test = true;
       db.operations.push(op);
 
       // Notion (réutilise la fonction existante injectée par index.js)
@@ -401,10 +403,11 @@ async function routeInteraction(interaction) {
           const _cleanTag = x => (x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
           const _veut = [t.label || '', op.pole === 'legal' ? 'iron wolf' : 'confrerie', op.pole === 'legal' ? 'legal' : 'illegal', 'operation'].map(_cleanTag).filter(Boolean);
           const _tags = (opsCh.availableTags || []).filter(tg => { const tn = _cleanTag(tg.name); return _veut.some(w => w && (tn.includes(w) || w.includes(tn))); }).map(tg => tg.id).slice(0, 5);
-          const _opts = { name: `🎯 ${op.name}`.slice(0, 100), message: payloadMsg };
+          const _nomOp = (modetest.prefixe ? modetest.prefixe(`🎯 ${op.name}`, op) : `🎯 ${op.name}`).slice(0, 100);
+          const _opts = { name: _nomOp, message: payloadMsg };
           if (_tags.length) _opts.appliedTags = _tags;
           let post = await opsCh.threads.create(_opts).catch(() => null);
-          if (!post && _tags.length) post = await opsCh.threads.create({ name: `🎯 ${op.name}`.slice(0, 100), message: payloadMsg }).catch(() => null);
+          if (!post && _tags.length) post = await opsCh.threads.create({ name: _nomOp, message: payloadMsg }).catch(() => null);
           if (post) {
             op.channelId = post.id; op.threadId = post.id;
             const starter = await post.fetchStarterMessage().catch(() => null);
@@ -419,7 +422,7 @@ async function routeInteraction(interaction) {
             op.channelId = opsCh.id; op.msgId = sent.id;
             await sent.pin().catch(() => {});
             if (!sent.hasThread) {
-              const fil = await sent.startThread({ name: `🎯 ${op.name}`.slice(0, 100), autoArchiveDuration: 10080 }).catch(() => null);
+              const fil = await sent.startThread({ name: (modetest.prefixe ? modetest.prefixe(`🎯 ${op.name}`, op) : `🎯 ${op.name}`).slice(0, 100), autoArchiveDuration: 10080 }).catch(() => null);
               if (fil) { op.threadId = fil.id; await fil.send({ content: coordTxt }).catch(() => {}); }
             }
           }

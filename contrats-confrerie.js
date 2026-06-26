@@ -10,6 +10,7 @@ const {
   StringSelectMenuBuilder, UserSelectMenuBuilder, MessageFlags, AttachmentBuilder,
 } = require('discord.js');
 const path = require('path');
+let modetest = {}; try { modetest = require('./modetest'); } catch {}
 // Texture parchemin jointe aux MP (contrat/briefing/fin de mission) : fichier local du dépôt →
 // lien permanent (les liens cdn.discordapp.com expirent au bout de ~24h). Référencée via attachment://.
 const PARCHEMIN_IMG = 'attachment://parchemin.png';
@@ -580,7 +581,7 @@ async function posterForum(guild, contrat) {
     if (!forum || forum.type !== 15 || !forum.threads?.create) return;
     const clean = s => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
     const cli = contrat.commanditaire || (contrat.confidentiel ? 'Anonyme' : '');
-    const titre = `${contrat.id}${cli ? ' — ' + cli : ''}`.slice(0, 100);
+    const titre = (modetest.prefixe ? modetest.prefixe(`${contrat.id}${cli ? ' — ' + cli : ''}`, contrat) : `${contrat.id}${cli ? ' — ' + cli : ''}`).slice(0, 100);
     const veut = ['confrerie', 'illegal', clean(contrat.status === 'propose' ? 'en attente' : contrat.status)].filter(Boolean);
     const tags = forum.availableTags || [];
     const appliedTags = tags.filter(t => { const tn = clean(t.name); return veut.some(w => w && (tn.includes(w) || w.includes(tn))); }).map(t => t.id).slice(0, 5);
@@ -636,6 +637,7 @@ async function onModalSubmit(interaction) {
   };
   // Reformulation IA façon Far West 1904 du contenu narratif (objet + consignes), en parallèle
   [contrat.objet, contrat.details] = await Promise.all([rp1904(contrat.objet), rp1904(contrat.details)]);
+  if (modetest.estActif?.()) contrat.test = true;
   db.contrats.push(contrat);
   saveDB(db); _persistNow();
   syncNotion(contrat, '🟡 Proposé');
