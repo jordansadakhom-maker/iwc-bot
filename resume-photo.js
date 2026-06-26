@@ -19,9 +19,8 @@ const REGIONS = {
   louisiane: { label: 'Louisiane', emoji: '⚜️', color: 0x8E44AD },
   autre:     { label: 'Autre',     emoji: '📰', color: 0xC8A45C },
 };
-// Rôles « gestion » à pinguer / prévenir en MP quand une annonce importante est repérée.
-const GESTION = ['Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier', 'Opérateur', 'Operateur'];
-function _gestionRoles(guild) { try { return [...guild.roles.cache.filter(r => GESTION.some(n => r.name.includes(n))).values()]; } catch { return []; } }
+// Rôle La Confrérie (pôle illégal) : pingé dans le salon + prévenu en MP quand une annonce importante est repérée.
+const ROLE_CONFRERIE = '1508898841993281658';
 
 const PROMPT_RESUME = `Tu es un greffier méticuleux. On te montre une ou plusieurs images (captures d'un jeu Far West type Red Dead / RedM : journaux, affiches, lettres, scènes).
 Analyse-les et réponds UNIQUEMENT en JSON valide, sans markdown, ce format EXACT :
@@ -111,30 +110,30 @@ async function onMessage(message) {
       .setFooter({ text: 'Résumé rédigé automatiquement par l\'IA d\'après l\'image' });
     const reply = await message.reply({ embeds: [embed], allowedMentions: { parse: [] } }).catch(() => null);
 
-    // ── Annonce IMPORTANTE → ping de la gestion dans le salon + MP (résumé + photo) ──
+    // ── Annonce IMPORTANTE → ping de La Confrérie dans le salon + MP à chaque membre ──
     if (important) {
-      const roles = _gestionRoles(message.guild);
       const lien = reply ? `https://discord.com/channels/${message.guild.id}/${message.channel.id}/${reply.id}` : null;
-      if (roles.length) {
-        await message.channel.send({
-          content: `🚨 ${roles.map(r => `<@&${r.id}>`).join(' ')} — **annonce journal importante** (${region.emoji} ${region.label}), à voir ci-dessus.`,
-          allowedMentions: { roles: roles.map(r => r.id) },
-        }).catch(() => {});
-      }
-      // MP aux gestionnaires (dédupliqués, plafonné) avec le résumé + la photo
+      // Ping du rôle Confrérie dans le salon
+      await message.channel.send({
+        content: `🚨 <@&${ROLE_CONFRERIE}> — **annonce journal importante** (${region.emoji} ${region.label}), à voir ci-dessus.`,
+        allowedMentions: { roles: [ROLE_CONFRERIE] },
+      }).catch(() => {});
+      // MP à chaque membre de la Confrérie : résumé + photo + lien
       const photoUrl = imgs[0]?.url || null;
-      const seen = new Set();
-      for (const r of roles) {
-        for (const mem of r.members.values()) {
-          if (mem.user.bot || seen.has(mem.id)) continue;
-          seen.add(mem.id);
-          if (seen.size > 25) break;
+      let role = message.guild.roles.cache.get(ROLE_CONFRERIE) || null;
+      try { await message.guild.members.fetch(); } catch {} // s'assurer que les membres du rôle sont en cache
+      role = message.guild.roles.cache.get(ROLE_CONFRERIE) || role;
+      if (role) {
+        let n = 0;
+        for (const mem of role.members.values()) {
+          if (mem.user.bot) continue;
+          if (n >= 60) break; // garde-fou anti-abus
+          n++;
           const dmE = EmbedBuilder.from(embed);
           if (photoUrl) dmE.setImage(photoUrl);
           if (lien) dmE.addFields({ name: '🔗 Voir dans le salon', value: `[Ouvrir le message](${lien})` });
           mem.send({ content: `🚨 **Annonce journal importante** (${region.emoji} ${region.label}) :`, embeds: [dmE] }).catch(() => {});
         }
-        if (seen.size > 25) break;
       }
     }
     return true;
@@ -153,7 +152,7 @@ function _panneauEmbed() {
       '**Comment ça marche :**',
       '1️⃣ Envoie une (ou plusieurs) **photo(s)** ici.',
       '2️⃣ Je la lis (🔍) puis je réponds avec un **« 📝 Résumé »** étiqueté **🤠 Texas** ou **⚜️ Louisiane**.',
-      '3️⃣ Si l\'info est **importante** 🚨, je **ping la direction** et je vous l\'envoie **en MP** (résumé + photo).',
+      '3️⃣ Si l\'info est **importante** 🚨, je **ping La Confrérie** et j\'envoie à chaque membre un **MP** (résumé + photo + lien).',
       '',
       '✅ Aucune commande à taper. La photo reste en place, le résumé s\'ajoute dessous.',
     ].join('\n'))
