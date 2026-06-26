@@ -11,6 +11,7 @@ const {
 } = require('discord.js');
 const { loadDB, saveDB, sauvegarderSurGitHub } = require('./db');
 let relais = {}; try { relais = require('./relais'); } catch {}
+let modetest = {}; try { modetest = require('./modetest'); } catch {}
 
 const CH_JOURNAL = '1508756535407542372';
 const CH_ELEMENT_OPS = '1518349707686973470'; // #élément-opérations : on y archive les avis clôturés
@@ -353,6 +354,7 @@ async function handleCreateModal(interaction) {
     createdBy: interaction.user.username,
     channelId: interaction.channelId,
   };
+  if (modetest.estActif?.()) t.test = true;
   if (stash && stash.photoUrl) t.photo = stash.photoUrl;
   // On récupère la photo en mémoire pour la réuploader DANS l'avis (elle survivra à la suppression du signalement)
   let photoBuf = null;
@@ -373,7 +375,7 @@ async function handleCreateModal(interaction) {
     if (photoBuf) { const u = [...sent.attachments.values()][0]?.url; if (u) t.photo = u; }
     // Ouvrir un fil « Dossier » avec la description physique complète + la discussion
     try {
-      const thread = await sent.startThread({ name: `🔍 Dossier — ${t.cible}`.slice(0, 100), autoArchiveDuration: 10080 }).catch(() => null);
+      const thread = await sent.startThread({ name: (modetest.prefixe ? modetest.prefixe(`🔍 Dossier — ${t.cible}`, t) : `🔍 Dossier — ${t.cible}`).slice(0, 100), autoArchiveDuration: 10080 }).catch(() => null);
       if (thread) {
         t.threadId = thread.id;
         const intro = "📋 **Dossier complet de la cible.** Signalez vos pistes (bouton sur l'avis ci-dessus) et échangez sur la traque ici.";

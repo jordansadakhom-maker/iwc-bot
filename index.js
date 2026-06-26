@@ -70,6 +70,10 @@ let direction = {};
 try { direction = require('./direction'); console.log('✅ Module direction chargé'); }
 catch (e) { console.log('⚠️ direction non chargé:', e.message); }
 
+let modetest = {};
+try { modetest = require('./modetest'); console.log('✅ Module mode-test chargé'); }
+catch (e) { console.log('⚠️ modetest non chargé:', e.message); }
+
 let comptabilite = {};
 try { comptabilite = require('./comptabilite'); console.log('✅ Module comptabilité chargé'); }
 catch (e) { console.log('⚠️ comptabilite non chargé:', e.message); }
@@ -2680,7 +2684,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
     }
     if (!db.contrats) db.contrats = [];
     const contrat = { id: vote.contratId, type: 'offre', clientNom: vote.clientNom, objet: `${vote.titre} — ${vote.objet}`, remuneration: `$${vote.montant}`, montant: vote.montant, details: vote.conditions || '', dateEcheance: null, emetteurId: vote.proposePar, emetteurNom: vote.proposeNom, status: 'en_attente', suivi: 'En attente', createdAt: new Date().toISOString() };
-    db.contrats.push(contrat); saveDB(db);
+    if (modetest.estActif?.()) contrat.test = true; db.contrats.push(contrat); saveDB(db);
     sauvegarderSurGitHub().catch(() => {});
     try { await reaction.message.edit({ embeds: [EmbedBuilder.from(reaction.message.embeds[0]).setColor(0x2ECC71).setTitle(`✅ VALIDÉ — ${vote.contratId}`)] }); } catch {}
     try { const ef = new EmbedBuilder().setColor(0x2C3E50).setTitle(`📜 ${vote.contratId} — ${vote.clientNom}`).addFields({ name: '💵 Montant', value: `$${vote.montant.toLocaleString('fr-FR')}`, inline: true }, { name: '📅 Échéance', value: vote.echeance || 'Aucune', inline: true }, { name: '📋 Objet', value: vote.objet.slice(0, 1000) }); await _posterContratForum(guild, contrat, ef); } catch {}
@@ -2992,6 +2996,10 @@ function _posteCommandementRows() {
       new ButtonBuilder().setCustomId('dec_open').setLabel('Proposer une décision').setEmoji('🗳️').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('tache_open').setLabel('Tâches').setEmoji('✅').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('reun_open').setLabel('Réunion').setEmoji('📋').setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('mt_toggle').setLabel('Mode Test (on/off)').setEmoji('🧪').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('mt_purge').setLabel('Purger les tests').setEmoji('🧹').setStyle(ButtonStyle.Danger),
     ),
   ];
 }
@@ -3714,6 +3722,7 @@ client.on('interactionCreate', async interaction => {
   if (await chiffrement.routeInteraction?.(interaction)) return;
   if (await _routePosteCommandement(interaction)) return;
   if (await direction.routeInteraction?.(interaction)) return;
+  if (await modetest.routeInteraction?.(interaction)) return;
   if (await operations.routeInteraction?.(interaction)) return;
   if (await rumeurs.routeInteraction?.(interaction)) return;
   if (await inventaire.routeInteraction?.(interaction)) return;
@@ -4759,7 +4768,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     if (_mIso) dateEcheanceOffre = _mIso[0];
     else if (_mFr) { const _y = _mFr[3].length === 2 ? '20' + _mFr[3] : _mFr[3]; dateEcheanceOffre = `${_y}-${String(_mFr[2]).padStart(2, '0')}-${String(_mFr[1]).padStart(2, '0')}`; }
     const contrat = { id: contratId, type: 'offre', typeMission: typeMissionOffre, clientNom: interaction.fields.getTextInputValue('client_nom'), emetteurIC: emetteurICOffre, objet: objetFinalOffre, remuneration: primeOffre, prime: primeOffre, userId: clientIdOffre, details: interaction.fields.getTextInputValue('details') || '', echeanceTexte: echRaw, dateEcheance: dateEcheanceOffre, emetteurId: interaction.user.id, emetteurNom: interaction.user.username, status: 'en_attente', createdAt: new Date().toISOString() };
-    db.contrats.push(contrat); saveDB(db);
+    if (modetest.estActif?.()) contrat.test = true; db.contrats.push(contrat); saveDB(db);
     _syncContratNotion(contrat, 'en_attente').catch(() => {});
     await interaction.editReply({ content: `✅ Contrat **${contratId}** envoyé au client.` });
     const embed = _contratOffreEmbed(contrat);
@@ -4844,7 +4853,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     else if (_mFr) { const _y = _mFr[3].length === 2 ? '20' + _mFr[3] : _mFr[3]; dateEcheance = `${_y}-${String(_mFr[2]).padStart(2, '0')}-${String(_mFr[1]).padStart(2, '0')}`; }
     const emetteurIC = db.members[interaction.user.id]?.name || interaction.user.username;
     const contrat = { id: contratId, type: 'externe', contactId, clientNom: interaction.fields.getTextInputValue('client_nom').trim(), emetteurIC, emetteurId: interaction.user.id, emetteurNom: interaction.user.username, objet: interaction.fields.getTextInputValue('objet'), remuneration: interaction.fields.getTextInputValue('prime'), details: interaction.fields.getTextInputValue('details') || '', echeanceTexte: echRaw, dateEcheance, status: 'signe', suivi: 'En cours', createdAt: new Date().toISOString() };
-    db.contrats.push(contrat); saveDB(db);
+    if (modetest.estActif?.()) contrat.test = true; db.contrats.push(contrat); saveDB(db);
     _syncContratNotion(contrat, 'signe').catch(() => {});
     _posterContratForum(guild, contrat).catch(() => {});
     _updateContratPanel(interaction.client).catch(() => {});
@@ -5228,7 +5237,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const objetSaisiEmploi = interaction.fields.getTextInputValue('objet');
     const objetFinalEmploi = typeMissionEmploi && typeMissionEmploi !== 'Autre' ? `${typeMissionEmploi} — ${objetSaisiEmploi}` : objetSaisiEmploi;
     const contrat = { id: contratId, type: 'emploi', typeMission: typeMissionEmploi, employeurNom: interaction.fields.getTextInputValue('employeur_nom'), emetteurIC: signataireICEmploi, objet: objetFinalEmploi, remuneration: interaction.fields.getTextInputValue('remuneration'), userId: interaction.fields.getTextInputValue('user_id').trim(), details: interaction.fields.getTextInputValue('details') || '', dateEcheance: (interaction.fields.getTextInputValue('details') || '').match(/\d{4}-\d{2}-\d{2}/)?.[0] || null, signataire: interaction.user.username, signataireId: interaction.user.id, status: 'en_attente', createdAt: new Date().toISOString() };
-    db.contrats.push(contrat); saveDB(db);
+    if (modetest.estActif?.()) contrat.test = true; db.contrats.push(contrat); saveDB(db);
     _syncContratNotion(contrat, 'en_attente').catch(() => {});
     await interaction.editReply({ content: `📋 Contrat **${contratId}** créé.` });
     const embed = new EmbedBuilder().setColor(0x8B5A2A).setTitle(`📥 CONTRAT EMPLOYEUR — ${contratId}`).setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n  CONTRAT PROPOSÉ À IRON WOLF COMPANY\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```').addFields({ name: '🆔 Référence', value: `\`${contratId}\``, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: '✍️ Soumis par', value: signataireICEmploi, inline: true }, { name: `🏭 Employeur — ${contrat.employeurNom}`, value: contrat.dateEcheance ? `📅 Échéance : ${fmtShort(contrat.dateEcheance)}` : '—' }, { name: '💰 Rémunération', value: contrat.remuneration }, { name: '📋 Objet', value: contrat.objet }, { name: '📌 Statut', value: '🟡 En attente de notre signature', inline: true }).setFooter({ text: `Iron Wolf Company • Secrétariat officiel • ${fmtShort(new Date())}` });

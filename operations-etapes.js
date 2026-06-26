@@ -27,6 +27,7 @@ const {
 
 let dbMod = {};
 try { dbMod = require('./db'); } catch { dbMod = {}; }
+let modetest = {}; try { modetest = require('./modetest'); } catch {}
 const loadDB = dbMod.loadDB || (() => ({}));
 const saveDB = dbMod.saveDB || (() => {});
 const backupGit = (typeof dbMod.sauvegarderSurGitHub === 'function') ? dbMod.sauvegarderSurGitHub : null;
@@ -579,6 +580,7 @@ async function creerOperationDepuisContrat(guild, contrat, opts = {}) {
   if (c) c.operationId = op.id;
   op.agents = Array.isArray(c?.agents) ? c.agents.slice() : []; // agents assignés (contrats Confrérie) → à prévenir
   op.membres = []; // personnes assignées manuellement sur l'opération (dès la 1re étape)
+  if (c?.test || modetest.estActif?.()) op.test = true; // hérite du test du contrat (ou mode test actif)
   db.preparations.push(op);
   _persist(db);
 
@@ -595,7 +597,7 @@ async function creerOperationDepuisContrat(guild, contrat, opts = {}) {
 
   try {
     if (opsCh && opsCh.type === 15 && opsCh.threads?.create) {
-      const nomFil = `${op.emoji} ${_clip(op.cible, 70)}`.slice(0, 100);
+      const nomFil = (modetest.prefixe ? modetest.prefixe(`${op.emoji} ${_clip(op.cible, 70)}`, op) : `${op.emoji} ${_clip(op.cible, 70)}`).slice(0, 100);
       const tagsOp = _appliedTags(opsCh, [op.categorie, op.pole === 'legal' ? 'iron wolf' : 'confrerie', op.pole === 'legal' ? 'legal' : 'illegal', 'operation']);
       const optsThread = { name: nomFil, message: payload };
       if (tagsOp.length) optsThread.appliedTags = tagsOp;
@@ -612,7 +614,7 @@ async function creerOperationDepuisContrat(guild, contrat, opts = {}) {
       if (sent) {
         op.channelId = opsCh.id; op.msgId = sent.id;
         await sent.pin().catch(() => {});
-        const fil = await sent.startThread({ name: `${op.emoji} ${_clip(op.cible, 70)}`.slice(0, 100), autoArchiveDuration: 10080 }).catch(() => null);
+        const fil = await sent.startThread({ name: (modetest.prefixe ? modetest.prefixe(`${op.emoji} ${_clip(op.cible, 70)}`, op) : `${op.emoji} ${_clip(op.cible, 70)}`).slice(0, 100), autoArchiveDuration: 10080 }).catch(() => null);
         if (fil) { op.threadId = fil.id; await fil.send({ content: coord }).catch(() => {}); }
       }
     }
