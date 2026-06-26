@@ -11,9 +11,40 @@ const {
   SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
   MessageFlags, AuditLogEvent,
 } = require('discord.js');
+const dbm = require('./db');
 
 // ⚙️ Les deux seules personnes autorisées à supprimer (avec confirmation)
 const AUTORISES = ['944208797084311583', '696325126047662081'];
+
+// 👑 LE MAÎTRE — seul autorisé à : ajouter un bot, faire une sauvegarde,
+//    et LEVER un verrouillage. Personne d'autre, même la Direction.
+const MAITRE = '944208797084311583';
+
+// ───────────────────────── VERROUILLAGE (kill switch) ─────────────────────────
+//  En cas de tentative de sauvegarde/clonage/nuke non autorisée, le bot se FIGE
+//  pour tout le monde sauf le Maître, l'alerte, et expulse l'intrus. L'état est
+//  persisté en base → il survit à un redémarrage.
+function _etatSecu() { try { const db = dbm.loadDB(); db.securite = db.securite || {}; return db.securite; } catch { return {}; } }
+function estVerrouille() { try { return !!_etatSecu().verrou; } catch { return false; } }
+function _setVerrou(val, raison, parId) {
+  try {
+    const db = dbm.loadDB(); db.securite = db.securite || {};
+    db.securite.verrou = !!val;
+    db.securite.raison = raison || null;
+    db.securite.depuis = new Date().toISOString();
+    db.securite.parId = parId || null;
+    dbm.saveDB(db); dbm.saveDBSync?.();
+  } catch (e) { console.log('[SÉCURITÉ] _setVerrou:', e?.message); }
+}
+
+// Compteur glissant pour détecter les actions de MASSE (clé = auteur:type d'action)
+const _compteur = new Map();
+function _massif(execId, action, seuil = 4, fenetreMs = 10000) {
+  const key = `${execId}:${action}`; const now = Date.now();
+  const arr = (_compteur.get(key) || []).filter(t => now - t < fenetreMs);
+  arr.push(now); _compteur.set(key, arr);
+  return arr.length >= seuil;
+}
 
 // ⚙️ Retirer automatiquement les rôles de l'auteur d'une suppression non autorisée
 const NEUTRALISER_ATTAQUANT = true;
@@ -61,6 +92,84 @@ function _verdictAuteur(guild, auteurId) {
   if (estAutorise(auteurId)) return Promise.resolve('\nℹ️ Auteur = responsable autorisé (pense à passer par `/supprimer-…` pour éviter la restauration).');
   if (!NEUTRALISER_ATTAQUANT) return Promise.resolve('');
   return _neutraliser(guild, auteurId).then(ok => ok ? '\n🔒 Ses rôles ont été retirés automatiquement (neutralisation).' : '');
+}
+
+// Alerte dédiée au verrouillage, avec bouton « Déverrouiller » pour le Maître
+async function _alerterVerrou(guild, raison) {
+  const embed = new EmbedBuilder().setColor(0x8B0000)
+    .setTitle('🔒 SERVEUR VERROUILLÉ — sécurité déclenchée')
+    .setDescription(
+      `**Une action non autorisée a été détectée :**\n${raison}\n\n` +
+      `🧊 Le bot est désormais **gelé** pour tout le monde — plus aucune commande ne fonctionne.\n` +
+      `👑 **Toi seul** peux le réactiver, avec le bouton ci-dessous ou \`/securite deverrouiller\`.`,
+    ).setTimestamp();
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('sec_unlock').setLabel('🔓 Déverrouiller (Maître)').setStyle(ButtonStyle.Success),
+  );
+  try { const u = await guild.client.users.fetch(MAITRE); await u.send({ embeds: [embed], components: [row] }); } catch {}
+  // On informe aussi les autres responsables (sans bouton — ils ne peuvent pas lever le verrou)
+  for (const id of AUTORISES) { if (id === MAITRE) continue; try { const u = await guild.client.users.fetch(id); await u.send({ embeds: [embed] }); } catch {} }
+  console.log(`[SÉCURITÉ] 🔒 VERROUILLAGE — ${raison.replace(/\n/g, ' ')}`);
+}
+
+// Déclenche le verrouillage : fige le bot, alerte le Maître, expulse l'intrus.
+async function verrouiller(guild, raison, opts = {}) {
+  const dejaVerrou = estVerrouille();
+  _setVerrou(true, raison, opts.intrusId || null);
+  // Expulsion / neutralisation de l'intrus
+  try {
+    if (opts.botId) { await guild.members.kick(opts.botId, 'Sécurité : bot ajouté sans autorisation du Maître').catch(() => {}); }
+    if (opts.intrusId && opts.intrusId !== guild.ownerId && !AUTORISES.includes(opts.intrusId)) { await _neutraliser(guild, opts.intrusId); }
+  } catch (e) { console.log('[SÉCURITÉ] expulsion intrus:', e?.message); }
+  if (!dejaVerrou) await _alerterVerrou(guild, raison); // pas de spam si déjà verrouillé
+}
+
+// Lève le verrouillage — RÉSERVÉ AU MAÎTRE.
+async function deverrouiller(userId, guild) {
+  if (userId !== MAITRE) return false;
+  _setVerrou(false, null, null);
+  if (guild) { try { const u = await guild.client.users.fetch(MAITRE); await u.send('🔓 **Serveur déverrouillé.** Le bot refonctionne normalement.'); } catch {} }
+  console.log(`[SÉCURITÉ] 🔓 Déverrouillé par le Maître (${userId}).`);
+  return true;
+}
+
+// ───────────────────────── Détecteur (logs d'audit) ─────────────────────────
+//  Un seul point d'entrée pour : bot ajouté + actions de masse.
+const _MASS_ACTIONS = {
+  [AuditLogEvent.ChannelCreate]: 'création de salons',
+  [AuditLogEvent.ChannelDelete]: 'suppression de salons',
+  [AuditLogEvent.RoleCreate]: 'création de rôles',
+  [AuditLogEvent.RoleDelete]: 'suppression de rôles',
+  [AuditLogEvent.MemberBanAdd]: 'bannissements',
+  [AuditLogEvent.MemberKick]: 'expulsions',
+  [AuditLogEvent.WebhookCreate]: 'création de webhooks',
+};
+async function _onAuditEntry(entry, guild) {
+  try {
+    if (!guild) return;
+    const exec = entry.executorId;
+    const botSelf = guild.client.user.id;
+    if (exec === botSelf) return; // nos propres restaurations ne comptent pas
+
+    // 1) BOT AJOUTÉ sans l'autorisation du Maître → expulsion + verrouillage
+    if (entry.action === AuditLogEvent.BotAdd) {
+      if (exec === MAITRE) { console.log('[SÉCURITÉ] Bot ajouté par le Maître — autorisé.'); return; }
+      const botId = entry.targetId;
+      await verrouiller(guild,
+        `🤖 Un bot (<@${botId}>) a été ajouté par <@${exec || '??'}> **sans ton autorisation**. Il a été expulsé.`,
+        { intrusId: exec, botId });
+      return;
+    }
+
+    // 2) ACTIONS DE MASSE (clonage/nuke) → neutralisation + verrouillage
+    if (_MASS_ACTIONS[entry.action] && exec && exec !== MAITRE) {
+      if (_massif(exec, entry.action)) {
+        await verrouiller(guild,
+          `⚠️ Actions de **masse** détectées (${_MASS_ACTIONS[entry.action]}) par <@${exec}> — signe d'un clonage ou d'un nuke.`,
+          { intrusId: exec });
+      }
+    }
+  } catch (e) { console.log('[SÉCURITÉ] _onAuditEntry:', e?.message); }
 }
 
 // ───────────────────────── Anti-nuke : SALONS ─────────────────────────
@@ -155,10 +264,46 @@ const securiteCommands = [
     .addChannelOption(o => o.setName('salon').setDescription('Le salon à supprimer').setRequired(true)),
   new SlashCommandBuilder().setName('supprimer-role').setDescription('🔒 Supprimer un rôle (réservé + confirmation requise)')
     .addRoleOption(o => o.setName('role').setDescription('Le rôle à supprimer').setRequired(true)),
+  new SlashCommandBuilder().setName('securite').setDescription('🛡️ Verrouillage de sécurité (Maître)')
+    .addSubcommand(s => s.setName('etat').setDescription('Voir si le serveur est verrouillé'))
+    .addSubcommand(s => s.setName('verrouiller').setDescription('🔒 Verrouiller le bot manuellement (Maître)'))
+    .addSubcommand(s => s.setName('deverrouiller').setDescription('🔓 Lever le verrouillage (Maître)')),
 ];
 
 // ───────────────────────── Routeur d'interactions ─────────────────────────
 async function routeInteraction(interaction) {
+  // /securite (etat / verrouiller / deverrouiller)
+  if (interaction.isChatInputCommand?.() && interaction.commandName === 'securite') {
+    const sub = interaction.options.getSubcommand();
+    if (sub === 'etat') {
+      const e = _etatSecu();
+      const txt = e.verrou
+        ? `🔒 **Verrouillé** depuis ${e.depuis ? new Date(e.depuis).toLocaleString('fr-FR') : '?'}\n📋 Raison : ${e.raison || '—'}`
+        : '✅ **Non verrouillé** — tout fonctionne normalement.';
+      await interaction.reply({ content: txt, flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+    if (interaction.user.id !== MAITRE) { await interaction.reply({ content: '🔒 Seul le Maître peut (dé)verrouiller le bot.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+    if (sub === 'verrouiller') {
+      await verrouiller(interaction.guild, `🔒 Verrouillage manuel demandé par le Maître.`, {});
+      await interaction.reply({ content: '🔒 Bot **verrouillé**. Plus aucune commande ne répond, sauf pour toi. Utilise `/securite deverrouiller` pour rétablir.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+    if (sub === 'deverrouiller') {
+      await deverrouiller(interaction.user.id, interaction.guild);
+      await interaction.reply({ content: '🔓 Bot **déverrouillé** — tout refonctionne.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+  }
+  // Bouton « Déverrouiller » (depuis l'alerte MP du Maître)
+  if (interaction.isButton?.() && interaction.customId === 'sec_unlock') {
+    if (interaction.user.id !== MAITRE) { await interaction.reply({ content: '🔒 Seul le Maître peut lever le verrouillage.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+    const g = interaction.guild || interaction.client.guilds.cache.first();
+    await deverrouiller(interaction.user.id, g);
+    await interaction.update({ content: '🔓 **Serveur déverrouillé.** Le bot refonctionne normalement.', embeds: [], components: [] }).catch(() => {});
+    return true;
+  }
+
   // /supprimer-salon
   if (interaction.isChatInputCommand?.() && interaction.commandName === 'supprimer-salon') {
     if (!estAutorise(interaction.user.id)) { await interaction.reply({ content: '🔒 Seuls les responsables autorisés peuvent supprimer un salon.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
@@ -231,7 +376,9 @@ async function routeInteraction(interaction) {
 function initSecurite(client) {
   client.on('channelDelete', _onChannelDelete);
   client.on('roleDelete', _onRoleDelete);
-  console.log('🛡️ Module sécurité actif (anti-nuke salons + rôles · suppression sous confirmation)');
+  // Détecteur central : bot ajouté + actions de masse → verrouillage
+  client.on('guildAuditLogEntryCreate', (entry, guild) => { _onAuditEntry(entry, guild).catch(() => {}); });
+  console.log('🛡️ Module sécurité actif (anti-nuke · verrouillage anti-clonage/nuke · Maître = ' + MAITRE + ')');
 }
 
-module.exports = { initSecurite, routeInteraction, securiteCommands, AUTORISES };
+module.exports = { initSecurite, routeInteraction, securiteCommands, AUTORISES, MAITRE, estVerrouille, verrouiller, deverrouiller };
