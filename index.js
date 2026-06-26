@@ -6,7 +6,7 @@ const {
   StringSelectMenuBuilder, UserSelectMenuBuilder,
   ModalBuilder, TextInputBuilder, TextInputStyle,
   SlashCommandBuilder, MessageFlags,
-  PermissionFlagsBits,
+  PermissionFlagsBits, AttachmentBuilder,
 } = require('discord.js');
 const cron = require('node-cron');
 
@@ -61,6 +61,10 @@ catch (e) { console.log('⚠️ resume-photo non chargé:', e.message); }
 let chiffrement = {};
 try { chiffrement = require('./chiffrement'); console.log('✅ Module chiffrement chargé'); }
 catch (e) { console.log('⚠️ chiffrement non chargé:', e.message); }
+
+let bilan = {};
+try { bilan = require('./bilan'); console.log('✅ Module bilan chargé'); }
+catch (e) { console.log('⚠️ bilan non chargé:', e.message); }
 
 let comptabilite = {};
 try { comptabilite = require('./comptabilite'); console.log('✅ Module comptabilité chargé'); }
@@ -654,6 +658,7 @@ const SLASH_COMMANDS = [
     .addSubcommand(s => s.setName('liste').setDescription('📋 Opérations en cours et en préparation'))
     .addSubcommand(s => s.setName('suivi').setDescription('🗂️ Tableau de suivi des opérations par étapes (avancement)'))
     .addSubcommand(s => s.setName('programmer').setDescription('🕐 Programmer une opération à lancement automatique (Direction)')),
+  new SlashCommandBuilder().setName('bilan').setDescription('📊 Exporter un Google Sheet (.xlsx) de tout : contrats, argent, opérations… (Direction)'),
 ].map(c => c.toJSON());
 
 async function registerSlashCommands(guild) {
@@ -1349,6 +1354,26 @@ async function handleSlashCommand(interaction) {
   if (commandName === 'recap') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
     return interaction.reply({ embeds: [_genererRecapEmbed(loadDB())], flags: MessageFlags.Ephemeral });
+  }
+  if (commandName === 'bilan') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    if (!bilan.genererClasseur) return interaction.reply({ content: "❌ Module d'export indisponible.", flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      const buf = await bilan.genererClasseur(loadDB(), interaction.guild);
+      const jour = new Date().toISOString().slice(0, 10);
+      const file = new AttachmentBuilder(Buffer.from(buf), { name: `bilan-iwc-${jour}.xlsx` });
+      const note = '📊 **Bilan de l\'organisation** — instantané à jour.\n\n📥 *Pour l\'ouvrir dans Google Sheets : Drive → clic droit sur le fichier → « Ouvrir avec » → Google Sheets (ou Fichier → Importer).*';
+      let dmOk = false;
+      try { const dm = await interaction.user.createDM(); await dm.send({ content: note, files: [file] }); dmOk = true; } catch {}
+      if (dmOk) return interaction.editReply({ content: '✅ Bilan envoyé en message privé. 📨' });
+      // Repli : si les MP sont fermés, on l'envoie en éphémère ici
+      const file2 = new AttachmentBuilder(Buffer.from(buf), { name: `bilan-iwc-${jour}.xlsx` });
+      return interaction.editReply({ content: note + '\n\n*(Tes MP semblent fermés — voici le fichier ici.)*', files: [file2] });
+    } catch (e) {
+      console.log('❌ /bilan:', e.message);
+      return interaction.editReply({ content: `❌ Erreur lors de la génération du bilan : ${e.message}` });
+    }
   }
   if (commandName === 'contrats-importer') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
