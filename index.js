@@ -66,6 +66,10 @@ let bilan = {};
 try { bilan = require('./bilan'); console.log('✅ Module bilan chargé'); }
 catch (e) { console.log('⚠️ bilan non chargé:', e.message); }
 
+let direction = {};
+try { direction = require('./direction'); console.log('✅ Module direction chargé'); }
+catch (e) { console.log('⚠️ direction non chargé:', e.message); }
+
 let comptabilite = {};
 try { comptabilite = require('./comptabilite'); console.log('✅ Module comptabilité chargé'); }
 catch (e) { console.log('⚠️ comptabilite non chargé:', e.message); }
@@ -2353,6 +2357,7 @@ async function autoSetup(guild) {
   resumePhoto.installerPanneau?.(guild.client).then(() => console.log('📸 Panneau résumé-photo en place')).catch(() => {});
   chiffrement.installerPanneau?.(guild.client).then(() => console.log('🔐 Panneau chiffrement en place')).catch(() => {});
   _installerPosteCommandement(guild).then(() => console.log('🎖️ Poste de commandement Direction en place')).catch(() => {});
+  direction.installerMemo?.(guild).then(() => console.log('📌 Mémo Direction en place')).catch(() => {});
   _installerPanelAgenda(guild).then(() => console.log('📅 Panneau agenda installé')).catch(() => {});
   _setupComptaChannel(guild).then(() => console.log('💰 Salon comptabilité prêt')).catch(() => {});
   _majPanneauxRdvClient(guild).then(() => console.log('📨 Panneaux RDV client à jour')).catch(() => {});
@@ -2982,6 +2987,11 @@ function _posteCommandementRows() {
       new ButtonBuilder().setCustomId('dir_secu').setLabel('Sécurité').setEmoji('🛡️').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('dir_verrou').setLabel('Verrouiller').setEmoji('🔒').setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId('dir_deverrou').setLabel('Déverrouiller').setEmoji('🔓').setStyle(ButtonStyle.Success),
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('dec_open').setLabel('Proposer une décision').setEmoji('🗳️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('tache_open').setLabel('Tâches').setEmoji('✅').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('reun_open').setLabel('Réunion').setEmoji('📋').setStyle(ButtonStyle.Secondary),
     ),
   ];
 }
@@ -3703,6 +3713,7 @@ client.on('interactionCreate', async interaction => {
   if (await opsEtapes.routeInteraction?.(interaction)) return;
   if (await chiffrement.routeInteraction?.(interaction)) return;
   if (await _routePosteCommandement(interaction)) return;
+  if (await direction.routeInteraction?.(interaction)) return;
   if (await operations.routeInteraction?.(interaction)) return;
   if (await rumeurs.routeInteraction?.(interaction)) return;
   if (await inventaire.routeInteraction?.(interaction)) return;
