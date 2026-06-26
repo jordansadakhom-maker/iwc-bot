@@ -2950,6 +2950,8 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 });
 
 client.on('messageCreate', async message => {
+  // 🔒 Verrouillage de sécurité : bot gelé → on ignore tout message hors Maître.
+  try { if (securite.estVerrouille?.() && message.author?.id !== securite.MAITRE) return; } catch {}
   // Nettoyage : les messages système « X a épinglé un message » n'apportent rien → on les retire
   try {
     if (message.type === 6 /* ChannelPinnedMessage */) { await message.delete().catch(() => {}); return; }
@@ -3603,6 +3605,11 @@ client.on('interactionCreate', interaction => {
 client.on('interactionCreate', async interaction => {
  try {
   const guild = interaction.guild; const db = loadDB();
+  // 🔒 Verrouillage de sécurité : si actif, le bot est gelé pour tous SAUF le Maître.
+  if (securite.estVerrouille?.() && interaction.user?.id !== securite.MAITRE) {
+    try { if (interaction.isRepliable?.() && !interaction.replied && !interaction.deferred) await interaction.reply({ content: '🔒 **Système verrouillé** (sécurité). Le bot est gelé jusqu\'à déverrouillage par le Maître.', flags: MessageFlags.Ephemeral }); } catch {}
+    return;
+  }
   if (await contratsConf.routeInteraction?.(interaction)) return;
   if (await opsEtapes.routeInteraction?.(interaction)) return;
   if (await chiffrement.routeInteraction?.(interaction)) return;
