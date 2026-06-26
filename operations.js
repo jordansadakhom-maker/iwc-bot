@@ -77,6 +77,7 @@ const TYPES = {
   extr:  { label: '🔥 Extraction / sauvetage',       pole: 'legal' },
   // 🔪 La Confrérie (illégal)
   braq:  { label: '💰 Braquage (banque/train/diligence)', pole: 'illegal' },
+  esp:   { label: '👁️ Espionnage / Filature',       pole: 'illegal' },
   emb:   { label: '🔫 Embuscade',                    pole: 'illegal' },
   vol:   { label: '🐴 Vol de bétail / cargaison',    pole: 'illegal' },
   contre:{ label: '📦 Contrebande',                  pole: 'illegal' },
