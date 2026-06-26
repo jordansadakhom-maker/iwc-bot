@@ -13,30 +13,29 @@ const ROLES_DIRECTION = ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Offi
 const estDirection = (member) => !!member?.roles?.cache?.some(r => ROLES_DIRECTION.some(n => r.name.includes(n)));
 
 // Message d'accueil/relance (MP). opts.relance = true → ton « petit rappel ».
+// Un SEUL message, clair et logique : la personne sait tout de suite quoi faire.
 function messageClientPayload(guild, opts = {}) {
   const lien = `https://discord.com/channels/${guild.id}/${SALON_DEMANDES}`;
   const intro = opts.relance
-    ? '👋 **Petit rappel amical de l\'Iron Wolf Company.**\nTu as rejoint notre serveur mais tu n\'as pas encore fait de démarche — voici comment nous contacter 👇'
-    : '🐺 **Bienvenue à l\'Iron Wolf Company !**\nRavis de t\'accueillir. Voici **comment faire appel à nous** 👇';
+    ? '👋 *Petit rappel : tu as rejoint le serveur mais tu n\'as pas encore fait de démarche.*'
+    : '🐺 **Bienvenue à l\'Iron Wolf Company.**';
   const embed = new EmbedBuilder().setColor(0x8B5A2A)
-    .setTitle('📨 Nous contacter — RDV & Télégramme')
+    .setTitle('🤝 Comment travailler avec nous')
     .setDescription([
       intro,
       '',
-      '📅 **Prendre rendez-vous pour une prestation**',
-      '— escorte, protection rapprochée, contrat, enquête, récupération…',
+      'On s\'occupe de **protection, escorte, contrats, enquêtes, récupérations…** Pour faire appel à nous, c\'est **simple et rapide** :',
       '',
-      '✉️ **Ou simplement nous envoyer un télégramme**',
-      '— une question, une demande, un message à la Direction.',
+      `**1.** Ouvre le salon <#${SALON_DEMANDES}> *(bouton ci-dessous).*`,
+      '**2.** Clique sur **« ✉ Envoyer un télégramme ».**',
+      '**3.** Explique ta demande *(ou prends rendez-vous).*',
+      '**4.** La Direction te répond **directement ici, en privé.**',
       '',
-      `**Comment faire ?** Tout se passe dans le salon <#${SALON_DEMANDES}> :`,
-      '➡️ Clique sur **« ✉ Envoyer un télégramme »**, remplis le petit formulaire, et la Direction te répond directement.',
-      '',
-      '*Clique sur le bouton ci-dessous pour y aller tout de suite.*',
+      '*C\'est tout — pas besoin d\'autre chose.* 👇',
     ].join('\n'))
     .setFooter({ text: 'Iron Wolf Company — à votre service' });
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setLabel('Prendre RDV / Envoyer un télégramme').setEmoji('📨').setStyle(ButtonStyle.Link).setURL(lien),
+    new ButtonBuilder().setLabel('Faire ma demande').setEmoji('📨').setStyle(ButtonStyle.Link).setURL(lien),
   );
   return { embeds: [embed], components: [row] };
 }
