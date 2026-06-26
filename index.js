@@ -472,6 +472,31 @@ async function _parcheminFichier(blocks, name) {
   } catch (e) { console.log('⚠️ parchemin contrat:', e.message); }
   try { return new AttachmentBuilder(`${__dirname}/assets/parchemin.png`, { name: 'parchemin.png' }); } catch { return null; }
 }
+// Blocs du parchemin d'un contrat de prestation (offre).
+function _blocsContratOffre(contrat) {
+  return [
+    { type: 'title', text: 'CONTRAT DE PRESTATION' },
+    { type: 'subtitle', text: 'Iron Wolf Company — Anno 1899' },
+    { type: 'rule' },
+    { type: 'field', label: 'Référence', value: contrat.id },
+    ...(contrat.typeMission ? [{ type: 'field', label: 'Nature de la mission', value: contrat.typeMission }] : []),
+    ...(contrat.clientNom ? [{ type: 'field', label: 'Client', value: contrat.clientNom }] : []),
+    { type: 'field', label: 'Prime proposée', value: contrat.prime || contrat.remuneration || '—' },
+    { type: 'field', label: 'Échéance', value: contrat.echeanceTexte || (contrat.dateEcheance ? fmtShort(contrat.dateEcheance) : 'À convenir') },
+    { type: 'rule' },
+    { type: 'para', label: 'Objet du contrat', text: contrat.objet || '—' },
+    ...(contrat.details ? [{ type: 'para', label: 'Conditions', text: String(contrat.details).slice(0, 700) }] : []),
+    { type: 'rule' },
+    { type: 'quote', text: '« Votre signature vous engage, et votre parole vaut la vie. » — Iron Wolf Company, 1899' },
+  ];
+}
+// Envoie à un client le contrat d'offre AVEC le parchemin en image (DM lisible + fichier joint).
+async function _envoyerOffreClient(cible, contenu, contrat, row) {
+  const parch = await _parcheminFichier(_blocsContratOffre(contrat), `contrat-${contrat.id}.png`);
+  const base = _contratOffreEmbed(contrat);
+  const embedDM = parch ? EmbedBuilder.from(base).setImage(`attachment://${parch.name}`) : base;
+  return cible.send({ content: contenu, embeds: [embedDM], components: row ? [row] : [], files: parch ? [parch] : [] });
+}
 function _contratOffreEmbed(contrat) {
   const ech = contrat.echeanceTexte || (contrat.dateEcheance ? fmtShort(contrat.dateEcheance) : 'Aucune');
   const e = new EmbedBuilder().setColor(contrat.contreOffre ? 0xC9A227 : 0x2C3E50)
@@ -4600,31 +4625,14 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     await interaction.editReply({ content: `✅ Contrat **${contratId}** envoyé au client.` });
     const embed = _contratOffreEmbed(contrat);
     const row = _contratClientButtons(contratId);
-    // 1) On envoie le contrat AU CLIENT par message privé, avec les boutons Accepter / Refuser :
-    //    il accepte ou refuse directement via le bot, sans passer par le serveur.
-    // Parchemin « texte gravé » du contrat, joint au MP du client (comme la Confrérie).
-    const _parchOffre = await _parcheminFichier([
-      { type: 'title', text: 'CONTRAT DE PRESTATION' },
-      { type: 'subtitle', text: 'Iron Wolf Company — Anno 1899' },
-      { type: 'rule' },
-      { type: 'field', label: 'Référence', value: contrat.id },
-      ...(contrat.typeMission ? [{ type: 'field', label: 'Nature de la mission', value: contrat.typeMission }] : []),
-      ...(contrat.clientNom ? [{ type: 'field', label: 'Client', value: contrat.clientNom }] : []),
-      { type: 'field', label: 'Prime proposée', value: contrat.prime || contrat.remuneration || '—' },
-      { type: 'field', label: 'Échéance', value: contrat.echeanceTexte || (contrat.dateEcheance ? fmtShort(contrat.dateEcheance) : 'À convenir') },
-      { type: 'rule' },
-      { type: 'para', label: 'Objet du contrat', text: contrat.objet || '—' },
-      ...(contrat.details ? [{ type: 'para', label: 'Conditions', text: String(contrat.details).slice(0, 700) }] : []),
-      { type: 'rule' },
-      { type: 'quote', text: '« Votre signature vous engage, et votre parole vaut la vie. » — Iron Wolf Company, 1899' },
-    ], `contrat-${contrat.id}.png`);
+    // 1) On envoie le contrat AU CLIENT par message privé, sur PARCHEMIN (image) + boutons.
+    //    L'embed reste en position 0 (le handler des boutons édite embeds[0]).
     let dmOk = false;
     try {
       const m = await guild.members.fetch(contrat.userId).catch(() => null);
       if (m) {
-        // L'embed du contrat doit rester en position 0 (le handler des boutons édite embeds[0]).
-        const intro = `📨 **Iron Wolf Company vous soumet un contrat.**\nLe contrat est joint sur **parchemin** 📜. Lisez les termes ci-dessous, puis cliquez sur **✍️ J'accepte les termes** ou **❌ Refuser** — votre réponse nous parvient automatiquement.`;
-        await m.send({ content: intro, embeds: [embed], components: [row], files: _parchOffre ? [_parchOffre] : [] });
+        const intro = `📨 **Iron Wolf Company vous soumet un contrat.**\nLe contrat est présenté sur **parchemin** 📜. Lisez les termes, puis cliquez sur **✍️ J'accepte les termes** ou **❌ Refuser** — votre réponse nous parvient automatiquement.`;
+        await _envoyerOffreClient(m, intro, contrat, row);
         dmOk = true;
       }
     } catch {}
@@ -5040,7 +5048,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     if (action === 'refuse') {
       contrat.status = 'en_attente'; saveDB(db); // on garde notre offre initiale sur la table
       await interaction.update({ content: `❌ Contre-offre refusée — l'offre initiale est maintenue et renvoyée au client.`, embeds: [], components: [] }).catch(() => {});
-      if (client) await client.send({ content: '↩️ La compagnie **maintient son offre initiale**. Vous pouvez l\'accepter, la refuser, ou refaire une contre-offre :', embeds: [_contratOffreEmbed(contrat)], components: [_contratClientButtons(contratId)] }).catch(() => {});
+      if (client) await _envoyerOffreClient(client, '↩️ La compagnie **maintient son offre initiale**. Vous pouvez l\'accepter, la refuser, ou refaire une contre-offre :', contrat, _contratClientButtons(contratId)).catch(() => {});
       return;
     }
     // rdv
@@ -6285,6 +6293,20 @@ async function _assurerEtiquettesOperations(guild) {
       { name: '🟢 En cours', kw: 'cours' },
       { name: '🏁 Terminée', kw: 'terminee' },
       { name: '✖️ Annulée', kw: 'annulee' },
+      // Catégories de mission (pour ranger les opérations par type)
+      { name: '📦 Contrebande', kw: 'contrebande' },
+      { name: '🧨 Sabotage', kw: 'sabotage' },
+      { name: '🐴 Vol organisé', kw: 'vol' },
+      { name: '🗡️ Élimination', kw: 'elimination' },
+      { name: '✊ Extorsion', kw: 'extorsion' },
+      { name: '🔍 Espionnage', kw: 'espionnage' },
+      { name: '👁️ Surveillance', kw: 'surveillance' },
+      { name: '🛡️ Protection', kw: 'protection' },
+      { name: '🎯 Chasseur de primes', kw: 'chasseur' },
+      { name: '🎯 Chasse de prime', kw: 'chasse de prime' },
+      { name: '⛓️ Récupération', kw: 'recuperation' },
+      { name: '🐎 Escorte', kw: 'escorte' },
+      { name: '⚔️ Intervention', kw: 'intervention' },
     ];
     const has = v => existing.some(t => v.emoji ? (t.name || '').includes(v.emoji) : clean(t.name).includes(v.kw));
     const manquants = voulu.filter(v => !has(v));
