@@ -2552,8 +2552,8 @@ client.on('guildMemberAdd', async member => {
   }
   await sendLog(guild, 'ARRIVEE', { userId: member.id, username: member.user.username, accountAge: daysSince(member.user.createdAt), inviteur });
   await notionExtra.alerteCompteSuspect?.(guild, member);
-  await envoyerDMRecap(guild, member.id, 'candidature', { message: '🐺 Bienvenue sur **Iron Wolf Company** !\n\nLis le **#règlement** et postule dans **#recrutement**.\n\n*La porte est ouverte une fois. Une seule.*\n— La Direction' }).catch(() => {});
-  // MP « comment nous contacter » : prendre RDV pour nos prestations / envoyer un télégramme
+  // MP d'accueil : comment nous contacter — prendre RDV pour nos prestations / envoyer un télégramme
+  // (remplace l'ancien MP règlement/recrutement, à la demande de la Direction)
   await accueil.envoyerAccueil?.(member).catch(() => {});
 });
 
