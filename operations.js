@@ -395,8 +395,14 @@ async function routeInteraction(interaction) {
       let sent = null;
       try {
         if (opsCh && opsCh.type === 15 && opsCh.threads?.create) {
-          // Salon FORUM → créer un post (le post est lui-même le fil de contribution)
-          const post = await opsCh.threads.create({ name: `🎯 ${op.name}`.slice(0, 100), message: payloadMsg }).catch(() => null);
+          // Salon FORUM → créer un post catégorisé (étiquettes : type de mission + pôle)
+          const _cleanTag = x => (x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+          const _veut = [t.label || '', op.pole === 'legal' ? 'iron wolf' : 'confrerie', op.pole === 'legal' ? 'legal' : 'illegal', 'operation'].map(_cleanTag).filter(Boolean);
+          const _tags = (opsCh.availableTags || []).filter(tg => { const tn = _cleanTag(tg.name); return _veut.some(w => w && (tn.includes(w) || w.includes(tn))); }).map(tg => tg.id).slice(0, 5);
+          const _opts = { name: `🎯 ${op.name}`.slice(0, 100), message: payloadMsg };
+          if (_tags.length) _opts.appliedTags = _tags;
+          let post = await opsCh.threads.create(_opts).catch(() => null);
+          if (!post && _tags.length) post = await opsCh.threads.create({ name: `🎯 ${op.name}`.slice(0, 100), message: payloadMsg }).catch(() => null);
           if (post) {
             op.channelId = post.id; op.threadId = post.id;
             const starter = await post.fetchStarterMessage().catch(() => null);
