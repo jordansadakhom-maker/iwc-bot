@@ -58,6 +58,10 @@ let resumePhoto = {};
 try { resumePhoto = require('./resume-photo'); console.log('✅ Module résumé-photo chargé'); }
 catch (e) { console.log('⚠️ resume-photo non chargé:', e.message); }
 
+let chiffrement = {};
+try { chiffrement = require('./chiffrement'); console.log('✅ Module chiffrement chargé'); }
+catch (e) { console.log('⚠️ chiffrement non chargé:', e.message); }
+
 let comptabilite = {};
 try { comptabilite = require('./comptabilite'); console.log('✅ Module comptabilité chargé'); }
 catch (e) { console.log('⚠️ comptabilite non chargé:', e.message); }
@@ -2322,6 +2326,7 @@ async function autoSetup(guild) {
   medical.installerExemple?.(guild).then(() => console.log('🩺 Exemple test d\'aptitude posté')).catch(() => {});
   inventaire.rafraichirBoardDemarrage?.(guild.client).then(() => console.log('📦 Board inventaire rafraîchi (boutons à jour)')).catch(() => {});
   resumePhoto.installerPanneau?.(guild.client).then(() => console.log('📸 Panneau résumé-photo en place')).catch(() => {});
+  chiffrement.installerPanneau?.(guild.client).then(() => console.log('🔐 Panneau chiffrement en place')).catch(() => {});
   _installerPanelAgenda(guild).then(() => console.log('📅 Panneau agenda installé')).catch(() => {});
   _setupComptaChannel(guild).then(() => console.log('💰 Salon comptabilité prêt')).catch(() => {});
   _majPanneauxRdvClient(guild).then(() => console.log('📨 Panneaux RDV client à jour')).catch(() => {});
@@ -3575,6 +3580,7 @@ client.on('interactionCreate', async interaction => {
   const guild = interaction.guild; const db = loadDB();
   if (await contratsConf.routeInteraction?.(interaction)) return;
   if (await opsEtapes.routeInteraction?.(interaction)) return;
+  if (await chiffrement.routeInteraction?.(interaction)) return;
   if (await operations.routeInteraction?.(interaction)) return;
   if (await rumeurs.routeInteraction?.(interaction)) return;
   if (await inventaire.routeInteraction?.(interaction)) return;
