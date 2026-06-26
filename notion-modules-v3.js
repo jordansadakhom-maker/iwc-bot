@@ -610,7 +610,7 @@ async function handleInformateurRapportButton(interaction) {
   modal.addComponents(
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('source').setLabel('Source (nom / pseudo / anonyme)').setStyle(TextInputStyle.Short).setPlaceholder('Ex: Contact dans la police, Anonyme...').setRequired(true)),
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cible').setLabel('Cible / Lieu').setStyle(TextInputStyle.Short).setPlaceholder('Ex: Commissariat de Paleto Bay, Famille Moreau...').setRequired(true)),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('information').setLabel('Information collectée').setStyle(TextInputStyle.Paragraph).setPlaceholder('Décris ce que tu as vu / entendu / appris...').setRequired(true).setMaxLength(1000)),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('information').setLabel('Information collectée').setStyle(TextInputStyle.Paragraph).setPlaceholder('Décris ce que tu as vu / entendu / appris...').setRequired(true).setMaxLength(4000)),
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('fiabilite').setLabel('Fiabilité (Confirmée / Non confirmée)').setStyle(TextInputStyle.Short).setPlaceholder('Confirmée  ou  Non confirmée').setRequired(true)),
   );
   await interaction.showModal(modal);
@@ -625,7 +625,7 @@ async function handleInformateurModal(interaction) {
   await _archiverRapportNotion(rapport);
   const infosCh = getCh(interaction.guild, 'informateurs');
   if (infosCh) await infosCh.send({
-    embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle(`🆕 Rapport \`${rapport.id}\` — À vérifier`).addFields({ name: '🕵️ Source', value: source, inline: true }, { name: '🎯 Cible / Lieu', value: cible, inline: true }, { name: '📋 Fiabilité déclarée', value: `${estConfirmee ? '✅' : '⚠️'} ${fiabilite}`, inline: true }, { name: '📝 Information', value: information.slice(0, 800) }, { name: '👤 Rapporteur', value: `<@${interaction.user.id}>`, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: '📌 Statut', value: '🆕 En attente de validation Direction', inline: false }).setFooter({ text: 'IWC • Réseau Informateurs — Confidentiel' }).setTimestamp()],
+    embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle(`🆕 Rapport \`${rapport.id}\` — À vérifier`).setDescription(`📝 **Information**\n${information.slice(0, 4000)}`).addFields({ name: '🕵️ Source', value: source.slice(0, 256), inline: true }, { name: '🎯 Cible / Lieu', value: cible.slice(0, 256), inline: true }, { name: '📋 Fiabilité déclarée', value: `${estConfirmee ? '✅' : '⚠️'} ${fiabilite}`, inline: true }, { name: '👤 Rapporteur', value: `<@${interaction.user.id}>`, inline: true }, { name: '📅 Date', value: fmtShort(new Date()), inline: true }, { name: '📌 Statut', value: '🆕 En attente de validation Direction', inline: false }).setFooter({ text: 'IWC • Réseau Informateurs — Confidentiel' }).setTimestamp()],
     components: [new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`info_confirmer_${rapport.id}`).setLabel('✅ Confirmer').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`info_infirmer_${rapport.id}`).setLabel('❌ Infirmer').setStyle(ButtonStyle.Danger),
