@@ -1,0 +1,41 @@
+name: Redéploiement Render
+
+# Déclenche un redéploiement Render (= redémarrage du bot) à chaque push sur main.
+# Plus besoin de redémarrer le bot à la main après chaque changement.
+#
+# ── Mise en place (une seule fois) ──
+# 1. Dans Render : ouvre ton service → Settings → "Deploy Hook" → copie l'URL.
+# 2. Dans GitHub : repo → Settings → Secrets and variables → Actions → New repository secret.
+#       Name  : RENDER_DEPLOY_HOOK
+#       Value : (colle l'URL du Deploy Hook)
+# 3. C'est tout. Chaque fusion sur main redéploiera le bot automatiquement.
+#
+# Tant que le secret n'est pas configuré, ce workflow ne fait rien (il s'ignore).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}   # permet aussi de le lancer à la main depuis l'onglet Actions
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Déclencher le déploiement Render
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "ℹ️ RENDER_DEPLOY_HOOK non configuré — rien à faire."
+            echo "   (Ajoute le secret pour activer le redéploiement automatique.)"
+            exit 0
+          fi
+          echo "🚀 Déclenchement du redéploiement Render…"
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$HOOK")
+          echo "Réponse Render : HTTP $code"
+          if [ "$code" -ge 200 ] && [ "$code" -lt 400 ]; then
+            echo "✅ Redéploiement déclenché."
+          else
+            echo "❌ Échec (HTTP $code) — vérifie l'URL du Deploy Hook."
+            exit 1
+          fi
