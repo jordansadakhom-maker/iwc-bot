@@ -5226,6 +5226,8 @@ client.once('clientReady', async () => {
     for (const g of client.guilds.cache.values()) await notionV4.checkDashboardAlertes?.(g).catch(() => {});
   });
   cron.schedule('0 9 * * *',  async () => { for (const g of client.guilds.cache.values()) await postDailyAgenda(g).catch(() => {}); }, { timezone: 'Europe/Paris' });
+  // ── Relance des avis de recherche dormants (chaque jour à 12h) ──
+  cron.schedule('0 12 * * *', async () => { try { await traque.verifierDormants?.(client); } catch (e) { console.log('⚠️ relance avis dormants:', e.message); } }, { timezone: 'Europe/Paris' });
 
   // ── Briefing renseignement quotidien (20h) ──
   cron.schedule('0 20 * * *', async () => {

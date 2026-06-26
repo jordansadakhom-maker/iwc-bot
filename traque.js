@@ -30,7 +30,12 @@ const DANGER = {
 
 const traqueCommands = [
   new SlashCommandBuilder().setName('avis-recherche').setDescription('🎯 Lancer un avis de recherche (traque une cible)'),
-  new SlashCommandBuilder().setName('traques').setDescription('🎯 Voir les avis de recherche en cours'),
+  new SlashCommandBuilder().setName('traques').setDescription('🎯 Voir les avis de recherche en cours')
+    .addStringOption(o => o.setName('dangerosite').setDescription('Filtrer par dangerosité').setRequired(false)
+      .addChoices({ name: '🟢 Faible', value: 'faible' }, { name: '🟡 Moyen', value: 'moyen' }, { name: '🟠 Élevé', value: 'eleve' }, { name: '🔴 Extrême', value: 'extreme' }))
+    .addStringOption(o => o.setName('tri').setDescription('Trier les résultats').setRequired(false)
+      .addChoices({ name: '💰 Prime (haute → basse)', value: 'prime' }, { name: '⚠️ Dangerosité', value: 'danger' }, { name: '🆕 Plus récents', value: 'recent' }))
+    .addStringOption(o => o.setName('lieu').setDescription('Filtrer par lieu / région (texte)').setRequired(false)),
   new SlashCommandBuilder().setName('signalement').setDescription("📋 Signalement détaillé d'une cible à partir d'une photo")
     .addAttachmentOption(o => o.setName('photo').setDescription('Capture de la personne en jeu').setRequired(true))
     .addStringOption(o => o.setName('cible').setDescription('Nom / identité de la cible (optionnel)').setRequired(false)),
@@ -68,6 +73,26 @@ async function postElementOps(ops, payload, titre = 'Opération') {
 }
 function fmtDate(d) { if (!d) return '—'; const dt = new Date(d); return isNaN(dt.getTime()) ? String(d) : dt.toLocaleDateString('fr-FR'); }
 function findTraque(db, id) { return (db.traques || []).find(t => t.id === id || t.messageId === id); }
+// Montant numérique extrait d'une prime en texte libre (ex: "500 $" → 500).
+function _montantPrime(s) { const m = String(s || '').replace(/\s/g, '').match(/(\d[\d.,]*)/); return m ? (parseInt(m[1].replace(/[.,]/g, ''), 10) || 0) : 0; }
+// Crédite le portefeuille RP (db.economie) des chasseurs, à parts égales. Renvoie {part, total, n}.
+function _crediterChasseurs(db, chasseurs, montantTotal, raison) {
+  db.economie = db.economie || {};
+  const ids = [...new Set((chasseurs || []).filter(Boolean))];
+  if (!ids.length || montantTotal <= 0) return { part: 0, total: 0, n: ids.length };
+  const part = Math.floor(montantTotal / ids.length);
+  if (part <= 0) return { part: 0, total: 0, n: ids.length };
+  const date = new Date().toLocaleDateString('fr-FR');
+  for (const id of ids) {
+    const cur = db.economie[id];
+    const compte = (cur && typeof cur === 'object') ? cur : { solde: (typeof cur === 'number' ? cur : 0), historique: [] };
+    if (!Array.isArray(compte.historique)) compte.historique = [];
+    compte.solde = (compte.solde || 0) + part;
+    compte.historique.push({ date, montant: part, raison: String(raison || 'Prime').slice(0, 120) });
+    db.economie[id] = compte;
+  }
+  return { part, total: part * ids.length, n: ids.length };
+}
 function dangerLabel(v) { return DANGER[v] || '🟡 Moyen'; }
 
 // ─── Signalement par photo (vision IA) ───
@@ -370,6 +395,23 @@ async function handleCreateModal(interaction) {
     } catch {}
   }
   db.traques.push(t);
+  // 🗺️ Lien carte : la dernière position connue de la cible est enregistrée sur la carte (Confrérie).
+  if (t.position && t.position !== '—') {
+    try {
+      if (!db.carte) db.carte = {};
+      if (!Array.isArray(db.carte.points)) db.carte.points = [];
+      const pid = 'cw-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      db.carte.points.push({
+        id: pid, type: 'planque', niveau: 'membre',
+        nom: `🎯 ${t.cible}`.slice(0, 80), region: 'Autre',
+        lieu: String(t.position).slice(0, 200),
+        notes: `Avis de recherche ${t.id} · prime ${t.prime} · ${dangerLabel(t.dangerosite)}`.slice(0, 500),
+        avisId: t.id, parId: t.createdBy || null, parNom: t.createdBy || 'La Confrérie',
+        createdAt: new Date().toISOString(),
+      });
+      t.cartePointId = pid;
+    } catch {}
+  }
   if (sid && db._signalements) delete db._signalements[sid];
   saveDB(db);
   // Relais inter-serveurs : recopie de l'affiche vers l'autre serveur (no-op si non configuré)
@@ -462,6 +504,27 @@ async function handleClotureSelect(interaction) {
   t.resultat = (STATUTS[choix] || {}).label || choix;
   const prime = choix === 'capturee' || choix === 'eliminee' ? t.prime : null;
 
+  // 💰 Versement AUTOMATIQUE de la prime aux chasseurs (montant fixé à la création → divisé à parts égales)
+  let versement = null;
+  if ((choix === 'capturee' || choix === 'eliminee') && !t.primeVersee) {
+    const montant = _montantPrime(t.prime);
+    if (montant > 0 && (t.chasseurs || []).length) {
+      const r = _crediterChasseurs(db, t.chasseurs, montant, `Prime — ${t.cible} (${t.id})`);
+      if (r.part > 0) {
+        t.primeVersee = r.total; t.primePart = r.part; versement = r;
+        // Annonce dans le fil dossier
+        if (t.threadId) {
+          try { const th = await interaction.guild.channels.fetch(t.threadId).catch(() => null);
+            if (th?.send) await th.send({ content: `💰 **Prime versée** : ${r.total.toLocaleString('fr-FR')} $ répartis entre ${r.n} chasseur(s) → **${r.part.toLocaleString('fr-FR')} $** chacun.\n${t.chasseurs.map(x => `<@${x}>`).join(' ')}`, allowedMentions: { users: t.chasseurs.slice(0, 25) } }).catch(() => {});
+          } catch {}
+        }
+      }
+    }
+  }
+  const primeJournalTxt = versement
+    ? `\n💰 Prime **${versement.total.toLocaleString('fr-FR')} $** versée : **${versement.part.toLocaleString('fr-FR')} $** à chaque chasseur (portefeuille RP)`
+    : (prime ? `\n💰 Prime : **${prime}** *(à verser manuellement)*` : '');
+
   // 1) Archivage de la fiche clôturée dans #élément-opérations (la traque fait partie d'une opération)
   const ops = elementOpsCh(interaction.guild);
   if (ops) {
@@ -470,7 +533,7 @@ async function handleClotureSelect(interaction) {
   }
   // 2) Trace au journal
   const jc = journalCh(interaction.guild);
-  if (jc) await jc.send({ embeds: [new EmbedBuilder().setColor((STATUTS[choix] || {}).couleur || 0x555555).setTitle(`🎯 Avis clôturé — ${t.cible}`).setDescription(`Résultat : **${t.resultat}**${prime ? `\n💰 Prime à verser : **${prime}**` : ''}\nChasseurs : ${(t.chasseurs || []).map(x => `<@${x}>`).join(', ') || '—'}`).setFooter({ text: `IWC • ${t.id}` }).setTimestamp()] }).catch(() => {});
+  if (jc) await jc.send({ embeds: [new EmbedBuilder().setColor((STATUTS[choix] || {}).couleur || 0x555555).setTitle(`🎯 Avis clôturé — ${t.cible}`).setDescription(`Résultat : **${t.resultat}**${primeJournalTxt}\nChasseurs : ${(t.chasseurs || []).map(x => `<@${x}>`).join(', ') || '—'}`).setFooter({ text: `IWC • ${t.id}` }).setTimestamp()] }).catch(() => {});
 
   // 3) Photo optionnelle : on laisse la possibilité de déposer une photo dans le fil du dossier
   //    (les modals Discord ne reçoivent pas de fichier). L'avis n'est retiré qu'ENSUITE — soit dès
@@ -490,7 +553,8 @@ async function handleClotureSelect(interaction) {
   }
   saveDB(db);
   sauvegarderSurGitHub?.().catch(() => {});
-  return interaction.update({ content: `✅ Avis **${id}** clôturé : ${t.resultat}. Fiche archivée dans <#${CH_ELEMENT_OPS}>.${prime ? ` Pense à verser la prime (${prime}) aux chasseurs.` : ''}${invitePhoto}`, components });
+  const primeReply = versement ? ` 💰 Prime **${versement.total.toLocaleString('fr-FR')} $** versée automatiquement (${versement.part.toLocaleString('fr-FR')} $/chasseur).` : (prime ? ` 💰 Prime à verser : ${prime} (aucun chasseur inscrit ou montant non chiffré).` : '');
+  return interaction.update({ content: `✅ Avis **${id}** clôturé : ${t.resultat}. Fiche archivée dans <#${CH_ELEMENT_OPS}>.${primeReply}${invitePhoto}`, components });
 }
 async function handleFinir(interaction) {
   if (!estResponsable(interaction.member)) return interaction.reply({ content: '❌ Réservé aux responsables.', flags: MessageFlags.Ephemeral });
@@ -545,13 +609,25 @@ async function refreshAvisById(guild, wantedId) {
 // ─── Liste des traques en cours ───
 async function handleListe(interaction) {
   const db = loadDB();
-  const actifs = (db.traques || []).filter(t => ['chasse', 'reperee'].includes(t.status));
-  const e = new EmbedBuilder().setColor(0xE67E22).setTitle('🎯 Avis de recherche en cours').setFooter({ text: `IWC • ${actifs.length} traque(s) active(s)` });
-  if (!actifs.length) e.setDescription('*Aucune traque en cours.*');
-  else e.setDescription(actifs.slice(0, 20).map(t => {
+  const dgr = interaction.options?.getString?.('dangerosite') || null;
+  const tri = interaction.options?.getString?.('tri') || null;
+  const lieuF = (interaction.options?.getString?.('lieu') || '').trim().toLowerCase();
+  const dangerOrder = { extreme: 4, eleve: 3, moyen: 2, faible: 1 };
+  let actifs = (db.traques || []).filter(t => ['chasse', 'reperee'].includes(t.status));
+  if (dgr) actifs = actifs.filter(t => (t.dangerosite || 'moyen') === dgr);
+  if (lieuF) actifs = actifs.filter(t => `${t.position || ''}`.toLowerCase().includes(lieuF));
+  if (tri === 'prime') actifs.sort((a, b) => _montantPrime(b.prime) - _montantPrime(a.prime));
+  else if (tri === 'danger') actifs.sort((a, b) => (dangerOrder[b.dangerosite] || 0) - (dangerOrder[a.dangerosite] || 0));
+  else if (tri === 'recent') actifs.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  const filtres = [dgr && `dangerosité ${dangerLabel(dgr)}`, lieuF && `lieu « ${lieuF} »`, tri && `tri ${tri}`].filter(Boolean).join(' · ');
+  const e = new EmbedBuilder().setColor(0xE67E22).setTitle('🎯 Avis de recherche en cours').setFooter({ text: `IWC • ${actifs.length} traque(s)${filtres ? ' · filtré' : ''}` });
+  let desc = filtres ? `*Filtres — ${filtres}*\n\n` : '';
+  if (!actifs.length) desc += '*Aucun avis ne correspond.*';
+  else desc += actifs.slice(0, 20).map(t => {
     const st = STATUTS[t.status] || STATUTS.chasse;
-    return `${st.label} \`${t.id}\` — **${t.cible}** · 📍 ${t.position} · 💰 ${t.prime} · 🤠 ${(t.chasseurs || []).length}`;
-  }).join('\n').slice(0, 4000));
+    return `${st.label} \`${t.id}\` — **${t.cible}** · ⚠️ ${dangerLabel(t.dangerosite)} · 📍 ${t.position} · 💰 ${t.prime} · 🤠 ${(t.chasseurs || []).length}`;
+  }).join('\n');
+  e.setDescription(desc.slice(0, 4000));
   return interaction.reply({ embeds: [e], flags: MessageFlags.Ephemeral });
 }
 
@@ -737,4 +813,36 @@ async function routeInteraction(interaction) {
   return false;
 }
 
-module.exports = { traqueCommands, routeInteraction, onMessage, ensureWantedPanel, refreshAvisById, ouvrirModalAvis };
+// ─── Relance automatique des avis dormants (non résolus depuis X jours) ───
+const RELANCE_JOURS = 3;
+async function verifierDormants(client) {
+  try {
+    const db = loadDB();
+    const now = Date.now();
+    const seuilMs = RELANCE_JOURS * 24 * 3600 * 1000;
+    const dormants = (db.traques || [])
+      .filter(t => ['chasse', 'reperee'].includes(t.status))
+      .filter(t => { const ref = new Date(t.lastRelance || t.createdAt || 0).getTime(); return ref && (now - ref) >= seuilMs; });
+    if (!dormants.length) return;
+    for (const g of client.guilds.cache.values()) {
+      let ch = db.wantedChannelId ? await g.channels.fetch(db.wantedChannelId).catch(() => null) : null;
+      if (!ch) ch = _findWantedChannel(g);
+      if (!ch?.send) continue;
+      for (const t of dormants) {
+        const jours = Math.floor((now - new Date(t.createdAt || now).getTime()) / 86400000);
+        const lien = (t.messageId && t.channelId) ? `https://discord.com/channels/${g.id}/${t.channelId}/${t.messageId}` : '';
+        const e = new EmbedBuilder().setColor(0xE67E22).setTitle(`⏰ Avis toujours ouvert — ${t.cible}`)
+          .setDescription(`Ouvert depuis **${jours} jour(s)**, toujours pas résolu.\n💰 Prime : **${t.prime}** · ⚠️ ${dangerLabel(t.dangerosite)} · 📍 ${t.position || '—'}\n🤠 Chasseurs : ${(t.chasseurs || []).map(x => `<@${x}>`).join(', ') || '*aucun*'}`)
+          .setFooter({ text: `IWC • ${t.id} • relance automatique` });
+        if (t.photo) e.setThumbnail(t.photo);
+        await ch.send({ content: `<@&${ROLE_CONFRERIE}> — ⏰ **Un avis de recherche attend toujours preneur.** ${lien}`, embeds: [e], allowedMentions: { roles: [ROLE_CONFRERIE] } }).catch(() => {});
+        t.lastRelance = new Date().toISOString();
+        await new Promise(r => setTimeout(r, 500));
+      }
+      break; // le salon wanted n'existe que dans un seul serveur
+    }
+    saveDB(db); sauvegarderSurGitHub?.().catch(() => {});
+  } catch (e) { console.log('❌ traque verifierDormants:', e.message); }
+}
+
+module.exports = { traqueCommands, routeInteraction, onMessage, ensureWantedPanel, refreshAvisById, ouvrirModalAvis, verifierDormants };
