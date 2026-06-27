@@ -226,5 +226,28 @@ async function restaurerDepuisGitHub() {
   }
 }
 
-module.exports = { loadDB, saveDB, saveDBSync, invalidateCache, sauvegarderSurGitHub, restaurerDepuisGitHub };
+// ── Charge TOUS les instantanés du Gist (iwc-data.json + backup-AAAA-MM-JJ.json) ──
+// Sert à récupérer des données perdues (ex : rapports/avis effacés) depuis une
+// sauvegarde plus ancienne. Renvoie [{nom, data}] trié du plus récent au plus ancien.
+async function chargerTousSnapshots() {
+  if (!process.env.GITHUB_TOKEN || !process.env.GITHUB_GIST_ID) return [];
+  try {
+    const res = await fetch(`https://api.github.com/gists/${process.env.GITHUB_GIST_ID}`, { headers: { 'Authorization': `Bearer ${process.env.GITHUB_TOKEN}` } });
+    if (!res.ok) return [];
+    const gist = await res.json();
+    const out = [];
+    for (const [nom, f] of Object.entries(gist.files || {})) {
+      if (!/\.json$/i.test(nom)) continue;
+      let content = f.content;
+      if ((f.truncated || !content) && f.raw_url) { try { const r = await fetch(f.raw_url); content = await r.text(); } catch {} }
+      if (!content) continue;
+      try { out.push({ nom, data: JSON.parse(content) }); } catch {}
+    }
+    // iwc-data.json (le principal) en premier, puis backups du plus récent au plus ancien
+    out.sort((a, b) => (a.nom === 'iwc-data.json' ? -1 : b.nom === 'iwc-data.json' ? 1 : b.nom.localeCompare(a.nom)));
+    return out;
+  } catch (e) { console.log('❌ chargerTousSnapshots:', e.message); return []; }
+}
+
+module.exports = { loadDB, saveDB, saveDBSync, invalidateCache, sauvegarderSurGitHub, restaurerDepuisGitHub, chargerTousSnapshots };
 

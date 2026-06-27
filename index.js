@@ -10,7 +10,7 @@ const {
 } = require('discord.js');
 const cron = require('node-cron');
 
-const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub } = require('./db');
+const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub, restaurerDepuisGitHub, chargerTousSnapshots } = require('./db');
 // Version du bot (sert au /version ET à la génération auto des patch notes)
 const BOT_VERSION = '9.0 (26 juin — opérations bouclées (prime→coffre + compte-rendu RP + /op suivi), wanted enrichi (prime auto aux chasseurs, relance, carte, filtres), renseignement IA, journal-photo par région + alertes Confrérie, parchemin client/engagement, fix candidatures & inventaire)';
 const { initPapiers, papiersCommands } = require('./papiers');
@@ -3134,6 +3134,31 @@ client.on('messageCreate', async message => {
       const m = await message.reply({ content: '♻️ Restauration des avis de recherche depuis la base…', allowedMentions: { parse: [] } }).catch(() => null);
       try { const n = await traque.restaurerAvis?.(message.guild); if (m) await m.edit(`✅ ${n || 0} avis de recherche réaffiché(s) depuis la base.`).catch(() => {}); }
       catch (e) { if (m) await m.edit(`❌ ${e.message}`).catch(() => {}); }
+      return;
+    }
+    // Récupération PROFONDE depuis les sauvegardes Gist (si les données ont été perdues de la base)
+    if (message.guild && !message.author?.bot && /^!recuperer-renseignements\b/i.test((message.content || '').trim())) {
+      if (!isDirection(message.member)) { await message.reply({ content: '❌ Réservé à la Direction.', allowedMentions: { parse: [] } }).catch(() => {}); return; }
+      const m = await message.reply({ content: '🔎 Recherche dans les sauvegardes (Gist)…', allowedMentions: { parse: [] } }).catch(() => null);
+      try {
+        const snaps = await chargerTousSnapshots();
+        if (!snaps.length) { if (m) await m.edit('⚠️ Aucune sauvegarde accessible (GITHUB_GIST_ID/TOKEN manquants ?).').catch(() => {}); return; }
+        const db = loadDB();
+        db.informateurs = db.informateurs || []; db.traques = db.traques || [];
+        const idsR = new Set(db.informateurs.map(r => r && r.id).filter(Boolean));
+        const idsT = new Set(db.traques.map(t => t && t.id).filter(Boolean));
+        let addR = 0, addT = 0;
+        for (const s of snaps) {
+          for (const r of (s.data?.informateurs || [])) { if (r && r.id && !idsR.has(r.id)) { db.informateurs.push(r); idsR.add(r.id); addR++; } }
+          for (const t of (s.data?.traques || [])) { if (t && t.id && !idsT.has(t.id)) { db.traques.push(t); idsT.add(t.id); addT++; } }
+        }
+        saveDB(db); saveDBSync(); try { await sauvegarderSurGitHub?.(); } catch {}
+        if (m) await m.edit(`✅ Récupéré depuis **${snaps.length}** sauvegarde(s) : **${addR}** rapport(s) + **${addT}** avis ré-injecté(s) en base.\nJe les réaffiche…`).catch(() => {});
+        let nR = 0, nA = 0;
+        try { nR = await notionV3.reposterTousRapports?.(message.guild) || 0; } catch {}
+        try { nA = await traque.restaurerAvis?.(message.guild) || 0; } catch {}
+        if (m) await m.edit(`✅ Récupération terminée : **${addR}** rapport(s) + **${addT}** avis retrouvés dans les sauvegardes.\n♻️ **${nR}** rapport(s) et **${nA}** avis réaffichés dans les salons.`).catch(() => {});
+      } catch (e) { if (m) await m.edit(`❌ ${e.message}`).catch(() => {}); }
       return;
     }
   } catch {}
