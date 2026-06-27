@@ -3104,6 +3104,25 @@ client.on('messageCreate', async message => {
       return;
     }
   } catch {}
+  // Restauration depuis la base (si des messages d'un salon ont disparu) — Direction.
+  //  !restaurer-informateurs  → reposte les rapports informateurs sauvegardés
+  //  !restaurer-wanted        → reposte les avis de recherche ouverts sauvegardés
+  try {
+    if (message.guild && !message.author?.bot && /^!restaurer-informateurs\b/i.test((message.content || '').trim())) {
+      if (!isDirection(message.member)) { await message.reply({ content: '❌ Réservé à la Direction.', allowedMentions: { parse: [] } }).catch(() => {}); return; }
+      const m = await message.reply({ content: '♻️ Restauration des rapports informateurs depuis la base…', allowedMentions: { parse: [] } }).catch(() => null);
+      try { const n = await notionV3.reposterTousRapports?.(message.guild); if (m) await m.edit(`✅ ${n || 0} rapport(s) réaffiché(s) depuis la base.`).catch(() => {}); }
+      catch (e) { if (m) await m.edit(`❌ ${e.message}`).catch(() => {}); }
+      return;
+    }
+    if (message.guild && !message.author?.bot && /^!restaurer-wanted\b/i.test((message.content || '').trim())) {
+      if (!isDirection(message.member)) { await message.reply({ content: '❌ Réservé à la Direction.', allowedMentions: { parse: [] } }).catch(() => {}); return; }
+      const m = await message.reply({ content: '♻️ Restauration des avis de recherche depuis la base…', allowedMentions: { parse: [] } }).catch(() => null);
+      try { const n = await traque.restaurerAvis?.(message.guild); if (m) await m.edit(`✅ ${n || 0} avis de recherche réaffiché(s) depuis la base.`).catch(() => {}); }
+      catch (e) { if (m) await m.edit(`❌ ${e.message}`).catch(() => {}); }
+      return;
+    }
+  } catch {}
   // Réorganisation du serveur : !reorg test / !reorg / !reorg annuler (direction uniquement)
   try { if (await reorg.onMessage?.(message)) return; } catch {}
   // Salon RP : on réécrit le message en western immersif puis on le re-poste sous le nom de l'auteur

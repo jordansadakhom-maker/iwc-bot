@@ -713,6 +713,27 @@ async function _attacherPhotoRapport(message) {
   } catch (e) { console.log('⚠️ _attacherPhotoRapport:', e.message); }
 }
 
+// Restauration : reposte les rapports sauvegardes en base (si le salon a ete vide).
+async function reposterTousRapports(guild, limite = 40) {
+  const infosCh = getCh(guild, 'informateurs'); if (!infosCh) return 0;
+  const db = loadDB();
+  const rapports = (db.informateurs || []).slice(-limite);
+  if (!rapports.length) return 0;
+  await infosCh.send({ embeds: [new EmbedBuilder().setColor(0x2C2F33).setTitle('♻️ Restauration des rapports').setDescription(`Réaffichage de **${rapports.length}** rapport(s) conservé(s) en base. *(Les messages supprimes ne sont pas recuperables, mais les donnees, si.)*`)] }).catch(() => {});
+  let n = 0;
+  for (const r of rapports) {
+    // Si le message existe encore, on ne le double pas.
+    if (r.messageId && r.channelId) {
+      try { const ch = await guild.channels.fetch(r.channelId).catch(() => null); const ex = ch && ch.messages ? await ch.messages.fetch(r.messageId).catch(() => null) : null; if (ex) continue; } catch {}
+    }
+    const sent = await infosCh.send({ embeds: [_rapportEmbed(r)], components: r.statut === 'nouveau' ? [_rapportBoutons(r.id)] : [] }).catch(() => null);
+    if (sent) { r.messageId = sent.id; r.channelId = infosCh.id; n++; }
+    await new Promise(res => setTimeout(res, 500)); // anti rate-limit
+  }
+  saveDB(db); await _persistNow();
+  return n;
+}
+
 async function handleInformateurModal(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const source = interaction.fields.getTextInputValue('source'); const cible = interaction.fields.getTextInputValue('cible'); const information = interaction.fields.getTextInputValue('information');
@@ -1044,7 +1065,7 @@ module.exports = {
   checkInactivite, JOURS_INACTIF,
   updateHierarchieEmbed, handleHierarchieCommand, handleGradeSetCommand, handleGradePanelButton, handleGradeMembreSelect, handleGradeGradeSelect, handleGradeMajButton, handleGradeUp, handleGradeDown, handleGradeFiche, handleGradeEligibles, showGradeMembre, GRADES_LEGAL, GRADES_ILLEGAL, ROLES,
   setupAffairesPanel, handleAffaireNouvelleButton, handleAffaireModal, handleAffaireVote, handleAffaireDetail, postResumeAffaires, handleAffairesResumeButton, checkAffairesTimeout,
-  setupInformateursPanel, handleInformateurRapportButton, handleInformateurModal, handleInformateurHistorique, handleInformateurMessage, handleInformateurConfirmer, handleInformateurInfirmer, majCarnetRenseignements: _majCarnetRenseignements, republierRapportsManquants, creerRenseignement,
+  setupInformateursPanel, handleInformateurRapportButton, handleInformateurModal, handleInformateurHistorique, handleInformateurMessage, handleInformateurConfirmer, handleInformateurInfirmer, majCarnetRenseignements: _majCarnetRenseignements, republierRapportsManquants, reposterTousRapports, creerRenseignement,
   handlePlanningScreenshot, handlePlansMessage,
   getMentionPole, updateNotionStatutPole,
   syncOperationTermineeNotion, syncAbsenceNotion,
