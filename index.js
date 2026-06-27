@@ -3391,6 +3391,9 @@ client.on('messageCreate', async message => {
         const heure = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
         const dateStr = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
         const colors = { normale: 0x8B5A2A, importante: 0xFFA500, urgente: 0xED4245 };
+        // Repères visuels : badge de priorité (titre) + jauge de menace
+        const _BADGE = { urgente: '🔴 ', importante: '🟠 ', normale: '' };
+        const _GAUGE = { faible: '🟢 Faible ▰▱▱', moyen: '🟡 Moyen ▰▰▱', eleve: '🔴 Élevé ▰▰▰' };
 
         // ── Tenter un rapport IA structuré (transcription brute = info sans le balisage) ──
         const transcriptionBrute = info.replace(/\*\*/g, '').replace(/▸/g, '').replace(/🔑.*/s, '').trim();
@@ -3407,7 +3410,7 @@ client.on('messageCreate', async message => {
           const lieuFinal = rapport.lieu || lieu;
           // Niveau de menace -> priorité + couleur
           const menace = (rapport.menace || '').toLowerCase();
-          const menaceAffiche = { faible: '🟢 Faible', moyen: '🟡 Moyen', eleve: '🔴 Élevé' }[menace] || '';
+          const menaceAffiche = _GAUGE[menace] || '';
           if (menace === 'eleve') priorite = 'urgente';
           else if (menace === 'moyen' && priorite === 'normale') priorite = 'importante';
           else if (catsR.includes('🩸 Violence') || catsR.includes('🔫 Armes') || catsR.includes('🔥 Danger')) {
@@ -3419,7 +3422,7 @@ client.on('messageCreate', async message => {
           const recoLabel = importantReco ? (_DEST_LABEL[destKeyReco] || '🕵️ Carnet de renseignements') : null;
           embed = new EmbedBuilder()
             .setColor(colors[priorite] || colors.normale)
-            .setTitle(importantReco ? '📋 RAPPORT DE TERRAIN' : '📝 NOTE DE TERRAIN')
+            .setTitle(`${_BADGE[priorite] || ''}${importantReco ? '📋 RAPPORT DE TERRAIN' : '📝 NOTE DE TERRAIN'}`)
             .setAuthor({ name: `🕵️ ${agent} · ${heure} · ${dateStr}` })
             .setDescription(`*${rapport.resume}*`)
             .addFields(
@@ -3453,7 +3456,7 @@ client.on('messageCreate', async message => {
           })();
           embed = new EmbedBuilder()
             .setColor(colors[priorite] || colors.normale)
-            .setTitle('📋 NOTE DE TERRAIN')
+            .setTitle(`${_BADGE[priorite] || ''}📋 NOTE DE TERRAIN`)
             .setAuthor({ name: `🕵️ ${agent} · ${heure} · ${dateStr}` })
             .setDescription(`*« ${apercu} »*`)
             .addFields(
@@ -3523,8 +3526,9 @@ client.on('messageCreate', async message => {
         } catch {}
 
         if (estDoublon) {
-          // Ajouter une mention discrète plutôt qu'un nouveau rapport complet
-          embed.setFooter({ text: `IWC · Renseignement · Priorité : ${priorite} · ⚠️ Recoupe une info déjà signalée` });
+          // Recoupement : champ visible (un même fait signalé par 2 agents = info plus fiable)
+          embed.addFields({ name: '🔁 Recoupement', value: '⚠️ *Recoupe une info déjà signalée récemment — fiabilité renforcée.*', inline: false });
+          embed.setFooter({ text: `IWC · Renseignement · Priorité : ${priorite} · 🔁 Recoupé` });
         }
 
         // ── Poster dans un fil si une cible est detectee, sinon dans le salon ──
