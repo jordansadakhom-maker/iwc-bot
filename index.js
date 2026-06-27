@@ -2402,6 +2402,7 @@ async function autoSetup(guild) {
   direction.installerMemo?.(guild).then(() => console.log('📌 Mémo Direction en place')).catch(() => {});
   assistant.installerPanneau?.(guild).then(() => console.log('🤖 Panneau assistant IA en place')).catch(() => {});
   tenue.installerPanneau?.(guild).then(() => console.log('🧵 Panneau Vestiaire (#tenue) en place')).catch(() => {});
+  _installerPanneauContrats(guild).then(() => console.log('📜 Panneau « Contrats en cours » en place')).catch(() => {});
   // ♻️ Restauration AUTO (une seule fois) du contenu disparu : reposte rapports informateurs + avis wanted
   // depuis la base. Anti-doublon : ne reposte que ce dont le message a disparu.
   try {
@@ -2746,6 +2747,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
     try { const ef = new EmbedBuilder().setColor(0x2C3E50).setTitle(`📜 ${vote.contratId} — ${vote.clientNom}`).addFields({ name: '💵 Montant', value: `$${vote.montant.toLocaleString('fr-FR')}`, inline: true }, { name: '📅 Échéance', value: vote.echeance || 'Aucune', inline: true }, { name: '📋 Objet', value: vote.objet.slice(0, 1000) }); await _posterContratForum(guild, contrat, ef); } catch {}
     _updatePlanningContrats(client).catch(() => {});
     _updateContratPanel(client).catch(() => {});
+    _updatePanneauContrats(client).catch(() => {});
     try { await reaction.message.channel.send({ content: `✅ **Contrat ${vote.contratId} validé** par le groupe (5 votes) — il rejoint les contrats officiels.` }); } catch {}
     return;
   }
@@ -4993,6 +4995,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     _posterContratForum(guild, contrat).catch(() => {});
     _updateContratPanel(interaction.client).catch(() => {});
     _updatePlanningContrats(interaction.client).catch(() => {});
+    _updatePanneauContrats(interaction.client).catch(() => {});
     ajouterJournalIC(guild, { type: 'contrat', emoji: '📇', titre: `Contrat ${contratId} — ${contrat.clientNom}`, description: String(contrat.objet || '').slice(0, 200), auteur: emetteurIC }).catch(() => {});
     if (c.id) repertoire.rafraichirFicheContact?.(guild, c.id).catch(() => {});
     return interaction.editReply({ content: `✅ Contrat **${contratId}** créé pour **${contrat.clientNom}** (depuis le répertoire) et enregistré en *En cours*.\n📇 La fiche du contact est mise à jour avec l'historique.` });
@@ -5159,6 +5162,20 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     if (!c) return interaction.update({ content: "❌ Contrat introuvable.", embeds: [], components: [] });
     return interaction.update(_contratSuiviPayload(c));
   }
+  // Panneau permanent « Contrats en cours » : ouvrir un contrat → fiche PRIVÉE
+  // (ne touche pas le panneau public, partagé). Les actions de la fiche restent
+  // les boutons csuivi:: habituels, appliqués sur la réponse éphémère.
+  if (interaction.isStringSelectMenu() && interaction.customId === 'cpanel_select') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    const c = (loadDB().contrats || []).find(x => String(x.id) === interaction.values[0]);
+    if (!c) return interaction.reply({ content: "❌ Contrat introuvable (peut-être déjà clôturé). Clique 🔄 Rafraîchir.", flags: MessageFlags.Ephemeral });
+    return interaction.reply({ ..._contratSuiviPayload(c), flags: MessageFlags.Ephemeral });
+  }
+  if (interaction.isButton() && interaction.customId === 'cpanel_refresh') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    await interaction.deferUpdate().catch(() => {});
+    return _updatePanneauContrats(interaction.client);
+  }
   if (interaction.isButton() && interaction.customId.startsWith('csuivi::')) {
     if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
     const parts = interaction.customId.split('::'); const stageKey = parts[1]; const ref = parts.slice(2).join('::');
@@ -5181,6 +5198,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     ajouterJournalIC(interaction.guild, { type: 'contrat', emoji: '📜', titre: `Contrat ${c.id} → ${stage}`, description: String(c.objet || c.clientNom || c.commanditaire || '').slice(0, 200), auteur: interaction.user.username }).catch(() => {});
     _updateContratPanel(interaction.client).catch(() => {});
     _updatePlanningContrats(interaction.client).catch(() => {});
+    _updatePanneauContrats(interaction.client).catch(() => {});
     if (stage === 'Validé') _alerteContratAEncaisser(interaction.guild, c).catch(() => {});
     return interaction.update(_contratSuiviPayload(c, `✅ Étape mise à jour : **${stage}** — synchronisé dans Notion.`));
   }
@@ -5209,6 +5227,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     _syncTransactionNotion({ type: 'Entrée', coffre: 'legal', montant, objet: `Contrat ${c.id} honoré`, responsable: interaction.user.username, solde, date: new Date().toISOString(), discordId: interaction.user.id, userId: interaction.user.id }).catch(() => {});
     _updateContratPanel(interaction.client).catch(() => {});
     _updatePlanningContrats(interaction.client).catch(() => {});
+    _updatePanneauContrats(interaction.client).catch(() => {});
     avis.demanderAvis?.(interaction.guild, c).catch(() => {}); // ⭐ demande d'avis au client
     return interaction.editReply({ content: `🏁 **Contrat ${c.id} honoré !**\n💰 **+$${montant.toLocaleString('fr-FR')}** versés au coffre commun.\n💼 Nouveau solde : **$${solde.toLocaleString('fr-FR')}**\n🧾 Facture créée dans le forum (trace écrite).\n📒 Étape passée à **Honoré** (Notion + journal de bord).\n⭐ Un avis a été demandé au client en MP.` });
   }
@@ -5456,7 +5475,7 @@ client.once('clientReady', async () => {
   });
   // (Import Notion automatique RETIRÉ : il réimportait chaque minute les contrats supprimés après un reset.
   //  Les contrats viennent maintenant de la base locale sauvegardée + import manuel via /import-contrats.)
-  cron.schedule('*/5 * * * *', async () => { try { await _updateContratPanel(client); } catch {} try { await _updatePlanningContrats(client); } catch {} try { await comptabilite.refreshPanel?.(client); } catch {} });
+  cron.schedule('*/5 * * * *', async () => { try { await _updateContratPanel(client); } catch {} try { await _updatePlanningContrats(client); } catch {} try { await _updatePanneauContrats(client); } catch {} try { await comptabilite.refreshPanel?.(client); } catch {} });
   cron.schedule('0 18 * * *', async () => {
     try { const u = await client.users.fetch('944208797084311583').catch(() => null); if (u) await u.send({ embeds: [_genererRecapEmbed(loadDB())] }).catch(() => {}); } catch {}
   }, { timezone: 'Europe/Paris' });
@@ -6193,6 +6212,86 @@ async function _updateContratPanel(client) {
     }
     if (!msg) return;
     await msg.edit({ embeds: [_contratPanelEmbed(loadDB())] }).catch(() => {});
+  } catch {}
+}
+
+// ═══ PANNEAU PERMANENT « CONTRATS EN COURS » (#tableau-de-bord) ═══
+// Liste visible en permanence + menu déroulant pour ouvrir chaque contrat
+// individuellement (fiche privée avec actions). Réservé à la Direction.
+function _panneauContratsPayload(db) {
+  const now = new Date();
+  const stadeOf = c => c.suivi || _suiviDepuisStatut(c);
+  const clos = ['Honoré', 'Abandonné'];
+  const emo = { 'En attente': '🟡', 'En cours': '🔵', 'Validé': '✅' };
+  const joursEch = c => { if (!c.dateEcheance) return Infinity; const d = new Date(c.dateEcheance); if (isNaN(d.getTime())) return Infinity; return Math.round((Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())) / 86400000); };
+  const fmtEch = c => { const j = joursEch(c); if (j === Infinity) return ''; if (j < 0) return `⏰ retard ${Math.abs(j)}j`; if (j === 0) return '⏰ auj.'; if (j === 1) return '⏰ demain'; if (j <= 3) return `⏰ ${j}j`; return `📅 ${j}j`; };
+  const pole = c => ((c.cc || c.type === 'confrerie' || String(c.id).startsWith('CF-')) ? '🔒' : '⚖️');
+  const actifs = (db.contrats || []).filter(c => !clos.includes(stadeOf(c)));
+  actifs.sort((a, b) => joursEch(a) - joursEch(b));
+  const lignes = actifs.slice(0, 25).map(c => {
+    const stade = stadeOf(c);
+    const nom = c.clientNom || c.commanditaire || '—';
+    const objet = c.objet ? ' · ' + String(c.objet).slice(0, 40) : '';
+    const ech = fmtEch(c); const echTxt = ech ? ' · ' + ech : '';
+    return `${emo[stade] || '⚪'} ${pole(c)} \`${c.id}\` — **${String(nom).slice(0, 30)}**${objet}${echTxt}`;
+  });
+  const embed = new EmbedBuilder().setColor(0x8B1A1A).setTitle('📜 CONTRATS EN COURS')
+    .setDescription(actifs.length
+      ? (lignes.join('\n').slice(0, 4000) + (actifs.length > 25 ? `\n\n*… +${actifs.length - 25} autre(s) — ouvre « 🎮 Gérer » pour filtrer / chercher.*` : ''))
+      : '*Aucun contrat en cours pour le moment.* ✅')
+    .setFooter({ text: `${actifs.length} en cours • ⚖️ IWC · 🔒 Confrérie • choisis un contrat ci-dessous pour l'ouvrir • maj ${fmtShort(now)}` });
+  const rows = [];
+  if (actifs.length) {
+    const opts = actifs.slice(0, 25).map(c => {
+      const stade = stadeOf(c);
+      const nom = c.clientNom || c.commanditaire || '';
+      const objet = c.objet || '';
+      const label = ([nom, objet].filter(Boolean).join(' — ') || String(c.id)).slice(0, 100);
+      const desc = [stade, fmtEch(c).replace(/[⏰📅]/g, '').trim(), String(c.id)].filter(Boolean).join(' · ').slice(0, 100);
+      return { label, description: desc || undefined, value: String(c.id), emoji: emo[stade] || '⚪' };
+    });
+    rows.push(new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder().setCustomId('cpanel_select').setPlaceholder('📜 Ouvrir un contrat…').addOptions(opts),
+    ));
+  }
+  rows.push(new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('cpanel_refresh').setLabel('Rafraîchir').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('csuivi_open').setLabel('Gérer / filtrer / chercher').setEmoji('🎮').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('csuivi_archives').setLabel('Archives').setEmoji('📁').setStyle(ButtonStyle.Secondary),
+  ));
+  return { embeds: [embed], components: rows };
+}
+async function _installerPanneauContrats(guild) {
+  try {
+    const ch = await guild.channels.fetch(SALON_COMMANDEMENT).catch(() => null);
+    if (!ch || typeof ch.send !== 'function') return;
+    const botId = guild.client.user.id;
+    const payload = _panneauContratsPayload(loadDB());
+    let exists = null;
+    try { const pins = await ch.messages.fetchPinned().catch(() => null); if (pins) exists = pins.find(m => m.author?.id === botId && (m.embeds?.[0]?.title || '').includes('CONTRATS EN COURS')); } catch {}
+    if (!exists) { const recent = await ch.messages.fetch({ limit: 40 }).catch(() => null); if (recent) exists = recent.find(m => m.author?.id === botId && (m.embeds?.[0]?.title || '').includes('CONTRATS EN COURS')); }
+    if (exists) {
+      await exists.edit(payload).catch(() => {});
+      const d = loadDB(); d.panneauContrats = { channelId: ch.id, messageId: exists.id }; saveDBSync(d);
+      return;
+    }
+    const m = await ch.send(payload).catch(() => null);
+    if (m) { await m.pin().catch(() => {}); const d = loadDB(); d.panneauContrats = { channelId: ch.id, messageId: m.id }; saveDBSync(d); }
+  } catch (e) { console.log('⚠️ panneau contrats en cours:', e.message); }
+}
+async function _updatePanneauContrats(client) {
+  try {
+    const ref = loadDB().panneauContrats;
+    if (!ref || !ref.channelId) return;
+    const ch = await client.channels.fetch(ref.channelId).catch(() => null);
+    if (!ch) return;
+    let msg = ref.messageId ? await ch.messages.fetch(ref.messageId).catch(() => null) : null;
+    if (!msg) {
+      const recent = await ch.messages.fetch({ limit: 40 }).catch(() => null);
+      if (recent) { msg = [...recent.values()].find(m => m.author.id === client.user.id && (m.embeds?.[0]?.title || '').includes('CONTRATS EN COURS')) || null; if (msg) { const d = loadDB(); d.panneauContrats = { channelId: ch.id, messageId: msg.id }; saveDBSync(d); } }
+    }
+    if (!msg) return;
+    await msg.edit(_panneauContratsPayload(loadDB())).catch(() => {});
   } catch {}
 }
 
