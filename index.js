@@ -86,6 +86,10 @@ let avis = {};
 try { avis = require('./avis'); console.log('✅ Module avis chargé'); }
 catch (e) { console.log('⚠️ avis non chargé:', e.message); }
 
+let assistant = {};
+try { assistant = require('./assistant'); console.log('✅ Module assistant chargé'); }
+catch (e) { console.log('⚠️ assistant non chargé:', e.message); }
+
 let comptabilite = {};
 try { comptabilite = require('./comptabilite'); console.log('✅ Module comptabilité chargé'); }
 catch (e) { console.log('⚠️ comptabilite non chargé:', e.message); }
@@ -2374,6 +2378,7 @@ async function autoSetup(guild) {
   chiffrement.installerPanneau?.(guild.client).then(() => console.log('🔐 Panneau chiffrement en place')).catch(() => {});
   _installerPosteCommandement(guild).then(() => console.log('🎖️ Poste de commandement Direction en place')).catch(() => {});
   direction.installerMemo?.(guild).then(() => console.log('📌 Mémo Direction en place')).catch(() => {});
+  assistant.installerPanneau?.(guild).then(() => console.log('🤖 Panneau assistant IA en place')).catch(() => {});
   _installerPanelAgenda(guild).then(() => console.log('📅 Panneau agenda installé')).catch(() => {});
   _setupComptaChannel(guild).then(() => console.log('💰 Salon comptabilité prêt')).catch(() => {});
   _majPanneauxRdvClient(guild).then(() => console.log('📨 Panneaux RDV client à jour')).catch(() => {});
@@ -3016,6 +3021,7 @@ function _posteCommandementRows() {
       new ButtonBuilder().setCustomId('mt_purge').setLabel('Purger les tests').setEmoji('🧹').setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId('relance_open').setLabel('Relancer un visiteur').setEmoji('📨').setStyle(ButtonStyle.Primary),
     ),
+    ...(assistant.rowPourCommandement ? [assistant.rowPourCommandement()] : []),
   ];
 }
 async function _installerPosteCommandement(guild) {
@@ -3740,6 +3746,7 @@ client.on('interactionCreate', async interaction => {
   if (await modetest.routeInteraction?.(interaction)) return;
   if (await accueil.routeInteraction?.(interaction)) return;
   if (await avis.routeInteraction?.(interaction)) return;
+  if (await assistant.routeInteraction?.(interaction)) return;
   if (await operations.routeInteraction?.(interaction)) return;
   if (await rumeurs.routeInteraction?.(interaction)) return;
   if (await inventaire.routeInteraction?.(interaction)) return;
