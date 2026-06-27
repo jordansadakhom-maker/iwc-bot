@@ -254,6 +254,7 @@ const {
 // apparaît ainsi juste sous le panneau). Repérés par un marqueur de titre, re-postés en bas.
 stickyPanel.register(SALON_HARDCODED.CONTRATS, 'les contrats');
 stickyPanel.register(SALON_HARDCODED.OPERATIONS, 'centre des opérations');
+stickyPanel.register('1516948864056168498', 'papiers'); // #registre : le panneau « 📜 PAPIERS » reste en bas (les papiers s'archivent au-dessus)
 
 function getChById(guild, salonKey, ...fallbackNames) {
   // D'abord chercher dans SALON_IDS (config.js)

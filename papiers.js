@@ -546,6 +546,35 @@ async function gererInteractionPapiers(interaction) {
       return;
     }
 
+    // 1c) Bouton « 🪖 Code » → affiche le Code (en privé) + bouton pour jurer
+    if (interaction.isButton?.() && interaction.customId === 'papier_code_open') {
+      if (!estMembre(interaction.member)) return interaction.reply({ content: '🔒 Réservé aux membres de la Compagnie.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('papier_code_jurer').setLabel('🩸 Apposer ma marque de sang').setStyle(ButtonStyle.Danger),
+      );
+      return interaction.reply({ embeds: [embedCode()], components: [row], flags: MessageFlags.Ephemeral }).catch(() => {});
+    }
+
+    // 1d) Bouton « 🔍 Consulter » → derniers papiers archivés (en privé)
+    if (interaction.isButton?.() && interaction.customId === 'papier_consult') {
+      if (!estMembre(interaction.member)) return interaction.reply({ content: '🔒 Réservé aux membres de la Compagnie.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const ch = await interaction.client.channels.fetch(CONFIG.REGISTRE_CHANNEL_ID).catch(() => null);
+      if (!ch) return interaction.editReply({ content: '⚠️ Salon registre introuvable.' }).catch(() => {});
+      const msgs = await ch.messages.fetch({ limit: 40 }).catch(() => null);
+      if (!msgs) return interaction.editReply({ content: '⚠️ Impossible de lire le salon registre (permissions ?).' }).catch(() => {});
+      const me = interaction.client.user.id;
+      const papiers = [...msgs.values()]
+        .filter(m => m.author.id === me && m.embeds?.length > 0 && !(m.embeds[0]?.title || '').includes('PAPIERS — IRON WOLF COMPANY'))
+        .sort((a, b) => b.createdTimestamp - a.createdTimestamp).slice(0, 12);
+      if (!papiers.length) return interaction.editReply({ content: '📭 Aucun papier archivé pour le moment.' }).catch(() => {});
+      const lignes = papiers.map(m => `• [**${(m.embeds[0]?.title || 'Papier').replace(/[*_`]/g, '')}**](${m.url}) — <t:${Math.floor(m.createdTimestamp / 1000)}:R>`);
+      return interaction.editReply({ embeds: [new EmbedBuilder().setColor(COL.sepia)
+        .setTitle('📒 Derniers papiers archivés')
+        .setDescription(lignes.join('\n'))
+        .setFooter({ text: `${papiers.length} papier(s) • /papiers pour filtrer` })] }).catch(() => {});
+    }
+
     // 2) Soumission des formulaires
     if (interaction.isModalSubmit?.() && interaction.customId?.startsWith('papier_modal_')) {
       const type = interaction.customId.replace('papier_modal_', '');
@@ -900,23 +929,36 @@ async function deployerPapiers(client) {
 function _panelPapiersPayload() {
   const e = new EmbedBuilder().setColor(COL.sepia).setTitle('📜 PAPIERS — IRON WOLF COMPANY')
     .setDescription([
-      '*Tous les documents officiels de la Compagnie, en un clic.*',
+      '*Tous les documents officiels de la Compagnie — créés et archivés ici.*',
       '',
-      'Choisis un document ci-dessous, remplis le formulaire — il est généré puis archivé ici.',
+      '__**✍️ Créer un document**__',
+      'Clique un bouton ci-dessous, remplis le formulaire : il est généré, tamponné d\'une référence, puis archivé dans ce salon.',
+      '',
+      '__**🔍 Consulter**__',
+      '« Consulter les derniers papiers » liste les derniers documents avec un lien direct vers chacun.',
+      '',
+      '📌 *Reçu · Dette (signable) · Casier · Carte · Ordre de mission · Billet · Avis de recherche (Direction) · Code de la Confrérie.*',
     ].join('\n'))
     .setFooter({ text: 'Iron Wolf Company • Registre des papiers' });
+  // 📄 Documents courants
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('papier_open_recu').setLabel('Reçu').setEmoji('🧾').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('papier_open_dette').setLabel('Dette').setEmoji('📜').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('papier_open_casier').setLabel('Casier').setEmoji('🗂️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('papier_open_carte').setLabel('Carte').setEmoji('🎴').setStyle(ButtonStyle.Secondary),
   );
+  // 🎖️ Mission & Confrérie
   const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('papier_open_ordre').setLabel('Ordre de mission').setEmoji('🎖️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('papier_open_billet').setLabel('Billet').setEmoji('🃏').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('papier_open_wanted').setLabel('Avis de recherche').setEmoji('🔫').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('papier_code_open').setLabel('Code').setEmoji('🪖').setStyle(ButtonStyle.Secondary),
   );
-  return { embeds: [e], components: [row1, row2] };
+  // 🔍 Consultation
+  const row3 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('papier_consult').setLabel('Consulter les derniers papiers').setEmoji('🔍').setStyle(ButtonStyle.Primary),
+  );
+  return { embeds: [e], components: [row1, row2, row3] };
 }
 async function installerPanelPapiers(client) {
   try {
