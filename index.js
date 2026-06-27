@@ -9242,23 +9242,29 @@ function _panneauVisiteursPayload() {
 
 async function _installerPanelVisiteurs(guild) {
   try {
-    const ch = guild.channels.cache.get(SALON_VISITEURS); if (!ch?.messages) return;
+    const ch = guild.channels.cache.get(SALON_VISITEURS) || await guild.channels.fetch(SALON_VISITEURS).catch(() => null);
+    if (!ch?.messages) return;
     const me = guild.client.user.id;
     const db = loadDB();
-    const msgs = await ch.messages.fetch({ limit: 50 }).catch(() => null);
-    const mesMsgs = msgs ? [...msgs.values()].filter(m => m.author.id === me) : [];
-    let panneau = mesMsgs.find(m => (m.embeds?.[0]?.title || '').includes('VISITEURS')) || null;
-    // 1re mise en ligne de cette annonce : on (re)poste à neuf pour PINGER les visiteurs UNE seule fois.
-    if (!db.visiteursAnnoncePing) {
-      for (const m of mesMsgs) await m.delete().catch(() => {});
-      const sent = await ch.send(_panneauVisiteursPayload()).catch(() => null);
-      if (sent) { try { await sent.pin(); } catch {} db.visiteursAnnoncePing = true; saveDB(db); }
+    // ── Retrouver le panneau de façon FIABLE : id mémorisé → épinglés → 50 derniers ──
+    // (l'ancienne version ne cherchait que dans les 50 derniers messages : dès que le
+    //  panneau passait au-delà, le bot en repostait un NOUVEAU + re-pingait à CHAQUE démarrage.)
+    let panneau = null;
+    if (db.visiteursPanelId) panneau = await ch.messages.fetch(db.visiteursPanelId).catch(() => null);
+    if (!panneau) { const pins = await ch.messages.fetchPinned().catch(() => null); if (pins) panneau = pins.find(m => m.author.id === me && (m.embeds?.[0]?.title || '').includes('VISITEURS')) || null; }
+    if (!panneau) { const msgs = await ch.messages.fetch({ limit: 50 }).catch(() => null); if (msgs) panneau = [...msgs.values()].find(m => m.author.id === me && (m.embeds?.[0]?.title || '').includes('VISITEURS')) || null; }
+
+    if (panneau) {
+      // Déjà présent → on ÉDITE (une édition ne re-pingue jamais) et on mémorise l'id.
+      await panneau.edit(_panneauVisiteursPayload()).catch(() => {});
+      if (db.visiteursPanelId !== panneau.id) { db.visiteursPanelId = panneau.id; db.visiteursAnnoncePing = true; saveDB(db); saveDBSync?.(); }
+      // Nettoyer d'éventuels doublons de CE panneau (laissés par l'ancien bug)
+      try { const recent = await ch.messages.fetch({ limit: 50 }).catch(() => null); if (recent) for (const m of recent.values()) { if (m.author.id === me && m.id !== panneau.id && (m.embeds?.[0]?.title || '').includes('VISITEURS')) await m.delete().catch(() => {}); } } catch {}
       return;
     }
-    // Ensuite : on édite le panneau (mention visible, AUCUN re-ping au redémarrage) et on déclutter.
-    for (const m of mesMsgs) { if (m.id !== panneau?.id) await m.delete().catch(() => {}); }
-    if (panneau) await panneau.edit(_panneauVisiteursPayload()).catch(() => {});
-    else { const sent = await ch.send(_panneauVisiteursPayload()).catch(() => null); if (sent) { try { await sent.pin(); } catch {} } }
+    // Absent → on le poste UNE seule fois (ping visiteurs), on épingle, on mémorise l'id.
+    const sent = await ch.send(_panneauVisiteursPayload()).catch(() => null);
+    if (sent) { try { await sent.pin(); } catch {} db.visiteursPanelId = sent.id; db.visiteursAnnoncePing = true; saveDB(db); saveDBSync?.(); }
   } catch (e) { console.log('⚠️ _installerPanelVisiteurs:', e.message); }
 }
 
