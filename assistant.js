@@ -6,7 +6,7 @@
 //  • ✍️ Rédaction RP : annonces, briefs, lettres… ton western ~1904.
 //  • 📝 Résumé : résume un texte collé (fil, dossier…).
 // ─────────────────────────────────────────────────────────────────────────────
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, AttachmentBuilder } = require('discord.js');
 const { loadDB } = require('./db');
 
 const SALON_PANEL = '1518042088879423640';        // #dashboard (choisi par la Direction)
@@ -14,7 +14,8 @@ const ROLE_CONFRERIE = '1508898841993281658';      // Pôle Illégal
 const ROLES_DIRECTION = ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier', 'Instructeur', 'Secrétaire', 'Conseil'];
 const MODELE = 'claude-haiku-4-5-20251001';
 
-const estAcces = (member) => !!member?.roles?.cache?.some(r => r.id === ROLE_CONFRERIE || ROLES_DIRECTION.some(n => r.name.includes(n)));
+const estAcces = (member) => !!member?.roles?.cache?.some(r => r.id === ROLE_CONFRERIE || ROLES_DIRECTION.some(n => (r.name || '').includes(n)));
+const estDirection = (member) => !!member?.roles?.cache?.some(r => ROLES_DIRECTION.some(n => (r.name || '').includes(n)));
 const _norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 // ═══════════════════════════ RECHERCHE GLOBALE ═══════════════════════════
@@ -104,6 +105,39 @@ async function _resumer(texte) {
   return _callIA([{ role: 'user', content: `Résume en FRANÇAIS, de façon claire et concise (puces si utile), le texte suivant. Garde les faits, chiffres, noms et décisions importantes :\n\n${texte.slice(0, 8000)}` }], 700);
 }
 
+// 🧠 Profil de cible : compile une fiche de renseignement à partir de TOUT ce que la base sait.
+async function _profilCible(db, nom) {
+  const q = _norm(nom);
+  const rapports = (db.informateurs || []).filter(r => _norm(`${r.source} ${r.cible} ${r.info}`).includes(q)).slice(-15)
+    .map(r => `[${r.id}] cible:${r.cible || '—'} fiab:${r.fiabilite || '—'}${r.quand ? ` quand:${r.quand}` : ''} — ${(r.info || '').slice(0, 400)}`);
+  const avis = (db.traques || []).filter(t => _norm(`${t.cible} ${t.position}`).includes(q))
+    .map(t => `Avis ${t.id}: ${t.cible} @ ${t.position || '—'} · prime ${t.prime || '—'} · ${t.dangerosite || '—'} [${t.status || '—'}]`);
+  const contacts = (db.repertoire?.contacts || []).filter(c => _norm(`${c.nom || ''} ${c.nomsurnom || ''} ${c.metier || ''} ${c.notes || ''}`).includes(q))
+    .map(c => `Contact: ${c.nom || c.nomsurnom} · métier ${c.metier || '—'} · affil ${c.affiliation || '—'} · ${c.notes || ''}`);
+  const contexte = [...rapports, ...avis, ...contacts].join('\n').slice(0, 6000);
+  if (!contexte.trim()) return { vide: true };
+  const txt = await _callIA([{ role: 'user', content: `Tu es l'analyste du renseignement de La Confrérie (RP western ~1904). À partir UNIQUEMENT des éléments ci-dessous, rédige une **FICHE DE RENSEIGNEMENT consolidée** en français sur « ${nom} ». Structure claire avec ces sections : 🪪 Identité · 📍 Lieux & habitudes · 🤝 Relations · 📑 Faits connus · ⚠️ Dangerosité · 🎯 Recommandations. Reste factuel, ne invente rien ; si une section manque d'infos, écris « inconnu ».\n\n=== ÉLÉMENTS (${rapports.length} rapport(s), ${avis.length} avis, ${contacts.length} contact(s)) ===\n${contexte}` }], 1100);
+  return { txt, n: { rapports: rapports.length, avis: avis.length, contacts: contacts.length } };
+}
+
+// 🖼️ Génération d'image (OpenAI). Renvoie { buffer } ou { err }.
+async function _genererImageIA(prompt) {
+  const key = process.env.OPENAI_API_KEY; if (!key) return { err: 'no_key' };
+  try {
+    const resp = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      body: JSON.stringify({ model: 'gpt-image-1', prompt: prompt.slice(0, 3500), size: '1024x1024', n: 1 }),
+    });
+    if (!resp.ok) { const b = await resp.text().catch(() => ''); return { err: `HTTP ${resp.status}: ${b.slice(0, 200)}` }; }
+    const data = await resp.json();
+    const d = data?.data?.[0];
+    if (d?.b64_json) return { buffer: Buffer.from(d.b64_json, 'base64') };
+    if (d?.url) { const r = await fetch(d.url); return { buffer: Buffer.from(await r.arrayBuffer()) }; }
+    return { err: 'réponse vide' };
+  } catch (e) { return { err: e.message }; }
+}
+
 // ═══════════════════════════ PANNEAU ═══════════════════════════
 function _panneauEmbed() {
   return new EmbedBuilder().setColor(0x2B2118).setTitle('🤖 ASSISTANT IA & RECHERCHE')
@@ -114,16 +148,24 @@ function _panneauEmbed() {
       '💬 **Poser une question** — « combien on a gagné ? », « quelles opérations sont en cours ? »… réponse à partir des vraies données.',
       '✍️ **Rédiger (RP)** — annonces, briefs d\'opération, lettres… ton western.',
       '📝 **Résumer** — colle un long texte, je le résume.',
+      '🧠 **Profil de cible** — fiche de renseignement consolidée sur quelqu\'un (depuis tous les rapports/avis/contacts).',
+      '🖼️ **Générer une image** — portrait / affiche « wanted » *(Direction)*.',
     ].join('\n'))
     .setFooter({ text: 'Iron Wolf Company & La Confrérie' });
 }
 function _panneauRows() {
-  return [new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('asst_search').setLabel('Rechercher').setEmoji('🔎').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('asst_ask').setLabel('Poser une question').setEmoji('💬').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('asst_write').setLabel('Rédiger (RP)').setEmoji('✍️').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('asst_sum').setLabel('Résumer').setEmoji('📝').setStyle(ButtonStyle.Secondary),
-  )];
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('asst_search').setLabel('Rechercher').setEmoji('🔎').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('asst_ask').setLabel('Poser une question').setEmoji('💬').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('asst_write').setLabel('Rédiger (RP)').setEmoji('✍️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('asst_sum').setLabel('Résumer').setEmoji('📝').setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('asst_profil').setLabel('Profil de cible').setEmoji('🧠').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('asst_image').setLabel('Générer une image').setEmoji('🖼️').setStyle(ButtonStyle.Secondary),
+    ),
+  ];
 }
 // Rangée de boutons à greffer sur le Poste de Commandement (Direction)
 function rowPourCommandement() { return _panneauRows()[0]; }
@@ -163,6 +205,12 @@ async function routeInteraction(interaction) {
       if (cid === 'asst_ask') { await interaction.showModal(_modal('asst_ask_modal', '💬 Poser une question', 'Ta question', TextInputStyle.Paragraph, 'Ex : combien on a gagné ? quelles opérations en cours ?')).catch(() => {}); return true; }
       if (cid === 'asst_write') { await interaction.showModal(_modal('asst_write_modal', '✍️ Rédaction RP', 'Qu\'est-ce que je rédige ?', TextInputStyle.Paragraph, 'Ex : une annonce de recrutement Confrérie…')).catch(() => {}); return true; }
       if (cid === 'asst_sum') { await interaction.showModal(_modal('asst_sum_modal', '📝 Résumer un texte', 'Colle le texte à résumer', TextInputStyle.Paragraph, 'Colle ici le fil / dossier / message long…')).catch(() => {}); return true; }
+      if (cid === 'asst_profil') { await interaction.showModal(_modal('asst_profil_modal', '🧠 Profil de cible', 'Nom de la personne / cible', TextInputStyle.Short, 'Ex : Silas Grimshaw')).catch(() => {}); return true; }
+      if (cid === 'asst_image') {
+        if (!estDirection(interaction.member)) { await interaction.reply({ content: '🔒 La génération d\'images est réservée à la Direction (coût par image).', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+        await interaction.showModal(_modal('asst_image_modal', '🖼️ Générer une image', 'Décris l\'image voulue', TextInputStyle.Paragraph, 'Ex : portrait d\'un hors-la-loi balafré, chapeau noir…')).catch(() => {});
+        return true;
+      }
       return false;
     }
 
@@ -175,6 +223,27 @@ async function routeInteraction(interaction) {
         const e = new EmbedBuilder().setColor(0x2B2118).setTitle(`🔎 Recherche — « ${val} »`).setDescription(`**${res.total}** résultat(s) :`);
         for (const g of res.groupes) e.addFields({ name: `${g.titre} (${g.n})`, value: g.items.map(i => `• ${i}`).join('\n').slice(0, 1024) });
         await interaction.reply({ embeds: [e], flags: MessageFlags.Ephemeral }).catch(() => {});
+        return true;
+      }
+      // 🧠 Profil de cible (depuis les données)
+      if (cid === 'asst_profil_modal') {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+        const res = await _profilCible(loadDB(), val);
+        if (res.vide) { await interaction.editReply({ content: `🧠 Aucune information sur **${val}** dans nos données.` }).catch(() => {}); return true; }
+        if (!res.txt) { await interaction.editReply({ content: '❌ Assistant IA indisponible (clé API absente ou erreur).' }).catch(() => {}); return true; }
+        const e = new EmbedBuilder().setColor(0x7A2E2E).setTitle(`🧠 Fiche de renseignement — ${val}`.slice(0, 256)).setDescription(res.txt.slice(0, 4096)).setFooter({ text: `Sources : ${res.n.rapports} rapport(s) · ${res.n.avis} avis · ${res.n.contacts} contact(s) — à vérifier` });
+        await interaction.editReply({ embeds: [e] }).catch(() => {});
+        return true;
+      }
+      // 🖼️ Génération d'image (Direction)
+      if (cid === 'asst_image_modal') {
+        if (!estDirection(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+        const prompt = `Illustration western, État du Texas / Louisiane vers 1899, ambiance Red Dead Redemption 2. ${val}. Style réaliste, lumière naturelle, ton sépia légèrement désaturé, sans aucun texte ni lettrage.`;
+        const res = await _genererImageIA(prompt);
+        if (res.err === 'no_key') { await interaction.editReply({ content: '🖼️ Génération d\'images **non configurée**. Ajoute la clé `OPENAI_API_KEY` au bot (Render → Environment) pour l\'activer.' }).catch(() => {}); return true; }
+        if (res.err) { await interaction.editReply({ content: `❌ Échec de la génération : ${res.err}` }).catch(() => {}); return true; }
+        await interaction.editReply({ content: `🖼️ Image générée pour : *${val.slice(0, 200)}*`, files: [new AttachmentBuilder(res.buffer, { name: 'iwc-image.png' })] }).catch(() => {});
         return true;
       }
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
