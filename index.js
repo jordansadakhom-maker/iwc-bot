@@ -2401,6 +2401,7 @@ async function autoSetup(guild) {
   _installerPosteCommandement(guild).then(() => console.log('🎖️ Poste de commandement Direction en place')).catch(() => {});
   direction.installerMemo?.(guild).then(() => console.log('📌 Mémo Direction en place')).catch(() => {});
   assistant.installerPanneau?.(guild).then(() => console.log('🤖 Panneau assistant IA en place')).catch(() => {});
+  tenue.installerPanneau?.(guild).then(() => console.log('🧵 Panneau Vestiaire (#tenue) en place')).catch(() => {});
   // ♻️ Restauration AUTO (une seule fois) du contenu disparu : reposte rapports informateurs + avis wanted
   // depuis la base. Anti-doublon : ne reposte que ce dont le message a disparu.
   try {
