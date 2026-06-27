@@ -2401,7 +2401,7 @@ async function autoSetup(guild) {
   _installerPosteCommandement(guild).then(() => console.log('🎖️ Poste de commandement Direction en place')).catch(() => {});
   direction.installerMemo?.(guild).then(() => console.log('📌 Mémo Direction en place')).catch(() => {});
   assistant.installerPanneau?.(guild).then(() => console.log('🤖 Panneau assistant IA en place')).catch(() => {});
-  tenue.installerPanneau?.(guild).then(() => console.log('🧵 Panneau Vestiaire (#tenue) en place')).catch(() => {});
+  tenue.retirerPanneau?.(guild).then(() => console.log('🧵 Panneau Vestiaire retiré (#tenue gardé propre)')).catch(() => {});
   _installerPanneauContrats(guild).then(() => console.log('📜 Panneau « Contrats en cours » en place')).catch(() => {});
   // ♻️ Restauration AUTO (une seule fois) du contenu disparu : reposte rapports informateurs + avis wanted
   // depuis la base. Anti-doublon : ne reposte que ce dont le message a disparu.
@@ -4348,6 +4348,20 @@ client.on('interactionCreate', async interaction => {
         { name: '⏳ Réponse', value: 'Sous **48h**, en **message privé**. Garde tes MP ouverts !' },
       )
       .setFooter({ text: 'Iron Wolf Company • Prêt ? Clique sur 📋 Candidature.' });
+    await interaction.reply({ embeds: [e], flags: MessageFlags.Ephemeral }); return;
+  }
+
+  if (interaction.isButton() && interaction.customId === 'visiteur_faq') {
+    const e = new EmbedBuilder().setColor(0xC8A45C).setTitle('❓ COMMENT ÇA MARCHE — VISITEURS')
+      .setDescription('*Faire appel à l\'Iron Wolf Company, étape par étape.*')
+      .addFields(
+        { name: '🛡️ Que pouvez-vous nous demander ?', value: 'Protection, escorte de convoi, enquête, récupération de dette, négociation… ou une **affaire plus discrète**. Si c\'est risqué, c\'est pour nous.' },
+        { name: '✏️ Pourquoi mettre mon nom RP ?', value: 'On rédige votre **contrat à votre nom**. Cliquez sur **« Définir mon pseudo RP »** ou modifiez votre pseudo (clic droit sur votre nom).' },
+        { name: '📨 Comment vous contacter ?', value: 'Cliquez sur **« Faire ma demande / Prendre RDV »** : exposez votre besoin avec vos mots, ou réservez une prestation. La Direction lit **chaque** demande.' },
+        { name: '✍️ Et ensuite ?', value: 'On vous recontacte, puis vous **recevez le contrat en message privé** : vous pouvez **signer, refuser ou proposer une contre-offre**.' },
+        { name: '⚠️ Important', value: 'Gardez vos **MP ouverts** *(Paramètres du serveur → Confidentialité)* pour recevoir le contrat. Les tarifs dépendent de la mission.' },
+      )
+      .setFooter({ text: 'Iron Wolf Company · « La force est dans l\'ombre. »' });
     await interaction.reply({ embeds: [e], flags: MessageFlags.Ephemeral }); return;
   }
 
@@ -9388,7 +9402,7 @@ async function _majPanneauxRdvClient(guild) {
 // ── Salon VISITEURS (1519611763866337420) : panneau d'accueil clair + 2 boutons fonctionnels ──
 const SALON_VISITEURS = '1519611763866337420';
 const ROLE_VISITEUR = '1508756369258578070'; // rôle Visiteur (pour le ping de l'annonce)
-function _panneauVisiteursPayload() {
+function _panneauVisiteursPayload(guildId) {
   const embed = new EmbedBuilder()
     .setColor(0xC8A45C)
     .setTitle('👋  BIENVENUE — ESPACE VISITEURS  🐺')
@@ -9413,8 +9427,15 @@ function _panneauVisiteursPayload() {
       '— *« La force est dans l\'ombre. »*',
     ].join('\n'))
     .setFooter({ text: 'Iron Wolf Company · Bureau de Saint-Denis' });
+  // Boutons : les 3 étapes deviennent cliquables (le lien RDV ne marche que si on a l'ID du serveur).
+  const boutons = [
+    new ButtonBuilder().setCustomId('btn_surnom_ouvrir').setLabel('Définir mon pseudo RP').setEmoji('✏️').setStyle(ButtonStyle.Primary),
+  ];
+  if (guildId) boutons.push(new ButtonBuilder().setLabel('Faire ma demande / Prendre RDV').setEmoji('📨').setStyle(ButtonStyle.Link).setURL(`https://discord.com/channels/${guildId}/1512171267560702013`));
+  boutons.push(new ButtonBuilder().setCustomId('visiteur_faq').setLabel('Comment ça marche ?').setEmoji('❓').setStyle(ButtonStyle.Secondary));
+  const row = new ActionRowBuilder().addComponents(...boutons);
   // Ping des visiteurs en tête de l'annonce (ne notifie qu'au 1er envoi, jamais sur une édition)
-  return { content: `<@&${ROLE_VISITEUR}>`, embeds: [embed], components: [], allowedMentions: { roles: [ROLE_VISITEUR] } };
+  return { content: `<@&${ROLE_VISITEUR}>`, embeds: [embed], components: [row], allowedMentions: { roles: [ROLE_VISITEUR] } };
 }
 
 async function _installerPanelVisiteurs(guild) {
@@ -9433,14 +9454,14 @@ async function _installerPanelVisiteurs(guild) {
 
     if (panneau) {
       // Déjà présent → on ÉDITE (une édition ne re-pingue jamais) et on mémorise l'id.
-      await panneau.edit(_panneauVisiteursPayload()).catch(() => {});
+      await panneau.edit(_panneauVisiteursPayload(guild.id)).catch(() => {});
       if (db.visiteursPanelId !== panneau.id) { db.visiteursPanelId = panneau.id; db.visiteursAnnoncePing = true; saveDB(db); saveDBSync?.(); }
       // Nettoyer d'éventuels doublons de CE panneau (laissés par l'ancien bug)
       try { const recent = await ch.messages.fetch({ limit: 50 }).catch(() => null); if (recent) for (const m of recent.values()) { if (m.author.id === me && m.id !== panneau.id && (m.embeds?.[0]?.title || '').includes('VISITEURS')) await m.delete().catch(() => {}); } } catch {}
       return;
     }
     // Absent → on le poste UNE seule fois (ping visiteurs), on épingle, on mémorise l'id.
-    const sent = await ch.send(_panneauVisiteursPayload()).catch(() => null);
+    const sent = await ch.send(_panneauVisiteursPayload(guild.id)).catch(() => null);
     if (sent) { try { await sent.pin(); } catch {} db.visiteursPanelId = sent.id; db.visiteursAnnoncePing = true; saveDB(db); saveDBSync?.(); }
   } catch (e) { console.log('⚠️ _installerPanelVisiteurs:', e.message); }
 }
@@ -10375,14 +10396,16 @@ async function _installerMenu(guild, forcer = false) {
   try {
     const chStart = await guild.channels.fetch(COMMENCER_SALON_ID).catch(() => null);
     if (chStart) {
-      if (forcer) { await _nettoyerAnciensPanneaux(chStart, 'COMMENCE ICI'); await _nettoyerAnciensPanneaux(chStart, 'MENU PRINCIPAL'); }
+      // #commencer-ici doit rester PROPRE : seul le guide « COMMENCE ICI » y reste.
+      // On retire toute copie du MENU PRINCIPAL (doublon du salon menu) à chaque passage.
+      await _nettoyerAnciensPanneaux(chStart, 'MENU PRINCIPAL').catch(() => {});
+      if (forcer) await _nettoyerAnciensPanneaux(chStart, 'COMMENCE ICI');
       const rowStart = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_surnom_ouvrir').setLabel('✏️ Définir mon pseudo RP').setStyle(ButtonStyle.Primary));
       // Cherche un panneau « COMMENCE ICI » déjà présent
       let existant = null;
       try { const msgs = await chStart.messages.fetch({ limit: 30 }); existant = msgs.find(m => m.author.id === client.user.id && (m.embeds[0]?.title || '').includes('COMMENCE ICI')) || null; } catch {}
       if (forcer || !existant) {
         const m1 = await chStart.send({ embeds: [_buildCommencerIci()], components: [rowStart] }); await m1.pin().catch(() => {});
-        const m2 = await chStart.send(_buildMenuPrincipal()); await m2.pin().catch(() => {});
       } else {
         // Déjà présent → on met le contenu à jour EN PLACE (pas de doublon, garde l'épingle)
         await existant.edit({ embeds: [_buildCommencerIci()], components: [rowStart] }).catch(() => {});

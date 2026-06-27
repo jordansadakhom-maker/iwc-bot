@@ -48,6 +48,8 @@ async function _analyserTenue(imgs) {
 }
 
 function _isTenueChannel(channel) {
+  // Par ID (fiable même si le salon est renommé) OU par nom.
+  if (channel?.id === SALON_TENUE) return true;
   const clean = (channel?.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   return /tenue|vestiaire/.test(clean);
 }
@@ -178,4 +180,17 @@ async function installerPanneau(guild) {
   } catch (e) { console.log('⚠️ tenue installerPanneau:', e.message); }
 }
 
-module.exports = { onMessage, routeInteraction, installerPanneau, SALON_TENUE };
+// ── Retirer le panneau explicatif (le salon doit rester propre, sans pin) ──
+async function retirerPanneau(guild) {
+  try {
+    let ch = await guild.channels.fetch(SALON_TENUE).catch(() => null);
+    if (!ch || typeof ch.send !== 'function') ch = guild.channels.cache.find(c => c.isTextBased?.() && _isTenueChannel(c)) || null;
+    if (!ch?.messages) return;
+    const botId = guild.client.user.id;
+    const cible = m => m.author?.id === botId && (m.embeds?.[0]?.title || '').includes('VESTIAIRE');
+    try { const pins = await ch.messages.fetchPinned().catch(() => null); if (pins) for (const m of pins.values()) if (cible(m)) await m.delete().catch(() => {}); } catch {}
+    try { const recent = await ch.messages.fetch({ limit: 50 }).catch(() => null); if (recent) for (const m of recent.values()) if (cible(m)) await m.delete().catch(() => {}); } catch {}
+  } catch (e) { console.log('⚠️ tenue retirerPanneau:', e.message); }
+}
+
+module.exports = { onMessage, routeInteraction, installerPanneau, retirerPanneau, SALON_TENUE };

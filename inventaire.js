@@ -677,7 +677,12 @@ async function routeInteraction(interaction) {
       await _refreshBoard(interaction.client, inv);
       await _log(interaction.client, inv, `📷 <@${interaction.user.id}> a ${mode === 'replace' ? "remplacé tout le coffre par" : "ajouté au coffre"} la lecture (${items.length} objet(s) lu(s)) :\n${_recapDiff(lignes)}`);
       await _checkSeuils(interaction.client, inv, changes);
-      await interaction.editReply({ content: `✅ **Coffre mis à jour** — ${lignes.length} changement(s). Vérifie le détail ci-dessous (avant → après) :`, embeds: [_recapEmbed(mode, lignes)], components: [] }).catch(() => {});
+      // Salon propre : le coffre reflète maintenant la photo → on retire la photo épinglée,
+      // et le récap ci-dessous s'efface tout seul (la trace reste dans le fil 📦 Journal du coffre).
+      try { const chC = await interaction.client.channels.fetch(inv.channelId).catch(() => null); if (chC) { await _purgerPhotoPrecedente(chC, inv, null); persist(db); } } catch {}
+      await interaction.editReply({ content: `✅ **Coffre mis à jour** — ${lignes.length} changement(s). *(Ce récap disparaît dans 1 min ; le détail reste dans le fil 📦 Journal du coffre.)*`, embeds: [_recapEmbed(mode, lignes)], components: [] }).catch(() => {});
+      const _recapMsg = interaction.message;
+      if (_recapMsg) setTimeout(() => { _recapMsg.delete().catch(() => {}); }, 60000);
       return true;
     }
 
