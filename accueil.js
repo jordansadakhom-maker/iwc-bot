@@ -54,21 +54,25 @@ async function routeInteraction(interaction) {
 
     if (cid === 'relance_open') {
       const row = new ActionRowBuilder().addComponents(
-        new UserSelectMenuBuilder().setCustomId('relance_sel').setPlaceholder('Choisis la personne à relancer…').setMinValues(1).setMaxValues(1),
+        new UserSelectMenuBuilder().setCustomId('relance_sel').setPlaceholder('Tape un nom pour chercher n\'importe qui…').setMinValues(1).setMaxValues(10),
       );
-      await interaction.reply({ content: '📨 **Relancer un visiteur** — sélectionne la personne à qui renvoyer les explications (RDV / télégramme) :', components: [row], flags: MessageFlags.Ephemeral }).catch(() => {});
+      await interaction.reply({ content: '📨 **Relancer un/des visiteur(s)**\n🔎 *La liste affichée est courte au départ : **tape un nom dans la barre** pour retrouver **n\'importe quelle personne** du serveur. Tu peux en sélectionner plusieurs d\'un coup.*', components: [row], flags: MessageFlags.Ephemeral }).catch(() => {});
       return true;
     }
 
     if (cid === 'relance_sel') {
-      const userId = interaction.values?.[0];
-      const member = userId ? await interaction.guild.members.fetch(userId).catch(() => null) : null;
-      if (!member) { await interaction.update({ content: '⚠️ Membre introuvable.', components: [] }).catch(() => {}); return true; }
-      const ok = await envoyerAccueil(member, { relance: true });
-      await interaction.update({
-        content: ok ? `✅ Relance envoyée en MP à <@${userId}>.` : `⚠️ Impossible d'envoyer le MP à <@${userId}> (ses messages privés sont probablement fermés).`,
-        components: [],
-      }).catch(() => {});
+      const ids = interaction.values || [];
+      if (!ids.length) { await interaction.update({ content: '⚠️ Personne sélectionnée.', components: [] }).catch(() => {}); return true; }
+      await interaction.update({ content: `📨 Envoi de la relance à ${ids.length} personne(s)…`, components: [] }).catch(() => {});
+      const ok = [], ko = [];
+      for (const userId of ids) {
+        const member = await interaction.guild.members.fetch(userId).catch(() => null);
+        if (member && await envoyerAccueil(member, { relance: true })) ok.push(userId); else ko.push(userId);
+      }
+      const lignes = [];
+      if (ok.length) lignes.push(`✅ Relance envoyée en MP à : ${ok.map(i => `<@${i}>`).join(', ')}`);
+      if (ko.length) lignes.push(`⚠️ Échec (MP fermés ?) : ${ko.map(i => `<@${i}>`).join(', ')}`);
+      await interaction.editReply({ content: lignes.join('\n') || '—' }).catch(() => {});
       return true;
     }
     return false;
