@@ -2102,6 +2102,29 @@ Laisse une copie du papier sur un serveur allié, **anonymement**, signée « La
 *— L'Administration de La Confrérie*`,
 ];
 
+// Panneau de recrutement enrichi (présentation + étapes) + boutons Candidature & FAQ
+function _recrutementPanneau() {
+  const embed = new EmbedBuilder().setColor(0x8B1A1A)
+    .setTitle('🐺 REJOINDRE L\'IRON WOLF COMPANY')
+    .setDescription([
+      '*Dans l\'Ouest, on ne survit pas seul. La Compagnie, c\'est une famille — discipline, honneur, et de quoi remplir ses poches pour ceux qui la méritent.*',
+      '',
+      'Tu veux en faire partie ? Voici comment 👇',
+    ].join('\n'))
+    .addFields(
+      { name: '🏛️ Qui sommes-nous', value: 'Une compagnie de l\'Ouest : **protection, escorte, contrats, enquêtes, récupérations**. On opère au grand jour… et parfois dans l\'ombre.' },
+      { name: '🎁 Ce qu\'on t\'offre', value: '→ Une **équipe** soudée et de l\'action\n→ Des **contrats rémunérés** et du matériel\n→ Une **hiérarchie** où l\'on monte au mérite\n→ Des **opérations** organisées (repérage → exécution)' },
+      { name: '📝 Comment postuler', value: '**1.** Clique sur **📋 Candidature**\n**2.** Remplis le formulaire (ton personnage, son histoire, tes dispos)\n**3.** La Direction étudie ton dossier' },
+      { name: '⏳ Et ensuite ?', value: '→ Réponse **en message privé sous 48h**\n→ Garde tes **MP ouverts** pour la recevoir\n→ Un refus n\'est pas toujours justifié — *la porte s\'ouvre une fois.*' },
+    )
+    .setFooter({ text: 'Iron Wolf Company • Recrutement officiel — « La force est dans l\'ombre »' });
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('open_candidature_legal').setLabel('Candidature').setEmoji('📋').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('recrut_faq').setLabel('Découvrir / FAQ').setEmoji('❓').setStyle(ButtonStyle.Secondary),
+  );
+  return { embeds: [embed], components: [row] };
+}
+
 async function autoSetup(guild) {
   const db = loadDB(); console.log('🔧 Auto-setup en cours...');
   // ⚠️ #planning RETIRÉ de cette purge : il a des panneaux ÉPINGLÉS légitimes (tableau des échéances,
@@ -2228,15 +2251,14 @@ async function autoSetup(guild) {
 
   const recrutCh = guild.channels.cache.get(CH.RECRUTEMENT);
   if (recrutCh) {
-    const msgs = await recrutCh.messages.fetch({ limit: 20 });
-    const existing = msgs.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('CANDIDATURE') && m.components.length > 0 && m.components[0]?.components?.length >= 1);
-    if (existing) { db.recrutementMsgId = existing.id; }
+    const msgs = await recrutCh.messages.fetch({ limit: 20 }).catch(() => null);
+    const payload = _recrutementPanneau();
+    const existing = msgs ? msgs.find(m => m.author.id === client.user.id && /CANDIDATURE|REJOINDRE/i.test(m.embeds[0]?.title || '') && (m.components?.length || 0) > 0) : null;
+    if (existing) { await existing.edit(payload).catch(() => {}); db.recrutementMsgId = existing.id; }
     else {
-      for (const [, mm] of msgs) { if (mm.author.id === client.user.id && /RECRUTEMENT|CANDIDATURE/i.test(mm.embeds[0]?.title || '') && (mm.components?.length || 0) > 0) await mm.delete().catch(() => {}); }
+      if (msgs) for (const [, mm] of msgs) { if (mm.author.id === client.user.id && /RECRUTEMENT|CANDIDATURE|REJOINDRE/i.test(mm.embeds[0]?.title || '') && (mm.components?.length || 0) > 0) await mm.delete().catch(() => {}); }
       if (db.recrutementMsgId) { const old = await recrutCh.messages.fetch(db.recrutementMsgId).catch(() => null); if (old) await old.delete().catch(() => {}); db.recrutementMsgId = null; }
-      const embed = new EmbedBuilder().setColor(0x8B1A1A).setTitle('📋 CANDIDATURE — IRON WOLF COMPANY').setDescription('*On ne demande pas à rejoindre la Compagnie. On y est invité.*\n*Si vous êtes ici, c\'est qu\'on vous en juge digne.*').addFields({ name: '📝 Rejoindre la Compagnie', value: '→ Clique sur **📋 Candidature** et remplis le formulaire.\n→ Présente ton personnage, son parcours, tes disponibilités.' }, { name: '⚠️ Important', value: '→ Réponse en DM sous 48h\n→ Aucune justification en cas de refus\n→ *La porte est ouverte une fois. Une seule.*' }).setFooter({ text: 'Iron Wolf Company • Recrutement officiel' });
-      const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('open_candidature_legal').setLabel('📋 Candidature').setStyle(ButtonStyle.Primary));
-      const sent = await recrutCh.send({ embeds: [embed], components: [row] }); db.recrutementMsgId = sent.id;
+      const sent = await recrutCh.send(payload); db.recrutementMsgId = sent.id;
     }
     saveDB(db);
   }
@@ -4305,14 +4327,29 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId === 'grade_select_grade')           return notionV3.handleGradeGradeSelect?.(interaction);
   }
 
+  if (interaction.isButton() && interaction.customId === 'recrut_faq') {
+    const e = new EmbedBuilder().setColor(0x8B1A1A).setTitle('❓ DÉCOUVRIR LA COMPAGNIE — FAQ')
+      .setDescription('*Tout ce qu\'il faut savoir avant de postuler.*')
+      .addFields(
+        { name: '🎭 C\'est quoi le RP ici ?', value: 'Du roleplay **western réaliste** (fin XIXᵉ). Tu incarnes un personnage et tu vis ses aventures dans l\'Ouest.' },
+        { name: '🧰 Faut-il de l\'expérience ?', value: 'Non — **débutants motivés** comme vétérans sont les bienvenus. On forme et on encadre.' },
+        { name: '🛡️ Que fait la Compagnie ?', value: 'Protection, escorte de convois, contrats, enquêtes, récupérations… et des **opérations en équipe**.' },
+        { name: '📈 Comment progresser ?', value: 'Au **mérite** : grades, responsabilités, primes. Plus tu t\'investis, plus tu montes.' },
+        { name: '👤 Que préparer ?', value: 'Un **personnage** (nom + prénom RP, un âge, un métier) et une petite **histoire**. Le reste vient en jouant.' },
+        { name: '⏳ Réponse', value: 'Sous **48h**, en **message privé**. Garde tes MP ouverts !' },
+      )
+      .setFooter({ text: 'Iron Wolf Company • Prêt ? Clique sur 📋 Candidature.' });
+    await interaction.reply({ embeds: [e], flags: MessageFlags.Ephemeral }); return;
+  }
+
   if (interaction.isButton() && interaction.customId === 'open_candidature_legal') {
     const modal = new ModalBuilder().setCustomId('candidature_modal_legal').setTitle('📋 Candidature — Iron Wolf Company');
     modal.addComponents(
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom_perso').setLabel('Nom IC · Âge (Ex: Jonas Caverly, 34 ans)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Jonas Caverly, 34 ans')),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('metier').setLabel('Métier / Compétences').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Médecin, Avocat, Ingénieur...')),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('background').setLabel('Background du personnage').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(800).setPlaceholder('Qui est ton personnage ? Son histoire, ce qui l\'amène ici...')),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('motivation').setLabel('Pourquoi rejoindre IWC ?').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500).setPlaceholder('Qu\'est-ce que tu apportes à la Compagnie ? Tes objectifs IC...')),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('dispos').setLabel('Disponibilités · Niveau RP').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Soir semaine + week-end · Confirmé 2 ans')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom_perso').setLabel('Nom + prénom IC · Âge').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex : Jonas Caverly, 34 ans')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('metier').setLabel('Métier / spécialité du personnage').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex : médecin, tireur, éclaireur, forgeron...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('background').setLabel('Histoire de ton personnage').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(900).setPlaceholder('D\'où vient-il ? Son passé, son caractère, ce qui l\'amène ici...')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('motivation').setLabel('Motivation + ce que tu cherches en RP').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500).setPlaceholder('Pourquoi nous ? Quel genre de RP tu aimes (action, intrigue, métier...) ?')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('dispos').setLabel('Disponibilités + expérience RP').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex : soirs semaine + week-end · 2 ans d\'expérience')),
     );
     await interaction.showModal(modal); return;
   }
