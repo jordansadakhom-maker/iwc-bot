@@ -3030,6 +3030,7 @@ function _posteCommandementEmbed() {
       '*Outils de pilotage réservés aux haut-gradés. Tout est privé (réponses visibles de toi seul).*',
       '',
       '📊 **Récap** — ce qui demande ton attention maintenant.',
+      '📜 **Contrats** — la liste de tous les contrats ; ouvre chacun individuellement *(faire avancer, honorer, encaisser au coffre, abandonner)*.',
       '🗂️ **Suivi opérations** — avancement de toutes les opérations.',
       '📈 **Bilan (Google Sheet)** — export complet envoyé en MP.',
       '🛡️ **Sécurité** — état du verrouillage anti-clonage/nuke.',
@@ -3041,6 +3042,7 @@ function _posteCommandementRows() {
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('dir_recap').setLabel('Récap').setEmoji('📊').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('csuivi_open').setLabel('Contrats').setEmoji('📜').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('dir_suivi').setLabel('Suivi opérations').setEmoji('🗂️').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('dir_bilan').setLabel('Bilan (Sheet)').setEmoji('📈').setStyle(ButtonStyle.Success),
     ),
