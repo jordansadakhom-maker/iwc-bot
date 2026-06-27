@@ -2997,7 +2997,8 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 //  Salon haut-gradé : accès rapide en 1 clic au récap, suivi des opérations,
 //  export bilan, état sécurité et verrouillage. Réutilise les fonctions existantes.
 // ═══════════════════════════════════════════════════════════════
-const SALON_COMMANDEMENT = '1510712255514153101';
+const SALON_COMMANDEMENT = '1518042088879423640';        // #tableau-de-bord (déplacé depuis le salon HRP)
+const ANCIEN_SALON_COMMANDEMENT = '1510712255514153101'; // ancien emplacement (HRP) — à nettoyer
 function _posteCommandementEmbed() {
   return new EmbedBuilder()
     .setColor(0x2E5A88)
@@ -3043,6 +3044,14 @@ async function _installerPosteCommandement(guild) {
     const ch = await guild.channels.fetch(SALON_COMMANDEMENT).catch(() => null);
     if (!ch || typeof ch.send !== 'function') return;
     const botId = guild.client.user.id;
+    // Nettoyage : retirer l'ancien Poste de Commandement du salon HRP s'il y traîne encore.
+    try {
+      const old = await guild.channels.fetch(ANCIEN_SALON_COMMANDEMENT).catch(() => null);
+      if (old?.messages && old.id !== ch.id) {
+        const recents = await old.messages.fetch({ limit: 40 }).catch(() => null);
+        if (recents) for (const m of recents.values()) { if (m.author?.id === botId && (m.embeds?.[0]?.title || '').includes('POSTE DE COMMANDEMENT')) await m.delete().catch(() => {}); }
+      }
+    } catch {}
     let exists = null;
     try { const pins = await ch.messages.fetchPinned().catch(() => null); if (pins) exists = pins.find(m => m.author?.id === botId && (m.embeds?.[0]?.title || '').includes('POSTE DE COMMANDEMENT')); } catch {}
     if (!exists) { const recent = await ch.messages.fetch({ limit: 30 }).catch(() => null); if (recent) exists = recent.find(m => m.author?.id === botId && (m.embeds?.[0]?.title || '').includes('POSTE DE COMMANDEMENT')); }
