@@ -9,7 +9,7 @@ const {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   StringSelectMenuBuilder, SlashCommandBuilder, MessageFlags, AttachmentBuilder, ChannelType,
 } = require('discord.js');
-const { loadDB, saveDB, sauvegarderSurGitHub } = require('./db');
+const { loadDB, saveDB, saveDBSync, sauvegarderSurGitHub } = require('./db');
 let relais = {}; try { relais = require('./relais'); } catch {}
 let modetest = {}; try { modetest = require('./modetest'); } catch {}
 
@@ -695,17 +695,30 @@ async function ensureWantedPanel(guild) {
     if (db.wantedChannelId) ch = await guild.channels.fetch(db.wantedChannelId).catch(() => null);
     if (!ch) ch = _findWantedChannel(guild);
     if (!ch) return;
-    if (db.wantedPanel && db.wantedPanel.messageId && db.wantedPanel.channelId === ch.id) {
-      const existing = await ch.messages.fetch(db.wantedPanel.messageId).catch(() => null);
-      if (existing) { if (db.wantedChannelId !== ch.id) { db.wantedChannelId = ch.id; saveDB(db); } return; }
+    const me = guild.client.user.id;
+    const estPanel = (m) => m.author.id === me && (m.embeds?.[0]?.title || '').includes('SIGNALEMENTS'); // titre du PANNEAU (pas des avis)
+    // ── Retrouver le panneau de façon FIABLE : id mémorisé → épinglés → 50 derniers ──
+    let panel = null;
+    if (db.wantedPanel?.messageId) panel = await ch.messages.fetch(db.wantedPanel.messageId).catch(() => null);
+    if (!panel) { const pins = await ch.messages.fetchPinned().catch(() => null); if (pins) panel = pins.find(estPanel) || null; }
+    if (!panel) { const msgs = await ch.messages.fetch({ limit: 50 }).catch(() => null); if (msgs) panel = [...msgs.values()].find(estPanel) || null; }
+
+    if (panel) {
+      // Déjà présent → on ÉDITE (jamais de repost ni de ping au démarrage) et on mémorise l'id.
+      await panel.edit({ embeds: [buildWantedPanel()], components: buildWantedButtons() }).catch(() => {});
+      if (db.wantedChannelId !== ch.id || db.wantedPanel?.messageId !== panel.id) { db.wantedChannelId = ch.id; db.wantedPanel = { channelId: ch.id, messageId: panel.id }; saveDB(db); saveDBSync?.(); }
+      // Nettoyer les doublons du PANNEAU laissés par l'ancien bug (ne touche pas aux avis)
+      try { const recent = await ch.messages.fetch({ limit: 50 }).catch(() => null); if (recent) for (const m of recent.values()) { if (estPanel(m) && m.id !== panel.id) await m.delete().catch(() => {}); } } catch {}
+      return;
     }
+    // Absent → on le poste UNE fois, on épingle, on mémorise l'id.
     const sent = await ch.send({ embeds: [buildWantedPanel()], components: buildWantedButtons() }).catch(() => null);
     if (!sent) return;
     sent.pin().catch(() => {});
     const db2 = loadDB();
     db2.wantedChannelId = ch.id;
     db2.wantedPanel = { channelId: ch.id, messageId: sent.id };
-    saveDB(db2);
+    saveDB(db2); saveDBSync?.();
   } catch {}
 }
 // Traite UNE photo → un signalement complet (récap réuploadé + ping Confrérie + stash pour créer l'avis)
