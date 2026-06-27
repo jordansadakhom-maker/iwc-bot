@@ -3031,39 +3031,41 @@ function _posteCommandementEmbed() {
     .setDescription([
       '*Outils de pilotage réservés aux haut-gradés. Tout est privé (réponses visibles de toi seul).*',
       '',
-      '📊 **Récap** — ce qui demande ton attention maintenant.',
-      '📜 **Contrats** — la liste de tous les contrats ; ouvre chacun individuellement *(faire avancer, honorer, encaisser au coffre, abandonner)*.',
-      '🗂️ **Suivi opérations** — avancement de toutes les opérations.',
-      '📈 **Bilan (Google Sheet)** — export complet envoyé en MP.',
-      '🛡️ **Sécurité** — état du verrouillage anti-clonage/nuke.',
-      '🔒 **Verrouiller / 🔓 Déverrouiller** — kill switch *(Maître uniquement)*.',
+      '__**📌 Pilotage**__',
+      '📊 Récap · 📜 Contrats · 🗂️ Suivi des opérations · 📈 Bilan (Google Sheet)',
+      '',
+      '__**🏛️ Direction**__',
+      '🗳️ Proposer une décision · ✅ Tâches · 📋 Réunion · 📨 Relancer un visiteur',
+      '',
+      '__**🛡️ Sécurité & tests**__',
+      '🛡️ Sécurité *(+ verrou Maître)* · 🧪 Mode test · 🧹 Purger les tests',
+      '',
+      '🤖 *L\'**Assistant IA** est dans le panneau juste en dessous.*',
     ].join('\n'))
     .setFooter({ text: 'Iron Wolf Company — État-major' });
 }
 function _posteCommandementRows() {
   return [
+    // 📌 Pilotage
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('dir_recap').setLabel('Récap').setEmoji('📊').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('csuivi_open').setLabel('Contrats').setEmoji('📜').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('dir_suivi').setLabel('Suivi opérations').setEmoji('🗂️').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('dir_bilan').setLabel('Bilan (Sheet)').setEmoji('📈').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('dir_suivi').setLabel('Suivi ops').setEmoji('🗂️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('dir_bilan').setLabel('Bilan').setEmoji('📈').setStyle(ButtonStyle.Success),
     ),
+    // 🏛️ Direction
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('dir_secu').setLabel('Sécurité').setEmoji('🛡️').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('dir_verrou').setLabel('Verrouiller').setEmoji('🔒').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('dir_deverrou').setLabel('Déverrouiller').setEmoji('🔓').setStyle(ButtonStyle.Success),
-    ),
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('dec_open').setLabel('Proposer une décision').setEmoji('🗳️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('dec_open').setLabel('Décision').setEmoji('🗳️').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('tache_open').setLabel('Tâches').setEmoji('✅').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('reun_open').setLabel('Réunion').setEmoji('📋').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('relance_open').setLabel('Relancer').setEmoji('📨').setStyle(ButtonStyle.Secondary),
     ),
+    // 🛡️ Sécurité & tests
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('mt_toggle').setLabel('Mode Test (on/off)').setEmoji('🧪').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('mt_purge').setLabel('Purger les tests').setEmoji('🧹').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('relance_open').setLabel('Relancer un visiteur').setEmoji('📨').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('dir_secu').setLabel('Sécurité').setEmoji('🛡️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('mt_toggle').setLabel('Mode test').setEmoji('🧪').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('mt_purge').setLabel('Purge').setEmoji('🧹').setStyle(ButtonStyle.Danger),
     ),
-    ...(assistant.rowPourCommandement ? [assistant.rowPourCommandement()] : []),
   ];
 }
 async function _installerPosteCommandement(guild) {
@@ -3098,7 +3100,16 @@ async function _routePosteCommandement(interaction) {
     if (id === 'dir_suivi') { await interaction.reply({ embeds: [_buildSuivi(loadDB())], flags: MessageFlags.Ephemeral }); return true; }
     if (id === 'dir_secu') {
       const v = securite.estVerrouille?.();
-      await interaction.reply({ content: v ? '🔒 **Système VERROUILLÉ** (sécurité active). Seul le Maître peut lever le verrou.' : '✅ **Système non verrouillé** — surveillance anti-clonage/nuke active.', flags: MessageFlags.Ephemeral });
+      const estMaitre = interaction.user.id === securite.MAITRE;
+      const payload = { content: v ? '🔒 **Système VERROUILLÉ** (sécurité active). Seul le Maître peut lever le verrou.' : '✅ **Système non verrouillé** — surveillance anti-clonage/nuke active.', flags: MessageFlags.Ephemeral };
+      // Le kill switch (Maître uniquement) est proposé ici, plus besoin de 2 boutons sur le panneau.
+      if (estMaitre) {
+        payload.components = [new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('dir_verrou').setLabel('Verrouiller').setEmoji('🔒').setStyle(ButtonStyle.Danger),
+          new ButtonBuilder().setCustomId('dir_deverrou').setLabel('Déverrouiller').setEmoji('🔓').setStyle(ButtonStyle.Success),
+        )];
+      }
+      await interaction.reply(payload);
       return true;
     }
     if (id === 'dir_bilan') {
