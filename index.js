@@ -3122,14 +3122,14 @@ client.on('messageCreate', async message => {
   //  !restaurer-informateurs  → reposte les rapports informateurs sauvegardés
   //  !restaurer-wanted        → reposte les avis de recherche ouverts sauvegardés
   try {
-    if (message.guild && !message.author?.bot && /^!restaurer-informateurs\b/i.test((message.content || '').trim())) {
+    if (message.guild && !message.author?.bot && /^[!\/]?\s*restaurer[ -]informateurs\b/i.test((message.content || '').trim())) {
       if (!isDirection(message.member)) { await message.reply({ content: '❌ Réservé à la Direction.', allowedMentions: { parse: [] } }).catch(() => {}); return; }
       const m = await message.reply({ content: '♻️ Restauration des rapports informateurs depuis la base…', allowedMentions: { parse: [] } }).catch(() => null);
       try { const n = await notionV3.reposterTousRapports?.(message.guild); if (m) await m.edit(`✅ ${n || 0} rapport(s) réaffiché(s) depuis la base.`).catch(() => {}); }
       catch (e) { if (m) await m.edit(`❌ ${e.message}`).catch(() => {}); }
       return;
     }
-    if (message.guild && !message.author?.bot && /^!restaurer-wanted\b/i.test((message.content || '').trim())) {
+    if (message.guild && !message.author?.bot && /^[!\/]?\s*restaurer[ -]wanted\b/i.test((message.content || '').trim())) {
       if (!isDirection(message.member)) { await message.reply({ content: '❌ Réservé à la Direction.', allowedMentions: { parse: [] } }).catch(() => {}); return; }
       const m = await message.reply({ content: '♻️ Restauration des avis de recherche depuis la base…', allowedMentions: { parse: [] } }).catch(() => null);
       try { const n = await traque.restaurerAvis?.(message.guild); if (m) await m.edit(`✅ ${n || 0} avis de recherche réaffiché(s) depuis la base.`).catch(() => {}); }
@@ -3137,7 +3137,7 @@ client.on('messageCreate', async message => {
       return;
     }
     // Récupération PROFONDE depuis les sauvegardes Gist (si les données ont été perdues de la base)
-    if (message.guild && !message.author?.bot && /^!recuperer-renseignements\b/i.test((message.content || '').trim())) {
+    if (message.guild && !message.author?.bot && /^[!\/]?\s*recuperer[ -]renseignements\b/i.test((message.content || '').trim())) {
       if (!isDirection(message.member)) { await message.reply({ content: '❌ Réservé à la Direction.', allowedMentions: { parse: [] } }).catch(() => {}); return; }
       const m = await message.reply({ content: '🔎 Recherche dans les sauvegardes (Gist)…', allowedMentions: { parse: [] } }).catch(() => null);
       try {
