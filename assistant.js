@@ -19,38 +19,99 @@ const estDirection = (member) => !!member?.roles?.cache?.some(r => ROLES_DIRECTI
 const _norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 // ═══════════════════════════ RECHERCHE GLOBALE ═══════════════════════════
-function _recherche(db, terme) {
-  const q = _norm(terme); if (!q) return { total: 0, groupes: [] };
-  const match = (...vals) => vals.some(v => _norm(v).includes(q));
+// Distance d'édition (cappée) → tolérance aux fautes de frappe.
+function _lev(a, b) {
+  a = a || ''; b = b || '';
+  if (Math.abs(a.length - b.length) > 2) return 3;
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) => { const r = new Array(n + 1).fill(0); r[0] = i; return r; });
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++)
+    dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return dp[m][n];
+}
+// Match tolérant : sous-chaîne OU mot proche (1 faute) si le terme fait ≥ 4 lettres.
+function _flou(champ, q) {
+  const c = _norm(champ); if (!c || !q) return false;
+  if (c.includes(q)) return true;
+  if (q.length >= 4) for (const tok of c.split(/[^a-z0-9]+/)) { if (tok && Math.abs(tok.length - q.length) <= 2 && _lev(tok, q) <= 1) return true; }
+  return false;
+}
+const _url = (g, c, m) => (g && c) ? (m ? `https://discord.com/channels/${g}/${c}/${m}` : `https://discord.com/channels/${g}/${c}`) : null;
+const _lbl = (txt, url) => (url ? `[${txt}](${url})` : txt);
+const _poleC = (c) => (c?.cc || c?.type === 'confrerie' || c?.pole === 'illegal') ? 'confrerie' : 'compagnie';
+const _lienContrat = (g, c) => c.forumThreadId ? _url(g, c.forumThreadId) : _url(g, c.channelId, c.msgId);
+const _lienOp = (g, o) => o.threadId ? _url(g, o.threadId) : _url(g, o.channelId, o.msgId);
+const _lienTraque = (g, t) => (t.channelId && t.messageId) ? _url(g, t.channelId, t.messageId) : (t.threadId ? _url(g, t.threadId) : null);
+const _lienInfo = (g, r) => (r.channelId && r.messageId) ? _url(g, r.channelId, r.messageId) : (r.threadId ? _url(g, r.threadId) : null);
+function _statutMatch(val, f) {
+  if (!f) return true; const v = _norm(val).replace(/[ _-]/g, ''), ff = _norm(f).replace(/[ _-]/g, '');
+  const syn = { ouvert: ['chasse', 'reperee', 'ouvert', 'enattente', 'propose'], encours: ['encours', 'prep', 'valide', 'signe', 'accepte', 'actif'], honore: ['honore', 'termine', 'cloture', 'paye'], paye: ['honore'], termine: ['termine', 'cloture', 'honore', 'clos'], ferme: ['cloture', 'clos', 'termine'], cloture: ['cloture', 'clos', 'termine'] };
+  const keys = syn[ff]; if (keys) return keys.some(k => v.includes(k));
+  return v.includes(ff);
+}
+
+// opts : { guildId, type, statut, pole } — filtres optionnels.
+function _recherche(db, terme, opts = {}) {
+  const q = _norm(terme);
+  const g = opts.guildId;
+  const typeOK = (t) => !opts.type || opts.type === t;
+  const m = (...vals) => !q || _flou(vals.filter(Boolean).join(' '), q);
   const groupes = [];
   const add = (titre, items) => { if (items.length) groupes.push({ titre, items: items.slice(0, 8), n: items.length }); };
 
-  add('📜 Contrats', (db.contrats || []).filter(c => match(c.id, c.clientNom, c.commanditaire, c.objet, c.typeMission, c.suivi, c.status))
-    .map(c => `\`${c.id}\` ${c.clientNom || c.commanditaire || '—'} — ${(c.objet || c.typeMission || '—')}`.slice(0, 90)));
+  if (typeOK('contrat')) {
+    let arr = (db.contrats || []).filter(c => m(c.id, c.clientNom, c.commanditaire, c.objet, c.typeMission));
+    if (opts.pole) arr = arr.filter(c => _poleC(c) === opts.pole);
+    if (opts.statut) arr = arr.filter(c => _statutMatch(`${c.suivi || ''} ${c.status || ''}`, opts.statut));
+    add('📜 Contrats', arr.map(c => _lbl(`\`${c.id}\` ${c.clientNom || c.commanditaire || '—'} — ${(c.objet || c.typeMission || '—')}`.slice(0, 80), _lienContrat(g, c))));
+  }
+  if (typeOK('operation')) {
+    let arr = [...(db.preparations || []), ...(db.operations || [])].filter(o => m(o.id, o.cible, o.name, o.categorie, o.objectif));
+    if (opts.pole) arr = arr.filter(o => (o.pole === 'illegal' ? 'confrerie' : 'compagnie') === opts.pole);
+    if (opts.statut) arr = arr.filter(o => _statutMatch(o.status, opts.statut));
+    add('🎯 Opérations', arr.map(o => _lbl(`\`${o.id}\` ${o.cible || o.name || '—'} [${o.status || '—'}]`.slice(0, 80), _lienOp(g, o))));
+  }
+  if (typeOK('avis') && (!opts.pole || opts.pole === 'confrerie')) {
+    let arr = (db.traques || []).filter(t => m(t.id, t.cible, t.position, t.commanditaire));
+    if (opts.statut) arr = arr.filter(t => _statutMatch(t.status, opts.statut));
+    add('🔎 Avis de recherche', arr.map(t => _lbl(`\`${t.id}\` ${t.cible || '—'} @ ${t.position || '—'} [${t.status || '—'}]`.slice(0, 80), _lienTraque(g, t))));
+  }
+  if (typeOK('contact')) {
+    add('📇 Répertoire', (db.repertoire?.contacts || []).filter(c => m(c.nom, c.nomsurnom, c.telegramme, c.metier, c.notes, c.affiliation))
+      .map(c => `${c.nom || c.nomsurnom || '—'}${c.telegramme ? ` · 📨${c.telegramme}` : ''}${c.metier ? ` · ${c.metier}` : ''}`.slice(0, 90)));
+  }
+  if (typeOK('informateur')) {
+    add('🕵️ Informateurs', (db.informateurs || []).filter(r => m(r.id, r.source, r.cible, r.info))
+      .map(r => _lbl(`\`${r.id}\` ${r.cible || '—'} — ${(r.info || '').slice(0, 45)}`.slice(0, 80), _lienInfo(g, r))));
+  }
+  if (typeOK('note')) {
+    add('📝 Notes de terrain', (db.notesTerrain || []).filter(n => m(n.texte, n.contenu, n.resume, n.lieu, n.agent, n.titre))
+      .map(n => `${n.lieu ? `📍${n.lieu} · ` : ''}${(n.resume || n.texte || n.contenu || '—')}`.slice(0, 90)));
+  }
+  if (typeOK('facture')) {
+    add('🧾 Factures', (db.factures || []).filter(f => m(f.id, f.ref, f.objet, f.clientNom, f.type, f.note))
+      .map(f => `${f.ref || f.id || '—'} · ${f.clientNom || '—'} · ${(f.objet || '—')} · ${f.montant || 0}$`.slice(0, 90)));
+  }
+  if (typeOK('membre')) {
+    add('👥 Membres', Object.values(db.members || {}).filter(mb => m(mb.name, mb.rang)).map(mb => `${mb.name || '—'} — ${mb.rang || '—'}`.slice(0, 90)));
+  }
+  if (typeOK('avisclient')) {
+    add('⭐ Avis clients', (db.avisClients || []).filter(a => m(a.clientNom, a.commentaire, a.objet)).map(a => `${a.clientNom || '—'} (${a.note || '?'}/5)${a.commentaire ? ` — « ${a.commentaire.slice(0, 40)} »` : ''}`.slice(0, 90)));
+  }
+  if (typeOK('carte')) {
+    add('🗺️ Carte', (db.carte?.points || []).filter(p => m(p.nom, p.lieu, p.region, p.notes)).map(p => `${p.nom || '—'} — ${p.lieu || p.region || '—'}`.slice(0, 90)));
+  }
+  return { total: groupes.reduce((s, gr) => s + gr.n, 0), groupes };
+}
 
-  const ops = [...(db.preparations || []), ...(db.operations || [])];
-  add('🎯 Opérations', ops.filter(o => match(o.id, o.cible, o.name, o.categorie, o.objectif))
-    .map(o => `\`${o.id}\` ${o.cible || o.name || '—'} — ${o.categorie || ''} [${o.status || '—'}]`.slice(0, 90)));
-
-  add('🔎 Avis de recherche', (db.traques || []).filter(t => match(t.id, t.cible, t.position, t.commanditaire))
-    .map(t => `\`${t.id}\` ${t.cible || '—'} @ ${t.position || '—'} [${t.status || '—'}]`.slice(0, 90)));
-
-  add('📇 Répertoire', (db.repertoire?.contacts || []).filter(c => match(c.nom, c.nomsurnom, c.telegramme, c.metier, c.notes, c.affiliation))
-    .map(c => `${c.nom || c.nomsurnom || '—'}${c.telegramme ? ` · 📨${c.telegramme}` : ''}${c.metier ? ` · ${c.metier}` : ''}`.slice(0, 90)));
-
-  add('🕵️ Informateurs', (db.informateurs || []).filter(r => match(r.id, r.source, r.cible, r.info))
-    .map(r => `\`${r.id}\` ${r.cible || '—'} — ${(r.info || '').slice(0, 50)}`.slice(0, 90)));
-
-  add('👥 Membres', Object.values(db.members || {}).filter(m => match(m.name, m.rang))
-    .map(m => `${m.name || '—'} — ${m.rang || '—'}`.slice(0, 90)));
-
-  add('⭐ Avis clients', (db.avisClients || []).filter(a => match(a.clientNom, a.commentaire, a.objet))
-    .map(a => `${a.clientNom || '—'} (${a.note || '?'}/5)${a.commentaire ? ` — « ${a.commentaire.slice(0, 50)} »` : ''}`.slice(0, 90)));
-
-  add('🗺️ Carte', (db.carte?.points || []).filter(p => match(p.nom, p.lieu, p.region, p.notes))
-    .map(p => `${p.nom || '—'} — ${p.lieu || p.region || '—'}`.slice(0, 90)));
-
-  return { total: groupes.reduce((s, g) => s + g.n, 0), groupes };
+// Recherche en langage naturel : l'IA extrait des filtres, la recherche reste déterministe.
+async function _rechercheIA(db, phrase, guildId) {
+  const opts = { guildId };
+  let termes = phrase;
+  const out = await _callIA([{ role: 'user', content: `Analyse cette requête de recherche (organisation RP western) et renvoie UNIQUEMENT un JSON compact, sans texte autour : {"motsCles":"...","type":"contrat|operation|avis|contact|informateur|note|facture|membre|null","statut":"ouvert|en cours|honoré|null","pole":"compagnie|confrerie|null"}. "motsCles" = noms/lieux/sujets à chercher (peut être vide). Requête : ${phrase}` }], 250);
+  if (out) { try { const j = JSON.parse(out.replace(/```json|```/g, '').trim()); if (j.type && j.type !== 'null') opts.type = j.type; if (j.statut && j.statut !== 'null') opts.statut = j.statut; if (j.pole && j.pole !== 'null') opts.pole = j.pole; if (typeof j.motsCles === 'string' && j.motsCles.trim()) termes = j.motsCles.trim(); } catch {} }
+  return _recherche(db, termes, opts);
 }
 
 // ═══════════════════════════ IA ═══════════════════════════
@@ -218,11 +279,15 @@ async function routeInteraction(interaction) {
     if (interaction.isModalSubmit?.()) {
       const val = (interaction.fields.getTextInputValue('q') || '').trim();
       if (cid === 'asst_search_modal') {
-        const res = _recherche(loadDB(), val);
-        if (!res.total) { await interaction.reply({ content: `🔎 Aucun résultat pour **${val}**.`, flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
-        const e = new EmbedBuilder().setColor(0x2B2118).setTitle(`🔎 Recherche — « ${val} »`).setDescription(`**${res.total}** résultat(s) :`);
-        for (const g of res.groupes) e.addFields({ name: `${g.titre} (${g.n})`, value: g.items.map(i => `• ${i}`).join('\n').slice(0, 1024) });
-        await interaction.reply({ embeds: [e], flags: MessageFlags.Ephemeral }).catch(() => {});
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+        const gid = interaction.guild?.id;
+        // Phrase (≥3 mots ou mots-filtres) → recherche IA ; sinon recherche mot-clé directe.
+        const phrase = /\s/.test(val) && (val.trim().split(/\s+/).length >= 3 || /non *pay|en cours|ouvert|ferm|honor|confr|compagnie|protection|prime|pay[ée]|cloti?ur/i.test(val));
+        const res = phrase ? await _rechercheIA(loadDB(), val, gid) : _recherche(loadDB(), val, { guildId: gid });
+        if (!res.total) { await interaction.editReply({ content: `🔎 Aucun résultat pour **${val}**.` }).catch(() => {}); return true; }
+        const e = new EmbedBuilder().setColor(0x2B2118).setTitle(`🔎 Recherche — « ${val.slice(0, 80)} »`).setDescription(`**${res.total}** résultat(s)${phrase ? ' *(comprise par l\'IA)*' : ''} :`);
+        for (const grp of res.groupes) e.addFields({ name: `${grp.titre} (${grp.n})`, value: grp.items.map(i => `• ${i}`).join('\n').slice(0, 1024) });
+        await interaction.editReply({ embeds: [e] }).catch(() => {});
         return true;
       }
       // 🧠 Profil de cible (depuis les données)
