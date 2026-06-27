@@ -847,4 +847,29 @@ async function verifierDormants(client) {
   } catch (e) { console.log('❌ traque verifierDormants:', e.message); }
 }
 
-module.exports = { traqueCommands, routeInteraction, onMessage, ensureWantedPanel, refreshAvisById, ouvrirModalAvis, verifierDormants };
+// Restauration : reposte les avis de recherche OUVERTS sauvegardes en base
+// (utile si les messages du salon wanted ont disparu). Renvoie le nombre reposte.
+async function restaurerAvis(guild) {
+  const db = loadDB();
+  const ouverts = (db.traques || []).filter(t => ['chasse', 'reperee'].includes(String(t.status || '').toLowerCase()));
+  if (!ouverts.length) return 0;
+  let targetCh = null;
+  if (db.wantedChannelId) targetCh = await guild.channels.fetch(db.wantedChannelId).catch(() => null);
+  if (!targetCh || !targetCh.send) targetCh = _findWantedChannel(guild);
+  if (!targetCh || !targetCh.send) return 0;
+  let n = 0;
+  for (const t of ouverts) {
+    // Si l'affiche existe encore, on ne la double pas.
+    if (t.messageId) { const ex = await targetCh.messages.fetch(t.messageId).catch(() => null); if (ex) continue; }
+    const embed = buildPoster(t);
+    const payload = { embeds: [embed], components: buildBoutons(t), allowedMentions: { parse: [] } };
+    if (t.photo) { try { const buf = await _imageBytes(t.photo); if (buf) { embed.setThumbnail('attachment://wanted.png'); payload.files = [new AttachmentBuilder(buf, { name: 'wanted.png' })]; } } catch {} }
+    const sent = await targetCh.send(payload).catch(() => null);
+    if (sent) { t.messageId = sent.id; t.channelId = targetCh.id; n++; }
+    await new Promise(r => setTimeout(r, 400)); // anti rate-limit
+  }
+  saveDB(db); sauvegarderSurGitHub?.().catch(() => {});
+  return n;
+}
+
+module.exports = { traqueCommands, routeInteraction, onMessage, ensureWantedPanel, refreshAvisById, ouvrirModalAvis, verifierDormants, restaurerAvis };
