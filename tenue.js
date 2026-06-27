@@ -143,4 +143,39 @@ async function routeInteraction(interaction) {
   } catch (e) { if ([10062, 40060].includes(e?.code)) return true; console.log('❌ tenue routeInteraction:', e.message); return true; }
 }
 
-module.exports = { onMessage, routeInteraction };
+// ── Panneau explicatif épinglé dans #tenue ──
+const SALON_TENUE = '1517863681655046234';
+function _panneauEmbed() {
+  return new EmbedBuilder().setColor(0x8B5A2A)
+    .setTitle('🧵 LE VESTIAIRE — IRON WOLF COMPANY')
+    .setDescription([
+      '*Le tailleur de la Compagnie juge ton allure. Montre-lui ta tenue.*',
+      '',
+      '**📸 Comment faire ?**',
+      '→ Poste **une ou plusieurs photos** de ta tenue dans ce salon.',
+      '→ Le tailleur en fait une **fiche immersive** : silhouette, pièces, couleurs, matières, style.',
+      '→ Ton message d\'origine est **retiré** pour garder le salon propre.',
+      '',
+      '**💡 Astuces**',
+      '→ Mets le **nom de ton personnage** en légende de la photo.',
+      '→ Plusieurs **angles / lumières** = couleurs mieux jugées.',
+      '→ Plusieurs photos d\'une **même tenue** d\'un coup, c\'est parfait.',
+    ].join('\n'))
+    .setFooter({ text: 'Le Vestiaire • « L\'habit fait le hors-la-loi »' });
+}
+async function installerPanneau(guild) {
+  try {
+    let ch = await guild.channels.fetch(SALON_TENUE).catch(() => null);
+    if (!ch || typeof ch.send !== 'function') ch = guild.channels.cache.find(c => c.isTextBased?.() && _isTenueChannel(c)) || null;
+    if (!ch || typeof ch.send !== 'function') return;
+    const botId = guild.client.user.id;
+    let exists = null;
+    try { const pins = await ch.messages.fetchPinned().catch(() => null); if (pins) exists = pins.find(m => m.author?.id === botId && (m.embeds?.[0]?.title || '').includes('VESTIAIRE')); } catch {}
+    if (!exists) { const recent = await ch.messages.fetch({ limit: 30 }).catch(() => null); if (recent) exists = recent.find(m => m.author?.id === botId && (m.embeds?.[0]?.title || '').includes('VESTIAIRE')); }
+    if (exists) { await exists.edit({ embeds: [_panneauEmbed()] }).catch(() => {}); return; }
+    const m = await ch.send({ embeds: [_panneauEmbed()] }).catch(() => null);
+    if (m) await m.pin().catch(() => {});
+  } catch (e) { console.log('⚠️ tenue installerPanneau:', e.message); }
+}
+
+module.exports = { onMessage, routeInteraction, installerPanneau, SALON_TENUE };
