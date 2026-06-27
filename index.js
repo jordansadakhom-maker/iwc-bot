@@ -2379,6 +2379,20 @@ async function autoSetup(guild) {
   _installerPosteCommandement(guild).then(() => console.log('🎖️ Poste de commandement Direction en place')).catch(() => {});
   direction.installerMemo?.(guild).then(() => console.log('📌 Mémo Direction en place')).catch(() => {});
   assistant.installerPanneau?.(guild).then(() => console.log('🤖 Panneau assistant IA en place')).catch(() => {});
+  // ♻️ Restauration AUTO (une seule fois) du contenu disparu : reposte rapports informateurs + avis wanted
+  // depuis la base. Anti-doublon : ne reposte que ce dont le message a disparu.
+  try {
+    if (!loadDB().restaurationFaite) {
+      (async () => {
+        try {
+          const nR = await notionV3.reposterTousRapports?.(guild).catch(() => 0);
+          const nA = await traque.restaurerAvis?.(guild).catch(() => 0);
+          const d = loadDB(); d.restaurationFaite = true; saveDB(d); try { await sauvegarderSurGitHub?.(); } catch {}
+          console.log(`♻️ Restauration auto : ${nR || 0} rapport(s) + ${nA || 0} avis reposte(s)`);
+        } catch (e) { console.log('⚠️ restauration auto:', e.message); }
+      })();
+    }
+  } catch {}
   _installerPanelAgenda(guild).then(() => console.log('📅 Panneau agenda installé')).catch(() => {});
   _setupComptaChannel(guild).then(() => console.log('💰 Salon comptabilité prêt')).catch(() => {});
   _majPanneauxRdvClient(guild).then(() => console.log('📨 Panneaux RDV client à jour')).catch(() => {});
