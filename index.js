@@ -3315,17 +3315,9 @@ client.on('messageCreate', async message => {
   // ── Note du micro de terrain → réaction 📜 (contrat) + RÉSUMÉ automatique ──
   if (message.webhookId && (message.embeds?.[0]?.title || '').includes('Rapport de terrain')) {
     try { await message.react('📜'); } catch (e) { console.log('⚠️ Réaction note:', e.message); }
-    // ── Tri 1-clic du rapport (Direction) : carnet de renseignements · contrat · avis de recherche ──
-    try {
-      const triageRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`note_rens::${message.id}`).setLabel('Verser au carnet').setEmoji('🕵️').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(`note_contrat::${message.id}`).setLabel('En faire un contrat').setEmoji('📜').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId(`note_avis::${message.id}`).setLabel('Avis de recherche').setEmoji('🎯').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId(`note_op::${message.id}`).setLabel('Lancer une opération').setEmoji('⚙️').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(`note_carte::${message.id}`).setLabel('Ajouter à la carte').setEmoji('📍').setStyle(ButtonStyle.Secondary),
-      );
-      await message.reply({ content: '🗂️ **Que faire de ce rapport ?** *(Direction)*', components: [triageRow], allowedMentions: { repliedUser: false } });
-    } catch (e) { console.log('⚠️ Boutons tri note:', e.message); }
+    // ── Tri 1-clic du rapport (Direction) : les boutons sont attachés PLUS BAS à la note
+    //    reformatée (sentRapport) — et non au message webhook qui est supprimé ensuite,
+    //    sinon les boutons pointent vers un message disparu → « Rapport introuvable ».
     // ── Longue scène (fichier .txt joint) → conversation COMPLÈTE dans un FIL sous le rapport ──
     // Le salon reste propre : seul le rapport y apparaît, le détail est dans le fil (lisible sans télécharger).
     (async () => {
@@ -3640,9 +3632,10 @@ client.on('messageCreate', async message => {
           destNote = thread;
         }
         const sentRapport = await destNote.send({ embeds: [embed] });
-        // ── Info importante : tri 1-clic rattaché au rapport (destination conseillée mise en avant) ──
-        if (sentRapport && importantReco) {
-          try { await sentRapport.edit({ components: [_triRowRapport(sentRapport.id, destKeyReco)] }); } catch (e) { console.log('⚠️ tri rapport:', e.message); }
+        // ── Tri 1-clic rattaché au rapport LUI-MÊME (id valide, persiste). Pour TOUTES les
+        //    notes (la destination conseillée n'est mise en avant que pour les infos importantes). ──
+        if (sentRapport) {
+          try { await sentRapport.edit({ components: [_triRowRapport(sentRapport.id, importantReco ? destKeyReco : '')] }); } catch (e) { console.log('⚠️ tri rapport:', e.message); }
         }
         // ── Transcription COMPLÈTE sans coupure (un champ Discord est limité à 1024 caractères) ──
         // Au-delà de ~980 caractères, on poste l'intégralité en messages complémentaires (spoiler), par blocs de 1850.
@@ -9993,7 +9986,20 @@ async function _lireTexteNote(message) {
     if (att) { const r = await fetch(att.url); const t = await r.text(); if (t) return t; }
   } catch (e) { console.log('⚠️ Lecture note (fichier):', e.message); }
   const emb = message.embeds?.[0];
-  if (emb?.description) return emb.description;
+  if (emb) {
+    // Concatène description + champs utiles (résumé des faits, transcription) en retirant les spoilers,
+    // pour que le triage dispose du texte complet même sur une note reformatée.
+    const parts = [];
+    if (emb.description) parts.push(emb.description);
+    for (const f of (emb.fields || [])) {
+      if (/résumé|resume|transcription|faits|détails|details/i.test(f.name || '')) {
+        const v = String(f.value || '').replace(/\|\|/g, '').trim();
+        if (v && !/post[ée]e? (ci-dessous|en|int[ée]grale)/i.test(v)) parts.push(v);
+      }
+    }
+    const txt = parts.join('\n').replace(/[*_`]/g, '').trim();
+    if (txt) return txt;
+  }
   return message.content || '';
 }
 
