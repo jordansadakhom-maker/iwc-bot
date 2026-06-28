@@ -100,11 +100,25 @@ function _panelSondagePayload() {
 async function _install(channel, payload, titleMark) {
   if (!channel?.send) return null;
   const me = channel.client.user.id;
-  const msgs = await channel.messages.fetch({ limit: 30 }).catch(() => null);
-  const existing = msgs ? [...msgs.values()].find(m => m.author.id === me && (m.embeds?.[0]?.title || '').includes(titleMark)) : null;
-  if (existing) { await existing.edit(payload).catch(() => {}); return existing; }
+  const db = loadDB();
+  if (!db.annoncesPanels) db.annoncesPanels = {};
+  const key = `${channel.id}:${titleMark}`;
+  const estPanel = m => m.author?.id === me && (m.embeds?.[0]?.title || '').includes(titleMark);
+  // Recherche FIABLE pour ne JAMAIS reposter en double au redémarrage :
+  // 1) id mémorisé  → 2) messages épinglés  → 3) 50 derniers messages.
+  let existing = null;
+  if (db.annoncesPanels[key]) existing = await channel.messages.fetch(db.annoncesPanels[key]).catch(() => null);
+  if (!existing) { const pins = await channel.messages.fetchPinned().catch(() => null); if (pins) existing = [...pins.values()].find(estPanel) || null; }
+  if (!existing) { const msgs = await channel.messages.fetch({ limit: 50 }).catch(() => null); if (msgs) existing = [...msgs.values()].find(estPanel) || null; }
+  if (existing) {
+    await existing.edit(payload).catch(() => {});
+    if (db.annoncesPanels[key] !== existing.id) { db.annoncesPanels[key] = existing.id; saveDB(db); }
+    // Nettoie d'éventuels doublons laissés par l'ancien bug (panneaux identiques en trop)
+    try { const recent = await channel.messages.fetch({ limit: 50 }).catch(() => null); if (recent) for (const m of recent.values()) { if (estPanel(m) && m.id !== existing.id) await m.delete().catch(() => {}); } } catch {}
+    return existing;
+  }
   const sent = await channel.send(payload).catch(() => null);
-  if (sent) { try { await sent.pin(); } catch {} }
+  if (sent) { try { await sent.pin(); } catch {} db.annoncesPanels[key] = sent.id; saveDB(db); }
   return sent;
 }
 async function installerPanelAnnonce(guild, channel) { return _install(channel, _panelAnnoncePayload(), 'ANNONCES'); }
