@@ -2405,6 +2405,8 @@ async function autoSetup(guild) {
   tenue.retirerPanneau?.(guild).then(() => console.log('🧵 Panneau Vestiaire retiré (#tenue gardé propre)')).catch(() => {});
   _installerPanneauContrats(guild).then(() => console.log('📜 Panneau « Contrats en cours » en place')).catch(() => {});
   _installerCataloguePrestations(guild).then(() => console.log('🤠 Catalogue des prestations (1518301186275676230) en place')).catch(() => {});
+  // Forum des rapports : prépare les étiquettes (priorité + catégories) dès le démarrage
+  (async () => { try { const f = await guild.channels.fetch(FORUM_RAPPORTS).catch(() => null); if (f && f.type === ChannelType.GuildForum) { await _assurerTagsForumRapports(f); console.log('📋 Forum des rapports : étiquettes prêtes'); } } catch {} })();
   // Panneau d'annonces HRP (Direction → formulaire → annonce + ping + rappels)
   (async () => { try { const hrpCh = await guild.channels.fetch('1509250452141772890').catch(() => null); if (hrpCh) { await annonces.installerPanelAnnonce?.(guild, hrpCh); console.log('📢 Panneau annonces HRP en place'); } } catch {} })();
   // Annonce ponctuelle demandée par la Direction → postée UNE seule fois (garde-fou anti-répétition).
@@ -3202,6 +3204,58 @@ Classe-la. Réponds STRICTEMENT en JSON, sans aucun texte autour :
   } catch { return null; }
 }
 
+// ── Forum des rapports : chaque note de terrain devient un POST étiqueté (rangé + recherchable) ──
+const FORUM_RAPPORTS = '1520707905639284837';
+const _TAGS_RAPPORTS = [
+  { name: '🔴 Urgent', kw: 'urgent' }, { name: '🟠 Important', kw: 'important' }, { name: '⚪ Normal', kw: 'normal' },
+  { name: '🩸 Violence', kw: 'violence' }, { name: '🔫 Armes', kw: 'armes' }, { name: '💰 Argent', kw: 'argent' },
+  { name: '🥃 Trafic', kw: 'trafic' }, { name: '🐎 Bétail', kw: 'betail' }, { name: '👮 Loi', kw: 'loi' },
+  { name: '🔥 Danger', kw: 'danger' }, { name: '🤝 Alliance', kw: 'alliance' }, { name: '🕵️ Renseignement', kw: 'renseignement' },
+];
+const _cleanTag = s => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+async function _assurerTagsForumRapports(forum) {
+  try {
+    if (!forum?.setAvailableTags) return forum?.availableTags || [];
+    const existing = forum.availableTags || [];
+    const manquants = _TAGS_RAPPORTS.filter(v => !existing.some(t => _cleanTag(t.name).includes(v.kw)));
+    if (manquants.length && existing.length + manquants.length <= 20) {
+      const merged = [
+        ...existing.map(t => { const o = { name: t.name, moderated: !!t.moderated }; if (t.id) o.id = t.id; if (t.emoji && (t.emoji.id || t.emoji.name)) o.emoji = { id: t.emoji.id || null, name: t.emoji.name || null }; return o; }),
+        ...manquants.map(v => ({ name: v.name })),
+      ];
+      await forum.setAvailableTags(merged).catch(e => console.log('⚠️ rapports setAvailableTags:', e.message));
+      const f = await forum.fetch().catch(() => null);
+      if (f) return f.availableTags || existing;
+    }
+    return existing;
+  } catch { return forum?.availableTags || []; }
+}
+async function _posterNoteAuForum(guild, embed, opts = {}) {
+  try {
+    const forum = guild.channels.cache.get(FORUM_RAPPORTS) || await guild.channels.fetch(FORUM_RAPPORTS).catch(() => null);
+    if (!forum || forum.type !== ChannelType.GuildForum || !forum.threads?.create) return null;
+    const available = await _assurerTagsForumRapports(forum);
+    const idFor = mot => { const t = (available || []).find(x => _cleanTag(x.name).includes(mot)); return t ? t.id : null; };
+    const applied = [];
+    const prioMot = opts.priorite === 'urgente' ? 'urgent' : opts.priorite === 'importante' ? 'important' : 'normal';
+    const pid = idFor(prioMot); if (pid) applied.push(pid);
+    for (const c of (opts.categories || [])) {
+      const mot = _cleanTag(String(c)).replace(/[^a-z ]/g, '').trim().split(/\s+/).pop();
+      if (!mot) continue;
+      const cid = idFor(mot);
+      if (cid && !applied.includes(cid)) applied.push(cid);
+      if (applied.length >= 5) break;
+    }
+    const coeur = (opts.cible ? `🎯 ${opts.cible} — ` : '') + (opts.resume || opts.cible || opts.agent || 'Rapport de terrain');
+    const titre = ((opts.badge || '') + coeur).replace(/\s+/g, ' ').trim().slice(0, 95) || 'Rapport de terrain';
+    let post = await forum.threads.create({ name: titre, message: { embeds: [embed] }, appliedTags: applied.slice(0, 5) }).catch(() => null);
+    if (!post) post = await forum.threads.create({ name: titre, message: { embeds: [embed] } }).catch(() => null);
+    if (!post) return null;
+    const starter = await post.fetchStarterMessage().catch(() => null);
+    return { post, starter };
+  } catch (e) { console.log('⚠️ poster note forum:', e.message); return null; }
+}
+
 client.on('messageCreate', async message => {
   // 🔒 Verrouillage de sécurité : bot gelé → on ignore tout message hors Maître.
   try { if (securite.estVerrouille?.() && message.author?.id !== securite.MAITRE) return; } catch {}
@@ -3602,36 +3656,33 @@ client.on('messageCreate', async message => {
           embed.setFooter({ text: `IWC · Renseignement · Priorité : ${priorite} · 🔁 Recoupé` });
         }
 
-        // ── Poster dans un fil si une cible est detectee, sinon dans le salon ──
+        // ── Cible visible dans l'embed (forum comme repli) ──
+        if (cibleDetectee && !cible) embed.spliceFields(0, 0, { name: '🎯 Cible détectée', value: cibleDetectee, inline: true });
+        // ── Destination : FORUM des rapports (rangé + recherchable), sinon repli salon/fil par cible ──
         let destNote = message.channel;
-        if (cibleDetectee) {
-          // Ajouter la cible à l'embed si pas deja presente
-          if (!cible) {
-            embed.spliceFields(0, 0, { name: '🎯 Cible détectée', value: cibleDetectee, inline: true });
+        let sentRapport = null;
+        const _forumRes = await _posterNoteAuForum(message.guild, embed, {
+          priorite, badge: _BADGE[priorite] || '', cible: cibleDetectee,
+          resume: (rapport && rapport.resume) ? rapport.resume : '',
+          agent, categories: (rapport && rapport.categories && rapport.categories.length) ? rapport.categories : tagsDetectes,
+        });
+        if (_forumRes && _forumRes.post) {
+          destNote = _forumRes.post;
+          sentRapport = _forumRes.starter;
+        } else {
+          // Repli : pas de forum dispo → fil par cible dans le salon d'origine
+          if (cibleDetectee) {
+            const ch = message.channel;
+            const threadName = `🎯 ${cibleDetectee}`.slice(0, 100);
+            let thread = null;
+            try { const active = await ch.threads.fetchActive().catch(() => null); if (active) thread = active.threads.find(t => t.name === threadName); } catch {}
+            if (!thread) { try { const archived = await ch.threads.fetchArchived().catch(() => null); if (archived) thread = archived.threads.find(t => t.name === threadName); } catch {} }
+            if (!thread) { try { thread = await ch.threads.create({ name: threadName, autoArchiveDuration: 10080, reason: `Dossier : ${cibleDetectee}` }); } catch { thread = ch; } }
+            else if (thread.archived) { await thread.setArchived(false).catch(() => {}); }
+            destNote = thread;
           }
-          const ch = message.channel;
-          const threadName = `🎯 ${cibleDetectee}`.slice(0, 100);
-          let thread = null;
-          try {
-            const active = await ch.threads.fetchActive().catch(() => null);
-            if (active) thread = active.threads.find(t => t.name === threadName);
-          } catch {}
-          if (!thread) {
-            try {
-              const archived = await ch.threads.fetchArchived().catch(() => null);
-              if (archived) thread = archived.threads.find(t => t.name === threadName);
-            } catch {}
-          }
-          if (!thread) {
-            try {
-              thread = await ch.threads.create({ name: threadName, autoArchiveDuration: 10080, reason: `Dossier : ${cibleDetectee}` });
-            } catch { thread = ch; }
-          } else if (thread.archived) {
-            await thread.setArchived(false).catch(() => {});
-          }
-          destNote = thread;
+          sentRapport = await destNote.send({ embeds: [embed] });
         }
-        const sentRapport = await destNote.send({ embeds: [embed] });
         // ── Tri 1-clic rattaché au rapport LUI-MÊME (id valide, persiste). Pour TOUTES les
         //    notes (la destination conseillée n'est mise en avant que pour les infos importantes). ──
         if (sentRapport) {
