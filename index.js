@@ -2404,7 +2404,7 @@ async function autoSetup(guild) {
   assistant.installerPanneau?.(guild).then(() => console.log('🤖 Panneau assistant IA en place')).catch(() => {});
   tenue.retirerPanneau?.(guild).then(() => console.log('🧵 Panneau Vestiaire retiré (#tenue gardé propre)')).catch(() => {});
   _installerPanneauContrats(guild).then(() => console.log('📜 Panneau « Contrats en cours » en place')).catch(() => {});
-  _installerPanneauDemandeVisiteur(guild).then(() => console.log('✉️ Panneau « Faire une demande » (visiteurs) en place')).catch(() => {});
+  _nettoyerDoublonDemandeVisiteur(guild).then(() => console.log('🧹 Doublon panneau demande (1518301186275676230) retiré')).catch(() => {});
   // Panneau d'annonces HRP (Direction → formulaire → annonce + ping + rappels)
   (async () => { try { const hrpCh = await guild.channels.fetch('1509250452141772890').catch(() => null); if (hrpCh) { await annonces.installerPanelAnnonce?.(guild, hrpCh); console.log('📢 Panneau annonces HRP en place'); } } catch {} })();
   // Annonce ponctuelle demandée par la Direction → postée UNE seule fois (garde-fou anti-répétition).
@@ -9484,24 +9484,18 @@ async function _majPanneauxRdvClient(guild) {
   } catch (e) { console.log('⚠️ _majPanneauxRdvClient:', e.message); }
 }
 
-// Panneau « Faire une demande » pour le salon des visiteurs (point d'entrée)
-// Réutilise le panneau client unifié (bouton ✉️ télégramme → carte dans #demandes).
+// Doublon retiré : le salon des demandes officiel reste 1512171267560702013.
+// On nettoie le panneau (identique) que le bot avait posté dans 1518301186275676230.
 const SALON_DEMANDE_VISITEUR = '1518301186275676230';
-async function _installerPanneauDemandeVisiteur(guild) {
+async function _nettoyerDoublonDemandeVisiteur(guild) {
   try {
     const ch = await guild.channels.fetch(SALON_DEMANDE_VISITEUR).catch(() => null);
-    if (!ch?.messages || typeof ch.send !== 'function') return;
+    if (!ch?.messages) return;
     const me = guild.client.user.id;
     const aBouton = (m, id) => m.components?.some(r => r.components?.some(c => c.customId === id));
     const msgs = await ch.messages.fetch({ limit: 30 }).catch(() => null);
-    const panneau = msgs ? [...msgs.values()].find(m => m.author.id === me && aBouton(m, 'rdvclient_demande')) : null;
-    // Dédoublonne d'éventuelles copies
-    if (msgs) for (const m of msgs.values()) { if (m.author.id === me && aBouton(m, 'rdvclient_demande') && m.id !== panneau?.id) await m.delete().catch(() => {}); }
-    const payload = _rdvClientPayload();
-    if (panneau) { await panneau.edit(payload).catch(() => {}); return; }
-    const sent = await ch.send(payload).catch(() => null);
-    if (sent) await sent.pin().catch(() => {});
-  } catch (e) { console.log('⚠️ panneau demande visiteur:', e.message); }
+    if (msgs) for (const m of msgs.values()) { if (m.author.id === me && aBouton(m, 'rdvclient_demande')) await m.delete().catch(() => {}); }
+  } catch (e) { console.log('⚠️ nettoyage doublon demande visiteur:', e.message); }
 }
 
 // ── Salon VISITEURS (1519611763866337420) : panneau d'accueil clair + 2 boutons fonctionnels ──
