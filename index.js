@@ -137,6 +137,9 @@ catch (e) { console.log('⚠️ relais non chargé:', e.message); }
 let tenue = {};
 try { tenue = require('./tenue'); console.log('✅ Module tenue (Le Vestiaire) chargé'); }
 catch (e) { console.log('⚠️ tenue non chargé:', e.message); }
+let orthographe = {};
+try { orthographe = require('./orthographe'); console.log('✅ Module orthographe (correcteur) chargé'); }
+catch (e) { console.log('⚠️ orthographe non chargé:', e.message); }
 
 let reddead = {};
 try { reddead = require('./reddead'); console.log('✅ Module reddead (Le Photographe Far West) chargé'); }
@@ -3358,6 +3361,8 @@ client.on('messageCreate', async message => {
   try { if (await comptabilite.onMessage?.(message)) return; } catch {}
   try { if (await traque.onMessage?.(message)) return; } catch {}
   try { if (await tenue.onMessage?.(message)) return; } catch {}
+  // Salon correcteur : on corrige l'orthographe et on repost sous le nom de l'auteur
+  try { if (await orthographe.onMessage?.(message)) return; } catch {}
   // Salon Far West : capture Red Dead → cliché repeint par l'IA (Gemini), original retiré
   try { if (await reddead.onMessage?.(message)) return; } catch {}
   // Répertoire : image déposée dans le fil d'une fiche → devient le portrait du contact
