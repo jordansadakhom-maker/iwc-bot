@@ -2404,7 +2404,7 @@ async function autoSetup(guild) {
   assistant.installerPanneau?.(guild).then(() => console.log('🤖 Panneau assistant IA en place')).catch(() => {});
   tenue.retirerPanneau?.(guild).then(() => console.log('🧵 Panneau Vestiaire retiré (#tenue gardé propre)')).catch(() => {});
   _installerPanneauContrats(guild).then(() => console.log('📜 Panneau « Contrats en cours » en place')).catch(() => {});
-  _nettoyerDoublonDemandeVisiteur(guild).then(() => console.log('🧹 Doublon panneau demande (1518301186275676230) retiré')).catch(() => {});
+  _installerCataloguePrestations(guild).then(() => console.log('🤠 Catalogue des prestations (1518301186275676230) en place')).catch(() => {});
   // Panneau d'annonces HRP (Direction → formulaire → annonce + ping + rappels)
   (async () => { try { const hrpCh = await guild.channels.fetch('1509250452141772890').catch(() => null); if (hrpCh) { await annonces.installerPanelAnnonce?.(guild, hrpCh); console.log('📢 Panneau annonces HRP en place'); } } catch {} })();
   // Annonce ponctuelle demandée par la Direction → postée UNE seule fois (garde-fou anti-répétition).
@@ -9484,18 +9484,62 @@ async function _majPanneauxRdvClient(guild) {
   } catch (e) { console.log('⚠️ _majPanneauxRdvClient:', e.message); }
 }
 
-// Doublon retiré : le salon des demandes officiel reste 1512171267560702013.
-// On nettoie le panneau (identique) que le bot avait posté dans 1518301186275676230.
+// Salon 1518301186275676230 : vitrine « Nos prestations » (le salon des demandes
+// officiel reste 1512171267560702013 — on retire au passage l'ancien doublon).
 const SALON_DEMANDE_VISITEUR = '1518301186275676230';
-async function _nettoyerDoublonDemandeVisiteur(guild) {
+function _cataloguePrestationsPayload(guildId) {
+  const embed = new EmbedBuilder()
+    .setColor(0xC8A45C)
+    .setTitle('🤠 IRON WOLF COMPANY — NOS PRESTATIONS')
+    .setDescription([
+      '```',
+      '╔═══════════════════════════════════╗',
+      '║   CE QUE NOUS FAISONS POUR VOUS   ║',
+      '╚═══════════════════════════════════╝',
+      '```',
+      '*La compagnie loue ses fusils, ses chevaux et son sang-froid. Voici nos services :*',
+      '',
+      '🛡️ **Protection rapprochée** — garde du corps, sécurité d\'une personne, d\'un lieu ou d\'un évènement.',
+      '🐎 **Escorte de convoi** — accompagnement et défense de diligences, marchandises ou voyageurs.',
+      '🔍 **Enquête & filature** — retrouver quelqu\'un, surveiller, recueillir des informations discrètes.',
+      '💰 **Récupération de dette** — recouvrement et négociation ferme, dans les règles.',
+      '🤝 **Négociation & médiation** — régler un différend, parlementer en votre nom.',
+      '🎯 **Chasse de prime** — traque de hors-la-loi recherchés.',
+      '⚔️ **Intervention** — opérations musclées, selon le cadre convenu.',
+      '',
+      '💵 *Tarifs selon la mission (durée, risque, nombre d\'agents) — on en discute à la demande.*',
+      '',
+      '👉 **Pour faire appel à nous :** ouvrez le salon des demandes (bouton ci-dessous), exposez votre besoin — la Direction vous répond **en personne**.',
+      '',
+      '— *« La force est dans l\'ombre. »*',
+    ].join('\n'))
+    .setFooter({ text: 'Iron Wolf Company · Bureau de Saint-Denis' });
+  const rows = [];
+  if (guildId) rows.push(new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setLabel('Faire une demande').setEmoji('📨').setStyle(ButtonStyle.Link).setURL(`https://discord.com/channels/${guildId}/1512171267560702013`),
+  ));
+  return { embeds: [embed], components: rows };
+}
+async function _installerCataloguePrestations(guild) {
   try {
     const ch = await guild.channels.fetch(SALON_DEMANDE_VISITEUR).catch(() => null);
-    if (!ch?.messages) return;
+    if (!ch?.messages || typeof ch.send !== 'function') return;
     const me = guild.client.user.id;
     const aBouton = (m, id) => m.components?.some(r => r.components?.some(c => c.customId === id));
-    const msgs = await ch.messages.fetch({ limit: 30 }).catch(() => null);
-    if (msgs) for (const m of msgs.values()) { if (m.author.id === me && aBouton(m, 'rdvclient_demande')) await m.delete().catch(() => {}); }
-  } catch (e) { console.log('⚠️ nettoyage doublon demande visiteur:', e.message); }
+    const estCatalogue = m => m.author?.id === me && (m.embeds?.[0]?.title || '').includes('NOS PRESTATIONS');
+    const msgs = await ch.messages.fetch({ limit: 40 }).catch(() => null);
+    // Retire l'ancien panneau de demande en doublon s'il traîne encore
+    if (msgs) for (const m of msgs.values()) { if (m.author?.id === me && aBouton(m, 'rdvclient_demande')) await m.delete().catch(() => {}); }
+    // Recherche fiable du catalogue (épinglés → 40 derniers) pour ne jamais reposter en double
+    let existing = null;
+    const pins = await ch.messages.fetchPinned().catch(() => null);
+    if (pins) existing = [...pins.values()].find(estCatalogue) || null;
+    if (!existing && msgs) existing = [...msgs.values()].find(estCatalogue) || null;
+    const payload = _cataloguePrestationsPayload(guild.id);
+    if (existing) { await existing.edit(payload).catch(() => {}); return; }
+    const sent = await ch.send(payload).catch(() => null);
+    if (sent) await sent.pin().catch(() => {});
+  } catch (e) { console.log('⚠️ catalogue prestations:', e.message); }
 }
 
 // ── Salon VISITEURS (1519611763866337420) : panneau d'accueil clair + 2 boutons fonctionnels ──
