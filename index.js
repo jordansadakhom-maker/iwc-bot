@@ -3139,6 +3139,34 @@ async function _routePosteCommandement(interaction) {
   return false;
 }
 
+// 🔎 Triage IA d'une demande client (télégramme) → { type, priorite, resume }.
+// Best-effort : renvoie null si pas de clé IA ou en cas d'échec (n'empêche jamais l'envoi).
+async function _trierTelegrammeIA({ nom, objet, lieu, details }) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const prompt = `Tu tries les demandes de clients d'une compagnie de mercenaires (RP western, fin XIXe siècle). Voici une demande reçue :
+- Demandeur : ${nom || '—'}
+- Objet : ${objet || '—'}
+- Lieu : ${lieu || '—'}
+- Détails : ${details || '—'}
+
+Classe-la. Réponds STRICTEMENT en JSON, sans aucun texte autour :
+{"type":"un type court parmi : Protection, Escorte, Enquête, Récupération de dette, Chasse de prime, Négociation, Intervention, Autre","priorite":"haute, moyenne ou basse","resume":"résumé en UNE phrase de 12 mots maximum"}`;
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 200, messages: [{ role: 'user', content: prompt }] }),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    let txt = (data?.content?.[0]?.text || '').trim().replace(/```json/gi, '').replace(/```/g, '').trim();
+    const m = txt.match(/\{[\s\S]*\}/); if (!m) return null;
+    const o = JSON.parse(m[0]);
+    return (o && typeof o === 'object') ? o : null;
+  } catch { return null; }
+}
+
 client.on('messageCreate', async message => {
   // 🔒 Verrouillage de sécurité : bot gelé → on ignore tout message hors Maître.
   try { if (securite.estVerrouille?.() && message.author?.id !== securite.MAITRE) return; } catch {}
@@ -4607,10 +4635,13 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const details = interaction.fields.getTextInputValue('details') || '';
     const dateSouhait = `${quandLabel}${moment ? ' (' + moment + ')' : ''}`;
 
+    // 🔎 Triage IA (type · priorité · résumé) — best-effort, n'empêche jamais l'envoi.
+    const tri = await _trierTelegrammeIA({ nom, objet, lieu, details });
+
     const db = loadDB();
     if (!db.rdvClients) db.rdvClients = [];
     const rdvId = 'RDVC-' + Date.now().toString().slice(-6);
-    const rdv = { id: rdvId, nom, objet, lieu, dateSouhait, dateNotion, details, demandeurId: interaction.user.id, statut: 'en_attente', createdAt: new Date().toISOString() };
+    const rdv = { id: rdvId, nom, objet, lieu, dateSouhait, dateNotion, details, tri, demandeurId: interaction.user.id, statut: 'en_attente', createdAt: new Date().toISOString() };
     db.rdvClients.push(rdv);
     if (db.rdvClients.length > 200) db.rdvClients = db.rdvClients.slice(-200);
     saveDB(db);
@@ -4632,8 +4663,15 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
         '',
         `*Demandeur Discord :* <@${interaction.user.id}>`,
       ].join('\n'))
-      .setFooter({ text: `Réf. ${rdvId} · En attente de décision` })
+      .setFooter({ text: `Réf. ${rdvId} · 🟡 En attente de décision` })
       .setTimestamp();
+    // 🔎 Triage IA affiché sur la carte (priorité colore aussi la carte pour repérer l'urgent)
+    if (tri && (tri.type || tri.resume)) {
+      const _prio = String(tri.priorite || '').toLowerCase();
+      const _badge = _prio.includes('haute') ? '🔴 Priorité haute' : _prio.includes('basse') ? '🟢 Priorité basse' : '🟠 Priorité moyenne';
+      if (_prio.includes('haute')) embed.setColor(0xED4245); else if (_prio.includes('basse')) embed.setColor(0x57F287);
+      embed.addFields({ name: '🔎 Triage', value: `${_badge}${tri.type ? ` · **${String(tri.type).slice(0, 40)}**` : ''}${tri.resume ? `\n*${String(tri.resume).slice(0, 150)}*` : ''}`.slice(0, 1024), inline: false });
+    }
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`rdvclient_fixer_${rdvId}`).setLabel('📅 Fixer le rendez-vous').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`rdvclient_repondre_${rdvId}`).setLabel('💬 Répondre au client').setStyle(ButtonStyle.Primary),
@@ -4643,7 +4681,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const dest = interaction.guild.channels.cache.get('1512175624176009348') || interaction.channel;
     let msgTele = null;
     if (dest) {
-      const rolesPing = interaction.guild.roles.cache.filter(r => { const n = (r.name || '').toLowerCase(); return n.includes('opérateur') || n.includes('operateur') || n.includes('homme de main') || n.includes('fondateur'); });
+      const rolesPing = interaction.guild.roles.cache.filter(r => { const n = (r.name || '').toLowerCase(); return n.includes('opérateur') || n.includes('operateur') || n.includes('homme de main') || n.includes('fondateur') || (n.includes('officier') && n.includes('terrain')); });
       const mentionIds = [...rolesPing.values()].map(r => r.id);
       const ping = mentionIds.map(id => `<@&${id}>`).join(' ');
       msgTele = await dest.send({
