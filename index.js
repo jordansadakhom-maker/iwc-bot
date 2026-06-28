@@ -2407,6 +2407,38 @@ async function autoSetup(guild) {
   _installerPanneauDemandeVisiteur(guild).then(() => console.log('✉️ Panneau « Faire une demande » (visiteurs) en place')).catch(() => {});
   // Panneau d'annonces HRP (Direction → formulaire → annonce + ping + rappels)
   (async () => { try { const hrpCh = await guild.channels.fetch('1509250452141772890').catch(() => null); if (hrpCh) { await annonces.installerPanelAnnonce?.(guild, hrpCh); console.log('📢 Panneau annonces HRP en place'); } } catch {} })();
+  // Annonce ponctuelle demandée par la Direction → postée UNE seule fois (garde-fou anti-répétition).
+  (async () => {
+    try {
+      if (loadDB()._annonceTresoContratsArmes) return;
+      const ch = await guild.channels.fetch('1508756400069804058').catch(() => null);
+      if (!ch || typeof ch.send !== 'function') return;
+      // Ping UNIQUEMENT les membres de la Confrérie
+      const confRole = guild.roles.cache.get('1508898841993281658') || guild.roles.cache.find(r => /confr[ée]rie/i.test(r.name || ''));
+      const tete = confRole ? `<@&${confRole.id}>\n\n` : '';
+      const msg = tete + [
+        '# 🐺 IRON WOLF COMPANY — Annonce',
+        '',
+        'Bonjour les amis ! 👋',
+        '',
+        'Quelques points importants à garder en tête :',
+        '',
+        '**💰 Trésorerie de la société**',
+        'Si vous avez de l\'argent à reverser à la société, merci de bien le **notifier** dans <#1508756453354373202>. Ça nous permet d\'avoir un **visuel clair** sur les comptes 😉',
+        '',
+        '**📜 Objectif contrats**',
+        'On va devoir rester **focus sur 1 contrat par semaine** — voire **2** si on peut se le permettre. Sans ça, la suite va vite devenir **critique** pour la compagnie. On s\'accroche ! 💪',
+        '',
+        '**🔫 Armes & équipement — derniers jours**',
+        '**Derniers jours** pour m\'envoyer en **MP** les armes / équipements que vous souhaiteriez. Ne traînez pas !',
+        '',
+        'Merci à tous, et au plaisir de bosser avec vous. 🤝',
+        '— *La Direction*',
+      ].join('\n');
+      const sent = await ch.send({ content: msg, allowedMentions: { roles: confRole ? [confRole.id] : [] } }).catch(() => null);
+      if (sent) { const d = loadDB(); d._annonceTresoContratsArmes = true; saveDBSync(d); console.log('📣 Annonce trésorerie/contrats/armes postée (une fois)'); }
+    } catch (e) { console.log('⚠️ annonce ponctuelle:', e.message); }
+  })();
   // ♻️ Restauration AUTO (une seule fois) du contenu disparu : reposte rapports informateurs + avis wanted
   // depuis la base. Anti-doublon : ne reposte que ce dont le message a disparu.
   try {
