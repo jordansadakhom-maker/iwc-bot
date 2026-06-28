@@ -48,9 +48,12 @@ async function _analyserTenue(imgs) {
 }
 
 function _isTenueChannel(channel) {
-  // Par ID (fiable même si le salon est renommé) OU par nom.
-  if (channel?.id === SALON_TENUE) return true;
   const clean = (channel?.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  // JAMAIS dans un salon d'inventaire / coffre / stock (les photos d'inventaire ne sont pas des tenues),
+  // même si l'ID correspond à un ancien salon « tenue » renommé depuis.
+  if (/inventaire|coffre|stock|banque|entrepot|magasin/.test(clean)) return false;
+  // Sinon : par ID (fiable même si le salon est renommé) OU par nom.
+  if (channel?.id === SALON_TENUE) return true;
   return /tenue|vestiaire/.test(clean);
 }
 
@@ -74,6 +77,13 @@ async function onMessage(message) {
     const bufs = [];
     for (const a of imgsAtt) { const b = await _imageBytes(a.url); if (b) bufs.push({ buf: b, mt: a.contentType || 'image/png' }); }
     const t = bufs.length ? await _analyserTenue(bufs.map(x => ({ b64: x.buf.toString('base64'), mt: x.mt }))) : null;
+
+    // Ce n'est pas une tenue (photo d'inventaire, capture quelconque…) → on ne poste RIEN
+    // et surtout on NE SUPPRIME PAS la photo de l'auteur.
+    if (t && /non\s*identifiab/i.test(String(t.description || ''))) {
+      if (wait) await wait.delete().catch(() => {});
+      return false;
+    }
 
     // Réuploader toutes les photos (la 1re = image principale de la fiche, les autres en complément)
     const files = bufs.map((x, i) => new AttachmentBuilder(x.buf, { name: `tenue_${i}.png` }));
