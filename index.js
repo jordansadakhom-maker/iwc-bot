@@ -719,7 +719,7 @@ const SLASH_COMMANDS = [
     .addSubcommand(s => s.setName('liste').setDescription('📋 Opérations en cours et en préparation'))
     .addSubcommand(s => s.setName('suivi').setDescription('🗂️ Tableau de suivi des opérations par étapes (avancement)'))
     .addSubcommand(s => s.setName('programmer').setDescription('🕐 Programmer une opération à lancement automatique (Direction)')),
-  new SlashCommandBuilder().setName('bilan').setDescription('📊 Exporter un Google Sheet (.xlsx) de tout : contrats, argent, opérations… (Direction)'),
+  new SlashCommandBuilder().setName('bilan-export').setDescription('📊 Exporter un Google Sheet (.xlsx) de tout : contrats, argent, opérations… (Direction)'),
 ].map(c => c.toJSON());
 
 async function registerSlashCommands(guild) {
@@ -1416,7 +1416,7 @@ async function handleSlashCommand(interaction) {
     if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
     return interaction.reply({ embeds: [_genererRecapEmbed(loadDB())], flags: MessageFlags.Ephemeral });
   }
-  if (commandName === 'bilan') {
+  if (commandName === 'bilan-export') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
     if (!bilan.genererClasseur) return interaction.reply({ content: "❌ Module d'export indisponible.", flags: MessageFlags.Ephemeral });
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
