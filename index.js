@@ -557,6 +557,28 @@ function _contratClientButtons(contratId) {
   );
 }
 
+// Ping de la Confrérie (rôle pôle illégal) — pour appeler les agents sur un contrat.
+const ROLE_CONFRERIE_ID = '1508898841993281658';
+function _roleConfrerie(guild) { return guild.roles.cache.get(ROLE_CONFRERIE_ID) || guild.roles.cache.find(r => /confr[ée]rie/i.test(r.name || '')) || null; }
+function _pingConfrerie(guild) { const r = _roleConfrerie(guild); return r ? { content: `<@&${r.id}>`, allowed: { roles: [r.id] } } : { content: '', allowed: { parse: [] } }; }
+
+// ── Participation à un contrat : « Je participe / Je ne participe pas » + liste vivante ──
+function _participationEmbed(contratId) {
+  const p = (loadDB().contratsParticipants || {})[contratId] || { objet: '', users: [] };
+  const users = Array.isArray(p.users) ? p.users : [];
+  return new EmbedBuilder().setColor(0x8B1A1A)
+    .setTitle(`🐺 Qui part sur ce contrat ? — ${contratId}`)
+    .setDescription(`Contrat **accepté**${p.objet ? ` : *${String(p.objet).slice(0, 200)}*` : ''}\n\n✅ **Je participe** pour t'engager · ❌ **Je ne participe pas** pour te retirer.`)
+    .addFields({ name: `Participants (${users.length})`, value: users.length ? users.map(id => `• <@${id}>`).join('\n').slice(0, 1024) : "*Personne pour l'instant — sois le premier !*" })
+    .setFooter({ text: 'Iron Wolf Company • Participation au contrat' });
+}
+function _participationRows(contratId) {
+  return [new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`cpart_join::${contratId}`).setLabel('Je participe').setEmoji('✅').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`cpart_leave::${contratId}`).setLabel('Je ne participe pas').setEmoji('❌').setStyle(ButtonStyle.Secondary),
+  )];
+}
+
 async function archiverContratReponses(guild, contrat, statut, embed) {
   try {
     const ch = getChHard(guild, 'CONTRATS_REPONSES') || guild.channels.cache.get('1518392786301227250');
@@ -566,18 +588,17 @@ async function archiverContratReponses(guild, contrat, statut, embed) {
     let thread = ch.threads?.cache.find(t => t.name.includes(contrat.id));
     if (!thread) {
       try {
-        // Chercher dans les threads archivés aussi
         const archived = await ch.threads.fetchArchived().catch(() => null);
         if (archived) thread = archived.threads.find(t => t.name.includes(contrat.id));
       } catch {}
     }
+    let embedPoste = false;
     if (!thread) {
-      // Salon FORUM (type 15) → on crée un POST de forum (message obligatoire), pas un thread classique
+      // Salon FORUM (type 15) → on crée un POST de forum (message obligatoire)
       if (ch.type === 15 && ch.threads?.create) {
-        const post = await ch.threads.create({ name: threadName, autoArchiveDuration: 10080, message: { embeds: [embed] } }).catch(() => null);
-        if (post) return; // l'embed est déjà dans le post du forum → terminé
+        thread = await ch.threads.create({ name: threadName, autoArchiveDuration: 10080, message: { embeds: [embed] } }).catch(() => null);
+        embedPoste = !!thread; // l'embed est déjà dans le post
       } else {
-        // Salon texte → thread public sans message parent, sinon message + thread
         try {
           thread = await ch.threads.create({ name: threadName, autoArchiveDuration: 10080, type: 11, reason: `Contrat ${contrat.id}` });
         } catch {
@@ -586,11 +607,22 @@ async function archiverContratReponses(guild, contrat, statut, embed) {
         }
       }
     }
-    if (thread) {
-      await thread.send({ embeds: [embed] });
-    } else if (ch.type !== 15) {
-      // Dernier fallback (salon texte uniquement) : envoyer directement dans le salon
-      await ch.send({ embeds: [embed] }).catch(() => {});
+    if (thread && !embedPoste) await thread.send({ embeds: [embed] });
+    else if (!thread && ch.type !== 15) await ch.send({ embeds: [embed] }).catch(() => {});
+
+    // ── Contrat ACCEPTÉ → on appelle la Confrérie à s'engager (ping + participation) ──
+    if (statut === 'signe' && thread) {
+      const dbp = loadDB(); if (!dbp.contratsParticipants) dbp.contratsParticipants = {};
+      if (!dbp.contratsParticipants[contrat.id]) dbp.contratsParticipants[contrat.id] = { objet: contrat.objet || '', users: [] };
+      else dbp.contratsParticipants[contrat.id].objet = contrat.objet || dbp.contratsParticipants[contrat.id].objet;
+      saveDB(dbp);
+      const ping = _pingConfrerie(guild);
+      await thread.send({
+        content: `${ping.content} 🐺 **Contrat accepté — qui s'engage ?**`.trim(),
+        embeds: [_participationEmbed(contrat.id)],
+        components: _participationRows(contrat.id),
+        allowedMentions: ping.allowed,
+      }).catch(() => {});
     }
   } catch (e) { console.log('❌ archiverContratReponses error:', e.message); }
 }
@@ -740,7 +772,7 @@ function getMentionRecrutement(guild) {
 function safeMentions(roleIds = [], userIds = []) {
   return { parse: [], roles: roleIds.filter(Boolean), users: userIds.filter(Boolean) };
 }
-function getContratMention(guild) { const roles = CONTRAT_ROLES.map(id => guild.roles.cache.get(id)).filter(Boolean).map(r => `<@&${r.id}>`); return [...roles, `<@${JUNE_MCCALL_ID}>`].join(' '); }
+function getContratMention(guild) { const roles = CONTRAT_ROLES.map(id => guild.roles.cache.get(id)).filter(Boolean).map(r => `<@&${r.id}>`); const conf = _roleConfrerie(guild); if (conf) roles.push(`<@&${conf.id}>`); return [...roles, `<@${JUNE_MCCALL_ID}>`].join(' '); }
 function isDirection(member) { return member?.roles.cache.some(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier', 'Instructeur', 'Secrétaire'].some(n => r.name.includes(n))); }
 function isMembre(member) {
   if (!member) return false;
@@ -5318,6 +5350,22 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
     await interaction.deferUpdate().catch(() => {});
     return _updatePanneauContrats(interaction.client);
+  }
+  // Participation à un contrat (Je participe / Je ne participe pas) — met à jour la liste vivante
+  if (interaction.isButton?.() && (interaction.customId.startsWith('cpart_join::') || interaction.customId.startsWith('cpart_leave::'))) {
+    const join = interaction.customId.startsWith('cpart_join::');
+    const contratId = interaction.customId.split('::').slice(1).join('::');
+    const db = loadDB();
+    if (!db.contratsParticipants) db.contratsParticipants = {};
+    if (!db.contratsParticipants[contratId]) db.contratsParticipants[contratId] = { objet: '', users: [] };
+    const rec = db.contratsParticipants[contratId];
+    if (!Array.isArray(rec.users)) rec.users = [];
+    const uid = interaction.user.id; const idx = rec.users.indexOf(uid);
+    if (join && idx === -1) rec.users.push(uid);
+    if (!join && idx !== -1) rec.users.splice(idx, 1);
+    saveDB(db);
+    await interaction.update({ embeds: [_participationEmbed(contratId)], components: _participationRows(contratId) }).catch(() => {});
+    return;
   }
   if (interaction.isButton() && interaction.customId.startsWith('csuivi::')) {
     if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
