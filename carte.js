@@ -22,6 +22,10 @@ const TYPES = [
   { key: 'chasse',  label: 'Chasse', emoji: '🦌' },
   { key: 'peche',   label: 'Pêche', emoji: '🎣' },
   { key: 'planque', label: 'Planque', emoji: '🏚️' },
+  { key: 'four',         label: 'Four', emoji: '🔥' },
+  { key: 'fleur_dragon', label: 'Fleur du dragon', emoji: '🐉' },
+  { key: 'fournaise',    label: 'Fournaise', emoji: '⚒️' },
+  { key: 'peches',       label: 'Pêches (fruit)', emoji: '🍑' },
   { key: 'autre',   label: 'Autre', emoji: '📌' },
 ];
 const NIVEAUX = [
