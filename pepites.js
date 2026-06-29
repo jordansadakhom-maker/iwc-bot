@@ -15,10 +15,11 @@ const DIRECTION = ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier',
 const estDirection = m => !!m?.roles?.cache?.some(r => DIRECTION.some(n => (r.name || '').includes(n)));
 
 function _ens(db) {
-  if (!db.pepites) db.pepites = { total: 0, prix: 0, log: [], panelId: null };
+  if (!db.pepites) db.pepites = { total: 0, prix: 0.05, log: [], panelId: null };
   if (!Array.isArray(db.pepites.log)) db.pepites.log = [];
   return db.pepites;
 }
+function _fmtArgent(n) { return Number(n).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
 // Extrait l'opération demandée d'un message (ou null si ce n'est pas un comptage)
 function _parse(content) {
@@ -41,7 +42,7 @@ function _panelEmbed(db) {
       '➕ `5` ou `+5` pour **ajouter** · ➖ `-2` pour **retirer** · 🟰 `=50` pour **fixer** le total.',
     ].join('\n'))
     .addFields({ name: '⛏️ Total ramassé', value: `**${p.total.toLocaleString('fr-FR')}** pépite(s)`, inline: true });
-  if (p.prix > 0) e.addFields({ name: '💵 Valeur estimée', value: `**$${(p.total * p.prix).toLocaleString('fr-FR')}** *(${p.prix}$/pépite)*`, inline: true });
+  if (p.prix > 0) e.addFields({ name: '💵 Valeur estimée', value: `**$${_fmtArgent(p.total * p.prix)}** *(${_fmtArgent(p.prix)}$/pépite)*`, inline: true });
   const log = (p.log || []).slice(-5).reverse();
   if (log.length) e.addFields({ name: '🧾 Derniers mouvements', value: log.map(l => `• ${l.signe || '+'}${l.n} — <@${l.u}>`).join('\n').slice(0, 1024), inline: false });
   e.setFooter({ text: 'Iron Wolf Company • Compteur de pépites' });
@@ -99,15 +100,16 @@ async function routeInteraction(interaction) {
     const cid = interaction.customId || '';
     if (interaction.isButton?.() && cid === 'pep_prix') {
       const modal = new ModalBuilder().setCustomId('pep_prix_modal').setTitle('💵 Prix unitaire d\'une pépite');
-      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prix').setLabel('Prix en $ par pépite (0 = enlever)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('ex : 8')));
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prix').setLabel('Prix $ / pépite (ex : 0.05 · 0 = enlever)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('ex : 0.05 ou 0.06')));
       await interaction.showModal(modal).catch(() => {});
       return true;
     }
     if (interaction.isModalSubmit?.() && cid === 'pep_prix_modal') {
-      const v = parseInt((interaction.fields.getTextInputValue('prix') || '').replace(/[^0-9]/g, ''), 10) || 0;
+      const raw = (interaction.fields.getTextInputValue('prix') || '').replace(',', '.').replace(/[^0-9.]/g, '');
+      const v = parseFloat(raw) || 0;
       const db = loadDB(); const p = _ens(db); p.prix = Math.max(0, v); saveDB(db);
       await _majPanneau(interaction.guild, db);
-      await interaction.reply({ content: `✅ Prix unitaire : ${p.prix > 0 ? `$${p.prix}/pépite` : 'retiré'}.`, flags: MessageFlags.Ephemeral }).catch(() => {});
+      await interaction.reply({ content: `✅ Prix unitaire : ${p.prix > 0 ? `$${_fmtArgent(p.prix)}/pépite` : 'retiré'}.`, flags: MessageFlags.Ephemeral }).catch(() => {});
       return true;
     }
     if (interaction.isButton?.() && cid === 'pep_undo') {
