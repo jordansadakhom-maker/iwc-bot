@@ -5790,6 +5790,16 @@ http.createServer(async (req, res) => {
     return;
   }
 
+  // Site « Chronique de l'Ouest » — histoire de l'Iron Wolf Company & de la Confrérie
+  if (req.method === 'GET' && ['/histoire', '/histoire/', '/site', '/chronique'].includes((req.url || '').split('?')[0])) {
+    try {
+      const html = require('fs').readFileSync(require('path').join(__dirname, 'docs', 'index.html'));
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(html);
+    } catch (e) { res.writeHead(500, { 'Content-Type': 'text/plain' }); res.end('Site indisponible'); }
+    return;
+  }
+
   // Endpoint note rapide
   if (req.method === 'POST' && req.url === '/api/note-rapide') {
     // Auth
