@@ -214,7 +214,9 @@ async function routeInteraction(interaction) {
       const base = _baseUrl();
       if (!base) { await interaction.reply({ content: '⚠️ L\'adresse web du bot n\'est pas encore connue.\n• La Direction peut la définir via **⚙️ Définir l\'adresse du bot** (en bas du panneau).\n• En attendant, utilise **🗺️ Voir la carte** pour afficher l\'image de référence.', flags: MessageFlags.Ephemeral }); return true; }
       const { tok, level } = creerToken(interaction.member); const niv = _niv(level);
-      await interaction.reply({ content: `🌐 **Carte cliquable** — accès ${niv.emoji} **${niv.label}**\n${base}/carte?k=${tok}\n\n🖱️ *Clique sur la carte pour poser un point. Lien personnel, valable 24h.*`, flags: MessageFlags.Ephemeral }); return true;
+      const lien = `${base}/carte?k=${tok}`;
+      const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Ouvrir la carte').setEmoji('🗺️').setURL(lien));
+      await interaction.reply({ content: `🌐 **Carte cliquable** — accès ${niv.emoji} **${niv.label}**.\n🖱️ *Clique le bouton ci-dessous : la carte s'ouvre directement. Lien personnel, valable 24h.*`, components: [row], flags: MessageFlags.Ephemeral }); return true;
     }
     if (interaction.isButton?.() && id === 'carte_seturl') {
       if (!_isDirection(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return true; }
