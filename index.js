@@ -3107,7 +3107,7 @@ function _posteCommandementEmbed() {
       '*Outils de pilotage réservés aux haut-gradés. Tout est privé (réponses visibles de toi seul).*',
       '',
       '__**📌 Pilotage**__',
-      '📊 Récap · 📜 Contrats · 🗂️ Suivi des opérations · 📈 Bilan (Google Sheet)',
+      '📊 Récap · 📜 Contrats · 🗂️ Suivi des opérations · 📈 Bilan (Google Sheet) · 🌐 Tableau web (lien en direct)',
       '',
       '__**🏛️ Direction**__',
       '🗳️ Proposer une décision · ✅ Tâches · 📋 Réunion · 📨 Relancer un visiteur',
@@ -3127,6 +3127,7 @@ function _posteCommandementRows() {
       new ButtonBuilder().setCustomId('csuivi_open').setLabel('Contrats').setEmoji('📜').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('dir_suivi').setLabel('Suivi ops').setEmoji('🗂️').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('dir_bilan').setLabel('Bilan').setEmoji('📈').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('dir_tableauweb').setLabel('Tableau web').setEmoji('🌐').setStyle(ButtonStyle.Secondary),
     ),
     // 🏛️ Direction
     new ActionRowBuilder().addComponents(
@@ -3173,6 +3174,16 @@ async function _routePosteCommandement(interaction) {
   try {
     if (id === 'dir_recap') { await interaction.reply({ embeds: [_genererRecapEmbed(loadDB())], flags: MessageFlags.Ephemeral }); return true; }
     if (id === 'dir_suivi') { await interaction.reply({ embeds: [_buildSuivi(loadDB())], flags: MessageFlags.Ephemeral }); return true; }
+    if (id === 'dir_tableauweb') {
+      const dbX = loadDB();
+      const tok = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2, 8);
+      dbX.tableauWeb = { tok, exp: Date.now() + 7 * 24 * 3600 * 1000 };
+      saveDB(dbX);
+      const base = (loadDB().carte?.baseUrl) || 'https://iwc-bot-web.onrender.com';
+      const url = `${base}/tableau?k=${tok}`;
+      await interaction.reply({ content: `🌐 **Tableau de bord en direct** — lien privé *(valable 7 jours)* :\n${url}\n\n*Les chiffres de la maison (coffre, contrats, pépites, opérations…), à jour, consultables sur téléphone. À ne partager qu'à qui de droit.*`, flags: MessageFlags.Ephemeral });
+      return true;
+    }
     if (id === 'dir_secu') {
       const v = securite.estVerrouille?.();
       const estMaitre = interaction.user.id === securite.MAITRE;
@@ -5820,6 +5831,60 @@ const PORT = process.env.PORT || 3000;
 
 const NOTE_SECRET = process.env.NOTE_SECRET || 'iwc-secret-1895';
 
+// ── Tableau de bord WEB en direct (chiffres de la maison) — servi sur /tableau ──
+function _tableauWebHtml(db, guild) {
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const nf = n => Number(n || 0).toLocaleString('fr-FR');
+  const cs = db.contrats || [];
+  const stadeOf = c => c.suivi || _suiviDepuisStatut(c);
+  const cBy = s => cs.filter(c => stadeOf(c) === s).length;
+  const cAtt = cBy('En attente'), cCours = cBy('En cours'), cVal = cBy('Validé'), cHon = cBy('Honoré');
+  const ops = db.operations || [];
+  const opCours = ops.filter(o => o.status === 'en_cours').length;
+  const opPrep = ops.filter(o => o.status === 'preparation').length;
+  const traques = db.traques || [];
+  const traquesAct = traques.filter(t => !t.capture && !t.clos && !/captur|clos|termin/i.test(String(t.statut || ''))).length;
+  const membres = Object.values(db.members || {});
+  const mTot = membres.filter(m => m.status !== 'parti').length;
+  const mAct = membres.filter(m => m.status === 'actif').length;
+  const mVis = membres.filter(m => m.status === 'visiteur').length;
+  const coffre = Number(db.coffre || 0);
+  const pep = db.pepites || { total: 0, prix: 0 };
+  const pepVal = (pep.prix > 0) ? pep.total * pep.prix : 0;
+  const maj = new Date().toLocaleString('fr-FR');
+  const card = (emoji, label, value, sub) => `<div class="card"><div class="ic">${emoji}</div><div class="val">${value}</div><div class="lbl">${esc(label)}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>`;
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="60"><title>Tableau de bord — ${esc(guild?.name || 'Iron Wolf Company')}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;900&family=EB+Garamond:ital@0;1&family=Special+Elite&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'EB Garamond',Georgia,serif;background:radial-gradient(ellipse at 50% 0%,#2a1d12,#160f0a 70%);color:#e9dcc2;min-height:100vh}
+header{text-align:center;padding:40px 16px 10px}
+.crest{font-size:54px;filter:drop-shadow(0 4px 12px rgba(0,0,0,.6))}
+h1{font-family:'Cinzel',serif;font-weight:900;font-size:clamp(1.6rem,5vw,2.6rem);color:#f2e4c4;text-shadow:0 2px 0 #000}
+.kick{font-family:'Special Elite',monospace;letter-spacing:.3em;text-transform:uppercase;color:#c8a45c;font-size:.78rem;margin-top:6px}
+.grid{max-width:920px;margin:24px auto;display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:0 16px}
+@media(max-width:640px){.grid{grid-template-columns:repeat(2,1fr)}}
+.card{background:linear-gradient(160deg,#241a12,#1a120c);border:1px solid #b8893b55;border-radius:10px;padding:22px 16px;text-align:center;box-shadow:0 8px 22px rgba(0,0,0,.35)}
+.card .ic{font-size:1.8rem}
+.card .val{font-family:'Cinzel',serif;font-weight:900;font-size:clamp(1.5rem,5vw,2.3rem);color:#d8a94e;margin:6px 0 2px;text-shadow:0 2px 0 #000}
+.card .lbl{font-family:'Special Elite',monospace;font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;opacity:.85}
+.card .sub{margin-top:8px;font-size:.92rem;opacity:.8}
+footer{text-align:center;padding:26px 16px 40px;font-family:'Special Elite',monospace;font-size:.7rem;letter-spacing:.1em;color:#9c8a66}
+footer b{color:#c8a45c}
+</style></head><body>
+<header><div class="crest">🐺</div><h1>${esc(guild?.name || 'Iron Wolf Company')}</h1><div class="kick">Tableau de bord — en direct</div></header>
+<main class="grid">
+${card('💰', 'Coffre', '$' + nf(coffre))}
+${card('⛏️', 'Pépites', nf(pep.total), pepVal ? ('≈ $' + pepVal.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) : '')}
+${card('📜', 'Contrats actifs', nf(cAtt + cCours + cVal), `🟡 ${cAtt} · 🔵 ${cCours} · ✅ ${cVal} · 🏁 ${cHon} honorés`)}
+${card('🎯', 'Opérations', nf(opCours + opPrep), `🟢 ${opCours} en cours · 🟡 ${opPrep} prép.`)}
+${card('🔫', 'Avis de recherche', nf(traquesAct))}
+${card('👥', 'Membres', nf(mTot), `✅ ${mAct} actifs · 👁️ ${mVis} visiteurs`)}
+</main>
+<footer>Mis à jour le <b>${esc(maj)}</b> · la page se rafraîchit toute seule · « La force est dans l'ombre »</footer>
+</body></html>`;
+}
+
 http.createServer(async (req, res) => {
   // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -5852,6 +5917,24 @@ http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(html);
     } catch (e) { res.writeHead(500, { 'Content-Type': 'text/plain' }); res.end('Site indisponible'); }
+    return;
+  }
+
+  // Tableau de bord web en direct — lien privé (token), chiffres de la maison
+  if (req.method === 'GET' && (req.url || '').split('?')[0] === '/tableau') {
+    try {
+      const u = new URL(req.url, 'http://x');
+      const k = u.searchParams.get('k');
+      const tw = loadDB().tableauWeb;
+      if (!tw || !k || k !== tw.tok || (tw.exp && tw.exp < Date.now())) {
+        res.writeHead(403, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end('<body style="background:#160f0a;color:#c8a45c;font-family:Georgia,serif;text-align:center;padding-top:80px"><h2>🔒 Lien invalide ou expiré</h2><p>Demande un nouveau lien depuis le Poste de Commandement (bouton « 🌐 Tableau web »).</p></body>');
+        return;
+      }
+      const guild = client.guilds.cache.first();
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(_tableauWebHtml(loadDB(), guild));
+    } catch (e) { res.writeHead(500, { 'Content-Type': 'text/plain' }); res.end('Erreur'); }
     return;
   }
 
