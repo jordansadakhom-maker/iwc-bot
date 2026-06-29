@@ -137,6 +137,9 @@ catch (e) { console.log('⚠️ relais non chargé:', e.message); }
 let tenue = {};
 try { tenue = require('./tenue'); console.log('✅ Module tenue (Le Vestiaire) chargé'); }
 catch (e) { console.log('⚠️ tenue non chargé:', e.message); }
+let pepites = {};
+try { pepites = require('./pepites'); console.log('✅ Module pépites (compteur) chargé'); }
+catch (e) { console.log('⚠️ pepites non chargé:', e.message); }
 
 let reddead = {};
 try { reddead = require('./reddead'); console.log('✅ Module reddead (Le Photographe Far West) chargé'); }
@@ -255,6 +258,7 @@ const {
 stickyPanel.register(SALON_HARDCODED.CONTRATS, 'les contrats');
 stickyPanel.register(SALON_HARDCODED.OPERATIONS, 'centre des opérations');
 stickyPanel.register('1516948864056168498', 'papiers'); // #registre : le panneau « 📜 PAPIERS » reste en bas (les papiers s'archivent au-dessus)
+stickyPanel.register('1521258635416834214', 'pépites'); // #pépites : le total reste en bas du salon
 
 function getChById(guild, salonKey, ...fallbackNames) {
   // D'abord chercher dans SALON_IDS (config.js)
@@ -2435,6 +2439,7 @@ async function autoSetup(guild) {
   direction.installerMemo?.(guild).then(() => console.log('📌 Mémo Direction en place')).catch(() => {});
   assistant.installerPanneau?.(guild).then(() => console.log('🤖 Panneau assistant IA en place')).catch(() => {});
   tenue.retirerPanneau?.(guild).then(() => console.log('🧵 Panneau Vestiaire retiré (#tenue gardé propre)')).catch(() => {});
+  pepites.installerPanneau?.(guild).then(() => console.log('💰 Panneau pépites en place')).catch(() => {});
   _installerPanneauContrats(guild).then(() => console.log('📜 Panneau « Contrats en cours » en place')).catch(() => {});
   _installerCataloguePrestations(guild).then(() => console.log('🤠 Catalogue des prestations (1518301186275676230) en place')).catch(() => {});
   // Forum des rapports : prépare les étiquettes (priorité + catégories) dès le démarrage
@@ -3387,6 +3392,7 @@ client.on('messageCreate', async message => {
   try { if (await _agendaPhotoOnMessage(message)) return; } catch {}
   try { if (await resumePhoto.onMessage?.(message)) return; } catch {}
   try { if (await inventaire.onMessage?.(message)) return; } catch {}
+  try { if (await pepites.onMessage?.(message)) return; } catch {}
   try { if (await comptabilite.onMessage?.(message)) return; } catch {}
   try { if (await traque.onMessage?.(message)) return; } catch {}
   try { if (await tenue.onMessage?.(message)) return; } catch {}
@@ -4018,6 +4024,7 @@ client.on('interactionCreate', async interaction => {
   if (await carte.routeInteraction?.(interaction)) return;
   if (await evenements.routeInteraction?.(interaction)) return;
   if (await annonces.routeInteraction?.(interaction)) return;
+  if (await pepites.routeInteraction?.(interaction)) return;
   if (await journaux.routeInteraction?.(interaction)) return;
   if (await factures.routeInteraction?.(interaction)) return;
   if (await medical.routeInteraction?.(interaction)) return;
