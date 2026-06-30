@@ -169,16 +169,22 @@ async function _resumer(texte) {
 // 🧠 Profil de cible : compile une fiche de renseignement à partir de TOUT ce que la base sait.
 async function _profilCible(db, nom) {
   const q = _norm(nom);
-  const rapports = (db.informateurs || []).filter(r => _norm(`${r.source} ${r.cible} ${r.info}`).includes(q)).slice(-15)
-    .map(r => `[${r.id}] cible:${r.cible || '—'} fiab:${r.fiabilite || '—'}${r.quand ? ` quand:${r.quand}` : ''} — ${(r.info || '').slice(0, 400)}`);
-  const avis = (db.traques || []).filter(t => _norm(`${t.cible} ${t.position}`).includes(q))
+  const rapports = (db.informateurs || []).filter(r => _norm(`${r.source || ''} ${r.cible || ''} ${r.info || ''}`).includes(q)).slice(-15)
+    .map(r => `[informateur ${r.id}] cible:${r.cible || '—'} fiab:${r.fiabilite || '—'}${r.quand ? ` quand:${r.quand}` : ''} — ${(r.info || '').slice(0, 400)}`);
+  const notes = (db.notesTerrain || []).filter(n => _norm(`${n.cible || ''} ${n.info || ''} ${n.lieu || ''} ${n.agent || ''} ${(n.tags || []).join(' ')}`).includes(q)).slice(-15)
+    .map(n => `[note terrain${n.date ? ' ' + String(n.date).slice(0, 10) : ''}] ${n.agent ? 'agent:' + n.agent + ' ' : ''}${n.lieu ? 'lieu:' + n.lieu + ' ' : ''}— ${(n.info || '').replace(/\s+/g, ' ').slice(0, 400)}`);
+  const avis = (db.traques || []).filter(t => _norm(`${t.cible || ''} ${t.position || ''}`).includes(q))
     .map(t => `Avis ${t.id}: ${t.cible} @ ${t.position || '—'} · prime ${t.prime || '—'} · ${t.dangerosite || '—'} [${t.status || '—'}]`);
-  const contacts = (db.repertoire?.contacts || []).filter(c => _norm(`${c.nom || ''} ${c.nomsurnom || ''} ${c.metier || ''} ${c.notes || ''}`).includes(q))
-    .map(c => `Contact: ${c.nom || c.nomsurnom} · métier ${c.metier || '—'} · affil ${c.affiliation || '—'} · ${c.notes || ''}`);
-  const contexte = [...rapports, ...avis, ...contacts].join('\n').slice(0, 6000);
+  const contacts = (db.repertoire?.contacts || []).filter(c => _norm(`${c.nom || ''} ${c.nomsurnom || ''} ${c.metier || ''} ${c.notes || ''} ${c.affiliation || ''}`).includes(q))
+    .map(c => `Contact: ${c.nom || c.nomsurnom} · métier ${c.metier || '—'} · affil ${c.affiliation || '—'} · ${(c.notes || '').slice(0, 200)}`);
+  const contrats = (db.contrats || []).filter(c => _norm(`${c.clientNom || ''} ${c.commanditaire || ''} ${c.objet || ''} ${c.cible || ''}`).includes(q)).slice(-10)
+    .map(c => `Contrat ${c.id}: ${c.clientNom || c.commanditaire || '—'} — ${(c.objet || '').slice(0, 120)} [${c.suivi || c.status || '?'}]`);
+  const lieux = (db.carte?.points || []).filter(p => _norm(`${p.nom || ''} ${p.notes || ''} ${p.lieu || ''} ${p.region || ''}`).includes(q))
+    .map(p => `Lieu connu: ${p.nom} (${p.type}) · ${p.region || ''} ${p.lieu || ''} · ${(p.notes || '').slice(0, 150)}`);
+  const contexte = [...rapports, ...notes, ...avis, ...contacts, ...contrats, ...lieux].join('\n').slice(0, 7000);
   if (!contexte.trim()) return { vide: true };
-  const txt = await _callIA([{ role: 'user', content: `Tu es l'analyste du renseignement de La Confrérie (RP western ~1904). À partir UNIQUEMENT des éléments ci-dessous, rédige une **FICHE DE RENSEIGNEMENT consolidée** en français sur « ${nom} ». Structure claire avec ces sections : 🪪 Identité · 📍 Lieux & habitudes · 🤝 Relations · 📑 Faits connus · ⚠️ Dangerosité · 🎯 Recommandations. Reste factuel, ne invente rien ; si une section manque d'infos, écris « inconnu ».\n\n=== ÉLÉMENTS (${rapports.length} rapport(s), ${avis.length} avis, ${contacts.length} contact(s)) ===\n${contexte}` }], 1100);
-  return { txt, n: { rapports: rapports.length, avis: avis.length, contacts: contacts.length } };
+  const txt = await _callIA([{ role: 'user', content: `Tu es l'analyste du renseignement de La Confrérie (RP western, Texans basés à Blackwater, ~1899-1904). À partir UNIQUEMENT des éléments ci-dessous, rédige une **FICHE DE RENSEIGNEMENT consolidée** en français sur « ${nom} ». Sections : 🪪 Identité · 📍 Lieux & habitudes · 🤝 Relations & affiliations · 📑 Faits connus (avec dates si dispo) · 💰 Contrats / avis liés · ⚠️ Dangerosité · 🎯 Recommandations d'action. Reste factuel, n'invente RIEN ; si une section manque d'infos, écris « inconnu ». Termine par une ligne « 📊 Fiabilité globale : faible / moyenne / élevée » selon le nombre et la concordance des sources.\n\n=== ÉLÉMENTS ===\n${contexte}` }], 1400);
+  return { txt, n: { rapports: rapports.length, notes: notes.length, avis: avis.length, contacts: contacts.length, contrats: contrats.length, lieux: lieux.length } };
 }
 
 // 🖼️ Génération d'image (OpenAI). Renvoie { buffer } ou { err }.
@@ -209,7 +215,7 @@ function _panneauEmbed() {
       '💬 **Poser une question** — « combien on a gagné ? », « quelles opérations sont en cours ? »… réponse à partir des vraies données.',
       '✍️ **Rédiger (RP)** — annonces, briefs d\'opération, lettres… ton western.',
       '📝 **Résumer** — colle un long texte, je le résume.',
-      '🧠 **Profil de cible** — fiche de renseignement consolidée sur quelqu\'un (depuis tous les rapports/avis/contacts).',
+      '🧠 **Profil de cible** — dossier de renseignement consolidé sur quelqu\'un, recoupé depuis informateurs, notes de terrain, avis de recherche, contacts, contrats et lieux connus.',
       '🖼️ **Générer une image** — portrait / affiche « wanted » *(Direction)*.',
     ].join('\n'))
     .setFooter({ text: 'Iron Wolf Company & La Confrérie' });
@@ -296,7 +302,16 @@ async function routeInteraction(interaction) {
         const res = await _profilCible(loadDB(), val);
         if (res.vide) { await interaction.editReply({ content: `🧠 Aucune information sur **${val}** dans nos données.` }).catch(() => {}); return true; }
         if (!res.txt) { await interaction.editReply({ content: '❌ Assistant IA indisponible (clé API absente ou erreur).' }).catch(() => {}); return true; }
-        const e = new EmbedBuilder().setColor(0x7A2E2E).setTitle(`🧠 Fiche de renseignement — ${val}`.slice(0, 256)).setDescription(res.txt.slice(0, 4096)).setFooter({ text: `Sources : ${res.n.rapports} rapport(s) · ${res.n.avis} avis · ${res.n.contacts} contact(s) — à vérifier` });
+        const _n = res.n;
+        const _src = [
+          _n.rapports ? `${_n.rapports} informateur(s)` : null,
+          _n.notes ? `${_n.notes} note(s) terrain` : null,
+          _n.avis ? `${_n.avis} avis` : null,
+          _n.contacts ? `${_n.contacts} contact(s)` : null,
+          _n.contrats ? `${_n.contrats} contrat(s)` : null,
+          _n.lieux ? `${_n.lieux} lieu(x)` : null,
+        ].filter(Boolean).join(' · ') || 'sources limitées';
+        const e = new EmbedBuilder().setColor(0x7A2E2E).setTitle(`🧠 Fiche de renseignement — ${val}`.slice(0, 256)).setDescription(res.txt.slice(0, 4096)).setFooter({ text: `Sources : ${_src} — à recouper/vérifier` });
         await interaction.editReply({ embeds: [e] }).catch(() => {});
         return true;
       }
