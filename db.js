@@ -77,6 +77,22 @@ function saveDB(data) {
       console.log('❌ saveDB error:', e.message);
     }
   }, 500);
+  // Sauvegarde cloud rapide après tout changement → survit à un redémarrage
+  // (conteneur Render éphémère). Debounce ~12s : regroupe les rafales d'écritures.
+  scheduleCloudBackup();
+}
+
+// ── Sauvegarde cloud rapide (debounce) déclenchée après chaque changement ──
+// Garantit que les données (pépites, coffre, etc.) sont sur le Gist en ~12s,
+// au lieu d'attendre le cron de 5 min — fenêtre de perte réduite à quelques secondes.
+let _cloudTimeout = null;
+function scheduleCloudBackup(delay = 12000) {
+  if (!process.env.GITHUB_TOKEN || !process.env.GITHUB_GIST_ID) return;
+  if (_cloudTimeout) clearTimeout(_cloudTimeout);
+  _cloudTimeout = setTimeout(() => {
+    _cloudTimeout = null;
+    sauvegarderSurGitHub().catch(() => {});
+  }, delay);
 }
 
 // Sauvegarde forcée immédiate (utilisée avant shutdown ou backup GitHub)
@@ -133,7 +149,8 @@ async function _doSauvegardeGitHub() {
         nbMembres > Object.keys(DEFAULT_DB.members).length ||
         (d.candidatures || []).length || (d.contrats || []).length || (d.operations || []).length ||
         (d.affaires || []).length || (d.informateurs || []).length ||
-        (d.coffre || 0) || (d.coffres?.legal || 0) || (d.coffres?.illegal || 0);
+        (d.coffre || 0) || (d.coffres?.legal || 0) || (d.coffres?.illegal || 0) ||
+        (d.pepites?.total || 0) || (d.pepites?.log || []).length;
       if (!aDuContenu) { console.log('⚠️ Sauvegarde GitHub ANNULÉE : données vides/suspectes (protection anti-écrasement)'); return false; }
     } catch { console.log('⚠️ Sauvegarde GitHub ANNULÉE : JSON invalide'); return false; }
 
@@ -202,6 +219,7 @@ async function restaurerDepuisGitHub() {
                       (existing.coffre || 0) > 0 ||
                       (existing.coffres?.legal || 0) > 0 ||
                       (existing.coffres?.illegal || 0) > 0 ||
+                      (existing.pepites?.total || 0) > 0 ||
                       nbMembres > Object.keys(DEFAULT_DB.members).length;
       if (hasData) return false; // Des données réelles existent → pas besoin de restaurer
     } catch {}
