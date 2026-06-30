@@ -3381,6 +3381,7 @@ client.on('messageCreate', async message => {
   try { if (await resumePhoto.onMessage?.(message)) return; } catch {}
   try { if (await inventaire.onMessage?.(message)) return; } catch {}
   try { if (await pepites.onMessage?.(message)) return; } catch {}
+  try { if (await musique.onMessage?.(message)) return; } catch {}
   try { if (await comptabilite.onMessage?.(message)) return; } catch {}
   try { if (await traque.onMessage?.(message)) return; } catch {}
   try { if (await tenue.onMessage?.(message)) return; } catch {}

@@ -6,8 +6,14 @@ FROM node:22-bookworm-slim
 
 # Outils de secours si un module natif doit se recompiler (sinon non utilisés).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates python3 build-essential \
+      ca-certificates python3 build-essential curl \
     && rm -rf /var/lib/apt/lists/*
+
+# yt-dlp : extraction audio YouTube (binaire autonome, mis à jour souvent).
+RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux \
+      -o /usr/local/bin/yt-dlp \
+    && chmod +x /usr/local/bin/yt-dlp \
+    && /usr/local/bin/yt-dlp --version
 
 WORKDIR /app
 

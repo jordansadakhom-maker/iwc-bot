@@ -1,19 +1,20 @@
 // ═══════════════════════════════════════════════════════════════
-//  musique.js — Jukebox vocal ambiance Far West / Sud profond
-//  Diffuse des radios internet (southern rock, country, cowboy roots…)
-//  dans un salon vocal. Panneau de contrôle avec boutons + menu.
+//  musique.js — Jukebox vocal : radios d'ambiance + file YouTube
+//  - Stations radio (southern rock, country, cowboy roots…)
+//  - Liens / recherches YouTube avec file d'attente (via yt-dlp)
 //
-//  Flux = radios en ligne fiables (style « Sweet Home Alabama »,
-//  Johnny Cash, Eagles, Creedence, Boot Liquor…). Décodés par ffmpeg
-//  (ffmpeg-static) → PCM → Opus (@discordjs/opus). Aucune dépendance
-//  système : tout est embarqué.
+//  Audio : yt-dlp / flux radio → ffmpeg (ffmpeg-static, décodage → PCM)
+//          → @discordjs/opus (encodage). Aucune dépendance système hormis
+//          yt-dlp (ajouté dans l'image Docker).
+//  ⚠️ La voix Discord nécessite l'UDP sortant → fonctionne sur Fly.io,
+//     pas sur Render.
 // ═══════════════════════════════════════════════════════════════
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, MessageFlags, ChannelType } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, ChannelType } = require('discord.js');
 const { spawn } = require('child_process');
 let voice = null; try { voice = require('@discordjs/voice'); } catch (e) { console.log('⚠️ @discordjs/voice indisponible:', e.message); }
 let FFMPEG = null; try { FFMPEG = require('ffmpeg-static'); } catch {}
-// Render peut livrer le binaire sans le bit exécutable → on le force au chargement.
 try { if (FFMPEG) require('fs').chmodSync(FFMPEG, 0o755); } catch {}
+const YTDLP = process.env.YTDLP_PATH || 'yt-dlp';
 let dbMod = {}; try { dbMod = require('./db'); } catch {}
 const loadDB = dbMod.loadDB || (() => ({}));
 const saveDB = dbMod.saveDB || (() => {});
@@ -21,7 +22,6 @@ const saveDB = dbMod.saveDB || (() => {});
 const SALON_MUSIQUE = '1509962606553727158';
 
 // ── Catalogue de stations (flux vérifiés joignables) ──
-// Ambiance western / sud des États-Unis : southern rock, country, cowboy roots.
 const STATIONS = [
   { id: 'bootliquor', emoji: '🤠', nom: 'Boot Liquor — Cowboy Roots', desc: 'Americana, country roots, ambiance saloon', url: 'https://ice1.somafm.com/bootliquor-128-mp3' },
   { id: 'southern',   emoji: '🎸', nom: 'Southern Rock', desc: 'Style « Sweet Home Alabama »', url: 'https://streams.radiobob.de/southernrock/mp3-192/mediaplayer' },
@@ -34,9 +34,14 @@ const STATIONS = [
 const stationById = id => STATIONS.find(s => s.id === id) || null;
 
 // ── État runtime par serveur (non persisté) ──
-// { connection, player, proc, stationId, playing, lastStart }
+// mode: 'radio' | 'queue'
 const G = new Map();
-function _state(guildId) { let s = G.get(guildId); if (!s) { s = { connection: null, player: null, proc: null, stationId: null, playing: false, lastStart: 0 }; G.set(guildId, s); } return s; }
+function _state(guildId) {
+  let s = G.get(guildId);
+  if (!s) { s = { connection: null, player: null, proc: null, mode: 'radio', stationId: null, queue: [], current: null, playing: false, lastStart: 0 }; G.set(guildId, s); }
+  if (!Array.isArray(s.queue)) s.queue = [];
+  return s;
+}
 
 function _ens(db) {
   if (!db.musique) db.musique = { stationId: 'bootliquor', volume: 0.5, panelId: null };
@@ -46,7 +51,6 @@ function _ens(db) {
 
 // ═══════════════════════ Audio ═══════════════════════
 function _spawnFfmpeg(url, label) {
-  // Décode le flux radio (mp3/aac…) → PCM brut 48kHz stéréo pour Discord.
   const args = [
     '-loglevel', 'warning',
     '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
@@ -56,19 +60,37 @@ function _spawnFfmpeg(url, label) {
     'pipe:1',
   ];
   const proc = spawn(FFMPEG, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-  // Observabilité : on capture les erreurs ffmpeg pour les logs Render.
-  let octets = 0, vu = false;
+  let octets = 0, vu = false, errBuf = '';
   proc.stdout.on('data', d => { octets += d.length; if (!vu) { vu = true; console.log(`🎵 ffmpeg reçoit de l'audio (${label}) — flux OK`); } });
-  let errBuf = '';
   proc.stderr.on('data', d => { errBuf += d.toString(); if (errBuf.length > 4000) errBuf = errBuf.slice(-4000); });
   proc.on('error', e => console.log(`⚠️ ffmpeg spawn error (${label}):`, e?.message));
-  proc.on('exit', (code, sig) => {
-    if (code && code !== 0) console.log(`⚠️ ffmpeg arrêté (${label}) code=${code} sig=${sig} octets=${octets}\n${errBuf.split('\n').slice(-4).join('\n')}`);
-  });
+  proc.on('exit', (code, sig) => { if (code && code !== 0) console.log(`⚠️ ffmpeg arrêté (${label}) code=${code} sig=${sig} octets=${octets}\n${errBuf.split('\n').slice(-4).join('\n')}`); });
   return proc;
 }
 
-function _killProc(s) { try { if (s.proc) { s.proc.kill('SIGKILL'); } } catch {} s.proc = null; }
+function _killProc(s) { try { if (s.proc) s.proc.kill('SIGKILL'); } catch {} s.proc = null; }
+
+// Résout un lien YouTube (ou une recherche) → { title, url direct }
+function _resolveYt(input) {
+  return new Promise(resolve => {
+    const args = ['--no-playlist', '--default-search', 'ytsearch1', '-f', 'bestaudio/best', '--print', '%(title)s', '--print', 'urls', '--no-warnings', '--', input];
+    let out = '', err = '', done = false;
+    let p;
+    try { p = spawn(YTDLP, args, { stdio: ['ignore', 'pipe', 'pipe'] }); }
+    catch (e) { console.log('⚠️ yt-dlp introuvable:', e.message); return resolve(null); }
+    const to = setTimeout(() => { if (!done) { done = true; try { p.kill('SIGKILL'); } catch {} console.log('⚠️ yt-dlp timeout'); resolve(null); } }, 30000);
+    p.stdout.on('data', d => out += d.toString());
+    p.stderr.on('data', d => err += d.toString());
+    p.on('error', e => { if (!done) { done = true; clearTimeout(to); console.log('⚠️ yt-dlp error:', e.message); resolve(null); } });
+    p.on('close', code => {
+      if (done) return; done = true; clearTimeout(to);
+      if (code !== 0) { console.log('⚠️ yt-dlp code', code, err.slice(-300)); return resolve(null); }
+      const lines = out.trim().split('\n').map(l => l.trim()).filter(Boolean);
+      if (lines.length < 2) return resolve(null);
+      resolve({ title: lines[0].slice(0, 200), url: lines[lines.length - 1] });
+    });
+  });
+}
 
 function _ensurePlayer(guild) {
   const s = _state(guild.id);
@@ -76,46 +98,81 @@ function _ensurePlayer(guild) {
   const player = voice.createAudioPlayer({ behaviors: { noSubscriber: voice.NoSubscriberBehavior.Play } });
   player.on('error', err => {
     console.log('⚠️ musique player error:', err?.message);
-    // Tente de relancer la station courante après une petite pause
-    if (s.playing && s.stationId) setTimeout(() => _diffuser(guild, s.stationId).catch(() => {}), 1500);
+    if (!s.playing) return;
+    if (s.mode === 'queue') { s.queue.shift(); setTimeout(() => _playQueue(guild).catch(() => {}), 800); }
+    else if (s.stationId) setTimeout(() => _diffuser(guild, s.stationId).catch(() => {}), 1500);
   });
   player.on(voice.AudioPlayerStatus.Playing, () => console.log('🔊 musique : lecture en cours (player Playing)'));
   player.on(voice.AudioPlayerStatus.Idle, () => {
-    // Le flux s'est interrompu (coupure radio) → on relance la même station.
-    if (s.playing && s.stationId) {
+    if (!s.playing) return;
+    if (s.mode === 'queue') {
+      // Le morceau courant est terminé (ou a échoué) → passe au suivant.
+      s.queue.shift();
+      if (s.queue.length) { setTimeout(() => _playQueue(guild).catch(() => {}), 500); }
+      else { s.current = null; const db = loadDB(); _majPanneau(guild, db).catch(() => {}); }
+      return;
+    }
+    // Radio : le flux a coupé → on relance la même station.
+    if (s.stationId) {
       const ecoule = Date.now() - (s.lastStart || 0);
-      const delai = ecoule < 4000 ? 4000 : 800; // évite une boucle de reconnexion trop serrée
-      setTimeout(() => { if (s.playing) _diffuser(guild, s.stationId).catch(() => {}); }, delai);
+      setTimeout(() => { if (s.playing) _diffuser(guild, s.stationId).catch(() => {}); }, ecoule < 4000 ? 4000 : 800);
     }
   });
   s.player = player;
   return player;
 }
 
-async function _diffuser(guild, stationId) {
+async function _playStream(guild, url, label) {
   const s = _state(guild.id);
-  const station = stationById(stationId);
-  if (!station || !s.connection) return false;
+  if (!s.connection) return false;
   const db = loadDB(); const cfg = _ens(db);
   _killProc(s);
-  const proc = _spawnFfmpeg(station.url, station.nom);
-  s.proc = proc;
-  s.stationId = stationId;
-  s.lastStart = Date.now();
+  const proc = _spawnFfmpeg(url, label); s.proc = proc; s.lastStart = Date.now();
   const resource = voice.createAudioResource(proc.stdout, { inputType: voice.StreamType.Raw, inlineVolume: true });
   try { resource.volume?.setVolume(cfg.volume); } catch {}
   const player = _ensurePlayer(guild);
   player.play(resource);
   s.connection.subscribe(player);
   s.playing = true;
-  cfg.stationId = stationId; saveDB(db);
   return true;
+}
+
+async function _diffuser(guild, stationId) {
+  const station = stationById(stationId);
+  if (!station) return false;
+  const s = _state(guild.id);
+  s.mode = 'radio'; s.stationId = stationId; s.current = null;
+  const db = loadDB(); const cfg = _ens(db); cfg.stationId = stationId; saveDB(db);
+  return _playStream(guild, station.url, station.nom);
+}
+
+async function _playQueue(guild) {
+  const s = _state(guild.id);
+  const item = s.queue[0];
+  if (!item) { s.mode = 'radio'; s.current = null; s.playing = false; _killProc(s); try { s.player?.stop(true); } catch {} const db = loadDB(); _majPanneau(guild, db).catch(() => {}); return false; }
+  s.mode = 'queue'; s.current = item;
+  const ok = await _playStream(guild, item.url, item.title);
+  const db = loadDB(); _majPanneau(guild, db).catch(() => {});
+  return ok;
+}
+
+// Ajoute un lien/recherche à la file et démarre si besoin.
+async function _ajouter(guild, voiceChannel, input, requesterId) {
+  const s = _state(guild.id);
+  const resolved = await _resolveYt(input);
+  if (!resolved) return { ok: false, raison: 'introuvable' };
+  s.queue.push({ title: resolved.title, url: resolved.url, by: requesterId });
+  if (!s.connection && voiceChannel) await _connecter(voiceChannel);
+  if (!s.connection) return { ok: false, raison: 'pas_de_vocal' };
+  const position = s.queue.length;
+  if (s.mode !== 'queue' || !s.playing) { await _playQueue(guild); return { ok: true, title: resolved.title, position: 1, joue: true }; }
+  const db = loadDB(); _majPanneau(guild, db).catch(() => {});
+  return { ok: true, title: resolved.title, position, joue: false };
 }
 
 async function _connecter(voiceChannel) {
   const s = _state(voiceChannel.guild.id);
-  if (s.connection && s.connection.joinConfig.channelId === voiceChannel.id
-      && s.connection.state.status !== voice.VoiceConnectionStatus.Destroyed) return s.connection;
+  if (s.connection && s.connection.joinConfig.channelId === voiceChannel.id && s.connection.state.status !== voice.VoiceConnectionStatus.Destroyed) return s.connection;
   try { if (s.connection) s.connection.destroy(); } catch {}
   const connection = voice.joinVoiceChannel({
     channelId: voiceChannel.id,
@@ -129,10 +186,7 @@ async function _connecter(voiceChannel) {
         voice.entersState(connection, voice.VoiceConnectionStatus.Signalling, 5000),
         voice.entersState(connection, voice.VoiceConnectionStatus.Connecting, 5000),
       ]);
-      // reconnexion en cours → on laisse faire
-    } catch {
-      _quitter(voiceChannel.guild.id);
-    }
+    } catch { _quitter(voiceChannel.guild.id); }
   });
   s.connection = connection;
   try { await voice.entersState(connection, voice.VoiceConnectionStatus.Ready, 20000); console.log(`🎙️ musique : connecté au vocal ${voiceChannel.name}`); }
@@ -142,7 +196,7 @@ async function _connecter(voiceChannel) {
 
 function _quitter(guildId) {
   const s = _state(guildId);
-  s.playing = false;
+  s.playing = false; s.mode = 'radio'; s.queue = []; s.current = null;
   _killProc(s);
   try { s.player?.stop(true); } catch {}
   try { s.connection?.destroy(); } catch {}
@@ -152,22 +206,30 @@ function _quitter(guildId) {
 // ═══════════════════════ Panneau ═══════════════════════
 function _statutTexte(guildId) {
   const s = _state(guildId);
-  if (s.playing && s.connection) { const st = stationById(s.stationId); return `🔊 **En lecture** — ${st ? st.emoji + ' ' + st.nom : 'station inconnue'}`; }
-  return '⏹️ *À l\'arrêt — rejoins un salon vocal puis clique sur ▶️ Lancer.*';
+  if (!s.connection || !s.playing) return '⏹️ *À l\'arrêt — rejoins un vocal puis ▶️ Lancer, ou colle un lien YouTube.*';
+  if (s.mode === 'queue' && s.current) {
+    let t = `🎧 **En lecture :** ${s.current.title}`;
+    const suite = s.queue.slice(1, 6);
+    if (suite.length) t += '\n📜 **À suivre :** ' + suite.map((q, i) => `\n  ${i + 1}. ${q.title}`).join('');
+    if (s.queue.length > 6) t += `\n  …et ${s.queue.length - 6} de plus`;
+    return t;
+  }
+  const st = stationById(s.stationId);
+  return `📻 **Radio :** ${st ? st.emoji + ' ' + st.nom : 'station'}`;
 }
 
 function _panelEmbed(db, guildId) {
   const cfg = _ens(db);
   const e = new EmbedBuilder().setColor(0xB5651D).setTitle('🎶 JUKEBOX DU SALOON — IRON WOLF COMPANY')
     .setDescription([
-      '*Mets l\'ambiance Far West dans le vocal — southern rock, country, cowboy roots.*',
+      '*Deux façons d\'écouter :*',
+      '• 📻 **Radios d\'ambiance** — choisis une station dans le menu, puis ▶️ Lancer.',
+      '• 🎧 **YouTube** — colle un **lien** (ou tape une **recherche**) ici, ou via le bouton 🔎. Ça se met en file.',
       '',
       _statutTexte(guildId),
-      '',
-      '**Comment faire :** rejoins un salon vocal, choisis une station dans le menu, puis ▶️ **Lancer**.',
     ].join('\n'))
     .addFields(
-      { name: '📻 Stations disponibles', value: STATIONS.map(st => `${st.emoji} **${st.nom}** — *${st.desc}*`).join('\n'), inline: false },
+      { name: '📻 Stations', value: STATIONS.map(st => `${st.emoji} ${st.nom}`).join(' · '), inline: false },
       { name: '🔊 Volume', value: `${Math.round((cfg.volume || 0.5) * 100)} %`, inline: true },
     )
     .setFooter({ text: 'Iron Wolf Company • Saloon de Blackwater' });
@@ -176,16 +238,19 @@ function _panelEmbed(db, guildId) {
 
 function _panelRows(db) {
   const cfg = _ens(db);
-  const menu = new StringSelectMenuBuilder().setCustomId('mus_pick').setPlaceholder('🎵 Choisir une station…')
+  const menu = new StringSelectMenuBuilder().setCustomId('mus_pick').setPlaceholder('📻 Choisir une station radio…')
     .addOptions(STATIONS.map(st => ({ label: st.nom.slice(0, 100), description: st.desc.slice(0, 100), value: st.id, emoji: st.emoji, default: st.id === cfg.stationId })));
   return [
     new ActionRowBuilder().addComponents(menu),
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('mus_play').setLabel('Lancer').setEmoji('▶️').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('mus_stop').setLabel('Arrêter').setEmoji('⏹️').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('mus_next').setLabel('Station suivante').setEmoji('⏭️').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('mus_voldown').setLabel('Vol -').setEmoji('🔉').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('mus_volup').setLabel('Vol +').setEmoji('🔊').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('mus_next').setLabel('Passer / Suivant').setEmoji('⏭️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('mus_voldown').setEmoji('🔉').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('mus_volup').setEmoji('🔊').setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('mus_add').setLabel('Ajouter un lien YouTube / rechercher').setEmoji('🔎').setStyle(ButtonStyle.Primary),
     ),
   ];
 }
@@ -211,11 +276,8 @@ async function installerPanneau(guild) {
   try { const db = loadDB(); _ens(db); await _majPanneau(guild, db); } catch (e) { console.log('⚠️ musique installerPanneau:', e.message); }
 }
 
-// Quitte automatiquement si plus personne (hors bots) n'écoute dans le vocal.
 function init(client) {
   if (!voice) return;
-  // Initialise libsodium (asynchrone) AVANT toute lecture : sans ça, le chiffrement
-  // des paquets audio peut échouer silencieusement → le bot rejoint mais reste muet.
   try { const sodium = require('libsodium-wrappers'); sodium.ready.then(() => console.log('🔐 musique : libsodium prêt')).catch(() => {}); } catch (e) { console.log('⚠️ musique libsodium:', e.message); }
   try { console.log('🎶 musique — dépendances audio :\n' + voice.generateDependencyReport()); } catch {}
   client.on('voiceStateUpdate', (oldS, newS) => {
@@ -226,13 +288,40 @@ function init(client) {
       const vcId = s.connection.joinConfig.channelId;
       const vc = guild.channels.cache.get(vcId);
       if (!vc) return;
-      const humains = vc.members.filter(m => !m.user.bot).size;
-      if (humains === 0) {
-        _quitter(guild.id);
-        const db = loadDB(); _majPanneau(guild, db).catch(() => {});
-      }
+      if (vc.members.filter(m => !m.user.bot).size === 0) { _quitter(guild.id); const db = loadDB(); _majPanneau(guild, db).catch(() => {}); }
     } catch {}
   });
+}
+
+// Salon musique : tout message (lien YouTube ou recherche) = ajout à la file.
+async function onMessage(message) {
+  try {
+    if (!message.guild || message.author?.bot || message.webhookId) return false;
+    if (message.channelId !== SALON_MUSIQUE) return false;
+    const contenu = (message.content || '').trim();
+    if (!contenu || contenu.length > 300) return false;
+    if (!voice || !FFMPEG) return false;
+    const vc = message.member?.voice?.channel
+      || ((message.channel.type === ChannelType.GuildVoice || message.channel.type === ChannelType.GuildStageVoice) ? message.channel : null);
+    if (!vc) {
+      const avert = await message.reply({ content: '🔇 Rejoins d\'abord un salon vocal pour que je puisse jouer ta musique.' }).catch(() => null);
+      if (avert) setTimeout(() => avert.delete().catch(() => {}), 10000);
+      return true;
+    }
+    await message.react('🔎').catch(() => {});
+    const res = await _ajouter(message.guild, vc, contenu, message.author.id);
+    await message.reactions.cache.get('🔎')?.remove().catch(() => {});
+    if (!res.ok) {
+      const m = await message.reply({ content: res.raison === 'pas_de_vocal' ? '🔇 Je n\'arrive pas à rejoindre le vocal.' : '❌ Rien trouvé pour ça.' }).catch(() => null);
+      if (m) setTimeout(() => m.delete().catch(() => {}), 10000);
+      return true;
+    }
+    await message.react('✅').catch(() => {});
+    const conf = await message.reply({ content: res.joue ? `🎧 Lecture : **${res.title}**` : `➕ Ajouté à la file (n°${res.position}) : **${res.title}**` }).catch(() => null);
+    if (conf) setTimeout(() => conf.delete().catch(() => {}), 12000);
+    const db = loadDB(); await _majPanneau(message.guild, db);
+    return true;
+  } catch (e) { console.log('❌ musique onMessage:', e.message); return false; }
 }
 
 // ═══════════════════════ Interactions ═══════════════════════
@@ -244,52 +333,76 @@ async function routeInteraction(interaction) {
     const guild = interaction.guild; if (!guild) return true;
     const db = loadDB(); const cfg = _ens(db);
 
-    // Menu : choisir une station
     if (interaction.isStringSelectMenu?.() && cid === 'mus_pick') {
       const choix = interaction.values?.[0];
       if (choix) { cfg.stationId = choix; saveDB(db); }
       const s = _state(guild.id);
-      if (s.playing && s.connection) await _diffuser(guild, choix).catch(() => {});
+      if (s.connection && s.playing) await _diffuser(guild, choix).catch(() => {});
       await _majPanneau(guild, db);
       const st = stationById(choix);
-      await interaction.reply({ content: s.playing ? `🎵 Station changée : ${st?.emoji || ''} **${st?.nom || ''}**.` : `🎵 Station sélectionnée : ${st?.emoji || ''} **${st?.nom || ''}**. Clique sur ▶️ Lancer.`, flags: MessageFlags.Ephemeral }).catch(() => {});
+      await interaction.reply({ content: (s.connection && s.playing) ? `📻 Station : ${st?.emoji || ''} **${st?.nom || ''}**.` : `📻 Station choisie : ${st?.emoji || ''} **${st?.nom || ''}**. Clique sur ▶️ Lancer.`, flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+
+    // Bouton « Ajouter » → fenêtre de saisie
+    if (interaction.isButton?.() && cid === 'mus_add') {
+      const modal = new ModalBuilder().setCustomId('mus_add_modal').setTitle('🔎 Ajouter une musique');
+      modal.addComponents(new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('q').setLabel('Lien YouTube ou recherche').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('https://youtu.be/… ou « sweet home alabama »')));
+      await interaction.showModal(modal).catch(() => {});
+      return true;
+    }
+    if (interaction.isModalSubmit?.() && cid === 'mus_add_modal') {
+      const q = (interaction.fields.getTextInputValue('q') || '').trim();
+      let vc = interaction.member?.voice?.channel || null;
+      if (!vc && (interaction.channel?.type === ChannelType.GuildVoice || interaction.channel?.type === ChannelType.GuildStageVoice)) vc = interaction.channel;
+      if (!vc) { await interaction.reply({ content: '🔇 Rejoins d\'abord un salon vocal.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const res = await _ajouter(guild, vc, q, interaction.user.id);
+      await _majPanneau(guild, db);
+      await interaction.editReply({ content: res.ok ? (res.joue ? `🎧 Lecture : **${res.title}**` : `➕ Ajouté (n°${res.position}) : **${res.title}**`) : '❌ Rien trouvé pour ça.' }).catch(() => {});
       return true;
     }
 
     if (interaction.isButton?.() && cid === 'mus_play') {
-      // Salon vocal cible : celui du membre, sinon le salon-panneau s'il est vocal.
       let vc = interaction.member?.voice?.channel || null;
-      if (!vc) {
-        const ch = interaction.channel;
-        if (ch && (ch.type === ChannelType.GuildVoice || ch.type === ChannelType.GuildStageVoice)) vc = ch;
-      }
-      if (!vc) { await interaction.reply({ content: '🔇 Rejoins d\'abord un salon vocal, puis clique sur ▶️ Lancer.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      if (!vc && (interaction.channel?.type === ChannelType.GuildVoice || interaction.channel?.type === ChannelType.GuildStageVoice)) vc = interaction.channel;
+      if (!vc) { await interaction.reply({ content: '🔇 Rejoins d\'abord un salon vocal, puis ▶️ Lancer.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const perms = vc.permissionsFor(guild.members.me);
       if (!perms?.has('Connect') || !perms?.has('Speak')) { await interaction.reply({ content: '🚫 Je n\'ai pas la permission de me connecter / parler dans ce salon vocal.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       await _connecter(vc);
-      const ok = await _diffuser(guild, cfg.stationId || 'bootliquor');
+      const s = _state(guild.id);
+      let ok, quoi;
+      if (s.queue.length) { ok = await _playQueue(guild); quoi = s.current?.title ? `🎧 ${s.current.title}` : 'la file'; }
+      else { ok = await _diffuser(guild, cfg.stationId || 'bootliquor'); const st = stationById(cfg.stationId || 'bootliquor'); quoi = `📻 ${st?.nom || ''}`; }
       await _majPanneau(guild, db);
-      const st = stationById(cfg.stationId || 'bootliquor');
-      await interaction.editReply({ content: ok ? `🔊 C'est parti dans **${vc.name}** — ${st?.emoji || ''} ${st?.nom || ''} 🤠` : '⚠️ Impossible de lancer la lecture.' }).catch(() => {});
+      await interaction.editReply({ content: ok ? `🔊 C'est parti dans **${vc.name}** — ${quoi} 🤠` : '⚠️ Impossible de lancer la lecture.' }).catch(() => {});
       return true;
     }
 
     if (interaction.isButton?.() && cid === 'mus_stop') {
       _quitter(guild.id);
       await _majPanneau(guild, db);
-      await interaction.reply({ content: '⏹️ Musique arrêtée, je quitte le vocal.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      await interaction.reply({ content: '⏹️ Musique arrêtée, file vidée, je quitte le vocal.', flags: MessageFlags.Ephemeral }).catch(() => {});
       return true;
     }
 
     if (interaction.isButton?.() && cid === 'mus_next') {
-      const idx = STATIONS.findIndex(s => s.id === (cfg.stationId || 'bootliquor'));
+      const s = _state(guild.id);
+      if (s.mode === 'queue' && s.playing) {
+        // Passer au morceau suivant (l'évènement Idle enchaîne).
+        try { s.player?.stop(true); } catch {}
+        await interaction.reply({ content: s.queue.length > 1 ? '⏭️ Morceau suivant.' : '⏭️ Fin de la file.', flags: MessageFlags.Ephemeral }).catch(() => {});
+        return true;
+      }
+      // Radio : station suivante
+      const idx = STATIONS.findIndex(x => x.id === (cfg.stationId || 'bootliquor'));
       const next = STATIONS[(idx + 1 + STATIONS.length) % STATIONS.length];
       cfg.stationId = next.id; saveDB(db);
-      const s = _state(guild.id);
-      if (s.playing && s.connection) await _diffuser(guild, next.id).catch(() => {});
+      if (s.connection && s.playing) await _diffuser(guild, next.id).catch(() => {});
       await _majPanneau(guild, db);
-      await interaction.reply({ content: `⏭️ Station : ${next.emoji} **${next.nom}**${s.playing ? '' : ' — clique sur ▶️ Lancer.'}`, flags: MessageFlags.Ephemeral }).catch(() => {});
+      await interaction.reply({ content: `📻 Station : ${next.emoji} **${next.nom}**${s.playing ? '' : ' — clique sur ▶️ Lancer.'}`, flags: MessageFlags.Ephemeral }).catch(() => {});
       return true;
     }
 
@@ -308,4 +421,4 @@ async function routeInteraction(interaction) {
   } catch (e) { if ([10062, 40060].includes(e?.code)) return true; console.log('❌ musique routeInteraction:', e.message); return true; }
 }
 
-module.exports = { installerPanneau, routeInteraction, init, SALON_MUSIQUE, STATIONS };
+module.exports = { installerPanneau, routeInteraction, onMessage, init, SALON_MUSIQUE, STATIONS };
