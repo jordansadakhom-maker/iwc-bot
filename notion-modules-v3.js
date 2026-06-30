@@ -14,7 +14,7 @@ function _persistNow() { try { if (typeof sauvegarderSurGitHub === 'function') r
 let notionExtra = {};
 try { notionExtra = require('./notion-extra'); } catch {}
 let relais = {}; try { relais = require('./relais'); } catch {}
-const JOURS_INACTIF = 5;
+const JOURS_INACTIF = 7;
 const ROLES = {
   LE_CONSEIL:    '1508289999035039875',
   OFFICIER:      '1508290255055229019',
