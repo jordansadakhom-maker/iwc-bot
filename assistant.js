@@ -187,6 +187,35 @@ async function _profilCible(db, nom) {
   return { txt, n: { rapports: rapports.length, notes: notes.length, avis: avis.length, contacts: contacts.length, contrats: contrats.length, lieux: lieux.length } };
 }
 
+// 🧬 Synthèse du renseignement : recoupe TOUS les rapports récents → brief stratégique.
+async function _syntheseRenseignement(db) {
+  const reports = (db.informateurs || []).slice(-45).map(r => `[info ${r.id || ''}] cible:${r.cible || '—'} source:${r.source || '—'} fiab:${r.fiabilite || '—'}${r.quand ? ' quand:' + r.quand : ''} — ${(r.info || '').replace(/\s+/g, ' ').slice(0, 300)}`);
+  const notes = (db.notesTerrain || []).slice(-25).map(n => `[note${n.date ? ' ' + String(n.date).slice(0, 10) : ''}] ${n.agent ? 'agent:' + n.agent + ' ' : ''}${n.lieu ? 'lieu:' + n.lieu + ' ' : ''}cible:${n.cible || '—'} — ${(n.info || '').replace(/\s+/g, ' ').slice(0, 280)}`);
+  const avis = (db.traques || []).filter(t => ['chasse', 'reperee', 'ouvert'].includes(t.status)).slice(-12).map(t => `Avis ${t.id}: ${t.cible} @ ${t.position || '—'} [${t.status}] prime ${t.prime || '—'}`);
+  const contexte = [...reports, ...notes, ...avis].join('\n').slice(0, 8000);
+  if (!contexte.trim()) return { vide: true };
+  const txt = await _callIA([{ role: 'user', content: `Tu es l'analyste en chef du renseignement de La Confrérie (RP western, Texans à Blackwater, ~1899-1904). À partir UNIQUEMENT des rapports d'informateurs, notes de terrain et avis ci-dessous, produis une **SYNTHÈSE DU RENSEIGNEMENT** en français, structurée :\n🔗 Recoupements (faits confirmés par plusieurs sources)\n🎯 Personnes / cibles à surveiller\n📍 Zones chaudes (lieux qui reviennent)\n⚠️ Menaces pour la maison\n🧭 Pistes & actions recommandées (priorisées)\n❓ Zones d'ombre à creuser\nReste factuel, signale explicitement les contradictions entre sources, n'invente RIEN. Sois synthétique et opérationnel.\n\n=== RAPPORTS (${reports.length}) · NOTES (${notes.length}) · AVIS (${avis.length}) ===\n${contexte}` }], 1500);
+  return { txt, n: { reports: reports.length, notes: notes.length, avis: avis.length } };
+}
+
+// 🎯 Avis de recherche (IA) : affiche « wanted » à partir du nom + contexte + données connues.
+async function _genererAvis(db, nom, contexte) {
+  const q = _norm(nom);
+  const connus = [];
+  (db.informateurs || []).filter(r => _norm(`${r.cible || ''} ${r.info || ''}`).includes(q)).slice(-8).forEach(r => connus.push(`info: ${(r.info || '').slice(0, 200)}`));
+  (db.notesTerrain || []).filter(n => _norm(`${n.cible || ''} ${n.info || ''} ${n.lieu || ''}`).includes(q)).slice(-6).forEach(n => connus.push(`terrain${n.lieu ? ' @' + n.lieu : ''}: ${(n.info || '').slice(0, 180)}`));
+  (db.traques || []).filter(t => _norm(`${t.cible || ''} ${t.position || ''}`).includes(q)).slice(-4).forEach(t => connus.push(`avis: ${t.cible} @ ${t.position || '—'} prime ${t.prime || '—'} [${t.status || '—'}]`));
+  (db.repertoire?.contacts || []).filter(c => _norm(`${c.nom || ''} ${c.nomsurnom || ''} ${c.affiliation || ''} ${c.notes || ''}`).includes(q)).slice(-4).forEach(c => connus.push(`contact: ${c.nom || c.nomsurnom} ${c.affiliation ? '(' + c.affiliation + ')' : ''} ${(c.notes || '').slice(0, 120)}`));
+  const base = connus.join('\n').slice(0, 3500);
+  const txt = await _callIA([{ role: 'user', content: `Rédige un **AVIS DE RECHERCHE** (style affiche « WANTED » de l'Ouest, ~1899-1904, en français) pour « ${nom} ».\nUtilise les informations connues ci-dessous et le contexte fourni. Tu peux soigner le ton, mais n'invente pas de faits précis vérifiables (dates, chiffres exacts) absents des données — reste plausible et sobre.\nFormat :\n🪪 **Identité & signalement** (nom, alias éventuels, description)\n⚖️ **Chefs d'accusation**\n📍 **Dernière position connue**\n⚠️ **Dangerosité** (Faible / Moyenne / Élevée / Extrême)\n💰 **Prime recommandée** (un montant en $ cohérent)\n📋 **Consignes aux chasseurs**\n\n=== CONTEXTE FOURNI ===\n${contexte || '(aucun)'}\n\n=== INFORMATIONS CONNUES ===\n${base || '(aucune dans nos dossiers)'}` }], 1100);
+  return { txt, n: connus.length };
+}
+
+// 📑 Analyse de contrat (IA)
+async function _analyserContrat(texte) {
+  return _callIA([{ role: 'user', content: `Tu es le conseiller de La Confrérie (RP western). Analyse le **contrat** ci-dessous et renvoie une fiche claire en français :\n📌 **Résumé** (1-2 phrases)\n👤 **Commanditaire**\n🎯 **Objet / cible**\n💰 **Paiement** (montant, modalités, acompte)\n⏳ **Échéance / délais**\n⚠️ **Risques** (sécurité, légal, réputation)\n📊 **Niveau de risque global** : Faible / Moyen / Élevé\n🔎 **Points de vigilance** (clauses floues, pièges, infos manquantes)\n✅ **Recommandation** : Accepter / Négocier / Refuser — avec une justification courte.\nSi une information manque, écris « non précisé ». Reste factuel, ne romance pas.\n\n=== CONTRAT ===\n${(texte || '').slice(0, 6000)}` }], 1200);
+}
+
 // 🖼️ Génération d'image (OpenAI). Renvoie { buffer } ou { err }.
 async function _genererImageIA(prompt) {
   const key = process.env.OPENAI_API_KEY; if (!key) return { err: 'no_key' };
@@ -215,7 +244,10 @@ function _panneauEmbed() {
       '💬 **Poser une question** — « combien on a gagné ? », « quelles opérations sont en cours ? »… réponse à partir des vraies données.',
       '✍️ **Rédiger (RP)** — annonces, briefs d\'opération, lettres… ton western.',
       '📝 **Résumer** — colle un long texte, je le résume.',
-      '🧠 **Profil de cible** — dossier de renseignement consolidé sur quelqu\'un, recoupé depuis informateurs, notes de terrain, avis de recherche, contacts, contrats et lieux connus.',
+      '🧠 **Profil de cible** — dossier consolidé sur quelqu\'un, recoupé depuis informateurs, notes de terrain, avis, contacts, contrats et lieux.',
+      '🧬 **Synthèse du renseignement** — recoupe TOUS les rapports récents → recoupements, cibles à surveiller, zones chaudes, menaces et pistes d\'action.',
+      '🎯 **Avis de recherche (IA)** — génère une affiche « wanted » prête à publier (signalement, chefs d\'accusation, dangerosité, prime).',
+      '📑 **Analyser un contrat** — colle un contrat, j\'en sors commanditaire, paiement, **risques**, niveau de risque et reco (accepter/négocier/refuser).',
       '🖼️ **Générer une image** — portrait / affiche « wanted » *(Direction)*.',
     ].join('\n'))
     .setFooter({ text: 'Iron Wolf Company & La Confrérie' });
@@ -230,7 +262,10 @@ function _panneauRows() {
     ),
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('asst_profil').setLabel('Profil de cible').setEmoji('🧠').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('asst_image').setLabel('Générer une image').setEmoji('🖼️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('asst_synth').setLabel('Synthèse rens.').setEmoji('🧬').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('asst_avis').setLabel('Avis de recherche').setEmoji('🎯').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('asst_contrat').setLabel('Analyser un contrat').setEmoji('📑').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('asst_image').setLabel('Image').setEmoji('🖼️').setStyle(ButtonStyle.Secondary),
     ),
   ];
 }
@@ -259,6 +294,14 @@ function _modal(id, titre, label, style, ph) {
   ));
   return m;
 }
+function _modalAvis() {
+  const m = new ModalBuilder().setCustomId('asst_avis_modal').setTitle('🎯 Avis de recherche (IA)');
+  m.addComponents(
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom').setLabel('Nom / cible').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(120).setPlaceholder('Ex : Silas Grimshaw')),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ctx').setLabel('Crime / contexte (facultatif)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(1500).setPlaceholder('Ex : a trahi la Confrérie, vol d\'or à Blackwater…')),
+  );
+  return m;
+}
 
 async function routeInteraction(interaction) {
   const cid = interaction.customId || '';
@@ -273,6 +316,17 @@ async function routeInteraction(interaction) {
       if (cid === 'asst_write') { await interaction.showModal(_modal('asst_write_modal', '✍️ Rédaction RP', 'Qu\'est-ce que je rédige ?', TextInputStyle.Paragraph, 'Ex : une annonce de recrutement Confrérie…')).catch(() => {}); return true; }
       if (cid === 'asst_sum') { await interaction.showModal(_modal('asst_sum_modal', '📝 Résumer un texte', 'Colle le texte à résumer', TextInputStyle.Paragraph, 'Colle ici le fil / dossier / message long…')).catch(() => {}); return true; }
       if (cid === 'asst_profil') { await interaction.showModal(_modal('asst_profil_modal', '🧠 Profil de cible', 'Nom de la personne / cible', TextInputStyle.Short, 'Ex : Silas Grimshaw')).catch(() => {}); return true; }
+      if (cid === 'asst_avis') { await interaction.showModal(_modalAvis()).catch(() => {}); return true; }
+      if (cid === 'asst_contrat') { await interaction.showModal(_modal('asst_contrat_modal', '📑 Analyser un contrat', 'Colle le texte du contrat', TextInputStyle.Paragraph, 'Colle ici le contrat / la proposition…')).catch(() => {}); return true; }
+      if (cid === 'asst_synth') {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+        const res = await _syntheseRenseignement(loadDB());
+        if (res.vide) { await interaction.editReply({ content: '🧬 Aucun rapport d\'informateur / note de terrain à synthétiser pour l\'instant.' }).catch(() => {}); return true; }
+        if (!res.txt) { await interaction.editReply({ content: '❌ Assistant IA indisponible (clé API absente ou erreur).' }).catch(() => {}); return true; }
+        const e = new EmbedBuilder().setColor(0x4A3B2A).setTitle('🧬 Synthèse du renseignement').setDescription(res.txt.slice(0, 4096)).setFooter({ text: `Basé sur ${res.n.reports} rapport(s) · ${res.n.notes} note(s) · ${res.n.avis} avis — à recouper` });
+        await interaction.editReply({ embeds: [e] }).catch(() => {});
+        return true;
+      }
       if (cid === 'asst_image') {
         if (!estDirection(interaction.member)) { await interaction.reply({ content: '🔒 La génération d\'images est réservée à la Direction (coût par image).', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
         await interaction.showModal(_modal('asst_image_modal', '🖼️ Générer une image', 'Décris l\'image voulue', TextInputStyle.Paragraph, 'Ex : portrait d\'un hors-la-loi balafré, chapeau noir…')).catch(() => {});
@@ -283,6 +337,17 @@ async function routeInteraction(interaction) {
 
     // Modals
     if (interaction.isModalSubmit?.()) {
+      // 🎯 Avis de recherche (IA) — champs dédiés (nom + contexte)
+      if (cid === 'asst_avis_modal') {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+        const nom = (interaction.fields.getTextInputValue('nom') || '').trim();
+        const ctx = (interaction.fields.getTextInputValue('ctx') || '').trim();
+        const res = await _genererAvis(loadDB(), nom, ctx);
+        if (!res.txt) { await interaction.editReply({ content: '❌ Assistant IA indisponible (clé API absente ou erreur).' }).catch(() => {}); return true; }
+        const e = new EmbedBuilder().setColor(0x7A2E2E).setTitle(`🎯 AVIS DE RECHERCHE — ${nom}`.slice(0, 256)).setDescription(res.txt.slice(0, 4096)).setFooter({ text: res.n ? `Recoupé avec ${res.n} élément(s) du dossier — à valider avant publication` : 'Généré sans données internes — à valider avant publication' });
+        await interaction.editReply({ embeds: [e] }).catch(() => {});
+        return true;
+      }
       const val = (interaction.fields.getTextInputValue('q') || '').trim();
       if (cid === 'asst_search_modal') {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
@@ -331,6 +396,7 @@ async function routeInteraction(interaction) {
       if (cid === 'asst_ask_modal') { out = await _repondreQuestion(loadDB(), val); titre = '💬 Réponse'; }
       else if (cid === 'asst_write_modal') { out = await _redigerRP(val); titre = '✍️ Rédaction'; }
       else if (cid === 'asst_sum_modal') { out = await _resumer(val); titre = '📝 Résumé'; }
+      else if (cid === 'asst_contrat_modal') { out = await _analyserContrat(val); titre = '📑 Analyse de contrat'; }
       else return true;
       if (!out) { await interaction.editReply({ content: '❌ Assistant IA indisponible (clé API absente ou erreur). Réessaie plus tard.' }).catch(() => {}); return true; }
       const e = new EmbedBuilder().setColor(0x2B2118).setTitle(titre).setDescription(out.slice(0, 4096)).setFooter({ text: 'Assistant IA — à vérifier avant usage' });
