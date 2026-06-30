@@ -277,6 +277,7 @@ async function routeInteraction(interaction) {
       await interaction.update({ content: `🗑️ **${p?.nom || pid}** supprimé.`, components: [] }); return true;
     }
   } catch (e) {
+    if ([10062, 40060, 10008].includes(e?.code)) return true; // interaction expirée / déjà traitée — sans bruit
     console.log('❌ carte routeInteraction:', e.message);
     try { if (!interaction.replied && !interaction.deferred) await interaction.reply({ content: '❌ Erreur sur la carte.', flags: MessageFlags.Ephemeral }); } catch {}
     return true;
@@ -386,17 +387,23 @@ header b{color:#d9a441}.lvl{font-size:13px;opacity:.85}.hint{font-size:13px;opac
 .pop .row{display:flex;gap:8px;margin-top:12px}.pop button{flex:1;padding:9px;border:0;border-radius:6px;cursor:pointer;font-weight:bold}
 .bok{background:#3a7d3a;color:#fff}.bno{background:#5a4632;color:#e8d8c0}.bdel{background:#a33;color:#fff}
 #mask{position:fixed;inset:0;background:#0008;z-index:40;display:none}.tag{font-size:11px;padding:2px 6px;border-radius:10px;background:#3a2c1e;margin-right:4px}
+#legend{position:fixed;top:60px;left:10px;background:#241a12ee;border:1px solid #5a4632;border-radius:8px;padding:8px 10px;z-index:30;max-width:48vw;max-height:72vh;overflow:auto;font-size:13px;display:none}
+#legend h4{margin:0 0 6px;color:#d9a441;font-size:13px}
+.leg{display:flex;align-items:center;gap:6px;padding:3px 4px;border-radius:5px;cursor:pointer;user-select:none}
+.leg:hover{background:#ffffff14}.leg.off{opacity:.4;text-decoration:line-through}
+.leg .dot{width:12px;height:12px;border-radius:50%;border:1px solid #ffffff88;flex:none}.leg .c{margin-left:auto;opacity:.7}
 </style></head><body>
 <header><b>🗺️ Carte — La Confrérie</b><span class="lvl">Accès : ${level === 'confidentiel' ? '🔴 Confidentiel' : level === 'membre' ? '🟡 Membre' : '🟢 Public'}</span><span class="hint">🖱️ Clique sur la carte pour ajouter un point</span></header>
-<div id="wrap"><img id="map" src="/carte/image?k=${tok}" alt="carte"></div><div id="mask"></div>
+<div id="wrap"><img id="map" src="/carte/image?k=${tok}" alt="carte"></div><div id="legend"></div><div id="mask"></div>
 <script>
-var TOK=${JSON.stringify(tok)},LVL=${JSON.stringify(level)},DATA={types:[],niveaux:[],points:[]};
+var TOK=${JSON.stringify(tok)},LVL=${JSON.stringify(level)},DATA={types:[],niveaux:[],points:[]},HIDDEN={};
 var wrap=document.getElementById('wrap'),mapImg=document.getElementById('map'),mask=document.getElementById('mask');
 function esc(s){var d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;}
-function colorFor(t){var m={recolte:'#3ca03c',vendeur:'#2870c8',illegal:'#c82828',chasse:'#965a28',peche:'#28a0b4',planque:'#783ca0',autre:'#5a5a5a'};return m[t]||'#5a5a5a';}
+function colorFor(t){var m={recolte:'#3ca03c',vendeur:'#2870c8',illegal:'#c82828',chasse:'#965a28',peche:'#28a0b4',planque:'#783ca0',four:'#e08a2e',fleur_dragon:'#b84fd0',fournaise:'#8a4b2a',peches:'#e8a05a',autre:'#5a5a5a'};return m[t]||'#5a5a5a';}
 function emojiFor(t){var o=DATA.types.find(function(x){return x.key===t;});return o?o.emoji:'📌';}
 function load(){fetch('/carte/data?k='+TOK).then(function(r){return r.json();}).then(function(j){if(j.error){document.body.innerHTML='<h2 style=text-align:center;margin-top:60px>Lien expiré</h2>';return;}DATA=j;render();});}
-function render(){document.querySelectorAll('.pin').forEach(function(p){p.remove();});DATA.points.forEach(function(p){if(p.x==null)return;var d=document.createElement('div');d.className='pin';d.style.left=p.x+'%';d.style.top=p.y+'%';d.style.background=colorFor(p.type);d.textContent=emojiFor(p.type);d.title=p.nom+(p.lieu?(' — '+p.lieu):'');d.onclick=function(e){e.stopPropagation();showInfo(p);};wrap.appendChild(d);});}
+function render(){document.querySelectorAll('.pin').forEach(function(p){p.remove();});DATA.points.forEach(function(p){if(p.x==null)return;if(HIDDEN[p.type])return;var d=document.createElement('div');d.className='pin';d.style.left=p.x+'%';d.style.top=p.y+'%';d.style.background=colorFor(p.type);d.textContent=emojiFor(p.type);d.title=p.nom+(p.lieu?(' — '+p.lieu):'');d.onclick=function(e){e.stopPropagation();showInfo(p);};wrap.appendChild(d);});buildLegend();}
+function buildLegend(){var counts={},tot=0;DATA.points.forEach(function(p){if(p.x==null)return;tot++;counts[p.type]=(counts[p.type]||0)+1;});var box=document.getElementById('legend');if(!box)return;var keys=DATA.types.filter(function(t){return counts[t.key];});if(!keys.length){box.style.display='none';return;}box.style.display='block';var html='<h4>Filtres · '+tot+' point(s)</h4>';keys.forEach(function(t){html+='<div class="leg'+(HIDDEN[t.key]?' off':'')+'" data-k="'+t.key+'"><span class="dot" style="background:'+colorFor(t.key)+'"></span>'+t.emoji+' '+esc(t.label)+'<span class="c">'+counts[t.key]+'</span></div>';});box.innerHTML=html;Array.prototype.forEach.call(box.querySelectorAll('.leg'),function(el){el.onclick=function(){var k=el.getAttribute('data-k');HIDDEN[k]=!HIDDEN[k];render();};});}
 function closePop(){var e=document.querySelector('.pop');if(e)e.remove();mask.style.display='none';}
 mask.onclick=closePop;
 function showInfo(p){closePop();mask.style.display='block';var n=DATA.niveaux.find(function(x){return x.key===p.niveau;});var box=document.createElement('div');box.className='pop';var del=(LVL==='confidentiel')?'<button class=bdel id=bdel>🗑️ Supprimer</button>':'';box.innerHTML='<h3>'+emojiFor(p.type)+' '+esc(p.nom)+'</h3><div><span class=tag>'+esc((DATA.types.find(function(x){return x.key===p.type;})||{}).label||p.type)+'</span><span class=tag>'+esc(n?n.label:p.niveau)+'</span></div>'+(p.region?'<p>📍 '+esc(p.region)+'</p>':'')+(p.lieu?'<p>'+esc(p.lieu)+'</p>':'')+(p.notes?'<p>📝 '+esc(p.notes)+'</p>':'')+'<div class=row>'+del+'<button class=bno id=bclose>Fermer</button></div>';document.body.appendChild(box);document.getElementById('bclose').onclick=closePop;if(del)document.getElementById('bdel').onclick=function(){fetch('/carte/del?k='+TOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:p.id})}).then(function(){closePop();load();});};}
