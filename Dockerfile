@@ -27,6 +27,9 @@ COPY . .
 
 ENV NODE_ENV=production
 ENV PORT=8080
+# Active le module musique intégré (voix + yt-dlp) — uniquement dans cette image
+# (Fly), où l'UDP et yt-dlp sont disponibles. Absent sur Render → module en sommeil.
+ENV MUSIQUE_ENABLED=1
 EXPOSE 8080
 
 CMD ["node", "index.js"]

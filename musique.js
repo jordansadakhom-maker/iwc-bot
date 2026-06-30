@@ -15,6 +15,12 @@ let voice = null; try { voice = require('@discordjs/voice'); } catch (e) { conso
 let FFMPEG = null; try { FFMPEG = require('ffmpeg-static'); } catch {}
 try { if (FFMPEG) require('fs').chmodSync(FFMPEG, 0o755); } catch {}
 const YTDLP = process.env.YTDLP_PATH || 'yt-dlp';
+// Le module n'est ACTIF que sur un hébergement compatible voix (UDP) + yt-dlp.
+// On l'active explicitement dans l'image Docker (Fly) via MUSIQUE_ENABLED=1.
+// Sur Render (pas d'UDP, pas de yt-dlp), il reste en sommeil : il n'intercepte
+// rien, n'affiche pas de panneau et ne génère aucune erreur — laissant la place
+// à un éventuel bot musique public.
+const MUSIQUE_ENABLED = process.env.MUSIQUE_ENABLED === '1';
 let dbMod = {}; try { dbMod = require('./db'); } catch {}
 const loadDB = dbMod.loadDB || (() => ({}));
 const saveDB = dbMod.saveDB || (() => {});
@@ -271,7 +277,25 @@ async function _majPanneau(guild, db) {
   } catch (e) { console.log('⚠️ musique _majPanneau:', e.message); }
 }
 
+async function _retirerPanneau(guild) {
+  // Supprime le panneau Jukebox (utilisé quand le module est en sommeil).
+  try {
+    const ch = await guild.channels.fetch(SALON_MUSIQUE).catch(() => null);
+    if (!ch?.messages) return;
+    const me = guild.client.user.id;
+    const estPanel = m => m.author?.id === me && (m.embeds?.[0]?.title || '').includes('JUKEBOX');
+    const trouves = [];
+    const pins = await ch.messages.fetchPinned().catch(() => null);
+    if (pins) trouves.push(...[...pins.values()].filter(estPanel));
+    const recent = await ch.messages.fetch({ limit: 30 }).catch(() => null);
+    if (recent) trouves.push(...[...recent.values()].filter(estPanel));
+    for (const m of trouves) await m.delete().catch(() => {});
+    const db = loadDB(); const cfg = _ens(db); if (cfg.panelId) { cfg.panelId = null; saveDB(db); }
+  } catch {}
+}
+
 async function installerPanneau(guild) {
+  if (!MUSIQUE_ENABLED) { await _retirerPanneau(guild); return; } // en sommeil sur cet hébergement
   if (!voice || !FFMPEG) { console.log('⚠️ musique : voice/ffmpeg indisponible, panneau non installé'); return; }
   try { const db = loadDB(); _ens(db); await _majPanneau(guild, db); } catch (e) { console.log('⚠️ musique installerPanneau:', e.message); }
 }
@@ -296,6 +320,7 @@ function init(client) {
 // Salon musique : tout message (lien YouTube ou recherche) = ajout à la file.
 async function onMessage(message) {
   try {
+    if (!MUSIQUE_ENABLED) return false; // en sommeil : on n'intercepte rien (laisse place à un bot public)
     if (!message.guild || message.author?.bot || message.webhookId) return false;
     if (message.channelId !== SALON_MUSIQUE) return false;
     const contenu = (message.content || '').trim();
@@ -329,6 +354,7 @@ async function routeInteraction(interaction) {
   try {
     const cid = interaction.customId || '';
     if (!cid.startsWith('mus_')) return false;
+    if (!MUSIQUE_ENABLED) { await interaction.reply({ content: 'ℹ️ La musique intégrée au bot n\'est pas disponible sur cet hébergement (voix bloquée). Elle s\'activera une fois le bot sur Fly. En attendant, utilise un bot musique public.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
     if (!voice || !FFMPEG) { await interaction.reply({ content: '⚠️ Module audio indisponible sur l\'hébergement actuel.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
     const guild = interaction.guild; if (!guild) return true;
     const db = loadDB(); const cfg = _ens(db);
