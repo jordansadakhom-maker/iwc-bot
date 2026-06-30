@@ -7360,7 +7360,10 @@ async function _assurerEtiquettesRegistre(forum) {
       ...existing.map(t => { const o = { name: t.name, moderated: !!t.moderated }; if (t.id) o.id = t.id; if (t.emoji && (t.emoji.id || t.emoji.name)) o.emoji = { id: t.emoji.id || null, name: t.emoji.name || null }; return o; }),
       ...manquants.map(v => ({ name: v.name })),
     ];
-    await forum.setAvailableTags(merged).catch(e => console.log('⚠️ registre setAvailableTags:', e.message));
+    // Discord refuse les noms en double → on dédoublonne par nom (garde le 1er)
+    const _vus = new Set();
+    const dedup = merged.filter(t => { const n = (t.name || '').trim().toLowerCase(); if (!n || _vus.has(n)) return false; _vus.add(n); return true; });
+    await forum.setAvailableTags(dedup).catch(e => console.log('⚠️ registre setAvailableTags:', e.message));
   } catch {}
 }
 function _tagsRegistre(forum, m) {
