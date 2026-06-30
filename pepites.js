@@ -35,14 +35,28 @@ function _parse(content) {
 
 function _panelEmbed(db) {
   const p = _ens(db);
+  const total = p.total || 0;
+  const prix = p.prix || 0;
+  const valeur = total * prix;
   const e = new EmbedBuilder().setColor(0xC8A45C).setTitle('💰 PÉPITES — IRON WOLF COMPANY')
     .setDescription([
-      '*Ramassé des pépites ? Poste le nombre ici — le total se calcule tout seul.*',
+      '*Ramassé des pépites ? Poste le nombre ici — le total et le gain se calculent tout seuls.*',
       '',
       '➕ `5` ou `+5` pour **ajouter** · ➖ `-2` pour **retirer** · 🟰 `=50` pour **fixer** le total.',
     ].join('\n'))
-    .addFields({ name: '⛏️ Total ramassé', value: `**${p.total.toLocaleString('fr-FR')}** pépite(s)`, inline: true });
-  if (p.prix > 0) e.addFields({ name: '💵 Valeur estimée', value: `**$${_fmtArgent(p.total * p.prix)}** *(${_fmtArgent(p.prix)}$/pépite)*`, inline: true });
+    .addFields(
+      { name: '⛏️ Total ramassé', value: `**${total.toLocaleString('fr-FR')}** pépite(s)`, inline: true },
+      { name: '💵 Prix unitaire', value: prix > 0 ? `**${_fmtArgent(prix)} $** / pépite` : '*non défini*', inline: true },
+    );
+  if (prix > 0) {
+    e.addFields({
+      name: '💰 Ce que ça rapporte',
+      value: `> **${valeur.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $**\n*${total.toLocaleString('fr-FR')} pépites × ${_fmtArgent(prix)} $ = ${_fmtArgent(valeur)} $*`,
+      inline: false,
+    });
+  } else {
+    e.addFields({ name: '💰 Ce que ça rapporte', value: '*Définis le prix unitaire (bouton 💵) pour voir le gain estimé.*', inline: false });
+  }
   const log = (p.log || []).slice(-5).reverse();
   if (log.length) e.addFields({ name: '🧾 Derniers mouvements', value: log.map(l => `• ${l.signe || '+'}${l.n} — <@${l.u}>`).join('\n').slice(0, 1024), inline: false });
   e.setFooter({ text: 'Iron Wolf Company • Compteur de pépites' });
