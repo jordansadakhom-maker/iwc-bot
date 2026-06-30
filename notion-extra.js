@@ -14,7 +14,7 @@ let notionExtra = {};
 try { notionExtra = require('./notion-extra'); } catch {}
 
 // ── Constantes ──
-const JOURS_INACTIF = 5;
+const JOURS_INACTIF = 7;
 
 // Rôles IDs — La Confrérie + Iron Wolf Company (pingés selon le pôle)
 const ROLES = {
