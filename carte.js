@@ -392,10 +392,13 @@ async function httpHandle(req, res, client) {
 function _pageHTML(tok, level) {
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Carte — La Confrérie</title><style>
-*{box-sizing:border-box}body{margin:0;font-family:Georgia,serif;background:#15110c;color:#e8d8c0}
+*{box-sizing:border-box}html,body{height:100%}body{margin:0;font-family:Georgia,serif;background:#15110c;color:#e8d8c0;display:flex;flex-direction:column;overflow:hidden}
 header{padding:10px 16px;background:#241a12;border-bottom:1px solid #4a3826;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 header b{color:#d9a441}.lvl{font-size:13px;opacity:.85}.hint{font-size:13px;opacity:.8;margin-left:auto}
-#wrap{position:relative;width:100%;max-width:2000px;margin:0 auto}#map{display:block;width:100%;height:auto;cursor:crosshair}
+#stage{position:relative;flex:1;overflow:hidden;background:#15110c;touch-action:none;cursor:grab}#stage.drag{cursor:grabbing}
+#wrap{position:absolute;left:0;top:0;width:100%;transform-origin:0 0}#map{display:block;width:100%;height:auto;cursor:crosshair}
+#zoom{position:fixed;bottom:10px;left:10px;display:flex;flex-direction:column;gap:6px;z-index:30}
+#zoom button{width:40px;height:40px;border-radius:8px;border:1px solid #5a4632;background:#241a12dd;color:#e8d8c0;font-size:20px;line-height:1;cursor:pointer}
 .pin{position:absolute;transform:translate(-50%,-50%);width:24px;height:24px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 5px #000;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px}
 .pop{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#241a12;border:1px solid #5a4632;border-radius:10px;padding:16px;width:330px;max-width:92vw;z-index:50;box-shadow:0 8px 40px #000a}
 .pop h3{margin:0 0 8px;color:#d9a441}.pop label{display:block;font-size:12px;margin:8px 0 2px;opacity:.85}
@@ -413,10 +416,11 @@ header #search{width:170px;max-width:40vw}
 #coords{position:fixed;bottom:10px;right:10px;background:#241a12dd;border:1px solid #5a4632;border-radius:6px;padding:5px 9px;font-family:monospace;font-size:12px;color:#d9a441;z-index:30}
 </style></head><body>
 <header><b>🗺️ Carte — La Confrérie</b><span class="lvl">Accès : ${level === 'confidentiel' ? '🔴 Confidentiel' : level === 'membre' ? '🟡 Membre' : '🟢 Public'}</span><input id="search" placeholder="🔎 Chercher un nom…"><select id="regionf"><option value="">📍 Toutes régions</option></select><span class="hint">🖱️ Clique pour ajouter</span></header>
-<div id="wrap"><img id="map" src="/carte/image?k=${tok}" alt="carte"></div><div id="legend"></div><div id="coords">X — · Y —</div><div id="mask"></div>
+<div id="stage"><div id="wrap"><img id="map" src="/carte/image?k=${tok}" alt="carte"></div></div><div id="legend"></div><div id="coords">X — · Y —</div><div id="zoom"><button id="zin" title="Zoom +">＋</button><button id="zout" title="Zoom −">－</button><button id="zres" title="Réinitialiser">⟲</button></div><div id="mask"></div>
 <script>
 var TOK=${JSON.stringify(tok)},LVL=${JSON.stringify(level)},DATA={types:[],niveaux:[],points:[]},HIDDEN={},SEARCH='',REGION='';
 var wrap=document.getElementById('wrap'),mapImg=document.getElementById('map'),mask=document.getElementById('mask');
+var SC=1,OX=0,OY=0,_moved=false;
 function esc(s){var d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;}
 function escA(s){return esc(s).replace(/"/g,'&quot;');}
 function borderFor(n){if(n==='confidentiel')return '3px solid #e05555';if(n==='membre')return '2px solid #f0c850';return '2px solid #ffffff';}
@@ -431,7 +435,23 @@ mask.onclick=closePop;
 function showInfo(p){closePop();mask.style.display='block';var n=DATA.niveaux.find(function(x){return x.key===p.niveau;});var box=document.createElement('div');box.className='pop';var del=(LVL==='confidentiel')?'<button class=bdel id=bdel>🗑️ Supprimer</button>':'';var ed='<button class=bok id=bedit>✏️ Modifier</button>';box.innerHTML='<h3>'+emojiFor(p.type)+' '+esc(p.nom)+'</h3><div><span class=tag>'+esc((DATA.types.find(function(x){return x.key===p.type;})||{}).label||p.type)+'</span><span class=tag>'+esc(n?n.label:p.niveau)+'</span></div>'+(p.region?'<p>📍 '+esc(p.region)+'</p>':'')+(p.lieu?'<p>'+esc(p.lieu)+'</p>':'')+(p.notes?'<p>📝 '+esc(p.notes)+'</p>':'')+(p.x!=null?'<p>🧭 <span style="font-family:monospace">X '+(+p.x).toFixed(1)+' · Y '+(+p.y).toFixed(1)+'</span></p>':'')+'<div class=row>'+ed+del+'<button class=bno id=bclose>Fermer</button></div>';document.body.appendChild(box);document.getElementById('bclose').onclick=closePop;document.getElementById('bedit').onclick=function(){closePop();showAdd(p.x,p.y,p);};if(del)document.getElementById('bdel').onclick=function(){fetch('/carte/del?k='+TOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:p.id})}).then(function(){closePop();load();});};}
 function _setCoords(x,y){var c=document.getElementById('coords');if(c)c.textContent='X '+x.toFixed(1)+' · Y '+y.toFixed(1);}
 mapImg.addEventListener('mousemove',function(e){var r=mapImg.getBoundingClientRect();_setCoords((e.clientX-r.left)/r.width*100,(e.clientY-r.top)/r.height*100);});
-mapImg.addEventListener('click',function(e){var r=mapImg.getBoundingClientRect();var x=(e.clientX-r.left)/r.width*100;var y=(e.clientY-r.top)/r.height*100;_setCoords(x,y);showAdd(x,y);});
+mapImg.addEventListener('click',function(e){if(_moved){_moved=false;return;}var r=mapImg.getBoundingClientRect();var x=(e.clientX-r.left)/r.width*100;var y=(e.clientY-r.top)/r.height*100;_setCoords(x,y);showAdd(x,y);});
+(function(){var STg=document.getElementById('stage');if(!STg)return;
+function applyT(){wrap.style.transform='translate('+OX+'px,'+OY+'px) scale('+SC+')';}
+function zoomAt(mx,my,ds){var ns=Math.min(6,Math.max(1,SC*ds));var k=ns/SC;OX=mx-(mx-OX)*k;OY=my-(my-OY)*k;SC=ns;if(SC<=1.001){SC=1;OX=0;OY=0;}applyT();}
+STg.addEventListener('wheel',function(e){e.preventDefault();var r=STg.getBoundingClientRect();zoomAt(e.clientX-r.left,e.clientY-r.top,e.deltaY<0?1.15:1/1.15);},{passive:false});
+var zin=document.getElementById('zin'),zout=document.getElementById('zout'),zres=document.getElementById('zres');
+if(zin)zin.onclick=function(){var r=STg.getBoundingClientRect();zoomAt(r.width/2,r.height/2,1.3);};
+if(zout)zout.onclick=function(){var r=STg.getBoundingClientRect();zoomAt(r.width/2,r.height/2,1/1.3);};
+if(zres)zres.onclick=function(){SC=1;OX=0;OY=0;applyT();};
+var dragging=false,sx=0,sy=0,sox=0,soy=0,pinch=0;
+STg.addEventListener('pointerdown',function(e){if(pinch)return;if(e.target&&e.target.closest&&e.target.closest('.pin'))return;dragging=true;_moved=false;sx=e.clientX;sy=e.clientY;sox=OX;soy=OY;STg.classList.add('drag');});
+window.addEventListener('pointermove',function(e){if(!dragging||pinch)return;var dx=e.clientX-sx,dy=e.clientY-sy;if(Math.abs(dx)+Math.abs(dy)>5)_moved=true;OX=sox+dx;OY=soy+dy;applyT();});
+window.addEventListener('pointerup',function(){dragging=false;STg.classList.remove('drag');});
+STg.addEventListener('touchstart',function(e){if(e.touches.length===2){pinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);dragging=false;}},{passive:false});
+STg.addEventListener('touchmove',function(e){if(e.touches.length===2){e.preventDefault();var d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);if(pinch){var r=STg.getBoundingClientRect();zoomAt((e.touches[0].clientX+e.touches[1].clientX)/2-r.left,(e.touches[0].clientY+e.touches[1].clientY)/2-r.top,d/pinch);}pinch=d;}},{passive:false});
+STg.addEventListener('touchend',function(e){if(e.touches.length<2)pinch=0;});
+})();
 function showAdd(x,y,ep){closePop();mask.style.display='block';var topts=DATA.types.map(function(t){return '<option value='+t.key+(ep&&ep.type===t.key?' selected':'')+'>'+t.emoji+' '+t.label+'</option>';}).join('');var nopts=DATA.niveaux.map(function(n){return '<option value='+n.key+(ep&&ep.niveau===n.key?' selected':'')+'>'+n.label+'</option>';}).join('');var box=document.createElement('div');box.className='pop';box.innerHTML='<h3>'+(ep?'✏️ Modifier le point':'➕ Nouveau point')+'</h3>'+((ep?ep.x:x)!=null?'<p style="font-family:monospace;opacity:.85;margin:0 0 6px">🧭 X '+(+(ep?ep.x:x)).toFixed(1)+' · Y '+(+(ep?ep.y:y)).toFixed(1)+'</p>':'')+'<label>Type</label><select id=f_type>'+topts+'</select><label>👁️ Qui peut voir ?</label><select id=f_niv>'+nopts+'</select><label>Nom *</label><input id=f_nom value="'+(ep?escA(ep.nom):'')+'" placeholder="Ex: Champ de coca"><label>Région</label><input id=f_region value="'+(ep?escA(ep.region):'')+'" placeholder="New Hanover, Lemoyne…"><label>Lieu précis</label><input id=f_lieu value="'+(ep?escA(ep.lieu):'')+'" placeholder="Ex: au nord de Valentine"><label>Notes</label><textarea id=f_notes rows=2>'+(ep?esc(ep.notes):'')+'</textarea><div class=row><button class=bok id=fadd>'+(ep?'Enregistrer':'Placer ici')+'</button><button class=bno id=fcancel>Annuler</button></div>';document.body.appendChild(box);document.getElementById('fcancel').onclick=closePop;document.getElementById('fadd').onclick=function(){var nom=document.getElementById('f_nom').value.trim();if(!nom){alert('Le nom est obligatoire');return;}var payload={type:document.getElementById('f_type').value,niveau:document.getElementById('f_niv').value,nom:nom,region:document.getElementById('f_region').value,lieu:document.getElementById('f_lieu').value,notes:document.getElementById('f_notes').value};var url;if(ep){url='/carte/edit?k='+TOK;payload.id=ep.id;}else{url='/carte/add?k='+TOK;payload.x=x;payload.y=y;}fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(){closePop();load();});};}
 var _si=document.getElementById('search');if(_si)_si.addEventListener('input',function(e){SEARCH=e.target.value||'';render();});
 var _ri=document.getElementById('regionf');if(_ri)_ri.addEventListener('change',function(e){REGION=e.target.value||'';render();});
