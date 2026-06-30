@@ -12,6 +12,8 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelect
 const { spawn } = require('child_process');
 let voice = null; try { voice = require('@discordjs/voice'); } catch (e) { console.log('⚠️ @discordjs/voice indisponible:', e.message); }
 let FFMPEG = null; try { FFMPEG = require('ffmpeg-static'); } catch {}
+// Render peut livrer le binaire sans le bit exécutable → on le force au chargement.
+try { if (FFMPEG) require('fs').chmodSync(FFMPEG, 0o755); } catch {}
 let dbMod = {}; try { dbMod = require('./db'); } catch {}
 const loadDB = dbMod.loadDB || (() => ({}));
 const saveDB = dbMod.saveDB || (() => {});
@@ -43,16 +45,27 @@ function _ens(db) {
 }
 
 // ═══════════════════════ Audio ═══════════════════════
-function _spawnFfmpeg(url) {
+function _spawnFfmpeg(url, label) {
   // Décode le flux radio (mp3/aac…) → PCM brut 48kHz stéréo pour Discord.
   const args = [
+    '-loglevel', 'warning',
     '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
     '-i', url,
     '-vn',
     '-f', 's16le', '-ar', '48000', '-ac', '2',
     'pipe:1',
   ];
-  return spawn(FFMPEG, args, { stdio: ['ignore', 'pipe', 'ignore'] });
+  const proc = spawn(FFMPEG, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  // Observabilité : on capture les erreurs ffmpeg pour les logs Render.
+  let octets = 0, vu = false;
+  proc.stdout.on('data', d => { octets += d.length; if (!vu) { vu = true; console.log(`🎵 ffmpeg reçoit de l'audio (${label}) — flux OK`); } });
+  let errBuf = '';
+  proc.stderr.on('data', d => { errBuf += d.toString(); if (errBuf.length > 4000) errBuf = errBuf.slice(-4000); });
+  proc.on('error', e => console.log(`⚠️ ffmpeg spawn error (${label}):`, e?.message));
+  proc.on('exit', (code, sig) => {
+    if (code && code !== 0) console.log(`⚠️ ffmpeg arrêté (${label}) code=${code} sig=${sig} octets=${octets}\n${errBuf.split('\n').slice(-4).join('\n')}`);
+  });
+  return proc;
 }
 
 function _killProc(s) { try { if (s.proc) { s.proc.kill('SIGKILL'); } } catch {} s.proc = null; }
@@ -66,6 +79,7 @@ function _ensurePlayer(guild) {
     // Tente de relancer la station courante après une petite pause
     if (s.playing && s.stationId) setTimeout(() => _diffuser(guild, s.stationId).catch(() => {}), 1500);
   });
+  player.on(voice.AudioPlayerStatus.Playing, () => console.log('🔊 musique : lecture en cours (player Playing)'));
   player.on(voice.AudioPlayerStatus.Idle, () => {
     // Le flux s'est interrompu (coupure radio) → on relance la même station.
     if (s.playing && s.stationId) {
@@ -84,8 +98,7 @@ async function _diffuser(guild, stationId) {
   if (!station || !s.connection) return false;
   const db = loadDB(); const cfg = _ens(db);
   _killProc(s);
-  const proc = _spawnFfmpeg(station.url);
-  proc.on('error', e => console.log('⚠️ ffmpeg error:', e?.message));
+  const proc = _spawnFfmpeg(station.url, station.nom);
   s.proc = proc;
   s.stationId = stationId;
   s.lastStart = Date.now();
@@ -122,7 +135,7 @@ async function _connecter(voiceChannel) {
     }
   });
   s.connection = connection;
-  try { await voice.entersState(connection, voice.VoiceConnectionStatus.Ready, 20000); }
+  try { await voice.entersState(connection, voice.VoiceConnectionStatus.Ready, 20000); console.log(`🎙️ musique : connecté au vocal ${voiceChannel.name}`); }
   catch (e) { console.log('⚠️ voice connect timeout:', e?.message); }
   return connection;
 }
@@ -201,6 +214,10 @@ async function installerPanneau(guild) {
 // Quitte automatiquement si plus personne (hors bots) n'écoute dans le vocal.
 function init(client) {
   if (!voice) return;
+  // Initialise libsodium (asynchrone) AVANT toute lecture : sans ça, le chiffrement
+  // des paquets audio peut échouer silencieusement → le bot rejoint mais reste muet.
+  try { const sodium = require('libsodium-wrappers'); sodium.ready.then(() => console.log('🔐 musique : libsodium prêt')).catch(() => {}); } catch (e) { console.log('⚠️ musique libsodium:', e.message); }
+  try { console.log('🎶 musique — dépendances audio :\n' + voice.generateDependencyReport()); } catch {}
   client.on('voiceStateUpdate', (oldS, newS) => {
     try {
       const guild = newS.guild || oldS.guild; if (!guild) return;
