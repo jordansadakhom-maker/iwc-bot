@@ -3156,8 +3156,8 @@ async function _routePosteCommandement(interaction) {
       const tok = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2, 8);
       dbX.tableauWeb = { tok, exp: Date.now() + 7 * 24 * 3600 * 1000 };
       saveDB(dbX);
-      const base = (loadDB().carte?.baseUrl) || 'https://iwc-bot-web.onrender.com';
-      const url = `${base}/tableau?k=${tok}`;
+      const base = (loadDB().carte?.baseUrl) || process.env.PUBLIC_URL || process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || 'https://iwc-bot-web.onrender.com';
+      const url = `${base.replace(/\/$/, '')}/tableau?k=${tok}`;
       await interaction.reply({ content: `🌐 **Tableau de bord en direct** — lien privé *(valable 7 jours)* :\n${url}\n\n*Les chiffres de la maison (coffre, contrats, pépites, opérations…), à jour, consultables sur téléphone. À ne partager qu'à qui de droit.*`, flags: MessageFlags.Ephemeral });
       return true;
     }

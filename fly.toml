@@ -1,0 +1,36 @@
+# ── Configuration Fly.io du bot IWC ────────────────────────────
+# Contrairement à Render, Fly.io laisse passer l'UDP sortant → la
+# musique vocale Discord fonctionne. La machine reste allumée 24h/24.
+#
+# ⚠️ Le nom « app » doit être unique sur Fly. Si « iwc-bot » est pris,
+#    `fly launch` t'en proposera un autre (ou change-le ici).
+
+app = "iwc-bot"
+primary_region = "cdg"   # Paris — faible latence pour le vocal en Europe
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  NODE_ENV = "production"
+  # PUBLIC_URL est défini comme secret/variable (voir le guide) :
+  #   https://<nom-de-ton-app>.fly.dev
+
+# Serveur web du bot (carte interactive, /tableau, keepalive…).
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Le bot doit rester connecté en permanence (passerelle Discord + vocal) :
+  # on NE met PAS la machine en veille.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+# Une seule machine (un bot Discord ne doit pas tourner en double :
+# sinon double réponse aux commandes).
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1024mb"   # sharp + ffmpeg + vocal : 1 Go confortable (512 Mo possible si stable)
+  cpus = 1
