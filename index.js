@@ -11312,6 +11312,15 @@ async function _assurerAccesVisiteur(guild) {
   } catch (e) { console.log('❌ _assurerAccesVisiteur:', e.message); }
 }
 
-client.login(process.env.DISCORD_TOKEN || process.env.TOKEN || process.env.BOT_TOKEN)
-  .then(() => console.log('🔑 Login OK'))
-  .catch(e => { console.error('❌ Login failed:', e.message); process.exit(1); });
+const _discordToken = process.env.DISCORD_TOKEN || process.env.TOKEN || process.env.BOT_TOKEN;
+if (!_discordToken) {
+  // Premier démarrage avant que les secrets soient définis (ex. Fly) :
+  // on NE quitte PAS le process — le serveur web reste actif, la machine
+  // reste saine, et l'hébergeur la redémarrera tout seul une fois le token ajouté.
+  console.error('❌ Aucun DISCORD_TOKEN / TOKEN défini — le bot attend ses secrets.');
+  console.error('   → Ajoute-les (Fly : app → Secrets). La machine redémarrera automatiquement et le bot se connectera.');
+} else {
+  client.login(_discordToken)
+    .then(() => console.log('🔑 Login OK'))
+    .catch(e => { console.error('❌ Login failed:', e.message); process.exit(1); });
+}
