@@ -561,6 +561,9 @@ function _contratClientButtons(contratId) {
   );
 }
 
+// Dédoublonne une liste d'étiquettes de forum par nom (Discord refuse les noms en double).
+function _tagsUniq(arr) { const s = new Set(); return (arr || []).filter(t => { const n = (t.name || '').trim().toLowerCase(); if (!n || s.has(n)) return false; s.add(n); return true; }); }
+
 // Ping de la Confrérie (rôle pôle illégal) — pour appeler les agents sur un contrat.
 const ROLE_CONFRERIE_ID = '1508898841993281658';
 function _roleConfrerie(guild) { return guild.roles.cache.get(ROLE_CONFRERIE_ID) || guild.roles.cache.find(r => /confr[ée]rie/i.test(r.name || '')) || null; }
@@ -1099,7 +1102,7 @@ async function installerTresorerie(guild) {
           ...existing.map(t => { const o = { name: t.name, moderated: !!t.moderated }; if (t.id) o.id = t.id; if (t.emoji && (t.emoji.id || t.emoji.name)) o.emoji = { id: t.emoji.id || null, name: t.emoji.name || null }; return o; }),
           ...manquants.map(v => ({ name: v.name })),
         ];
-        await forum.setAvailableTags(merged).catch(e => console.log('⚠️ trésorerie setAvailableTags:', e.message));
+        await forum.setAvailableTags(_tagsUniq(merged)).catch(e => console.log('⚠️ trésorerie setAvailableTags:', e.message));
       }
     }
     // Dossiers principaux (Entrées / Sorties) créés tout de suite
@@ -3271,7 +3274,7 @@ async function _assurerTagsForumRapports(forum) {
         ...existing.map(t => { const o = { name: t.name, moderated: !!t.moderated }; if (t.id) o.id = t.id; if (t.emoji && (t.emoji.id || t.emoji.name)) o.emoji = { id: t.emoji.id || null, name: t.emoji.name || null }; return o; }),
         ...manquants.map(v => ({ name: v.name })),
       ];
-      await forum.setAvailableTags(merged).catch(e => console.log('⚠️ rapports setAvailableTags:', e.message));
+      await forum.setAvailableTags(_tagsUniq(merged)).catch(e => console.log('⚠️ rapports setAvailableTags:', e.message));
       const f = await forum.fetch().catch(() => null);
       if (f) return f.availableTags || existing;
     }
@@ -6863,7 +6866,7 @@ async function _assurerEtiquettesContrats(guild) {
       ...existing.map(t => { const o = { name: t.name, moderated: !!t.moderated }; if (t.id) o.id = t.id; if (t.emoji && (t.emoji.id || t.emoji.name)) o.emoji = { id: t.emoji.id || null, name: t.emoji.name || null }; return o; }),
       ...manquants.map(v => ({ name: v.name })),
     ];
-    await forum.setAvailableTags(merged).catch(e => console.log('⚠️ contrats setAvailableTags:', e.message));
+    await forum.setAvailableTags(_tagsUniq(merged)).catch(e => console.log('⚠️ contrats setAvailableTags:', e.message));
     // Re-catégorise les contrats déjà publiés (une seule fois, à la création des étiquettes)
     const db = loadDB();
     for (const c of (db.contrats || []).slice(0, 60)) { if (c.ficheForumThreadId) await _majContratForum(guild, c).catch(() => {}); }
@@ -6898,7 +6901,7 @@ async function _assurerEtiquettesAgenda(guild) {
         ...existing.map(t => { const o = { name: t.name, moderated: !!t.moderated }; if (t.id) o.id = t.id; if (t.emoji && (t.emoji.id || t.emoji.name)) o.emoji = { id: t.emoji.id || null, name: t.emoji.name || null }; return o; }),
         ...manquants.map(v => ({ name: v.name })),
       ];
-      await forum.setAvailableTags(merged).catch(e => console.log('⚠️ agenda setAvailableTags:', e.message));
+      await forum.setAvailableTags(_tagsUniq(merged)).catch(e => console.log('⚠️ agenda setAvailableTags:', e.message));
     }
   } catch (e) { console.log('❌ _assurerEtiquettesAgenda:', e.message); }
 }
@@ -6987,7 +6990,7 @@ async function _assurerEtiquettesOperations(guild) {
         ...existing.map(t => { const o = { name: t.name, moderated: !!t.moderated }; if (t.id) o.id = t.id; if (t.emoji && (t.emoji.id || t.emoji.name)) o.emoji = { id: t.emoji.id || null, name: t.emoji.name || null }; return o; }),
         ...manquants.map(v => ({ name: v.name })),
       ];
-      await forum.setAvailableTags(merged).catch(e => console.log('⚠️ operations setAvailableTags:', e.message));
+      await forum.setAvailableTags(_tagsUniq(merged)).catch(e => console.log('⚠️ operations setAvailableTags:', e.message));
     }
     await _syncEtiquettesOperations(guild, forum);
   } catch (e) { console.log('❌ _assurerEtiquettesOperations:', e.message); }
