@@ -166,6 +166,10 @@ let medical = {};
 try { medical = require('./medical'); console.log('✅ Module medical (Suivi médical) chargé'); }
 catch (e) { console.log('⚠️ medical non chargé:', e.message); }
 
+let musique = {};
+try { musique = require('./musique'); console.log('✅ Module musique (Jukebox vocal) chargé'); }
+catch (e) { console.log('⚠️ musique non chargé:', e.message); }
+
 const { fmtLong, fmtShort, daysSince, parisOffsetHours, _fmtDollars, transcriptionHallucinee } = require('./utils');
 const parrainage = require('./parrainage');
 parrainage.init({ isDirection, isMembre });
@@ -2443,6 +2447,7 @@ async function autoSetup(guild) {
   assistant.installerPanneau?.(guild).then(() => console.log('🤖 Panneau assistant IA en place')).catch(() => {});
   tenue.retirerPanneau?.(guild).then(() => console.log('🧵 Panneau Vestiaire retiré (#tenue gardé propre)')).catch(() => {});
   pepites.installerPanneau?.(guild).then(() => console.log('💰 Panneau pépites en place')).catch(() => {});
+  musique.installerPanneau?.(guild).then(() => console.log('🎶 Panneau musique en place')).catch(() => {});
   _installerPanneauContrats(guild).then(() => console.log('📜 Panneau « Contrats en cours » en place')).catch(() => {});
   _installerCataloguePrestations(guild).then(() => console.log('🤠 Catalogue des prestations (1518301186275676230) en place')).catch(() => {});
   // Forum des rapports : prépare les étiquettes (priorité + catégories) dès le démarrage
@@ -4008,6 +4013,7 @@ client.on('interactionCreate', async interaction => {
   if (await evenements.routeInteraction?.(interaction)) return;
   if (await annonces.routeInteraction?.(interaction)) return;
   if (await pepites.routeInteraction?.(interaction)) return;
+  if (await musique.routeInteraction?.(interaction)) return;
   if (await journaux.routeInteraction?.(interaction)) return;
   if (await factures.routeInteraction?.(interaction)) return;
   if (await medical.routeInteraction?.(interaction)) return;
@@ -5629,6 +5635,7 @@ client.once('clientReady', async () => {
   client.user.setActivity('la meute • IWC 1895', { type: ActivityType.Watching });
   try { rumeurs.init?.(client); } catch (e) { console.log('⚠️ rumeurs.init:', e.message); }
   try { reseau.init?.(client); } catch (e) { console.log('⚠️ reseau.init:', e.message); }
+  try { musique.init?.(client); } catch (e) { console.log('⚠️ musique.init:', e.message); }
   await restaurerDepuisGitHub();
   for (const guild of client.guilds.cache.values()) {
     await registerSlashCommands(guild).catch(e => console.log('registerSlashCommands error:', e.message));
