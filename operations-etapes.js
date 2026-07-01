@@ -579,7 +579,7 @@ async function creerOperationDepuisContrat(guild, contrat, opts = {}) {
   const c = (db.contrats || []).find(x => x.id === contrat.id);
   if (c) c.operationId = op.id;
   op.agents = Array.isArray(c?.agents) ? c.agents.slice() : []; // agents assignés (contrats Confrérie) → à prévenir
-  op.membres = []; // personnes assignées manuellement sur l'opération (dès la 1re étape)
+  op.membres = Array.isArray(opts.membres) ? [...new Set(opts.membres)] : []; // participants pré-assignés (ex. depuis le panneau du contrat)
   if (c?.test || modetest.estActif?.()) op.test = true; // hérite du test du contrat (ou mode test actif)
   db.preparations.push(op);
   _persist(db);
