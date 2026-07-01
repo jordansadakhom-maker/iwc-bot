@@ -2813,7 +2813,10 @@ client.on('messageReactionAdd', async (reaction, user) => {
     if (!isAccept && !isRefuse) return;
     const reactUsers = await reaction.users.fetch().catch(() => null);
     const count = reactUsers ? reactUsers.filter(u => !u.bot).size : 0;
-    if (count < 5) return;
+    // La Direction peut VALIDER immédiatement (✅) sans attendre les 5 votes du groupe.
+    let estDir = false;
+    try { const _mv = await guild.members.fetch(user.id).catch(() => null); estDir = !!(_mv && isDirection(_mv)); } catch {}
+    if (count < 5 && !(estDir && isAccept)) return;
     const vote = db.contratsVote[reaction.message.id];
     delete db.contratsVote[reaction.message.id];
     if (isRefuse) {
@@ -2830,7 +2833,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
     _updatePlanningContrats(client).catch(() => {});
     _updateContratPanel(client).catch(() => {});
     _updatePanneauContrats(client).catch(() => {});
-    try { await reaction.message.channel.send({ content: `✅ **Contrat ${vote.contratId} validé** par le groupe (5 votes) — il rejoint les contrats officiels.` }); } catch {}
+    try { await reaction.message.channel.send({ content: `✅ **Contrat ${vote.contratId} validé**${(estDir && count < 5) ? ' par la Direction' : ' par le groupe (5 votes)'} — il rejoint les contrats officiels.` }); } catch {}
     return;
   }
 
