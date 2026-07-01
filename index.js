@@ -2864,6 +2864,14 @@ client.on('messageReactionAdd', async (reaction, user) => {
     _updatePlanningContrats(client).catch(() => {});
     _updateContratPanel(client).catch(() => {});
     _updatePanneauContrats(client).catch(() => {});
+    // Panneau « Qui part sur ce contrat ? » (Je participe · Notifier · Créer l'opération) — comme pour un contrat accepté
+    try {
+      const embArchive = new EmbedBuilder().setColor(0x2ECC71).setTitle(`✅ Contrat validé — ${contrat.id}`)
+        .setDescription(`**${vote.clientNom || 'Client'}**${contrat.objet ? `\n${String(contrat.objet).slice(0, 1500)}` : ''}`)
+        .addFields({ name: '💵 Montant', value: `$${(vote.montant || 0).toLocaleString('fr-FR')}`, inline: true }, { name: '📅 Échéance', value: vote.echeance || 'Aucune', inline: true })
+        .setFooter({ text: 'Iron Wolf Company • Contrat express validé' }).setTimestamp();
+      await archiverContratReponses(guild, contrat, 'signe', embArchive);
+    } catch (e) { console.log('⚠️ express participation:', e.message); }
     try { await reaction.message.channel.send({ content: `✅ **Contrat ${vote.contratId} validé**${(estDir && count < 5) ? ' par la Direction' : ' par le groupe (5 votes)'} — il rejoint les contrats officiels.` }); } catch {}
     return;
   }
