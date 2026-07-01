@@ -6314,9 +6314,17 @@ async function _validerModalOpCreer(interaction) {
   // Récupérer la ville depuis le customId (modal_op_creer_VILLE_ENCODEE)
   const lieuVille  = decodeURIComponent(interaction.customId.replace('modal_op_creer_', ''));
   const lieu       = lieuDetail || lieuVille || '—';
-  const objectif   = interaction.fields.getTextInputValue('objectif').trim();
+  const objectifRaw = interaction.fields.getTextInputValue('objectif').trim();
   const poleRaw    = interaction.fields.getTextInputValue('pole').trim().toLowerCase();
-  const details    = interaction.fields.getTextInputValue('details').trim() || '—';
+  const detailsRaw  = interaction.fields.getTextInputValue('details').trim() || '—';
+  // ✍️ Reformulation IA (comme les contrats) : l'objectif et les notes saisis sont réécrits proprement,
+  //     en gardant les faits. Repli sur le texte original si l'IA est indisponible → aucune perte.
+  const [_objRef, _detRef] = await Promise.all([
+    objectifRaw ? _reformulerRP(objectifRaw) : Promise.resolve(null),
+    (detailsRaw && detailsRaw !== '—') ? _reformulerRP(detailsRaw) : Promise.resolve(null),
+  ]);
+  const objectif = _objRef || objectifRaw;
+  const details  = _detRef || detailsRaw;
   const pole     = poleRaw.includes('lég') || poleRaw.includes('leg') ? 'legal' : 'illegal';
   const createur = db.members[interaction.user.id]?.name || interaction.user.username;
 
