@@ -602,6 +602,51 @@ async function posterForum(guild, contrat) {
   } catch (e) { console.log('⚠️ post contrat Confrérie forum:', e.message); }
 }
 
+// ── Validation manuelle : aperçu + confirmation AVANT publication ──
+// Désactivable via db.contratsValidationOff = true (repasse en publication directe).
+const _ccPending = new Map();
+function _ccValidationActive() { try { return !loadDB().contratsValidationOff; } catch { return true; } }
+function _ccRowValidation(draftId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`cc_pub::${draftId}`).setLabel('Confirmer & publier').setEmoji('✅').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`cc_annul::${draftId}`).setLabel('Annuler').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+  );
+}
+// Publie réellement le contrat (base + Notion + salon #contrats + forum). Source unique.
+async function _publierContratConfrerie(guild, contrat) {
+  const db = loadDB();
+  if (!db.contrats) db.contrats = [];
+  if (!db.contrats.find(c => c.id === contrat.id)) db.contrats.push(contrat);
+  saveDB(db); _persistNow();
+  syncNotion(contrat, '🟡 Proposé');
+  const ch = await fetchCh(guild, CH_CONTRATS);
+  if (!ch) return { ok: false };
+  const sent = await ch.send({
+    content: `${directionMention(guild)} — 🐺 Nouveau contrat à valider.`,
+    embeds: [buildContratEmbed(contrat)],
+    components: buildContratButtons(contrat),
+  });
+  contrat.msgId = sent.id;
+  contrat.channelId = ch.id;
+  saveDB(db); await _persistNow(); // ATTENDRE la sauvegarde Gist : survit à un redéploiement immédiat
+  posterForum(guild, contrat).catch(() => {});
+  return { ok: true };
+}
+async function onValiderCreation(interaction) {
+  await interaction.deferUpdate().catch(() => {});
+  const draftId = interaction.customId.split('::')[1];
+  const contrat = _ccPending.get(draftId);
+  if (!contrat) { await interaction.editReply({ content: '⏳ Cet aperçu a expiré (redémarrage du bot). Recrée le contrat.', embeds: [], components: [] }).catch(() => {}); return; }
+  _ccPending.delete(draftId);
+  const r = await _publierContratConfrerie(interaction.guild, contrat);
+  await interaction.editReply({ content: r.ok ? `✅ Contrat **${contrat.id}** publié dans #contrats${contrat.confidentiel ? ' *(anonyme & confidentiel)*' : ''}.` : '⚠️ Contrat enregistré, mais le salon #contrats est introuvable.', embeds: [], components: [] }).catch(() => {});
+}
+async function onAnnulerCreation(interaction) {
+  const draftId = interaction.customId.split('::')[1];
+  _ccPending.delete(draftId);
+  await interaction.update({ content: '🗑️ Création annulée — aucun contrat publié.', embeds: [], components: [] }).catch(() => {});
+}
+
 async function onModalSubmit(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const parts = interaction.customId.split('::');
@@ -638,21 +683,20 @@ async function onModalSubmit(interaction) {
   // Reformulation IA façon Far West 1904 du contenu narratif (objet + consignes), en parallèle
   [contrat.objet, contrat.details] = await Promise.all([rp1904(contrat.objet), rp1904(contrat.details)]);
   if (modetest.estActif?.()) contrat.test = true;
-  db.contrats.push(contrat);
-  saveDB(db); _persistNow();
-  syncNotion(contrat, '🟡 Proposé');
 
-  const ch = await fetchCh(interaction.guild, CH_CONTRATS);
-  if (!ch) { await interaction.editReply({ content: '⚠️ Contrat enregistré, mais le salon #contrats est introuvable.' }); return; }
-  const sent = await ch.send({
-    content: `${directionMention(interaction.guild)} — 🐺 Nouveau contrat à valider.`,
-    embeds: [buildContratEmbed(contrat)],
-    components: buildContratButtons(contrat),
-  });
-  contrat.msgId = sent.id;
-  contrat.channelId = ch.id;
-  saveDB(db); await _persistNow(); // ATTENDRE la sauvegarde Gist : le contrat survit à un redéploiement immédiat
-  posterForum(interaction.guild, contrat).catch(() => {});
+  // ── Validation manuelle : aperçu + confirmation AVANT publication ──
+  if (_ccValidationActive()) {
+    if (_ccPending.size > 100) { const _k = _ccPending.keys().next().value; if (_k) _ccPending.delete(_k); }
+    _ccPending.set(contrat.id, contrat);
+    return interaction.editReply({
+      content: `📋 **Aperçu du contrat** — vérifie puis **confirme** pour publier. *Rien n'est envoyé tant que tu n'as pas cliqué.*${confidentiel ? ' *(anonyme & confidentiel)*' : ''}`,
+      embeds: [buildContratEmbed(contrat)],
+      components: [_ccRowValidation(contrat.id)],
+    });
+  }
+  // Mode automatique (validation désactivée) : publication directe
+  const _r = await _publierContratConfrerie(interaction.guild, contrat);
+  if (!_r.ok) { await interaction.editReply({ content: '⚠️ Contrat enregistré, mais le salon #contrats est introuvable.' }); return; }
   await interaction.editReply({ content: `✅ Contrat **${contrat.id}** créé${confidentiel ? ' *(anonyme & confidentiel)*' : ''}.` });
 }
 
@@ -1066,6 +1110,8 @@ async function routeInteraction(interaction) {
       const id = interaction.customId;
       if (id === 'cc_new') { await onNew(interaction); return true; }
       if (id === 'cc_mine') { await onMine(interaction); return true; }
+      if (id.startsWith('cc_pub::')) { await onValiderCreation(interaction); return true; }
+      if (id.startsWith('cc_annul::')) { await onAnnulerCreation(interaction); return true; }
       if (id.startsWith('cc_accept::')) { await onAccept(interaction); return true; }
       if (id.startsWith('cc_refuse::')) { await onRefuse(interaction); return true; }
       if (id.startsWith('cc_assign::')) { await onAssign(interaction); return true; }
