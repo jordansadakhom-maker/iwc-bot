@@ -49,6 +49,15 @@ async function _corrigerTexte(texte) {
   } catch { return t; }
 }
 
+// Reformulation immersive façon Far West (comme les contrats) : réécrit proprement en gardant les faits.
+// Repli sur la simple correction orthographique si la reformulation n'est pas dispo.
+async function _reformuler(texte) {
+  const t = (texte || '').trim();
+  if (t.length < 3) return t;
+  try { if (typeof global.reformulerRP === 'function') { const r = await global.reformulerRP(t.slice(0, 1500)); if (r) return r; } } catch {}
+  return _corrigerTexte(t);
+}
+
 let cfg = {};
 try { cfg = require('./config'); } catch { cfg = {}; }
 const ROLE_LEGAL = cfg.ROLE_POLE_LEGAL || '1508756436082102303';
@@ -349,11 +358,12 @@ async function routeInteraction(interaction) {
       const t = TYPES[typeKey] || { pole: 'legal' };
       const code = (interaction.fields.getTextInputValue('code') || '').trim() || genCodeName();
       const quand = (interaction.fields.getTextInputValue('quand') || '').trim();
-      // Correction orthographique automatique (objectif, butin, briefing — pas le nom de code ni la date)
+      // Reformulation IA immersive de l'objectif et du briefing (comme les contrats) ;
+      // le butin (montant) est juste corrigé. Le nom de code et la date ne sont pas touchés.
       const [objectifC, butin, briefing] = await Promise.all([
-        _corrigerTexte((interaction.fields.getTextInputValue('objectif') || '').trim()),
+        _reformuler((interaction.fields.getTextInputValue('objectif') || '').trim()),
         _corrigerTexte((interaction.fields.getTextInputValue('butin') || '').trim()),
-        _corrigerTexte((interaction.fields.getTextInputValue('briefing') || '').trim()),
+        _reformuler((interaction.fields.getTextInputValue('briefing') || '').trim()),
       ]);
       const objectif = objectifC || '—';
 
