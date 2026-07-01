@@ -615,6 +615,7 @@ function _participationRows(contratId) {
   return [new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`cpart_join::${contratId}`).setLabel('Je participe').setEmoji('✅').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`cpart_leave::${contratId}`).setLabel('Je ne participe pas').setEmoji('❌').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`cpart_notify::${contratId}`).setLabel('Notifier les participants').setEmoji('📣').setStyle(ButtonStyle.Primary),
   )];
 }
 
@@ -5467,6 +5468,30 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     if (!join && idx !== -1) rec.users.splice(idx, 1);
     saveDB(db);
     await interaction.update({ embeds: [_participationEmbed(contratId)], components: _participationRows(contratId) }).catch(() => {});
+    return;
+  }
+  // 📣 Notifier les participants inscrits (ping dans le fil + MP)
+  if (interaction.isButton?.() && interaction.customId.startsWith('cpart_notify::')) {
+    const contratId = interaction.customId.split('::').slice(1).join('::');
+    const peutNotifier = isDirection(interaction.member) || interaction.member?.roles?.cache?.some(r => /confr|officier|op[eé]rateur|fondateur|fl[eé]au|conseil|panseur/i.test(r.name || ''));
+    if (!peutNotifier) { await interaction.reply({ content: '🔒 Réservé à la Direction / aux officiers.', flags: MessageFlags.Ephemeral }).catch(() => {}); return; }
+    const rec = (loadDB().contratsParticipants || {})[contratId] || { objet: '', users: [] };
+    const users = (Array.isArray(rec.users) ? rec.users : []).slice(0, 50);
+    if (!users.length) { await interaction.reply({ content: '🐺 Personne n\'a encore rejoint ce contrat — rien à notifier.', flags: MessageFlags.Ephemeral }).catch(() => {}); return; }
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+    const objetTxt = rec.objet ? `\n*${String(rec.objet).slice(0, 200)}*` : '';
+    // (1) Ping dans le fil
+    await interaction.channel?.send({
+      content: `📣 **Rassemblement — contrat ${contratId}**\n${users.map(id => `<@${id}>`).join(' ')}${objetTxt}\nOn se prépare, l'affaire est lancée. 🐺`,
+      allowedMentions: { users },
+    }).catch(() => {});
+    // (2) MP à chaque participant (meilleur effort)
+    let dm = 0;
+    for (const uid of users) {
+      const u = await interaction.client.users.fetch(uid).catch(() => null);
+      if (u) { const ok = await u.send({ content: `📣 **Contrat ${contratId} — tu es attendu !**${objetTxt}\n\nRejoins l'équipe, c'est le moment. — Iron Wolf Company` }).catch(() => null); if (ok) dm++; }
+    }
+    await interaction.editReply({ content: `✅ ${users.length} participant(s) notifié(s) dans le fil · ${dm} joint(s) en MP${dm < users.length ? ' *(les autres ont leurs MP fermés)*' : ''}.` }).catch(() => {});
     return;
   }
   if (interaction.isButton() && interaction.customId.startsWith('csuivi::')) {
