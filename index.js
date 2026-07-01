@@ -354,8 +354,9 @@ const _agendaPhotoDrafts = new Map();
 function _agendaPhotoCleanup() { const now = Date.now(); for (const [k, v] of _agendaPhotoDrafts) if (now - (v.at || 0) > 3600000) _agendaPhotoDrafts.delete(k); }
 async function _agendaPhotoExtract(b64, mt) {
   const key = process.env.ANTHROPIC_API_KEY; if (!key) return null;
-  const prompt = `Tu analyses une capture d'écran (planning, calendrier, affiche ou message) annonçant un RENDEZ-VOUS ou un événement, pour un serveur RP western. Extrais les informations VISIBLES. Réponds STRICTEMENT en JSON, sans texte autour :
-{"titre":"intitulé court du RDV/événement","date":"JJ/MM/AAAA (utilise l'année en cours si elle n'est pas écrite)","heure":"ex: 21h00","lieu":"lieu si mentionné, sinon vide","notes":"détails utiles (participants, ordre du jour…), sinon vide"}
+  const prompt = `Tu analyses une capture d'écran pour un serveur RP western. Détermine D'ABORD si elle annonce vraiment un RENDEZ-VOUS / ÉVÉNEMENT daté (planning, calendrier, affiche, convocation, message d'organisation). Si ce n'est PAS le cas — carte, lieu marqué, capture de jeu, photo, meme, inventaire, etc. — mets "estRdv" à false et laisse les autres champs vides.
+Réponds STRICTEMENT en JSON, sans texte autour :
+{"estRdv":true,"titre":"intitulé court du RDV/événement","date":"JJ/MM/AAAA (utilise l'année en cours si elle n'est pas écrite)","heure":"ex: 21h00","lieu":"lieu si mentionné, sinon vide","notes":"détails utiles (participants, ordre du jour…), sinon vide"}
 Mets une chaîne vide pour toute info absente. N'invente rien.`;
   const body = (model) => JSON.stringify({ model, max_tokens: 600, messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: mt || 'image/png', data: b64 } }, { type: 'text', text: prompt }] }] });
   const call = async (model) => {
@@ -380,7 +381,10 @@ async function _agendaPhotoOnMessage(message) {
     const wait = await message.channel.send({ content: '🔎 Je lis la capture pour préparer le rendez-vous…', allowedMentions: { parse: [] } }).catch(() => null);
     let buf = null; try { const r = await fetch(img.url); if (r.ok) buf = Buffer.from(await r.arrayBuffer()); } catch {}
     const data = buf ? await _agendaPhotoExtract(buf.toString('base64'), img.contentType || 'image/png') : null;
-    if (!data || (!data.titre && !data.date)) { if (wait) await wait.edit('🤔 Je n\'ai pas réussi à lire les infos du rendez-vous sur cette image. Utilise le bouton **« Nouveau rendez-vous »** pour le saisir à la main.').catch(() => {}); return true; }
+    // Pas un rendez-vous (carte, lieu, capture de jeu…) ou lecture impossible → on ne pollue pas le salon : on retire juste le message d'attente.
+    if (!data || data.estRdv === false) { if (wait) await wait.delete().catch(() => {}); return true; }
+    // Ça ressemble à un rendez-vous mais illisible → on aide à le saisir à la main.
+    if (!data.titre && !data.date) { if (wait) await wait.edit('🤔 Je n\'ai pas réussi à lire les infos du rendez-vous sur cette image. Utilise le bouton **« Nouveau rendez-vous »** pour le saisir à la main.').catch(() => {}); return true; }
     _agendaPhotoCleanup();
     const id = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
     _agendaPhotoDrafts.set(id, { titre: data.titre || '', date: data.date || '', heure: data.heure || '', lieu: data.lieu || '', notes: data.notes || '', sourceMsgId: message.id, channelId: message.channelId, at: Date.now() });
