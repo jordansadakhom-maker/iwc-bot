@@ -332,6 +332,30 @@ Message : "${texte}"`;
     return txt && txt.length > 1 ? txt.slice(0, 1900) : null;
   } catch (e) { console.log('⚠️ _reformulerRP error:', e.message); return null; }
 }
+// ✍️ Brief de mission : transforme des notes brutes en UN paragraphe de synthèse clair et immersif.
+async function _briefOperationIA({ nom, lieu, objectif, notes, pole }) {
+  const apiKey = process.env.ANTHROPIC_API_KEY; if (!apiKey) return null;
+  try {
+    const prompt = `Tu rédiges les ordres de mission d'une organisation de l'Ouest américain (~1899-1904), jeu de rôle Far West (RDR2). À partir des éléments bruts ci-dessous, rédige un BRIEF DE MISSION en UN SEUL paragraphe clair, fluide et immersif (3 à 5 phrases) qui résume l'opération : ce qu'on va faire, où, et dans quel but.
+RÈGLES STRICTES : conserve EXACTEMENT les faits (lieu, objectif, noms, chiffres) ; n'invente RIEN ; aucun anachronisme ni emoji ; français, ton western sobre et crédible ; structure et clarifie, ne recopie pas mot pour mot. Réponds UNIQUEMENT par le paragraphe.
+
+Nom de l'opération : ${nom || '—'}
+Lieu : ${lieu || '—'}
+Objectif : ${objectif || '—'}
+Notes (équipe / matériel / heure) : ${notes || '—'}
+Pôle : ${pole === 'legal' ? 'légal (Iron Wolf Company)' : 'clandestin (La Confrérie)'}`;
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 500, messages: [{ role: 'user', content: prompt }] }),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    let txt = (data?.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+    txt = txt.replace(/^["«»\s]+|["«»\s]+$/g, '').trim();
+    return txt && txt.length > 10 ? txt.slice(0, 1000) : null;
+  } catch (e) { console.log('⚠️ _briefOperationIA:', e.message); return null; }
+}
 async function _reposterCommeMembre(channel, member, user, content) {
   try {
     const hooks = await channel.fetchWebhooks().catch(() => null);
@@ -6257,6 +6281,8 @@ async function _validerModalOpCreer(interaction) {
     } catch(e) { console.log('❌ Notion op créer:', e.message); }
   }
   op.notionPageId = notionPageId;
+  // ✍️ Brief IA : un beau paragraphe qui résume l'opération (à partir de tes notes brutes)
+  try { const brief = await _briefOperationIA({ nom, lieu, objectif, notes: details === '—' ? '' : details, pole }); if (brief) op.brief = brief; } catch {}
   saveDB(db);
 
   await sendLog(guild, 'OPERATION', { nom: op.name, lieu: op.lieu, equipe: op.equipe, statut: '🟡 En préparation' });
@@ -6271,6 +6297,7 @@ async function _validerModalOpCreer(interaction) {
       { name: '🆔 ID', value: `\`${op.id}\``, inline: true },
       { name: '📍 Lieu', value: lieu, inline: true },
       { name: '🎯 Objectif', value: objectif, inline: true },
+      ...(op.brief ? [{ name: '📝 Briefing', value: op.brief.slice(0, 1024), inline: false }] : []),
       { name: '👥 Participants (0)', value: '*Clique ✋ pour rejoindre*', inline: false },
       { name: '📋 Détails', value: details, inline: false },
       ...(notionPageId ? [{ name: '🔗 Notion', value: `[Voir la fiche](https://notion.so/${notionPageId.replace(/-/g, '')})`, inline: true }] : []),
