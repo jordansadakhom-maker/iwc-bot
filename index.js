@@ -3282,6 +3282,124 @@ async function _posterNoteAuForum(guild, embed, opts = {}) {
   } catch (e) { console.log('⚠️ poster note forum:', e.message); return null; }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  Validation manuelle des renseignements (salon transcription)
+//  Chaque transcription est d'abord proposée EN BROUILLON : on choisit
+//  « Mettre en note », « En faire une opération » ou « Ignorer ».
+//  Désactivable via db.notesValidationOff = true (repasse en auto).
+// ═══════════════════════════════════════════════════════════════════
+const _notesPending = new Map();
+function _validationNotesActive() { try { return !loadDB().notesValidationOff; } catch { return true; } }
+function _rowValidationNote(draftId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`ndval_note::${draftId}`).setLabel('Mettre en note').setEmoji('📝').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`ndval_op::${draftId}`).setLabel('En faire une opération').setEmoji('⚔️').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`ndval_skip::${draftId}`).setLabel('Ignorer').setEmoji('🗑️').setStyle(ButtonStyle.Secondary),
+  );
+}
+
+// Publie réellement un renseignement (forum + repli fil + tri + transcription + base + Notion).
+async function _finaliserNoteTerrain(guild, ctx) {
+  let destNote = ctx.channel;
+  let sentRapport = null;
+  const _forumRes = await _posterNoteAuForum(guild, ctx.embed, {
+    priorite: ctx.priorite, badge: ctx.badge || '', cible: ctx.cible,
+    resume: (ctx.rapport && ctx.rapport.resume) ? ctx.rapport.resume : '',
+    agent: ctx.agent, categories: (ctx.rapport && ctx.rapport.categories && ctx.rapport.categories.length) ? ctx.rapport.categories : ctx.tags,
+  });
+  if (_forumRes && _forumRes.post) {
+    destNote = _forumRes.post;
+    sentRapport = _forumRes.starter;
+  } else if (ctx.cible) {
+    const ch = ctx.channel;
+    const threadName = `🎯 ${ctx.cible}`.slice(0, 100);
+    let thread = null;
+    try { const active = await ch.threads.fetchActive().catch(() => null); if (active) thread = active.threads.find(t => t.name === threadName); } catch {}
+    if (!thread) { try { const archived = await ch.threads.fetchArchived().catch(() => null); if (archived) thread = archived.threads.find(t => t.name === threadName); } catch {} }
+    if (!thread) { try { thread = await ch.threads.create({ name: threadName, autoArchiveDuration: 10080, reason: `Dossier : ${ctx.cible}` }); } catch { thread = ch; } }
+    else if (thread.archived) { await thread.setArchived(false).catch(() => {}); }
+    destNote = thread;
+    sentRapport = await destNote.send({ embeds: [ctx.embed] });
+  } else {
+    sentRapport = await destNote.send({ embeds: [ctx.embed] });
+  }
+  if (sentRapport) {
+    try { await sentRapport.edit({ components: [_triRowRapport(sentRapport.id, ctx.importantReco ? ctx.destKeyReco : '')] }); } catch (e) { console.log('⚠️ tri rapport:', e.message); }
+  }
+  const _txtComplet = (ctx.transcriptionBrute || '').trim();
+  if (_txtComplet.length > 980) {
+    const blocs = _txtComplet.match(/[\s\S]{1,1850}/g) || [];
+    for (let i = 0; i < blocs.length; i++) {
+      const entete = i === 0 ? `🎙️ **Transcription complète (intégrale — ${blocs.length} partie${blocs.length > 1 ? 's' : ''}) :**\n` : '';
+      await destNote.send({ content: entete + '||' + blocs[i] + '||' }).catch(() => {});
+    }
+  }
+  try {
+    const db = loadDB();
+    if (!db.notesTerrain) db.notesTerrain = [];
+    db.notesTerrain.push({ agent: ctx.agent, lieu: ctx.lieu, info: ctx.info, priorite: ctx.priorite, cible: ctx.cible || '', tags: ctx.tags, date: new Date().toISOString() });
+    if (db.notesTerrain.length > 200) db.notesTerrain = db.notesTerrain.slice(-200);
+    saveDB(db);
+  } catch (e) { console.log('❌ Stockage note:', e.message); }
+  if (process.env.NOTION_RENSEIGNEMENTS_DB) {
+    try {
+      const catsTexte = (ctx.rapport && ctx.rapport.categories ? ctx.rapport.categories : ctx.tags).join(', ');
+      const resumeTexte = (ctx.rapport && ctx.rapport.resume) ? ctx.rapport.resume : (ctx.info || '').slice(0, 200);
+      const detailsTexte = (ctx.rapport && ctx.rapport.details) ? ctx.rapport.details : ctx.info;
+      await _notionCreate(process.env.NOTION_RENSEIGNEMENTS_DB, {
+        'Titre':    { title: [{ text: { content: (resumeTexte || 'Note de terrain').slice(0, 100) } }] },
+        'Agent':    { rich_text: [{ text: { content: ctx.agent } }] },
+        'Cible':    { rich_text: [{ text: { content: ctx.cible || '—' } }] },
+        'Lieu':     { rich_text: [{ text: { content: ctx.lieu || '—' } }] },
+        'Détails':  { rich_text: [{ text: { content: (detailsTexte || '—').slice(0, 1900) } }] },
+        'Catégories': { rich_text: [{ text: { content: catsTexte || '—' } }] },
+        'Priorité': { select: { name: ctx.priorite } },
+        'Date':     { date: { start: new Date().toISOString() } },
+      });
+      console.log('✅ Renseignement synchronisé sur Notion');
+    } catch (e) { console.log('❌ Sync Notion renseignement:', e.message); }
+  }
+  console.log(`✅ Note validée par ${ctx.agent} ${(ctx.tags || []).length ? '[' + ctx.tags.join(',') + ']' : ''}`);
+  return destNote;
+}
+
+// Traite le clic de validation (note / opération / ignorer).
+async function _gererValidationNote(interaction) {
+  try {
+    const [action, draftId] = (interaction.customId || '').split('::');
+    const ctx = _notesPending.get(draftId);
+    if (!ctx) { await interaction.reply({ content: '⏳ Ce brouillon a expiré (redémarrage du bot). Renvoie la transcription.', flags: MessageFlags.Ephemeral }).catch(() => {}); return; }
+    if (action === 'ndval_skip') {
+      _notesPending.delete(draftId);
+      await interaction.update({ content: `🗑️ Renseignement **ignoré** (non enregistré) — par ${interaction.member?.displayName || interaction.user.username}.`, embeds: [], components: [] }).catch(() => {});
+      return;
+    }
+    await interaction.deferUpdate().catch(() => {});
+    const ch = await interaction.client.channels.fetch(ctx.channelId).catch(() => null) || interaction.channel;
+    await _finaliserNoteTerrain(interaction.guild, { ...ctx, channel: ch });
+    if (action === 'ndval_op') {
+      let opCree = false;
+      try {
+        const pseudoContrat = {
+          id: 'NOTE-' + draftId,
+          typeMission: 'Autre',
+          objet: (ctx.cible ? `${ctx.cible}${ctx.lieu ? ' — ' + ctx.lieu : ''}` : ((ctx.rapport && ctx.rapport.resume) || 'Renseignement de terrain')).slice(0, 200),
+          commanditaire: ctx.agent || '—',
+          details: ((ctx.rapport && ctx.rapport.details) || ctx.info || '').slice(0, 1000),
+          remuneration: '—', echeanceTexte: null,
+        };
+        const op = await opsEtapes.creerOperationDepuisContrat?.(interaction.guild, pseudoContrat, { parId: interaction.user.id });
+        opCree = !!op;
+      } catch (e) { console.log('⚠️ ndval_op:', e.message); }
+      _notesPending.delete(draftId);
+      await interaction.editReply({ content: opCree ? '⚔️ Note enregistrée **et opération à préparer créée** dans #operations.' : '⚠️ Note enregistrée, mais création d\'opération impossible.', embeds: [], components: [] }).catch(() => {});
+      return;
+    }
+    _notesPending.delete(draftId);
+    await interaction.editReply({ content: '✅ Enregistré **en note** dans le forum des rapports.', embeds: [], components: [] }).catch(() => {});
+  } catch (e) { if (![10062, 10008, 40060].includes(e?.code)) console.log('❌ validation note:', e.message); }
+}
+
 client.on('messageCreate', async message => {
   // 🔒 Verrouillage de sécurité : bot gelé → on ignore tout message hors Maître.
   try { if (securite.estVerrouille?.() && message.author?.id !== securite.MAITRE) return; } catch {}
@@ -3700,83 +3818,18 @@ client.on('messageCreate', async message => {
 
         // ── Cible visible dans l'embed (forum comme repli) ──
         if (cibleDetectee && !cible) embed.spliceFields(0, 0, { name: '🎯 Cible détectée', value: cibleDetectee, inline: true });
-        // ── Destination : FORUM des rapports (rangé + recherchable), sinon repli salon/fil par cible ──
-        let destNote = message.channel;
-        let sentRapport = null;
-        const _forumRes = await _posterNoteAuForum(message.guild, embed, {
-          priorite, badge: _BADGE[priorite] || '', cible: cibleDetectee,
-          resume: (rapport && rapport.resume) ? rapport.resume : '',
-          agent, categories: (rapport && rapport.categories && rapport.categories.length) ? rapport.categories : tagsDetectes,
-        });
-        if (_forumRes && _forumRes.post) {
-          destNote = _forumRes.post;
-          sentRapport = _forumRes.starter;
+        // ── Validation manuelle : on propose un BROUILLON (note / opération / ignorer) ──
+        //     Rien n'est publié tant que quelqu'un n'a pas choisi. (auto si db.notesValidationOff)
+        const _noteCtx = { channel: message.channel, channelId: message.channel.id, embed, priorite, badge: _BADGE[priorite] || '', cible: cibleDetectee, rapport, tags: tagsDetectes, agent, lieu, info, importantReco, destKeyReco, transcriptionBrute };
+        if (_validationNotesActive()) {
+          if (_notesPending.size > 200) { const _k = _notesPending.keys().next().value; if (_k) _notesPending.delete(_k); }
+          const draftId = 'ND' + Date.now().toString(36);
+          _notesPending.set(draftId, _noteCtx);
+          const _preview = await message.channel.send({ content: '🕵️ **Renseignement à valider** — que veux-tu en faire ?\n*Rien n\'est enregistré tant que tu n\'as pas choisi.*', embeds: [embed], components: [_rowValidationNote(draftId)] }).catch(() => null);
+          if (_preview) _noteCtx.previewMsgId = _preview.id;
         } else {
-          // Repli : pas de forum dispo → fil par cible dans le salon d'origine
-          if (cibleDetectee) {
-            const ch = message.channel;
-            const threadName = `🎯 ${cibleDetectee}`.slice(0, 100);
-            let thread = null;
-            try { const active = await ch.threads.fetchActive().catch(() => null); if (active) thread = active.threads.find(t => t.name === threadName); } catch {}
-            if (!thread) { try { const archived = await ch.threads.fetchArchived().catch(() => null); if (archived) thread = archived.threads.find(t => t.name === threadName); } catch {} }
-            if (!thread) { try { thread = await ch.threads.create({ name: threadName, autoArchiveDuration: 10080, reason: `Dossier : ${cibleDetectee}` }); } catch { thread = ch; } }
-            else if (thread.archived) { await thread.setArchived(false).catch(() => {}); }
-            destNote = thread;
-          }
-          sentRapport = await destNote.send({ embeds: [embed] });
+          await _finaliserNoteTerrain(message.guild, _noteCtx);
         }
-        // ── Tri 1-clic rattaché au rapport LUI-MÊME (id valide, persiste). Pour TOUTES les
-        //    notes (la destination conseillée n'est mise en avant que pour les infos importantes). ──
-        if (sentRapport) {
-          try { await sentRapport.edit({ components: [_triRowRapport(sentRapport.id, importantReco ? destKeyReco : '')] }); } catch (e) { console.log('⚠️ tri rapport:', e.message); }
-        }
-        // ── Transcription COMPLÈTE sans coupure (un champ Discord est limité à 1024 caractères) ──
-        // Au-delà de ~980 caractères, on poste l'intégralité en messages complémentaires (spoiler), par blocs de 1850.
-        const _txtComplet = (transcriptionBrute || '').trim();
-        if (_txtComplet.length > 980) {
-          const blocs = _txtComplet.match(/[\s\S]{1,1850}/g) || [];
-          for (let i = 0; i < blocs.length; i++) {
-            const entete = i === 0 ? `🎙️ **Transcription complète (intégrale — ${blocs.length} partie${blocs.length > 1 ? 's' : ''}) :**\n` : '';
-            await destNote.send({ content: entete + '||' + blocs[i] + '||' }).catch(() => {});
-          }
-        }
-
-        // ── Stockage local de la note (pour /notes) ──
-        try {
-          const db = loadDB();
-          if (!db.notesTerrain) db.notesTerrain = [];
-          db.notesTerrain.push({
-            agent, lieu, info, priorite,
-            cible: cibleDetectee || '',
-            tags: tagsDetectes,
-            date: new Date().toISOString(),
-          });
-          // Garder les 200 dernières
-          if (db.notesTerrain.length > 200) db.notesTerrain = db.notesTerrain.slice(-200);
-          saveDB(db);
-        } catch(e) { console.log('❌ Stockage note:', e.message); }
-
-        // ── Synthèse Notion (si base configurée) ──
-        if (process.env.NOTION_RENSEIGNEMENTS_DB) {
-          try {
-            const catsTexte = (rapport && rapport.categories ? rapport.categories : tagsDetectes).join(', ');
-            const resumeTexte = (rapport && rapport.resume) ? rapport.resume : info.slice(0, 200);
-            const detailsTexte = (rapport && rapport.details) ? rapport.details : info;
-            await _notionCreate(process.env.NOTION_RENSEIGNEMENTS_DB, {
-              'Titre':    { title: [{ text: { content: (resumeTexte || 'Note de terrain').slice(0, 100) } }] },
-              'Agent':    { rich_text: [{ text: { content: agent } }] },
-              'Cible':    { rich_text: [{ text: { content: cibleDetectee || '—' } }] },
-              'Lieu':     { rich_text: [{ text: { content: lieu || '—' } }] },
-              'Détails':  { rich_text: [{ text: { content: (detailsTexte || '—').slice(0, 1900) } }] },
-              'Catégories': { rich_text: [{ text: { content: catsTexte || '—' } }] },
-              'Priorité': { select: { name: priorite } },
-              'Date':     { date: { start: new Date().toISOString() } },
-            });
-            console.log('✅ Renseignement synchronisé sur Notion');
-          } catch(e) { console.log('❌ Sync Notion renseignement:', e.message); }
-        }
-
-        console.log(`✅ Note vocale postée par ${agent} ${tagsDetectes.length ? '[' + tagsDetectes.join(',') + ']' : ''}`);
         await message.delete().catch(() => {});
       }
     } catch(e) { console.log('❌ Webhook note error:', e.message); }
@@ -4007,6 +4060,7 @@ client.on('interactionCreate', async interaction => {
       saveDB(db);
     }
   } catch {}
+  if (interaction.isButton?.() && (interaction.customId || '').startsWith('ndval_')) return _gererValidationNote(interaction);
   if (await contratsConf.routeInteraction?.(interaction)) return;
   if (await opsEtapes.routeInteraction?.(interaction)) return;
   if (await chiffrement.routeInteraction?.(interaction)) return;
