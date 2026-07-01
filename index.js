@@ -3292,6 +3292,20 @@ client.on('messageCreate', async message => {
   try { if (await securitePlus.onMessage(message)) return; } catch {}
   // Panneaux collants : on garde le panneau en bas du salon (ne consomme rien)
   try { stickyPanel.onMessage(message); } catch {}
+  // ⚡ Suivi d'activité — AVANT tout aiguillage de module. Sinon un message
+  // « consommé » par un module (inventaire, pépites, carte, tenue…) ne comptait
+  // pas comme activité, et le membre finissait marqué « inactif » à tort.
+  try {
+    if (message.guild && !message.author?.bot && !message.webhookId) {
+      const dbAct = loadDB();
+      const mAct = dbAct.members?.[message.author.id];
+      if (mAct && mAct.status !== 'parti' && mAct.status !== 'absent') {
+        mAct.lastActivity = new Date().toISOString();
+        if (mAct.status === 'inactif') mAct.status = 'actif';
+        saveDB(dbAct);
+      }
+    }
+  } catch {}
   // Réinitialisation du registre (sans commande slash, pour ne pas dépasser la limite Discord) :
   // un responsable tape « !reset-registre » → confirmation par boutons.
   try {
@@ -3982,6 +3996,16 @@ client.on('interactionCreate', async interaction => {
     try { if (interaction.isRepliable?.() && !interaction.replied && !interaction.deferred) await interaction.reply({ content: '🔒 **Système verrouillé** (sécurité). Le bot est gelé jusqu\'à déverrouillage par le Maître.', flags: MessageFlags.Ephemeral }); } catch {}
     return;
   }
+  // ⚡ Suivi d'activité : un clic (bouton / menu / modale) compte comme activité.
+  try {
+    const uidAct = interaction.user?.id;
+    const mAct = uidAct && db.members?.[uidAct];
+    if (mAct && mAct.status !== 'parti' && mAct.status !== 'absent') {
+      mAct.lastActivity = new Date().toISOString();
+      if (mAct.status === 'inactif') mAct.status = 'actif';
+      saveDB(db);
+    }
+  } catch {}
   if (await contratsConf.routeInteraction?.(interaction)) return;
   if (await opsEtapes.routeInteraction?.(interaction)) return;
   if (await chiffrement.routeInteraction?.(interaction)) return;
@@ -5638,6 +5662,22 @@ client.once('clientReady', async () => {
   try { reseau.init?.(client); } catch (e) { console.log('⚠️ reseau.init:', e.message); }
   try { musique.init?.(client); } catch (e) { console.log('⚠️ musique.init:', e.message); }
   await restaurerDepuisGitHub();
+  // 🔧 Correction unique : le suivi d'activité ratait les messages consommés par un
+  // module et les clics → des membres actifs étaient marqués « inactifs » à tort.
+  // Maintenant que le suivi est réparé, on repart d'une base saine (une seule fois).
+  try {
+    const dbc = loadDB();
+    if (!dbc.corrInactifV2) {
+      let n = 0;
+      for (const m of Object.values(dbc.members || {})) {
+        if (m.status === 'inactif') { m.status = 'actif'; m.lastActivity = new Date().toISOString(); n++; }
+      }
+      dbc.corrInactifV2 = true;
+      saveDB(dbc); saveDBSync();
+      console.log(`🔧 Correction activité : ${n} membre(s) « inactif » réactivé(s) (suivi corrigé).`);
+      try { await sauvegarderSurGitHub?.(); } catch {}
+    }
+  } catch (e) { console.log('⚠️ correction inactifs:', e.message); }
   for (const guild of client.guilds.cache.values()) {
     await registerSlashCommands(guild).catch(e => console.log('registerSlashCommands error:', e.message));
     await autoSetup(guild).catch(e => console.log('autoSetup error:', e.message));
