@@ -148,6 +148,7 @@ async function _doSauvegardeGitHub() {
       const aDuContenu =
         nbMembres > Object.keys(DEFAULT_DB.members).length ||
         (d.candidatures || []).length || (d.contrats || []).length || (d.operations || []).length ||
+        (d.preparations || []).length ||
         (d.affaires || []).length || (d.informateurs || []).length ||
         (d.coffre || 0) || (d.coffres?.legal || 0) || (d.coffres?.illegal || 0) ||
         (d.pepites?.total || 0) || (d.pepites?.log || []).length;
