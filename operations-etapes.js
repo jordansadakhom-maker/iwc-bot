@@ -812,6 +812,17 @@ function tableauEmbed() {
 // ═══════════════════════════════════════════════════════════════
 //  ROUTEUR D'INTERACTIONS  (préfixe opx_ )
 // ═══════════════════════════════════════════════════════════════
+// Panneau d'une opération qui n'existe plus (terminée, annulée, ou perdue) → on le désactive proprement.
+async function _opDisparu(interaction) {
+  try {
+    if (interaction.message && !interaction.isModalSubmit?.()) {
+      const e0 = (interaction.message.embeds || []).slice(0, 1);
+      await interaction.message.edit({ content: '⚠️ *Cette opération n\'existe plus (terminée, annulée ou trop ancienne). Panneau désactivé.*', embeds: e0, components: [] }).catch(() => {});
+    }
+  } catch {}
+  try { await interaction.reply({ content: '⚠️ Cette opération n\'existe plus (terminée, annulée ou trop ancienne). J\'ai désactivé ce panneau — recrée l\'opération si besoin.', flags: MessageFlags.Ephemeral }).catch(() => {}); } catch {}
+}
+
 async function routeInteraction(interaction) {
   try {
     const cid = interaction.customId || '';
@@ -823,7 +834,7 @@ async function routeInteraction(interaction) {
       const idx = parseInt(idxS, 10);
       const db = loadDB();
       const op = _find(db, id);
-      if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      if (!op) { await _opDisparu(interaction); return true; }
       if (idx !== _currentIdx(op)) { await interaction.reply({ content: '⛔ Cette étape n\'est pas l\'étape en cours.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const def = _defs(op.categorie)[idx];
       const et = op.etapes[idx];
@@ -846,7 +857,7 @@ async function routeInteraction(interaction) {
       const idx = parseInt(idxS, 10);
       const db = loadDB();
       const op = _find(db, id);
-      if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      if (!op) { await _opDisparu(interaction); return true; }
       const def = _defs(op.categorie)[idx];
       const et = op.etapes[idx];
       if (!et.champs) et.champs = {};
@@ -866,7 +877,7 @@ async function routeInteraction(interaction) {
       const idx = parseInt(idxS, 10);
       const db = loadDB();
       const op = _find(db, id);
-      if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      if (!op) { await _opDisparu(interaction); return true; }
       if (idx !== _currentIdx(op)) { await interaction.reply({ content: '⛔ Cette étape n\'est pas l\'étape en cours.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const ch = interaction.channel;
       if (!ch || typeof ch.createMessageCollector !== 'function') { await interaction.reply({ content: '❌ Impossible de collecter une photo ici (utilise le fil de l\'opération).', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
@@ -902,7 +913,7 @@ async function routeInteraction(interaction) {
       if (!isDirection(interaction.member)) { await interaction.reply({ content: '🔒 Seule la Direction peut valider une étape.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const db = loadDB();
       const op = _find(db, id);
-      if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      if (!op) { await _opDisparu(interaction); return true; }
       if (idx !== _currentIdx(op)) { await interaction.reply({ content: '⛔ Étape déjà validée ou verrouillée.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const def = _defs(op.categorie)[idx];
       const et = op.etapes[idx];
@@ -934,7 +945,7 @@ async function routeInteraction(interaction) {
       const id = cid.split('::')[1];
       const db = loadDB();
       const op = _find(db, id);
-      if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      if (!op) { await _opDisparu(interaction); return true; }
       if (typeof global.ouvrirAvisRecherche !== 'function') { await interaction.reply({ content: '⚠️ Module avis de recherche indisponible.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       // Pré-remplit le signalement à partir de l'étape de repérage
       const defs = _defs(op.categorie);
@@ -950,7 +961,7 @@ async function routeInteraction(interaction) {
       const id = cid.split('::')[1];
       const db = loadDB();
       const op = _find(db, id);
-      if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      if (!op) { await _opDisparu(interaction); return true; }
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       await _genererEtPosterRecit(interaction.guild, op).catch(() => {});
       await interaction.editReply({ content: '📜 Compte-rendu RP généré dans le fil.' }).catch(() => {});
@@ -962,7 +973,7 @@ async function routeInteraction(interaction) {
       const id = cid.split('::')[1];
       const db = loadDB();
       const op = _find(db, id);
-      if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      if (!op) { await _opDisparu(interaction); return true; }
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       await _posterDossier(interaction.guild, op).catch(() => {});
       await interaction.editReply({ content: '📄 Dossier généré dans le fil.' }).catch(() => {});
@@ -974,7 +985,7 @@ async function routeInteraction(interaction) {
       const id = cid.split('::')[1];
       const db = loadDB();
       const op = _find(db, id);
-      if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      if (!op) { await _opDisparu(interaction); return true; }
       const menu = new UserSelectMenuBuilder().setCustomId(`opx_assignsel::${id}`).setPlaceholder('Choisis les membres à assigner…').setMinValues(0).setMaxValues(20);
       await interaction.reply({ content: '👥 Sélectionne les membres à **assigner** à cette opération (ils seront prévenus dans le fil).', components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral }).catch(() => {});
       return true;
@@ -983,7 +994,7 @@ async function routeInteraction(interaction) {
       const id = cid.split('::')[1];
       const db = loadDB();
       const op = _find(db, id);
-      if (!op) { await interaction.update({ content: '❌ Opération introuvable.', components: [] }).catch(() => {}); return true; }
+      if (!op) { await interaction.update({ content: '⚠️ Cette opération n\'existe plus (terminée, annulée ou trop ancienne).', embeds: [], components: [] }).catch(() => {}); return true; }
       const avant = new Set(op.membres || []);
       op.membres = interaction.values || [];
       _persist(db);
@@ -1003,7 +1014,7 @@ async function routeInteraction(interaction) {
       if (!isDirection(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const db = loadDB();
       const op = _find(db, id);
-      if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      if (!op) { await _opDisparu(interaction); return true; }
       op.status = 'annulee';
       _persist(db);
       await interaction.reply({ content: `🗑️ Opération **${op.id}** annulée.`, flags: MessageFlags.Ephemeral }).catch(() => {});
