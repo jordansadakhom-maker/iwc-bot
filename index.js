@@ -616,7 +616,38 @@ function _participationRows(contratId) {
     new ButtonBuilder().setCustomId(`cpart_join::${contratId}`).setLabel('Je participe').setEmoji('✅').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`cpart_leave::${contratId}`).setLabel('Je ne participe pas').setEmoji('❌').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`cpart_notify::${contratId}`).setLabel('Notifier les participants').setEmoji('📣').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`cpart_op::${contratId}`).setLabel('Créer l\'opération').setEmoji('⚔️').setStyle(ButtonStyle.Secondary),
   )];
+}
+
+// ⚔️ Créer une opération depuis le panneau de participation d'un contrat, en assignant les participants.
+async function _cpartCreerOpBouton(interaction) {
+  try {
+    const contratId = interaction.customId.split('::').slice(1).join('::');
+    const peut = isDirection(interaction.member) || interaction.member?.roles?.cache?.some(r => /confr|officier|op[eé]rateur|fondateur|fl[eé]au|conseil|panseur/i.test(r.name || ''));
+    if (!peut) { await interaction.reply({ content: '🔒 Réservé à la Direction / aux officiers.', flags: MessageFlags.Ephemeral }).catch(() => {}); return; }
+    const rec = (loadDB().contratsParticipants || {})[contratId] || { users: [] };
+    const defaults = (Array.isArray(rec.users) ? rec.users : []).filter(Boolean).slice(0, 25);
+    const menu = new UserSelectMenuBuilder().setCustomId(`cpart_opsel::${contratId}`).setPlaceholder('👥 Qui participe à l\'opération ?').setMinValues(1).setMaxValues(25);
+    if (defaults.length) { try { menu.setDefaultUsers(...defaults); } catch {} }
+    await interaction.reply({ content: `⚔️ **Créer l'opération depuis le contrat ${contratId}** — choisis qui y participe *(les inscrits « Je participe » sont pré-sélectionnés)* :`, components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral }).catch(() => {});
+  } catch (e) { console.log('❌ cpart_op:', e.message); }
+}
+async function _cpartCreerOpSelect(interaction) {
+  try {
+    const contratId = interaction.customId.split('::').slice(1).join('::');
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+    const membres = (interaction.values || []).slice(0, 25);
+    const db = loadDB();
+    let contrat = (db.contrats || []).find(c => String(c.id) === String(contratId));
+    if (!contrat) { const rec = (db.contratsParticipants || {})[contratId] || {}; contrat = { id: contratId, typeMission: 'Autre', objet: rec.objet || `Contrat ${contratId}`, commanditaire: '—', details: '', remuneration: '—', echeanceTexte: null }; }
+    let op = null;
+    try { op = await opsEtapes.creerOperationDepuisContrat?.(interaction.guild, contrat, { parId: interaction.user.id, membres }); } catch (e) { console.log('⚠️ cpart_opsel create:', e.message); }
+    if (!op) { await interaction.editReply({ content: '⚠️ Impossible de créer l\'opération (réessaie).' }).catch(() => {}); return; }
+    let dm = 0;
+    for (const uid of membres) { const u = await interaction.client.users.fetch(uid).catch(() => null); if (u) { const ok = await u.send({ content: `⚔️ **Tu es assigné à une opération** (contrat ${contratId}).\nLa préparation se fait dans #operations. — Iron Wolf Company` }).catch(() => null); if (ok) dm++; } }
+    await interaction.editReply({ content: `✅ Opération créée avec **${membres.length} participant(s)** assigné(s) — à préparer dans #operations.${dm ? ` · ${dm} prévenu(s) en MP` : ''}` }).catch(() => {});
+  } catch (e) { console.log('❌ cpart_opsel:', e.message); }
 }
 
 async function archiverContratReponses(guild, contrat, statut, embed) {
@@ -4093,6 +4124,8 @@ client.on('interactionCreate', async interaction => {
     }
   } catch {}
   if (interaction.isButton?.() && (interaction.customId || '').startsWith('ndval_')) return _gererValidationNote(interaction);
+  if (interaction.isButton?.() && (interaction.customId || '').startsWith('cpart_op::')) return _cpartCreerOpBouton(interaction);
+  if (interaction.isUserSelectMenu?.() && (interaction.customId || '').startsWith('cpart_opsel::')) return _cpartCreerOpSelect(interaction);
   if (await contratsConf.routeInteraction?.(interaction)) return;
   if (await opsEtapes.routeInteraction?.(interaction)) return;
   if (await chiffrement.routeInteraction?.(interaction)) return;
