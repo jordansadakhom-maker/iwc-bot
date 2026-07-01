@@ -279,6 +279,18 @@ function _pingRoles(guild) {
   } catch { return { content: '', ids: [] }; }
 }
 
+const _warnedThreads = new Set(); // fils de télégramme non reconnus déjà signalés (anti-spam)
+
+// Prévient l'équipe DANS LE FIL qu'un message n'a pas pu être livré au client (throttle 10 min).
+async function _prevenirEchecLivraison(channel, conv, db, raison) {
+  try {
+    const now = Date.now();
+    if (conv.dmFailNoticeAt && now - conv.dmFailNoticeAt < 10 * 60000) return;
+    conv.dmFailNoticeAt = now; persist(db);
+    await channel.send({ content: `⚠️ **Ton message n'a PAS été reçu par le client.**\n${raison}` }).catch(() => {});
+  } catch {}
+}
+
 async function onMessage(message) {
   try {
     if (message.author?.bot) return false;
@@ -310,14 +322,28 @@ async function onMessage(message) {
 
     // (2) Message de l'équipe dans un fil de conversation → MP au client
     const conv = Object.values(store).find(c => c.threadId === message.channel.id);
-    if (!conv) return false;
+    if (!conv) {
+      // Fil de télégramme que le bot ne reconnaît plus (ex. perdu lors d'un redémarrage) → prévenir au lieu de rester muet
+      try {
+        const nom = message.channel?.name || '';
+        if (nom.startsWith('💬 ') && !/^\s*(\/\/|\(\()/.test(message.content || '') && !_warnedThreads.has(message.channel.id)) {
+          _warnedThreads.add(message.channel.id);
+          await message.channel.send({ content: '⚠️ **Je ne retrouve plus cette conversation** (perdue lors d\'un redémarrage ?). Tes messages ici **ne sont plus transmis au client**.\n👉 Rouvre un **nouveau télégramme** avec lui (bouton ✉) pour reprendre l\'échange.' }).catch(() => {});
+        }
+      } catch {}
+      return false;
+    }
     if (conv.status !== 'ouvert') return false; // fil clôturé : on ne relaie plus
     const content = message.content || '';
     if (!content && message.attachments.size === 0) return false;
     if (/^\s*(\/\/|\(\()/.test(content)) { _logMsg(conv, 'note', message.member?.displayName || message.author.username, content.replace(/^\s*(\/\/|\(\()\s*/, '')); persist(db); await message.react('📝').catch(() => {}); return true; } // note interne
 
     const user = await message.client.users.fetch(conv.demandeurId).catch(() => null);
-    if (!user) { await message.react('⚠️').catch(() => {}); return true; }
+    if (!user) {
+      await message.react('⚠️').catch(() => {});
+      await _prevenirEchecLivraison(message.channel, conv, db, `**${conv.nomRP || 'Le client'}** est introuvable (a-t-il quitté le serveur ?). Le message n'a pas été livré.`);
+      return true;
+    }
     const files = [...message.attachments.values()].map(a => a.url);
     // Correction orthographique du message envoyé au client (⏳ pendant le traitement)
     let contentCorr = content;
@@ -331,7 +357,13 @@ async function onMessage(message) {
       content: files.length ? files.join('\n') : null,
       embeds: [_embedMP('✉ TÉLÉGRAMME — IRON WOLF COMPANY', [contentCorr.slice(0, 3500) || '*(pièce jointe)*', '', '*Répondez à ce message pour continuer.*'], conv.rdvId)],
     }).catch(() => null);
-    if (sent) { _logMsg(conv, 'equipe', message.member?.displayName || message.author.username, contentCorr, { files: files.length }); persist(db); }
+    if (sent) {
+      _logMsg(conv, 'equipe', message.member?.displayName || message.author.username, contentCorr, { files: files.length });
+      if (conv.dmFailNoticeAt) conv.dmFailNoticeAt = null; // la livraison remarche → on réarme l'alerte
+      persist(db);
+    } else {
+      await _prevenirEchecLivraison(message.channel, conv, db, `**${conv.nomRP || 'Le client'}** a ses **messages privés fermés** (ou ne partage plus de serveur avec le bot) — impossible de lui livrer.\n👉 Demande-lui d'**ouvrir ses MP** : *Paramètres Discord → Confidentialité & sécurité → « Autoriser les messages privés des membres du serveur »*, puis renvoie ton message.`);
+    }
     await message.react(sent ? '✅' : '⚠️').catch(() => {});
     return true;
   } catch (e) { console.log('❌ telegramme onMessage:', e.message); return false; }
