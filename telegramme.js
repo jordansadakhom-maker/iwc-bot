@@ -392,7 +392,17 @@ async function routeInteraction(interaction) {
     const rdvId = interaction.customId.split('::')[1];
     const db = loadDB(); const store = _store(db);
     const conv = store[rdvId];
-    if (!conv) { await interaction.reply({ content: '⚠️ Conversation introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+    if (!conv) {
+      // Conversation perdue (redémarrage ancien) : on ne peut plus la relayer, mais on permet
+      // quand même de CLÔTURER / CLASSER pour fermer le fil (l'intention de l'utilisateur).
+      if (isClose || isPurge) {
+        await interaction.update({ content: '🔒 **Conversation clôturée.** *(Ses données avaient été perdues lors d\'un redémarrage — le fil est simplement fermé.)*', components: [] }).catch(() => { interaction.deferUpdate?.().catch(() => {}); });
+        try { const th = interaction.channel; if (th?.isThread?.()) await th.setArchived(true).catch(() => {}); } catch {}
+        return true;
+      }
+      await interaction.reply({ content: '⚠️ Conversation introuvable (données perdues lors d\'un redémarrage). Ouvre un **nouveau télégramme** pour reprendre l\'échange.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
 
     // ─── GARDER OUVERT (réponse à la relance d'inactivité) ───
     if (isKeep) {
