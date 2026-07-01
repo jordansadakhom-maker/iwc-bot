@@ -175,13 +175,15 @@ async function routeInteraction(interaction) {
     if (interaction.isChatInputCommand?.()) {
       if (interaction.commandName === 'annonce-installer') {
         if (!estGestion(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return true; }
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         await installerPanelAnnonce(interaction.guild, interaction.channel);
-        await interaction.reply({ content: `✅ Panneau d'annonces installé dans ${interaction.channel}.`, flags: MessageFlags.Ephemeral }); return true;
+        await interaction.editReply({ content: `✅ Panneau d'annonces installé dans ${interaction.channel}.` }); return true;
       }
       if (interaction.commandName === 'sondage-installer') {
         if (!estGestion(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return true; }
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         await installerPanelSondage(interaction.guild, interaction.channel);
-        await interaction.reply({ content: `✅ Panneau de sondages installé dans ${interaction.channel}.`, flags: MessageFlags.Ephemeral }); return true;
+        await interaction.editReply({ content: `✅ Panneau de sondages installé dans ${interaction.channel}.` }); return true;
       }
       return false;
     }

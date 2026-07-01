@@ -384,6 +384,7 @@ async function routeInteraction(interaction) {
     // ── Validation d'une fiche contact proposée (depuis un contrat) ──
     if (interaction.isButton?.() && (interaction.customId.startsWith("rep_pcont_ok::") || interaction.customId.startsWith("rep_pcont_no::"))) {
       if (!estDirection(interaction.member)) { await interaction.reply({ content: "🔒 Réservé à la Direction.", flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      await interaction.deferUpdate().catch(() => {}); // accuse réception <3s avant la création du fil de forum
       const id = interaction.customId.split("::")[1];
       const ignore = interaction.customId.startsWith("rep_pcont_no::");
       const db = loadDB(); const rep = _ensure(db);
@@ -391,16 +392,16 @@ async function routeInteraction(interaction) {
       if (ignore) {
         if (rep.propositions) delete rep.propositions[id];
         persist(db);
-        await interaction.update({ content: "❌ Fiche **non créée** (ignorée).", embeds: [], components: [] }).catch(() => {});
+        await interaction.editReply({ content: "❌ Fiche **non créée** (ignorée).", embeds: [], components: [] }).catch(() => {});
         return true;
       }
-      if (!prop) { await interaction.update({ content: "⏳ Proposition expirée.", embeds: [], components: [] }).catch(() => {}); return true; }
+      if (!prop) { await interaction.editReply({ content: "⏳ Proposition expirée.", embeds: [], components: [] }).catch(() => {}); return true; }
       const nc = await ajouterContactAuto(interaction.guild, { nom: prop.nom, relation: "Affaire / professionnelle", notes: prop.notes, creeParNom: prop.creeParNom }).catch(() => null);
       const db2 = loadDB(); const rep2 = _ensure(db2);
       if (rep2.propositions) delete rep2.propositions[id];
       if (nc) { const cc = (db2.contrats || []).find(x => String(x.id) === String(prop.contratId)); if (cc) cc.contactId = nc.id; }
       persist(db2);
-      await interaction.update({ content: nc ? `✅ Fiche contact **${nc.nom}** créée dans le répertoire.` : "⚠️ Création impossible.", embeds: [], components: [] }).catch(() => {});
+      await interaction.editReply({ content: nc ? `✅ Fiche contact **${nc.nom}** créée dans le répertoire.` : "⚠️ Création impossible.", embeds: [], components: [] }).catch(() => {});
       return true;
     }
 

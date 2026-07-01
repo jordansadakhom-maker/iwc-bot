@@ -439,6 +439,7 @@ async function handlePisteModal(interaction) {
   const db = loadDB();
   const t = findTraque(db, id);
   if (!t) return interaction.reply({ content: '❌ Avis introuvable.', flags: MessageFlags.Ephemeral });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral }); // accuse réception <3s avant les appels réseau (refresh + fetch + send)
   if (!Array.isArray(t.pistes)) t.pistes = [];
   const lieu = (interaction.fields.getTextInputValue('lieu') || '').trim();
   const info = interaction.fields.getTextInputValue('info').trim();
@@ -452,7 +453,7 @@ async function handlePisteModal(interaction) {
   const dest = t.threadId ? (await interaction.guild.channels.fetch(t.threadId).catch(() => null)) : null;
   const cibleDest = dest || interaction.channel;
   if (cibleDest?.send) await cibleDest.send({ content: `<@&${ROLE_CONFRERIE}> — une piste vient d'être signalée sur **${t.cible}**.`, embeds: [alerte], allowedMentions: { roles: [ROLE_CONFRERIE] } }).catch(() => {});
-  return interaction.reply({ content: '✅ Piste enregistrée. Merci, chasseur.', flags: MessageFlags.Ephemeral });
+  return interaction.editReply({ content: '✅ Piste enregistrée. Merci, chasseur.' });
 }
 
 // ─── Rejoindre la traque ───
@@ -501,6 +502,7 @@ async function handleClotureSelect(interaction) {
   const db = loadDB();
   const t = findTraque(db, id);
   if (!t) return interaction.update({ content: '❌ Avis introuvable.', components: [] });
+  await interaction.deferUpdate().catch(() => {}); // accuse réception <3s avant le travail réseau (forum + journal + refresh)
   t.status = choix;
   t.closedAt = new Date().toISOString();
   t.resultat = (STATUTS[choix] || {}).label || choix;
@@ -556,7 +558,7 @@ async function handleClotureSelect(interaction) {
   saveDB(db);
   sauvegarderSurGitHub?.().catch(() => {});
   const primeReply = versement ? ` 💰 Prime **${versement.total.toLocaleString('fr-FR')} $** versée automatiquement (${versement.part.toLocaleString('fr-FR')} $/chasseur).` : (prime ? ` 💰 Prime à verser : ${prime} (aucun chasseur inscrit ou montant non chiffré).` : '');
-  return interaction.update({ content: `✅ Avis **${id}** clôturé : ${t.resultat}. Fiche archivée dans <#${CH_ELEMENT_OPS}>.${primeReply}${invitePhoto}`, components });
+  return interaction.editReply({ content: `✅ Avis **${id}** clôturé : ${t.resultat}. Fiche archivée dans <#${CH_ELEMENT_OPS}>.${primeReply}${invitePhoto}`, components }).catch(() => {});
 }
 async function handleFinir(interaction) {
   if (!estResponsable(interaction.member)) return interaction.reply({ content: '❌ Réservé aux responsables.', flags: MessageFlags.Ephemeral });

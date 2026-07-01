@@ -408,13 +408,19 @@ async function routeInteraction(interaction) {
           if (!att || !estImage) { await dm.send('⚠️ Ce n\'est pas une image — reclique sur « Ajouter une photo » pour réessayer.').catch(() => {}); return; }
           const db2 = loadDB(); const store2 = _store(db2); const rdv2 = store2.rdvs[rdvId];
           if (!rdv2) return;
-          rdv2.photo = 'attachment://lieu.png'; store2.rdvs[rdvId] = rdv2; _persist(db2);
-          // On recopie l'image SUR le télégramme (salon staff) : elle y reste de façon permanente
+          rdv2.photo = 'attachment://lieu.png'; // référence pour l'édition ci-dessous (fichier joint)
+          // On recopie l'image SUR le télégramme (salon staff) et on garde son URL CDN permanente
+          let urlPermanente = null;
           try {
             const tch = await interaction.client.channels.fetch(rdv2.channelId).catch(() => null);
             const tmsg = tch && await tch.messages.fetch(rdv2.msgId).catch(() => null);
-            if (tmsg) await tmsg.edit({ embeds: [_embedRdv(rdv2)], files: [new AttachmentBuilder(att.url, { name: 'lieu.png' })], components: _boutonsTelegramme(rdv2) }).catch(() => {});
+            if (tmsg) {
+              const posted = await tmsg.edit({ embeds: [_embedRdv(rdv2)], files: [new AttachmentBuilder(att.url, { name: 'lieu.png' })], components: _boutonsTelegramme(rdv2) }).catch(() => null);
+              urlPermanente = posted?.attachments?.first()?.url || null;
+            }
           } catch {}
+          // On persiste l'URL http permanente (pas 'attachment://…') → l'image survit aux ré-éditions du télégramme
+          rdv2.photo = urlPermanente || rdv2.photo; store2.rdvs[rdvId] = rdv2; _persist(db2);
           await dm.send('✅ Photo bien reçue et ajoutée à ta demande. Merci !').catch(() => {});
         } catch {}
       });
@@ -494,13 +500,13 @@ async function routeInteraction(interaction) {
       const lieuLabel = LIEUX[rdv.lieuKey] || rdv.lieuKey || '';
       const typeLabel = TYPES[rdv.typeKey]?.label || 'Prestation';
       const detailsPre = [lieuLabel ? `Lieu : ${lieuLabel}` : '', rdv.souhaitTexte ? `Souhait du client : ${rdv.souhaitTexte}` : '', rdv.details || ''].filter(Boolean).join('\n').slice(0, 800);
-      const modal = new ModalBuilder().setCustomId('contrat_offre_modal::Autre').setTitle('📜 Contrat — suite au RDV');
+      const modal = new ModalBuilder().setCustomId(`contrat_offre_modal::Autre::${(rdv.contactId || rdv.clientId || '').toString()}`).setTitle('📜 Contrat — suite au RDV');
       modal.addComponents(
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('client_nom').setLabel('Nom / Entreprise du client').setStyle(TextInputStyle.Short).setRequired(true).setValue((rdv.nomRP || '').toString().slice(0, 100))),
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objet').setLabel('Objet de la mission').setStyle(TextInputStyle.Short).setRequired(true).setValue(typeLabel.toString().slice(0, 100))),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('remuneration').setLabel('Notre rémunération souhaitée').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 1500$ + 500$/jour')),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('user_id').setLabel('ID Discord du client').setStyle(TextInputStyle.Short).setRequired(true).setValue((rdv.contactId || rdv.clientId || '').toString())),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Détails / conditions / échéance').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setValue(detailsPre)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prime').setLabel('Notre rémunération souhaitée').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 1500$ + 500$/jour')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('echeance').setLabel('Échéance (JJ/MM/AAAA, optionnel)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: 15/07/1904')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Détails / conditions').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setValue(detailsPre)),
       );
       await interaction.showModal(modal).catch(() => {});
       return true;

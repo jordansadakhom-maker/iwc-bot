@@ -178,6 +178,7 @@ async function routeInteraction(interaction) {
       const rapport = interaction.fields.getTextInputValue('rapport').trim();
       const forum = _ch(interaction.guild, FORUM_RIPOUX);
       if (!forum || forum.type !== 15 || !forum.threads?.create) { await interaction.reply({ content: '⚠️ Forum du Ripoux introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {}); // accuse réception <3s avant la création du fil de forum
       const embed = new EmbedBuilder()
         .setColor(0x6B4423)
         .setAuthor({ name: `🎖️ ${r.nom} — notre homme dans la loi` })
@@ -193,7 +194,7 @@ async function routeInteraction(interaction) {
       if (tagId) opts.appliedTags = [tagId];
       let post = await forum.threads.create(opts).catch(() => null);
       if (!post) post = await forum.threads.create({ name: opts.name, message: msg }).catch(() => null);
-      await interaction.reply({ content: `✅ Rapport transmis${post ? ` : <#${post.id}>` : ''}.`, flags: MessageFlags.Ephemeral }).catch(() => {});
+      await interaction.editReply({ content: `✅ Rapport transmis${post ? ` : <#${post.id}>` : ''}.` }).catch(() => {});
       return true;
     }
 

@@ -431,8 +431,8 @@ async function routeInteraction(interaction) {
       const db = loadDB(); const f = _fiche(db, id);
       f.statut = statut; f.majPar = interaction.member?.displayName || interaction.user.username; f.majAt = Date.now();
       _log(f, `Statut → ${STATUTS[statut].label}`, f.majPar); saveDB(db);
+      await _afficherFiche(interaction, id, true); // accuse réception du bouton d'abord (évite « interaction a échoué »)
       await _alerteStatut(interaction.guild, id, f); // alerte si inapte / observation
-      await _afficherFiche(interaction, id, true);
       return true;
     }
 

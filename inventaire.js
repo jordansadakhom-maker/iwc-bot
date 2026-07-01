@@ -65,7 +65,7 @@ function _boardEmbed(inv) {
     const items = inv.stock[c] || {};
     const noms = Object.keys(items).sort();
     let val = noms.length ? noms.map(n => `${n} × **${items[n]}**`).join("\n") : "*— vide —*";
-    if (val.length > 1000) val = val.slice(0, 1000) + "\n…";
+    if (val.length > 750) val = val.slice(0, 750) + "\n…";
     e.addFields({ name: `${CAT_EMOJI[c]} ${c} (${per[c]})`, value: val, inline: false });
   }
   if (inv.photoMsg) e.addFields({ name: "📷 Photo du coffre", value: "Dernière(s) capture(s) épinglée(s) dans ce salon.", inline: false });
@@ -384,7 +384,7 @@ function _proposalEmbed(items) {
   const lignes = {};
   for (const it of items) { (lignes[it.categorie] = lignes[it.categorie] || []).push(`${it.nom} × **${it.quantite}**`); }
   let desc = CATS.filter(c => lignes[c]).map(c => `${CAT_EMOJI[c]} **${c}**\n${lignes[c].join("\n")}`).join("\n\n") || "*(aucun objet lu)*";
-  if (desc.length > 3600) desc = desc.slice(0, 3600) + "\n…";
+  if (desc.length > 3400) desc = desc.slice(0, 3400) + "\n…";
   return new EmbedBuilder().setColor(0xC9A66B).setTitle("📷 Lecture de la capture du coffre")
     .setDescription("Voici ce que j'ai lu sur la photo. **Vérifie bien les quantités**, puis choisis :\n\n" + desc +
       "\n\n**Que faire de cette lecture ?**\n" +
