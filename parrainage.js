@@ -38,6 +38,7 @@ async function _handleParrainageAssigner(interaction) {
 
 async function _handleMonParrainage(interaction) {
   if (!isMembre(interaction.member)) return interaction.reply({ content: '🔒 Réservé aux membres.', flags: MessageFlags.Ephemeral });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const db = loadDB(); const par = db.parrainages || {}; const id = interaction.member.id;
   const e = new EmbedBuilder().setColor(0xB8860B).setTitle(`🤝 Mon parrainage — ${interaction.member.displayName}`);
   const monParrain = par[id] && par[id].parrainId;
@@ -53,7 +54,7 @@ async function _handleMonParrainage(interaction) {
   }
   if (!monParrain && !filleuls.length) e.setDescription("*Tu n'as ni parrain ni filleul pour le moment. La Direction peut t'en attribuer un.*");
   e.setFooter({ text: 'Iron Wolf Company' });
-  return interaction.reply({ embeds: [e], flags: MessageFlags.Ephemeral });
+  return interaction.editReply({ embeds: [e] });
 }
 
 // Renvoie true si l'interaction a été prise en charge (sinon index.js continue).

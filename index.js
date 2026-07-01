@@ -871,7 +871,7 @@ async function sendLog(guild, type, data) {
     RETROGRADATION: { color: 0xED4245, title: 'RÉTROGRADATION — ' + data.username, fields: [{ name: '👤 Membre', value: `<@${data.userId}>`, inline: true }, { name: '📉 Ancien rang', value: data.ancienRang || '—', inline: true }, { name: '📈 Nouveau rang', value: data.nouveauRang || '—', inline: true }, { name: '📝 Raison', value: data.raison || '—', inline: true }] },
   };
   const cfg = cfgs[type]; if (!cfg) return;
-  await ch.send({ embeds: [new EmbedBuilder().setColor(cfg.color).setTitle(cfg.emoji + ' ' + cfg.title).addFields(...cfg.fields).setFooter({ text: 'IWC • Logs • ' + new Date().toLocaleString('fr-FR') })] }).catch(e => console.log('Log error:', e.message));
+  await ch.send({ embeds: [new EmbedBuilder().setColor(cfg.color).setTitle(cfg.title).addFields(...cfg.fields).setFooter({ text: 'IWC • Logs • ' + new Date().toLocaleString('fr-FR') })] }).catch(e => console.log('Log error:', e.message));
 }
 
 async function archiverCandidatureNotion(cand, statut, validePar) {
@@ -2075,8 +2075,9 @@ async function cleanBotPinnedMessages(guild, ...channelNames) {
       const ch = getCh(guild, name); if (!ch) continue;
       const pinnedRaw = await ch.messages.fetchPins().catch(() => null);
       if (pinnedRaw) {
-        const pinnedList = pinnedRaw.values ? [...pinnedRaw.values()] : (Array.isArray(pinnedRaw) ? pinnedRaw : []);
-        for (const msg of pinnedList) { if (msg.author.id !== botId) continue; await msg.unpin().catch(() => {}); await msg.delete().catch(() => {}); }
+        const pinnedList = Array.isArray(pinnedRaw?.items) ? pinnedRaw.items.map(it => it.message)
+          : (pinnedRaw.values ? [...pinnedRaw.values()] : (Array.isArray(pinnedRaw) ? pinnedRaw : []));
+        for (const msg of pinnedList) { if (!msg || msg.author?.id !== botId) continue; await msg.unpin().catch(() => {}); await msg.delete().catch(() => {}); }
       }
       const msgs = await ch.messages.fetch({ limit: 50 }).catch(() => null);
       if (!msgs) continue;
@@ -4323,20 +4324,7 @@ client.on('interactionCreate', async interaction => {
       return;
     }
 
-    // ── Handler sélection lieu modification ──
-    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('op_modifier_lieu_')) {
-      const opIdML = interaction.customId.replace('op_modifier_lieu_', '');
-      const lieuVal = interaction.values[0];
-      const lieuVille = VILLES_RDR2.find(v => v.value === lieuVal);
-      const modal = new ModalBuilder()
-        .setCustomId(`modal_op_modifier_${opIdML}_${lieuVal}`)
-        .setTitle(`✏️ Modifier opération`);
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objectif').setLabel('Objectif').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Neutraliser les gardes...')),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Équipe / Notes').setStyle(TextInputStyle.Paragraph).setRequired(false).setPlaceholder('Membres impliqués, matériel, heure...')),
-      );
-      return interaction.showModal(modal);
-    }
+    // ── Handler sélection lieu modification : déplacé dans le bloc isStringSelectMenu (plus bas) ──
 
     // ── Handler présence ✋ ──
     if (interaction.customId.startsWith('op_present_')) {
@@ -4487,6 +4475,16 @@ client.on('interactionCreate', async interaction => {
 
   if (interaction.isStringSelectMenu()) {
     if (interaction.customId === 'op_lieu_select')               return _handleOpLieuSelect(interaction);
+    if (interaction.customId.startsWith('op_modifier_lieu_')) {
+      const opIdML = interaction.customId.replace('op_modifier_lieu_', '');
+      const lieuVal = interaction.values[0];
+      const modal = new ModalBuilder().setCustomId(`modal_op_modifier_${opIdML}_${lieuVal}`).setTitle('✏️ Modifier opération');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objectif').setLabel('Objectif').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Neutraliser les gardes...')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Équipe / Notes').setStyle(TextInputStyle.Paragraph).setRequired(false).setPlaceholder('Membres impliqués, matériel, heure...')),
+      );
+      return interaction.showModal(modal);
+    }
     if (interaction.customId === 'agenda_lieu_select')           return _handleAgendaLieuSelect(interaction);
     // [CORRECTION] btn_rdv_modal_ retiré d'ici — c'est un bouton pas un select
     if (interaction.customId === 'tresor_config_limite_legal') {
@@ -5318,6 +5316,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
   }
   if (interaction.isButton() && interaction.customId === 'csuivi_reset_go') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    await interaction.deferUpdate().catch(() => {}); // accuse réception <3s avant le travail réseau (Gist + refresh)
     const dbR = loadDB();
     const n = (dbR.contrats || []).length;
     dbR.contrats = [];
@@ -5325,7 +5324,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     await sauvegarderSurGitHub().catch(() => {}); // pousse le reset sur le Gist TOUT DE SUITE (sinon il revient au redémarrage)
     try { await _updatePlanningContrats(interaction.client); } catch {}
     try { await _updateContratPanel(interaction.client); } catch {}
-    return interaction.update({ content: `🗑️ **${n} contrat(s) supprimé(s).** Le tableau des échéances et le panneau sont remis à zéro. Tu peux repartir sur du propre. ✅`, components: [] });
+    return interaction.editReply({ content: `🗑️ **${n} contrat(s) supprimé(s).** Le tableau des échéances et le panneau sont remis à zéro. Tu peux repartir sur du propre. ✅`, components: [] }).catch(() => {});
   }
   if (interaction.isButton() && interaction.customId.startsWith('csuivi_filtre::')) {
     if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
@@ -5626,7 +5625,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     _syncContratNotion(contrat, 'signe', signataireDirIC).catch(() => {});
     await sendLog(guild, 'CONTRAT_SIGNE', { contratId, objet: contrat.objet, signe: `${signataireDirIC} — IWC` });
     await ajouterJournalIC(guild, { type: 'contrat', titre: `Contrat employeur signé — ${contratId}`, description: `Employeur : **${contrat.employeurNom}** · Mission : ${contrat.objet}`, auteur: interaction.user.username });
-    await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287).spliceFields(5, 1, { name: '📌 Statut', value: `✅ Signé le ${fmtShort(new Date())} par ${interaction.user.username}`, inline: true })], components: [] });
+    { const _e = EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x57F287); const _si = (_e.data.fields || []).findIndex(f => /statut/i.test(f.name)); if (_si >= 0) _e.spliceFields(_si, 1, { name: '📌 Statut', value: `✅ Signé le ${fmtShort(new Date())} par ${interaction.user.username}`, inline: true }); await interaction.update({ embeds: [_e], components: [] }); }
     const _embedEmploiSigne = new EmbedBuilder().setColor(0x57F287).setTitle(`✅ CONTRAT EMPLOYEUR SIGNÉ — ${contratId}`).addFields({ name: '🆔 Réf', value: `\`${contratId}\``, inline: true }, { name: '📅 Signé le', value: fmtShort(new Date()), inline: true }, { name: '✍️ Signé par', value: signataireDirIC, inline: true }, { name: '🏭 Employeur', value: contrat.employeurNom }, { name: '📋 Mission', value: contrat.objet }, { name: '💰 Rémunération', value: contrat.remuneration }).setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` });
     await archiverContratReponses(guild, contrat, 'signe', _embedEmploiSigne);
     try { const m = await guild.members.fetch(contrat.userId).catch(() => null); if (m) await m.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ Contrat signé — IWC').setDescription(`Iron Wolf Company a **signé** le contrat **${contratId}**.\n\n**Mission :** ${contrat.objet}\n**Rémunération :** ${contrat.remuneration}`).setFooter({ text: 'IWC • Notification' })] }); } catch {}
@@ -5642,7 +5641,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const refuseurDirIC = db.members[interaction.user.id]?.name || interaction.user.username;
     _syncContratNotion(contrat, 'refuse', refuseurDirIC).catch(() => {});
     await sendLog(guild, 'CONTRAT_REFUSE', { contratId, objet: contrat.objet });
-    await interaction.update({ embeds: [EmbedBuilder.from(interaction.message.embeds[0]).setColor(0xED4245).spliceFields(5, 1, { name: '📌 Statut', value: `❌ Décliné le ${fmtShort(new Date())}`, inline: true })], components: [] });
+    { const _e = EmbedBuilder.from(interaction.message.embeds[0]).setColor(0xED4245); const _si = (_e.data.fields || []).findIndex(f => /statut/i.test(f.name)); if (_si >= 0) _e.spliceFields(_si, 1, { name: '📌 Statut', value: `❌ Décliné le ${fmtShort(new Date())}`, inline: true }); await interaction.update({ embeds: [_e], components: [] }); }
     const _embedEmploiRefuse = new EmbedBuilder().setColor(0xED4245).setTitle(`❌ CONTRAT EMPLOYEUR DÉCLINÉ — ${contratId}`).addFields({ name: '🆔 Réf', value: `\`${contratId}\``, inline: true }, { name: '👤 Décliné par', value: interaction.user.username, inline: true }, { name: '🏭 Employeur', value: contrat.employeurNom }, { name: '📋 Mission', value: contrat.objet }).setFooter({ text: `IWC • ${fmtShort(new Date())}` });
     await archiverContratReponses(guild, contrat, 'refuse', _embedEmploiRefuse);
     return;
@@ -8780,6 +8779,7 @@ async function _validerModalRdvIndividuel(interaction) {
   if (!dateISO) return interaction.editReply({ content: '❌ Format de date invalide. Utilise JJ/MM/AAAA.' });
   const rdvId = `RDV-${Date.now().toString().slice(-5)}`;
   const emetteurIC = db.members[interaction.user.id]?.name || interaction.user.username;
+  const emetteurPole = db.members[interaction.user.id]?.pole || 'legal';
   const dateAffiche = new Date(dateISO).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
   const dateCapital = dateAffiche.charAt(0).toUpperCase() + dateAffiche.slice(1);
   const participants = pending.ids.map(id => db.members[id]?.name || id);
@@ -8853,6 +8853,7 @@ async function _validerModalRdv(interaction) {
   const dateCapital = dateAffiche.charAt(0).toUpperCase() + dateAffiche.slice(1);
   const poleMap = { legal: { label: 'Pole Legal', roleId: ROLE_POLE_LEGAL, color: 0x3B82F6 }, illegal: { label: 'La Confrerie', roleId: ROLE_POLE_ILLEGAL, color: 0x8B1A1A }, tous: { label: 'Tous les membres', roleId: null, color: 0x2C3E50 }, direction: { label: 'Direction', roleId: null, color: 0xFFD700 } };
   const poleCfg = poleMap[pole] || poleMap.tous;
+  let photoUrl = null;
   const embed = new EmbedBuilder().setColor(poleCfg.color).setTitle(`📅 ${titre.toUpperCase()}`).setDescription('```\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n   IRON WOLF COMPANY — CONVOCATION\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n```')
     .addFields({ name: '🆔 Référence', value: '`' + rdvId + '`', inline: true }, { name: '📅 Date', value: dateCapital, inline: true }, { name: '🕐 Heure', value: `**${heure}**`, inline: true }, { name: '📍 Lieu', value: lieu, inline: true }, { name: '👥 Destinataires', value: poleCfg.label, inline: true }, { name: '✍️ Convoqué par', value: emetteurIC, inline: true })
     .setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` }).setTimestamp();
@@ -8916,7 +8917,7 @@ async function _validerModalRdv(interaction) {
     )],
   });
 
-  let photoUrl = null;
+  photoUrl = null;
   try {
     const photoFilter = m => m.author.id === interaction.user.id && m.attachments.size > 0 && m.channel.id === interaction.channel.id;
     const btnFilter   = i => i.user.id === interaction.user.id && i.customId === skipPhotoId;

@@ -364,9 +364,9 @@ async function routeInteraction(interaction) {
       if (choix) { cfg.stationId = choix; saveDB(db); }
       const s = _state(guild.id);
       if (s.connection && s.playing) await _diffuser(guild, choix).catch(() => {});
-      await _majPanneau(guild, db);
       const st = stationById(choix);
       await interaction.reply({ content: (s.connection && s.playing) ? `📻 Station : ${st?.emoji || ''} **${st?.nom || ''}**.` : `📻 Station choisie : ${st?.emoji || ''} **${st?.nom || ''}**. Clique sur ▶️ Lancer.`, flags: MessageFlags.Ephemeral }).catch(() => {});
+      _majPanneau(guild, db).catch(() => {});
       return true;
     }
 
@@ -409,8 +409,8 @@ async function routeInteraction(interaction) {
 
     if (interaction.isButton?.() && cid === 'mus_stop') {
       _quitter(guild.id);
-      await _majPanneau(guild, db);
       await interaction.reply({ content: '⏹️ Musique arrêtée, file vidée, je quitte le vocal.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      _majPanneau(guild, db).catch(() => {});
       return true;
     }
 
@@ -427,8 +427,8 @@ async function routeInteraction(interaction) {
       const next = STATIONS[(idx + 1 + STATIONS.length) % STATIONS.length];
       cfg.stationId = next.id; saveDB(db);
       if (s.connection && s.playing) await _diffuser(guild, next.id).catch(() => {});
-      await _majPanneau(guild, db);
       await interaction.reply({ content: `📻 Station : ${next.emoji} **${next.nom}**${s.playing ? '' : ' — clique sur ▶️ Lancer.'}`, flags: MessageFlags.Ephemeral }).catch(() => {});
+      _majPanneau(guild, db).catch(() => {});
       return true;
     }
 
@@ -438,8 +438,8 @@ async function routeInteraction(interaction) {
       saveDB(db);
       const s = _state(guild.id);
       try { s.player?.state?.resource?.volume?.setVolume(cfg.volume); } catch {}
-      await _majPanneau(guild, db);
       await interaction.reply({ content: `🔊 Volume : ${Math.round(cfg.volume * 100)} %`, flags: MessageFlags.Ephemeral }).catch(() => {});
+      _majPanneau(guild, db).catch(() => {});
       return true;
     }
 

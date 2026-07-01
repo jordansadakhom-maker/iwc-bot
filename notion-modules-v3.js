@@ -668,7 +668,8 @@ function _rapportEmbed(r) {
   if (Array.isArray(r.analysesPhotos) && r.analysesPhotos.length) { e.addFields({ name: '🔍 Analyse IA des photos', value: r.analysesPhotos.map(d => `• ${d}`).join('\n').slice(0, 1024), inline: false }); }
   return e.setFooter({ text: 'IWC • Réseau Informateurs — Confidentiel' }).setTimestamp(new Date(r.createdAt || Date.now()));
 }
-function _rapportBoutons(id) {
+function _rapportBoutons(rOrId) {
+  const id = (rOrId && typeof rOrId === 'object') ? rOrId.id : rOrId;
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`info_confirmer_${id}`).setLabel('✅ Confirmer').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`info_infirmer_${id}`).setLabel('❌ Infirmer').setStyle(ButtonStyle.Danger),
@@ -820,12 +821,6 @@ function _rapportEnAttenteEmbed(r) {
     { name: '👤 Rapporteur', value: r.rapporteurId ? `<@${r.rapporteurId}>` : (r.rapporteur || '—'), inline: true },
     { name: '📌 Statut', value: '🆕 En attente de validation', inline: true },
   ).setFooter({ text: 'IWC • Réseau Informateurs — Confidentiel' }).setTimestamp(new Date(r.createdAt || Date.now()));
-}
-function _rapportBoutons(r) {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`info_confirmer_${r.id}`).setLabel('✅ Confirmer').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`info_infirmer_${r.id}`).setLabel('❌ Infirmer').setStyle(ButtonStyle.Danger),
-  );
 }
 async function republierRapportsManquants(guild) {
   try {

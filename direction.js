@@ -94,7 +94,7 @@ function _tachesPayload(db) {
 function _reunEmbed(m) {
   const e = new EmbedBuilder().setColor(m.statut === 'clos' ? 0x555555 : COULEUR)
     .setTitle(`📋 RÉUNION — ${m.titre}`)
-    .setDescription(`🗓️ **${m.date || 'à définir'}**\n\n**Ordre du jour :**\n` + ((m.points && m.points.length) ? m.points.map((p, i) => `**${i + 1}.** ${p}`).join('\n') : '*Aucun point. Ajoute-en avec ➕.*'));
+    .setDescription((`🗓️ **${m.date || 'à définir'}**\n\n**Ordre du jour :**\n` + ((m.points && m.points.length) ? m.points.map((p, i) => `**${i + 1}.** ${p}`).join('\n') : '*Aucun point. Ajoute-en avec ➕.*')).slice(0, 4096));
   if (m.statut === 'clos') {
     e.addFields({ name: '📝 Compte-rendu', value: (m.compteRendu || '—').slice(0, 1024) });
     e.setFooter({ text: `Réunion close · ouverte par ${m.parNom || '?'}` });

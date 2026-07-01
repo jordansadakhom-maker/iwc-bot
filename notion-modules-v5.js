@@ -132,10 +132,12 @@ async function handleOpProgrammeeModal(interaction) {
       content: `<@&${pole === 'legal' ? ROLE_POLE_LEGAL : ROLE_POLE_ILLEGAL}> — 🕐 Opération programmée **${nom}** — Inscriptions ouvertes !`,
       embeds: [embed],
       components: [rowP, rowG],
-    });
-    op.msgId  = msg.id;
-    op.chanId = msg.channel.id;
-    saveDB(db);
+    }).catch(() => null);
+    if (msg) {
+      op.msgId  = msg.id;
+      op.chanId = msg.channel.id;
+      saveDB(db);
+    }
   }
 
   await interaction.editReply({ content: `✅ Opération **${nom}** programmée pour le **${new Date(lancementAt).toLocaleString('fr-FR')}**.\nLancement automatique à l'heure prévue.` });
@@ -226,7 +228,7 @@ async function checkOpsProgrammees(guild) {
             '',
             '**Options disponibles :**',
             '> 🟢 Lancer quand même — cliquez le bouton dans le salon',
-            "'> ❌ Annuler — si l\'opération n\'a plus lieu',"
+            '> ❌ Annuler — si l\'opération n\'a plus lieu',
           ].join('\n'))
           .addFields({ name: '📅 Heure prévue', value: new Date(op.lancementAt).toLocaleString('fr-FR'), inline: true })
           .setFooter({ text: 'IWC • Opération en attente de décision' })
@@ -361,7 +363,7 @@ async function handleOpLancerForce(interaction) {
 // ═══════════════════════════════════════════════════════════════
 
 async function handleStatsAvancees(interaction) {
-  await interaction.deferReply({ ephemeral: false });
+  if (!interaction.deferred && !interaction.replied) await interaction.deferReply();
 
   const db  = loadDB();
   const now = Date.now();

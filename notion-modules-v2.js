@@ -159,7 +159,7 @@ async function handleTresorModal(interaction) {
   await interaction.followUp({ embeds: [embedPhoto], flags: MessageFlags.Ephemeral });
 
   const clean    = s => s.toLowerCase().replace(/[^a-z0-9-]/g, '');
-  const cibleNom = coffre === 'Légal' ? 'coffre-entreprise' : 'coffre-illegal';
+  const cibleNom = 'coffre-entreprise'; // le flux part de #coffre-entreprise (coffre commun) — on y écoute la photo
   const coffreCh = interaction.guild.channels.cache.find(c => clean(c.name || '').includes(clean(cibleNom)));
   if (!coffreCh) return;
 
@@ -352,7 +352,7 @@ async function _validerTransaction(guild, tx, photoUrl) {
   }).catch(() => {});
 
   const clean    = s => s.toLowerCase().replace(/[^a-z0-9-]/g, '');
-  const cibleNom = tx.coffre === 'Légal' ? 'coffre-entreprise' : 'coffre-illegal';
+  const cibleNom = 'coffre-entreprise'; // coffre commun géré depuis #coffre-entreprise
   const coffreCh = guild.channels.cache.find(c => clean(c.name || '').includes(clean(cibleNom)));
 
   if (coffreCh) {
@@ -361,9 +361,9 @@ async function _validerTransaction(guild, tx, photoUrl) {
 
     const embed = new EmbedBuilder()
       .setColor(isEntree ? 0x57F287 : 0xED4245)
-      .setAuthor({ name: `${tx.coffre === 'Légal' ? '⚖️ Iron Wolf Company' : '🔒 La Confrérie'} • Trésorerie`, iconURL: guild.iconURL() || undefined })
+      .setAuthor({ name: `⚖️ Iron Wolf Company • Trésorerie`, iconURL: guild.iconURL() || undefined })
       .setTitle(`${isEntree ? '📈' : '📉'} ${tx.type.toUpperCase()} — $${tx.montant.toLocaleString('fr-FR')}`)
-      .setDescription(`\`\`\`\n${line}\n  ${tx.coffre === 'Légal' ? '⚖️ COFFRE LÉGAL' : '🔒 COFFRE ILLÉGAL'}\n${line}\n\`\`\``)
+      .setDescription(`\`\`\`\n${line}\n  🏦 COFFRE ENTREPRISE\n${line}\n\`\`\``)
       .addFields(
         { name: '📋 Objet',       value: tx.objet,                                             inline: true },
         { name: '👤 Responsable', value: tx.username,                                          inline: true },
@@ -727,7 +727,7 @@ async function handleTresorConfigSelect(interaction) {
   console.log(`✅ Limite sortie ${isLegal ? 'légal' : 'illégal'} mise à jour : $${montant} par ${interaction.user.username}`);
 }
 
-function nettoyerTransactionsFantôomes() {
+function nettoyerTransactionsFantomes() {
   const db = loadDB(); if (!db.transactionsPendantes) return;
   const now = Date.now(); const limite = 10 * 60 * 1000; let changed = false;
   for (const [txId, tx] of Object.entries(db.transactionsPendantes)) { if (now - new Date(tx.createdAt).getTime() > limite) { delete db.transactionsPendantes[txId]; changed = true; console.log(`🧹 Transaction fantôme supprimée : ${txId}`); } }
@@ -779,7 +779,7 @@ async function checkAlerteCoffre(guild) {
 module.exports = {
   handleTresorCommand, handleTresorFlow, handleTresorModal, handleSoldeButton, setupTresorButton, rafraichirPanelCoffre,
   handleTresorValidation, handleTresorConfigButton, handleTresorConfigSelect,
-  nettoyerTransactionsFantôomes,
+  nettoyerTransactionsFantomes,
   ajouterJournalIC: _ajouterJournalIC,
   handleJournalCommand, handleJournalPagination,
   handleContratsArchives,

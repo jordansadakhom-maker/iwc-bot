@@ -188,9 +188,9 @@ function buildContratEmbed(contrat) {
   const confid = !!contrat.confidentiel;
 
   const commanditaire = confid ? '🕶️ *Anonyme*' : (contrat.commanditaire || '—');
-  const objet = confid
+  const objet = (confid
     ? '🔒 *Confidentiel — détails transmis aux agents en privé.*'
-    : (contrat.objet || '—');
+    : (contrat.objet || '—')).slice(0, 1024);
 
   const agents = (contrat.agents && contrat.agents.length)
     ? contrat.agents.map(id => {
@@ -284,7 +284,7 @@ function buildSignatureEmbed(contrat) {
       { name: '💰 Récompense promise', value: `${contrat.remuneration || '—'}`, inline: true },
       { name: '📅 Terme échu le', value: contrat.dateEcheance ? fmtDate(contrat.dateEcheance) : (contrat.echeanceTexte || 'À votre convenance'), inline: true },
       { name: '​', value: '​', inline: true },
-      { name: '📋 Objet du contrat', value: contrat.objet || '—', inline: false },
+      { name: '📋 Objet du contrat', value: (contrat.objet || '—').slice(0, 1024), inline: false },
     )
     .setFooter({ text: '✒️ La Confrérie — scellé à la cire noire • Document confidentiel' });
   if (contrat.details) e.addFields({ name: '🪶 Consignes & clauses', value: contrat.details.slice(0, 1000) });
@@ -315,7 +315,7 @@ function buildBriefingEmbed(contrat) {
       { name: '⚠️ Péril encouru', value: `${r.emoji} ${r.label}`, inline: true },
       { name: '📅 Terme échu le', value: contrat.dateEcheance ? fmtDate(contrat.dateEcheance) : (contrat.echeanceTexte || 'À votre convenance'), inline: true },
       { name: '👤 Commanditaire', value: contrat.commanditaire ? contrat.commanditaire : '🕶️ Anonyme', inline: false },
-      { name: '📋 Objet du contrat', value: contrat.objet || '—', inline: false },
+      { name: '📋 Objet du contrat', value: (contrat.objet || '—').slice(0, 1024), inline: false },
       { name: '💰 Récompense promise', value: `${contrat.remuneration || '—'} *(prime ${r.prime})*`, inline: false },
     )
     .setFooter({ text: '✒️ La Confrérie — scellé à la cire noire • Ordre confidentiel' });
