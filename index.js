@@ -3431,6 +3431,12 @@ async function _finaliserNoteTerrain(guild, ctx) {
     } catch (e) { console.log('❌ Sync Notion renseignement:', e.message); }
   }
   console.log(`✅ Note validée par ${ctx.agent} ${(ctx.tags || []).length ? '[' + ctx.tags.join(',') + ']' : ''}`);
+  // 🕵️ Extraction automatique des contacts mentionnés (noms / n° de télégramme) → fiches du répertoire
+  try {
+    repertoire.traiterRapportTerrain?.(guild, ctx.transcriptionBrute || ctx.info || '', `note ${ctx.agent || ''}`.trim())
+      .then(r => { if (r && ((r.crees || []).length || (r.majs || []).length)) console.log(`🎴 Contacts auto : ${(r.crees || []).length} créé(s), ${(r.majs || []).length} mis à jour`); })
+      .catch(() => {});
+  } catch {}
   return destNote;
 }
 
