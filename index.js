@@ -157,6 +157,9 @@ catch (e) { console.log('⚠️ evenements non chargé:', e.message); }
 let carte = {};
 try { carte = require('./carte'); console.log('✅ Module carte (carte interactive) chargé'); }
 catch (e) { console.log('⚠️ carte non chargé:', e.message); }
+let portail = {};
+try { portail = require('./portail'); console.log('✅ Module portail (portail web IWC) chargé'); }
+catch (e) { console.log('⚠️ portail non chargé:', e.message); }
 
 let factures = {};
 try { factures = require('./factures'); console.log('✅ Module factures (Facturation) chargé'); }
@@ -2454,6 +2457,8 @@ async function autoSetup(guild) {
   _installerPanelCoffreIllegal(guild).then(() => console.log('🔒 Panneau coffre illégal (boutons) installé')).catch(() => {});
   try { carte.init?.({ isMembre, isDirection }); } catch {}
   carte.installerPanel?.(guild).then(() => console.log('🗺️ Panneau carte interactive installé')).catch(() => {});
+  try { portail.init?.({ isMembre, isDirection }); } catch {}
+  portail.installerPanel?.(guild).then(() => console.log('🌐 Panneau portail web installé')).catch(() => {});
   _assurerEtiquettesContrats(guild).then(() => console.log('🏷️ Étiquettes contrats prêtes (type + statut)')).catch(() => {});
   _assurerEtiquettesOperations(guild).then(() => console.log('🏷️ Étiquettes opérations prêtes (pôle + statut)')).catch(() => {});
   _assurerEtiquettesAgenda(guild).then(() => console.log('🏷️ Étiquettes agenda prêtes (type + statut)')).catch(() => {});
@@ -4169,6 +4174,7 @@ client.on('interactionCreate', async interaction => {
   if (await ripoux.routeInteraction?.(interaction)) return;
   if (await routeTresorerieInteraction(interaction)) return;
   if (await carte.routeInteraction?.(interaction)) return;
+  if (await portail.routeInteraction?.(interaction)) return;
   if (await evenements.routeInteraction?.(interaction)) return;
   if (await annonces.routeInteraction?.(interaction)) return;
   if (await pepites.routeInteraction?.(interaction)) return;
@@ -6206,6 +6212,7 @@ http.createServer(async (req, res) => {
   }
 
   if (await carte.httpHandle?.(req, res, client)) return;
+  if (await portail.httpHandle?.(req, res, client)) return;
 
   res.writeHead(404); res.end('Not found');
 }).listen(PORT, () => console.log(`🌐 Serveur keepalive en écoute sur le port ${PORT}`));
