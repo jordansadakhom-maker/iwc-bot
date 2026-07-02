@@ -35,8 +35,19 @@ const NIVEAUX = [
 ];
 const REGIONS = ['Ambarino', 'New Hanover', 'Lemoyne', 'West Elizabeth', 'New Austin', 'Guarma', 'Autre'];
 
+// ── Itinéraires / routes tracés sur la carte (opérations, routines, replis…) ──
+const ROUTE_TYPES = [
+  { key: 'operation', label: "Itinéraire d'opération", emoji: '🎯', color: '#c82828' },
+  { key: 'routine',   label: 'Route habituelle / routine', emoji: '🔁', color: '#2870c8' },
+  { key: 'repli',     label: 'Repli / évasion', emoji: '🏃', color: '#e0762e' },
+  { key: 'patrouille',label: 'Patrouille / reconnaissance', emoji: '🐎', color: '#3ca03c' },
+  { key: 'convoi',    label: 'Convoi / contrebande', emoji: '📦', color: '#b84fd0' },
+  { key: 'autre',     label: 'Autre itinéraire', emoji: '🧵', color: '#c8a45c' },
+];
+
 const _type = k => TYPES.find(t => t.key === k) || { key: k, label: k, emoji: '📌' };
 const _niv = k => NIVEAUX.find(n => n.key === k) || { key: k, label: k, emoji: '⚪' };
+const _rtype = k => ROUTE_TYPES.find(t => t.key === k) || { key: k, label: k, emoji: '🧵', color: '#c8a45c' };
 
 let _isMembre = () => true, _isDirection = () => false;
 function init(opts) { if (opts?.isMembre) _isMembre = opts.isMembre; if (opts?.isDirection) _isDirection = opts.isDirection; }
@@ -45,8 +56,18 @@ function _peutVoir(member, niveau) {
   if (niveau === 'confidentiel') return _isDirection(member);
   return true;
 }
-function _ensure(db) { if (!db.carte) db.carte = {}; if (!Array.isArray(db.carte.points)) db.carte.points = []; return db.carte; }
+function _ensure(db) { if (!db.carte) db.carte = {}; if (!Array.isArray(db.carte.points)) db.carte.points = []; if (!Array.isArray(db.carte.routes)) db.carte.routes = []; return db.carte; }
 function _id() { return 'PT-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
+function _rid() { return 'RT-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
+function _cleanPoints(arr) {
+  if (!Array.isArray(arr)) return [];
+  const out = [];
+  for (const p of arr) {
+    const x = Math.max(0, Math.min(100, Number(p && p.x))), y = Math.max(0, Math.min(100, Number(p && p.y)));
+    if (isFinite(x) && isFinite(y)) out.push({ x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 });
+  }
+  return out.slice(0, 60);
+}
 function _estImage(a) { return (a.contentType || '').startsWith('image') || /\.(png|jpe?g|webp|gif)(\?|$)/i.test(a.url || a.name || ''); }
 
 // Brouillons d'ajout (en mémoire) : userId -> { type, niveau }
@@ -89,7 +110,7 @@ function _panelEmbed(db) {
     .setDescription([
       '*Tous les lieux utiles, classés et conservés — récoltes, vendeurs, coups, chasse, pêche, planques.*',
       '',
-      '**🌐 Ouvrir la carte cliquable** — la carte interactive : clique dessus pour poser/voir des points.',
+      '**🌐 Ouvrir la carte cliquable** — la carte interactive : pose des points **et trace des itinéraires** (opérations, routines, replis, patrouilles…).',
       '**🗺️ Voir la carte** — l\'image de la carte en référence (ici dans Discord).',
       '**🔍 Consulter** — la liste des lieux que ton **accréditation** te permet de voir.',
       '**➕ Ajouter** — enregistre un lieu (type · accès · région · notes).',
@@ -346,8 +367,9 @@ async function httpHandle(req, res, client) {
     if (u.pathname === '/carte/data') {
       if (!level) { res.writeHead(403, { 'Content-Type': 'application/json' }); res.end('{"error":"expired"}'); return true; }
       const pts = (loadDB().carte?.points || []).filter(p => _canSee(level, p.niveau)).map(p => ({ id: p.id, type: p.type, niveau: p.niveau, nom: p.nom, lieu: p.lieu || '', notes: p.notes || '', region: p.region || '', x: (typeof p.x === 'number' ? p.x : null), y: (typeof p.y === 'number' ? p.y : null) }));
+      const routes = (loadDB().carte?.routes || []).filter(r => _canSee(level, r.niveau)).map(r => ({ id: r.id, type: r.type, niveau: r.niveau, nom: r.nom, notes: r.notes || '', points: (r.points || []).map(p => ({ x: p.x, y: p.y })) }));
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ level, types: TYPES.map(t => ({ key: t.key, label: t.label, emoji: t.emoji })), niveaux: _niveauxAutorises(level), points: pts })); return true;
+      res.end(JSON.stringify({ level, types: TYPES.map(t => ({ key: t.key, label: t.label, emoji: t.emoji })), routeTypes: ROUTE_TYPES.map(t => ({ key: t.key, label: t.label, emoji: t.emoji, color: t.color })), niveaux: _niveauxAutorises(level), points: pts, routes })); return true;
     }
     if (u.pathname === '/carte/add' && req.method === 'POST') {
       if (!level) { res.writeHead(403); res.end('{}'); return true; }
@@ -380,6 +402,44 @@ async function httpHandle(req, res, client) {
           saveDB(db); res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}'); if (guild) installerPanel(guild).catch(() => {});
         } catch { res.writeHead(500); res.end('{}'); }
       }); return true;
+    }
+    // ── Itinéraires / routes ──
+    if (u.pathname === '/carte/route/add' && req.method === 'POST') {
+      if (!level) { res.writeHead(403); res.end('{}'); return true; }
+      let body = ''; req.on('data', d => body += d); req.on('end', () => {
+        try {
+          const d = JSON.parse(body || '{}');
+          const nom = String(d.nom || '').trim().slice(0, 100); if (!nom) { res.writeHead(400); res.end('{"error":"nom"}'); return; }
+          const points = _cleanPoints(d.points); if (points.length < 2) { res.writeHead(400); res.end('{"error":"points"}'); return; }
+          const type = ROUTE_TYPES.find(t => t.key === d.type) ? d.type : 'autre';
+          let niveau = ['public', 'membre', 'confidentiel'].includes(d.niveau) ? d.niveau : 'membre'; if (!_canSee(level, niveau)) niveau = level;
+          const db = loadDB(); const c = _ensure(db);
+          c.routes.push({ id: _rid(), type, niveau, nom, points, notes: String(d.notes || '').slice(0, 500), parId: info.userId, parNom: '(carte web)', createdAt: new Date().toISOString() });
+          saveDB(db);
+          res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}'); if (guild) installerPanel(guild).catch(() => {});
+        } catch { res.writeHead(500); res.end('{}'); }
+      }); return true;
+    }
+    if (u.pathname === '/carte/route/edit' && req.method === 'POST') {
+      if (!level) { res.writeHead(403); res.end('{}'); return true; }
+      let body = ''; req.on('data', d => body += d); req.on('end', () => {
+        try {
+          const d = JSON.parse(body || '{}'); const db = loadDB(); const c = _ensure(db);
+          const r = c.routes.find(x => x.id === d.id);
+          if (!r) { res.writeHead(404); res.end('{}'); return; }
+          if (!_canSee(level, r.niveau)) { res.writeHead(403); res.end('{}'); return; }
+          const nom = String(d.nom || '').trim().slice(0, 100); if (nom) r.nom = nom;
+          if (ROUTE_TYPES.find(t => t.key === d.type)) r.type = d.type;
+          let niveau = ['public', 'membre', 'confidentiel'].includes(d.niveau) ? d.niveau : r.niveau; if (!_canSee(level, niveau)) niveau = r.niveau; r.niveau = niveau;
+          r.notes = String(d.notes || '').slice(0, 500);
+          if (Array.isArray(d.points)) { const pts = _cleanPoints(d.points); if (pts.length >= 2) r.points = pts; }
+          saveDB(db); res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}'); if (guild) installerPanel(guild).catch(() => {});
+        } catch { res.writeHead(500); res.end('{}'); }
+      }); return true;
+    }
+    if (u.pathname === '/carte/route/del' && req.method === 'POST') {
+      if (level !== 'confidentiel') { res.writeHead(403); res.end('{}'); return true; }
+      let body = ''; req.on('data', d => body += d); req.on('end', () => { try { const d = JSON.parse(body || '{}'); const db = loadDB(); const c = _ensure(db); c.routes = c.routes.filter(r => r.id !== d.id); saveDB(db); res.writeHead(200); res.end('{"ok":true}'); if (guild) installerPanel(guild).catch(() => {}); } catch { res.writeHead(500); res.end('{}'); } }); return true;
     }
     if (u.pathname === '/carte') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -414,11 +474,22 @@ header b{color:#d9a441}.lvl{font-size:13px;opacity:.85}.hint{font-size:13px;opac
 header input,header select{background:#15110c;color:#e8d8c0;border:1px solid #5a4632;border-radius:6px;padding:6px 8px;font-family:inherit;font-size:13px}
 header #search{width:170px;max-width:40vw}
 #coords{position:fixed;bottom:10px;right:10px;background:#241a12dd;border:1px solid #5a4632;border-radius:6px;padding:5px 9px;font-family:monospace;font-size:12px;color:#d9a441;z-index:30}
+#routes{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
+polyline.rline{fill:none;stroke-width:3;stroke-linejoin:round;stroke-linecap:round;pointer-events:stroke;cursor:pointer}
+polyline.rhalo{fill:none;stroke:#000;stroke-width:6;opacity:.3;stroke-linejoin:round;stroke-linecap:round;pointer-events:none}
+.modebtn{background:#241a12;color:#e8d8c0;border:1px solid #5a4632;border-radius:6px;padding:6px 10px;font-family:inherit;font-size:13px;cursor:pointer}
+.modebtn.on{background:#d9a441;color:#1a1208;border-color:#d9a441;font-weight:bold}
+#drawbar{position:fixed;top:58px;left:50%;transform:translateX(-50%);z-index:35;background:#241a12f2;border:1px solid #d9a441;border-radius:10px;padding:8px 10px;display:none;gap:8px;align-items:center;box-shadow:0 6px 20px #000a}
+#drawbar.on{display:flex}#drawbar span{font-size:13px;color:#f0c850}
+#drawbar button{border:0;border-radius:6px;padding:7px 10px;cursor:pointer;font-weight:bold;font-family:inherit;font-size:13px}
+.dbu{background:#5a4632;color:#e8d8c0}.dbf{background:#3a7d3a;color:#fff}.dbc{background:#a33;color:#fff}
+.leg.rt .dot{height:5px;border-radius:2px;width:16px}
 </style></head><body>
-<header><b>🗺️ Carte — La Confrérie</b><span class="lvl">Accès : ${level === 'confidentiel' ? '🔴 Confidentiel' : level === 'membre' ? '🟡 Membre' : '🟢 Public'}</span><input id="search" placeholder="🔎 Chercher un nom…"><select id="regionf"><option value="">📍 Toutes régions</option></select><span class="hint">🖱️ Clique pour ajouter</span></header>
-<div id="stage"><div id="wrap"><img id="map" src="/carte/image?k=${tok}" alt="carte"></div></div><div id="legend"></div><div id="coords">X — · Y —</div><div id="zoom"><button id="zin" title="Zoom +">＋</button><button id="zout" title="Zoom −">－</button><button id="zres" title="Réinitialiser">⟲</button></div><div id="mask"></div>
+<header><b>🗺️ Carte — La Confrérie</b><span class="lvl">Accès : ${level === 'confidentiel' ? '🔴 Confidentiel' : level === 'membre' ? '🟡 Membre' : '🟢 Public'}</span><input id="search" placeholder="🔎 Chercher…"><select id="regionf"><option value="">📍 Toutes régions</option></select><button id="modebtn" class="modebtn">🧵 Tracer un itinéraire</button><span class="hint">🖱️ Clic = point · 🧵 = itinéraire</span></header>
+<div id="stage"><div id="wrap"><img id="map" src="/carte/image?k=${tok}" alt="carte"><svg id="routes" viewBox="0 0 100 100" preserveAspectRatio="none"></svg></div></div><div id="legend"></div><div id="coords">X — · Y —</div><div id="zoom"><button id="zin" title="Zoom +">＋</button><button id="zout" title="Zoom −">－</button><button id="zres" title="Réinitialiser">⟲</button></div><div id="drawbar"><span id="drawinfo">Itinéraire : 0 point</span><button id="drawundo" class="dbu">↶ Annuler</button><button id="drawfin" class="dbf">✓ Terminer</button><button id="drawcancel" class="dbc">✕</button></div><div id="mask"></div>
 <script>
 var TOK=${JSON.stringify(tok)},LVL=${JSON.stringify(level)},DATA={types:[],niveaux:[],points:[]},HIDDEN={},SEARCH='',REGION='';
+var ROUTES=[],RTYPES=[],RHIDDEN={},MODE='pts',DRAW=[];
 var wrap=document.getElementById('wrap'),mapImg=document.getElementById('map'),mask=document.getElementById('mask');
 var SC=1,OX=0,OY=0,_moved=false;
 function esc(s){var d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;}
@@ -426,16 +497,25 @@ function escA(s){return esc(s).replace(/"/g,'&quot;');}
 function borderFor(n){if(n==='confidentiel')return '3px solid #e05555';if(n==='membre')return '2px solid #f0c850';return '2px solid #ffffff';}
 function colorFor(t){var m={recolte:'#3ca03c',vendeur:'#2870c8',illegal:'#c82828',chasse:'#965a28',peche:'#28a0b4',planque:'#783ca0',four:'#e08a2e',fleur_dragon:'#b84fd0',fournaise:'#8a4b2a',peches:'#e8a05a',autre:'#5a5a5a'};return m[t]||'#5a5a5a';}
 function emojiFor(t){var o=DATA.types.find(function(x){return x.key===t;});return o?o.emoji:'📌';}
-function load(){fetch('/carte/data?k='+TOK).then(function(r){return r.json();}).then(function(j){if(j.error){document.body.innerHTML='<h2 style=text-align:center;margin-top:60px>Lien expiré</h2>';return;}DATA=j;render();});}
-function render(){document.querySelectorAll('.pin').forEach(function(p){p.remove();});var q=(SEARCH||'').toLowerCase();DATA.points.forEach(function(p){if(p.x==null)return;if(HIDDEN[p.type])return;if(REGION&&(p.region||'')!==REGION)return;if(q&&(p.nom||'').toLowerCase().indexOf(q)<0&&(p.lieu||'').toLowerCase().indexOf(q)<0&&(p.notes||'').toLowerCase().indexOf(q)<0)return;var d=document.createElement('div');d.className='pin';d.style.left=p.x+'%';d.style.top=p.y+'%';d.style.background=colorFor(p.type);d.style.border=borderFor(p.niveau);d.textContent=emojiFor(p.type);d.title=p.nom+(p.lieu?(' — '+p.lieu):'');d.onclick=function(e){e.stopPropagation();showInfo(p);};wrap.appendChild(d);});buildLegend();buildRegions();}
+function rcolor(t){var o=RTYPES.find(function(x){return x.key===t;});return o?o.color:'#c8a45c';}
+function remoji(t){var o=RTYPES.find(function(x){return x.key===t;});return o?o.emoji:'🧵';}
+function rlabel(t){var o=RTYPES.find(function(x){return x.key===t;});return o?o.label:t;}
+function sizeSvg(){var s=document.getElementById('routes');if(s&&mapImg){s.setAttribute('width',mapImg.clientWidth);s.setAttribute('height',mapImg.clientHeight);s.style.width=mapImg.clientWidth+'px';s.style.height=mapImg.clientHeight+'px';}}
+function renderRoutes(){var svg=document.getElementById('routes');if(!svg)return;sizeSvg();var q=(SEARCH||'').toLowerCase();var h='';for(var i=0;i<ROUTES.length;i++){var r=ROUTES[i];if(RHIDDEN[r.type])continue;if(!r.points||r.points.length<2)continue;if(q&&(r.nom||'').toLowerCase().indexOf(q)<0&&(r.notes||'').toLowerCase().indexOf(q)<0)continue;var pts=r.points.map(function(p){return p.x+','+p.y;}).join(' ');h+='<polyline class="rhalo" points="'+pts+'" vector-effect="non-scaling-stroke"></polyline><polyline class="rline" data-rid="'+r.id+'" points="'+pts+'" stroke="'+rcolor(r.type)+'" vector-effect="non-scaling-stroke"></polyline>';}if(MODE==='route'&&DRAW.length){var dp=DRAW.map(function(p){return p.x+','+p.y;}).join(' ');if(DRAW.length>1)h+='<polyline class="rline" points="'+dp+'" stroke="#f0c850" stroke-dasharray="2 1.5" vector-effect="non-scaling-stroke"></polyline>';for(var k=0;k<DRAW.length;k++)h+='<circle cx="'+DRAW[k].x+'" cy="'+DRAW[k].y+'" r="1" fill="#f0c850" stroke="#1a1208" stroke-width="0.3"></circle>';}svg.innerHTML=h;Array.prototype.forEach.call(svg.querySelectorAll('.rline[data-rid]'),function(el){el.addEventListener('click',function(e){e.stopPropagation();var r=ROUTES.find(function(x){return x.id===el.getAttribute('data-rid');});if(r)showRoute(r);});});}
+function showRoute(r){closePop();mask.style.display='block';var n=DATA.niveaux.find(function(x){return x.key===r.niveau;});var box=document.createElement('div');box.className='pop';var del=(LVL==='confidentiel')?'<button class=bdel id=rdel>🗑️ Supprimer</button>':'';var ed='<button class=bok id=redit>✏️ Modifier</button>';box.innerHTML='<h3>'+remoji(r.type)+' '+esc(r.nom)+'</h3><div><span class=tag>'+esc(rlabel(r.type))+'</span><span class=tag>'+esc(n?n.label:r.niveau)+'</span><span class=tag>'+r.points.length+' points</span></div>'+(r.notes?'<p>📝 '+esc(r.notes)+'</p>':'')+'<div class=row>'+ed+del+'<button class=bno id=rclose>Fermer</button></div>';document.body.appendChild(box);document.getElementById('rclose').onclick=closePop;document.getElementById('redit').onclick=function(){showRouteForm(r);};if(del)document.getElementById('rdel').onclick=function(){fetch('/carte/route/del?k='+TOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:r.id})}).then(function(){closePop();load();});};}
+function showRouteForm(er){closePop();mask.style.display='block';var topts=RTYPES.map(function(t){return '<option value='+t.key+(er&&er.type===t.key?' selected':'')+'>'+t.emoji+' '+t.label+'</option>';}).join('');var nopts=DATA.niveaux.map(function(n){return '<option value='+n.key+(er&&er.niveau===n.key?' selected':'')+'>'+n.label+'</option>';}).join('');var box=document.createElement('div');box.className='pop';box.innerHTML='<h3>'+(er?'✏️ Modifier le tracé':'🧵 Nouvel itinéraire')+'</h3><p style="font-family:monospace;opacity:.85;margin:0 0 6px">'+(er?er.points.length:DRAW.length)+' point(s) tracé(s)</p><label>Type</label><select id=r_type>'+topts+'</select><label>👁️ Qui peut voir ?</label><select id=r_niv>'+nopts+'</select><label>Nom *</label><input id=r_nom value="'+(er?escA(er.nom):'')+'" placeholder="Ex: Convoi Blackwater vers Valentine"><label>Notes (horaires, fréquence, précautions…)</label><textarea id=r_notes rows=2>'+(er?esc(er.notes):'')+'</textarea><div class=row><button class=bok id=r_save>Enregistrer</button><button class=bno id=r_cancel>Annuler</button></div>';document.body.appendChild(box);document.getElementById('r_cancel').onclick=closePop;document.getElementById('r_save').onclick=function(){var nom=document.getElementById('r_nom').value.trim();if(!nom){alert('Le nom est obligatoire');return;}var payload={nom:nom,type:document.getElementById('r_type').value,niveau:document.getElementById('r_niv').value,notes:document.getElementById('r_notes').value};var url;if(er){url='/carte/route/edit?k='+TOK;payload.id=er.id;}else{url='/carte/route/add?k='+TOK;payload.points=DRAW;}fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(){DRAW=[];setMode('pts');closePop();load();});};}
+function updateDrawBar(){var el=document.getElementById('drawinfo');if(el)el.textContent='Itinéraire : '+DRAW.length+' point'+(DRAW.length>1?'s':'');}
+function setMode(m){MODE=m;var b=document.getElementById('modebtn');var bar=document.getElementById('drawbar');if(b){b.classList.toggle('on',m==='route');b.textContent=m==='route'?'✋ Arrêter le tracé':'🧵 Tracer un itinéraire';}if(bar)bar.classList.toggle('on',m==='route');if(m!=='route')DRAW=[];updateDrawBar();renderRoutes();}
+function load(){fetch('/carte/data?k='+TOK).then(function(r){return r.json();}).then(function(j){if(j.error){document.body.innerHTML='<h2 style=text-align:center;margin-top:60px>Lien expiré</h2>';return;}DATA=j;ROUTES=j.routes||[];RTYPES=j.routeTypes||[];render();});}
+function render(){document.querySelectorAll('.pin').forEach(function(p){p.remove();});var q=(SEARCH||'').toLowerCase();DATA.points.forEach(function(p){if(p.x==null)return;if(HIDDEN[p.type])return;if(REGION&&(p.region||'')!==REGION)return;if(q&&(p.nom||'').toLowerCase().indexOf(q)<0&&(p.lieu||'').toLowerCase().indexOf(q)<0&&(p.notes||'').toLowerCase().indexOf(q)<0)return;var d=document.createElement('div');d.className='pin';d.style.left=p.x+'%';d.style.top=p.y+'%';d.style.background=colorFor(p.type);d.style.border=borderFor(p.niveau);d.textContent=emojiFor(p.type);d.title=p.nom+(p.lieu?(' — '+p.lieu):'');d.onclick=function(e){e.stopPropagation();showInfo(p);};wrap.appendChild(d);});buildLegend();buildRegions();renderRoutes();}
 function buildRegions(){var sel=document.getElementById('regionf');if(!sel)return;var regs={};DATA.points.forEach(function(p){if(p.region)regs[p.region]=1;});var opts='<option value="">📍 Toutes régions</option>';Object.keys(regs).sort().forEach(function(r){opts+='<option value="'+escA(r)+'"'+(r===REGION?' selected':'')+'>📍 '+esc(r)+'</option>';});sel.innerHTML=opts;}
-function buildLegend(){var counts={},tot=0;DATA.points.forEach(function(p){if(p.x==null)return;tot++;counts[p.type]=(counts[p.type]||0)+1;});var box=document.getElementById('legend');if(!box)return;var keys=DATA.types.filter(function(t){return counts[t.key];});if(!keys.length){box.style.display='none';return;}box.style.display='block';var html='<h4>Filtres · '+tot+' point(s)</h4>';keys.forEach(function(t){html+='<div class="leg'+(HIDDEN[t.key]?' off':'')+'" data-k="'+t.key+'"><span class="dot" style="background:'+colorFor(t.key)+'"></span>'+t.emoji+' '+esc(t.label)+'<span class="c">'+counts[t.key]+'</span></div>';});box.innerHTML=html;Array.prototype.forEach.call(box.querySelectorAll('.leg'),function(el){el.onclick=function(){var k=el.getAttribute('data-k');HIDDEN[k]=!HIDDEN[k];render();};});}
+function buildLegend(){var counts={},tot=0;DATA.points.forEach(function(p){if(p.x==null)return;tot++;counts[p.type]=(counts[p.type]||0)+1;});var rcounts={};ROUTES.forEach(function(r){rcounts[r.type]=(rcounts[r.type]||0)+1;});var box=document.getElementById('legend');if(!box)return;var keys=DATA.types.filter(function(t){return counts[t.key];});var rkeys=RTYPES.filter(function(t){return rcounts[t.key];});if(!keys.length&&!rkeys.length){box.style.display='none';return;}box.style.display='block';var html='';if(keys.length){html+='<h4>Lieux · '+tot+'</h4>';keys.forEach(function(t){html+='<div class="leg'+(HIDDEN[t.key]?' off':'')+'" data-k="'+t.key+'"><span class="dot" style="background:'+colorFor(t.key)+'"></span>'+t.emoji+' '+esc(t.label)+'<span class="c">'+counts[t.key]+'</span></div>';});}if(rkeys.length){html+='<h4 style="margin-top:8px">🧵 Itinéraires</h4>';rkeys.forEach(function(t){html+='<div class="leg rt'+(RHIDDEN[t.key]?' off':'')+'" data-rk="'+t.key+'"><span class="dot" style="background:'+t.color+'"></span>'+t.emoji+' '+esc(t.label)+'<span class="c">'+rcounts[t.key]+'</span></div>';});}box.innerHTML=html;Array.prototype.forEach.call(box.querySelectorAll('.leg[data-k]'),function(el){el.onclick=function(){var k=el.getAttribute('data-k');HIDDEN[k]=!HIDDEN[k];render();};});Array.prototype.forEach.call(box.querySelectorAll('.leg[data-rk]'),function(el){el.onclick=function(){var k=el.getAttribute('data-rk');RHIDDEN[k]=!RHIDDEN[k];buildLegend();renderRoutes();};});}
 function closePop(){var e=document.querySelector('.pop');if(e)e.remove();mask.style.display='none';}
 mask.onclick=closePop;
 function showInfo(p){closePop();mask.style.display='block';var n=DATA.niveaux.find(function(x){return x.key===p.niveau;});var box=document.createElement('div');box.className='pop';var del=(LVL==='confidentiel')?'<button class=bdel id=bdel>🗑️ Supprimer</button>':'';var ed='<button class=bok id=bedit>✏️ Modifier</button>';box.innerHTML='<h3>'+emojiFor(p.type)+' '+esc(p.nom)+'</h3><div><span class=tag>'+esc((DATA.types.find(function(x){return x.key===p.type;})||{}).label||p.type)+'</span><span class=tag>'+esc(n?n.label:p.niveau)+'</span></div>'+(p.region?'<p>📍 '+esc(p.region)+'</p>':'')+(p.lieu?'<p>'+esc(p.lieu)+'</p>':'')+(p.notes?'<p>📝 '+esc(p.notes)+'</p>':'')+(p.x!=null?'<p>🧭 <span style="font-family:monospace">X '+(+p.x).toFixed(1)+' · Y '+(+p.y).toFixed(1)+'</span></p>':'')+'<div class=row>'+ed+del+'<button class=bno id=bclose>Fermer</button></div>';document.body.appendChild(box);document.getElementById('bclose').onclick=closePop;document.getElementById('bedit').onclick=function(){closePop();showAdd(p.x,p.y,p);};if(del)document.getElementById('bdel').onclick=function(){fetch('/carte/del?k='+TOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:p.id})}).then(function(){closePop();load();});};}
 function _setCoords(x,y){var c=document.getElementById('coords');if(c)c.textContent='X '+x.toFixed(1)+' · Y '+y.toFixed(1);}
 mapImg.addEventListener('mousemove',function(e){var r=mapImg.getBoundingClientRect();_setCoords((e.clientX-r.left)/r.width*100,(e.clientY-r.top)/r.height*100);});
-mapImg.addEventListener('click',function(e){if(_moved){_moved=false;return;}var r=mapImg.getBoundingClientRect();var x=(e.clientX-r.left)/r.width*100;var y=(e.clientY-r.top)/r.height*100;_setCoords(x,y);showAdd(x,y);});
+mapImg.addEventListener('click',function(e){if(_moved){_moved=false;return;}var r=mapImg.getBoundingClientRect();var x=(e.clientX-r.left)/r.width*100;var y=(e.clientY-r.top)/r.height*100;_setCoords(x,y);if(MODE==='route'){DRAW.push({x:+x.toFixed(2),y:+y.toFixed(2)});renderRoutes();updateDrawBar();return;}showAdd(x,y);});
 (function(){var STg=document.getElementById('stage');if(!STg)return;
 function applyT(){wrap.style.transform='translate('+OX+'px,'+OY+'px) scale('+SC+')';}
 function zoomAt(mx,my,ds){var ns=Math.min(6,Math.max(1,SC*ds));var k=ns/SC;OX=mx-(mx-OX)*k;OY=my-(my-OY)*k;SC=ns;if(SC<=1.001){SC=1;OX=0;OY=0;}applyT();}
@@ -445,7 +525,7 @@ if(zin)zin.onclick=function(){var r=STg.getBoundingClientRect();zoomAt(r.width/2
 if(zout)zout.onclick=function(){var r=STg.getBoundingClientRect();zoomAt(r.width/2,r.height/2,1/1.3);};
 if(zres)zres.onclick=function(){SC=1;OX=0;OY=0;applyT();};
 var dragging=false,sx=0,sy=0,sox=0,soy=0,pinch=0;
-STg.addEventListener('pointerdown',function(e){if(pinch)return;if(e.target&&e.target.closest&&e.target.closest('.pin'))return;dragging=true;_moved=false;sx=e.clientX;sy=e.clientY;sox=OX;soy=OY;STg.classList.add('drag');});
+STg.addEventListener('pointerdown',function(e){if(pinch)return;if(e.target&&e.target.closest&&(e.target.closest('.pin')||e.target.closest('.rline')))return;dragging=true;_moved=false;sx=e.clientX;sy=e.clientY;sox=OX;soy=OY;STg.classList.add('drag');});
 window.addEventListener('pointermove',function(e){if(!dragging||pinch)return;var dx=e.clientX-sx,dy=e.clientY-sy;if(Math.abs(dx)+Math.abs(dy)>5)_moved=true;OX=sox+dx;OY=soy+dy;applyT();});
 window.addEventListener('pointerup',function(){dragging=false;STg.classList.remove('drag');});
 STg.addEventListener('touchstart',function(e){if(e.touches.length===2){pinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);dragging=false;}},{passive:false});
@@ -455,6 +535,12 @@ STg.addEventListener('touchend',function(e){if(e.touches.length<2)pinch=0;});
 function showAdd(x,y,ep){closePop();mask.style.display='block';var topts=DATA.types.map(function(t){return '<option value='+t.key+(ep&&ep.type===t.key?' selected':'')+'>'+t.emoji+' '+t.label+'</option>';}).join('');var nopts=DATA.niveaux.map(function(n){return '<option value='+n.key+(ep&&ep.niveau===n.key?' selected':'')+'>'+n.label+'</option>';}).join('');var box=document.createElement('div');box.className='pop';box.innerHTML='<h3>'+(ep?'✏️ Modifier le point':'➕ Nouveau point')+'</h3>'+((ep?ep.x:x)!=null?'<p style="font-family:monospace;opacity:.85;margin:0 0 6px">🧭 X '+(+(ep?ep.x:x)).toFixed(1)+' · Y '+(+(ep?ep.y:y)).toFixed(1)+'</p>':'')+'<label>Type</label><select id=f_type>'+topts+'</select><label>👁️ Qui peut voir ?</label><select id=f_niv>'+nopts+'</select><label>Nom *</label><input id=f_nom value="'+(ep?escA(ep.nom):'')+'" placeholder="Ex: Champ de coca"><label>Région</label><input id=f_region value="'+(ep?escA(ep.region):'')+'" placeholder="New Hanover, Lemoyne…"><label>Lieu précis</label><input id=f_lieu value="'+(ep?escA(ep.lieu):'')+'" placeholder="Ex: au nord de Valentine"><label>Notes</label><textarea id=f_notes rows=2>'+(ep?esc(ep.notes):'')+'</textarea><div class=row><button class=bok id=fadd>'+(ep?'Enregistrer':'Placer ici')+'</button><button class=bno id=fcancel>Annuler</button></div>';document.body.appendChild(box);document.getElementById('fcancel').onclick=closePop;document.getElementById('fadd').onclick=function(){var nom=document.getElementById('f_nom').value.trim();if(!nom){alert('Le nom est obligatoire');return;}var payload={type:document.getElementById('f_type').value,niveau:document.getElementById('f_niv').value,nom:nom,region:document.getElementById('f_region').value,lieu:document.getElementById('f_lieu').value,notes:document.getElementById('f_notes').value};var url;if(ep){url='/carte/edit?k='+TOK;payload.id=ep.id;}else{url='/carte/add?k='+TOK;payload.x=x;payload.y=y;}fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(){closePop();load();});};}
 var _si=document.getElementById('search');if(_si)_si.addEventListener('input',function(e){SEARCH=e.target.value||'';render();});
 var _ri=document.getElementById('regionf');if(_ri)_ri.addEventListener('change',function(e){REGION=e.target.value||'';render();});
+var _mb=document.getElementById('modebtn');if(_mb)_mb.onclick=function(){setMode(MODE==='route'?'pts':'route');};
+var _du=document.getElementById('drawundo');if(_du)_du.onclick=function(){DRAW.pop();renderRoutes();updateDrawBar();};
+var _df=document.getElementById('drawfin');if(_df)_df.onclick=function(){if(DRAW.length<2){alert('Ajoute au moins 2 points sur la carte.');return;}showRouteForm();};
+var _dc=document.getElementById('drawcancel');if(_dc)_dc.onclick=function(){DRAW=[];setMode('pts');};
+window.addEventListener('resize',function(){sizeSvg();renderRoutes();});
+mapImg.addEventListener('load',function(){sizeSvg();renderRoutes();});
 if(mapImg.complete)load();else{mapImg.onload=load;mapImg.onerror=load;}
 </script></body></html>`;
 }
