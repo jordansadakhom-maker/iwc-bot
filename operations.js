@@ -60,6 +60,7 @@ async function _reformuler(texte) {
 
 let cfg = {};
 try { cfg = require('./config'); } catch { cfg = {}; }
+let opsEtapes = null; try { opsEtapes = require('./operations-etapes'); } catch {}
 const ROLE_LEGAL = cfg.ROLE_POLE_LEGAL || '1508756436082102303';
 const ROLE_ILLEGAL = cfg.ROLE_POLE_ILLEGAL || '1508898841993281658';
 const SALON_OPERATIONS = '1518349707686973470';
@@ -196,6 +197,7 @@ function _boutons(op) {
   const rowM = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`op_modifier_${op.id}`).setLabel('✏️ Modifier').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`op_lierwanted_${op.id}`).setLabel('🔗 Lier un avis de recherche').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`opnew_prep::${op.id}`).setLabel('📋 Préparer par étapes').setStyle(ButtonStyle.Primary),
   );
   return [rowP, rowG, rowM];
 }
@@ -286,6 +288,30 @@ async function routeInteraction(interaction) {
         await interaction.reply({ content: '🎯 **Nouvelle opération** — étape 1/2 : le type de mission.', components: [new ActionRowBuilder().addComponents(_menuType())], flags: MessageFlags.Ephemeral }).catch(() => {});
         return true;
       }
+    }
+
+    // ── 📋 Préparer par étapes : crée la préparation détaillée (5 étapes) depuis cette opération ──
+    if (interaction.isButton?.() && interaction.customId?.startsWith('opnew_prep::')) {
+      if (!opsEtapes?.creerOperationDepuisContrat) { await interaction.reply({ content: '⚠️ Le module « étapes » est indisponible.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const opId = interaction.customId.split('::')[1];
+      const db = loadDB();
+      const op = (db.operations || []).find(o => String(o.id) === String(opId));
+      if (!op) { await interaction.reply({ content: '⚠️ Opération introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const typeLabel = String(TYPES[op.typeKey]?.label || '').replace(/^[^\p{L}]+/u, '').trim();
+      const pseudo = {
+        id: `OPS-${op.id}`,
+        typeMission: typeLabel || op.objectif || 'Autre',
+        objet: op.objectif || op.name || 'Opération',
+        commanditaire: op.createurNom || '—',
+        details: op.briefing || op.equipe || '',
+        remuneration: op.butin || '—',
+        echeanceTexte: op.quandTexte || null,
+      };
+      let created = null;
+      try { created = await opsEtapes.creerOperationDepuisContrat(interaction.guild, pseudo, { parId: interaction.user?.id, membres: op.participants || [], pole: op.pole }); } catch (e) { console.log('⚠️ opnew_prep:', e.message); }
+      await interaction.editReply({ content: created ? '📋 **Préparation par étapes créée** dans #operations — remplis et valide chaque étape (Cible → Dispositif → Équipe → Recueil → Rapport).' : '⚠️ Impossible de créer la préparation par étapes (réessaie).' }).catch(() => {});
+      return true;
     }
 
     // ── Lier un avis de recherche à cette opération ──
