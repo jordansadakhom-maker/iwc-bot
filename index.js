@@ -4147,6 +4147,7 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isButton?.() && (interaction.customId || '').startsWith('ndval_')) return _gererValidationNote(interaction);
   if (interaction.isButton?.() && (interaction.customId || '').startsWith('cpart_op::')) return _cpartCreerOpBouton(interaction);
   if (interaction.isUserSelectMenu?.() && (interaction.customId || '').startsWith('cpart_opsel::')) return _cpartCreerOpSelect(interaction);
+  if (interaction.isUserSelectMenu?.() && (interaction.customId || '').startsWith('info_notify_sel_')) return notionV3.handleInformateurNotifySelect?.(interaction);
   if (await contratsConf.routeInteraction?.(interaction)) return;
   if (await opsEtapes.routeInteraction?.(interaction)) return;
   if (await chiffrement.routeInteraction?.(interaction)) return;
@@ -4353,6 +4354,8 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId === 'setup_annuler')               return interaction.update({ content: '❌ Annulé — aucune modification effectuée.', components: [] });
     if (interaction.customId === 'btn_informateur_historique') { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); return notionV3.handleInformateurHistorique?.(interaction); }
     if (interaction.customId.startsWith('info_confirmer_'))    return notionV3.handleInformateurConfirmer?.(interaction);
+    if (interaction.customId.startsWith('info_synth_'))        return notionV3.handleInformateurSynthese?.(interaction);
+    if (interaction.customId.startsWith('info_notify_'))       return notionV3.handleInformateurNotify?.(interaction); // le select (info_notify_sel_) est routé plus haut (UserSelectMenu)
     if (interaction.customId === 'btn_absent_programmer')         return _ouvrirModalAbsentProgrammer(interaction);
     if (interaction.customId.startsWith('btn_absent_confirmer_')) return _confirmerAbsence(interaction);
     if (interaction.customId === 'btn_absent_annuler')             return interaction.update({ content: '↩️ Absence annulée.', embeds: [], components: [] });

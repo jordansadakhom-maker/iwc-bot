@@ -5,7 +5,7 @@
 const {
   EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  StringSelectMenuBuilder, MessageFlags,
+  StringSelectMenuBuilder, UserSelectMenuBuilder, MessageFlags,
 } = require('discord.js');
 const { loadDB, saveDB, sauvegarderSurGitHub } = require('./db');
 // Sauvegarde Gist immédiate : sur Render le disque est éphémère. Sans push immédiat, un rapport
@@ -648,6 +648,59 @@ async function _analyserPhotos(urls) {
   for (const u of (urls || []).slice(0, 4)) { const d = await _decrirePhoto(u); if (d) out.push(d); }
   return out;
 }
+// 🧠 Synthèse IA : consolide le rapport initial + les précisions du fil + les
+// descriptions de photos en UN rapport de renseignement clair. Renvoie le texte ou null.
+async function _synthetiserRapport({ info, cible, source, precisions, analyses }) {
+  const apiKey = process.env.ANTHROPIC_API_KEY; if (!apiKey) return null;
+  try {
+    const blocs = [];
+    if (info) blocs.push('RAPPORT INITIAL :\n' + info);
+    if (Array.isArray(precisions) && precisions.length) blocs.push('PRÉCISIONS AJOUTÉES PAR LES MEMBRES :\n' + precisions.map(p => `- ${p}`).join('\n'));
+    if (Array.isArray(analyses) && analyses.length) blocs.push('DESCRIPTIONS DES PHOTOS :\n' + analyses.map(a => `- ${a}`).join('\n'));
+    if (!blocs.length) return null;
+    const prompt = [
+      "Tu es l'officier de renseignement d'une compagnie de l'Ouest américain (~1904).",
+      "À partir des éléments bruts ci-dessous (rapport initial, précisions de plusieurs membres, descriptions de photos), rédige UN SEUL rapport de renseignement clair, factuel et bien organisé, en français.",
+      "Consolide TOUT sans rien inventer ni omettre d'important, retire les doublons et les grossièretés inutiles, garde un ton sobre et professionnel (immersion Far West discrète).",
+      cible && cible !== '—' ? ('CIBLE : ' + cible) : '',
+      source && source !== '—' ? ('SOURCE : ' + source) : '',
+      '',
+      blocs.join('\n\n'),
+      '',
+      "Structure ta réponse ainsi (n'écris une rubrique que si tu as l'info) :",
+      "**Synthèse** : 1 à 2 phrases.",
+      "**Localisation & habitudes** : • …",
+      "**Entourage** : • …",
+      "**Signalement / reconnaissance** : • …",
+      "**À vérifier / prochaines actions** : • …",
+      "Ne mentionne jamais que tu es une IA. Réponds uniquement avec le rapport.",
+    ].filter(Boolean).join('\n');
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 900, messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }] }),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const txt = (data?.content || []).filter(c => c.type === 'text').map(c => c.text).join('').trim();
+    return txt ? txt.slice(0, 3500) : null;
+  } catch (e) { console.log('⚠️ _synthetiserRapport:', e.message); return null; }
+}
+// Récupère les précisions (texte des membres) écrites dans le fil d'un rapport.
+async function _precisionsDuFil(guild, r) {
+  try {
+    if (!r?.threadId) return [];
+    const th = guild.channels.cache.get(r.threadId) || await guild.channels.fetch(r.threadId).catch(() => null);
+    if (!th?.messages?.fetch) return [];
+    const msgs = await th.messages.fetch({ limit: 100 }).catch(() => null);
+    if (!msgs) return [];
+    return [...msgs.values()]
+      .filter(m => !m.author?.bot && (m.content || '').trim().length > 1)
+      .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+      .map(m => `${m.member?.displayName || m.author.username} : ${m.content.replace(/\s+/g, ' ').trim()}`)
+      .slice(0, 40);
+  } catch { return []; }
+}
 // Embed d'un rapport (réutilisé à la création et lors de l'ajout de photos).
 function _rapportEmbed(r) {
   const estConfirmee = String(r.fiabilite || '').toLowerCase().includes('confirm') && !String(r.fiabilite || '').toLowerCase().includes('non');
@@ -666,6 +719,7 @@ function _rapportEmbed(r) {
   const photos = Array.isArray(r.photos) ? r.photos : [];
   if (photos.length) { e.setImage(photos[0]); e.addFields({ name: '📷 Photos', value: `${photos.length} pièce(s) jointe(s)` + (photos.length > 1 ? ' — ' + photos.slice(1).map((u, i) => `[#${i + 2}](${u})`).join(' ') : ''), inline: false }); }
   if (Array.isArray(r.analysesPhotos) && r.analysesPhotos.length) { e.addFields({ name: '🔍 Analyse IA des photos', value: r.analysesPhotos.map(d => `• ${d}`).join('\n').slice(0, 1024), inline: false }); }
+  if (r.synthese) { e.addFields({ name: '🧠 Synthèse du renseignement', value: String(r.synthese).slice(0, 1024), inline: false }); }
   return e.setFooter({ text: 'IWC • Réseau Informateurs — Confidentiel' }).setTimestamp(new Date(r.createdAt || Date.now()));
 }
 function _rapportBoutons(rOrId) {
@@ -673,7 +727,63 @@ function _rapportBoutons(rOrId) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`info_confirmer_${id}`).setLabel('✅ Confirmer').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`info_infirmer_${id}`).setLabel('❌ Infirmer').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`info_synth_${id}`).setLabel('🧠 Synthèse IA').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`info_notify_${id}`).setLabel('📣 Notifier').setStyle(ButtonStyle.Secondary),
   );
+}
+function _rapportById(id) { return (loadDB().informateurs || []).find(x => x.id === id) || null; }
+async function _rafraichirRapport(guild, r) {
+  try {
+    if (!r.channelId || !r.messageId) return;
+    const ch = guild.channels.cache.get(r.channelId) || await guild.channels.fetch(r.channelId).catch(() => null);
+    const msg = ch && ch.messages ? await ch.messages.fetch(r.messageId).catch(() => null) : null;
+    if (msg) await msg.edit({ embeds: [_rapportEmbed(r)], components: (r.statut === 'confirme' || r.statut === 'infirme') ? [_rapportBoutonsClos(r)] : [_rapportBoutons(r.id)] }).catch(() => {});
+  } catch {}
+}
+// Boutons conservés même une fois le rapport clos (synthèse + notifier restent utiles)
+function _rapportBoutonsClos(rOrId) {
+  const id = (rOrId && typeof rOrId === 'object') ? rOrId.id : rOrId;
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`info_synth_${id}`).setLabel('🧠 Synthèse IA').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`info_notify_${id}`).setLabel('📣 Notifier').setStyle(ButtonStyle.Secondary),
+  );
+}
+// 🧠 Bouton « Synthèse IA » — reformule tout le fil en un rapport propre
+async function handleInformateurSynthese(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const id = interaction.customId.replace('info_synth_', '');
+  const r = _rapportById(id);
+  if (!r) return interaction.editReply({ content: '❌ Rapport introuvable.' });
+  const precisions = await _precisionsDuFil(interaction.guild, r);
+  const synthese = await _synthetiserRapport({ info: r.info, cible: r.cible, source: r.source, precisions, analyses: r.analysesPhotos || [] });
+  if (!synthese) return interaction.editReply({ content: "⚠️ Je n'ai pas réussi à générer la synthèse (aucun contenu exploitable ou IA indisponible)." });
+  const db = loadDB(); const r2 = (db.informateurs || []).find(x => x.id === id); if (r2) { r2.synthese = synthese; saveDB(db); await _persistNow(); Object.assign(r, { synthese }); }
+  await _rafraichirRapport(interaction.guild, r);
+  // Copie aussi dans le fil pour que tout le monde la voie
+  try { if (r.threadId) { const th = interaction.guild.channels.cache.get(r.threadId) || await interaction.guild.channels.fetch(r.threadId).catch(() => null); if (th?.send) await th.send({ embeds: [new EmbedBuilder().setColor(0x6B0000).setTitle(`🧠 Synthèse — ${r.id}`).setDescription(synthese.slice(0, 4000)).setFooter({ text: 'IWC • Réseau Informateurs' })] }).catch(() => {}); } } catch {}
+  await interaction.editReply({ content: `✅ Synthèse générée et ajoutée au rapport \`${r.id}\` (${precisions.length} précision(s) prise(s) en compte).` });
+}
+// 📣 Bouton « Notifier » — ping des membres pour compléter le dossier
+async function handleInformateurNotify(interaction) {
+  const id = interaction.customId.replace('info_notify_', '');
+  if (!_rapportById(id)) return interaction.reply({ content: '❌ Rapport introuvable.', flags: MessageFlags.Ephemeral });
+  const row = new ActionRowBuilder().addComponents(
+    new UserSelectMenuBuilder().setCustomId(`info_notify_sel_${id}`).setPlaceholder('Choisis les membres à prévenir…').setMinValues(1).setMaxValues(10),
+  );
+  return interaction.reply({ content: `📣 Qui veux-tu prévenir pour compléter le dossier \`${id}\` ?`, components: [row], flags: MessageFlags.Ephemeral });
+}
+async function handleInformateurNotifySelect(interaction) {
+  const id = interaction.customId.replace('info_notify_sel_', '');
+  const r = _rapportById(id);
+  if (!r) return interaction.update({ content: '❌ Rapport introuvable.', components: [] });
+  const ids = interaction.values || [];
+  if (!ids.length) return interaction.update({ content: 'Aucun membre sélectionné.', components: [] });
+  const mentions = ids.map(u => `<@${u}>`).join(' ');
+  const dest = r.threadId ? (interaction.guild.channels.cache.get(r.threadId) || await interaction.guild.channels.fetch(r.threadId).catch(() => null)) : null;
+  const cible = dest && dest.send ? dest : interaction.channel;
+  const lien = (r.channelId && r.messageId) ? `https://discord.com/channels/${interaction.guild.id}/${r.channelId}/${r.messageId}` : '';
+  if (cible?.send) await cible.send({ content: `📣 ${mentions} — merci de **compléter le dossier \`${r.id}\`**${r.cible && r.cible !== '—' ? ` (cible : **${r.cible}**)` : ''} avec les informations en votre possession.${lien ? `\n🔗 ${lien}` : ''}`, allowedMentions: { users: ids.slice(0, 25) } }).catch(() => {});
+  return interaction.update({ content: `✅ ${ids.length} membre(s) prévenu(s) pour le dossier \`${r.id}\`.`, components: [] });
 }
 // Poste le rapport + ouvre un fil « photos » et mémorise les identifiants.
 async function _posterRapport(guild, rapport) {
@@ -936,7 +1046,7 @@ async function _traiterValidationInfo(interaction, decision) {
     .setColor(confirme ? 0xED4245 : 0x555555)
     .setTitle(`${confirme ? '🔴 Confirmé' : '⬛ Infirmé'} — Rapport ${rapId}`)
     .spliceFields(-1, 1, { name: '📌 Statut', value: confirme ? `🔴 Confirmé par ${interaction.user.username}` : `⬛ Infirmé par ${interaction.user.username}`, inline: false });
-  await interaction.update({ embeds: [embed], components: [] }).catch(() => {}); // accusé de réception (< 3 s) AVANT toute opération réseau lente
+  await interaction.update({ embeds: [embed], components: [_rapportBoutonsClos(rapId)] }).catch(() => {}); // accusé de réception (< 3 s) AVANT toute opération réseau lente — on garde 🧠 Synthèse / 📣 Notifier
   await _persistNow(); // PUIS sauvegarde Gist durable (peut prendre quelques s) — l'accusé est déjà parti, plus de risque de 10062
   // Sync Notion (best effort)
   if (global._syncInformateurNotion) global._syncInformateurNotion(rapport, decision, interaction.user.username).catch(() => {});
@@ -1060,7 +1170,7 @@ module.exports = {
   checkInactivite, JOURS_INACTIF,
   updateHierarchieEmbed, handleHierarchieCommand, handleGradeSetCommand, handleGradePanelButton, handleGradeMembreSelect, handleGradeGradeSelect, handleGradeMajButton, handleGradeUp, handleGradeDown, handleGradeFiche, handleGradeEligibles, showGradeMembre, GRADES_LEGAL, GRADES_ILLEGAL, GRADES_UNIFIES, ROLES,
   setupAffairesPanel, handleAffaireNouvelleButton, handleAffaireModal, handleAffaireVote, handleAffaireDetail, postResumeAffaires, handleAffairesResumeButton, checkAffairesTimeout,
-  setupInformateursPanel, handleInformateurRapportButton, handleInformateurModal, handleInformateurHistorique, handleInformateurMessage, handleInformateurConfirmer, handleInformateurInfirmer, majCarnetRenseignements: _majCarnetRenseignements, republierRapportsManquants, reposterTousRapports, creerRenseignement,
+  setupInformateursPanel, handleInformateurRapportButton, handleInformateurModal, handleInformateurHistorique, handleInformateurMessage, handleInformateurConfirmer, handleInformateurInfirmer, handleInformateurSynthese, handleInformateurNotify, handleInformateurNotifySelect, majCarnetRenseignements: _majCarnetRenseignements, republierRapportsManquants, reposterTousRapports, creerRenseignement,
   handlePlanningScreenshot, handlePlansMessage,
   getMentionPole, updateNotionStatutPole,
   syncOperationTermineeNotion, syncAbsenceNotion,
