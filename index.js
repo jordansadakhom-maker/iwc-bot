@@ -2464,6 +2464,8 @@ async function autoSetup(guild) {
   _assurerEtiquettesAgenda(guild).then(() => console.log('🏷️ Étiquettes agenda prêtes (type + statut)')).catch(() => {});
   // Regroupement des forums sous « 📋 Forums » — une seule fois (respecte les déplacements manuels ultérieurs)
   if (!loadDB().forumsCategoryId) _rangerForums(guild).then(r => console.log(`📋 Forums rangés : ${r.moved} déplacé(s)`)).catch(() => {});
+  // Verrou « membres uniquement » sur les forums confidentiels (les visiteurs ne doivent pas les voir)
+  _verrouillerForumsMembres(guild).catch(() => {});
   { const evtCh = guild.channels.cache.get('1519247268367171751'); if (evtCh) evenements.installerPanel?.(guild, evtCh).then(() => console.log('🎉 Panneau événements installé')).catch(() => {}); }
   notionV3.republierRapportsManquants?.(guild).then(() => notionV3.majCarnetRenseignements?.(guild)).then(() => console.log('📓 Carnet de renseignements installé')).catch(() => {});
   // Rumeurs RP dans le même salon que Le Réseau (choix : les deux ensemble)
@@ -7216,6 +7218,42 @@ const FORUMS_A_RANGER = [
   '1518409832892469450', // 🗂️ Registre
   '1519114962738348102', // 🎖️ Ripoux
 ];
+// Forums confidentiels à cacher aux visiteurs (accès membres uniquement)
+const FORUMS_MEMBRES_ONLY = [
+  '1520707905639284837', // 📋 -rapports
+  '1519485624636407879', // 🤝 rendez-vous
+];
+// Verrouille ces forums en « membres uniquement » de façon ADDITIVE :
+// on ajoute seulement le refus @everyone/Visiteur et l'accès membres/bot,
+// sans jamais retirer un accès existant (edit par rôle, pas set global).
+async function _verrouillerForumsMembres(guild) {
+  try {
+    const EVERYONE = guild.roles.everyone.id;
+    const VISITEUR = '1508756369258578070';
+    const R_LEGAL  = '1509251285264761053';
+    const R_ILLEG  = '1508898841993281658';
+    const R_ABSENT = '1511134028474876035';
+    const dirRoleIds = guild.roles.cache
+      .filter(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier', 'Co-Directeur'].some(n => r.name.includes(n)))
+      .map(r => r.id);
+    let done = 0;
+    for (const id of FORUMS_MEMBRES_ONLY) {
+      const forum = guild.channels.cache.get(id) || await guild.channels.fetch(id).catch(() => null);
+      if (!forum || !forum.permissionOverwrites) continue;
+      // 1) Cacher aux non-membres
+      await forum.permissionOverwrites.edit(EVERYONE, { ViewChannel: false }).catch(e => console.log('⚠️ verrou forum @everyone', forum.name, e.message));
+      await forum.permissionOverwrites.edit(VISITEUR, { ViewChannel: false }).catch(() => {});
+      // 2) Garantir l'accès des membres (on n'enlève rien)
+      for (const rid of [R_LEGAL, R_ILLEG, R_ABSENT, ...dirRoleIds]) {
+        await forum.permissionOverwrites.edit(rid, { ViewChannel: true }).catch(() => {});
+      }
+      // 3) Le bot garde tout ce qu'il faut pour publier (rapports, rendez-vous…)
+      if (guild.members.me) await forum.permissionOverwrites.edit(guild.members.me.id, { ViewChannel: true, SendMessages: true, SendMessagesInThreads: true, CreatePublicThreads: true, ManageThreads: true, ReadMessageHistory: true, EmbedLinks: true, AttachFiles: true }).catch(() => {});
+      done++;
+    }
+    if (done) console.log(`🔒 ${done} forum(s) verrouillé(s) membres uniquement (visiteurs exclus)`);
+  } catch (e) { console.log('⚠️ _verrouillerForumsMembres:', e.message); }
+}
 async function _rangerForums(guild) {
   try {
     const db = loadDB();
