@@ -14,6 +14,17 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags
 let dbMod = {}; try { dbMod = require('./db'); } catch {}
 const loadDB = dbMod.loadDB || (() => ({}));
 const saveDB = dbMod.saveDB || (() => {});
+// Hiérarchie officielle (grades unifiés, résolus par rôle Discord) — source de vérité partagée
+let _gradesUnifies = [];
+try { _gradesUnifies = require('./notion-modules-v3').GRADES_UNIFIES || []; } catch {}
+if (!_gradesUnifies.length) _gradesUnifies = [
+  { emoji: '👑', nom: 'Fondateur', match: ['Fondateur'], desc: "Vision d'ensemble, dernière décision." },
+  { emoji: '🔴', nom: 'Le Conseil — Directeur / Co-Directeur', match: ['Conseil', 'Directeur'], desc: 'La direction : pilote la compagnie.' },
+  { emoji: '🎖️', nom: 'Officier de Terrain', match: ['Officier'], desc: 'Encadre le terrain, organise les opérations.' },
+  { emoji: '🔵', nom: 'Agent Confirmé', match: ['Agent Confimé', 'Agent Confirmé', 'Agent'], desc: 'Membre aguerri et autonome.' },
+  { emoji: '🟢', nom: 'Opérateur', match: ['Opérateur'], desc: 'Le cœur opérationnel de la compagnie.' },
+  { emoji: '⚪', nom: 'Recrue — Probatoire', match: ['Recrue'], desc: "Nouvelle recrue en période d'essai." },
+];
 
 // Salon d'accueil du portail (par défaut : le salon de la carte interactive)
 const PORTAIL_CHANNEL_ID = process.env.PORTAIL_CHANNEL_ID || '1519308989119074435';
@@ -470,50 +481,75 @@ cv.addEventListener('pointerleave',function(){tip.style.display='none';});
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  🏛️ Organigramme
+//  🏛️ Organigramme — hiérarchie unifiée officielle (rôles Discord)
 // ═══════════════════════════════════════════════════════════════
-function _pageOrga(tok) {
+// Construit les mêmes grades que la commande /hierarchie : grades unifiés
+// résolus par les VRAIS rôles Discord (source de vérité). Repli sur le champ
+// « rang » stocké si la guild n'est pas disponible.
+async function _orgaTiers(db, guild) {
+  const clean = s => (s || '').toLowerCase();
+  // 1) Source de vérité : rôles Discord
+  if (guild && guild.roles && guild.members) {
+    try {
+      const all = await guild.members.fetch();
+      const roleDuGrade = g =>
+        guild.roles.cache.find(r => g.match.some(m => clean(r.name) === clean(m)))
+        || guild.roles.cache.find(r => g.match.some(m => clean(r.name).includes(clean(m))));
+      const deja = new Set();
+      const tiers = [];
+      for (const g of _gradesUnifies) {
+        const role = roleDuGrade(g);
+        const mems = role ? [...all.values()].filter(m => !m.user.bot && m.roles.cache.has(role.id) && !deja.has(m.id)) : [];
+        mems.forEach(m => deja.add(m.id));
+        tiers.push({ emoji: g.emoji, nom: g.nom, desc: g.desc || '', membres: mems.map(m => ({ name: m.displayName, status: (db.members[m.id] && db.members[m.id].status) || 'actif' })).sort((a, b) => a.name.localeCompare(b.name)) });
+      }
+      return { tiers, source: 'roles' };
+    } catch {}
+  }
+  // 2) Repli : champ « rang » stocké, mappé sur les mêmes grades
+  const membres = _members(db).filter(m => m.status !== 'parti' && m.status !== 'visiteur');
+  const deja = new Set();
+  const tiers = _gradesUnifies.map(g => {
+    const mems = membres.filter(m => !deja.has(m.id) && g.match.some(k => clean(m.rang).includes(clean(k))));
+    mems.forEach(m => deja.add(m.id));
+    return { emoji: g.emoji, nom: g.nom, desc: g.desc || '', membres: mems.map(m => ({ name: m.name, status: m.status })).sort((a, b) => a.name.localeCompare(b.name)) };
+  });
+  const reste = membres.filter(m => !deja.has(m.id));
+  if (reste.length) tiers.push({ emoji: '•', nom: 'Autres membres', desc: '', membres: reste.map(m => ({ name: m.name, status: m.status })).sort((a, b) => a.name.localeCompare(b.name)) });
+  return { tiers, source: 'db' };
+}
+async function _pageOrga(tok, level, guild) {
   const db = loadDB();
-  const membres = _members(db).filter(m => m.status !== 'parti');
-  const poleLabel = { legal: '⚖️ Iron Wolf Company', illegal: '🎭 La Confrérie', '': '🐺 Compagnie' };
-  const poleColor = { legal: '#2e6da4', illegal: '#8a2f2f', '': '#8a6d3b' };
-  function memCard(m) {
-    const st = M_STATUT[m.status];
-    return `<div class="oc" style="border-left:4px solid ${st.color}">
-      <div class="oc-n">${esc(m.name)}</div>
-      <div class="oc-r">${esc(m.rang)}</div>
-      <div class="oc-s">${st.emoji} ${st.label}</div>
-    </div>`;
-  }
-  let html = '';
-  for (let tier = 0; tier <= 3; tier++) {
-    const group = membres.filter(m => m.tier === tier).sort((a, b) => a.name.localeCompare(b.name));
-    if (!group.length) continue;
-    html += `<div class="tier"><div class="tier-h">${TIER_LABEL[tier]}</div><div class="tier-row">${group.map(memCard).join('')}</div></div>`;
-    if (tier < 3) html += '<div class="conn">│</div>';
-  }
-  const visiteurs = membres.filter(m => m.tier === 4);
-  if (visiteurs.length) html += `<div class="tier vis"><div class="tier-h">${TIER_LABEL[4]}</div><div class="tier-row">${visiteurs.sort((a, b) => a.name.localeCompare(b.name)).map(memCard).join('')}</div></div>`;
-  // Répartition par pôle (petit résumé)
-  const parPole = {};
-  membres.forEach(m => { const p = m.pole || ''; parPole[p] = (parPole[p] || 0) + 1; });
-  const resume = Object.entries(parPole).map(([p, n]) => `<span class="pole-badge" style="background:${poleColor[p]}">${esc(poleLabel[p] || p)} · ${n}</span>`).join('');
+  const { tiers, source } = await _orgaTiers(db, guild);
+  const memCard = m => { const st = M_STATUT[m.status] || M_STATUT.actif; return `<div class="oc" style="border-left:4px solid ${st.color}"><div class="oc-n">${esc(m.name)}</div><div class="oc-s">${st.emoji} ${st.label}</div></div>`; };
+  const totalGrades = tiers.reduce((s, t) => s + t.membres.length, 0);
+  let actifs = 0, absents = 0, inactifs = 0;
+  tiers.forEach(t => t.membres.forEach(m => { if (m.status === 'absent') absents++; else if (m.status === 'inactif') inactifs++; else actifs++; }));
+  const blocks = tiers.map((t, i) => {
+    const cards = t.membres.length ? t.membres.map(memCard).join('') : '<div class="oc-empty">— personne —</div>';
+    const conn = i < tiers.length - 1 ? '<div class="conn">│</div>' : '';
+    return `<div class="tier"><div class="tier-h">${t.emoji} ${esc(t.nom)} <span class="tier-c">${t.membres.length}</span></div>${t.desc ? `<div class="tier-d">${esc(t.desc)}</div>` : ''}<div class="tier-row">${cards}</div></div>${conn}`;
+  }).join('');
+  const sum = `<span class="og-b" style="background:#3ca03c">✅ ${actifs} actifs</span><span class="og-b" style="background:#e0b028">🟡 ${absents} absents</span><span class="og-b" style="background:#d63a3a">🔴 ${inactifs} inactifs</span>`;
   const body = `<div class="wrap">
-    <div class="orga-sum">${resume}</div>
-    ${membres.length ? html : '<div class="empty">Aucun membre enregistré.</div>'}
+    <div class="orga-sum">${sum}</div>
+    ${totalGrades || tiers.length ? blocks : '<div class="empty">Aucun membre gradé.</div>'}
+    <div class="og-note">${source === 'roles' ? 'Basé sur les vrais rôles Discord — comme la commande /hierarchie.' : 'Basé sur les grades enregistrés (rôles Discord indisponibles au chargement).'}</div>
   </div>`;
   const extraCss = `
 .orga-sum{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-bottom:20px}
-.pole-badge{color:#fff;font-family:'Special Elite',monospace;font-size:.74rem;border-radius:20px;padding:5px 12px;text-shadow:0 1px 1px #0006}
+.og-b{color:#fff;font-family:'Special Elite',monospace;font-size:.74rem;border-radius:20px;padding:5px 12px;text-shadow:0 1px 1px #0006}
 .tier{background:linear-gradient(160deg,#241a12,#191109);border:1px solid #b8893b44;border-radius:12px;padding:14px 16px;margin:0 auto;max-width:960px}
-.tier.vis{opacity:.85;margin-top:22px}
-.tier-h{font-family:'Cinzel',serif;font-weight:700;color:#f0d89a;text-align:center;font-size:1.1rem;margin-bottom:12px;letter-spacing:.03em}
+.tier-h{font-family:'Cinzel',serif;font-weight:700;color:#f0d89a;text-align:center;font-size:1.15rem;letter-spacing:.03em}
+.tier-c{background:#3a2c1e;border:1px solid #5a4632;border-radius:20px;font-size:.72rem;padding:1px 9px;font-family:'Special Elite',monospace;vertical-align:middle}
+.tier-d{text-align:center;font-size:.9rem;opacity:.7;font-style:italic;margin:4px 0 12px}
 .tier-row{display:flex;flex-wrap:wrap;gap:12px;justify-content:center}
-.oc{background:#15100a;border:1px solid #5a4632;border-radius:9px;padding:11px 14px;min-width:170px;box-shadow:0 4px 10px #0005}
+.oc{background:#15100a;border:1px solid #5a4632;border-radius:9px;padding:11px 14px;min-width:160px;box-shadow:0 4px 10px #0005}
 .oc-n{font-family:'Cinzel',serif;font-weight:700;color:#f2e4c4;font-size:1.02rem}
-.oc-r{font-size:.92rem;color:#d9a441;margin:2px 0}
-.oc-s{font-family:'Special Elite',monospace;font-size:.7rem;opacity:.82}
-.conn{text-align:center;color:#7a5c3a;font-size:1.6rem;line-height:1;margin:2px 0}`;
+.oc-s{font-family:'Special Elite',monospace;font-size:.7rem;opacity:.82;margin-top:3px}
+.oc-empty{opacity:.4;font-style:italic;padding:6px 0}
+.conn{text-align:center;color:#7a5c3a;font-size:1.6rem;line-height:1;margin:2px 0}
+.og-note{text-align:center;font-family:'Special Elite',monospace;font-size:.66rem;opacity:.55;margin-top:20px}`;
   return _shell({ title: 'Organigramme', tok, body, extraCss });
 }
 
@@ -843,7 +879,7 @@ const PAGES = {
   'gazette': { fn: _pageGazette, min: 'membre' },
   'tresorerie': { fn: _pageTresorerie, min: 'confidentiel' },
 };
-async function httpHandle(req, res /*, client */) {
+async function httpHandle(req, res, client) {
   let u; try { u = new URL(req.url, 'http://x'); } catch { return false; }
   if (u.pathname !== '/portail' && !u.pathname.startsWith('/portail/')) return false;
   try {
@@ -851,11 +887,12 @@ async function httpHandle(req, res /*, client */) {
     const info = _tokInfo(tok); const level = info?.level || null;
     const sub = u.pathname === '/portail' ? '' : decodeURIComponent(u.pathname.slice('/portail/'.length)).replace(/\/+$/, '');
     const page = PAGES[sub];
+    const guild = client?.guilds?.cache?.first?.() || null;
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     if (!level) { res.end(_expired()); return true; }
     if (!page) { res.end(_shell({ title: 'Introuvable', tok, body: '<div class="empty">Cet outil n\'existe pas. <a href="/portail?k=' + esc(tok) + '">← Retour au portail</a></div>' })); return true; }
     if (!_atLeast(level, page.min)) { res.end(_locked(page.min)); return true; }
-    res.end(page.passLevel ? page.fn(tok, level) : page.fn(tok));
+    res.end(await page.fn(tok, level, guild));
     return true;
   } catch (e) {
     console.log('❌ portail httpHandle:', e.message);
