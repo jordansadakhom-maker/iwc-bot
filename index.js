@@ -5558,6 +5558,29 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
   if (interaction.isButton() && interaction.customId.startsWith('csuivi::')) {
     if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
     const parts = interaction.customId.split('::'); const stageKey = parts[1]; const ref = parts.slice(2).join('::');
+    // 🗑️ Suppression définitive d'un contrat précis (nettoyage de doublons/tests)
+    if (stageKey === 'suppr') {
+      const c0 = (loadDB().contrats || []).find(x => String(x.id) === ref);
+      if (!c0) return interaction.reply({ content: '❌ Contrat introuvable.', flags: MessageFlags.Ephemeral });
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`csuivi::supprok::${ref}`).setLabel('🗑️ Oui, supprimer').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('csuivi_retour').setLabel('Annuler').setStyle(ButtonStyle.Secondary),
+      );
+      return interaction.update({ content: `⚠️ Supprimer **définitivement** le contrat \`${c0.id}\` — **${c0.clientNom || c0.commanditaire || '—'}**${c0.objet ? ' · ' + String(c0.objet).slice(0, 50) : ''} ?\n*(Irréversible. À utiliser pour effacer les tests/doublons.)*`, embeds: [], components: [row] });
+    }
+    if (stageKey === 'supprok') {
+      const dbX = loadDB(); const c0 = (dbX.contrats || []).find(x => String(x.id) === ref);
+      if (!c0) return interaction.update({ content: '✅ Déjà supprimé.', embeds: [], components: [] }).catch(() => {});
+      dbX.contrats = (dbX.contrats || []).filter(x => String(x.id) !== ref);
+      saveDB(dbX);
+      // Retire le post du forum des contrats s'il existe encore
+      try { if (c0.forumThreadId || c0.threadId) { const th = await interaction.guild.channels.fetch(c0.forumThreadId || c0.threadId).catch(() => null); if (th?.delete) await th.delete().catch(() => {}); } } catch {}
+      _updateContratPanel?.(interaction.client)?.catch?.(() => {});
+      _updatePlanningContrats?.(interaction.client)?.catch?.(() => {});
+      _updatePanneauContrats?.(interaction.client)?.catch?.(() => {});
+      ajouterJournalIC(interaction.guild, { type: 'contrat', emoji: '🗑️', titre: `Contrat ${ref} supprimé`, description: String(c0.objet || c0.clientNom || c0.commanditaire || '').slice(0, 200), auteur: interaction.user.username }).catch(() => {});
+      return interaction.update({ content: `🗑️ Contrat \`${ref}\` supprimé.`, embeds: [], components: [] }).catch(() => {});
+    }
     const stageMap = { attente: 'En attente', cours: 'En cours', valide: 'Validé', honore: 'Honoré', abandon: 'Abandonné' };
     const stage = stageMap[stageKey];
     const dbX = loadDB(); const c = (dbX.contrats || []).find(x => String(x.id) === ref);
@@ -6590,6 +6613,7 @@ function _contratSuiviPayload(c, note) {
   const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`csuivi::honore::${c.id}`).setLabel('🏁 Honoré (encaisser)').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`csuivi::abandon::${c.id}`).setLabel('✖️ Abandonné').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`csuivi::suppr::${c.id}`).setLabel('🗑️ Supprimer').setStyle(ButtonStyle.Danger),
   );
   const row3 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('csuivi_retour').setLabel('↩️ Retour à la liste').setStyle(ButtonStyle.Secondary),
