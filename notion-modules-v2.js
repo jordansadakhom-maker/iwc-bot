@@ -370,14 +370,14 @@ async function _validerTransaction(guild, tx, photoUrl) {
         { name: '🆔 Réf.',        value: `\`${tx.txId}\``,                                    inline: true },
         { name: `${isEntree ? '📥' : '📤'} Mouvement`, value: `**${isEntree ? '+' : '-'}$${tx.montant.toLocaleString('fr-FR')}**`, inline: true },
         { name: '💰 Solde actuel',value: `**$${nouveauSolde.toLocaleString('fr-FR')}**`,      inline: true },
-        { name: '📸 Preuve',      value: '✅ Photo vérifiée',                                  inline: true },
+        { name: '📸 Preuve',      value: photoUrl ? '✅ Photo vérifiée' : '➖ Sans preuve (Direction)', inline: true },
       );
 
     if (photoUrl) embed.setImage(photoUrl);
     embed.setFooter({ text: `IWC • ${new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}` }).setTimestamp();
 
-    const sentMsg = await coffreCh.send({ embeds: [embed] }).catch(() => null);
-    if (sentMsg) setTimeout(() => sentMsg.delete().catch(() => {}), 30000);
+    // Fiche conservée = registre permanent du coffre (plus d'auto-suppression)
+    await coffreCh.send({ embeds: [embed] }).catch(() => {});
   }
 
   // Rafraîchir le panel trésorerie
@@ -426,6 +426,14 @@ function _isDirection(member) {
   return member?.roles?.cache?.some(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier'].some(n => r.name.includes(n)));
 }
 
+// Une fiche de transaction (à CONSERVER comme registre) : carte Entrée/Sortie du coffre
+function _estFicheTx(m) {
+  const e = m.embeds?.[0]; if (!e) return false;
+  if (/Trésorerie/i.test(e.author?.name || '') && /(ENTRÉE|SORTIE)/i.test(e.title || '')) return true;
+  if ((e.fields || []).some(f => /TX-\d/i.test(f.value || ''))) return true;
+  return false;
+}
+
 async function setupTresorButton(guild) {
   const ch = guild.channels.cache.find(c => c.name?.includes('coffre-entreprise'));
   if (!ch) return;
@@ -449,9 +457,10 @@ async function setupTresorButton(guild) {
   // Séparer : panel bot (avec boutons) vs tout le reste
   const botMsgs = allMsgs.filter(m => m.author.id === guild.members.me?.id);
   const panels  = botMsgs.filter(m => m.components?.length > 0 && m.embeds?.[0]?.title?.includes('Trésorerie'));
-  const autres  = botMsgs.filter(m => !panels.find(p => p.id === m.id));
+  // On CONSERVE les fiches de transaction (registre permanent du coffre) — on ne nettoie que le reste
+  const autres  = botMsgs.filter(m => !panels.find(p => p.id === m.id) && !_estFicheTx(m));
 
-  // Supprimer TOUS les messages bot qui ne sont pas le panel principal
+  // Supprimer les messages bot parasites (ni le panel, ni une fiche de transaction)
   for (const m of autres) await m.delete().catch(() => {});
   // Supprimer les doublons de panels
   for (let i = 1; i < panels.length; i++) await panels[i].delete().catch(() => {});
