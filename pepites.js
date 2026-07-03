@@ -26,11 +26,18 @@ function _parse(content) {
   const c = (content || '').trim();
   if (!c) return null;
   let m;
-  if ((m = c.match(/^=\s*(\d{1,7})\b/))) return { mode: 'set', n: +m[1] };
-  if ((m = c.match(/^-\s*(\d{1,7})\b/))) return { mode: 'sub', n: +m[1] };
-  if (/^\+?\s*\d{1,7}\s*$/.test(c)) { m = c.match(/(\d{1,7})/); return { mode: 'add', n: +m[1] }; }
-  if (/p[ée]pite|nugget|⛏|💰/i.test(c)) { m = c.match(/(\d{1,7})/); if (m) return { mode: 'add', n: +m[1] }; }
-  return null;
+  // Commandes explicites (ancrées en début de message)
+  if ((m = c.match(/^=\s*(\d{1,7})\b/))) return { mode: 'set', n: +m[1] };   // « =50 » → fixer le total
+  if ((m = c.match(/^-\s*(\d{1,7})\b/))) return { mode: 'sub', n: +m[1] };   // « -2 » → retirer
+  if (/^\+?\s*\d{1,7}\s*$/.test(c)) { m = c.match(/(\d{1,7})/); return { mode: 'add', n: +m[1] }; } // « 5 » / « +5 » → ajouter
+  // Salon dédié : un nom/contexte + un nombre → on AJOUTE le nombre
+  // (ex : « Jonas = 121 », « Jonas : 2030 », « Renard 2293 », « ... 2293 pépites »)
+  const near = c.match(/(\d{1,7})\s*(?:p[ée]pites?|nuggets?|⛏|💰)/i); // nombre collé à « pépite » prioritaire
+  if (near) return { mode: 'add', n: +near[1] };
+  const nums = (c.match(/\d{1,7}/g) || []).map(Number).filter(n => n > 0);
+  if (!nums.length) return null;
+  if (nums.length === 1) return { mode: 'add', n: nums[0] };
+  return { mode: 'add', n: Math.max(...nums) }; // plusieurs nombres sans mot-clé : le plus grand (le montant probable)
 }
 
 function _panelEmbed(db) {
@@ -43,6 +50,7 @@ function _panelEmbed(db) {
       '*Ramassé des pépites ? Poste le nombre ici — le total et le gain se calculent tout seuls.*',
       '',
       '➕ `5` ou `+5` pour **ajouter** · ➖ `-2` pour **retirer** · 🟰 `=50` pour **fixer** le total.',
+      '_Tu peux aussi écrire avec un nom : `Jonas 121`, `Renard : 2030`, `… 2293 pépites` — je prends le nombre._',
     ].join('\n'))
     .addFields(
       { name: '⛏️ Total ramassé', value: `**${total.toLocaleString('fr-FR')}** pépite(s)`, inline: true },
