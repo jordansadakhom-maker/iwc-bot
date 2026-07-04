@@ -685,7 +685,55 @@ function buildWantedButtons() {
   return [new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('wanted_avis').setLabel('Lancer un avis de recherche').setEmoji('🎯').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId('wanted_list').setLabel('Voir les avis en cours').setEmoji('📋').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('wanted_manage').setLabel('Gérer les avis').setEmoji('🛠️').setStyle(ButtonStyle.Secondary),
   )];
+}
+
+// ─── Gestion des avis (responsables) : clôturer / supprimer ───
+async function handleManage(interaction) {
+  if (!estResponsable(interaction.member)) return interaction.reply({ content: '❌ La gestion des avis est réservée aux responsables.', flags: MessageFlags.Ephemeral });
+  const list = (loadDB().traques || []).slice(-25).reverse();
+  if (!list.length) return interaction.reply({ content: '📭 Aucun avis de recherche enregistré.', flags: MessageFlags.Ephemeral });
+  const sel = new StringSelectMenuBuilder().setCustomId('traque_manage_sel').setPlaceholder('Choisis un avis à gérer…').addOptions(
+    list.map(t => ({ label: `${t.cible || 'Cible'}`.slice(0, 100), value: t.id, description: `${t.id} · ${(STATUTS[t.status] || STATUTS.chasse).label} · 💰 ${t.prime || '—'}`.slice(0, 100) }))
+  );
+  return interaction.reply({ content: '🛠️ **Gérer les avis de recherche** — choisis-en un :', components: [new ActionRowBuilder().addComponents(sel)], flags: MessageFlags.Ephemeral });
+}
+async function handleManageSelect(interaction) {
+  if (!estResponsable(interaction.member)) return interaction.update({ content: '❌ Réservé aux responsables.', components: [] }).catch(() => {});
+  const t = findTraque(loadDB(), interaction.values[0]);
+  if (!t) return interaction.update({ content: '❌ Avis introuvable.', components: [] }).catch(() => {});
+  const st = STATUTS[t.status] || STATUTS.chasse;
+  const closed = ['capturee', 'eliminee', 'abandonnee'].includes(t.status);
+  const btns = [];
+  if (!closed) btns.push(new ButtonBuilder().setCustomId(`traque_cloturer::${t.id}`).setLabel('Clôturer').setEmoji('✅').setStyle(ButtonStyle.Primary));
+  btns.push(new ButtonBuilder().setCustomId(`traque_suppr::${t.id}`).setLabel('Supprimer').setEmoji('🗑️').setStyle(ButtonStyle.Danger));
+  return interaction.update({
+    content: `🎯 **${t.cible}** \`${t.id}\`\n📌 ${st.label} · 💰 ${t.prime || '—'} · ⚠️ ${dangerLabel(t.dangerosite)} · 📍 ${t.position || '—'} · 🤠 ${(t.chasseurs || []).length} chasseur(s)`,
+    components: [new ActionRowBuilder().addComponents(...btns)],
+  }).catch(() => {});
+}
+async function handleSupprButton(interaction) {
+  if (!estResponsable(interaction.member)) return interaction.reply({ content: '❌ Réservé aux responsables.', flags: MessageFlags.Ephemeral });
+  const t = findTraque(loadDB(), interaction.customId.split('::')[1]);
+  if (!t) return interaction.update({ content: '❌ Avis introuvable.', components: [] }).catch(() => {});
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`traque_supprok::${t.id}`).setLabel('Oui, supprimer').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('traque_supprno').setLabel('Annuler').setStyle(ButtonStyle.Secondary),
+  );
+  return interaction.update({ content: `⚠️ Supprimer **définitivement** l'avis \`${t.id}\` — **${t.cible}** ?\n*Retire l'affiche et son fil, et **stoppe les relances automatiques**. Irréversible.*`, components: [row] }).catch(() => {});
+}
+async function handleSupprOk(interaction) {
+  if (!estResponsable(interaction.member)) return interaction.reply({ content: '❌ Réservé aux responsables.', flags: MessageFlags.Ephemeral });
+  const db = loadDB();
+  const t = findTraque(db, interaction.customId.split('::')[1]);
+  if (!t) return interaction.update({ content: '✅ Déjà supprimé.', components: [] }).catch(() => {});
+  try { if (t.threadId) { const th = await interaction.guild.channels.fetch(t.threadId).catch(() => null); if (th?.delete) await th.delete().catch(() => {}); } } catch {}
+  await _retirerAvis(interaction.guild, t); // supprime l'affiche (et son fil)
+  try { if (t.cartePointId && db.carte?.points) db.carte.points = db.carte.points.filter(p => p.id !== t.cartePointId && p.avisId !== t.id); } catch {}
+  db.traques = (db.traques || []).filter(x => x.id !== t.id);
+  saveDB(db); sauvegarderSurGitHub?.().catch(() => {});
+  return interaction.update({ content: `🗑️ Avis \`${t.id}\` — **${t.cible}** supprimé. Relances automatiques stoppées.`, components: [] }).catch(() => {});
 }
 function _findWantedChannel(guild) {
   return guild.channels.cache.find(c => (c.type === 0 || c.type === 5) && /wanted|avis.?recherche/i.test(c.name || '')) || null;
@@ -819,8 +867,13 @@ async function routeInteraction(interaction) {
     if (cid.startsWith('traque_from_signal::')) { await handleFromSignal(interaction); return true; }
     if (cid === 'wanted_avis') { await interaction.showModal(modalCreation()); return true; }
     if (cid === 'wanted_list') { await handleListe(interaction); return true; }
+    if (cid === 'wanted_manage') { await handleManage(interaction); return true; }
+    if (cid.startsWith('traque_suppr::'))     { await handleSupprButton(interaction); return true; }
+    if (cid.startsWith('traque_supprok::'))   { await handleSupprOk(interaction); return true; }
+    if (cid === 'traque_supprno')             { await interaction.update({ content: '↩️ Suppression annulée.', components: [] }).catch(() => {}); return true; }
     if (cid.startsWith('traque_noop::'))      { await interaction.deferUpdate().catch(() => {}); return true; }
   }
+  if (interaction.isStringSelectMenu?.() && (interaction.customId || '').startsWith('traque_manage_sel')) { await handleManageSelect(interaction); return true; }
   if (interaction.isStringSelectMenu?.() && (interaction.customId || '').startsWith('traque_cloture_select::')) { await handleClotureSelect(interaction); return true; }
   if (interaction.isStringSelectMenu?.() && (interaction.customId || '').startsWith('traque_lierop_sel::')) { await handleLierOpSelect(interaction); return true; }
   if (interaction.isModalSubmit?.()) {
