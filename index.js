@@ -2550,6 +2550,8 @@ async function autoSetup(guild) {
   for (const _annCh of ['1509250452141772890', '1508756400069804058']) {
     (async (cid) => { try { const c = await guild.channels.fetch(cid).catch(() => null); if (c?.send) { await annonces.installerPanelAnnonce?.(guild, c); console.log('📢 Panneau annonces en place :', cid); } } catch {} })(_annCh);
   }
+  // Panneau « Table de jeu » du saloon (blackjack)
+  (async () => { try { const c = await guild.channels.fetch('1523378716770570372').catch(() => null); if (c?.send) { await blackjack.installerPanelBlackjack?.(guild, c); console.log('🎰 Panneau blackjack en place'); } } catch {} })();
   // (Annonce ponctuelle trésorerie/contrats/armes retirée — elle avait été postée, plus besoin.)
   // ♻️ Restauration AUTO (une seule fois) du contenu disparu : reposte rapports informateurs + avis wanted
   // depuis la base. Anti-doublon : ne reposte que ce dont le message a disparu.

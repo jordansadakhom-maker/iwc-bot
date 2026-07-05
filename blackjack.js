@@ -6,7 +6,8 @@
 //     (Tirer / Rester / Doubler). Compteur de jetons (gains/pertes) par table.
 //   • Tout est préfixé bj_ — n'écrit RIEN en base, aucune économie touchée.
 // ───────────────────────────────────────────────────────────────────────────
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, AttachmentBuilder } = require('discord.js');
+let _img = null; try { _img = require('./blackjack-image'); } catch { _img = null; }
 
 const GESTION = ['Opérateur', 'Operateur', 'Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier', 'Secrétaire', 'Instructeur'];
 function _estGestion(member) { try { return !!member?.roles?.cache?.some(r => GESTION.some(n => r.name.includes(n))); } catch { return false; } }
@@ -63,61 +64,68 @@ function _estHote(t, interaction) { return interaction.user.id === t.hoteId || _
 function _clearTimer(t) { if (t.timer) { clearTimeout(t.timer); t.timer = null; } }
 
 // ─── Rendu du plateau ───
-function _payload(t) {
-  const e = new EmbedBuilder().setColor(0xC8A45C).setTitle('🎰  TABLE DE BLACKJACK  🃏');
-  const lignes = [];
-
-  // Croupier
+// Lignes « cartes » en texte (repli si l'image ne se génère pas).
+function _lignesCartes(t) {
+  const L = [];
   if (t.phase === 'jeu') {
     const up = t.croupier.main[0];
-    lignes.push('🎩 **Croupier** — ' + (up ? _fmtCarte(up) + '  ' + DOS : '—') + '   *(carte cachée)*');
+    L.push('🎩 **Croupier** — ' + (up ? _fmtCarte(up) + '  ' + DOS : '—') + '   *(carte cachée)*');
   } else if (t.croupier.main.length) {
     const dt = _total(t.croupier.main);
-    lignes.push('🎩 **Croupier** — ' + _fmtMain(t.croupier.main) + '   **= ' + dt + '**' + (dt > 21 ? '  💥 brûlé' : (_estBJ(t.croupier.main) ? '  ✦ blackjack' : '')));
-  } else {
-    lignes.push('🎩 **Croupier** — *prêt à distribuer.*');
-  }
-  lignes.push('─────────────────────────────');
-
-  // Sièges
-  if (!t.sieges.length) {
-    lignes.push('*Aucun joueur assis. Cliquez sur* **🪑 S\'asseoir** *pour rejoindre la table.*');
-  } else {
-    t.sieges.forEach((s, i) => {
-      const tot = s.main.length ? _total(s.main) : null;
-      let statut = '';
-      if (t.phase === 'jeu') {
-        if (s.statut === 'bust') statut = '💥 brûlé';
-        else if (s.statut === 'blackjack') statut = '✦ BLACKJACK';
-        else if (s.statut === 'stand') statut = '✋ reste';
-        else if (i === t.tourIdx) statut = '🎯 **à lui de jouer**';
-        else statut = '⏳';
-      } else if (s.resultat) {
-        statut = s.resultat;
-      }
-      const mains = s.main.length ? '  ' + _fmtMain(s.main) + (tot != null ? '  **= ' + tot + '**' : '') : '';
-      const solde = t.soldes[s.userId] ? '  ·  jetons ' + _money(t.soldes[s.userId]) : '';
-      lignes.push('🪑 **' + s.nom + '** — mise ' + _money(s.mise) + mains + (statut ? '  ' + statut : '') + solde);
-    });
-  }
-
-  // Invite / phase
-  lignes.push('─────────────────────────────');
-  if (t.phase === 'lobby') {
-    if (t.manche > 0) lignes.push('🔚 **Manche terminée.** L\'hôte peut relancer une manche, ou chacun ajuster sa mise.');
-    else lignes.push(t.ambiance || '💬 *' + _pick(_phrasesDeal) + '*');
-    lignes.push('👉 Asseyez-vous, réglez votre mise, puis l\'**hôte distribue**.');
-  } else {
+    L.push('🎩 **Croupier** — ' + _fmtMain(t.croupier.main) + '   **= ' + dt + '**' + (dt > 21 ? '  · brûlé' : (_estBJ(t.croupier.main) ? '  · blackjack' : '')));
+  } else L.push('🎩 **Croupier** — *prêt à distribuer.*');
+  L.push('─────────────────────────────');
+  if (!t.sieges.length) L.push('*Aucun joueur assis. Cliquez sur* **🪑 S\'asseoir** *pour rejoindre la table.*');
+  else t.sieges.forEach((s, i) => {
+    const tot = s.main.length ? _total(s.main) : null;
+    let st = '';
+    if (t.phase === 'jeu') { if (s.statut === 'bust') st = '· brûlé'; else if (s.statut === 'blackjack') st = '· BLACKJACK'; else if (s.statut === 'stand') st = '· reste'; else if (i === t.tourIdx) st = '· **à lui de jouer**'; else st = '· ⏳'; }
+    else if (s.resultat) st = s.resultat;
+    const mains = s.main.length ? '  ' + _fmtMain(s.main) + (tot != null ? '  **= ' + tot + '**' : '') : '';
+    L.push('🪑 **' + s.nom + '** — mise ' + _money(s.mise) + mains + (st ? '  ' + st : ''));
+  });
+  return L;
+}
+// Lignes « état » (invite / tour / soldes) — toujours affichées.
+function _lignesStatut(t) {
+  const L = [];
+  if (t.phase === 'jeu') {
     const s = t.sieges[t.tourIdx];
-    lignes.push('➡️ **À ' + (s ? s.nom : '—') + ' de jouer** — Tirer, Rester' + (s && s.main.length === 2 ? ', ou Doubler' : '') + '.');
-    if (t.ambiance) lignes.push('💬 *' + t.ambiance + '*');
+    L.push('➡️ **À ' + (s ? s.nom : '—') + ' de jouer** — 🃏 Tirer · ✋ Rester' + (s && s.main.length === 2 ? ' · ⏫ Doubler' : ''));
+    if (t.ambiance) L.push('💬 *' + t.ambiance + '*');
+  } else if (t.manche > 0) {
+    L.push('🔚 **Manche terminée.** L\'hôte peut **relancer une manche** ou **fermer la table**.');
+    if (t.ambiance) L.push('💬 *' + t.ambiance + '*');
+  } else {
+    L.push('💬 *' + (t.ambiance || _pick(_phrasesDeal)) + '*');
+    L.push('👉 **S\'asseoir**, régler sa mise, puis l\'**hôte distribue**.');
   }
-  if (t.reshuffle) { lignes.push('🔀 *(le sabot a été rebattu)*'); }
-
-  e.setDescription(lignes.join('\n'));
-  e.setFooter({ text: 'Hôte : ' + t.hoteNom + '  ·  Blackjack payé 3:2  ·  Le croupier tire jusqu\'à 17' });
-
-  // Boutons
+  const sold = Object.entries(t.soldes).filter(([, n]) => n).map(([u, n]) => { const s = t.sieges.find(x => x.userId === u); return '• ' + (s ? s.nom : 'Parti') + ' : ' + _money(n); });
+  if (sold.length) L.push('💰 **Jetons de la soirée**\n' + sold.join('\n'));
+  if (t.reshuffle) L.push('🔀 *(sabot rebattu)*');
+  return L;
+}
+function _imgState(t) {
+  return {
+    sousTitre: t.phase === 'jeu'
+      ? ('À ' + (t.sieges[t.tourIdx]?.nom || '—') + ' de jouer — Tirer, Rester' + (t.sieges[t.tourIdx]?.main.length === 2 ? ' ou Doubler' : ''))
+      : (t.manche > 0 ? 'Manche terminée — l\'hôte peut relancer ou fermer' : 'Faites vos jeux — misez, puis l\'hôte distribue'),
+    croupier: {
+      cards: (t.croupier.main || []).map(c => ({ r: c.r, s: c.s })),
+      hidden: t.phase === 'jeu',
+      total: t.croupier.main.length ? _total(t.croupier.main) : null,
+      bust: t.croupier.main.length ? _total(t.croupier.main) > 21 : false,
+      bj: _estBJ(t.croupier.main || []),
+    },
+    joueurs: t.sieges.map((s, i) => {
+      let badge = '';
+      if (t.phase === 'jeu') { badge = s.statut === 'bust' ? 'brûlé' : s.statut === 'blackjack' ? 'BLACKJACK' : s.statut === 'stand' ? 'reste' : (i === t.tourIdx ? 'à lui de jouer' : 'en attente'); }
+      else if (s.resultat) badge = s.resultat;
+      return { nom: s.nom, mise: _money(s.mise), cards: (s.main || []).map(c => ({ r: c.r, s: c.s })), total: s.main.length ? _total(s.main) : 0, actif: t.phase === 'jeu' && i === t.tourIdx, badge };
+    }),
+  };
+}
+function _components(t) {
   const rows = [];
   if (t.phase === 'lobby') {
     rows.push(new ActionRowBuilder().addComponents(
@@ -136,10 +144,24 @@ function _payload(t) {
       new ButtonBuilder().setCustomId('bj_double').setLabel('Doubler').setEmoji('⏫').setStyle(ButtonStyle.Secondary).setDisabled(!(s && s.main.length === 2)),
     ));
   }
-  return { embeds: [e], components: rows };
+  return rows;
+}
+// Construit le message complet (image si possible, sinon texte). Renvoie { embeds, components, files }.
+async function _screen(t) {
+  const e = new EmbedBuilder().setColor(0xC8A45C).setTitle('🎰  TABLE DE BLACKJACK  🃏')
+    .setFooter({ text: 'Hôte : ' + t.hoteNom + '  ·  Blackjack payé 3:2  ·  Le croupier tire jusqu\'à 17' });
+  let buf = null;
+  try { if (_img?.genererTable) buf = await _img.genererTable(_imgState(t)); } catch { buf = null; }
+  if (buf) {
+    e.setImage('attachment://blackjack.png');
+    e.setDescription(_lignesStatut(t).join('\n').slice(0, 4000));
+    return { embeds: [e], components: _components(t), files: [new AttachmentBuilder(buf, { name: 'blackjack.png' })] };
+  }
+  e.setDescription(_lignesCartes(t).concat(['─────────────────────────────']).concat(_lignesStatut(t)).join('\n').slice(0, 4000));
+  return { embeds: [e], components: _components(t), files: [] };
 }
 
-async function _refresh(t) { try { if (t.msg) await t.msg.edit(_payload(t)); } catch (e) { console.log('⚠️ bj refresh:', e.message); } }
+async function _refresh(t) { try { if (t.msg) { const p = await _screen(t); await t.msg.edit({ ...p, attachments: [] }); } } catch (e) { console.log('⚠️ bj refresh:', e.message); } }
 
 // ─── Déroulé d'une manche ───
 function _armer(t) {
@@ -255,7 +277,7 @@ async function routeInteraction(interaction) {
       const exist = tables.get(interaction.channelId);
       if (exist) { await interaction.reply({ content: '🎰 Une table est déjà ouverte dans ce salon. Rejoins-la un peu plus haut !', flags: eph }); return true; }
       const t = _creerTable(interaction);
-      const msg = await interaction.channel.send(_payload(t)).catch(() => null);
+      const msg = await interaction.channel.send(await _screen(t)).catch(() => null);
       if (!msg) { await interaction.reply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).', flags: eph }); return true; }
       t.msg = msg; t.messageId = msg.id; tables.set(interaction.channelId, t);
       await interaction.reply({ content: '🎰 Table ouverte — tu en es l\'**hôte**. Assieds-toi 👇 puis clique **Distribuer** quand tout le monde a misé.', flags: eph });
@@ -349,7 +371,7 @@ async function routeInteraction(interaction) {
       const e = new EmbedBuilder().setColor(0x8a6d3b).setTitle('🎰 Table fermée')
         .setDescription('Le croupier ramasse les cartes. Merci d\'avoir joué à la maison.' + (bilan ? '\n\n**Bilan des jetons :**\n' + bilan : ''))
         .setFooter({ text: 'Iron Wolf Company · Saloon' });
-      try { await t.msg?.edit({ embeds: [e], components: [] }); } catch {}
+      try { await t.msg?.edit({ embeds: [e], components: [], files: [], attachments: [] }); } catch {}
       await interaction.deferUpdate().catch(() => {});
       return true;
     }
