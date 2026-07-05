@@ -396,10 +396,11 @@ async function installerPanelPoker(guild, channel) {
 async function _envoyerMain(interaction, t, s) {
   const eph = MessageFlags.Ephemeral;
   const ev = _evaluer(s.main);
+  await interaction.deferReply({ flags: eph }).catch(() => {}); // accuse réception avant de générer l'image
   let buf = null;
   try { if (_img?.genererMain) buf = await _img.genererMain({ nom: s.nom, cards: s.main.map(c => ({ r: c.r, s: c.s })), evalNom: ev.nom, sousTitre: t.phase === 'echange' ? 'Choisissez 0 à 5 cartes à échanger' : 'Vos cartes' }); } catch { buf = null; }
-  if (buf) { await interaction.reply({ content: '👁️ **Votre main** — ' + ev.nom, files: [new AttachmentBuilder(buf, { name: 'main.png' })], flags: eph }).catch(() => {}); }
-  else { await interaction.reply({ content: '👁️ **Votre main** : ' + _fmtMain(s.main) + '\n➡️ ' + ev.nom, flags: eph }).catch(() => {}); }
+  if (buf) { await interaction.editReply({ content: '👁️ **Votre main** — ' + ev.nom, files: [new AttachmentBuilder(buf, { name: 'main.png' })] }).catch(() => {}); }
+  else { await interaction.editReply({ content: '👁️ **Votre main** : ' + _fmtMain(s.main) + '\n➡️ ' + ev.nom }).catch(() => {}); }
 }
 
 // ─── Routeur d'interactions ───
@@ -413,11 +414,12 @@ async function routeInteraction(interaction) {
     if (interaction.isButton() && id === 'pk_open') {
       const exist = tables.get(interaction.channelId);
       if (exist) { await interaction.reply({ content: '🃏 Une table est déjà ouverte dans ce salon. Rejoins-la un peu plus haut !', flags: eph }); return true; }
+      await interaction.deferReply({ flags: eph });
       const t = _creerTable(interaction);
       const msg = await interaction.channel.send(await _screen(t)).catch(() => null);
-      if (!msg) { await interaction.reply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).', flags: eph }); return true; }
+      if (!msg) { await interaction.editReply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).' }); return true; }
       t.msg = msg; t.messageId = msg.id; tables.set(interaction.channelId, t);
-      await interaction.reply({ content: '🃏 Table ouverte — tu en es l\'**hôte**. Assieds-toi 👇 puis clique **Distribuer** quand au moins 2 joueurs ont misé.', flags: eph });
+      await interaction.editReply({ content: '🃏 Table ouverte — tu en es l\'**hôte**. Assieds-toi 👇 puis clique **Distribuer** quand au moins 2 joueurs ont misé.' });
       return true;
     }
 

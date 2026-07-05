@@ -372,11 +372,12 @@ async function routeInteraction(interaction) {
     if (interaction.isButton() && id === 'faro_open') {
       const exist = tables.get(interaction.channelId);
       if (exist) { await interaction.reply({ content: '🎰 Une table de Faro est déjà ouverte dans ce salon. Rejoins-la un peu plus haut !', flags: eph }); return true; }
+      await interaction.deferReply({ flags: eph });
       const t = _creerTable(interaction);
       const msg = await interaction.channel.send(await _screen(t)).catch(() => null);
-      if (!msg) { await interaction.reply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).', flags: eph }); return true; }
+      if (!msg) { await interaction.editReply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).' }); return true; }
       t.msg = msg; t.messageId = msg.id; tables.set(interaction.channelId, t);
-      await interaction.reply({ content: '🎰 Table de Faro ouverte — tu tiens la **banque**. Les joueurs misent 👇 puis tu cliques **Tourner**.', flags: eph });
+      await interaction.editReply({ content: '🎰 Table de Faro ouverte — tu tiens la **banque**. Les joueurs misent 👇 puis tu cliques **Tourner**.' });
       return true;
     }
 

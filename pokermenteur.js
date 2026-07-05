@@ -397,11 +397,12 @@ async function routeInteraction(interaction) {
     if (interaction.isButton() && id === 'pm_open') {
       const exist = tables.get(interaction.channelId);
       if (exist) { await interaction.reply({ content: '🎲 Une table est déjà ouverte dans ce salon. Rejoins-la un peu plus haut !', flags: eph }); return true; }
+      await interaction.deferReply({ flags: eph });
       const t = _creerTable(interaction);
       const msg = await interaction.channel.send(await _screen(t)).catch(() => null);
-      if (!msg) { await interaction.reply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).', flags: eph }); return true; }
+      if (!msg) { await interaction.editReply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).' }); return true; }
       t.msg = msg; t.messageId = msg.id; tables.set(interaction.channelId, t);
-      await interaction.reply({ content: '🎲 Table ouverte — tu en es l\'**hôte**. Assieds-toi 👇 (mise l\'ante), puis clique **Lancer la partie** quand tout le monde est prêt.', flags: eph });
+      await interaction.editReply({ content: '🎲 Table ouverte — tu en es l\'**hôte**. Assieds-toi 👇 (mise l\'ante), puis clique **Lancer la partie** quand tout le monde est prêt.' });
       return true;
     }
 
@@ -470,10 +471,11 @@ async function routeInteraction(interaction) {
       const j = _joueur(t, interaction.user.id);
       if (!j) { await interaction.reply({ content: 'Tu n\'es pas à cette table.', flags: eph }); return true; }
       if (!j.vivant || !(j.des || []).length) { await interaction.reply({ content: '🎲 Tu n\'as pas de dés en main pour l\'instant.', flags: eph }); return true; }
+      await interaction.deferReply({ flags: eph }); // accuse réception avant de générer l'image
       let buf = null;
       try { if (_img?.genererMain) buf = await _img.genererMain(j.des, j.nom); } catch { buf = null; }
-      if (buf) { await interaction.reply({ content: '🫣 Tes dés (les **1** sont jokers) :', files: [new AttachmentBuilder(buf, { name: 'mesdes.png' })], flags: eph }); }
-      else { await interaction.reply({ content: '🫣 Tes dés : **' + (j.des || []).join(' · ') + '**  _(les 1 sont jokers)_', flags: eph }); }
+      if (buf) { await interaction.editReply({ content: '🫣 Tes dés (les **1** sont jokers) :', files: [new AttachmentBuilder(buf, { name: 'mesdes.png' })] }); }
+      else { await interaction.editReply({ content: '🫣 Tes dés : **' + (j.des || []).join(' · ') + '**  _(les 1 sont jokers)_' }); }
       return true;
     }
 

@@ -464,11 +464,12 @@ async function routeInteraction(interaction) {
     if (interaction.isButton() && id === 'dom_open') {
       const exist = tables.get(interaction.channelId);
       if (exist) { await interaction.reply({ content: '🁢 Une table est déjà ouverte dans ce salon. Rejoins-la un peu plus haut !', flags: eph }); return true; }
+      await interaction.deferReply({ flags: eph });
       const t = _creerTable(interaction);
       const msg = await interaction.channel.send(await _screen(t)).catch(() => null);
-      if (!msg) { await interaction.reply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).', flags: eph }); return true; }
+      if (!msg) { await interaction.editReply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).' }); return true; }
       t.msg = msg; t.messageId = msg.id; tables.set(interaction.channelId, t);
-      await interaction.reply({ content: '🁢 Table ouverte — tu en es l\'**hôte**. Rejoins 👇 puis clique **Distribuer** quand tout le monde a misé (min. ' + MIN_JOUEURS + ' joueurs).', flags: eph });
+      await interaction.editReply({ content: '🁢 Table ouverte — tu en es l\'**hôte**. Rejoins 👇 puis clique **Distribuer** quand tout le monde a misé (min. ' + MIN_JOUEURS + ' joueurs).' });
       return true;
     }
 
@@ -526,7 +527,9 @@ async function routeInteraction(interaction) {
     if (interaction.isButton() && id === 'dom_peek') {
       const j = _joueur(t, interaction.user.id);
       if (!j) { await interaction.reply({ content: 'Tu n\'es pas à cette table.', flags: eph }); return true; }
-      await interaction.reply(await _peekPayload(t, j)); return true;
+      await interaction.deferReply({ flags: eph }); // accuse réception avant de générer l'image
+      const _pp = await _peekPayload(t, j); delete _pp.flags;
+      await interaction.editReply(_pp); return true;
     }
 
     // Jouer une tuile → menu de sélection (joueur courant uniquement)

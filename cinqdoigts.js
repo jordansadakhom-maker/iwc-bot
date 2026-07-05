@@ -386,11 +386,12 @@ async function routeInteraction(interaction) {
     if (interaction.isButton() && id === 'fff_open') {
       const exist = tables.get(interaction.channelId);
       if (exist) { await interaction.reply({ content: '🔪 Une table de Cinq Doigts est déjà ouverte dans ce salon. Rejoins-la plus haut !', flags: eph }); return true; }
+      await interaction.deferReply({ flags: eph });
       const t = _creerTable(interaction);
       const msg = await interaction.channel.send(await _screen(t)).catch(() => null);
-      if (!msg) { await interaction.reply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).', flags: eph }); return true; }
+      if (!msg) { await interaction.editReply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).' }); return true; }
       t.msg = msg; t.messageId = msg.id; tables.set(interaction.channelId, t);
-      await interaction.reply({ content: '🔪 Table ouverte — tu en es l\'**hôte**. Lance un **Solo**, ou monte un **Duel** 👇', flags: eph });
+      await interaction.editReply({ content: '🔪 Table ouverte — tu en es l\'**hôte**. Lance un **Solo**, ou monte un **Duel** 👇' });
       return true;
     }
 
@@ -479,10 +480,11 @@ async function routeInteraction(interaction) {
       } else { lignes.push('Aucune manche en cours pour l\'instant.'); }
       const meilleur = t.scores[interaction.user.id] || 0;
       if (meilleur) lignes.push('🏅 Ton meilleur score solo de la soirée : **' + meilleur + '** manche(s).');
+      await interaction.deferReply({ flags: eph }); // accuse réception avant de générer l'image
       let buf = null;
       try { if (_img?.genererPeek) buf = await _img.genererPeek(_imgState(t)); } catch { buf = null; }
-      if (buf) await interaction.reply({ content: lignes.join('\n'), files: [new AttachmentBuilder(buf, { name: 'nerfs.png' })], flags: eph });
-      else await interaction.reply({ content: lignes.join('\n'), flags: eph });
+      if (buf) await interaction.editReply({ content: lignes.join('\n'), files: [new AttachmentBuilder(buf, { name: 'nerfs.png' })] });
+      else await interaction.editReply({ content: lignes.join('\n') });
       return true;
     }
 

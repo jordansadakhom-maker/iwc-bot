@@ -347,11 +347,12 @@ async function routeInteraction(interaction) {
     if (interaction.isButton() && id === 'bj_open') {
       const exist = tables.get(interaction.channelId);
       if (exist) { await interaction.reply({ content: '🎰 Une table est déjà ouverte dans ce salon. Rejoins-la un peu plus haut !', flags: eph }); return true; }
+      await interaction.deferReply({ flags: eph }); // accuse réception AVANT de générer l'image (sinon timeout 3 s)
       const t = _creerTable(interaction);
       const msg = await interaction.channel.send(await _screen(t)).catch(() => null);
-      if (!msg) { await interaction.reply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).', flags: eph }); return true; }
+      if (!msg) { await interaction.editReply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).' }); return true; }
       t.msg = msg; t.messageId = msg.id; tables.set(interaction.channelId, t);
-      await interaction.reply({ content: '🎰 Table ouverte — tu en es l\'**hôte**. Assieds-toi 👇 puis clique **Distribuer** quand tout le monde a misé.', flags: eph });
+      await interaction.editReply({ content: '🎰 Table ouverte — tu en es l\'**hôte**. Assieds-toi 👇 puis clique **Distribuer** quand tout le monde a misé.' });
       return true;
     }
 
