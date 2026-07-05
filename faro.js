@@ -17,6 +17,8 @@
 // ───────────────────────────────────────────────────────────────────────────
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, AttachmentBuilder } = require('discord.js');
 let _img = null; try { _img = require('./faro-image'); } catch { _img = null; }
+let casino = {}; try { casino = require('./casino-banque'); } catch { casino = {}; }
+const _sous = uid => (casino.solde ? casino.solde(uid) : 0);
 
 const PREFIXE = 'faro_';
 
@@ -39,6 +41,65 @@ function _fmtCarte(c) { return '`' + c.r + c.s + '`'; }
 const _phrasesMise = ['« Faites vos jeux sur le tableau, messieurs-dames. »', '« Posez vos jetons, le sabot n\'attend pas. »', '« Sur quel rang tentez-vous le sort ce soir ? »'];
 const _phrasesTour = ['Le donneur fait glisser deux cartes du sabot…', 'La boîte à faro rend son verdict…', 'Le donneur retourne : perdante, puis gagnante.'];
 function _pick(a) { return a[Math.floor(Math.random() * a.length)]; }
+
+// ── Émotes RP à coller EN JEU (RedM) : garde la scène vivante pendant qu'on joue sur Discord ──
+const _EMOTES_SCENE = [
+  '/do Le donneur fait glisser deux cartes du sabot, la salle retient son souffle.',
+  '/do Sur le tapis vert, les jetons s\'empilent au fil des rangs misés.',
+  '/do La boîte à faro cliquette ; chaque carte tirée fait monter la tension autour du tableau.',
+  '/do Fumée de cigare et tintement des jetons emplissent le saloon pendant que la banque tourne les cartes.',
+];
+const _EMOTES_MISE = [
+  '/me pose ses jetons sur le rang de son choix, l\'œil décidé.',
+  '/me glisse une pile de jetons sur le tableau et fixe le sabot.',
+  '/me hésite un instant puis mise sur son rang porte-bonheur.',
+  '/me tapote le tapis à l\'endroit de sa mise, confiant.',
+];
+const _EMOTES_ATTENTE = [
+  '/me suit d\'un œil aiguisé les cartes du banquier.',
+  '/me croise les bras, guettant la prochaine carte du sabot.',
+  '/me retient son souffle en attendant que le donneur tourne.',
+];
+const _EMOTES_GAGNE = [
+  '/me ramasse ses gains sur le rang gagnant avec un sourire en coin.',
+  '/me empile ses jetons fraîchement gagnés d\'un geste satisfait.',
+];
+const _EMOTES_PERDU = [
+  '/me voit ses jetons raflés par la banque et serre les dents.',
+  '/me pousse un soupir en regardant sa mise filer vers le donneur.',
+];
+const _EMOTES_GEN = [
+  '/me sirote son verre en surveillant le tableau des rangs.',
+  '/me jauge le donneur du regard, une main sur ses jetons.',
+];
+// Pioche une émote /me selon le contexte du joueur (dernier coup, mise en cours, à venir).
+function _emotePerso(t, joueur) {
+  const uid = typeof joueur === 'string' ? joueur : joueur?.userId;
+  if (!uid) return _pick(_EMOTES_SCENE);
+  const d = t.dernier;
+  if (d && d.resultats) {
+    const miens = d.resultats.filter(r => r.userId === uid);
+    if (miens.length) { const net = miens.reduce((a, r) => a + r.delta, 0); return _pick(net > 0 ? _EMOTES_GAGNE : net < 0 ? _EMOTES_PERDU : _EMOTES_GEN); }
+  }
+  if (t.mises.some(m => m.userId === uid)) return _pick(_EMOTES_ATTENTE);
+  return _pick(_EMOTES_MISE);
+}
+// ── Règles : « comment jouer », montrées avant de tourner un coup ──
+const _REGLES = [
+  '📖 **FARO — COMMENT JOUER**',
+  '',
+  '**But :** miser sur le bon **rang** (A → K) et te faire payer par la **banque**.',
+  '',
+  '**La table :** un tableau des 13 rangs. Tu poses tes **jetons** sur un ou plusieurs rangs.',
+  '**Le coup :** le donneur tire **deux cartes** du sabot :',
+  '• 🥇 1re carte = **PERDANTE** — les mises sur ce rang vont à la **banque**.',
+  '• 🎯 2e carte = **GAGNANTE** — les mises sur ce rang sont payées **1:1**.',
+  '**Rang non sorti :** ta mise **reste en place** pour le coup suivant (ou retire-la avec « Retirer mes mises »).',
+  '**Split :** si les deux cartes sont du **même rang**, la maison prend la **moitié** des mises de ce rang — c\'est le seul, et très faible, avantage de la banque.',
+  '',
+  '🎭 **Reste en RP :** appuie sur **Emote** et colle la ligne **en jeu** — comme ça, personne ne te prend pour un AFK pendant que tu joues ici.',
+  '💰 **Sous :** tes gains/pertes sont cumulés dans ton compteur de **sous** du saloon (bouton « Mes sous »).',
+];
 
 // ─── État des tables (en mémoire, une par salon) ───
 const tables = new Map(); // channelId -> table
@@ -120,6 +181,8 @@ function _resoudreCoup(t, perdante, gagnante) {
   t.mises = restants;
   t.coup++;
   t.dernier = { perdante, gagnante, split, resultats };
+  // Compteur de « sous » PERSISTANT du saloon : reflète EXACTEMENT le net de ce coup (une seule écriture).
+  try { if (casino.crediterLot && resultats.length) casino.crediterLot(resultats.map(r => ({ userId: r.userId, montant: r.delta }))); } catch {}
   return t.dernier;
 }
 
@@ -192,6 +255,7 @@ function _lignesStatut(t) {
   const L = [];
   if (t.coup > 0) L.push('▶️ **Replacez vos mises**, puis l\'hôte **Tourne** un nouveau coup.');
   else L.push('👉 **Misez sur un rang**, puis l\'**hôte** clique **Tourner**.');
+  if (t.coup === 0) L.push('📖 *Nouveau ? Clique **Comment jouer** avant de miser.*  🎭 *Pense à **Emote RP** pour rester crédible en jeu.*');
   if (t.ambiance) L.push('💬 *' + t.ambiance + '*');
   const sold = Object.entries(t.soldes).filter(([, n]) => n).map(([u, n]) => '• ' + (t.joueurs[u] || 'Parti') + ' : ' + _signe(n));
   if (sold.length) L.push('💰 **Jetons de la soirée** (banque : ' + _signe(t.banque) + ')\n' + sold.join('\n'));
@@ -199,6 +263,14 @@ function _lignesStatut(t) {
   return L;
 }
 
+// Rangée commune : Comment jouer / Emote RP / Mes sous (présente sur toutes les phases).
+function _rowExtras() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('faro_regles').setLabel('Comment jouer').setEmoji('📖').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('faro_emote').setLabel('Emote RP').setEmoji('🎭').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('faro_sous').setLabel('Mes sous').setEmoji('💰').setStyle(ButtonStyle.Secondary),
+  );
+}
 function _components(t) {
   const rows = [];
   rows.push(new ActionRowBuilder().addComponents(
@@ -210,6 +282,7 @@ function _components(t) {
     new ButtonBuilder().setCustomId('faro_turn').setLabel('Tourner').setEmoji('🎴').setStyle(ButtonStyle.Primary).setDisabled(!t.mises.length),
     new ButtonBuilder().setCustomId('faro_close').setLabel('Fermer la table').setEmoji('❌').setStyle(ButtonStyle.Danger),
   ));
+  rows.push(_rowExtras());
   return rows;
 }
 
@@ -377,6 +450,28 @@ async function routeInteraction(interaction) {
         .setFooter({ text: 'Iron Wolf Company · Saloon' });
       try { await t.msg?.edit({ embeds: [e], components: [], files: [], attachments: [] }); } catch {}
       await interaction.deferUpdate().catch(() => {});
+      return true;
+    }
+
+    // Comment jouer (règles, avant de tourner)
+    if (interaction.isButton() && id === 'faro_regles') {
+      await interaction.reply({ content: _REGLES.join('\n'), flags: eph });
+      return true;
+    }
+    // Emote RP à coller en jeu (anti-AFK)
+    if (interaction.isButton() && id === 'faro_emote') {
+      const lignes = _emotePerso(t, interaction.user.id) + '\n' + _pick(_EMOTES_SCENE);
+      await interaction.reply({ content: '🎭 **Reste dans la scène !** Colle une de ces lignes **en jeu** (RedM) pour ne pas passer pour AFK :\n```\n' + lignes + '\n```\n*Astuce : garde le jeu en fenêtre, alterne vite, et remets une émote à chaque mise.*', flags: eph });
+      return true;
+    }
+    // Compteur de sous du saloon (persistant)
+    if (interaction.isButton() && id === 'faro_sous') {
+      const total = _sous(interaction.user.id);
+      const enTable = interaction.user.id in t.soldes;
+      const sess = t.soldes[interaction.user.id] || 0;
+      const top = casino.classement ? casino.classement(3) : [];
+      const topTxt = top.length ? '\n\n🏆 **Gros joueurs du saloon**\n' + top.map(([u, n], i) => (i + 1) + '. <@' + u + '> — ' + _money(n)).join('\n') : '';
+      await interaction.reply({ content: '💰 **Tes sous au saloon : ' + _money(total) + '**' + (enTable ? '\n*(à cette table : ' + _signe(sess) + ')*' : '') + topTxt, flags: eph, allowedMentions: { parse: [] } });
       return true;
     }
 
