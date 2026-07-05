@@ -20,6 +20,11 @@ const stickyPanel = require('./sticky-panel');
 let annonces = {}; try { annonces = require('./annonces'); console.log('✅ Module annonces/sondages chargé'); } catch (e) { console.log('⚠️ annonces non chargé:', e.message); }
 let journaux = {}; try { journaux = require('./journaux'); console.log('✅ Module journaux chargé'); } catch (e) { console.log('⚠️ journaux non chargé:', e.message); }
 let blackjack = {}; try { blackjack = require('./blackjack'); console.log('✅ Module blackjack chargé'); } catch (e) { console.log('⚠️ blackjack non chargé:', e.message); }
+let pokermenteur = {}; try { pokermenteur = require('./pokermenteur'); console.log('✅ Module poker menteur chargé'); } catch (e) { console.log('⚠️ pokermenteur non chargé:', e.message); }
+let faro = {}; try { faro = require('./faro'); console.log('✅ Module faro chargé'); } catch (e) { console.log('⚠️ faro non chargé:', e.message); }
+let poker = {}; try { poker = require('./poker'); console.log('✅ Module poker chargé'); } catch (e) { console.log('⚠️ poker non chargé:', e.message); }
+let cinqdoigts = {}; try { cinqdoigts = require('./cinqdoigts'); console.log('✅ Module cinq doigts chargé'); } catch (e) { console.log('⚠️ cinqdoigts non chargé:', e.message); }
+let dominos = {}; try { dominos = require('./dominos'); console.log('✅ Module dominos chargé'); } catch (e) { console.log('⚠️ dominos non chargé:', e.message); }
 const rdvplus = require('./rdvplus');
 const reorg = require('./reorg');
 
@@ -2550,8 +2555,8 @@ async function autoSetup(guild) {
   for (const _annCh of ['1509250452141772890', '1508756400069804058']) {
     (async (cid) => { try { const c = await guild.channels.fetch(cid).catch(() => null); if (c?.send) { await annonces.installerPanelAnnonce?.(guild, c); console.log('📢 Panneau annonces en place :', cid); } } catch {} })(_annCh);
   }
-  // Panneau « Table de jeu » du saloon (blackjack)
-  (async () => { try { const c = await guild.channels.fetch('1523378716770570372').catch(() => null); if (c?.send) { await blackjack.installerPanelBlackjack?.(guild, c); console.log('🎰 Panneau blackjack en place'); } } catch {} })();
+  // Panneau UNIFIÉ « Tables de jeu » du saloon (blackjack + poker menteur + faro + poker + cinq doigts + dominos)
+  (async () => { try { await _installerPanelSaloon(guild, '1523378716770570372'); console.log('🎰 Panneau Saloon (6 jeux) en place'); } catch {} })();
   // (Annonce ponctuelle trésorerie/contrats/armes retirée — elle avait été postée, plus besoin.)
   // ♻️ Restauration AUTO (une seule fois) du contenu disparu : reposte rapports informateurs + avis wanted
   // depuis la base. Anti-doublon : ne reposte que ce dont le message a disparu.
@@ -4211,6 +4216,11 @@ client.on('interactionCreate', async interaction => {
   if (await evenements.routeInteraction?.(interaction)) return;
   if (await annonces.routeInteraction?.(interaction)) return;
   if (await blackjack.routeInteraction?.(interaction)) return;
+  if (await pokermenteur.routeInteraction?.(interaction)) return;
+  if (await faro.routeInteraction?.(interaction)) return;
+  if (await poker.routeInteraction?.(interaction)) return;
+  if (await cinqdoigts.routeInteraction?.(interaction)) return;
+  if (await dominos.routeInteraction?.(interaction)) return;
   if (await pepites.routeInteraction?.(interaction)) return;
   if (await musique.routeInteraction?.(interaction)) return;
   if (await journaux.routeInteraction?.(interaction)) return;
@@ -10107,6 +10117,67 @@ async function _installerCataloguePrestations(guild) {
     const sent = await ch.send(payload).catch(() => null);
     if (sent) await sent.pin().catch(() => {});
   } catch (e) { console.log('⚠️ catalogue prestations:', e.message); }
+}
+
+// ── Panneau UNIFIÉ « Saloon — Tables de jeu » : un seul point d'entrée pour les 6 jeux ──
+// Chaque bouton ouvre une table via le module concerné (bj_open, pm_open, faro_open, pk_open, fff_open, dom_open).
+function _panneauSaloonPayload() {
+  const embed = new EmbedBuilder()
+    .setColor(0xC8A45C)
+    .setTitle('🎰 SALOON — TABLES DE JEU')
+    .setDescription([
+      '```',
+      '╔═══════════════════════════════════╗',
+      '║   LA MAISON VOUS OUVRE SES TABLES ║',
+      '╚═══════════════════════════════════╝',
+      '```',
+      '*Poussez la porte, tirez une chaise. Choisissez votre poison : cartes, dés ou couteau. Celui qui ouvre une table en devient l\'**hôte**.*',
+      '',
+      '🃏 **Blackjack** — battez le croupier sans dépasser 21 *(payé 3:2)*.',
+      '🎲 **Poker Menteur** — misez, bluffez, criez « Menteur ! » *(dés cachés)*.',
+      '🎴 **Faro** — misez sur les rangs, le donneur tourne les cartes.',
+      '♠️ **Poker (5 cartes)** — main fermée, un échange, la meilleure rafle le pot.',
+      '🔪 **Cinq Doigts** — jeu de nerfs au couteau, le plus rapide gagne.',
+      '🁢 **Dominos** — videz votre main avant les autres.',
+      '',
+      '👉 Cliquez un jeu pour **ouvrir une table** dans ce salon.',
+      '',
+      '— *« On mise ce qu\'on ose perdre. »*',
+    ].join('\n'))
+    .setFooter({ text: 'Iron Wolf Company · Saloon · Mises en jetons de table' });
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('bj_open').setLabel('Blackjack').setEmoji('🃏').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('pm_open').setLabel('Poker Menteur').setEmoji('🎲').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('faro_open').setLabel('Faro').setEmoji('🎴').setStyle(ButtonStyle.Secondary),
+  );
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('pk_open').setLabel('Poker').setEmoji('♠️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('fff_open').setLabel('Cinq Doigts').setEmoji('🔪').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dom_open').setLabel('Dominos').setStyle(ButtonStyle.Secondary),
+  );
+  return { embeds: [embed], components: [row1, row2] };
+}
+async function _installerPanelSaloon(guild, channelId) {
+  try {
+    const ch = await guild.channels.fetch(channelId).catch(() => null);
+    if (!ch?.messages || typeof ch.send !== 'function') return;
+    const me = guild.client.user.id;
+    const estHub = m => m.author?.id === me && (m.embeds?.[0]?.title || '').includes('TABLES DE JEU');
+    // Nettoie l'ancien panneau blackjack seul (titre « TABLE DE JEU » singulier) s'il traîne.
+    const aBouton = (m, id) => m.components?.some(r => r.components?.some(c => c.customId === id));
+    let existing = null;
+    const pins = await ch.messages.fetchPinned().catch(() => null);
+    if (pins) existing = [...pins.values()].find(estHub) || null;
+    const msgs = await ch.messages.fetch({ limit: 50 }).catch(() => null);
+    if (!existing && msgs) existing = [...msgs.values()].find(estHub) || null;
+    if (msgs) for (const m of msgs.values()) {
+      if (m.author?.id === me && m !== existing && aBouton(m, 'bj_open') && !estHub(m)) await m.delete().catch(() => {});
+    }
+    const payload = _panneauSaloonPayload();
+    if (existing) { await existing.edit(payload).catch(() => {}); return; }
+    const sent = await ch.send(payload).catch(() => null);
+    if (sent) await sent.pin().catch(() => {});
+  } catch (e) { console.log('⚠️ panneau saloon:', e.message); }
 }
 
 // ── Salon VISITEURS (1519611763866337420) : panneau d'accueil clair + 2 boutons fonctionnels ──
