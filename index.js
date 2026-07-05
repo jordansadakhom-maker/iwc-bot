@@ -19,6 +19,7 @@ const securitePlus = require('./securite-plus');
 const stickyPanel = require('./sticky-panel');
 let annonces = {}; try { annonces = require('./annonces'); console.log('✅ Module annonces/sondages chargé'); } catch (e) { console.log('⚠️ annonces non chargé:', e.message); }
 let journaux = {}; try { journaux = require('./journaux'); console.log('✅ Module journaux chargé'); } catch (e) { console.log('⚠️ journaux non chargé:', e.message); }
+let blackjack = {}; try { blackjack = require('./blackjack'); console.log('✅ Module blackjack chargé'); } catch (e) { console.log('⚠️ blackjack non chargé:', e.message); }
 const rdvplus = require('./rdvplus');
 const reorg = require('./reorg');
 
@@ -4207,6 +4208,7 @@ client.on('interactionCreate', async interaction => {
   if (await portail.routeInteraction?.(interaction)) return;
   if (await evenements.routeInteraction?.(interaction)) return;
   if (await annonces.routeInteraction?.(interaction)) return;
+  if (await blackjack.routeInteraction?.(interaction)) return;
   if (await pepites.routeInteraction?.(interaction)) return;
   if (await musique.routeInteraction?.(interaction)) return;
   if (await journaux.routeInteraction?.(interaction)) return;
