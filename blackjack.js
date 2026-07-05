@@ -8,6 +8,65 @@
 // ───────────────────────────────────────────────────────────────────────────
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, AttachmentBuilder } = require('discord.js');
 let _img = null; try { _img = require('./blackjack-image'); } catch { _img = null; }
+let casino = {}; try { casino = require('./casino-banque'); } catch { casino = {}; }
+const _sous = uid => (casino.solde ? casino.solde(uid) : 0);
+
+// ── Émotes RP à coller EN JEU (RedM) : garde la scène vivante pendant qu'on joue sur Discord ──
+const _EMOTES_SCENE = [
+  '/do Une partie de blackjack bat son plein : cartes qui claquent, jetons empilés, regards tendus.',
+  '/do L\'atmosphère feutrée du saloon, entre fumée de cigare et cliquetis des mises.',
+  '/do Autour du tapis vert, la tension monte à chaque carte retournée.',
+  '/me distribue un regard circulaire à la table avant de reporter les yeux sur ses cartes.',
+];
+const _EMOTES_LOBBY = [
+  '/me tire une chaise et s\'installe à la table de blackjack, l\'air confiant.',
+  '/me fait tinter quelques pièces entre ses doigts en fixant le tapis vert.',
+  '/me ajuste son chapeau et jauge les autres joueurs du regard.',
+  '/me pose sa mise sur le tapis et attend la donne.',
+];
+const _EMOTES_TOUR = [
+  '/me observe ses cartes en silence, pesant sa décision.',
+  '/me tapote nerveusement le bord de la table du bout des doigts.',
+  '/me plisse les yeux, hésitant entre tirer et rester.',
+];
+const _EMOTES_GAGNE = [
+  '/me ramasse ses gains avec un sourire en coin.',
+  '/me empile ses jetons d\'un geste satisfait.',
+];
+const _EMOTES_PERDU = [
+  '/me repousse ses cartes et grommelle dans sa barbe.',
+  '/me lâche un juron étouffé en voyant la main du croupier.',
+];
+const _EMOTES_GEN = [
+  '/me sirote son verre en surveillant le jeu des autres.',
+  '/me croise les bras, cartes en main, impassible.',
+];
+function _emotePerso(t, s) {
+  if (!s) return _pick(_EMOTES_SCENE);
+  if (t.phase === 'lobby') { if (s.resultat) { const n = s.net || 0; return _pick(n > 0 ? _EMOTES_GAGNE : n < 0 ? _EMOTES_PERDU : _EMOTES_GEN); } return _pick(_EMOTES_LOBBY); }
+  if (t.sieges[t.tourIdx]?.userId === s.userId) return _pick(_EMOTES_TOUR);
+  if (s.statut === 'bust') return _pick(_EMOTES_PERDU);
+  return _pick(_EMOTES_GEN);
+}
+// ── Règles : « comment jouer », montrées avant de lancer une partie ──
+const _REGLES = [
+  '📖 **BLACKJACK — COMMENT JOUER**',
+  '',
+  '**But :** battre le croupier en approchant **21** sans le dépasser.',
+  '',
+  '**Valeurs :** figures (V/D/R) = 10 · As = 1 **ou** 11 · les autres = leur chiffre.',
+  '**La donne :** chacun mise et reçoit 2 cartes visibles ; le croupier en a 2, dont **une cachée**.',
+  '**À ton tour :**',
+  '• 🃏 **Tirer** — une carte de plus.',
+  '• ✋ **Rester** — tu gardes ta main et passes la main.',
+  '• ⏫ **Doubler** — tu doubles ta mise et ne reçois **qu\'une** carte.',
+  '**Brûlé :** dépasser 21 = perdu direct.',
+  '**Le croupier** joue en dernier : il **tire jusqu\'à 17**, puis s\'arrête.',
+  '**Tu gagnes** si tu es plus proche de 21 que lui (ou s\'il brûle). Un **Blackjack** (21 en 2 cartes) est payé **3:2**.',
+  '',
+  '🎭 **Reste en RP :** appuie sur **Emote** à chaque action et colle la ligne **en jeu** — comme ça, personne ne te prend pour un AFK pendant que tu joues ici.',
+  '💰 **Sous :** tes gains/pertes sont cumulés dans ton compteur de **sous** du saloon (bouton « Mes sous »).',
+];
 
 const GESTION = ['Opérateur', 'Operateur', 'Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier', 'Secrétaire', 'Instructeur'];
 function _estGestion(member) { try { return !!member?.roles?.cache?.some(r => GESTION.some(n => r.name.includes(n))); } catch { return false; } }
@@ -99,6 +158,7 @@ function _lignesStatut(t) {
   } else {
     L.push('💬 *' + (t.ambiance || _pick(_phrasesDeal)) + '*');
     L.push('👉 **S\'asseoir**, régler sa mise, puis l\'**hôte distribue**.');
+    L.push('📖 *Nouveau ? Clique **Comment jouer** avant de lancer.*  🎭 *Pense à **Emote RP** pour rester crédible en jeu.*');
   }
   const sold = Object.entries(t.soldes).filter(([, n]) => n).map(([u, n]) => { const s = t.sieges.find(x => x.userId === u); return '• ' + (s ? s.nom : 'Parti') + ' : ' + _money(n); });
   if (sold.length) L.push('💰 **Jetons de la soirée**\n' + sold.join('\n'));
@@ -121,9 +181,17 @@ function _imgState(t) {
       let badge = '';
       if (t.phase === 'jeu') { badge = s.statut === 'bust' ? 'brûlé' : s.statut === 'blackjack' ? 'BLACKJACK' : s.statut === 'stand' ? 'reste' : (i === t.tourIdx ? 'à lui de jouer' : 'en attente'); }
       else if (s.resultat) badge = s.resultat;
-      return { nom: s.nom, mise: _money(s.mise), cards: (s.main || []).map(c => ({ r: c.r, s: c.s })), total: s.main.length ? _total(s.main) : 0, actif: t.phase === 'jeu' && i === t.tourIdx, badge };
+      return { nom: s.nom, mise: _money(s.mise), sous: _money(_sous(s.userId)), cards: (s.main || []).map(c => ({ r: c.r, s: c.s })), total: s.main.length ? _total(s.main) : 0, actif: t.phase === 'jeu' && i === t.tourIdx, badge };
     }),
   };
+}
+// Rangée commune : Comment jouer / Emote RP / Mes sous (présente sur toutes les phases).
+function _rowExtras() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('bj_regles').setLabel('Comment jouer').setEmoji('📖').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('bj_emote').setLabel('Emote RP').setEmoji('🎭').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('bj_sous').setLabel('Mes sous').setEmoji('💰').setStyle(ButtonStyle.Secondary),
+  );
 }
 function _components(t) {
   const rows = [];
@@ -144,6 +212,7 @@ function _components(t) {
       new ButtonBuilder().setCustomId('bj_double').setLabel('Doubler').setEmoji('⏫').setStyle(ButtonStyle.Secondary).setDisabled(!(s && s.main.length === 2)),
     ));
   }
+  rows.push(_rowExtras());
   return rows;
 }
 // Construit le message complet (image si possible, sinon texte). Renvoie { embeds, components, files }.
@@ -209,6 +278,8 @@ function _croupierEtResolution(t) {
     s.resultat = label; s.net = net; s.statut = 'fini';
     t.soldes[s.userId] = (t.soldes[s.userId] || 0) + net;
   }
+  // Compteur de « sous » PERSISTANT du saloon (une seule écriture pour toute la table).
+  try { if (casino.crediterLot) casino.crediterLot(t.sieges.map(s => ({ userId: s.userId, montant: s.net || 0 }))); } catch {}
   t.phase = 'lobby';
   t.ambiance = _pick(_phrasesTire);
 }
@@ -373,6 +444,29 @@ async function routeInteraction(interaction) {
         .setFooter({ text: 'Iron Wolf Company · Saloon' });
       try { await t.msg?.edit({ embeds: [e], components: [], files: [], attachments: [] }); } catch {}
       await interaction.deferUpdate().catch(() => {});
+      return true;
+    }
+
+    // Comment jouer (règles, avant de lancer)
+    if (interaction.isButton() && id === 'bj_regles') {
+      await interaction.reply({ content: _REGLES.join('\n'), flags: eph });
+      return true;
+    }
+    // Emote RP à coller en jeu (anti-AFK)
+    if (interaction.isButton() && id === 'bj_emote') {
+      const s = _siege(t, interaction.user.id);
+      const lignes = _emotePerso(t, s) + '\n' + _pick(_EMOTES_SCENE);
+      await interaction.reply({ content: '🎭 **Reste dans la scène !** Colle une de ces lignes **en jeu** (RedM) pour ne pas passer pour AFK :\n```\n' + lignes + '\n```\n*Astuce : garde le jeu en fenêtre, alterne vite, et remets une émote à chaque action.*', flags: eph });
+      return true;
+    }
+    // Compteur de sous du saloon (persistant)
+    if (interaction.isButton() && id === 'bj_sous') {
+      const total = _sous(interaction.user.id);
+      const s = _siege(t, interaction.user.id);
+      const sess = s ? (t.soldes[interaction.user.id] || 0) : 0;
+      const top = casino.classement ? casino.classement(3) : [];
+      const topTxt = top.length ? '\n\n🏆 **Gros joueurs du saloon**\n' + top.map(([u, n], i) => (i + 1) + '. <@' + u + '> — ' + _money(n)).join('\n') : '';
+      await interaction.reply({ content: '💰 **Tes sous au saloon : ' + _money(total) + '**' + (s ? '\n*(à cette table : ' + _money(sess) + ')*' : '') + topTxt, flags: eph, allowedMentions: { parse: [] } });
       return true;
     }
 
