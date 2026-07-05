@@ -151,6 +151,12 @@ function _annPreview(d) {
     d.eventTs ? '' : "⏰ *Les rappels nécessitent une date + heure valides.*",
   ].filter(Boolean).join('\n');
 }
+// Rangée « gérer » ajoutée SOUS chaque annonce publiée (annulation ultérieure par la Direction).
+function _gererRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('ann_gerer').setLabel('Gérer').setEmoji('🛠️').setStyle(ButtonStyle.Secondary),
+  );
+}
 function _pollRows() {
   return [
     new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('poll_role').setPlaceholder('👥 Rôle à pinger (optionnel)').setMinValues(0).setMaxValues(1)),
@@ -239,18 +245,80 @@ async function routeInteraction(interaction) {
       if (c.label && d.cat !== 'aucune') embed.addFields({ name: 'Catégorie', value: `${c.emoji} ${c.label}`, inline: true });
       if (d.eventTs) embed.addFields({ name: '🗓️ Quand', value: `<t:${_ts(d.eventTs)}:F>\n<t:${_ts(d.eventTs)}:R>`, inline: true });
       const content = d.roleId ? `<@&${d.roleId}>` : '';
-      const sent = await ch.send({ content, embeds: [embed], allowedMentions: { roles: d.roleId ? [d.roleId] : [] } }).catch(e => { console.log('⚠️ annonce send:', e.message); return null; });
+      const sent = await ch.send({ content, embeds: [embed], components: [_gererRow()], allowedMentions: { roles: d.roleId ? [d.roleId] : [] } }).catch(e => { console.log('⚠️ annonce send:', e.message); return null; });
       let remCount = 0;
-      if (sent && d.eventTs && d.reminders?.length) {
-        const db = loadDB(); if (!Array.isArray(db.annoncesReminders)) db.annoncesReminders = [];
-        for (const off of d.reminders) {
-          const fireAt = d.eventTs - (off === '60' ? 60 : 30) * 60000;
-          if (fireAt > Date.now() - 60000) { db.annoncesReminders.push({ id: 'R' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), channelId: d.channelId, roleId: d.roleId || null, titre: d.titre, eventTs: d.eventTs, fireAt, fired: false }); remCount++; }
+      if (sent) {
+        const db = loadDB();
+        // Mémorise l'annonce publiée (pour l'annuler proprement plus tard).
+        if (!db.annoncesPubliees) db.annoncesPubliees = {};
+        db.annoncesPubliees[sent.id] = { channelId: d.channelId, roleId: d.roleId || null, titre: d.titre, eventTs: d.eventTs || null, cat: d.cat, by: interaction.member?.displayName || interaction.user.username, at: Date.now() };
+        if (d.eventTs && d.reminders?.length) {
+          if (!Array.isArray(db.annoncesReminders)) db.annoncesReminders = [];
+          for (const off of d.reminders) {
+            const fireAt = d.eventTs - (off === '60' ? 60 : 30) * 60000;
+            if (fireAt > Date.now() - 60000) { db.annoncesReminders.push({ id: 'R' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), channelId: d.channelId, roleId: d.roleId || null, titre: d.titre, eventTs: d.eventTs, fireAt, fired: false, annonceMsgId: sent.id }); remCount++; }
+          }
         }
         saveDB(db);
       }
       _drafts.delete(interaction.user.id);
-      await interaction.update({ content: sent ? `✅ Annonce publiée dans ${ch}.${remCount ? ` ⏰ ${remCount} rappel(s) programmé(s).` : ''}` : '❌ Échec de publication (permissions ?).', components: [] }); return true;
+      await interaction.update({ content: sent ? `✅ Annonce publiée dans ${ch}.${remCount ? ` ⏰ ${remCount} rappel(s) programmé(s).` : ''}\n🛠️ *Un bouton « Gérer » est disponible sous l'annonce pour l'**annuler** en cas de besoin.*` : '❌ Échec de publication (permissions ?).', components: [] }); return true;
+    }
+
+    // ── GÉRER / ANNULER une annonce déjà publiée ──
+    if (interaction.isButton() && id === 'ann_gerer') {
+      if (!estGestion(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return true; }
+      const rec = (loadDB().annoncesPubliees || {})[interaction.message.id];
+      const titre = rec?.titre || (interaction.message.embeds?.[0]?.title || 'cette annonce').replace(/^[^\wÀ-ÿ]+/, '').trim();
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`ann_annuler::${interaction.channelId}::${interaction.message.id}`).setLabel("Annuler l'annonce").setEmoji('❌').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('ann_gclose').setLabel('Fermer').setStyle(ButtonStyle.Secondary),
+      );
+      await interaction.reply({ content: `🛠️ **Gérer** — « ${titre} »\nTu peux **annuler** cette annonce : elle sera marquée *ANNULÉE*, ses rappels seront supprimés, et les personnes pingées seront prévenues.`, components: [row], flags: MessageFlags.Ephemeral }); return true;
+    }
+    if (interaction.isButton() && id === 'ann_gclose') { await interaction.update({ content: '✅ Fermé.', components: [] }); return true; }
+    if (interaction.isButton() && id.startsWith('ann_annuler::')) {
+      if (!estGestion(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }); return true; }
+      const [, chId, msgId] = id.split('::');
+      const modal = new ModalBuilder().setCustomId(`ann_annuler_modal::${chId}::${msgId}`).setTitle("❌ Annuler l'annonce");
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('raison').setLabel('Raison (facultatif)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(200).setPlaceholder('Ex : événement reporté, annulé faute de participants…')),
+      );
+      await interaction.showModal(modal); return true;
+    }
+    if (interaction.isModalSubmit() && id.startsWith('ann_annuler_modal::')) {
+      const [, chId, msgId] = id.split('::');
+      const raison = (interaction.fields.getTextInputValue('raison') || '').trim();
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const ch = interaction.guild.channels.cache.get(chId) || await interaction.guild.channels.fetch(chId).catch(() => null);
+      const msg = ch ? await ch.messages.fetch(msgId).catch(() => null) : null;
+      if (!msg) { await interaction.editReply({ content: "❌ Annonce introuvable (déjà supprimée ?)." }); return true; }
+      const db = loadDB();
+      const rec = (db.annoncesPubliees || {})[msgId] || {};
+      const titre = rec.titre || (msg.embeds?.[0]?.title || 'Annonce').replace(/^[^\wÀ-ÿ]+/, '').trim();
+      // 1) Marque l'annonce comme ANNULÉE (on garde une trace, on ne supprime pas le message).
+      let embed = msg.embeds?.[0] ? EmbedBuilder.from(msg.embeds[0]) : new EmbedBuilder().setDescription(titre);
+      embed.setColor(0xED4245).setTitle(`❌ ANNULÉE — ${titre}`.slice(0, 256))
+        .addFields({ name: '❌ Annulée', value: `${raison ? raison + '\n' : ''}par **${interaction.member?.displayName || interaction.user.username}** • <t:${_ts(Date.now())}:R>` });
+      await msg.edit({ embeds: [embed], components: [] }).catch(() => {});
+      // 2) Supprime les rappels programmés pour cette annonce.
+      let remOff = 0;
+      if (Array.isArray(db.annoncesReminders)) {
+        const before = db.annoncesReminders.length;
+        db.annoncesReminders = db.annoncesReminders.filter(r => !(r.annonceMsgId === msgId || (rec.titre && r.channelId === chId && r.titre === rec.titre && !r.fired)));
+        remOff = before - db.annoncesReminders.length;
+      }
+      if (db.annoncesPubliees && db.annoncesPubliees[msgId]) { db.annoncesPubliees[msgId].annulee = true; db.annoncesPubliees[msgId].annuleeAt = Date.now(); }
+      saveDB(db);
+      // 3) Prévient les personnes concernées (même rôle que l'annonce d'origine).
+      const roleId = rec.roleId || (msg.content?.match(/<@&(\d+)>/)?.[1]) || null;
+      const notice = [
+        `⚠️ **Annonce annulée** — « ${titre} »`,
+        rec.eventTs ? `🗓️ *(était prévue <t:${_ts(rec.eventTs)}:F>)*` : '',
+        raison ? `📝 ${raison}` : '',
+      ].filter(Boolean).join('\n');
+      await ch.send({ content: (roleId ? `<@&${roleId}> ` : '') + notice, allowedMentions: { roles: roleId ? [roleId] : [] } }).catch(() => {});
+      await interaction.editReply({ content: `✅ Annonce annulée${remOff ? ` — ${remOff} rappel(s) supprimé(s)` : ''}. Les personnes pingées ont été prévenues.` }); return true;
     }
 
     // ══════════ SONDAGES ══════════

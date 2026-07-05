@@ -19,6 +19,12 @@ const securitePlus = require('./securite-plus');
 const stickyPanel = require('./sticky-panel');
 let annonces = {}; try { annonces = require('./annonces'); console.log('✅ Module annonces/sondages chargé'); } catch (e) { console.log('⚠️ annonces non chargé:', e.message); }
 let journaux = {}; try { journaux = require('./journaux'); console.log('✅ Module journaux chargé'); } catch (e) { console.log('⚠️ journaux non chargé:', e.message); }
+let blackjack = {}; try { blackjack = require('./blackjack'); console.log('✅ Module blackjack chargé'); } catch (e) { console.log('⚠️ blackjack non chargé:', e.message); }
+let pokermenteur = {}; try { pokermenteur = require('./pokermenteur'); console.log('✅ Module poker menteur chargé'); } catch (e) { console.log('⚠️ pokermenteur non chargé:', e.message); }
+let faro = {}; try { faro = require('./faro'); console.log('✅ Module faro chargé'); } catch (e) { console.log('⚠️ faro non chargé:', e.message); }
+let poker = {}; try { poker = require('./poker'); console.log('✅ Module poker chargé'); } catch (e) { console.log('⚠️ poker non chargé:', e.message); }
+let cinqdoigts = {}; try { cinqdoigts = require('./cinqdoigts'); console.log('✅ Module cinq doigts chargé'); } catch (e) { console.log('⚠️ cinqdoigts non chargé:', e.message); }
+let dominos = {}; try { dominos = require('./dominos'); console.log('✅ Module dominos chargé'); } catch (e) { console.log('⚠️ dominos non chargé:', e.message); }
 const rdvplus = require('./rdvplus');
 const reorg = require('./reorg');
 
@@ -530,6 +536,31 @@ function _listerClientsEligibles(guild) {
   }
   out.sort((a, b) => a.pseudo.localeCompare(b.pseudo));
   return out;
+}
+
+// ── Rôle « Client » : statut donné (à la main par la Direction) à un visiteur pour
+//    qu'il accède à l'espace client (vitrine des prestations + prise de rendez-vous).
+//    Purement ADDITIF : trouve/crée le rôle et n'ouvre l'espace client qu'en LECTURE
+//    (allow ViewChannel uniquement — n'enlève aucun accès à personne). Iron Wolf, pas la Confrérie.
+const SALONS_ESPACE_CLIENT = ['1518301186275676230', '1512171267560702013']; // vitrine « Nos prestations » + rendez-vous-client
+async function _assurerRoleClient(guild) {
+  try {
+    let role = guild.roles.cache.find(r => (r.name || '').toLowerCase() === 'client')
+      || guild.roles.cache.find(r => /^client\b/i.test(r.name || ''));
+    if (!role) {
+      role = await guild.roles.create({ name: 'Client', color: 0xC8A45C, mentionable: false, hoist: false, reason: 'Espace client — Iron Wolf Company' }).catch(() => null);
+    }
+    if (!role) return null;
+    // Ouvre en lecture les salons de l'espace client (allow seulement).
+    for (const id of SALONS_ESPACE_CLIENT) {
+      const ch = guild.channels.cache.get(id) || await guild.channels.fetch(id).catch(() => null);
+      if (!ch?.permissionOverwrites) continue;
+      const cur = ch.permissionOverwrites.cache.get(role.id);
+      const dejaOuvert = cur && cur.allow?.has?.(PermissionFlagsBits.ViewChannel);
+      if (!dejaOuvert) await ch.permissionOverwrites.edit(role, { ViewChannel: true, ReadMessageHistory: true }).catch(() => {});
+    }
+    return role;
+  } catch (e) { console.log('⚠️ _assurerRoleClient:', e.message); return null; }
 }
 
 // Parchemin générique pour les contrats client/engagement : image « texte gravé »
@@ -2520,8 +2551,12 @@ async function autoSetup(guild) {
   _installerCataloguePrestations(guild).then(() => console.log('🤠 Catalogue des prestations (1518301186275676230) en place')).catch(() => {});
   // Forum des rapports : prépare les étiquettes (priorité + catégories) dès le démarrage
   (async () => { try { const f = await guild.channels.fetch(FORUM_RAPPORTS).catch(() => null); if (f && f.type === ChannelType.GuildForum) { await _assurerTagsForumRapports(f); console.log('📋 Forum des rapports : étiquettes prêtes'); } } catch {} })();
-  // Panneau d'annonces HRP (Direction → formulaire → annonce + ping + rappels)
-  (async () => { try { const hrpCh = await guild.channels.fetch('1509250452141772890').catch(() => null); if (hrpCh) { await annonces.installerPanelAnnonce?.(guild, hrpCh); console.log('📢 Panneau annonces HRP en place'); } } catch {} })();
+  // Panneau d'annonces (Direction → formulaire → annonce + ping + rappels + annulation)
+  for (const _annCh of ['1509250452141772890', '1508756400069804058']) {
+    (async (cid) => { try { const c = await guild.channels.fetch(cid).catch(() => null); if (c?.send) { await annonces.installerPanelAnnonce?.(guild, c); console.log('📢 Panneau annonces en place :', cid); } } catch {} })(_annCh);
+  }
+  // Panneau UNIFIÉ « Tables de jeu » du saloon (blackjack + poker menteur + faro + poker + cinq doigts + dominos)
+  (async () => { try { await _installerPanelSaloon(guild, '1523378716770570372'); console.log('🎰 Panneau Saloon (6 jeux) en place'); } catch {} })();
   // (Annonce ponctuelle trésorerie/contrats/armes retirée — elle avait été postée, plus besoin.)
   // ♻️ Restauration AUTO (une seule fois) du contenu disparu : reposte rapports informateurs + avis wanted
   // depuis la base. Anti-doublon : ne reposte que ce dont le message a disparu.
@@ -4180,6 +4215,12 @@ client.on('interactionCreate', async interaction => {
   if (await portail.routeInteraction?.(interaction)) return;
   if (await evenements.routeInteraction?.(interaction)) return;
   if (await annonces.routeInteraction?.(interaction)) return;
+  if (await blackjack.routeInteraction?.(interaction)) return;
+  if (await pokermenteur.routeInteraction?.(interaction)) return;
+  if (await faro.routeInteraction?.(interaction)) return;
+  if (await poker.routeInteraction?.(interaction)) return;
+  if (await cinqdoigts.routeInteraction?.(interaction)) return;
+  if (await dominos.routeInteraction?.(interaction)) return;
   if (await pepites.routeInteraction?.(interaction)) return;
   if (await musique.routeInteraction?.(interaction)) return;
   if (await journaux.routeInteraction?.(interaction)) return;
@@ -5064,8 +5105,11 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
           .setFooter({ text: `Iron Wolf Company • ${fmtShort(new Date())}` })
           .setTimestamp();
         if (rdv.objet) embedAgenda.addFields({ name: '📋 Objet', value: String(rdv.objet).slice(0, 1000) });
+        // Suite logique du rendez-vous : donner l'accès Client, puis créer le contrat.
         const rowAgenda = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId(`rdvclient_repondre_${rdvId}`).setLabel('💬 Répondre au client').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId(`rdvclient_acces_${rdvId}`).setLabel('🎫 Donner l\'accès Client').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId(`rdvclient_contrat_${rdvId}`).setLabel('📜 Créer le contrat').setStyle(ButtonStyle.Success),
         );
         await posterRdvForum(interaction.guild, {
           titre: `RDV CLIENT — ${rdv.nom || 'Client'}`,
@@ -5103,7 +5147,12 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     // Notion garde la traçabilité : on nettoie le salon en supprimant le télégramme traité
     const msgFixe = interaction.message;
     setTimeout(() => { msgFixe?.delete?.().catch(() => {}); }, 8000);
-    return interaction.editReply({ content: `✅ Rendez-vous fixé et confirmé au client : **${dateRdv} à ${heure}** (${lieuRdv}). Ajouté à l'agenda Notion.` });
+    // Suite logique proposée à la Direction : accès Client puis contrat (mêmes boutons que sur la carte #agenda).
+    const rowSuite = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`rdvclient_acces_${rdvId}`).setLabel('🎫 Donner l\'accès Client').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`rdvclient_contrat_${rdvId}`).setLabel('📜 Créer le contrat').setStyle(ButtonStyle.Success),
+    );
+    return interaction.editReply({ content: `✅ Rendez-vous fixé et confirmé au client : **${dateRdv} à ${heure}** (${lieuRdv}). Ajouté à l'agenda Notion.\n\n**Suite :** donnez au besoin l'**accès Client** au visiteur, puis **créez le contrat** — dans cet ordre.`, components: [rowSuite] });
   }
 
   // ── RÉPONDRE AU CLIENT (échange libre, façon secrétaire) ──
@@ -5171,6 +5220,76 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const msgRef = interaction.message;
     setTimeout(() => { msgRef?.delete?.().catch(() => {}); }, 8000);
     return;
+  }
+
+  // ── DONNER L'ACCÈS CLIENT (suite du RDV : le visiteur devient client officiel) ──
+  if (interaction.isButton() && interaction.customId.startsWith('rdvclient_acces_')) {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const rdvId = interaction.customId.replace('rdvclient_acces_', '');
+    const db = loadDB();
+    const rdv = (db.rdvClients || []).find(r => r.id === rdvId) || _rdvDepuisEmbed(interaction, rdvId);
+    if (!rdv?.demandeurId) return interaction.editReply({ content: "❌ Impossible de retrouver le client de ce rendez-vous." });
+    const role = await _assurerRoleClient(interaction.guild);
+    if (!role) return interaction.editReply({ content: "⚠️ Le rôle « Client » n'a pas pu être créé (permission « Gérer les rôles » manquante ?)." });
+    const m = await interaction.guild.members.fetch(rdv.demandeurId).catch(() => null);
+    if (!m) return interaction.editReply({ content: '❌ Ce client n\'est plus sur le serveur.' });
+    if (m.roles.cache.has(role.id)) return interaction.editReply({ content: `ℹ️ <@${rdv.demandeurId}> a déjà l'accès Client.` });
+    const ok = await m.roles.add(role, `Accès client accordé (RDV ${rdvId}) par ${interaction.member.displayName}`).then(() => true).catch(() => false);
+    if (!ok) return interaction.editReply({ content: "⚠️ Ajout du rôle refusé (le rôle du bot doit être au-dessus du rôle « Client » dans la hiérarchie)." });
+    // Petit mot au client pour l'orienter vers son espace.
+    try { const u = await client.users.fetch(rdv.demandeurId); await u.send(`🎫 **Iron Wolf Company** — vous avez désormais l'accès **Client**. Vous pouvez consulter nos prestations et prendre rendez-vous dans l'espace qui vous est réservé.`).catch(() => {}); } catch {}
+    return interaction.editReply({ content: `✅ Accès **Client** accordé à <@${rdv.demandeurId}>. Il voit maintenant la vitrine des prestations et le salon des rendez-vous.` });
+  }
+
+  // ── CRÉER LE CONTRAT depuis un RDV fixé (chaînage demande → RDV → contrat) ──
+  //    Réutilise tel quel le flux d'offre existant (contrat_offre_modal) : on choisit juste le
+  //    type de mission, le reste (client = demandeur, objet) est pré-rempli depuis le RDV.
+  if (interaction.isButton() && interaction.customId.startsWith('rdvclient_contrat_')) {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
+    const rdvId = interaction.customId.replace('rdvclient_contrat_', '');
+    const db = loadDB();
+    const rdv = (db.rdvClients || []).find(r => r.id === rdvId) || _rdvDepuisEmbed(interaction, rdvId);
+    if (!rdv?.demandeurId) return interaction.reply({ content: "❌ Impossible de retrouver le client de ce rendez-vous. Utilisez « Proposer un contrat » manuellement.", flags: MessageFlags.Ephemeral });
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId(`contrat_type_rdv::${rdvId}`)
+      .setPlaceholder('Type de mission pour ce contrat...')
+      .addOptions(
+        { label: 'Protection rapprochée', value: 'Protection rapprochée', emoji: '🛡️' },
+        { label: 'Escorte de convoi',     value: 'Escorte de convoi',     emoji: '🐎' },
+        { label: 'Surveillance / Filature', value: 'Surveillance / Filature', emoji: '👁️' },
+        { label: 'Chasse de prime',       value: 'Chasse de prime',       emoji: '🎯' },
+        { label: 'Récupération de dette', value: 'Récupération de dette', emoji: '💰' },
+        { label: 'Intervention armée',    value: 'Intervention armée',    emoji: '⚔️' },
+        { label: 'Autre (à préciser)',    value: 'Autre',                 emoji: '📦' },
+      );
+    return interaction.reply({ content: `📜 **Contrat pour ${rdv.nom || 'ce client'}** *(suite du rendez-vous ${rdvId})*\nChoisis le type de mission — le formulaire s'ouvrira **pré-rempli** avec le client et l'objet.`, components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral });
+  }
+
+  // Choix du type fait → formulaire d'offre PRÉ-REMPLI (même customId que le flux normal → même création)
+  if (interaction.isStringSelectMenu() && interaction.customId.startsWith('contrat_type_rdv::')) {
+    const rdvId = interaction.customId.split('::')[1] || '';
+    const typeMission = interaction.values[0];
+    const db = loadDB();
+    const rdv = (db.rdvClients || []).find(r => r.id === rdvId) || _rdvDepuisEmbed(interaction, rdvId);
+    if (!rdv?.demandeurId) return interaction.update({ content: '❌ Rendez-vous introuvable.', components: [] }).catch(() => {});
+    const objetPref = rdv.objet ? String(rdv.objet).slice(0, 100) : '';
+    const detailsPref = [rdv.details, rdv.lieu ? `Lieu souhaité : ${rdv.lieu}` : '', rdv.dateSouhait ? `Créneau évoqué : ${rdv.dateSouhait}` : ''].filter(Boolean).join('\n').slice(0, 800);
+    const modal = new ModalBuilder().setCustomId(`contrat_offre_modal::${typeMission}::${rdv.demandeurId}`).setTitle('📤 Nos conditions — Contrat client');
+    const nomInput = new TextInputBuilder().setCustomId('client_nom').setLabel('Nom / Entreprise du client (RP)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Famille Moreau...');
+    if (rdv.nom) nomInput.setValue(String(rdv.nom).slice(0, 100));
+    const objetInput = new TextInputBuilder().setCustomId('objet').setLabel('Objet de la mission').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: Protection rapprochée du convoi...');
+    if (objetPref) objetInput.setValue(objetPref);
+    const detailsInput = new TextInputBuilder().setCustomId('details').setLabel('Détails / conditions').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setPlaceholder('Conditions, lieu, nombre d\'agents, infos utiles…');
+    if (detailsPref) detailsInput.setValue(detailsPref);
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(nomInput),
+      new ActionRowBuilder().addComponents(objetInput),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prime').setLabel('Prime proposée').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 1500$ + 500$/jour')),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('echeance').setLabel('Échéance / date limite').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: 30/08/2026  ·  ou « sous 7 jours »')),
+      new ActionRowBuilder().addComponents(detailsInput),
+    );
+    return interaction.showModal(modal);
   }
 
   if (interaction.isButton() && interaction.customId === 'open_contrat_offre') {
@@ -9998,6 +10117,67 @@ async function _installerCataloguePrestations(guild) {
     const sent = await ch.send(payload).catch(() => null);
     if (sent) await sent.pin().catch(() => {});
   } catch (e) { console.log('⚠️ catalogue prestations:', e.message); }
+}
+
+// ── Panneau UNIFIÉ « Saloon — Tables de jeu » : un seul point d'entrée pour les 6 jeux ──
+// Chaque bouton ouvre une table via le module concerné (bj_open, pm_open, faro_open, pk_open, fff_open, dom_open).
+function _panneauSaloonPayload() {
+  const embed = new EmbedBuilder()
+    .setColor(0xC8A45C)
+    .setTitle('🎰 SALOON — TABLES DE JEU')
+    .setDescription([
+      '```',
+      '╔═══════════════════════════════════╗',
+      '║   LA MAISON VOUS OUVRE SES TABLES ║',
+      '╚═══════════════════════════════════╝',
+      '```',
+      '*Poussez la porte, tirez une chaise. Choisissez votre poison : cartes, dés ou couteau. Celui qui ouvre une table en devient l\'**hôte**.*',
+      '',
+      '🃏 **Blackjack** — battez le croupier sans dépasser 21 *(payé 3:2)*.',
+      '🎲 **Poker Menteur** — misez, bluffez, criez « Menteur ! » *(dés cachés)*.',
+      '🎴 **Faro** — misez sur les rangs, le donneur tourne les cartes.',
+      '♠️ **Poker (5 cartes)** — main fermée, un échange, la meilleure rafle le pot.',
+      '🔪 **Cinq Doigts** — jeu de nerfs au couteau, le plus rapide gagne.',
+      '🁢 **Dominos** — videz votre main avant les autres.',
+      '',
+      '👉 Cliquez un jeu pour **ouvrir une table** dans ce salon.',
+      '',
+      '— *« On mise ce qu\'on ose perdre. »*',
+    ].join('\n'))
+    .setFooter({ text: 'Iron Wolf Company · Saloon · Mises en jetons de table' });
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('bj_open').setLabel('Blackjack').setEmoji('🃏').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('pm_open').setLabel('Poker Menteur').setEmoji('🎲').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('faro_open').setLabel('Faro').setEmoji('🎴').setStyle(ButtonStyle.Secondary),
+  );
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('pk_open').setLabel('Poker').setEmoji('♠️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('fff_open').setLabel('Cinq Doigts').setEmoji('🔪').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dom_open').setLabel('Dominos').setStyle(ButtonStyle.Secondary),
+  );
+  return { embeds: [embed], components: [row1, row2] };
+}
+async function _installerPanelSaloon(guild, channelId) {
+  try {
+    const ch = await guild.channels.fetch(channelId).catch(() => null);
+    if (!ch?.messages || typeof ch.send !== 'function') return;
+    const me = guild.client.user.id;
+    const estHub = m => m.author?.id === me && (m.embeds?.[0]?.title || '').includes('TABLES DE JEU');
+    // Nettoie l'ancien panneau blackjack seul (titre « TABLE DE JEU » singulier) s'il traîne.
+    const aBouton = (m, id) => m.components?.some(r => r.components?.some(c => c.customId === id));
+    let existing = null;
+    const pins = await ch.messages.fetchPinned().catch(() => null);
+    if (pins) existing = [...pins.values()].find(estHub) || null;
+    const msgs = await ch.messages.fetch({ limit: 50 }).catch(() => null);
+    if (!existing && msgs) existing = [...msgs.values()].find(estHub) || null;
+    if (msgs) for (const m of msgs.values()) {
+      if (m.author?.id === me && m !== existing && aBouton(m, 'bj_open') && !estHub(m)) await m.delete().catch(() => {});
+    }
+    const payload = _panneauSaloonPayload();
+    if (existing) { await existing.edit(payload).catch(() => {}); return; }
+    const sent = await ch.send(payload).catch(() => null);
+    if (sent) await sent.pin().catch(() => {});
+  } catch (e) { console.log('⚠️ panneau saloon:', e.message); }
 }
 
 // ── Salon VISITEURS (1519611763866337420) : panneau d'accueil clair + 2 boutons fonctionnels ──
