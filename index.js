@@ -2545,8 +2545,10 @@ async function autoSetup(guild) {
   _installerCataloguePrestations(guild).then(() => console.log('🤠 Catalogue des prestations (1518301186275676230) en place')).catch(() => {});
   // Forum des rapports : prépare les étiquettes (priorité + catégories) dès le démarrage
   (async () => { try { const f = await guild.channels.fetch(FORUM_RAPPORTS).catch(() => null); if (f && f.type === ChannelType.GuildForum) { await _assurerTagsForumRapports(f); console.log('📋 Forum des rapports : étiquettes prêtes'); } } catch {} })();
-  // Panneau d'annonces HRP (Direction → formulaire → annonce + ping + rappels)
-  (async () => { try { const hrpCh = await guild.channels.fetch('1509250452141772890').catch(() => null); if (hrpCh) { await annonces.installerPanelAnnonce?.(guild, hrpCh); console.log('📢 Panneau annonces HRP en place'); } } catch {} })();
+  // Panneau d'annonces (Direction → formulaire → annonce + ping + rappels + annulation)
+  for (const _annCh of ['1509250452141772890', '1508756400069804058']) {
+    (async (cid) => { try { const c = await guild.channels.fetch(cid).catch(() => null); if (c?.send) { await annonces.installerPanelAnnonce?.(guild, c); console.log('📢 Panneau annonces en place :', cid); } } catch {} })(_annCh);
+  }
   // (Annonce ponctuelle trésorerie/contrats/armes retirée — elle avait été postée, plus besoin.)
   // ♻️ Restauration AUTO (une seule fois) du contenu disparu : reposte rapports informateurs + avis wanted
   // depuis la base. Anti-doublon : ne reposte que ce dont le message a disparu.
