@@ -118,7 +118,7 @@ async function genererTable(state) {
       const y = headH + croH + idx * rowH;
       if (j.actif) S.push(`<rect x="24" y="${y - 2}" width="${W - 48}" height="${rowH - 8}" rx="12" fill="#0f5132" opacity="0.5" stroke="#e7cf94" stroke-width="1.5"/>`);
       S.push(`<text x="44" y="${y + 26}" font-family="DejaVu Sans, Arial, sans-serif" font-size="19" font-weight="bold" fill="${j.actif ? '#ffe8a3' : '#eaf3ec'}">${j.actif ? '▸ ' : ''}${esc(j.nom)}</text>`);
-      S.push(`<text x="44" y="${y + 48}" font-family="DejaVu Sans, Arial, sans-serif" font-size="14" fill="#bcd7c6">Mise ${esc(j.mise)}${j.badge ? '   ·   ' + esc(j.badge) : ''}</text>`);
+      S.push(`<text x="44" y="${y + 48}" font-family="DejaVu Sans, Arial, sans-serif" font-size="14" fill="#bcd7c6">Mise ${esc(j.mise)}${j.sous ? '   ·   Sous ' + esc(j.sous) : ''}${j.badge ? '   ·   ' + esc(j.badge) : ''}</text>`);
       const cardsX = 300;
       S.push(ligneCartes(j.cards || [], cardsX, y - 2, CW, CH, GAP, false));
       if ((j.cards || []).length) S.push(`<text x="${cardsX + (j.cards.length) * (CW + GAP) + 6}" y="${y + CH / 2 + 4}" font-family="DejaVu Sans, Arial, sans-serif" font-size="22" font-weight="bold" fill="#ffffff">= ${j.total}</text>`);

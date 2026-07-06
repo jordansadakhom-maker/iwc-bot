@@ -19,8 +19,72 @@
 // ───────────────────────────────────────────────────────────────────────────
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, AttachmentBuilder } = require('discord.js');
 let _img = null; try { _img = require('./cinqdoigts-image'); } catch { _img = null; }
+let casino = {}; try { casino = require('./casino-banque'); } catch { casino = {}; }
+const _sous = uid => (casino.solde ? casino.solde(uid) : 0);
 
 const PREFIXE = 'fff_';
+
+// ── Émotes RP à coller EN JEU (RedM) : garde la scène vivante pendant qu'on joue sur Discord ──
+const _EMOTES_SCENE = [
+  '/do La lame claque sur le bois à un rythme effréné, la table retient son souffle.',
+  '/do Le couteau danse entre les doigts, une goutte de sueur perle sur le front.',
+  '/do Un cercle de curieux s\'est formé autour du duel au couteau.',
+  '/do Le fil de la lame accroche la lumière de la lampe à huile.',
+];
+const _EMOTES_LOBBY = [
+  '/me écarte les doigts sur la table et empoigne le couteau.',
+  '/me pose la main à plat sur le bois et roule les épaules pour se détendre.',
+  '/me fait tourner le couteau dans sa paume en jaugeant l\'adversaire.',
+  '/me crache dans sa main et raffermit sa prise sur le manche.',
+];
+const _EMOTES_TOUR = [
+  '/me plante la lame entre ses doigts, de plus en plus vite.',
+  '/me fixe l\'intervalle et abat le couteau d\'un geste sec.',
+  '/me retient sa respiration et pique la pointe au ras de la peau.',
+];
+const _EMOTES_GAGNE = [
+  '/me relève la lame indemne et esquisse un sourire en coin.',
+  '/me écarte les doigts intacts et ramasse la mise d\'un geste tranquille.',
+];
+const _EMOTES_PERDU = [
+  '/me lâche un juron et presse sa main endolorie contre sa chemise.',
+  '/me repose le couteau, la main tremblante, en serrant les dents.',
+];
+const _EMOTES_GEN = [
+  '/me suit du regard la lame qui pique le bois, le souffle court.',
+  '/me tapote la table du bout des doigts, prêt à reprendre le couteau.',
+];
+
+// Émote contextuelle selon la phase et le sort du joueur.
+function _emotePerso(t, j) {
+  if (!j) return _pick(_EMOTES_SCENE);
+  if (t.phase === 'jeu') {
+    if (t.joueurs[t.tourIdx]?.userId === j.userId) return _pick(_EMOTES_TOUR);
+    return _pick(_EMOTES_GEN);
+  }
+  const n = t.soldes[j.userId] || 0;
+  if (n > 0) return _pick(_EMOTES_GAGNE);
+  if (n < 0) return _pick(_EMOTES_PERDU);
+  return _pick(_EMOTES_LOBBY);
+}
+
+// ── Règles : « comment jouer », montrées avant de lancer une partie ──
+const _REGLES = [
+  '📖 **CINQ DOIGTS — COMMENT JOUER**',
+  '',
+  '**But :** un jeu de nerfs. Plante le couteau dans le **bon intervalle** entre tes doigts, **vite et juste**, sans flancher.',
+  '',
+  '**La table :** 5 intervalles entre les doigts, numérotés **1 à 5** (les boutons).',
+  '**Chaque manche :** un intervalle **CIBLE** s\'illumine (lueur dorée). Presse **le bon bouton** avant que la **fenêtre de temps** ne se referme.',
+  '**Le tempo :** la fenêtre **rétrécit** à chaque manche (départ ≈ 4 s, plancher ≈ 1,3 s). Plus ça monte, plus il faut être rapide.',
+  '**Planté :** mauvais bouton **OU** trop lent = tu te **plantes** — la partie s\'arrête.',
+  '',
+  '**🖐️ Solo :** survis au plus de manches → ton **score**.',
+  '**⚔️ Duel (2 joueurs, mise) :** tour à tour, **même fenêtre au même niveau** (équitable). Le **premier planté** perd le pot, l\'autre rafle la mise.',
+  '',
+  '🎭 **Reste en RP :** appuie sur **Emote RP** à chaque coup et colle la ligne **en jeu** — comme ça, personne ne te prend pour un AFK pendant que tu joues ici.',
+  '💰 **Sous :** tes gains/pertes de duel sont cumulés dans ton compteur de **sous** du saloon (bouton « Mes sous »).',
+];
 
 const GESTION = ['Opérateur', 'Operateur', 'Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier', 'Secrétaire', 'Instructeur'];
 function _estGestion(member) { try { return !!member?.roles?.cache?.some(r => GESTION.some(n => r.name.includes(n))); } catch { return false; } }
@@ -149,6 +213,8 @@ function _resoudrePlante(t, perdantId, cause) {
     const mise = t.mise || 0;
     t.soldes[perdant.userId] = (t.soldes[perdant.userId] || 0) - mise;
     t.soldes[gagnant.userId] = (t.soldes[gagnant.userId] || 0) + mise;
+    // Compteur de « sous » PERSISTANT du saloon (une seule écriture pour le règlement).
+    try { if (casino.crediterLot) casino.crediterLot([{ userId: perdant.userId, montant: -mise }, { userId: gagnant.userId, montant: mise }]); } catch {}
     t.dernierResultat = perdant.nom + ' s\'est PLANTÉ (' + motif + ') — ' + gagnant.nom + ' rafle le pot (+' + _money(mise) + ').';
     info.gagnantId = gagnant.userId;
     info.perdantId = perdant.userId;
@@ -218,6 +284,14 @@ function _lignesTexte(t) {
   return L;
 }
 
+// Rangée commune : Comment jouer / Emote RP / Mes sous (présente sur toutes les phases).
+function _rowExtras() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('fff_regles').setLabel('Comment jouer').setEmoji('📖').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('fff_emote').setLabel('Emote RP').setEmoji('🎭').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('fff_sous').setLabel('Mes sous').setEmoji('💰').setStyle(ButtonStyle.Secondary),
+  );
+}
 function _components(t) {
   const rows = [];
   if (t.phase === 'jeu') {
@@ -241,6 +315,7 @@ function _components(t) {
       new ButtonBuilder().setCustomId('fff_close').setLabel('Fermer la table').setEmoji('❌').setStyle(ButtonStyle.Danger),
     ));
   }
+  rows.push(_rowExtras());
   return rows;
 }
 
@@ -311,11 +386,12 @@ async function routeInteraction(interaction) {
     if (interaction.isButton() && id === 'fff_open') {
       const exist = tables.get(interaction.channelId);
       if (exist) { await interaction.reply({ content: '🔪 Une table de Cinq Doigts est déjà ouverte dans ce salon. Rejoins-la plus haut !', flags: eph }); return true; }
+      await interaction.deferReply({ flags: eph });
       const t = _creerTable(interaction);
       const msg = await interaction.channel.send(await _screen(t)).catch(() => null);
-      if (!msg) { await interaction.reply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).', flags: eph }); return true; }
+      if (!msg) { await interaction.editReply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).' }); return true; }
       t.msg = msg; t.messageId = msg.id; tables.set(interaction.channelId, t);
-      await interaction.reply({ content: '🔪 Table ouverte — tu en es l\'**hôte**. Lance un **Solo**, ou monte un **Duel** 👇', flags: eph });
+      await interaction.editReply({ content: '🔪 Table ouverte — tu en es l\'**hôte**. Lance un **Solo**, ou monte un **Duel** 👇' });
       return true;
     }
 
@@ -404,10 +480,11 @@ async function routeInteraction(interaction) {
       } else { lignes.push('Aucune manche en cours pour l\'instant.'); }
       const meilleur = t.scores[interaction.user.id] || 0;
       if (meilleur) lignes.push('🏅 Ton meilleur score solo de la soirée : **' + meilleur + '** manche(s).');
+      await interaction.deferReply({ flags: eph }); // accuse réception avant de générer l'image
       let buf = null;
       try { if (_img?.genererPeek) buf = await _img.genererPeek(_imgState(t)); } catch { buf = null; }
-      if (buf) await interaction.reply({ content: lignes.join('\n'), files: [new AttachmentBuilder(buf, { name: 'nerfs.png' })], flags: eph });
-      else await interaction.reply({ content: lignes.join('\n'), flags: eph });
+      if (buf) await interaction.editReply({ content: lignes.join('\n'), files: [new AttachmentBuilder(buf, { name: 'nerfs.png' })] });
+      else await interaction.editReply({ content: lignes.join('\n') });
       return true;
     }
 
@@ -446,6 +523,29 @@ async function routeInteraction(interaction) {
         .setFooter({ text: 'Iron Wolf Company · Saloon' });
       try { await t.msg?.edit({ embeds: [e], components: [], files: [], attachments: [] }); } catch {}
       await interaction.deferUpdate().catch(() => {});
+      return true;
+    }
+
+    // Comment jouer (règles, avant de lancer)
+    if (interaction.isButton() && id === 'fff_regles') {
+      await interaction.reply({ content: _REGLES.join('\n'), flags: eph });
+      return true;
+    }
+    // Emote RP à coller en jeu (anti-AFK)
+    if (interaction.isButton() && id === 'fff_emote') {
+      const j = _joueur(t, interaction.user.id);
+      const lignes = _emotePerso(t, j) + '\n' + _pick(_EMOTES_SCENE);
+      await interaction.reply({ content: '🎭 **Reste dans la scène !** Colle une de ces lignes **en jeu** (RedM) pour ne pas passer pour AFK :\n```\n' + lignes + '\n```\n*Astuce : garde le jeu en fenêtre, alterne vite, et remets une émote à chaque coup de couteau.*', flags: eph });
+      return true;
+    }
+    // Compteur de sous du saloon (persistant)
+    if (interaction.isButton() && id === 'fff_sous') {
+      const total = _sous(interaction.user.id);
+      const j = _joueur(t, interaction.user.id);
+      const sess = t.soldes[interaction.user.id] || 0;
+      const top = casino.classement ? casino.classement(3) : [];
+      const topTxt = top.length ? '\n\n🏆 **Gros joueurs du saloon**\n' + top.map(([u, n], i) => (i + 1) + '. <@' + u + '> — ' + _money(n)).join('\n') : '';
+      await interaction.reply({ content: '💰 **Tes sous au saloon : ' + _money(total) + '**' + (j || sess ? '\n*(à cette table : ' + _money(sess) + ')*' : '') + topTxt, flags: eph, allowedMentions: { parse: [] } });
       return true;
     }
 

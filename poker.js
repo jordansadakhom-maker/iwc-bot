@@ -13,6 +13,65 @@
 // ───────────────────────────────────────────────────────────────────────────
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, AttachmentBuilder } = require('discord.js');
 let _img = null; try { _img = require('./poker-image'); } catch { _img = null; }
+let casino = {}; try { casino = require('./casino-banque'); } catch { casino = {}; }
+const _sous = uid => (casino.solde ? casino.solde(uid) : 0);
+
+// ── Émotes RP à coller EN JEU (RedM) : garde la scène vivante pendant qu'on joue sur Discord ──
+const _EMOTES_SCENE = [
+  '/do Cinq cartes en main, les regards se jaugent autour du tapis.',
+  '/do L\'atmosphère feutrée du saloon, entre fumée de cigare et cliquetis des jetons.',
+  '/do Le pot grossit au centre de la table, les visages se ferment.',
+  '/me réarrange ses cartes contre sa poitrine, visage fermé.',
+];
+const _EMOTES_LOBBY = [
+  '/me tire une chaise et s\'installe à la table de poker, l\'air confiant.',
+  '/me pousse son ante au centre du tapis d\'un geste sec.',
+  '/me ajuste son chapeau et jauge les autres joueurs du regard.',
+  '/me fait tinter quelques jetons entre ses doigts en attendant la donne.',
+];
+const _EMOTES_TOUR = [
+  '/me étudie ses cinq cartes en silence, pesant lesquelles défausser.',
+  '/me tapote nerveusement le bord de la table du bout des doigts.',
+  '/me glisse deux cartes hors de son jeu, le regard impénétrable.',
+  '/me pousse quelques jetons au centre sans un mot.',
+];
+const _EMOTES_GAGNE = [
+  '/me ramasse le pot d\'un large geste, un sourire en coin.',
+  '/me abat sa main et empile les jetons raflés d\'un air satisfait.',
+];
+const _EMOTES_PERDU = [
+  '/me repousse ses cartes et grommelle dans sa barbe.',
+  '/me jette sa main sur le tapis, dépité, en voyant le jeu du vainqueur.',
+];
+const _EMOTES_GEN = [
+  '/me sirote son verre en surveillant le jeu des autres.',
+  '/me croise les bras, cartes serrées contre lui, impassible.',
+];
+function _emotePerso(t, s) {
+  if (!s) return _pick(_EMOTES_SCENE);
+  if (t.phase === 'abattage') { const n = s.net || 0; return _pick(s.gagnant || n > 0 ? _EMOTES_GAGNE : n < 0 ? _EMOTES_PERDU : _EMOTES_GEN); }
+  if (t.phase === 'echange') { if (t.sieges[t.tourIdx]?.userId === s.userId) return _pick(_EMOTES_TOUR); return _pick(_EMOTES_GEN); }
+  if (t.manche > 0 && s.resultat) { const n = s.net || 0; return _pick(n > 0 ? _EMOTES_GAGNE : n < 0 ? _EMOTES_PERDU : _EMOTES_GEN); }
+  return _pick(_EMOTES_LOBBY);
+}
+// ── Règles : « comment jouer », montrées avant de lancer une partie ──
+const _REGLES = [
+  '📖 **POKER 5-CARD DRAW — COMMENT JOUER**',
+  '',
+  '**But :** avoir la **meilleure main de 5 cartes** à l\'abattage pour rafler le **pot**.',
+  '',
+  '**L\'ante :** chacun mise un ante en s\'asseyant — tous les antes forment le **pot**.',
+  '**La donne :** l\'hôte distribue **5 cartes privées** à chaque joueur (bouton 👁️ **Voir ma main**).',
+  '**L\'échange :** à ton tour, tu **défausses 0 à 5 cartes** (bouton 🔄 **Échanger**) et tu piochies autant de remplaçantes.',
+  '**L\'abattage :** on retourne les mains, la meilleure rafle le pot ; **égalité = partage**.',
+  '',
+  '**Ordre des mains (du plus fort au plus faible) :**',
+  '• Quinte flush · Carré · Full · Couleur · Quinte · Brelan · Double paire · Paire · Carte haute.',
+  '**Départage :** à catégorie égale, on compare les valeurs (kickers). La roue **A-2-3-4-5** est la plus petite quinte.',
+  '',
+  '🎭 **Reste en RP :** appuie sur **Emote** à chaque action et colle la ligne **en jeu** — comme ça, personne ne te prend pour un AFK pendant que tu joues ici.',
+  '💰 **Sous :** tes gains/pertes sont cumulés dans ton compteur de **sous** du saloon (bouton « Mes sous »).',
+];
 
 const GESTION = ['Opérateur', 'Operateur', 'Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier', 'Secrétaire', 'Instructeur'];
 function _estGestion(member) { try { return !!member?.roles?.cache?.some(r => GESTION.some(n => r.name.includes(n))); } catch { return false; } }
@@ -132,6 +191,7 @@ function _lignesStatut(t) {
   } else {
     L.push('💬 *' + (t.ambiance || _pick(_phrasesDeal)) + '*');
     L.push('👉 **S\'asseoir** (régler son ante), puis l\'**hôte distribue** (2 à 6 joueurs).');
+    L.push('📖 *Nouveau ? Clique **Comment jouer** avant de lancer.*  🎭 *Pense à **Emote RP** pour rester crédible en jeu.*');
   }
   L.push('💵 **Pot : ' + _money(t.pot) + '**');
   const sold = Object.entries(t.soldes).filter(([, n]) => n).map(([u, n]) => { const s = t.sieges.find(x => x.userId === u); return '• ' + (s ? s.nom : 'Parti') + ' : ' + _money(n); });
@@ -160,6 +220,14 @@ function _imgState(t) {
     }),
   };
 }
+// Rangée commune : Comment jouer / Emote RP / Mes sous (présente sur toutes les phases).
+function _rowExtras() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('pk_regles').setLabel('Comment jouer').setEmoji('📖').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('pk_emote').setLabel('Emote RP').setEmoji('🎭').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('pk_sous').setLabel('Mes sous').setEmoji('💰').setStyle(ButtonStyle.Secondary),
+  );
+}
 function _components(t) {
   const rows = [];
   if (t.phase === 'lobby') {
@@ -185,6 +253,7 @@ function _components(t) {
       new ButtonBuilder().setCustomId('pk_close').setLabel('Fermer la table').setEmoji('❌').setStyle(ButtonStyle.Danger),
     ));
   }
+  rows.push(_rowExtras());
   return rows;
 }
 async function _screen(t) {
@@ -263,6 +332,8 @@ function _showdown(t) {
       : '❌ Perdu';
     t.soldes[s.userId] = (t.soldes[s.userId] || 0) + s.net;
   }
+  // Compteur de « sous » PERSISTANT du saloon (une seule écriture pour toute la table).
+  try { if (casino.crediterLot) casino.crediterLot(t.sieges.map(s => ({ userId: s.userId, montant: s.net || 0 }))); } catch {}
   t.ambiance = _pick(_phrasesShow) + (gagnants.length > 1 ? ' Pot partagé (' + gagnants[0].eval.nom + ').' : ' ' + gagnants[0].nom + ' l\'emporte avec : ' + gagnants[0].eval.nom + '.');
 }
 
@@ -325,10 +396,11 @@ async function installerPanelPoker(guild, channel) {
 async function _envoyerMain(interaction, t, s) {
   const eph = MessageFlags.Ephemeral;
   const ev = _evaluer(s.main);
+  await interaction.deferReply({ flags: eph }).catch(() => {}); // accuse réception avant de générer l'image
   let buf = null;
   try { if (_img?.genererMain) buf = await _img.genererMain({ nom: s.nom, cards: s.main.map(c => ({ r: c.r, s: c.s })), evalNom: ev.nom, sousTitre: t.phase === 'echange' ? 'Choisissez 0 à 5 cartes à échanger' : 'Vos cartes' }); } catch { buf = null; }
-  if (buf) { await interaction.reply({ content: '👁️ **Votre main** — ' + ev.nom, files: [new AttachmentBuilder(buf, { name: 'main.png' })], flags: eph }).catch(() => {}); }
-  else { await interaction.reply({ content: '👁️ **Votre main** : ' + _fmtMain(s.main) + '\n➡️ ' + ev.nom, flags: eph }).catch(() => {}); }
+  if (buf) { await interaction.editReply({ content: '👁️ **Votre main** — ' + ev.nom, files: [new AttachmentBuilder(buf, { name: 'main.png' })] }).catch(() => {}); }
+  else { await interaction.editReply({ content: '👁️ **Votre main** : ' + _fmtMain(s.main) + '\n➡️ ' + ev.nom }).catch(() => {}); }
 }
 
 // ─── Routeur d'interactions ───
@@ -342,11 +414,12 @@ async function routeInteraction(interaction) {
     if (interaction.isButton() && id === 'pk_open') {
       const exist = tables.get(interaction.channelId);
       if (exist) { await interaction.reply({ content: '🃏 Une table est déjà ouverte dans ce salon. Rejoins-la un peu plus haut !', flags: eph }); return true; }
+      await interaction.deferReply({ flags: eph });
       const t = _creerTable(interaction);
       const msg = await interaction.channel.send(await _screen(t)).catch(() => null);
-      if (!msg) { await interaction.reply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).', flags: eph }); return true; }
+      if (!msg) { await interaction.editReply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).' }); return true; }
       t.msg = msg; t.messageId = msg.id; tables.set(interaction.channelId, t);
-      await interaction.reply({ content: '🃏 Table ouverte — tu en es l\'**hôte**. Assieds-toi 👇 puis clique **Distribuer** quand au moins 2 joueurs ont misé.', flags: eph });
+      await interaction.editReply({ content: '🃏 Table ouverte — tu en es l\'**hôte**. Assieds-toi 👇 puis clique **Distribuer** quand au moins 2 joueurs ont misé.' });
       return true;
     }
 
@@ -447,6 +520,29 @@ async function routeInteraction(interaction) {
         .setFooter({ text: 'Iron Wolf Company · Saloon' });
       try { await t.msg?.edit({ embeds: [e], components: [], files: [], attachments: [] }); } catch {}
       await interaction.deferUpdate().catch(() => {});
+      return true;
+    }
+
+    // Comment jouer (règles, avant de lancer)
+    if (interaction.isButton() && id === 'pk_regles') {
+      await interaction.reply({ content: _REGLES.join('\n'), flags: eph });
+      return true;
+    }
+    // Emote RP à coller en jeu (anti-AFK)
+    if (interaction.isButton() && id === 'pk_emote') {
+      const s = _siege(t, interaction.user.id);
+      const lignes = _emotePerso(t, s) + '\n' + _pick(_EMOTES_SCENE);
+      await interaction.reply({ content: '🎭 **Reste dans la scène !** Colle une de ces lignes **en jeu** (RedM) pour ne pas passer pour AFK :\n```\n' + lignes + '\n```\n*Astuce : garde le jeu en fenêtre, alterne vite, et remets une émote à chaque action.*', flags: eph });
+      return true;
+    }
+    // Compteur de sous du saloon (persistant)
+    if (interaction.isButton() && id === 'pk_sous') {
+      const total = _sous(interaction.user.id);
+      const s = _siege(t, interaction.user.id);
+      const sess = s ? (t.soldes[interaction.user.id] || 0) : 0;
+      const top = casino.classement ? casino.classement(3) : [];
+      const topTxt = top.length ? '\n\n🏆 **Gros joueurs du saloon**\n' + top.map(([u, n], i) => (i + 1) + '. <@' + u + '> — ' + _money(n)).join('\n') : '';
+      await interaction.reply({ content: '💰 **Tes sous au saloon : ' + _money(total) + '**' + (s ? '\n*(à cette table : ' + _money(sess) + ')*' : '') + topTxt, flags: eph, allowedMentions: { parse: [] } });
       return true;
     }
 

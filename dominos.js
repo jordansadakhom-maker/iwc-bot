@@ -12,8 +12,70 @@
 // ───────────────────────────────────────────────────────────────────────────
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, AttachmentBuilder } = require('discord.js');
 let _img = null; try { _img = require('./dominos-image'); } catch { _img = null; }
+let casino = {}; try { casino = require('./casino-banque'); } catch { casino = {}; }
+const _sous = uid => (casino.solde ? casino.solde(uid) : 0);
 
 const PREFIXE = 'dom_';
+
+// ── Émotes RP à coller EN JEU (RedM) : garde la scène vivante pendant qu'on joue sur Discord ──
+const _EMOTES_SCENE = [
+  '/do Les tuiles s\'alignent dans un cliquetis d\'ivoire sur le bois usé.',
+  '/do Une partie de dominos s\'étire, chaque raccord ponctué d\'un claquement sec.',
+  '/do L\'odeur du tabac froid flotte au-dessus de la chaîne d\'os qui serpente.',
+  '/me balaie la table du regard, comptant en silence les pips restants.',
+];
+const _EMOTES_LOBBY = [
+  '/me tire une chaise et pose sa mise au centre de la table.',
+  '/me fait glisser ses tuiles face cachée et les redresse d\'un doigt.',
+  '/me ajuste son chapeau et jauge ses adversaires avant la donne.',
+  '/me mélange les os d\'un revers de main dans un cliquetis sourd.',
+];
+const _EMOTES_TOUR = [
+  '/me étudie ses dominos en cherchant le bon raccord.',
+  '/me pose une tuile au bout de la chaîne d\'un geste sec.',
+  '/me hésite, une tuile suspendue au-dessus des deux extrémités.',
+  '/me tapote une tuile contre le bord de la table, songeur.',
+];
+const _EMOTES_GAGNE = [
+  '/me abat sa dernière tuile et écarte les bras, la main vide.',
+  '/me ramasse le pot d\'un geste ample, un sourire au coin des lèvres.',
+];
+const _EMOTES_PERDU = [
+  '/me repousse ses tuiles restantes en soupirant.',
+  '/me retourne ses derniers os, encore lourds de pips.',
+];
+const _EMOTES_GEN = [
+  '/me surveille les extrémités ouvertes en attendant son tour.',
+  '/me sirote son verre, ses tuiles serrées contre lui.',
+  '/me croise les bras, impassible, la chaîne s\'allongeant devant lui.',
+];
+function _emotePerso(t, j) {
+  if (!j) return _pick(_EMOTES_SCENE);
+  if (t.phase === 'lobby') {
+    if (t.manche > 0 && j.net != null) { const n = j.net || 0; return _pick(n > 0 ? _EMOTES_GAGNE : n < 0 ? _EMOTES_PERDU : _EMOTES_GEN); }
+    return _pick(_EMOTES_LOBBY);
+  }
+  if (t.joueurs[t.tourIdx]?.userId === j.userId) return _pick(_EMOTES_TOUR);
+  return _pick(_EMOTES_GEN);
+}
+// ── Règles : « comment jouer », montrées avant de lancer une partie ──
+const _REGLES = [
+  '📖 **DOMINOS (DOUBLE-SIX, BLOQUÉ) — COMMENT JOUER**',
+  '',
+  '**But :** être le premier à **vider sa main** de tuiles pour rafler le **pot**.',
+  '',
+  '**Le jeu :** 28 tuiles (de 0-0 à 6-6). Chacun mise un **ante** ; toutes les mises forment le pot.',
+  '**La donne :** 7 tuiles à 2 joueurs, 6 à 3, 5 à 4. Le reste forme la **pioche** (boneyard). L\'ouvreur est celui qui a le plus gros double (sinon la plus grosse tuile).',
+  '**À ton tour :**',
+  '• 🀱 **Jouer une tuile** — raccorde une tuile à une des **deux extrémités** ouvertes (pips égaux).',
+  '• 🂠 **Piocher** — si rien ne raccorde, tire dans la pioche jusqu\'à pouvoir jouer.',
+  '• ⏭️ **Passer** — seulement si tu ne peux pas jouer **et** que la pioche est vide.',
+  '• 👁️ **Voir ma main** — affiche tes tuiles en privé (les jouables sont marquées).',
+  '**Fin de manche :** le premier à vider sa main **remporte le pot**. Si tout le monde est bloqué (personne ne joue, pioche vide), c\'est le **plus petit total de pips** qui gagne.',
+  '',
+  '🎭 **Reste en RP :** appuie sur **Emote** à chaque action et colle la ligne **en jeu** — comme ça, personne ne te prend pour un AFK pendant que tu joues ici.',
+  '💰 **Sous :** tes gains/pertes sont cumulés dans ton compteur de **sous** du saloon (bouton « Mes sous »).',
+];
 
 const GESTION = ['Opérateur', 'Operateur', 'Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier', 'Secrétaire', 'Instructeur'];
 function _estGestion(member) { try { return !!member?.roles?.cache?.some(r => GESTION.some(n => r.name.includes(n))); } catch { return false; } }
@@ -162,6 +224,8 @@ function _resoudreManche(t, gagnantIdx, cause) {
     t.soldes[j.userId] = (t.soldes[j.userId] || 0) + net;
     j.net = net;
   }
+  // Compteur de « sous » PERSISTANT du saloon (une seule écriture pour toute la table).
+  try { if (casino.crediterLot) casino.crediterLot(t.joueurs.map(j => ({ userId: j.userId, montant: j.net || 0 }))); } catch {}
   const detailPips = cause === 'blocage'
     ? '  (' + t.joueurs.map(j => j.nom + ' : ' + _totalPips(j.main) + ' pips').join(', ') + ')'
     : '';
@@ -267,12 +331,21 @@ function _lignesStatut(t) {
   } else {
     L.push('💬 *' + (t.ambiance || _pick(_phrasesOuvre)) + '*');
     L.push('👉 **Rejoindre** avec un ante, puis l\'**hôte distribue** (' + MIN_JOUEURS + ' à ' + MAX_JOUEURS + ' joueurs).');
+    L.push('📖 *Nouveau ? Clique **Comment jouer** avant de lancer.*  🎭 *Pense à **Emote RP** pour rester crédible en jeu.*');
   }
   const sold = Object.entries(t.soldes).filter(([, n]) => n).map(([u, n]) => { const j = t.joueurs.find(x => x.userId === u); return '• ' + (j ? j.nom : 'Parti') + ' : ' + _money(n); });
   if (sold.length) L.push('💰 **Jetons de la soirée**\n' + sold.join('\n'));
   return L;
 }
 
+// Rangée commune : Comment jouer / Emote RP / Mes sous (présente sur toutes les phases).
+function _rowExtras() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('dom_regles').setLabel('Comment jouer').setEmoji('📖').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dom_emote').setLabel('Emote RP').setEmoji('🎭').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dom_sous').setLabel('Mes sous').setEmoji('💰').setStyle(ButtonStyle.Secondary),
+  );
+}
 function _components(t) {
   const rows = [];
   if (t.phase === 'lobby') {
@@ -295,6 +368,7 @@ function _components(t) {
       new ButtonBuilder().setCustomId('dom_close').setLabel('Fermer la table').setEmoji('❌').setStyle(ButtonStyle.Danger),
     ));
   }
+  rows.push(_rowExtras());
   return rows;
 }
 
@@ -390,11 +464,12 @@ async function routeInteraction(interaction) {
     if (interaction.isButton() && id === 'dom_open') {
       const exist = tables.get(interaction.channelId);
       if (exist) { await interaction.reply({ content: '🁢 Une table est déjà ouverte dans ce salon. Rejoins-la un peu plus haut !', flags: eph }); return true; }
+      await interaction.deferReply({ flags: eph });
       const t = _creerTable(interaction);
       const msg = await interaction.channel.send(await _screen(t)).catch(() => null);
-      if (!msg) { await interaction.reply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).', flags: eph }); return true; }
+      if (!msg) { await interaction.editReply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).' }); return true; }
       t.msg = msg; t.messageId = msg.id; tables.set(interaction.channelId, t);
-      await interaction.reply({ content: '🁢 Table ouverte — tu en es l\'**hôte**. Rejoins 👇 puis clique **Distribuer** quand tout le monde a misé (min. ' + MIN_JOUEURS + ' joueurs).', flags: eph });
+      await interaction.editReply({ content: '🁢 Table ouverte — tu en es l\'**hôte**. Rejoins 👇 puis clique **Distribuer** quand tout le monde a misé (min. ' + MIN_JOUEURS + ' joueurs).' });
       return true;
     }
 
@@ -452,7 +527,9 @@ async function routeInteraction(interaction) {
     if (interaction.isButton() && id === 'dom_peek') {
       const j = _joueur(t, interaction.user.id);
       if (!j) { await interaction.reply({ content: 'Tu n\'es pas à cette table.', flags: eph }); return true; }
-      await interaction.reply(await _peekPayload(t, j)); return true;
+      await interaction.deferReply({ flags: eph }); // accuse réception avant de générer l'image
+      const _pp = await _peekPayload(t, j); delete _pp.flags;
+      await interaction.editReply(_pp); return true;
     }
 
     // Jouer une tuile → menu de sélection (joueur courant uniquement)
@@ -522,6 +599,29 @@ async function routeInteraction(interaction) {
         .setFooter({ text: 'Iron Wolf Company · Saloon' });
       try { await t.msg?.edit({ embeds: [e], components: [], files: [], attachments: [] }); } catch {}
       await interaction.deferUpdate().catch(() => {});
+      return true;
+    }
+
+    // Comment jouer (règles, avant de lancer)
+    if (interaction.isButton() && id === 'dom_regles') {
+      await interaction.reply({ content: _REGLES.join('\n'), flags: eph });
+      return true;
+    }
+    // Emote RP à coller en jeu (anti-AFK)
+    if (interaction.isButton() && id === 'dom_emote') {
+      const j = _joueur(t, interaction.user.id);
+      const lignes = _emotePerso(t, j) + '\n' + _pick(_EMOTES_SCENE);
+      await interaction.reply({ content: '🎭 **Reste dans la scène !** Colle une de ces lignes **en jeu** (RedM) pour ne pas passer pour AFK :\n```\n' + lignes + '\n```\n*Astuce : garde le jeu en fenêtre, alterne vite, et remets une émote à chaque tuile posée.*', flags: eph });
+      return true;
+    }
+    // Compteur de sous du saloon (persistant)
+    if (interaction.isButton() && id === 'dom_sous') {
+      const total = _sous(interaction.user.id);
+      const j = _joueur(t, interaction.user.id);
+      const sess = j ? (t.soldes[interaction.user.id] || 0) : 0;
+      const top = casino.classement ? casino.classement(3) : [];
+      const topTxt = top.length ? '\n\n🏆 **Gros joueurs du saloon**\n' + top.map(([u, n], i) => (i + 1) + '. <@' + u + '> — ' + _money(n)).join('\n') : '';
+      await interaction.reply({ content: '💰 **Tes sous au saloon : ' + _money(total) + '**' + (j ? '\n*(à cette table : ' + _money(sess) + ')*' : '') + topTxt, flags: eph, allowedMentions: { parse: [] } });
       return true;
     }
 

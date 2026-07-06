@@ -13,6 +13,8 @@
 // ───────────────────────────────────────────────────────────────────────────
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, AttachmentBuilder } = require('discord.js');
 let _img = null; try { _img = require('./pokermenteur-image'); } catch { _img = null; }
+let casino = {}; try { casino = require('./casino-banque'); } catch { casino = {}; }
+const _sous = uid => (casino.solde ? casino.solde(uid) : 0);
 
 const PREFIXE = 'pm_';
 const GESTION = ['Opérateur', 'Operateur', 'Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier', 'Secrétaire', 'Instructeur'];
@@ -26,6 +28,62 @@ const TOUR_MS = 120000; // 2 min pour parler, sinon auto-action sûre
 function _money(n) { const s = Math.abs(Math.round(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' '); return (n < 0 ? '−' : '') + s + ' $'; }
 function _pick(a) { return a[Math.floor(Math.random() * a.length)]; }
 const _phrasesManche = ['« Secouez, misez, mentez. »', '« Que le meilleur bluffeur gagne. »', '« Les dés roulent, les langues fourchent. »', '« Regardez vos dés… et le visage des autres. »'];
+
+// ── Émotes RP à coller EN JEU (RedM) : garde la scène vivante pendant qu'on joue sur Discord ──
+const _EMOTES_SCENE = [
+  '/do Les gobelets claquent sur le bois, les enchères montent, personne ne cille.',
+  '/do Autour de la table, des dés roulent en secret et les regards se jaugent.',
+  '/do Le saloon retient son souffle : un bluff de trop et quelqu\'un perdra un dé.',
+  '/me fixe ses adversaires un à un, cherchant le mensonge sur leurs visages.',
+];
+const _EMOTES_LOBBY = [
+  '/me tire une chaise, pose son ante sur le tapis et fait rouler ses dés dans sa paume.',
+  '/me secoue son gobelet près de son oreille, l\'air de rien, avant de s\'asseoir.',
+  '/me ajuste son chapeau et jauge les autres bluffeurs autour de la table.',
+  '/me claque quelques pièces sur le bois en guise de mise et s\'installe.',
+];
+const _EMOTES_TOUR = [
+  '/me secoue son gobelet et jette un œil discret à ses dés à l\'abri des regards.',
+  '/me caresse sa moustache, pesant s\'il doit surenchérir ou crier au menteur.',
+  '/me tapote le tapis du bout des doigts, le visage fermé, avant d\'annoncer.',
+];
+const _EMOTES_GAGNE = [
+  '/me ramasse le pot d\'un geste ample, un sourire en coin sous le chapeau.',
+  '/me rafle les pièces au centre de la table et lève son verre à sa chance.',
+];
+const _EMOTES_PERDU = [
+  '/me repousse un dé sur le côté en grommelant dans sa barbe.',
+  '/me lâche un juron étouffé en découvrant les dés retournés.',
+];
+const _EMOTES_GEN = [
+  '/me garde ses dés cachés sous sa paume et observe le jeu des autres.',
+  '/me croise les bras, gobelet renversé devant lui, impassible.',
+];
+function _emotePerso(t, j) {
+  if (!j) return _pick(_EMOTES_SCENE);
+  if (t.phase === 'fini') { return _pick(t.gagnant && t.gagnant.userId === j.userId ? _EMOTES_GAGNE : _EMOTES_PERDU); }
+  if (t.phase === 'entredeux') { const pIdx = t.dernierDefi ? t.dernierDefi.perdantIdx : -1; return _pick(t.joueurs[pIdx]?.userId === j.userId ? _EMOTES_PERDU : _EMOTES_GEN); }
+  if (t.phase === 'jeu') { if (t.joueurs[t.tourIdx]?.userId === j.userId) return _pick(_EMOTES_TOUR); if (!j.vivant) return _pick(_EMOTES_PERDU); return _pick(_EMOTES_GEN); }
+  return _pick(_EMOTES_LOBBY);
+}
+// ── Règles : « comment jouer », montrées avant de lancer une partie ──
+const _REGLES = [
+  '📖 **POKER MENTEUR (LIAR\'S DICE) — COMMENT JOUER**',
+  '',
+  '**But :** être le **dernier debout**. Chaque joueur a 5 dés secrets ; qui se trompe perd un dé, à 0 il est éliminé.',
+  '',
+  '**La donne :** chacun mise son **ante** au pot, puis lance ses 5 dés **en secret** (bouton 🫣 **Voir mes dés**).',
+  '**Une enchère = QUANTITÉ × FACE** (ex. **3 × 4**) : tu paries qu\'il y a **au moins** 3 dés montrant un **4** sur **toute la table**.',
+  '**Les 1 sont des JOKERS** : ils comptent pour n\'importe quelle face. On ne mise donc jamais sur la face 1.',
+  '**À ton tour :**',
+  '• 🎲 **Surenchérir** — monte la **quantité**, ou garde la quantité avec une **face plus haute**.',
+  '• 🗯️ **MENTEUR !** — tu contestes l\'enchère en cours. On révèle alors tous les dés.',
+  '**Résolution :** si le vrai total (dés à la face **+** les 1) **atteint** l\'enchère → elle était **VRAIE**, le **contestataire** perd un dé ; sinon l\'**enchérisseur** perd un dé.',
+  '**Éliminé à 0 dé.** Le dernier survivant **rafle tout le pot**.',
+  '',
+  '🎭 **Reste en RP :** appuie sur **Emote RP** à chaque tour et colle la ligne **en jeu** — comme ça, personne ne te prend pour un AFK pendant que tu joues ici.',
+  '💰 **Sous :** tes gains/pertes de la soirée sont cumulés dans ton compteur de **sous** du saloon (bouton « Mes sous »).',
+];
 
 // ─── Logique des dés (pure, testable) ───
 function _lancer(n) { const d = []; for (let i = 0; i < n; i++) d.push(1 + Math.floor(Math.random() * 6)); return d; }
@@ -177,6 +235,8 @@ function _defi(t, challengerIdx) {
     t.phase = 'fini';
     const g = vivants[0] || null;
     if (g) { t.gagnant = g; t.soldes[g.userId] = (t.soldes[g.userId] || 0) + t.pot; }
+    // Compteur de « sous » PERSISTANT du saloon : net de la partie (ante réglé à l'assise + pot au vainqueur). Une seule écriture pour toute la table.
+    try { if (casino.crediterLot) casino.crediterLot(t.joueurs.map(j => ({ userId: j.userId, montant: t.soldes[j.userId] || 0 }))); } catch {}
   }
   return { vrai, total, perdantIdx };
 }
@@ -223,10 +283,19 @@ function _lignesTexte(t) {
   if (t.phase === 'entredeux' && t.dernierDefi) L.push('⚖️ *' + t.dernierDefi.txt + '*');
   else if (t.phase === 'fini' && t.gagnant) L.push('★ **' + t.gagnant.nom + ' rafle le pot de ' + _money(t.pot) + ' !**');
   else if (t.ambiance) L.push('💬 *' + t.ambiance + '*');
+  if (t.phase === 'lobby' && t.manche === 0) L.push('📖 *Nouveau ? Clique **Comment jouer** avant de lancer.*  🎭 *Pense à **Emote RP** pour rester crédible en jeu.*');
   if (t.historique.length) L.push('🗒️ *Enchères : ' + t.historique.slice(-4).join(' · ') + '*');
   const sold = Object.entries(t.soldes).filter(([, n]) => n).map(([u, n]) => { const j = t.joueurs.find(x => x.userId === u); return '• ' + (j ? j.nom : 'Parti') + ' : ' + _money(n); });
   if (sold.length) L.push('🏦 **Jetons de la soirée**\n' + sold.join('\n'));
   return L;
+}
+// Rangée commune : Comment jouer / Emote RP / Mes sous (présente sur toutes les phases).
+function _rowExtras() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('pm_regles').setLabel('Comment jouer').setEmoji('📖').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('pm_emote').setLabel('Emote RP').setEmoji('🎭').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('pm_sous').setLabel('Mes sous').setEmoji('💰').setStyle(ButtonStyle.Secondary),
+  );
 }
 function _components(t) {
   const rows = [];
@@ -255,6 +324,7 @@ function _components(t) {
       new ButtonBuilder().setCustomId('pm_close').setLabel('Fermer la table').setEmoji('❌').setStyle(ButtonStyle.Danger),
     ));
   }
+  rows.push(_rowExtras());
   return rows;
 }
 async function _screen(t) {
@@ -266,7 +336,7 @@ async function _screen(t) {
     e.setImage('attachment://pokermenteur.png');
     const sold = Object.entries(t.soldes).filter(([, n]) => n).map(([u, n]) => { const j = t.joueurs.find(x => x.userId === u); return '• ' + (j ? j.nom : 'Parti') + ' : ' + _money(n); });
     let desc = '';
-    if (t.phase === 'lobby' && t.manche === 0) desc = '👉 **S\'asseoir** pour miser l\'ante, puis l\'**hôte lance la partie** (≥ ' + MIN_JOUEURS + ' joueurs).';
+    if (t.phase === 'lobby' && t.manche === 0) desc = '👉 **S\'asseoir** pour miser l\'ante, puis l\'**hôte lance la partie** (≥ ' + MIN_JOUEURS + ' joueurs).\n📖 *Nouveau ? Clique **Comment jouer** avant de lancer.*  🎭 *Pense à **Emote RP** pour rester crédible en jeu.*';
     else if (t.phase === 'jeu') desc = '🫣 **Voir mes dés** (privé) · 🎲 **Surenchérir** · 🗯️ **Menteur !**';
     else if (t.phase === 'entredeux') desc = '⚖️ *' + (t.dernierDefi?.txt || '') + '*';
     else if (t.phase === 'fini') desc = '★ **' + (t.gagnant?.nom || '—') + ' rafle le pot de ' + _money(t.pot) + ' !**';
@@ -327,11 +397,12 @@ async function routeInteraction(interaction) {
     if (interaction.isButton() && id === 'pm_open') {
       const exist = tables.get(interaction.channelId);
       if (exist) { await interaction.reply({ content: '🎲 Une table est déjà ouverte dans ce salon. Rejoins-la un peu plus haut !', flags: eph }); return true; }
+      await interaction.deferReply({ flags: eph });
       const t = _creerTable(interaction);
       const msg = await interaction.channel.send(await _screen(t)).catch(() => null);
-      if (!msg) { await interaction.reply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).', flags: eph }); return true; }
+      if (!msg) { await interaction.editReply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).' }); return true; }
       t.msg = msg; t.messageId = msg.id; tables.set(interaction.channelId, t);
-      await interaction.reply({ content: '🎲 Table ouverte — tu en es l\'**hôte**. Assieds-toi 👇 (mise l\'ante), puis clique **Lancer la partie** quand tout le monde est prêt.', flags: eph });
+      await interaction.editReply({ content: '🎲 Table ouverte — tu en es l\'**hôte**. Assieds-toi 👇 (mise l\'ante), puis clique **Lancer la partie** quand tout le monde est prêt.' });
       return true;
     }
 
@@ -400,10 +471,11 @@ async function routeInteraction(interaction) {
       const j = _joueur(t, interaction.user.id);
       if (!j) { await interaction.reply({ content: 'Tu n\'es pas à cette table.', flags: eph }); return true; }
       if (!j.vivant || !(j.des || []).length) { await interaction.reply({ content: '🎲 Tu n\'as pas de dés en main pour l\'instant.', flags: eph }); return true; }
+      await interaction.deferReply({ flags: eph }); // accuse réception avant de générer l'image
       let buf = null;
       try { if (_img?.genererMain) buf = await _img.genererMain(j.des, j.nom); } catch { buf = null; }
-      if (buf) { await interaction.reply({ content: '🫣 Tes dés (les **1** sont jokers) :', files: [new AttachmentBuilder(buf, { name: 'mesdes.png' })], flags: eph }); }
-      else { await interaction.reply({ content: '🫣 Tes dés : **' + (j.des || []).join(' · ') + '**  _(les 1 sont jokers)_', flags: eph }); }
+      if (buf) { await interaction.editReply({ content: '🫣 Tes dés (les **1** sont jokers) :', files: [new AttachmentBuilder(buf, { name: 'mesdes.png' })] }); }
+      else { await interaction.editReply({ content: '🫣 Tes dés : **' + (j.des || []).join(' · ') + '**  _(les 1 sont jokers)_' }); }
       return true;
     }
 
@@ -464,6 +536,29 @@ async function routeInteraction(interaction) {
         .setFooter({ text: 'Iron Wolf Company · Saloon' });
       try { await t.msg?.edit({ embeds: [e], components: [], files: [], attachments: [] }); } catch {}
       await interaction.deferUpdate().catch(() => {});
+      return true;
+    }
+
+    // Comment jouer (règles, avant de lancer)
+    if (interaction.isButton() && id === 'pm_regles') {
+      await interaction.reply({ content: _REGLES.join('\n'), flags: eph });
+      return true;
+    }
+    // Emote RP à coller en jeu (anti-AFK)
+    if (interaction.isButton() && id === 'pm_emote') {
+      const j = _joueur(t, interaction.user.id);
+      const lignes = _emotePerso(t, j) + '\n' + _pick(_EMOTES_SCENE);
+      await interaction.reply({ content: '🎭 **Reste dans la scène !** Colle une de ces lignes **en jeu** (RedM) pour ne pas passer pour AFK :\n```\n' + lignes + '\n```\n*Astuce : garde le jeu en fenêtre, alterne vite, et remets une émote à chaque tour.*', flags: eph });
+      return true;
+    }
+    // Compteur de sous du saloon (persistant)
+    if (interaction.isButton() && id === 'pm_sous') {
+      const total = _sous(interaction.user.id);
+      const j = _joueur(t, interaction.user.id);
+      const sess = j ? (t.soldes[interaction.user.id] || 0) : 0;
+      const top = casino.classement ? casino.classement(3) : [];
+      const topTxt = top.length ? '\n\n🏆 **Gros joueurs du saloon**\n' + top.map(([u, n], i) => (i + 1) + '. <@' + u + '> — ' + _money(n)).join('\n') : '';
+      await interaction.reply({ content: '💰 **Tes sous au saloon : ' + _money(total) + '**' + (j ? '\n*(à cette table : ' + _money(sess) + ')*' : '') + topTxt, flags: eph, allowedMentions: { parse: [] } });
       return true;
     }
 

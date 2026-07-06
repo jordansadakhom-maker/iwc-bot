@@ -10141,6 +10141,7 @@ function _panneauSaloonPayload() {
       '🁢 **Dominos** — videz votre main avant les autres.',
       '',
       '👉 Cliquez un jeu pour **ouvrir une table** dans ce salon.',
+      '📖 *À chaque table : bouton **Comment jouer** (les règles), **Emote RP** (pour rester crédible en jeu) et **Mes sous** (votre compteur de gains).*',
       '',
       '— *« On mise ce qu\'on ose perdre. »*',
     ].join('\n'))
