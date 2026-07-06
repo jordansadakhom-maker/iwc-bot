@@ -306,7 +306,7 @@ async function _callVision(model, b64, mt) {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model, max_tokens: 2000, messages: [{ role: 'user', content: [
+      body: JSON.stringify({ model, max_tokens: 4096, messages: [{ role: 'user', content: [
         { type: 'image', source: { type: 'base64', media_type: _cleanMt(mt), data: b64 } },
         { type: 'text', text: PROMPT_VISION },
       ] }] }),
@@ -341,7 +341,10 @@ function _parseItems(txt) {
   } catch { return null; }
 }
 async function _analyserImage(b64, mt) {
-  let txt = await _callVision('claude-sonnet-4-6', b64, mt);
+  // Modèle le plus fort en premier (lecture la plus exacte des noms/quantités),
+  // puis replis gracieux si indisponible.
+  let txt = await _callVision('claude-opus-4-8', b64, mt);
+  if (!txt) txt = await _callVision('claude-sonnet-4-6', b64, mt);
   if (!txt) txt = await _callVision('claude-haiku-4-5-20251001', b64, mt);
   return _parseItems(txt);
 }
@@ -388,16 +391,16 @@ function _proposalEmbed(items) {
   return new EmbedBuilder().setColor(0xC9A66B).setTitle("📷 Lecture de la capture du coffre")
     .setDescription("Voici ce que j'ai lu sur la photo. **Vérifie bien les quantités**, puis choisis :\n\n" + desc +
       "\n\n**Que faire de cette lecture ?**\n" +
-      "➕ **Ajouter au stock** — j'**AJOUTE** ces objets à ce qui est déjà dans le coffre *(le choix normal pour un réapprovisionnement — rien n'est retiré)*\n" +
-      "📸 **Le coffre = toute la photo** — ⚠️ le coffre devient **EXACTEMENT** cette liste : à utiliser **uniquement** si la photo montre **TOUT** le coffre *(tout ce qui n'y figure pas sera retiré)*\n" +
+      "📸 **Coffre = la photo (exact)** — le coffre devient **EXACTEMENT** cette liste. *Le bon choix quand la photo montre TOUT le coffre : tout ce qui n'y figure pas est retiré, pour que le coffre corresponde pile à la photo.*\n" +
+      "➕ **Ajouter au stock** — j'**AJOUTE** seulement ces objets à ce qui est déjà là *(pour un réapprovisionnement partiel — rien n'est retiré)*\n" +
       "✏️ **Corriger un objet** — rectifier une ligne mal lue avant de valider\n" +
       "❌ **Annuler** — ne rien changer")
-    .setFooter({ text: "Par défaut : ➕ Ajouter (n'enlève rien). N'utilise « = toute la photo » que pour un inventaire complet." });
+    .setFooter({ text: "📸 = le coffre reflète pile la photo (photo du coffre COMPLET). ➕ = ajout partiel sans rien enlever." });
 }
 function _proposalRow() {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("invp_add").setLabel("Ajouter au stock").setEmoji("➕").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId("invp_replace").setLabel("Le coffre = toute la photo").setEmoji("📸").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("invp_replace").setLabel("Coffre = la photo (exact)").setEmoji("📸").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("invp_add").setLabel("Ajouter au stock").setEmoji("➕").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("invp_edit").setLabel("Corriger un objet").setEmoji("✏️").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("invp_cancel").setLabel("Annuler").setEmoji("❌").setStyle(ButtonStyle.Secondary),
   );
@@ -779,14 +782,18 @@ async function _purgerPhotoPrecedente(ch, inv, saufId) {
 
 // ── Image(s) glissée(s) dans le salon → lecture IA → MISE À JOUR DIRECTE du coffre ──
 async function onMessage(message) {
+  let claimed = false; // dès qu'on sait que c'est le salon du coffre + une image → on le prend en charge
   try {
     if (!message || message.author?.bot) return false;
     const db = loadDB();
     if (!db.inventaire || !db.inventaire.channelId || message.channelId !== db.inventaire.channelId) return false;
     const imgs = message.attachments ? [...message.attachments.values()].filter(a => _estImage(a)) : [];
     if (!imgs.length) return false;
+    // C'est le salon du coffre et il y a une image : ce message appartient au coffre.
+    // On renvoie TOUJOURS true à partir d'ici, pour que le Vestiaire ne le traite jamais comme une tenue.
+    claimed = true;
     // Pas de clé IA → on ne touche à rien (sinon on supprimerait la photo de référence pour rien)
-    if (!process.env.ANTHROPIC_API_KEY) { await message.react("⚠️").catch(() => {}); return false; }
+    if (!process.env.ANTHROPIC_API_KEY) { await message.react("⚠️").catch(() => {}); return true; }
     const inv = _ensure(db);
     await message.react("🔍").catch(() => {});
     // Nettoie d'éventuels tableaux du coffre en double (scan profond) avant de traiter la photo
@@ -802,7 +809,7 @@ async function onMessage(message) {
     await _purgerRecapsPrecedents(message.channel, message.client.user.id);
     await _proposer(message.channel, items, message.author.id, db, inv);
     return true;
-  } catch { return false; }
+  } catch { return claimed; }
 }
 
 module.exports = { inventaireCommands, routeInteraction, onMessage, rafraichirBoardDemarrage };
