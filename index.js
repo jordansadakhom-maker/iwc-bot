@@ -3969,6 +3969,26 @@ client.on('messageCreate', async message => {
     const wasAbsent = db.members[message.author.id].status === 'absent'; const wasInactif = db.members[message.author.id].status === 'inactif';
     db.members[message.author.id].lastActivity = new Date().toISOString();
     if (wasAbsent || wasInactif) {
+      // Anti-annulation express d'une absence : un membre qui vient de déclarer une
+      // absence ne doit PAS « revenir » automatiquement dès qu'il poste un message,
+      // tant que sa date de retour prévue n'est pas passée (et pendant une courte
+      // période de grâce après la déclaration). `/retour` reste dispo pour revenir
+      // volontairement plus tôt.
+      let _doitRevenir = true;
+      if (wasAbsent) {
+        const _mAbs = db.members[message.author.id];
+        const _now = Date.now();
+        const _GRACE_MS = 12 * 3600 * 1000; // 12 h de grâce après la déclaration
+        const _fin = _mAbs.absentJusqu ? Date.parse(_mAbs.absentJusqu) : NaN;
+        const _depuis = _mAbs.absentDepuis ? Date.parse(_mAbs.absentDepuis) : NaN;
+        const _dansFenetre = !Number.isNaN(_fin) && _fin > _now;                 // retour prévu encore à venir
+        const _tropRecent  = !Number.isNaN(_depuis) && (_now - _depuis) < _GRACE_MS;
+        // On garde l'absence tant que la fenêtre déclarée court. La grâce ne protège
+        // que les absences SANS date de retour (indéterminées) juste après déclaration ;
+        // une fenêtre déjà échue laisse bien le membre revenir.
+        if (_dansFenetre || (Number.isNaN(_fin) && _tropRecent)) _doitRevenir = false;
+      }
+      if (_doitRevenir) {
       db.members[message.author.id].status = 'actif';
       _syncMembreNotion(message.author.id, { status: 'actif', lastActivity: new Date().toISOString() }).catch(() => {});
       // [CORRECTION] Débloquer écriture si absent
@@ -3991,6 +4011,7 @@ client.on('messageCreate', async message => {
       }
       await notionExtra.majStatutActiviteNotion?.(message.author.id, 'actif');
       if (wasInactif) { const logsCh = await getLogsCh(guild); if (logsCh) await logsCh.send({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle(`✅ Retour activité — ${message.author.username}`).setDescription(`**${message.author.username}** est de retour après une période d'inactivité.`).addFields({ name: '📅 Date retour', value: fmtShort(new Date()), inline: true }).setFooter({ text: 'IWC • Activité automatique' })] }).catch(() => {}); }
+      }
     }
     saveDB(db);
   }
@@ -3999,7 +4020,19 @@ client.on('messageCreate', async message => {
   const _absSalon = guild.channels.cache.get(SALON_HARDCODED.ABSENCES);
   const _isInAbsSalon = (message.channel.id === _absSalon?.id);
   if (_isInAbsSalon) {
-    if (db.members[message.author.id]) { db.members[message.author.id].status = 'absent'; saveDB(db); await message.react('✅'); await notionExtra.majStatutActiviteNotion?.(message.author.id, 'absent'); }
+    if (db.members[message.author.id]) {
+      const _mem = db.members[message.author.id];
+      _mem.status = 'absent';
+      _mem.absentDepuis = new Date().toISOString();
+      // Déduire la date de retour depuis le texte ("4 jours", "2 semaines"…) pour
+      // que l'absence soit protégée pendant toute la durée annoncée (sinon un simple
+      // message l'annulerait aussitôt).
+      const _fin = _parseFinAbsence(message.content);
+      if (_fin) _mem.absentJusqu = _fin;
+      const _rz = (message.content.match(/raison\s*:?\s*(.+)$/i) || [])[1];
+      if (_rz) _mem.absentRaison = _rz.trim().slice(0, 200);
+      saveDB(db); await message.react('✅'); await notionExtra.majStatutActiviteNotion?.(message.author.id, 'absent');
+    }
     await notionV3.syncAbsenceNotion?.(message.author.id, 'absent').catch(() => {});
     await notionV4.posterAbsencePropre?.(guild, message.member, message.content, `#${message.channel.name}`).catch(() => {});
     await sendLog(guild, 'ABSENCE', { userId: message.author.id, username: message.author.username }); return;
@@ -9537,6 +9570,34 @@ async function _validerModalAbsentProgramme(interaction) {
   await _enregistrerAbsence(interaction, guild, dureeLabel, dateFin.toISOString(), raison, estFuture ? dateDebut.toISOString() : null);
 }
 
+// ── Déduit une date de retour ISO depuis une durée saisie en texte libre ──
+//    ("4 jours", "2 semaines", "1 mois", "jusqu'au 15 juin", "indéterminée"…).
+//    Renvoie null si indéterminée ou illisible. Utilisé par le modal ET par la
+//    déclaration d'absence écrite directement dans le salon #absences.
+function _parseFinAbsence(dureeRaw) {
+  try {
+    const raw = String(dureeRaw || '').trim();
+    const d = raw.toLowerCase();
+    if (!d) return null;
+    if (d.includes('indét') || d.includes('indeter')) return null;
+    if (d.match(/(\d+)\s*jour/))    return new Date(Date.now() + parseInt(d.match(/(\d+)/)[1]) * 86400000).toISOString();
+    if (d.match(/(\d+)\s*semaine/)) return new Date(Date.now() + parseInt(d.match(/(\d+)/)[1]) * 7 * 86400000).toISOString();
+    if (d.match(/(\d+)\s*mois/))    return new Date(Date.now() + parseInt(d.match(/(\d+)/)[1]) * 30 * 86400000).toISOString();
+    if (d.includes('jusqu')) {
+      const dateMatch = raw.match(/(\d{1,2})[\/\s]([a-zéûôàèù]+|\d{1,2})(?:[\/\s](\d{4}))?/i);
+      if (dateMatch) {
+        const months = { jan: 0, fév: 1, fev: 1, mar: 2, avr: 3, mai: 4, juin: 5, jul: 6, aoû: 7, aou: 7, sep: 8, oct: 9, nov: 10, déc: 11, dec: 11 };
+        const day = parseInt(dateMatch[1]);
+        const monthRaw = dateMatch[2].toLowerCase().slice(0, 3);
+        const month = months[monthRaw] ?? (parseInt(dateMatch[2]) - 1);
+        const year = dateMatch[3] ? parseInt(dateMatch[3]) : new Date().getFullYear();
+        return new Date(year, isNaN(month) ? 0 : month, day).toISOString();
+      }
+    }
+    return null;
+  } catch { return null; }
+}
+
 // ── Fonction centrale enregistrement absence ──
 async function _enregistrerAbsence(interaction, guild, dureeLabel, finAbsence, raison, debutProgramme = null) {
   const db = loadDB();
@@ -9574,6 +9635,7 @@ async function _enregistrerAbsence(interaction, guild, dureeLabel, finAbsence, r
   m.status       = 'absent';
   m.absentJusqu  = finAbsence;
   m.absentRaison = raison;
+  m.absentDepuis = new Date().toISOString();
   m.lastActivity = new Date().toISOString();
   saveDB(db);
 
@@ -9677,6 +9739,7 @@ async function _validerModalAbsent(interaction) {
   db.members[interaction.user.id].absentJusqu  = finAbsence;
   db.members[interaction.user.id].absentRaison = raison;
   db.members[interaction.user.id].absentMode   = modeLectureSeule ? 'lecture-seule' : 'absent-total';
+  db.members[interaction.user.id].absentDepuis = new Date().toISOString();
   db.members[interaction.user.id].lastActivity = new Date().toISOString();
   saveDB(db);
 
@@ -9746,6 +9809,7 @@ async function _checkRetoursAbsence(guild) {
     m.status = 'absent';
     m.absentJusqu = m.absenceProgrammee.fin;
     m.absentRaison = m.absenceProgrammee.raison;
+    m.absentDepuis = new Date().toISOString();
     delete m.absenceProgrammee;
     changed = true;
     const membreD = await guild.members.fetch(uid).catch(() => null);

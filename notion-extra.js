@@ -123,6 +123,7 @@ async function handleAbsenceDetection(message) {
   const db = loadDB();
   if (db.members[message.author.id]) {
     db.members[message.author.id].status = 'absent';
+    db.members[message.author.id].absentDepuis = new Date().toISOString();
     db.members[message.author.id].lastActivity = new Date().toISOString();
     saveDB(db);
   }
