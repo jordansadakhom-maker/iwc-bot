@@ -25,6 +25,7 @@ let faro = {}; try { faro = require('./faro'); console.log('✅ Module faro char
 let poker = {}; try { poker = require('./poker'); console.log('✅ Module poker chargé'); } catch (e) { console.log('⚠️ poker non chargé:', e.message); }
 let cinqdoigts = {}; try { cinqdoigts = require('./cinqdoigts'); console.log('✅ Module cinq doigts chargé'); } catch (e) { console.log('⚠️ cinqdoigts non chargé:', e.message); }
 let dominos = {}; try { dominos = require('./dominos'); console.log('✅ Module dominos chargé'); } catch (e) { console.log('⚠️ dominos non chargé:', e.message); }
+let missionsIA = {}; try { missionsIA = require('./missions-ia'); console.log('✅ Module missions-ia chargé'); } catch (e) { console.log('⚠️ missions-ia non chargé:', e.message); }
 const rdvplus = require('./rdvplus');
 const reorg = require('./reorg');
 
@@ -4223,6 +4224,7 @@ client.on('interactionCreate', async interaction => {
   if (await poker.routeInteraction?.(interaction)) return;
   if (await cinqdoigts.routeInteraction?.(interaction)) return;
   if (await dominos.routeInteraction?.(interaction)) return;
+  if (await missionsIA.routeInteraction?.(interaction)) return;
   if (await pepites.routeInteraction?.(interaction)) return;
   if (await musique.routeInteraction?.(interaction)) return;
   if (await journaux.routeInteraction?.(interaction)) return;
