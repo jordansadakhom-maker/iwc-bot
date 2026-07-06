@@ -94,9 +94,11 @@ function _estGestion(member) { try { return !!member?.roles?.cache?.some(r => GE
 
 // ─── Réglages du jeu ───
 const N_INTERVALLES = 5;
-const FENETRE_DEPART = 4000;   // ms — fenêtre de la 1re manche
-const PLANCHER = 1300;         // ms — fenêtre minimale (tolérante à la latence)
-const PAS = 250;               // ms retirés par NIVEAU de vitesse
+// Difficulté : fenêtres plus courtes + rétrécissement plus rapide → réflexe plus exigeant.
+// (GRACE_LATENCE inchangé : on durcit le JEU, pas la tolérance à la latence Discord.)
+const FENETRE_DEPART = 3200;   // ms — fenêtre de la 1re manche (avant : 4000)
+const PLANCHER = 1100;         // ms — fenêtre minimale, tolérante à la latence (avant : 1300)
+const PAS = 300;               // ms retirés par NIVEAU de vitesse (avant : 250)
 const GRACE_LATENCE = 500;     // ms de tolérance ajoutés au JUGEMENT (latence Discord)
 const TIMER_GRACE = 1000;      // ms de sursis avant l'auto-« planté » (>= GRACE_LATENCE)
 const MISE_MIN = 1, MISE_MAX = 1000000;

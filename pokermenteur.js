@@ -81,6 +81,7 @@ const _REGLES = [
   '**À ton tour :**',
   '• 🎲 **Surenchérir** — monte la **quantité**, ou garde la quantité avec une **face plus haute**.',
   '• 🗯️ **MENTEUR !** — tu contestes l\'enchère en cours. On révèle alors tous les dés.',
+  '• 🎯 **Pile-poil !** *(calza)* — coup de maître risqué : tu paries que l\'enchère est **exactement** juste (total = quantité annoncée). **Réussi → tu RÉCUPÈRES un dé** ; **raté → tu en perds un**. Rare, mais ça peut te sauver.',
   '**Résolution :** si le vrai total (dés à la face **+** les 1) **atteint** l\'enchère → elle était **VRAIE**, le **contestataire** perd un dé ; sinon l\'**enchérisseur** perd un dé.',
   '**Éliminé à 0 dé.** Le dernier survivant **rafle tout le pot**.',
   '',
@@ -244,6 +245,41 @@ function _defi(t, challengerIdx) {
   return { vrai, total, perdantIdx };
 }
 
+// Exécute un « Pile-poil / Exact » (calza) : le joueur parie que l'enchère est
+// EXACTEMENT juste. Lecture parfaite → il RÉCUPÈRE un dé ; raté → il en perd un.
+function _calza(t, callerIdx) {
+  _clearTimer(t);
+  const bid = t.bid;
+  const total = _compterFace(t.joueurs, bid.face);
+  const exact = total === bid.qty;
+  const caller = t.joueurs[callerIdx];
+  t.reveal = true;
+  t.phase = 'entredeux';
+  let verdict;
+  if (exact) {
+    const avant = caller.nb;
+    caller.nb = Math.min(NB_DES, caller.nb + 1);
+    verdict = '« PILE-POIL ! » de ' + caller.nom + ' — exactement ' + total + ' dé(s) pour ' + bid.qty + '×' + bid.face + '. Lecture parfaite : ' + caller.nom + (caller.nb > avant ? ' RÉCUPÈRE un dé.' : ' (déjà au maximum).');
+    t.dernierDefi = { txt: verdict, perdantIdx: -1 };
+    t.ouvreurIdx = callerIdx; // le brillant relance la manche
+  } else {
+    caller.nb -= 1;
+    verdict = '« PILE-POIL ! » de ' + caller.nom + ' — mais il y avait ' + total + ' dé(s), pas ' + bid.qty + '. Raté : ' + caller.nom + ' perd un dé.';
+    t.dernierDefi = { txt: verdict, perdantIdx: callerIdx };
+    if (caller.nb <= 0) { caller.vivant = false; caller.des = []; t.dernierDefi.txt += ' ' + caller.nom + ' est ÉLIMINÉ.'; }
+    t.ouvreurIdx = caller.vivant ? callerIdx : _prochainVivant(t, callerIdx);
+  }
+  t.ambiance = verdict;
+  const vivants = t.joueurs.filter(j => j.vivant);
+  if (vivants.length <= 1) {
+    t.phase = 'fini';
+    const g = vivants[0] || null;
+    if (g) { t.gagnant = g; t.soldes[g.userId] = (t.soldes[g.userId] || 0) + t.pot; }
+    try { if (casino.crediterLot) casino.crediterLot(t.joueurs.map(j => ({ userId: j.userId, montant: t.soldes[j.userId] || 0 }))); } catch {}
+  }
+  return { exact, total };
+}
+
 // ─── Rendu ───
 function _sousTitre(t) {
   if (t.phase === 'jeu') { const j = t.joueurs[t.tourIdx]; return 'À ' + (j ? j.nom : '—') + ' de parler — Surenchérir ou crier « Menteur ! »'; }
@@ -318,6 +354,7 @@ function _components(t) {
       new ButtonBuilder().setCustomId('pm_peek').setLabel('Voir mes dés').setEmoji('🫣').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('pm_bid').setLabel('Surenchérir').setEmoji('🎲').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('pm_challenge').setLabel('MENTEUR !').setEmoji('🗯️').setStyle(ButtonStyle.Danger).setDisabled(!t.bid),
+      new ButtonBuilder().setCustomId('pm_exact').setLabel('Pile-poil !').setEmoji('🎯').setStyle(ButtonStyle.Success).setDisabled(!t.bid),
     ));
   } else if (t.phase === 'entredeux') {
     rows.push(new ActionRowBuilder().addComponents(
@@ -547,6 +584,17 @@ async function routeInteraction(interaction) {
       await _refresh(t); return true;
     }
 
+    // PILE-POIL ! (calza — parier que l'enchère est EXACTEMENT juste)
+    if (interaction.isButton() && id === 'pm_exact') {
+      if (t.phase !== 'jeu') { await interaction.reply({ content: 'Aucune manche en cours.', flags: eph }); return true; }
+      const cur = t.joueurs[t.tourIdx];
+      if (!cur || cur.userId !== interaction.user.id) { await interaction.reply({ content: '⏳ Ce n\'est pas ton tour — c\'est à **' + (cur ? cur.nom : '—') + '** de parler.', flags: eph }); return true; }
+      if (!t.bid) { await interaction.reply({ content: '🚫 Aucune enchère : « Pile-poil » se déclare sur une enchère existante.', flags: eph }); return true; }
+      await interaction.deferUpdate().catch(() => {});
+      _calza(t, t.tourIdx);
+      await _refresh(t); return true;
+    }
+
     // Fermer la table (hôte)
     if (interaction.isButton() && id === 'pm_close') {
       if (!_estHote(t, interaction)) { await interaction.reply({ content: '🔒 Seul l\'hôte (ou la Direction) peut fermer la table.', flags: eph }); return true; }
@@ -606,5 +654,5 @@ async function routeInteraction(interaction) {
 module.exports = {
   routeInteraction,
   installerPanelPokerMenteur,
-  _test: { _compterFace, _totalDes, _bidValide, _resoudreDefi, _defi, _lancer, _nouvelleManche, _lancerPartie, _creerTable, _prochainVivant, tables },
+  _test: { _compterFace, _totalDes, _bidValide, _resoudreDefi, _defi, _calza, _lancer, _nouvelleManche, _lancerPartie, _creerTable, _prochainVivant, tables },
 };
