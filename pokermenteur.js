@@ -15,6 +15,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder
 let _img = null; try { _img = require('./pokermenteur-image'); } catch { _img = null; }
 let casino = {}; try { casino = require('./casino-banque'); } catch { casino = {}; }
 let _ambiance = {}; try { _ambiance = require('./ambiance-ia'); } catch { _ambiance = {}; }
+let _notif = {}; try { _notif = require('./table-notif'); } catch { _notif = {}; }
 const _sous = uid => (casino.solde ? casino.solde(uid) : 0);
 
 const PREFIXE = 'pm_';
@@ -303,7 +304,8 @@ function _components(t) {
   const rows = [];
   if (t.phase === 'lobby') {
     rows.push(new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('pm_sit').setLabel('S\'asseoir (miser l\'ante)').setEmoji('🪑').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('pm_sit').setLabel('S\'asseoir (ante)').setEmoji('🪑').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('pm_mise').setLabel('Mon ante').setEmoji('💵').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('pm_leave').setLabel('Se lever').setEmoji('🚪').setStyle(ButtonStyle.Secondary),
     ));
     rows.push(new ActionRowBuilder().addComponents(
@@ -329,6 +331,12 @@ function _components(t) {
   rows.push(_rowExtras());
   return rows;
 }
+function _contentLigne(t) {
+  if (t.phase === 'jeu') { const j = t.joueurs[t.tourIdx]; return j ? '🎯 **Au tour de ' + j.nom + '** — 🎲 Surenchérir ou 🗯️ « Menteur ! »' : ''; }
+  if (t.phase === 'entredeux') return '⚖️ *' + (t.dernierDefi?.txt || 'Défi résolu') + '*   — l\'hôte relance la manche.';
+  if (t.phase === 'fini') return '🏆 **' + (t.gagnant?.nom || '—') + '** rafle le pot de ' + _money(t.pot) + ' !';
+  return '💰 Misez votre ante (💵 Ma mise), puis l\'hôte lance la partie.';
+}
 async function _screen(t) {
   const e = new EmbedBuilder().setColor(0xC8A45C).setTitle('🎲  POKER MENTEUR  ·  LIAR\'S DICE')
     .setFooter({ text: 'Hôte : ' + t.hoteNom + '  ·  5 dés chacun  ·  Les 1 sont jokers  ·  Dernier debout rafle le pot' });
@@ -344,12 +352,18 @@ async function _screen(t) {
     else if (t.phase === 'fini') desc = '★ **' + (t.gagnant?.nom || '—') + ' rafle le pot de ' + _money(t.pot) + ' !**';
     if (sold.length) desc += '\n🏦 **Jetons de la soirée**\n' + sold.join('\n');
     if (desc) e.setDescription(desc.slice(0, 4000));
-    return { embeds: [e], components: _components(t), files: [new AttachmentBuilder(buf, { name: 'pokermenteur.png' })] };
+    return { content: _contentLigne(t), embeds: [e], components: _components(t), files: [new AttachmentBuilder(buf, { name: 'pokermenteur.png' })] };
   }
   e.setDescription(_lignesTexte(t).join('\n').slice(0, 4000));
-  return { embeds: [e], components: _components(t), files: [] };
+  return { content: _contentLigne(t), embeds: [e], components: _components(t), files: [] };
 }
-async function _refresh(t) { try { if (t.msg) { const p = await _screen(t); await t.msg.edit({ ...p, attachments: [] }); } } catch (e) { console.log('⚠️ pm refresh:', e.message); } }
+async function _refresh(t) {
+  try {
+    if (t.msg) { const p = await _screen(t); await t.msg.edit({ ...p, attachments: [], allowedMentions: { parse: [] } }); }
+    const _cur = (t.joueurs || [])[t.tourIdx];
+    await _notif.majPingTour?.(t, t.msg?.channel, (t.phase === 'jeu') ? _cur?.userId : null);
+  } catch (e) { console.log('⚠️ pm refresh:', e.message); }
+}
 
 // ─── Panneau d'ouverture ───
 function _panelPayload() {
@@ -412,26 +426,30 @@ async function routeInteraction(interaction) {
     if (!t) { if (interaction.isButton() || interaction.isModalSubmit()) { await interaction.reply({ content: '⌛ Cette table n\'est plus active. Ouvre-en une nouvelle depuis le panneau 🎲.', flags: eph }).catch(() => {}); } return true; }
 
     // S'asseoir → modal d'ante
-    if (interaction.isButton() && id === 'pm_sit') {
-      if (t.phase !== 'lobby') { await interaction.reply({ content: '⏳ Une partie est en cours — assieds-toi à la prochaine table.', flags: eph }); return true; }
-      if (_joueur(t, interaction.user.id)) { await interaction.reply({ content: 'Tu es déjà assis. Tu peux ajuster ton ante en te rasseyant.', flags: eph }); return true; }
-      if (t.joueurs.length >= MAX_JOUEURS) { await interaction.reply({ content: '🈵 La table est complète (' + MAX_JOUEURS + ' joueurs).', flags: eph }); return true; }
-      const modal = new ModalBuilder().setCustomId('pm_sit_modal').setTitle('🪑 S\'asseoir — miser l\'ante')
-        .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ante').setLabel('Votre ante (jetons)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(8).setPlaceholder('Ex : 50')));
+    if (interaction.isButton() && (id === 'pm_sit' || id === 'pm_mise')) {
+      if (t.phase !== 'lobby') { await interaction.reply({ content: '⏳ Une partie est en cours — (re)mise à la prochaine.', flags: eph }); return true; }
+      const _dj = _joueur(t, interaction.user.id);
+      if (id === 'pm_mise' && !_dj) { await interaction.reply({ content: 'Assieds-toi d\'abord (🪑) pour miser ton ante.', flags: eph }); return true; }
+      if (!_dj && t.joueurs.length >= MAX_JOUEURS) { await interaction.reply({ content: '🈵 La table est complète (' + MAX_JOUEURS + ' joueurs).', flags: eph }); return true; }
+      const modal = new ModalBuilder().setCustomId('pm_sit_modal').setTitle(_dj ? '💵 Changer mon ante' : '🪑 S\'asseoir — miser l\'ante')
+        .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ante').setLabel('Votre ante (jetons)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(8).setValue(_dj ? String(_dj.ante) : '').setPlaceholder('Ex : 50')));
       await interaction.showModal(modal); return true;
     }
     if (interaction.isModalSubmit() && id === 'pm_sit_modal') {
       if (t.phase !== 'lobby') { await interaction.reply({ content: '⏳ Partie en cours, patiente.', flags: eph }); return true; }
-      if (_joueur(t, interaction.user.id)) { await interaction.reply({ content: 'Tu es déjà assis.', flags: eph }); return true; }
-      if (t.joueurs.length >= MAX_JOUEURS) { await interaction.reply({ content: '🈵 Table complète.', flags: eph }); return true; }
       let ante = parseInt((interaction.fields.getTextInputValue('ante') || '').replace(/[^0-9]/g, ''), 10);
       if (!Number.isFinite(ante) || ante < ANTE_MIN) ante = ANTE_MIN;
       if (ante > ANTE_MAX) ante = ANTE_MAX;
-      const j = { userId: interaction.user.id, nom: interaction.member?.displayName || interaction.user.username, des: [], nb: NB_DES, vivant: true, ante };
-      t.joueurs.push(j);
-      t.pot += ante;
-      t.soldes[j.userId] = (t.soldes[j.userId] || 0) - ante;
-      await interaction.reply({ content: '✅ Tu es assis, ante de **' + _money(ante) + '** au pot. Bonne chance, et bon bluff !', flags: eph });
+      let j = _joueur(t, interaction.user.id);
+      if (j) {
+        // Changement d'ante : on ajuste le pot et le solde de la différence.
+        const _diff = ante - j.ante; j.ante = ante; t.pot += _diff; t.soldes[j.userId] = (t.soldes[j.userId] || 0) - _diff;
+      } else {
+        if (t.joueurs.length >= MAX_JOUEURS) { await interaction.reply({ content: '🈵 Table complète.', flags: eph }); return true; }
+        j = { userId: interaction.user.id, nom: interaction.member?.displayName || interaction.user.username, des: [], nb: NB_DES, vivant: true, ante };
+        t.joueurs.push(j); t.pot += ante; t.soldes[j.userId] = (t.soldes[j.userId] || 0) - ante;
+      }
+      await interaction.reply({ content: '✅ Ante réglé à **' + _money(ante) + '** au pot. Bonne chance, et bon bluff !', flags: eph });
       await _refresh(t); return true;
     }
 

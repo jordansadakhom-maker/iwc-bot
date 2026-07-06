@@ -9,6 +9,7 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, AttachmentBuilder } = require('discord.js');
 let _img = null; try { _img = require('./blackjack-image'); } catch { _img = null; }
 let _ambiance = {}; try { _ambiance = require('./ambiance-ia'); } catch { _ambiance = {}; }
+let _notif = {}; try { _notif = require('./table-notif'); } catch { _notif = {}; }
 let casino = {}; try { casino = require('./casino-banque'); } catch { casino = {}; }
 const _sous = uid => (casino.solde ? casino.solde(uid) : 0);
 
@@ -200,6 +201,7 @@ function _components(t) {
   if (t.phase === 'lobby') {
     rows.push(new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('bj_sit').setLabel('S\'asseoir').setEmoji('🪑').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('bj_mise').setLabel('Ma mise').setEmoji('💵').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('bj_leave').setLabel('Se lever').setEmoji('🚪').setStyle(ButtonStyle.Secondary),
     ));
     rows.push(new ActionRowBuilder().addComponents(
@@ -217,22 +219,43 @@ function _components(t) {
   rows.push(_rowExtras());
   return rows;
 }
-// Construit le message complet (image si possible, sinon texte). Renvoie { embeds, components, files }.
+// Ligne TOUJOURS visible au-dessus de la table (marche même sans image) :
+// à qui le tour pendant le jeu, résultats à la fin.
+function _contentLigne(t) {
+  if (t.phase === 'jeu') {
+    const s = t.sieges[t.tourIdx];
+    return s ? '🎯 **Au tour de ' + s.nom + '** — 🃏 Tirer · ✋ Rester' + (s.main.length === 2 ? ' · ⏫ Doubler' : '') : '';
+  }
+  if (t.manche > 0) {
+    const res = t.sieges.filter(s => s.resultat).map(s => (s.net > 0 ? '🟢' : s.net < 0 ? '🔴' : '⚪') + ' **' + s.nom + '** ' + (s.net > 0 ? '+' : '') + _money(s.net)).join('   ·   ');
+    return '🏁 **Manche terminée** — ' + (res || 'aucun joueur') + '   *(relancez ou fermez)*';
+  }
+  return '💰 **Réglez vos mises** (bouton 💵 Ma mise), puis l\'hôte distribue.';
+}
+// Construit le message complet (image si possible, sinon texte). Renvoie { content, embeds, components, files }.
 async function _screen(t) {
   const e = new EmbedBuilder().setColor(0xC8A45C).setTitle('🎰  TABLE DE BLACKJACK  🃏')
     .setFooter({ text: 'Hôte : ' + t.hoteNom + '  ·  Blackjack payé 3:2  ·  Le croupier tire jusqu\'à 17' });
+  const content = _contentLigne(t);
   let buf = null;
   try { if (_img?.genererTable) buf = await _img.genererTable(_imgState(t)); } catch { buf = null; }
   if (buf) {
     e.setImage('attachment://blackjack.png');
     e.setDescription(_lignesStatut(t).join('\n').slice(0, 4000));
-    return { embeds: [e], components: _components(t), files: [new AttachmentBuilder(buf, { name: 'blackjack.png' })] };
+    return { content, embeds: [e], components: _components(t), files: [new AttachmentBuilder(buf, { name: 'blackjack.png' })] };
   }
   e.setDescription(_lignesCartes(t).concat(['─────────────────────────────']).concat(_lignesStatut(t)).join('\n').slice(0, 4000));
-  return { embeds: [e], components: _components(t), files: [] };
+  return { content, embeds: [e], components: _components(t), files: [] };
 }
 
-async function _refresh(t) { try { if (t.msg) { const p = await _screen(t); await t.msg.edit({ ...p, attachments: [] }); } } catch (e) { console.log('⚠️ bj refresh:', e.message); } }
+async function _refresh(t) {
+  try {
+    if (t.msg) { const p = await _screen(t); await t.msg.edit({ ...p, attachments: [], allowedMentions: { parse: [] } }); }
+    // Pingue le joueur courant quand le tour change (une seule notif vivante).
+    const cur = t.phase === 'jeu' ? t.sieges[t.tourIdx] : null;
+    await _notif.majPingTour?.(t, t.msg?.channel, cur?.userId);
+  } catch (e) { console.log('⚠️ bj refresh:', e.message); }
+}
 
 // ─── Déroulé d'une manche ───
 function _armer(t) {
@@ -362,13 +385,14 @@ async function routeInteraction(interaction) {
     const t = tables.get(interaction.channelId);
     if (!t) { if (interaction.isButton() || interaction.isModalSubmit()) { await interaction.reply({ content: '⌛ Cette table n\'est plus active. Ouvre-en une nouvelle depuis le panneau 🎰.', flags: eph }).catch(() => {}); } return true; }
 
-    // S'asseoir → modal de mise
-    if (interaction.isButton() && id === 'bj_sit') {
-      if (t.phase === 'jeu') { await interaction.reply({ content: '⏳ Une manche est en cours — assieds-toi à la fin de celle-ci.', flags: eph }); return true; }
-      if (_siege(t, interaction.user.id)) { await interaction.reply({ content: 'Tu es déjà assis. Tu peux ajuster ta mise en te rasseyant.', flags: eph }); return true; }
-      if (t.sieges.length >= MAX_SIEGES) { await interaction.reply({ content: '🈵 La table est complète (' + MAX_SIEGES + ' joueurs).', flags: eph }); return true; }
-      const modal = new ModalBuilder().setCustomId('bj_sit_modal').setTitle('🪑 S\'asseoir à la table')
-        .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('mise').setLabel('Votre mise (en $)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(8).setPlaceholder('Ex : 50')));
+    // S'asseoir / Changer ma mise → modal (accessible aussi si déjà assis, pour AJUSTER la mise à chaque main)
+    if (interaction.isButton() && (id === 'bj_sit' || id === 'bj_mise')) {
+      if (t.phase === 'jeu') { await interaction.reply({ content: '⏳ Une manche est en cours — (re)mise à la fin de celle-ci.', flags: eph }); return true; }
+      const dejaAssis = _siege(t, interaction.user.id);
+      if (id === 'bj_mise' && !dejaAssis) { await interaction.reply({ content: 'Assieds-toi d\'abord (bouton 🪑) pour poser une mise.', flags: eph }); return true; }
+      if (!dejaAssis && t.sieges.length >= MAX_SIEGES) { await interaction.reply({ content: '🈵 La table est complète (' + MAX_SIEGES + ' joueurs).', flags: eph }); return true; }
+      const modal = new ModalBuilder().setCustomId('bj_sit_modal').setTitle(dejaAssis ? '💵 Changer ma mise' : '🪑 S\'asseoir à la table')
+        .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('mise').setLabel('Votre mise (en $)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(8).setValue(dejaAssis ? String(dejaAssis.mise) : '').setPlaceholder('Ex : 50')));
       await interaction.showModal(modal); return true;
     }
     if (interaction.isModalSubmit() && id === 'bj_sit_modal') {
@@ -438,6 +462,7 @@ async function routeInteraction(interaction) {
     if (interaction.isButton() && id === 'bj_close') {
       if (!_estHote(t, interaction)) { await interaction.reply({ content: '🔒 Seul l\'hôte (ou la Direction) peut fermer la table.', flags: eph }); return true; }
       _clearTimer(t);
+      await _notif.majPingTour?.(t, t.msg?.channel, null); // retire la notif « à toi de jouer »
       tables.delete(interaction.channelId);
       const bilan = t.sieges.length || Object.keys(t.soldes).length
         ? Object.entries(t.soldes).map(([uid, n]) => '• <@' + uid + '> : ' + _money(n)).join('\n')

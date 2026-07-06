@@ -15,6 +15,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelect
 let _img = null; try { _img = require('./poker-image'); } catch { _img = null; }
 let casino = {}; try { casino = require('./casino-banque'); } catch { casino = {}; }
 let _ambiance = {}; try { _ambiance = require('./ambiance-ia'); } catch { _ambiance = {}; }
+let _notif = {}; try { _notif = require('./table-notif'); } catch { _notif = {}; }
 const _sous = uid => (casino.solde ? casino.solde(uid) : 0);
 
 // ── Émotes RP à coller EN JEU (RedM) : garde la scène vivante pendant qu'on joue sur Discord ──
@@ -235,6 +236,7 @@ function _components(t) {
   if (t.phase === 'lobby') {
     rows.push(new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('pk_sit').setLabel('S\'asseoir').setEmoji('🪑').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('pk_mise').setLabel('Mon ante').setEmoji('💵').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('pk_leave').setLabel('Se lever').setEmoji('🚪').setStyle(ButtonStyle.Secondary),
     ));
     rows.push(new ActionRowBuilder().addComponents(
@@ -258,6 +260,11 @@ function _components(t) {
   rows.push(_rowExtras());
   return rows;
 }
+function _contentLigne(t) {
+  if (t.phase === 'echange') { const s = t.sieges[t.tourIdx]; return s ? '🎯 **Au tour de ' + s.nom + '** — 🔄 échanger 0 à 5 cartes' : ''; }
+  if (t.phase === 'abattage') { const g = t.sieges.filter(s => s.gagnant); return g.length ? '🏆 **' + g.map(s => s.nom).join(', ') + '** rafle le pot !' : '🏁 Abattage — résultats sur la table.'; }
+  return '💰 Misez votre ante (💵 Ma mise), puis l\'hôte distribue.';
+}
 async function _screen(t) {
   const e = new EmbedBuilder().setColor(0xC8A45C).setTitle('🃏  TABLE DE POKER — 5-CARD DRAW  🎴')
     .setFooter({ text: 'Hôte : ' + t.hoteNom + '  ·  Ante → pot  ·  Meilleure main rafle le pot  ·  Entre joueurs, sans maison' });
@@ -266,12 +273,18 @@ async function _screen(t) {
   if (buf) {
     e.setImage('attachment://poker.png');
     e.setDescription(_lignesStatut(t).join('\n').slice(0, 4000));
-    return { embeds: [e], components: _components(t), files: [new AttachmentBuilder(buf, { name: 'poker.png' })] };
+    return { content: _contentLigne(t), embeds: [e], components: _components(t), files: [new AttachmentBuilder(buf, { name: 'poker.png' })] };
   }
   e.setDescription(_lignesCartes(t).concat(['─────────────────────────────']).concat(_lignesStatut(t)).join('\n').slice(0, 4000));
-  return { embeds: [e], components: _components(t), files: [] };
+  return { content: _contentLigne(t), embeds: [e], components: _components(t), files: [] };
 }
-async function _refresh(t) { try { if (t.msg) { const p = await _screen(t); await t.msg.edit({ ...p, attachments: [] }); } } catch (e) { console.log('⚠️ pk refresh:', e.message); } }
+async function _refresh(t) {
+  try {
+    if (t.msg) { const p = await _screen(t); await t.msg.edit({ ...p, attachments: [], allowedMentions: { parse: [] } }); }
+    const _cur = (t.sieges || [])[t.tourIdx];
+    await _notif.majPingTour?.(t, t.msg?.channel, (t.phase === 'echange') ? _cur?.userId : null);
+  } catch (e) { console.log('⚠️ pk refresh:', e.message); }
+}
 
 // ─── Déroulé d'une main ───
 function _armer(t) {
@@ -430,12 +443,13 @@ async function routeInteraction(interaction) {
     if (!t) { if (interaction.isButton() || interaction.isModalSubmit() || interaction.isStringSelectMenu()) { await interaction.reply({ content: '⌛ Cette table n\'est plus active. Ouvre-en une nouvelle depuis le panneau 🃏.', flags: eph }).catch(() => {}); } return true; }
 
     // S'asseoir → modal d'ante
-    if (interaction.isButton() && id === 'pk_sit') {
-      if (t.phase !== 'lobby') { await interaction.reply({ content: '⏳ Une main est en cours — assieds-toi à la fin de celle-ci.', flags: eph }); return true; }
-      if (_siege(t, interaction.user.id)) { await interaction.reply({ content: 'Tu es déjà assis. Tu peux ajuster ton ante en te rasseyant.', flags: eph }); return true; }
-      if (t.sieges.length >= MAX_SIEGES) { await interaction.reply({ content: '🈵 La table est complète (' + MAX_SIEGES + ' joueurs).', flags: eph }); return true; }
-      const modal = new ModalBuilder().setCustomId('pk_sit_modal').setTitle('🪑 S\'asseoir à la table')
-        .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ante').setLabel('Votre ante (en $)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(8).setPlaceholder('Ex : 50')));
+    if (interaction.isButton() && (id === 'pk_sit' || id === 'pk_mise')) {
+      if (t.phase !== 'lobby') { await interaction.reply({ content: '⏳ Une main est en cours — (re)mise à la fin de celle-ci.', flags: eph }); return true; }
+      const _dj = _siege(t, interaction.user.id);
+      if (id === 'pk_mise' && !_dj) { await interaction.reply({ content: 'Assieds-toi d\'abord (🪑) pour miser ton ante.', flags: eph }); return true; }
+      if (!_dj && t.sieges.length >= MAX_SIEGES) { await interaction.reply({ content: '🈵 La table est complète (' + MAX_SIEGES + ' joueurs).', flags: eph }); return true; }
+      const modal = new ModalBuilder().setCustomId('pk_sit_modal').setTitle(_dj ? '💵 Changer mon ante' : '🪑 S\'asseoir à la table')
+        .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ante').setLabel('Votre ante (en $)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(8).setValue(_dj ? String(_dj.ante) : '').setPlaceholder('Ex : 50')));
       await interaction.showModal(modal); return true;
     }
     if (interaction.isModalSubmit() && id === 'pk_sit_modal') {

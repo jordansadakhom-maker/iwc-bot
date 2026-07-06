@@ -21,6 +21,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder
 let _img = null; try { _img = require('./cinqdoigts-image'); } catch { _img = null; }
 let casino = {}; try { casino = require('./casino-banque'); } catch { casino = {}; }
 let _ambiance = {}; try { _ambiance = require('./ambiance-ia'); } catch { _ambiance = {}; }
+let _notif = {}; try { _notif = require('./table-notif'); } catch { _notif = {}; }
 const _sous = uid => (casino.solde ? casino.solde(uid) : 0);
 
 const PREFIXE = 'fff_';
@@ -321,6 +322,11 @@ function _components(t) {
   return rows;
 }
 
+function _contentLigne(t) {
+  if (t.phase === 'jeu') { const j = t.joueurs[t.tourIdx]; return j ? '🎯 **Au tour de ' + j.nom + '** — plante l\'intervalle en lueur (boutons 1-5), vite !' : ''; }
+  if (t.ambiance) return '🏁 *' + t.ambiance + '*';
+  return '🔪 Lance un **Solo**, ou monte un **Duel** (mise).';
+}
 async function _screen(t) {
   const e = new EmbedBuilder().setColor(0xC8A45C).setTitle('🔪  CINQ DOIGTS  ·  FIVE FINGER FILLET')
     .setFooter({ text: 'Hôte : ' + t.hoteNom + '  ·  Jeu de nerfs — vite et juste  ·  Duel symétrique, aucune maison' });
@@ -329,13 +335,19 @@ async function _screen(t) {
   if (buf) {
     e.setImage('attachment://cinqdoigts.png');
     e.setDescription((t.ambiance ? '💬 *' + t.ambiance + '*' : '​').slice(0, 4000));
-    return { embeds: [e], components: _components(t), files: [new AttachmentBuilder(buf, { name: 'cinqdoigts.png' })] };
+    return { content: _contentLigne(t), embeds: [e], components: _components(t), files: [new AttachmentBuilder(buf, { name: 'cinqdoigts.png' })] };
   }
   e.setDescription(_lignesTexte(t).join('\n').slice(0, 4000));
-  return { embeds: [e], components: _components(t), files: [] };
+  return { content: _contentLigne(t), embeds: [e], components: _components(t), files: [] };
 }
 
-async function _refresh(t) { try { if (t.msg) { const p = await _screen(t); await t.msg.edit({ ...p, attachments: [] }); } } catch (e) { console.log('⚠️ fff refresh:', e.message); } }
+async function _refresh(t) {
+  try {
+    if (t.msg) { const p = await _screen(t); await t.msg.edit({ ...p, attachments: [], allowedMentions: { parse: [] } }); }
+    const _cur = (t.joueurs || [])[t.tourIdx];
+    await _notif.majPingTour?.(t, t.msg?.channel, (t.phase === 'jeu') ? _cur?.userId : null);
+  } catch (e) { console.log('⚠️ fff refresh:', e.message); }
+}
 
 // ─── Panneau d'ouverture (installable dans le salon casino) ───
 function _panelPayload() {
