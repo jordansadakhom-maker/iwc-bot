@@ -22,6 +22,7 @@ let _img = null; try { _img = require('./cinqdoigts-image'); } catch { _img = nu
 let casino = {}; try { casino = require('./casino-banque'); } catch { casino = {}; }
 let _ambiance = {}; try { _ambiance = require('./ambiance-ia'); } catch { _ambiance = {}; }
 let _notif = {}; try { _notif = require('./table-notif'); } catch { _notif = {}; }
+let _voix = {}; try { _voix = require('./casino-voix'); } catch { _voix = {}; }
 const _sous = uid => (casino.solde ? casino.solde(uid) : 0);
 
 const PREFIXE = 'fff_';
@@ -514,6 +515,7 @@ async function routeInteraction(interaction) {
       const verdict = _juger({ cible: t.cible, bouton, dt, fenetre: t.fenetre + GRACE_LATENCE });
       _clearTimer(t);
       await interaction.deferUpdate().catch(() => {});
+      try { _voix.jouer?.(interaction.member?.voice?.channel, 'lame'); } catch {}
       if (verdict.ok) {
         _reussite(t, j);
         t.ambiance = _pick(_phrasesReussite);

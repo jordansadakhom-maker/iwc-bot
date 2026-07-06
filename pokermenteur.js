@@ -16,6 +16,7 @@ let _img = null; try { _img = require('./pokermenteur-image'); } catch { _img = 
 let casino = {}; try { casino = require('./casino-banque'); } catch { casino = {}; }
 let _ambiance = {}; try { _ambiance = require('./ambiance-ia'); } catch { _ambiance = {}; }
 let _notif = {}; try { _notif = require('./table-notif'); } catch { _notif = {}; }
+let _voix = {}; try { _voix = require('./casino-voix'); } catch { _voix = {}; }
 const _sous = uid => (casino.solde ? casino.solde(uid) : 0);
 
 const PREFIXE = 'pm_';
@@ -474,6 +475,7 @@ async function routeInteraction(interaction) {
       if (t.joueurs.length < MIN_JOUEURS) { await interaction.reply({ content: 'Il faut au moins ' + MIN_JOUEURS + ' joueurs.', flags: eph }); return true; }
       await interaction.deferUpdate().catch(() => {});
       _lancerPartie(t);
+      try { _voix.jouer?.(interaction.member?.voice?.channel, 'des'); } catch {}
       await _refresh(t); return true;
     }
 

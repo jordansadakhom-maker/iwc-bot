@@ -20,6 +20,7 @@ let _img = null; try { _img = require('./faro-image'); } catch { _img = null; }
 let casino = {}; try { casino = require('./casino-banque'); } catch { casino = {}; }
 let _ambiance = {}; try { _ambiance = require('./ambiance-ia'); } catch { _ambiance = {}; }
 let _notif = {}; try { _notif = require('./table-notif'); } catch { _notif = {}; }
+let _voix = {}; try { _voix = require('./casino-voix'); } catch { _voix = {}; }
 const _sous = uid => (casino.solde ? casino.solde(uid) : 0);
 
 const PREFIXE = 'faro_';
@@ -447,6 +448,7 @@ async function routeInteraction(interaction) {
       await interaction.deferUpdate().catch(() => {});
       _clearTimer(t);
       _tourner(t);
+      try { _voix.jouer?.(interaction.member?.voice?.channel, 'carte'); } catch {}
       t.ambiance = _pick(_phrasesTour);
       _armer(t);
       await _refresh(t); return true;

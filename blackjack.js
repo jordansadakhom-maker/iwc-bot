@@ -10,6 +10,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder
 let _img = null; try { _img = require('./blackjack-image'); } catch { _img = null; }
 let _ambiance = {}; try { _ambiance = require('./ambiance-ia'); } catch { _ambiance = {}; }
 let _notif = {}; try { _notif = require('./table-notif'); } catch { _notif = {}; }
+let _voix = {}; try { _voix = require('./casino-voix'); } catch { _voix = {}; }
 let casino = {}; try { casino = require('./casino-banque'); } catch { casino = {}; }
 const _sous = uid => (casino.solde ? casino.solde(uid) : 0);
 
@@ -429,6 +430,7 @@ async function routeInteraction(interaction) {
       if (!t.sieges.length) { await interaction.reply({ content: 'Personne n\'est assis à la table.', flags: eph }); return true; }
       await interaction.deferUpdate().catch(() => {});
       _distribuer(t);
+      try { _voix.jouer?.(interaction.member?.voice?.channel, 'battage'); } catch {}
       await _refresh(t); return true;
     }
 
