@@ -2339,9 +2339,10 @@ async function autoSetup(guild) {
     if (!accueilDejaPoste) {
       if (msgs) { for (const m of msgs.values()) { if (m.author.id === client.user.id) await m.delete().catch(() => {}); } }
       const _ids = [];
-      for (const _chunk of REGLEMENT_CHUNKS) { const _m = await reglCh.send(_chunk).catch(() => null); if (_m) _ids.push(_m.id); }
+      // allowedMentions parse:[] → le règlement ne pingue JAMAIS personne (@everyone/@here compris).
+      for (const _chunk of REGLEMENT_CHUNKS) { const _m = await reglCh.send({ content: _chunk, allowedMentions: { parse: [] } }).catch(() => null); if (_m) _ids.push(_m.id); }
       db.reglementChunkIds = _ids;
-      const sent = await reglCh.send(_valMsg).catch(() => null);
+      const sent = await reglCh.send({ content: _valMsg, allowedMentions: { parse: [] } }).catch(() => null);
       if (sent) { await sent.react('✅').catch(() => {}); db.reglementMsgId = sent.id; }
       saveDB(db);
       console.log('✅ Règlement (accueil + validation) reposté dans #' + reglCh.name + ' (' + _ids.length + ' parties)');

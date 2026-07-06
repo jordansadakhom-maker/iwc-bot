@@ -46,7 +46,7 @@ Il se divise en deux blocs : **la vie sur le serveur** et **les règles du RP**.
 - Pas de sujets sensibles hors-jeu (politique réelle, religion, débats clivants).
 - Pas de partage d'informations personnelles d'autrui (doxxing) → sanction lourde et définitive.`,
   `## Article 3 — Spam & publicité
-- Pas de spam : flood, messages répétés, abus de mentions (@everyone, @here) ou de réactions.
+- Pas de spam : flood, messages répétés, abus de mentions de masse (« everyone » / « here ») ou de réactions.
 - Aucune publicité (autre serveur, chaîne, projet) sans accord écrit du Staff.
 - Pas de pub ni de démarchage dans les messages privés des membres.
 - On poste dans le bon salon, en restant dans le sujet du canal.
