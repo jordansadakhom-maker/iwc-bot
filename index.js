@@ -2140,6 +2140,14 @@ Sois concis et factuel, base-toi UNIQUEMENT sur les notes. Maximum 250 mots.`;
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
+          .setCustomId('debut')
+          .setLabel('Jour de début (optionnel)')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false)
+          .setPlaceholder('Vide = tout de suite · ex: demain · 10/07 · lundi')
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
           .setCustomId('raison')
           .setLabel('Raison (optionnel)')
           .setStyle(TextInputStyle.Short)
@@ -9570,6 +9578,50 @@ async function _validerModalAbsentProgramme(interaction) {
   await _enregistrerAbsence(interaction, guild, dureeLabel, dateFin.toISOString(), raison, estFuture ? dateDebut.toISOString() : null);
 }
 
+// ── Numéro de mois (0-11) depuis un nom de mois français, ou null ──
+//    (juillet AVANT juin pour lever l'ambiguïté « jui… »).
+function _moisFr(mot) {
+  const w = String(mot || '').toLowerCase();
+  if (w.startsWith('janv')) return 0;
+  if (w.startsWith('fév') || w.startsWith('fev')) return 1;
+  if (w.startsWith('mars') || w === 'mar') return 2;
+  if (w.startsWith('avr')) return 3;
+  if (w.startsWith('mai')) return 4;
+  if (w.startsWith('juil')) return 6;                 // juillet — avant juin
+  if (w.startsWith('juin') || w.startsWith('jun')) return 5;
+  if (w.startsWith('aoû') || w.startsWith('aou')) return 7;
+  if (w.startsWith('sep')) return 8;
+  if (w.startsWith('oct')) return 9;
+  if (w.startsWith('nov')) return 10;
+  if (w.startsWith('déc') || w.startsWith('dec')) return 11;
+  return null;
+}
+
+// ── Déduit le JOUR de début d'une absence depuis un texte libre ──
+//    "demain", "après-demain", "aujourd'hui / ce soir / maintenant" (= immédiat → null),
+//    un jour de la semaine ("lundi"…), "JJ/MM(/AAAA)" ou "10 juillet".
+//    Renvoie une Date (à minuit) du jour de début, ou null si vide/immédiat/illisible.
+function _parseJour(txt) {
+  try {
+    const raw = String(txt || '').trim();
+    if (!raw) return null;
+    const d = raw.toLowerCase();
+    const auj = new Date(); auj.setHours(0, 0, 0, 0);
+    if (d.includes('aujourd') || d.includes('ce soir') || d.includes('maintenant') || d.includes('tout de suite')) return null; // immédiat
+    if (d.replace(/[-\s]/g, '').includes('aprèsdemain') || d.replace(/[-\s]/g, '').includes('apresdemain')) { const x = new Date(auj); x.setDate(x.getDate() + 2); return x; }
+    if (d.includes('demain')) { const x = new Date(auj); x.setDate(x.getDate() + 1); return x; }
+    const jours = { dimanche: 0, lundi: 1, mardi: 2, mercredi: 3, jeudi: 4, vendredi: 5, samedi: 6 };
+    for (const [nom, idx] of Object.entries(jours)) {
+      if (d.includes(nom)) { const x = new Date(auj); const delta = (((idx - x.getDay()) % 7) + 7) % 7 || 7; x.setDate(x.getDate() + delta); return x; }
+    }
+    let mm = raw.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/);
+    if (mm) { const day = +mm[1], mon = +mm[2] - 1; let yr = mm[3] ? +mm[3] : auj.getFullYear(); if (yr < 100) yr += 2000; const x = new Date(yr, mon, day); x.setHours(0, 0, 0, 0); return isNaN(x.getTime()) ? null : x; }
+    mm = raw.match(/(\d{1,2})\s+([a-zéûôàèùäîï]+)/i);
+    if (mm) { const mon = _moisFr(mm[2]); if (mon != null) { const day = +mm[1]; const x = new Date(auj.getFullYear(), mon, day); x.setHours(0, 0, 0, 0); if (x < auj) x.setFullYear(x.getFullYear() + 1); return x; } }
+    return null;
+  } catch { return null; }
+}
+
 // ── Déduit une date de retour ISO depuis une durée saisie en texte libre ──
 //    ("4 jours", "2 semaines", "1 mois", "jusqu'au 15 juin", "indéterminée"…).
 //    Renvoie null si indéterminée ou illisible. Utilisé par le modal ET par la
@@ -9709,28 +9761,42 @@ async function _validerModalAbsent(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const guild = interaction.guild;
   const dureeRaw = interaction.fields.getTextInputValue('duree').trim();
+  let debutRaw = '';
+  try { debutRaw = (interaction.fields.getTextInputValue('debut') || '').trim(); } catch {}
   const raison   = interaction.fields.getTextInputValue('raison').trim() || '—';
   // Mode lecture-seule par défaut : la personne peut lire mais pas écrire
   const modeLectureSeule = true;
 
-  // Calculer la date de retour depuis la durée saisie
+  // Jour de début optionnel : si un jour FUTUR est saisi → absence PROGRAMMÉE.
+  const debutDate = _parseJour(debutRaw);
+  const estProgramme = debutDate && debutDate.getTime() > Date.now();
+  // La durée se compte à partir du jour de début quand l'absence est programmée.
+  const base = estProgramme ? debutDate.getTime() : Date.now();
+
+  // Calculer la date de retour depuis la durée saisie (relative au début)
   let finAbsence = null;
   const d = dureeRaw.toLowerCase();
   if (d.includes('indét') || d.includes('indeter')) finAbsence = null;
-  else if (d.match(/(\d+)\s*jour/)) finAbsence = new Date(Date.now() + parseInt(d.match(/(\d+)/)[1]) * 86400000).toISOString();
-  else if (d.match(/(\d+)\s*semaine/)) finAbsence = new Date(Date.now() + parseInt(d.match(/(\d+)/)[1]) * 7 * 86400000).toISOString();
-  else if (d.match(/(\d+)\s*mois/)) finAbsence = new Date(Date.now() + parseInt(d.match(/(\d+)/)[1]) * 30 * 86400000).toISOString();
+  else if (d.match(/(\d+)\s*jour/)) finAbsence = new Date(base + parseInt(d.match(/(\d+)/)[1]) * 86400000).toISOString();
+  else if (d.match(/(\d+)\s*semaine/)) finAbsence = new Date(base + parseInt(d.match(/(\d+)/)[1]) * 7 * 86400000).toISOString();
+  else if (d.match(/(\d+)\s*mois/)) finAbsence = new Date(base + parseInt(d.match(/(\d+)/)[1]) * 30 * 86400000).toISOString();
   else if (d.includes('jusqu')) {
     // "jusqu'au 15 juin" → chercher une date
     const dateMatch = dureeRaw.match(/(\d{1,2})[\/\s]([a-zéûôàèù]+|\d{1,2})(?:[\/\s](\d{4}))?/i);
     if (dateMatch) {
-      const months = { jan: 0, fév: 1, fev: 1, mar: 2, avr: 3, mai: 4, juin: 5, jul: 6, aoû: 7, aou: 7, sep: 8, oct: 9, nov: 10, déc: 11, dec: 11 };
       const day = parseInt(dateMatch[1]);
-      const monthRaw = dateMatch[2].toLowerCase().slice(0, 3);
-      const month = months[monthRaw] ?? (parseInt(dateMatch[2]) - 1);
+      const month = _moisFr(dateMatch[2]) ?? (parseInt(dateMatch[2]) - 1);
       const year = dateMatch[3] ? parseInt(dateMatch[3]) : new Date().getFullYear();
       finAbsence = new Date(year, isNaN(month) ? 0 : month, day).toISOString();
     }
+  }
+
+  // ── Absence PROGRAMMÉE : elle commence un jour futur, on ne bloque rien maintenant ──
+  if (estProgramme) {
+    const jourAff = debutDate.toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' });
+    const dureeLabel = dureeRaw + ' — à partir du ' + jourAff;
+    await _enregistrerAbsence(interaction, guild, dureeLabel, finAbsence, raison, debutDate.toISOString());
+    return;
   }
 
   const db = loadDB();
