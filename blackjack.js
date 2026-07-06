@@ -8,6 +8,7 @@
 // ───────────────────────────────────────────────────────────────────────────
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, AttachmentBuilder } = require('discord.js');
 let _img = null; try { _img = require('./blackjack-image'); } catch { _img = null; }
+let _ambiance = {}; try { _ambiance = require('./ambiance-ia'); } catch { _ambiance = {}; }
 let casino = {}; try { casino = require('./casino-banque'); } catch { casino = {}; }
 const _sous = uid => (casino.solde ? casino.solde(uid) : 0);
 
@@ -190,6 +191,7 @@ function _rowExtras() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('bj_regles').setLabel('Comment jouer').setEmoji('📖').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('bj_emote').setLabel('Emote RP').setEmoji('🎭').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('bj_voix').setLabel('À dire (voix)').setEmoji('🎙️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('bj_sous').setLabel('Mes sous').setEmoji('💰').setStyle(ButtonStyle.Secondary),
   );
 }
@@ -458,6 +460,19 @@ async function routeInteraction(interaction) {
       const s = _siege(t, interaction.user.id);
       const lignes = _emotePerso(t, s) + '\n' + _pick(_EMOTES_SCENE);
       await interaction.reply({ content: '🎭 **Reste dans la scène !** Colle une de ces lignes **en jeu** (RedM) pour ne pas passer pour AFK :\n```\n' + lignes + '\n```\n*Astuce : garde le jeu en fenêtre, alterne vite, et remets une émote à chaque action.*', flags: eph });
+      return true;
+    }
+    // Réplique à DIRE À VOIX HAUTE en jeu (ambiance IA)
+    if (interaction.isButton() && id === 'bj_voix') {
+      await interaction.deferReply({ flags: eph }); // l'IA peut prendre 1-2 s
+      const s = _siege(t, interaction.user.id);
+      const role = (_estHote(t, interaction) && !s) ? 'croupier' : 'joueur';
+      let situation = 'general';
+      if (t.phase === 'jeu' && s) { situation = s.statut === 'bust' ? 'perd' : s.statut === 'blackjack' ? 'gagne' : (t.sieges[t.tourIdx]?.userId === interaction.user.id ? 'tour' : 'attente'); }
+      else if (s?.resultat) { const n = s.net || 0; situation = n > 0 ? 'gagne' : n < 0 ? 'perd' : 'general'; }
+      const detail = s?.main?.length ? ('main à ' + _total(s.main)) : '';
+      const ligne = await _ambiance.repliqueVocale?.({ jeu: 'blackjack', role, situation, detail }) || '';
+      await interaction.editReply({ content: '🎙️ **À dire à voix haute (en jeu)** :\n> ' + ligne + '\n\n*Dis-le au micro pour animer la table — pas besoin de le taper.*' });
       return true;
     }
     // Compteur de sous du saloon (persistant)

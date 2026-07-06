@@ -18,6 +18,7 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, AttachmentBuilder } = require('discord.js');
 let _img = null; try { _img = require('./faro-image'); } catch { _img = null; }
 let casino = {}; try { casino = require('./casino-banque'); } catch { casino = {}; }
+let _ambiance = {}; try { _ambiance = require('./ambiance-ia'); } catch { _ambiance = {}; }
 const _sous = uid => (casino.solde ? casino.solde(uid) : 0);
 
 const PREFIXE = 'faro_';
@@ -268,6 +269,7 @@ function _rowExtras() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('faro_regles').setLabel('Comment jouer').setEmoji('📖').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('faro_emote').setLabel('Emote RP').setEmoji('🎭').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('faro_voix').setLabel('À dire (voix)').setEmoji('🎙️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('faro_sous').setLabel('Mes sous').setEmoji('💰').setStyle(ButtonStyle.Secondary),
   );
 }
@@ -466,6 +468,17 @@ async function routeInteraction(interaction) {
       return true;
     }
     // Compteur de sous du saloon (persistant)
+    // Réplique à DIRE À VOIX HAUTE en jeu (ambiance IA)
+    if (interaction.isButton() && id === 'faro_voix') {
+      await interaction.deferReply({ flags: eph });
+      const _arr = t.joueurs || t.sieges || [];
+      const _cur = _arr[t.tourIdx];
+      const _role = _estHote(t, interaction) ? 'banquier' : 'joueur';
+      const _sit = (_cur && _cur.userId === interaction.user.id) ? 'general' : 'general';
+      const _ligne = await _ambiance.repliqueVocale?.({ jeu: 'faro', role: _role, situation: _sit }) || '';
+      await interaction.editReply({ content: '🎙️ **À dire à voix haute (en jeu)** :\n> ' + _ligne + '\n\n*Dis-le au micro pour animer la table — pas besoin de le taper.*' });
+      return true;
+    }
     if (interaction.isButton() && id === 'faro_sous') {
       const total = _sous(interaction.user.id);
       const enTable = interaction.user.id in t.soldes;
