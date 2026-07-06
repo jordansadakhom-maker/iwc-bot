@@ -2557,6 +2557,8 @@ async function autoSetup(guild) {
   }
   // Panneau UNIFIÉ « Tables de jeu » du saloon (blackjack + poker menteur + faro + poker + cinq doigts + dominos)
   (async () => { try { await _installerPanelSaloon(guild, '1523378716770570372'); console.log('🎰 Panneau Saloon (6 jeux) en place'); } catch {} })();
+  // Crée le rôle « Client » dès le démarrage (au lieu d'attendre la 1re attribution) + ouvre l'espace client en lecture.
+  (async () => { try { const r = await _assurerRoleClient(guild); console.log(r ? '👤 Rôle « Client » prêt' : '⚠️ Rôle « Client » non créé (permission « Gérer les rôles » ?)'); } catch {} })();
   // (Annonce ponctuelle trésorerie/contrats/armes retirée — elle avait été postée, plus besoin.)
   // ♻️ Restauration AUTO (une seule fois) du contenu disparu : reposte rapports informateurs + avis wanted
   // depuis la base. Anti-doublon : ne reposte que ce dont le message a disparu.
