@@ -2571,6 +2571,36 @@ async function autoSetup(guild) {
   (async () => { try { const r = await _assurerRoleClient(guild); console.log(r ? '👤 Rôle « Client » prêt' : '⚠️ Rôle « Client » non créé (permission « Gérer les rôles » ?)'); } catch {} })();
   // Panneau du générateur de missions RP (salon Direction) — réservé à l'état-major.
   (async () => { try { await missionsIA.installerPanelMissions?.(guild, '1510712255514153101'); console.log('🎯 Panneau générateur de missions en place'); } catch {} })();
+  // 🔒 Salon STRICTEMENT réservé aux Fondateurs : SEUL le rôle « Fondateur » (et le bot) voit/accède.
+  // On ferme à @everyone ET on retire l'accès à tout autre rôle/membre. (Limite Discord : les rôles
+  // « Administrateur » et le propriétaire du serveur passent toujours outre — impossible à bloquer par salon.)
+  // Sécurité : si le rôle Fondateur est introuvable, on NE verrouille PAS (sinon plus personne ne verrait le salon).
+  (async () => {
+    try {
+      const CH_FOND = '1510721404855648287';
+      const db = loadDB();
+      if (db.accesFondateurStrictFait_1510721404855648287) return; // déjà appliqué → on ne réécrase pas d'éventuels réglages manuels
+      const ch = await guild.channels.fetch(CH_FOND).catch(() => null);
+      if (!ch?.permissionOverwrites) return;
+      const fond = guild.roles.cache.find(r => /fondateur/i.test(r.name || ''));
+      if (!fond) { console.log('⚠️ Rôle « Fondateur » introuvable — salon ' + CH_FOND + ' NON verrouillé (nouvel essai au prochain démarrage).'); return; }
+      const meId = guild.members.me?.id;
+      const everyoneId = guild.roles.everyone.id;
+      // 1) Fondateurs (et le bot) : accès complet — AVANT toute fermeture
+      await ch.permissionOverwrites.edit(fond, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true }).catch(e => console.log('⚠️ accès Fondateur (rôle):', e.message));
+      if (guild.members.me) await ch.permissionOverwrites.edit(guild.members.me, { ViewChannel: true }).catch(() => {});
+      // 2) retirer l'accès à TOUT autre rôle/membre qui l'aurait explicitement (sauf Fondateur, bot, @everyone)
+      let retires = 0;
+      for (const ow of [...ch.permissionOverwrites.cache.values()]) {
+        if (ow.id === fond.id || ow.id === meId || ow.id === everyoneId) continue;
+        if (await ch.permissionOverwrites.delete(ow.id).then(() => true).catch(() => false)) retires++;
+      }
+      // 3) fermer à @everyone
+      await ch.permissionOverwrites.edit(guild.roles.everyone, { ViewChannel: false }).catch(e => console.log('⚠️ verrou Fondateur (@everyone) — manque « Gérer les permissions » ?:', e.message));
+      db.accesFondateurStrictFait_1510721404855648287 = true; saveDB(db);
+      console.log('🔒 Salon ' + CH_FOND + ' STRICTEMENT réservé aux Fondateurs (rôle « ' + fond.name + ' ») — ' + retires + ' autre(s) accès retiré(s).');
+    } catch (e) { console.log('⚠️ verrou Fondateur strict:', e.message); }
+  })();
   // (Annonce ponctuelle trésorerie/contrats/armes retirée — elle avait été postée, plus besoin.)
   // ♻️ Restauration AUTO (une seule fois) du contenu disparu : reposte rapports informateurs + avis wanted
   // depuis la base. Anti-doublon : ne reposte que ce dont le message a disparu.
