@@ -10270,10 +10270,10 @@ function _panneauSaloonPayload() {
       '```',
       '*Poussez la porte, tirez une chaise. Choisissez votre poison : cartes, dés ou couteau. Celui qui ouvre une table en devient l\'**hôte**.*',
       '',
-      '🃏 **Blackjack** — battez le croupier sans dépasser 21 *(payé 3:2)*.',
-      '🎲 **Poker Menteur** — misez, bluffez, criez « Menteur ! » *(dés cachés)*.',
-      '🎴 **Faro** — misez sur les rangs, le donneur tourne les cartes.',
-      '♠️ **Poker (5 cartes)** — main fermée, un échange, la meilleure rafle le pot.',
+      '🃏 **Blackjack** — battez le croupier sans dépasser 21 *(payé 6:5, assurance possible)*.',
+      '🎲 **Poker Menteur** — misez, bluffez, criez « Menteur ! » ou tentez le « Pile-poil ! » *(dés cachés)*.',
+      '🎴 **Faro** — misez sur les rangs, le donneur tourne les cartes *(la banque prend sa commission)*.',
+      '♠️ **Poker (5 cartes)** — main fermée, un échange *(3 cartes max)*, la meilleure rafle le pot.',
       '🔪 **Cinq Doigts** — jeu de nerfs au couteau, le plus rapide gagne.',
       '🁢 **Dominos** — videz votre main avant les autres.',
       '',
@@ -10291,7 +10291,7 @@ function _panneauSaloonPayload() {
   const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('pk_open').setLabel('Poker').setEmoji('♠️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('fff_open').setLabel('Cinq Doigts').setEmoji('🔪').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dom_open').setLabel('Dominos').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dom_open').setLabel('Dominos').setEmoji('🁢').setStyle(ButtonStyle.Secondary),
   );
   return { embeds: [embed], components: [row1, row2] };
 }

@@ -15,8 +15,9 @@ const DIRECTION = ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier',
 const estDirection = m => !!m?.roles?.cache?.some(r => DIRECTION.some(n => (r.name || '').includes(n)));
 
 function _ens(db) {
-  if (!db.pepites) db.pepites = { total: 0, prix: 0.05, log: [], panelId: null };
+  if (!db.pepites) db.pepites = { total: 0, prix: 0.05, log: [], panelId: null, parPersonne: {} };
   if (!Array.isArray(db.pepites.log)) db.pepites.log = [];
+  if (!db.pepites.parPersonne || typeof db.pepites.parPersonne !== 'object') db.pepites.parPersonne = {};
   return db.pepites;
 }
 function _fmtArgent(n) { return Number(n).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -65,6 +66,11 @@ function _panelEmbed(db) {
   } else {
     e.addFields({ name: '💰 Ce que ça rapporte', value: '*Définis le prix unitaire (bouton 💵) pour voir le gain estimé.*', inline: false });
   }
+  const tops = Object.entries(p.parPersonne || {}).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  if (tops.length) {
+    const medailles = ['🥇', '🥈', '🥉'];
+    e.addFields({ name: '🏆 Meilleurs ramasseurs', value: tops.map(([u, n], i) => `${medailles[i] || '•'} <@${u}> — **${n.toLocaleString('fr-FR')}** pépite(s)`).join('\n').slice(0, 1024), inline: false });
+  }
   const log = (p.log || []).slice(-5).reverse();
   if (log.length) e.addFields({ name: '🧾 Derniers mouvements', value: log.map(l => `• ${l.signe || '+'}${l.n} — <@${l.u}>`).join('\n').slice(0, 1024), inline: false });
   e.setFooter({ text: 'Iron Wolf Company • Compteur de pépites' });
@@ -107,7 +113,7 @@ async function onMessage(message) {
     const db = loadDB(); const p = _ens(db);
     if (parsed.mode === 'set') p.total = parsed.n;
     else if (parsed.mode === 'sub') p.total = Math.max(0, p.total - parsed.n);
-    else p.total += parsed.n;
+    else { p.total += parsed.n; p.parPersonne[message.author.id] = (p.parPersonne[message.author.id] || 0) + parsed.n; } // crédite le ramasseur
     p.log.push({ u: message.author.id, n: parsed.n, signe: parsed.mode === 'sub' ? '-' : (parsed.mode === 'set' ? '=' : '+'), at: Date.now() });
     if (p.log.length > 50) p.log = p.log.slice(-50);
     saveDB(db);
@@ -137,14 +143,18 @@ async function routeInteraction(interaction) {
     if (interaction.isButton?.() && cid === 'pep_undo') {
       if (!estDirection(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const db = loadDB(); const p = _ens(db); const last = p.log.pop();
-      if (last) { if (last.signe === '-') p.total += last.n; else if (last.signe === '=') { /* on ne restaure pas un set */ } else p.total = Math.max(0, p.total - last.n); }
+      if (last) {
+        if (last.signe === '-') p.total += last.n;
+        else if (last.signe === '=') { /* on ne restaure pas un set */ }
+        else { p.total = Math.max(0, p.total - last.n); if (last.u) p.parPersonne[last.u] = Math.max(0, (p.parPersonne[last.u] || 0) - last.n); } // décrédite le ramasseur
+      }
       saveDB(db); await _majPanneau(interaction.guild, db);
       await interaction.reply({ content: last ? `↩️ Dernier mouvement annulé (${last.signe}${last.n}).` : 'Rien à annuler.', flags: MessageFlags.Ephemeral }).catch(() => {});
       return true;
     }
     if (interaction.isButton?.() && cid === 'pep_reset') {
       if (!estDirection(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
-      const db = loadDB(); const p = _ens(db); p.total = 0; p.log = []; saveDB(db); await _majPanneau(interaction.guild, db);
+      const db = loadDB(); const p = _ens(db); p.total = 0; p.log = []; p.parPersonne = {}; saveDB(db); await _majPanneau(interaction.guild, db);
       await interaction.reply({ content: '🗑️ Compteur de pépites remis à zéro.', flags: MessageFlags.Ephemeral }).catch(() => {});
       return true;
     }
