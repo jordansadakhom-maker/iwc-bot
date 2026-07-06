@@ -52,6 +52,9 @@ function _isTenueChannel(channel) {
   // JAMAIS dans un salon d'inventaire / coffre / stock (les photos d'inventaire ne sont pas des tenues),
   // même si l'ID correspond à un ancien salon « tenue » renommé depuis.
   if (/inventaire|coffre|stock|banque|entrepot|magasin/.test(clean)) return false;
+  // JAMAIS non plus dans le salon configuré comme COFFRE COMMUN (lecture d'inventaire par photo) :
+  // là, les photos sont des captures de coffre, pas des tenues.
+  try { const inv = loadDB().inventaire; if (inv?.channelId && channel?.id === inv.channelId) return false; } catch {}
   // Sinon : par ID (fiable même si le salon est renommé) OU par nom.
   if (channel?.id === SALON_TENUE) return true;
   return /tenue|vestiaire/.test(clean);
