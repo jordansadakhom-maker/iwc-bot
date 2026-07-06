@@ -97,25 +97,67 @@ async function _refreshPanel(client, rep) {
     if (!rep.channelId || !rep.panneau) return;
     const ch = await client.channels.fetch(rep.channelId).catch(() => null); if (!ch) return;
     const msg = await ch.messages.fetch(rep.panneau).catch(() => null); if (!msg) return;
-    await msg.edit({ embeds: [_panelEmbed(rep)], components: [_panelButtons()] }).catch(() => {});
+    await msg.edit({ embeds: [_panelEmbed(rep)], components: [_panelButtons(), _filterRow()] }).catch(() => {});
   } catch {}
 }
 
-// ── Recherche ──
-function _filter(contacts, terme) {
-  const n = _norm(terme); if (!n) return [];
-  return (contacts || []).filter(c =>
-    _norm(c.nom).includes(n) ||
-    _norm(c.telegramme).includes(n) ||
-    _norm(c.notes).includes(n) ||
-    _norm(c.type).includes(n) ||
-    _norm(TYPE_PLURIEL[c.type] || '').includes(n)
-  );
+// ── Recherche (tolérante : TOUS les champs, multi-mots, fautes de frappe pardonnées) ──
+// Distance de Levenshtein (petite) pour rattraper les coquilles.
+function _lev(a, b) {
+  if (a === b) return 0;
+  const m = a.length, n = b.length;
+  if (!m) return n; if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+    }
+    prev = cur;
+  }
+  return prev[n];
 }
-function _resultsEmbed(matches, terme) {
-  const e = new EmbedBuilder().setColor(COULEUR).setTitle(`🔎 Recherche — « ${terme} »`)
+// Champs cherchables d'un contact (tous les champs utiles, y compris secteur/métier).
+const _CHAMPS = c => [c.nom, c.telegramme, c.notes, c.type, TYPE_PLURIEL[c.type], c.metier, c.secteur, c.affiliation, c.relation, c.creeParNom];
+// Blob normalisé (pour les correspondances par sous-chaîne).
+function _hay(c) { return _CHAMPS(c).map(x => _norm(x)).filter(Boolean).join(' '); }
+// Liste des MOTS normalisés (champs découpés sur les espaces/ponctuation) — pour le fuzzy par mot.
+function _motsDe(c) {
+  const out = [];
+  for (const ch of _CHAMPS(c)) for (const w of String(ch || '').split(/[\s,;/·—–-]+/)) { const nw = _norm(w); if (nw) out.push(nw); }
+  return out;
+}
+function _filter(contacts, terme) {
+  const raw = String(terme || '').trim();
+  const nFull = _norm(raw);
+  if (!nFull) return [];
+  const tokens = raw.split(/\s+/).map(_norm).filter(t => t.length >= 2);
+  const scored = [];
+  for (const c of (contacts || [])) {
+    const hay = _hay(c); if (!hay) continue;
+    const nom = _norm(c.nom);
+    let score = 0;
+    if (hay.includes(nFull)) score = 100;                                     // le terme entier apparaît
+    else if (tokens.length && tokens.every(t => hay.includes(t))) score = 80;  // tous les mots présents
+    else if (tokens.length) {                                                  // sinon : tolérance aux fautes
+      const mots = _motsDe(c);
+      const okFuzzy = tokens.every(t => mots.some(w => {
+        if (w.includes(t) || t.includes(w)) return true;
+        const seuil = t.length <= 4 ? 1 : 2;
+        return _lev(t, w) <= seuil;
+      }));
+      if (okFuzzy) score = 50;
+    }
+    if (score > 0) { if (nom && nom.includes(nFull)) score += 20; scored.push({ c, score }); }
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.map(x => x.c);
+}
+function _resultsEmbed(matches, terme, titre) {
+  const e = new EmbedBuilder().setColor(COULEUR).setTitle(titre || `🔎 Recherche — « ${terme} »`)
     .setFooter({ text: "Iron Wolf Company • répertoire" });
-  if (!matches.length) { e.setDescription(`Aucun contact ne correspond à **${terme}**.\n*Essaie un nom, un télégramme, un type (allié, client, indic…) ou un mot des notes.*`); return e; }
+  if (!matches.length) { e.setDescription(`Aucun contact ne correspond à **${terme}**.\n*Essaie un nom, un télégramme, un type (allié, client, indic…), un secteur ou un mot des notes.*`); return e; }
   const sorted = matches.slice().sort((a, b) => {
     const ti = TYPES.indexOf(a.type) - TYPES.indexOf(b.type); return ti !== 0 ? ti : (a.nom || '').localeCompare(b.nom || '');
   });
@@ -125,6 +167,33 @@ function _resultsEmbed(matches, terme) {
   return e;
 }
 
+// Menu « Voir une fiche en détail » à partir d'une liste de contacts.
+function _selectVoir(list) {
+  const opts = (list || []).slice(0, 25).map(c => ({
+    label: (c.nom || 'Sans nom').slice(0, 100),
+    description: (`${TYPE_PLURIEL[c.type] || c.type || ''}${c.telegramme ? ' · 📨 ' + c.telegramme : ''}`.slice(0, 100)) || '—',
+    value: c.id,
+  })).filter(o => o.value);
+  if (!opts.length) return null;
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder().setCustomId('repvoir').setPlaceholder('👁️ Voir une fiche en détail…').addOptions(opts)
+  );
+}
+// Rangée de filtres par type (Alliés / Clients / Indics / Ennemis).
+function _filterRow() {
+  return new ActionRowBuilder().addComponents(
+    ...TYPES.filter(t => t !== 'Neutre').map(t =>
+      new ButtonBuilder().setCustomId('repfiltre::' + t).setLabel(TYPE_PLURIEL[t]).setEmoji(TYPE_EMOJI[t]).setStyle(ButtonStyle.Secondary))
+  );
+}
+// Fiche détaillée lisible à partir d'un contact (fiche simple OU riche).
+function _detailFromContact(c) {
+  return _richFiche({
+    nomsurnom: c.nom || c.nomsurnom, telegramme: c.telegramme, metier: c.metier, secteur: c.secteur,
+    affiliation: c.affiliation, relation: c.relation, fiabilite: c.fiabilite, statut: c.statut,
+    dernierContact: c.dernierContact, creeParNom: c.creeParNom, notes: c.notes, id: c.id,
+  });
+}
 function _formModal(customId, titre, c) {
   c = c || {};
   const m = new ModalBuilder().setCustomId(customId).setTitle(titre);
@@ -341,8 +410,8 @@ async function installerPanelContact(guild) {
     const uid = guild.client?.user?.id;
     const msgs = await ch.messages.fetch({ limit: 20 }).catch(() => null);
     const panel = msgs ? [...msgs.values()].find(m => m.author.id === uid && (m.embeds?.[0]?.title || "").includes("NOUVELLE FICHE DE CONTACT")) : null;
-    if (panel) { await panel.edit({ embeds: [_panelContactEmbed()], components: [_panelContactButtons()] }).catch(() => {}); return; } // maj en place (ajoute le bouton 🔎)
-    const sent = await ch.send({ embeds: [_panelContactEmbed()], components: [_panelContactButtons()] }).catch(() => null);
+    if (panel) { await panel.edit({ embeds: [_panelContactEmbed()], components: [_panelContactButtons(), _filterRow()] }).catch(() => {}); return; } // maj en place (ajoute le bouton 🔎)
+    const sent = await ch.send({ embeds: [_panelContactEmbed()], components: [_panelContactButtons(), _filterRow()] }).catch(() => null);
     if (sent) await sent.pin().catch(() => {});
   } catch (e) { console.log("⚠️ install panneau contact:", e.message); }
 }
@@ -363,7 +432,7 @@ async function routeInteraction(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       const db = loadDB(); const rep = _ensure(db);
       rep.channelId = interaction.channelId;
-      const m = await interaction.channel.send({ embeds: [_panelEmbed(rep)], components: [_panelButtons()] }).catch(() => null);
+      const m = await interaction.channel.send({ embeds: [_panelEmbed(rep)], components: [_panelButtons(), _filterRow()] }).catch(() => null);
       if (!m) { await interaction.editReply({ content: "❌ Je n'ai pas pu poster ici (vérifie mes permissions d'écriture)." }).catch(() => {}); return true; }
       rep.panneau = m.id; try { await m.pin(); } catch {}
       persist(db);
@@ -376,8 +445,8 @@ async function routeInteraction(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       const db = loadDB(); const rep = _ensure(db);
       const terme = (interaction.options.getString("recherche") || "").trim();
-      if (terme) { await interaction.editReply({ embeds: [_resultsEmbed(_filter(rep.contacts, terme), terme)], components: [_panelButtons()] }).catch(() => {}); return true; }
-      await interaction.editReply({ embeds: [_panelEmbed(rep)], components: [_panelButtons()] }).catch(() => {});
+      if (terme) { const found = _filter(rep.contacts, terme); const rows = [_selectVoir(found), _panelButtons()].filter(Boolean); await interaction.editReply({ embeds: [_resultsEmbed(found, terme)], components: rows }).catch(() => {}); return true; }
+      await interaction.editReply({ embeds: [_panelEmbed(rep)], components: [_panelButtons(), _filterRow()] }).catch(() => {});
       return true;
     }
 
@@ -426,7 +495,9 @@ async function routeInteraction(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       const db = loadDB(); const rep = _ensure(db);
       const terme = (interaction.fields.getTextInputValue("terme") || "").trim();
-      await interaction.editReply({ embeds: [_resultsEmbed(_filter(rep.contacts, terme), terme)] }).catch(() => {});
+      const found = _filter(rep.contacts, terme);
+      const rows = [_selectVoir(found)].filter(Boolean);
+      await interaction.editReply({ embeds: [_resultsEmbed(found, terme)], components: rows }).catch(() => {});
       return true;
     }
 
@@ -662,6 +733,33 @@ async function routeInteraction(interaction) {
       const okMsg = `✅ Fiche de **${d.nomsurnom}** publiée dans ${posted ? posted.where : "—"} et ajoutée au carnet (recherchable avec \`/repertoire\`). Clique **✏️ Modifier** sur la fiche pour la mettre à jour plus tard.`;
       const koMsg = `⚠️ Je n'ai pas trouvé de salon où publier (répertoire/contacts). La fiche est ajoutée au carnet ; copie-la si besoin :\n\n${fiche}`.slice(0, 1900);
       await interaction.editReply({ content: posted ? okMsg : koMsg, components: [] }).catch(() => {});
+      return true;
+    }
+
+    // ── Voir une fiche en détail (menu 👁️ des résultats / filtres) ──
+    if (interaction.isStringSelectMenu?.() && interaction.customId === "repvoir") {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {}); // accuse réception AVANT de charger la photo
+      const cid = interaction.values?.[0];
+      const db = loadDB(); const rep = _ensure(db);
+      const c = (rep.contacts || []).find(x => x.id === cid);
+      if (!c) { await interaction.editReply({ content: "⚠️ Fiche introuvable (peut-être supprimée)." }).catch(() => {}); return true; }
+      const payload = { content: _detailFromContact(c).slice(0, 1900) };
+      if (c.photoUrl) { const buf = await _imageBytes(c.photoUrl); if (buf) payload.files = [new AttachmentBuilder(buf, { name: 'contact.png' })]; }
+      await interaction.editReply(payload).catch(() => {});
+      return true;
+    }
+
+    // ── Filtre par type (boutons Alliés / Clients / Indics / Ennemis) ──
+    if (interaction.isButton?.() && (interaction.customId || "").startsWith("repfiltre::")) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const type = interaction.customId.split("::")[1];
+      const db = loadDB(); const rep = _ensure(db);
+      const list = (rep.contacts || []).filter(c => c.type === type).sort((a, b) => (a.nom || '').localeCompare(b.nom || ''));
+      const titre = `${TYPE_EMOJI[type] || '📇'} ${TYPE_PLURIEL[type] || type} (${list.length})`;
+      const e = list.length ? _resultsEmbed(list, type, titre)
+        : new EmbedBuilder().setColor(COULEUR).setTitle(titre).setDescription(`Aucun contact « ${TYPE_PLURIEL[type] || type} » dans le carnet pour l'instant.`).setFooter({ text: "Iron Wolf Company • répertoire" });
+      const rows = [_selectVoir(list)].filter(Boolean);
+      await interaction.editReply({ embeds: [e], components: rows }).catch(() => {});
       return true;
     }
 
