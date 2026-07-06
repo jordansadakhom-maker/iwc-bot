@@ -30,6 +30,8 @@ function _estGestion(member) { try { return !!member?.roles?.cache?.some(r => GE
 
 const MISE_MIN = 1, MISE_MAX = 1000000;
 const TOUR_MS = 120000; // 2 min d'inactivité → auto-tour SÛR (ne résout que les mises déjà posées par les joueurs)
+// ─── Difficulté (réglable) : la banque prélève une commission sur les gains ───
+const PART_MAISON = 0.10; // 10 % retenus par la banque sur chaque gain → avantage maison réaliste
 
 const RANGS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
 const COULEURS = ['♠', '♥', '♦', '♣'];
@@ -96,9 +98,9 @@ const _REGLES = [
   '**La table :** un tableau des 13 rangs. Tu poses tes **jetons** sur un ou plusieurs rangs.',
   '**Le coup :** le donneur tire **deux cartes** du sabot :',
   '• 🥇 1re carte = **PERDANTE** — les mises sur ce rang vont à la **banque**.',
-  '• 🎯 2e carte = **GAGNANTE** — les mises sur ce rang sont payées **1:1**.',
+  '• 🎯 2e carte = **GAGNANTE** — les mises sur ce rang sont payées **1:1**, **moins 10 % de commission** pour la banque.',
   '**Rang non sorti :** ta mise **reste en place** pour le coup suivant (ou retire-la avec « Retirer mes mises »).',
-  '**Split :** si les deux cartes sont du **même rang**, la maison prend la **moitié** des mises de ce rang — c\'est le seul, et très faible, avantage de la banque.',
+  '**Split :** si les deux cartes sont du **même rang**, la maison prend la **moitié** des mises de ce rang. Avec la commission, la banque garde un vrai avantage — jouez fin.',
   '',
   '🎭 **Reste en RP :** appuie sur **Emote** et colle la ligne **en jeu** — comme ça, personne ne te prend pour un AFK pendant que tu joues ici.',
   '💰 **Sous :** tes gains/pertes sont cumulés dans ton compteur de **sous** du saloon (bouton « Mes sous »).',
@@ -168,7 +170,7 @@ function _resoudreCoup(t, perdante, gagnante) {
       delta = -Math.round(m.montant / 2);
       issue = 'split';
     } else if (m.rang === gagnante.r) {
-      delta = m.montant;            // payé 1:1 (récupère la mise + gain égal)
+      delta = Math.max(1, Math.round(m.montant * (1 - PART_MAISON))); // 1:1 moins la commission de la banque
       issue = 'gagne';
     } else if (m.rang === perdante.r) {
       delta = -m.montant;           // mise perdue, va à la banque
@@ -297,7 +299,7 @@ function _contentLigne(t) {
 }
 async function _screen(t) {
   const e = new EmbedBuilder().setColor(0xC8A45C).setTitle('🎰  TABLE DE FARO  🎴')
-    .setFooter({ text: 'Hôte (banque) : ' + t.hoteNom + '  ·  Gagnante payée 1:1  ·  Split = moitié à la maison' });
+    .setFooter({ text: 'Hôte (banque) : ' + t.hoteNom + '  ·  Gagnante 1:1 −10% commission  ·  Split = moitié à la maison' });
   let buf = null;
   try { if (_img?.genererTableFaro) buf = await _img.genererTableFaro(_imgState(t)); } catch { buf = null; }
   if (buf) {
@@ -512,5 +514,5 @@ async function routeInteraction(interaction) {
 module.exports = {
   routeInteraction,
   installerPanelFaro,
-  _test: { _construireSabot, _ajouterMise, _retirerMises, _misesDe, _totalRang, _resoudreCoup, _tourner, _labelDernier, _nouvelleTable, _creerTable, RANGS, tables },
+  _test: { _construireSabot, _ajouterMise, _retirerMises, _misesDe, _totalRang, _resoudreCoup, _tourner, _labelDernier, _nouvelleTable, _creerTable, RANGS, tables, PART_MAISON },
 };

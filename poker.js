@@ -4,7 +4,7 @@
 //   • Un joueur OUVRE la table : il en est l'« hôte ». 2 à 6 joueurs.
 //   • Chacun s'assied avec un ANTE (jetons de table) → alimente le POT.
 //   • L'hôte DISTRIBUE : 5 cartes PRIVÉES par joueur (pk_peek → image éphémère).
-//   • Un tour d'ÉCHANGE : à son tour, chaque joueur défausse 0 à 5 cartes
+//   • Un tour d'ÉCHANGE : à son tour, chaque joueur défausse 0 à 3 cartes
 //     (pk_draw → menu) et pioche autant de remplaçantes.
 //   • ABATTAGE (showdown) : la meilleure main rafle le pot. Égalité → partage.
 //   • Jeu ENTRE JOUEURS : aucune maison, aucun avantage — équitable par nature.
@@ -65,7 +65,7 @@ const _REGLES = [
   '',
   '**L\'ante :** chacun mise un ante en s\'asseyant — tous les antes forment le **pot**.',
   '**La donne :** l\'hôte distribue **5 cartes privées** à chaque joueur (bouton 👁️ **Voir ma main**).',
-  '**L\'échange :** à ton tour, tu **défausses 0 à 5 cartes** (bouton 🔄 **Échanger**) et tu piochies autant de remplaçantes.',
+  '**L\'échange :** à ton tour, tu **défausses 0 à 3 cartes** (bouton 🔄 **Échanger**) et tu piochies autant de remplaçantes.',
   '**L\'abattage :** on retourne les mains, la meilleure rafle le pot ; **égalité = partage**.',
   '',
   '**Ordre des mains (du plus fort au plus faible) :**',
@@ -83,6 +83,8 @@ const PREFIXE = 'pk_';
 const MAX_SIEGES = 6, MIN_JOUEURS = 2;
 const MISE_MIN = 1, MISE_MAX = 1000000;
 const TOUR_MS = 120000; // 2 min pour échanger, sinon « garde ses 5 cartes » (0 défausse) automatiquement
+// ─── Difficulté (réglable) : défausse limitée → on ne refait plus toute sa main ───
+const DRAW_MAX = 3;    // au lieu de 5 : impossible de tout jeter, chaque carte gardée compte
 
 const RANGS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
 const COULEURS = ['♠', '♥', '♦', '♣'];
@@ -185,7 +187,7 @@ function _lignesStatut(t) {
   const L = [];
   if (t.phase === 'echange') {
     const s = t.sieges[t.tourIdx];
-    L.push('➡️ **À ' + (s ? s.nom : '—') + ' d\'échanger** — 👁️ Voir ma main · 🔄 Échanger mes cartes (0 à 5)');
+    L.push('➡️ **À ' + (s ? s.nom : '—') + ' d\'échanger** — 👁️ Voir ma main · 🔄 Échanger mes cartes (0 à 3)');
   } else if (t.phase === 'abattage') {
     L.push('🏆 **Abattage !** ' + (t.ambiance || ''));
   } else if (t.manche > 0) {
@@ -204,7 +206,7 @@ function _lignesStatut(t) {
 function _imgState(t) {
   return {
     sousTitre: t.phase === 'echange'
-      ? ('À ' + (t.sieges[t.tourIdx]?.nom || '—') + ' d\'échanger — 0 à 5 cartes')
+      ? ('À ' + (t.sieges[t.tourIdx]?.nom || '—') + ' d\'échanger — 0 à 3 cartes')
       : t.phase === 'abattage' ? 'Abattage — la meilleure main rafle le pot'
         : (t.manche > 0 ? 'Main terminée — l\'hôte peut relancer ou fermer' : 'Asseyez-vous et misez votre ante, puis l\'hôte distribue'),
     pot: _money(t.pot),
@@ -262,7 +264,7 @@ function _components(t) {
   return rows;
 }
 function _contentLigne(t) {
-  if (t.phase === 'echange') { const s = t.sieges[t.tourIdx]; return s ? '🎯 **Au tour de ' + s.nom + '** — 🔄 échanger 0 à 5 cartes' : ''; }
+  if (t.phase === 'echange') { const s = t.sieges[t.tourIdx]; return s ? '🎯 **Au tour de ' + s.nom + '** — 🔄 échanger 0 à 3 cartes' : ''; }
   if (t.phase === 'abattage') { const g = t.sieges.filter(s => s.gagnant); return g.length ? '🏆 **' + g.map(s => s.nom).join(', ') + '** rafle le pot !' : '🏁 Abattage — résultats sur la table.'; }
   return '💰 Misez votre ante (💵 Ma mise), puis l\'hôte distribue.';
 }
@@ -381,7 +383,7 @@ function _panelPayload() {
       '```',
       '*Approchez, tirez une chaise. Cinq cartes, un tour d\'échange, et l\'on abat les mains — le meilleur jeu rafle le pot.*',
       '',
-      '🃏 **5-Card Draw** — chacun mise un **ante** (jetons de table), reçoit 5 cartes, échange 0 à 5 cartes, puis on compare. Jeu **entre joueurs**, sans maison.',
+      '🃏 **5-Card Draw** — chacun mise un **ante** (jetons de table), reçoit 5 cartes, échange 0 à 3 cartes, puis on compare. Jeu **entre joueurs**, sans maison.',
       '',
       '👉 **Ouvrir une table** ci-dessous : vous en devenez l\'**hôte**. Les autres s\'asseyent avec leur ante, et la partie commence.',
     ].join('\n'))
@@ -414,7 +416,7 @@ async function _envoyerMain(interaction, t, s) {
   const ev = _evaluer(s.main);
   await interaction.deferReply({ flags: eph }).catch(() => {}); // accuse réception avant de générer l'image
   let buf = null;
-  try { if (_img?.genererMain) buf = await _img.genererMain({ nom: s.nom, cards: s.main.map(c => ({ r: c.r, s: c.s })), evalNom: ev.nom, sousTitre: t.phase === 'echange' ? 'Choisissez 0 à 5 cartes à échanger' : 'Vos cartes' }); } catch { buf = null; }
+  try { if (_img?.genererMain) buf = await _img.genererMain({ nom: s.nom, cards: s.main.map(c => ({ r: c.r, s: c.s })), evalNom: ev.nom, sousTitre: t.phase === 'echange' ? 'Choisissez 0 à 3 cartes à échanger' : 'Vos cartes' }); } catch { buf = null; }
   if (buf) { await interaction.editReply({ content: '👁️ **Votre main** — ' + ev.nom, files: [new AttachmentBuilder(buf, { name: 'main.png' })] }).catch(() => {}); }
   else { await interaction.editReply({ content: '👁️ **Votre main** : ' + _fmtMain(s.main) + '\n➡️ ' + ev.nom }).catch(() => {}); }
 }
@@ -506,9 +508,9 @@ async function routeInteraction(interaction) {
       if (!s) { await interaction.reply({ content: 'Aucun joueur à jouer.', flags: eph }); return true; }
       if (s.userId !== interaction.user.id) { await interaction.reply({ content: '⏳ Ce n\'est pas ton tour — c\'est à **' + s.nom + '** d\'échanger.', flags: eph }); return true; }
       if (s.drew) { await interaction.reply({ content: 'Tu as déjà échangé pour cette main.', flags: eph }); return true; }
-      const menu = new StringSelectMenuBuilder().setCustomId('pk_draw_select').setPlaceholder('Cartes à défausser (aucune = garder tout)').setMinValues(0).setMaxValues(5)
+      const menu = new StringSelectMenuBuilder().setCustomId('pk_draw_select').setPlaceholder('Cartes à défausser (0 à 3 max)').setMinValues(0).setMaxValues(DRAW_MAX)
         .addOptions(s.main.map((c, i) => ({ label: c.r + ' ' + c.s, description: 'Défausser cette carte', value: String(i) })));
-      await interaction.reply({ content: '🔄 **Ta main** : ' + _fmtMain(s.main) + '\nChoisis 0 à 5 cartes à défausser, puis valide.', components: [new ActionRowBuilder().addComponents(menu)], flags: eph });
+      await interaction.reply({ content: '🔄 **Ta main** : ' + _fmtMain(s.main) + '\nChoisis **0 à ' + DRAW_MAX + '** cartes à défausser (pas plus — chaque choix compte), puis valide.', components: [new ActionRowBuilder().addComponents(menu)], flags: eph });
       return true;
     }
     if (interaction.isStringSelectMenu() && id === 'pk_draw_select') {
@@ -516,7 +518,7 @@ async function routeInteraction(interaction) {
       const s = t.sieges[t.tourIdx];
       if (!s || s.userId !== interaction.user.id) { await interaction.update({ content: '⏳ Ce n\'est plus ton tour.', components: [] }).catch(() => {}); return true; }
       if (s.drew) { await interaction.update({ content: 'Tu as déjà échangé.', components: [] }).catch(() => {}); return true; }
-      const indices = (interaction.values || []).map(v => parseInt(v, 10));
+      const indices = (interaction.values || []).map(v => parseInt(v, 10)).slice(0, DRAW_MAX); // sécurité : jamais plus que la limite
       const nb = _echanger(t, s, indices);
       const ev = _evaluer(s.main);
       t.ambiance = s.nom + (nb ? ' échange ' + nb + ' carte' + (nb > 1 ? 's' : '') + '.' : ' garde ses cartes.');

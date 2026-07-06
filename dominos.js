@@ -86,7 +86,8 @@ function _estGestion(member) { try { return !!member?.roles?.cache?.some(r => GE
 const MAX_JOUEURS = 4, MIN_JOUEURS = 2;
 const ANTE_MIN = 1, ANTE_MAX = 1000000;
 const TOUR_MS = 120000; // 2 min pour jouer, sinon action sûre auto (jouer/piocher/passer)
-const MAINS = { 2: 7, 3: 6, 4: 5 }; // tuiles distribuées selon le nombre de joueurs
+// Difficulté : mains PLUS GRANDES → pioche (boneyard) réduite → plus de blocages, jeu plus tendu.
+const MAINS = { 2: 8, 3: 7, 4: 6 }; // tuiles distribuées selon le nombre de joueurs (max 28)
 
 // ─── Le set de 28 tuiles ───
 function _construireSet() { const s = []; for (let a = 0; a <= 6; a++) for (let b = a; b <= 6; b++) s.push({ a, b }); return s; }

@@ -63,9 +63,10 @@ const _REGLES = [
   '• 🃏 **Tirer** — une carte de plus.',
   '• ✋ **Rester** — tu gardes ta main et passes la main.',
   '• ⏫ **Doubler** — tu doubles ta mise et ne reçois **qu\'une** carte.',
+  '• 🛡️ **Assurance** — *si le croupier montre un As* : mise annexe (moitié de ta mise) qui paie **2:1** s\'il a un blackjack. Sinon, tu la perds. À toi de juger le risque.',
   '**Brûlé :** dépasser 21 = perdu direct.',
-  '**Le croupier** joue en dernier : il **tire jusqu\'à 17**, puis s\'arrête.',
-  '**Tu gagnes** si tu es plus proche de 21 que lui (ou s\'il brûle). Un **Blackjack** (21 en 2 cartes) est payé **3:2**.',
+  '**Le croupier** joue en dernier : il **tire jusqu\'à 17** — et même **sur le 17 souple** (As + 6). La maison ne fait pas de cadeau.',
+  '**Tu gagnes** si tu es plus proche de 21 que lui (ou s\'il brûle). Un **Blackjack** (21 en 2 cartes) est payé **6:5**.',
   '',
   '🎭 **Reste en RP :** appuie sur **Emote** à chaque action et colle la ligne **en jeu** — comme ça, personne ne te prend pour un AFK pendant que tu joues ici.',
   '💰 **Sous :** tes gains/pertes sont cumulés dans ton compteur de **sous** du saloon (bouton « Mes sous »).',
@@ -86,6 +87,17 @@ const DOS = '🂠';
 function _val(r) { if (r === 'A') return 11; if (r === 'J' || r === 'Q' || r === 'K') return 10; return parseInt(r, 10); }
 function _total(main) { let t = 0, as = 0; for (const c of main) { t += _val(c.r); if (c.r === 'A') as++; } while (t > 21 && as > 0) { t -= 10; as--; } return t; }
 function _estBJ(main) { return main.length === 2 && _total(main) === 21; }
+// Vrai si la main vaut 17 avec un As encore compté 11 (« 17 souple »).
+function _estSoft17(main) {
+  if (_total(main) !== 17) return false;
+  let raw = 0, as = 0; for (const c of main) { raw += _val(c.r); if (c.r === 'A') as++; }
+  const reduits = Math.round((raw - 17) / 10); // nb d'As ramenés à 1 pour ne pas dépasser
+  return as - reduits > 0;                     // il reste au moins un As compté 11
+}
+// ─── Difficulté (réglable) ──────────────────────────────────────────────
+const CROUPIER_H17 = true;  // le croupier TIRE sur le 17 souple (plus dur, réaliste)
+const BJ_PAIEMENT  = 1.2;   // blackjack payé 6:5 (au lieu de 1.5 = 3:2) → avantage maison
+// ────────────────────────────────────────────────────────────────────────
 function _fmtCarte(c) { return '`' + c.r + c.s + '`'; }
 function _fmtMain(main) { return main.map(_fmtCarte).join(' '); }
 function _money(n) { const s = Math.abs(Math.round(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' '); return (n < 0 ? '−' : '') + s + ' $'; }
@@ -211,11 +223,17 @@ function _components(t) {
     ));
   } else {
     const s = t.sieges[t.tourIdx];
-    rows.push(new ActionRowBuilder().addComponents(
+    const asVisible = t.croupier.main[0]?.r === 'A';
+    const comp = [
       new ButtonBuilder().setCustomId('bj_hit').setLabel('Tirer').setEmoji('🃏').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('bj_stand').setLabel('Rester').setEmoji('✋').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('bj_double').setLabel('Doubler').setEmoji('⏫').setStyle(ButtonStyle.Secondary).setDisabled(!(s && s.main.length === 2)),
-    ));
+    ];
+    // Assurance : proposée uniquement si le croupier montre un As, avant d'avoir agi.
+    if (asVisible && s && s.main.length === 2 && !s.assurance) {
+      comp.push(new ButtonBuilder().setCustomId('bj_assur').setLabel('Assurance').setEmoji('🛡️').setStyle(ButtonStyle.Secondary));
+    }
+    rows.push(new ActionRowBuilder().addComponents(...comp));
   }
   rows.push(_rowExtras());
   return rows;
@@ -236,7 +254,7 @@ function _contentLigne(t) {
 // Construit le message complet (image si possible, sinon texte). Renvoie { content, embeds, components, files }.
 async function _screen(t) {
   const e = new EmbedBuilder().setColor(0xC8A45C).setTitle('🎰  TABLE DE BLACKJACK  🃏')
-    .setFooter({ text: 'Hôte : ' + t.hoteNom + '  ·  Blackjack payé 3:2  ·  Le croupier tire jusqu\'à 17' });
+    .setFooter({ text: 'Hôte : ' + t.hoteNom + '  ·  Blackjack payé 6:5  ·  Croupier tire sur le 17 souple' });
   const content = _contentLigne(t);
   let buf = null;
   try { if (_img?.genererTable) buf = await _img.genererTable(_imgState(t)); } catch { buf = null; }
@@ -286,20 +304,25 @@ function _avancer(t) {
 
 function _croupierEtResolution(t) {
   const enJeu = t.sieges.some(s => s.statut === 'stand' || s.statut === 'blackjack');
-  if (enJeu) { while (_total(t.croupier.main) < 17) t.croupier.main.push(_piocher(t)); }
+  if (enJeu) { while (_total(t.croupier.main) < 17 || (CROUPIER_H17 && _estSoft17(t.croupier.main))) t.croupier.main.push(_piocher(t)); }
   const dt = _total(t.croupier.main);
   const dBJ = _estBJ(t.croupier.main);
   for (const s of t.sieges) {
     const pt = _total(s.main);
     let net = 0, label = '';
     if (s.statut === 'bust') { net = -s.mise; label = '❌ Perdu (brûlé)'; }
-    else if (s.statut === 'blackjack') { if (dBJ) { net = 0; label = '➖ Égalité (double blackjack)'; } else { net = Math.round(s.mise * 1.5); label = '✦ BLACKJACK ! +' + _money(net); } }
+    else if (s.statut === 'blackjack') { if (dBJ) { net = 0; label = '➖ Égalité (double blackjack)'; } else { net = Math.round(s.mise * BJ_PAIEMENT); label = '✦ BLACKJACK ! +' + _money(net); } }
     else { // stand
       if (dBJ) { net = -s.mise; label = '❌ Perdu (blackjack croupier)'; }
       else if (dt > 21) { net = s.mise; label = '✅ Gagné (croupier brûlé) +' + _money(net); }
       else if (pt > dt) { net = s.mise; label = '✅ Gagné +' + _money(net); }
       else if (pt < dt) { net = -s.mise; label = '❌ Perdu'; }
       else { net = 0; label = '➖ Égalité'; }
+    }
+    // Assurance (pari annexe pris quand le croupier montrait un As) : paie 2:1 si BJ croupier.
+    if (s.assurance > 0) {
+      if (dBJ) { net += s.assurance * 2; label += '  ·  🛡️ assurance +' + _money(s.assurance * 2); }
+      else { net -= s.assurance; label += '  ·  🛡️ assurance −' + _money(s.assurance); }
     }
     s.resultat = label; s.net = net; s.statut = 'fini';
     t.soldes[s.userId] = (t.soldes[s.userId] || 0) + net;
@@ -314,7 +337,7 @@ function _distribuer(t) {
   t.manche++;
   t.reshuffle = false;
   t.croupier.main = [];
-  for (const s of t.sieges) { s.main = []; s.statut = 'jeu'; s.resultat = ''; s.net = 0; }
+  for (const s of t.sieges) { s.main = []; s.statut = 'jeu'; s.resultat = ''; s.net = 0; s.assurance = 0; }
   // 2 cartes chacun, puis 2 au croupier
   for (let k = 0; k < 2; k++) { for (const s of t.sieges) s.main.push(_piocher(t)); t.croupier.main.push(_piocher(t)); }
   for (const s of t.sieges) { if (_estBJ(s.main)) s.statut = 'blackjack'; }
@@ -335,7 +358,7 @@ function _panelPayload() {
       '```',
       '*Approchez, tentez votre chance à la table de Blackjack. Le croupier de la maison distribue — à vous de savoir vous arrêter à temps.*',
       '',
-      '🃏 **Blackjack** — battez le croupier sans dépasser 21. Le blackjack paie **3:2**, le croupier tire jusqu\'à **17**.',
+      '🃏 **Blackjack** — battez le croupier sans dépasser 21. Blackjack payé **6:5**, le croupier tire **sur le 17 souple**, et l\'**assurance** est possible s\'il montre un As. La maison ne fait pas de cadeau.',
       '',
       '👉 **Ouvrir une table** ci-dessous : vous en devenez l\'**hôte**. Les autres joueurs s\'asseyent avec leur mise, et la partie commence.',
     ].join('\n'))
@@ -435,6 +458,19 @@ async function routeInteraction(interaction) {
     }
 
     // Actions de jeu : Tirer / Rester / Doubler
+    // Assurance (pari annexe) — se prend à ton tour quand le croupier montre un As.
+    if (interaction.isButton() && id === 'bj_assur') {
+      if (t.phase !== 'jeu') { await interaction.reply({ content: 'Aucune manche en cours.', flags: eph }); return true; }
+      const s = t.sieges[t.tourIdx];
+      if (!s || s.userId !== interaction.user.id) { await interaction.reply({ content: '⏳ L\'assurance se prend à ton tour.', flags: eph }); return true; }
+      if (t.croupier.main[0]?.r !== 'A') { await interaction.reply({ content: 'Assurance possible seulement si le croupier montre un As.', flags: eph }); return true; }
+      if (s.main.length !== 2 || s.assurance) { await interaction.reply({ content: 'Trop tard pour t\'assurer sur cette main.', flags: eph }); return true; }
+      await interaction.deferUpdate().catch(() => {});
+      s.assurance = Math.max(1, Math.round(s.mise / 2));
+      t.ambiance = s.nom + ' prend une assurance (' + _money(s.assurance) + ').';
+      await _refresh(t); return true;
+    }
+
     if (interaction.isButton() && (id === 'bj_hit' || id === 'bj_stand' || id === 'bj_double')) {
       if (t.phase !== 'jeu') { await interaction.reply({ content: 'Aucune manche en cours.', flags: eph }); return true; }
       const s = t.sieges[t.tourIdx];
@@ -521,4 +557,4 @@ async function routeInteraction(interaction) {
   }
 }
 
-module.exports = { routeInteraction, installerPanelBlackjack, _test: { _total, _estBJ, _construireSabot, _distribuer, _croupierEtResolution, _creerTable, tables } };
+module.exports = { routeInteraction, installerPanelBlackjack, _test: { _total, _estBJ, _estSoft17, _construireSabot, _distribuer, _croupierEtResolution, _creerTable, tables, BJ_PAIEMENT, CROUPIER_H17 } };
