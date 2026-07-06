@@ -20,6 +20,9 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, AttachmentBuilder } = require('discord.js');
 let _img = null; try { _img = require('./cinqdoigts-image'); } catch { _img = null; }
 let casino = {}; try { casino = require('./casino-banque'); } catch { casino = {}; }
+let _ambiance = {}; try { _ambiance = require('./ambiance-ia'); } catch { _ambiance = {}; }
+let _notif = {}; try { _notif = require('./table-notif'); } catch { _notif = {}; }
+let _voix = {}; try { _voix = require('./casino-voix'); } catch { _voix = {}; }
 const _sous = uid => (casino.solde ? casino.solde(uid) : 0);
 
 const PREFIXE = 'fff_';
@@ -289,6 +292,7 @@ function _rowExtras() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('fff_regles').setLabel('Comment jouer').setEmoji('📖').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('fff_emote').setLabel('Emote RP').setEmoji('🎭').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('fff_voix').setLabel('À dire (voix)').setEmoji('🎙️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('fff_sous').setLabel('Mes sous').setEmoji('💰').setStyle(ButtonStyle.Secondary),
   );
 }
@@ -319,6 +323,11 @@ function _components(t) {
   return rows;
 }
 
+function _contentLigne(t) {
+  if (t.phase === 'jeu') { const j = t.joueurs[t.tourIdx]; return j ? '🎯 **Au tour de ' + j.nom + '** — plante l\'intervalle en lueur (boutons 1-5), vite !' : ''; }
+  if (t.ambiance) return '🏁 *' + t.ambiance + '*';
+  return '🔪 Lance un **Solo**, ou monte un **Duel** (mise).';
+}
 async function _screen(t) {
   const e = new EmbedBuilder().setColor(0xC8A45C).setTitle('🔪  CINQ DOIGTS  ·  FIVE FINGER FILLET')
     .setFooter({ text: 'Hôte : ' + t.hoteNom + '  ·  Jeu de nerfs — vite et juste  ·  Duel symétrique, aucune maison' });
@@ -327,13 +336,19 @@ async function _screen(t) {
   if (buf) {
     e.setImage('attachment://cinqdoigts.png');
     e.setDescription((t.ambiance ? '💬 *' + t.ambiance + '*' : '​').slice(0, 4000));
-    return { embeds: [e], components: _components(t), files: [new AttachmentBuilder(buf, { name: 'cinqdoigts.png' })] };
+    return { content: _contentLigne(t), embeds: [e], components: _components(t), files: [new AttachmentBuilder(buf, { name: 'cinqdoigts.png' })] };
   }
   e.setDescription(_lignesTexte(t).join('\n').slice(0, 4000));
-  return { embeds: [e], components: _components(t), files: [] };
+  return { content: _contentLigne(t), embeds: [e], components: _components(t), files: [] };
 }
 
-async function _refresh(t) { try { if (t.msg) { const p = await _screen(t); await t.msg.edit({ ...p, attachments: [] }); } } catch (e) { console.log('⚠️ fff refresh:', e.message); } }
+async function _refresh(t) {
+  try {
+    if (t.msg) { const p = await _screen(t); await t.msg.edit({ ...p, attachments: [], allowedMentions: { parse: [] } }); }
+    const _cur = (t.joueurs || [])[t.tourIdx];
+    await _notif.majPingTour?.(t, t.msg?.channel, (t.phase === 'jeu') ? _cur?.userId : null);
+  } catch (e) { console.log('⚠️ fff refresh:', e.message); }
+}
 
 // ─── Panneau d'ouverture (installable dans le salon casino) ───
 function _panelPayload() {
@@ -500,6 +515,7 @@ async function routeInteraction(interaction) {
       const verdict = _juger({ cible: t.cible, bouton, dt, fenetre: t.fenetre + GRACE_LATENCE });
       _clearTimer(t);
       await interaction.deferUpdate().catch(() => {});
+      try { _voix.jouer?.(interaction.member?.voice?.channel, 'lame'); } catch {}
       if (verdict.ok) {
         _reussite(t, j);
         t.ambiance = _pick(_phrasesReussite);
@@ -539,6 +555,17 @@ async function routeInteraction(interaction) {
       return true;
     }
     // Compteur de sous du saloon (persistant)
+    // Réplique à DIRE À VOIX HAUTE en jeu (ambiance IA)
+    if (interaction.isButton() && id === 'fff_voix') {
+      await interaction.deferReply({ flags: eph });
+      const _arr = t.joueurs || t.sieges || [];
+      const _cur = _arr[t.tourIdx];
+      const _role = _estHote(t, interaction) ? 'croupier' : 'joueur';
+      const _sit = (_cur && _cur.userId === interaction.user.id) ? 'tour' : 'general';
+      const _ligne = await _ambiance.repliqueVocale?.({ jeu: 'cinq doigts', role: _role, situation: _sit }) || '';
+      await interaction.editReply({ content: '🎙️ **À dire à voix haute (en jeu)** :\n> ' + _ligne + '\n\n*Dis-le au micro pour animer la table — pas besoin de le taper.*' });
+      return true;
+    }
     if (interaction.isButton() && id === 'fff_sous') {
       const total = _sous(interaction.user.id);
       const j = _joueur(t, interaction.user.id);

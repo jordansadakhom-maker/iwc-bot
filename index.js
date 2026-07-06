@@ -25,6 +25,7 @@ let faro = {}; try { faro = require('./faro'); console.log('✅ Module faro char
 let poker = {}; try { poker = require('./poker'); console.log('✅ Module poker chargé'); } catch (e) { console.log('⚠️ poker non chargé:', e.message); }
 let cinqdoigts = {}; try { cinqdoigts = require('./cinqdoigts'); console.log('✅ Module cinq doigts chargé'); } catch (e) { console.log('⚠️ cinqdoigts non chargé:', e.message); }
 let dominos = {}; try { dominos = require('./dominos'); console.log('✅ Module dominos chargé'); } catch (e) { console.log('⚠️ dominos non chargé:', e.message); }
+let missionsIA = {}; try { missionsIA = require('./missions-ia'); console.log('✅ Module missions-ia chargé'); } catch (e) { console.log('⚠️ missions-ia non chargé:', e.message); }
 const rdvplus = require('./rdvplus');
 const reorg = require('./reorg');
 
@@ -2338,9 +2339,10 @@ async function autoSetup(guild) {
     if (!accueilDejaPoste) {
       if (msgs) { for (const m of msgs.values()) { if (m.author.id === client.user.id) await m.delete().catch(() => {}); } }
       const _ids = [];
-      for (const _chunk of REGLEMENT_CHUNKS) { const _m = await reglCh.send(_chunk).catch(() => null); if (_m) _ids.push(_m.id); }
+      // allowedMentions parse:[] → le règlement ne pingue JAMAIS personne (@everyone/@here compris).
+      for (const _chunk of REGLEMENT_CHUNKS) { const _m = await reglCh.send({ content: _chunk, allowedMentions: { parse: [] } }).catch(() => null); if (_m) _ids.push(_m.id); }
       db.reglementChunkIds = _ids;
-      const sent = await reglCh.send(_valMsg).catch(() => null);
+      const sent = await reglCh.send({ content: _valMsg, allowedMentions: { parse: [] } }).catch(() => null);
       if (sent) { await sent.react('✅').catch(() => {}); db.reglementMsgId = sent.id; }
       saveDB(db);
       console.log('✅ Règlement (accueil + validation) reposté dans #' + reglCh.name + ' (' + _ids.length + ' parties)');
@@ -4223,6 +4225,7 @@ client.on('interactionCreate', async interaction => {
   if (await poker.routeInteraction?.(interaction)) return;
   if (await cinqdoigts.routeInteraction?.(interaction)) return;
   if (await dominos.routeInteraction?.(interaction)) return;
+  if (await missionsIA.routeInteraction?.(interaction)) return;
   if (await pepites.routeInteraction?.(interaction)) return;
   if (await musique.routeInteraction?.(interaction)) return;
   if (await journaux.routeInteraction?.(interaction)) return;

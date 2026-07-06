@@ -104,7 +104,7 @@ async function onMessage(message) {
       await message.delete().catch(() => {});
       await timeout(message.member, CONF.SPAM_TIMEOUT_MS, 'Spam de mentions');
       await alerter(message.guild, '📛 Spam de mentions',
-        `<@${message.author.id}> a envoyé un message avec **${nbMentions}** mentions${message.mentions?.everyone ? ' (+ @everyone/@here)' : ''} dans <#${message.channelId}>. Message supprimé, sourdine 5 min.`);
+        `<@${message.author.id}> a envoyé un message avec **${nbMentions}** mentions${message.mentions?.everyone ? ' (+ everyone/here)' : ''} dans <#${message.channelId}>. Message supprimé, sourdine 5 min.`);
       return true;
     }
 

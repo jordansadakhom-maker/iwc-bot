@@ -13,6 +13,9 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, AttachmentBuilder } = require('discord.js');
 let _img = null; try { _img = require('./dominos-image'); } catch { _img = null; }
 let casino = {}; try { casino = require('./casino-banque'); } catch { casino = {}; }
+let _ambiance = {}; try { _ambiance = require('./ambiance-ia'); } catch { _ambiance = {}; }
+let _notif = {}; try { _notif = require('./table-notif'); } catch { _notif = {}; }
+let _voix = {}; try { _voix = require('./casino-voix'); } catch { _voix = {}; }
 const _sous = uid => (casino.solde ? casino.solde(uid) : 0);
 
 const PREFIXE = 'dom_';
@@ -343,6 +346,7 @@ function _rowExtras() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('dom_regles').setLabel('Comment jouer').setEmoji('📖').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('dom_emote').setLabel('Emote RP').setEmoji('🎭').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dom_voix').setLabel('À dire (voix)').setEmoji('🎙️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('dom_sous').setLabel('Mes sous').setEmoji('💰').setStyle(ButtonStyle.Secondary),
   );
 }
@@ -351,6 +355,7 @@ function _components(t) {
   if (t.phase === 'lobby') {
     rows.push(new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('dom_join').setLabel('Rejoindre').setEmoji('🪑').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('dom_mise').setLabel('Mon ante').setEmoji('💵').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('dom_leave').setLabel('Se lever').setEmoji('🚪').setStyle(ButtonStyle.Secondary),
     ));
     rows.push(new ActionRowBuilder().addComponents(
@@ -372,6 +377,11 @@ function _components(t) {
   return rows;
 }
 
+function _contentLigne(t) {
+  if (t.phase === 'jeu') { const j = t.joueurs[t.tourIdx]; return j ? '🎯 **Au tour de ' + j.nom + '** — 🀱 Jouer · 🂠 Piocher · ⏭️ Passer' : ''; }
+  if (t.manche > 0 && t.resultat) return '🏁 ' + t.resultat;
+  return '💰 Rejoignez et misez (💵 Ma mise), puis l\'hôte distribue.';
+}
 async function _screen(t) {
   const e = new EmbedBuilder().setColor(0xC8A45C).setTitle('🁢  TABLE DE DOMINOS  🁫')
     .setFooter({ text: 'Hôte : ' + t.hoteNom + '  ·  Double-six, jeu bloqué  ·  Le vainqueur ramasse le pot' });
@@ -380,13 +390,19 @@ async function _screen(t) {
   if (buf) {
     e.setImage('attachment://dominos.png');
     e.setDescription(_lignesStatut(t).join('\n').slice(0, 4000));
-    return { embeds: [e], components: _components(t), files: [new AttachmentBuilder(buf, { name: 'dominos.png' })] };
+    return { content: _contentLigne(t), embeds: [e], components: _components(t), files: [new AttachmentBuilder(buf, { name: 'dominos.png' })] };
   }
   e.setDescription(_lignesTexte(t).concat(['─────────────────────────────']).concat(_lignesStatut(t)).join('\n').slice(0, 4000));
-  return { embeds: [e], components: _components(t), files: [] };
+  return { content: _contentLigne(t), embeds: [e], components: _components(t), files: [] };
 }
 
-async function _refresh(t) { try { if (t.msg) { const p = await _screen(t); await t.msg.edit({ ...p, attachments: [] }); } } catch (e) { console.log('⚠️ dom refresh:', e.message); } }
+async function _refresh(t) {
+  try {
+    if (t.msg) { const p = await _screen(t); await t.msg.edit({ ...p, attachments: [], allowedMentions: { parse: [] } }); }
+    const _cur = (t.joueurs || [])[t.tourIdx];
+    await _notif.majPingTour?.(t, t.msg?.channel, (t.phase === 'jeu') ? _cur?.userId : null);
+  } catch (e) { console.log('⚠️ dom refresh:', e.message); }
+}
 
 // Image (ou texte) de la main privée d'un joueur → réponse éphémère.
 async function _peekPayload(t, j) {
@@ -478,12 +494,13 @@ async function routeInteraction(interaction) {
     if (!t) { if (interaction.isButton() || interaction.isModalSubmit() || interaction.isStringSelectMenu()) { await interaction.reply({ content: '⌛ Cette table n\'est plus active. Ouvre-en une nouvelle depuis le panneau 🁢.', flags: eph }).catch(() => {}); } return true; }
 
     // Rejoindre → modal d'ante
-    if (interaction.isButton() && id === 'dom_join') {
-      if (t.phase === 'jeu') { await interaction.reply({ content: '⏳ Une partie est en cours — rejoins à la fin de la manche.', flags: eph }); return true; }
-      if (_joueur(t, interaction.user.id)) { await interaction.reply({ content: 'Tu es déjà à la table. Reclique pour ajuster ton ante.', flags: eph }); return true; }
-      if (t.joueurs.length >= MAX_JOUEURS) { await interaction.reply({ content: '🈵 La table est complète (' + MAX_JOUEURS + ' joueurs).', flags: eph }); return true; }
-      const modal = new ModalBuilder().setCustomId('dom_join_modal').setTitle('🪑 Rejoindre la table')
-        .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ante').setLabel('Votre ante (en $)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(8).setPlaceholder('Ex : 20')));
+    if (interaction.isButton() && (id === 'dom_join' || id === 'dom_mise')) {
+      if (t.phase === 'jeu') { await interaction.reply({ content: '⏳ Une partie est en cours — (re)mise à la fin de la manche.', flags: eph }); return true; }
+      const _dj = _joueur(t, interaction.user.id);
+      if (id === 'dom_mise' && !_dj) { await interaction.reply({ content: 'Rejoins d\'abord (🪑) pour miser ton ante.', flags: eph }); return true; }
+      if (!_dj && t.joueurs.length >= MAX_JOUEURS) { await interaction.reply({ content: '🈵 La table est complète (' + MAX_JOUEURS + ' joueurs).', flags: eph }); return true; }
+      const modal = new ModalBuilder().setCustomId('dom_join_modal').setTitle(_dj ? '💵 Changer mon ante' : '🪑 Rejoindre la table')
+        .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ante').setLabel('Votre ante (en $)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(8).setValue(_dj ? String(_dj.ante) : '').setPlaceholder('Ex : 20')));
       await interaction.showModal(modal); return true;
     }
     if (interaction.isModalSubmit() && id === 'dom_join_modal') {
@@ -520,6 +537,7 @@ async function routeInteraction(interaction) {
       if (t.joueurs.length < MIN_JOUEURS) { await interaction.reply({ content: 'Il faut au moins ' + MIN_JOUEURS + ' joueurs.', flags: eph }); return true; }
       await interaction.deferUpdate().catch(() => {});
       _distribuer(t);
+      try { _voix.jouer?.(interaction.member?.voice?.channel, 'tuiles'); } catch {}
       await _refresh(t); return true;
     }
 
@@ -615,6 +633,17 @@ async function routeInteraction(interaction) {
       return true;
     }
     // Compteur de sous du saloon (persistant)
+    // Réplique à DIRE À VOIX HAUTE en jeu (ambiance IA)
+    if (interaction.isButton() && id === 'dom_voix') {
+      await interaction.deferReply({ flags: eph });
+      const _arr = t.joueurs || t.sieges || [];
+      const _cur = _arr[t.tourIdx];
+      const _role = _estHote(t, interaction) ? 'croupier' : 'joueur';
+      const _sit = (_cur && _cur.userId === interaction.user.id) ? 'tour' : 'general';
+      const _ligne = await _ambiance.repliqueVocale?.({ jeu: 'dominos', role: _role, situation: _sit }) || '';
+      await interaction.editReply({ content: '🎙️ **À dire à voix haute (en jeu)** :\n> ' + _ligne + '\n\n*Dis-le au micro pour animer la table — pas besoin de le taper.*' });
+      return true;
+    }
     if (interaction.isButton() && id === 'dom_sous') {
       const total = _sous(interaction.user.id);
       const j = _joueur(t, interaction.user.id);
