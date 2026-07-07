@@ -54,7 +54,7 @@ async function _corrigerTexte(texte) {
 async function _reformuler(texte) {
   const t = (texte || '').trim();
   if (t.length < 3) return t;
-  try { if (typeof global.reformulerRP === 'function') { const r = await global.reformulerRP(t.slice(0, 1500)); if (r) return r; } } catch {}
+  try { if (typeof global.reformulerRP === 'function') { const r = await global.reformulerRP(t.slice(0, 2000)); if (r) return r; } } catch {}
   return _corrigerTexte(t);
 }
 
@@ -149,6 +149,22 @@ function _salonOps(guild) {
     || null;
 }
 
+// Découpe un briefing long en plusieurs champs (Discord limite un champ à 1024).
+// On coupe de préférence sur un saut de ligne pour rester lisible.
+function _champsBriefing(txt) {
+  let s = String(txt || '').trim();
+  if (!s) return [];
+  const out = [];
+  while (s.length && out.length < 4) {
+    let cut;
+    if (s.length <= 1024) cut = s.length;
+    else { cut = s.lastIndexOf('\n', 1024); if (cut < 400) cut = 1024; }
+    out.push({ name: out.length === 0 ? '📜 Briefing' : '📜 Briefing (suite)', value: s.slice(0, cut).trim() || '—', inline: false });
+    s = s.slice(cut).trim();
+  }
+  return out;
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  EMBED « ORDRE D'OPÉRATION » (compatible handlers op_* existants)
 //  → field[0] DOIT être « Statut »  ·  un champ DOIT commencer par « 👥 Participants »
@@ -173,8 +189,8 @@ function _embedOrdre(op) {
       { name: '📍 Lieu', value: op.lieu || '—', inline: true },
       { name: '🕐 Quand', value: dt ? `${tsF(dt)}\n${tsR(dt)}` : (op.quandTexte ? `*${op.quandTexte}* (à fixer)` : '*À définir*'), inline: true },
       ...(op.butin ? [{ name: '💰 Butin / prime visé', value: op.butin, inline: true }] : []),
-      { name: '📋 Objectif', value: (op.objectif || '—').slice(0, 1000), inline: false },
-      ...(op.briefing ? [{ name: '📜 Briefing', value: op.briefing.slice(0, 1000), inline: false }] : []),
+      { name: '📋 Objectif', value: (op.objectif || '—').slice(0, 1024), inline: false },
+      ..._champsBriefing(op.briefing),
       { name: '👥 Participants (0)', value: '*Personne pour l\'instant. Clique « ✋ Je participe » ci-dessous.*', inline: false },
     )
     .setFooter({ text: `Réf. ${op.id} • Iron Wolf Company` })
@@ -366,10 +382,10 @@ async function routeInteraction(interaction) {
       const modal = new ModalBuilder().setCustomId(`opnew_modal::${typeKey}::${lieuKey}`).setTitle('🎯 Ordre d\'opération');
       modal.addComponents(
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('code').setLabel('Nom de code (vide = généré)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(50).setPlaceholder('Ex : Corbeau Rouge')),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objectif').setLabel('Objectif de la mission').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(200).setPlaceholder('Ex : intercepter le convoi près de Rhodes')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objectif').setLabel('Objectif de la mission').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(300).setPlaceholder('Ex : intercepter le convoi près de Rhodes')),
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('quand').setLabel('Quand ? (jour + heure)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(60).setPlaceholder('Ex : 22/06 à 21h')),
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('butin').setLabel('Butin / prime visé (facultatif)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(120).setPlaceholder('Ex : 3000$ + cargaison')),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('briefing').setLabel('Briefing / consignes (facultatif)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(900).setPlaceholder('Plan, rôles, point de ralliement, infos utiles…')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('briefing').setLabel('Briefing / consignes (facultatif)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(2000).setPlaceholder('Plan, rôles, point de ralliement, infos utiles…')),
       );
       await interaction.showModal(modal).catch(() => {});
       return true;
