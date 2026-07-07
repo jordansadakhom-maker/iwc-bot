@@ -124,6 +124,10 @@ let armes = {};
 try { armes = require('./armes'); console.log('✅ Module armes (registre) chargé'); }
 catch (e) { console.log('⚠️ armes non chargé:', e.message); }
 
+let nettoyeur = {};
+try { nettoyeur = require('./nettoyeur'); console.log('✅ Module nettoyeur chargé'); }
+catch (e) { console.log('⚠️ nettoyeur non chargé:', e.message); }
+
 let telegramme = {};
 try { telegramme = require('./telegramme'); console.log('✅ Module télégrammes (conversations) chargé'); }
 catch (e) { console.log('⚠️ telegramme non chargé:', e.message); }
@@ -213,6 +217,7 @@ const client = new Client({
 initPapiers(client);
 securite.initSecurite(client);
 securitePlus.initSecuritePlus(client);
+nettoyeur.demarrer?.(client);
 operations.init?.({
   creerOperationNotion: (op) => notionExtra.creerOperationNotion?.(op),
   poleRoleId: (guild, pole) => _poleRoleId(guild, pole),
@@ -3640,6 +3645,8 @@ client.on('messageCreate', async message => {
   } catch {}
   // Sécurité+ : anti-spam / anti-scam (ne consomme le message QUE s'il a été supprimé)
   try { if (await securitePlus.onMessage(message)) return; } catch {}
+  // Nettoyeur : planifie la suppression du bruit du bot (ne consomme rien, ne touche qu'aux messages du bot)
+  try { nettoyeur.onMessage?.(message); } catch {}
   // Panneaux collants : on garde le panneau en bas du salon (ne consomme rien)
   try { stickyPanel.onMessage(message); } catch {}
   // ⚡ Suivi d'activité — AVANT tout aiguillage de module. Sinon un message
@@ -3654,6 +3661,17 @@ client.on('messageCreate', async message => {
         if (mAct.status === 'inactif') mAct.status = 'actif';
         saveDB(dbAct);
       }
+    }
+  } catch {}
+  // Nettoyeur : « !nettoyage » ouvre le panneau de configuration (Direction).
+  try { if (await nettoyeur.commande?.(message)) return; } catch {}
+  // Modération : « !moderation » affiche l'état des protections (Direction).
+  try {
+    if (message.guild && !message.author?.bot && /^!moderation\b/i.test((message.content || '').trim())) {
+      if (!isDirection(message.member)) { await message.reply({ content: '❌ Réservé à la Direction.', allowedMentions: { parse: [] } }).catch(() => {}); return; }
+      const emb = securitePlus.rapportEmbed?.(message.guild);
+      if (emb) await message.reply({ embeds: [emb], allowedMentions: { parse: [] } }).catch(() => {});
+      return;
     }
   } catch {}
   // Réinitialisation du registre (sans commande slash, pour ne pas dépasser la limite Discord) :
@@ -4346,6 +4364,7 @@ client.on('interactionCreate', async interaction => {
   if (await absences.routeInteraction?.(interaction)) return;
   if (await repertoire.routeInteraction?.(interaction)) return;
   if (await armes.routeInteraction?.(interaction)) return;
+  if (await nettoyeur.routeInteraction?.(interaction)) return;
   if (await monitoring.routeInteraction?.(interaction)) return;
   if (await telegramme.routeInteraction?.(interaction)) return;
   if (await securite.routeInteraction?.(interaction)) return;

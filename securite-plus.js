@@ -25,6 +25,9 @@ const CONF = {
   MASSMOD: 4, MASSMOD_WINDOW_MS: 20000,     // 4 ban/kick en 20 s par la même personne → attaque
 };
 
+// ── Liens d'invitation Discord (pub vers un autre serveur) — retirés chez les non-staff ──
+const INVITE_RE = /(?:discord(?:app)?\.com\/invite|discord(?:\.gg|\.li|\.me)|dsc\.gg|invite\.gg|discord\.io)\/[a-z0-9\-_]+/i;
+
 // ── Domaines/motifs d'arnaque connus (liste ciblée pour limiter les faux positifs) ──
 const SCAM_RE = [
   /\bfree\s*[-]?\s*nitro\b/i,
@@ -41,6 +44,8 @@ const SCAM_RE = [
 const _msgs = new Map();      // userId → [timestamps]
 const _joins = new Map();     // guildId → [{id, at}]
 const _modActs = new Map();   // guildId:executorId → [timestamps]
+const _invStrikes = new Map();// userId → [timestamps] (récidive d'invitations)
+const INVITE_STRIKE_WINDOW_MS = 10 * 60 * 1000;
 let _lastRaidAlert = 0;
 
 // ── Helpers ──
@@ -60,6 +65,16 @@ async function alerter(guild, titre, description, couleur = 0xC0392B) {
   // MP aux responsables
   for (const id of AUTORISES) { try { const u = await guild.client.users.fetch(id); await u.send({ embeds: [embed] }); } catch {} }
   console.log(`[SÉCURITÉ+] ${titre} — ${description.replace(/\n/g, ' ').slice(0, 200)}`);
+}
+// Prévient l'auteur EN PRIVÉ (MP) — modération « douce » : on explique gentiment.
+async function avertirMembre(user, guild, titre, message) {
+  try {
+    if (!user || user.bot) return false;
+    const e = new EmbedBuilder().setColor(0xE67E22).setTitle(titre).setDescription(String(message).slice(0, 1800))
+      .setFooter({ text: (guild?.name || 'Serveur') + ' • Modération automatique' }).setTimestamp();
+    await user.send({ embeds: [e] });
+    return true;
+  } catch { return false; } // MP fermés → on n'insiste pas
 }
 async function timeout(member, ms, raison) {
   try { if (member?.moderatable) { await member.timeout(ms, raison); return true; } } catch {}
@@ -93,8 +108,27 @@ async function onMessage(message) {
     if (contenu && SCAM_RE.some(re => re.test(contenu))) {
       await message.delete().catch(() => {});
       await timeout(message.member, CONF.SPAM_TIMEOUT_MS, 'Lien/arnaque détecté');
+      await avertirMembre(message.author, message.guild, '🪤 Message supprimé',
+        'Ton message ressemblait à une **arnaque / hameçonnage** (faux Nitro, lien piégé, faux cadeau Steam…) et a été retiré ; tu es en sourdine quelques minutes par précaution. Si c\'est une erreur, préviens la Direction.');
       await alerter(message.guild, '🪤 Lien d\'arnaque supprimé',
         `Message de <@${message.author.id}> dans <#${message.channelId}> supprimé (arnaque/phishing présumé) et auteur mis en sourdine 5 min.\n\n> ${contenu.slice(0, 300).replace(/\n/g, ' ')}`);
+      return true;
+    }
+
+    // — Anti-invitation Discord : pub vers un autre serveur (retirée chez les non-staff) —
+    if (contenu && INVITE_RE.test(contenu)) {
+      await message.delete().catch(() => {});
+      const now = Date.now();
+      const arr = (_invStrikes.get(message.author.id) || []).filter(t => now - t < INVITE_STRIKE_WINDOW_MS);
+      arr.push(now); _invStrikes.set(message.author.id, arr);
+      const recidive = arr.length >= 2;
+      if (recidive) await timeout(message.member, CONF.SPAM_TIMEOUT_MS, 'Invitations Discord répétées');
+      await avertirMembre(message.author, message.guild, '🔗 Lien d\'invitation retiré',
+        `Ton message dans **#${message.channel?.name || 'ce salon'}** a été supprimé : les **liens d'invitation vers d'autres serveurs Discord** ne sont pas autorisés ici.` +
+        (recidive ? '\n\n⚠️ C\'est la **2ᵉ fois** : tu es en sourdine quelques minutes. Merci d\'arrêter.' : '\n\nMerci de ne pas recommencer. 🙏'));
+      await alerter(message.guild, '🔗 Invitation Discord supprimée',
+        `Message de <@${message.author.id}> dans <#${message.channelId}> supprimé (lien d'invitation vers un autre serveur).` + (recidive ? '\n→ Récidive : sourdine 5 min.' : ''),
+        0xE67E22);
       return true;
     }
 
@@ -103,6 +137,8 @@ async function onMessage(message) {
     if (nbMentions >= CONF.MAX_MENTIONS || (message.mentions?.everyone && nbMentions >= 3)) {
       await message.delete().catch(() => {});
       await timeout(message.member, CONF.SPAM_TIMEOUT_MS, 'Spam de mentions');
+      await avertirMembre(message.author, message.guild, '📛 Message supprimé',
+        'Ton message mentionnait **trop de personnes d\'un coup** (spam de mentions) et a été retiré ; tu es en sourdine quelques minutes. Merci de calmer les pings. 🙏');
       await alerter(message.guild, '📛 Spam de mentions',
         `<@${message.author.id}> a envoyé un message avec **${nbMentions}** mentions${message.mentions?.everyone ? ' (+ everyone/here)' : ''} dans <#${message.channelId}>. Message supprimé, sourdine 5 min.`);
       return true;
@@ -122,6 +158,8 @@ async function onMessage(message) {
         const aSupprimer = recents.filter(m => m.author.id === message.author.id && (now - m.createdTimestamp) < CONF.SPAM_WINDOW_MS * 2);
         for (const m of aSupprimer.values()) await m.delete().catch(() => {});
       } catch {}
+      await avertirMembre(message.author, message.guild, '🌊 Ralentis un peu',
+        'Tu as envoyé **trop de messages en quelques secondes** : certains ont été retirés et tu es en sourdine quelques minutes. Rien de grave — respire, puis reprends tranquillement. 🙂');
       await alerter(message.guild, '🌊 Flood détecté',
         `<@${message.author.id}> a envoyé ${arr.length}+ messages en ${CONF.SPAM_WINDOW_MS / 1000}s dans <#${message.channelId}>. Sourdine 5 min, messages récents supprimés.`);
       return true;
@@ -190,7 +228,21 @@ function initSecuritePlus(client) {
   client.on('guildMemberAdd', m => { onGuildMemberAdd(m).catch(() => {}); });
   client.on('guildBanAdd', b => { onGuildBanAdd(b).catch(() => {}); });
   client.on('guildMemberRemove', m => { onGuildMemberRemove(m).catch(() => {}); });
-  console.log('🛡️ securite-plus initialisé (anti-spam, anti-scam, anti-raid, anti ban/kick masse)');
+  console.log('🛡️ securite-plus initialisé (anti-spam, anti-scam, anti-invitation, anti-raid, anti ban/kick masse)');
 }
 
-module.exports = { initSecuritePlus, onMessage, CONF };
+// Rapport d'état de la modération (commande « !moderation », Direction).
+function rapportEmbed(guild) {
+  return new EmbedBuilder().setColor(0x2ECC71).setTitle('🛡️ MODÉRATION — protections actives')
+    .setDescription('Modération automatique **légère & sûre** : le staff et les bots sont **toujours exemptés**, et tout est **réversible**.')
+    .addFields(
+      { name: '🔗 Liens d\'invitation Discord', value: 'Supprimés (pub d\'un autre serveur). Auteur prévenu en privé ; sourdine 5 min en cas de récidive.', inline: false },
+      { name: '🪤 Arnaques / hameçonnage', value: 'Faux Nitro, liens piégés, faux cadeaux Steam → supprimés + sourdine 5 min + auteur prévenu.', inline: false },
+      { name: '📛 Spam de mentions', value: `≥ ${CONF.MAX_MENTIONS} mentions (ou @everyone abusif) → supprimé + sourdine + auteur prévenu.`, inline: false },
+      { name: '🌊 Flood', value: `${CONF.SPAM_MSGS} messages en ${CONF.SPAM_WINDOW_MS / 1000}s → messages récents retirés + sourdine + auteur prévenu.`, inline: false },
+      { name: '🚨 Anti-raid', value: `${CONF.RAID_JOINS} arrivées en ${CONF.RAID_WINDOW_MS / 1000}s → sourdine des arrivants (réversible) + alerte Direction.`, inline: false },
+      { name: '🔨 Ban/Kick en masse', value: `${CONF.MASSMOD} sanctions en ${CONF.MASSMOD_WINDOW_MS / 1000}s → rôles du modérateur retirés par précaution + alerte.`, inline: false },
+    ).setFooter({ text: 'Aucun filtre de gros mots — le RP reste 100 % libre.' }).setTimestamp();
+}
+
+module.exports = { initSecuritePlus, onMessage, rapportEmbed, CONF, INVITE_RE };
