@@ -15,8 +15,8 @@ const saveDB = dbMod.saveDB || (() => {});
 const backupGit = (typeof dbMod.sauvegarderSurGitHub === 'function') ? dbMod.sauvegarderSurGitHub : null;
 function persist(db) { try { saveDB(db); } catch {} try { if (backupGit) backupGit(); } catch {} }
 
-// Salon où vit le panneau (posé au démarrage). À renseigner une fois connu.
-const SALON_ARMES = '';
+// Salon où vit le panneau (posé au démarrage).
+const SALON_ARMES = '1524184998066917406';
 
 const DIRECTION = ['Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'];
 function estGestion(member) { try { return !!member?.roles?.cache?.some(r => DIRECTION.some(n => (r.name || '').includes(n))); } catch { return false; } }
