@@ -120,6 +120,9 @@ catch (e) { console.log('⚠️ absences non chargé:', e.message); }
 let repertoire = {};
 try { repertoire = require('./repertoire'); console.log('✅ Module répertoire chargé'); }
 catch (e) { console.log('⚠️ répertoire non chargé:', e.message); }
+let armes = {};
+try { armes = require('./armes'); console.log('✅ Module armes (registre) chargé'); }
+catch (e) { console.log('⚠️ armes non chargé:', e.message); }
 
 let telegramme = {};
 try { telegramme = require('./telegramme'); console.log('✅ Module télégrammes (conversations) chargé'); }
@@ -2616,6 +2619,8 @@ async function autoSetup(guild) {
   (async () => { try { const r = await _assurerRoleClient(guild); console.log(r ? '👤 Rôle « Client » prêt' : '⚠️ Rôle « Client » non créé (permission « Gérer les rôles » ?)'); } catch {} })();
   // Panneau du générateur de missions RP (salon Direction) — réservé à l'état-major.
   (async () => { try { await missionsIA.installerPanelMissions?.(guild, '1510712255514153101'); console.log('🎯 Panneau générateur de missions en place'); } catch {} })();
+  // Registre des armes (n° de série) — pose le panneau si un salon est configuré (SALON_ARMES).
+  (async () => { try { await armes.installerPanneau?.(guild); if (armes.SALON_ARMES) console.log('🔫 Registre des armes en place'); } catch {} })();
   // 🔒 Salon STRICTEMENT réservé aux Fondateurs : SEUL le rôle « Fondateur » (et le bot) voit/accède.
   // On ferme à @everyone ET on retire l'accès à tout autre rôle/membre. (Limite Discord : les rôles
   // « Administrateur » et le propriétaire du serveur passent toujours outre — impossible à bloquer par salon.)
@@ -4322,6 +4327,7 @@ client.on('interactionCreate', async interaction => {
   if (await diagnostic.routeInteraction?.(interaction)) return;
   if (await absences.routeInteraction?.(interaction)) return;
   if (await repertoire.routeInteraction?.(interaction)) return;
+  if (await armes.routeInteraction?.(interaction)) return;
   if (await monitoring.routeInteraction?.(interaction)) return;
   if (await telegramme.routeInteraction?.(interaction)) return;
   if (await securite.routeInteraction?.(interaction)) return;
