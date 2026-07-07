@@ -24,6 +24,18 @@ function estGestion(member) { try { return !!member?.roles?.cache?.some(r => DIR
 const COULEUR = 0x8C6D3F;
 const CATS_DEFAUT = ['Revolver', 'Pistolet', 'Fusil à répétition', 'Fusil à pompe', 'Carabine', 'Fusil de précision', 'Autre'];
 const AFF_DEFAUT = ['Iron Wolf Company', 'La Confrérie', 'Coffre commun', 'Personnel'];
+const ROLE_CONFRERIE = '1508898841993281658'; // rôle « La Confrérie » (pôle illégal)
+
+// Membres de la Confrérie (pour assigner une arme à une personne). Cache du bot.
+function _membresConfrerie(guild) {
+  try {
+    const role = guild?.roles?.cache?.get(ROLE_CONFRERIE) || guild?.roles?.cache?.find(r => /confr[ée]rie/i.test(r.name || ''));
+    if (!role) return [];
+    return [...role.members.values()].filter(m => !m.user?.bot)
+      .map(m => ({ id: m.id, nom: m.displayName || m.user?.username || m.id }))
+      .sort((a, b) => a.nom.localeCompare(b.nom)).slice(0, 25);
+  } catch { return []; }
+}
 
 function _id() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 function _clip(v, n) { return String(v == null ? '' : v).slice(0, n); }
@@ -67,7 +79,7 @@ function _panelEmbed(r) {
   for (const [aff, list] of Object.entries(parAff)) {
     if (champs >= 20) break;
     list.sort((a, b) => (a.type || '').localeCompare(b.type || ''));
-    let val = list.slice(0, 12).map(a => `• \`${a.serie}\` — **${a.type}**${a.categorie ? ` *(${a.categorie})*` : ''}`).join('\n');
+    let val = list.slice(0, 12).map(a => `• \`${a.serie}\` — **${a.type}**${a.categorie ? ` *(${a.categorie})*` : ''}${a.membreId ? ` · 👤 <@${a.membreId}>` : ''}`).join('\n');
     if (list.length > 12) val += `\n…(+${list.length - 12} autres)`;
     e.addFields({ name: `🏷️ ${_clip(aff, 60)} (${list.length})`, value: val.slice(0, 1024), inline: false });
     champs++;
@@ -94,33 +106,52 @@ async function _refreshPanel(client, r) {
 async function installerPanneau(guild, channelId) {
   try {
     const cid = channelId || SALON_ARMES;
-    if (!cid) return;
-    const ch = await guild.channels.fetch(cid).catch(() => null);
-    if (!ch || typeof ch.send !== 'function') return;
+    if (!cid) return false;
+    // fetch, avec repli sur le cache si le fetch échoue
+    let ch = await guild.channels.fetch(cid).catch(() => null);
+    if (!ch) ch = guild.channels.cache.get(cid) || null;
+    if (!ch) { console.log('⚠️ Registre armes : salon ' + cid + ' introuvable/inaccessible dans « ' + (guild.name || guild.id) + ' » (mauvais ID, ou le bot n\'a pas « Voir le salon » ?).'); return false; }
     const db = loadDB(); const r = _ensure(db);
     r.channelId = cid;
     const me = guild.client.user.id;
     const estPanel = m => m.author?.id === me && (m.embeds?.[0]?.title || '').includes('REGISTRE DES ARMES');
+    const payload = { embeds: [_panelEmbed(r)], components: _panelButtons() };
+
+    // Salon FORUM (type 15) → le panneau vit dans un fil épinglé
+    if (ch.type === 15 && ch.threads?.create) {
+      const act = await ch.threads.fetchActive().catch(() => null);
+      let post = act?.threads ? [...act.threads.values()].find(t => (t.name || '').includes('Registre des armes')) : null;
+      if (post) { const st = await post.fetchStarterMessage().catch(() => null); if (st) { await st.edit(payload).catch(() => {}); r.panelId = st.id; persist(db); return true; } }
+      const created = await ch.threads.create({ name: '🔫 Registre des armes', message: payload }).catch(e => { console.log('⚠️ Registre armes (forum) :', e.message); return null; });
+      if (created) { await created.pin?.().catch(() => {}); const st = await created.fetchStarterMessage().catch(() => null); if (st) r.panelId = st.id; persist(db); return true; }
+      return false;
+    }
+    if (typeof ch.send !== 'function') { console.log('⚠️ Registre armes : le salon ' + cid + ' n\'est pas un salon texte où poster (type ' + ch.type + ' — catégorie/vocal ?). Donne un salon texte.'); return false; }
+
     let panel = null;
     if (r.panelId) panel = await ch.messages.fetch(r.panelId).catch(() => null);
     if (!panel) { const pins = await ch.messages.fetchPinned().catch(() => null); if (pins) panel = [...pins.values()].find(estPanel) || null; }
     if (!panel) { const recent = await ch.messages.fetch({ limit: 30 }).catch(() => null); if (recent) panel = [...recent.values()].find(estPanel) || null; }
-    if (panel) { await panel.edit({ embeds: [_panelEmbed(r)], components: _panelButtons() }).catch(() => {}); r.panelId = panel.id; persist(db); return; }
-    const sent = await ch.send({ embeds: [_panelEmbed(r)], components: _panelButtons() }).catch(() => null);
-    if (sent) { await sent.pin().catch(() => {}); r.panelId = sent.id; persist(db); }
-  } catch (e) { console.log('⚠️ armes installerPanneau:', e.message); }
+    if (panel) { await panel.edit(payload).catch(() => {}); r.panelId = panel.id; persist(db); return true; }
+    const sent = await ch.send(payload).catch(e => { console.log('⚠️ Registre armes : envoi impossible dans ' + cid + ' — permission « Envoyer des messages » du bot ? (' + e.message + ')'); return null; });
+    if (sent) { await sent.pin().catch(() => {}); r.panelId = sent.id; persist(db); return true; }
+    return false;
+  } catch (e) { console.log('⚠️ armes installerPanneau:', e.message); return false; }
 }
 
 // ─── Draft (persisté) : entre le modal texte et le choix des menus ───
 function _pruneDrafts(r) { try { const k = Object.keys(r.drafts); if (k.length > 50) for (const key of k.slice(0, k.length - 50)) delete r.drafts[key]; } catch {} }
-function _draftMsg(r, d, draftId) {
+function _draftMsg(r, d, draftId, membres) {
   const optsCat = r.categories.slice(0, 24).map(c => ({ label: _clip(c, 100), value: c, default: d.categorie === c }));
   optsCat.push({ label: 'Nouvelle catégorie…', value: '__new__', emoji: '➕' });
   const optsAff = r.appartenances.slice(0, 24).map(a => ({ label: _clip(a, 100), value: a, default: d.appartenance === a }));
   optsAff.push({ label: 'Nouvelle affectation…', value: '__new__', emoji: '➕' });
+  const optsMbr = [{ label: 'Aucun (pas de personne)', value: '__none__', default: !d.membreId, emoji: '🚫' }];
+  for (const m of (membres || []).slice(0, 24)) optsMbr.push({ label: _clip(m.nom, 100), value: m.id, default: d.membreId === m.id });
   const rows = [
     new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`arme_selcat::${draftId}`).setPlaceholder('🗂️ Catégorie de l\'arme…').addOptions(optsCat)),
     new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`arme_selaff::${draftId}`).setPlaceholder('🏷️ À qui / quoi appartient-elle…').addOptions(optsAff)),
+    new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`arme_selmbr::${draftId}`).setPlaceholder('👤 Détenteur — membre de la Confrérie (optionnel)…').addOptions(optsMbr)),
     new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`arme_gen::${draftId}`).setLabel('Enregistrer l\'arme').setEmoji('✅').setStyle(ButtonStyle.Success)),
   ];
   const recap = [
@@ -131,8 +162,9 @@ function _draftMsg(r, d, draftId) {
     '',
     `🗂️ Catégorie : ${d.categorie || '*à choisir*'}`,
     `🏷️ Appartient à : ${d.appartenance || '*à choisir*'}`,
+    `👤 Détenteur : ${d.membreNom ? d.membreNom : '*aucun*'}`,
     '',
-    'Choisis la **catégorie** et l\'**affectation**, puis **Enregistrer**.',
+    'Choisis la **catégorie** et l\'**affectation** (le **détenteur** est optionnel), puis **Enregistrer**.',
   ].filter(x => x != null).join('\n');
   return { content: recap, components: rows };
 }
@@ -142,13 +174,13 @@ function _filtreArmes(armes, terme) {
   const n = _norm(terme); if (!n) return [];
   return (armes || []).filter(a =>
     _norm(a.serie).includes(n) || _norm(a.type).includes(n) || _norm(a.categorie).includes(n) ||
-    _norm(a.appartenance).includes(n) || _norm(a.notes).includes(n)
+    _norm(a.appartenance).includes(n) || _norm(a.notes).includes(n) || _norm(a.membreNom).includes(n)
   );
 }
 function _resultsEmbed(list, terme) {
   const e = new EmbedBuilder().setColor(COULEUR).setTitle(`🔎 Registre des armes — « ${terme} »`).setFooter({ text: 'Iron Wolf Company • registre des armes' });
   if (!list.length) { e.setDescription(`Aucune arme ne correspond à **${terme}**.\n*Essaie un n° de série, un type, une catégorie ou une affectation.*`); return e; }
-  const lignes = list.slice(0, 25).map(a => `• \`${a.serie}\` — **${a.type}**${a.categorie ? ` *(${a.categorie})*` : ''}  ·  🏷️ ${a.appartenance || '—'}${a.notes ? `\n   ↳ ${_clip(a.notes, 100)}` : ''}`);
+  const lignes = list.slice(0, 25).map(a => `• \`${a.serie}\` — **${a.type}**${a.categorie ? ` *(${a.categorie})*` : ''}  ·  🏷️ ${a.appartenance || '—'}${a.membreId ? ` · 👤 <@${a.membreId}>` : ''}${a.notes ? `\n   ↳ ${_clip(a.notes, 100)}` : ''}`);
   e.setDescription(lignes.join('\n').slice(0, 4000));
   e.addFields({ name: '​', value: `**${list.length}** résultat(s)${list.length > 25 ? ' — 25 premiers affichés' : ''}`, inline: false });
   return e;
@@ -201,10 +233,10 @@ async function routeInteraction(interaction) {
         serie: (interaction.fields.getTextInputValue('serie') || '').trim().slice(0, 60),
         type: (interaction.fields.getTextInputValue('type') || '').trim().slice(0, 80),
         notes: (interaction.fields.getTextInputValue('notes') || '').trim().slice(0, 300),
-        categorie: '', appartenance: '', by: interaction.user.id, at: Date.now(),
+        categorie: '', appartenance: '', membreId: null, membreNom: '', by: interaction.user.id, at: Date.now(),
       };
       _pruneDrafts(r); persist(db);
-      await interaction.reply({ ..._draftMsg(r, r.drafts[draftId], draftId), flags: eph }).catch(() => {});
+      await interaction.reply({ ..._draftMsg(r, r.drafts[draftId], draftId, _membresConfrerie(interaction.guild)), flags: eph }).catch(() => {});
       return true;
     }
     // ── Choix catégorie / affectation d'un draft ──
@@ -225,7 +257,7 @@ async function routeInteraction(interaction) {
       }
       if (estCat) d.categorie = val; else d.appartenance = val;
       persist(db);
-      await interaction.update(_draftMsg(r, d, draftId)).catch(() => {});
+      await interaction.update(_draftMsg(r, d, draftId, _membresConfrerie(interaction.guild))).catch(() => {});
       return true;
     }
     // ── Création d'une nouvelle valeur (catégorie/affectation) depuis le draft ──
@@ -238,7 +270,21 @@ async function routeInteraction(interaction) {
       const val = _ajoutUnique(quoi === 'cat' ? r.categories : r.appartenances, interaction.fields.getTextInputValue('valeur'));
       if (val) { if (quoi === 'cat') d.categorie = val; else d.appartenance = val; }
       persist(db);
-      await interaction.update(_draftMsg(r, d, draftId)).catch(() => {});
+      await interaction.update(_draftMsg(r, d, draftId, _membresConfrerie(interaction.guild))).catch(() => {});
+      return true;
+    }
+    // ── Choix du détenteur (membre de la Confrérie) d'un draft ──
+    if (interaction.isStringSelectMenu?.() && cid.startsWith('arme_selmbr::')) {
+      if (!estGestion(interaction.member)) return refuse();
+      const draftId = cid.split('::')[1];
+      const db = loadDB(); const r = _ensure(db);
+      const d = r.drafts[draftId];
+      if (!d) { await interaction.update({ content: '⌛ Saisie expirée — reclique **➕ Ajouter une arme**.', components: [] }).catch(() => {}); return true; }
+      const val = interaction.values[0];
+      if (val === '__none__') { d.membreId = null; d.membreNom = ''; }
+      else { const gm = await interaction.guild.members.fetch(val).catch(() => null); d.membreId = val; d.membreNom = gm?.displayName || gm?.user?.username || val; }
+      persist(db);
+      await interaction.update(_draftMsg(r, d, draftId, _membresConfrerie(interaction.guild))).catch(() => {});
       return true;
     }
     // ── Enregistrer l'arme ──
@@ -249,12 +295,13 @@ async function routeInteraction(interaction) {
       const d = r.drafts[draftId];
       if (!d) { await interaction.update({ content: '⌛ Saisie expirée — reclique **➕ Ajouter une arme**.', components: [] }).catch(() => {}); return true; }
       if (!d.categorie || !d.appartenance) { await interaction.reply({ content: '⚠️ Choisis d\'abord la **catégorie** ET l\'**affectation**.', flags: eph }).catch(() => {}); return true; }
-      const arme = { id: _id(), serie: d.serie, type: d.type, categorie: d.categorie, appartenance: d.appartenance, notes: d.notes || '', par: interaction.user.id, at: Date.now() };
+      const arme = { id: _id(), serie: d.serie, type: d.type, categorie: d.categorie, appartenance: d.appartenance, membreId: d.membreId || null, membreNom: d.membreNom || '', notes: d.notes || '', par: interaction.user.id, at: Date.now() };
       r.armes.push(arme);
       delete r.drafts[draftId];
       persist(db);
       await _refreshPanel(interaction.client, r);
-      await interaction.update({ content: `✅ Arme enregistrée : \`${arme.serie}\` — **${arme.type}** *(${arme.categorie})* · 🏷️ ${arme.appartenance}.`, components: [] }).catch(() => {});
+      const detTxt = arme.membreId ? ` · 👤 <@${arme.membreId}>` : '';
+      await interaction.update({ content: `✅ Arme enregistrée : \`${arme.serie}\` — **${arme.type}** *(${arme.categorie})* · 🏷️ ${arme.appartenance}${detTxt}.`, components: [] }).catch(() => {});
       return true;
     }
 

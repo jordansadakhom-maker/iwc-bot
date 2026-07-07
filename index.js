@@ -2620,7 +2620,7 @@ async function autoSetup(guild) {
   // Panneau du générateur de missions RP (salon Direction) — réservé à l'état-major.
   (async () => { try { await missionsIA.installerPanelMissions?.(guild, '1510712255514153101'); console.log('🎯 Panneau générateur de missions en place'); } catch {} })();
   // Registre des armes (n° de série) — pose le panneau si un salon est configuré (SALON_ARMES).
-  (async () => { try { await armes.installerPanneau?.(guild); if (armes.SALON_ARMES) console.log('🔫 Registre des armes en place'); } catch {} })();
+  (async () => { try { const ok = await armes.installerPanneau?.(guild); if (ok) console.log('🔫 Registre des armes en place'); } catch {} })();
   // 🔒 Salon STRICTEMENT réservé aux Fondateurs : SEUL le rôle « Fondateur » (et le bot) voit/accède.
   // On ferme à @everyone ET on retire l'accès à tout autre rôle/membre. (Limite Discord : les rôles
   // « Administrateur » et le propriétaire du serveur passent toujours outre — impossible à bloquer par salon.)
