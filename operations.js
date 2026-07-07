@@ -16,7 +16,7 @@
 // ───────────────────────────────────────────────────────────────────────────
 const {
   SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags,
+  StringSelectMenuBuilder, UserSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags,
 } = require('discord.js');
 
 let dbMod = {};
@@ -191,7 +191,7 @@ function _embedOrdre(op) {
       ...(op.butin ? [{ name: '💰 Butin / prime visé', value: op.butin, inline: true }] : []),
       { name: '📋 Objectif', value: (op.objectif || '—').slice(0, 1024), inline: false },
       ..._champsBriefing(op.briefing),
-      { name: '👥 Participants (0)', value: '*Personne pour l\'instant. Clique « ✋ Je participe » ci-dessous.*', inline: false },
+      { name: `👥 Participants (${(op.participantsIds?.length || op.participants?.length || 0)})`, value: ((op.participantsIds?.length ? op.participantsIds.map(i => `<@${i}>`).join(', ') : (op.participants?.length ? op.participants.join(', ') : '')) || '*Personne pour l\'instant. Clique « ✋ Je participe » ci-dessous.*').slice(0, 1024), inline: false },
     )
     .setFooter({ text: `Réf. ${op.id} • Iron Wolf Company` })
     .setTimestamp();
@@ -204,6 +204,7 @@ function _boutons(op) {
   const rowP = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`op_participer_${op.id}`).setLabel('✋ Je participe').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`op_retrait_${op.id}`).setLabel('🚪 Me retirer').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`op_assigner_${op.id}`).setLabel('➕ Assigner un membre').setStyle(ButtonStyle.Secondary),
   );
   const rowG = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`op_encours_${op.id}`).setLabel('🟢 Lancer').setStyle(ButtonStyle.Success),
@@ -290,6 +291,56 @@ function _menuType() {
 // ═══════════════════════════════════════════════════════════════
 async function routeInteraction(interaction) {
   try {
+    // ── Assigner un membre à l'opération (Direction) — complète « ✋ Je participe » ──
+    if (interaction.isButton?.() && interaction.customId?.startsWith('op_assigner_')) {
+      if (!isDirection(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const opId = interaction.customId.replace('op_assigner_', '');
+      const db = loadDB(); const op = (db.operations || []).find(o => o.id === opId);
+      if (!op) { await interaction.reply({ content: '❌ Opération introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      if (['terminee', 'annulee'].includes(op.status)) { await interaction.reply({ content: '❌ Cette opération est clôturée.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const menu = new UserSelectMenuBuilder().setCustomId(`op_assign_sel::${opId}`).setPlaceholder('Choisis le(s) membre(s) à assigner…').setMinValues(1).setMaxValues(10);
+      await interaction.reply({ content: '➕ **Qui assignes-tu à cette opération ?** *(ils apparaîtront dans les participants ; ils peuvent toujours se retirer eux-mêmes)*', components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+    if (interaction.isUserSelectMenu?.() && interaction.customId?.startsWith('op_assign_sel::')) {
+      if (!isDirection(interaction.member)) { await interaction.update({ content: '🔒 Réservé à la Direction.', components: [] }).catch(() => {}); return true; }
+      await interaction.deferUpdate().catch(() => {});
+      const opId = interaction.customId.split('::')[1];
+      const db = loadDB(); const op = (db.operations || []).find(o => o.id === opId);
+      if (!op) { await interaction.editReply({ content: '❌ Opération introuvable.', components: [] }).catch(() => {}); return true; }
+      op.participants = op.participants || []; op.participantsIds = op.participantsIds || [];
+      const ajoutes = [], deja = [];
+      for (const uid of (interaction.values || [])) {
+        const gm = await interaction.guild.members.fetch(uid).catch(() => null);
+        if (gm?.user?.bot) continue;
+        const nom = gm?.displayName || gm?.user?.username || uid;
+        if (op.participantsIds.includes(uid)) { deja.push(`<@${uid}>`); continue; }
+        op.participantsIds.push(uid);
+        if (!op.participants.includes(nom)) op.participants.push(nom);
+        ajoutes.push(`<@${uid}>`);
+        try { await gm?.send(`➕ Tu as été **assigné(e)** à l'opération **« ${op.name} »** par la Direction. Retrouve-la dans le salon des opérations.`); } catch {}
+      }
+      saveDB(db);
+      // Met à jour UNIQUEMENT le champ « Participants » de la carte (préserve statut & co).
+      try {
+        const ch = op.channelId ? await interaction.guild.channels.fetch(op.channelId).catch(() => null) : null;
+        const cardMsg = (ch && op.msgId) ? await ch.messages.fetch(op.msgId).catch(() => null) : null;
+        if (cardMsg?.embeds?.[0]) {
+          const updated = EmbedBuilder.from(cardMsg.embeds[0]);
+          const idx = cardMsg.embeds[0].fields.findIndex(f => f.name.startsWith('👥 Participants'));
+          const liste = (op.participantsIds.length ? op.participantsIds.map(i => `<@${i}>`).join(', ') : '*Personne pour l\'instant. Clique « ✋ Je participe » ci-dessous.*').slice(0, 1024);
+          const champ = { name: `👥 Participants (${op.participantsIds.length})`, value: liste, inline: false };
+          if (idx >= 0) updated.spliceFields(idx, 1, champ); else updated.addFields(champ);
+          await cardMsg.edit({ embeds: [updated], allowedMentions: { parse: [] } }).catch(() => {});
+        }
+      } catch {}
+      const parts = [];
+      if (ajoutes.length) parts.push(`✅ Assigné(s) : ${ajoutes.join(', ')}`);
+      if (deja.length) parts.push(`ℹ️ Déjà participant(s) : ${deja.join(', ')}`);
+      await interaction.editReply({ content: parts.join('\n') || 'Aucun membre ajouté.', components: [] }).catch(() => {});
+      return true;
+    }
+
     // Commandes
     if (interaction.isChatInputCommand?.()) {
       if (interaction.commandName === 'panel-operations') {
