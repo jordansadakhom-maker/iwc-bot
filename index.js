@@ -342,6 +342,46 @@ Message : "${texte}"`;
     return txt && txt.length > 1 ? txt.slice(0, 1900) : null;
   } catch (e) { console.log('⚠️ _reformulerRP error:', e.message); return null; }
 }
+// ✍️ Reformulation d'un BRIEFING : transforme des notes brutes en briefing immersif ET
+// STRUCTURÉ (sections en **gras** + emoji + puces « • » + phrase d'ambiance en *italique*),
+// prêt à afficher dans un embed (pas de titres markdown #). `faction` : 'illegal' (La
+// Confrérie) ou 'legal' (Iron Wolf Company). Renvoie null si indispo → repli côté appelant.
+async function _reformulerBriefingRP(texte, faction) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const t = (texte || '').trim();
+  if (!apiKey || t.length < 3) return null;
+  try {
+    const orga = faction === 'illegal' ? 'La Confrérie (organisation clandestine)' : "l'Iron Wolf Company (compagnie de mercenaires)";
+    const prompt = `Tu rédiges le BRIEFING d'un ordre de mission pour ${orga}, dans un jeu de rôle Far West (RedM / Red Dead Redemption 2, ~1899-1904). À partir des notes brutes ci-dessous, produis un briefing IMMERSIF et STRUCTURÉ, prêt à afficher.
+
+CE QUE TU ÉCRIS :
+- Des sections courtes, chacune introduite par un intitulé en **gras** précédé d'un emoji sobre (ex : 🗺️ **Contexte**, 🧩 **Le plan**, ⚠️ **Consignes**).
+- Des puces « • » pour les listes (étapes, rôles, consignes).
+- Une courte phrase d'ambiance en *italique* pour finir.
+- La fiche affiche DÉJÀ le type, le lieu, l'objectif et le butin : ne les répète pas. Concentre-toi sur le contexte, le déroulé/plan et les consignes.
+
+RÈGLES STRICTES :
+- Conserve EXACTEMENT le sens, les faits, les noms et les chiffres des notes ; n'invente RIEN (aucun lieu, nom, détail ou intention nouvelle).
+- Ton western d'époque, rugueux et imagé. AUCUN anachronisme, aucun terme moderne.
+- N'utilise PAS de titres markdown (#, ##) — uniquement du **gras**, des puces « • » et des emojis.
+- Adapte la structure à la matière : peu d'infos = briefing court, sans sections vides ni remplissage.
+- Concis, ~1500 caractères maximum.
+- Si une partie est hors-RP entre (parenthèses), garde-la telle quelle.
+Réponds UNIQUEMENT avec le briefing, sans commentaire ni guillemets autour.
+
+Notes brutes : "${t}"`;
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1100, messages: [{ role: 'user', content: prompt }] }),
+    });
+    if (!resp.ok) { console.log('⚠️ _reformulerBriefingRP HTTP', resp.status, (await resp.text().catch(() => '')).slice(0, 200)); return null; }
+    const data = await resp.json();
+    let out = (data?.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+    out = out.replace(/^["«»\s]+|["«»\s]+$/g, '').trim();
+    return out && out.length > 5 ? out.slice(0, 1900) : null;
+  } catch (e) { console.log('⚠️ _reformulerBriefingRP error:', e.message); return null; }
+}
 // ✍️ Brief de mission : transforme des notes brutes en UN paragraphe de synthèse clair et immersif.
 async function _briefOperationIA({ nom, lieu, objectif, notes, pole }) {
   const apiKey = process.env.ANTHROPIC_API_KEY; if (!apiKey) return null;
@@ -10520,6 +10560,7 @@ global._syncAffaireNotion = _syncAffaireNotion;
 global._syncSurnomNotion = _syncSurnomNotion;
 global.ajouterJournalIC = ajouterJournalIC;
 global.reformulerRP = _reformulerRP;
+global.reformulerBriefingRP = _reformulerBriefingRP;
 global.envoyerDMRecap = envoyerDMRecap;
 global.getChById = getChById;
 global.sendLog = sendLog;

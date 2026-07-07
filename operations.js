@@ -57,6 +57,14 @@ async function _reformuler(texte) {
   try { if (typeof global.reformulerRP === 'function') { const r = await global.reformulerRP(t.slice(0, 2000)); if (r) return r; } } catch {}
   return _corrigerTexte(t);
 }
+// Reformulation IMMERSIVE et STRUCTURÉE pour le briefing (sections, puces, ambiance).
+// Repli sur la reformulation simple si l'IA de briefing est indisponible.
+async function _reformulerBriefing(texte, pole) {
+  const t = (texte || '').trim();
+  if (t.length < 3) return t;
+  try { if (typeof global.reformulerBriefingRP === 'function') { const r = await global.reformulerBriefingRP(t.slice(0, 2000), pole); if (r) return r; } } catch {}
+  return _reformuler(t);
+}
 
 let cfg = {};
 try { cfg = require('./config'); } catch { cfg = {}; }
@@ -456,7 +464,7 @@ async function routeInteraction(interaction) {
       const [objectifC, butin, briefing] = await Promise.all([
         _reformuler((interaction.fields.getTextInputValue('objectif') || '').trim()),
         _corrigerTexte((interaction.fields.getTextInputValue('butin') || '').trim()),
-        _reformuler((interaction.fields.getTextInputValue('briefing') || '').trim()),
+        _reformulerBriefing((interaction.fields.getTextInputValue('briefing') || '').trim(), t.pole), // briefing → style immersif structuré
       ]);
       const objectif = objectifC || '—';
 
