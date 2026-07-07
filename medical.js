@@ -73,6 +73,7 @@ function _log(f, action, par) { if (!f.historique) f.historique = []; f.historiq
 // Tronque proprement toute valeur dynamique avant de la donner à un builder Discord
 // (évite les RangeError « Invalid string length » de la validation discord.js).
 function _clip(v, n) { return String(v == null ? '' : v).slice(0, n); }
+function _idDmd() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 function _embedFiche(f, gm) {
   const st = STATUTS[f.statut] || STATUTS.non_teste;
   const e = new EmbedBuilder().setColor(st.couleur).setTitle('🩺 Suivi médical — confidentiel')
@@ -278,11 +279,13 @@ async function installerPanel(guild) {
       '',
       '• **Ouvrir un dossier** — consulter/éditer le suivi d\'un membre *(médecin & Direction)*.',
       '• **Vue d\'ensemble** — la liste des statuts *(médecin & Direction)*.',
+      '• **📨 Demandes en attente** — les demandes de RDV à traiter *(médecin & Direction)*.',
       '• **🆘 Demander un RDV** — besoin de soins ? Décris ton motif, le médecin te recontacte *(tout le monde)*.',
     ].join('\n'));
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('med_select').setLabel('Ouvrir un dossier').setEmoji('🩺').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('med_liste').setLabel('Vue d\'ensemble').setEmoji('📋').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('med_demandes').setLabel('Demandes en attente').setEmoji('📨').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('med_demande::open').setLabel('Demander un RDV').setEmoji('🆘').setStyle(ButtonStyle.Success),
   );
   // Forum (type 15) → post épinglé ; sinon salon classique → message. Mise à jour EN PLACE si déjà présent.
@@ -344,6 +347,14 @@ async function routeInteraction(interaction) {
         )
         .setFooter({ text: "Discussion interne équipe médicale — le patient n'a pas accès à ce fil." })
         .setTimestamp();
+      // Persiste la demande (consultable via « Demandes en attente » même si la notif de salon disparaît).
+      try { const db = loadDB(); if (!Array.isArray(db.demandesRdvMed)) db.demandesRdvMed = []; db.demandesRdvMed.push({ id: _idDmd(), patientId: interaction.user.id, nomRP, motif: motif.slice(0, 1024), dispos, at: Date.now(), statut: 'en_attente' }); if (db.demandesRdvMed.length > 100) db.demandesRdvMed = db.demandesRdvMed.slice(-100); saveDB(db); } catch {}
+      // MP à chaque médecin : un message privé ne disparaît pas quand on ouvre une notif de salon.
+      try {
+        const roleMed = interaction.guild.roles.cache.get(ROLE_MEDECIN);
+        const docs = roleMed ? [...roleMed.members.values()].filter(m => !m.user.bot) : [];
+        for (const doc of docs) await doc.send({ content: '🩺 **Nouvelle demande de RDV médical à traiter** — tu peux aussi la retrouver via **« Demandes en attente »** sur le panneau médical.', embeds: [embed] }).catch(() => {});
+      } catch {}
       try {
         const forum = _ch(interaction.guild, MEDICAL_CHANNEL);
         const titre = `🩺 Demande RDV — ${nomRP}`.slice(0, 100);
@@ -628,6 +639,73 @@ async function routeInteraction(interaction) {
       _log(f, `Test d'aptitude rédigé — ${input.verdict}`, f.majPar); saveDB(db);
       await _alerteStatut(interaction.guild, id, f); // alerte si le verdict rend inapte / en observation
       await interaction.editReply({ content: posted ? `✅ Test d'aptitude de **${input.patient}** rédigé et posté dans le forum. Statut → **${f.statut}**, test validé.` : '⚠️ Test généré mais impossible de le poster (vérifie les permissions du bot sur le forum).' }).catch(() => {});
+      return true;
+    }
+
+    // ── Demandes de RDV en attente (médecin / Direction) ──
+    if (interaction.isButton?.() && cid === 'med_demandes') {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé au médecin et à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const db = loadDB(); const list = (db.demandesRdvMed || []).filter(d => d.statut === 'en_attente').slice().reverse();
+      if (!list.length) { await interaction.reply({ content: '📭 Aucune demande de RDV en attente.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const e = new EmbedBuilder().setColor(0x2ECC71).setTitle('📨 Demandes de RDV en attente (' + list.length + ')')
+        .setDescription(list.slice(0, 15).map(d => `• **${_clip(d.nomRP || 'Patient', 60)}** (<@${d.patientId}>) — *${_clip(d.motif, 80)}*  ·  ${_dateFR(d.at)}`).join('\n').slice(0, 4000))
+        .setFooter({ text: 'Choisis une demande pour la traiter.' });
+      const menu = new StringSelectMenuBuilder().setCustomId('med_dmd_sel').setPlaceholder('Traiter une demande…')
+        .addOptions(list.slice(0, 25).map(d => ({ label: _clip(d.nomRP || 'Patient', 100) || 'Patient', description: _clip(d.motif, 100) || '—', value: d.id })));
+      await interaction.reply({ embeds: [e], components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+    // Sélection d'une demande → détail + actions
+    if (interaction.isStringSelectMenu?.() && cid === 'med_dmd_sel') {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé au médecin et à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const did = interaction.values?.[0];
+      const db = loadDB(); const d = (db.demandesRdvMed || []).find(x => x.id === did);
+      if (!d) { await interaction.reply({ content: '⚠️ Demande introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const e = new EmbedBuilder().setColor(0x2ECC71).setTitle('🩺 Demande de RDV — ' + _clip(d.nomRP || 'Patient', 60))
+        .addFields(
+          { name: '👤 Patient', value: `${_clip(d.nomRP || '—', 80)} (<@${d.patientId}>)`, inline: false },
+          { name: '📝 Motif', value: _clip(d.motif || '—', 1024), inline: false },
+          { name: '🕐 Disponibilités', value: _clip(d.dispos || '—', 200), inline: true },
+          { name: '📅 Reçue le', value: _dateFR(d.at), inline: true },
+        );
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('med_dmd_rep::' + d.id).setLabel('Répondre au patient (MP)').setEmoji('✉️').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('med_dmd_ok::' + d.id).setLabel('Marquer traitée').setEmoji('✅').setStyle(ButtonStyle.Success),
+      );
+      await interaction.reply({ embeds: [e], components: [row], flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+    // Marquer une demande comme traitée
+    if (interaction.isButton?.() && cid.startsWith('med_dmd_ok::')) {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé au médecin et à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const did = cid.split('::')[1];
+      const db = loadDB(); const d = (db.demandesRdvMed || []).find(x => x.id === did);
+      if (d) { d.statut = 'traitee'; d.traiteePar = interaction.user.id; d.traiteeAt = Date.now(); saveDB(db); }
+      await interaction.update({ content: d ? '✅ Demande marquée comme traitée.' : '⚠️ Demande introuvable.', embeds: [], components: [] }).catch(() => {});
+      return true;
+    }
+    // Répondre au patient (MP) — ouvre un modal
+    if (interaction.isButton?.() && cid.startsWith('med_dmd_rep::')) {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé au médecin et à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const did = cid.split('::')[1];
+      const modal = new ModalBuilder().setCustomId('med_dmd_repm::' + did).setTitle('✉️ Répondre au patient');
+      modal.addComponents(new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('msg').setLabel('Message envoyé au patient (en MP)').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000).setPlaceholder('Ex : RDV fixé demain 21h au cabinet de Valentine.')
+      ));
+      await interaction.showModal(modal).catch(() => {});
+      return true;
+    }
+    // Envoi de la réponse en MP au patient + demande marquée traitée
+    if (interaction.isModalSubmit?.() && cid.startsWith('med_dmd_repm::')) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const did = cid.split('::')[1];
+      const db = loadDB(); const d = (db.demandesRdvMed || []).find(x => x.id === did);
+      if (!d) { await interaction.editReply({ content: '⚠️ Demande introuvable.' }).catch(() => {}); return true; }
+      const msg = (interaction.fields.getTextInputValue('msg') || '').trim();
+      let envoye = false;
+      try { const u = await interaction.client.users.fetch(d.patientId); await u.send(['🩺 **Cabinet médical de l\'Iron Wolf Company — réponse à ta demande de RDV**', '', msg, '', '— *Le médecin*'].join('\n')); envoye = true; } catch {}
+      d.statut = 'traitee'; d.traiteePar = interaction.user.id; d.traiteeAt = Date.now(); d.reponse = msg.slice(0, 1000); saveDB(db);
+      await interaction.editReply({ content: envoye ? '✅ Réponse envoyée au patient en MP — demande marquée traitée.' : '⚠️ Le patient a sans doute fermé ses MP : réponse non délivrée. Demande marquée traitée — recontacte-le en jeu.' }).catch(() => {});
       return true;
     }
 
