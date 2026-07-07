@@ -94,21 +94,37 @@ async function _refreshPanel(client, r) {
 async function installerPanneau(guild, channelId) {
   try {
     const cid = channelId || SALON_ARMES;
-    if (!cid) return;
-    const ch = await guild.channels.fetch(cid).catch(() => null);
-    if (!ch || typeof ch.send !== 'function') return;
+    if (!cid) return false;
+    // fetch, avec repli sur le cache si le fetch échoue
+    let ch = await guild.channels.fetch(cid).catch(() => null);
+    if (!ch) ch = guild.channels.cache.get(cid) || null;
+    if (!ch) { console.log('⚠️ Registre armes : salon ' + cid + ' introuvable/inaccessible dans « ' + (guild.name || guild.id) + ' » (mauvais ID, ou le bot n\'a pas « Voir le salon » ?).'); return false; }
     const db = loadDB(); const r = _ensure(db);
     r.channelId = cid;
     const me = guild.client.user.id;
     const estPanel = m => m.author?.id === me && (m.embeds?.[0]?.title || '').includes('REGISTRE DES ARMES');
+    const payload = { embeds: [_panelEmbed(r)], components: _panelButtons() };
+
+    // Salon FORUM (type 15) → le panneau vit dans un fil épinglé
+    if (ch.type === 15 && ch.threads?.create) {
+      const act = await ch.threads.fetchActive().catch(() => null);
+      let post = act?.threads ? [...act.threads.values()].find(t => (t.name || '').includes('Registre des armes')) : null;
+      if (post) { const st = await post.fetchStarterMessage().catch(() => null); if (st) { await st.edit(payload).catch(() => {}); r.panelId = st.id; persist(db); return true; } }
+      const created = await ch.threads.create({ name: '🔫 Registre des armes', message: payload }).catch(e => { console.log('⚠️ Registre armes (forum) :', e.message); return null; });
+      if (created) { await created.pin?.().catch(() => {}); const st = await created.fetchStarterMessage().catch(() => null); if (st) r.panelId = st.id; persist(db); return true; }
+      return false;
+    }
+    if (typeof ch.send !== 'function') { console.log('⚠️ Registre armes : le salon ' + cid + ' n\'est pas un salon texte où poster (type ' + ch.type + ' — catégorie/vocal ?). Donne un salon texte.'); return false; }
+
     let panel = null;
     if (r.panelId) panel = await ch.messages.fetch(r.panelId).catch(() => null);
     if (!panel) { const pins = await ch.messages.fetchPinned().catch(() => null); if (pins) panel = [...pins.values()].find(estPanel) || null; }
     if (!panel) { const recent = await ch.messages.fetch({ limit: 30 }).catch(() => null); if (recent) panel = [...recent.values()].find(estPanel) || null; }
-    if (panel) { await panel.edit({ embeds: [_panelEmbed(r)], components: _panelButtons() }).catch(() => {}); r.panelId = panel.id; persist(db); return; }
-    const sent = await ch.send({ embeds: [_panelEmbed(r)], components: _panelButtons() }).catch(() => null);
-    if (sent) { await sent.pin().catch(() => {}); r.panelId = sent.id; persist(db); }
-  } catch (e) { console.log('⚠️ armes installerPanneau:', e.message); }
+    if (panel) { await panel.edit(payload).catch(() => {}); r.panelId = panel.id; persist(db); return true; }
+    const sent = await ch.send(payload).catch(e => { console.log('⚠️ Registre armes : envoi impossible dans ' + cid + ' — permission « Envoyer des messages » du bot ? (' + e.message + ')'); return null; });
+    if (sent) { await sent.pin().catch(() => {}); r.panelId = sent.id; persist(db); return true; }
+    return false;
+  } catch (e) { console.log('⚠️ armes installerPanneau:', e.message); return false; }
 }
 
 // ─── Draft (persisté) : entre le modal texte et le choix des menus ───
