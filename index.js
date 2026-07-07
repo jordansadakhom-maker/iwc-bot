@@ -2615,6 +2615,24 @@ async function autoSetup(guild) {
   }
   // Panneau UNIFIÉ « Tables de jeu » du saloon (blackjack + poker menteur + faro + poker + cinq doigts + dominos)
   (async () => { try { await _installerPanelSaloon(guild, '1523378716770570372'); console.log('🎰 Panneau Saloon (6 jeux) en place'); } catch {} })();
+  // Saloon : écriture verrouillée — on ne peut QUE jouer (boutons), pas écrire de messages.
+  (async () => {
+    try {
+      const ch = await guild.channels.fetch('1523378716770570372').catch(() => null);
+      if (ch?.permissionOverwrites) {
+        await ch.permissionOverwrites.edit(guild.roles.everyone, {
+          SendMessages: false,
+          SendMessagesInThreads: false,
+          CreatePublicThreads: false,
+          CreatePrivateThreads: false,
+        }).catch(() => {});
+        if (guild.members.me) {
+          await ch.permissionOverwrites.edit(guild.members.me, { SendMessages: true, ViewChannel: true }).catch(() => {});
+        }
+        console.log('🔒 Saloon en lecture seule (jeu uniquement)');
+      }
+    } catch {}
+  })();
   // Crée le rôle « Client » dès le démarrage (au lieu d'attendre la 1re attribution) + ouvre l'espace client en lecture.
   (async () => { try { const r = await _assurerRoleClient(guild); console.log(r ? '👤 Rôle « Client » prêt' : '⚠️ Rôle « Client » non créé (permission « Gérer les rôles » ?)'); } catch {} })();
   // Panneau du générateur de missions RP (salon Direction) — réservé à l'état-major.

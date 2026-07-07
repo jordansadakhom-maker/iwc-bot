@@ -62,11 +62,13 @@ const _REGLES = [
   '**À ton tour :**',
   '• 🃏 **Tirer** — une carte de plus.',
   '• ✋ **Rester** — tu gardes ta main et passes la main.',
-  '• ⏫ **Doubler** — tu doubles ta mise et ne reçois **qu\'une** carte.',
+  '• ⏫ **Doubler** — tu doubles ta mise et ne reçois **qu\'une** carte. *Autorisé uniquement sur un total de **9, 10 ou 11**.*',
   '• 🛡️ **Assurance** — *si le croupier montre un As* : mise annexe (moitié de ta mise) qui paie **2:1** s\'il a un blackjack. Sinon, tu la perds. À toi de juger le risque.',
   '**Brûlé :** dépasser 21 = perdu direct.',
   '**Le croupier** joue en dernier : il **tire jusqu\'à 17** — et même **sur le 17 souple** (As + 6). La maison ne fait pas de cadeau.',
-  '**Tu gagnes** si tu es plus proche de 21 que lui (ou s\'il brûle). Un **Blackjack** (21 en 2 cartes) est payé **6:5**.',
+  '⚠️ **Règle de la maison :** si le croupier **brûle à exactement 22**, c\'est une **égalité** (tu ne gagnes pas, tu ne perds pas).',
+  '**Tu gagnes** si tu es plus proche de 21 que lui (ou s\'il brûle à 23+). Un **Blackjack** (21 en 2 cartes) est payé **6:5**.',
+  '💵 **Mise maximale : 100 $.**',
   '',
   '🎭 **Reste en RP :** appuie sur **Emote** à chaque action et colle la ligne **en jeu** — comme ça, personne ne te prend pour un AFK pendant que tu joues ici.',
   '💰 **Sous :** tes gains/pertes sont cumulés dans ton compteur de **sous** du saloon (bouton « Mes sous »).',
@@ -76,7 +78,7 @@ const GESTION = ['Opérateur', 'Operateur', 'Concepteur', 'Fléau', 'fleau', 'Fo
 function _estGestion(member) { try { return !!member?.roles?.cache?.some(r => GESTION.some(n => r.name.includes(n))); } catch { return false; } }
 
 const MAX_SIEGES = 5;
-const MISE_MIN = 1, MISE_MAX = 1000000;
+const MISE_MIN = 1, MISE_MAX = 100; // plafond de mise volontairement bas (100) pour cadrer les gains
 const TOUR_MS = 120000; // 2 min pour jouer, sinon « Rester » auto
 
 const RANGS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
@@ -97,6 +99,9 @@ function _estSoft17(main) {
 // ─── Difficulté (réglable) ──────────────────────────────────────────────
 const CROUPIER_H17 = true;  // le croupier TIRE sur le 17 souple (plus dur, réaliste)
 const BJ_PAIEMENT  = 1.2;   // blackjack payé 6:5 (au lieu de 1.5 = 3:2) → avantage maison
+const PUSH_22      = true;  // si le croupier brûle à EXACTEMENT 22 → égalité (pas gagné) : gros avantage maison, réaliste
+// Double autorisé UNIQUEMENT sur un total de 9, 10 ou 11 (un 2-cartes 9/10/11 est toujours « dur »).
+function _doublable(main) { return Array.isArray(main) && main.length === 2 && [9, 10, 11].includes(_total(main)); }
 // ────────────────────────────────────────────────────────────────────────
 function _fmtCarte(c) { return '`' + c.r + c.s + '`'; }
 function _fmtMain(main) { return main.map(_fmtCarte).join(' '); }
@@ -165,7 +170,7 @@ function _lignesStatut(t) {
   const L = [];
   if (t.phase === 'jeu') {
     const s = t.sieges[t.tourIdx];
-    L.push('➡️ **À ' + (s ? s.nom : '—') + ' de jouer** — 🃏 Tirer · ✋ Rester' + (s && s.main.length === 2 ? ' · ⏫ Doubler' : ''));
+    L.push('➡️ **À ' + (s ? s.nom : '—') + ' de jouer** — 🃏 Tirer · ✋ Rester' + (s && _doublable(s.main) ? ' · ⏫ Doubler' : ''));
     if (t.ambiance) L.push('💬 *' + t.ambiance + '*');
   } else if (t.manche > 0) {
     L.push('🔚 **Manche terminée.** L\'hôte peut **relancer une manche** ou **fermer la table**.');
@@ -183,7 +188,7 @@ function _lignesStatut(t) {
 function _imgState(t) {
   return {
     sousTitre: t.phase === 'jeu'
-      ? ('À ' + (t.sieges[t.tourIdx]?.nom || '—') + ' de jouer — Tirer, Rester' + (t.sieges[t.tourIdx]?.main.length === 2 ? ' ou Doubler' : ''))
+      ? ('À ' + (t.sieges[t.tourIdx]?.nom || '—') + ' de jouer — Tirer, Rester' + (_doublable(t.sieges[t.tourIdx]?.main) ? ' ou Doubler' : ''))
       : (t.manche > 0 ? 'Manche terminée — l\'hôte peut relancer ou fermer' : 'Faites vos jeux — misez, puis l\'hôte distribue'),
     croupier: {
       cards: (t.croupier.main || []).map(c => ({ r: c.r, s: c.s })),
@@ -227,7 +232,7 @@ function _components(t) {
     const comp = [
       new ButtonBuilder().setCustomId('bj_hit').setLabel('Tirer').setEmoji('🃏').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('bj_stand').setLabel('Rester').setEmoji('✋').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('bj_double').setLabel('Doubler').setEmoji('⏫').setStyle(ButtonStyle.Secondary).setDisabled(!(s && s.main.length === 2)),
+      new ButtonBuilder().setCustomId('bj_double').setLabel('Doubler').setEmoji('⏫').setStyle(ButtonStyle.Secondary).setDisabled(!(s && _doublable(s.main))),
     ];
     // Assurance : proposée uniquement si le croupier montre un As, avant d'avoir agi.
     if (asVisible && s && s.main.length === 2 && !s.assurance) {
@@ -243,7 +248,7 @@ function _components(t) {
 function _contentLigne(t) {
   if (t.phase === 'jeu') {
     const s = t.sieges[t.tourIdx];
-    return s ? '🎯 **Au tour de ' + s.nom + '** — 🃏 Tirer · ✋ Rester' + (s.main.length === 2 ? ' · ⏫ Doubler' : '') : '';
+    return s ? '🎯 **Au tour de ' + s.nom + '** — 🃏 Tirer · ✋ Rester' + (_doublable(s.main) ? ' · ⏫ Doubler' : '') : '';
   }
   if (t.manche > 0) {
     const res = t.sieges.filter(s => s.resultat).map(s => (s.net > 0 ? '🟢' : s.net < 0 ? '🔴' : '⚪') + ' **' + s.nom + '** ' + (s.net > 0 ? '+' : '') + _money(s.net)).join('   ·   ');
@@ -254,7 +259,7 @@ function _contentLigne(t) {
 // Construit le message complet (image si possible, sinon texte). Renvoie { content, embeds, components, files }.
 async function _screen(t) {
   const e = new EmbedBuilder().setColor(0xC8A45C).setTitle('🎰  TABLE DE BLACKJACK  🃏')
-    .setFooter({ text: 'Hôte : ' + t.hoteNom + '  ·  Blackjack payé 6:5  ·  Croupier tire sur le 17 souple' });
+    .setFooter({ text: 'Hôte : ' + t.hoteNom + '  ·  BJ 6:5 · H17 · croupier 22 = égalité · mise max 100 $' });
   const content = _contentLigne(t);
   let buf = null;
   try { if (_img?.genererTable) buf = await _img.genererTable(_imgState(t)); } catch { buf = null; }
@@ -314,6 +319,7 @@ function _croupierEtResolution(t) {
     else if (s.statut === 'blackjack') { if (dBJ) { net = 0; label = '➖ Égalité (double blackjack)'; } else { net = Math.round(s.mise * BJ_PAIEMENT); label = '✦ BLACKJACK ! +' + _money(net); } }
     else { // stand
       if (dBJ) { net = -s.mise; label = '❌ Perdu (blackjack croupier)'; }
+      else if (PUSH_22 && dt === 22) { net = 0; label = '➖ Égalité — le croupier brûle à 22 (règle de la maison)'; }
       else if (dt > 21) { net = s.mise; label = '✅ Gagné (croupier brûlé) +' + _money(net); }
       else if (pt > dt) { net = s.mise; label = '✅ Gagné +' + _money(net); }
       else if (pt < dt) { net = -s.mise; label = '❌ Perdu'; }
@@ -385,6 +391,24 @@ async function installerPanelBlackjack(guild, channel) {
   } catch (e) { console.log('⚠️ bj panel:', e.message); return null; }
 }
 
+// Salon propre : supprime les anciens messages du bot (tables, tables fermées, pings)
+// pour ne garder que le panneau (épinglé) + le message qu'on vient de créer.
+async function _nettoyerSalon(channel, gardeId) {
+  try {
+    if (!channel?.messages?.fetch) return;
+    const me = channel.client.user.id;
+    const msgs = await channel.messages.fetch({ limit: 50 }).catch(() => null);
+    if (!msgs) return;
+    for (const m of msgs.values()) {
+      if (m.author?.id !== me) continue;                 // seulement les messages du bot
+      if (gardeId && m.id === gardeId) continue;          // garder le message courant
+      if (m.pinned) continue;                             // ne jamais toucher au panneau (épinglé)
+      if (/TABLES DE JEU|TABLE DE JEU/i.test(m.embeds?.[0]?.title || '')) continue; // sécurité anti-panneau
+      await m.delete().catch(() => {});
+    }
+  } catch {}
+}
+
 // ─── Routeur d'interactions ───
 async function routeInteraction(interaction) {
   try {
@@ -401,6 +425,7 @@ async function routeInteraction(interaction) {
       const msg = await interaction.channel.send(await _screen(t)).catch(() => null);
       if (!msg) { await interaction.editReply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).' }); return true; }
       t.msg = msg; t.messageId = msg.id; tables.set(interaction.channelId, t);
+      await _nettoyerSalon(interaction.channel, msg.id); // salon propre : retire les anciennes tables
       await interaction.editReply({ content: '🎰 Table ouverte — tu en es l\'**hôte**. Assieds-toi 👇 puis clique **Distribuer** quand tout le monde a misé.' });
       return true;
     }
@@ -416,7 +441,7 @@ async function routeInteraction(interaction) {
       if (id === 'bj_mise' && !dejaAssis) { await interaction.reply({ content: 'Assieds-toi d\'abord (bouton 🪑) pour poser une mise.', flags: eph }); return true; }
       if (!dejaAssis && t.sieges.length >= MAX_SIEGES) { await interaction.reply({ content: '🈵 La table est complète (' + MAX_SIEGES + ' joueurs).', flags: eph }); return true; }
       const modal = new ModalBuilder().setCustomId('bj_sit_modal').setTitle(dejaAssis ? '💵 Changer ma mise' : '🪑 S\'asseoir à la table')
-        .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('mise').setLabel('Votre mise (en $)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(8).setValue(dejaAssis ? String(dejaAssis.mise) : '').setPlaceholder('Ex : 50')));
+        .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('mise').setLabel('Votre mise (max 100 $)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(3).setValue(dejaAssis ? String(dejaAssis.mise) : '').setPlaceholder('Ex : 50 — plafond 100 $')));
       await interaction.showModal(modal); return true;
     }
     if (interaction.isModalSubmit() && id === 'bj_sit_modal') {
@@ -486,7 +511,7 @@ async function routeInteraction(interaction) {
       } else if (id === 'bj_stand') {
         s.statut = 'stand'; t.ambiance = s.nom + ' reste à ' + _total(s.main) + '.'; _avancer(t);
       } else { // double
-        if (s.main.length !== 2) { await _refresh(t); return true; }
+        if (!_doublable(s.main)) { await _refresh(t); return true; } // double seulement sur 9/10/11
         s.mise *= 2; s.main.push(_piocher(t));
         const tot = _total(s.main);
         s.statut = tot > 21 ? 'bust' : 'stand';
@@ -505,11 +530,11 @@ async function routeInteraction(interaction) {
       const bilan = t.sieges.length || Object.keys(t.soldes).length
         ? Object.entries(t.soldes).map(([uid, n]) => '• <@' + uid + '> : ' + _money(n)).join('\n')
         : '';
-      const e = new EmbedBuilder().setColor(0x8a6d3b).setTitle('🎰 Table fermée')
-        .setDescription('Le croupier ramasse les cartes. Merci d\'avoir joué à la maison.' + (bilan ? '\n\n**Bilan des jetons :**\n' + bilan : ''))
-        .setFooter({ text: 'Iron Wolf Company · Saloon' });
-      try { await t.msg?.edit({ embeds: [e], components: [], files: [], attachments: [] }); } catch {}
-      await interaction.deferUpdate().catch(() => {});
+      const chan = t.msg?.channel || interaction.channel;
+      // Salon propre : on SUPPRIME le message de la table (au lieu de le laisser) + les anciens résidus.
+      try { await t.msg?.delete(); } catch {}
+      try { await _nettoyerSalon(chan, null); } catch {}
+      await interaction.reply({ content: '🎰 **Table fermée.** Le croupier ramasse les cartes.' + (bilan ? '\n\n**Bilan des jetons :**\n' + bilan : ''), flags: eph, allowedMentions: { parse: [] } }).catch(() => {});
       return true;
     }
 
