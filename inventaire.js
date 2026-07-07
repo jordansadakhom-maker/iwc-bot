@@ -341,10 +341,9 @@ function _parseItems(txt) {
   } catch { return null; }
 }
 async function _analyserImage(b64, mt) {
-  // Modèle le plus fort en premier (lecture la plus exacte des noms/quantités),
-  // puis replis gracieux si indisponible.
-  let txt = await _callVision('claude-opus-4-8', b64, mt);
-  if (!txt) txt = await _callVision('claude-sonnet-4-6', b64, mt);
+  // Modèle ÉCONOMIQUE en premier (bon compromis coût/précision), repli sur haiku.
+  // (On a retiré Opus, bien plus cher, pour limiter la consommation de crédits.)
+  let txt = await _callVision('claude-sonnet-4-6', b64, mt);
   if (!txt) txt = await _callVision('claude-haiku-4-5-20251001', b64, mt);
   return _parseItems(txt);
 }

@@ -319,8 +319,7 @@ function _norm2(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, 
 async function _reformulerRP(texte) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;
-  try {
-    const prompt = `Tu reformules un message pour un jeu de rôle Far West (RedM / Red Dead Redemption 2), dans l'Ouest américain vers 1899-1904.
+  const prompt = `Tu reformules un message pour un jeu de rôle Far West (RedM / Red Dead Redemption 2), dans l'Ouest américain vers 1899-1904.
 Réécris le message ci-dessous en FRANÇAIS RP, immersif et VIVANT, comme le dirait vraiment un personnage de l'époque : ton naturel, parler rugueux et imagé, vocabulaire et tournures western d'époque. Soigne la formulation et le rythme pour l'ambiance.
 RÈGLES STRICTES :
 - Conserve EXACTEMENT le sens, les informations et l'intention d'origine ; n'invente AUCUN fait nouveau (ni lieu, ni nom, ni chiffre, ni intention).
@@ -330,17 +329,23 @@ RÈGLES STRICTES :
 Réponds UNIQUEMENT avec le message reformulé, sans guillemets ni commentaire.
 
 Message : "${texte}"`;
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 700, messages: [{ role: 'user', content: prompt }] }),
-    });
-    if (!resp.ok) { console.log('⚠️ _reformulerRP HTTP', resp.status, (await resp.text().catch(() => '')).slice(0, 250)); return null; }
-    const data = await resp.json();
-    let txt = (data?.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
-    txt = txt.replace(/^["«»\s]+|["«»\s]+$/g, '').trim();
-    return txt && txt.length > 1 ? txt.slice(0, 1900) : null;
-  } catch (e) { console.log('⚠️ _reformulerRP error:', e.message); return null; }
+  // Modèle principal (économique) puis modèle de SECOURS si le 1er est indisponible/en erreur.
+  const MODELES = ['claude-haiku-4-5-20251001', 'claude-sonnet-4-6'];
+  for (const model of MODELES) {
+    try {
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model, max_tokens: 700, messages: [{ role: 'user', content: prompt }] }),
+      });
+      if (!resp.ok) { console.log('⚠️ _reformulerRP HTTP', resp.status, '(' + model + ')', (await resp.text().catch(() => '')).slice(0, 200)); continue; } // → tente le modèle suivant
+      const data = await resp.json();
+      let txt = (data?.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+      txt = txt.replace(/^["«»\s]+|["«»\s]+$/g, '').trim();
+      if (txt && txt.length > 1) return txt.slice(0, 1900);
+    } catch (e) { console.log('⚠️ _reformulerRP error (' + model + '):', e.message); }
+  }
+  return null;
 }
 // ✍️ Reformulation d'un BRIEFING : transforme des notes brutes en briefing immersif ET
 // STRUCTURÉ (sections en **gras** + emoji + puces « • » + phrase d'ambiance en *italique*),
@@ -3701,12 +3706,14 @@ client.on('messageCreate', async message => {
         const reformule = await _reformulerRP(brut);
         if (!reformule) {
           console.log('⚠️ Salon RP: reformulation vide/échouée (voir log _reformulerRP juste au-dessus — clé/quota/modèle ?).');
+          await message.react('⚠️').catch(() => {}); // signal visible : l'IA de reformulation est indisponible (clé/crédits/modèle)
         } else if (_norm2(reformule) === _norm2(brut)) {
           console.log('ℹ️ Salon RP: reformulation identique à l\'original → message laissé tel quel.');
         } else {
           const ok = await _reposterCommeMembre(message.channel, message.member, message.author, reformule);
           if (ok) { await message.delete().catch(() => {}); return; }
           console.log('⚠️ Salon RP: repost via webhook échoué → vérifie la permission « Gérer les webhooks » du bot dans ce salon.');
+          await message.react('🔧').catch(() => {}); // signal visible : reformulation OK mais repost webhook impossible (permission ?)
         }
       }
     }
