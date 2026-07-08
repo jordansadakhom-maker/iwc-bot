@@ -13,7 +13,7 @@
 //  Piloté par la Direction via « !nettoyage ». Additif : préfixe net_, écrit
 //  uniquement db.nettoyeur — aucune autre donnée touchée.
 // ───────────────────────────────────────────────────────────────────────────
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder, ChannelType, MessageFlags } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder, ChannelType, MessageFlags, PermissionFlagsBits } = require('discord.js');
 
 let dbMod = {}; try { dbMod = require('./db'); } catch { dbMod = {}; }
 const loadDB = dbMod.loadDB || (() => ({}));
@@ -52,6 +52,9 @@ const PROTEGES_DEFAUT = [
 const NOISE_RE = /^\s*(?:✅|✔️|☑️|❌|❎|⏳|⌛|♻️|🔁|🔒|🔓|🧹|🗑️|👍|👌|🆗|➖|✨|🙏|💾|📎|📌|🔧|⚠️|🕹️|🎰)/u;
 // Formules de confirmation connues (sans emoji).
 const PHRASES_RE = /^(?:c'est fait|bien reçu|enregistr[ée]|mise à jour|termin[ée]|op[ée]ration effectu[ée]e|table ferm[ée]e|salon nettoy[ée]|d[ée]j[àa] propre|fait\s*!?$)/i;
+// Commandes texte d'administration d'un MEMBRE : on les efface après traitement pour garder le salon net.
+// (Liste fermée : on ne touche jamais à un message qui commence par « ! » sans être une de ces commandes.)
+const CMD_RE = /^!(?:nettoyage|moderation|reset-registre|restaurer[ -]\w+|recuperer[ -]\w+)\b/i;
 
 // Vrai si le message est du « bruit du bot » sans intérêt (voir en-tête).
 function _estBruitBot(msg, botId) {
@@ -89,12 +92,21 @@ function onMessage(message) {
   try {
     if (!_client) _client = message.client;
     const botId = message.client?.user?.id;
-    if (!botId || message.author?.id !== botId) return;
+    if (!botId) return;
     const db = loadDB(); const n = _ensure(db);
     if (!n.actif) return;
     const chId = message.channelId;
     if (n.proteges.includes(chId)) return;
     if (n.salons.length && !n.salons.includes(chId)) return;
+
+    // 1) Commande d'admin d'un MEMBRE (« !nettoyage », « !reset-registre »…) → effacée après un court délai.
+    if (message.author?.id !== botId && !message.webhookId && CMD_RE.test((message.content || '').trim())) {
+      _watch.add(chId);
+      setTimeout(() => { message.delete().catch(() => {}); }, 30 * 1000);
+      return;
+    }
+    // 2) Bruit du bot → suppression différée (on laisse le temps de lire la confirmation).
+    if (message.author?.id !== botId) return;
     if (!_estBruitBot(message, botId)) return;
     _watch.add(chId);
     const ttl = Math.max(1, n.ttlMin) * 60 * 1000;
@@ -124,6 +136,39 @@ async function _sweep() {
       }
     }
   } catch {}
+}
+
+// Grand ménage : balaie TOUS les salons texte (sauf protégés) et retire le bruit
+// du bot. Lancé chaque jour + par le bouton « Nettoyer maintenant ». Ignore les
+// messages de moins de 2 min (pour ne pas effacer une confirmation en cours).
+async function grandMenage(guild) {
+  let nb = 0;
+  try {
+    if (!guild?.channels?.cache) return 0;
+    const db = loadDB(); const n = _ensure(db);
+    if (!n.actif) return 0;
+    const botId = guild.client.user?.id;
+    const now = Date.now();
+    const me = guild.members.me;
+    const chans = guild.channels.cache.filter(c =>
+      c && c.type === ChannelType.GuildText &&
+      !n.proteges.includes(c.id) &&
+      (!n.salons.length || n.salons.includes(c.id)));
+    for (const ch of chans.values()) {
+      try {
+        if (!ch.messages?.fetch) continue;
+        const perms = me ? ch.permissionsFor(me) : null;
+        if (perms && !perms.has(PermissionFlagsBits.ManageMessages)) continue; // pas le droit d'effacer ici
+        const msgs = await ch.messages.fetch({ limit: 30 }).catch(() => null);
+        if (!msgs) continue;
+        for (const m of msgs.values()) {
+          if (now - m.createdTimestamp < 2 * 60 * 1000) continue; // trop récent → on laisse
+          if (_estBruitBot(m, botId)) { await m.delete().catch(() => {}); nb++; }
+        }
+      } catch {}
+    }
+  } catch {}
+  return nb;
 }
 
 // Nettoyage IMMÉDIAT (bouton « Nettoyer maintenant »), sans attendre le délai.
@@ -204,8 +249,8 @@ async function routeInteraction(interaction) {
     if (id === 'net_ttl') { n.ttlMin = n.ttlMin >= 30 ? 5 : (n.ttlMin >= 10 ? 30 : 10); persist(db); await _maj(interaction, n); return true; }
     if (id === 'net_now') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
-      const nb = await sweepNow(interaction.guild, interaction.channelId);
-      await interaction.editReply({ content: `🧹 Nettoyage effectué : **${nb}** message(s) du bot retiré(s).` }).catch(() => {});
+      const nb = await grandMenage(interaction.guild);
+      await interaction.editReply({ content: `🧹 Grand ménage effectué : **${nb}** message(s) du bot retiré(s) dans les salons non protégés.` }).catch(() => {});
       return true;
     }
     if (id === 'net_salons' && interaction.isChannelSelectMenu?.()) { n.salons = (interaction.values || []).slice(0, 25); persist(db); await _maj(interaction, n); return true; }
@@ -214,14 +259,15 @@ async function routeInteraction(interaction) {
   } catch (e) { console.log('⚠️ nettoyeur route:', e.message); return true; }
 }
 
-// Démarre le balayage périodique.
+// Démarre le balayage périodique + le grand ménage quotidien.
 function demarrer(client) {
   _client = client;
-  try { setInterval(() => { _sweep().catch(() => {}); }, 5 * 60 * 1000); } catch {}
-  console.log('🧹 Nettoyeur démarré (bruit du bot, hors salons protégés)');
+  try { setInterval(() => { _sweep().catch(() => {}); }, 5 * 60 * 1000); } catch {}          // rattrapage léger toutes les 5 min
+  try { setInterval(() => { grandMenage(client.guilds.cache.first()).catch(() => {}); }, 12 * 60 * 60 * 1000); } catch {} // grand ménage 2×/jour
+  console.log('🧹 Nettoyeur démarré (bruit du bot + commandes admin, hors salons protégés)');
 }
 
 module.exports = {
-  onMessage, routeInteraction, commande, demarrer, sweepNow,
-  _test: { _estBruitBot, _ensure, PROTEGES_DEFAUT },
+  onMessage, routeInteraction, commande, demarrer, sweepNow, grandMenage,
+  _test: { _estBruitBot, _ensure, PROTEGES_DEFAUT, CMD_RE },
 };

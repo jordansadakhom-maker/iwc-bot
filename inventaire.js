@@ -311,7 +311,7 @@ async function _callVision(model, b64, mt) {
         { type: 'text', text: PROMPT_VISION },
       ] }] }),
     });
-    if (!resp.ok) { const body = await resp.text().catch(() => ''); console.log(`❌ inventaire vision ${model} HTTP ${resp.status}: ${body.slice(0, 300)}`); return null; }
+    if (!resp.ok) { const body = await resp.text().catch(() => ''); console.log(`❌ inventaire vision ${model} HTTP ${resp.status}: ${body.slice(0, 300)}`); if ([401, 402, 429].includes(resp.status)) { try { global.signalerPanneIA?.('lecture du coffre (photo)', resp.status); } catch {} } return null; }
     const data = await resp.json();
     const txt = data?.content?.[0]?.text || "";
     if (!txt) console.log(`⚠️ inventaire vision ${model}: réponse sans texte`);
