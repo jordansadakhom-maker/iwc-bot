@@ -22,7 +22,10 @@ function estGestion(member) { try { return !!member?.roles?.cache?.some(r => DIR
 
 const COULEUR = 0x6B4C2E;
 // Catégories : clé → { label, emoji, couleur }
+//   • wanted  → fiche présentée comme un AVIS DE RECHERCHE (poster : prime, consigne, dangerosité).
+//   • autres  → fiche de renseignement détaillée classique.
 const CATS = {
+  wanted:       { label: 'Wanted',           emoji: '💰', couleur: 0x8E1B1B },
   recherche:    { label: 'Recherché',        emoji: '🔴', couleur: 0xC0392B },
   ennemi:       { label: 'Ennemi',           emoji: '⚔️', couleur: 0xE67E22 },
   rival:        { label: 'Rival',            emoji: '🥊', couleur: 0xD35400 },
@@ -30,7 +33,7 @@ const CATS = {
   neutre:       { label: 'Neutre',           emoji: '⚪', couleur: 0x95A5A6 },
   allie:        { label: 'Allié',            emoji: '🤝', couleur: 0x2ECC71 },
 };
-const CAT_ORDER = ['recherche', 'ennemi', 'rival', 'surveillance', 'neutre', 'allie'];
+const CAT_ORDER = ['wanted', 'recherche', 'ennemi', 'rival', 'surveillance', 'neutre', 'allie'];
 const DNG = {
   faible:   { label: 'Faible',   emoji: '🟢' },
   moyenne:  { label: 'Moyenne',  emoji: '🟡' },
@@ -130,6 +133,7 @@ function _panelRows() {
       new ButtonBuilder().setCustomId('grp_del').setLabel('Retirer').setEmoji('🗑️').setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('grp_filter::wanted').setLabel('Wanted').setEmoji('💰').setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId('grp_filter::recherche').setLabel('Recherchés').setEmoji('🔴').setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId('grp_filter::ennemi').setLabel('Ennemis').setEmoji('⚔️').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('grp_filter::surveillance').setLabel('Surveillance').setEmoji('👁️').setStyle(ButtonStyle.Secondary),
@@ -138,8 +142,29 @@ function _panelRows() {
   ];
 }
 
-// ─── Fiche détaillée ───
+// ─── Fiche « Wanted » (avis de recherche, façon poster) ───
+function _wantedEmbed(g) {
+  const d = _dngInfo(g.dangerosite);
+  const e = new EmbedBuilder().setColor(0x8E1B1B).setTitle(`💰 AVIS DE RECHERCHE — ${_clip(g.nom, 190)}`)
+    .setDescription('☠️ *Groupe recherché. Toute information menant à sa localisation ou sa capture est récompensée.*');
+  e.addFields(
+    { name: '💰 Prime', value: _clip(g.prime || '—', 100), inline: true },
+    { name: '⚠️ Dangerosité', value: d ? `${d.emoji} ${d.label}` : '—', inline: true },
+    { name: '🎯 Consigne', value: _clip(g.consigne || 'Indifférent', 100), inline: true },
+  );
+  if (g.meneur) e.addFields({ name: '👤 Meneur / chef', value: _clip(g.meneur, 300), inline: true });
+  if (g.territoire) e.addFields({ name: '📍 Dernière position / secteur', value: _clip(g.territoire, 300), inline: true });
+  if (g.commanditaire) e.addFields({ name: '🧾 Commanditaire', value: _clip(g.commanditaire, 200), inline: true });
+  if (g.effectif) e.addFields({ name: '👥 Effectif & armement', value: _clip(g.effectif, 500), inline: false });
+  if (g.notes) e.addFields({ name: '📝 Renseignements', value: _clip(g.notes, 1024), inline: false });
+  if (g.photo) e.setImage(g.photo);
+  e.setFooter({ text: `Avis ${g.id}${g.par ? ' · établi par ' + g.par : ''}` }).setTimestamp(g.createdAt || Date.now());
+  return e;
+}
+
+// ─── Fiche détaillée (renseignement) — sauf « wanted » qui bascule en avis de recherche ───
 function _ficheEmbed(g) {
+  if (g.categorie === 'wanted') return _wantedEmbed(g);
   const c = _catInfo(g.categorie);
   const d = _dngInfo(g.dangerosite);
   const e = new EmbedBuilder().setColor(c.couleur).setTitle(`${c.emoji} ${_clip(g.nom, 200)}`)
@@ -155,6 +180,7 @@ function _ficheEmbed(g) {
 
 // Aperçu d'un brouillon pendant le classement (catégorie/dangerosité), avec photo si présente.
 function _previewEmbed(draft) {
+  if (draft.categorie === 'wanted') return _wantedEmbed(draft);
   const c = _catInfo(draft.categorie); const d = _dngInfo(draft.dangerosite);
   const e = new EmbedBuilder().setColor(draft.categorie ? c.couleur : COULEUR).setTitle(`🕵️ ${_clip(draft.nom, 200)}`)
     .setDescription(`${draft.categorie ? `${c.emoji} ${c.label}` : '*(catégorie à choisir)*'}${d ? `  ·  ${d.emoji} ${d.label}` : ''}`);
@@ -166,7 +192,7 @@ function _previewEmbed(draft) {
 }
 function _classementPayload(draft) {
   const p = { content: _classementContenu(draft), components: _classementRows(draft) };
-  if (draft.photo || draft.notes || draft.effectif) p.embeds = [_previewEmbed(draft)];
+  if (draft.photo || draft.notes || draft.effectif || draft.categorie === 'wanted') p.embeds = [_previewEmbed(draft)];
   return p;
 }
 
@@ -183,15 +209,21 @@ function _listePayload(groupes, titre) {
 }
 
 // Selects de classement (catégorie + dangerosité) + bouton enregistrer, pour un brouillon.
+// Si la catégorie choisie est « wanted », on ajoute un bouton pour fixer prime / consigne / commanditaire.
 function _classementRows(draft) {
   const selCat = new StringSelectMenuBuilder().setCustomId('grp_selcat').setPlaceholder(draft.categorie ? `Catégorie : ${_catInfo(draft.categorie).label}` : '① Catégorie du groupe')
     .addOptions(CAT_ORDER.map(k => ({ label: CATS[k].label, value: k, emoji: CATS[k].emoji, default: draft.categorie === k })));
   const selDng = new StringSelectMenuBuilder().setCustomId('grp_seldng').setPlaceholder(draft.dangerosite ? `Dangerosité : ${_dngInfo(draft.dangerosite).label}` : '② Dangerosité (facultatif)')
     .addOptions(DNG_ORDER.map(k => ({ label: DNG[k].label, value: k, emoji: DNG[k].emoji, default: draft.dangerosite === k })));
-  const btn = new ButtonBuilder().setCustomId('grp_save').setLabel('Enregistrer la fiche').setEmoji('✅').setStyle(ButtonStyle.Success).setDisabled(!draft.categorie);
-  return [new ActionRowBuilder().addComponents(selCat), new ActionRowBuilder().addComponents(selDng), new ActionRowBuilder().addComponents(btn)];
+  const btnRow = new ActionRowBuilder();
+  if (draft.categorie === 'wanted') {
+    btnRow.addComponents(new ButtonBuilder().setCustomId('grp_prime').setEmoji('💰').setLabel(draft.prime ? `Prime : ${_clip(draft.prime, 40)}` : 'Prime & consigne').setStyle(ButtonStyle.Secondary));
+  }
+  btnRow.addComponents(new ButtonBuilder().setCustomId('grp_save').setLabel('Enregistrer la fiche').setEmoji('✅').setStyle(ButtonStyle.Success).setDisabled(!draft.categorie));
+  return [new ActionRowBuilder().addComponents(selCat), new ActionRowBuilder().addComponents(selDng), btnRow];
 }
 function _classementContenu(draft) {
+  if (draft.categorie === 'wanted') return `💰 **Avis de recherche : ${_clip(draft.nom, 100)}**\nFixe la **prime & la consigne** (bouton 💰), ajuste la **dangerosité**, puis **Enregistrer**.`;
   return `🗂️ **Nouveau groupe : ${_clip(draft.nom, 100)}**\nChoisis la **catégorie**${draft.categorie ? ' ✅' : ''} (et la dangerosité), puis **Enregistrer**.`;
 }
 
@@ -281,6 +313,37 @@ async function routeInteraction(interaction) {
       await interaction.update({ content: `✅ **${_clip(draft.nom, 100)}** fiché (${_catInfo(draft.categorie).emoji} ${_catInfo(draft.categorie).label}).`, embeds: [_ficheEmbed(draft)], components: [] }).catch(() => {});
       // met à jour le panneau si on peut le retrouver
       try { const ch = await interaction.guild.channels.fetch(SALON_GROUPES).catch(() => null); if (ch?.messages?.fetch) { const recents = await ch.messages.fetch({ limit: 30 }).catch(() => null); const panel = recents && [...recents.values()].find(m => /REGISTRE DES GROUPES/i.test(m.embeds?.[0]?.title || '')); if (panel) await panel.edit({ embeds: [_panelEmbed(r)], components: _panelRows() }).catch(() => {}); } } catch {}
+      return true;
+    }
+
+    // 💰 Prime & consigne (uniquement pour un avis de recherche « wanted ») → modale
+    if (interaction.isButton?.() && id === 'grp_prime') {
+      const db = loadDB(); const r = _ensure(db);
+      const draft = r.drafts[interaction.user.id];
+      if (!draft) { await interaction.reply({ content: '⏳ Fiche expirée — recommence via ➕.', flags: eph }).catch(() => {}); return true; }
+      const modal = new ModalBuilder().setCustomId('grp_prime_modal').setTitle('💰 Avis de recherche');
+      const tPrime = new TextInputBuilder().setCustomId('prime').setLabel('Prime / récompense').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100).setPlaceholder('Ex : 500 $ · une info précise');
+      const tConsigne = new TextInputBuilder().setCustomId('consigne').setLabel('Consigne').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100).setPlaceholder('Mort ou vif · Vif uniquement · Indifférent');
+      const tComm = new TextInputBuilder().setCustomId('commanditaire').setLabel('Commanditaire (facultatif)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(120).setPlaceholder('Qui lance l\'avis');
+      if (draft.prime) tPrime.setValue(_clip(draft.prime, 100));
+      if (draft.consigne) tConsigne.setValue(_clip(draft.consigne, 100));
+      if (draft.commanditaire) tComm.setValue(_clip(draft.commanditaire, 120));
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(tPrime),
+        new ActionRowBuilder().addComponents(tConsigne),
+        new ActionRowBuilder().addComponents(tComm),
+      );
+      await interaction.showModal(modal).catch(() => {});
+      return true;
+    }
+    if (interaction.isModalSubmit?.() && id === 'grp_prime_modal') {
+      const gf = (k) => { try { return (interaction.fields.getTextInputValue(k) || '').trim(); } catch { return ''; } };
+      const db = loadDB(); const r = _ensure(db);
+      const draft = r.drafts[interaction.user.id];
+      if (!draft) { await interaction.reply({ content: '⏳ Fiche expirée — recommence via ➕.', flags: eph }).catch(() => {}); return true; }
+      draft.prime = gf('prime'); draft.consigne = gf('consigne'); draft.commanditaire = gf('commanditaire'); persist(db);
+      if (interaction.isFromMessage?.()) await interaction.update(_classementPayload(draft)).catch(() => {});
+      else await interaction.reply({ content: '✅ Prime & consigne enregistrées — clique **Enregistrer la fiche**.', flags: eph }).catch(() => {});
       return true;
     }
 
