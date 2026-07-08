@@ -179,7 +179,7 @@ function _actions(id) {
     ),
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`med_suivi::${id}`).setLabel('Ajouter un suivi de soin').setEmoji('🩺').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(`med_cloture::${id}`).setLabel('Patient rétabli — clôturer').setEmoji('🟢').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`med_cloture::${id}`).setLabel('Archiver le dossier (rétabli)').setEmoji('🗂️').setStyle(ButtonStyle.Success),
     ),
   ];
 }
@@ -226,13 +226,16 @@ async function _dossierThread(guild, id, f) {
       const t = await ch.threads.fetch(f.threadId).catch(() => null);
       if (t) { if (t.archived) await t.setArchived(false).catch(() => {}); return t; }
     }
-    let found = null;
-    try { const act = await ch.threads.fetchActive().catch(() => null); if (act?.threads) found = [...act.threads.values()].find(t => (t.name || '').includes(tag)); } catch {}
-    if (!found) { try { const arc = await ch.threads.fetchArchived().catch(() => null); if (arc?.threads) found = [...arc.threads.values()].find(t => (t.name || '').includes(tag)); } catch {} }
-    if (found) { if (found.archived) await found.setArchived(false).catch(() => {}); f.threadId = found.id; return found; }
+    // Retrouve le fil du patient : par tag [id] OU par son nom (rattrape les anciens fils « En observation — X »).
     const gm = await guild.members.fetch(id).catch(() => null);
-    const nom = (gm?.displayName || String(id)).slice(0, 70);
-    const t = await ch.threads.create({ name: `🩺 ${nom} ${tag}`.slice(0, 100), message: { content: `<@&${ROLE_MEDECIN}>`, embeds: [_embedFiche(f, gm)], allowedMentions: { roles: [ROLE_MEDECIN] } } }).catch(() => null);
+    const nom = (gm?.displayName || '').trim();
+    const _match = (t) => { const nm = t.name || ''; return nm.includes(tag) || (nom && nm.toLowerCase().includes(nom.toLowerCase())); };
+    let found = null;
+    try { const act = await ch.threads.fetchActive().catch(() => null); if (act?.threads) found = [...act.threads.values()].find(_match); } catch {}
+    if (!found) { try { const arc = await ch.threads.fetchArchived().catch(() => null); if (arc?.threads) found = [...arc.threads.values()].find(_match); } catch {} }
+    if (found) { if (found.archived) await found.setArchived(false).catch(() => {}); f.threadId = found.id; return found; }
+    const nomF = (nom || String(id)).slice(0, 70);
+    const t = await ch.threads.create({ name: `🩺 ${nomF} ${tag}`.slice(0, 100), message: { content: `<@&${ROLE_MEDECIN}>`, embeds: [_embedFiche(f, gm)], allowedMentions: { roles: [ROLE_MEDECIN] } } }).catch(() => null);
     if (t) f.threadId = t.id;
     return t;
   } catch { return null; }
@@ -245,6 +248,26 @@ async function _posterAuDossier(guild, id, f, embed, ping) {
     if (cible?.send) { await cible.send({ content: ping || '', embeds: [embed], allowedMentions: ping ? { roles: [ROLE_MEDECIN] } : { parse: [] } }).catch(() => {}); return true; }
     return false;
   } catch { return false; }
+}
+
+// Archive TOUS les fils du patient dans le forum (le fil mémorisé + les anciens
+// « En observation — X »), pour qu'ils disparaissent de la liste active. Réversible.
+async function _archiverFilsPatient(guild, id, gm) {
+  let n = 0;
+  try {
+    const ch = _ch(guild, MEDICAL_CHANNEL);
+    if (!ch || ch.type !== 15 || !ch.threads?.fetchActive) return 0;
+    const tag = `[${id}]`;
+    const nom = (gm?.displayName || '').trim().toLowerCase();
+    const act = await ch.threads.fetchActive().catch(() => null);
+    const list = act?.threads ? [...act.threads.values()] : [];
+    for (const t of list) {
+      const nm = (t.name || '');
+      const match = nm.includes(tag) || (nom && nm.toLowerCase().includes(nom));
+      if (match && t.setArchived && !t.archived) { await t.setArchived(true).catch(() => {}); n++; }
+    }
+  } catch {}
+  return n;
 }
 
 // ── Alerte statut (INAPTE / OBSERVATION) — postée DANS le dossier du patient ──
@@ -600,29 +623,28 @@ async function routeInteraction(interaction) {
       return true;
     }
 
-    // ── Clôturer un dossier : patient totalement rétabli → repasse « apte » + archive le fil ──
+    // ── Archiver le dossier : le fil disparaît du forum, l'historique reste consultable ici ──
     if (interaction.isButton?.() && cid.startsWith('med_cloture::')) {
       if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé au médecin et à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const id = cid.split('::')[1];
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       const db = loadDB(); const f = _fiche(db, id);
       const par = interaction.member?.displayName || interaction.user.username;
-      f.statut = 'apte'; f.clotureAt = Date.now(); f.majPar = par; f.majAt = Date.now();
-      _log(f, '🟢 Patient rétabli — dossier clôturé', par);
-      saveDB(db);
       const gm = await interaction.guild.members.fetch(id).catch(() => null);
-      const embClose = new EmbedBuilder().setColor(0x2ECC71).setTitle('🟢 Dossier clôturé — patient rétabli')
-        .setDescription(`${gm ? `**${_clip(gm.displayName, 80)}**` : `<@${id}>`} est déclaré **totalement rétabli** le ${_dateFR(Date.now())}. Statut repassé à **✅ Apte**.`)
+      f.statut = 'apte'; f.clotureAt = Date.now(); f.majPar = par; f.majAt = Date.now();
+      _log(f, '🗂️ Dossier archivé (patient rétabli)', par);
+      // Dernière note DANS le fil, puis on archive TOUS les fils du patient (fini l'affichage dans le forum).
+      const embClose = new EmbedBuilder().setColor(0x2ECC71).setTitle('🗂️ Dossier archivé — patient rétabli')
+        .setDescription(`${gm ? `**${_clip(gm.displayName, 80)}**` : `<@${id}>`} — dossier **clôturé et archivé** le ${_dateFR(Date.now())}. Statut : **✅ Apte**.\n*Tout l'historique (blessures, soins) reste consultable depuis le panneau médical.*`)
         .addFields({ name: 'Clôturé par', value: _clip(par, 60), inline: true })
         .setFooter({ text: 'Iron Wolf Company · Suivi médical' }).setTimestamp();
       await _posterAuDossier(interaction.guild, id, f, embClose, '');
-      saveDB(db);
-      // Archive le fil du dossier (il se rouvrira tout seul à la prochaine déclaration).
-      try {
-        const ch = _ch(interaction.guild, MEDICAL_CHANNEL);
-        if (f.threadId && ch?.threads?.fetch) { const t = await ch.threads.fetch(f.threadId).catch(() => null); if (t?.setArchived) await t.setArchived(true).catch(() => {}); }
-      } catch {}
-      await interaction.editReply({ content: '🟢 Dossier clôturé — le patient est marqué **rétabli (apte)** et son fil a été archivé.', embeds: [_embedFiche(f, gm)], components: _actions(id) }).catch(() => {});
+      saveDB(db); // persiste le statut + threadId
+      const nb = await _archiverFilsPatient(interaction.guild, id, gm);
+      await interaction.editReply({
+        content: `🗂️ **Dossier archivé.**${nb ? ` ${nb} fil(s) retiré(s) du forum « suivi-médical ».` : ''} Le patient est marqué **✅ Apte** et **tout l'historique reste consultable** en rouvrant son dossier ici. Il se rouvrira tout seul si une nouvelle blessure survient.`,
+        embeds: [_embedFiche(f, gm)], components: _actions(id),
+      }).catch(() => {});
       return true;
     }
 
@@ -880,4 +902,4 @@ async function installerPanelDemande(channel) {
   return true;
 }
 
-module.exports = { installerPanel, installerExemple, installerPanelDemande, routeInteraction, checkRappelsMedicaux, MEDICAL_CHANNEL, ROLE_MEDECIN, _test: { _dossierThread, _posterAuDossier } };
+module.exports = { installerPanel, installerExemple, installerPanelDemande, routeInteraction, checkRappelsMedicaux, MEDICAL_CHANNEL, ROLE_MEDECIN, _test: { _dossierThread, _posterAuDossier, _archiverFilsPatient } };
