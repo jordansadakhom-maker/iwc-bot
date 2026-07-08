@@ -76,6 +76,16 @@ async function avertirMembre(user, guild, titre, message) {
     return true;
   } catch { return false; } // MP fermés → on n'insiste pas
 }
+// Enregistre un avertissement AUTO dans le registre unifié (via index.js) et
+// renvoie un suffixe « · ⚠️ avertissement N/3 » à ajouter à l'alerte Direction.
+function noterStrike(user, raison) {
+  try {
+    const total = (typeof global.enregistrerAvertissementAuto === 'function')
+      ? global.enregistrerAvertissementAuto(user?.id, user?.username, raison)
+      : null;
+    return total ? ` · ⚠️ avertissement **${total}/3**` : '';
+  } catch { return ''; }
+}
 async function timeout(member, ms, raison) {
   try { if (member?.moderatable) { await member.timeout(ms, raison); return true; } } catch {}
   return false;
@@ -110,8 +120,9 @@ async function onMessage(message) {
       await timeout(message.member, CONF.SPAM_TIMEOUT_MS, 'Lien/arnaque détecté');
       await avertirMembre(message.author, message.guild, '🪤 Message supprimé',
         'Ton message ressemblait à une **arnaque / hameçonnage** (faux Nitro, lien piégé, faux cadeau Steam…) et a été retiré ; tu es en sourdine quelques minutes par précaution. Si c\'est une erreur, préviens la Direction.');
+      const strikeScam = noterStrike(message.author, 'Modération auto : arnaque/hameçonnage');
       await alerter(message.guild, '🪤 Lien d\'arnaque supprimé',
-        `Message de <@${message.author.id}> dans <#${message.channelId}> supprimé (arnaque/phishing présumé) et auteur mis en sourdine 5 min.\n\n> ${contenu.slice(0, 300).replace(/\n/g, ' ')}`);
+        `Message de <@${message.author.id}> dans <#${message.channelId}> supprimé (arnaque/phishing présumé) et auteur mis en sourdine 5 min.${strikeScam}\n\n> ${contenu.slice(0, 300).replace(/\n/g, ' ')}`);
       return true;
     }
 
@@ -126,8 +137,9 @@ async function onMessage(message) {
       await avertirMembre(message.author, message.guild, '🔗 Lien d\'invitation retiré',
         `Ton message dans **#${message.channel?.name || 'ce salon'}** a été supprimé : les **liens d'invitation vers d'autres serveurs Discord** ne sont pas autorisés ici.` +
         (recidive ? '\n\n⚠️ C\'est la **2ᵉ fois** : tu es en sourdine quelques minutes. Merci d\'arrêter.' : '\n\nMerci de ne pas recommencer. 🙏'));
+      const strikeInv = noterStrike(message.author, 'Modération auto : lien d\'invitation Discord');
       await alerter(message.guild, '🔗 Invitation Discord supprimée',
-        `Message de <@${message.author.id}> dans <#${message.channelId}> supprimé (lien d'invitation vers un autre serveur).` + (recidive ? '\n→ Récidive : sourdine 5 min.' : ''),
+        `Message de <@${message.author.id}> dans <#${message.channelId}> supprimé (lien d'invitation vers un autre serveur).${strikeInv}` + (recidive ? '\n→ Récidive : sourdine 5 min.' : ''),
         0xE67E22);
       return true;
     }
@@ -139,8 +151,9 @@ async function onMessage(message) {
       await timeout(message.member, CONF.SPAM_TIMEOUT_MS, 'Spam de mentions');
       await avertirMembre(message.author, message.guild, '📛 Message supprimé',
         'Ton message mentionnait **trop de personnes d\'un coup** (spam de mentions) et a été retiré ; tu es en sourdine quelques minutes. Merci de calmer les pings. 🙏');
+      const strikeMent = noterStrike(message.author, 'Modération auto : spam de mentions');
       await alerter(message.guild, '📛 Spam de mentions',
-        `<@${message.author.id}> a envoyé un message avec **${nbMentions}** mentions${message.mentions?.everyone ? ' (+ everyone/here)' : ''} dans <#${message.channelId}>. Message supprimé, sourdine 5 min.`);
+        `<@${message.author.id}> a envoyé un message avec **${nbMentions}** mentions${message.mentions?.everyone ? ' (+ everyone/here)' : ''} dans <#${message.channelId}>. Message supprimé, sourdine 5 min.${strikeMent}`);
       return true;
     }
 
@@ -160,8 +173,9 @@ async function onMessage(message) {
       } catch {}
       await avertirMembre(message.author, message.guild, '🌊 Ralentis un peu',
         'Tu as envoyé **trop de messages en quelques secondes** : certains ont été retirés et tu es en sourdine quelques minutes. Rien de grave — respire, puis reprends tranquillement. 🙂');
+      const strikeFlood = noterStrike(message.author, 'Modération auto : flood de messages');
       await alerter(message.guild, '🌊 Flood détecté',
-        `<@${message.author.id}> a envoyé ${arr.length}+ messages en ${CONF.SPAM_WINDOW_MS / 1000}s dans <#${message.channelId}>. Sourdine 5 min, messages récents supprimés.`);
+        `<@${message.author.id}> a envoyé ${arr.length}+ messages en ${CONF.SPAM_WINDOW_MS / 1000}s dans <#${message.channelId}>. Sourdine 5 min, messages récents supprimés.${strikeFlood}`);
       return true;
     }
   } catch (e) { console.log('⚠️ securite-plus onMessage:', e.message); }

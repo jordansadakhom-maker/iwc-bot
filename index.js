@@ -128,6 +128,10 @@ let nettoyeur = {};
 try { nettoyeur = require('./nettoyeur'); console.log('✅ Module nettoyeur chargé'); }
 catch (e) { console.log('⚠️ nettoyeur non chargé:', e.message); }
 
+let recapHebdo = {};
+try { recapHebdo = require('./recap-hebdo'); console.log('✅ Module récap hebdo chargé'); }
+catch (e) { console.log('⚠️ récap hebdo non chargé:', e.message); }
+
 let telegramme = {};
 try { telegramme = require('./telegramme'); console.log('✅ Module télégrammes (conversations) chargé'); }
 catch (e) { console.log('⚠️ telegramme non chargé:', e.message); }
@@ -218,6 +222,7 @@ initPapiers(client);
 securite.initSecurite(client);
 securitePlus.initSecuritePlus(client);
 nettoyeur.demarrer?.(client);
+recapHebdo.demarrer?.(client);
 operations.init?.({
   creerOperationNotion: (op) => notionExtra.creerOperationNotion?.(op),
   poleRoleId: (guild, pole) => _poleRoleId(guild, pole),
@@ -346,7 +351,7 @@ Message : "${texte}"`;
         headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
         body: JSON.stringify({ model, max_tokens: 700, messages: [{ role: 'user', content: prompt }] }),
       });
-      if (!resp.ok) { console.log('⚠️ _reformulerRP HTTP', resp.status, '(' + model + ')', (await resp.text().catch(() => '')).slice(0, 200)); continue; } // → tente le modèle suivant
+      if (!resp.ok) { console.log('⚠️ _reformulerRP HTTP', resp.status, '(' + model + ')', (await resp.text().catch(() => '')).slice(0, 200)); if ([401, 402, 429].includes(resp.status)) { try { global.signalerPanneIA?.('reformulation RP', resp.status); } catch {} } continue; } // → tente le modèle suivant
       const data = await resp.json();
       let txt = (data?.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
       txt = txt.replace(/^["«»\s]+|["«»\s]+$/g, '').trim();
@@ -388,7 +393,7 @@ Notes brutes : "${t}"`;
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1100, messages: [{ role: 'user', content: prompt }] }),
     });
-    if (!resp.ok) { console.log('⚠️ _reformulerBriefingRP HTTP', resp.status, (await resp.text().catch(() => '')).slice(0, 200)); return null; }
+    if (!resp.ok) { console.log('⚠️ _reformulerBriefingRP HTTP', resp.status, (await resp.text().catch(() => '')).slice(0, 200)); if ([401, 402, 429].includes(resp.status)) { try { global.signalerPanneIA?.('reformulation de briefing', resp.status); } catch {} } return null; }
     const data = await resp.json();
     let out = (data?.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
     out = out.replace(/^["«»\s]+|["«»\s]+$/g, '').trim();
@@ -3665,6 +3670,8 @@ client.on('messageCreate', async message => {
   } catch {}
   // Nettoyeur : « !nettoyage » ouvre le panneau de configuration (Direction).
   try { if (await nettoyeur.commande?.(message)) return; } catch {}
+  // Récap hebdo : « !recap » poste le résumé d'activité (Direction).
+  try { if (await recapHebdo.commande?.(message)) return; } catch {}
   // Modération : « !moderation » affiche l'état des protections (Direction).
   try {
     if (message.guild && !message.author?.bot && /^!moderation\b/i.test((message.content || '').trim())) {
@@ -10693,6 +10700,48 @@ global.getInformateurCh = (guild) => getJournalCh(guild) || guild.channels.cache
 global.getInactiviteCh = (guild) => getJournalCh(guild) || guild.channels.cache.get(SALON_HARDCODED.JOURNAL_DE_BORD);
 global.getAlerteCh = (guild) => getJournalCh(guild) || guild.channels.cache.get(SALON_HARDCODED.JOURNAL_DE_BORD);
 global.JOURNAL_CH_ID = '1508756535407542372';
+
+// ── Modération unifiée : enregistre un avertissement AUTOMATIQUE (persistant) ──
+// La modération auto (securite-plus) appelle ceci pour que ses sanctions rejoignent
+// le MÊME registre que /avertir → consultable via /avertissements, escalade qui
+// survit aux redémarrages. Anti-doublon : 1 strike auto / membre / 10 min.
+const _autoAvertDedup = new Map(); // userId → dernier ts
+global.enregistrerAvertissementAuto = (userId, username, raison) => {
+  try {
+    if (!userId) return null;
+    const now = Date.now();
+    const last = _autoAvertDedup.get(userId) || 0;
+    if (now - last < 10 * 60 * 1000) return null; // même personne < 10 min → on ne re-strike pas
+    _autoAvertDedup.set(userId, now);
+    const db = loadDB();
+    if (!db.avertissements) db.avertissements = {};
+    if (!db.avertissements[userId]) db.avertissements[userId] = [];
+    const avt = { id: `AUTO-${now.toString().slice(-5)}`, raison: String(raison || 'Modération automatique').slice(0, 300), parId: client.user?.id || null, par: 'Modération auto', date: new Date().toISOString(), auto: true };
+    db.avertissements[userId].push(avt);
+    saveDB(db);
+    try { if (typeof sauvegarderSurGitHub === 'function') sauvegarderSurGitHub(); } catch {}
+    return db.avertissements[userId].length;
+  } catch { return null; }
+};
+
+// ── Alerte « panne IA » (crédits/quota épuisés) : prévient la Direction UNE fois ──
+// Appelée quand un appel Anthropic renvoie 401/402/429. Cooldown 30 min pour ne pas spammer.
+let _dernierePanneIA = 0;
+global.signalerPanneIA = async (contexte, code) => {
+  try {
+    const now = Date.now();
+    if (now - _dernierePanneIA < 30 * 60 * 1000) return; // 1 alerte / 30 min
+    _dernierePanneIA = now;
+    const guild = client.guilds.cache.first();
+    const txt = `🔴 **Panne IA détectée** — ${contexte}${code ? ` (HTTP ${code})` : ''}.\n` +
+      `L'API Anthropic a refusé la requête (crédits ou quota épuisés). La **reformulation RP** et la **lecture du coffre** risquent de ne plus fonctionner.\n\n` +
+      `➡️ **Recharge le compte Anthropic** sur console.anthropic.com pour rétablir le service.\n` +
+      `*(Alerte unique — je ne la répète pas avant 30 min.)*`;
+    try { if (guild) { const ch = global.getAlerteCh?.(guild); if (ch?.send) await ch.send(txt); } } catch {}
+    try { for (const id of (securite.AUTORISES || [])) { const u = await client.users.fetch(id).catch(() => null); if (u) await u.send(txt).catch(() => {}); } } catch {}
+    console.log('[IA] Panne signalée à la Direction :', contexte, code || '');
+  } catch {}
+};
 
 // Mettre à jour le statut activité dans Fiches_personnages
 async function _syncTousMembresNotion(guild) {
