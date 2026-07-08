@@ -179,6 +179,7 @@ function _actions(id) {
     ),
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`med_suivi::${id}`).setLabel('Ajouter un suivi de soin').setEmoji('🩺').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`med_cloture::${id}`).setLabel('Patient rétabli — clôturer').setEmoji('🟢').setStyle(ButtonStyle.Success),
     ),
   ];
 }
@@ -213,11 +214,43 @@ Réponds STRICTEMENT en JSON, rien d'autre :
   } catch (e) { console.log('❌ medical evaluerBlessure:', e.message); return null; }
 }
 
-// ── Alerte quand un membre devient INAPTE ou EN OBSERVATION (prévient le médecin) ──
+// ── Dossier = UN seul fil de forum par patient (réutilisé, jamais recréé) ──
+// Retourne le fil du patient : celui mémorisé sur la fiche, sinon retrouvé par son
+// tag [id], sinon créé une seule fois. Mémorise l'identifiant du fil sur f.threadId.
+async function _dossierThread(guild, id, f) {
+  try {
+    const ch = _ch(guild, MEDICAL_CHANNEL);
+    if (!ch || ch.type !== 15 || !ch.threads?.create) return null; // seulement en mode forum
+    const tag = `[${id}]`;
+    if (f.threadId) {
+      const t = await ch.threads.fetch(f.threadId).catch(() => null);
+      if (t) { if (t.archived) await t.setArchived(false).catch(() => {}); return t; }
+    }
+    let found = null;
+    try { const act = await ch.threads.fetchActive().catch(() => null); if (act?.threads) found = [...act.threads.values()].find(t => (t.name || '').includes(tag)); } catch {}
+    if (!found) { try { const arc = await ch.threads.fetchArchived().catch(() => null); if (arc?.threads) found = [...arc.threads.values()].find(t => (t.name || '').includes(tag)); } catch {} }
+    if (found) { if (found.archived) await found.setArchived(false).catch(() => {}); f.threadId = found.id; return found; }
+    const gm = await guild.members.fetch(id).catch(() => null);
+    const nom = (gm?.displayName || String(id)).slice(0, 70);
+    const t = await ch.threads.create({ name: `🩺 ${nom} ${tag}`.slice(0, 100), message: { content: `<@&${ROLE_MEDECIN}>`, embeds: [_embedFiche(f, gm)], allowedMentions: { roles: [ROLE_MEDECIN] } } }).catch(() => null);
+    if (t) f.threadId = t.id;
+    return t;
+  } catch { return null; }
+}
+// Ajoute une entrée AU dossier existant du patient (fil unique), avec repli salon simple.
+async function _posterAuDossier(guild, id, f, embed, ping) {
+  try {
+    const t = await _dossierThread(guild, id, f);
+    const cible = t?.send ? t : _ch(guild, MEDICAL_CHANNEL);
+    if (cible?.send) { await cible.send({ content: ping || '', embeds: [embed], allowedMentions: ping ? { roles: [ROLE_MEDECIN] } : { parse: [] } }).catch(() => {}); return true; }
+    return false;
+  } catch { return false; }
+}
+
+// ── Alerte statut (INAPTE / OBSERVATION) — postée DANS le dossier du patient ──
 async function _alerteStatut(guild, id, f) {
   try {
     if (f.statut !== 'inapte' && f.statut !== 'observation') return;
-    const ch = _ch(guild, MEDICAL_CHANNEL); if (!ch) return;
     const gm = await guild.members.fetch(id).catch(() => null);
     const st = STATUTS[f.statut] || STATUTS.non_teste;
     const e = new EmbedBuilder().setColor(st.couleur)
@@ -230,12 +263,7 @@ async function _alerteStatut(guild, id, f) {
       )
       .setFooter({ text: 'Iron Wolf Company · Suivi médical' }).setTimestamp();
     if (f.notes) e.addFields({ name: '📝 Notes', value: _clip(f.notes, 500), inline: false });
-    const ping = `<@&${ROLE_MEDECIN}>`;
-    if (ch.type === 15 && ch.threads?.create) {
-      await ch.threads.create({ name: `🚨 ${st.label} — ${(gm?.displayName || id)}`.slice(0, 100), message: { content: ping, embeds: [e], allowedMentions: { roles: [ROLE_MEDECIN] } } }).catch(() => {});
-    } else if (ch.send) {
-      await ch.send({ content: ping, embeds: [e], allowedMentions: { roles: [ROLE_MEDECIN] } }).catch(() => {});
-    }
+    await _posterAuDossier(guild, id, f, e, `<@&${ROLE_MEDECIN}>`);
   } catch {}
 }
 // Extrait une date/heure d'un texte libre de RDV (best-effort) → timestamp ms ou null
@@ -450,7 +478,8 @@ async function routeInteraction(interaction) {
       f.statut = statut; f.majPar = interaction.member?.displayName || interaction.user.username; f.majAt = Date.now();
       _log(f, `Statut → ${STATUTS[statut].label}`, f.majPar); saveDB(db);
       await _afficherFiche(interaction, id, true); // accuse réception du bouton d'abord (évite « interaction a échoué »)
-      await _alerteStatut(interaction.guild, id, f); // alerte si inapte / observation
+      await _alerteStatut(interaction.guild, id, f); // alerte si inapte / observation (dans le dossier du patient)
+      saveDB(db); // persiste le fil du dossier (f.threadId) éventuellement créé
       return true;
     }
 
@@ -554,7 +583,46 @@ async function routeInteraction(interaction) {
       _log(f, `Suivi de soin ajouté : ${soin.slice(0, 80)}`, par);
       saveDB(db);
       const gm = await interaction.guild.members.fetch(id).catch(() => null);
+      // Le suivi s'AJOUTE au dossier existant du patient (fil unique).
+      const embSuivi = new EmbedBuilder().setColor((STATUTS[f.statut] || STATUTS.non_teste).couleur)
+        .setTitle('🩺 Suivi de soin')
+        .setDescription(`Patient : ${gm ? `**${_clip(gm.displayName, 80)}**` : `<@${id}>`} · ${_clip(dateSaisie || _dateFR(Date.now()), 40)}`)
+        .addFields(
+          { name: 'Soin réalisé', value: _clip(soin, 900), inline: false },
+          ...(etat ? [{ name: 'État / évolution', value: _clip(etat, 500), inline: false }] : []),
+          ...(traitement ? [{ name: 'Traitement', value: _clip(traitement, 300), inline: true }] : []),
+          ...(suite ? [{ name: 'Prochaine étape', value: _clip(suite, 200), inline: true }] : []),
+          { name: 'Soignant', value: _clip(par, 60), inline: true },
+        ).setFooter({ text: 'Iron Wolf Company · Suivi médical' }).setTimestamp();
+      await _posterAuDossier(interaction.guild, id, f, embSuivi, '');
+      saveDB(db); // persiste le fil du dossier (f.threadId)
       await interaction.editReply({ content: '✅ Suivi de soin enregistré.', embeds: [_embedFiche(f, gm)], components: _actions(id) }).catch(() => {});
+      return true;
+    }
+
+    // ── Clôturer un dossier : patient totalement rétabli → repasse « apte » + archive le fil ──
+    if (interaction.isButton?.() && cid.startsWith('med_cloture::')) {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé au médecin et à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const id = cid.split('::')[1];
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const db = loadDB(); const f = _fiche(db, id);
+      const par = interaction.member?.displayName || interaction.user.username;
+      f.statut = 'apte'; f.clotureAt = Date.now(); f.majPar = par; f.majAt = Date.now();
+      _log(f, '🟢 Patient rétabli — dossier clôturé', par);
+      saveDB(db);
+      const gm = await interaction.guild.members.fetch(id).catch(() => null);
+      const embClose = new EmbedBuilder().setColor(0x2ECC71).setTitle('🟢 Dossier clôturé — patient rétabli')
+        .setDescription(`${gm ? `**${_clip(gm.displayName, 80)}**` : `<@${id}>`} est déclaré **totalement rétabli** le ${_dateFR(Date.now())}. Statut repassé à **✅ Apte**.`)
+        .addFields({ name: 'Clôturé par', value: _clip(par, 60), inline: true })
+        .setFooter({ text: 'Iron Wolf Company · Suivi médical' }).setTimestamp();
+      await _posterAuDossier(interaction.guild, id, f, embClose, '');
+      saveDB(db);
+      // Archive le fil du dossier (il se rouvrira tout seul à la prochaine déclaration).
+      try {
+        const ch = _ch(interaction.guild, MEDICAL_CHANNEL);
+        if (f.threadId && ch?.threads?.fetch) { const t = await ch.threads.fetch(f.threadId).catch(() => null); if (t?.setArchived) await t.setArchived(true).catch(() => {}); }
+      } catch {}
+      await interaction.editReply({ content: '🟢 Dossier clôturé — le patient est marqué **rétabli (apte)** et son fil a été archivé.', embeds: [_embedFiche(f, gm)], components: _actions(id) }).catch(() => {});
       return true;
     }
 
@@ -590,8 +658,19 @@ async function routeInteraction(interaction) {
       f.notes = ((f.notes ? f.notes + '\n' : '') + noteLigne).slice(0, 1000);
       _log(f, `Blessure signalée${evalRes ? ` → ${STATUTS[f.statut]?.label || f.statut}` : ''}`, par);
       saveDB(db);
-      if (evalRes?.statut && evalRes.statut !== ancien) await _alerteStatut(interaction.guild, id, f).catch(() => {});
       const gm = await interaction.guild.members.fetch(id).catch(() => null);
+      // La déclaration s' AJOUTE au dossier existant du patient (fil unique) — plus de doublon.
+      const embBless = new EmbedBuilder().setColor((STATUTS[f.statut] || STATUTS.non_teste).couleur)
+        .setTitle('🩹 Blessure / soin déclaré')
+        .setDescription(`Patient : ${gm ? `**${_clip(gm.displayName, 80)}**` : `<@${id}>`} · ${_dateFR(Date.now())}`)
+        .addFields(
+          { name: 'Ce qui s\'est passé', value: _clip(desc, 900), inline: false },
+          ...(localisation ? [{ name: 'Localisation', value: _clip(localisation, 100), inline: true }] : []),
+          ...(evalRes ? [{ name: 'Évaluation', value: `gravité **${_clip(evalRes.gravite, 40)}** · statut → **${STATUTS[f.statut]?.label || f.statut}**`, inline: false }, { name: '💊 Recommandation', value: _clip(evalRes.recommandation, 400), inline: false }] : []),
+          { name: 'Déclaré par', value: _clip(par, 60), inline: true },
+        ).setFooter({ text: 'Iron Wolf Company · Suivi médical' }).setTimestamp();
+      await _posterAuDossier(interaction.guild, id, f, embBless, (f.statut === 'inapte' || f.statut === 'observation') ? `<@&${ROLE_MEDECIN}>` : '');
+      saveDB(db); // persiste le fil du dossier (f.threadId)
       const verdict = evalRes
         ? `🧠 **Évaluation automatique :** blessure **${evalRes.gravite}**.\n→ Statut mis à jour : **${STATUTS[f.statut]?.label || f.statut}**\n💊 *${evalRes.recommandation}*`
         : '⚠️ Blessure enregistrée (l\'évaluation IA est indisponible — ajuste le statut à la main si besoin).';
@@ -801,4 +880,4 @@ async function installerPanelDemande(channel) {
   return true;
 }
 
-module.exports = { installerPanel, installerExemple, installerPanelDemande, routeInteraction, checkRappelsMedicaux, MEDICAL_CHANNEL, ROLE_MEDECIN };
+module.exports = { installerPanel, installerExemple, installerPanelDemande, routeInteraction, checkRappelsMedicaux, MEDICAL_CHANNEL, ROLE_MEDECIN, _test: { _dossierThread, _posterAuDossier } };
