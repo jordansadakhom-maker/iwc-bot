@@ -3781,6 +3781,8 @@ client.on('messageCreate', async message => {
   try { if (await comptabilite.onMessage?.(message)) return; } catch {}
   try { if (await traque.onMessage?.(message)) return; } catch {}
   try { if (await tenue.onMessage?.(message)) return; } catch {}
+  // Registre des groupes : une photo postée dans le salon dédié → analyse IA détaillée.
+  try { if (await groupes.onMessage?.(message)) return; } catch {}
   // Salon Far West : capture Red Dead → cliché repeint par l'IA (Gemini), original retiré
   try { if (await reddead.onMessage?.(message)) return; } catch {}
   // Répertoire : image déposée dans le fil d'une fiche → devient le portrait du contact
