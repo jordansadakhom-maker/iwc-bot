@@ -59,6 +59,22 @@ const LIEUX = {
   aut: '📍 Autre (précisé dans les détails)',
 };
 
+// ── Champs spécifiques par prestation (chaque prestation pose SES bonnes questions) ──
+// Format : [id, label(≤45), 'short'|'para', requis, maxLength, placeholder]
+const CHAMPS_PRESTATION = {
+  esc: [['trajet', 'Trajet (départ → arrivée)', 'short', true, 120, 'Ex : Valentine → Saint-Denis'], ['duree', 'Durée estimée', 'short', false, 60, 'Ex : ~2h, une demi-journée…']],
+  cnv: [['trajet', 'Trajet (départ → arrivée)', 'short', true, 120, 'Ex : Valentine → Saint-Denis'], ['duree', 'Durée estimée', 'short', false, 60, 'Ex : ~2h, une demi-journée…']],
+  pro: [['proteger', 'Qui / quoi protéger ?', 'short', true, 120, 'Ex : un marchand et sa cargaison'], ['menace', 'Contre quelle menace ?', 'short', false, 120, 'Ex : bandits, un rival…']],
+  sec: [['lieu_precis', 'Quel lieu sécuriser ?', 'short', true, 120, 'Ex : un entrepôt à Saint-Denis'], ['menace', 'Menace / risque connu', 'short', false, 120, 'Ex : cambriolage, intrusion…']],
+  enq: [['cible', 'Sur qui / quoi enquêter ?', 'short', true, 120, 'Ex : un associé douteux'], ['objectif', 'Ce que vous cherchez à savoir', 'para', true, 400, 'Ex : est-il en train de nous trahir ?']],
+  neg: [['parties', 'Entre qui ? (parties concernées)', 'short', true, 120, 'Ex : nous et la famille Braithwaite'], ['enjeu', 'Objet / enjeu du différend', 'para', true, 400, 'Ex : partage d\'un territoire']],
+  rec: [['objet', 'Bien / montant à récupérer', 'short', true, 120, 'Ex : une dette de 500 $'], ['debiteur', 'Auprès de qui ? (le débiteur)', 'short', true, 120, 'Ex : un joueur de Saint-Denis']],
+  bnt: [['cible', 'Nom de la cible', 'short', true, 120, 'Ex : « Le Serpent » Callahan'], ['mandat', 'Mandat / prime / conditions', 'para', false, 400, 'Ex : vivant, 800 $, mandat officiel']],
+  trv: [['nature', 'Nature du travail', 'para', true, 400, 'Décris ce qu\'il faut faire'], ['contraintes', 'Contraintes / discrétion', 'short', false, 150, 'Ex : sans témoin, de nuit…']],
+};
+
+function _satLabel(n) { return n === 'bien' ? '👍 Satisfait' : n === 'moyen' ? '😐 Mitigé' : n === 'mauvais' ? '👎 Mécontent' : '—'; }
+
 // ── Helpers généraux ──
 const ref = () => `RDV-${Date.now().toString().slice(-5)}`;
 const fmtDate = () => new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
@@ -202,12 +218,14 @@ function _embedRdv(rdv) {
       { name: '👤 Demandeur', value: `${rdv.nomRP}${rdv.clientId ? ` (<@${rdv.clientId}>)` : ''}`, inline: false },
       { name: '🧰 Prestation', value: typeLabel, inline: true },
       { name: '📍 Lieu', value: lieuLabel, inline: true },
-      ...(rdv.trajet ? [{ name: '🗺️ Trajet', value: String(rdv.trajet).slice(0, 200), inline: true }] : []),
-      ...(rdv.duree ? [{ name: '⏱️ Durée estimée', value: String(rdv.duree).slice(0, 100), inline: true }] : []),
+      ...(Array.isArray(rdv.reponses) ? rdv.reponses.slice(0, 4).map(rp => ({ name: '• ' + String(rp.label).slice(0, 100), value: String(rp.value).slice(0, 300), inline: true })) : []),
+      ...(!rdv.reponses && rdv.trajet ? [{ name: '🗺️ Trajet', value: String(rdv.trajet).slice(0, 200), inline: true }] : []),
+      ...(!rdv.reponses && rdv.duree ? [{ name: '⏱️ Durée estimée', value: String(rdv.duree).slice(0, 100), inline: true }] : []),
       { name: '🕐 Créneau', value: dt ? `${tsF(dt)}\n${tsR(dt)}` : (rdv.souhaitTexte ? `*Souhait : ${rdv.souhaitTexte}* (à fixer)` : '—'), inline: false },
       { name: '📇 Contact (pour le contrat)', value: `<@${rdv.contactId || rdv.clientId}> · ID : \`${rdv.contactId || rdv.clientId}\``, inline: false },
       ...(rdv.agentId ? [{ name: '🤝 Agent assigné', value: `<@${rdv.agentId}>`, inline: true }] : []),
       ...(rdv.details ? [{ name: '📝 Détails', value: rdv.details.slice(0, 1000), inline: false }] : []),
+      ...(rdv.satisfaction ? [{ name: '⭐ Satisfaction client', value: _satLabel(rdv.satisfaction) + (rdv.satisfactionComment ? `\n*« ${String(rdv.satisfactionComment).slice(0, 300)} »*` : ''), inline: false }] : []),
     )
     .setFooter({ text: `Iron Wolf Company · Bureau des Rendez-vous` })
     .setTimestamp();
@@ -305,6 +323,7 @@ function panelPayload() {
     .setFooter({ text: 'Iron Wolf Company · Bureau de Saint-Denis' });
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('rdvp_book').setLabel('Besoin de nos services').setEmoji('🤝').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('rdvp_mesdemandes').setLabel('Mes demandes').setEmoji('📋').setStyle(ButtonStyle.Secondary),
   );
   return { embeds: [embed], components: [row] };
 }
@@ -376,6 +395,7 @@ async function routeInteraction(interaction) {
             { name: '📅 Total RDV', value: String(total), inline: true },
             { name: '✅ Honorés', value: String(honored), inline: true },
             { name: '👻 Lapins', value: String(noshow), inline: true },
+            ...(c?.avis && (c.avis.bien || c.avis.moyen || c.avis.mauvais) ? [{ name: '⭐ Satisfaction', value: `👍 ${c.avis.bien || 0} · 😐 ${c.avis.moyen || 0} · 👎 ${c.avis.mauvais || 0}`, inline: false }] : []),
             { name: '🕘 Derniers RDV', value: hist, inline: false },
           )] }).catch(() => {});
         return true;
@@ -387,6 +407,65 @@ async function routeInteraction(interaction) {
       const sel = new StringSelectMenuBuilder().setCustomId('rdvp_type').setPlaceholder('1️⃣ Choisis la prestation')
         .addOptions(Object.entries(TYPES).map(([k, v]) => ({ label: v.label, value: k })));
       await interaction.reply({ content: '✉ **Prise de rendez-vous** — étape 1/2 : la prestation.', components: [new ActionRowBuilder().addComponents(sel)], flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+
+    // ===== CLIENT : voir MES demandes (+ annuler une demande en attente) =====
+    if (interaction.isButton?.() && interaction.customId === 'rdvp_mesdemandes') {
+      const store = _store(loadDB());
+      const mine = Object.values(store.rdvs).filter(r => r.clientId === interaction.user.id).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 8);
+      if (!mine.length) { await interaction.reply({ content: '📭 Tu n\'as aucune demande en cours. Clique sur **« Besoin de nos services »** pour en faire une.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const lignes = mine.map(r => { const si = STATUT_INFO[r.statut] || STATUT_INFO['Planifié']; const dt = _slotToDate(r.slot); return `${si.icone} **${TYPES[r.typeKey]?.label || 'RDV'}** · \`${r.id}\` — ${si.texte}${dt ? ` · ${tsF(dt)}` : (r.souhaitTexte ? ` · souhait : ${r.souhaitTexte}` : '')}`; });
+      const annulables = mine.filter(r => ['Planifié', 'Confirmé'].includes(r.statut));
+      const comps = [];
+      if (annulables.length) {
+        const sel = new StringSelectMenuBuilder().setCustomId('rdvp_annuler_sel').setPlaceholder('Annuler une demande en attente…')
+          .addOptions(annulables.map(r => ({ label: `${String(TYPES[r.typeKey]?.label || 'RDV').replace(/[^\p{L}\p{N} ]/gu, '').trim().slice(0, 70)} · ${r.id}`, value: r.id })));
+        comps.push(new ActionRowBuilder().addComponents(sel));
+      }
+      await interaction.reply({ embeds: [new EmbedBuilder().setColor(COL.sepia).setTitle('📋 Mes demandes').setDescription(lignes.join('\n')).setFooter({ text: 'Iron Wolf Company · Bureau des Rendez-vous' })], components: comps, flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+    if (interaction.isStringSelectMenu?.() && interaction.customId === 'rdvp_annuler_sel') {
+      const rdvId = interaction.values[0];
+      const db = loadDB(); const store = _store(db); const rdv = store.rdvs[rdvId];
+      if (!rdv || rdv.clientId !== interaction.user.id) { await interaction.update({ content: '⚠️ Demande introuvable.', embeds: [], components: [] }).catch(() => {}); return true; }
+      if (!['Planifié', 'Confirmé'].includes(rdv.statut)) { await interaction.update({ content: 'Cette demande ne peut plus être annulée.', embeds: [], components: [] }).catch(() => {}); return true; }
+      rdv.statut = 'Annulé'; store.rdvs[rdvId] = rdv; _persist(db);
+      try { await _notionStatut(rdv.notionId, 'Annulé'); } catch {}
+      await _rafraichirTelegramme(interaction.client, rdv).catch(() => {});
+      try { const ch = rdv.channelId && await interaction.client.channels.fetch(rdv.channelId).catch(() => null); if (ch?.send) await ch.send({ content: `🚫 Le client <@${rdv.clientId}> a **annulé lui-même** sa demande \`${rdv.id}\` (${TYPES[rdv.typeKey]?.label || 'RDV'}).` }).catch(() => {}); } catch {}
+      await interaction.update({ content: `🚫 Ta demande \`${rdvId}\` a bien été annulée. Merci de nous avoir prévenus !`, embeds: [], components: [] }).catch(() => {});
+      return true;
+    }
+
+    // ===== CLIENT : retour de satisfaction (après une prestation honorée) =====
+    if (interaction.isButton?.() && interaction.customId?.startsWith('rdvp_sat::')) {
+      const [, rdvId, note] = interaction.customId.split('::');
+      const db = loadDB(); const store = _store(db); const rdv = store.rdvs[rdvId];
+      if (!rdv) { await interaction.reply({ content: '⚠️ Demande introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      if (rdv.clientId && interaction.user.id !== rdv.clientId) { await interaction.reply({ content: '🔒 Seul le client concerné peut répondre.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      rdv.satisfaction = note; store.rdvs[rdvId] = rdv;
+      const c = store.clients[rdv.clientId]; if (c) { c.avis = c.avis || { bien: 0, moyen: 0, mauvais: 0 }; c.avis[note] = (c.avis[note] || 0) + 1; store.clients[rdv.clientId] = c; }
+      _persist(db);
+      await _rafraichirTelegramme(interaction.client, rdv).catch(() => {});
+      const rowC = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`rdvp_satmot::${rdvId}`).setLabel('Laisser un mot (facultatif)').setEmoji('✍️').setStyle(ButtonStyle.Secondary));
+      try { await interaction.update({ content: `Merci pour votre retour ! ${_satLabel(note)}`, embeds: [], components: [rowC] }); }
+      catch { try { await interaction.reply({ content: `Merci pour votre retour ! ${_satLabel(note)}`, flags: MessageFlags.Ephemeral }); } catch {} }
+      return true;
+    }
+    if (interaction.isButton?.() && interaction.customId?.startsWith('rdvp_satmot::')) {
+      const rdvId = interaction.customId.split('::')[1];
+      const modal = new ModalBuilder().setCustomId(`rdvp_satmot_modal::${rdvId}`).setTitle('✍️ Votre retour')
+        .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('mot').setLabel('Un mot sur la prestation (facultatif)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500)));
+      await interaction.showModal(modal).catch(() => {});
+      return true;
+    }
+    if (interaction.isModalSubmit?.() && interaction.customId?.startsWith('rdvp_satmot_modal::')) {
+      const rdvId = interaction.customId.split('::')[1];
+      const db = loadDB(); const store = _store(db); const rdv = store.rdvs[rdvId];
+      if (rdv) { rdv.satisfactionComment = (interaction.fields.getTextInputValue('mot') || '').trim(); store.rdvs[rdvId] = rdv; _persist(db); await _rafraichirTelegramme(interaction.client, rdv).catch(() => {}); }
+      await interaction.reply({ content: '🙏 Merci, votre retour a bien été transmis à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {});
       return true;
     }
 
@@ -441,26 +520,18 @@ async function routeInteraction(interaction) {
     if (interaction.isStringSelectMenu?.() && interaction.customId?.startsWith('rdvp_lieu::')) {
       const typeKey = interaction.customId.split('::')[1];
       const lieuKey = interaction.values[0];
-      const estEscorte = (typeKey === 'esc' || typeKey === 'cnv');
+      // Formulaire adapté à la prestation : Nom + questions spécifiques + Quand + Détails (≤ 5 champs).
+      // L'ID Discord n'est plus redemandé : on récupère automatiquement celui du demandeur.
       const modal = new ModalBuilder().setCustomId(`rdvp_modal::${typeKey}::${lieuKey}`).setTitle('✉ Votre demande de rendez-vous');
-      if (estEscorte) {
-        // Escorte : on demande le trajet (départ → arrivée) et une durée estimée (retour de Kodo_ku).
-        // L'ID Discord n'est pas redemandé : on récupère automatiquement celui du demandeur.
-        modal.addComponents(
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom').setLabel('Votre nom (personnage)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setPlaceholder('Ex : Mr. Abberline')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('trajet').setLabel('Trajet (départ → arrivée)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(120).setPlaceholder('Ex : Valentine → Saint-Denis')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duree').setLabel('Durée estimée').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(60).setPlaceholder('Ex : ~2h, une demi-journée…')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('quand').setLabel('Quand ? (jour + heure souhaités)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setPlaceholder('Ex : 20/06 à 21h, ou samedi soir')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Votre demande (détails)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setPlaceholder('Convoi, marchandise, dangers connus…')),
-        );
-      } else {
-        modal.addComponents(
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom').setLabel('Votre nom (personnage)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setPlaceholder('Ex : Mr. Abberline')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('quand').setLabel('Quand ? (jour + heure souhaités)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setPlaceholder('Ex : 20/06 à 21h, ou samedi soir')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('contact').setLabel('Votre ID Discord (pour le contrat)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(25).setValue(interaction.user.id).setPlaceholder('Identifiant numérique — laissez tel quel')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Votre demande (détails)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setPlaceholder('Le besoin, le contexte…')),
-        );
-      }
+      const _ti = (id, label, style, req, max, ph) => new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId(id).setLabel(String(label).slice(0, 45))
+          .setStyle(style === 'para' ? TextInputStyle.Paragraph : TextInputStyle.Short)
+          .setRequired(!!req).setMaxLength(max).setPlaceholder(String(ph || '').slice(0, 100)));
+      const rows = [_ti('nom', 'Votre nom (personnage)', 'short', true, 60, 'Ex : Mr. Abberline')];
+      for (const [cid, label, style, req, max, ph] of (CHAMPS_PRESTATION[typeKey] || [])) rows.push(_ti('sp_' + cid, label, style, req, max, ph));
+      rows.push(_ti('quand', 'Quand ? (jour + heure souhaités)', 'short', true, 60, 'Ex : 20/06 à 21h, ou samedi soir'));
+      if (rows.length < 5) rows.push(_ti('details', 'Votre demande (détails)', 'para', false, 800, 'Le besoin, le contexte…'));
+      modal.addComponents(...rows.slice(0, 5));
       await interaction.showModal(modal).catch(() => {});
       return true;
     }
@@ -471,14 +542,14 @@ async function routeInteraction(interaction) {
       const nomRP = gf('nom') || (interaction.member?.displayName || interaction.user.username);
       const quand = gf('quand');
       const details = gf('details');
-      const trajet = gf('trajet'); // escortes uniquement
-      const duree = gf('duree');   // escortes uniquement
+      const reponses = []; // réponses aux questions spécifiques de la prestation
+      for (const [cid, label] of (CHAMPS_PRESTATION[typeKey] || [])) { const v = gf('sp_' + cid); if (v) reponses.push({ id: cid, label, value: v }); }
       const contactRaw = gf('contact').replace(/[^0-9]/g, '');
       const contactId = /^\d{16,21}$/.test(contactRaw) ? contactRaw : interaction.user.id;
       const slot = _parseSlot(quand); // créneau précis si on a pu le lire, sinon null (on garde le texte)
       const db = loadDB(); const store = _store(db);
       const id = ref();
-      const rdv = { id, clientId: interaction.user.id, contactId, nomRP, typeKey, lieuKey, slot, souhaitTexte: quand, trajet, duree, photo: '', details, statut: 'Planifié', notionId: null, channelId: null, msgId: null, agentId: null, sent: {}, createdAt: Date.now() };
+      const rdv = { id, clientId: interaction.user.id, contactId, nomRP, typeKey, lieuKey, slot, souhaitTexte: quand, reponses, photo: '', details, statut: 'Planifié', notionId: null, channelId: null, msgId: null, agentId: null, sent: {}, createdAt: Date.now() };
       // Notion (best-effort)
       rdv.notionId = await _notionCreer(rdv);
       // Dossier client
@@ -498,7 +569,7 @@ async function routeInteraction(interaction) {
           '```', ' WESTERN UNION ', '```',
           `REÇU STOP DEMANDE ENREGISTRÉE STOP RÉF **${id}** STOP`,
           `PRESTATION ${TYPES[typeKey]?.label || '—'} STOP LIEU ${LIEUX[lieuKey] || '—'} STOP`,
-          trajet ? `TRAJET ${trajet} STOP${duree ? ` DUREE ESTIMEE ${duree} STOP` : ''}` : '',
+          ...reponses.map(rp => `${String(rp.label).toUpperCase()} ${rp.value} STOP`),
           dt ? `CRÉNEAU SOUHAITÉ ${tsF(dt)} STOP` : (quand ? `CRÉNEAU SOUHAITÉ ${quand} STOP` : ''),
           'LA DIRECTION ÉTUDIE VOTRE DEMANDE STOP RÉPONSE À SUIVRE STOP',
           'UN CONTRAT POURRA VOUS ÊTRE ENVOYÉ À SIGNER STOP',
@@ -518,7 +589,10 @@ async function routeInteraction(interaction) {
       if (!rdv) { await interaction.reply({ content: '⚠️ Rendez-vous introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const lieuLabel = LIEUX[rdv.lieuKey] || rdv.lieuKey || '';
       const typeLabel = TYPES[rdv.typeKey]?.label || 'Prestation';
-      const detailsPre = [lieuLabel ? `Lieu : ${lieuLabel}` : '', rdv.trajet ? `Trajet : ${rdv.trajet}` : '', rdv.duree ? `Durée estimée : ${rdv.duree}` : '', rdv.souhaitTexte ? `Souhait du client : ${rdv.souhaitTexte}` : '', rdv.details || ''].filter(Boolean).join('\n').slice(0, 800);
+      const repLignes = Array.isArray(rdv.reponses)
+        ? rdv.reponses.map(rp => `${rp.label} : ${rp.value}`)
+        : [rdv.trajet ? `Trajet : ${rdv.trajet}` : '', rdv.duree ? `Durée estimée : ${rdv.duree}` : ''];
+      const detailsPre = [lieuLabel ? `Lieu : ${lieuLabel}` : '', ...repLignes, rdv.souhaitTexte ? `Souhait du client : ${rdv.souhaitTexte}` : '', rdv.details || ''].filter(Boolean).join('\n').slice(0, 800);
       const modal = new ModalBuilder().setCustomId(`contrat_offre_modal::Autre::${(rdv.contactId || rdv.clientId || '').toString()}`).setTitle('📜 Contrat — suite au RDV');
       modal.addComponents(
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('client_nom').setLabel('Nom / Entreprise du client').setStyle(TextInputStyle.Short).setRequired(true).setValue((rdv.nomRP || '').toString().slice(0, 100))),
@@ -574,6 +648,18 @@ async function routeInteraction(interaction) {
         await _notionStatut(rdv.notionId, 'Honoré');
         await interaction.update({ embeds: [_embedRdv(rdv)], components: _boutonsTelegramme(rdv) }).catch(() => {});
         try { const ch = await interaction.client.channels.fetch(rdv.channelId).catch(() => null); const msg = ch && await ch.messages.fetch(rdv.msgId).catch(() => null); if (msg) await msg.unpin().catch(() => {}); } catch {}
+        // Retour client : on lui demande son avis en MP (suivi qualité / réputation).
+        if (rdv.clientId && !rdv.satisfaction) {
+          const rowSat = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`rdvp_sat::${rdvId}::bien`).setEmoji('👍').setLabel('Satisfait').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId(`rdvp_sat::${rdvId}::moyen`).setEmoji('😐').setLabel('Mitigé').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId(`rdvp_sat::${rdvId}::mauvais`).setEmoji('👎').setLabel('Mécontent').setStyle(ButtonStyle.Danger),
+          );
+          const embSat = new EmbedBuilder().setColor(COL.or).setTitle('✦ Votre avis nous intéresse')
+            .setDescription(`Merci d'avoir fait appel à l'**Iron Wolf Company** (réf. \`${rdv.id}\`).\nComment s'est passée la prestation ? Un simple clic nous aide à nous améliorer.`)
+            .setFooter({ text: 'Iron Wolf Company · Bureau des Rendez-vous' });
+          try { const u = await interaction.client.users.fetch(rdv.clientId); await u.send({ embeds: [embSat], components: [rowSat] }); } catch {}
+        }
         return true;
       }
 
@@ -687,4 +773,4 @@ async function checkRappelsClients(guild) {
   } catch (e) { console.log('[RDV+] checkRappelsClients erreur:', e?.message); }
 }
 
-module.exports = { routeInteraction, checkRappelsClients, rdvplusCommands, panelPayload };
+module.exports = { routeInteraction, checkRappelsClients, rdvplusCommands, panelPayload, _test: { CHAMPS_PRESTATION, _satLabel } };
