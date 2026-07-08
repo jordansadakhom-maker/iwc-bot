@@ -128,6 +128,10 @@ let nettoyeur = {};
 try { nettoyeur = require('./nettoyeur'); console.log('✅ Module nettoyeur chargé'); }
 catch (e) { console.log('⚠️ nettoyeur non chargé:', e.message); }
 
+let groupes = {};
+try { groupes = require('./groupes'); console.log('✅ Module groupes (registre) chargé'); }
+catch (e) { console.log('⚠️ groupes non chargé:', e.message); }
+
 let recapHebdo = {};
 try { recapHebdo = require('./recap-hebdo'); console.log('✅ Module récap hebdo chargé'); }
 catch (e) { console.log('⚠️ récap hebdo non chargé:', e.message); }
@@ -2649,6 +2653,7 @@ async function autoSetup(guild) {
   (async () => { try { await missionsIA.installerPanelMissions?.(guild, '1510712255514153101'); console.log('🎯 Panneau générateur de missions en place'); } catch {} })();
   // Registre des armes (n° de série) — pose le panneau si un salon est configuré (SALON_ARMES).
   (async () => { try { const ok = await armes.installerPanneau?.(guild); if (ok) console.log('🔫 Registre des armes en place'); } catch {} })();
+  (async () => { try { const ok = await groupes.installerPanneau?.(guild); if (ok) console.log('🗂️ Registre des groupes en place'); } catch {} })();
   // 🔒 Salon STRICTEMENT réservé aux Fondateurs : SEUL le rôle « Fondateur » (et le bot) voit/accède.
   // On ferme à @everyone ET on retire l'accès à tout autre rôle/membre. (Limite Discord : les rôles
   // « Administrateur » et le propriétaire du serveur passent toujours outre — impossible à bloquer par salon.)
@@ -4372,6 +4377,7 @@ client.on('interactionCreate', async interaction => {
   if (await repertoire.routeInteraction?.(interaction)) return;
   if (await armes.routeInteraction?.(interaction)) return;
   if (await nettoyeur.routeInteraction?.(interaction)) return;
+  if (await groupes.routeInteraction?.(interaction)) return;
   if (await monitoring.routeInteraction?.(interaction)) return;
   if (await telegramme.routeInteraction?.(interaction)) return;
   if (await securite.routeInteraction?.(interaction)) return;
