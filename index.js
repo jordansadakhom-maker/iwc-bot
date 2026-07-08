@@ -65,6 +65,10 @@ let resumePhoto = {};
 try { resumePhoto = require('./resume-photo'); console.log('✅ Module résumé-photo chargé'); }
 catch (e) { console.log('⚠️ resume-photo non chargé:', e.message); }
 
+let traductionReunion = {};
+try { traductionReunion = require('./traduction-reunion'); console.log('✅ Module traduction-réunion chargé'); }
+catch (e) { console.log('⚠️ traduction-reunion non chargé:', e.message); }
+
 let chiffrement = {};
 try { chiffrement = require('./chiffrement'); console.log('✅ Module chiffrement chargé'); }
 catch (e) { console.log('⚠️ chiffrement non chargé:', e.message); }
@@ -2608,6 +2612,7 @@ async function autoSetup(guild) {
   medical.installerExemple?.(guild).then(() => console.log('🩺 Exemple test d\'aptitude posté')).catch(() => {});
   inventaire.rafraichirBoardDemarrage?.(guild.client).then(() => console.log('📦 Board inventaire rafraîchi (boutons à jour)')).catch(() => {});
   resumePhoto.installerPanneau?.(guild.client).then(() => console.log('📸 Panneau résumé-photo en place')).catch(() => {});
+  traductionReunion.installerPanneau?.(guild.client).then(() => console.log('🌐 Panneau traduction-réunion en place')).catch(() => {});
   chiffrement.installerPanneau?.(guild.client).then(() => console.log('🔐 Panneau chiffrement en place')).catch(() => {});
   _installerPosteCommandement(guild).then(() => console.log('🎖️ Poste de commandement Direction en place')).catch(() => {});
   direction.installerMemo?.(guild).then(() => console.log('📌 Mémo Direction en place')).catch(() => {});
@@ -3770,6 +3775,8 @@ client.on('messageCreate', async message => {
   try { if (await telegramme.onMessage?.(message)) return; } catch {}
   try { if (await _agendaPhotoOnMessage(message)) return; } catch {}
   try { if (await resumePhoto.onMessage?.(message)) return; } catch {}
+  // Réunion enregistrée (audio) → transcription + traduction française
+  try { if (await traductionReunion.onMessage?.(message)) return; } catch {}
   try { if (await inventaire.onMessage?.(message)) return; } catch {}
   try { if (await pepites.onMessage?.(message)) return; } catch {}
   try { if (await musique.onMessage?.(message)) return; } catch {}
