@@ -22,7 +22,10 @@ function estGestion(member) { try { return !!member?.roles?.cache?.some(r => DIR
 
 const COULEUR = 0x6B4C2E;
 // Catégories : clé → { label, emoji, couleur }
+//   • wanted  → fiche présentée comme un AVIS DE RECHERCHE (poster : prime, consigne, dangerosité).
+//   • autres  → fiche de renseignement détaillée classique.
 const CATS = {
+  wanted:       { label: 'Wanted',           emoji: '💰', couleur: 0x8E1B1B },
   recherche:    { label: 'Recherché',        emoji: '🔴', couleur: 0xC0392B },
   ennemi:       { label: 'Ennemi',           emoji: '⚔️', couleur: 0xE67E22 },
   rival:        { label: 'Rival',            emoji: '🥊', couleur: 0xD35400 },
@@ -30,7 +33,7 @@ const CATS = {
   neutre:       { label: 'Neutre',           emoji: '⚪', couleur: 0x95A5A6 },
   allie:        { label: 'Allié',            emoji: '🤝', couleur: 0x2ECC71 },
 };
-const CAT_ORDER = ['recherche', 'ennemi', 'rival', 'surveillance', 'neutre', 'allie'];
+const CAT_ORDER = ['wanted', 'recherche', 'ennemi', 'rival', 'surveillance', 'neutre', 'allie'];
 const DNG = {
   faible:   { label: 'Faible',   emoji: '🟢' },
   moyenne:  { label: 'Moyenne',  emoji: '🟡' },
@@ -130,6 +133,7 @@ function _panelRows() {
       new ButtonBuilder().setCustomId('grp_del').setLabel('Retirer').setEmoji('🗑️').setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('grp_filter::wanted').setLabel('Wanted').setEmoji('💰').setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId('grp_filter::recherche').setLabel('Recherchés').setEmoji('🔴').setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId('grp_filter::ennemi').setLabel('Ennemis').setEmoji('⚔️').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('grp_filter::surveillance').setLabel('Surveillance').setEmoji('👁️').setStyle(ButtonStyle.Secondary),
@@ -138,35 +142,84 @@ function _panelRows() {
   ];
 }
 
-// ─── Fiche détaillée ───
-function _ficheEmbed(g) {
+// ─── Affiche par catégorie : chaque catégorie a sa bannière et son ton ───
+const BANNERS = {
+  wanted:       { titre: 'AVIS DE RECHERCHE', tagline: '☠️ *Groupe recherché. Toute information menant à sa localisation ou sa capture est récompensée.*' },
+  recherche:    { titre: 'RECHERCHÉ',         tagline: '🔍 *Groupe activement recherché — signalez toute information utile.*' },
+  ennemi:       { titre: 'GROUPE ENNEMI',     tagline: '⚔️ *Hostile déclaré — prudence maximale sur le terrain.*' },
+  rival:        { titre: 'GROUPE RIVAL',      tagline: '🥊 *Concurrent sur le territoire — à surveiller de près.*' },
+  surveillance: { titre: 'SOUS SURVEILLANCE', tagline: '👁️ *Sous observation — renseignements en cours de collecte.*' },
+  neutre:       { titre: 'GROUPE NEUTRE',     tagline: '⚪ *Sans hostilité connue à ce jour.*' },
+  allie:        { titre: 'GROUPE ALLIÉ',      tagline: '🤝 *Partenaire de confiance sur le territoire.*' },
+};
+// Ne garde que les champs IA réellement visibles (issus de l'analyse photo).
+function _cleanIA(s) {
+  const out = {};
+  if (!s || typeof s !== 'object') return out;
+  for (const k of ['effectif', 'tenues', 'armement', 'signes', 'montures', 'lieu', 'activite', 'trait_distinctif', 'resume']) {
+    if (_okv(s[k])) out[k] = String(s[k]).slice(0, 1024);
+  }
+  return out;
+}
+
+// ─── L'AFFICHE : même style que le wanted, adaptée à la catégorie sélectionnée, avec les détails IA répartis ───
+function _afficheEmbed(g) {
   const c = _catInfo(g.categorie);
+  const b = BANNERS[g.categorie] || { titre: 'FICHE GROUPE', tagline: '' };
   const d = _dngInfo(g.dangerosite);
-  const e = new EmbedBuilder().setColor(c.couleur).setTitle(`${c.emoji} ${_clip(g.nom, 200)}`)
-    .setDescription(`**Catégorie :** ${c.emoji} ${c.label}${d ? `  ·  **Dangerosité :** ${d.emoji} ${d.label}` : ''}`);
+  const ia = g.ia && typeof g.ia === 'object' ? g.ia : {};
+  const wanted = g.categorie === 'wanted';
+  const e = new EmbedBuilder().setColor(c.couleur).setTitle(`${c.emoji} ${b.titre} — ${_clip(g.nom, 180)}`);
+  if (b.tagline) e.setDescription(b.tagline);
+  // En-tête : le wanted met prime/consigne ; les autres mettent la dangerosité en avant.
+  if (wanted) {
+    e.addFields(
+      { name: '💰 Prime', value: _clip(g.prime || '—', 100), inline: true },
+      { name: '⚠️ Dangerosité', value: d ? `${d.emoji} ${d.label}` : '—', inline: true },
+      { name: '🎯 Consigne', value: _clip(g.consigne || 'Indifférent', 100), inline: true },
+    );
+    if (g.commanditaire) e.addFields({ name: '🧾 Commanditaire', value: _clip(g.commanditaire, 200), inline: true });
+  } else if (d) {
+    e.addFields({ name: '⚠️ Dangerosité', value: `${d.emoji} ${d.label}`, inline: true });
+  }
   if (g.meneur) e.addFields({ name: '👤 Meneur / chef', value: _clip(g.meneur, 300), inline: true });
-  if (g.territoire) e.addFields({ name: '📍 Territoire / secteur', value: _clip(g.territoire, 300), inline: true });
-  if (g.effectif) e.addFields({ name: '👥 Effectif & armement', value: _clip(g.effectif, 500), inline: false });
-  if (g.notes) e.addFields({ name: '📝 Renseignements', value: _clip(g.notes, 1024), inline: false });
+  const lieu = g.territoire || ia.lieu;
+  if (lieu) e.addFields({ name: wanted ? '📍 Dernière position / secteur' : '📍 Territoire / secteur', value: _clip(lieu, 300), inline: true });
+  const effectif = g.effectif || ia.effectif;
+  if (effectif) e.addFields({ name: '👥 Effectif & allure', value: _clip(effectif, 500), inline: false });
+  // Détails IA répartis, chacun dans son champ.
+  if (ia.tenues)   e.addFields({ name: '👔 Tenues / couleurs', value: _clip(ia.tenues, 500), inline: true });
+  if (ia.armement) e.addFields({ name: '🔫 Armement', value: _clip(ia.armement, 500), inline: true });
+  if (ia.signes)   e.addFields({ name: '🎗️ Signes / insignes', value: _clip(ia.signes, 500), inline: true });
+  if (ia.montures) e.addFields({ name: '🐎 Montures', value: _clip(ia.montures, 400), inline: true });
+  if (ia.activite) e.addFields({ name: '🎯 Activité observée', value: _clip(ia.activite, 400), inline: true });
+  if (ia.trait_distinctif) e.addFields({ name: '⭐ Signe le plus reconnaissable', value: _clip(ia.trait_distinctif, 256), inline: false });
+  // Renseignements : résumé IA si l'analyse a servi, sinon les notes manuelles.
+  const rens = ia.resume || (!g.ia ? g.notes : '');
+  if (rens) e.addFields({ name: '📝 Renseignements', value: _clip(rens, 1024), inline: false });
   if (g.photo) e.setImage(g.photo);
-  e.setFooter({ text: `Fiche ${g.id}${g.par ? ' · établie par ' + g.par : ''}` }).setTimestamp(g.createdAt || Date.now());
+  e.setFooter({ text: `${wanted ? 'Avis' : 'Fiche'} ${g.id}${g.par ? ` · ${wanted ? 'établi' : 'établie'} par ${g.par}` : ''}` }).setTimestamp(g.createdAt || Date.now());
   return e;
 }
 
-// Aperçu d'un brouillon pendant le classement (catégorie/dangerosité), avec photo si présente.
+// Fiche définitive = l'affiche (utilisée à l'enregistrement et pour « voir une fiche »).
+function _ficheEmbed(g) { return _afficheEmbed(g); }
+
+// Aperçu d'un brouillon pendant le classement : dès qu'une catégorie est choisie → l'affiche correspondante.
 function _previewEmbed(draft) {
-  const c = _catInfo(draft.categorie); const d = _dngInfo(draft.dangerosite);
-  const e = new EmbedBuilder().setColor(draft.categorie ? c.couleur : COULEUR).setTitle(`🕵️ ${_clip(draft.nom, 200)}`)
-    .setDescription(`${draft.categorie ? `${c.emoji} ${c.label}` : '*(catégorie à choisir)*'}${d ? `  ·  ${d.emoji} ${d.label}` : ''}`);
+  if (draft.categorie) return _afficheEmbed(draft);
+  // Catégorie pas encore choisie : aperçu neutre de ce que l'IA / la saisie a déjà rempli.
+  const e = new EmbedBuilder().setColor(COULEUR).setTitle(`🕵️ ${_clip(draft.nom, 200)}`)
+    .setDescription('*(choisis une catégorie pour générer l\'affiche)*');
   if (draft.territoire) e.addFields({ name: '📍 Territoire / secteur', value: _clip(draft.territoire, 300), inline: true });
-  if (draft.effectif) e.addFields({ name: '👥 Effectif & armement', value: _clip(draft.effectif, 500), inline: false });
+  if (draft.effectif) e.addFields({ name: '👥 Effectif & allure', value: _clip(draft.effectif, 500), inline: false });
   if (draft.notes) e.addFields({ name: '📝 Renseignements', value: _clip(draft.notes, 1024), inline: false });
   if (draft.photo) e.setImage(draft.photo);
   return e;
 }
 function _classementPayload(draft) {
   const p = { content: _classementContenu(draft), components: _classementRows(draft) };
-  if (draft.photo || draft.notes || draft.effectif) p.embeds = [_previewEmbed(draft)];
+  if (draft.photo || draft.notes || draft.effectif || draft.categorie) p.embeds = [_previewEmbed(draft)];
   return p;
 }
 
@@ -183,15 +236,21 @@ function _listePayload(groupes, titre) {
 }
 
 // Selects de classement (catégorie + dangerosité) + bouton enregistrer, pour un brouillon.
+// Si la catégorie choisie est « wanted », on ajoute un bouton pour fixer prime / consigne / commanditaire.
 function _classementRows(draft) {
   const selCat = new StringSelectMenuBuilder().setCustomId('grp_selcat').setPlaceholder(draft.categorie ? `Catégorie : ${_catInfo(draft.categorie).label}` : '① Catégorie du groupe')
     .addOptions(CAT_ORDER.map(k => ({ label: CATS[k].label, value: k, emoji: CATS[k].emoji, default: draft.categorie === k })));
   const selDng = new StringSelectMenuBuilder().setCustomId('grp_seldng').setPlaceholder(draft.dangerosite ? `Dangerosité : ${_dngInfo(draft.dangerosite).label}` : '② Dangerosité (facultatif)')
     .addOptions(DNG_ORDER.map(k => ({ label: DNG[k].label, value: k, emoji: DNG[k].emoji, default: draft.dangerosite === k })));
-  const btn = new ButtonBuilder().setCustomId('grp_save').setLabel('Enregistrer la fiche').setEmoji('✅').setStyle(ButtonStyle.Success).setDisabled(!draft.categorie);
-  return [new ActionRowBuilder().addComponents(selCat), new ActionRowBuilder().addComponents(selDng), new ActionRowBuilder().addComponents(btn)];
+  const btnRow = new ActionRowBuilder();
+  if (draft.categorie === 'wanted') {
+    btnRow.addComponents(new ButtonBuilder().setCustomId('grp_prime').setEmoji('💰').setLabel(draft.prime ? `Prime : ${_clip(draft.prime, 40)}` : 'Prime & consigne').setStyle(ButtonStyle.Secondary));
+  }
+  btnRow.addComponents(new ButtonBuilder().setCustomId('grp_save').setLabel('Enregistrer la fiche').setEmoji('✅').setStyle(ButtonStyle.Success).setDisabled(!draft.categorie));
+  return [new ActionRowBuilder().addComponents(selCat), new ActionRowBuilder().addComponents(selDng), btnRow];
 }
 function _classementContenu(draft) {
+  if (draft.categorie === 'wanted') return `💰 **Avis de recherche : ${_clip(draft.nom, 100)}**\nFixe la **prime & la consigne** (bouton 💰), ajuste la **dangerosité**, puis **Enregistrer**.`;
   return `🗂️ **Nouveau groupe : ${_clip(draft.nom, 100)}**\nChoisis la **catégorie**${draft.categorie ? ' ✅' : ''} (et la dangerosité), puis **Enregistrer**.`;
 }
 
@@ -281,6 +340,37 @@ async function routeInteraction(interaction) {
       await interaction.update({ content: `✅ **${_clip(draft.nom, 100)}** fiché (${_catInfo(draft.categorie).emoji} ${_catInfo(draft.categorie).label}).`, embeds: [_ficheEmbed(draft)], components: [] }).catch(() => {});
       // met à jour le panneau si on peut le retrouver
       try { const ch = await interaction.guild.channels.fetch(SALON_GROUPES).catch(() => null); if (ch?.messages?.fetch) { const recents = await ch.messages.fetch({ limit: 30 }).catch(() => null); const panel = recents && [...recents.values()].find(m => /REGISTRE DES GROUPES/i.test(m.embeds?.[0]?.title || '')); if (panel) await panel.edit({ embeds: [_panelEmbed(r)], components: _panelRows() }).catch(() => {}); } } catch {}
+      return true;
+    }
+
+    // 💰 Prime & consigne (uniquement pour un avis de recherche « wanted ») → modale
+    if (interaction.isButton?.() && id === 'grp_prime') {
+      const db = loadDB(); const r = _ensure(db);
+      const draft = r.drafts[interaction.user.id];
+      if (!draft) { await interaction.reply({ content: '⏳ Fiche expirée — recommence via ➕.', flags: eph }).catch(() => {}); return true; }
+      const modal = new ModalBuilder().setCustomId('grp_prime_modal').setTitle('💰 Avis de recherche');
+      const tPrime = new TextInputBuilder().setCustomId('prime').setLabel('Prime / récompense').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100).setPlaceholder('Ex : 500 $ · une info précise');
+      const tConsigne = new TextInputBuilder().setCustomId('consigne').setLabel('Consigne').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100).setPlaceholder('Mort ou vif · Vif uniquement · Indifférent');
+      const tComm = new TextInputBuilder().setCustomId('commanditaire').setLabel('Commanditaire (facultatif)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(120).setPlaceholder('Qui lance l\'avis');
+      if (draft.prime) tPrime.setValue(_clip(draft.prime, 100));
+      if (draft.consigne) tConsigne.setValue(_clip(draft.consigne, 100));
+      if (draft.commanditaire) tComm.setValue(_clip(draft.commanditaire, 120));
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(tPrime),
+        new ActionRowBuilder().addComponents(tConsigne),
+        new ActionRowBuilder().addComponents(tComm),
+      );
+      await interaction.showModal(modal).catch(() => {});
+      return true;
+    }
+    if (interaction.isModalSubmit?.() && id === 'grp_prime_modal') {
+      const gf = (k) => { try { return (interaction.fields.getTextInputValue(k) || '').trim(); } catch { return ''; } };
+      const db = loadDB(); const r = _ensure(db);
+      const draft = r.drafts[interaction.user.id];
+      if (!draft) { await interaction.reply({ content: '⏳ Fiche expirée — recommence via ➕.', flags: eph }).catch(() => {}); return true; }
+      draft.prime = gf('prime'); draft.consigne = gf('consigne'); draft.commanditaire = gf('commanditaire'); persist(db);
+      if (interaction.isFromMessage?.()) await interaction.update(_classementPayload(draft)).catch(() => {});
+      else await interaction.reply({ content: '✅ Prime & consigne enregistrées — clique **Enregistrer la fiche**.', flags: eph }).catch(() => {});
       return true;
     }
 
@@ -378,7 +468,7 @@ async function onMessage(message) {
       id: _id(), nom, meneur: '',
       territoire: _okv(s.lieu) ? String(s.lieu).slice(0, 120) : '',
       effectif: _okv(s.effectif) ? String(s.effectif).slice(0, 200) : '',
-      notes: _photoDescTexte(s), categorie: null, dangerosite: _mapDng(s.dangerosite),
+      notes: _photoDescTexte(s), ia: _cleanIA(s), categorie: null, dangerosite: _mapDng(s.dangerosite),
       photo: null, par: message.member?.displayName || message.author.username, createdAt: Date.now(),
     };
 
@@ -397,4 +487,4 @@ async function onMessage(message) {
   } catch (e) { console.log('❌ groupes onMessage:', e.message); return true; }
 }
 
-module.exports = { installerPanneau, routeInteraction, onMessage, SALON_GROUPES, _test: { _ensure, _filtreGroupes, _norm, _mapDng, _photoDescTexte, CATS, DNG } };
+module.exports = { installerPanneau, routeInteraction, onMessage, SALON_GROUPES, _test: { _ensure, _filtreGroupes, _norm, _mapDng, _photoDescTexte, _cleanIA, _afficheEmbed, _ficheEmbed, _previewEmbed, _classementRows, BANNERS, CATS, DNG } };
