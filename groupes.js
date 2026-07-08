@@ -117,9 +117,11 @@ function _panelEmbed(r) {
     .setDescription('*Renseignements sur les autres bandes et organisations du territoire.*');
   const parCat = {};
   for (const g of gs) parCat[g.categorie] = (parCat[g.categorie] || 0) + 1;
-  const lignes = CAT_ORDER.filter(k => parCat[k]).map(k => `${CATS[k].emoji} **${CATS[k].label}** — ${parCat[k]}`);
-  if (gs.length) e.addFields({ name: `📊 ${gs.length} groupe(s) fiché(s)`, value: lignes.join('\n') || '—', inline: false });
-  else e.addFields({ name: '— Registre vide —', value: 'Clique **➕ Ficher un groupe** pour ajouter le premier.', inline: false });
+  // Légende toujours visible : les catégories disponibles (avec le compte s'il y en a).
+  const legende = CAT_ORDER.map(k => `${CATS[k].emoji} **${CATS[k].label}**${parCat[k] ? ` — ${parCat[k]}` : ''}`).join('\n');
+  e.addFields({ name: '🏷️ Catégories', value: legende, inline: false });
+  if (gs.length) e.addFields({ name: `📊 ${gs.length} groupe(s) fiché(s)`, value: 'Choisis la catégorie du groupe au moment de le ficher.', inline: false });
+  else e.addFields({ name: '— Registre vide —', value: 'Clique **➕ Ficher un groupe** (ou **📸 Par photo**) pour ajouter le premier.', inline: false });
   e.setFooter({ text: 'Direction · renseignement — Iron Wolf Company / La Confrérie' }).setTimestamp();
   return e;
 }
@@ -266,15 +268,20 @@ async function installerPanneau(guild) {
     if (ch.type === 15 && ch.threads?.create) {
       const act = await ch.threads.fetchActive().catch(() => null);
       const ex = act?.threads ? [...act.threads.values()].find(t => /REGISTRE DES GROUPES/i.test(t.name || '')) : null;
-      if (ex) return true;
+      if (ex) {
+        // Rafraîchit le message d'ouverture du fil pour appliquer les boutons/catégories à jour.
+        const starter = await ex.fetchStarterMessage().catch(() => null);
+        if (starter) await starter.edit(payload).catch(() => {});
+        return true;
+      }
       await ch.threads.create({ name: '🗂️ REGISTRE DES GROUPES', message: payload }).catch(() => {});
       return true;
     }
     if (typeof ch.send !== 'function') { console.log('⚠️ groupes: salon non textuel', ch.type); return false; }
-    // Évite les doublons : si un panneau existe déjà, on ne re-poste pas.
+    // Si un panneau existe déjà, on le RAFRAÎCHIT (embed + boutons à jour) au lieu d'en re-poster un.
     const recents = await ch.messages.fetch({ limit: 30 }).catch(() => null);
     const deja = recents && [...recents.values()].find(m => m.author?.id === guild.members.me?.id && /REGISTRE DES GROUPES/i.test(m.embeds?.[0]?.title || ''));
-    if (deja) return true;
+    if (deja) { await deja.edit(payload).catch(() => {}); if (!deja.pinned) await deja.pin().catch(() => {}); return true; }
     const msg = await ch.send(payload).catch(e => { console.log('⚠️ groupes: envoi panneau échoué', e.message); return null; });
     if (msg) await msg.pin().catch(() => {});
     return !!msg;
