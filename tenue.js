@@ -12,7 +12,7 @@ let dbMod = {}; try { dbMod = require('./db'); } catch { dbMod = {}; }
 const loadDB = dbMod.loadDB || (() => ({}));
 const saveDB = dbMod.saveDB || (() => {});
 
-const PROMPT_TENUE = "Tu es le tailleur d'une compagnie de mercenaires dans un RP western (Far West texan, fin XIXe siecle). On te montre une ou PLUSIEURS photos de la MEME tenue d'un personnage (parfois sous des angles ou des lumieres differents — utilise-les TOUTES pour bien juger les COULEURS et les details). Reponds UNIQUEMENT en JSON strict, sans aucun texte autour, au format exact : {\"description\":\"3 a 4 phrases immersives et elogieuses, facon avis d'un tailleur de l'Ouest : la silhouette, l'effet d'ensemble, ce qui fait le caractere et la prestance du personnage\",\"pieces\":\"liste detaillee des pieces visibles AVEC leurs couleurs precises et leurs matieres (chapeau, manteau, veste, gilet, chemise, pantalon, bottes, foulard/bandana, gants, ceinturon, sacoche, arme portee...), separees par des virgules\",\"couleurs\":\"la palette dominante de la tenue en 2 a 4 couleurs precises (ex: brun cuir, bordeaux, beige sable, noir charbon)\",\"matieres\":\"les matieres apparentes (cuir, laine, lin, coton, peau de bete...), sinon Non visible\",\"style\":\"un ou deux mots qualifiant le style (ex: elegant, brut, hors-la-loi, distingue, sauvage, sobre, baroudeur)\"}. Si les images ne montrent pas un personnage en tenue, mets description a 'Tenue non identifiable'.";
+const PROMPT_TENUE = "Tu es le tailleur d'une compagnie de mercenaires dans un RP western (Far West texan, fin XIXe siecle). On te montre une ou PLUSIEURS photos de la MEME tenue d'un personnage — parfois sous des angles differents, ou montrant des PARTIES et ACCESSOIRES differents (face, dos, gros plans, chapeau, armes, sacoches...). Utilise-les TOUTES ENSEMBLE : COMBINE ce que montre chaque photo et dresse la liste COMPLETE de la tenue, sans JAMAIS omettre un objet vu sur une seule des photos. Reponds UNIQUEMENT en JSON strict, sans aucun texte autour, au format exact : {\"description\":\"3 a 4 phrases immersives et elogieuses, facon avis d'un tailleur de l'Ouest : la silhouette, l'effet d'ensemble, ce qui fait le caractere et la prestance du personnage\",\"pieces\":\"liste EXHAUSTIVE de TOUTES les pieces et accessoires visibles sur l'ENSEMBLE des photos, AVEC leurs couleurs precises et leurs matieres (chapeau, masque/foulard/bandana, manteau, veste, gilet, chemise, pantalon ou jupe, bottes, gants, ceinturon, holster/etui, arme(s) portee(s), sacoche, bijoux, eperons, insignes...), separees par des virgules ; n'oublie AUCUN objet, meme vu sur une seule photo\",\"couleurs\":\"la palette dominante de la tenue en 2 a 4 couleurs precises (ex: brun cuir, bordeaux, beige sable, noir charbon)\",\"matieres\":\"les matieres apparentes (cuir, laine, lin, coton, peau de bete...), sinon Non visible\",\"style\":\"un ou deux mots qualifiant le style (ex: elegant, brut, hors-la-loi, distingue, sauvage, sobre, baroudeur)\"}. Si les images ne montrent pas un personnage en tenue, mets description a 'Tenue non identifiable'.";
 
 async function _imageBytes(url) {
   try { const r = await fetch(url); if (!r.ok) return null; return Buffer.from(await r.arrayBuffer()); } catch { return null; }
@@ -26,7 +26,7 @@ async function _callVisionTenue(model, imgs) {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model, max_tokens: 1000, messages: [{ role: 'user', content }] }),
+      body: JSON.stringify({ model, max_tokens: 1500, messages: [{ role: 'user', content }] }),
     });
     if (!resp.ok) return null;
     const data = await resp.json();
@@ -62,38 +62,59 @@ function _isTenueChannel(channel) {
 
 function _ok(v) { return v && !/^(non visible|non identifiable|aucun|néant|n\/a)$/i.test(String(v).trim()); }
 
+// Fusion des photos postées coup sur coup : on accumule les images du même auteur
+// pendant quelques secondes, puis on analyse TOUT ensemble → une seule fiche complète,
+// même quand la tenue tient sur deux captures séparées.
+const _pending = new Map();       // clé « channelId:userId » → lot en cours
+const _DEBOUNCE_MS = 4500;        // délai d'attente d'une éventuelle photo suivante
+
 async function onMessage(message) {
   try {
     if (!message.guild || message.author?.bot) return false;
     if (!_isTenueChannel(message.channel)) return false;
-    const imgsAtt = message.attachments ? [...message.attachments.values()].filter(a => (a.contentType || '').startsWith('image')).slice(0, 4) : [];
+    const imgsAtt = message.attachments ? [...message.attachments.values()].filter(a => (a.contentType || '').startsWith('image')).slice(0, 6) : [];
     if (!imgsAtt.length) return false;
 
+    const key = message.channel.id + ':' + message.author.id;
+    let p = _pending.get(key);
+    if (!p) { p = { imgs: [], msgs: [], nom: null, note: '', channel: message.channel, member: message.member, author: message.author, wait: null, timer: null }; _pending.set(key, p); }
+    for (const a of imgsAtt) p.imgs.push({ url: a.url, mt: a.contentType || 'image/png' });
+    p.imgs = p.imgs.slice(-6); // au plus 6 photos par tenue
+    p.msgs.push(message);
     const cap = (message.content || '').trim();
-    const nomPerso = (cap && cap.length <= 40) ? cap : (message.member?.displayName || message.author.username);
-    const note = (cap && cap.length > 40) ? cap.slice(0, 250) : '';
+    if (cap) { if (cap.length <= 40 && !p.nom) p.nom = cap; else if (cap.length > 40 && !p.note) p.note = cap.slice(0, 250); }
 
-    const plur = imgsAtt.length > 1 ? `les ${imgsAtt.length} photos` : 'la tenue';
-    const wait = await message.channel.send({ content: `🧵 Le tailleur examine ${plur}…`, allowedMentions: { parse: [] } }).catch(() => null);
+    const n = p.imgs.length;
+    const texte = `🧵 Le tailleur examine ${n > 1 ? `les ${n} photos` : 'la tenue'}…`;
+    if (!p.wait) p.wait = await message.channel.send({ content: texte, allowedMentions: { parse: [] } }).catch(() => null);
+    else await p.wait.edit({ content: texte }).catch(() => {});
 
-    // Télécharger toutes les photos
+    if (p.timer) clearTimeout(p.timer);
+    p.timer = setTimeout(() => { _pending.delete(key); _finaliserTenue(p).catch(() => {}); }, _DEBOUNCE_MS);
+    return true;
+  } catch { return false; }
+}
+
+// Analyse le lot complet (toutes les photos accumulées) et poste UNE fiche.
+async function _finaliserTenue(p) {
+  try {
+    const nomPerso = p.nom || p.member?.displayName || p.author?.username || 'Membre';
+    const note = p.note || '';
     const bufs = [];
-    for (const a of imgsAtt) { const b = await _imageBytes(a.url); if (b) bufs.push({ buf: b, mt: a.contentType || 'image/png' }); }
+    for (const im of p.imgs) { const b = await _imageBytes(im.url); if (b) bufs.push({ buf: b, mt: im.mt }); }
     const t = bufs.length ? await _analyserTenue(bufs.map(x => ({ b64: x.buf.toString('base64'), mt: x.mt }))) : null;
 
-    // Ce n'est pas une tenue (photo d'inventaire, capture quelconque…) → on ne poste RIEN
-    // et surtout on NE SUPPRIME PAS la photo de l'auteur.
+    // Pas une tenue → on retire juste le message d'attente, on NE supprime PAS les photos de l'auteur.
     if (t && /non\s*identifiab/i.test(String(t.description || ''))) {
-      if (wait) await wait.delete().catch(() => {});
-      return false;
+      if (p.wait) await p.wait.delete().catch(() => {});
+      return;
     }
 
-    // Réuploader toutes les photos (la 1re = image principale de la fiche, les autres en complément)
     const files = bufs.map((x, i) => new AttachmentBuilder(x.buf, { name: `tenue_${i}.png` }));
     const e = new EmbedBuilder()
       .setColor(0x8B5A2B)
       .setTitle(`🤠 ${nomPerso} — Allure`)
-      .setFooter({ text: `Le Vestiaire • Iron Wolf Company • partagé par ${message.author.username}` })
+      .setFooter({ text: `Le Vestiaire • Iron Wolf Company • partagé par ${p.author?.username || ''}` })
       .setTimestamp();
     if (files.length) e.setImage('attachment://tenue_0.png');
     if (t && _ok(t.description)) {
@@ -110,14 +131,15 @@ async function onMessage(message) {
     const payload = { content: '', embeds: [e] };
     if (files.length) payload.files = files;
     let card = null;
-    if (wait) card = await wait.edit(payload).catch(() => null); else card = await message.channel.send(payload).catch(() => null);
+    if (p.wait) card = await p.wait.edit(payload).catch(() => null);
+    if (!card) card = await p.channel.send(payload).catch(() => null);
 
     if (card) { for (const r of ['🤠', '🔥', '👍']) { await card.react(r).catch(() => {}); } }
     // 👗 Garde-robe : on mémorise la dernière tenue décrite du membre
     if (card && t && _ok(t.description)) {
       try {
         const db = loadDB(); if (!db.garderobe) db.garderobe = {};
-        db.garderobe[message.author.id] = {
+        db.garderobe[p.author.id] = {
           nomPerso,
           description: String(t.description).slice(0, 700),
           pieces: _ok(t.pieces) ? String(t.pieces).slice(0, 1024) : '',
@@ -131,10 +153,9 @@ async function onMessage(message) {
         saveDB(db);
       } catch {}
     }
-    // Retirer le message d'origine UNIQUEMENT si au moins une photo a pu être réuploadée
-    if (files.length && card) await message.delete().catch(() => {});
-    return true;
-  } catch { return false; }
+    // Salon propre : retirer les messages-photos d'origine une fois la fiche postée.
+    if (files.length && card) { for (const m of p.msgs) { await m.delete().catch(() => {}); } }
+  } catch {}
 }
 
 // Bouton « 👔 Ma garde-robe » → affiche la dernière tenue enregistrée du membre
