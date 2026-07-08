@@ -202,6 +202,8 @@ function _embedRdv(rdv) {
       { name: '👤 Demandeur', value: `${rdv.nomRP}${rdv.clientId ? ` (<@${rdv.clientId}>)` : ''}`, inline: false },
       { name: '🧰 Prestation', value: typeLabel, inline: true },
       { name: '📍 Lieu', value: lieuLabel, inline: true },
+      ...(rdv.trajet ? [{ name: '🗺️ Trajet', value: String(rdv.trajet).slice(0, 200), inline: true }] : []),
+      ...(rdv.duree ? [{ name: '⏱️ Durée estimée', value: String(rdv.duree).slice(0, 100), inline: true }] : []),
       { name: '🕐 Créneau', value: dt ? `${tsF(dt)}\n${tsR(dt)}` : (rdv.souhaitTexte ? `*Souhait : ${rdv.souhaitTexte}* (à fixer)` : '—'), inline: false },
       { name: '📇 Contact (pour le contrat)', value: `<@${rdv.contactId || rdv.clientId}> · ID : \`${rdv.contactId || rdv.clientId}\``, inline: false },
       ...(rdv.agentId ? [{ name: '🤝 Agent assigné', value: `<@${rdv.agentId}>`, inline: true }] : []),
@@ -439,28 +441,44 @@ async function routeInteraction(interaction) {
     if (interaction.isStringSelectMenu?.() && interaction.customId?.startsWith('rdvp_lieu::')) {
       const typeKey = interaction.customId.split('::')[1];
       const lieuKey = interaction.values[0];
+      const estEscorte = (typeKey === 'esc' || typeKey === 'cnv');
       const modal = new ModalBuilder().setCustomId(`rdvp_modal::${typeKey}::${lieuKey}`).setTitle('✉ Votre demande de rendez-vous');
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom').setLabel('Votre nom (personnage)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setPlaceholder('Ex : Mr. Abberline')),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('quand').setLabel('Quand ? (jour + heure souhaités)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setPlaceholder('Ex : 20/06 à 21h, ou samedi soir')),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('contact').setLabel('Votre ID Discord (pour le contrat)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(25).setValue(interaction.user.id).setPlaceholder('Identifiant numérique — laissez tel quel')),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Votre demande (détails)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setPlaceholder('Le besoin, le contexte…')),
-      );
+      if (estEscorte) {
+        // Escorte : on demande le trajet (départ → arrivée) et une durée estimée (retour de Kodo_ku).
+        // L'ID Discord n'est pas redemandé : on récupère automatiquement celui du demandeur.
+        modal.addComponents(
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom').setLabel('Votre nom (personnage)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setPlaceholder('Ex : Mr. Abberline')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('trajet').setLabel('Trajet (départ → arrivée)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(120).setPlaceholder('Ex : Valentine → Saint-Denis')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duree').setLabel('Durée estimée').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(60).setPlaceholder('Ex : ~2h, une demi-journée…')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('quand').setLabel('Quand ? (jour + heure souhaités)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setPlaceholder('Ex : 20/06 à 21h, ou samedi soir')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Votre demande (détails)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setPlaceholder('Convoi, marchandise, dangers connus…')),
+        );
+      } else {
+        modal.addComponents(
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom').setLabel('Votre nom (personnage)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setPlaceholder('Ex : Mr. Abberline')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('quand').setLabel('Quand ? (jour + heure souhaités)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setPlaceholder('Ex : 20/06 à 21h, ou samedi soir')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('contact').setLabel('Votre ID Discord (pour le contrat)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(25).setValue(interaction.user.id).setPlaceholder('Identifiant numérique — laissez tel quel')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Votre demande (détails)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setPlaceholder('Le besoin, le contexte…')),
+        );
+      }
       await interaction.showModal(modal).catch(() => {});
       return true;
     }
     if (interaction.isModalSubmit?.() && interaction.customId?.startsWith('rdvp_modal::')) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       const [, typeKey, lieuKey] = interaction.customId.split('::');
-      const nomRP = (interaction.fields.getTextInputValue('nom') || '').trim() || (interaction.member?.displayName || interaction.user.username);
-      const quand = (interaction.fields.getTextInputValue('quand') || '').trim();
-      const details = (interaction.fields.getTextInputValue('details') || '').trim();
-      const contactRaw = (interaction.fields.getTextInputValue('contact') || '').replace(/[^0-9]/g, '');
+      const gf = (k) => { try { return (interaction.fields.getTextInputValue(k) || '').trim(); } catch { return ''; } }; // lecture tolérante (champ absent selon la prestation)
+      const nomRP = gf('nom') || (interaction.member?.displayName || interaction.user.username);
+      const quand = gf('quand');
+      const details = gf('details');
+      const trajet = gf('trajet'); // escortes uniquement
+      const duree = gf('duree');   // escortes uniquement
+      const contactRaw = gf('contact').replace(/[^0-9]/g, '');
       const contactId = /^\d{16,21}$/.test(contactRaw) ? contactRaw : interaction.user.id;
       const slot = _parseSlot(quand); // créneau précis si on a pu le lire, sinon null (on garde le texte)
       const db = loadDB(); const store = _store(db);
       const id = ref();
-      const rdv = { id, clientId: interaction.user.id, contactId, nomRP, typeKey, lieuKey, slot, souhaitTexte: quand, photo: '', details, statut: 'Planifié', notionId: null, channelId: null, msgId: null, agentId: null, sent: {}, createdAt: Date.now() };
+      const rdv = { id, clientId: interaction.user.id, contactId, nomRP, typeKey, lieuKey, slot, souhaitTexte: quand, trajet, duree, photo: '', details, statut: 'Planifié', notionId: null, channelId: null, msgId: null, agentId: null, sent: {}, createdAt: Date.now() };
       // Notion (best-effort)
       rdv.notionId = await _notionCreer(rdv);
       // Dossier client
@@ -480,6 +498,7 @@ async function routeInteraction(interaction) {
           '```', ' WESTERN UNION ', '```',
           `REÇU STOP DEMANDE ENREGISTRÉE STOP RÉF **${id}** STOP`,
           `PRESTATION ${TYPES[typeKey]?.label || '—'} STOP LIEU ${LIEUX[lieuKey] || '—'} STOP`,
+          trajet ? `TRAJET ${trajet} STOP${duree ? ` DUREE ESTIMEE ${duree} STOP` : ''}` : '',
           dt ? `CRÉNEAU SOUHAITÉ ${tsF(dt)} STOP` : (quand ? `CRÉNEAU SOUHAITÉ ${quand} STOP` : ''),
           'LA DIRECTION ÉTUDIE VOTRE DEMANDE STOP RÉPONSE À SUIVRE STOP',
           'UN CONTRAT POURRA VOUS ÊTRE ENVOYÉ À SIGNER STOP',
@@ -499,7 +518,7 @@ async function routeInteraction(interaction) {
       if (!rdv) { await interaction.reply({ content: '⚠️ Rendez-vous introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const lieuLabel = LIEUX[rdv.lieuKey] || rdv.lieuKey || '';
       const typeLabel = TYPES[rdv.typeKey]?.label || 'Prestation';
-      const detailsPre = [lieuLabel ? `Lieu : ${lieuLabel}` : '', rdv.souhaitTexte ? `Souhait du client : ${rdv.souhaitTexte}` : '', rdv.details || ''].filter(Boolean).join('\n').slice(0, 800);
+      const detailsPre = [lieuLabel ? `Lieu : ${lieuLabel}` : '', rdv.trajet ? `Trajet : ${rdv.trajet}` : '', rdv.duree ? `Durée estimée : ${rdv.duree}` : '', rdv.souhaitTexte ? `Souhait du client : ${rdv.souhaitTexte}` : '', rdv.details || ''].filter(Boolean).join('\n').slice(0, 800);
       const modal = new ModalBuilder().setCustomId(`contrat_offre_modal::Autre::${(rdv.contactId || rdv.clientId || '').toString()}`).setTitle('📜 Contrat — suite au RDV');
       modal.addComponents(
         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('client_nom').setLabel('Nom / Entreprise du client').setStyle(TextInputStyle.Short).setRequired(true).setValue((rdv.nomRP || '').toString().slice(0, 100))),
