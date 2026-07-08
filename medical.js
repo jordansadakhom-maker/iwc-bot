@@ -85,6 +85,10 @@ function _embedFiche(f, gm) {
       { name: '📝 Notes', value: _clip(f.notes || '*Aucune note*', 1000), inline: false },
     );
   if (f.blessures?.length) e.addFields({ name: '🩹 Blessures / soins', value: _clip(f.blessures.slice(-5).reverse().map(b => `• \`${_clip(b.date, 40)}\` ${_clip(b.desc, 100)}${b.localisation ? ` (${_clip(b.localisation, 40)})` : ''}${b.gravite ? ` — **${_clip(b.gravite, 20)}**` : ''}`).join('\n'), 1024), inline: false });
+  if (f.suivis?.length) e.addFields({ name: '🩺 Suivi de soin', value: _clip(f.suivis.slice(-4).reverse().map(s => {
+    const det = [s.etat && `état : ${s.etat}`, s.traitement && `traitement : ${s.traitement}`, s.suite && `suite : ${s.suite}`].filter(Boolean).join(' · ');
+    return `• \`${_clip(s.date, 40)}\` **${_clip(s.soin, 140)}**${s.soignant ? ` — *${_clip(s.soignant, 50)}*` : ''}${det ? `\n   ${_clip(det, 240)}` : ''}`;
+  }).join('\n'), 1024), inline: false });
   if (f.historique?.length) e.addFields({ name: '🕓 Historique', value: _clip(f.historique.slice(-8).reverse().map(h => `• \`${_clip(h.date, 40)}\` ${_clip(h.action, 120)}${h.par ? ` — *${_clip(h.par, 60)}*` : ''}`).join('\n'), 1024), inline: false });
   if (gm?.user) e.setThumbnail(gm.user.displayAvatarURL());
   e.setFooter({ text: _clip(f.majPar ? `Dernière mise à jour par ${f.majPar}` : 'Dossier médical confidentiel', 200) });
@@ -172,6 +176,9 @@ function _actions(id) {
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`med_blessure::${id}`).setLabel('Signaler une blessure / un soin').setEmoji('🩹').setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId(`med_aptitude::${id}`).setLabel('Rédiger le test d\'aptitude').setEmoji('🧪').setStyle(ButtonStyle.Primary),
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`med_suivi::${id}`).setLabel('Ajouter un suivi de soin').setEmoji('🩺').setStyle(ButtonStyle.Primary),
     ),
   ];
 }
@@ -511,6 +518,43 @@ async function routeInteraction(interaction) {
       _log(f, 'Notes mises à jour', f.majPar); saveDB(db);
       const gm = await interaction.guild.members.fetch(id).catch(() => null);
       await interaction.editReply({ content: '✅ Notes enregistrées.', embeds: [_embedFiche(f, gm)], components: _actions(id) }).catch(() => {});
+      return true;
+    }
+
+    // ── Ajouter un suivi de soin → journal de soins chronologique (n'affecte PAS le statut) ──
+    if (interaction.isButton?.() && cid.startsWith('med_suivi::')) {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé au médecin et à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const id = cid.split('::')[1];
+      const modal = new ModalBuilder().setCustomId(`med_suivi_modal::${id}`).setTitle('🩺 Suivi de soin');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('soin').setLabel('Soin / acte réalisé').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500).setPlaceholder('ex : pansement changé, points retirés, désinfection de la plaie…')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('etat').setLabel('État / évolution du patient').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(400).setPlaceholder('ex : cicatrise bien, douleur en baisse, fièvre tombée…')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('traitement').setLabel('Traitement / prescription (facultatif)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(200).setPlaceholder('ex : laudanum 2×/jour, repos 3 jours…')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('suite').setLabel('Prochaine étape / suivi (facultatif)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(150).setPlaceholder('ex : recontrôle dans 3 jours')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('date').setLabel('Date (vide = aujourd\'hui)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(40).setPlaceholder('ex : 8 Septembre 1904')),
+      );
+      await interaction.showModal(modal).catch(() => {});
+      return true;
+    }
+    if (interaction.isModalSubmit?.() && cid.startsWith('med_suivi_modal::')) {
+      const id = cid.split('::')[1];
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const db = loadDB(); const f = _fiche(db, id);
+      const soin = (interaction.fields.getTextInputValue('soin') || '').trim();
+      const etat = (interaction.fields.getTextInputValue('etat') || '').trim();
+      const traitement = (interaction.fields.getTextInputValue('traitement') || '').trim();
+      const suite = (interaction.fields.getTextInputValue('suite') || '').trim();
+      const dateSaisie = (interaction.fields.getTextInputValue('date') || '').trim();
+      const par = interaction.member?.displayName || interaction.user.username;
+      if (!soin) { await interaction.editReply({ content: '⚠️ Il faut au moins décrire le soin réalisé.' }).catch(() => {}); return true; }
+      if (!f.suivis) f.suivis = [];
+      f.suivis.push({ date: dateSaisie || _dateFR(Date.now()), soin, etat, traitement, suite, soignant: par });
+      if (f.suivis.length > 20) f.suivis = f.suivis.slice(-20);
+      f.majPar = par; f.majAt = Date.now();
+      _log(f, `Suivi de soin ajouté : ${soin.slice(0, 80)}`, par);
+      saveDB(db);
+      const gm = await interaction.guild.members.fetch(id).catch(() => null);
+      await interaction.editReply({ content: '✅ Suivi de soin enregistré.', embeds: [_embedFiche(f, gm)], components: _actions(id) }).catch(() => {});
       return true;
     }
 
