@@ -1,0 +1,632 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Le système de gestion Iron Wolf, réarmé pour un bureau du shérif : avis de recherche, écrous, patrouilles, renseignement et analyse IA — le tout piloté depuis Discord, en français.">
+<meta name="theme-color" content="#15110c">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Bureau du Shérif — le système, côté loi">
+<meta property="og:description" content="Le système de gestion Iron Wolf, réarmé pour un bureau du shérif : avis de recherche, écrous, patrouilles, renseignement et analyse IA — le tout piloté depuis Discord, en français.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='16' fill='%2315110c'/><polygon points='50,14 61,41 91,41 66,59 76,88 50,69 24,88 34,59 9,41 39,41' fill='%23d8ac57'/></svg>">
+<title>Bureau du Shérif — le système, côté loi</title>
+<style>
+  :root {
+    /* Parchemin / broadside — thème clair par défaut */
+    --bg:       #E7DCC4;
+    --bg-2:     #DFD4B9;
+    --surface:  #F3ECDB;
+    --surface-2:#EBE1CB;
+    --ink:      #241C13;
+    --ink-soft: #5B4E3B;
+    --ink-mute: #837256;
+    --line:     #CBBB94;
+    --line-soft:#D8CBA8;
+    --gold:     #9A6A15;
+    --gold-ink: #7C540E;
+    --oxblood:  #8E2B24;
+    --teal:     #2C5A54;
+    --shadow:   26 20 12;
+    --glow: transparent;
+
+    --font-display: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    --font-body: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+
+    --step--1: clamp(0.78rem, 0.74rem + 0.2vw, 0.86rem);
+    --step-0:  clamp(1rem, 0.96rem + 0.2vw, 1.08rem);
+    --step-1:  clamp(1.2rem, 1.12rem + 0.4vw, 1.4rem);
+    --step-2:  clamp(1.5rem, 1.36rem + 0.7vw, 1.9rem);
+    --step-3:  clamp(1.9rem, 1.6rem + 1.5vw, 2.7rem);
+    --step-4:  clamp(2.6rem, 2rem + 3vw, 4.4rem);
+    --step-5:  clamp(3.4rem, 2.4rem + 5vw, 6.4rem);
+
+    --maxw: 1120px;
+    --readw: 62ch;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      /* Suie / gaz — bureau du shérif la nuit */
+      --bg:       #15110C;
+      --bg-2:     #1C1710;
+      --surface:  #221B13;
+      --surface-2:#291F15;
+      --ink:      #ECE1CB;
+      --ink-soft: #BCAC8D;
+      --ink-mute: #8B7B5E;
+      --line:     #3A2F20;
+      --line-soft:#2C2318;
+      --gold:     #D8AC57;
+      --gold-ink: #E9C578;
+      --oxblood:  #C24A3E;
+      --teal:     #64A498;
+      --shadow:   0 0 0;
+      --glow: rgba(216,172,87,0.10);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg:#E7DCC4; --bg-2:#DFD4B9; --surface:#F3ECDB; --surface-2:#EBE1CB;
+    --ink:#241C13; --ink-soft:#5B4E3B; --ink-mute:#837256; --line:#CBBB94; --line-soft:#D8CBA8;
+    --gold:#9A6A15; --gold-ink:#7C540E; --oxblood:#8E2B24; --teal:#2C5A54; --shadow:26 20 12; --glow:transparent;
+  }
+  :root[data-theme="dark"] {
+    --bg:#15110C; --bg-2:#1C1710; --surface:#221B13; --surface-2:#291F15;
+    --ink:#ECE1CB; --ink-soft:#BCAC8D; --ink-mute:#8B7B5E; --line:#3A2F20; --line-soft:#2C2318;
+    --gold:#D8AC57; --gold-ink:#E9C578; --oxblood:#C24A3E; --teal:#64A498; --shadow:0 0 0; --glow:rgba(216,172,87,0.10);
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: var(--step-0);
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+  /* Grain de papier / suie, léger */
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none; z-index: 0;
+    background:
+      radial-gradient(120% 80% at 50% -10%, var(--glow), transparent 60%),
+      repeating-linear-gradient(0deg, rgba(0,0,0,0.014) 0 1px, transparent 1px 3px);
+    mix-blend-mode: multiply;
+    opacity: .5;
+  }
+  @media (prefers-color-scheme: dark) { body::before { mix-blend-mode: screen; opacity:.6; } }
+  :root[data-theme="dark"] body::before { mix-blend-mode: screen; opacity:.6; }
+
+  .wrap { position: relative; z-index: 1; max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(18px, 5vw, 44px); }
+
+  a { color: inherit; }
+  h1,h2,h3 { text-wrap: balance; margin: 0; }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: var(--step--1);
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--gold-ink);
+    font-weight: 600;
+  }
+  .rule { height: 0; border: 0; border-top: 1.5px solid var(--ink); opacity: .8; }
+  .rule-double { height: 5px; border: 0; border-top: 1.5px solid var(--ink); border-bottom: 1.5px solid var(--ink); opacity: .8; }
+
+  /* ── Étoile de shérif ── */
+  .star { color: var(--gold); display: inline-block; line-height: 0; filter: drop-shadow(0 1px 0 rgba(0,0,0,.25)); }
+  .star svg { display: block; width: 100%; height: 100%; }
+
+  /* ── Barre haute ── */
+  .topbar {
+    position: sticky; top: 0; z-index: 20;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .topbar .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 60px; }
+  .brand { display: flex; align-items: center; gap: 11px; }
+  .brand .star { width: 26px; height: 26px; }
+  .brand b { font-family: var(--font-display); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; font-size: .96rem; }
+  .brand small { display:block; font-family: var(--font-mono); font-size: .58rem; letter-spacing:.2em; color: var(--ink-mute); text-transform: uppercase; margin-top: 1px; }
+  .topbar .tag {
+    font-family: var(--font-mono); font-size: var(--step--1);
+    letter-spacing: .12em; text-transform: uppercase; color: var(--ink-soft);
+    border: 1px solid var(--line); border-radius: 2px; padding: 4px 10px;
+  }
+  @media (max-width: 620px) { .topbar .tag { display: none; } }
+
+  /* ── Héros ── */
+  .hero { padding: clamp(46px, 8vw, 96px) 0 clamp(30px, 5vw, 56px); text-align: center; }
+  .hero .bigstar { width: clamp(66px, 12vw, 104px); height: clamp(66px, 12vw, 104px); margin: 0 auto clamp(18px,3vw,30px); }
+  .hero h1 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .01em;
+    line-height: .98;
+    font-size: var(--step-5);
+    margin: 0 auto;
+    max-width: 15ch;
+  }
+  .hero h1 .thin { display:block; font-size: .42em; letter-spacing:.3em; font-weight: 400; color: var(--ink-soft); margin-bottom: .5em; }
+  .hero .deck {
+    max-width: 54ch; margin: clamp(20px,3vw,30px) auto 0;
+    font-size: var(--step-1); color: var(--ink-soft); line-height: 1.55;
+  }
+  .hero .deck b { color: var(--ink); font-weight: 600; }
+  .chips { display: flex; flex-wrap: wrap; gap: 10px 12px; justify-content: center; margin-top: clamp(22px,3vw,30px); }
+  .chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--font-mono); font-size: var(--step--1); letter-spacing: .04em;
+    background: var(--surface); border: 1px solid var(--line);
+    padding: 8px 14px; border-radius: 2px; color: var(--ink);
+  }
+  .chip .tick { color: var(--gold-ink); font-weight: 700; }
+  .masthead-rules { max-width: 720px; margin: clamp(34px,5vw,56px) auto 0; display: grid; gap: 4px; }
+  .masthead-rules .stampline { display:flex; align-items:center; justify-content:center; gap: 18px; margin: 12px 0; }
+  .stamp {
+    font-family: var(--font-mono); text-transform: uppercase; letter-spacing: .18em;
+    font-size: var(--step--1); color: var(--oxblood);
+    border: 2px solid var(--oxblood); border-radius: 3px; padding: 6px 12px;
+    transform: rotate(-3deg); opacity: .92;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--oxblood) 25%, transparent);
+  }
+
+  /* ── Sections ── */
+  section { padding: clamp(40px, 7vw, 82px) 0; }
+  .sec-head { max-width: var(--readw); margin: 0 0 clamp(26px,4vw,40px); }
+  .sec-head.center { margin-left:auto; margin-right:auto; text-align:center; }
+  .sec-head h2 {
+    font-family: var(--font-display); text-transform: uppercase; letter-spacing: .03em;
+    font-size: var(--step-3); line-height: 1.02; margin-top: 10px;
+  }
+  .sec-head p { color: var(--ink-soft); margin: 14px 0 0; font-size: var(--step-1); }
+
+  .division { margin-top: clamp(30px, 5vw, 52px); }
+  .division:first-of-type { margin-top: 0; }
+  .division > .divhead {
+    display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+    padding-bottom: 12px; margin-bottom: 26px;
+    border-bottom: 1.5px solid var(--ink);
+  }
+  .division > .divhead h3 {
+    font-family: var(--font-display); text-transform: uppercase; letter-spacing: .05em;
+    font-size: var(--step-2);
+  }
+  .division > .divhead .tagm {
+    font-family: var(--font-mono); font-size: var(--step--1); letter-spacing: .14em;
+    text-transform: uppercase; color: var(--gold-ink); margin-left: auto;
+  }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 16px; }
+  .card {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 22px 20px 20px;
+    display: flex; flex-direction: column; gap: 10px;
+    transition: transform .28s cubic-bezier(.2,.7,.2,1), border-color .28s, box-shadow .28s;
+  }
+  .card::before {
+    content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px;
+    background: var(--gold); border-radius: 3px; opacity: .0; transition: opacity .28s;
+  }
+  .card:hover { transform: translateY(-4px); border-color: color-mix(in srgb, var(--gold) 55%, var(--line)); box-shadow: 0 14px 34px -20px rgba(var(--shadow), .7); }
+  .card:hover::before { opacity: .9; }
+  .card .ic {
+    width: 40px; height: 40px; border-radius: 3px;
+    display: grid; place-items: center; font-size: 21px;
+    background: var(--surface-2); border: 1px solid var(--line);
+  }
+  .card h4 { margin: 4px 0 0; font-family: var(--font-display); font-size: var(--step-1); letter-spacing: .01em; line-height: 1.15; }
+  .card p { margin: 0; color: var(--ink-soft); font-size: var(--step--1); line-height: 1.55; }
+  .card .disc {
+    margin-top: auto; padding-top: 10px;
+    font-family: var(--font-mono); font-size: .68rem; letter-spacing: .03em;
+    color: var(--ink-mute); border-top: 1px dashed var(--line);
+    display: flex; gap: 7px; align-items: center;
+  }
+  .card .disc .dot { color: var(--teal); }
+
+  /* ── Répliques d'embeds Discord (toujours en sombre, comme une capture) ── */
+  .demo { background: var(--bg-2); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .mocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; align-items: start; }
+  .dc {
+    --dc-bg:#2b2d31; --dc-card:#313338; --dc-line:#3f4248;
+    --dc-white:#f2f3f5; --dc-mute:#b5bac1; --dc-dim:#949ba4;
+    background: var(--dc-bg); border-radius: 10px; padding: 16px 16px 14px;
+    box-shadow: 0 20px 44px -26px rgba(0,0,0,.75); border: 1px solid #232428;
+    font-family: var(--font-body);
+  }
+  .dc .dc-top { display:flex; align-items:center; gap: 9px; margin-bottom: 11px; }
+  .dc .dc-ava { width: 30px; height: 30px; border-radius: 50%; display:grid; place-items:center; color:#1a1206; flex: none; }
+  .dc .dc-ava .star { width: 18px; height: 18px; color: #1a1206; }
+  .dc .dc-name { color: var(--dc-white); font-weight: 600; font-size: .84rem; display:flex; align-items:center; gap:7px; }
+  .dc .dc-bot { background:#5865f2; color:#fff; font-size:.56rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; padding: 2px 5px; border-radius: 4px; }
+  .dc .dc-ts { color: var(--dc-dim); font-size: .68rem; margin-left: 2px; }
+  .embed {
+    background: var(--dc-card); border-radius: 4px; border-left: 4px solid var(--em, #C0453B);
+    padding: 13px 15px 14px;
+  }
+  .embed .em-title { color: var(--dc-white); font-weight: 700; font-size: .92rem; line-height: 1.25; margin: 0 0 4px; }
+  .embed .em-desc { color: var(--dc-mute); font-size: .78rem; line-height: 1.5; margin: 0 0 11px; font-style: italic; }
+  .embed .em-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 11px 14px; }
+  .embed .em-f.full { grid-column: 1 / -1; }
+  .embed .em-f .k { color: var(--dc-white); font-weight: 700; font-size: .72rem; margin: 0 0 2px; }
+  .embed .em-f .v { color: var(--dc-mute); font-size: .76rem; line-height: 1.4; margin: 0; }
+  .embed .em-photo {
+    margin-top: 12px; height: 116px; border-radius: 4px;
+    background:
+      linear-gradient(180deg, rgba(0,0,0,.05), rgba(0,0,0,.45)),
+      repeating-linear-gradient(115deg, #4a3b2c 0 12px, #402f22 12px 24px),
+      radial-gradient(80% 120% at 30% 20%, #6b5334, #2c2016);
+    border: 1px solid #22242a; position: relative; overflow: hidden;
+    display:flex; align-items:flex-end; padding: 8px 10px;
+  }
+  .embed .em-photo span { font-family: var(--font-mono); font-size:.6rem; letter-spacing:.14em; text-transform:uppercase; color: rgba(255,255,255,.72); background: rgba(0,0,0,.4); padding: 3px 7px; border-radius: 3px; }
+  .embed .em-foot { color: var(--dc-dim); font-size: .66rem; margin: 12px 0 0; display:flex; align-items:center; gap:7px; }
+  .mock-cap { font-family: var(--font-mono); font-size: var(--step--1); letter-spacing:.06em; color: var(--ink-soft); text-align:center; margin: 12px 0 0; }
+  @media (max-width: 460px) { .embed .em-grid { grid-template-columns: 1fr 1fr; } }
+
+  /* ── Bande IA ── */
+  .ai-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px,1fr)); gap: 18px; margin-top: 8px; }
+  .ai-item { display:flex; flex-direction: column; gap: 8px; padding: 4px 0; }
+  .ai-item .n { font-family: var(--font-mono); color: var(--gold-ink); font-size: var(--step--1); letter-spacing:.14em; }
+  .ai-item h4 { font-family: var(--font-display); font-size: var(--step-1); margin: 0; }
+  .ai-item p { margin: 0; color: var(--ink-soft); font-size: var(--step--1); }
+  .ai-flow { display:flex; align-items:center; gap: 10px; flex-wrap: wrap; margin: 26px 0 0; font-family: var(--font-mono); font-size: var(--step--1); letter-spacing:.04em; }
+  .ai-flow .pill { background: var(--surface); border:1px solid var(--line); padding: 7px 12px; border-radius: 2px; }
+  .ai-flow .arw { color: var(--gold-ink); }
+
+  /* ── Clôture ── */
+  .close { text-align: center; }
+  .close .bigstar { width: 52px; height: 52px; margin: 0 auto 20px; }
+  .close h2 { font-family: var(--font-display); text-transform: uppercase; font-size: var(--step-3); letter-spacing:.03em; }
+  .close p { max-width: 52ch; margin: 16px auto 0; color: var(--ink-soft); font-size: var(--step-1); }
+  .close .stampline { display:flex; justify-content:center; margin-top: 30px; }
+
+  footer { border-top: 1px solid var(--line); padding: 30px 0 46px; }
+  footer .wrap { display:flex; flex-wrap: wrap; gap: 12px 24px; align-items:center; justify-content: space-between; }
+  footer .fnote { font-family: var(--font-mono); font-size: .7rem; letter-spacing: .06em; color: var(--ink-mute); text-transform: uppercase; }
+  footer .brand b { font-size: .82rem; }
+
+  /* ── Reveal ── */
+  .rise { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s cubic-bezier(.2,.7,.2,1); }
+  .rise.in { opacity: 1; transform: none; }
+  :focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; border-radius: 2px; }
+  @media (prefers-reduced-motion: reduce) {
+    .rise { opacity: 1; transform: none; transition: none; }
+    .card { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="tinstar" viewBox="0 0 100 100">
+    <circle cx="50" cy="50" r="47" fill="none" stroke="currentColor" stroke-width="3"/>
+    <polygon points="50,16 57.9,39.1 82.3,39.5 62.8,54.2 70,77.5 50,63.5 30,77.5 37.2,54.2 17.7,39.5 42.1,39.1" fill="currentColor"/>
+    <circle cx="50" cy="16" r="3.4" fill="currentColor"/>
+    <circle cx="82.3" cy="39.5" r="3.4" fill="currentColor"/>
+    <circle cx="70" cy="77.5" r="3.4" fill="currentColor"/>
+    <circle cx="30" cy="77.5" r="3.4" fill="currentColor"/>
+    <circle cx="17.7" cy="39.5" r="3.4" fill="currentColor"/>
+    <circle cx="50" cy="50" r="6.4" fill="none" stroke="var(--bg)" stroke-width="2.4"/>
+  </symbol>
+</svg>
+
+<header class="topbar">
+  <div class="wrap">
+    <div class="brand">
+      <span class="star"><svg><use href="#tinstar"/></svg></span>
+      <span><b>Bureau du Shérif</b><small>Comté · RedM / RDR2</small></span>
+    </div>
+    <span class="tag">Démonstration</span>
+  </div>
+</header>
+
+<main>
+  <section class="hero wrap">
+    <div class="star bigstar rise" id="hero-star"><svg><use href="#tinstar"/></svg></div>
+    <h1 class="rise">
+      <span class="thin">Le système, côté loi</span>
+      Tenir le comté,<br>dossier par dossier.
+    </h1>
+    <p class="deck rise">
+      Le moteur qui fait tourner l'<b>Iron Wolf Company</b> — avis de recherche, écrous,
+      patrouilles, renseignement, <b>analyse IA</b> — réarmé pour un <b>bureau du shérif</b>.
+      Tout se pilote depuis Discord, en français, sans rien installer.
+    </p>
+    <div class="chips rise">
+      <span class="chip"><span class="tick">✓</span> 100 % en jeu, en français</span>
+      <span class="chip"><span class="tick">✓</span> Rien à installer — tout dans Discord</span>
+      <span class="chip"><span class="tick">✓</span> Tourne 24 h/24</span>
+    </div>
+    <div class="masthead-rules rise">
+      <hr class="rule-double">
+      <div class="stampline">
+        <span class="stamp">Réservé au bureau</span>
+        <span class="stamp" style="transform:rotate(2.5deg)">Confidentiel</span>
+      </div>
+      <hr class="rule-double">
+    </div>
+  </section>
+
+  <section class="wrap">
+    <div class="sec-head center rise">
+      <span class="eyebrow">Les mêmes outils · une autre étoile</span>
+      <h2>De quoi équiper tout un bureau</h2>
+      <p>Chaque module de l'Iron Wolf a son équivalent naturel côté loi. Rien à réinventer — juste à porter l'étoile.</p>
+    </div>
+
+    <div class="division">
+      <div class="divhead rise"><h3>Application de la loi</h3><span class="tagm">Traque · écrou · patrouille</span></div>
+      <div class="cards">
+        <article class="card rise">
+          <div class="ic">🎯</div>
+          <h4>Avis de recherche &amp; primes</h4>
+          <p>Publiez un avis complet : cible, prime, dangerosité, consigne « mort ou vif », commanditaire. Les chasseurs s'y inscrivent, la prime se verse toute seule à la capture.</p>
+          <div class="disc"><span class="dot">▸</span> Salon #avis-de-recherche</div>
+        </article>
+        <article class="card rise">
+          <div class="ic">⛓️</div>
+          <h4>Registre des détenus (écrou)</h4>
+          <p>Qui est en cellule, pour quel motif, caution, durée, date de libération. Un dossier par détenu, réouvrable, archivable — l'historique reste consultable.</p>
+          <div class="disc"><span class="dot">▸</span> Bouton « Écrouer / Libérer »</div>
+        </article>
+        <article class="card rise">
+          <div class="ic">🚔</div>
+          <h4>Patrouilles &amp; main courante</h4>
+          <p>Déclarez une patrouille, journalisez chaque intervention avec l'heure et le secteur. La main courante se tient toute seule, horodatée.</p>
+          <div class="disc"><span class="dot">▸</span> Rapport en un clic</div>
+        </article>
+        <article class="card rise">
+          <div class="ic">📜</div>
+          <h4>Mandats &amp; décisions</h4>
+          <p>Émission de mandats d'arrêt ou de perquisition, validés par la hiérarchie, notifiés et archivés. Chaque décision laisse une trace signée.</p>
+          <div class="disc"><span class="dot">▸</span> Validation Direction</div>
+        </article>
+      </div>
+    </div>
+
+    <div class="division">
+      <div class="divhead rise"><h3>Administration du comté</h3><span class="tagm">Citoyens · caisse · dossiers</span></div>
+      <div class="cards">
+        <article class="card rise">
+          <div class="ic">📇</div>
+          <h4>Registre des citoyens</h4>
+          <p>Un répertoire des habitants : identité, casier, contacts, photo. Recherche tolérante par nom, secteur ou mot-clé — la fiche remonte en un instant.</p>
+          <div class="disc"><span class="dot">▸</span> Recherche instantanée</div>
+        </article>
+        <article class="card rise">
+          <div class="ic">💰</div>
+          <h4>Amendes &amp; caisse du bureau</h4>
+          <p>Émission d'amendes, encaissements, salaires des adjoints, trésorerie du bureau. Chaque mouvement est tracé, le solde toujours à jour.</p>
+          <div class="disc"><span class="dot">▸</span> Comptabilité automatique</div>
+        </article>
+        <article class="card rise">
+          <div class="ic">🩺</div>
+          <h4>Infirmerie &amp; dossiers médicaux</h4>
+          <p>Blessures, soins, aptitude au service, suivi. Un seul dossier par personne qui s'enrichit à chaque déclaration, puis s'archive une fois rétabli.</p>
+          <div class="disc"><span class="dot">▸</span> Un dossier, tout l'historique</div>
+        </article>
+        <article class="card rise">
+          <div class="ic">🚂</div>
+          <h4>Transferts &amp; escortes</h4>
+          <p>Planifiez un transfert de prisonnier ou un convoi : lieu de départ, d'arrivée, durée estimée, escorte affectée. Départ et arrivée pointés.</p>
+          <div class="disc"><span class="dot">▸</span> Départ → arrivée horodatés</div>
+        </article>
+      </div>
+    </div>
+
+    <div class="division">
+      <div class="divhead rise"><h3>Renseignement &amp; IA</h3><span class="tagm">Le vrai atout</span></div>
+      <div class="cards">
+        <article class="card rise">
+          <div class="ic">🕵️</div>
+          <h4>Renseignement sur les bandes</h4>
+          <p>Fichez chaque gang du comté : meneur, territoire, effectif, signes distinctifs, dangerosité. Classés par catégorie (recherché, ennemi, sous surveillance…).</p>
+          <div class="disc"><span class="dot">▸</span> Registre des groupes</div>
+        </article>
+        <article class="card rise">
+          <div class="ic">🤖</div>
+          <h4>Analyse IA d'une photo</h4>
+          <p>Postez une capture d'un suspect ou d'une bande : l'IA en tire une fiche détaillée — tenue, armement, montures, signe le plus reconnaissable — prête à classer.</p>
+          <div class="disc"><span class="dot">▸</span> Photo → fiche complète</div>
+        </article>
+        <article class="card rise">
+          <div class="ic">🗺️</div>
+          <h4>Carte du comté &amp; dispatch</h4>
+          <p>Positions, points chauds, juridiction. Les signalements citoyens arrivent en file, priorisés, prêts à être dispatchés aux adjoints en patrouille.</p>
+          <div class="disc"><span class="dot">▸</span> Signalements en file</div>
+        </article>
+        <article class="card rise">
+          <div class="ic">✒️</div>
+          <h4>Rapports rédigés par l'IA</h4>
+          <p>Une note brute devient un rapport propre en style RP. L'IA reformule, met en forme, et repeint même les captures Red Dead en illustration d'affiche.</p>
+          <div class="disc"><span class="dot">▸</span> Note brute → rapport net</div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="demo">
+    <div class="wrap">
+      <div class="sec-head center rise">
+        <span class="eyebrow">À quoi ça ressemble en jeu</span>
+        <h2>Des fiches nettes, dans vos salons</h2>
+        <p>Voici, tel quel, ce que le bot poste dans Discord. Rien de bricolé — des cartes lisibles, prêtes à l'emploi.</p>
+      </div>
+      <div class="mocks">
+        <!-- Avis de recherche -->
+        <div>
+          <div class="dc rise">
+            <div class="dc-top">
+              <span class="dc-ava" style="background:#C0453B"><span class="star"><svg><use href="#tinstar"/></svg></span></span>
+              <span class="dc-name">Bureau du Shérif <span class="dc-bot">Bot</span></span>
+              <span class="dc-ts">aujourd'hui à 21:14</span>
+            </div>
+            <div class="embed" style="--em:#C0453B">
+              <p class="em-title">💰 AVIS DE RECHERCHE — « Le Corbeau » Malone</p>
+              <p class="em-desc">Recherché pour vols de diligence à main armée sur la route de Rhodes. Toute information menant à sa capture est récompensée.</p>
+              <div class="em-grid">
+                <div class="em-f"><p class="k">💰 Prime</p><p class="v">500 $</p></div>
+                <div class="em-f"><p class="k">⚠️ Dangerosité</p><p class="v">🟠 Élevée</p></div>
+                <div class="em-f"><p class="k">🎯 Consigne</p><p class="v">Mort ou vif</p></div>
+                <div class="em-f"><p class="k">📍 Dernière position</p><p class="v">Abords de Rhodes</p></div>
+                <div class="em-f"><p class="k">🧾 Commanditaire</p><p class="v">Bureau du comté</p></div>
+                <div class="em-f full"><p class="k">⭐ Signe reconnaissable</p><p class="v">Long manteau noir, foulard bordeaux au cou.</p></div>
+              </div>
+              <div class="em-photo"><span>Cliché — analysé par l'IA</span></div>
+              <p class="em-foot">Avis AR-4192 · établi par Adj. Harrigan</p>
+            </div>
+          </div>
+          <p class="mock-cap">Avis de recherche</p>
+        </div>
+
+        <!-- Écrou -->
+        <div>
+          <div class="dc rise">
+            <div class="dc-top">
+              <span class="dc-ava" style="background:#D8AC57"><span class="star"><svg><use href="#tinstar"/></svg></span></span>
+              <span class="dc-name">Bureau du Shérif <span class="dc-bot">Bot</span></span>
+              <span class="dc-ts">aujourd'hui à 21:31</span>
+            </div>
+            <div class="embed" style="--em:#5865f2">
+              <p class="em-title">⛓️ ÉCROU — Cassidy Boyd</p>
+              <p class="em-desc">Placé en cellule. Dossier ouvert au registre des détenus.</p>
+              <div class="em-grid">
+                <div class="em-f"><p class="k">⚖️ Motif</p><p class="v">Rixe &amp; ivresse publique</p></div>
+                <div class="em-f"><p class="k">🔒 Cellule</p><p class="v">N° 2</p></div>
+                <div class="em-f"><p class="k">💵 Caution</p><p class="v">120 $</p></div>
+                <div class="em-f"><p class="k">⏳ Durée</p><p class="v">2 jours</p></div>
+                <div class="em-f"><p class="k">🗓️ Libération</p><p class="v">11 juillet, 18 h</p></div>
+                <div class="em-f"><p class="k">👮 Écroué par</p><p class="v">Shérif Dutch</p></div>
+              </div>
+              <p class="em-foot">Dossier D-0087 · statut : 🔴 En cellule</p>
+            </div>
+          </div>
+          <p class="mock-cap">Registre des détenus</p>
+        </div>
+
+        <!-- Renseignement bande -->
+        <div>
+          <div class="dc rise">
+            <div class="dc-top">
+              <span class="dc-ava" style="background:#C0453B"><span class="star"><svg><use href="#tinstar"/></svg></span></span>
+              <span class="dc-name">Bureau du Shérif <span class="dc-bot">Bot</span></span>
+              <span class="dc-ts">aujourd'hui à 22:02</span>
+            </div>
+            <div class="embed" style="--em:#e67e22">
+              <p class="em-title">⚔️ GROUPE ENNEMI — Les Fils de Rhodes</p>
+              <p class="em-desc">Fiche de renseignement établie à partir d'une photo analysée par l'IA.</p>
+              <div class="em-grid">
+                <div class="em-f"><p class="k">⚠️ Dangerosité</p><p class="v">🔴 Critique</p></div>
+                <div class="em-f"><p class="k">👤 Meneur</p><p class="v">« Le Corbeau »</p></div>
+                <div class="em-f"><p class="k">📍 Territoire</p><p class="v">Rhodes &amp; alentours</p></div>
+                <div class="em-f full"><p class="k">👥 Effectif</p><p class="v">≈ 6 hommes, allure aguerrie</p></div>
+                <div class="em-f"><p class="k">👔 Tenues</p><p class="v">Manteaux bruns, foulards bordeaux</p></div>
+                <div class="em-f"><p class="k">🔫 Armement</p><p class="v">Fusils à répétition</p></div>
+                <div class="em-f"><p class="k">🐎 Montures</p><p class="v">Chevaux bais</p></div>
+              </div>
+              <p class="em-foot">Fiche z9-af2 · renseignement du comté</p>
+            </div>
+          </div>
+          <p class="mock-cap">Renseignement sur les bandes</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap">
+    <div class="sec-head rise">
+      <span class="eyebrow">L'atout qui change tout</span>
+      <h2>L'IA fait le sale boulot</h2>
+      <p>Ce qui prendrait dix minutes à taper à la main se fait en un envoi de photo. C'est là que le bureau gagne du temps.</p>
+    </div>
+    <div class="ai-grid">
+      <div class="ai-item rise">
+        <span class="n">01 · REGARDE</span>
+        <h4>Elle lit la photo</h4>
+        <p>Une capture d'un suspect ou d'une bande, et l'IA relève tenue, couleurs, armement, montures et le signe le plus reconnaissable.</p>
+      </div>
+      <div class="ai-item rise">
+        <span class="n">02 · RÉDIGE</span>
+        <h4>Elle dresse la fiche</h4>
+        <p>Chaque détail tombe dans son champ. La fiche — ou l'avis de recherche — sort complète, prête à classer et à publier.</p>
+      </div>
+      <div class="ai-item rise">
+        <span class="n">03 · METS EN SCÈNE</span>
+        <h4>Elle repeint le cliché</h4>
+        <p>La capture Red Dead est retravaillée en illustration d'affiche, et vos notes brutes deviennent des rapports en bon style RP.</p>
+      </div>
+    </div>
+    <div class="ai-flow rise" aria-hidden="true">
+      <span class="pill">📸 Photo du suspect</span>
+      <span class="arw">→</span>
+      <span class="pill">🤖 Analyse IA</span>
+      <span class="arw">→</span>
+      <span class="pill">📋 Fiche / avis complet</span>
+      <span class="arw">→</span>
+      <span class="pill">🗂️ Classé &amp; archivé</span>
+    </div>
+  </section>
+
+  <section class="demo">
+    <div class="wrap close">
+      <div class="star bigstar rise"><svg><use href="#tinstar"/></svg></div>
+      <h2 class="rise">Prêt à épingler l'étoile ?</h2>
+      <p class="rise">
+        Tout ce que vous venez de voir tourne déjà, chaque jour, pour l'Iron Wolf Company.
+        Le même moteur peut être taillé pour votre comté — mêmes fonctions, votre étoile,
+        vos salons, votre juridiction.
+      </p>
+      <div class="stampline rise">
+        <span class="stamp" style="transform:rotate(-2deg); border-color:var(--teal); color:var(--teal)">Bon pour service</span>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="brand">
+      <span class="star" style="width:22px;height:22px"><svg><use href="#tinstar"/></svg></span>
+      <span><b>Bureau du Shérif</b></span>
+    </div>
+    <span class="fnote">Démonstration · propulsé par le système Iron Wolf · RedM / RDR2 · Français</span>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var items = Array.prototype.slice.call(document.querySelectorAll('.rise'));
+    if (reduce || !('IntersectionObserver' in window)) {
+      items.forEach(function (el) { el.classList.add('in'); });
+      return;
+    }
+    // Héros visible d'emblée, en cascade douce.
+    var hero = document.querySelectorAll('.hero .rise');
+    Array.prototype.forEach.call(hero, function (el, i) {
+      setTimeout(function () { el.classList.add('in'); }, 90 * i + 60);
+    });
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+      });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
+    items.forEach(function (el) { if (!el.classList.contains('in')) io.observe(el); });
+  })();
+</script>
+
+</body>
+</html>
