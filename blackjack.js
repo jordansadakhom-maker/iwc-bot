@@ -65,9 +65,9 @@ const _REGLES = [
   '• ⏫ **Doubler** — tu doubles ta mise et ne reçois **qu\'une** carte. *Autorisé uniquement sur un total de **9, 10 ou 11**.*',
   '• 🛡️ **Assurance** — *si le croupier montre un As* : mise annexe (moitié de ta mise) qui paie **2:1** s\'il a un blackjack. Sinon, tu la perds. À toi de juger le risque.',
   '**Brûlé :** dépasser 21 = perdu direct.',
-  '**Le croupier** joue en dernier : il **tire jusqu\'à 17** — et même **sur le 17 souple** (As + 6). La maison ne fait pas de cadeau.',
-  '⚠️ **Règle de la maison :** si le croupier **brûle à exactement 22**, c\'est une **égalité** (tu ne gagnes pas, tu ne perds pas).',
-  '**Tu gagnes** si tu es plus proche de 21 que lui (ou s\'il brûle à 23+). Un **Blackjack** (21 en 2 cartes) est payé **6:5**.',
+  '**Le croupier** joue en dernier : il **tire jusqu\'à 17** (parfois aussi sur le **17 souple**, selon la table).',
+  '🎲 **Difficulté variable :** chaque table est tirée au sort — 🟢 **clémente** · 🟡 **équilibrée** · 🟠 **serrée** · 🔴 **maison**. Le **paiement du blackjack** (3:2 ou 6:5), la **règle du 17 souple** et l\'**égalité à 22** en dépendent. La difficulté est **affichée sur la table** : regarde-la avant de miser.',
+  '**Tu gagnes** si tu es plus proche de 21 que le croupier (ou s\'il brûle). Un **Blackjack** (21 en 2 cartes) est payé **3:2 ou 6:5** selon la table.',
   '💵 **Mise maximale : 100 $.**',
   '',
   '🎭 **Reste en RP :** appuie sur **Emote** à chaque action et colle la ligne **en jeu** — comme ça, personne ne te prend pour un AFK pendant que tu joues ici.',
@@ -96,10 +96,25 @@ function _estSoft17(main) {
   const reduits = Math.round((raw - 17) / 10); // nb d'As ramenés à 1 pour ne pas dépasser
   return as - reduits > 0;                     // il reste au moins un As compté 11
 }
-// ─── Difficulté (réglable) ──────────────────────────────────────────────
-const CROUPIER_H17 = true;  // le croupier TIRE sur le 17 souple (plus dur, réaliste)
-const BJ_PAIEMENT  = 1.2;   // blackjack payé 6:5 (au lieu de 1.5 = 3:2) → avantage maison
-const PUSH_22      = true;  // si le croupier brûle à EXACTEMENT 22 → égalité (pas gagné) : gros avantage maison, réaliste
+// ─── Difficulté (réglages de repli) ─────────────────────────────────────
+const CROUPIER_H17 = true;  // repli : le croupier TIRE sur le 17 souple
+const BJ_PAIEMENT  = 1.2;   // repli : blackjack payé 6:5
+const PUSH_22      = true;  // repli : croupier brûlé à EXACTEMENT 22 → égalité
+// ─── Difficulté VARIABLE : chaque table tire un profil au sort ───────────
+//   parfois clémente, souvent honnête, parfois rude, rarement impitoyable.
+const DIFFICULTES = [
+  { key: 'clemente',   emoji: '🟢', label: 'Table clémente',     bjPay: 1.5, h17: false, push22: false, poids: 26, desc: 'Blackjack payé **3:2**, le croupier **reste sur 17**. Les vents te sont favorables.' },
+  { key: 'equilibree', emoji: '🟡', label: 'Table équilibrée',   bjPay: 1.5, h17: true,  push22: false, poids: 34, desc: 'Blackjack payé **3:2**, le croupier **tire sur le 17 souple**. Une partie honnête.' },
+  { key: 'serree',     emoji: '🟠', label: 'Table serrée',       bjPay: 1.2, h17: true,  push22: false, poids: 26, desc: 'Blackjack payé **6:5**, le croupier **tire sur le 17 souple**. La maison serre la vis.' },
+  { key: 'maison',     emoji: '🔴', label: 'Table de la maison', bjPay: 1.2, h17: true,  push22: true,  poids: 14, desc: 'Blackjack payé **6:5**, **H17**, et **croupier brûlé à 22 = égalité**. Impitoyable.' },
+];
+function _rollDifficulte() {
+  const total = DIFFICULTES.reduce((n, d) => n + d.poids, 0);
+  let r = Math.random() * total;
+  for (const d of DIFFICULTES) { r -= d.poids; if (r < 0) return d; }
+  return DIFFICULTES[1];
+}
+function _reglesTxt(d) { return `BJ ${d.bjPay === 1.5 ? '3:2' : '6:5'} · ${d.h17 ? 'H17' : 'S17'}${d.push22 ? ' · 22=égalité' : ''}`; }
 // Double autorisé UNIQUEMENT sur un total de 9, 10 ou 11 (un 2-cartes 9/10/11 est toujours « dur »).
 function _doublable(main) { return Array.isArray(main) && main.length === 2 && [9, 10, 11].includes(_total(main)); }
 // ────────────────────────────────────────────────────────────────────────
@@ -135,6 +150,7 @@ function _creerTable(interaction) {
     timer: null,
     ambiance: '',
     reshuffle: false,
+    diff: _rollDifficulte(),     // difficulté tirée au sort pour toute la durée de la table
   };
 }
 
@@ -176,6 +192,7 @@ function _lignesStatut(t) {
     L.push('🔚 **Manche terminée.** L\'hôte peut **relancer une manche** ou **fermer la table**.');
     if (t.ambiance) L.push('💬 *' + t.ambiance + '*');
   } else {
+    if (t.diff) L.push(`${t.diff.emoji} **Difficulté de la table : ${t.diff.label}** — ${t.diff.desc}`);
     L.push('💬 *' + (t.ambiance || _pick(_phrasesDeal)) + '*');
     L.push('👉 **S\'asseoir**, régler sa mise, puis l\'**hôte distribue**.');
     L.push('📖 *Nouveau ? Clique **Comment jouer** avant de lancer.*  🎭 *Pense à **Emote RP** pour rester crédible en jeu.*');
@@ -258,8 +275,9 @@ function _contentLigne(t) {
 }
 // Construit le message complet (image si possible, sinon texte). Renvoie { content, embeds, components, files }.
 async function _screen(t) {
+  const d = t.diff || DIFFICULTES[1];
   const e = new EmbedBuilder().setColor(0xC8A45C).setTitle('🎰  TABLE DE BLACKJACK  🃏')
-    .setFooter({ text: 'Hôte : ' + t.hoteNom + '  ·  BJ 6:5 · H17 · croupier 22 = égalité · mise max 100 $' });
+    .setFooter({ text: `Hôte : ${t.hoteNom}  ·  ${d.emoji} ${d.label} · ${_reglesTxt(d)} · mise max 100 $` });
   const content = _contentLigne(t);
   let buf = null;
   try { if (_img?.genererTable) buf = await _img.genererTable(_imgState(t)); } catch { buf = null; }
@@ -309,17 +327,18 @@ function _avancer(t) {
 
 function _croupierEtResolution(t) {
   const enJeu = t.sieges.some(s => s.statut === 'stand' || s.statut === 'blackjack');
-  if (enJeu) { while (_total(t.croupier.main) < 17 || (CROUPIER_H17 && _estSoft17(t.croupier.main))) t.croupier.main.push(_piocher(t)); }
+  const H17 = t.diff ? t.diff.h17 : CROUPIER_H17;
+  if (enJeu) { while (_total(t.croupier.main) < 17 || (H17 && _estSoft17(t.croupier.main))) t.croupier.main.push(_piocher(t)); }
   const dt = _total(t.croupier.main);
   const dBJ = _estBJ(t.croupier.main);
   for (const s of t.sieges) {
     const pt = _total(s.main);
     let net = 0, label = '';
     if (s.statut === 'bust') { net = -s.mise; label = '❌ Perdu (brûlé)'; }
-    else if (s.statut === 'blackjack') { if (dBJ) { net = 0; label = '➖ Égalité (double blackjack)'; } else { net = Math.round(s.mise * BJ_PAIEMENT); label = '✦ BLACKJACK ! +' + _money(net); } }
+    else if (s.statut === 'blackjack') { if (dBJ) { net = 0; label = '➖ Égalité (double blackjack)'; } else { net = Math.round(s.mise * (t.diff ? t.diff.bjPay : BJ_PAIEMENT)); label = '✦ BLACKJACK ! +' + _money(net); } }
     else { // stand
       if (dBJ) { net = -s.mise; label = '❌ Perdu (blackjack croupier)'; }
-      else if (PUSH_22 && dt === 22) { net = 0; label = '➖ Égalité — le croupier brûle à 22 (règle de la maison)'; }
+      else if ((t.diff ? t.diff.push22 : PUSH_22) && dt === 22) { net = 0; label = '➖ Égalité — le croupier brûle à 22 (règle de la maison)'; }
       else if (dt > 21) { net = s.mise; label = '✅ Gagné (croupier brûlé) +' + _money(net); }
       else if (pt > dt) { net = s.mise; label = '✅ Gagné +' + _money(net); }
       else if (pt < dt) { net = -s.mise; label = '❌ Perdu'; }
@@ -364,7 +383,7 @@ function _panelPayload() {
       '```',
       '*Approchez, tentez votre chance à la table de Blackjack. Le croupier de la maison distribue — à vous de savoir vous arrêter à temps.*',
       '',
-      '🃏 **Blackjack** — battez le croupier sans dépasser 21. Blackjack payé **6:5**, le croupier tire **sur le 17 souple**, et l\'**assurance** est possible s\'il montre un As. La maison ne fait pas de cadeau.',
+      '🃏 **Blackjack** — battez le croupier sans dépasser 21. **Chaque table a sa difficulté**, tirée au sort à l\'ouverture : 🟢 clémente · 🟡 équilibrée · 🟠 serrée · 🔴 maison — parfois clémente, parfois impitoyable. L\'**assurance** reste possible si le croupier montre un As.',
       '',
       '👉 **Ouvrir une table** ci-dessous : vous en devenez l\'**hôte**. Les autres joueurs s\'asseyent avec leur mise, et la partie commence.',
     ].join('\n'))
