@@ -208,7 +208,7 @@
   <section class="intro">
     <span class="eyebrow">Démonstration interactive</span>
     <h1>Essayez le bureau vous-même</h1>
-    <p>Fichez un groupe, lancez un avis de recherche, écrouez un détenu, émettez une amende — tout se génère en direct, comme le ferait le bot dans Discord.</p>
+    <p>Fichez un groupe, lancez un avis de recherche, écrouez un détenu, émettez une amende, planifiez une patrouille, tenez le registre des citoyens, délivrez un mandat — tout se génère en direct, comme le ferait le bot dans Discord.</p>
     <div class="note">
       <span class="star" style="width:18px;height:18px;flex:none">🔒</span>
       <span><b>Bac à sable 100 % local.</b> Vos saisies restent sur cet appareil (rien n'est envoyé nulle part) et sont conservées entre les visites. Dans le vrai bot, tout ceci vit dans Discord, avec l'analyse IA des photos et la sauvegarde automatique.</span>
@@ -220,6 +220,9 @@
     <button class="tab" role="tab" id="tab-ecr" aria-controls="p-ecr" aria-selected="false"><span class="e">⛓️</span> Écrou des détenus</button>
     <button class="tab" role="tab" id="tab-amd" aria-controls="p-amd" aria-selected="false"><span class="e">💵</span> Amendes &amp; caisse</button>
     <button class="tab" role="tab" id="tab-ia" aria-controls="p-ia" aria-selected="false"><span class="e">🔎</span> Analyse photo (IA)</button>
+    <button class="tab" role="tab" id="tab-pat" aria-controls="p-pat" aria-selected="false"><span class="e">🚔</span> Patrouilles</button>
+    <button class="tab" role="tab" id="tab-cit" aria-controls="p-cit" aria-selected="false"><span class="e">📇</span> Registre des citoyens</button>
+    <button class="tab" role="tab" id="tab-man" aria-controls="p-man" aria-selected="false"><span class="e">📜</span> Mandats</button>
   </div>
 
   <!-- ── Registre / Avis ── -->
@@ -344,6 +347,92 @@
         <p class="previewlbl">Signalement généré</p>
         <div id="ia-result"></div>
       </div>
+    </div>
+  </section>
+
+  <!-- ── Patrouilles ── -->
+  <section class="panel" id="p-pat" role="tabpanel" aria-labelledby="tab-pat">
+    <div class="cols">
+      <form class="card" id="form-pat" autocomplete="off">
+        <h3>Lancer une patrouille</h3>
+        <p class="sub">Affectez des agents à un secteur — la fiche de patrouille se génère à droite.</p>
+        <div class="field"><label for="pt-secteur">Secteur</label><input type="text" id="pt-secteur" required maxlength="90" placeholder="Route de Saint-Denis"></div>
+        <div class="field"><label for="pt-agents">Agents</label><input type="text" id="pt-agents" maxlength="140" placeholder="Adj. Harrigan, Adj. Boyd"></div>
+        <div class="field row2">
+          <div class="field" style="margin:0"><label for="pt-debut">Heure de début</label><input type="text" id="pt-debut" maxlength="20" placeholder="21h00"></div>
+          <div class="field" style="margin:0"><label for="pt-duree">Durée</label><input type="text" id="pt-duree" maxlength="20" placeholder="2h"></div>
+        </div>
+        <div class="field"><label for="pt-obs">Observations</label><textarea id="pt-obs" maxlength="600" placeholder="Faits marquants, incidents, personnes croisées…"></textarea></div>
+        <div class="actions">
+          <button type="submit" class="btn primary">🚔 Enregistrer la patrouille</button>
+          <button type="reset" class="btn ghost">Réinitialiser</button>
+        </div>
+      </form>
+      <div>
+        <p class="previewlbl">Aperçu de la patrouille</p>
+        <div id="pat-preview"></div>
+      </div>
+    </div>
+    <div class="liste">
+      <div class="liste-head"><h3>Registre des patrouilles</h3></div>
+      <div class="grid" id="pat-list"></div>
+    </div>
+  </section>
+
+  <!-- ── Registre des citoyens ── -->
+  <section class="panel" id="p-cit" role="tabpanel" aria-labelledby="tab-cit">
+    <div class="cols">
+      <form class="card" id="form-cit" autocomplete="off">
+        <h3>Ficher un citoyen</h3>
+        <p class="sub">Enregistrez un habitant du comté — la fiche citoyen se génère à droite.</p>
+        <div class="field"><label for="ci-nom">Nom</label><input type="text" id="ci-nom" required maxlength="80" placeholder="Martha Delacroix"></div>
+        <div class="field row2">
+          <div class="field" style="margin:0"><label for="ci-age">Âge</label><input type="number" id="ci-age" min="0" step="1" placeholder="34"></div>
+          <div class="field" style="margin:0"><label for="ci-prof">Profession</label><input type="text" id="ci-prof" maxlength="80" placeholder="Forgeronne"></div>
+        </div>
+        <div class="field"><label for="ci-casier">Casier / notes</label><textarea id="ci-casier" maxlength="600" placeholder="Antécédents, remarques, informations utiles…"></textarea></div>
+        <div class="actions">
+          <button type="submit" class="btn primary">📇 Enregistrer la fiche</button>
+          <button type="reset" class="btn ghost">Réinitialiser</button>
+        </div>
+      </form>
+      <div>
+        <p class="previewlbl">Aperçu de la fiche</p>
+        <div id="cit-preview"></div>
+      </div>
+    </div>
+    <div class="liste">
+      <div class="liste-head">
+        <h3>Registre des citoyens</h3>
+        <div class="field" style="margin:0;min-width:210px"><input type="text" id="cit-search" maxlength="80" placeholder="🔎 Rechercher (nom, métier, casier)…" aria-label="Rechercher un citoyen"></div>
+      </div>
+      <div class="grid" id="cit-list"></div>
+    </div>
+  </section>
+
+  <!-- ── Mandats ── -->
+  <section class="panel" id="p-man" role="tabpanel" aria-labelledby="tab-man">
+    <div class="cols">
+      <form class="card" id="form-man" autocomplete="off">
+        <h3>Émettre un mandat</h3>
+        <p class="sub">Rédigez un mandat officiel — le document se génère à droite.</p>
+        <div class="field"><span class="lbl">Type de mandat</span><div class="segwrap" id="m-types"></div></div>
+        <div class="field"><label for="m-cible">Cible</label><input type="text" id="m-cible" required maxlength="90" placeholder="Cassidy Boyd"></div>
+        <div class="field"><label for="m-motif">Motif</label><input type="text" id="m-motif" maxlength="140" placeholder="Vol de bétail &amp; fuite"></div>
+        <div class="field"><label for="m-par">Émis par</label><input type="text" id="m-par" maxlength="80" placeholder="Juge Harrow"></div>
+        <div class="actions">
+          <button type="submit" class="btn primary">📜 Émettre le mandat</button>
+          <button type="reset" class="btn ghost">Réinitialiser</button>
+        </div>
+      </form>
+      <div>
+        <p class="previewlbl">Aperçu du mandat</p>
+        <div id="man-preview"></div>
+      </div>
+    </div>
+    <div class="liste">
+      <div class="liste-head"><h3>Registre des mandats</h3></div>
+      <div class="grid" id="man-list"></div>
     </div>
   </section>
 </main>
@@ -786,12 +875,189 @@
   $("#ia-reset").addEventListener("click",iaResetZone);
   iaResetZone();
 
+  /* ═══════════ MODULE 5 : PATROUILLES ═══════════ */
+  var patrouilles = store.get("patrouilles", []);
+  function patDraft() {
+    return {
+      id: uid(),
+      secteur: $("#pt-secteur").value.trim() || "Secteur non précisé",
+      agents: $("#pt-agents").value.trim(),
+      debut: $("#pt-debut").value.trim(),
+      duree: $("#pt-duree").value.trim(),
+      obs: $("#pt-obs").value.trim(),
+      statut: "encours",
+      ts: Date.now()
+    };
+  }
+  function patOpts(p) {
+    var terminee = p.statut === "terminee";
+    var fields = [];
+    fields.push({ k: "📍 Secteur", v: p.secteur });
+    if (p.agents) fields.push({ k: "👮 Agents", v: p.agents });
+    if (p.debut) fields.push({ k: "🕐 Début", v: p.debut });
+    if (p.duree) fields.push({ k: "⏳ Durée", v: p.duree });
+    if (p.obs) fields.push({ k: "📝 Observations", v: p.obs, full: true });
+    return {
+      avatar: terminee ? "#2ECC71" : "#5865f2",
+      color: terminee ? "#2ECC71" : "#5865f2",
+      title: "🚔 PATROUILLE" + (terminee ? " (terminée)" : "") + " — " + p.secteur,
+      desc: terminee ? "Patrouille terminée. Ronde clôturée." : "Patrouille en cours sur le terrain.",
+      fields: fields,
+      foot: "Patrouille " + p.id + " · statut : " + (terminee ? "🟢 Terminée" : "🔴 En cours")
+    };
+  }
+  function renderPatPreview() { var host = $("#pat-preview"); host.innerHTML = ""; host.appendChild(embedNode(patOpts(patDraft()))); }
+  function renderPatList() {
+    var host = $("#pat-list"); host.innerHTML = "";
+    var list = patrouilles.slice().sort(function (a, b) { return b.ts - a.ts; });
+    if (!list.length) { host.appendChild(el("p", "empty", "Aucune patrouille — lancez-en une ci-dessus.")); return; }
+    list.forEach(function (p) {
+      var wrap = el("div"); wrap.appendChild(embedNode(patOpts(p)));
+      var acts = el("div", "fiche-actions");
+      var bt = el("button", "mini-btn", p.statut === "terminee" ? "↩️ Rouvrir" : "✅ Terminer");
+      bt.addEventListener("click", function () { p.statut = p.statut === "terminee" ? "encours" : "terminee"; store.set("patrouilles", patrouilles); renderPatList(); toast(p.statut === "terminee" ? "Patrouille terminée." : "Patrouille rouverte."); });
+      var del = el("button", "mini-btn danger", "🗑️ Retirer");
+      del.addEventListener("click", function () { patrouilles = patrouilles.filter(function (x) { return x.id !== p.id; }); store.set("patrouilles", patrouilles); renderPatList(); toast("Patrouille retirée."); });
+      acts.appendChild(bt); acts.appendChild(del); wrap.appendChild(acts); host.appendChild(wrap);
+    });
+  }
+  $("#form-pat").addEventListener("submit", function (ev) {
+    ev.preventDefault(); var p = patDraft(); patrouilles.push(p); store.set("patrouilles", patrouilles);
+    renderPatList(); toast("Patrouille lancée 🚔"); ev.target.reset(); renderPatPreview();
+  });
+  $("#form-pat").addEventListener("input", renderPatPreview);
+  $("#form-pat").addEventListener("reset", function () { setTimeout(renderPatPreview, 0); });
+
+  /* ═══════════ MODULE 6 : REGISTRE DES CITOYENS ═══════════ */
+  var citoyens = store.get("citoyens", []);
+  var citFilter = "";
+  function citDraft() {
+    var age = parseInt($("#ci-age").value, 10);
+    return {
+      id: uid(),
+      nom: $("#ci-nom").value.trim() || "Citoyen sans nom",
+      age: isNaN(age) ? "" : age,
+      profession: $("#ci-prof").value.trim(),
+      casier: $("#ci-casier").value.trim(),
+      ts: Date.now()
+    };
+  }
+  function citOpts(c) {
+    var fields = [];
+    if (c.age !== "" && c.age != null) fields.push({ k: "🎂 Âge", v: c.age + " ans" });
+    if (c.profession) fields.push({ k: "🛠️ Profession", v: c.profession });
+    if (c.casier) fields.push({ k: "📋 Casier / notes", v: c.casier, full: true });
+    return {
+      avatar: "#C8A45C",
+      color: "#C8A45C",
+      title: "📇 " + c.nom,
+      desc: "Fiche du registre des citoyens du comté.",
+      fields: fields,
+      foot: "Fiche citoyen " + c.id
+    };
+  }
+  function renderCitPreview() { var host = $("#cit-preview"); host.innerHTML = ""; host.appendChild(embedNode(citOpts(citDraft()))); }
+  function renderCitList() {
+    var host = $("#cit-list"); host.innerHTML = "";
+    var list = citoyens.slice().sort(function (a, b) { return b.ts - a.ts; });
+    var q = citFilter.trim().toLowerCase();
+    if (q) list = list.filter(function (c) { return (c.nom + " " + c.profession + " " + c.casier).toLowerCase().indexOf(q) >= 0; });
+    if (!list.length) { host.appendChild(el("p", "empty", citoyens.length ? "Aucun citoyen ne correspond à la recherche." : "Registre vide — fichez le premier citoyen ci-dessus.")); return; }
+    list.forEach(function (c) {
+      var wrap = el("div"); wrap.appendChild(embedNode(citOpts(c)));
+      var acts = el("div", "fiche-actions");
+      var del = el("button", "mini-btn danger", "🗑️ Retirer");
+      del.addEventListener("click", function () { citoyens = citoyens.filter(function (x) { return x.id !== c.id; }); store.set("citoyens", citoyens); renderCitList(); toast("Fiche citoyen retirée."); });
+      acts.appendChild(del); wrap.appendChild(acts); host.appendChild(wrap);
+    });
+  }
+  $("#form-cit").addEventListener("submit", function (ev) {
+    ev.preventDefault(); var c = citDraft(); citoyens.push(c); store.set("citoyens", citoyens);
+    renderCitList(); toast("« " + c.nom + " » fiché au registre 📇"); ev.target.reset(); renderCitPreview();
+  });
+  $("#form-cit").addEventListener("input", renderCitPreview);
+  $("#form-cit").addEventListener("reset", function () { setTimeout(renderCitPreview, 0); });
+  $("#cit-search").addEventListener("input", function (ev) { citFilter = ev.target.value; renderCitList(); });
+
+  /* ═══════════ MODULE 7 : MANDATS ═══════════ */
+  var mandats = store.get("mandats", []);
+  var MAN_TYPES = {
+    arret:        { label: "Arrêt",        of: "ARRÊT",        color: "#C0453B" },
+    perquisition: { label: "Perquisition", of: "PERQUISITION", color: "#E67E22" },
+    comparution:  { label: "Comparution",  of: "COMPARUTION",  color: "#5865f2" }
+  };
+  var MAN_ORDER = ["arret", "perquisition", "comparution"];
+  var mState = { type: "arret" };
+  var mtypes = $("#m-types");
+  MAN_ORDER.forEach(function (k) {
+    var b = el("button", "seg"); b.type = "button"; b.setAttribute("aria-pressed", k === mState.type ? "true" : "false");
+    b.textContent = MAN_TYPES[k].label;
+    b.addEventListener("click", function () {
+      mState.type = k;
+      Array.prototype.forEach.call(mtypes.children, function (c) { c.setAttribute("aria-pressed", "false"); });
+      b.setAttribute("aria-pressed", "true");
+      renderManPreview();
+    });
+    mtypes.appendChild(b);
+  });
+  function manDraft() {
+    return {
+      id: uid(),
+      type: mState.type,
+      cible: $("#m-cible").value.trim() || "Cible non précisée",
+      motif: $("#m-motif").value.trim(),
+      par: $("#m-par").value.trim(),
+      statut: "emis",
+      ts: Date.now()
+    };
+  }
+  function manOpts(m) {
+    var t = MAN_TYPES[m.type] || MAN_TYPES.arret;
+    var execute = m.statut === "execute";
+    var fields = [];
+    if (m.motif) fields.push({ k: "⚖️ Motif", v: m.motif, full: true });
+    if (m.par) fields.push({ k: "🖋️ Émis par", v: m.par });
+    return {
+      avatar: execute ? "#2ECC71" : t.color,
+      color: execute ? "#2ECC71" : t.color,
+      title: "📜 MANDAT D'" + t.of + (execute ? " (exécuté)" : "") + " — " + m.cible,
+      desc: execute ? "Mandat exécuté. Procédure close." : "Mandat officiel émis par le tribunal du comté.",
+      fields: fields,
+      foot: "Mandat " + m.id + " · statut : " + (execute ? "🟢 Exécuté" : "🔴 Émis")
+    };
+  }
+  function renderManPreview() { var host = $("#man-preview"); host.innerHTML = ""; host.appendChild(embedNode(manOpts(manDraft()))); }
+  function renderManList() {
+    var host = $("#man-list"); host.innerHTML = "";
+    var list = mandats.slice().sort(function (a, b) { return b.ts - a.ts; });
+    if (!list.length) { host.appendChild(el("p", "empty", "Aucun mandat — émettez-en un ci-dessus.")); return; }
+    list.forEach(function (m) {
+      var wrap = el("div"); wrap.appendChild(embedNode(manOpts(m)));
+      var acts = el("div", "fiche-actions");
+      var bt = el("button", "mini-btn", m.statut === "execute" ? "↩️ Rouvrir" : "✅ Marquer exécuté");
+      bt.addEventListener("click", function () { m.statut = m.statut === "execute" ? "emis" : "execute"; store.set("mandats", mandats); renderManList(); toast(m.statut === "execute" ? "Mandat exécuté." : "Mandat rouvert."); });
+      var del = el("button", "mini-btn danger", "🗑️ Retirer");
+      del.addEventListener("click", function () { mandats = mandats.filter(function (x) { return x.id !== m.id; }); store.set("mandats", mandats); renderManList(); toast("Mandat retiré."); });
+      acts.appendChild(bt); acts.appendChild(del); wrap.appendChild(acts); host.appendChild(wrap);
+    });
+  }
+  $("#form-man").addEventListener("submit", function (ev) {
+    ev.preventDefault(); var m = manDraft(); mandats.push(m); store.set("mandats", mandats);
+    renderManList(); toast("Mandat émis 📜"); ev.target.reset();
+    Array.prototype.forEach.call(mtypes.children, function (c, i) { c.setAttribute("aria-pressed", MAN_ORDER[i] === mState.type ? "true" : "false"); });
+    renderManPreview();
+  });
+  $("#form-man").addEventListener("input", renderManPreview);
+  $("#form-man").addEventListener("reset", function () { setTimeout(renderManPreview, 0); });
+
   /* ── Réinitialisation globale ── */
   $("#reset-all").addEventListener("click", function () {
-    if (!confirm("Vider toute la démo (groupes, détenus, amendes) sur cet appareil ?")) return;
-    ["groupes", "detenus", "amendes"].forEach(function (k) { try { localStorage.removeItem("sherifDemo." + k); } catch (e) {} });
-    groupes = []; detenus = []; amendes = []; gFilter = "";
+    if (!confirm("Vider toute la démo (groupes, détenus, amendes, patrouilles, citoyens, mandats) sur cet appareil ?")) return;
+    ["groupes", "detenus", "amendes", "patrouilles", "citoyens", "mandats"].forEach(function (k) { try { localStorage.removeItem("sherifDemo." + k); } catch (e) {} });
+    groupes = []; detenus = []; amendes = []; patrouilles = []; citoyens = []; mandats = []; gFilter = ""; citFilter = "";
+    if ($("#cit-search")) $("#cit-search").value = "";
     renderGrpList(); renderGrpFilters(); renderEcrList(); renderAmdList(); renderAmdTally();
+    renderPatList(); renderCitList(); renderManList();
     toast("Démo réinitialisée.");
   });
 
@@ -799,6 +1065,9 @@
   renderGrpPreview(); renderGrpList(); renderGrpFilters();
   renderEcrPreview(); renderEcrList();
   renderAmdTally(); renderAmdList();
+  renderPatPreview(); renderPatList();
+  renderCitPreview(); renderCitList();
+  renderManPreview(); renderManList();
 })();
 </script>
 </body>
