@@ -49,16 +49,27 @@ function _dngInfo(k) { return DNG[k] || null; }
 const PROMPT_GROUPE = `Tu es un officier du renseignement d'une organisation dans un jeu vidéo Far West (RedM / Red Dead Redemption 2). On te montre UNE ou PLUSIEURS captures d'écran d'un MEME GROUPE ou d'une MEME BANDE (une ou plusieurs personnes, parfois une banniere, un campement, une scene) — utilise-les TOUTES ensemble. Personnages fictifs de jeu.
 Observe l'image avec minutie et dresse un RENSEIGNEMENT DETAILLE et FACTUEL permettant d'identifier et de jauger ce groupe. Note les COULEURS PRECISES (pas "sombre" mais "brun foncé", "bordeaux"...), les armes visibles, les signes communs (foulards de couleur, insignes, marques). N'invente rien : si un element n'est pas visible, mets "Non visible".
 Reponds UNIQUEMENT avec un objet JSON valide, sans texte ni balise autour, au format EXACT :
-{"nom":"nom probable du groupe si une banniere/enseigne/indice le donne, sinon Non visible","effectif":"nombre de personnes visibles et leur allure generale","tenues":"style vestimentaire commun et couleurs recurrentes precises, matieres","armement":"armes visibles (types precis) et comment elles sont portees, sinon Aucune visible","signes":"insignes, bannieres, foulards de couleur, marques ou elements distinctifs communs au groupe, sinon Aucun visible","montures":"chevaux/attelages visibles : robes, equipement, sinon Non visible","lieu":"decor, lieu probable, moment de la journee, sinon Non visible","activite":"ce que le groupe semble faire (embuscade, campement, patrouille, transaction...), sinon Non visible","trait_distinctif":"LE signe le plus reconnaissable de ce groupe","dangerosite":"faible|moyenne|elevee|critique","resume":"2 a 3 phrases de synthese, facon rapport de renseignement"}
+{"nom":"nom probable du groupe si une banniere/enseigne/indice le donne, sinon Non visible","effectif":"nombre de personnes visibles et leur allure generale","tenues":"style vestimentaire commun et couleurs recurrentes precises, matieres","armement":"armes visibles (types precis) et comment elles sont portees, sinon Aucune visible","signes":"insignes, bannieres, foulards de couleur, marques ou elements distinctifs communs au groupe, sinon Aucun visible","montures":"chevaux/attelages visibles : robes, equipement, sinon Non visible","lieu":"decor, lieu probable, moment de la journee, sinon Non visible","activite":"ce que le groupe semble faire (embuscade, campement, patrouille, transaction...), sinon Non visible","trait_distinctif":"LE signe le plus reconnaissable de ce groupe","dangerosite":"faible|moyenne|elevee|critique","prime":"si avis de recherche : montant de prime suggere en dollars coherent avec la dangerosite (ex 500 $), sinon Non applicable","consigne":"si avis de recherche : Mort ou vif OU Vif de preference OU Capturer, sinon Non applicable","resume":"2 a 3 phrases de synthese, facon rapport de renseignement, ORIENTEES selon la categorie indiquee"}
 Ecris en francais, riche et precis.`;
+// Oriente la rédaction de la fiche selon la catégorie choisie AVANT l'analyse.
+const CAT_DIRECTIVE = {
+  wanted:       'Ce groupe est classe « WANTED » (AVIS DE RECHERCHE). Redige le "resume" comme un avis de recherche : insiste sur ce qui permet de les RECONNAITRE et de les CAPTURER. Remplis bien "prime" et "consigne".',
+  recherche:    'Ce groupe est « RECHERCHE ». Oriente le "resume" vers ce qui aide a les LOCALISER et a recueillir des informations sur eux.',
+  ennemi:       'Ce groupe est « ENNEMI ». Oriente le "resume" vers la MENACE : capacite de combat, armement, tactique, niveau de danger.',
+  rival:        'Ce groupe est « RIVAL ». Oriente le "resume" vers leur ACTIVITE concurrente, leur territoire, ce qui les oppose a nous.',
+  surveillance: 'Ce groupe est « SOUS SURVEILLANCE ». Oriente le "resume" vers ce qu il faut continuer a OBSERVER et les signaux a surveiller.',
+  neutre:       'Ce groupe est « NEUTRE ». Reste factuel et neutre dans le "resume".',
+  allie:        'Ce groupe est « ALLIE ». Oriente le "resume" vers ce qui en fait un partenaire fiable et les points de cooperation.',
+};
 
 async function _imageBytes(url) { try { const r = await fetch(url); if (!r.ok) return null; return Buffer.from(await r.arrayBuffer()); } catch { return null; } }
-async function _callVisionGroupe(model, imgs, indice) {
+async function _callVisionGroupe(model, imgs, indice, catKey) {
   const apiKey = process.env.ANTHROPIC_API_KEY; if (!apiKey) return null;
   try {
     const hint = (indice && indice.trim()) ? `\n\nINDICATION : le groupe se nomme peut-etre « ${indice.trim()} ».` : '';
+    const orient = (catKey && CAT_DIRECTIVE[catKey]) ? `\n\nORIENTATION DE LA FICHE : ${CAT_DIRECTIVE[catKey]}` : '';
     const content = imgs.map(im => ({ type: 'image', source: { type: 'base64', media_type: im.mt || 'image/png', data: im.b64 } }));
-    content.push({ type: 'text', text: PROMPT_GROUPE + hint });
+    content.push({ type: 'text', text: PROMPT_GROUPE + hint + orient });
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
@@ -70,7 +81,7 @@ async function _callVisionGroupe(model, imgs, indice) {
   } catch { return null; }
 }
 function _parseG(txt) { if (!txt) return null; txt = String(txt).trim().replace(/```json/gi, '').replace(/```/g, '').trim(); const m = txt.match(/\{[\s\S]*\}/); if (!m) return null; try { const o = JSON.parse(m[0]); return (o && typeof o === 'object') ? o : null; } catch { return null; } }
-async function _analyserGroupePhoto(imgs, indice) { let t = await _callVisionGroupe('claude-sonnet-4-6', imgs, indice); if (!t) t = await _callVisionGroupe('claude-haiku-4-5-20251001', imgs, indice); return _parseG(t); }
+async function _analyserGroupePhoto(imgs, indice, catKey) { let t = await _callVisionGroupe('claude-sonnet-4-6', imgs, indice, catKey); if (!t) t = await _callVisionGroupe('claude-haiku-4-5-20251001', imgs, indice, catKey); return _parseG(t); }
 function _okv(v) { return v && !/^(non visible|aucune? visible|aucun visible|non applicable|n\/a|neant|néant)$/i.test(String(v).trim()); }
 function _mapDng(v) { const k = _norm(v).replace(/s$/, ''); if (/critiq|extrem/.test(k)) return 'critique'; if (/elev/.test(k)) return 'elevee'; if (/moyen/.test(k)) return 'moyenne'; if (/faibl/.test(k)) return 'faible'; return null; }
 function _photoDescTexte(s) {
@@ -342,6 +353,38 @@ async function routeInteraction(interaction) {
       await interaction.reply({ ..._classementPayload(draft), flags: eph }).catch(() => {});
       return true;
     }
+    // 📸→🏷️ Photo : la catégorie est choisie → l'IA analyse la photo en s'y adaptant, puis dresse la fiche
+    if (interaction.isStringSelectMenu?.() && id === 'grp_photocat') {
+      const db = loadDB(); const r = _ensure(db);
+      const draft = r.drafts[interaction.user.id];
+      if (!draft) { await interaction.update({ content: '⏳ Fiche expirée — reposte la photo dans le salon.', embeds: [], components: [] }).catch(() => {}); return true; }
+      const catKey = interaction.values[0];
+      draft.categorie = catKey; draft.awaitingCat = false;
+      const pend = _pendingPhotos.get(draft.id);
+      const cap0 = draft.cap || (pend && pend.cap) || '';
+      // Retire le menu, garde la photo, montre la progression.
+      await interaction.update({ content: `🕵️ **Analyse en cours** — fiche **${_catInfo(catKey).emoji} ${_catInfo(catKey).label}**…`, components: [] }).catch(() => {});
+      let s = null;
+      try { if (pend && pend.bufs && pend.bufs.length) s = await _analyserGroupePhoto(pend.bufs, pend.cap, catKey); } catch {}
+      _pendingPhotos.delete(draft.id);
+      if (s) {
+        if (!draft.nom) draft.nom = (cap0 && cap0.length <= 100 ? cap0 : '') || (_okv(s.nom) ? String(s.nom).slice(0, 100) : 'Groupe non identifié');
+        draft.territoire = _okv(s.lieu) ? String(s.lieu).slice(0, 120) : '';
+        draft.effectif = _okv(s.effectif) ? String(s.effectif).slice(0, 200) : '';
+        draft.notes = _photoDescTexte(s);
+        draft.ia = _cleanIA(s);
+        if (!draft.dangerosite) draft.dangerosite = _mapDng(s.dangerosite);
+        if (catKey === 'wanted') { if (_okv(s.prime)) draft.prime = String(s.prime).slice(0, 60); if (_okv(s.consigne)) draft.consigne = String(s.consigne).slice(0, 60); }
+      } else if (!draft.nom) {
+        draft.nom = (cap0 && cap0.length <= 100 ? cap0 : '') || 'Groupe non identifié';
+      }
+      persist(db);
+      const payload = _classementPayload(draft);
+      if (!s) payload.content = `⚠️ Analyse indisponible — ${payload.content}`;
+      try { await interaction.editReply(payload); } catch { try { await interaction.message.edit(payload); } catch {} }
+      return true;
+    }
+
     // Selects de classement
     if (interaction.isStringSelectMenu?.() && (id === 'grp_selcat' || id === 'grp_seldng')) {
       const db = loadDB(); const r = _ensure(db);
@@ -514,7 +557,23 @@ async function routeInteraction(interaction) {
   } catch (e) { if ([10062, 40060].includes(e?.code)) return true; console.log('❌ groupes routeInteraction:', e.message); return true; }
 }
 
-// ─── Renseignement par photo : une capture postée dans le salon → analyse IA détaillée ───
+// Photos en attente d'un choix de catégorie (en mémoire, non persisté) : draftId → { bufs, cap }.
+const _pendingPhotos = new Map();
+function _stashPhotos(draftId, bufs, cap) {
+  if (_pendingPhotos.size > 40) { const k = _pendingPhotos.keys().next().value; if (k) _pendingPhotos.delete(k); } // garde-fou mémoire
+  _pendingPhotos.set(draftId, { bufs, cap });
+}
+// Étape 1 (photo reçue) : on demande la catégorie AVANT d'analyser.
+function _demandeCatRows() {
+  const sel = new StringSelectMenuBuilder().setCustomId('grp_photocat').setPlaceholder('Choisis la catégorie — l\'analyse s\'y adaptera')
+    .addOptions(CAT_ORDER.map(k => ({ label: CATS[k].label, value: k, emoji: CATS[k].emoji })));
+  return [new ActionRowBuilder().addComponents(sel)];
+}
+function _demandeCatContenu() {
+  return '📸 **Photo reçue.** Pour quelle **catégorie** veux-tu la fiche ?\nDès ton choix, le renseignement **analyse la photo** et rédige une fiche **adaptée** (Wanted → avis de recherche, Ennemi → menace, etc.).';
+}
+
+// ─── Renseignement par photo : capture postée → on demande la catégorie → analyse IA orientée ───
 async function onMessage(message) {
   try {
     if (!message.guild || message.author?.bot) return false;
@@ -524,35 +583,24 @@ async function onMessage(message) {
     if (!atts.length) return false;
 
     const cap = (message.content || '').trim();
-    const wait = await message.channel.send({ content: `🕵️ Le renseignement analyse ${atts.length > 1 ? `les ${atts.length} photos` : 'le groupe'}…`, allowedMentions: { parse: [] } }).catch(() => null);
+    const wait = await message.channel.send({ content: '📸 Photo reçue…', allowedMentions: { parse: [] } }).catch(() => null);
     const bufs = [];
     for (const a of atts) { const b = await _imageBytes(a.url); if (b) bufs.push({ buf: b, mt: a.contentType || 'image/png' }); }
-    const s = bufs.length ? await _analyserGroupePhoto(bufs.map(x => ({ b64: x.buf.toString('base64'), mt: x.mt })), cap) : null;
-    const buf = bufs[0]?.buf || null;
-    if (!s) {
-      if (wait) await wait.edit({ content: '⚠️ Analyse indisponible pour le moment — tu peux ficher le groupe à la main via ➕.' }).catch(() => {});
-      return true;
-    }
+    if (!bufs.length) { if (wait) await wait.edit({ content: '⚠️ Impossible de lire la photo — réessaie, ou fiche le groupe à la main via ➕.' }).catch(() => {}); return true; }
 
     const db = loadDB(); const r = _ensure(db);
-    const nom = (cap && cap.length <= 100 ? cap : '') || (_okv(s.nom) ? String(s.nom).slice(0, 100) : 'Groupe non identifié');
     const draft = {
-      id: _id(), nom, meneur: '',
-      territoire: _okv(s.lieu) ? String(s.lieu).slice(0, 120) : '',
-      effectif: _okv(s.effectif) ? String(s.effectif).slice(0, 200) : '',
-      notes: _photoDescTexte(s), ia: _cleanIA(s), categorie: null, dangerosite: _mapDng(s.dangerosite),
-      photo: null, par: message.member?.displayName || message.author.username, createdAt: Date.now(),
+      id: _id(), nom: (cap && cap.length <= 100 ? cap : ''), meneur: '', territoire: '', effectif: '',
+      notes: '', ia: null, categorie: null, dangerosite: null, photo: null, cap,
+      awaitingCat: true, par: message.member?.displayName || message.author.username, createdAt: Date.now(),
     };
-
-    let card = null;
-    if (buf) {
-      const emb = _previewEmbed(draft).setImage('attachment://groupe.png');
-      const payload = { content: `${_classementContenu(draft)}  ·  📸 photo jointe`, embeds: [emb], components: _classementRows(draft), files: [new AttachmentBuilder(buf, { name: 'groupe.png' })], allowedMentions: { parse: [] } };
-      card = wait ? await wait.edit(payload).catch(() => null) : await message.channel.send(payload).catch(() => null);
-      if (card) { const u = [...card.attachments.values()][0]?.url; if (u) draft.photo = u; }
-    } else {
-      card = wait ? await wait.edit(_classementPayload(draft)).catch(() => null) : await message.channel.send(_classementPayload(draft)).catch(() => null);
-    }
+    const buf = bufs[0].buf;
+    const emb = new EmbedBuilder().setColor(COULEUR).setTitle('🕵️ Nouveau groupe — photo reçue')
+      .setDescription('*Choisis la catégorie ci-dessous : l\'analyse s\'y adaptera.*').setImage('attachment://groupe.png');
+    const payload = { content: _demandeCatContenu(), embeds: [emb], components: _demandeCatRows(), files: [new AttachmentBuilder(buf, { name: 'groupe.png' })], allowedMentions: { parse: [] } };
+    const card = wait ? await wait.edit(payload).catch(() => null) : await message.channel.send(payload).catch(() => null);
+    if (card) { const u = [...card.attachments.values()][0]?.url; if (u) draft.photo = u; }
+    _stashPhotos(draft.id, bufs.map(x => ({ b64: x.buf.toString('base64'), mt: x.mt })), cap);
     r.drafts[message.author.id] = draft; persist(db);
     await message.delete().catch(() => {});
     return true;
