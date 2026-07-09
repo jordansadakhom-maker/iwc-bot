@@ -18,6 +18,8 @@ const loadDB = dbMod.loadDB || (() => ({}));
 const saveDB = dbMod.saveDB || (() => {});
 const backupGit = (typeof dbMod.sauvegarderSurGitHub === 'function') ? dbMod.sauvegarderSurGitHub : null;
 function _persist(db) { try { saveDB(db); } catch {} try { if (backupGit) backupGit(); } catch {} }
+// Facturation (facultative : si le module est là, l'encaissement d'un RDV génère une facture).
+let facturesMod = null; try { facturesMod = require('./factures'); } catch { facturesMod = null; }
 
 // ── Config (avec valeurs de repli sûres) ──
 const SALON_DEMANDES = '1512171267560702013';
@@ -226,6 +228,7 @@ function _embedRdv(rdv) {
       ...(rdv.agentId ? [{ name: '🤝 Agent assigné', value: `<@${rdv.agentId}>`, inline: true }] : []),
       ...(rdv.details ? [{ name: '📝 Détails', value: rdv.details.slice(0, 1000), inline: false }] : []),
       ...(rdv.satisfaction ? [{ name: '⭐ Satisfaction client', value: _satLabel(rdv.satisfaction) + (rdv.satisfactionComment ? `\n*« ${String(rdv.satisfactionComment).slice(0, 300)} »*` : ''), inline: false }] : []),
+      ...(rdv.paiement ? [{ name: '💰 Paiement', value: `Encaissé : **$${Number(rdv.paiement.montant || 0).toLocaleString('fr-FR')}**${rdv.paiement.facture ? ` · Facture \`${rdv.paiement.facture}\`` : ''}${rdv.paiement.par ? `\n*par ${rdv.paiement.par}*` : ''}`, inline: false }] : []),
     )
     .setFooter({ text: `Iron Wolf Company · Bureau des Rendez-vous` })
     .setTimestamp();
@@ -249,8 +252,14 @@ function _boutonsTelegramme(rdv) {
     ];
   }
   if (rdv.statut === 'Honoré') {
+    // Mission validée → on encaisse le paiement (marque payé + coffre + facture). Une fois payé, bouton verrouillé.
+    if (rdv.paiement) {
+      return [new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`rdvp_paid_noop::${rdv.id}`).setLabel(`💰 Payé — $${Number(rdv.paiement.montant || 0).toLocaleString('fr-FR')}`).setStyle(ButtonStyle.Success).setDisabled(true),
+      )];
+    }
     return [new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`rdvp_contrat::${rdv.id}`).setLabel('📜 Établir le contrat').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`rdvp_encaisser::${rdv.id}`).setLabel('💰 Encaisser le paiement').setStyle(ButtonStyle.Success),
     )];
   }
   if (['Annulé', 'Décliné', 'Lapin'].includes(rdv.statut)) return []; // clôturé
@@ -581,27 +590,52 @@ async function routeInteraction(interaction) {
       return true;
     }
 
-    // ===== Établir un contrat à partir d'un RDV honoré (pré-remplit le formulaire de contrat existant) =====
-    if (interaction.isButton?.() && /^rdvp_contrat::/.test(interaction.customId || '')) {
+    // ===== Encaisser le paiement d'un RDV honoré : marque payé → crédite le coffre → génère une facture =====
+    if (interaction.isButton?.() && /^rdvp_encaisser::/.test(interaction.customId || '')) {
       if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction / aux opérateurs.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const rdvId = interaction.customId.split('::')[1];
       const store = _store(loadDB()); const rdv = store.rdvs[rdvId];
       if (!rdv) { await interaction.reply({ content: '⚠️ Rendez-vous introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
-      const lieuLabel = LIEUX[rdv.lieuKey] || rdv.lieuKey || '';
+      if (rdv.paiement) { await interaction.reply({ content: `✅ Déjà encaissé : $${Number(rdv.paiement.montant || 0).toLocaleString('fr-FR')}.`, flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const typeLabel = TYPES[rdv.typeKey]?.label || 'Prestation';
-      const repLignes = Array.isArray(rdv.reponses)
-        ? rdv.reponses.map(rp => `${rp.label} : ${rp.value}`)
-        : [rdv.trajet ? `Trajet : ${rdv.trajet}` : '', rdv.duree ? `Durée estimée : ${rdv.duree}` : ''];
-      const detailsPre = [lieuLabel ? `Lieu : ${lieuLabel}` : '', ...repLignes, rdv.souhaitTexte ? `Souhait du client : ${rdv.souhaitTexte}` : '', rdv.details || ''].filter(Boolean).join('\n').slice(0, 800);
-      const modal = new ModalBuilder().setCustomId(`contrat_offre_modal::Autre::${(rdv.contactId || rdv.clientId || '').toString()}`).setTitle('📜 Contrat — suite au RDV');
+      const modal = new ModalBuilder().setCustomId(`rdvp_encaisser_modal::${rdvId}`).setTitle('💰 Encaisser le paiement');
       modal.addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('client_nom').setLabel('Nom / Entreprise du client').setStyle(TextInputStyle.Short).setRequired(true).setValue((rdv.nomRP || '').toString().slice(0, 100))),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objet').setLabel('Objet de la mission').setStyle(TextInputStyle.Short).setRequired(true).setValue(typeLabel.toString().slice(0, 100))),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prime').setLabel('Notre rémunération souhaitée').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex: 1500$ + 500$/jour')),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('echeance').setLabel('Échéance (JJ/MM/AAAA, optionnel)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex: 15/07/1904')),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Détails / conditions').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800).setValue(detailsPre)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('montant').setLabel('Montant reçu ($)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex : 1500')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('note').setLabel('Note (facultatif)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(200).setPlaceholder(`${typeLabel} — ${rdv.nomRP || ''}`.slice(0, 100))),
       );
       await interaction.showModal(modal).catch(() => {});
+      return true;
+    }
+    if (interaction.isModalSubmit?.() && /^rdvp_encaisser_modal::/.test(interaction.customId || '')) {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction / aux opérateurs.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const rdvId = interaction.customId.split('::')[1];
+      const db = loadDB(); const store = _store(db); const rdv = store.rdvs[rdvId];
+      if (!rdv) { await interaction.reply({ content: '⚠️ Rendez-vous introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      if (rdv.paiement) { await interaction.reply({ content: '✅ Déjà encaissé.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const mRaw = String(interaction.fields.getTextInputValue('montant') || '').replace(/\s/g, '').match(/\d+/);
+      const montant = mRaw ? parseInt(mRaw[0], 10) : 0;
+      if (!montant) { await interaction.reply({ content: '⚠️ Montant invalide — indique un nombre (ex : 1500).', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const note = (interaction.fields.getTextInputValue('note') || '').trim();
+      const par = interaction.member?.displayName || interaction.user.username;
+      const typeLabel = TYPES[rdv.typeKey]?.label || 'Prestation';
+      const objet = `RDV ${typeLabel} — ${rdv.nomRP || 'client'} (${rdv.id})`.slice(0, 200);
+      rdv.paiement = { montant, par, parId: interaction.user.id, at: new Date().toISOString(), note, facture: null };
+      // 1) Crédite le coffre commun (journal + Notion + rafraîchit le bilan compta)
+      let solde = null;
+      try { solde = await global.crediterCoffrePrime?.({ guild: interaction.guild, montant, objet, responsable: par, responsableId: interaction.user.id }); } catch {}
+      // 2) Génère une facture (anti-doublon par réf. RDV)
+      let facNum = null;
+      try {
+        const res = await facturesMod?.creerFacture?.(interaction.guild, { objet, montant, clientNom: rdv.nomRP || 'Client', type: 'RDV — ' + typeLabel, remuneration: `$${montant}`, ref: `RDV ${rdv.id}`, note, par, parId: interaction.user.id });
+        if (res && res.f && res.f.numero) { facNum = res.f.numero; rdv.paiement.facture = facNum; }
+      } catch {}
+      store.rdvs[rdvId] = rdv; _persist(db);
+      // 3) Met à jour la fiche du RDV
+      let acked = false;
+      try { await interaction.update({ embeds: [_embedRdv(rdv)], components: _boutonsTelegramme(rdv) }); acked = true; } catch {}
+      if (!acked) { try { const ch = await interaction.client.channels.fetch(rdv.channelId).catch(() => null); const msg = ch && await ch.messages.fetch(rdv.msgId).catch(() => null); if (msg) await msg.edit({ embeds: [_embedRdv(rdv)], components: _boutonsTelegramme(rdv) }).catch(() => {}); } catch {} }
+      const conf = `💰 **Paiement encaissé** : $${montant.toLocaleString('fr-FR')}${solde != null ? ` · coffre : $${Number(solde).toLocaleString('fr-FR')}` : ''}${facNum ? ` · facture \`${facNum}\`` : ''}.`;
+      try { if (acked) await interaction.followUp({ content: conf, flags: MessageFlags.Ephemeral }); else await interaction.reply({ content: conf, flags: MessageFlags.Ephemeral }); } catch {}
       return true;
     }
 
