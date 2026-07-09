@@ -199,6 +199,11 @@ function _afficheEmbed(g) {
   // Renseignements : résumé IA si l'analyse a servi, sinon les notes manuelles.
   const rens = ia.resume || (!g.ia ? g.notes : '');
   if (rens) e.addFields({ name: '📝 Renseignements', value: _clip(rens, 1024), inline: false });
+  // Journal d'incidents (les plus récents en bas de fiche).
+  if (Array.isArray(g.incidents) && g.incidents.length) {
+    const derniers = g.incidents.slice(-4).map(it => `• \`${it.date}\` ${_clip(it.texte, 180)}`).join('\n');
+    e.addFields({ name: `🗒️ Incidents récents (${g.incidents.length})`, value: _clip(derniers, 1024), inline: false });
+  }
   if (g.photo) e.setImage(g.photo);
   e.setFooter({ text: `${wanted ? 'Avis' : 'Fiche'} ${g.id}${g.par ? ` · ${wanted ? 'établi' : 'établie'} par ${g.par}` : ''}` }).setTimestamp(g.createdAt || Date.now());
   return e;
@@ -206,6 +211,17 @@ function _afficheEmbed(g) {
 
 // Fiche définitive = l'affiche (utilisée à l'enregistrement et pour « voir une fiche »).
 function _ficheEmbed(g) { return _afficheEmbed(g); }
+
+// Boutons d'action sous une fiche : consigner un incident, et (si groupe hostile) lancer un avis de recherche.
+function _ficheComponents(g) {
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`grp_incident::${g.id}`).setLabel('Consigner un incident').setEmoji('🗒️').setStyle(ButtonStyle.Secondary),
+  );
+  if (['wanted', 'recherche', 'ennemi', 'rival', 'surveillance'].includes(g.categorie)) {
+    row.addComponents(new ButtonBuilder().setCustomId(`grp_avis::${g.id}`).setLabel('Lancer un avis de recherche').setEmoji('🎯').setStyle(ButtonStyle.Danger));
+  }
+  return [row];
+}
 
 // Aperçu d'un brouillon pendant le classement : dès qu'une catégorie est choisie → l'affiche correspondante.
 function _previewEmbed(draft) {
@@ -417,12 +433,61 @@ async function routeInteraction(interaction) {
       return true;
     }
 
-    // 👁️ Voir une fiche
+    // 👁️ Voir une fiche (+ actions : incident / avis de recherche)
     if (interaction.isStringSelectMenu?.() && id === 'grp_voir') {
       const db = loadDB(); const r = _ensure(db);
       const g = r.groupes.find(x => x.id === interaction.values[0]);
       if (!g) { await interaction.reply({ content: '⚠️ Fiche introuvable.', flags: eph }).catch(() => {}); return true; }
-      await interaction.reply({ embeds: [_ficheEmbed(g)], flags: eph }).catch(() => {});
+      await interaction.reply({ embeds: [_ficheEmbed(g)], components: _ficheComponents(g), flags: eph }).catch(() => {});
+      return true;
+    }
+
+    // 🎯 Depuis une fiche → lancer un avis de recherche pré-rempli (module traque)
+    if (interaction.isButton?.() && id.startsWith('grp_avis::')) {
+      const db = loadDB(); const r = _ensure(db);
+      const g = r.groupes.find(x => x.id === id.split('::')[1]);
+      if (!g) { await interaction.reply({ content: '⚠️ Fiche introuvable.', flags: eph }).catch(() => {}); return true; }
+      const ia = g.ia || {};
+      const parts = [];
+      parts.push(`Groupe : ${g.nom}${g.categorie ? ` (${_catInfo(g.categorie).label})` : ''}`);
+      if (g.effectif || ia.effectif) parts.push('Effectif : ' + (g.effectif || ia.effectif));
+      if (ia.tenues) parts.push('Tenues : ' + ia.tenues);
+      if (ia.armement) parts.push('Armement : ' + ia.armement);
+      if (ia.trait_distinctif) parts.push('Signe : ' + ia.trait_distinctif);
+      if (ia.resume) parts.push(ia.resume); else if (g.notes) parts.push(g.notes);
+      const signalement = parts.join(' · ').slice(0, 500);
+      const cible = String(g.meneur || g.nom || 'Inconnu').slice(0, 100);
+      try {
+        if (typeof global.ouvrirAvisRecherche === 'function') { await global.ouvrirAvisRecherche(interaction, { cible, signalement }); return true; }
+      } catch (e) { console.log('⚠️ grp_avis:', e.message); }
+      await interaction.reply({ content: '⚠️ Le module d\'avis de recherche n\'est pas disponible ici.', flags: eph }).catch(() => {});
+      return true;
+    }
+
+    // 🗒️ Depuis une fiche → consigner un incident horodaté
+    if (interaction.isButton?.() && id.startsWith('grp_incident::')) {
+      const gid = id.split('::')[1];
+      const modal = new ModalBuilder().setCustomId(`grp_incident_modal::${gid}`).setTitle('🗒️ Consigner un incident')
+        .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('txt').setLabel('Que s\'est-il passé ?').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(400).setPlaceholder('Ex : accrochage à Rhodes, 2 blessés côté adverse…')));
+      await interaction.showModal(modal).catch(() => {});
+      return true;
+    }
+    if (interaction.isModalSubmit?.() && id.startsWith('grp_incident_modal::')) {
+      const gid = id.split('::')[1];
+      const db = loadDB(); const r = _ensure(db);
+      const g = r.groupes.find(x => x.id === gid);
+      if (!g) { await interaction.reply({ content: '⚠️ Fiche introuvable.', flags: eph }).catch(() => {}); return true; }
+      const txt = (interaction.fields.getTextInputValue('txt') || '').trim();
+      if (!txt) { await interaction.reply({ content: '⚠️ Incident vide.', flags: eph }).catch(() => {}); return true; }
+      if (!Array.isArray(g.incidents)) g.incidents = [];
+      const dt = new Date();
+      const p2 = n => String(n).padStart(2, '0');
+      const date = `${p2(dt.getDate())}/${p2(dt.getMonth() + 1)} ${p2(dt.getHours())}h${p2(dt.getMinutes())}`;
+      g.incidents.push({ date, texte: txt.slice(0, 400), par: interaction.member?.displayName || interaction.user.username });
+      if (g.incidents.length > 50) g.incidents = g.incidents.slice(-50);
+      persist(db);
+      if (interaction.isFromMessage?.()) { try { await interaction.update({ embeds: [_ficheEmbed(g)], components: _ficheComponents(g) }); return true; } catch {} }
+      await interaction.reply({ content: `🗒️ Incident consigné sur **${_clip(g.nom, 100)}** (${g.incidents.length} au total).`, flags: eph }).catch(() => {});
       return true;
     }
 
@@ -494,4 +559,4 @@ async function onMessage(message) {
   } catch (e) { console.log('❌ groupes onMessage:', e.message); return true; }
 }
 
-module.exports = { installerPanneau, routeInteraction, onMessage, SALON_GROUPES, _test: { _ensure, _filtreGroupes, _norm, _mapDng, _photoDescTexte, _cleanIA, _afficheEmbed, _ficheEmbed, _previewEmbed, _classementRows, BANNERS, CATS, DNG } };
+module.exports = { installerPanneau, routeInteraction, onMessage, SALON_GROUPES, _test: { _ensure, _filtreGroupes, _norm, _mapDng, _photoDescTexte, _cleanIA, _afficheEmbed, _ficheEmbed, _ficheComponents, _previewEmbed, _classementRows, BANNERS, CATS, DNG } };
