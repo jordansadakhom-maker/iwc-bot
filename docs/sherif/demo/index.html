@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Démonstration interactive du système Bureau du Shérif : fichez un groupe, lancez un avis de recherche, écrouez un détenu, émettez une amende — tout se génère en direct dans votre navigateur.">
+<meta name="theme-color" content="#15110c">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='16' fill='%2315110c'/><polygon points='50,14 61,41 91,41 66,59 76,88 50,69 24,88 34,59 9,41 39,41' fill='%23d8ac57'/></svg>">
+<title>Bureau du Shérif — Démonstration interactive</title>
+<style>
+  :root {
+    --bg:#E7DCC4; --bg-2:#DFD4B9; --surface:#F3ECDB; --surface-2:#EBE1CB;
+    --ink:#241C13; --ink-soft:#5B4E3B; --ink-mute:#837256; --line:#CBBB94; --line-soft:#D8CBA8;
+    --gold:#9A6A15; --gold-ink:#7C540E; --oxblood:#8E2B24; --teal:#2C5A54; --glow:transparent;
+    --good:#2f7d4f; --warn:#9a6a15; --crit:#8E2B24;
+    --font-display: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    --font-body: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --step--1: clamp(0.78rem, 0.74rem + 0.2vw, 0.86rem);
+    --step-0:  clamp(1rem, 0.96rem + 0.2vw, 1.06rem);
+    --step-1:  clamp(1.15rem, 1.08rem + 0.35vw, 1.32rem);
+    --step-2:  clamp(1.45rem, 1.3rem + 0.7vw, 1.85rem);
+    --step-3:  clamp(1.85rem, 1.55rem + 1.4vw, 2.6rem);
+    --maxw: 1180px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#15110C; --bg-2:#1C1710; --surface:#221B13; --surface-2:#291F15;
+      --ink:#ECE1CB; --ink-soft:#BCAC8D; --ink-mute:#8B7B5E; --line:#3A2F20; --line-soft:#2C2318;
+      --gold:#D8AC57; --gold-ink:#E9C578; --oxblood:#C24A3E; --teal:#64A498; --glow:rgba(216,172,87,0.10);
+      --good:#5cc98a; --warn:#D8AC57; --crit:#C24A3E;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg:#E7DCC4; --bg-2:#DFD4B9; --surface:#F3ECDB; --surface-2:#EBE1CB;
+    --ink:#241C13; --ink-soft:#5B4E3B; --ink-mute:#837256; --line:#CBBB94; --line-soft:#D8CBA8;
+    --gold:#9A6A15; --gold-ink:#7C540E; --oxblood:#8E2B24; --teal:#2C5A54; --glow:transparent;
+    --good:#2f7d4f; --warn:#9a6a15; --crit:#8E2B24;
+  }
+  :root[data-theme="dark"] {
+    --bg:#15110C; --bg-2:#1C1710; --surface:#221B13; --surface-2:#291F15;
+    --ink:#ECE1CB; --ink-soft:#BCAC8D; --ink-mute:#8B7B5E; --line:#3A2F20; --line-soft:#2C2318;
+    --gold:#D8AC57; --gold-ink:#E9C578; --oxblood:#C24A3E; --teal:#64A498; --glow:rgba(216,172,87,0.10);
+    --good:#5cc98a; --warn:#D8AC57; --crit:#C24A3E;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--font-body); font-size: var(--step-0); line-height: 1.6;
+    -webkit-font-smoothing: antialiased; overflow-x: hidden;
+  }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(16px, 4vw, 40px); }
+  a { color: var(--gold-ink); }
+  h1,h2,h3,h4 { margin: 0; text-wrap: balance; }
+
+  .eyebrow { font-family: var(--font-mono); font-size: var(--step--1); letter-spacing: .2em; text-transform: uppercase; color: var(--gold-ink); font-weight: 600; }
+  .star { color: var(--gold); display:inline-block; line-height:0; }
+  .star svg { display:block; width:100%; height:100%; }
+
+  /* Barre haute */
+  .topbar { position: sticky; top: 0; z-index: 30; background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  .topbar .wrap { display:flex; align-items:center; justify-content:space-between; gap: 12px; height: 58px; }
+  .brand { display:flex; align-items:center; gap:10px; }
+  .brand .star { width: 24px; height:24px; }
+  .brand b { font-family: var(--font-display); text-transform: uppercase; letter-spacing:.04em; font-size:.92rem; }
+  .back { font-family: var(--font-mono); font-size: var(--step--1); letter-spacing:.06em; text-decoration:none; color: var(--ink-soft); border:1px solid var(--line); padding:6px 11px; border-radius:3px; }
+  .back:hover { border-color: var(--gold); color: var(--ink); }
+
+  /* Intro */
+  .intro { padding: clamp(28px,5vw,52px) 0 clamp(14px,2vw,22px); }
+  .intro h1 { font-family: var(--font-display); text-transform: uppercase; letter-spacing:.02em; font-size: var(--step-3); line-height:1.02; margin-top:10px; }
+  .intro p { color: var(--ink-soft); max-width: 62ch; margin: 14px 0 0; font-size: var(--step-1); }
+  .note { display:flex; align-items:flex-start; gap:10px; margin-top: 20px; padding: 12px 15px; background: var(--surface); border:1px solid var(--line); border-left: 3px solid var(--gold); border-radius: 4px; font-size: var(--step--1); color: var(--ink-soft); }
+  .note b { color: var(--ink); }
+
+  /* Onglets */
+  .tabs { display:flex; flex-wrap: wrap; gap: 8px; margin: clamp(22px,3vw,32px) 0 0; border-bottom: 1.5px solid var(--line); }
+  .tab { appearance:none; background:none; border:0; cursor:pointer; font-family: var(--font-body); font-size: var(--step-0); color: var(--ink-soft); padding: 11px 15px; border-radius: 6px 6px 0 0; border: 1px solid transparent; border-bottom: none; position: relative; top: 1.5px; display:flex; align-items:center; gap:8px; }
+  .tab . e { font-size: 1.05em; }
+  .tab[aria-selected="true"] { color: var(--ink); background: var(--surface); border-color: var(--line); font-weight: 600; }
+  .tab:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+  .panel { display:none; padding: clamp(22px,3vw,32px) 0 60px; }
+  .panel[data-active="true"] { display:block; }
+  .cols { display:grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: clamp(18px,3vw,30px); align-items:start; }
+  @media (max-width: 820px) { .cols { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--surface); border:1px solid var(--line); border-radius: 8px; padding: clamp(16px,2.4vw,24px);
+  }
+  .card > h3 { font-family: var(--font-display); font-size: var(--step-2); text-transform: uppercase; letter-spacing:.02em; margin-bottom: 4px; }
+  .card > .sub { color: var(--ink-mute); font-size: var(--step--1); margin-bottom: 18px; }
+
+  /* Formulaires */
+  .field { display:flex; flex-direction:column; gap:6px; margin-bottom: 14px; }
+  .field.row2 { display:grid; grid-template-columns:1fr 1fr; gap: 12px; }
+  .field label, .lbl { font-family: var(--font-mono); font-size: .72rem; letter-spacing:.08em; text-transform: uppercase; color: var(--ink-mute); }
+  input[type=text], input[type=number], textarea, select {
+    font-family: var(--font-body); font-size: var(--step-0); color: var(--ink);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 9px 11px; width: 100%;
+  }
+  textarea { resize: vertical; min-height: 62px; line-height:1.5; }
+  input:focus, textarea:focus, select:focus { outline: 2px solid var(--gold); outline-offset: 1px; border-color: var(--gold); }
+  select { cursor: pointer; }
+  .segwrap { display:flex; flex-wrap:wrap; gap:7px; }
+  .seg { appearance:none; cursor:pointer; font-family: var(--font-body); font-size: var(--step--1); color: var(--ink-soft); background: var(--bg); border:1px solid var(--line); border-radius: 999px; padding: 6px 12px; display:flex; align-items:center; gap:6px; }
+  .seg[aria-pressed="true"] { background: color-mix(in srgb, var(--gold) 22%, var(--surface)); border-color: var(--gold); color: var(--ink); font-weight:600; }
+  .seg:focus-visible { outline: 2px solid var(--gold); outline-offset:2px; }
+  .filepick { display:flex; align-items:center; gap:11px; }
+  .filepick .btn-file { cursor:pointer; font-family: var(--font-mono); font-size: var(--step--1); letter-spacing:.04em; border:1px dashed var(--line); border-radius:5px; padding: 9px 13px; color: var(--ink-soft); background: var(--bg); }
+  .filepick .btn-file:hover { border-color: var(--gold); color: var(--ink); }
+  .filepick input[type=file] { position:absolute; width:1px; height:1px; opacity:0; }
+  .filepick .fname { font-size: var(--step--1); color: var(--ink-mute); }
+
+  .actions { display:flex; flex-wrap:wrap; gap: 10px; margin-top: 6px; }
+  .btn { appearance:none; cursor:pointer; font-family: var(--font-body); font-weight:600; font-size: var(--step-0); border-radius: 6px; padding: 10px 18px; border:1px solid transparent; }
+  .btn.primary { background: var(--gold); color: #1a1206; }
+  .btn.primary:hover { filter: brightness(1.06); }
+  .btn.ghost { background: transparent; color: var(--ink-soft); border-color: var(--line); }
+  .btn.ghost:hover { color: var(--ink); border-color: var(--gold); }
+  .btn:focus-visible { outline: 2px solid var(--gold); outline-offset:2px; }
+
+  .previewlbl { font-family: var(--font-mono); font-size:.72rem; letter-spacing:.12em; text-transform:uppercase; color: var(--ink-mute); margin-bottom: 12px; }
+
+  /* Liste */
+  .liste { margin-top: clamp(22px,3vw,30px); }
+  .liste-head { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding-bottom: 12px; margin-bottom: 16px; border-bottom: 1.5px solid var(--line); }
+  .liste-head h3 { font-family: var(--font-display); text-transform:uppercase; letter-spacing:.03em; font-size: var(--step-1); }
+  .filters { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { appearance:none; cursor:pointer; font-family: var(--font-mono); font-size:.68rem; letter-spacing:.04em; color: var(--ink-soft); background: var(--surface); border:1px solid var(--line); border-radius:999px; padding:5px 10px; }
+  .chip[aria-pressed="true"] { background: color-mix(in srgb, var(--gold) 20%, var(--surface)); border-color: var(--gold); color: var(--ink); }
+  .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(290px,1fr)); gap: 16px; }
+  .empty { color: var(--ink-mute); font-style: italic; padding: 20px 4px; }
+
+  /* Fiche façon Discord (toujours sombre, comme une capture) */
+  .dc { --dc-bg:#313338; --dc-white:#f2f3f5; --dc-mute:#b5bac1; --dc-dim:#949ba4;
+    background: var(--dc-bg); border-radius: 9px; padding: 14px 15px 13px; border:1px solid #232428; box-shadow: 0 16px 34px -24px rgba(0,0,0,.7); position:relative; }
+  .dc .dc-top { display:flex; align-items:center; gap:8px; margin-bottom: 9px; }
+  .dc .dc-ava { width: 26px; height:26px; border-radius:50%; display:grid; place-items:center; flex:none; }
+  .dc .dc-ava .star { width:15px; height:15px; color:#1a1206; }
+  .dc .dc-name { color: var(--dc-white); font-weight:600; font-size:.8rem; display:flex; align-items:center; gap:6px; }
+  .dc .dc-bot { background:#5865f2; color:#fff; font-size:.52rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; padding:2px 5px; border-radius:4px; }
+  .embed { background:#2b2d31; border-radius:4px; border-left:4px solid var(--em,#C0453B); padding: 12px 14px 13px; }
+  .embed .em-title { color: var(--dc-white); font-weight:700; font-size:.9rem; line-height:1.25; margin:0 0 4px; }
+  .embed .em-desc { color: var(--dc-mute); font-size:.76rem; line-height:1.5; margin:0 0 10px; font-style:italic; }
+  .embed .em-grid { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px 13px; }
+  .embed .em-f.full { grid-column: 1 / -1; }
+  .embed .em-f .k { color: var(--dc-white); font-weight:700; font-size:.7rem; margin:0 0 2px; }
+  .embed .em-f .v { color: var(--dc-mute); font-size:.75rem; line-height:1.4; margin:0; word-wrap: break-word; }
+  .embed .em-photo { margin-top: 11px; border-radius:4px; overflow:hidden; border:1px solid #22242a; max-height: 220px; }
+  .embed .em-photo img { display:block; width:100%; height:100%; object-fit: cover; max-height: 220px; }
+  .embed .em-foot { color: var(--dc-dim); font-size:.64rem; margin: 11px 0 0; }
+  .fiche-actions { display:flex; gap:8px; margin-top: 10px; }
+  .mini-btn { appearance:none; cursor:pointer; font-family: var(--font-mono); font-size:.66rem; letter-spacing:.04em; padding:5px 10px; border-radius:4px; border:1px solid var(--line); background: var(--surface); color: var(--ink-soft); }
+  .mini-btn:hover { border-color: var(--gold); color: var(--ink); }
+  .mini-btn.danger:hover { border-color: var(--crit); color: var(--crit); }
+
+  .tally { display:flex; gap: 14px; flex-wrap:wrap; margin-bottom: 16px; }
+  .tally .t { flex:1; min-width: 130px; background: var(--surface-2); border:1px solid var(--line); border-radius:7px; padding: 12px 14px; }
+  .tally .t .n { font-family: var(--font-mono); font-size:.64rem; letter-spacing:.1em; text-transform:uppercase; color: var(--ink-mute); }
+  .tally .t .v { font-family: var(--font-display); font-size: var(--step-2); margin-top:3px; font-variant-numeric: tabular-nums; }
+
+  footer { border-top:1px solid var(--line); padding: 24px 0 40px; }
+  footer .wrap { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; }
+  footer .fnote { font-family: var(--font-mono); font-size:.68rem; letter-spacing:.05em; color: var(--ink-mute); text-transform:uppercase; }
+
+  :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+  @media (prefers-reduced-motion: no-preference) { .dc { transition: transform .2s; } }
+  .toast { position: fixed; left:50%; bottom: 22px; transform: translateX(-50%) translateY(20px); background: var(--ink); color: var(--bg); font-size: var(--step--1); padding: 10px 18px; border-radius: 8px; opacity:0; pointer-events:none; transition: opacity .25s, transform .25s; z-index: 50; box-shadow: 0 12px 30px -12px rgba(0,0,0,.5); }
+  .toast.show { opacity:1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="tinstar" viewBox="0 0 100 100">
+    <circle cx="50" cy="50" r="47" fill="none" stroke="currentColor" stroke-width="3"/>
+    <polygon points="50,16 57.9,39.1 82.3,39.5 62.8,54.2 70,77.5 50,63.5 30,77.5 37.2,54.2 17.7,39.5 42.1,39.1" fill="currentColor"/>
+    <circle cx="50" cy="16" r="3.4" fill="currentColor"/><circle cx="82.3" cy="39.5" r="3.4" fill="currentColor"/>
+    <circle cx="70" cy="77.5" r="3.4" fill="currentColor"/><circle cx="30" cy="77.5" r="3.4" fill="currentColor"/>
+    <circle cx="17.7" cy="39.5" r="3.4" fill="currentColor"/>
+    <circle cx="50" cy="50" r="6.4" fill="none" stroke="var(--bg)" stroke-width="2.4"/>
+  </symbol>
+</svg>
+
+<header class="topbar">
+  <div class="wrap">
+    <div class="brand"><span class="star"><svg><use href="#tinstar"/></svg></span><b>Bureau du Shérif</b></div>
+    <a class="back" href="../">← Retour à la présentation</a>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="intro">
+    <span class="eyebrow">Démonstration interactive</span>
+    <h1>Essayez le bureau vous-même</h1>
+    <p>Fichez un groupe, lancez un avis de recherche, écrouez un détenu, émettez une amende — tout se génère en direct, comme le ferait le bot dans Discord.</p>
+    <div class="note">
+      <span class="star" style="width:18px;height:18px;flex:none">🔒</span>
+      <span><b>Bac à sable 100 % local.</b> Vos saisies restent sur cet appareil (rien n'est envoyé nulle part) et sont conservées entre les visites. Dans le vrai bot, tout ceci vit dans Discord, avec l'analyse IA des photos et la sauvegarde automatique.</span>
+    </div>
+  </section>
+
+  <div class="tabs" role="tablist" aria-label="Modules">
+    <button class="tab" role="tab" id="tab-grp" aria-controls="p-grp" aria-selected="true"><span class="e">🕵️</span> Registre &amp; avis de recherche</button>
+    <button class="tab" role="tab" id="tab-ecr" aria-controls="p-ecr" aria-selected="false"><span class="e">⛓️</span> Écrou des détenus</button>
+    <button class="tab" role="tab" id="tab-amd" aria-controls="p-amd" aria-selected="false"><span class="e">💵</span> Amendes &amp; caisse</button>
+  </div>
+
+  <!-- ── Registre / Avis ── -->
+  <section class="panel" id="p-grp" role="tabpanel" aria-labelledby="tab-grp" data-active="true">
+    <div class="cols">
+      <form class="card" id="form-grp" autocomplete="off">
+        <h3>Ficher un groupe</h3>
+        <p class="sub">Renseignez une bande, choisissez une catégorie — l'affiche se génère à droite.</p>
+        <div class="field"><label for="g-nom">Nom du groupe</label><input type="text" id="g-nom" required maxlength="90" placeholder="Ex : Les Fils de Rhodes"></div>
+        <div class="field row2">
+          <div class="field" style="margin:0"><label for="g-meneur">Meneur / chef</label><input type="text" id="g-meneur" maxlength="90" placeholder="« Le Corbeau »"></div>
+          <div class="field" style="margin:0"><label for="g-territoire">Territoire</label><input type="text" id="g-territoire" maxlength="90" placeholder="Rhodes &amp; alentours"></div>
+        </div>
+        <div class="field"><label for="g-effectif">Effectif &amp; armement</label><input type="text" id="g-effectif" maxlength="140" placeholder="≈ 6 hommes, fusils à répétition"></div>
+        <div class="field"><label for="g-notes">Renseignements</label><textarea id="g-notes" maxlength="600" placeholder="Habitudes, signes distinctifs, faits marquants…"></textarea></div>
+        <div class="field"><span class="lbl">Catégorie</span><div class="segwrap" id="g-cats"></div></div>
+        <div class="field"><span class="lbl">Dangerosité</span><div class="segwrap" id="g-dng"></div></div>
+        <div class="field wanted-only" hidden><label for="g-prime">Prime</label><input type="text" id="g-prime" maxlength="60" placeholder="500 $"></div>
+        <div class="field wanted-only row2" hidden>
+          <div class="field" style="margin:0"><label for="g-consigne">Consigne</label><input type="text" id="g-consigne" maxlength="60" placeholder="Mort ou vif"></div>
+          <div class="field" style="margin:0"><label for="g-comm">Commanditaire</label><input type="text" id="g-comm" maxlength="80" placeholder="Bureau du comté"></div>
+        </div>
+        <div class="field"><span class="lbl">Photo (illustration)</span>
+          <div class="filepick"><label class="btn-file" for="g-photo">📸 Choisir une image</label><input type="file" id="g-photo" accept="image/*"><span class="fname" id="g-photo-name">aucune</span></div>
+        </div>
+        <div class="actions">
+          <button type="submit" class="btn primary">✅ Enregistrer au registre</button>
+          <button type="reset" class="btn ghost">Réinitialiser</button>
+        </div>
+      </form>
+      <div>
+        <p class="previewlbl">Aperçu de l'affiche</p>
+        <div id="grp-preview"></div>
+      </div>
+    </div>
+
+    <div class="liste">
+      <div class="liste-head">
+        <h3>Registre des groupes</h3>
+        <div class="filters" id="grp-filters"></div>
+      </div>
+      <div class="grid" id="grp-list"></div>
+    </div>
+  </section>
+
+  <!-- ── Écrou ── -->
+  <section class="panel" id="p-ecr" role="tabpanel" aria-labelledby="tab-ecr">
+    <div class="cols">
+      <form class="card" id="form-ecr" autocomplete="off">
+        <h3>Écrouer un détenu</h3>
+        <p class="sub">Placez quelqu'un en cellule — le dossier d'écrou se génère à droite.</p>
+        <div class="field"><label for="e-nom">Nom du détenu</label><input type="text" id="e-nom" required maxlength="80" placeholder="Cassidy Boyd"></div>
+        <div class="field"><label for="e-motif">Motif</label><input type="text" id="e-motif" maxlength="120" placeholder="Rixe &amp; ivresse publique"></div>
+        <div class="field row2">
+          <div class="field" style="margin:0"><label for="e-cellule">Cellule</label><input type="text" id="e-cellule" maxlength="20" placeholder="N° 2"></div>
+          <div class="field" style="margin:0"><label for="e-caution">Caution ($)</label><input type="number" id="e-caution" min="0" step="10" placeholder="120"></div>
+        </div>
+        <div class="field row2">
+          <div class="field" style="margin:0"><label for="e-duree">Durée (jours)</label><input type="number" id="e-duree" min="0" step="1" placeholder="2"></div>
+          <div class="field" style="margin:0"><label for="e-par">Écroué par</label><input type="text" id="e-par" maxlength="60" placeholder="Shérif Dutch"></div>
+        </div>
+        <div class="actions">
+          <button type="submit" class="btn primary">⛓️ Écrouer</button>
+          <button type="reset" class="btn ghost">Réinitialiser</button>
+        </div>
+      </form>
+      <div>
+        <p class="previewlbl">Aperçu du dossier</p>
+        <div id="ecr-preview"></div>
+      </div>
+    </div>
+    <div class="liste">
+      <div class="liste-head"><h3>Registre des détenus</h3></div>
+      <div class="grid" id="ecr-list"></div>
+    </div>
+  </section>
+
+  <!-- ── Amendes ── -->
+  <section class="panel" id="p-amd" role="tabpanel" aria-labelledby="tab-amd">
+    <div class="cols">
+      <form class="card" id="form-amd" autocomplete="off">
+        <h3>Émettre une amende</h3>
+        <p class="sub">Verbalisez un contrevenant — le montant alimente la caisse du bureau.</p>
+        <div class="field"><label for="a-nom">Contrevenant</label><input type="text" id="a-nom" required maxlength="80" placeholder="Arthur Callahan"></div>
+        <div class="field"><label for="a-motif">Motif</label><input type="text" id="a-motif" maxlength="120" placeholder="Décharge d'arme en ville"></div>
+        <div class="field"><label for="a-montant">Montant ($)</label><input type="number" id="a-montant" min="0" step="5" required placeholder="45"></div>
+        <div class="actions">
+          <button type="submit" class="btn primary">💵 Émettre l'amende</button>
+          <button type="reset" class="btn ghost">Réinitialiser</button>
+        </div>
+      </form>
+      <div>
+        <p class="previewlbl">Caisse du bureau</p>
+        <div class="tally" id="amd-tally"></div>
+        <div class="card" style="padding:16px 18px"><p class="sub" style="margin:0">Émettez une amende : elle apparaît dans le registre ci-dessous et s'ajoute au total « à encaisser ». Marquez-la « payée » pour la basculer dans la caisse.</p></div>
+      </div>
+    </div>
+    <div class="liste">
+      <div class="liste-head"><h3>Registre des amendes</h3></div>
+      <div class="grid" id="amd-list"></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <button class="btn ghost" id="reset-all">🧹 Réinitialiser la démo</button>
+    <span class="fnote">Démo locale · propulsé par le système Iron Wolf · RedM / RDR2</span>
+  </div>
+</footer>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var el = function (tag, cls, txt) { var e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  var uid = function () { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); };
+  var esc = function (v) { return (v == null ? "" : String(v)); };
+
+  var store = {
+    get: function (k, def) { try { var v = JSON.parse(localStorage.getItem("sherifDemo." + k)); return v == null ? def : v; } catch (e) { return def; } },
+    set: function (k, v) { try { localStorage.setItem("sherifDemo." + k, JSON.stringify(v)); } catch (e) {} }
+  };
+
+  var CATS = {
+    wanted:       { label: "Wanted",           emoji: "💰", color: "#C0453B", banner: "AVIS DE RECHERCHE", tag: "☠️ Groupe recherché. Toute information menant à sa capture est récompensée." },
+    recherche:    { label: "Recherché",        emoji: "🔴", color: "#C0392B", banner: "RECHERCHÉ",         tag: "🔍 Groupe activement recherché — signalez toute information utile." },
+    ennemi:       { label: "Ennemi",           emoji: "⚔️", color: "#E67E22", banner: "GROUPE ENNEMI",     tag: "⚔️ Hostile déclaré — prudence maximale sur le terrain." },
+    rival:        { label: "Rival",            emoji: "🥊", color: "#D35400", banner: "GROUPE RIVAL",      tag: "🥊 Concurrent sur le territoire — à surveiller de près." },
+    surveillance: { label: "Sous surveillance", emoji: "👁️", color: "#C9A227", banner: "SOUS SURVEILLANCE", tag: "👁️ Sous observation — renseignements en cours de collecte." },
+    neutre:       { label: "Neutre",           emoji: "⚪", color: "#8A94A0", banner: "GROUPE NEUTRE",     tag: "⚪ Sans hostilité connue à ce jour." },
+    allie:        { label: "Allié",            emoji: "🤝", color: "#2ECC71", banner: "GROUPE ALLIÉ",      tag: "🤝 Partenaire de confiance sur le territoire." }
+  };
+  var CAT_ORDER = ["wanted", "recherche", "ennemi", "rival", "surveillance", "neutre", "allie"];
+  var DNG = { faible: { l: "Faible", e: "🟢" }, moyenne: { l: "Moyenne", e: "🟡" }, elevee: { l: "Élevée", e: "🟠" }, critique: { l: "Critique", e: "🔴" } };
+  var DNG_ORDER = ["faible", "moyenne", "elevee", "critique"];
+
+  var toastT;
+  function toast(msg) { var t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(function () { t.classList.remove("show"); }, 2200); }
+
+  /* ── Onglets ── */
+  var tabs = Array.prototype.slice.call(document.querySelectorAll(".tab"));
+  tabs.forEach(function (t) {
+    t.addEventListener("click", function () {
+      tabs.forEach(function (x) { x.setAttribute("aria-selected", "false"); });
+      t.setAttribute("aria-selected", "true");
+      document.querySelectorAll(".panel").forEach(function (p) { p.setAttribute("data-active", p.id === t.getAttribute("aria-controls") ? "true" : "false"); });
+    });
+  });
+
+  /* ── Construit une fiche façon embed Discord ── */
+  function embedNode(opts) {
+    // opts: {avatar, color, title, desc, fields:[{k,v,full}], photo, foot}
+    var dc = el("div", "dc");
+    var top = el("div", "dc-top");
+    var ava = el("span", "dc-ava"); ava.style.background = opts.avatar || "#C0453B";
+    var st = el("span", "star"); st.innerHTML = '<svg><use href="#tinstar"/></svg>'; ava.appendChild(st);
+    var name = el("div", "dc-name"); name.appendChild(document.createTextNode("Bureau du Shérif "));
+    var bot = el("span", "dc-bot", "Bot"); name.appendChild(bot);
+    top.appendChild(ava); top.appendChild(name); dc.appendChild(top);
+
+    var emb = el("div", "embed"); emb.style.setProperty("--em", opts.color || "#C0453B");
+    emb.appendChild(el("p", "em-title", opts.title));
+    if (opts.desc) { var d = el("p", "em-desc"); d.textContent = opts.desc; emb.appendChild(d); }
+    var fields = (opts.fields || []).filter(function (f) { return f && f.v != null && String(f.v).trim() !== ""; });
+    if (fields.length) {
+      var grid = el("div", "em-grid");
+      fields.forEach(function (f) {
+        var fe = el("div", "em-f" + (f.full ? " full" : ""));
+        fe.appendChild(el("p", "k", f.k));
+        fe.appendChild(el("p", "v", String(f.v)));
+        grid.appendChild(fe);
+      });
+      emb.appendChild(grid);
+    }
+    if (opts.photo) { var ph = el("div", "em-photo"); var img = el("img"); img.src = opts.photo; img.alt = ""; ph.appendChild(img); emb.appendChild(ph); }
+    if (opts.foot) emb.appendChild(el("p", "em-foot", opts.foot));
+    dc.appendChild(emb);
+    return dc;
+  }
+
+  /* ═══════════ MODULE 1 : GROUPES / AVIS ═══════════ */
+  var groupes = store.get("groupes", []);
+  var gState = { cat: "recherche", dng: "", photo: null };
+  var gFilter = "";
+
+  // Boutons catégorie / dangerosité
+  var gcats = $("#g-cats");
+  CAT_ORDER.forEach(function (k) {
+    var b = el("button", "seg"); b.type = "button"; b.setAttribute("aria-pressed", k === gState.cat ? "true" : "false");
+    b.innerHTML = '<span>' + CATS[k].emoji + '</span> ' + CATS[k].label;
+    b.addEventListener("click", function () {
+      gState.cat = k;
+      Array.prototype.forEach.call(gcats.children, function (c) { c.setAttribute("aria-pressed", "false"); });
+      b.setAttribute("aria-pressed", "true");
+      document.querySelectorAll("#form-grp .wanted-only").forEach(function (w) { w.hidden = (k !== "wanted"); });
+      renderGrpPreview();
+    });
+    gcats.appendChild(b);
+  });
+  var gdng = $("#g-dng");
+  (function () {
+    var none = el("button", "seg"); none.type = "button"; none.setAttribute("aria-pressed", "true"); none.textContent = "— aucune —";
+    none.addEventListener("click", function () { gState.dng = ""; setDngPressed(none); renderGrpPreview(); });
+    gdng.appendChild(none);
+    DNG_ORDER.forEach(function (k) {
+      var b = el("button", "seg"); b.type = "button"; b.setAttribute("aria-pressed", "false");
+      b.innerHTML = '<span>' + DNG[k].e + '</span> ' + DNG[k].l;
+      b.addEventListener("click", function () { gState.dng = k; setDngPressed(b); renderGrpPreview(); });
+      gdng.appendChild(b);
+    });
+  })();
+  function setDngPressed(btn) { Array.prototype.forEach.call(gdng.children, function (c) { c.setAttribute("aria-pressed", "false"); }); btn.setAttribute("aria-pressed", "true"); }
+
+  // Photo → miniature (canvas) pour tenir dans localStorage
+  $("#g-photo").addEventListener("change", function (ev) {
+    var f = ev.target.files && ev.target.files[0];
+    if (!f) { gState.photo = null; $("#g-photo-name").textContent = "aucune"; renderGrpPreview(); return; }
+    $("#g-photo-name").textContent = f.name.slice(0, 28);
+    var r = new FileReader();
+    r.onload = function () {
+      var img = new Image();
+      img.onload = function () {
+        var max = 720, w = img.width, h = img.height;
+        if (w > max || h > max) { var s = Math.min(max / w, max / h); w = Math.round(w * s); h = Math.round(h * s); }
+        var cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+        cv.getContext("2d").drawImage(img, 0, 0, w, h);
+        try { gState.photo = cv.toDataURL("image/jpeg", 0.82); } catch (e) { gState.photo = r.result; }
+        renderGrpPreview();
+      };
+      img.onerror = function () { gState.photo = null; renderGrpPreview(); };
+      img.src = r.result;
+    };
+    r.readAsDataURL(f);
+  });
+
+  function draftFromForm() {
+    return {
+      id: uid(),
+      nom: $("#g-nom").value.trim() || "Groupe sans nom",
+      meneur: $("#g-meneur").value.trim(),
+      territoire: $("#g-territoire").value.trim(),
+      effectif: $("#g-effectif").value.trim(),
+      notes: $("#g-notes").value.trim(),
+      categorie: gState.cat,
+      dangerosite: gState.dng,
+      prime: $("#g-prime").value.trim(),
+      consigne: $("#g-consigne").value.trim(),
+      commanditaire: $("#g-comm").value.trim(),
+      photo: gState.photo,
+      par: "Adjoint (démo)",
+      ts: Date.now()
+    };
+  }
+
+  function afficheOpts(g) {
+    var c = CATS[g.categorie] || CATS.recherche;
+    var d = DNG[g.dangerosite];
+    var wanted = g.categorie === "wanted";
+    var fields = [];
+    if (wanted) {
+      fields.push({ k: "💰 Prime", v: g.prime || "—" });
+      fields.push({ k: "⚠️ Dangerosité", v: d ? d.e + " " + d.l : "—" });
+      fields.push({ k: "🎯 Consigne", v: g.consigne || "Indifférent" });
+      if (g.commanditaire) fields.push({ k: "🧾 Commanditaire", v: g.commanditaire });
+    } else if (d) {
+      fields.push({ k: "⚠️ Dangerosité", v: d.e + " " + d.l });
+    }
+    if (g.meneur) fields.push({ k: "👤 Meneur / chef", v: g.meneur });
+    if (g.territoire) fields.push({ k: wanted ? "📍 Dernière position" : "📍 Territoire", v: g.territoire });
+    if (g.effectif) fields.push({ k: "👥 Effectif & armement", v: g.effectif, full: true });
+    if (g.notes) fields.push({ k: "📝 Renseignements", v: g.notes, full: true });
+    return { avatar: c.color, color: c.color, title: c.emoji + " " + c.banner + " — " + g.nom, desc: c.tag, fields: fields, photo: g.photo, foot: (wanted ? "Avis " : "Fiche ") + g.id + " · " + g.par };
+  }
+
+  function renderGrpPreview() {
+    var g = draftFromForm();
+    var host = $("#grp-preview"); host.innerHTML = "";
+    host.appendChild(embedNode(afficheOpts(g)));
+  }
+
+  function renderGrpList() {
+    var host = $("#grp-list"); host.innerHTML = "";
+    var list = groupes.slice().sort(function (a, b) { return b.ts - a.ts; });
+    if (gFilter) list = list.filter(function (g) { return g.categorie === gFilter; });
+    if (!list.length) { host.appendChild(el("p", "empty", groupes.length ? "Aucun groupe dans cette catégorie." : "Registre vide — fichez le premier groupe ci-dessus.")); return; }
+    list.forEach(function (g) {
+      var wrap = el("div");
+      wrap.appendChild(embedNode(afficheOpts(g)));
+      var acts = el("div", "fiche-actions");
+      var del = el("button", "mini-btn danger", "🗑️ Retirer");
+      del.addEventListener("click", function () { groupes = groupes.filter(function (x) { return x.id !== g.id; }); store.set("groupes", groupes); renderGrpList(); renderGrpFilters(); toast("Groupe retiré du registre."); });
+      acts.appendChild(del);
+      wrap.appendChild(acts);
+      host.appendChild(wrap);
+    });
+  }
+
+  function renderGrpFilters() {
+    var host = $("#grp-filters"); host.innerHTML = "";
+    var counts = {}; groupes.forEach(function (g) { counts[g.categorie] = (counts[g.categorie] || 0) + 1; });
+    var all = el("button", "chip", "Tous · " + groupes.length); all.setAttribute("aria-pressed", gFilter === "" ? "true" : "false");
+    all.addEventListener("click", function () { gFilter = ""; renderGrpFilters(); renderGrpList(); });
+    host.appendChild(all);
+    CAT_ORDER.forEach(function (k) {
+      if (!counts[k]) return;
+      var b = el("button", "chip", CATS[k].emoji + " " + CATS[k].label + " · " + counts[k]);
+      b.setAttribute("aria-pressed", gFilter === k ? "true" : "false");
+      b.addEventListener("click", function () { gFilter = k; renderGrpFilters(); renderGrpList(); });
+      host.appendChild(b);
+    });
+  }
+
+  $("#form-grp").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var g = draftFromForm();
+    groupes.push(g); store.set("groupes", groupes);
+    renderGrpList(); renderGrpFilters();
+    toast("« " + g.nom + " » fiché au registre ✅");
+    ev.target.reset();
+    gState.photo = null; $("#g-photo-name").textContent = "aucune";
+    document.querySelectorAll("#form-grp .wanted-only").forEach(function (w) { w.hidden = (gState.cat !== "wanted"); });
+    renderGrpPreview();
+  });
+  $("#form-grp").addEventListener("input", renderGrpPreview);
+  $("#form-grp").addEventListener("reset", function () { setTimeout(function () { gState.photo = null; $("#g-photo-name").textContent = "aucune"; renderGrpPreview(); }, 0); });
+
+  /* ═══════════ MODULE 2 : ÉCROU ═══════════ */
+  var detenus = store.get("detenus", []);
+
+  function ecrDraft() {
+    var duree = parseInt($("#e-duree").value, 10);
+    return {
+      id: uid(),
+      nom: $("#e-nom").value.trim() || "Détenu sans nom",
+      motif: $("#e-motif").value.trim(),
+      cellule: $("#e-cellule").value.trim(),
+      caution: $("#e-caution").value.trim(),
+      duree: isNaN(duree) ? "" : duree,
+      par: $("#e-par").value.trim(),
+      statut: "cellule",
+      ts: Date.now()
+    };
+  }
+  function releaseDate(d) {
+    if (d.duree === "" || d.duree == null) return "";
+    var dt = new Date(d.ts + d.duree * 86400000);
+    return dt.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
+  }
+  function ecrOpts(d) {
+    var libre = d.statut === "libre";
+    var fields = [];
+    if (d.motif) fields.push({ k: "⚖️ Motif", v: d.motif, full: true });
+    if (d.cellule) fields.push({ k: "🔒 Cellule", v: d.cellule });
+    if (d.caution) fields.push({ k: "💵 Caution", v: d.caution + " $" });
+    if (d.duree !== "" && d.duree != null) fields.push({ k: "⏳ Durée", v: d.duree + " j" });
+    var rd = releaseDate(d);
+    if (rd && !libre) fields.push({ k: "🗓️ Libération", v: rd });
+    if (d.par) fields.push({ k: "👮 Écroué par", v: d.par });
+    return {
+      avatar: libre ? "#2ECC71" : "#D8AC57",
+      color: libre ? "#2ECC71" : "#5865f2",
+      title: (libre ? "🔓 LIBÉRÉ — " : "⛓️ ÉCROU — ") + d.nom,
+      desc: libre ? "Détenu libéré. Dossier clôturé au registre." : "Placé en cellule. Dossier ouvert au registre des détenus.",
+      fields: fields,
+      foot: "Dossier " + d.id + " · statut : " + (libre ? "🟢 Libéré" : "🔴 En cellule")
+    };
+  }
+  function renderEcrPreview() { var host = $("#ecr-preview"); host.innerHTML = ""; host.appendChild(embedNode(ecrOpts(ecrDraft()))); }
+  function renderEcrList() {
+    var host = $("#ecr-list"); host.innerHTML = "";
+    var list = detenus.slice().sort(function (a, b) { return b.ts - a.ts; });
+    if (!list.length) { host.appendChild(el("p", "empty", "Aucun détenu — écrouez quelqu'un ci-dessus.")); return; }
+    list.forEach(function (d) {
+      var wrap = el("div"); wrap.appendChild(embedNode(ecrOpts(d)));
+      var acts = el("div", "fiche-actions");
+      if (d.statut !== "libre") {
+        var lib = el("button", "mini-btn", "🔓 Libérer");
+        lib.addEventListener("click", function () { d.statut = "libre"; store.set("detenus", detenus); renderEcrList(); toast(d.nom + " libéré."); });
+        acts.appendChild(lib);
+      }
+      var del = el("button", "mini-btn danger", "🗑️ Retirer");
+      del.addEventListener("click", function () { detenus = detenus.filter(function (x) { return x.id !== d.id; }); store.set("detenus", detenus); renderEcrList(); toast("Dossier retiré."); });
+      acts.appendChild(del); wrap.appendChild(acts); host.appendChild(wrap);
+    });
+  }
+  $("#form-ecr").addEventListener("submit", function (ev) {
+    ev.preventDefault(); var d = ecrDraft(); detenus.push(d); store.set("detenus", detenus);
+    renderEcrList(); toast(d.nom + " écroué ⛓️"); ev.target.reset(); renderEcrPreview();
+  });
+  $("#form-ecr").addEventListener("input", renderEcrPreview);
+  $("#form-ecr").addEventListener("reset", function () { setTimeout(renderEcrPreview, 0); });
+
+  /* ═══════════ MODULE 3 : AMENDES ═══════════ */
+  var amendes = store.get("amendes", []);
+  function money(n) { return (Math.round(n) || 0).toLocaleString("fr-FR") + " $"; }
+  function renderAmdTally() {
+    var host = $("#amd-tally"); host.innerHTML = "";
+    var encaisse = 0, du = 0;
+    amendes.forEach(function (a) { if (a.payee) encaisse += a.montant; else du += a.montant; });
+    [["En caisse", encaisse, "var(--good)"], ["À encaisser", du, "var(--warn)"], ["Émises", amendes.length, "var(--ink)"]].forEach(function (row, i) {
+      var t = el("div", "t"); t.appendChild(el("div", "n", row[0]));
+      var v = el("div", "v", i === 2 ? String(row[1]) : money(row[1])); v.style.color = row[2]; t.appendChild(v); host.appendChild(t);
+    });
+  }
+  function renderAmdList() {
+    var host = $("#amd-list"); host.innerHTML = "";
+    var list = amendes.slice().sort(function (a, b) { return b.ts - a.ts; });
+    if (!list.length) { host.appendChild(el("p", "empty", "Aucune amende émise pour le moment.")); return; }
+    list.forEach(function (a) {
+      var opts = {
+        avatar: "#D8AC57", color: a.payee ? "#2ECC71" : "#C0453B",
+        title: "💵 AMENDE — " + a.nom,
+        desc: a.payee ? "Amende réglée — encaissée par le bureau." : "Amende émise — en attente de paiement.",
+        fields: [{ k: "⚖️ Motif", v: a.motif || "—", full: true }, { k: "💰 Montant", v: money(a.montant) }, { k: "📌 Statut", v: a.payee ? "🟢 Payée" : "🔴 Impayée" }],
+        foot: "Amende " + a.id
+      };
+      var wrap = el("div"); wrap.appendChild(embedNode(opts));
+      var acts = el("div", "fiche-actions");
+      var pay = el("button", "mini-btn", a.payee ? "↩️ Marquer impayée" : "✅ Marquer payée");
+      pay.addEventListener("click", function () { a.payee = !a.payee; store.set("amendes", amendes); renderAmdList(); renderAmdTally(); toast(a.payee ? "Amende encaissée." : "Amende ré-ouverte."); });
+      var del = el("button", "mini-btn danger", "🗑️ Retirer");
+      del.addEventListener("click", function () { amendes = amendes.filter(function (x) { return x.id !== a.id; }); store.set("amendes", amendes); renderAmdList(); renderAmdTally(); });
+      acts.appendChild(pay); acts.appendChild(del); wrap.appendChild(acts); host.appendChild(wrap);
+    });
+  }
+  $("#form-amd").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var montant = parseFloat($("#a-montant").value) || 0;
+    var a = { id: uid(), nom: $("#a-nom").value.trim() || "Contrevenant", motif: $("#a-motif").value.trim(), montant: montant, payee: false, ts: Date.now() };
+    amendes.push(a); store.set("amendes", amendes); renderAmdList(); renderAmdTally();
+    toast("Amende de " + money(montant) + " émise 💵"); ev.target.reset();
+  });
+
+  /* ── Réinitialisation globale ── */
+  $("#reset-all").addEventListener("click", function () {
+    if (!confirm("Vider toute la démo (groupes, détenus, amendes) sur cet appareil ?")) return;
+    ["groupes", "detenus", "amendes"].forEach(function (k) { try { localStorage.removeItem("sherifDemo." + k); } catch (e) {} });
+    groupes = []; detenus = []; amendes = []; gFilter = "";
+    renderGrpList(); renderGrpFilters(); renderEcrList(); renderAmdList(); renderAmdTally();
+    toast("Démo réinitialisée.");
+  });
+
+  /* ── Premier rendu ── */
+  renderGrpPreview(); renderGrpList(); renderGrpFilters();
+  renderEcrPreview(); renderEcrList();
+  renderAmdTally(); renderAmdList();
+})();
+</script>
+</body>
+</html>
