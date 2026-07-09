@@ -308,6 +308,7 @@ const rdvplusCommands = [
   new SlashCommandBuilder().setName('dossier-client').setDescription('🗂️ Consulter le dossier RDV d\'un client')
     .addUserOption(o => o.setName('membre').setDescription('Le client (s\'il est sur le serveur)').setRequired(false))
     .addStringOption(o => o.setName('id').setDescription('Ou son ID Discord').setRequired(false)),
+  new SlashCommandBuilder().setName('recap-rdv').setDescription('📊 Récap des RDV : encaissements du mois + stats des agents (Direction)'),
 ];
 
 // Panneau « Besoin de nos services » (réserver une prestation) — builder réutilisable
@@ -370,6 +371,36 @@ async function routeInteraction(interaction) {
           return `${si.icone} **${type} — ${r.nomRP}**\n${tsF(dt)} · ${tsR(dt)} · 📍 ${lieu}${r.agentId ? ` · 🤝 <@${r.agentId}>` : ''}`;
         });
         await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COL.sepia).setTitle('📅 Rendez-vous à venir').setDescription(lignes.join('\n\n')).setFooter({ text: `${list.length} RDV · Bureau des Rendez-vous` })] }).catch(() => {});
+        return true;
+      }
+
+      if (cmd === 'recap-rdv') {
+        if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+        const eur = n => '$' + (Math.round(n) || 0).toLocaleString('fr-FR');
+        const store = _store(loadDB());
+        const rdvs = Object.values(store.rdvs);
+        const now = new Date();
+        const memeMois = d => d && d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+        const payes = rdvs.filter(r => r.paiement && memeMois(new Date(r.paiement.at)));
+        const totalMois = payes.reduce((n, r) => n + (r.paiement.montant || 0), 0);
+        // Encaissements du mois par prestation
+        const parType = {};
+        for (const r of payes) { const k = r.typeKey || 'autre'; if (!parType[k]) parType[k] = { n: 0, m: 0 }; parType[k].n++; parType[k].m += r.paiement.montant || 0; }
+        const lignesType = Object.entries(parType).sort((a, b) => b[1].m - a[1].m).map(([k, v]) => `${TYPES[k]?.label || k} — **${eur(v.m)}** (${v.n})`);
+        // Stats agents (tout temps) : missions honorées + total encaissé
+        const parAgent = {};
+        for (const r of rdvs) { if (!r.agentId) continue; if (r.statut !== 'Honoré' && !r.paiement) continue; if (!parAgent[r.agentId]) parAgent[r.agentId] = { miss: 0, enc: 0 }; parAgent[r.agentId].miss++; parAgent[r.agentId].enc += r.paiement?.montant || 0; }
+        const topAgents = Object.entries(parAgent).sort((a, b) => b[1].miss - a[1].miss).slice(0, 6).map(([uid, v]) => `<@${uid}> — **${v.miss}** mission(s) · ${eur(v.enc)}`);
+        let moisNom = ''; try { moisNom = now.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }); } catch { moisNom = `${now.getMonth() + 1}/${now.getFullYear()}`; }
+        const e = new EmbedBuilder().setColor(COL.or).setTitle('📊 Récap des rendez-vous')
+          .addFields(
+            { name: `💰 Encaissé — ${moisNom}`, value: `**${eur(totalMois)}**  ·  ${payes.length} paiement(s)`, inline: false },
+            { name: '🧰 Par prestation (ce mois)', value: lignesType.length ? lignesType.join('\n').slice(0, 1024) : '*Aucun encaissement ce mois.*', inline: false },
+            { name: '🤝 Agents — missions honorées', value: topAgents.length ? topAgents.join('\n').slice(0, 1024) : '*Aucune mission honorée pour le moment.*', inline: false },
+          )
+          .setFooter({ text: 'Iron Wolf Company · Bureau des Rendez-vous' }).setTimestamp();
+        await interaction.editReply({ embeds: [e] }).catch(() => {});
         return true;
       }
 
@@ -801,6 +832,14 @@ async function checkRappelsClients(guild) {
       if (mins > 5 && mins <= 60 && !rdv.sent['1h']) {
         await _mpClient(guild.client, rdv.clientId, '', new EmbedBuilder().setColor(COL.orange).setTitle('⏰ Rappel — votre rendez-vous dans 1 heure').setDescription([`RÉF **${rdv.id}** STOP`, `LIEU ${LIEUX[rdv.lieuKey] || '—'} STOP`, `QUAND ${tsR(dt)} STOP`].join('\n')).setFooter({ text: 'Iron Wolf Company' }));
         rdv.sent['1h'] = true; changed = true;
+      }
+      // Rappel à l'AGENT assigné, 1 h avant la mission.
+      if (rdv.agentId && mins > 5 && mins <= 60 && !rdv.sent['agent1h']) {
+        try {
+          const ag = await guild.client.users.fetch(rdv.agentId);
+          await ag.send({ embeds: [new EmbedBuilder().setColor(COL.vert).setTitle('🤝 Ta mission commence dans 1 heure').setDescription([`RÉF **${rdv.id}** STOP TU ES L'AGENT ASSIGNÉ STOP`, `PRESTATION ${TYPES[rdv.typeKey]?.label || '—'} STOP LIEU ${LIEUX[rdv.lieuKey] || '—'} STOP`, `CLIENT ${rdv.nomRP || '—'} STOP QUAND ${tsR(dt)} STOP`].join('\n')).setFooter({ text: 'Iron Wolf Company · Bureau des Rendez-vous' })] });
+        } catch {}
+        rdv.sent['agent1h'] = true; changed = true;
       }
     }
     if (changed) _persist(db);
