@@ -161,6 +161,19 @@
   .tally .t .n { font-family: var(--font-mono); font-size:.64rem; letter-spacing:.1em; text-transform:uppercase; color: var(--ink-mute); }
   .tally .t .v { font-family: var(--font-display); font-size: var(--step-2); margin-top:3px; font-variant-numeric: tabular-nums; }
 
+  /* Analyse photo */
+  .dropzone { border:2px dashed var(--line); border-radius:8px; padding: 26px 18px; text-align:center; color: var(--ink-mute); cursor:pointer; background: var(--bg); transition: border-color .2s, background .2s; }
+  .dropzone:hover, .dropzone.drag { border-color: var(--gold); color: var(--ink); background: color-mix(in srgb, var(--gold) 9%, var(--bg)); }
+  .dropzone .dz-ico { font-size: 30px; line-height:1; }
+  .dropzone .dz-main { font-size: var(--step-0); margin-top:8px; }
+  .dropzone .dz-sub { font-family: var(--font-mono); font-size:.68rem; letter-spacing:.04em; margin-top:5px; }
+  .dropzone img { max-height: 200px; max-width:100%; border-radius:6px; margin: 0 auto 8px; display:block; }
+  .ia-note { margin-top:14px; padding: 11px 13px; background: var(--surface-2); border:1px solid var(--line); border-left:3px solid var(--teal); border-radius:5px; font-size: var(--step--1); color: var(--ink-soft); }
+  .analyzing { display:flex; align-items:center; gap:11px; color: var(--ink-soft); font-family: var(--font-mono); font-size: var(--step--1); padding: 22px 4px; }
+  .spin { width:16px; height:16px; border:2px solid var(--line); border-top-color: var(--gold); border-radius:50%; animation: spin .7s linear infinite; flex:none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
   footer { border-top:1px solid var(--line); padding: 24px 0 40px; }
   footer .wrap { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; }
   footer .fnote { font-family: var(--font-mono); font-size:.68rem; letter-spacing:.05em; color: var(--ink-mute); text-transform:uppercase; }
@@ -206,6 +219,7 @@
     <button class="tab" role="tab" id="tab-grp" aria-controls="p-grp" aria-selected="true"><span class="e">🕵️</span> Registre &amp; avis de recherche</button>
     <button class="tab" role="tab" id="tab-ecr" aria-controls="p-ecr" aria-selected="false"><span class="e">⛓️</span> Écrou des détenus</button>
     <button class="tab" role="tab" id="tab-amd" aria-controls="p-amd" aria-selected="false"><span class="e">💵</span> Amendes &amp; caisse</button>
+    <button class="tab" role="tab" id="tab-ia" aria-controls="p-ia" aria-selected="false"><span class="e">🔎</span> Analyse photo (IA)</button>
   </div>
 
   <!-- ── Registre / Avis ── -->
@@ -306,6 +320,30 @@
     <div class="liste">
       <div class="liste-head"><h3>Registre des amendes</h3></div>
       <div class="grid" id="amd-list"></div>
+    </div>
+  </section>
+
+  <!-- ── Analyse photo (IA) ── -->
+  <section class="panel" id="p-ia" role="tabpanel" aria-labelledby="tab-ia">
+    <div class="cols">
+      <div class="card">
+        <h3>Analyse d'une photo</h3>
+        <p class="sub">Transférez la photo d'un individu recherché — l'analyse en tire un signalement complet et dresse l'avis de recherche.</p>
+        <div class="field"><label for="ia-nom">Nom (si connu)</label><input type="text" id="ia-nom" maxlength="80" placeholder="Laissez vide si inconnu"></div>
+        <div class="field"><span class="lbl">Photo du suspect</span>
+          <div class="dropzone" id="ia-drop"><div class="dz-ico">📸</div><div class="dz-main">Déposez une photo ici, ou cliquez pour choisir</div><div class="dz-sub">JPG / PNG — reste sur votre appareil</div></div>
+          <input type="file" id="ia-photo" accept="image/*" hidden>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn primary" id="ia-analyser" disabled>🔎 Analyser la photo</button>
+          <button type="button" class="btn ghost" id="ia-reset">Effacer</button>
+        </div>
+        <p class="ia-note"><b>Démo :</b> ici l'analyse lit réellement les <b>couleurs dominantes</b> et la <b>lumière</b> de votre photo pour composer un signalement plausible. Dans le vrai bot, c'est l'<b>IA (Claude)</b> qui décrit la scène en détail et remplit la fiche automatiquement.</p>
+      </div>
+      <div>
+        <p class="previewlbl">Signalement généré</p>
+        <div id="ia-result"></div>
+      </div>
     </div>
   </section>
 </main>
@@ -478,8 +516,14 @@
     }
     if (g.meneur) fields.push({ k: "👤 Meneur / chef", v: g.meneur });
     if (g.territoire) fields.push({ k: wanted ? "📍 Dernière position" : "📍 Territoire", v: g.territoire });
-    if (g.effectif) fields.push({ k: "👥 Effectif & armement", v: g.effectif, full: true });
-    if (g.notes) fields.push({ k: "📝 Renseignements", v: g.notes, full: true });
+    if (g.effectif) fields.push({ k: "👥 Effectif & allure", v: g.effectif, full: true });
+    if (g.ia && g.ia.tenues) fields.push({ k: "👔 Tenue / couleurs", v: g.ia.tenues });
+    if (g.ia && g.ia.armement) fields.push({ k: "🔫 Armement", v: g.ia.armement });
+    if (g.ia && g.ia.montures) fields.push({ k: "🐎 Monture", v: g.ia.montures });
+    if (g.ia && g.ia.activite) fields.push({ k: "🎯 Activité", v: g.ia.activite });
+    if (g.ia && g.ia.trait_distinctif) fields.push({ k: "⭐ Signe distinctif", v: g.ia.trait_distinctif, full: true });
+    var rens = (g.ia && g.ia.resume) ? g.ia.resume : g.notes;
+    if (rens) fields.push({ k: "📝 Renseignements", v: rens, full: true });
     return { avatar: c.color, color: c.color, title: c.emoji + " " + c.banner + " — " + g.nom, desc: c.tag, fields: fields, photo: g.photo, foot: (wanted ? "Avis " : "Fiche ") + g.id + " · " + g.par };
   }
 
@@ -641,6 +685,106 @@
     amendes.push(a); store.set("amendes", amendes); renderAmdList(); renderAmdTally();
     toast("Amende de " + money(montant) + " émise 💵"); ev.target.reset();
   });
+
+  /* ═══════════ MODULE 4 : ANALYSE PHOTO (IA — démo) ═══════════ */
+  var REFCOL = [
+    [[28,24,20],"noir charbon"],[[60,46,34],"brun foncé"],[[110,82,54],"brun"],
+    [[150,120,82],"fauve"],[[192,172,132],"beige"],[[226,216,192],"blanc cassé"],
+    [[120,26,28],"bordeaux"],[[172,44,36],"rouge sang"],[[200,120,42],"ocre"],
+    [[92,96,72],"vert-de-gris"],[[42,62,46],"vert sombre"],[[42,56,82],"bleu nuit"],
+    [[84,104,122],"bleu acier"],[[112,110,114],"gris"],[[204,192,176],"lin"]
+  ];
+  function colorName(r,g,b){ var best=1e9,nm="sombre"; for(var i=0;i<REFCOL.length;i++){ var c=REFCOL[i][0]; var dd=(c[0]-r)*(c[0]-r)+(c[1]-g)*(c[1]-g)+(c[2]-b)*(c[2]-b); if(dd<best){best=dd;nm=REFCOL[i][1];} } return nm; }
+  function pick(seed,arr){ return arr[((seed%arr.length)+arr.length)%arr.length]; }
+
+  var iaPhoto=null, iaDraft=null;
+  var iaDrop=$("#ia-drop"), iaFile=$("#ia-photo"), iaBtn=$("#ia-analyser");
+
+  function iaResetZone(){
+    iaDrop.innerHTML='<div class="dz-ico">📸</div><div class="dz-main">Déposez une photo ici, ou cliquez pour choisir</div><div class="dz-sub">JPG / PNG — reste sur votre appareil</div>';
+    iaPhoto=null; iaBtn.disabled=true; $("#ia-result").innerHTML='<p class="empty">Transférez une photo puis cliquez « Analyser ».</p>';
+  }
+  function iaShowThumb(dataUrl){ iaDrop.innerHTML=""; var im=el("img"); im.src=dataUrl; im.alt=""; iaDrop.appendChild(im); iaDrop.appendChild(el("div","dz-sub","Photo prête — cliquez « Analyser »")); }
+  function iaLoadFile(f){
+    if(!f||!/^image\//.test(f.type||"")) return;
+    var r=new FileReader();
+    r.onload=function(){
+      var img=new Image();
+      img.onload=function(){
+        var max=760,w=img.width,h=img.height;
+        if(w>max||h>max){ var s=Math.min(max/w,max/h); w=Math.round(w*s); h=Math.round(h*s); }
+        var cv=document.createElement("canvas"); cv.width=w; cv.height=h; cv.getContext("2d").drawImage(img,0,0,w,h);
+        try{ iaPhoto=cv.toDataURL("image/jpeg",0.82); }catch(e){ iaPhoto=r.result; }
+        iaShowThumb(iaPhoto); iaBtn.disabled=false;
+      };
+      img.onerror=iaResetZone; img.src=r.result;
+    };
+    r.readAsDataURL(f);
+  }
+  iaDrop.addEventListener("click",function(){ iaFile.click(); });
+  iaFile.addEventListener("change",function(e){ iaLoadFile(e.target.files&&e.target.files[0]); });
+  ["dragover","dragenter"].forEach(function(ev){ iaDrop.addEventListener(ev,function(e){ e.preventDefault(); iaDrop.classList.add("drag"); }); });
+  ["dragleave","drop"].forEach(function(ev){ iaDrop.addEventListener(ev,function(e){ e.preventDefault(); iaDrop.classList.remove("drag"); }); });
+  iaDrop.addEventListener("drop",function(e){ iaLoadFile(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]); });
+
+  function analyzePixels(dataUrl,cb){
+    var img=new Image();
+    img.onload=function(){
+      var S=64,cv=document.createElement("canvas"); cv.width=S; cv.height=S;
+      var ctx=cv.getContext("2d"); ctx.drawImage(img,0,0,S,S);
+      var px; try{ px=ctx.getImageData(0,0,S,S).data; }catch(e){ cb(null); return; }
+      var buckets={},lumSum=0,rS=0,gS=0,bS=0,n=0;
+      for(var i=0;i<px.length;i+=4){ var r=px[i],g=px[i+1],b=px[i+2],a=px[i+3]; if(a<128)continue;
+        lumSum+=0.299*r+0.587*g+0.114*b; rS+=r; gS+=g; bS+=b; n++;
+        var k=(r>>5)+"-"+(g>>5)+"-"+(b>>5); if(!buckets[k])buckets[k]={c:0,r:0,g:0,b:0}; var bk=buckets[k]; bk.c++; bk.r+=r; bk.g+=g; bk.b+=b; }
+      if(!n)n=1;
+      var arr=Object.keys(buckets).map(function(k){ var bk=buckets[k]; return {c:bk.c,r:bk.r/bk.c,g:bk.g/bk.c,b:bk.b/bk.c}; }).sort(function(a,b){ return b.c-a.c; });
+      var names=[]; for(var j=0;j<arr.length&&names.length<3;j++){ var nm=colorName(arr[j].r,arr[j].g,arr[j].b); if(names.indexOf(nm)<0)names.push(nm); }
+      cb({ colors:names, lum:lumSum/n, warmth:(rS-bS)/n, seed:Math.abs(Math.round(rS*0.7+gS*1.3+bS*2.1+arr.length*11)) });
+    };
+    img.onerror=function(){ cb(null); };
+    img.src=dataUrl;
+  }
+
+  function buildIADraft(a,nom,photo){
+    var col=a.colors&&a.colors.length?a.colors:["brun","sombre"];
+    var c1=col[0], c2=col[1]||col[0], accent=col[2]||col[1]||"bordeaux";
+    var lumTxt=a.lum<70?"de nuit":(a.lum<120?"au crépuscule":"en plein jour");
+    var allure=pick(a.seed,["carrure imposante","silhouette sèche et nerveuse","stature moyenne, épaules larges","grande taille, démarche assurée"]);
+    var arme=pick(a.seed+1,["revolver à la ceinture","carabine en bandoulière","fusil à répétition","double holster bien garni","couteau de chasse à la hanche"]);
+    var monture=pick(a.seed+2,["cheval bai harnaché de cuir sombre","alezan robuste","étalon noir","jument grise tachetée","monture non visible sur le cliché"]);
+    var lieu=pick(a.seed+3,["abords de Rhodes","route de Saint-Denis","collines de Big Valley","périphérie de Valentine","marais du bayou"]);
+    var trait=pick(a.seed+4,["foulard "+accent+" noué au cou","chapeau à large bord rabattu","cicatrice marquée à la joue","long manteau "+c1,"barbe fournie, regard dur"]);
+    var activite=pick(a.seed+5,["semble surveiller les environs","posté comme en embuscade","de passage, l'allure pressée","en repérage discret"]);
+    var dngPool=a.lum<90?["elevee","critique","elevee","critique"]:["moyenne","elevee","moyenne","elevee"];
+    var dng=pick(a.seed,dngPool);
+    var tenue="Tons "+c1+(c2&&c2!==c1?" et "+c2:"")+(col[2]&&col[2]!==c1&&col[2]!==c2?", touches de "+col[2]:"");
+    var resume="Individu à "+allure+", vêtu de "+tenue.toLowerCase()+", aperçu "+lumTxt+" aux "+lieu+". Signe marquant : "+trait+". Porte "+arme+". À considérer comme "+(DNG[dng]?DNG[dng].l.toLowerCase():"dangereux")+".";
+    return { id:uid(), nom:(nom&&nom.trim())||"Individu non identifié", meneur:"", categorie:"wanted", dangerosite:dng, territoire:lieu, effectif:allure, consigne:"À appréhender", commanditaire:"Bureau du comté", prime:"", notes:"", photo:photo, par:"Analyse IA (démo)", ts:Date.now(), ia:{ tenues:tenue, armement:arme, montures:monture, activite:activite, trait_distinctif:trait, resume:resume } };
+  }
+
+  function renderIAResult(){
+    var host=$("#ia-result"); host.innerHTML="";
+    var wrap=el("div"); wrap.appendChild(embedNode(afficheOpts(iaDraft)));
+    var acts=el("div","fiche-actions");
+    var save=el("button","mini-btn","✅ Enregistrer au registre");
+    save.addEventListener("click",function(){ groupes.push(iaDraft); store.set("groupes",groupes); renderGrpList(); renderGrpFilters(); toast("Avis enregistré au registre ✅"); save.disabled=true; save.textContent="✅ Enregistré"; });
+    acts.appendChild(save); wrap.appendChild(acts); host.appendChild(wrap);
+  }
+
+  iaBtn.addEventListener("click",function(){
+    if(!iaPhoto)return;
+    var host=$("#ia-result"); host.innerHTML='<div class="analyzing"><span class="spin"></span> L\'analyse examine la photo…</div>';
+    var photo=iaPhoto, nom=$("#ia-nom").value;
+    setTimeout(function(){
+      analyzePixels(photo,function(a){
+        if(!a){ host.innerHTML='<p class="empty">Analyse impossible sur cette image — réessayez avec une autre.</p>'; return; }
+        iaDraft=buildIADraft(a,nom,photo); renderIAResult(); toast("Signalement dressé 🔎");
+      });
+    },850);
+  });
+  $("#ia-reset").addEventListener("click",iaResetZone);
+  iaResetZone();
 
   /* ── Réinitialisation globale ── */
   $("#reset-all").addEventListener("click", function () {
