@@ -343,6 +343,7 @@ RÈGLES STRICTES :
 - AUCUN anachronisme (pas un mot ni un objet moderne), aucun emoji.
 - Garde une longueur comparable (de l'ambiance, pas du blabla en plus).
 - Si une partie est hors-RP entre (parenthèses) ou (( doubles parenthèses )), laisse-la telle quelle.
+- Garde TELS QUELS et INCHANGÉS les mentions Discord (<@…>, <@&…>, <#…>) et les liens (http…) : ne les traduis pas, ne les reformule pas, recopie-les à l'identique là où c'est naturel.
 Réponds UNIQUEMENT avec le message reformulé, sans guillemets ni commentaire.
 
 Message : "${texte}"`;
@@ -3752,11 +3753,22 @@ client.on('messageCreate', async message => {
   try {
     if (message.channel?.id === SALON_RP_REFORMULATION && !message.author?.bot && !message.webhookId && message.guild) {
       const brut = (message.content || '').trim();
-      const skip = !brut || brut.length < 2 || message.attachments.size > 0 || /^[\/!.]/.test(brut) || /^https?:\/\//i.test(brut);
+      const RE_MENTION = /<(?:@[!&]?|#)\d+>/g, RE_EMOJI = /<a?:\w+:\d+>/g, RE_URL = /https?:\/\/\S+/gi;
+      // Ce qui reste une fois retirés pings, salons, émojis et liens : reste-t-il une vraie prose à reformuler ?
+      const motsUtiles = brut.replace(RE_MENTION, ' ').replace(RE_EMOJI, ' ').replace(RE_URL, ' ').replace(/[^0-9A-Za-zÀ-ÿ]+/g, ' ').trim();
+      // On laisse le message TEL QUEL (donc ping/lien fonctionnels) s'il n'y a pas de vrai texte à styliser.
+      const skip = !brut || message.attachments.size > 0 || /^[\/!.]/.test(brut) || motsUtiles.length < 3;
       if (!skip && !process.env.ANTHROPIC_API_KEY) {
         console.log('⚠️ Salon RP: ANTHROPIC_API_KEY absente → reformulation impossible (configure la clé sur Render).');
       } else if (!skip) {
-        const reformule = await _reformulerRP(brut);
+        let reformule = await _reformulerRP(brut);
+        // Filet de sécurité : réinjecte les pings/liens que l'IA aurait retirés (pour qu'ils fonctionnent quand même).
+        if (reformule) {
+          const garder = [];
+          for (const mm of (brut.match(RE_MENTION) || [])) if (!reformule.includes(mm)) garder.push(mm);
+          for (const uu of (brut.match(RE_URL) || [])) if (!reformule.includes(uu)) garder.push(uu);
+          if (garder.length) reformule = (reformule + '\n' + garder.join(' ')).slice(0, 1990);
+        }
         if (!reformule) {
           console.log('⚠️ Salon RP: reformulation vide/échouée (voir log _reformulerRP juste au-dessus — clé/quota/modèle ?).');
           await message.react('⚠️').catch(() => {}); // signal visible : l'IA de reformulation est indisponible (clé/crédits/modèle)
