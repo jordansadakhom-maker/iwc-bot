@@ -366,10 +366,14 @@ function _demarrerMain(t) {
 
   t.phase = 'main';
   t.rue = t.variante === 'holdem' ? 'preflop' : 'mise1';
-  // premier à parler : après la BB (heads-up preflop : le bouton/SB)
-  if (heads) t.tourIdx = sbIdx;
-  else t.tourIdx = _suivant(t, bbIdx, s => _peutAgir(s));
-  if (t.tourIdx < 0) t.tourIdx = _suivant(t, bbIdx, s => s.inHand && !s.folded);
+  // premier à parler : après la BB (heads-up preflop : le bouton/SB), et
+  // TOUJOURS un joueur qui peut réellement agir. Si personne ne peut miser
+  // (tout le monde à tapis sur les blindes), on déroule directement l'abattage.
+  let first;
+  if (heads) first = _peutAgir(t.sieges[sbIdx]) ? sbIdx : _suivant(t, sbIdx, s => _peutAgir(s));
+  else first = _suivant(t, bbIdx, s => _peutAgir(s));
+  if (first < 0) { t.tourIdx = -1; _finRonde(t); }   // aucun joueur ne peut agir → déroulé + abattage
+  else t.tourIdx = first;
   return { ok: true, sbIdx, bbIdx };
 }
 
@@ -398,7 +402,11 @@ function _cashOut(t, s) {
   const net = _netSiege(s);
   try { if (casino.crediter && net !== 0) casino.crediter(s.userId, net); } catch {}
   const i = _idx(t, s.userId);
-  if (i >= 0) t.sieges.splice(i, 1);
+  if (i >= 0) {
+    t.sieges.splice(i, 1);
+    if (i < t.boutonIdx) t.boutonIdx--;                        // garde le bouton donneur au bon siège
+    if (t.boutonIdx >= t.sieges.length) t.boutonIdx = t.sieges.length - 1;
+  }
   return net;
 }
 
@@ -528,6 +536,7 @@ function _components(t) {
       rows.push(new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('pkt_draw').setLabel('Échanger').setEmoji('🔄').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('pkt_cards').setLabel('Voir ma main').setEmoji('👁️').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('pkt_skip').setLabel('Forcer la suite (hôte)').setEmoji('⏭️').setStyle(ButtonStyle.Secondary),
       ));
       return rows;
     }
@@ -623,7 +632,12 @@ async function routeInteraction(interaction) {
     const eph = MessageFlags.Ephemeral;
 
     if (interaction.isButton() && id === 'pkt_open') {
-      if (tables.get(interaction.channelId)) { await interaction.reply({ content: '♠️ Une table de poker est déjà ouverte ici. Rejoins-la plus haut !', flags: eph }); return true; }
+      const dejaLa = tables.get(interaction.channelId);
+      if (dejaLa) {
+        const vivante = await dejaLa.msg?.fetch?.().then(() => true).catch(() => false);
+        if (vivante) { await interaction.reply({ content: '♠️ Une table de poker est déjà ouverte ici. Rejoins-la plus haut !', flags: eph }); return true; }
+        tables.delete(interaction.channelId); // le message a disparu → on repart proprement
+      }
       await interaction.deferReply({ flags: eph });
       const t = _nouvelleTable({ channelId: interaction.channelId, guildId: interaction.guild?.id, hoteId: interaction.user.id, hoteNom: interaction.member?.displayName || interaction.user.username });
       const msg = await interaction.channel.send(_screenPayload(t)).catch(() => null);
@@ -679,8 +693,10 @@ async function routeInteraction(interaction) {
       let sb = parseInt((interaction.fields.getTextInputValue('sb') || '').replace(/[^0-9]/g, ''), 10);
       let bb = parseInt((interaction.fields.getTextInputValue('bb') || '').replace(/[^0-9]/g, ''), 10);
       if (!Number.isFinite(sb) || sb < 1) sb = 1;
+      if (sb > CAVE_MAX) sb = CAVE_MAX;
       if (!Number.isFinite(bb) || bb < sb) bb = sb * 2;
       if (bb > CAVE_MAX) bb = CAVE_MAX;
+      if (sb > bb) sb = bb;              // la petite blinde ne dépasse jamais la grosse
       t.sb = sb; t.bb = bb; t.minRaise = bb;
       await interaction.reply({ content: `⚙️ Blindes réglées : **${_money(sb)} / ${_money(bb)}**.`, flags: eph });
       await _refresh(t); return true;
@@ -783,18 +799,26 @@ async function routeInteraction(interaction) {
       await _refresh(t); return true;
     }
 
-    // ── Passer le joueur (hôte) ──
+    // ── Passer le joueur / forcer la suite (hôte) ──
     if (interaction.isButton() && id === 'pkt_skip') {
       if (!_estHote(t, interaction)) { await interaction.reply({ content: '🔒 Réservé à l\'hôte.', flags: eph }); return true; }
-      if (t.phase !== 'main' || t.rue === 'draw') { await interaction.reply({ content: 'Rien à passer.', flags: eph }); return true; }
-      const cur = t.sieges[t.tourIdx];
-      if (!cur) { await interaction.reply({ content: 'Personne au trait.', flags: eph }); return true; }
-      const action = (t.currentBet - cur.committed > 0) ? 'fold' : 'check';
-      _agir(t, cur, action);
+      if (t.phase !== 'main') { await interaction.reply({ content: 'Rien à passer.', flags: eph }); return true; }
       await interaction.deferUpdate().catch(() => {});
+      if (t.rue === 'draw') {
+        // débloque une phase d'échange figée : les joueurs restants gardent leur main
+        for (const s of _enJeu(t)) if (!s.drawn) s.drawn = true;
+        _finDraw(t);
+      } else {
+        const cur = t.sieges[t.tourIdx];
+        if (cur) { const action = (t.currentBet - cur.committed > 0) ? 'fold' : 'check'; _agir(t, cur, action); }
+      }
       await _refresh(t); return true;
     }
 
+    // filet de sécurité : tout pkt_* non géré est quand même acquitté (jamais « interaction failed »)
+    if ((interaction.isButton?.() || interaction.isModalSubmit?.()) && !interaction.replied && !interaction.deferred) {
+      await interaction.deferUpdate().catch(() => {});
+    }
     return true;
   } catch (e) {
     console.log('❌ pokertable routeInteraction:', e.message);
@@ -809,6 +833,6 @@ module.exports = {
   __engine: {
     RANGS, COULEURS, _rval, _evaluer, _compare, _evaluerMeilleure, _combinaisons, _construireDeck,
     _nouvelleTable, _nouveauSiege, _demarrerMain, _agir, _appliquerDraw, _construirePots, _abattage,
-    _peutAgir, _enJeu, _netSiege, _money, _fmtMain, _screenPayload, _components,
+    _peutAgir, _enJeu, _netSiege, _money, _fmtMain, _screenPayload, _components, tables,
   },
 };

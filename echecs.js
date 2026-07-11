@@ -359,6 +359,7 @@ function _screenPayload(t) {
     const etat = [];
     if (t.echec) etat.push('⚠️ **ÉCHEC au roi !**');
     etat.push(`🎯 Au trait : ${auTrait}  — clique **Jouer un coup**.`);
+    if (t.nulleOfferte) { const nomP = t.nulleOfferte === 'w' ? nomW : nomB; etat.push(`🤝 **${nomP} propose la nulle** — l'adversaire peut cliquer **🤝 Proposer nulle** pour accepter.`); }
     if (t.dernierTexte) etat.push(`↩️ Dernier coup : \`${t.dernierTexte}\``);
     e.setDescription([plateau, '', etat.join('\n')].join('\n'))
       .setFooter({ text: `⚪ ${nomW}  vs  ⚫ ${nomB} · coup ${t.coups}${t.mise > 0 ? ` · enjeu ${_money(t.mise)}` : ''} · MAJ=Blancs, min=Noirs` });
@@ -518,7 +519,12 @@ async function routeInteraction(interaction) {
 
     // Ouvrir une table
     if (interaction.isButton() && id === 'ech_open') {
-      if (tables.get(interaction.channelId)) { await interaction.reply({ content: '♟️ Une table d\'Échecs est déjà ouverte ici. Rejoins-la plus haut !', flags: eph }); return true; }
+      const dejaLa = tables.get(interaction.channelId);
+      if (dejaLa) {
+        const vivante = await dejaLa.msg?.fetch?.().then(() => true).catch(() => false);
+        if (vivante) { await interaction.reply({ content: '♟️ Une table d\'Échecs est déjà ouverte ici. Rejoins-la plus haut !', flags: eph }); return true; }
+        tables.delete(interaction.channelId); // message disparu → on repart proprement
+      }
       await interaction.deferReply({ flags: eph });
       const t = _nouvellePartie(interaction);
       t.joueurs.w = { userId: interaction.user.id, nom: t.hoteNom }; // l'hôte prend les Blancs par défaut
@@ -652,15 +658,15 @@ async function routeInteraction(interaction) {
       const col = _couleurDe(t, interaction.user.id);
       if (!col) { await interaction.reply({ content: '👀 Tu n\'es pas un joueur de cette partie.', flags: eph }); return true; }
       if (t.nulleOfferte && t.nulleOfferte !== col) {
-        // l'adversaire avait proposé → on accepte
-        await interaction.deferUpdate().catch(() => {});
+        // l'adversaire avait proposé → on accepte. _terminer AVANT tout await (anti double-clic).
         _terminer(t, null, 'accord mutuel');
+        await interaction.deferUpdate().catch(() => {});
         await _refresh(t);
         return true;
       }
       t.nulleOfferte = col;
-      const advId = col === 'w' ? t.joueurs.b?.userId : t.joueurs.w?.userId;
-      await interaction.reply({ content: `🤝 Proposition de nulle envoyée. ${advId ? `<@${advId}>` : 'L\'adversaire'} peut cliquer **🤝 Proposer nulle** à son tour pour accepter.`, flags: eph });
+      await interaction.deferUpdate().catch(() => {});
+      await _refresh(t); // le plateau affiche « X propose la nulle » pour l'adversaire
       return true;
     }
 
@@ -669,14 +675,17 @@ async function routeInteraction(interaction) {
       if (t.phase !== 'jeu') { await interaction.reply({ content: 'La partie n\'est pas en cours.', flags: eph }); return true; }
       const col = _couleurDe(t, interaction.user.id);
       if (!col) { await interaction.reply({ content: '👀 Tu n\'es pas un joueur de cette partie.', flags: eph }); return true; }
-      await interaction.deferUpdate().catch(() => {});
+      // _terminer AVANT le premier await : un 2e clic concurrent verra phase='fini' et sera rejeté
+      // (sinon la mise était créditée deux fois).
       _terminer(t, enemy(col), 'abandon adverse');
+      await interaction.deferUpdate().catch(() => {});
       await _refresh(t);
       return true;
     }
 
     // ── Rejouer ──
     if (interaction.isButton() && id === 'ech_rejouer') {
+      if (!_couleurDe(t, interaction.user.id) && !_estGestion(interaction.member)) { await interaction.reply({ content: '🔒 Seuls les joueurs (ou la Direction) peuvent relancer.', flags: eph }); return true; }
       const w = t.joueurs.w, b = t.joueurs.b, mise = t.mise, hoteId = t.hoteId, hoteNom = t.hoteNom;
       const nt = _nouvellePartie({ channelId: t.channelId, guild: { id: t.guildId }, user: { id: hoteId }, member: { displayName: hoteNom } });
       nt.joueurs.w = w; nt.joueurs.b = b; nt.mise = mise; nt.msg = t.msg; nt.messageId = t.messageId;
@@ -686,6 +695,10 @@ async function routeInteraction(interaction) {
       return true;
     }
 
+    // filet de sécurité : tout ech_* non géré est quand même acquitté (jamais « interaction failed »)
+    if ((interaction.isButton?.() || interaction.isModalSubmit?.()) && !interaction.replied && !interaction.deferred) {
+      await interaction.deferUpdate().catch(() => {});
+    }
     return true; // ech_* pris en charge
   } catch (e) {
     console.log('❌ echecs routeInteraction:', e.message);

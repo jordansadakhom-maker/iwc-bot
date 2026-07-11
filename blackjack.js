@@ -283,7 +283,8 @@ function _components(t) {
       new ButtonBuilder().setCustomId('bj_split').setLabel('Séparer').setEmoji('🔀').setStyle(ButtonStyle.Secondary).setDisabled(!(s && _splittable(t, s))),
     ];
     // Assurance : proposée uniquement si le croupier montre un As, avant d'avoir agi.
-    if (asVisible && s && s.main.length === 2 && !s.assurance) {
+    // Jamais sur une main issue d'un split (l'assurance ne se prend qu'une fois, sur la main initiale).
+    if (asVisible && s && s.main.length === 2 && !s.assurance && !s.isSplitHand) {
       comp.push(new ButtonBuilder().setCustomId('bj_assur').setLabel('Assurance').setEmoji('🛡️').setStyle(ButtonStyle.Secondary));
     }
     rows.push(new ActionRowBuilder().addComponents(...comp));
@@ -490,7 +491,7 @@ async function routeInteraction(interaction) {
       if (t.phase === 'jeu') { await interaction.reply({ content: '⏳ Une manche est en cours — (re)mise à la fin de celle-ci.', flags: eph }); return true; }
       const dejaAssis = _siege(t, interaction.user.id);
       if (id === 'bj_mise' && !dejaAssis) { await interaction.reply({ content: 'Assieds-toi d\'abord (bouton 🪑) pour poser une mise.', flags: eph }); return true; }
-      if (!dejaAssis && t.sieges.length >= MAX_SIEGES) { await interaction.reply({ content: '🈵 La table est complète (' + MAX_SIEGES + ' joueurs).', flags: eph }); return true; }
+      if (!dejaAssis && t.sieges.filter(s => !s.isSplitHand).length >= MAX_SIEGES) { await interaction.reply({ content: '🈵 La table est complète (' + MAX_SIEGES + ' joueurs).', flags: eph }); return true; }
       const modal = new ModalBuilder().setCustomId('bj_sit_modal').setTitle(dejaAssis ? '💵 Changer ma mise' : '🪑 S\'asseoir à la table')
         .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('mise').setLabel('Votre mise (max 100 $)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(3).setValue(dejaAssis ? String(dejaAssis.mise) : '').setPlaceholder('Ex : 50 — plafond 100 $')));
       await interaction.showModal(modal); return true;
@@ -503,7 +504,7 @@ async function routeInteraction(interaction) {
       let s = _siege(t, interaction.user.id);
       if (s) { s.mise = mise; }
       else {
-        if (t.sieges.length >= MAX_SIEGES) { await interaction.reply({ content: '🈵 Table complète.', flags: eph }); return true; }
+        if (t.sieges.filter(x => !x.isSplitHand).length >= MAX_SIEGES) { await interaction.reply({ content: '🈵 Table complète.', flags: eph }); return true; }
         s = { userId: interaction.user.id, nom: interaction.member?.displayName || interaction.user.username, mise, main: [], statut: 'attente', resultat: '', net: 0 };
         t.sieges.push(s);
       }
@@ -540,6 +541,7 @@ async function routeInteraction(interaction) {
       const s = t.sieges[t.tourIdx];
       if (!s || s.userId !== interaction.user.id) { await interaction.reply({ content: '⏳ L\'assurance se prend à ton tour.', flags: eph }); return true; }
       if (t.croupier.main[0]?.r !== 'A') { await interaction.reply({ content: 'Assurance possible seulement si le croupier montre un As.', flags: eph }); return true; }
+      if (s.isSplitHand) { await interaction.reply({ content: 'L\'assurance ne se prend qu\'une fois, sur la main de départ (pas sur une main séparée).', flags: eph }); return true; }
       if (s.main.length !== 2 || s.assurance) { await interaction.reply({ content: 'Trop tard pour t\'assurer sur cette main.', flags: eph }); return true; }
       await interaction.deferUpdate().catch(() => {});
       s.assurance = Math.max(1, Math.round(s.mise / 2));
@@ -552,6 +554,7 @@ async function routeInteraction(interaction) {
       const s = t.sieges[t.tourIdx];
       if (!s) { await interaction.reply({ content: 'Aucun joueur à jouer.', flags: eph }); return true; }
       if (s.userId !== interaction.user.id) { await interaction.reply({ content: '⏳ Ce n\'est pas ton tour — c\'est à **' + s.nom + '** de jouer.', flags: eph }); return true; }
+      _clearTimer(t); // évite que le timer AFK ne se déclenche pendant le round-trip de l'action
       await interaction.deferUpdate().catch(() => {});
       if (id === 'bj_hit') {
         s.main.push(_piocher(t));
@@ -579,6 +582,7 @@ async function routeInteraction(interaction) {
       if (!s) { await interaction.reply({ content: 'Aucun joueur à jouer.', flags: eph }); return true; }
       if (s.userId !== interaction.user.id) { await interaction.reply({ content: '⏳ Ce n\'est pas ton tour — c\'est à **' + s.nom + '** de jouer.', flags: eph }); return true; }
       if (!_splittable(t, s)) { await interaction.reply({ content: '🔀 Séparation impossible : il faut **2 cartes de même rang** (max 4 mains).', flags: eph }); return true; }
+      _clearTimer(t);
       await interaction.deferUpdate().catch(() => {});
       const rang = s.main[0].r;
       t.ambiance = s.nom + ' sépare ses ' + rang + ' en deux mains.';
@@ -639,6 +643,10 @@ async function routeInteraction(interaction) {
       return true;
     }
 
+    // filet de sécurité : tout bj_* non géré est quand même acquitté (jamais « interaction failed »)
+    if ((interaction.isButton?.() || interaction.isModalSubmit?.()) && !interaction.replied && !interaction.deferred) {
+      await interaction.deferUpdate().catch(() => {});
+    }
     return true; // customId bj_* pris en charge
   } catch (e) {
     console.log('❌ blackjack routeInteraction:', e.message);
