@@ -10508,7 +10508,7 @@ function _panneauSaloonPayload() {
       '```',
       '*Poussez la porte, tirez une chaise. Choisissez votre poison : cartes, dés ou couteau. Celui qui ouvre une table en devient l\'**hôte**.*',
       '',
-      '🃏 **Blackjack** — battez le croupier sans dépasser 21 *(payé 6:5, assurance possible)*.',
+      '🃏 **Blackjack** — battez le croupier sans dépasser 21 *(tirer, doubler, séparer, assurance)*.',
       '🎲 **Poker Menteur** — misez, bluffez, criez « Menteur ! » ou tentez le « Pile-poil ! » *(dés cachés)*.',
       '🎴 **Faro** — misez sur les rangs, le donneur tourne les cartes *(la banque prend sa commission)*.',
       '♠️ **Poker** — vraie table multijoueur : **Texas Hold\'em** ou **5 Cartes**, blindes, enchères, pot & pots secondaires.',

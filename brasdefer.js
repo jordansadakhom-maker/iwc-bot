@@ -339,7 +339,11 @@ async function routeInteraction(interaction) {
     // Ouvrir une table
     if (interaction.isButton() && id === 'brf_open') {
       const exist = tables.get(interaction.channelId);
-      if (exist) { await interaction.reply({ content: '💪 Une table de Bras de fer est déjà ouverte ici. Rejoins-la plus haut !', flags: eph }); return true; }
+      if (exist) {
+        const vivante = await exist.msg?.fetch?.().then(() => true).catch(() => false);
+        if (vivante) { await interaction.reply({ content: '💪 Une table de Bras de fer est déjà ouverte ici. Rejoins-la plus haut !', flags: eph }); return true; }
+        _clearTimer(exist); tables.delete(interaction.channelId); // message disparu → on repart proprement
+      }
       await interaction.deferReply({ flags: eph });
       const t = _creerTable(interaction);
       const msg = await interaction.channel.send(_screenPayload(t)).catch(() => null);
@@ -374,6 +378,11 @@ async function routeInteraction(interaction) {
     // ── SOLO ──
     if (interaction.isButton() && id === 'brf_solo') {
       if (t.phase === 'jeu') { await interaction.reply({ content: '⏳ Une passe est déjà en cours — finis-la.', flags: eph }); return true; }
+      // Ne pas écraser un duel en préparation (anti-griefing) : si des joueurs sont
+      // inscrits au duel (autres que celui qui clique), le solo est refusé.
+      if (t.mode === 'duel' && t.joueurs.some(j => j.userId !== interaction.user.id)) {
+        await interaction.reply({ content: '⚔️ Un **duel est en préparation** à cette table. Clique **Rejoindre** pour y entrer, ou attends qu\'il se termine.', flags: eph }); return true;
+      }
       const nom = interaction.member?.displayName || interaction.user.username;
       t.mode = 'solo';
       t.joueurs = [{ userId: interaction.user.id, nom }];
@@ -473,6 +482,10 @@ async function routeInteraction(interaction) {
       return true;
     }
 
+    // filet de sécurité : tout brf_* non géré est quand même acquitté (jamais « interaction failed »)
+    if ((interaction.isButton?.() || interaction.isModalSubmit?.()) && !interaction.replied && !interaction.deferred) {
+      await interaction.deferUpdate().catch(() => {});
+    }
     return true; // customId brf_* pris en charge
   } catch (e) {
     console.log('❌ brasdefer routeInteraction:', e.message);
