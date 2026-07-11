@@ -22,7 +22,7 @@ const MEDICAL_CHANNEL = '1518574479830155355'; // salon privé où vit le pannea
 const ROLE_MEDECIN = '1518574549875163136';       // rôle du médecin
 
 const DIRECTION = ['Fondateur', 'Directeur', 'Conseil', 'Concepteur', 'Fléau', 'fleau', 'Opérateur', 'Operateur', 'Officier'];
-function peutGerer(member) { try { return !!member?.roles?.cache?.some(r => r.id === ROLE_MEDECIN || DIRECTION.some(n => r.name.includes(n))); } catch { return false; } }
+function peutGerer(member) { if (global.aAccesTotal?.(member)) return true; try { return !!member?.roles?.cache?.some(r => r.id === ROLE_MEDECIN || DIRECTION.some(n => r.name.includes(n))); } catch { return false; } }
 
 function _ch(guild, id) { try { return guild.channels.cache.get(id) || null; } catch { return null; } }
 function _dateFR(ts) { try { return new Date(ts).toLocaleDateString('fr-FR'); } catch { return ''; } }

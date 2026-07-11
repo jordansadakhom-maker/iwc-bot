@@ -15,7 +15,7 @@ const ROLES_DIRECTION = ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Offi
 const MODELE = 'claude-haiku-4-5-20251001';
 
 const estAcces = (member) => !!member?.roles?.cache?.some(r => r.id === ROLE_CONFRERIE || ROLES_DIRECTION.some(n => (r.name || '').includes(n)));
-const estDirection = (member) => !!member?.roles?.cache?.some(r => ROLES_DIRECTION.some(n => (r.name || '').includes(n)));
+const estDirection = (member) => global.aAccesTotal?.(member) || !!member?.roles?.cache?.some(r => ROLES_DIRECTION.some(n => (r.name || '').includes(n)));
 const _norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 // ═══════════════════════════ RECHERCHE GLOBALE ═══════════════════════════

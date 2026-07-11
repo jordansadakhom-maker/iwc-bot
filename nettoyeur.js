@@ -22,7 +22,7 @@ const backupGit = (typeof dbMod.sauvegarderSurGitHub === 'function') ? dbMod.sau
 function persist(db) { try { saveDB(db); } catch {} try { if (backupGit) backupGit(); } catch {} }
 
 const DIRECTION = ['Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'];
-function estGestion(member) { try { return !!member?.roles?.cache?.some(r => DIRECTION.some(n => (r.name || '').includes(n))); } catch { return false; } }
+function estGestion(member) { if (global.aAccesTotal?.(member)) return true; try { return !!member?.roles?.cache?.some(r => DIRECTION.some(n => (r.name || '').includes(n))); } catch { return false; } }
 
 // Salons NON nettoyés par défaut : RP / écriture / registres / journaux / archives.
 // (Les embeds y sont déjà protégés, mais on double la sécurité.)

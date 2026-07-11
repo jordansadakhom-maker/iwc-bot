@@ -87,7 +87,7 @@ function estMembre(member) {
 const DIRECTION_ROLE_NAMES = ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Conseil'];
 // Membres de La Confrérie (pôle illégal) — à pinger sur un avis de recherche (mêmes rôles que index.js)
 const CONFRERIE_ROLE_NAMES = ['Concepteur', 'Fléau', 'fleau', 'Exécuteur', 'éxécuteur', 'execu', 'Condamné', 'condamne', 'Maudit', 'Confrérie', 'confrerie'];
-function estDirection(member) {
+function estDirection(member) { if (global.aAccesTotal?.(member)) return true;
   return !!member?.roles?.cache?.some(r => DIRECTION_ROLE_NAMES.some(n => r.name.includes(n)));
 }
 

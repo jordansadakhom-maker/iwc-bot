@@ -9,7 +9,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags
 const { loadDB, saveDB, sauvegarderSurGitHub } = require('./db');
 
 const ROLES_DIRECTION = ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier', 'Instructeur', 'Secrétaire'];
-const estDirection = (member) => !!member?.roles?.cache?.some(r => ROLES_DIRECTION.some(n => r.name.includes(n)));
+const estDirection = (member) => global.aAccesTotal?.(member) || !!member?.roles?.cache?.some(r => ROLES_DIRECTION.some(n => r.name.includes(n)));
 
 function _state() { const db = loadDB(); db.modeTest = db.modeTest || { actif: false }; return db.modeTest; }
 function estActif() { try { return !!_state().actif; } catch { return false; } }

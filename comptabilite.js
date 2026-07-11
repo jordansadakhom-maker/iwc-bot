@@ -17,7 +17,7 @@ const backup = (typeof dbMod.sauvegarderSurGitHub === 'function') ? dbMod.sauveg
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || null;
 
 const DIRECTION_ROLES = ['Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'];
-function estDirection(m) { try { return !!m?.roles?.cache?.some(r => DIRECTION_ROLES.some(n => r.name.includes(n))); } catch { return false; } }
+function estDirection(m) { if (global.aAccesTotal?.(m)) return true; try { return !!m?.roles?.cache?.some(r => DIRECTION_ROLES.some(n => r.name.includes(n))); } catch { return false; } }
 
 function _eur(n) { return (parseFloat(n) || 0).toLocaleString('fr-FR'); }
 function _suivi(c) { return c.suivi || (c.status === 'honore' ? 'Honoré' : c.status === 'signe' ? 'En cours' : c.status === 'valide' ? 'Validé' : 'En attente'); }
