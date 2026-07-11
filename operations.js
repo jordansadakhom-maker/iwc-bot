@@ -180,17 +180,22 @@ function _champsBriefing(txt) {
 function _embedOrdre(op) {
   const t = TYPES[op.typeKey] || {};
   const dt = _slotToDate(op.quandSlot);
-  const col = op.pole === 'legal' ? COL.bleu : COL.rouge;
+  const _stOp = ({ en_cours: { l: '🟢 En cours', c: null }, terminee: { l: '✅ Terminée', c: 0x2ECC71 }, annulee: { l: '❌ Annulée', c: 0x95A5A6 } })[op.status] || { l: '🟡 En préparation', c: null };
+  const col = _stOp.c || (op.pole === 'legal' ? COL.bleu : COL.rouge);
+  const _titre = op.status === 'annulee' ? `❌ OPÉRATION ANNULÉE — « ${op.name} »`
+    : op.status === 'terminee' ? `✅ OPÉRATION TERMINÉE — « ${op.name} »`
+      : `🎯 ORDRE D'OPÉRATION — « ${op.name} »`;
+  const _desc = op.status === 'annulee'
+    ? ['```', ' COMMANDEMENT · IRON WOLF COMPANY ', '```', '❌ **Cette opération a été annulée.**'].join('\n')
+    : op.status === 'terminee'
+      ? ['```', ' COMMANDEMENT · IRON WOLF COMPANY ', '```', '✅ **Cette opération est terminée.**'].join('\n')
+      : ['```', ' COMMANDEMENT · IRON WOLF COMPANY ', '```', 'Par ordre du Commandement, l\'opération ci-dessous est **ouverte aux engagements**.', 'Tout membre concerné peut s\'enrôler avec **✋ Je participe**.'].join('\n');
   const e = new EmbedBuilder()
     .setColor(col)
-    .setTitle(`🎯 ORDRE D'OPÉRATION — « ${op.name} »`)
-    .setDescription([
-      '```', ' COMMANDEMENT · IRON WOLF COMPANY ', '```',
-      'Par ordre du Commandement, l\'opération ci-dessous est **ouverte aux engagements**.',
-      'Tout membre concerné peut s\'enrôler avec **✋ Je participe**.',
-    ].join('\n'))
+    .setTitle(_titre)
+    .setDescription(_desc)
     .addFields(
-      { name: 'Statut', value: '🟡 En préparation', inline: true },
+      { name: 'Statut', value: _stOp.l, inline: true },
       { name: 'Pôle', value: op.pole === 'legal' ? '⚖️ Pôle Légal' : '🔪 La Confrérie', inline: true },
       { name: '🎯 Type', value: t.label || 'Opération', inline: true },
       { name: '🤠 Organisé par', value: op.createurId ? `<@${op.createurId}>` : (op.createurNom || '—'), inline: true },
@@ -209,6 +214,12 @@ function _embedOrdre(op) {
   return e;
 }
 function _boutons(op) {
+  // Opération clôturée → plus de boutons d'action, juste un rappel verrouillé.
+  if (op.status === 'annulee' || op.status === 'terminee') {
+    return [new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`op_closed_${op.id}`).setLabel(op.status === 'annulee' ? '❌ Opération annulée' : '✅ Opération terminée').setStyle(ButtonStyle.Secondary).setDisabled(true),
+    )];
+  }
   const rowP = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`op_participer_${op.id}`).setLabel('✋ Je participe').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`op_retrait_${op.id}`).setLabel('🚪 Me retirer').setStyle(ButtonStyle.Secondary),
@@ -243,6 +254,10 @@ async function refreshOpById(guild, opId) {
     if (!ch) return;
     const msg = await ch.messages.fetch(op.msgId).catch(() => null);
     if (msg) await msg.edit({ embeds: [_embedOrdre(op)], components: _boutons(op) }).catch(() => {});
+    // Opération clôturée dans un fil de forum → on l'archive pour qu'elle quitte la liste active (désencombrement).
+    if (['annulee', 'terminee'].includes(op.status) && typeof ch.isThread === 'function' && ch.isThread() && !ch.archived) {
+      await ch.setArchived(true, `Opération ${op.status}`).catch(() => {});
+    }
   } catch {}
 }
 
