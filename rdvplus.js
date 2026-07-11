@@ -410,10 +410,17 @@ async function routeInteraction(interaction) {
         const idOpt = (interaction.options.getString('id') || '').replace(/\D/g, '');
         const clientId = membre?.id || idOpt;
         if (!clientId) { await interaction.reply({ content: '⚠️ Indique un membre ou un ID Discord.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
-        const store = _store(loadDB());
+        const db = loadDB(); const store = _store(db);
         const c = store.clients[clientId];
         const rdvs = Object.values(store.rdvs).filter(r => r.clientId === clientId).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 6);
-        if (!c && !rdvs.length) { await interaction.reply({ content: `📭 Aucun dossier pour <@${clientId}>.`, flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+        // Historique unifié : télégrammes (ancien flux) + conversations suivies.
+        const telegrammes = (db.rdvClients || []).filter(r => r.demandeurId === clientId).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        const convs = Object.values(db.conversations || {}).filter(cv => cv.demandeurId === clientId);
+        if (!c && !rdvs.length && !telegrammes.length && !convs.length) { await interaction.reply({ content: `📭 Aucun dossier pour <@${clientId}>.`, flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+        const teleLignes = telegrammes.slice(0, 4).map(r => { const st = r.statut === 'fixe' ? '📅 fixé' : r.statut === 'refuse' ? '❌ décliné' : '🟡 en attente'; return `${st} · ${String(r.objet || '—')}`.slice(0, 90); }).join('\n');
+        const convOuvertes = convs.filter(cv => cv.status === 'ouvert').length;
+        const derniereConv = convs.slice().sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0))[0];
+        const convLien = derniereConv?.threadId && interaction.guild ? `\n[Ouvrir la dernière conversation](https://discord.com/channels/${interaction.guild.id}/${derniereConv.threadId})` : '';
         const honored = c?.honored || 0, noshow = c?.noshow || 0, total = c?.total || rdvs.length;
         let fiab = '🆕 Nouveau client';
         if (total >= 1) {
@@ -437,6 +444,8 @@ async function routeInteraction(interaction) {
             { name: '👻 Lapins', value: String(noshow), inline: true },
             ...(c?.avis && (c.avis.bien || c.avis.moyen || c.avis.mauvais) ? [{ name: '⭐ Satisfaction', value: `👍 ${c.avis.bien || 0} · 😐 ${c.avis.moyen || 0} · 👎 ${c.avis.mauvais || 0}`, inline: false }] : []),
             { name: '🕘 Derniers RDV', value: hist, inline: false },
+            ...(telegrammes.length ? [{ name: `📨 Télégrammes (${telegrammes.length})`, value: (teleLignes || '—').slice(0, 1024), inline: false }] : []),
+            ...(convs.length ? [{ name: `🧵 Conversations (${convs.length})`, value: `${convs.length} au total · ${convOuvertes} ouverte(s)${convLien}`.slice(0, 1024), inline: false }] : []),
           )] }).catch(() => {});
         return true;
       }

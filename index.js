@@ -5218,6 +5218,12 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
       new ButtonBuilder().setCustomId(`rdvclient_repondre_${rdvId}`).setLabel('💬 Répondre au client').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`rdvclient_refuse_${rdvId}`).setLabel('❌ Décliner').setStyle(ButtonStyle.Danger),
     );
+    // Réponses rapides (1 clic) — envoient un message-type au client + trace dans le fil.
+    const rowQr = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`rdvclient_qr_recu_${rdvId}`).setLabel('👋 Accuser réception').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`rdvclient_qr_prec_${rdvId}`).setLabel('❓ Demander des précisions').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`rdvclient_qr_creneau_${rdvId}`).setLabel('🕐 Proposer un créneau').setStyle(ButtonStyle.Secondary),
+    );
     // Envoyer le télégramme dans le salon des demandes, avec PING Opérateur + Homme de main + Fondateur
     const dest = interaction.guild.channels.cache.get('1512175624176009348') || interaction.channel;
     let msgTele = null;
@@ -5228,7 +5234,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
       msgTele = await dest.send({
         content: `${ping ? ping + ' — ' : ''}📨 **Nouveau télégramme à traiter, un client demande un rendez-vous.**`,
         embeds: [embed],
-        components: [row],
+        components: [row, rowQr],
         allowedMentions: { roles: mentionIds },
       }).catch(() => null);
       // Épingler le télégramme en attente (tâche à traiter)
@@ -5239,7 +5245,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
         if (conv?.threadId) {
           // Lien visible vers l'historique de l'échange, directement sur la carte.
           embed.addFields({ name: '🧵 Suivi de l\'échange', value: `Historique complet de la conversation : <#${conv.threadId}>`, inline: false });
-          await msgTele.edit({ embeds: [embed], components: [row] }).catch(() => {});
+          await msgTele.edit({ embeds: [embed], components: [row, rowQr] }).catch(() => {});
         } else {
           console.log('⚠️ Télégramme: fil de conversation non créé (permission « Créer des fils » manquante dans le salon des demandes ?)');
           try { monitoring.logTech?.(interaction.client, 'warn', 'Fil de conversation non créé', 'Impossible de créer le fil de suivi du télégramme — vérifie la permission « Créer des fils publics/privés » du bot dans le salon des demandes.'); } catch {}
@@ -5383,8 +5389,9 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     // Notion garde la traçabilité : on nettoie le salon en supprimant le télégramme traité
     const msgFixe = interaction.message;
     setTimeout(() => { msgFixe?.delete?.().catch(() => {}); }, 8000);
-    // Trace : consigner la décision dans le fil de suivi.
+    // Trace : consigner la décision dans le fil de suivi + programmer la clôture auto (2 jours après le RDV fixé).
     try { await telegramme.ajouterAuFil?.(client, rdvId, 'note', 'Décision', `✅ Rendez-vous fixé : ${dateRdv} à ${heure} — ${lieuRdv} (par ${interaction.member.displayName})`); } catch {}
+    try { telegramme.marquerFixe?.(rdvId); } catch {}
     // Suite logique proposée à la Direction : accès Client puis contrat (mêmes boutons que sur la carte #agenda).
     const rowSuite = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`rdvclient_acces_${rdvId}`).setLabel('🎫 Donner l\'accès Client').setStyle(ButtonStyle.Secondary),
@@ -5427,6 +5434,27 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     return interaction.editReply({ content: '✅ Message envoyé au client. Il pourra vous répondre (ça s\'affichera dans le fil de suivi), et vous pourrez fixer le RDV quand vous serez d\'accord.' });
   }
 
+  // ── RÉPONSES RAPIDES (1 clic) : accuser réception / demander des précisions / proposer un créneau ──
+  if (interaction.isButton() && /^rdvclient_qr_(recu|prec|creneau)_/.test(interaction.customId)) {
+    if (!_peutGererRdv(interaction.member)) return interaction.reply({ content: '❌ Réservé aux Opérateurs.', flags: MessageFlags.Ephemeral });
+    const mQr = interaction.customId.match(/^rdvclient_qr_(recu|prec|creneau)_(.+)$/);
+    const typeQr = mQr[1], rdvId = mQr[2];
+    const db = loadDB();
+    const rdv = (db.rdvClients || []).find(r => r.id === rdvId) || _rdvDepuisEmbed(interaction, rdvId);
+    if (!rdv?.demandeurId) return interaction.reply({ content: '❌ Client introuvable pour cette demande.', flags: MessageFlags.Ephemeral });
+    const PRESETS = {
+      recu:    'Bonjour, nous avons bien reçu votre demande. Nous revenons vers vous très vite. — Iron Wolf Company',
+      prec:    'Bonjour, pourriez-vous nous préciser quelques détails (lieu exact, nombre de personnes concernées, éventuel budget) afin de mieux vous servir ? — Iron Wolf Company',
+      creneau: 'Bonjour, seriez-vous disponible en soirée cette semaine ? Proposez-nous un créneau qui vous arrange et nous nous organiserons. — Iron Wolf Company',
+    };
+    const msgQr = PRESETS[typeQr];
+    const libelle = typeQr === 'recu' ? 'accusé de réception' : typeQr === 'prec' ? 'demande de précisions' : 'proposition de créneau';
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try { const u = await client.users.fetch(rdv.demandeurId); await u.send(['💬 **Iron Wolf Company — Le secrétariat vous répond**', `*(au sujet de votre demande : ${rdv.objet || '—'})*`, '', msgQr, '', "— *Le secrétariat de l'Iron Wolf Company*"].join('\n')).catch(() => {}); } catch {}
+    try { await telegramme.ajouterAuFil?.(client, rdvId, 'equipe', interaction.member?.displayName || interaction.user.username, msgQr); } catch {}
+    return interaction.editReply({ content: `✅ Réponse rapide envoyée au client (${libelle}). Sa réponse s'affichera dans le fil de suivi.` });
+  }
+
   // ── DÉCLINER ──
   if (interaction.isButton() && interaction.customId.startsWith('rdvclient_refuse_')) {
     if (!_peutGererRdv(interaction.member)) return interaction.reply({ content: '❌ Réservé aux Opérateurs.', flags: MessageFlags.Ephemeral });
@@ -5459,8 +5487,9 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     await interaction.message?.unpin().catch(() => {}); // désépingler : tâche terminée
     const msgRef = interaction.message;
     setTimeout(() => { msgRef?.delete?.().catch(() => {}); }, 8000);
-    // Trace : consigner la décision dans le fil de suivi.
+    // Trace : consigner la décision dans le fil de suivi, puis clôturer automatiquement (récap archivé).
     try { await telegramme.ajouterAuFil?.(client, rdvId, 'note', 'Décision', `❌ Demande déclinée par ${interaction.member.displayName}`); } catch {}
+    try { await telegramme.cloturerAuto?.(client, guild, rdvId, `Déclinée par ${interaction.member.displayName}`); } catch {}
     return;
   }
 

@@ -110,15 +110,18 @@ async function _archiverConversationNotion(conv, resume) {
 }
 
 // (B + C + E) Récap de clôture : posté dans le fil ET le registre, archivé Notion, avec lien.
-async function _cloturerAvecRecap(interaction, conv, thread) {
+async function _cloturerAvecRecap(ctx, conv, thread) {
   try {
+    const byName = (ctx && ctx.byName) || 'Système';
+    const client = ctx && ctx.client;
+    const guildId = ctx && ctx.guild && ctx.guild.id;
     const msgs = Array.isArray(conv.messages) ? conv.messages : [];
     const nbClient = msgs.filter(m => m.from === 'client').length;
     const nbEquipe = msgs.filter(m => m.from === 'equipe').length;
     const nbNotes = msgs.filter(m => m.from === 'note').length;
     const ouvertLe = conv.createdAt ? new Date(conv.createdAt) : null;
     const clotLe = new Date();
-    const lien = (interaction.guild?.id && conv.threadId) ? `https://discord.com/channels/${interaction.guild.id}/${conv.threadId}` : null;
+    const lien = (guildId && conv.threadId) ? `https://discord.com/channels/${guildId}/${conv.threadId}` : null;
 
     const resume = msgs.length ? await _resumeIA(conv) : null;
 
@@ -136,7 +139,7 @@ async function _cloturerAvecRecap(interaction, conv, thread) {
         { name: '⏱️ Durée', value: ouvertLe ? _dureeHumaine(clotLe - ouvertLe) : '—', inline: true },
         { name: '✍️ Ont répondu', value: (repondants.join(', ') || '—').slice(0, 1024), inline: false },
       )
-      .setFooter({ text: `Clôturé par ${interaction.user.username} • IWC — Confidentiel` }).setTimestamp();
+      .setFooter({ text: `Clôturé par ${byName} • IWC — Confidentiel` }).setTimestamp();
     if (premier) recap.addFields({ name: '📩 Demande initiale', value: String(premier.content || '—').slice(0, 1024) });
     if (resume) recap.addFields({ name: '🧠 Résumé', value: resume.slice(0, 1024) });
     if (lien) recap.addFields({ name: '🔗 Conversation', value: `[Ouvrir le fil](${lien})` });
@@ -149,15 +152,15 @@ async function _cloturerAvecRecap(interaction, conv, thread) {
         const t = m.at ? new Date(m.at).toLocaleString('fr-FR') : '';
         return `[${t}] ${who} :\n${m.content || ''}${m.files ? `\n  (${m.files} pièce(s) jointe(s))` : ''}`;
       });
-      const entete = `TÉLÉGRAMME ${conv.rdvId} — ${conv.nomRP || 'Client'}\nOuvert : ${ouvertLe ? _dateHeure(ouvertLe) : '—'} · Clôturé : ${_dateHeure(clotLe)} · Clôturé par : ${interaction.user.username}\n${'='.repeat(50)}\n\n`;
+      const entete = `TÉLÉGRAMME ${conv.rdvId} — ${conv.nomRP || 'Client'}\nOuvert : ${ouvertLe ? _dateHeure(ouvertLe) : '—'} · Clôturé : ${_dateHeure(clotLe)} · Clôturé par : ${byName}\n${'='.repeat(50)}\n\n`;
       transcriptTxt = entete + (lignes.join('\n\n') || 'Aucun message enregistré.');
     } catch {}
     const mkFile = () => transcriptTxt ? [new AttachmentBuilder(Buffer.from(transcriptTxt, 'utf8'), { name: `telegramme-${conv.rdvId}.txt` })] : [];
 
     if (thread) await thread.send({ embeds: [recap], files: mkFile() }).catch(() => {});
     const db = loadDB();
-    if (db.registreTelegrammesId) {
-      const reg = await interaction.client.channels.fetch(db.registreTelegrammesId).catch(() => null);
+    if (db.registreTelegrammesId && client) {
+      const reg = await client.channels.fetch(db.registreTelegrammesId).catch(() => null);
       if (reg) await reg.send({ embeds: [recap], files: mkFile() }).catch(() => {});
     }
     await _archiverConversationNotion(conv, resume).catch(() => {});
@@ -210,25 +213,10 @@ async function ouvrirConversation(message, { rdvId, demandeurId, nomRP }) {
     if (store[rdvId]?.threadId) return store[rdvId]; // déjà ouverte
 
     const tname = `💬 ${(nomRP || 'Client').slice(0, 60)} — ${rdvId}`;
-    let thread = await message.channel.threads.create({
-      name: tname,
-      autoArchiveDuration: 10080,
-      type: ChannelType.PrivateThread,
-      invitable: false,
-    }).catch(() => null);
-    if (!thread) thread = await message.startThread({ name: tname, autoArchiveDuration: 10080 }).catch(() => null); // repli fil public si privé indisponible
+    // Fil PUBLIC attaché au télégramme → visible par toute l'équipe qui a accès au salon (accès large à l'historique).
+    let thread = await message.startThread({ name: tname, autoArchiveDuration: 10080 }).catch(() => null);
+    if (!thread) thread = await message.channel.threads.create({ name: tname, autoArchiveDuration: 10080, type: ChannelType.PublicThread }).catch(() => null);
     if (!thread) return null;
-    // Option B : ajouter automatiquement l'équipe au fil privé (Opérateur / Homme de main / Fondateur)
-    if (thread.type === ChannelType.PrivateThread) {
-      try {
-        const g = message.guild;
-        const cible = r => { const n = (r.name || '').toLowerCase(); return n.includes('opérateur') || n.includes('operateur') || n.includes('officier') || n.includes('homme de main') || n.includes('fondateur') || n.includes('panseur') || PING_TELEGRAMME.includes(r.id); };
-        const ids = new Set();
-        for (const role of g.roles.cache.filter(cible).values()) { for (const mem of role.members.values()) ids.add(mem.id); }
-        let n = 0;
-        for (const uid of ids) { if (n >= 40) break; await thread.members.add(uid).catch(() => {}); n++; }
-      } catch {}
-    }
 
     store[rdvId] = {
       rdvId, demandeurId, nomRP: nomRP || 'Client',
@@ -269,10 +257,11 @@ async function ouvrirConversation(message, { rdvId, demandeurId, nomRP }) {
       if (typeof global.ajouterJournalIC === 'function' && thread.guild) {
         const apercuRaw = (message.embeds?.[0]?.description || (message.embeds?.[0]?.fields || []).map(f => f.value).join(' · ') || message.content || '').replace(/\s+/g, ' ').trim();
         const apercu = apercuRaw ? apercuRaw.slice(0, 300) : '';
+        const lienFil = `https://discord.com/channels/${thread.guild.id}/${thread.id}`;
         await global.ajouterJournalIC(thread.guild, {
           type: 'autre', emoji: '📨',
           titre: `Nouveau télégramme — ${nomRP || 'Client'}`,
-          description: `Demande reçue de <@${demandeurId}>.${apercu ? `\n\n*${apercu}*` : ''}\n\n💬 Suivi dans le fil : <#${thread.id}>`,
+          description: `Demande reçue de <@${demandeurId}>.${apercu ? `\n\n*${apercu}*` : ''}\n\n💬 [Suivre l'échange dans le fil](${lienFil})`,
           auteur: nomRP || 'Client',
         });
       }
@@ -438,7 +427,7 @@ async function routeInteraction(interaction) {
         await interaction.followUp?.({ content: '⚠️ Aucun **registre** n\'est configuré : je ne supprime pas (pour ne pas perdre la trace de l\'échange). Installe un registre avec `/registre-telegrammes-installer`, puis réessaie. En attendant, la conversation est archivée.', flags: MessageFlags.Ephemeral }).catch(() => {});
         return true;
       }
-      if (conv.status !== 'cloture' && conv.status !== 'classe') { try { await _cloturerAvecRecap(interaction, conv, thread0); } catch {} } // on archive le récap avant de supprimer
+      if (conv.status !== 'cloture' && conv.status !== 'classe') { try { await _cloturerAvecRecap({ client: interaction.client, guild: interaction.guild, byName: interaction.user.username }, conv, thread0); } catch {} } // on archive le récap avant de supprimer
       if (thread0) await thread0.delete().catch(() => {});
       try {
         const parent = await interaction.client.channels.fetch(conv.parentChannelId).catch(() => null);
@@ -475,7 +464,7 @@ async function routeInteraction(interaction) {
     // (4) Récap + archive (en arrière-plan : ne bloque plus l'affichage)
     if (isClose) {
       (async () => {
-        try { await _cloturerAvecRecap(interaction, conv, thread); } catch {}
+        try { await _cloturerAvecRecap({ client: interaction.client, guild: interaction.guild, byName: interaction.user.username }, conv, thread); } catch {}
         if (thread) await thread.setArchived(true).catch(() => {});
       })();
     } else if (thread) {
@@ -498,8 +487,15 @@ async function verifierInactivite(client) {
   try {
     const db = loadDB(); const store = _store(db); const now = Date.now();
     const SEUIL = 3 * 86400000; let changed = false;
+    const SEUIL_FIXE = 2 * 86400000; // RDV fixé → clôture auto 2 jours après
     for (const [rdvId, conv] of Object.entries(store)) {
       if (!conv || conv.status !== 'ouvert') continue;
+      // RDV déjà fixé et 2 jours passés → on clôture automatiquement (récap archivé).
+      if (conv.fixedAt && now - conv.fixedAt > SEUIL_FIXE) {
+        const g = client.guilds.cache.first();
+        await cloturerAuto(client, g, rdvId, 'Clôture auto (RDV fixé)').catch(() => {});
+        continue;
+      }
       const last = conv.lastActivityAt || conv.createdAt || 0;
       if (now - last < SEUIL) continue;                          // encore récent
       if (conv.relanceAt && now - conv.relanceAt < SEUIL) continue; // déjà relancé récemment
@@ -516,4 +512,26 @@ async function verifierInactivite(client) {
   } catch (e) { console.log('⚠️ telegramme verifierInactivite:', e.message); }
 }
 
-module.exports = { ouvrirConversation, ajouterAuFil, onMessage, routeInteraction, telegrammeCommands, verifierInactivite };
+// Clôture programmée (sans interaction) : récap au registre + Notion, fil archivé, client prévenu.
+async function cloturerAuto(client, guild, rdvId, byName) {
+  try {
+    if (!client || !rdvId) return false;
+    const db = loadDB(); const store = _store(db);
+    const conv = store[rdvId];
+    if (!conv || ['cloture', 'classe'].includes(conv.status)) return false;
+    conv.status = 'cloture'; conv.closedAt = Date.now(); persist(db);
+    const thread = await client.channels.fetch(conv.threadId).catch(() => null);
+    if (thread) await thread.send('🔒 **Conversation clôturée automatiquement.**').catch(() => {});
+    try { await _cloturerAvecRecap({ client, guild, byName: byName || 'Système' }, conv, thread); } catch {}
+    if (thread) await thread.setArchived(true).catch(() => {});
+    try { const u = await client.users.fetch(conv.demandeurId); if (u) await u.send({ embeds: [_embedMP('📪 CONVERSATION CLÔTURÉE', ['Votre échange avec Iron Wolf Company est terminé. Merci !'], rdvId)] }).catch(() => {}); } catch {}
+    return true;
+  } catch { return false; }
+}
+// Marque une conversation comme « RDV fixé » → la clôture auto se déclenchera quelques jours après.
+function marquerFixe(rdvId) {
+  try { const db = loadDB(); const store = _store(db); const conv = store[rdvId]; if (conv) { conv.fixedAt = Date.now(); persist(db); return true; } } catch {}
+  return false;
+}
+
+module.exports = { ouvrirConversation, ajouterAuFil, cloturerAuto, marquerFixe, onMessage, routeInteraction, telegrammeCommands, verifierInactivite };
