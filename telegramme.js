@@ -170,6 +170,24 @@ function peutGerer(member) { if (global.aAccesTotal?.(member)) return true;
 }
 
 function _store(db) { if (!db.conversations) db.conversations = {}; return db.conversations; }
+
+// Journalise un message dans la conversation d'un rdvId ET le poste dans le fil de suivi (trace complète,
+// même pour les actions faites hors du fil : « Répondre au client », « Fixer », « Décliner »).
+async function ajouterAuFil(client, rdvId, from, name, content) {
+  try {
+    if (!client || !rdvId || !content) return false;
+    const db = loadDB(); const store = _store(db);
+    const conv = store[rdvId];
+    if (!conv || !conv.threadId) return false;
+    _logMsg(conv, from, name || '—', content); persist(db);
+    const thread = await client.channels.fetch(conv.threadId).catch(() => null);
+    if (thread && typeof thread.send === 'function') {
+      const tag = from === 'equipe' ? `📤 **${(name || 'Équipe')}** → client` : from === 'note' ? '📌 **Décision**' : from === 'client' ? `📥 **${(name || 'Client')}**` : '⚙️ **Système**';
+      await thread.send({ content: `${tag} :\n${String(content).slice(0, 1800)}`, allowedMentions: { parse: [] } }).catch(() => {});
+    }
+    return true;
+  } catch { return false; }
+}
 function _findOuverteParUser(store, userId) {
   const list = Object.values(store).filter(c => c.demandeurId === userId && c.status === 'ouvert');
   return list.length ? list[list.length - 1] : null;
@@ -498,4 +516,4 @@ async function verifierInactivite(client) {
   } catch (e) { console.log('⚠️ telegramme verifierInactivite:', e.message); }
 }
 
-module.exports = { ouvrirConversation, onMessage, routeInteraction, telegrammeCommands, verifierInactivite };
+module.exports = { ouvrirConversation, ajouterAuFil, onMessage, routeInteraction, telegrammeCommands, verifierInactivite };
