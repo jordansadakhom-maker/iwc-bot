@@ -257,10 +257,11 @@ async function ouvrirConversation(message, { rdvId, demandeurId, nomRP }) {
       if (typeof global.ajouterJournalIC === 'function' && thread.guild) {
         const apercuRaw = (message.embeds?.[0]?.description || (message.embeds?.[0]?.fields || []).map(f => f.value).join(' · ') || message.content || '').replace(/\s+/g, ' ').trim();
         const apercu = apercuRaw ? apercuRaw.slice(0, 300) : '';
+        const lienFil = `https://discord.com/channels/${thread.guild.id}/${thread.id}`;
         await global.ajouterJournalIC(thread.guild, {
           type: 'autre', emoji: '📨',
           titre: `Nouveau télégramme — ${nomRP || 'Client'}`,
-          description: `Demande reçue de <@${demandeurId}>.${apercu ? `\n\n*${apercu}*` : ''}\n\n💬 Suivi dans le fil : <#${thread.id}>`,
+          description: `Demande reçue de <@${demandeurId}>.${apercu ? `\n\n*${apercu}*` : ''}\n\n💬 [Suivre l'échange dans le fil](${lienFil})`,
           auteur: nomRP || 'Client',
         });
       }
