@@ -62,7 +62,8 @@ const _REGLES = [
   '**À ton tour :**',
   '• 🃏 **Tirer** — une carte de plus.',
   '• ✋ **Rester** — tu gardes ta main et passes la main.',
-  '• ⏫ **Doubler** — tu doubles ta mise et ne reçois **qu\'une** carte. *Autorisé uniquement sur un total de **9, 10 ou 11**.*',
+  '• ⏫ **Doubler** — sur tes **2 premières cartes** : tu doubles ta mise et ne reçois **qu\'une** carte de plus.',
+  '• 🔀 **Séparer** — si tes 2 cartes sont de **même rang**, sépare-les en **deux mains** (mise égale sur chacune), jouées l\'une après l\'autre. *Deux As séparés reçoivent **une seule carte** chacun. Jusqu\'à 4 mains.*',
   '• 🛡️ **Assurance** — *si le croupier montre un As* : mise annexe (moitié de ta mise) qui paie **2:1** s\'il a un blackjack. Sinon, tu la perds. À toi de juger le risque.',
   '**Brûlé :** dépasser 21 = perdu direct.',
   '**Le croupier** joue en dernier : il **tire jusqu\'à 17** (parfois aussi sur le **17 souple**, selon la table).',
@@ -115,8 +116,35 @@ function _rollDifficulte() {
   return DIFFICULTES[1];
 }
 function _reglesTxt(d) { return `BJ ${d.bjPay === 1.5 ? '3:2' : '6:5'} · ${d.h17 ? 'H17' : 'S17'}${d.push22 ? ' · 22=égalité' : ''}`; }
-// Double autorisé UNIQUEMENT sur un total de 9, 10 ou 11 (un 2-cartes 9/10/11 est toujours « dur »).
-function _doublable(main) { return Array.isArray(main) && main.length === 2 && [9, 10, 11].includes(_total(main)); }
+// Double autorisé sur les 2 premières cartes (règle standard / Washington Post).
+function _doublable(main) { return Array.isArray(main) && main.length === 2; }
+// Séparer (split) : 2 cartes de MÊME RANG, main initiale, dans la limite de 4 mains par joueur.
+function _splittable(t, s) {
+  if (!s || !Array.isArray(s.main) || s.main.length !== 2) return false;
+  if (s.main[0].r !== s.main[1].r) return false;
+  if (s.aceSplitLock) return false;
+  const nbMains = t.sieges.filter(x => x.userId === s.userId).length;
+  return nbMains < 4;
+}
+// Sépare la main du siège `idx` en deux : la 2ᵉ carte part dans une nouvelle main
+// (pseudo-siège inséré juste après), chacune reçoit une carte. Deux As → 1 carte
+// chacun puis on reste (règle standard).
+function _split(t, idx) {
+  const s = t.sieges[idx];
+  const estAs = s.main[0].r === 'A';
+  const c2 = s.main.pop();
+  const nouveau = { userId: s.userId, nom: s.nom, mise: s.mise, main: [c2], statut: 'jeu', resultat: '', net: 0, assurance: 0, isSplitHand: true };
+  s.main.push(_piocher(t));
+  nouveau.main.push(_piocher(t));
+  t.sieges.splice(idx + 1, 0, nouveau);
+  if (estAs) {
+    s.statut = 'stand'; s.aceSplitLock = true;
+    nouveau.statut = 'stand'; nouveau.aceSplitLock = true;
+    _avancer(t);
+  } else if (_total(s.main) === 21) {
+    s.statut = 'stand'; _avancer(t);
+  } else { _armer(t); }
+}
 // ────────────────────────────────────────────────────────────────────────
 function _fmtCarte(c) { return '`' + c.r + c.s + '`'; }
 function _fmtMain(main) { return main.map(_fmtCarte).join(' '); }
@@ -177,7 +205,9 @@ function _lignesCartes(t) {
     if (t.phase === 'jeu') { if (s.statut === 'bust') st = '· brûlé'; else if (s.statut === 'blackjack') st = '· BLACKJACK'; else if (s.statut === 'stand') st = '· reste'; else if (i === t.tourIdx) st = '· **à lui de jouer**'; else st = '· ⏳'; }
     else if (s.resultat) st = s.resultat;
     const mains = s.main.length ? '  ' + _fmtMain(s.main) + (tot != null ? '  **= ' + tot + '**' : '') : '';
-    L.push('🪑 **' + s.nom + '** — mise ' + _money(s.mise) + mains + (st ? '  ' + st : ''));
+    const chaise = s.isSplitHand ? '↳' : '🪑';
+    const nomAff = s.nom + (s.isSplitHand ? ' *(main séparée)*' : '');
+    L.push(chaise + ' **' + nomAff + '** — mise ' + _money(s.mise) + mains + (st ? '  ' + st : ''));
   });
   return L;
 }
@@ -186,7 +216,7 @@ function _lignesStatut(t) {
   const L = [];
   if (t.phase === 'jeu') {
     const s = t.sieges[t.tourIdx];
-    L.push('➡️ **À ' + (s ? s.nom : '—') + ' de jouer** — 🃏 Tirer · ✋ Rester' + (s && _doublable(s.main) ? ' · ⏫ Doubler' : ''));
+    L.push('➡️ **À ' + (s ? s.nom : '—') + ' de jouer** — 🃏 Tirer · ✋ Rester' + (s && _doublable(s.main) ? ' · ⏫ Doubler' : '') + (s && _splittable(t, s) ? ' · 🔀 Séparer' : ''));
     if (t.ambiance) L.push('💬 *' + t.ambiance + '*');
   } else if (t.manche > 0) {
     L.push('🔚 **Manche terminée.** L\'hôte peut **relancer une manche** ou **fermer la table**.');
@@ -205,7 +235,7 @@ function _lignesStatut(t) {
 function _imgState(t) {
   return {
     sousTitre: t.phase === 'jeu'
-      ? ('À ' + (t.sieges[t.tourIdx]?.nom || '—') + ' de jouer — Tirer, Rester' + (_doublable(t.sieges[t.tourIdx]?.main) ? ' ou Doubler' : ''))
+      ? ('À ' + (t.sieges[t.tourIdx]?.nom || '—') + ' de jouer — Tirer, Rester' + (_doublable(t.sieges[t.tourIdx]?.main) ? ', Doubler' : '') + (_splittable(t, t.sieges[t.tourIdx]) ? ', Séparer' : ''))
       : (t.manche > 0 ? 'Manche terminée — l\'hôte peut relancer ou fermer' : 'Faites vos jeux — misez, puis l\'hôte distribue'),
     croupier: {
       cards: (t.croupier.main || []).map(c => ({ r: c.r, s: c.s })),
@@ -250,6 +280,7 @@ function _components(t) {
       new ButtonBuilder().setCustomId('bj_hit').setLabel('Tirer').setEmoji('🃏').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('bj_stand').setLabel('Rester').setEmoji('✋').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('bj_double').setLabel('Doubler').setEmoji('⏫').setStyle(ButtonStyle.Secondary).setDisabled(!(s && _doublable(s.main))),
+      new ButtonBuilder().setCustomId('bj_split').setLabel('Séparer').setEmoji('🔀').setStyle(ButtonStyle.Secondary).setDisabled(!(s && _splittable(t, s))),
     ];
     // Assurance : proposée uniquement si le croupier montre un As, avant d'avoir agi.
     if (asVisible && s && s.main.length === 2 && !s.assurance) {
@@ -265,7 +296,7 @@ function _components(t) {
 function _contentLigne(t) {
   if (t.phase === 'jeu') {
     const s = t.sieges[t.tourIdx];
-    return s ? '🎯 **Au tour de ' + s.nom + '** — 🃏 Tirer · ✋ Rester' + (_doublable(s.main) ? ' · ⏫ Doubler' : '') : '';
+    return s ? '🎯 **Au tour de ' + s.nom + '** — 🃏 Tirer · ✋ Rester' + (_doublable(s.main) ? ' · ⏫ Doubler' : '') + (_splittable(t, s) ? ' · 🔀 Séparer' : '') : '';
   }
   if (t.manche > 0) {
     const res = t.sieges.filter(s => s.resultat).map(s => (s.net > 0 ? '🟢' : s.net < 0 ? '🔴' : '⚪') + ' **' + s.nom + '** ' + (s.net > 0 ? '+' : '') + _money(s.net)).join('   ·   ');
@@ -361,8 +392,9 @@ function _croupierEtResolution(t) {
 function _distribuer(t) {
   t.manche++;
   t.reshuffle = false;
+  t.sieges = t.sieges.filter(s => !s.isSplitHand); // retire les mains séparées de la manche précédente
   t.croupier.main = [];
-  for (const s of t.sieges) { s.main = []; s.statut = 'jeu'; s.resultat = ''; s.net = 0; s.assurance = 0; }
+  for (const s of t.sieges) { s.main = []; s.statut = 'jeu'; s.resultat = ''; s.net = 0; s.assurance = 0; s.aceSplitLock = false; }
   // 2 cartes chacun, puis 2 au croupier
   for (let k = 0; k < 2; k++) { for (const s of t.sieges) s.main.push(_piocher(t)); t.croupier.main.push(_piocher(t)); }
   for (const s of t.sieges) { if (_estBJ(s.main)) s.statut = 'blackjack'; }
@@ -484,8 +516,8 @@ async function routeInteraction(interaction) {
       if (t.phase === 'jeu' && _siege(t, interaction.user.id)) { await interaction.reply({ content: '⏳ Tu ne peux pas quitter en pleine manche — finis le coup.', flags: eph }); return true; }
       const idx = t.sieges.findIndex(s => s.userId === interaction.user.id);
       if (idx < 0) { await interaction.reply({ content: 'Tu n\'es pas assis à cette table.', flags: eph }); return true; }
-      const solde = t.soldes[t.sieges[idx].userId] || 0;
-      t.sieges.splice(idx, 1);
+      const solde = t.soldes[interaction.user.id] || 0;
+      t.sieges = t.sieges.filter(s => s.userId !== interaction.user.id); // retire toutes ses mains
       await interaction.reply({ content: '🚪 Tu quittes la table. Bilan de la soirée : **' + _money(solde) + '** de jetons.', flags: eph });
       await _refresh(t); return true;
     }
@@ -537,6 +569,20 @@ async function routeInteraction(interaction) {
         t.ambiance = s.nom + ' double la mise et tire une carte' + (tot > 21 ? ' — brûlé !' : '.');
         _avancer(t);
       }
+      await _refresh(t); return true;
+    }
+
+    // Séparer (split)
+    if (interaction.isButton() && id === 'bj_split') {
+      if (t.phase !== 'jeu') { await interaction.reply({ content: 'Aucune manche en cours.', flags: eph }); return true; }
+      const s = t.sieges[t.tourIdx];
+      if (!s) { await interaction.reply({ content: 'Aucun joueur à jouer.', flags: eph }); return true; }
+      if (s.userId !== interaction.user.id) { await interaction.reply({ content: '⏳ Ce n\'est pas ton tour — c\'est à **' + s.nom + '** de jouer.', flags: eph }); return true; }
+      if (!_splittable(t, s)) { await interaction.reply({ content: '🔀 Séparation impossible : il faut **2 cartes de même rang** (max 4 mains).', flags: eph }); return true; }
+      await interaction.deferUpdate().catch(() => {});
+      const rang = s.main[0].r;
+      t.ambiance = s.nom + ' sépare ses ' + rang + ' en deux mains.';
+      _split(t, t.tourIdx);
       await _refresh(t); return true;
     }
 
@@ -601,4 +647,4 @@ async function routeInteraction(interaction) {
   }
 }
 
-module.exports = { routeInteraction, installerPanelBlackjack, _test: { _total, _estBJ, _estSoft17, _construireSabot, _distribuer, _croupierEtResolution, _creerTable, tables, BJ_PAIEMENT, CROUPIER_H17 } };
+module.exports = { routeInteraction, installerPanelBlackjack, _test: { _total, _estBJ, _estSoft17, _construireSabot, _distribuer, _croupierEtResolution, _creerTable, tables, BJ_PAIEMENT, CROUPIER_H17, _doublable, _splittable, _split, _avancer, _piocher, _val } };
