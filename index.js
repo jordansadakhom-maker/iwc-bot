@@ -25,6 +25,8 @@ let faro = {}; try { faro = require('./faro'); console.log('✅ Module faro char
 let poker = {}; try { poker = require('./poker'); console.log('✅ Module poker chargé'); } catch (e) { console.log('⚠️ poker non chargé:', e.message); }
 let cinqdoigts = {}; try { cinqdoigts = require('./cinqdoigts'); console.log('✅ Module cinq doigts chargé'); } catch (e) { console.log('⚠️ cinqdoigts non chargé:', e.message); }
 let dominos = {}; try { dominos = require('./dominos'); console.log('✅ Module dominos chargé'); } catch (e) { console.log('⚠️ dominos non chargé:', e.message); }
+let brasdefer = {}; try { brasdefer = require('./brasdefer'); console.log('✅ Module bras de fer chargé'); } catch (e) { console.log('⚠️ brasdefer non chargé:', e.message); }
+let echecs = {}; try { echecs = require('./echecs'); console.log('✅ Module échecs chargé'); } catch (e) { console.log('⚠️ echecs non chargé:', e.message); }
 let missionsIA = {}; try { missionsIA = require('./missions-ia'); console.log('✅ Module missions-ia chargé'); } catch (e) { console.log('⚠️ missions-ia non chargé:', e.message); }
 const rdvplus = require('./rdvplus');
 const reorg = require('./reorg');
@@ -4446,6 +4448,8 @@ client.on('interactionCreate', async interaction => {
   if (await poker.routeInteraction?.(interaction)) return;
   if (await cinqdoigts.routeInteraction?.(interaction)) return;
   if (await dominos.routeInteraction?.(interaction)) return;
+  if (await brasdefer.routeInteraction?.(interaction)) return;
+  if (await echecs.routeInteraction?.(interaction)) return;
   if (await missionsIA.routeInteraction?.(interaction)) return;
   if (await pepites.routeInteraction?.(interaction)) return;
   if (await musique.routeInteraction?.(interaction)) return;
@@ -10508,6 +10512,8 @@ function _panneauSaloonPayload() {
       '♠️ **Poker (5 cartes)** — main fermée, un échange *(3 cartes max)*, la meilleure rafle le pot.',
       '🔪 **Cinq Doigts** — jeu de nerfs au couteau, le plus rapide gagne.',
       '🁢 **Dominos** — videz votre main avant les autres.',
+      '💪 **Bras de fer** — épreuve de force, seul contre un PNJ ou en duel misé.',
+      '♟️ **Échecs** — duel d\'esprit à deux, règles complètes *(mise optionnelle)*.',
       '',
       '👉 Cliquez un jeu pour **ouvrir une table** dans ce salon.',
       '📖 *À chaque table : bouton **Comment jouer** (les règles), **Emote RP** (pour rester crédible en jeu) et **Mes sous** (votre compteur de gains).*',
@@ -10525,7 +10531,11 @@ function _panneauSaloonPayload() {
     new ButtonBuilder().setCustomId('fff_open').setLabel('Cinq Doigts').setEmoji('🔪').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('dom_open').setLabel('Dominos').setEmoji('🁢').setStyle(ButtonStyle.Secondary),
   );
-  return { embeds: [embed], components: [row1, row2] };
+  const row3 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('brf_open').setLabel('Bras de fer').setEmoji('💪').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('ech_open').setLabel('Échecs').setEmoji('♟️').setStyle(ButtonStyle.Secondary),
+  );
+  return { embeds: [embed], components: [row1, row2, row3] };
 }
 async function _installerPanelSaloon(guild, channelId) {
   try {
