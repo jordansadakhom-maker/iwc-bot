@@ -12,7 +12,7 @@ const saveDB = dbMod.saveDB || (() => {});
 
 const SALON_PEPITES = '1521258635416834214';
 const DIRECTION = ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier', 'Conseil'];
-const estDirection = m => !!m?.roles?.cache?.some(r => DIRECTION.some(n => (r.name || '').includes(n)));
+const estDirection = m => global.aAccesTotal?.(m) || !!m?.roles?.cache?.some(r => DIRECTION.some(n => (r.name || '').includes(n)));
 
 function _ens(db) {
   if (!db.pepites) db.pepites = { total: 0, prix: 0.05, log: [], panelId: null, parPersonne: {} };

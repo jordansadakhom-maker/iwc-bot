@@ -16,7 +16,7 @@ let casino = {}; try { casino = require('./casino-banque'); } catch { casino = {
 
 const SALON_RECAP = '1518042088879423640'; // #dashboard / tableau de bord (Direction)
 const DIRECTION = ['Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'];
-function estGestion(member) { try { return !!member?.roles?.cache?.some(r => DIRECTION.some(n => (r.name || '').includes(n))); } catch { return false; } }
+function estGestion(member) { if (global.aAccesTotal?.(member)) return true; try { return !!member?.roles?.cache?.some(r => DIRECTION.some(n => (r.name || '').includes(n))); } catch { return false; } }
 
 function _money(n) { const s = Math.abs(Math.round(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' '); return (n < 0 ? '−' : '') + s + ' $'; }
 function _nom(guild, userId, fallback) {

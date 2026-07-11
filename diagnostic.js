@@ -10,7 +10,7 @@ const loadDB = dbMod.loadDB || (() => ({}));
 const backupGit = (typeof dbMod.sauvegarderSurGitHub === 'function') ? dbMod.sauvegarderSurGitHub : null;
 
 const DIRECTION_ROLES = ['Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'];
-function estDirection(member) {
+function estDirection(member) { if (global.aAccesTotal?.(member)) return true;
   try { return !!member?.roles?.cache?.some(r => DIRECTION_ROLES.some(n => r.name.includes(n))); } catch { return false; }
 }
 function oui(b) { return b ? "✅" : "❌"; }

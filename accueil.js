@@ -10,7 +10,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, UserSelectMe
 // Salon où les clients prennent RDV / envoient un télégramme (bouton « ✉ Envoyer un télégramme »)
 const SALON_DEMANDES = '1512171267560702013';
 const ROLES_DIRECTION = ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier', 'Instructeur', 'Secrétaire'];
-const estDirection = (member) => !!member?.roles?.cache?.some(r => ROLES_DIRECTION.some(n => r.name.includes(n)));
+const estDirection = (member) => global.aAccesTotal?.(member) || !!member?.roles?.cache?.some(r => ROLES_DIRECTION.some(n => r.name.includes(n)));
 
 // Message d'accueil/relance (MP). opts.relance = true → ton « petit rappel ».
 // Un SEUL message, clair et logique : la personne sait tout de suite quoi faire.

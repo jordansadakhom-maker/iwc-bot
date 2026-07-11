@@ -152,7 +152,7 @@ async function installerPanel(guild) {
 }
 
 const GESTION = ['Opérateur', 'Operateur', 'Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'];
-function peutGerer(member) { try { return !!member?.roles?.cache?.some(r => GESTION.some(n => r.name.includes(n))); } catch { return false; } }
+function peutGerer(member) { if (global.aAccesTotal?.(member)) return true; try { return !!member?.roles?.cache?.some(r => GESTION.some(n => r.name.includes(n))); } catch { return false; } }
 
 async function routeInteraction(interaction) {
   try {

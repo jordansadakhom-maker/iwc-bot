@@ -16,7 +16,7 @@ const saveDB = dbMod.saveDB || (() => {});
 const FORUM_RIPOUX = '1519114962738348102'; // FORUM dédié au Ripoux
 
 const GESTION = ['Opérateur', 'Operateur', 'Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'];
-function peutGerer(member) { try { return !!member?.roles?.cache?.some(r => GESTION.some(n => r.name.includes(n))); } catch { return false; } }
+function peutGerer(member) { if (global.aAccesTotal?.(member)) return true; try { return !!member?.roles?.cache?.some(r => GESTION.some(n => r.name.includes(n))); } catch { return false; } }
 function peutRipoux(member, db) { try { const r = (db || loadDB()).ripoux || {}; return (r.userId && member?.id === r.userId) || peutGerer(member); } catch { return peutGerer(member); } }
 
 function _ch(guild, id) { try { return guild.channels.cache.get(id) || null; } catch { return null; } }

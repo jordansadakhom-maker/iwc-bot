@@ -81,7 +81,7 @@ function _satLabel(n) { return n === 'bien' ? '👍 Satisfait' : n === 'moyen' ?
 const ref = () => `RDV-${Date.now().toString().slice(-5)}`;
 const fmtDate = () => new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
 const fmtHeure = () => new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-const peutGerer = (member) => !!member?.roles?.cache?.some(r => GESTION_ROLES.some(n => r.name.includes(n)));
+const peutGerer = (member) => global.aAccesTotal?.(member) || !!member?.roles?.cache?.some(r => GESTION_ROLES.some(n => r.name.includes(n)));
 
 function _store(db) { if (!db.rdvplus) db.rdvplus = { rdvs: {}, clients: {} }; if (!db.rdvplus.rdvs) db.rdvplus.rdvs = {}; if (!db.rdvplus.clients) db.rdvplus.clients = {}; return db.rdvplus; }
 

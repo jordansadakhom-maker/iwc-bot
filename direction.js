@@ -13,7 +13,7 @@ const SALON_HRP = '1510712255514153101';
 const COULEUR = 0x2E5A88;
 const ROLES_DIRECTION = ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier', 'Instructeur', 'Secrétaire'];
 
-function estDirection(member) {
+function estDirection(member) { if (global.aAccesTotal?.(member)) return true;
   return !!member?.roles?.cache?.some(r => ROLES_DIRECTION.some(n => r.name.includes(n)));
 }
 let _seq = 0;

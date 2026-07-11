@@ -18,7 +18,7 @@ function persist(db) { try { saveDB(db); } catch {} try { if (backupGit) backupG
 
 const COL = 0x6B4F2A;
 const DIRECTION_ROLES = ['Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'];
-function estDirection(member) {
+function estDirection(member) { if (global.aAccesTotal?.(member)) return true;
   try { return !!member?.roles?.cache?.some(r => DIRECTION_ROLES.some(n => r.name.includes(n))); } catch { return false; }
 }
 

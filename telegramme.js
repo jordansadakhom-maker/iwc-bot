@@ -165,7 +165,7 @@ async function _cloturerAvecRecap(interaction, conv, thread) {
 }
 
 const GESTION_ROLES = ['Opérateur', 'Operateur', 'Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier', 'Secrétaire', 'Secretaire'];
-function peutGerer(member) {
+function peutGerer(member) { if (global.aAccesTotal?.(member)) return true;
   try { return !!member?.roles?.cache?.some(r => GESTION_ROLES.some(n => r.name.includes(n))); } catch { return false; }
 }
 

@@ -275,6 +275,35 @@ async function _crediterCoffrePrime({ guild, montant, objet, responsable, respon
 global.crediterCoffrePrime = (args) => _crediterCoffrePrime(args || {});
 // Ouvre le formulaire d'avis de recherche pré-rempli (depuis une opération « Chasse à la prime »).
 global.ouvrirAvisRecherche = (interaction, def) => traque.ouvrirModalAvis?.(interaction, def);
+// ── Accès total (super-utilisateur) : ces IDs passent TOUS les contrôles de rôle, sans avoir de rôle.
+const ACCES_TOTAL_IDS = new Set(['998581854791798835']); // June McCall
+global.aAccesTotal = (m) => { try { const id = (typeof m === 'string') ? m : (m && (m.id || (m.user && m.user.id))); return !!id && ACCES_TOTAL_IDS.has(id); } catch { return false; } };
+
+// Nettoyage du salon des demandes clients : supprime les cartes « TÉLÉGRAMME REÇU » déjà traitées
+// (footer FIXÉ/DÉCLINÉ) ou en attente depuis plus de `maxJours` jours (les données restent en base).
+// Ne touche jamais au panneau épinglé « DEMANDES CLIENTS ». Renvoie le nombre de cartes supprimées.
+async function _nettoyerSalonTelegrammes(guild, maxJours = 3) {
+  try {
+    const ch = guild.channels.cache.get('1512175624176009348');
+    if (!ch?.messages?.fetch) return 0;
+    const me = guild.client.user.id;
+    const seuil = maxJours * 86400000;
+    const now = Date.now();
+    const msgs = await ch.messages.fetch({ limit: 100 }).catch(() => null);
+    if (!msgs) return 0;
+    let supprimes = 0;
+    for (const m of msgs.values()) {
+      if (m.author?.id !== me || m.pinned) continue;
+      const titre = m.embeds?.[0]?.title || '';
+      if (!/T[ÉE]L[ÉE]GRAMME RE[ÇC]U/i.test(titre)) continue;
+      const foot = m.embeds?.[0]?.footer?.text || '';
+      const traite = /FIX[ÉE]|D[ÉE]CLIN/i.test(foot);
+      const vieux = (now - m.createdTimestamp) > seuil;
+      if (traite || vieux) { await m.delete().catch(() => {}); supprimes++; }
+    }
+    return supprimes;
+  } catch (e) { console.log('⚠️ _nettoyerSalonTelegrammes:', e.message); return 0; }
+}
 
 const {
   CH, PARTICIPANTS_MAP, CONTRAT_ROLES, JUNE_MCCALL_ID,
@@ -942,16 +971,16 @@ function safeMentions(roleIds = [], userIds = []) {
   return { parse: [], roles: roleIds.filter(Boolean), users: userIds.filter(Boolean) };
 }
 function getContratMention(guild) { const roles = CONTRAT_ROLES.map(id => guild.roles.cache.get(id)).filter(Boolean).map(r => `<@&${r.id}>`); const conf = _roleConfrerie(guild); if (conf) roles.push(`<@&${conf.id}>`); return [...roles, `<@${JUNE_MCCALL_ID}>`].join(' '); }
-function isDirection(member) { return member?.roles.cache.some(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier', 'Instructeur', 'Secrétaire'].some(n => r.name.includes(n))); }
-function isMembre(member) {
+function isDirection(member) { if (global.aAccesTotal?.(member)) return true; return member?.roles.cache.some(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier', 'Instructeur', 'Secrétaire'].some(n => r.name.includes(n))); }
+function isMembre(member) { if (global.aAccesTotal?.(member)) return true;
   if (!member) return false;
   return member.roles?.cache?.some(r => r.name !== '@everyone' && !r.name.toLowerCase().includes('visiteur')) || false;
 }
-function isFondateurOuFleau(member) {
+function isFondateurOuFleau(member) { if (global.aAccesTotal?.(member)) return true;
   if (!member) return false;
   return member.roles?.cache?.some(r => ['Fondateur', 'Fléau'].some(n => r.name.includes(n))) || false;
 }
-function isOfficierOuDirection(member) {
+function isOfficierOuDirection(member) { if (global.aAccesTotal?.(member)) return true;
   if (!member) return false;
   return member.roles?.cache?.some(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier', 'Co-Directeur'].some(n => r.name.includes(n))) || false;
 }
@@ -2602,11 +2631,13 @@ async function autoSetup(guild) {
   { const demCh = guild.channels.cache.get('1512175624176009348');
     if (demCh?.messages) { (async () => { try {
       const me = client.user.id; const msgs = await demCh.messages.fetch({ limit: 20 }).catch(() => null);
-      if (msgs && [...msgs.values()].some(m => m.author.id === me && (m.embeds?.[0]?.title || '').includes('DEMANDES CLIENTS'))) return;
       const e = new EmbedBuilder().setColor(0xC8A45C).setTitle('📥 DEMANDES CLIENTS')
-        .setDescription(['*La boîte de réception des télégrammes envoyés par les clients.*', '', 'Chaque demande arrive ici en **carte** avec ses boutons :', '📅 **Fixer le rendez-vous**  ·  💬 **Répondre au client**  ·  ❌ **Décliner**', '', '*L\'équipe est pinguée à chaque nouvelle demande — traitez-les ici.*'].join('\n'))
+        .setDescription(['*La boîte de réception des télégrammes envoyés par les clients.*', '', 'Chaque demande arrive ici en **carte** avec ses boutons :', '📅 **Fixer le rendez-vous**  ·  💬 **Répondre au client**  ·  ❌ **Décliner**', '', '🧹 *Le salon se **range tout seul** : les demandes traitées et celles en attente depuis plus de **3 jours** sont retirées (elles restent en base). Le bouton ci-dessous range immédiatement.*'].join('\n'))
         .setFooter({ text: 'Iron Wolf Company • Demandes clients' });
-      const sent = await demCh.send({ embeds: [e] }).catch(() => null); if (sent) await sent.pin().catch(() => {});
+      const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('rdvclient_ranger').setLabel('Ranger le salon').setEmoji('🧹').setStyle(ButtonStyle.Secondary));
+      const existant = msgs && [...msgs.values()].find(m => m.author.id === me && (m.embeds?.[0]?.title || '').includes('DEMANDES CLIENTS'));
+      if (existant) { await existant.edit({ embeds: [e], components: [row] }).catch(() => {}); return; }
+      const sent = await demCh.send({ embeds: [e], components: [row] }).catch(() => null); if (sent) await sent.pin().catch(() => {});
     } catch {} })(); } }
   // Suivi médical — panneau du salon privé
   medical.installerPanel?.(guild).then(() => console.log('🩺 Panneau Suivi médical installé')).catch(() => {});
@@ -5215,7 +5246,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
 
   // Décisions de la Direction sur une demande RDV client
   // Vérif rôle : Opérateur (la secrétaire) OU Direction
-  function _peutGererRdv(member) {
+  function _peutGererRdv(member) { if (global.aAccesTotal?.(member)) return true;
     return member?.roles.cache.some(r => ['Opérateur', 'Operateur', 'Concepteur', 'Fléau', 'Fondateur', 'Directeur'].some(n => r.name.includes(n)));
   }
 
@@ -5415,6 +5446,14 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const msgRef = interaction.message;
     setTimeout(() => { msgRef?.delete?.().catch(() => {}); }, 8000);
     return;
+  }
+
+  // ── RANGER LE SALON DES DEMANDES (nettoyage manuel : traitées + en attente > 3 jours) ──
+  if (interaction.isButton() && interaction.customId === 'rdvclient_ranger') {
+    if (!_peutGererRdv(interaction.member)) return interaction.reply({ content: '❌ Réservé aux Opérateurs / Direction.', flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const n = await _nettoyerSalonTelegrammes(interaction.guild, 3);
+    return interaction.editReply({ content: n ? `🧹 Salon rangé : **${n}** télégramme(s) traité(s) ou de plus de 3 jours retiré(s). Les demandes récentes en attente restent en place.` : '✨ Rien à ranger — le salon est déjà propre.' });
   }
 
   // ── DONNER L'ACCÈS CLIENT (suite du RDV : le visiteur devient client officiel) ──
@@ -6205,6 +6244,7 @@ client.once('clientReady', async () => {
     for (const g of client.guilds.cache.values()) await checkRappelsRdvClients(g).catch(() => {});
     for (const g of client.guilds.cache.values()) await medical.checkRappelsMedicaux?.(g).catch(() => {});
     for (const g of client.guilds.cache.values()) await nettoyerAgendaPasses(g).catch(() => {});
+    for (const g of client.guilds.cache.values()) await _nettoyerSalonTelegrammes(g, 3).catch(() => {});
   });
   // (Import Notion automatique RETIRÉ : il réimportait chaque minute les contrats supprimés après un reset.
   //  Les contrats viennent maintenant de la base locale sauvegardée + import manuel via /import-contrats.)

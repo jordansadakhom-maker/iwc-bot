@@ -19,7 +19,7 @@ function persist(db) { try { saveDB(db); } catch {} try { if (backupGit) backupG
 const SALON_ARMES = '1524184998066917406';
 
 const DIRECTION = ['Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'];
-function estGestion(member) { try { return !!member?.roles?.cache?.some(r => DIRECTION.some(n => (r.name || '').includes(n))); } catch { return false; } }
+function estGestion(member) { if (global.aAccesTotal?.(member)) return true; try { return !!member?.roles?.cache?.some(r => DIRECTION.some(n => (r.name || '').includes(n))); } catch { return false; } }
 
 const COULEUR = 0x8C6D3F;
 const CATS_DEFAUT = ['Revolver', 'Pistolet', 'Fusil à répétition', 'Fusil à pompe', 'Carabine', 'Fusil de précision', 'Autre'];
