@@ -5233,8 +5233,18 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
       }).catch(() => null);
       // Épingler le télégramme en attente (tâche à traiter)
       if (msgTele) await msgTele.pin().catch(() => {});
-      // Ouvrir une conversation suivie (fil + relais MP) sur ce télégramme
-      if (msgTele) { try { await telegramme.ouvrirConversation?.(msgTele, { rdvId, demandeurId: interaction.user.id, nomRP: nom }); } catch {} }
+      // Ouvrir une conversation suivie (fil + relais MP) sur ce télégramme → trace consultable
+      if (msgTele) { try {
+        const conv = await telegramme.ouvrirConversation?.(msgTele, { rdvId, demandeurId: interaction.user.id, nomRP: nom });
+        if (conv?.threadId) {
+          // Lien visible vers l'historique de l'échange, directement sur la carte.
+          embed.addFields({ name: '🧵 Suivi de l\'échange', value: `Historique complet de la conversation : <#${conv.threadId}>`, inline: false });
+          await msgTele.edit({ embeds: [embed], components: [row] }).catch(() => {});
+        } else {
+          console.log('⚠️ Télégramme: fil de conversation non créé (permission « Créer des fils » manquante dans le salon des demandes ?)');
+          try { monitoring.logTech?.(interaction.client, 'warn', 'Fil de conversation non créé', 'Impossible de créer le fil de suivi du télégramme — vérifie la permission « Créer des fils publics/privés » du bot dans le salon des demandes.'); } catch {}
+        }
+      } catch {} }
     }
     if (!msgTele) {
       console.log('❌ Télégramme non transmis (salon 1512175624176009348 introuvable ou bot sans permission d écrire).');
@@ -5373,6 +5383,8 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     // Notion garde la traçabilité : on nettoie le salon en supprimant le télégramme traité
     const msgFixe = interaction.message;
     setTimeout(() => { msgFixe?.delete?.().catch(() => {}); }, 8000);
+    // Trace : consigner la décision dans le fil de suivi.
+    try { await telegramme.ajouterAuFil?.(client, rdvId, 'note', 'Décision', `✅ Rendez-vous fixé : ${dateRdv} à ${heure} — ${lieuRdv} (par ${interaction.member.displayName})`); } catch {}
     // Suite logique proposée à la Direction : accès Client puis contrat (mêmes boutons que sur la carte #agenda).
     const rowSuite = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`rdvclient_acces_${rdvId}`).setLabel('🎫 Donner l\'accès Client').setStyle(ButtonStyle.Secondary),
@@ -5410,7 +5422,9 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
         `— *Le secrétariat de l'Iron Wolf Company*`,
       ].join('\n')).catch(() => {});
     } catch {}
-    return interaction.editReply({ content: '✅ Message envoyé au client. Il pourra vous répondre, et vous pourrez fixer le RDV quand vous serez d\'accord.' });
+    // Trace : consigner cette réponse dans le fil de suivi de la conversation.
+    try { await telegramme.ajouterAuFil?.(client, rdvId, 'equipe', interaction.member?.displayName || interaction.user.username, message); } catch {}
+    return interaction.editReply({ content: '✅ Message envoyé au client. Il pourra vous répondre (ça s\'affichera dans le fil de suivi), et vous pourrez fixer le RDV quand vous serez d\'accord.' });
   }
 
   // ── DÉCLINER ──
@@ -5445,6 +5459,8 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     await interaction.message?.unpin().catch(() => {}); // désépingler : tâche terminée
     const msgRef = interaction.message;
     setTimeout(() => { msgRef?.delete?.().catch(() => {}); }, 8000);
+    // Trace : consigner la décision dans le fil de suivi.
+    try { await telegramme.ajouterAuFil?.(client, rdvId, 'note', 'Décision', `❌ Demande déclinée par ${interaction.member.displayName}`); } catch {}
     return;
   }
 
