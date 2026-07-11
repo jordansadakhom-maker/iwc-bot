@@ -25,6 +25,9 @@ let faro = {}; try { faro = require('./faro'); console.log('✅ Module faro char
 let poker = {}; try { poker = require('./poker'); console.log('✅ Module poker chargé'); } catch (e) { console.log('⚠️ poker non chargé:', e.message); }
 let cinqdoigts = {}; try { cinqdoigts = require('./cinqdoigts'); console.log('✅ Module cinq doigts chargé'); } catch (e) { console.log('⚠️ cinqdoigts non chargé:', e.message); }
 let dominos = {}; try { dominos = require('./dominos'); console.log('✅ Module dominos chargé'); } catch (e) { console.log('⚠️ dominos non chargé:', e.message); }
+let pokertable = {}; try { pokertable = require('./pokertable'); console.log('✅ Module table de poker chargé'); } catch (e) { console.log('⚠️ pokertable non chargé:', e.message); }
+let brasdefer = {}; try { brasdefer = require('./brasdefer'); console.log('✅ Module bras de fer chargé'); } catch (e) { console.log('⚠️ brasdefer non chargé:', e.message); }
+let echecs = {}; try { echecs = require('./echecs'); console.log('✅ Module échecs chargé'); } catch (e) { console.log('⚠️ echecs non chargé:', e.message); }
 let missionsIA = {}; try { missionsIA = require('./missions-ia'); console.log('✅ Module missions-ia chargé'); } catch (e) { console.log('⚠️ missions-ia non chargé:', e.message); }
 const rdvplus = require('./rdvplus');
 const reorg = require('./reorg');
@@ -2660,7 +2663,7 @@ async function autoSetup(guild) {
     (async (cid) => { try { const c = await guild.channels.fetch(cid).catch(() => null); if (c?.send) { await annonces.installerPanelAnnonce?.(guild, c); console.log('📢 Panneau annonces en place :', cid); } } catch {} })(_annCh);
   }
   // Panneau UNIFIÉ « Tables de jeu » du saloon (blackjack + poker menteur + faro + poker + cinq doigts + dominos)
-  (async () => { try { await _installerPanelSaloon(guild, '1523378716770570372'); console.log('🎰 Panneau Saloon (6 jeux) en place'); } catch {} })();
+  (async () => { try { await _installerPanelSaloon(guild, '1523378716770570372'); console.log('🎰 Panneau Saloon (8 jeux) en place'); } catch {} })();
   // Saloon : écriture verrouillée — on ne peut QUE jouer (boutons), pas écrire de messages.
   (async () => {
     try {
@@ -4443,9 +4446,12 @@ client.on('interactionCreate', async interaction => {
   if (await blackjack.routeInteraction?.(interaction)) return;
   if (await pokermenteur.routeInteraction?.(interaction)) return;
   if (await faro.routeInteraction?.(interaction)) return;
+  if (await pokertable.routeInteraction?.(interaction)) return;
   if (await poker.routeInteraction?.(interaction)) return;
   if (await cinqdoigts.routeInteraction?.(interaction)) return;
   if (await dominos.routeInteraction?.(interaction)) return;
+  if (await brasdefer.routeInteraction?.(interaction)) return;
+  if (await echecs.routeInteraction?.(interaction)) return;
   if (await missionsIA.routeInteraction?.(interaction)) return;
   if (await pepites.routeInteraction?.(interaction)) return;
   if (await musique.routeInteraction?.(interaction)) return;
@@ -10489,7 +10495,7 @@ async function _installerCataloguePrestations(guild) {
 }
 
 // ── Panneau UNIFIÉ « Saloon — Tables de jeu » : un seul point d'entrée pour les 6 jeux ──
-// Chaque bouton ouvre une table via le module concerné (bj_open, pm_open, faro_open, pk_open, fff_open, dom_open).
+// Chaque bouton ouvre une table via le module concerné (bj_open, pm_open, faro_open, pkt_open, fff_open, dom_open, brf_open, ech_open).
 function _panneauSaloonPayload() {
   const embed = new EmbedBuilder()
     .setColor(0xC8A45C)
@@ -10505,9 +10511,11 @@ function _panneauSaloonPayload() {
       '🃏 **Blackjack** — battez le croupier sans dépasser 21 *(payé 6:5, assurance possible)*.',
       '🎲 **Poker Menteur** — misez, bluffez, criez « Menteur ! » ou tentez le « Pile-poil ! » *(dés cachés)*.',
       '🎴 **Faro** — misez sur les rangs, le donneur tourne les cartes *(la banque prend sa commission)*.',
-      '♠️ **Poker (5 cartes)** — main fermée, un échange *(3 cartes max)*, la meilleure rafle le pot.',
+      '♠️ **Poker** — vraie table multijoueur : **Texas Hold\'em** ou **5 Cartes**, blindes, enchères, pot & pots secondaires.',
       '🔪 **Cinq Doigts** — jeu de nerfs au couteau, le plus rapide gagne.',
       '🁢 **Dominos** — videz votre main avant les autres.',
+      '💪 **Bras de fer** — épreuve de force, seul contre un PNJ ou en duel misé.',
+      '♟️ **Échecs** — duel d\'esprit à deux, règles complètes *(mise optionnelle)*.',
       '',
       '👉 Cliquez un jeu pour **ouvrir une table** dans ce salon.',
       '📖 *À chaque table : bouton **Comment jouer** (les règles), **Emote RP** (pour rester crédible en jeu) et **Mes sous** (votre compteur de gains).*',
@@ -10521,11 +10529,15 @@ function _panneauSaloonPayload() {
     new ButtonBuilder().setCustomId('faro_open').setLabel('Faro').setEmoji('🎴').setStyle(ButtonStyle.Secondary),
   );
   const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('pk_open').setLabel('Poker').setEmoji('♠️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('pkt_open').setLabel('Poker').setEmoji('♠️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('fff_open').setLabel('Cinq Doigts').setEmoji('🔪').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('dom_open').setLabel('Dominos').setEmoji('🁢').setStyle(ButtonStyle.Secondary),
   );
-  return { embeds: [embed], components: [row1, row2] };
+  const row3 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('brf_open').setLabel('Bras de fer').setEmoji('💪').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('ech_open').setLabel('Échecs').setEmoji('♟️').setStyle(ButtonStyle.Secondary),
+  );
+  return { embeds: [embed], components: [row1, row2, row3] };
 }
 async function _installerPanelSaloon(guild, channelId) {
   try {
