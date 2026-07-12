@@ -10545,20 +10545,28 @@ async function _installerPanelSaloon(guild, channelId) {
     if (!ch?.messages || typeof ch.send !== 'function') return;
     const me = guild.client.user.id;
     const estHub = m => m.author?.id === me && (m.embeds?.[0]?.title || '').includes('TABLES DE JEU');
-    // Nettoie l'ancien panneau blackjack seul (titre « TABLE DE JEU » singulier) s'il traîne.
-    const aBouton = (m, id) => m.components?.some(r => r.components?.some(c => c.customId === id));
-    let existing = null;
-    const pins = await ch.messages.fetchPinned().catch(() => null);
-    if (pins) existing = [...pins.values()].find(estHub) || null;
-    const msgs = await ch.messages.fetch({ limit: 50 }).catch(() => null);
-    if (!existing && msgs) existing = [...msgs.values()].find(estHub) || null;
-    if (msgs) for (const m of msgs.values()) {
-      if (m.author?.id === me && m !== existing && aBouton(m, 'bj_open') && !estHub(m)) await m.delete().catch(() => {});
-    }
+    const aBouton = (m, id) => m.components?.some(r => r.components?.some(c => (c.customId || c.custom_id) === id));
+
+    // Rassemble les messages du salon : récents + épinglés (API v14.26 fetchPins, + repli fetchPinned).
+    const vus = new Map();
+    const add = arr => { for (const m of (arr || [])) if (m) vus.set(m.id, m); };
+    try { const msgs = await ch.messages.fetch({ limit: 100 }).catch(() => null); if (msgs?.values) add([...msgs.values()]); } catch {}
+    try { if (typeof ch.messages.fetchPins === 'function') { const r = await ch.messages.fetchPins().catch(() => null); if (r) add(r.items ? r.items.map(x => x.message || x) : (r.values ? [...r.values()] : (Array.isArray(r) ? r : []))); } } catch {}
+    try { const p = typeof ch.messages.fetchPinned === 'function' ? await ch.messages.fetchPinned().catch(() => null) : null; if (p?.values) add([...p.values()]); } catch {}
+    const tous = [...vus.values()];
+
+    const panels = tous.filter(estHub);
+    // Nettoie aussi d'éventuelles vieilles tables blackjack orphelines.
+    for (const m of tous) { if (m.author?.id === me && !panels.includes(m) && aBouton(m, 'bj_open')) await m.delete().catch(() => {}); }
+
+    // On SUPPRIME tous les anciens panneaux et on en repose UN neuf : l'édition en place
+    // ne prenait pas la 3e rangée (Bras de fer / Échecs). Le repost garantit un panneau à jour.
+    let supprimes = 0;
+    for (const m of panels) { if (await m.delete().then(() => true).catch(() => false)) supprimes++; }
     const payload = _panneauSaloonPayload();
-    if (existing) { await existing.edit(payload).catch(() => {}); return; }
-    const sent = await ch.send(payload).catch(() => null);
+    const sent = await ch.send(payload).catch(e => { console.log('⚠️ saloon: envoi du panneau échoué →', e?.message); return null; });
     if (sent) await sent.pin().catch(() => {});
+    console.log(`🎰 Saloon: ${supprimes} ancien(s) panneau(x) retiré(s), 1 neuf posté${sent ? '' : ' (ÉCHEC)'}.`);
   } catch (e) { console.log('⚠️ panneau saloon:', e.message); }
 }
 
