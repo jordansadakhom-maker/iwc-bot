@@ -428,6 +428,20 @@ async function routeInteraction(interaction) {
     if (!id.startsWith(PREFIXE)) return false;
     const eph = MessageFlags.Ephemeral;
 
+    // ── ANCIEN POKER RETIRÉ ──────────────────────────────────────────────────
+    // Remplacé par la nouvelle TABLE DE POKER (module pokertable.js, préfixe pkt_).
+    // On redirige tout clic sur l'ancien poker (y compris un vieux message resté
+    // dans le salon) vers le nouveau panneau, et on nettoie le message obsolète.
+    try {
+      if (interaction.isButton?.() || interaction.isModalSubmit?.()) {
+        await interaction.reply({ content: '🃏 L\'ancienne table de poker a été **remplacée** par la nouvelle table du saloon (blindes, cave, tapis, **Texas Hold\'em** & **5 Cartes**). Ouvre-la avec le bouton **♠️ Poker** du panneau.', flags: eph }).catch(() => {});
+      }
+      const m = interaction.message;
+      if (m && m.author?.id === m.client?.user?.id) await m.delete().catch(() => {});
+    } catch {}
+    return true;
+    // ─────────────────────────────────────────────────────────────────────────
+
     // Ouvrir une table (depuis le panneau)
     if (interaction.isButton() && id === 'pk_open') {
       const exist = tables.get(interaction.channelId);

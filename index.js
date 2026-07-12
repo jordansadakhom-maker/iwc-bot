@@ -2663,7 +2663,7 @@ async function autoSetup(guild) {
     (async (cid) => { try { const c = await guild.channels.fetch(cid).catch(() => null); if (c?.send) { await annonces.installerPanelAnnonce?.(guild, c); console.log('📢 Panneau annonces en place :', cid); } } catch {} })(_annCh);
   }
   // Panneau UNIFIÉ « Tables de jeu » du saloon (blackjack + poker menteur + faro + poker + cinq doigts + dominos)
-  (async () => { try { await _installerPanelSaloon(guild, '1523378716770570372'); console.log('🎰 Panneau Saloon (8 jeux) en place'); } catch {} })();
+  (async () => { try { await _installerPanelSaloon(guild, '1523378716770570372'); console.log('🎰 Panneau Saloon (8 jeux) en place'); await _nettoyerAncienPoker(guild, '1523378716770570372'); } catch {} })();
   // Saloon : écriture verrouillée — on ne peut QUE jouer (boutons), pas écrire de messages.
   (async () => {
     try {
@@ -10560,6 +10560,37 @@ async function _installerPanelSaloon(guild, channelId) {
     const sent = await ch.send(payload).catch(() => null);
     if (sent) await sent.pin().catch(() => {});
   } catch (e) { console.log('⚠️ panneau saloon:', e.message); }
+}
+
+// Nettoie d'un coup les messages de l'ANCIEN poker (5-card draw, préfixe pk_) qui
+// encombrent le salon — sans jamais toucher au panneau épinglé, à la nouvelle table
+// de poker (pkt_ / « Texas Hold'em »), ni aux autres jeux.
+async function _nettoyerAncienPoker(guild, channelId) {
+  try {
+    const ch = guild.channels.cache.get(channelId) || await guild.channels.fetch(channelId).catch(() => null);
+    if (!ch?.messages?.fetch) return 0;
+    const me = guild.client.user.id;
+    const msgs = await ch.messages.fetch({ limit: 100 }).catch(() => null);
+    if (!msgs) return 0;
+    let n = 0;
+    for (const m of msgs.values()) {
+      if (m.author?.id !== me || m.pinned) continue;              // jamais les autres, jamais le panneau
+      const titre = m.embeds?.[0]?.title || '';
+      const desc = m.embeds?.[0]?.description || '';
+      const contenu = m.content || '';
+      // signatures UNIQUES à l'ancien poker
+      const estAncienTable = /5-CARD DRAW/i.test(titre);
+      const estAncienFerme = /Table fermée/i.test(titre) && /ramasse les cartes/i.test(desc);
+      const aBoutonPk = (m.components || []).some(r => (r.components || []).some(c => {
+        const cid = c.customId || c.custom_id || '';
+        return cid.startsWith('pk_') && !cid.startsWith('pkt_');
+      }));
+      const texteAncien = /rafle le pot|Misez votre ante|échanger 0 à/i.test(contenu);
+      if (estAncienTable || estAncienFerme || aBoutonPk || texteAncien) { await m.delete().catch(() => {}); n++; }
+    }
+    if (n) console.log(`🧹 Ancien poker : ${n} message(s) obsolète(s) supprimé(s) du saloon.`);
+    return n;
+  } catch (e) { console.log('⚠️ nettoyage ancien poker:', e.message); return 0; }
 }
 
 // ── Salon VISITEURS (1519611763866337420) : panneau d'accueil clair + 2 boutons fonctionnels ──
