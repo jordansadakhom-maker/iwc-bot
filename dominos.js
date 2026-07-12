@@ -360,13 +360,13 @@ function _components(t) {
       new ButtonBuilder().setCustomId('dom_leave').setLabel('Se lever').setEmoji('🚪').setStyle(ButtonStyle.Secondary),
     ));
     rows.push(new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('dom_deal').setLabel(t.manche > 0 ? 'Relancer une manche' : 'Distribuer').setEmoji('🁢').setStyle(ButtonStyle.Primary).setDisabled(t.joueurs.length < MIN_JOUEURS),
+      new ButtonBuilder().setCustomId('dom_deal').setLabel(t.manche > 0 ? 'Relancer une manche' : 'Distribuer').setEmoji('🀄').setStyle(ButtonStyle.Primary).setDisabled(t.joueurs.length < MIN_JOUEURS),
       new ButtonBuilder().setCustomId('dom_close').setLabel('Fermer la table').setEmoji('❌').setStyle(ButtonStyle.Danger),
     ));
   } else {
     rows.push(new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('dom_play').setLabel('Jouer une tuile').setEmoji('🀱').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('dom_draw').setLabel('Piocher').setEmoji('🂠').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('dom_play').setLabel('Jouer une tuile').setEmoji('🀄').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('dom_draw').setLabel('Piocher').setEmoji('🎴').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('dom_pass').setLabel('Passer').setEmoji('⏭️').setStyle(ButtonStyle.Secondary),
     ));
     rows.push(new ActionRowBuilder().addComponents(
@@ -384,7 +384,7 @@ function _contentLigne(t) {
   return '💰 Rejoignez et misez (💵 Ma mise), puis l\'hôte distribue.';
 }
 async function _screen(t) {
-  const e = new EmbedBuilder().setColor(0xC8A45C).setTitle('🁢  TABLE DE DOMINOS  🁫')
+  const e = new EmbedBuilder().setColor(0xC8A45C).setTitle('🀄  TABLE DE DOMINOS  🀄')
     .setFooter({ text: 'Hôte : ' + t.hoteNom + '  ·  Double-six, jeu bloqué  ·  Le vainqueur ramasse le pot' });
   let buf = null;
   try { if (_img?.genererPlateau) buf = await _img.genererPlateau(_imgState(t)); } catch { buf = null; }
@@ -434,7 +434,7 @@ function _menuPose(opts) {
 
 // ─── Panneau d'ouverture ───
 function _panelPayload() {
-  const e = new EmbedBuilder().setColor(0xC8A45C).setTitle('🁢 SALOON — TABLE DE DOMINOS')
+  const e = new EmbedBuilder().setColor(0xC8A45C).setTitle('🀄 SALOON — TABLE DE DOMINOS')
     .setDescription([
       '```',
       '╔═══════════════════════════════╗',
@@ -443,13 +443,13 @@ function _panelPayload() {
       '```',
       '*Tirez une chaise, l\'ami. On aligne les os sur le bois — 28 tuiles, deux extrémités, pas de maison pour tricher.*',
       '',
-      '🁫 **Dominos bloqués** — raccordez vos tuiles aux extrémités ouvertes. Le premier à vider sa main rafle le pot ; en cas de blocage, c\'est le plus petit total qui gagne.',
+      '🀄 **Dominos bloqués** — raccordez vos tuiles aux extrémités ouvertes. Le premier à vider sa main rafle le pot ; en cas de blocage, c\'est le plus petit total qui gagne.',
       '',
       '👉 **Ouvrir une table** ci-dessous : vous en devenez l\'**hôte**. Les autres rejoignent avec leur ante, puis la partie commence.',
     ].join('\n'))
     .setFooter({ text: 'Iron Wolf Company · Saloon' });
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('dom_open').setLabel('Ouvrir une table de Dominos').setEmoji('🁢').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('dom_open').setLabel('Ouvrir une table de Dominos').setEmoji('🀄').setStyle(ButtonStyle.Success),
   );
   return { embeds: [e], components: [row] };
 }
@@ -480,19 +480,19 @@ async function routeInteraction(interaction) {
     // Ouvrir une table (depuis le panneau)
     if (interaction.isButton() && id === 'dom_open') {
       const exist = tables.get(interaction.channelId);
-      if (exist) { await interaction.reply({ content: '🁢 Une table est déjà ouverte dans ce salon. Rejoins-la un peu plus haut !', flags: eph }); return true; }
+      if (exist) { await interaction.reply({ content: '🀄 Une table est déjà ouverte dans ce salon. Rejoins-la un peu plus haut !', flags: eph }); return true; }
       await interaction.deferReply({ flags: eph });
       const t = _creerTable(interaction);
       const msg = await interaction.channel.send(await _screen(t)).catch(() => null);
       if (!msg) { await interaction.editReply({ content: '❌ Impossible d\'ouvrir la table ici (permissions ?).' }); return true; }
       t.msg = msg; t.messageId = msg.id; tables.set(interaction.channelId, t);
-      await interaction.editReply({ content: '🁢 Table ouverte — tu en es l\'**hôte**. Rejoins 👇 puis clique **Distribuer** quand tout le monde a misé (min. ' + MIN_JOUEURS + ' joueurs).' });
+      await interaction.editReply({ content: '🀄 Table ouverte — tu en es l\'**hôte**. Rejoins 👇 puis clique **Distribuer** quand tout le monde a misé (min. ' + MIN_JOUEURS + ' joueurs).' });
       return true;
     }
 
     // À partir d'ici il faut une table active
     const t = tables.get(interaction.channelId);
-    if (!t) { if (interaction.isButton() || interaction.isModalSubmit() || interaction.isStringSelectMenu()) { await interaction.reply({ content: '⌛ Cette table n\'est plus active. Ouvre-en une nouvelle depuis le panneau 🁢.', flags: eph }).catch(() => {}); } return true; }
+    if (!t) { if (interaction.isButton() || interaction.isModalSubmit() || interaction.isStringSelectMenu()) { await interaction.reply({ content: '⌛ Cette table n\'est plus active. Ouvre-en une nouvelle depuis le panneau 🀄.', flags: eph }).catch(() => {}); } return true; }
 
     // Rejoindre → modal d'ante
     if (interaction.isButton() && (id === 'dom_join' || id === 'dom_mise')) {
@@ -613,7 +613,7 @@ async function routeInteraction(interaction) {
       const bilan = Object.keys(t.soldes).length
         ? Object.entries(t.soldes).map(([uid, n]) => '• <@' + uid + '> : ' + _money(n)).join('\n')
         : '';
-      const e = new EmbedBuilder().setColor(0x8a6d3b).setTitle('🁢 Table fermée')
+      const e = new EmbedBuilder().setColor(0x8a6d3b).setTitle('🀄 Table fermée')
         .setDescription('On ramasse les os. Merci d\'avoir joué au saloon.' + (bilan ? '\n\n**Bilan des jetons :**\n' + bilan : ''))
         .setFooter({ text: 'Iron Wolf Company · Saloon' });
       try { await t.msg?.edit({ embeds: [e], components: [], files: [], attachments: [] }); } catch {}

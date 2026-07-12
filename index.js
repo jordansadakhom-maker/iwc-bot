@@ -10513,7 +10513,7 @@ function _panneauSaloonPayload() {
       '🎴 **Faro** — misez sur les rangs, le donneur tourne les cartes *(la banque prend sa commission)*.',
       '♠️ **Poker** — vraie table multijoueur : **Texas Hold\'em** ou **5 Cartes**, blindes, enchères, pot & pots secondaires.',
       '🔪 **Cinq Doigts** — jeu de nerfs au couteau, le plus rapide gagne.',
-      '🁢 **Dominos** — videz votre main avant les autres.',
+      '🀄 **Dominos** — videz votre main avant les autres.',
       '💪 **Bras de fer** — épreuve de force, seul contre un PNJ ou en duel misé.',
       '♟️ **Échecs** — duel d\'esprit à deux, règles complètes *(mise optionnelle)*.',
       '',
@@ -10531,7 +10531,7 @@ function _panneauSaloonPayload() {
   const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('pkt_open').setLabel('Poker').setEmoji('♠️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('fff_open').setLabel('Cinq Doigts').setEmoji('🔪').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dom_open').setLabel('Dominos').setEmoji('🁢').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dom_open').setLabel('Dominos').setEmoji('🀄').setStyle(ButtonStyle.Secondary),
   );
   const row3 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('brf_open').setLabel('Bras de fer').setEmoji('💪').setStyle(ButtonStyle.Secondary),
