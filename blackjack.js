@@ -57,6 +57,8 @@ const _REGLES = [
   '',
   '**But :** battre le croupier en approchant **21** sans le dépasser.',
   '',
+  '**💰 Capital & mise :** tu t\'assieds avec un **capital de départ** (ta cave). À chaque manche tu poses une **mise** : la gagner l\'ajoute à ton capital, la perdre la retire. Quand ton capital tombe à **0 $**, tu ne peux plus jouer — clique **💰 Recaver** pour recharger. *(Mise max 100 $ par manche.)*',
+  '',
   '**Valeurs :** figures (V/D/R) = 10 · As = 1 **ou** 11 · les autres = leur chiffre.',
   '**La donne :** chacun mise et reçoit 2 cartes visibles ; le croupier en a 2, dont **une cachée**.',
   '**À ton tour :**',
@@ -79,8 +81,12 @@ const GESTION = ['Opérateur', 'Operateur', 'Concepteur', 'Fléau', 'fleau', 'Fo
 function _estGestion(member) { try { return !!member?.roles?.cache?.some(r => GESTION.some(n => r.name.includes(n))); } catch { return false; } }
 
 const MAX_SIEGES = 5;
-const MISE_MIN = 1, MISE_MAX = 100; // plafond de mise volontairement bas (100) pour cadrer les gains
+const MISE_MIN = 1, MISE_MAX = 100; // plafond de mise PAR MANCHE volontairement bas (100)
+const CAVE_MIN = 10, CAVE_DEF = 500, CAVE_MAX = 2000; // capital de départ (bankroll) posé en s'asseyant
 const TOUR_MS = 120000; // 2 min pour jouer, sinon « Rester » auto
+
+// Capital (bankroll) courant d'un joueur — porté par son siège principal (pas les mains séparées).
+function _stackDe(t, s) { const p = t.sieges.find(x => x.userId === s.userId && !x.isSplitHand); return ((p ? p.stack : s.stack) || 0); }
 
 const RANGS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
 const COULEURS = ['♠', '♥', '♦', '♣'];
@@ -202,12 +208,14 @@ function _lignesCartes(t) {
   else t.sieges.forEach((s, i) => {
     const tot = s.main.length ? _total(s.main) : null;
     let st = '';
-    if (t.phase === 'jeu') { if (s.statut === 'bust') st = '· brûlé'; else if (s.statut === 'blackjack') st = '· BLACKJACK'; else if (s.statut === 'stand') st = '· reste'; else if (i === t.tourIdx) st = '· **à lui de jouer**'; else st = '· ⏳'; }
+    if (t.phase === 'jeu') { if (s.statut === 'sec') st = '· 💤 à sec'; else if (s.statut === 'bust') st = '· brûlé'; else if (s.statut === 'blackjack') st = '· BLACKJACK'; else if (s.statut === 'stand') st = '· reste'; else if (i === t.tourIdx) st = '· **à lui de jouer**'; else st = '· ⏳'; }
     else if (s.resultat) st = s.resultat;
     const mains = s.main.length ? '  ' + _fmtMain(s.main) + (tot != null ? '  **= ' + tot + '**' : '') : '';
     const chaise = s.isSplitHand ? '↳' : '🪑';
     const nomAff = s.nom + (s.isSplitHand ? ' *(main séparée)*' : '');
-    L.push(chaise + ' **' + nomAff + '** — mise ' + _money(s.mise) + mains + (st ? '  ' + st : ''));
+    // capital (bankroll) affiché sur le siège principal ; les mains séparées n'en montrent pas
+    const cap = s.isSplitHand ? '' : ((s.stack ?? 0) <= 0 ? '💰 **0 $ (à sec)** · ' : '💰 ' + _money(s.stack ?? 0) + ' · ');
+    L.push(chaise + ' **' + nomAff + '** — ' + cap + 'mise ' + _money(s.mise) + mains + (st ? '  ' + st : ''));
   });
   return L;
 }
@@ -224,7 +232,8 @@ function _lignesStatut(t) {
   } else {
     if (t.diff) L.push(`${t.diff.emoji} **Difficulté de la table : ${t.diff.label}** — ${t.diff.desc}`);
     L.push('💬 *' + (t.ambiance || _pick(_phrasesDeal)) + '*');
-    L.push('👉 **S\'asseoir**, régler sa mise, puis l\'**hôte distribue**.');
+    L.push('👉 **S\'asseoir** avec un **capital de départ**, régler sa **mise par manche**, puis l\'**hôte distribue**.');
+    L.push('💰 *Chaque manche gagnée/perdue augmente ou diminue ton capital. À **0**, tu ne peux plus jouer — clique **💰 Recaver** pour recharger.*');
     L.push('📖 *Nouveau ? Clique **Comment jouer** avant de lancer.*  🎭 *Pense à **Emote RP** pour rester crédible en jeu.*');
   }
   const sold = Object.entries(t.soldes).filter(([, n]) => n).map(([u, n]) => { const s = t.sieges.find(x => x.userId === u); return '• ' + (s ? s.nom : 'Parti') + ' : ' + _money(n); });
@@ -267,6 +276,7 @@ function _components(t) {
     rows.push(new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('bj_sit').setLabel('S\'asseoir').setEmoji('🪑').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('bj_mise').setLabel('Ma mise').setEmoji('💵').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('bj_recave').setLabel('Recaver').setEmoji('💰').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('bj_leave').setLabel('Se lever').setEmoji('🚪').setStyle(ButtonStyle.Secondary),
     ));
     rows.push(new ActionRowBuilder().addComponents(
@@ -279,12 +289,12 @@ function _components(t) {
     const comp = [
       new ButtonBuilder().setCustomId('bj_hit').setLabel('Tirer').setEmoji('🃏').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('bj_stand').setLabel('Rester').setEmoji('✋').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('bj_double').setLabel('Doubler').setEmoji('⏫').setStyle(ButtonStyle.Secondary).setDisabled(!(s && _doublable(s.main))),
-      new ButtonBuilder().setCustomId('bj_split').setLabel('Séparer').setEmoji('🔀').setStyle(ButtonStyle.Secondary).setDisabled(!(s && _splittable(t, s))),
+      new ButtonBuilder().setCustomId('bj_double').setLabel('Doubler').setEmoji('⏫').setStyle(ButtonStyle.Secondary).setDisabled(!(s && _doublable(s.main) && _stackDe(t, s) >= 2 * s.mise)),
+      new ButtonBuilder().setCustomId('bj_split').setLabel('Séparer').setEmoji('🔀').setStyle(ButtonStyle.Secondary).setDisabled(!(s && _splittable(t, s) && _stackDe(t, s) >= 2 * s.mise)),
     ];
     // Assurance : proposée uniquement si le croupier montre un As, avant d'avoir agi.
-    // Jamais sur une main issue d'un split (l'assurance ne se prend qu'une fois, sur la main initiale).
-    if (asVisible && s && s.main.length === 2 && !s.assurance && !s.isSplitHand) {
+    // Jamais sur une main issue d'un split ; et seulement si le capital la couvre.
+    if (asVisible && s && s.main.length === 2 && !s.assurance && !s.isSplitHand && _stackDe(t, s) >= s.mise + Math.ceil(s.mise / 2)) {
       comp.push(new ButtonBuilder().setCustomId('bj_assur').setLabel('Assurance').setEmoji('🛡️').setStyle(ButtonStyle.Secondary));
     }
     rows.push(new ActionRowBuilder().addComponents(...comp));
@@ -363,7 +373,9 @@ function _croupierEtResolution(t) {
   if (enJeu) { while (_total(t.croupier.main) < 17 || (H17 && _estSoft17(t.croupier.main))) t.croupier.main.push(_piocher(t)); }
   const dt = _total(t.croupier.main);
   const dBJ = _estBJ(t.croupier.main);
+  const gainManche = {}; // userId -> net de CETTE manche (pour l'appliquer au capital)
   for (const s of t.sieges) {
+    if (s.statut === 'sec') { s.resultat = '💤 à sec (n\'a pas joué)'; s.net = 0; continue; } // pas de mise
     const pt = _total(s.main);
     let net = 0, label = '';
     if (s.statut === 'bust') { net = -s.mise; label = '❌ Perdu (brûlé)'; }
@@ -383,6 +395,14 @@ function _croupierEtResolution(t) {
     }
     s.resultat = label; s.net = net; s.statut = 'fini';
     t.soldes[s.userId] = (t.soldes[s.userId] || 0) + net;
+    gainManche[s.userId] = (gainManche[s.userId] || 0) + net;
+  }
+  // Applique le résultat de la manche au CAPITAL (bankroll) de chaque siège réel.
+  // Le capital ne peut jamais devenir négatif (on ne perd pas plus que sa cave).
+  for (const s of t.sieges) {
+    if (s.isSplitHand) continue;
+    s.stack = Math.max(0, (s.stack || 0) + (gainManche[s.userId] || 0));
+    if (s.stack <= 0) s.resultat = (s.resultat ? s.resultat + '  ·  ' : '') + '💰 **à sec** — recave pour rejouer';
   }
   // Compteur de « sous » PERSISTANT du saloon (une seule écriture pour toute la table).
   try { if (casino.crediterLot) casino.crediterLot(t.sieges.map(s => ({ userId: s.userId, montant: s.net || 0 }))); } catch {}
@@ -395,10 +415,17 @@ function _distribuer(t) {
   t.reshuffle = false;
   t.sieges = t.sieges.filter(s => !s.isSplitHand); // retire les mains séparées de la manche précédente
   t.croupier.main = [];
-  for (const s of t.sieges) { s.main = []; s.statut = 'jeu'; s.resultat = ''; s.net = 0; s.assurance = 0; s.aceSplitLock = false; }
-  // 2 cartes chacun, puis 2 au croupier
-  for (let k = 0; k < 2; k++) { for (const s of t.sieges) s.main.push(_piocher(t)); t.croupier.main.push(_piocher(t)); }
-  for (const s of t.sieges) { if (_estBJ(s.main)) s.statut = 'blackjack'; }
+  for (const s of t.sieges) {
+    s.main = []; s.resultat = ''; s.net = 0; s.assurance = 0; s.aceSplitLock = false;
+    if (s.stack == null) s.stack = s.mise || MISE_MIN;                 // sécurité (anciens sièges)
+    if ((s.stack || 0) < MISE_MIN) { s.statut = 'sec'; continue; }     // à sec → ne reçoit pas de cartes
+    s.mise = Math.max(MISE_MIN, Math.min(s.mise || MISE_MIN, s.stack, MISE_MAX)); // la mise ne dépasse jamais le capital
+    s.statut = 'jeu';
+  }
+  const actifs = t.sieges.filter(s => s.statut === 'jeu');
+  // 2 cartes à chaque joueur ACTIF, puis 2 au croupier
+  for (let k = 0; k < 2; k++) { for (const s of actifs) s.main.push(_piocher(t)); t.croupier.main.push(_piocher(t)); }
+  for (const s of actifs) { if (_estBJ(s.main)) s.statut = 'blackjack'; }
   t.phase = 'jeu';
   t.tourIdx = -1;
   t.ambiance = _pick(_phrasesDeal);
@@ -486,29 +513,71 @@ async function routeInteraction(interaction) {
     const t = tables.get(interaction.channelId);
     if (!t) { if (interaction.isButton() || interaction.isModalSubmit()) { await interaction.reply({ content: '⌛ Cette table n\'est plus active. Ouvre-en une nouvelle depuis le panneau 🎰.', flags: eph }).catch(() => {}); } return true; }
 
-    // S'asseoir / Changer ma mise → modal (accessible aussi si déjà assis, pour AJUSTER la mise à chaque main)
-    if (interaction.isButton() && (id === 'bj_sit' || id === 'bj_mise')) {
-      if (t.phase === 'jeu') { await interaction.reply({ content: '⏳ Une manche est en cours — (re)mise à la fin de celle-ci.', flags: eph }); return true; }
-      const dejaAssis = _siege(t, interaction.user.id);
-      if (id === 'bj_mise' && !dejaAssis) { await interaction.reply({ content: 'Assieds-toi d\'abord (bouton 🪑) pour poser une mise.', flags: eph }); return true; }
-      if (!dejaAssis && t.sieges.filter(s => !s.isSplitHand).length >= MAX_SIEGES) { await interaction.reply({ content: '🈵 La table est complète (' + MAX_SIEGES + ' joueurs).', flags: eph }); return true; }
-      const modal = new ModalBuilder().setCustomId('bj_sit_modal').setTitle(dejaAssis ? '💵 Changer ma mise' : '🪑 S\'asseoir à la table')
-        .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('mise').setLabel('Votre mise (max 100 $)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(3).setValue(dejaAssis ? String(dejaAssis.mise) : '').setPlaceholder('Ex : 50 — plafond 100 $')));
+    // S'asseoir (nouveau joueur) → capital de départ + mise par manche
+    if (interaction.isButton() && id === 'bj_sit') {
+      if (t.phase === 'jeu') { await interaction.reply({ content: '⏳ Une manche est en cours — assieds-toi à la fin de celle-ci.', flags: eph }); return true; }
+      if (_siege(t, interaction.user.id)) { await interaction.reply({ content: '🪑 Tu es déjà assis. Utilise **💵 Ma mise** ou **💰 Recaver**.', flags: eph }); return true; }
+      if (t.sieges.filter(s => !s.isSplitHand).length >= MAX_SIEGES) { await interaction.reply({ content: '🈵 La table est complète (' + MAX_SIEGES + ' joueurs).', flags: eph }); return true; }
+      const modal = new ModalBuilder().setCustomId('bj_sit_modal').setTitle('🪑 S\'asseoir à la table')
+        .addComponents(
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cave').setLabel('Ton capital de départ (' + CAVE_MIN + '–' + CAVE_MAX + ' $)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(4).setPlaceholder('Ex : ' + CAVE_DEF)),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('mise').setLabel('Ta mise par manche (max ' + MISE_MAX + ' $)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(3).setPlaceholder('Ex : 25')),
+        );
+      await interaction.showModal(modal); return true;
+    }
+    // Changer sa mise par manche
+    if (interaction.isButton() && id === 'bj_mise') {
+      if (t.phase === 'jeu') { await interaction.reply({ content: '⏳ Manche en cours — change ta mise à la fin.', flags: eph }); return true; }
+      const s = _siege(t, interaction.user.id);
+      if (!s) { await interaction.reply({ content: 'Assieds-toi d\'abord (bouton 🪑) pour poser une mise.', flags: eph }); return true; }
+      const plafond = Math.max(MISE_MIN, Math.min(MISE_MAX, s.stack || MISE_MAX));
+      const modal = new ModalBuilder().setCustomId('bj_mise_modal').setTitle('💵 Ma mise par manche')
+        .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('mise').setLabel('Mise (max ' + plafond + ' $)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(3).setValue(String(s.mise || MISE_MIN))));
+      await interaction.showModal(modal); return true;
+    }
+    // Recaver : ajouter du capital (obligatoire une fois à sec)
+    if (interaction.isButton() && id === 'bj_recave') {
+      if (t.phase === 'jeu') { await interaction.reply({ content: '⏳ Manche en cours — recave à la fin.', flags: eph }); return true; }
+      const s = _siege(t, interaction.user.id);
+      if (!s) { await interaction.reply({ content: 'Assieds-toi d\'abord (bouton 🪑).', flags: eph }); return true; }
+      const modal = new ModalBuilder().setCustomId('bj_recave_modal').setTitle('💰 Recaver (ajouter du capital)')
+        .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ajout').setLabel('Montant à ajouter (max ' + CAVE_MAX + ' $)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(4).setPlaceholder('Ex : 200')));
       await interaction.showModal(modal); return true;
     }
     if (interaction.isModalSubmit() && id === 'bj_sit_modal') {
       if (t.phase === 'jeu') { await interaction.reply({ content: '⏳ Manche en cours, patiente.', flags: eph }); return true; }
+      if (_siege(t, interaction.user.id)) { await interaction.reply({ content: 'Tu es déjà assis.', flags: eph }); return true; }
+      if (t.sieges.filter(x => !x.isSplitHand).length >= MAX_SIEGES) { await interaction.reply({ content: '🈵 Table complète.', flags: eph }); return true; }
+      let cave = parseInt((interaction.fields.getTextInputValue('cave') || '').replace(/[^0-9]/g, ''), 10);
+      if (!Number.isFinite(cave) || cave < CAVE_MIN) cave = CAVE_DEF;
+      if (cave > CAVE_MAX) cave = CAVE_MAX;
       let mise = parseInt((interaction.fields.getTextInputValue('mise') || '').replace(/[^0-9]/g, ''), 10);
       if (!Number.isFinite(mise) || mise < MISE_MIN) mise = MISE_MIN;
-      if (mise > MISE_MAX) mise = MISE_MAX;
-      let s = _siege(t, interaction.user.id);
-      if (s) { s.mise = mise; }
-      else {
-        if (t.sieges.filter(x => !x.isSplitHand).length >= MAX_SIEGES) { await interaction.reply({ content: '🈵 Table complète.', flags: eph }); return true; }
-        s = { userId: interaction.user.id, nom: interaction.member?.displayName || interaction.user.username, mise, main: [], statut: 'attente', resultat: '', net: 0 };
-        t.sieges.push(s);
-      }
-      await interaction.reply({ content: '✅ Tu es assis, mise réglée à **' + _money(mise) + '**. Bonne chance !', flags: eph });
+      mise = Math.min(mise, MISE_MAX, cave);
+      const s = { userId: interaction.user.id, nom: interaction.member?.displayName || interaction.user.username, cave, stack: cave, mise, main: [], statut: 'attente', resultat: '', net: 0 };
+      t.sieges.push(s);
+      await interaction.reply({ content: '✅ Tu t\'assieds avec **' + _money(cave) + '** de capital, mise **' + _money(mise) + '** par manche. Bonne chance !', flags: eph });
+      await _refresh(t); return true;
+    }
+    if (interaction.isModalSubmit() && id === 'bj_mise_modal') {
+      const s = _siege(t, interaction.user.id);
+      if (!s) { await interaction.reply({ content: 'Tu n\'es plus à la table.', flags: eph }); return true; }
+      let mise = parseInt((interaction.fields.getTextInputValue('mise') || '').replace(/[^0-9]/g, ''), 10);
+      if (!Number.isFinite(mise) || mise < MISE_MIN) mise = MISE_MIN;
+      mise = Math.min(mise, MISE_MAX, Math.max(MISE_MIN, s.stack || MISE_MIN));
+      s.mise = mise;
+      await interaction.reply({ content: '💵 Mise réglée à **' + _money(mise) + '** par manche.' + ((s.stack || 0) < MISE_MIN ? ' ⚠️ Tu es **à sec** — clique **💰 Recaver** pour rejouer.' : ''), flags: eph });
+      await _refresh(t); return true;
+    }
+    if (interaction.isModalSubmit() && id === 'bj_recave_modal') {
+      const s = _siege(t, interaction.user.id);
+      if (!s) { await interaction.reply({ content: 'Tu n\'es plus à la table.', flags: eph }); return true; }
+      let ajout = parseInt((interaction.fields.getTextInputValue('ajout') || '').replace(/[^0-9]/g, ''), 10);
+      if (!Number.isFinite(ajout) || ajout < 1) ajout = CAVE_DEF;
+      if (ajout > CAVE_MAX) ajout = CAVE_MAX;
+      s.stack = (s.stack || 0) + ajout; s.cave = (s.cave || 0) + ajout;
+      if (!s.mise || s.mise < MISE_MIN) s.mise = Math.min(MISE_MAX, s.stack);
+      await interaction.reply({ content: '💰 Tu recaves **+' + _money(ajout) + '**. Capital : **' + _money(s.stack) + '**.', flags: eph });
       await _refresh(t); return true;
     }
 
@@ -528,6 +597,7 @@ async function routeInteraction(interaction) {
       if (!_estHote(t, interaction)) { await interaction.reply({ content: '🔒 Seul l\'hôte (ou la Direction) peut distribuer.', flags: eph }); return true; }
       if (t.phase === 'jeu') { await interaction.reply({ content: 'Une manche est déjà en cours.', flags: eph }); return true; }
       if (!t.sieges.length) { await interaction.reply({ content: 'Personne n\'est assis à la table.', flags: eph }); return true; }
+      if (!t.sieges.some(s => (s.stack ?? 0) >= MISE_MIN)) { await interaction.reply({ content: '💰 Tous les joueurs sont **à sec** — cliquez **💰 Recaver** pour recharger votre capital avant de distribuer.', flags: eph }); return true; }
       await interaction.deferUpdate().catch(() => {});
       _distribuer(t);
       try { _voix.jouer?.(interaction.member?.voice?.channel, 'battage'); } catch {}
@@ -565,7 +635,7 @@ async function routeInteraction(interaction) {
       } else if (id === 'bj_stand') {
         s.statut = 'stand'; t.ambiance = s.nom + ' reste à ' + _total(s.main) + '.'; _avancer(t);
       } else { // double
-        if (!_doublable(s.main)) { await _refresh(t); return true; } // double seulement sur 9/10/11
+        if (!_doublable(s.main) || _stackDe(t, s) < 2 * s.mise) { await _refresh(t); return true; } // besoin de 2× la mise en capital
         s.mise *= 2; s.main.push(_piocher(t));
         const tot = _total(s.main);
         s.statut = tot > 21 ? 'bust' : 'stand';
@@ -582,6 +652,7 @@ async function routeInteraction(interaction) {
       if (!s) { await interaction.reply({ content: 'Aucun joueur à jouer.', flags: eph }); return true; }
       if (s.userId !== interaction.user.id) { await interaction.reply({ content: '⏳ Ce n\'est pas ton tour — c\'est à **' + s.nom + '** de jouer.', flags: eph }); return true; }
       if (!_splittable(t, s)) { await interaction.reply({ content: '🔀 Séparation impossible : il faut **2 cartes de même rang** (max 4 mains).', flags: eph }); return true; }
+      if (_stackDe(t, s) < 2 * s.mise) { await interaction.reply({ content: '💰 Capital insuffisant pour séparer (il faut couvrir une 2ᵉ mise).', flags: eph }); return true; }
       _clearTimer(t);
       await interaction.deferUpdate().catch(() => {});
       const rang = s.main[0].r;
@@ -655,4 +726,4 @@ async function routeInteraction(interaction) {
   }
 }
 
-module.exports = { routeInteraction, installerPanelBlackjack, _test: { _total, _estBJ, _estSoft17, _construireSabot, _distribuer, _croupierEtResolution, _creerTable, tables, BJ_PAIEMENT, CROUPIER_H17, _doublable, _splittable, _split, _avancer, _piocher, _val } };
+module.exports = { routeInteraction, installerPanelBlackjack, _test: { _total, _estBJ, _estSoft17, _construireSabot, _distribuer, _croupierEtResolution, _creerTable, tables, BJ_PAIEMENT, CROUPIER_H17, _doublable, _splittable, _split, _avancer, _piocher, _val, _stackDe } };
