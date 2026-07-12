@@ -10544,6 +10544,9 @@ async function _installerPanelSaloon(guild, channelId) {
     const ch = await guild.channels.fetch(channelId).catch(() => null);
     if (!ch?.messages || typeof ch.send !== 'function') return;
     const me = guild.client.user.id;
+    // Le salon est en lecture seule : on GARANTIT d'abord que le bot peut y écrire
+    // (sinon l'envoi du panneau échoue selon l'ordre d'application des permissions).
+    try { if (guild.members?.me && ch.permissionOverwrites?.edit) await ch.permissionOverwrites.edit(guild.members.me, { SendMessages: true, ViewChannel: true }); } catch {}
     const estHub = m => m.author?.id === me && (m.embeds?.[0]?.title || '').includes('TABLES DE JEU');
     const aBouton = (m, id) => m.components?.some(r => r.components?.some(c => (c.customId || c.custom_id) === id));
 
@@ -10554,19 +10557,19 @@ async function _installerPanelSaloon(guild, channelId) {
     try { if (typeof ch.messages.fetchPins === 'function') { const r = await ch.messages.fetchPins().catch(() => null); if (r) add(r.items ? r.items.map(x => x.message || x) : (r.values ? [...r.values()] : (Array.isArray(r) ? r : []))); } } catch {}
     try { const p = typeof ch.messages.fetchPinned === 'function' ? await ch.messages.fetchPinned().catch(() => null) : null; if (p?.values) add([...p.values()]); } catch {}
     const tous = [...vus.values()];
-
     const panels = tous.filter(estHub);
-    // Nettoie aussi d'éventuelles vieilles tables blackjack orphelines.
-    for (const m of tous) { if (m.author?.id === me && !panels.includes(m) && aBouton(m, 'bj_open')) await m.delete().catch(() => {}); }
 
-    // On SUPPRIME tous les anciens panneaux et on en repose UN neuf : l'édition en place
-    // ne prenait pas la 3e rangée (Bras de fer / Échecs). Le repost garantit un panneau à jour.
-    let supprimes = 0;
-    for (const m of panels) { if (await m.delete().then(() => true).catch(() => false)) supprimes++; }
+    // POSTE D'ABORD le nouveau panneau. On ne supprime l'ancien QUE si le neuf est bien passé
+    // → jamais de salon vide même si l'envoi échoue (bug précédent : delete puis send raté).
     const payload = _panneauSaloonPayload();
     const sent = await ch.send(payload).catch(e => { console.log('⚠️ saloon: envoi du panneau échoué →', e?.message); return null; });
-    if (sent) await sent.pin().catch(() => {});
-    console.log(`🎰 Saloon: ${supprimes} ancien(s) panneau(x) retiré(s), 1 neuf posté${sent ? '' : ' (ÉCHEC)'}.`);
+    if (!sent) { console.log('⚠️ saloon: panneau NON reposté (envoi impossible) — ancien panneau conservé.'); return; }
+    await sent.pin().catch(() => {});
+    let supprimes = 0;
+    for (const m of panels) { if (m.id !== sent.id && await m.delete().then(() => true).catch(() => false)) supprimes++; }
+    // Nettoie aussi d'éventuelles vieilles tables blackjack orphelines.
+    for (const m of tous) { if (m.author?.id === me && m.id !== sent.id && !panels.includes(m) && aBouton(m, 'bj_open')) await m.delete().catch(() => {}); }
+    console.log(`🎰 Saloon: panneau neuf posté, ${supprimes} ancien(s) retiré(s).`);
   } catch (e) { console.log('⚠️ panneau saloon:', e.message); }
 }
 
