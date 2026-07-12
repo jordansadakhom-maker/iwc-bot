@@ -2686,6 +2686,8 @@ async function autoSetup(guild) {
   (async () => { try { const r = await _assurerRoleClient(guild); console.log(r ? '👤 Rôle « Client » prêt' : '⚠️ Rôle « Client » non créé (permission « Gérer les rôles » ?)'); } catch {} })();
   // Panneau du générateur de missions RP (salon Direction) — réservé à l'état-major.
   (async () => { try { await missionsIA.installerPanelMissions?.(guild, '1510712255514153101'); console.log('🎯 Panneau générateur de missions en place'); } catch {} })();
+  // Panneau + tableau vivant des absences (#absences).
+  (async () => { try { const ok = await absences.installerPanelAbsences?.(guild); if (ok) console.log('🌙 Panneau absences en place'); } catch {} })();
   // Registre des armes (n° de série) — pose le panneau si un salon est configuré (SALON_ARMES).
   (async () => { try { const ok = await armes.installerPanneau?.(guild); if (ok) console.log('🔫 Registre des armes en place'); } catch {} })();
   (async () => { try { const ok = await groupes.installerPanneau?.(guild); if (ok) console.log('🗂️ Registre des groupes en place'); } catch {} })();
@@ -4486,8 +4488,8 @@ client.on('interactionCreate', async interaction => {
   }
 
   if (interaction.isModalSubmit() && interaction.customId === 'modal_affaire')          return notionV3.handleAffaireModal?.(interaction);
-  if (interaction.isModalSubmit() && interaction.customId === 'modal_absent')           return _validerModalAbsent(interaction);
-  if (interaction.isModalSubmit() && interaction.customId === 'modal_absent_programmer') return _validerModalAbsentProgramme(interaction);
+  if (interaction.isModalSubmit() && interaction.customId === 'modal_absent')           { const r = await _validerModalAbsent(interaction); try { await absences.rafraichirTableau?.(interaction.guild); } catch {} return r; }
+  if (interaction.isModalSubmit() && interaction.customId === 'modal_absent_programmer') { const r = await _validerModalAbsentProgramme(interaction); try { await absences.rafraichirTableau?.(interaction.guild); } catch {} return r; }
   if (interaction.isModalSubmit() && interaction.customId === 'modal_agenda_rdv')        return notionV3.handleAgendaModal?.(interaction);
   if (interaction.isModalSubmit() && interaction.customId === 'modal_op_programmee')     return notionV5.handleOpProgrammeeModal?.(interaction);
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_op_creer'))   return _validerModalOpCreer(interaction);
