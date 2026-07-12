@@ -232,7 +232,7 @@ function _lignesStatut(t) {
   } else {
     if (t.diff) L.push(`${t.diff.emoji} **Difficulté de la table : ${t.diff.label}** — ${t.diff.desc}`);
     L.push('💬 *' + (t.ambiance || _pick(_phrasesDeal)) + '*');
-    L.push('👉 **S\'asseoir** avec un **capital de départ**, régler sa **mise par manche**, puis l\'**hôte distribue**.');
+    L.push('👉 **S\'asseoir** (capital de départ). **Avant chaque manche**, chacun choisit sa **mise** (💵 Ma mise), puis l\'**hôte distribue**.');
     L.push('💰 *Chaque manche gagnée/perdue augmente ou diminue ton capital. À **0**, tu ne peux plus jouer — clique **💰 Recaver** pour recharger.*');
     L.push('📖 *Nouveau ? Clique **Comment jouer** avant de lancer.*  🎭 *Pense à **Emote RP** pour rester crédible en jeu.*');
   }
@@ -320,7 +320,7 @@ async function _screen(t) {
   const d = t.diff || DIFFICULTES[1];
   const e = new EmbedBuilder().setColor(0xC8A45C).setTitle('🎰  TABLE DE BLACKJACK  🃏')
     .setFooter({ text: `Hôte : ${t.hoteNom}  ·  ${d.emoji} ${d.label} · ${_reglesTxt(d)} · mise max 100 $` });
-  const content = _contentLigne(t);
+  const content = (_contentLigne(t) || '').slice(0, 2000);
   let buf = null;
   try { if (_img?.genererTable) buf = await _img.genererTable(_imgState(t)); } catch { buf = null; }
   if (buf) {
@@ -513,16 +513,14 @@ async function routeInteraction(interaction) {
     const t = tables.get(interaction.channelId);
     if (!t) { if (interaction.isButton() || interaction.isModalSubmit()) { await interaction.reply({ content: '⌛ Cette table n\'est plus active. Ouvre-en une nouvelle depuis le panneau 🎰.', flags: eph }).catch(() => {}); } return true; }
 
-    // S'asseoir (nouveau joueur) → capital de départ + mise par manche
+    // S'asseoir (nouveau joueur) → uniquement le capital de départ.
+    // La mise, elle, se choisit AVANT CHAQUE MANCHE (bouton 💵 Ma mise).
     if (interaction.isButton() && id === 'bj_sit') {
       if (t.phase === 'jeu') { await interaction.reply({ content: '⏳ Une manche est en cours — assieds-toi à la fin de celle-ci.', flags: eph }); return true; }
-      if (_siege(t, interaction.user.id)) { await interaction.reply({ content: '🪑 Tu es déjà assis. Utilise **💵 Ma mise** ou **💰 Recaver**.', flags: eph }); return true; }
+      if (_siege(t, interaction.user.id)) { await interaction.reply({ content: '🪑 Tu es déjà assis. Règle ta mise avec **💵 Ma mise** avant chaque manche, ou **💰 Recaver**.', flags: eph }); return true; }
       if (t.sieges.filter(s => !s.isSplitHand).length >= MAX_SIEGES) { await interaction.reply({ content: '🈵 La table est complète (' + MAX_SIEGES + ' joueurs).', flags: eph }); return true; }
       const modal = new ModalBuilder().setCustomId('bj_sit_modal').setTitle('🪑 S\'asseoir à la table')
-        .addComponents(
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cave').setLabel('Ton capital de départ (' + CAVE_MIN + '–' + CAVE_MAX + ' $)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(4).setPlaceholder('Ex : ' + CAVE_DEF)),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('mise').setLabel('Ta mise par manche (max ' + MISE_MAX + ' $)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(3).setPlaceholder('Ex : 25')),
-        );
+        .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cave').setLabel('Ton capital de départ (' + CAVE_MIN + '–' + CAVE_MAX + ' $)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(4).setPlaceholder('Ex : ' + CAVE_DEF)));
       await interaction.showModal(modal); return true;
     }
     // Changer sa mise par manche
@@ -551,12 +549,11 @@ async function routeInteraction(interaction) {
       let cave = parseInt((interaction.fields.getTextInputValue('cave') || '').replace(/[^0-9]/g, ''), 10);
       if (!Number.isFinite(cave) || cave < CAVE_MIN) cave = CAVE_DEF;
       if (cave > CAVE_MAX) cave = CAVE_MAX;
-      let mise = parseInt((interaction.fields.getTextInputValue('mise') || '').replace(/[^0-9]/g, ''), 10);
-      if (!Number.isFinite(mise) || mise < MISE_MIN) mise = MISE_MIN;
-      mise = Math.min(mise, MISE_MAX, cave);
+      // mise de départ raisonnable (modifiable avant chaque manche via 💵 Ma mise)
+      const mise = Math.max(MISE_MIN, Math.min(MISE_MAX, cave, 25));
       const s = { userId: interaction.user.id, nom: interaction.member?.displayName || interaction.user.username, cave, stack: cave, mise, main: [], statut: 'attente', resultat: '', net: 0 };
       t.sieges.push(s);
-      await interaction.reply({ content: '✅ Tu t\'assieds avec **' + _money(cave) + '** de capital, mise **' + _money(mise) + '** par manche. Bonne chance !', flags: eph });
+      await interaction.reply({ content: '✅ Tu t\'assieds avec **' + _money(cave) + '** de capital.\n💵 **Avant chaque manche, choisis ta mise** avec le bouton **Ma mise** (par défaut ' + _money(mise) + ').', flags: eph });
       await _refresh(t); return true;
     }
     if (interaction.isModalSubmit() && id === 'bj_mise_modal') {
@@ -680,7 +677,10 @@ async function routeInteraction(interaction) {
 
     // Comment jouer (règles, avant de lancer)
     if (interaction.isButton() && id === 'bj_regles') {
-      await interaction.reply({ content: _REGLES.join('\n'), flags: eph });
+      // Règles en EMBED (description ≤ 4096) : le contenu texte est limité à 2000
+      // et les règles dépassent — d'où l'erreur « Invalid Form Body » sinon.
+      const eReg = new EmbedBuilder().setColor(0xC8A45C).setTitle('🃏 Blackjack — comment jouer').setDescription(_REGLES.join('\n').replace(/^📖 \*\*BLACKJACK.*\*\*\n\n/, '').slice(0, 4090));
+      await interaction.reply({ embeds: [eReg], flags: eph });
       return true;
     }
     // Emote RP à coller en jeu (anti-AFK)
