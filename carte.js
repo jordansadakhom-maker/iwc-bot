@@ -333,7 +333,14 @@ function creerToken(member) {
   const tok = _rndTok(); c.tokens[tok] = { level, userId: member.id, exp: now + 24 * 3600 * 1000 }; saveDB(db);
   return { tok, level };
 }
-function _tokInfo(tok) { const v = (loadDB().carte?.tokens || {})[tok]; if (!v || (v.exp && v.exp < Date.now())) return null; return v; }
+function _tokInfo(tok) {
+  const db = loadDB();
+  // Accepte un jeton de la carte OU du portail (même schéma d'accès public/membre/confidentiel),
+  // pour que la carte soit ouvrable depuis le portail avec le même lien personnel.
+  const v = (db.carte?.tokens || {})[tok] || (db.portail?.tokens || {})[tok];
+  if (!v || (v.exp && v.exp < Date.now())) return null;
+  return v;
+}
 function _canSee(level, niveau) { if (niveau === 'confidentiel') return level === 'confidentiel'; if (niveau === 'membre') return level === 'membre' || level === 'confidentiel'; return true; }
 function _niveauxAutorises(level) { return NIVEAUX.filter(n => _canSee(level, n.key)); }
 async function _baseMapBuffer(guild) {
@@ -633,3 +640,4 @@ if(mapImg.complete)load();else{mapImg.onload=load;mapImg.onerror=load;}
 }
 
 module.exports = { init, installerPanel, routeInteraction, onMessage, capterCarteFond, httpHandle, ouvrirAjout, CARTE_CHANNEL_ID };
+module.exports.__test = { _tokInfo }; // tests uniquement
