@@ -5225,6 +5225,7 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
       new ButtonBuilder().setCustomId(`rdvclient_fixer_${rdvId}`).setLabel('📅 Fixer le rendez-vous').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`rdvclient_repondre_${rdvId}`).setLabel('💬 Répondre au client').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`rdvclient_refuse_${rdvId}`).setLabel('❌ Décliner').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId(`rdvclient_cloturer_${rdvId}`).setLabel('🔒 Clôturer').setStyle(ButtonStyle.Secondary),
     );
     // Réponses rapides (1 clic) — envoient un message-type au client + trace dans le fil.
     const rowQr = new ActionRowBuilder().addComponents(
@@ -5498,6 +5499,33 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     // Trace : consigner la décision dans le fil de suivi, puis clôturer automatiquement (récap archivé).
     try { await telegramme.ajouterAuFil?.(client, rdvId, 'note', 'Décision', `❌ Demande déclinée par ${interaction.member.displayName}`); } catch {}
     try { await telegramme.cloturerAuto?.(client, guild, rdvId, `Déclinée par ${interaction.member.displayName}`); } catch {}
+    return;
+  }
+
+  // ── CLÔTURER LE TÉLÉGRAMME (fermeture neutre : dossier traité/archivé, SANS message de refus au client) ──
+  if (interaction.isButton() && interaction.customId.startsWith('rdvclient_cloturer_')) {
+    if (!_peutGererRdv(interaction.member)) return interaction.reply({ content: '❌ Réservé aux Opérateurs.', flags: MessageFlags.Ephemeral });
+    const rdvId = interaction.customId.replace('rdvclient_cloturer_', '');
+    const db = loadDB();
+    let rdv = (db.rdvClients || []).find(r => r.id === rdvId);
+    if (!rdv) {
+      rdv = _rdvDepuisEmbed(interaction, rdvId);
+      if (!rdv) return interaction.reply({ content: '❌ Demande introuvable.', flags: MessageFlags.Ephemeral });
+      if (!db.rdvClients) db.rdvClients = [];
+      db.rdvClients.push(rdv);
+    }
+    if (['fixe', 'refuse', 'cloture'].includes(rdv.statut)) return interaction.reply({ content: `⚠️ Déjà traité (${rdv.statut}).`, flags: MessageFlags.Ephemeral });
+    rdv.statut = 'cloture';
+    saveDB(db);
+    // Fermeture neutre : on ne notifie PAS le client (contrairement à « Décliner »).
+    const emb = EmbedBuilder.from(interaction.message.embeds[0]).setColor(0x99AAB5).setFooter({ text: `Réf. ${rdvId} · 🔒 CLÔTURÉ par ${interaction.member.displayName}` });
+    await interaction.update({ embeds: [emb], components: [] });
+    await interaction.message?.unpin().catch(() => {}); // désépingler : tâche terminée
+    const msgRef = interaction.message;
+    setTimeout(() => { msgRef?.delete?.().catch(() => {}); }, 8000);
+    // Trace : consigner la clôture dans le fil de suivi, puis archiver (récap).
+    try { await telegramme.ajouterAuFil?.(client, rdvId, 'note', 'Clôture', `🔒 Télégramme clôturé par ${interaction.member.displayName}`); } catch {}
+    try { await telegramme.cloturerAuto?.(client, guild, rdvId, `Clôturé par ${interaction.member.displayName}`); } catch {}
     return;
   }
 
