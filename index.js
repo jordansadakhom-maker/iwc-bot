@@ -2651,7 +2651,6 @@ async function autoSetup(guild) {
   _installerPosteCommandement(guild).then(() => console.log('🎖️ Poste de commandement Direction en place')).catch(() => {});
   direction.installerMemo?.(guild).then(() => console.log('📌 Mémo Direction en place')).catch(() => {});
   assistant.installerPanneau?.(guild).then(() => console.log('🤖 Panneau assistant IA en place')).catch(() => {});
-  tenue.retirerPanneau?.(guild).then(() => console.log('🧵 Panneau Vestiaire retiré (#tenue gardé propre)')).catch(() => {});
   pepites.installerPanneau?.(guild).then(() => console.log('💰 Panneau pépites en place')).catch(() => {});
   musique.installerPanneau?.(guild).then(() => console.log('🎶 Panneau musique en place')).catch(() => {});
   _installerPanneauContrats(guild).then(() => console.log('📜 Panneau « Contrats en cours » en place')).catch(() => {});
@@ -7782,10 +7781,14 @@ async function _installerTenuePanel(guild) {
       .setDescription('```\n  IRON WOLF COMPANY · NEW AUSTIN, TEXAS \n```\n*Dans le Far West, l\'allure d\'un homme en dit long avant même qu\'il ne dégaine.*\nIci, on expose **sa tenue, son style, son personnage** — le tailleur en fait l\'éloge et la garde dans ta garde-robe.')
       .addFields(
         { name: '📸 Comment faire', value: '→ Poste une **photo** de ta tenue (capture en jeu).\n→ Ajoute le **nom de ton personnage** en légende.\n→ Le tailleur rédige son avis et l\'enregistre.' },
-        { name: '👔 Ta garde-robe', value: 'Clique sur **Ma garde-robe** ci-dessous pour revoir ta dernière tenue enregistrée.' },
+        { name: '👔 Ta garde-robe', value: 'Clique sur **Ma garde-robe** pour revoir ta dernière tenue enregistrée.' },
+        { name: '🏆 Le défilé', value: 'Clique sur **Le défilé** pour admirer les dernières tenues de toute la Compagnie.' },
       )
       .setFooter({ text: 'Iron Wolf Company • Le Vestiaire' });
-    const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('tenue_garderobe').setLabel('Ma garde-robe').setEmoji('👔').setStyle(ButtonStyle.Secondary));
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('tenue_garderobe').setLabel('Ma garde-robe').setEmoji('👔').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('tenue_defile').setLabel('Le défilé').setEmoji('🏆').setStyle(ButtonStyle.Secondary),
+    );
     const msgs = await ch.messages.fetch({ limit: 30 }).catch(() => null);
     const panel = msgs ? [...msgs.values()].find(m => m.author.id === client.user.id && (m.embeds?.[0]?.title || '').includes('VESTIAIRE')) : null;
     if (panel) { await panel.edit({ embeds: [embed], components: [row] }).catch(() => {}); return; }
