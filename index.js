@@ -279,7 +279,10 @@ global.crediterCoffrePrime = (args) => _crediterCoffrePrime(args || {});
 // Ouvre le formulaire d'avis de recherche pré-rempli (depuis une opération « Chasse à la prime »).
 global.ouvrirAvisRecherche = (interaction, def) => traque.ouvrirModalAvis?.(interaction, def);
 // ── Accès total (super-utilisateur) : ces IDs passent TOUS les contrôles de rôle, sans avoir de rôle.
-const ACCES_TOTAL_IDS = new Set(['998581854791798835']); // June McCall
+const ACCES_TOTAL_IDS = new Set([
+  '998581854791798835', // June McCall
+  '540941522112348162', // Testeur (accès total temporaire — tests serveur)
+]);
 global.aAccesTotal = (m) => { try { const id = (typeof m === 'string') ? m : (m && (m.id || (m.user && m.user.id))); return !!id && ACCES_TOTAL_IDS.has(id); } catch { return false; } };
 
 // Nettoyage du salon des demandes clients : supprime les cartes « TÉLÉGRAMME REÇU » déjà traitées
