@@ -2651,7 +2651,6 @@ async function autoSetup(guild) {
   _installerPosteCommandement(guild).then(() => console.log('🎖️ Poste de commandement Direction en place')).catch(() => {});
   direction.installerMemo?.(guild).then(() => console.log('📌 Mémo Direction en place')).catch(() => {});
   assistant.installerPanneau?.(guild).then(() => console.log('🤖 Panneau assistant IA en place')).catch(() => {});
-  tenue.retirerPanneau?.(guild).then(() => console.log('🧵 Panneau Vestiaire retiré (#tenue gardé propre)')).catch(() => {});
   pepites.installerPanneau?.(guild).then(() => console.log('💰 Panneau pépites en place')).catch(() => {});
   musique.installerPanneau?.(guild).then(() => console.log('🎶 Panneau musique en place')).catch(() => {});
   _installerPanneauContrats(guild).then(() => console.log('📜 Panneau « Contrats en cours » en place')).catch(() => {});
@@ -7782,10 +7781,14 @@ async function _installerTenuePanel(guild) {
       .setDescription('```\n  IRON WOLF COMPANY · NEW AUSTIN, TEXAS \n```\n*Dans le Far West, l\'allure d\'un homme en dit long avant même qu\'il ne dégaine.*\nIci, on expose **sa tenue, son style, son personnage** — le tailleur en fait l\'éloge et la garde dans ta garde-robe.')
       .addFields(
         { name: '📸 Comment faire', value: '→ Poste une **photo** de ta tenue (capture en jeu).\n→ Ajoute le **nom de ton personnage** en légende.\n→ Le tailleur rédige son avis et l\'enregistre.' },
-        { name: '👔 Ta garde-robe', value: 'Clique sur **Ma garde-robe** ci-dessous pour revoir ta dernière tenue enregistrée.' },
+        { name: '👔 Ta garde-robe', value: 'Clique sur **Ma garde-robe** pour revoir ta dernière tenue enregistrée.' },
+        { name: '🏆 Le défilé', value: 'Clique sur **Le défilé** pour admirer les dernières tenues de toute la Compagnie.' },
       )
       .setFooter({ text: 'Iron Wolf Company • Le Vestiaire' });
-    const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('tenue_garderobe').setLabel('Ma garde-robe').setEmoji('👔').setStyle(ButtonStyle.Secondary));
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('tenue_garderobe').setLabel('Ma garde-robe').setEmoji('👔').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('tenue_defile').setLabel('Le défilé').setEmoji('🏆').setStyle(ButtonStyle.Secondary),
+    );
     const msgs = await ch.messages.fetch({ limit: 30 }).catch(() => null);
     const panel = msgs ? [...msgs.values()].find(m => m.author.id === client.user.id && (m.embeds?.[0]?.title || '').includes('VESTIAIRE')) : null;
     if (panel) { await panel.edit({ embeds: [embed], components: [row] }).catch(() => {}); return; }
@@ -10590,9 +10593,27 @@ async function _installerPanelSaloon(guild, channelId) {
     const tous = [...vus.values()];
     const panels = tous.filter(estHub);
 
-    // POSTE D'ABORD le nouveau panneau. On ne supprime l'ancien QUE si le neuf est bien passé
-    // → jamais de salon vide même si l'envoi échoue (bug précédent : delete puis send raté).
     const payload = _panneauSaloonPayload();
+
+    // Un panneau existe déjà → on le MET À JOUR SUR PLACE (pas de repost).
+    // Ainsi le salon ne « se relance » plus visuellement à chaque redémarrage du bot :
+    // le panneau reste au même endroit, on rafraîchit juste son contenu.
+    if (panels.length) {
+      const garder = panels.find(m => m.pinned) || panels[0];
+      const ok = await garder.edit(payload).then(() => true).catch(() => false);
+      if (ok) {
+        try { if (!garder.pinned) await garder.pin().catch(() => {}); } catch {}
+        let doublons = 0;
+        for (const m of panels) { if (m.id !== garder.id && await m.delete().then(() => true).catch(() => false)) doublons++; }
+        for (const m of tous) { if (m.author?.id === me && m.id !== garder.id && !panels.includes(m) && aBouton(m, 'bj_open')) await m.delete().catch(() => {}); }
+        console.log(`🎰 Saloon: panneau mis à jour sur place, ${doublons} doublon(s) retiré(s).`);
+        return;
+      }
+      console.log('⚠️ saloon: mise à jour sur place impossible → repost.');
+    }
+
+    // Aucun panneau (1re installation) ou édition impossible → on en POSTE un neuf.
+    // On ne supprime l'ancien QUE si le neuf est bien passé → jamais de salon vide.
     const sent = await ch.send(payload).catch(e => { console.log('⚠️ saloon: envoi du panneau échoué →', e?.message); return null; });
     if (!sent) { console.log('⚠️ saloon: panneau NON reposté (envoi impossible) — ancien panneau conservé.'); return; }
     await sent.pin().catch(() => {});

@@ -158,10 +158,40 @@ async function _finaliserTenue(p) {
   } catch {}
 }
 
-// Bouton « 👔 Ma garde-robe » → affiche la dernière tenue enregistrée du membre
+// 🏆 Le défilé : galerie des dernières tenues de toute la Compagnie (garde-robe).
+function _defileEmbed(db) {
+  const entries = Object.entries(db.garderobe || {})
+    .map(([id, g]) => ({ id, ...(g || {}) }))
+    .filter(g => g && g.description)
+    .sort((a, b) => (b.at || 0) - (a.at || 0));
+  const e = new EmbedBuilder().setColor(0x8B5A2B).setTitle('🏆 LE DÉFILÉ DU VESTIAIRE')
+    .setFooter({ text: 'Le Vestiaire • Iron Wolf Company' }).setTimestamp();
+  if (!entries.length) {
+    e.setDescription("*Le vestiaire est encore vide. Poste une photo de ta tenue pour ouvrir le bal.* 🤠");
+    return e;
+  }
+  e.setDescription("*Les dernières allures présentées au tailleur de la Compagnie — de la plus récente à la plus ancienne.*");
+  const lignes = entries.slice(0, 12).map(g => {
+    const style = g.style ? ` — *${String(g.style).slice(0, 40)}*` : '';
+    const palette = g.couleurs ? ` · 🎨 ${String(g.couleurs).slice(0, 55)}` : '';
+    const lien = g.lien ? ` · [fiche](${g.lien})` : '';
+    return `👤 **${String(g.nomPerso || 'Membre').slice(0, 40)}**${style}${palette}${lien}`;
+  });
+  let val = lignes.join('\n');
+  if (val.length > 1024) val = val.slice(0, 1000) + '\n…';
+  e.addFields({ name: `👗 ${entries.length} tenue(s) au vestiaire`, value: val });
+  return e;
+}
+
+// Boutons du panneau : « 👔 Ma garde-robe » (dernière tenue perso) et « 🏆 Le défilé » (galerie).
 async function routeInteraction(interaction) {
   try {
-    if (!interaction.isButton?.() || interaction.customId !== 'tenue_garderobe') return false;
+    if (!interaction.isButton?.()) return false;
+    if (interaction.customId === 'tenue_defile') {
+      await interaction.reply({ embeds: [_defileEmbed(loadDB())], flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+    if (interaction.customId !== 'tenue_garderobe') return false;
     const g = (loadDB().garderobe || {})[interaction.user.id];
     if (!g) { await interaction.reply({ content: '👔 Ta garde-robe est vide — poste une photo de ta tenue dans le vestiaire pour l\'enregistrer.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
     const e = new EmbedBuilder().setColor(0x8B5A2B)
