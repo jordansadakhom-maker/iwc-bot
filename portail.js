@@ -64,6 +64,7 @@ function _panelEmbed() {
       "*Tes outils interactifs, comme la carte cliquable — mais pour toute la maison.*",
       "Clique sur **Ouvrir le portail** : un lien **personnel** s'ouvre sur ton téléphone ou ton ordinateur.",
       '',
+      '🗺️ **Carte de la Confrérie** — la carte interactive (planques, cibles, itinéraires).',
       '🖼️ **Mur des avis de recherche** — les affiches WANTED, filtrables.',
       '🕸️ **La Toile** — le tableau d\'enquête (contacts reliés par des fils).',
       '🏛️ **Organigramme** — la hiérarchie de la compagnie, en clair.',
@@ -262,7 +263,9 @@ function _pageAccueil(tok, level) {
   const cAvisActifs = traques.filter(t => t.actif).length;
   const cOpsActives = ops.filter(o => ['preparation', 'programmee', 'en_cours', 'attente_direction'].includes(o.status)).length;
   const cMembres = membres.filter(m => m.status !== 'parti').length;
+  const cLieux = (db.carte?.points || []).length;
   const tools = [
+    { emoji: '🗺️', titre: 'Carte de la Confrérie', desc: 'La carte interactive : planques, cibles, points d\'intérêt et itinéraires — cliquable et zoomable.', badge: cLieux ? cLieux + ' lieu(x)' : '', min: 'membre', url: 'carte' },
     { href: 'mur', emoji: '🖼️', titre: 'Mur des avis de recherche', desc: 'Les affiches WANTED de la compagnie, filtrables par dangerosité et statut.', badge: cAvisActifs + ' actif(s)', min: 'membre' },
     { href: 'toile', emoji: '🕸️', titre: 'La Toile', desc: "Le tableau d'enquête : les contacts reliés entre eux par des fils rouges.", badge: contacts.length + ' contact(s)', min: 'membre' },
     { href: 'organigramme', emoji: '🏛️', titre: 'Organigramme', desc: 'La hiérarchie de la maison, du haut commandement aux membres.', badge: cMembres + ' membre(s)', min: 'membre' },
@@ -276,7 +279,9 @@ function _pageAccueil(tok, level) {
     const ok = _atLeast(level, t.min);
     const inner = `<div class="pc-em">${t.emoji}</div><div class="pc-t">${esc(t.titre)}</div><div class="pc-d">${esc(t.desc)}</div>${t.badge ? `<div class="pc-b">${esc(t.badge)}</div>` : ''}`;
     if (!ok) return `<div class="pc locked"><div class="pc-lock">🔒</div>${inner}</div>`;
-    return `<a class="pc" href="/portail/${t.href}?k=${esc(tok)}">${inner}</a>`;
+    // Outil « externe » (ex : la carte, servie sur /carte) → lien direct ; sinon page du portail.
+    const href = t.url ? `/${t.url}?k=${esc(tok)}` : `/portail/${t.href}?k=${esc(tok)}`;
+    return `<a class="pc" href="${href}">${inner}</a>`;
   }).join('');
   const nivTxt = level === 'confidentiel' ? '🔴 Direction' : level === 'membre' ? '🟡 Membre' : '🟢 Public';
   const body = `<div class="wrap">
@@ -902,3 +907,4 @@ async function httpHandle(req, res, client) {
 }
 
 module.exports = { init, installerPanel, routeInteraction, httpHandle, creerToken, PORTAIL_CHANNEL_ID };
+module.exports.__test = { _pageAccueil }; // tests uniquement
