@@ -5135,6 +5135,33 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
   }
 
   // ══════════ PRISE DE RDV CLIENT (façon télégramme) ══════════
+  // ── SUIVRE MA DEMANDE (le client vérifie où en est son télégramme) ──
+  if (interaction.isButton() && interaction.customId === 'rdvclient_suivi') {
+    const db = loadDB();
+    const miennes = (db.rdvClients || [])
+      .filter(r => r && r.demandeurId === interaction.user.id)
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+    if (!miennes.length) {
+      return interaction.reply({ content: "📭 Vous n'avez pas encore envoyé de télégramme. Cliquez sur **✉️ Envoyer un télégramme** pour nous exposer votre demande.", flags: MessageFlags.Ephemeral });
+    }
+    const badge = (r) => {
+      switch (r.statut) {
+        case 'fixe': return { t: '✅ Rendez-vous fixé', d: `📅 **${r.dateFixee || '—'}**${r.heureFixee ? ` à **${r.heureFixee}**` : ''}${r.lieuFixe ? ` · 📍 ${r.lieuFixe}` : ''}` };
+        case 'refuse': return { t: '❌ Demande déclinée', d: 'La Direction n\'a pas pu donner suite. Vous pouvez renvoyer un télégramme.' };
+        case 'cloture': return { t: '🔒 Dossier clôturé', d: 'Cette demande a été classée. Renvoyez un télégramme si besoin.' };
+        default: return { t: '🟡 En attente de décision', d: 'Votre télégramme est bien arrivé — la Direction le traite et vous répondra en personne.' };
+      }
+    };
+    const emb = new EmbedBuilder().setColor(0xC8A45C).setTitle('📋 Suivi de vos demandes')
+      .setFooter({ text: 'Iron Wolf Company · Bureau de Saint-Denis' }).setTimestamp();
+    for (const r of miennes.slice(0, 5)) {
+      const b = badge(r);
+      const quand = r.createdAt ? `<t:${Math.floor(new Date(r.createdAt).getTime() / 1000)}:R>` : '';
+      emb.addFields({ name: `${b.t} — ${String(r.objet || 'Demande').slice(0, 60)}`, value: `${b.d}\n*Réf. ${r.id}${quand ? ` · envoyé ${quand}` : ''}*`, inline: false });
+    }
+    return interaction.reply({ embeds: [emb], flags: MessageFlags.Ephemeral });
+  }
+
   if (interaction.isButton() && interaction.customId === 'rdvclient_demande') {
     // Étape 1 : choix du moment souhaité (plus ergonomique qu'une date tapée)
     const menu = new StringSelectMenuBuilder()
@@ -10439,6 +10466,7 @@ function _rdvClientPayload() {
       '',
       '✉️ **Envoyer un télégramme** — exposez votre demande **avec vos propres mots** (votre affaire, vos conditions). La Direction lit chaque message et **vous répond en personne**, en toute discrétion.',
       '🤝 **Réserver une prestation** — choisissez directement un **service et un créneau** (lieu, date, heure).',
+      '📋 **Suivre ma demande** — vérifiez à tout moment **où en est votre télégramme** (en attente, rendez-vous fixé, réponse de la Direction).',
       '',
       '— *« La force est dans l\'ombre. »*',
     ].join('\n'))
@@ -10446,6 +10474,7 @@ function _rdvClientPayload() {
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('rdvclient_demande').setLabel('Envoyer un télégramme').setEmoji('✉️').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('rdvp_book').setLabel('Réserver une prestation').setEmoji('🤝').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('rdvclient_suivi').setLabel('Suivre ma demande').setEmoji('📋').setStyle(ButtonStyle.Secondary),
   );
   return { embeds: [embed], components: [row] };
 }
