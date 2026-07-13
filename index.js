@@ -364,6 +364,8 @@ async function _verrouillerVocalRP(guild) {
 // Tout message humain y est réécrit en RP Far West (~1899-1904), puis re-posté
 // sous le nom/avatar de l'auteur (via webhook). Le message d'origine est supprimé.
 const SALON_RP_REFORMULATION = '1509244143199715499';
+// ✍️ Membre dont on corrige SILENCIEUSEMENT l'orthographe dans tous les salons.
+const CIBLE_ORTHO = '630437926798491651';
 function _norm2(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 async function _reformulerRP(texte) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -475,6 +477,83 @@ async function _reposterCommeMembre(channel, member, user, content) {
     }).catch(() => {});
     return true;
   } catch { return false; }
+}
+
+// ── ✍️ Correcteur orthographique discret d'un membre ──────────────────────────
+// Un membre (CIBLE_ORTHO) fait beaucoup de fautes : on corrige SILENCIEUSEMENT ses
+// messages — orthographe, accords, accents, ponctuation — SANS toucher au sens ni
+// au style, on les repost sous son nom/avatar via webhook, puis on retire l'original.
+// Chaque correction est consignée dans le journal technique (avant → après).
+async function _corrigerOrthographe(texte) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+  const prompt = `Tu es un correcteur orthographique pour des messages Discord en FRANÇAIS.
+Corrige UNIQUEMENT les fautes d'orthographe, d'accord, de grammaire, de conjugaison, d'accents et la ponctuation évidente du message ci-dessous.
+RÈGLES STRICTES :
+- Ne change RIEN d'autre : garde EXACTEMENT le sens, le ton, le style, le registre familier, l'argot et les tournures de l'auteur. Ne reformule pas, ne rends pas plus soutenu, n'ajoute et ne retire aucune information.
+- Recopie À L'IDENTIQUE et sans y toucher : les mentions Discord (<@…>, <@&…>, <#…>), les émojis personnalisés (<:nom:id>, <a:nom:id>), les émojis unicode et les liens (http…).
+- Garde la même langue (français) et une longueur quasi identique.
+- Si le message ne contient aucune faute, renvoie-le TEL QUEL, inchangé.
+Réponds UNIQUEMENT avec le message corrigé, sans guillemets ni commentaire.
+
+Message : "${texte}"`;
+  const MODELES = ['claude-haiku-4-5-20251001', 'claude-sonnet-4-6'];
+  for (const model of MODELES) {
+    try {
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model, max_tokens: 700, messages: [{ role: 'user', content: prompt }] }),
+      });
+      if (!resp.ok) { console.log('⚠️ _corrigerOrthographe HTTP', resp.status, '(' + model + ')'); if ([401, 402, 429].includes(resp.status)) { try { global.signalerPanneIA?.('correction orthographique', resp.status); } catch {} } continue; }
+      const data = await resp.json();
+      let txt = (data?.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+      txt = txt.replace(/^["«»\s]+|["«»\s]+$/g, '').trim();
+      if (txt && txt.length > 0) return txt.slice(0, 1990);
+    } catch (e) { console.log('⚠️ _corrigerOrthographe error (' + model + '):', e.message); }
+  }
+  return null;
+}
+// Repost du message corrigé sous le nom/avatar de l'auteur (gère aussi les fils).
+async function _reposterCorrige(message, texte) {
+  try {
+    const inThread = typeof message.channel.isThread === 'function' && message.channel.isThread();
+    const parent = inThread ? message.channel.parent : message.channel;
+    if (!parent || typeof parent.fetchWebhooks !== 'function') return false;
+    const hooks = await parent.fetchWebhooks().catch(() => null);
+    let hook = hooks?.find(h => h.owner?.id === parent.client.user.id && h.name === 'IWC RP');
+    if (!hook) hook = await parent.createWebhook({ name: 'IWC RP' }).catch(() => null);
+    if (!hook) return false;
+    const opts = {
+      content: texte.slice(0, 2000),
+      username: ((message.member?.displayName || message.author?.username || 'Inconnu')).slice(0, 80),
+      avatarURL: message.member?.displayAvatarURL?.() || message.author?.displayAvatarURL?.() || undefined,
+      allowedMentions: { parse: [] }, // l'original a déjà notifié → pas de second ping
+    };
+    if (inThread) opts.threadId = message.channel.id;
+    await hook.send(opts);
+    return true;
+  } catch { return false; }
+}
+// Trace discrète dans le journal technique : avant → après.
+async function _logCorrection(message, avant, apres) {
+  try {
+    const db = loadDB(); const id = db.techLogChannelId; if (!id) return;
+    const ch = await message.client.channels.fetch(id).catch(() => null); if (!ch?.send) return;
+    const nom = message.member?.displayName || message.author?.username || 'Membre';
+    const clean = s => String(s || '').replace(/```/g, 'ˋˋˋ').slice(0, 900);
+    const e = new EmbedBuilder()
+      .setColor(0xE0A93B)
+      .setAuthor({ name: `✍️ Correction orthographique — ${nom}`, iconURL: message.member?.displayAvatarURL?.() || message.author?.displayAvatarURL?.() || undefined })
+      .addFields(
+        { name: '📍 Salon', value: `<#${message.channel.id}>`, inline: false },
+        { name: '📝 Avant', value: '```\n' + clean(avant) + '\n```', inline: false },
+        { name: '✅ Après', value: '```\n' + clean(apres) + '\n```', inline: false },
+      )
+      .setFooter({ text: 'Correction automatique • invisible dans le salon' })
+      .setTimestamp();
+    await ch.send({ embeds: [e], allowedMentions: { parse: [] } }).catch(() => {});
+  } catch {}
 }
 
 // Panneau permanent dans #agenda : un bouton « Nouveau rendez-vous » plutôt qu'une commande.
@@ -4288,6 +4367,43 @@ client.on('messageCreate', async message => {
   // #plans avec ID hardcodé
   const plansTactCh = guild.channels.cache.get(SALON_HARDCODED.PLANS);
   if (plansTactCh && message.channel.id === plansTactCh.id) { await _archiverPlanNotion(message); return; }
+
+  // ── ✍️ Correction orthographique SILENCIEUSE d'un membre (tous salons) ──
+  // Placé en TOUT DERNIER : ne s'exécute que sur les messages qu'AUCUN autre
+  // traitement n'a consommés (conversation libre) → n'interfère avec rien.
+  try {
+    if (message.guild && !message.author?.bot && !message.webhookId
+        && message.author?.id === CIBLE_ORTHO
+        && message.channel?.id !== SALON_RP_REFORMULATION
+        && process.env.ANTHROPIC_API_KEY) {
+      const brut = (message.content || '').trim();
+      const RE_MENTION = /<(?:@[!&]?|#)\d+>/g, RE_EMOJI = /<a?:\w+:\d+>/g, RE_URL = /https?:\/\/\S+/gi;
+      const motsUtiles = brut.replace(RE_MENTION, ' ').replace(RE_EMOJI, ' ').replace(RE_URL, ' ').replace(/[^0-9A-Za-zÀ-ÿ]+/g, ' ').trim();
+      // On ne touche pas : messages vides, pièces jointes, commandes, ou sans vraie prose.
+      const skip = !brut || message.attachments.size > 0 || brut.length > 1900 || /^[\/!]/.test(brut) || motsUtiles.replace(/\s+/g, '').length < 4;
+      if (!skip) {
+        let corrige = await _corrigerOrthographe(brut);
+        // Filet de sécurité : réinjecte les pings/liens que l'IA aurait pu retirer.
+        if (corrige) {
+          const garder = [];
+          for (const mm of (brut.match(RE_MENTION) || [])) if (!corrige.includes(mm)) garder.push(mm);
+          for (const uu of (brut.match(RE_URL) || [])) if (!corrige.includes(uu)) garder.push(uu);
+          if (garder.length) corrige = (corrige + ' ' + garder.join(' ')).slice(0, 1990);
+        }
+        const norm = s => s.trim().replace(/\s+/g, ' ');
+        // On ne repost QUE si la correction change vraiment quelque chose (sinon invisible = inutile).
+        if (corrige && norm(corrige) !== norm(brut)) {
+          const ok = await _reposterCorrige(message, corrige);
+          if (ok) {
+            await message.delete().catch(() => {});
+            _logCorrection(message, brut, corrige).catch(() => {});
+            return;
+          }
+          console.log('⚠️ Correcteur ortho: repost webhook échoué → permission « Gérer les webhooks » manquante dans ce salon ?');
+        }
+      }
+    }
+  } catch (e) { console.log('⚠️ correcteur ortho:', e.message); }
 });
 
 // ── Archive une photo de lieu RDR2 dans Notion (salon #plans) — fiabilisé ──
