@@ -56,18 +56,45 @@ function _counts(inv) {
   return { per, total };
 }
 
+// Découpe une liste de lignes en blocs de ≤ maxLen caractères (limite d'un champ Discord : 1024).
+function _chunkLignes(lignes, maxLen) {
+  const blocs = []; let cur = "";
+  for (const ln of lignes) {
+    const cand = cur ? cur + "\n" + ln : ln;
+    if (cand.length > maxLen && cur) { blocs.push(cur); cur = ln; }
+    else cur = cand;
+  }
+  if (cur) blocs.push(cur);
+  return blocs;
+}
 function _boardEmbed(inv) {
   const { per, total } = _counts(inv);
   const e = new EmbedBuilder().setColor(COULEUR).setTitle(TITRE).setDescription(SOUS);
   const recap = CATS.map(c => `${CAT_EMOJI[c]} ${c} : **${per[c]}**`).join(" · ");
   e.addFields({ name: `📊 Récapitulatif — ${total} article(s) en réserve`, value: recap, inline: false });
+  // On affiche TOUS les objets. Une catégorie trop longue pour un seul champ Discord (1024 car.)
+  // est découpée sur plusieurs champs. Un budget global évite de dépasser la limite d'embed
+  // (6000 car.) qui, sinon, ferait échouer la mise à jour du tableau.
+  let budget = 3600;      // caractères disponibles pour les listes d'objets (marge sûre)
+  let restants = 0;       // objets non affichés faute de place (cas extrême de très gros coffre)
+  const MAX_FIELDS = 22;  // garde-fou (limite Discord : 25 champs)
   for (const c of CATS) {
     const items = inv.stock[c] || {};
     const noms = Object.keys(items).sort();
-    let val = noms.length ? noms.map(n => `${n} × **${items[n]}**`).join("\n") : "*— vide —*";
-    if (val.length > 750) val = val.slice(0, 750) + "\n…";
-    e.addFields({ name: `${CAT_EMOJI[c]} ${c} (${per[c]})`, value: val, inline: false });
+    if (!noms.length) { e.addFields({ name: `${CAT_EMOJI[c]} ${c} (0)`, value: "*— vide —*", inline: false }); continue; }
+    const lignes = noms.map(n => `${n} × **${items[n]}**`);
+    const blocs = _chunkLignes(lignes, 1000);
+    for (let i = 0; i < blocs.length; i++) {
+      if (budget - blocs[i].length < 0 || (e.data.fields?.length || 0) >= MAX_FIELDS) {
+        for (let j = i; j < blocs.length; j++) restants += blocs[j].split("\n").length;
+        break;
+      }
+      budget -= blocs[i].length;
+      const nom = blocs.length > 1 ? `${CAT_EMOJI[c]} ${c} (${per[c]}) — ${i + 1}/${blocs.length}` : `${CAT_EMOJI[c]} ${c} (${per[c]})`;
+      e.addFields({ name: nom, value: blocs[i], inline: false });
+    }
   }
+  if (restants > 0) e.addFields({ name: "⚠️ Trop d'objets pour tout afficher ici", value: `Environ **${restants}** ligne(s) de plus. Liste complète et exacte : **/inventaire-export**.`, inline: false });
   if (inv.photoMsg) e.addFields({ name: "📷 Photo du coffre", value: "Dernière(s) capture(s) épinglée(s) dans ce salon.", inline: false });
   e.addFields({ name: "🛠️ Comment gérer le coffre", value: "➕ **Ajouter** — choisis l'objet (ou « 🆕 Nouvel objet ») puis le **nombre à faire ENTRER**\n➖ **Retirer** — choisis l'objet puis le **nombre à faire SORTIR**\n✏️ **Corriger** — *seulement en cas d'erreur* : remets la **quantité exacte** (0 = supprimer)\n📷 *Tu peux aussi déposer une photo : je lis les objets puis tu choisis **➕ Ajouter au stock** (par défaut, n'enlève rien) ou **📸 = toute la photo** pour un inventaire complet.*", inline: false });
   e.setFooter({ text: "Mouvements dans le fil « 📦 Journal du coffre » · mis à jour automatiquement" });
@@ -872,3 +899,5 @@ async function onMessage(message) {
 }
 
 module.exports = { inventaireCommands, routeInteraction, onMessage, rafraichirBoardDemarrage };
+// Exposé pour les tests uniquement (aucun effet sur le fonctionnement).
+module.exports.__test = { _boardEmbed, _chunkLignes, _appliquer, _ensure, _counts };
