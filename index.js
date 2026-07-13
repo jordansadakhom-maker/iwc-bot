@@ -10590,9 +10590,27 @@ async function _installerPanelSaloon(guild, channelId) {
     const tous = [...vus.values()];
     const panels = tous.filter(estHub);
 
-    // POSTE D'ABORD le nouveau panneau. On ne supprime l'ancien QUE si le neuf est bien passé
-    // → jamais de salon vide même si l'envoi échoue (bug précédent : delete puis send raté).
     const payload = _panneauSaloonPayload();
+
+    // Un panneau existe déjà → on le MET À JOUR SUR PLACE (pas de repost).
+    // Ainsi le salon ne « se relance » plus visuellement à chaque redémarrage du bot :
+    // le panneau reste au même endroit, on rafraîchit juste son contenu.
+    if (panels.length) {
+      const garder = panels.find(m => m.pinned) || panels[0];
+      const ok = await garder.edit(payload).then(() => true).catch(() => false);
+      if (ok) {
+        try { if (!garder.pinned) await garder.pin().catch(() => {}); } catch {}
+        let doublons = 0;
+        for (const m of panels) { if (m.id !== garder.id && await m.delete().then(() => true).catch(() => false)) doublons++; }
+        for (const m of tous) { if (m.author?.id === me && m.id !== garder.id && !panels.includes(m) && aBouton(m, 'bj_open')) await m.delete().catch(() => {}); }
+        console.log(`🎰 Saloon: panneau mis à jour sur place, ${doublons} doublon(s) retiré(s).`);
+        return;
+      }
+      console.log('⚠️ saloon: mise à jour sur place impossible → repost.');
+    }
+
+    // Aucun panneau (1re installation) ou édition impossible → on en POSTE un neuf.
+    // On ne supprime l'ancien QUE si le neuf est bien passé → jamais de salon vide.
     const sent = await ch.send(payload).catch(e => { console.log('⚠️ saloon: envoi du panneau échoué →', e?.message); return null; });
     if (!sent) { console.log('⚠️ saloon: panneau NON reposté (envoi impossible) — ancien panneau conservé.'); return; }
     await sent.pin().catch(() => {});
