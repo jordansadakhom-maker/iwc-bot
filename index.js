@@ -364,8 +364,6 @@ async function _verrouillerVocalRP(guild) {
 // Tout message humain y est réécrit en RP Far West (~1899-1904), puis re-posté
 // sous le nom/avatar de l'auteur (via webhook). Le message d'origine est supprimé.
 const SALON_RP_REFORMULATION = '1509244143199715499';
-// ✍️ Membre dont on corrige SILENCIEUSEMENT l'orthographe dans tous les salons.
-const CIBLE_ORTHO = '630437926798491651';
 function _norm2(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 async function _reformulerRP(texte) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -479,11 +477,11 @@ async function _reposterCommeMembre(channel, member, user, content) {
   } catch { return false; }
 }
 
-// ── ✍️ Correcteur orthographique discret d'un membre ──────────────────────────
-// Un membre (CIBLE_ORTHO) fait beaucoup de fautes : on corrige SILENCIEUSEMENT ses
-// messages — orthographe, accords, accents, ponctuation — SANS toucher au sens ni
-// au style, on les repost sous son nom/avatar via webhook, puis on retire l'original.
-// Chaque correction est consignée dans le journal technique (avant → après).
+// ── ✍️ Correcteur orthographique discret (tout le monde) ──────────────────────
+// On corrige SILENCIEUSEMENT les messages — orthographe, accords, accents,
+// ponctuation — SANS toucher au sens ni au style, on les repost sous le nom/avatar
+// de l'auteur via webhook, puis on retire l'original. La correction ne se voit pas
+// et n'envoie AUCUNE notification (pas de log).
 async function _corrigerOrthographe(texte) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;
@@ -534,26 +532,6 @@ async function _reposterCorrige(message, texte) {
     await hook.send(opts);
     return true;
   } catch { return false; }
-}
-// Trace discrète dans le journal technique : avant → après.
-async function _logCorrection(message, avant, apres) {
-  try {
-    const db = loadDB(); const id = db.techLogChannelId; if (!id) return;
-    const ch = await message.client.channels.fetch(id).catch(() => null); if (!ch?.send) return;
-    const nom = message.member?.displayName || message.author?.username || 'Membre';
-    const clean = s => String(s || '').replace(/```/g, 'ˋˋˋ').slice(0, 900);
-    const e = new EmbedBuilder()
-      .setColor(0xE0A93B)
-      .setAuthor({ name: `✍️ Correction orthographique — ${nom}`, iconURL: message.member?.displayAvatarURL?.() || message.author?.displayAvatarURL?.() || undefined })
-      .addFields(
-        { name: '📍 Salon', value: `<#${message.channel.id}>`, inline: false },
-        { name: '📝 Avant', value: '```\n' + clean(avant) + '\n```', inline: false },
-        { name: '✅ Après', value: '```\n' + clean(apres) + '\n```', inline: false },
-      )
-      .setFooter({ text: 'Correction automatique • invisible dans le salon' })
-      .setTimestamp();
-    await ch.send({ embeds: [e], allowedMentions: { parse: [] } }).catch(() => {});
-  } catch {}
 }
 
 // Panneau permanent dans #agenda : un bouton « Nouveau rendez-vous » plutôt qu'une commande.
@@ -4368,12 +4346,12 @@ client.on('messageCreate', async message => {
   const plansTactCh = guild.channels.cache.get(SALON_HARDCODED.PLANS);
   if (plansTactCh && message.channel.id === plansTactCh.id) { await _archiverPlanNotion(message); return; }
 
-  // ── ✍️ Correction orthographique SILENCIEUSE d'un membre (tous salons) ──
+  // ── ✍️ Correction orthographique SILENCIEUSE (tout le monde, tous salons) ──
   // Placé en TOUT DERNIER : ne s'exécute que sur les messages qu'AUCUN autre
   // traitement n'a consommés (conversation libre) → n'interfère avec rien.
+  // Invisible et SANS notification (aucun log).
   try {
     if (message.guild && !message.author?.bot && !message.webhookId
-        && message.author?.id === CIBLE_ORTHO
         && message.channel?.id !== SALON_RP_REFORMULATION
         && process.env.ANTHROPIC_API_KEY) {
       const brut = (message.content || '').trim();
@@ -4396,7 +4374,6 @@ client.on('messageCreate', async message => {
           const ok = await _reposterCorrige(message, corrige);
           if (ok) {
             await message.delete().catch(() => {});
-            _logCorrection(message, brut, corrige).catch(() => {});
             return;
           }
           console.log('⚠️ Correcteur ortho: repost webhook échoué → permission « Gérer les webhooks » manquante dans ce salon ?');
