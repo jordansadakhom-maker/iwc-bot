@@ -1533,10 +1533,10 @@ function _coffreIllegalEmbed(db) {
   const fmt = n => `$${Math.round(n || 0).toLocaleString('fr-FR')}`;
   return new EmbedBuilder().setColor(0x8B1A1A)
     .setAuthor({ name: '🔒 La Confrérie • Trésorerie' })
-    .setTitle('🔒 Trésorerie — La Confrérie')
-    .setDescription('Enregistre chaque mouvement via les boutons ci-dessous.\n🔄 Synchronisé avec le coffre commun et le forum 💰 Trésorerie.')
-    .addFields({ name: '🏦 Coffre commun', value: `**${fmt(solde)}**`, inline: false })
-    .setFooter({ text: `La Confrérie • Trésorerie • ${new Date().toLocaleString('fr-FR')}` }).setTimestamp();
+    .setTitle('🔒 Coffre commun — La Confrérie')
+    .setDescription(`Enregistre chaque mouvement via les boutons ci-dessous.\n💡 **Un seul coffre unifié** pour toute la compagnie : ce solde est le **même** que dans <#${COFFRE_ENTREPRISE_ID}> et le forum 💰 Trésorerie.`)
+    .addFields({ name: '🏦 Coffre commun — solde unifié', value: `**${fmt(solde)}**`, inline: false })
+    .setFooter({ text: `La Confrérie • Coffre commun • ${new Date().toLocaleString('fr-FR')}` }).setTimestamp();
 }
 function _coffreIllegalRow() {
   return new ActionRowBuilder().addComponents(
@@ -1565,10 +1565,10 @@ function _coffreEntrepriseEmbed(db) {
   const fmt = n => `$${Math.round(n || 0).toLocaleString('fr-FR')}`;
   return new EmbedBuilder().setColor(0x2870C8)
     .setAuthor({ name: '⚖️ Iron Wolf Company • Trésorerie' })
-    .setTitle('🏦 Coffre de l\'entreprise — Iron Wolf Company')
-    .setDescription('Enregistre chaque mouvement d\'argent via les boutons ci-dessous.\n🔄 Synchronisé avec le coffre commun et le forum 💰 Trésorerie.')
-    .addFields({ name: '🏦 Solde du coffre', value: `**${fmt(solde)}**`, inline: false })
-    .setFooter({ text: `Iron Wolf Company • Trésorerie • ${new Date().toLocaleString('fr-FR')}` }).setTimestamp();
+    .setTitle('🏦 Coffre commun — Iron Wolf Company')
+    .setDescription(`Enregistre chaque mouvement d'argent via les boutons ci-dessous.\n💡 **Un seul coffre unifié** pour toute la compagnie : ce solde est le **même** que dans <#${COFFRE_ILLEGAL_ID}> et le forum 💰 Trésorerie.`)
+    .addFields({ name: '🏦 Coffre commun — solde unifié', value: `**${fmt(solde)}**`, inline: false })
+    .setFooter({ text: `Iron Wolf Company • Coffre commun • ${new Date().toLocaleString('fr-FR')}` }).setTimestamp();
 }
 function _coffreEntrepriseRow() {
   return new ActionRowBuilder().addComponents(
@@ -1585,7 +1585,7 @@ async function _installerPanelCoffreEntreprise(guild) {
     const payload = { embeds: [_coffreEntrepriseEmbed(db)], components: [_coffreEntrepriseRow()] };
     let msg = null;
     if (db.coffreEntreprisePanelId) msg = await ch.messages.fetch(db.coffreEntreprisePanelId).catch(() => null);
-    if (!msg) { const msgs = await ch.messages.fetch({ limit: 20 }).catch(() => null); msg = msgs ? [...msgs.values()].find(m => m.author?.id === guild.client.user.id && (m.embeds?.[0]?.title || '').includes('Coffre de l\'entreprise')) : null; }
+    if (!msg) { const msgs = await ch.messages.fetch({ limit: 20 }).catch(() => null); msg = msgs ? [...msgs.values()].find(m => { const t = m.embeds?.[0]?.title || ''; return m.author?.id === guild.client.user.id && t.includes('Coffre commun') && t.includes('Iron Wolf'); }) : null; }
     if (msg) { await msg.edit(payload).catch(() => {}); if (db.coffreEntreprisePanelId !== msg.id) { const d = loadDB(); d.coffreEntreprisePanelId = msg.id; saveDB(d); } }
     else { const sent = await ch.send(payload).catch(() => null); if (sent) { try { await sent.pin(); } catch {} const d = loadDB(); d.coffreEntreprisePanelId = sent.id; saveDB(d); } }
   } catch (e) { console.log('❌ _installerPanelCoffreEntreprise:', e.message); }
