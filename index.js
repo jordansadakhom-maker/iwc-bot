@@ -486,13 +486,19 @@ async function _corrigerOrthographe(texte) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;
   const prompt = `Tu es un correcteur orthographique pour des messages Discord en FRANÇAIS.
-Corrige UNIQUEMENT les fautes d'orthographe, d'accord, de grammaire, de conjugaison, d'accents et la ponctuation évidente du message ci-dessous.
-RÈGLES STRICTES :
-- Ne change RIEN d'autre : garde EXACTEMENT le sens, le ton, le style, le registre familier, l'argot et les tournures de l'auteur. Ne reformule pas, ne rends pas plus soutenu, n'ajoute et ne retire aucune information.
-- Recopie À L'IDENTIQUE et sans y toucher : les mentions Discord (<@…>, <@&…>, <#…>), les émojis personnalisés (<:nom:id>, <a:nom:id>), les émojis unicode et les liens (http…).
-- Garde la même langue (français) et une longueur quasi identique.
-- Si le message ne contient aucune faute, renvoie-le TEL QUEL, inchangé.
-Réponds UNIQUEMENT avec le message corrigé, sans guillemets ni commentaire.
+Ta seule tâche : détecter et corriger les VRAIES fautes (orthographe, accord, grammaire, conjugaison, accents).
+
+RÈGLE PRINCIPALE :
+- Si le message ne contient AUCUNE faute, réponds EXACTEMENT et UNIQUEMENT par : AUCUNE_FAUTE
+  (n'écris rien d'autre, ne recopie pas le message).
+- S'il y a au moins une vraie faute, réponds UNIQUEMENT avec le message corrigé.
+
+QUAND TU CORRIGES :
+- Ne change QUE ce qui est fautif. Laisse tout le reste STRICTEMENT identique : n'ajoute PAS de ponctuation, ne change PAS la casse (majuscules/minuscules), ne modifie PAS les espaces ni le style d'apostrophe/guillemets. Ne reformule pas, ne rends pas plus soutenu, n'ajoute et ne retire aucune information. Garde le ton, le registre familier, l'argot et les tournures de l'auteur.
+- N'invente pas de fautes : les tournures familières, l'argot, les abréviations courantes et l'absence de majuscule/point ne sont PAS des fautes.
+- Recopie À L'IDENTIQUE : mentions Discord (<@…>, <@&…>, <#…>), émojis (<:nom:id>, <a:nom:id> et unicode) et liens (http…).
+- Garde le français et une longueur quasi identique.
+Réponds sans guillemets ni commentaire.
 
 Message : "${texte}"`;
   const MODELES = ['claude-haiku-4-5-20251001', 'claude-sonnet-4-6'];
@@ -507,6 +513,8 @@ Message : "${texte}"`;
       const data = await resp.json();
       let txt = (data?.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
       txt = txt.replace(/^["«»\s]+|["«»\s]+$/g, '').trim();
+      // Le modèle signale explicitement « pas de faute » → on ne touche à rien.
+      if (/^AUCUNE[_ ]?FAUTE\.?$/i.test(txt)) return null;
       if (txt && txt.length > 0) return txt.slice(0, 1990);
     } catch (e) { console.log('⚠️ _corrigerOrthographe error (' + model + '):', e.message); }
   }
@@ -4368,7 +4376,9 @@ client.on('messageCreate', async message => {
           for (const uu of (brut.match(RE_URL) || [])) if (!corrige.includes(uu)) garder.push(uu);
           if (garder.length) corrige = (corrige + ' ' + garder.join(' ')).slice(0, 1990);
         }
-        const norm = s => s.trim().replace(/\s+/g, ' ');
+        // Filet secondaire : on ignore les différences PUREMENT cosmétiques (casse,
+        // espaces, style d'apostrophe/guillemets) — seule une vraie faute corrigée compte.
+        const norm = s => s.trim().toLowerCase().replace(/\s+/g, ' ').replace(/[‘’'`]/g, "'").replace(/[“”«»"]/g, '"');
         // On ne repost QUE si la correction change vraiment quelque chose (sinon invisible = inutile).
         if (corrige && norm(corrige) !== norm(brut)) {
           const ok = await _reposterCorrige(message, corrige);
