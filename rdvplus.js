@@ -85,6 +85,23 @@ const peutGerer = (member) => global.aAccesTotal?.(member) || !!member?.roles?.c
 
 function _store(db) { if (!db.rdvplus) db.rdvplus = { rdvs: {}, clients: {} }; if (!db.rdvplus.rdvs) db.rdvplus.rdvs = {}; if (!db.rdvplus.clients) db.rdvplus.clients = {}; return db.rdvplus; }
 
+// Prestation (RDV) → catégorie d'opération, pour la création automatique d'opération.
+const PRESTA_TO_CAT = {
+  esc: 'Protection rapprochée', cnv: 'Escorte de convoi', pro: 'Protection rapprochée',
+  sec: 'Protection', enq: 'Surveillance / Filature', neg: 'Autre',
+  rec: 'Récupération de dette', bnt: 'Chasse de prime', trv: 'Autre',
+};
+// Membres connectés au salon vocal « HRP » (repéré par son nom), sinon au vocal du cliqueur.
+function _membresVocalHRP(interaction) {
+  try {
+    const guild = interaction.guild;
+    let cible = guild.channels?.cache?.find(c => c.type === 2 && /hrp/i.test(c.name || '') && (c.members?.size || 0) > 0);
+    if (!cible) cible = interaction.member?.voice?.channel || null;
+    if (!cible?.members) return { ids: [], salon: cible?.name || null };
+    return { ids: [...cible.members.values()].filter(m => !m.user?.bot).map(m => m.id), salon: cible.name };
+  } catch { return { ids: [], salon: null }; }
+}
+
 function _salonDemandes(guild) {
   return guild.channels.cache.get(SALON_DEMANDES)
     || guild.channels.cache.find(c => c.isTextBased?.() && /demande|rendez|t[ée]l[ée]gramme/i.test(c.name))
@@ -248,6 +265,7 @@ function _boutonsTelegramme(rdv) {
       new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`rdvp_assign::${rdv.id}`).setLabel('👤 Assigner un agent').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(`rdvp_reply::${rdv.id}`).setLabel('💬 Répondre au client').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`rdvp_operation::${rdv.id}`).setLabel('🎯 Créer l\'opération').setStyle(ButtonStyle.Primary),
       ),
     ];
   }
@@ -256,10 +274,12 @@ function _boutonsTelegramme(rdv) {
     if (rdv.paiement) {
       return [new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`rdvp_paid_noop::${rdv.id}`).setLabel(`💰 Payé — $${Number(rdv.paiement.montant || 0).toLocaleString('fr-FR')}`).setStyle(ButtonStyle.Success).setDisabled(true),
+        new ButtonBuilder().setCustomId(`rdvp_operation::${rdv.id}`).setLabel('🎯 Créer l\'opération').setStyle(ButtonStyle.Primary),
       )];
     }
     return [new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`rdvp_encaisser::${rdv.id}`).setLabel('💰 Encaisser le paiement').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`rdvp_operation::${rdv.id}`).setLabel('🎯 Créer l\'opération').setStyle(ButtonStyle.Primary),
     )];
   }
   if (['Annulé', 'Décliné', 'Lapin'].includes(rdv.statut)) return []; // clôturé
@@ -679,6 +699,51 @@ async function routeInteraction(interaction) {
       return true;
     }
 
+    // ===== CRÉER UNE OPÉRATION à partir du rendez-vous (auto : catégorie, lieu, équipe du vocal HRP) =====
+    if (interaction.isButton?.() && (interaction.customId || '').startsWith('rdvp_operation::')) {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction / aux opérateurs.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const rdvId = interaction.customId.split('::')[1];
+      const db = loadDB(); const store = _store(db); const rdv = store.rdvs[rdvId];
+      if (!rdv) { await interaction.editReply({ content: '⚠️ Rendez-vous introuvable (peut-être trop ancien).' }).catch(() => {}); return true; }
+      if (typeof global.creerOpDepuisContrat !== 'function') { await interaction.editReply({ content: '⚠️ Le module des opérations n\'est pas disponible.' }).catch(() => {}); return true; }
+      // Équipe = membres connectés au vocal HRP (ou au vocal du cliqueur) + l'agent assigné.
+      const { ids: vocal, salon } = _membresVocalHRP(interaction);
+      const membres = [...new Set([...(vocal || []), ...(rdv.agentId ? [rdv.agentId] : [])])];
+      const typeMission = PRESTA_TO_CAT[rdv.typeKey] || 'Autre';
+      const pole = TYPES[rdv.typeKey]?.illegal ? 'illegal' : 'legal';
+      const lieu = LIEUX[rdv.lieuKey] || rdv.lieuKey || '';
+      const dt = _slotToDate(rdv.slot);
+      const creneau = dt ? tsF(dt) : (rdv.souhaitTexte || '');
+      const objetLabel = (TYPES[rdv.typeKey]?.label || 'Mission').replace(/^[^\p{L}]+/u, '').trim();
+      const contrat = {
+        id: 'RDVOP-' + rdvId,
+        typeMission,
+        objet: `${objetLabel} — ${rdv.nomRP || 'client'}${lieu ? ` · ${lieu}` : ''}`.slice(0, 100),
+        commanditaire: rdv.nomRP || '',
+        remuneration: rdv.paiement?.montant ? `$${Number(rdv.paiement.montant).toLocaleString('fr-FR')}` : '—',
+        echeanceTexte: creneau || null,
+        details: [rdv.details, lieu ? `📍 Lieu : ${lieu}` : '', creneau ? `🕐 Créneau : ${creneau}` : '', (rdv.contactId || rdv.clientId) ? `📇 Client : <@${rdv.contactId || rdv.clientId}>` : ''].filter(Boolean).join('\n').slice(0, 900),
+      };
+      let op = null;
+      try { op = await global.creerOpDepuisContrat(interaction.guild, contrat, { pole, parId: interaction.user.id, membres }); } catch (e) { console.log('❌ rdvp_operation create:', e.message); }
+      if (!op) { await interaction.editReply({ content: '⚠️ La création de l\'opération a échoué (voir logs). Tu peux la créer manuellement au besoin.' }).catch(() => {}); return true; }
+      rdv.operationId = op.id; store.rdvs[rdvId] = rdv; _persist(db);
+      // Prévient l'équipe (les participants du vocal) dans le fil de l'opération.
+      if (membres.length && op.threadId) {
+        try { const th = await interaction.client.channels.fetch(op.threadId).catch(() => null); if (th?.send) await th.send({ content: `👥 ${membres.map(m => `<@${m}>`).join(' ')} — vous êtes **assignés** à cette opération (équipe présente sur le vocal${salon ? ` « ${salon} »` : ''}). Préparez-la étape par étape ci-dessus.`, allowedMentions: { users: membres.slice(0, 50) } }).catch(() => {}); } catch {}
+      }
+      const lien = op.threadId ? `<#${op.threadId}>` : '#opérations';
+      await interaction.editReply({ content: [
+        `✅ **Opération créée** depuis le rendez-vous \`${rdvId}\` :`,
+        `${op.emoji || '🎯'} **${String(op.cible || objetLabel).slice(0, 80)}** *(${op.categorie})*`,
+        `📍 ${lieu || '—'}${creneau ? ` · 🕐 ${creneau}` : ''}`,
+        `👥 **${membres.length}** participant(s)${salon ? ` (vocal « ${salon} »)` : (membres.length ? '' : ' — *personne en vocal, ajoute l\'équipe à la main*')}`,
+        `➡️ Préparez-la dans ${lien}.`,
+      ].join('\n') }).catch(() => {});
+      return true;
+    }
+
     // ===== GESTION (Direction) =====
     const mGere = interaction.isButton?.() && /^rdvp_(confirm|assign|reply|decline|honored|noshow|reschedule|cancel)::/.test(interaction.customId || '');
     if (mGere) {
@@ -856,3 +921,4 @@ async function checkRappelsClients(guild) {
 }
 
 module.exports = { routeInteraction, checkRappelsClients, rdvplusCommands, panelPayload, _test: { CHAMPS_PRESTATION, _satLabel } };
+module.exports.__test = { PRESTA_TO_CAT, _membresVocalHRP, TYPES, LIEUX }; // tests uniquement
