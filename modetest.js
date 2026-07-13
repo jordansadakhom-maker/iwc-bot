@@ -121,4 +121,52 @@ async function routeInteraction(interaction) {
   }
 }
 
-module.exports = { estActif, setActif, prefixe, compter, purger, lignesEtat, routeInteraction, estDirection };
+// ─────────────────────────────────────────────────────────────────────────────
+//  Garde « alertes » du Mode Test — installée une seule fois au démarrage.
+//  Quand le Mode Test est ACTIF, on veut que les tests ne dérangent PERSONNE :
+//    1) aucun ping (rôle / membre / @everyone) n'est réellement notifié ;
+//    2) aucun message privé n'arrive aux membres réels — seuls les comptes à
+//       « accès total » (les testeurs) reçoivent encore leurs MP, pour vérifier
+//       les flux.
+//  On intercepte au niveau de discord.js, à 2 points centraux, donc AUCUN besoin
+//  de toucher aux centaines d'envois du bot. Quand le Mode Test est OFF, le
+//  comportement est strictement inchangé.
+// ─────────────────────────────────────────────────────────────────────────────
+let _gardeInstallee = false;
+function installerGardeAlertes() {
+  if (_gardeInstallee) return;
+  try {
+    const { MessagePayload, DMChannel } = require('discord.js');
+
+    // (1) Couper TOUS les pings tant que le Mode Test tourne. resolveBody()
+    //     construit le corps REST de tout message (salons, threads, réponses,
+    //     interactions, webhooks) → on y force « aucune mention ».
+    const origResolveBody = MessagePayload.prototype.resolveBody;
+    MessagePayload.prototype.resolveBody = function _mtResolveBody() {
+      const out = origResolveBody.apply(this, arguments);
+      try { if (estActif() && this.body) this.body.allowed_mentions = { parse: [] }; } catch {}
+      return out;
+    };
+
+    // (2) Bloquer les MP aux membres réels. User.send / GuildMember.send passent
+    //     tous par createDM() → DMChannel.send : un seul point suffit. Les
+    //     testeurs (accès total) continuent de recevoir leurs MP.
+    const origDMSend = DMChannel.prototype.send;
+    DMChannel.prototype.send = function _mtDMSend(...args) {
+      try {
+        if (estActif()) {
+          const id = this.recipientId || (this.recipient && this.recipient.id);
+          if (!id || !(global.aAccesTotal && global.aAccesTotal(id))) return Promise.resolve(null);
+        }
+      } catch {}
+      return origDMSend.apply(this, args);
+    };
+
+    _gardeInstallee = true;
+    console.log('🧪 Garde Mode Test installée : pings coupés + MP aux membres bloqués quand le Mode Test est actif.');
+  } catch (e) {
+    console.log('⚠️ installerGardeAlertes:', e && e.message);
+  }
+}
+
+module.exports = { estActif, setActif, prefixe, compter, purger, lignesEtat, routeInteraction, estDirection, installerGardeAlertes };

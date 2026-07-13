@@ -284,6 +284,9 @@ const ACCES_TOTAL_IDS = new Set([
   '540941522112348162', // Testeur (accès total temporaire — tests serveur)
 ]);
 global.aAccesTotal = (m) => { try { const id = (typeof m === 'string') ? m : (m && (m.id || (m.user && m.user.id))); return !!id && ACCES_TOTAL_IDS.has(id); } catch { return false; } };
+// Pendant le Mode Test : couper tous les pings + bloquer les MP aux membres réels
+// (les testeurs à accès total gardent leurs MP). Sans effet quand le Mode Test est OFF.
+modetest.installerGardeAlertes?.();
 
 // Nettoyage du salon des demandes clients : supprime les cartes « TÉLÉGRAMME REÇU » déjà traitées
 // (footer FIXÉ/DÉCLINÉ) ou en attente depuis plus de `maxJours` jours (les données restent en base).
