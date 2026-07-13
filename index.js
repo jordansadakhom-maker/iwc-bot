@@ -477,71 +477,6 @@ async function _reposterCommeMembre(channel, member, user, content) {
   } catch { return false; }
 }
 
-// ── ✍️ Correcteur orthographique discret (tout le monde) ──────────────────────
-// On corrige SILENCIEUSEMENT les messages — orthographe, accords, accents,
-// ponctuation — SANS toucher au sens ni au style, on les repost sous le nom/avatar
-// de l'auteur via webhook, puis on retire l'original. La correction ne se voit pas
-// et n'envoie AUCUNE notification (pas de log).
-async function _corrigerOrthographe(texte) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
-  const prompt = `Tu es un correcteur orthographique pour des messages Discord en FRANÇAIS.
-Ta seule tâche : détecter et corriger les VRAIES fautes (orthographe, accord, grammaire, conjugaison, accents).
-
-RÈGLE PRINCIPALE :
-- Si le message ne contient AUCUNE faute, réponds EXACTEMENT et UNIQUEMENT par : AUCUNE_FAUTE
-  (n'écris rien d'autre, ne recopie pas le message).
-- S'il y a au moins une vraie faute, réponds UNIQUEMENT avec le message corrigé.
-
-QUAND TU CORRIGES :
-- Ne change QUE ce qui est fautif. Laisse tout le reste STRICTEMENT identique : n'ajoute PAS de ponctuation, ne change PAS la casse (majuscules/minuscules), ne modifie PAS les espaces ni le style d'apostrophe/guillemets. Ne reformule pas, ne rends pas plus soutenu, n'ajoute et ne retire aucune information. Garde le ton, le registre familier, l'argot et les tournures de l'auteur.
-- N'invente pas de fautes : les tournures familières, l'argot, les abréviations courantes et l'absence de majuscule/point ne sont PAS des fautes.
-- Recopie À L'IDENTIQUE : mentions Discord (<@…>, <@&…>, <#…>), émojis (<:nom:id>, <a:nom:id> et unicode) et liens (http…).
-- Garde le français et une longueur quasi identique.
-Réponds sans guillemets ni commentaire.
-
-Message : "${texte}"`;
-  const MODELES = ['claude-haiku-4-5-20251001', 'claude-sonnet-4-6'];
-  for (const model of MODELES) {
-    try {
-      const resp = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model, max_tokens: 700, messages: [{ role: 'user', content: prompt }] }),
-      });
-      if (!resp.ok) { console.log('⚠️ _corrigerOrthographe HTTP', resp.status, '(' + model + ')'); if ([401, 402, 429].includes(resp.status)) { try { global.signalerPanneIA?.('correction orthographique', resp.status); } catch {} } continue; }
-      const data = await resp.json();
-      let txt = (data?.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
-      txt = txt.replace(/^["«»\s]+|["«»\s]+$/g, '').trim();
-      // Le modèle signale explicitement « pas de faute » → on ne touche à rien.
-      if (/^AUCUNE[_ ]?FAUTE\.?$/i.test(txt)) return null;
-      if (txt && txt.length > 0) return txt.slice(0, 1990);
-    } catch (e) { console.log('⚠️ _corrigerOrthographe error (' + model + '):', e.message); }
-  }
-  return null;
-}
-// Repost du message corrigé sous le nom/avatar de l'auteur (gère aussi les fils).
-async function _reposterCorrige(message, texte) {
-  try {
-    const inThread = typeof message.channel.isThread === 'function' && message.channel.isThread();
-    const parent = inThread ? message.channel.parent : message.channel;
-    if (!parent || typeof parent.fetchWebhooks !== 'function') return false;
-    const hooks = await parent.fetchWebhooks().catch(() => null);
-    let hook = hooks?.find(h => h.owner?.id === parent.client.user.id && h.name === 'IWC RP');
-    if (!hook) hook = await parent.createWebhook({ name: 'IWC RP' }).catch(() => null);
-    if (!hook) return false;
-    const opts = {
-      content: texte.slice(0, 2000),
-      username: ((message.member?.displayName || message.author?.username || 'Inconnu')).slice(0, 80),
-      avatarURL: message.member?.displayAvatarURL?.() || message.author?.displayAvatarURL?.() || undefined,
-      allowedMentions: { parse: [] }, // l'original a déjà notifié → pas de second ping
-    };
-    if (inThread) opts.threadId = message.channel.id;
-    await hook.send(opts);
-    return true;
-  } catch { return false; }
-}
-
 // Panneau permanent dans #agenda : un bouton « Nouveau rendez-vous » plutôt qu'une commande.
 // ── RDV depuis une PHOTO : l'IA lit une capture déposée dans #agenda ──
 const _agendaPhotoDrafts = new Map();
@@ -4354,43 +4289,6 @@ client.on('messageCreate', async message => {
   const plansTactCh = guild.channels.cache.get(SALON_HARDCODED.PLANS);
   if (plansTactCh && message.channel.id === plansTactCh.id) { await _archiverPlanNotion(message); return; }
 
-  // ── ✍️ Correction orthographique SILENCIEUSE (tout le monde, tous salons) ──
-  // Placé en TOUT DERNIER : ne s'exécute que sur les messages qu'AUCUN autre
-  // traitement n'a consommés (conversation libre) → n'interfère avec rien.
-  // Invisible et SANS notification (aucun log).
-  try {
-    if (message.guild && !message.author?.bot && !message.webhookId
-        && message.channel?.id !== SALON_RP_REFORMULATION
-        && process.env.ANTHROPIC_API_KEY) {
-      const brut = (message.content || '').trim();
-      const RE_MENTION = /<(?:@[!&]?|#)\d+>/g, RE_EMOJI = /<a?:\w+:\d+>/g, RE_URL = /https?:\/\/\S+/gi;
-      const motsUtiles = brut.replace(RE_MENTION, ' ').replace(RE_EMOJI, ' ').replace(RE_URL, ' ').replace(/[^0-9A-Za-zÀ-ÿ]+/g, ' ').trim();
-      // On ne touche pas : messages vides, pièces jointes, commandes, ou sans vraie prose.
-      const skip = !brut || message.attachments.size > 0 || brut.length > 1900 || /^[\/!]/.test(brut) || motsUtiles.replace(/\s+/g, '').length < 4;
-      if (!skip) {
-        let corrige = await _corrigerOrthographe(brut);
-        // Filet de sécurité : réinjecte les pings/liens que l'IA aurait pu retirer.
-        if (corrige) {
-          const garder = [];
-          for (const mm of (brut.match(RE_MENTION) || [])) if (!corrige.includes(mm)) garder.push(mm);
-          for (const uu of (brut.match(RE_URL) || [])) if (!corrige.includes(uu)) garder.push(uu);
-          if (garder.length) corrige = (corrige + ' ' + garder.join(' ')).slice(0, 1990);
-        }
-        // Filet secondaire : on ignore les différences PUREMENT cosmétiques (casse,
-        // espaces, style d'apostrophe/guillemets) — seule une vraie faute corrigée compte.
-        const norm = s => s.trim().toLowerCase().replace(/\s+/g, ' ').replace(/[‘’'`]/g, "'").replace(/[“”«»"]/g, '"');
-        // On ne repost QUE si la correction change vraiment quelque chose (sinon invisible = inutile).
-        if (corrige && norm(corrige) !== norm(brut)) {
-          const ok = await _reposterCorrige(message, corrige);
-          if (ok) {
-            await message.delete().catch(() => {});
-            return;
-          }
-          console.log('⚠️ Correcteur ortho: repost webhook échoué → permission « Gérer les webhooks » manquante dans ce salon ?');
-        }
-      }
-    }
-  } catch (e) { console.log('⚠️ correcteur ortho:', e.message); }
 });
 
 // ── Archive une photo de lieu RDR2 dans Notion (salon #plans) — fiabilisé ──
