@@ -7,7 +7,7 @@
 //   • Réservé à la Direction. Persisté en base (db.registreArmes) + sauvegarde Gist.
 //   • Tout est préfixé arme_ — n'écrit RIEN ailleurs, aucune autre donnée touchée.
 // ───────────────────────────────────────────────────────────────────────────
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, MessageFlags } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, MessageFlags, AttachmentBuilder } = require('discord.js');
 
 let dbMod = {}; try { dbMod = require('./db'); } catch { dbMod = {}; }
 const loadDB = dbMod.loadDB || (() => ({}));
@@ -87,13 +87,19 @@ function _panelEmbed(r) {
   return e;
 }
 function _panelButtons() {
-  return [new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('arme_add').setLabel('Ajouter une arme').setEmoji('➕').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('arme_search').setLabel('Rechercher').setEmoji('🔎').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('arme_cats').setLabel('Catégories').setEmoji('🗂️').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('arme_aff').setLabel('Affectations').setEmoji('🏷️').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('arme_del').setLabel('Retirer').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
-  )];
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('arme_add').setLabel('Ajouter une arme').setEmoji('➕').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('arme_search').setLabel('Rechercher').setEmoji('🔎').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('arme_cats').setLabel('Catégories').setEmoji('🗂️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('arme_aff').setLabel('Affectations').setEmoji('🏷️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('arme_del').setLabel('Retirer').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('arme_edit').setLabel('Modifier une arme').setEmoji('✏️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('arme_export').setLabel('Exporter le registre').setEmoji('📤').setStyle(ButtonStyle.Secondary),
+    ),
+  ];
 }
 async function _refreshPanel(client, r) {
   try {
@@ -148,14 +154,19 @@ function _draftMsg(r, d, draftId, membres) {
   optsAff.push({ label: 'Nouvelle affectation…', value: '__new__', emoji: '➕' });
   const optsMbr = [{ label: 'Aucun (pas de personne)', value: '__none__', default: !d.membreId, emoji: '🚫' }];
   for (const m of (membres || []).slice(0, 24)) optsMbr.push({ label: _clip(m.nom, 100), value: m.id, default: d.membreId === m.id });
+  const estEdit = !!d.editId;
+  const lastRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`arme_gen::${draftId}`).setLabel(estEdit ? 'Enregistrer les modifications' : 'Enregistrer l\'arme').setEmoji('✅').setStyle(ButtonStyle.Success),
+  );
+  if (estEdit) lastRow.addComponents(new ButtonBuilder().setCustomId(`arme_edittxt::${draftId}`).setLabel('Série / Type / Notes').setEmoji('✏️').setStyle(ButtonStyle.Secondary));
   const rows = [
     new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`arme_selcat::${draftId}`).setPlaceholder('🗂️ Catégorie de l\'arme…').addOptions(optsCat)),
     new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`arme_selaff::${draftId}`).setPlaceholder('🏷️ À qui / quoi appartient-elle…').addOptions(optsAff)),
     new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`arme_selmbr::${draftId}`).setPlaceholder('👤 Détenteur — membre de la Confrérie (optionnel)…').addOptions(optsMbr)),
-    new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`arme_gen::${draftId}`).setLabel('Enregistrer l\'arme').setEmoji('✅').setStyle(ButtonStyle.Success)),
+    lastRow,
   ];
   const recap = [
-    '**🔫 Nouvelle arme**',
+    estEdit ? '**🔧 Modifier l\'arme**' : '**🔫 Nouvelle arme**',
     `• N° de série : \`${d.serie}\``,
     `• Type : **${d.type}**`,
     d.notes ? `• Notes : ${_clip(d.notes, 200)}` : null,
@@ -164,7 +175,7 @@ function _draftMsg(r, d, draftId, membres) {
     `🏷️ Appartient à : ${d.appartenance || '*à choisir*'}`,
     `👤 Détenteur : ${d.membreNom ? d.membreNom : '*aucun*'}`,
     '',
-    'Choisis la **catégorie** et l\'**affectation** (le **détenteur** est optionnel), puis **Enregistrer**.',
+    estEdit ? 'Ajuste la **catégorie**, l\'**affectation** ou le **détenteur** dans les menus ; « ✏️ Série / Type / Notes » pour le reste ; puis **Enregistrer les modifications**.' : 'Choisis la **catégorie** et l\'**affectation** (le **détenteur** est optionnel), puis **Enregistrer**.',
   ].filter(x => x != null).join('\n');
   return { content: recap, components: rows };
 }
@@ -295,6 +306,19 @@ async function routeInteraction(interaction) {
       const d = r.drafts[draftId];
       if (!d) { await interaction.update({ content: '⌛ Saisie expirée — reclique **➕ Ajouter une arme**.', components: [] }).catch(() => {}); return true; }
       if (!d.categorie || !d.appartenance) { await interaction.reply({ content: '⚠️ Choisis d\'abord la **catégorie** ET l\'**affectation**.', flags: eph }).catch(() => {}); return true; }
+      // Mode édition : on met à jour l'arme existante ; sinon on en crée une nouvelle.
+      if (d.editId) {
+        const a = r.armes.find(x => x.id === d.editId);
+        if (!a) { delete r.drafts[draftId]; persist(db); await interaction.update({ content: '⚠️ Arme introuvable (déjà retirée ?).', components: [] }).catch(() => {}); return true; }
+        a.serie = d.serie; a.type = d.type; a.categorie = d.categorie; a.appartenance = d.appartenance;
+        a.membreId = d.membreId || null; a.membreNom = d.membreNom || ''; a.notes = d.notes || '';
+        a.majPar = interaction.user.id; a.majAt = Date.now();
+        delete r.drafts[draftId]; persist(db);
+        await _refreshPanel(interaction.client, r);
+        const detTxtE = a.membreId ? ` · 👤 <@${a.membreId}>` : '';
+        await interaction.update({ content: `✏️ Arme mise à jour : \`${a.serie}\` — **${a.type}** *(${a.categorie})* · 🏷️ ${a.appartenance}${detTxtE}.`, components: [] }).catch(() => {});
+        return true;
+      }
       const arme = { id: _id(), serie: d.serie, type: d.type, categorie: d.categorie, appartenance: d.appartenance, membreId: d.membreId || null, membreNom: d.membreNom || '', notes: d.notes || '', par: interaction.user.id, at: Date.now() };
       r.armes.push(arme);
       delete r.drafts[draftId];
@@ -302,6 +326,86 @@ async function routeInteraction(interaction) {
       await _refreshPanel(interaction.client, r);
       const detTxt = arme.membreId ? ` · 👤 <@${arme.membreId}>` : '';
       await interaction.update({ content: `✅ Arme enregistrée : \`${arme.serie}\` — **${arme.type}** *(${arme.categorie})* · 🏷️ ${arme.appartenance}${detTxt}.`, components: [] }).catch(() => {});
+      return true;
+    }
+
+    // ── Modifier une arme : choisir l'arme → éditer via le même formulaire (pré-rempli) ──
+    if (interaction.isButton?.() && cid === 'arme_edit') {
+      if (!estGestion(interaction.member)) return refuse();
+      const db = loadDB(); const r = _ensure(db);
+      if (!r.armes.length) { await interaction.reply({ content: '📭 Le registre est vide.', flags: eph }).catch(() => {}); return true; }
+      const row = _selectArmes([...r.armes].reverse(), 'editsel');
+      const extra = r.armes.length > 25 ? `\n*(${r.armes.length} armes — 25 dernières listées ; utilise 🔎 pour retrouver les autres)*` : '';
+      await interaction.reply({ content: `✏️ Quelle arme modifier ?${extra}`, components: [row], flags: eph }).catch(() => {});
+      return true;
+    }
+    if (interaction.isStringSelectMenu?.() && cid.startsWith('arme_editsel::')) {
+      if (!estGestion(interaction.member)) return refuse();
+      const aid = interaction.values?.[0];
+      const db = loadDB(); const r = _ensure(db);
+      const a = r.armes.find(x => x.id === aid);
+      if (!a) { await interaction.update({ content: '⚠️ Arme introuvable (déjà retirée ?).', components: [] }).catch(() => {}); return true; }
+      const draftId = _id();
+      r.drafts[draftId] = { serie: a.serie, type: a.type, notes: a.notes || '', categorie: a.categorie, appartenance: a.appartenance, membreId: a.membreId || null, membreNom: a.membreNom || '', editId: a.id, by: interaction.user.id, at: Date.now() };
+      _pruneDrafts(r); persist(db);
+      await interaction.update({ ..._draftMsg(r, r.drafts[draftId], draftId, _membresConfrerie(interaction.guild)), embeds: [] }).catch(() => {});
+      return true;
+    }
+    // ── Édition des champs texte (série / type / notes) d'un draft d'édition ──
+    if (interaction.isButton?.() && cid.startsWith('arme_edittxt::')) {
+      if (!estGestion(interaction.member)) return refuse();
+      const draftId = cid.split('::')[1];
+      const db = loadDB(); const r = _ensure(db);
+      const d = r.drafts[draftId];
+      if (!d) { await interaction.reply({ content: '⌛ Saisie expirée — reclique **✏️ Modifier une arme**.', flags: eph }).catch(() => {}); return true; }
+      const m = new ModalBuilder().setCustomId(`arme_edittxt_modal::${draftId}`).setTitle('✏️ Série / Type / Notes');
+      m.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('serie').setLabel('Numéro de série').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setValue(_clip(d.serie, 60))),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('type').setLabel('Type / modèle d\'arme').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(_clip(d.type, 80))),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('notes').setLabel('Notes (optionnel)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300).setValue(_clip(d.notes, 300))),
+      );
+      await interaction.showModal(m).catch(() => {});
+      return true;
+    }
+    if (interaction.isModalSubmit?.() && cid.startsWith('arme_edittxt_modal::')) {
+      if (!estGestion(interaction.member)) return refuse();
+      const draftId = cid.split('::')[1];
+      const db = loadDB(); const r = _ensure(db);
+      const d = r.drafts[draftId];
+      if (!d) { await interaction.reply({ content: '⌛ Saisie expirée — reclique **✏️ Modifier une arme**.', flags: eph }).catch(() => {}); return true; }
+      d.serie = (interaction.fields.getTextInputValue('serie') || '').trim().slice(0, 60) || d.serie;
+      d.type = (interaction.fields.getTextInputValue('type') || '').trim().slice(0, 80) || d.type;
+      d.notes = (interaction.fields.getTextInputValue('notes') || '').trim().slice(0, 300);
+      persist(db);
+      await interaction.update(_draftMsg(r, d, draftId, _membresConfrerie(interaction.guild))).catch(() => {});
+      return true;
+    }
+
+    // ── Exporter le registre (fichier texte) ──
+    if (interaction.isButton?.() && cid === 'arme_export') {
+      if (!estGestion(interaction.member)) return refuse();
+      await interaction.deferReply({ flags: eph }).catch(() => {});
+      const db = loadDB(); const r = _ensure(db);
+      if (!r.armes.length) { await interaction.editReply({ content: '📭 Le registre est vide — rien à exporter.' }).catch(() => {}); return true; }
+      const L = [];
+      L.push('REGISTRE DES ARMES — IRON WOLF COMPANY / LA CONFRÉRIE');
+      L.push(`Export du ${new Date().toLocaleString('fr-FR')} · ${r.armes.length} arme(s)`);
+      L.push('='.repeat(60));
+      const parAff = {};
+      for (const a of r.armes) { const k = a.appartenance || '—'; (parAff[k] = parAff[k] || []).push(a); }
+      for (const [aff, list] of Object.entries(parAff)) {
+        L.push('');
+        L.push(`### ${aff} (${list.length})`);
+        list.sort((a, b) => (a.type || '').localeCompare(b.type || ''));
+        for (const a of list) {
+          L.push(`- [${a.serie}] ${a.type}${a.categorie ? ` (${a.categorie})` : ''}${a.membreNom ? ` — détenteur : ${a.membreNom}` : ''}${a.notes ? ` | notes : ${a.notes}` : ''}`);
+        }
+      }
+      L.push('');
+      L.push('— Récapitulatif par catégorie —');
+      for (const c of r.categories) { const n = r.armes.filter(a => a.categorie === c).length; if (n) L.push(`${c} : ${n}`); }
+      const file = new AttachmentBuilder(Buffer.from(L.join('\n'), 'utf8'), { name: 'registre-armes.txt' });
+      await interaction.editReply({ content: `📤 Registre exporté — **${r.armes.length}** arme(s).`, files: [file] }).catch(() => {});
       return true;
     }
 
