@@ -55,8 +55,8 @@ function _isTenueChannel(channel) {
   // JAMAIS non plus dans le salon configuré comme COFFRE COMMUN (lecture d'inventaire par photo) :
   // là, les photos sont des captures de coffre, pas des tenues.
   try { const inv = loadDB().inventaire; if (inv?.channelId && channel?.id === inv.channelId) return false; } catch {}
-  // Sinon : par ID (fiable même si le salon est renommé) OU par nom.
-  if (channel?.id === SALON_TENUE) return true;
+  // Sinon : par ID SI un ID est explicitement configuré, sinon par nom uniquement.
+  if (SALON_TENUE && channel?.id === SALON_TENUE) return true;
   return /tenue|vestiaire/.test(clean);
 }
 
@@ -210,7 +210,10 @@ async function routeInteraction(interaction) {
 }
 
 // ── Panneau explicatif épinglé dans #tenue ──
-const SALON_TENUE = '1517863681655046234';
+// ⚠️ PAS d'ID en dur : l'ancien pointait par erreur sur le salon COFFRE/INVENTAIRE.
+// Le Vestiaire est repéré UNIQUEMENT par le nom du salon (« tenue » / « vestiaire »),
+// pour ne JAMAIS empiéter sur le coffre. Mettre un vrai ID ici seulement si besoin.
+const SALON_TENUE = '';
 function _panneauEmbed() {
   return new EmbedBuilder().setColor(0x8B5A2A)
     .setTitle('🧵 LE VESTIAIRE — IRON WOLF COMPANY')

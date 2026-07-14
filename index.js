@@ -1495,6 +1495,41 @@ async function routeTresorerieInteraction(interaction) {
       await interaction.editReply({ content: `✅ ${sortie ? '💸 Sortie' : '💵 Entrée'} (Confrérie) enregistrée : **${_fmtTreso(montant)}** (${motif}).\n🏦 Nouveau solde du coffre commun : **${_fmtTreso(solde)}**.` }).catch(() => {});
       return true;
     }
+
+    // ── #coffre-entreprise : panneau à boutons (coffre commun, style Iron Wolf Company) ──
+    if (interaction.isButton?.() && (id === 'centr_entree' || id === 'centr_sortie')) {
+      if (!isMembre(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à l\'Iron Wolf Company.', flags: MessageFlags.Ephemeral }); return true; }
+      const sortie = id === 'centr_sortie';
+      const modal = new ModalBuilder().setCustomId(sortie ? 'centr_modal_sortie' : 'centr_modal_entree').setTitle(sortie ? '💸 Sortie — Entreprise' : '💵 Entrée — Entreprise');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('montant').setLabel('Montant ($)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ex : 1500')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('motif').setLabel('Motif').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder(sortie ? 'Ex : Matériel, salaires, soins…' : 'Ex : Contrat honoré, prime, prestation…')),
+      );
+      await interaction.showModal(modal); return true;
+    }
+    if (interaction.isButton?.() && id === 'centr_refresh') {
+      await interaction.deferUpdate().catch(() => {});
+      await _installerPanelCoffreEntreprise(interaction.guild).catch(() => {});
+      return true;
+    }
+    if (interaction.isModalSubmit?.() && (id === 'centr_modal_entree' || id === 'centr_modal_sortie')) {
+      const sortie = id === 'centr_modal_sortie';
+      const montant = _parseMontant(interaction.fields.getTextInputValue('montant'));
+      const motif = (interaction.fields.getTextInputValue('motif') || '').trim().slice(0, 200);
+      if (!(montant > 0)) { await interaction.reply({ content: '❌ Montant invalide. Indique un nombre, ex : 1500.', flags: MessageFlags.Ephemeral }); return true; }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const dbX = loadDB(); if (typeof dbX.coffre !== 'number') dbX.coffre = 0;
+      dbX.coffre = Math.max(0, dbX.coffre + (sortie ? -montant : montant));
+      const solde = dbX.coffre; saveDB(dbX);
+      const auteur = interaction.member?.displayName || interaction.user.username;
+      const emoji = sortie ? '💸' : '💵';
+      const titre = sortie ? 'Sortie — Coffre Entreprise' : 'Entrée — Coffre Entreprise';
+      await ajouterJournalIC(interaction.guild, { type: 'tresorerie', emoji, titre, description: `${sortie ? '-' : '+'}${_fmtTreso(montant)} · ${motif} · par ${auteur}`, auteur, montant }).catch(() => {});
+      try { _syncTransactionNotion?.({ type: sortie ? 'Sortie' : 'Entrée', coffre: 'legal', montant, objet: motif, responsable: auteur, solde, date: new Date().toISOString(), discordId: interaction.user.id, userId: interaction.user.id }); } catch {}
+      try { await _installerPanelCoffreEntreprise(interaction.guild); } catch {} // rafraîchit le panneau (solde à jour)
+      await interaction.editReply({ content: `✅ ${sortie ? '💸 Sortie' : '💵 Entrée'} (Entreprise) enregistrée : **${_fmtTreso(montant)}** (${motif}).\n🏦 Nouveau solde du coffre : **${_fmtTreso(solde)}**.` }).catch(() => {});
+      return true;
+    }
   } catch (e) { console.log('❌ routeTresorerieInteraction:', e.message); try { if (!interaction.replied && !interaction.deferred) await interaction.reply({ content: '❌ Erreur lors de la saisie.', flags: MessageFlags.Ephemeral }); } catch {} return true; }
   return false;
 }
@@ -1504,10 +1539,10 @@ function _coffreIllegalEmbed(db) {
   const fmt = n => `$${Math.round(n || 0).toLocaleString('fr-FR')}`;
   return new EmbedBuilder().setColor(0x8B1A1A)
     .setAuthor({ name: '🔒 La Confrérie • Trésorerie' })
-    .setTitle('🔒 Trésorerie — La Confrérie')
-    .setDescription('Enregistre chaque mouvement via les boutons ci-dessous.\n🔄 Synchronisé avec le coffre commun et le forum 💰 Trésorerie.')
-    .addFields({ name: '🏦 Coffre commun', value: `**${fmt(solde)}**`, inline: false })
-    .setFooter({ text: `La Confrérie • Trésorerie • ${new Date().toLocaleString('fr-FR')}` }).setTimestamp();
+    .setTitle('🔒 Coffre commun — La Confrérie')
+    .setDescription(`Enregistre chaque mouvement via les boutons ci-dessous.\n💡 **Un seul coffre unifié** pour toute la compagnie : ce solde est le **même** que dans <#${COFFRE_ENTREPRISE_ID}> et le forum 💰 Trésorerie.`)
+    .addFields({ name: '🏦 Coffre commun — solde unifié', value: `**${fmt(solde)}**`, inline: false })
+    .setFooter({ text: `La Confrérie • Coffre commun • ${new Date().toLocaleString('fr-FR')}` }).setTimestamp();
 }
 function _coffreIllegalRow() {
   return new ActionRowBuilder().addComponents(
@@ -1528,6 +1563,38 @@ async function _installerPanelCoffreIllegal(guild) {
     if (msg) { await msg.edit(payload).catch(() => {}); if (db.coffreIllegalPanelId !== msg.id) { const d = loadDB(); d.coffreIllegalPanelId = msg.id; saveDB(d); } }
     else { const sent = await ch.send(payload).catch(() => null); if (sent) { try { await sent.pin(); } catch {} const d = loadDB(); d.coffreIllegalPanelId = sent.id; saveDB(d); } }
   } catch (e) { console.log('❌ _installerPanelCoffreIllegal:', e.message); }
+}
+// ── #coffre-entreprise : panneau à boutons (coffre commun, style Iron Wolf Company) ──
+const COFFRE_ENTREPRISE_ID = '1508756453354373202';
+function _coffreEntrepriseEmbed(db) {
+  const solde = db.coffre || 0;
+  const fmt = n => `$${Math.round(n || 0).toLocaleString('fr-FR')}`;
+  return new EmbedBuilder().setColor(0x2870C8)
+    .setAuthor({ name: '⚖️ Iron Wolf Company • Trésorerie' })
+    .setTitle('🏦 Coffre commun — Iron Wolf Company')
+    .setDescription(`Enregistre chaque mouvement d'argent via les boutons ci-dessous.\n💡 **Un seul coffre unifié** pour toute la compagnie : ce solde est le **même** que dans <#${COFFRE_ILLEGAL_ID}> et le forum 💰 Trésorerie.`)
+    .addFields({ name: '🏦 Coffre commun — solde unifié', value: `**${fmt(solde)}**`, inline: false })
+    .setFooter({ text: `Iron Wolf Company • Coffre commun • ${new Date().toLocaleString('fr-FR')}` }).setTimestamp();
+}
+function _coffreEntrepriseRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('centr_entree').setLabel('Entrée').setEmoji('💵').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('centr_sortie').setLabel('Sortie').setEmoji('💸').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('centr_refresh').setLabel('Actualiser').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
+  );
+}
+async function _installerPanelCoffreEntreprise(guild) {
+  try {
+    const ch = guild.channels.cache.get(COFFRE_ENTREPRISE_ID) || await guild.channels.fetch(COFFRE_ENTREPRISE_ID).catch(() => null);
+    if (!ch?.send) return;
+    const db = loadDB();
+    const payload = { embeds: [_coffreEntrepriseEmbed(db)], components: [_coffreEntrepriseRow()] };
+    let msg = null;
+    if (db.coffreEntreprisePanelId) msg = await ch.messages.fetch(db.coffreEntreprisePanelId).catch(() => null);
+    if (!msg) { const msgs = await ch.messages.fetch({ limit: 20 }).catch(() => null); msg = msgs ? [...msgs.values()].find(m => { const t = m.embeds?.[0]?.title || ''; return m.author?.id === guild.client.user.id && t.includes('Coffre commun') && t.includes('Iron Wolf'); }) : null; }
+    if (msg) { await msg.edit(payload).catch(() => {}); if (db.coffreEntreprisePanelId !== msg.id) { const d = loadDB(); d.coffreEntreprisePanelId = msg.id; saveDB(d); } }
+    else { const sent = await ch.send(payload).catch(() => null); if (sent) { try { await sent.pin(); } catch {} const d = loadDB(); d.coffreEntreprisePanelId = sent.id; saveDB(d); } }
+  } catch (e) { console.log('❌ _installerPanelCoffreEntreprise:', e.message); }
 }
 async function ajouterJournalIC(guild, entry) {
   try {
@@ -2597,6 +2664,7 @@ async function autoSetup(guild) {
   ripoux.installerPanel?.(guild).then(() => console.log('🎖️ Panneau Le Ripoux installé')).catch(() => {});
   installerTresorerie(guild).then(() => console.log('💰 Forum trésorerie prêt (étiquettes + dossiers)')).catch(() => {});
   _installerPanelCoffreIllegal(guild).then(() => console.log('🔒 Panneau coffre illégal (boutons) installé')).catch(() => {});
+  _installerPanelCoffreEntreprise(guild).then(() => console.log('⚖️ Panneau coffre entreprise (boutons) installé')).catch(() => {});
   try { carte.init?.({ isMembre, isDirection }); } catch {}
   carte.installerPanel?.(guild).then(() => console.log('🗺️ Panneau carte interactive installé')).catch(() => {});
   try { portail.init?.({ isMembre, isDirection }); } catch {}

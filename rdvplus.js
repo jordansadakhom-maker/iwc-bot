@@ -85,6 +85,29 @@ const peutGerer = (member) => global.aAccesTotal?.(member) || !!member?.roles?.c
 
 function _store(db) { if (!db.rdvplus) db.rdvplus = { rdvs: {}, clients: {} }; if (!db.rdvplus.rdvs) db.rdvplus.rdvs = {}; if (!db.rdvplus.clients) db.rdvplus.clients = {}; return db.rdvplus; }
 
+// Agents assignés à un RDV (multi-agent ; rétro-compat avec l'ancien agentId unique).
+function _agents(rdv) {
+  if (rdv && Array.isArray(rdv.agentIds) && rdv.agentIds.length) return rdv.agentIds;
+  return rdv && rdv.agentId ? [rdv.agentId] : [];
+}
+
+// Prestation (RDV) → catégorie d'opération, pour la création automatique d'opération.
+const PRESTA_TO_CAT = {
+  esc: 'Protection rapprochée', cnv: 'Escorte de convoi', pro: 'Protection rapprochée',
+  sec: 'Protection', enq: 'Surveillance / Filature', neg: 'Autre',
+  rec: 'Récupération de dette', bnt: 'Chasse de prime', trv: 'Autre',
+};
+// Membres connectés au salon vocal « HRP » (repéré par son nom), sinon au vocal du cliqueur.
+function _membresVocalHRP(interaction) {
+  try {
+    const guild = interaction.guild;
+    let cible = guild.channels?.cache?.find(c => c.type === 2 && /hrp/i.test(c.name || '') && (c.members?.size || 0) > 0);
+    if (!cible) cible = interaction.member?.voice?.channel || null;
+    if (!cible?.members) return { ids: [], salon: cible?.name || null };
+    return { ids: [...cible.members.values()].filter(m => !m.user?.bot).map(m => m.id), salon: cible.name };
+  } catch { return { ids: [], salon: null }; }
+}
+
 function _salonDemandes(guild) {
   return guild.channels.cache.get(SALON_DEMANDES)
     || guild.channels.cache.find(c => c.isTextBased?.() && /demande|rendez|t[ée]l[ée]gramme/i.test(c.name))
@@ -225,7 +248,7 @@ function _embedRdv(rdv) {
       ...(!rdv.reponses && rdv.duree ? [{ name: '⏱️ Durée estimée', value: String(rdv.duree).slice(0, 100), inline: true }] : []),
       { name: '🕐 Créneau', value: dt ? `${tsF(dt)}\n${tsR(dt)}` : (rdv.souhaitTexte ? `*Souhait : ${rdv.souhaitTexte}* (à fixer)` : '—'), inline: false },
       { name: '📇 Contact (pour le contrat)', value: `<@${rdv.contactId || rdv.clientId}> · ID : \`${rdv.contactId || rdv.clientId}\``, inline: false },
-      ...(rdv.agentId ? [{ name: '🤝 Agent assigné', value: `<@${rdv.agentId}>`, inline: true }] : []),
+      ...(_agents(rdv).length ? [{ name: `🤝 Agent${_agents(rdv).length > 1 ? 's' : ''} assigné${_agents(rdv).length > 1 ? 's' : ''}`, value: _agents(rdv).map(a => `<@${a}>`).join(', ').slice(0, 1000), inline: false }] : []),
       ...(rdv.details ? [{ name: '📝 Détails', value: rdv.details.slice(0, 1000), inline: false }] : []),
       ...(rdv.satisfaction ? [{ name: '⭐ Satisfaction client', value: _satLabel(rdv.satisfaction) + (rdv.satisfactionComment ? `\n*« ${String(rdv.satisfactionComment).slice(0, 300)} »*` : ''), inline: false }] : []),
       ...(rdv.paiement ? [{ name: '💰 Paiement', value: `Encaissé : **$${Number(rdv.paiement.montant || 0).toLocaleString('fr-FR')}**${rdv.paiement.facture ? ` · Facture \`${rdv.paiement.facture}\`` : ''}${rdv.paiement.par ? `\n*par ${rdv.paiement.par}*` : ''}`, inline: false }] : []),
@@ -248,6 +271,7 @@ function _boutonsTelegramme(rdv) {
       new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`rdvp_assign::${rdv.id}`).setLabel('👤 Assigner un agent').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(`rdvp_reply::${rdv.id}`).setLabel('💬 Répondre au client').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`rdvp_operation::${rdv.id}`).setLabel('🎯 Créer l\'opération').setStyle(ButtonStyle.Primary),
       ),
     ];
   }
@@ -256,10 +280,12 @@ function _boutonsTelegramme(rdv) {
     if (rdv.paiement) {
       return [new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`rdvp_paid_noop::${rdv.id}`).setLabel(`💰 Payé — $${Number(rdv.paiement.montant || 0).toLocaleString('fr-FR')}`).setStyle(ButtonStyle.Success).setDisabled(true),
+        new ButtonBuilder().setCustomId(`rdvp_operation::${rdv.id}`).setLabel('🎯 Créer l\'opération').setStyle(ButtonStyle.Primary),
       )];
     }
     return [new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`rdvp_encaisser::${rdv.id}`).setLabel('💰 Encaisser le paiement').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`rdvp_operation::${rdv.id}`).setLabel('🎯 Créer l\'opération').setStyle(ButtonStyle.Primary),
     )];
   }
   if (['Annulé', 'Décliné', 'Lapin'].includes(rdv.statut)) return []; // clôturé
@@ -368,7 +394,7 @@ async function routeInteraction(interaction) {
           const si = STATUT_INFO[r.statut] || STATUT_INFO['Planifié'];
           const type = TYPES[r.typeKey]?.label || 'RDV';
           const lieu = LIEUX[r.lieuKey] || r.lieuKey || '—';
-          return `${si.icone} **${type} — ${r.nomRP}**\n${tsF(dt)} · ${tsR(dt)} · 📍 ${lieu}${r.agentId ? ` · 🤝 <@${r.agentId}>` : ''}`;
+          return `${si.icone} **${type} — ${r.nomRP}**\n${tsF(dt)} · ${tsR(dt)} · 📍 ${lieu}${_agents(r).length ? ` · 🤝 ${_agents(r).map(a => `<@${a}>`).join(', ')}` : ''}`;
         });
         await interaction.editReply({ embeds: [new EmbedBuilder().setColor(COL.sepia).setTitle('📅 Rendez-vous à venir').setDescription(lignes.join('\n\n')).setFooter({ text: `${list.length} RDV · Bureau des Rendez-vous` })] }).catch(() => {});
         return true;
@@ -390,7 +416,7 @@ async function routeInteraction(interaction) {
         const lignesType = Object.entries(parType).sort((a, b) => b[1].m - a[1].m).map(([k, v]) => `${TYPES[k]?.label || k} — **${eur(v.m)}** (${v.n})`);
         // Stats agents (tout temps) : missions honorées + total encaissé
         const parAgent = {};
-        for (const r of rdvs) { if (!r.agentId) continue; if (r.statut !== 'Honoré' && !r.paiement) continue; if (!parAgent[r.agentId]) parAgent[r.agentId] = { miss: 0, enc: 0 }; parAgent[r.agentId].miss++; parAgent[r.agentId].enc += r.paiement?.montant || 0; }
+        for (const r of rdvs) { if (r.statut !== 'Honoré' && !r.paiement) continue; const ags = _agents(r); if (!ags.length) continue; const part = Math.round((r.paiement?.montant || 0) / ags.length); for (const aid of ags) { if (!parAgent[aid]) parAgent[aid] = { miss: 0, enc: 0 }; parAgent[aid].miss++; parAgent[aid].enc += part; } }
         const topAgents = Object.entries(parAgent).sort((a, b) => b[1].miss - a[1].miss).slice(0, 6).map(([uid, v]) => `<@${uid}> — **${v.miss}** mission(s) · ${eur(v.enc)}`);
         let moisNom = ''; try { moisNom = now.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }); } catch { moisNom = `${now.getMonth() + 1}/${now.getFullYear()}`; }
         const e = new EmbedBuilder().setColor(COL.or).setTitle('📊 Récap des rendez-vous')
@@ -679,6 +705,51 @@ async function routeInteraction(interaction) {
       return true;
     }
 
+    // ===== CRÉER UNE OPÉRATION à partir du rendez-vous (auto : catégorie, lieu, équipe du vocal HRP) =====
+    if (interaction.isButton?.() && (interaction.customId || '').startsWith('rdvp_operation::')) {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction / aux opérateurs.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const rdvId = interaction.customId.split('::')[1];
+      const db = loadDB(); const store = _store(db); const rdv = store.rdvs[rdvId];
+      if (!rdv) { await interaction.editReply({ content: '⚠️ Rendez-vous introuvable (peut-être trop ancien).' }).catch(() => {}); return true; }
+      if (typeof global.creerOpDepuisContrat !== 'function') { await interaction.editReply({ content: '⚠️ Le module des opérations n\'est pas disponible.' }).catch(() => {}); return true; }
+      // Équipe = membres connectés au vocal HRP (ou au vocal du cliqueur) + l'agent assigné.
+      const { ids: vocal, salon } = _membresVocalHRP(interaction);
+      const membres = [...new Set([...(vocal || []), ..._agents(rdv)])];
+      const typeMission = PRESTA_TO_CAT[rdv.typeKey] || 'Autre';
+      const pole = TYPES[rdv.typeKey]?.illegal ? 'illegal' : 'legal';
+      const lieu = LIEUX[rdv.lieuKey] || rdv.lieuKey || '';
+      const dt = _slotToDate(rdv.slot);
+      const creneau = dt ? tsF(dt) : (rdv.souhaitTexte || '');
+      const objetLabel = (TYPES[rdv.typeKey]?.label || 'Mission').replace(/^[^\p{L}]+/u, '').trim();
+      const contrat = {
+        id: 'RDVOP-' + rdvId,
+        typeMission,
+        objet: `${objetLabel} — ${rdv.nomRP || 'client'}${lieu ? ` · ${lieu}` : ''}`.slice(0, 100),
+        commanditaire: rdv.nomRP || '',
+        remuneration: rdv.paiement?.montant ? `$${Number(rdv.paiement.montant).toLocaleString('fr-FR')}` : '—',
+        echeanceTexte: creneau || null,
+        details: [rdv.details, lieu ? `📍 Lieu : ${lieu}` : '', creneau ? `🕐 Créneau : ${creneau}` : '', (rdv.contactId || rdv.clientId) ? `📇 Client : <@${rdv.contactId || rdv.clientId}>` : ''].filter(Boolean).join('\n').slice(0, 900),
+      };
+      let op = null;
+      try { op = await global.creerOpDepuisContrat(interaction.guild, contrat, { pole, parId: interaction.user.id, membres }); } catch (e) { console.log('❌ rdvp_operation create:', e.message); }
+      if (!op) { await interaction.editReply({ content: '⚠️ La création de l\'opération a échoué (voir logs). Tu peux la créer manuellement au besoin.' }).catch(() => {}); return true; }
+      rdv.operationId = op.id; store.rdvs[rdvId] = rdv; _persist(db);
+      // Prévient l'équipe (les participants du vocal) dans le fil de l'opération.
+      if (membres.length && op.threadId) {
+        try { const th = await interaction.client.channels.fetch(op.threadId).catch(() => null); if (th?.send) await th.send({ content: `👥 ${membres.map(m => `<@${m}>`).join(' ')} — vous êtes **assignés** à cette opération (équipe présente sur le vocal${salon ? ` « ${salon} »` : ''}). Préparez-la étape par étape ci-dessus.`, allowedMentions: { users: membres.slice(0, 50) } }).catch(() => {}); } catch {}
+      }
+      const lien = op.threadId ? `<#${op.threadId}>` : '#opérations';
+      await interaction.editReply({ content: [
+        `✅ **Opération créée** depuis le rendez-vous \`${rdvId}\` :`,
+        `${op.emoji || '🎯'} **${String(op.cible || objetLabel).slice(0, 80)}** *(${op.categorie})*`,
+        `📍 ${lieu || '—'}${creneau ? ` · 🕐 ${creneau}` : ''}`,
+        `👥 **${membres.length}** participant(s)${salon ? ` (vocal « ${salon} »)` : (membres.length ? '' : ' — *personne en vocal, ajoute l\'équipe à la main*')}`,
+        `➡️ Préparez-la dans ${lien}.`,
+      ].join('\n') }).catch(() => {});
+      return true;
+    }
+
     // ===== GESTION (Direction) =====
     const mGere = interaction.isButton?.() && /^rdvp_(confirm|assign|reply|decline|honored|noshow|reschedule|cancel)::/.test(interaction.customId || '');
     if (mGere) {
@@ -746,8 +817,10 @@ async function routeInteraction(interaction) {
       }
 
       if (action === 'rdvp_assign') {
-        const sel = new UserSelectMenuBuilder().setCustomId(`rdvp_assign_go::${rdvId}`).setPlaceholder('Quel agent s\'occupe de ce RDV ?').setMinValues(1).setMaxValues(1);
-        await interaction.reply({ content: '👤 Choisis l\'agent à assigner :', components: [new ActionRowBuilder().addComponents(sel)], flags: MessageFlags.Ephemeral }).catch(() => {});
+        const actuels = _agents(rdv);
+        const sel = new UserSelectMenuBuilder().setCustomId(`rdvp_assign_go::${rdvId}`).setPlaceholder('Quels agents s\'occupent de ce RDV ?').setMinValues(0).setMaxValues(10);
+        if (actuels.length) { try { sel.setDefaultUsers(...actuels.slice(0, 10)); } catch {} }
+        await interaction.reply({ content: `👤 Choisis **un ou plusieurs** agents à assigner${actuels.length ? ` *(actuellement : ${actuels.map(a => `<@${a}>`).join(', ')})*` : ''}.\n*La sélection **remplace** la liste ; tout désélectionner retire les agents.*`, components: [new ActionRowBuilder().addComponents(sel)], flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } }).catch(() => {});
         return true;
       }
 
@@ -772,21 +845,30 @@ async function routeInteraction(interaction) {
       const rdvId = interaction.customId.split('::')[1];
       const db = loadDB(); const store = _store(db); const rdv = store.rdvs[rdvId];
       if (!rdv) { await interaction.update({ content: '⚠️ RDV introuvable.', components: [] }).catch(() => {}); return true; }
-      const agentId = interaction.values[0];
-      rdv.agentId = agentId; store.rdvs[rdvId] = rdv; _persist(db);
-      await interaction.update({ content: `✅ Agent <@${agentId}> assigné au RDV \`${rdvId}\`.`, components: [] }).catch(() => {});
+      const anciens = _agents(rdv);
+      const agentIds = [...new Set(interaction.values || [])].slice(0, 10);
+      rdv.agentIds = agentIds;
+      rdv.agentId = agentIds[0] || null; // primaire = rétro-compat
+      rdv.sent = rdv.sent || {}; delete rdv.sent['agent1h']; // ré-armer le rappel « 1 h avant » pour l'équipe
+      store.rdvs[rdvId] = rdv; _persist(db);
+      await interaction.update({ content: agentIds.length ? `✅ ${agentIds.length} agent(s) assigné(s) au RDV \`${rdvId}\` : ${agentIds.map(a => `<@${a}>`).join(', ')}.` : `✅ Agents retirés du RDV \`${rdvId}\`.`, components: [], allowedMentions: { parse: [] } }).catch(() => {});
       await _rafraichirTelegramme(interaction.client, rdv);
-      const dt = _slotToDate(rdv.slot);
-      const brief = new EmbedBuilder().setColor(COL.bleu).setTitle('🤝 Mission — Rendez-vous assigné')
-        .setDescription(`Tu es chargé d'un rendez-vous client (réf. \`${rdv.id}\`).`)
-        .addFields(
-          { name: '🧰 Prestation', value: TYPES[rdv.typeKey]?.label || '—', inline: true },
-          { name: '📍 Lieu', value: LIEUX[rdv.lieuKey] || '—', inline: true },
-          { name: '🕐 Quand', value: dt ? `${tsF(dt)} (${tsR(dt)})` : (rdv.souhaitTexte ? `*Souhait : ${rdv.souhaitTexte}* (à fixer)` : '—'), inline: false },
-          { name: '👤 Client', value: rdv.nomRP, inline: true },
-          ...(rdv.details ? [{ name: '📝 Détails', value: rdv.details.slice(0, 1000), inline: false }] : []),
-        ).setFooter({ text: 'Iron Wolf Company · Bureau des Rendez-vous' });
-      await _mpClient(interaction.client, agentId, '', brief);
+      // Brief MP uniquement aux NOUVEAUX agents (on ne re-spamme pas ceux déjà assignés).
+      const nouveaux = agentIds.filter(a => !anciens.includes(a));
+      if (nouveaux.length) {
+        const dt = _slotToDate(rdv.slot);
+        const brief = new EmbedBuilder().setColor(COL.bleu).setTitle('🤝 Mission — Rendez-vous assigné')
+          .setDescription(`Tu es chargé d'un rendez-vous client (réf. \`${rdv.id}\`)${agentIds.length > 1 ? ` — en équipe (${agentIds.length} agents)` : ''}.`)
+          .addFields(
+            { name: '🧰 Prestation', value: TYPES[rdv.typeKey]?.label || '—', inline: true },
+            { name: '📍 Lieu', value: LIEUX[rdv.lieuKey] || '—', inline: true },
+            { name: '🕐 Quand', value: dt ? `${tsF(dt)} (${tsR(dt)})` : (rdv.souhaitTexte ? `*Souhait : ${rdv.souhaitTexte}* (à fixer)` : '—'), inline: false },
+            { name: '👤 Client', value: rdv.nomRP, inline: true },
+            ...(agentIds.length > 1 ? [{ name: '🤝 Équipe assignée', value: agentIds.map(a => `<@${a}>`).join(', ').slice(0, 1000), inline: false }] : []),
+            ...(rdv.details ? [{ name: '📝 Détails', value: rdv.details.slice(0, 1000), inline: false }] : []),
+          ).setFooter({ text: 'Iron Wolf Company · Bureau des Rendez-vous' });
+        for (const aId of nouveaux) await _mpClient(interaction.client, aId, '', brief);
+      }
       return true;
     }
 
@@ -842,12 +924,15 @@ async function checkRappelsClients(guild) {
         await _mpClient(guild.client, rdv.clientId, '', new EmbedBuilder().setColor(COL.orange).setTitle('⏰ Rappel — votre rendez-vous dans 1 heure').setDescription([`RÉF **${rdv.id}** STOP`, `LIEU ${LIEUX[rdv.lieuKey] || '—'} STOP`, `QUAND ${tsR(dt)} STOP`].join('\n')).setFooter({ text: 'Iron Wolf Company' }));
         rdv.sent['1h'] = true; changed = true;
       }
-      // Rappel à l'AGENT assigné, 1 h avant la mission.
-      if (rdv.agentId && mins > 5 && mins <= 60 && !rdv.sent['agent1h']) {
-        try {
-          const ag = await guild.client.users.fetch(rdv.agentId);
-          await ag.send({ embeds: [new EmbedBuilder().setColor(COL.vert).setTitle('🤝 Ta mission commence dans 1 heure').setDescription([`RÉF **${rdv.id}** STOP TU ES L'AGENT ASSIGNÉ STOP`, `PRESTATION ${TYPES[rdv.typeKey]?.label || '—'} STOP LIEU ${LIEUX[rdv.lieuKey] || '—'} STOP`, `CLIENT ${rdv.nomRP || '—'} STOP QUAND ${tsR(dt)} STOP`].join('\n')).setFooter({ text: 'Iron Wolf Company · Bureau des Rendez-vous' })] });
-        } catch {}
+      // Rappel à CHAQUE agent assigné, 1 h avant la mission.
+      const agentsRdv = _agents(rdv);
+      if (agentsRdv.length && mins > 5 && mins <= 60 && !rdv.sent['agent1h']) {
+        for (const aId of agentsRdv) {
+          try {
+            const ag = await guild.client.users.fetch(aId);
+            await ag.send({ embeds: [new EmbedBuilder().setColor(COL.vert).setTitle('🤝 Ta mission commence dans 1 heure').setDescription([`RÉF **${rdv.id}** STOP TU ES ASSIGNÉ À CETTE MISSION STOP`, `PRESTATION ${TYPES[rdv.typeKey]?.label || '—'} STOP LIEU ${LIEUX[rdv.lieuKey] || '—'} STOP`, `CLIENT ${rdv.nomRP || '—'} STOP QUAND ${tsR(dt)} STOP`, agentsRdv.length > 1 ? `ÉQUIPE ${agentsRdv.length} AGENTS STOP` : ''].filter(Boolean).join('\n')).setFooter({ text: 'Iron Wolf Company · Bureau des Rendez-vous' })] });
+          } catch {}
+        }
         rdv.sent['agent1h'] = true; changed = true;
       }
     }
@@ -856,3 +941,4 @@ async function checkRappelsClients(guild) {
 }
 
 module.exports = { routeInteraction, checkRappelsClients, rdvplusCommands, panelPayload, _test: { CHAMPS_PRESTATION, _satLabel } };
+module.exports.__test = { PRESTA_TO_CAT, _membresVocalHRP, TYPES, LIEUX, _agents }; // tests uniquement
