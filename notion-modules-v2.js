@@ -109,18 +109,19 @@ async function handleTresorModal(interaction) {
 
   const txId = `TX-${Date.now().toString().slice(-6)}`;
 
-  // ── Direction : pas de photo ni double saisie ──
-  if (_isDirection(interaction.member)) {
+  // ── Équipe de gestion du coffre : preuve photo FACULTATIVE (autorisé par la Direction).
+  //    Les autres membres passent par le bloc « photo requise » plus bas (traçabilité conservée).
+  if (_gereCoffre(interaction.member)) {
     if (!db.coffres) db.coffres = { legal: 0, illegal: 0 };
     const limiteDb2 = key === 'illegal' ? (db.limiteSortieIllegal || LIMITE_SORTIE_ILLEGAL) : (db.limiteSortieLegal || LIMITE_SORTIE_LEGAL);
     const txDirect = { txId, type, coffre, key, montant, objet, userId: interaction.user.id, username: interaction.user.username, guildId: interaction.guild.id, createdAt: new Date().toISOString(), photoOk: true, approved: true };
     if (type === 'Sortie' && montant > limiteDb2) {
       await _soumettreValidationDirection(interaction.guild, txDirect, null);
-      return interaction.followUp({ flags: MessageFlags.Ephemeral, embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('📨 Sortie importante soumise').setDescription(`Sortie de **$${montant.toLocaleString('fr-FR')}** soumise à validation Direction (traçabilité).\n\n*En tant que Direction, la preuve photo n'est pas requise.*`).setFooter({ text: `IWC • Réf. ${txId}` })] });
+      return interaction.followUp({ flags: MessageFlags.Ephemeral, embeds: [new EmbedBuilder().setColor(0xFFA500).setTitle('📨 Sortie importante — soumise à validation').setDescription(`Sortie de **$${montant.toLocaleString('fr-FR')}** soumise à validation de la Direction (au-dessus de $${limiteDb2.toLocaleString('fr-FR')}).`).setFooter({ text: `IWC • Réf. ${txId}` })] });
     }
     await _validerTransaction(interaction.guild, txDirect, null);
     const soldeFinal2 = loadDB().coffre || 0;
-    return interaction.followUp({ flags: MessageFlags.Ephemeral, embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ Transaction validée').addFields({ name: '🆔 Réf.', value: `\`${txId}\``, inline: true }, { name: `${type === 'Entrée' ? '📥' : '📤'} ${type}`, value: `$${montant.toLocaleString('fr-FR')}`, inline: true }, { name: '💰 Solde', value: `**$${soldeFinal2.toLocaleString('fr-FR')}**`, inline: true }).setFooter({ text: `IWC • Direction — Sans preuve photo` })] });
+    return interaction.followUp({ flags: MessageFlags.Ephemeral, embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('✅ Transaction enregistrée').addFields({ name: '🆔 Réf.', value: `\`${txId}\``, inline: true }, { name: `${type === 'Entrée' ? '📥' : '📤'} ${type}`, value: `$${montant.toLocaleString('fr-FR')}`, inline: true }, { name: '💰 Solde', value: `**$${soldeFinal2.toLocaleString('fr-FR')}**`, inline: true }).setFooter({ text: 'IWC • Gestion du coffre — preuve photo facultative' })] });
   }
 
   if (!db.transactionsPendantes) db.transactionsPendantes = {};
@@ -424,6 +425,14 @@ async function handleTresorValidation(interaction, decision) {
 
 function _isDirection(member) {
   return member?.roles?.cache?.some(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Officier'].some(n => r.name.includes(n)));
+}
+// Équipe de gestion du coffre (rôles de confiance, autorisés explicitement par la Direction) :
+// Direction + Officiers + Opérateurs + Conseil + Secrétariat. Ces rôles peuvent enregistrer une
+// transaction SANS preuve photo (photo facultative pour eux). Les AUTRES membres (Agent, Recrue…)
+// gardent la preuve photo OBLIGATOIRE — la traçabilité anti-fraude reste en place pour eux.
+function _gereCoffre(member) {
+  const ROLES = ['Concepteur', 'Fléau', 'fleau', 'Fondateur', 'Directeur', 'Conseil', 'Officier', 'Opérateur', 'Operateur', 'Secrétaire', 'Secretaire'];
+  return !!member?.roles?.cache?.some(r => ROLES.some(n => (r.name || '').includes(n)));
 }
 
 // Une fiche de transaction (à CONSERVER comme registre) : carte Entrée/Sortie du coffre
