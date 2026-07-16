@@ -741,19 +741,44 @@ function _pingConfrerie(guild) { const r = _roleConfrerie(guild); return r ? { c
 function _participationEmbed(contratId) {
   const p = (loadDB().contratsParticipants || {})[contratId] || { objet: '', users: [] };
   const users = Array.isArray(p.users) ? p.users : [];
-  return new EmbedBuilder().setColor(0x8B1A1A)
+  const limite = Number(p.limite) > 0 ? Number(p.limite) : 0;   // 0 = illimité
+  const complet = limite > 0 && users.length >= limite;
+  const compteur = limite > 0 ? `${users.length}/${limite}` : `${users.length}`;
+  const lignePlaces = limite > 0
+    ? (complet
+        ? `\n\n🔒 **Équipe complète** — ${limite} place(s) prise(s). Les inscriptions sont bloquées.`
+        : `\n\n🎯 **${limite - users.length} place(s) restante(s)** sur ${limite}.`)
+    : '';
+  return new EmbedBuilder().setColor(complet ? 0x555555 : 0x8B1A1A)
     .setTitle(`🐺 Qui part sur ce contrat ? — ${contratId}`)
-    .setDescription(`Contrat **accepté**${p.objet ? ` : *${String(p.objet).slice(0, 200)}*` : ''}\n\n✅ **Je participe** pour t'engager · ❌ **Je ne participe pas** pour te retirer.`)
-    .addFields({ name: `Participants (${users.length})`, value: users.length ? users.map(id => `• <@${id}>`).join('\n').slice(0, 1024) : "*Personne pour l'instant — sois le premier !*" })
+    .setDescription(`Contrat **accepté**${p.objet ? ` : *${String(p.objet).slice(0, 200)}*` : ''}\n\n✅ **Je participe** pour t'engager · ❌ **Je ne participe pas** pour te retirer.${lignePlaces}`)
+    .addFields({ name: `Participants (${compteur})`, value: users.length ? users.map(id => `• <@${id}>`).join('\n').slice(0, 1024) : "*Personne pour l'instant — sois le premier !*" })
     .setFooter({ text: 'Iron Wolf Company • Participation au contrat' });
 }
 function _participationRows(contratId) {
+  const p = (loadDB().contratsParticipants || {})[contratId] || {};
+  const limite = Number(p.limite) > 0 ? Number(p.limite) : 0;
+  const complet = limite > 0 && (Array.isArray(p.users) ? p.users.length : 0) >= limite;
   return [new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`cpart_join::${contratId}`).setLabel('Je participe').setEmoji('✅').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`cpart_join::${contratId}`).setLabel(complet ? 'Complet' : 'Je participe').setEmoji(complet ? '🔒' : '✅').setStyle(ButtonStyle.Success).setDisabled(complet),
     new ButtonBuilder().setCustomId(`cpart_leave::${contratId}`).setLabel('Je ne participe pas').setEmoji('❌').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`cpart_notify::${contratId}`).setLabel('Notifier les participants').setEmoji('📣').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`cpart_limit::${contratId}`).setLabel(limite > 0 ? `Places (${limite})` : 'Places').setEmoji('🔢').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`cpart_notify::${contratId}`).setLabel('Notifier').setEmoji('📣').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(`cpart_op::${contratId}`).setLabel('Créer l\'opération').setEmoji('⚔️').setStyle(ButtonStyle.Secondary),
   )];
+}
+// Rafraîchit le panneau de participation en place (après un changement de limite via modal).
+async function _rafraichirPanelParticipation(client, contratId) {
+  try {
+    const rec = (loadDB().contratsParticipants || {})[contratId];
+    if (!rec || !rec.msgId || !rec.channelId) return false;
+    const ch = await client.channels.fetch(rec.channelId).catch(() => null);
+    if (!ch) return false;
+    const msg = await ch.messages.fetch(rec.msgId).catch(() => null);
+    if (!msg) return false;
+    await msg.edit({ embeds: [_participationEmbed(contratId)], components: _participationRows(contratId) }).catch(() => {});
+    return true;
+  } catch { return false; }
 }
 
 // ⚔️ Créer une opération depuis le panneau de participation d'un contrat, en assignant les participants.
@@ -824,12 +849,20 @@ async function archiverContratReponses(guild, contrat, statut, embed) {
       else dbp.contratsParticipants[contrat.id].objet = contrat.objet || dbp.contratsParticipants[contrat.id].objet;
       saveDB(dbp);
       const ping = _pingConfrerie(guild);
-      await thread.send({
+      const panelMsg = await thread.send({
         content: `${ping.content} 🐺 **Contrat accepté — qui s'engage ?**`.trim(),
         embeds: [_participationEmbed(contrat.id)],
         components: _participationRows(contrat.id),
         allowedMentions: ping.allowed,
-      }).catch(() => {});
+      }).catch(() => null);
+      if (panelMsg) {
+        const db2 = loadDB();
+        if (db2.contratsParticipants?.[contrat.id]) {
+          db2.contratsParticipants[contrat.id].msgId = panelMsg.id;
+          db2.contratsParticipants[contrat.id].channelId = panelMsg.channelId;
+          saveDB(db2);
+        }
+      }
     }
   } catch (e) { console.log('❌ archiverContratReponses error:', e.message); }
 }
@@ -6012,11 +6045,69 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     if (!db.contratsParticipants[contratId]) db.contratsParticipants[contratId] = { objet: '', users: [] };
     const rec = db.contratsParticipants[contratId];
     if (!Array.isArray(rec.users)) rec.users = [];
+    // Mémorise le message du panneau pour pouvoir le rafraîchir plus tard (modal « Places »).
+    rec.msgId = interaction.message?.id || rec.msgId; rec.channelId = interaction.channelId || rec.channelId;
     const uid = interaction.user.id; const idx = rec.users.indexOf(uid);
+    const limite = Number(rec.limite) > 0 ? Number(rec.limite) : 0;
+    // Équipe complète → on refuse une NOUVELLE inscription (les déjà-inscrits peuvent toujours se retirer).
+    if (join && idx === -1 && limite > 0 && rec.users.length >= limite) {
+      saveDB(db);
+      await interaction.reply({ content: `🔒 L'équipe est **complète** (${rec.users.length}/${limite} places). Impossible de rejoindre — attends qu'une place se libère.`, flags: MessageFlags.Ephemeral }).catch(() => {});
+      return;
+    }
     if (join && idx === -1) rec.users.push(uid);
     if (!join && idx !== -1) rec.users.splice(idx, 1);
     saveDB(db);
     await interaction.update({ embeds: [_participationEmbed(contratId)], components: _participationRows(contratId) }).catch(() => {});
+    return;
+  }
+  // 🔢 Fixer / lever le nombre de places de l'opération (Direction / officiers) → modal
+  if (interaction.isButton?.() && interaction.customId.startsWith('cpart_limit::')) {
+    const contratId = interaction.customId.split('::').slice(1).join('::');
+    const peut = isDirection(interaction.member) || interaction.member?.roles?.cache?.some(r => /confr|officier|op[eé]rateur|fondateur|fl[eé]au|conseil|panseur/i.test(r.name || ''));
+    if (!peut) { await interaction.reply({ content: '🔒 Réservé à la Direction / aux officiers.', flags: MessageFlags.Ephemeral }).catch(() => {}); return; }
+    // Mémorise le message du panneau (le modal ne le fournit pas).
+    const db = loadDB();
+    if (!db.contratsParticipants) db.contratsParticipants = {};
+    if (!db.contratsParticipants[contratId]) db.contratsParticipants[contratId] = { objet: '', users: [] };
+    db.contratsParticipants[contratId].msgId = interaction.message?.id || db.contratsParticipants[contratId].msgId;
+    db.contratsParticipants[contratId].channelId = interaction.channelId || db.contratsParticipants[contratId].channelId;
+    saveDB(db);
+    const actuel = Number(db.contratsParticipants[contratId].limite) > 0 ? String(db.contratsParticipants[contratId].limite) : '';
+    const modal = new ModalBuilder().setCustomId(`cpart_limitmodal::${contratId}`).setTitle('🔢 Nombre de places')
+      .addComponents(new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('nb').setLabel('Combien de places ? (vide = illimité)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Ex : 4 — laisse vide pour retirer la limite').setValue(actuel).setMaxLength(3),
+      ));
+    await interaction.showModal(modal).catch(() => {});
+    return;
+  }
+  // 🔢 Validation du nombre de places
+  if (interaction.isModalSubmit?.() && interaction.customId.startsWith('cpart_limitmodal::')) {
+    const contratId = interaction.customId.split('::').slice(1).join('::');
+    const raw = (interaction.fields.getTextInputValue('nb') || '').trim();
+    const db = loadDB();
+    if (!db.contratsParticipants) db.contratsParticipants = {};
+    if (!db.contratsParticipants[contratId]) db.contratsParticipants[contratId] = { objet: '', users: [] };
+    const rec = db.contratsParticipants[contratId];
+    if (!Array.isArray(rec.users)) rec.users = [];
+    let msg;
+    if (!raw) {
+      delete rec.limite;
+      msg = '♻️ Limite retirée — les inscriptions sont **illimitées**.';
+    } else {
+      const n = parseInt(raw.replace(/\D/g, ''), 10);
+      if (!n || n < 1) { await interaction.reply({ content: '❌ Nombre invalide. Indique un entier ≥ 1, ou laisse vide pour illimité.', flags: MessageFlags.Ephemeral }).catch(() => {}); return; }
+      rec.limite = n;
+      const dejaInscrits = rec.users.length;
+      msg = dejaInscrits > n
+        ? `🔢 Limite fixée à **${n} place(s)**. ⚠️ Il y a déjà **${dejaInscrits}** inscrit(s) : personne n'est retiré, mais aucune nouvelle inscription ne sera acceptée.`
+        : (dejaInscrits === n
+            ? `🔒 Limite fixée à **${n} place(s)** — l'équipe est déjà **complète**, les inscriptions sont bloquées.`
+            : `🔢 Limite fixée à **${n} place(s)** — il reste **${n - dejaInscrits}** place(s). Au-delà, les inscriptions seront bloquées.`);
+    }
+    saveDB(db);
+    await _rafraichirPanelParticipation(interaction.client, contratId);
+    await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral }).catch(() => {});
     return;
   }
   // 📣 Notifier les participants inscrits (ping dans le fil + MP)
