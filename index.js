@@ -741,6 +741,14 @@ function _pingConfrerie(guild) { const r = _roleConfrerie(guild); return r ? { c
 function _participationEmbed(contratId) {
   const p = (loadDB().contratsParticipants || {})[contratId] || { objet: '', users: [] };
   const users = Array.isArray(p.users) ? p.users : [];
+  // Panneau clôturé : on fige la liste comme registre, plus aucune inscription.
+  if (p.closed) {
+    return new EmbedBuilder().setColor(0x2ECC71)
+      .setTitle(`🔒 Participation clôturée — ${contratId}`)
+      .setDescription(`${p.closeRaison || 'Les inscriptions sont closes.'}${p.objet ? `\n\n*${String(p.objet).slice(0, 200)}*` : ''}`)
+      .addFields({ name: `Participants engagés (${users.length})`, value: users.length ? users.map(id => `• <@${id}>`).join('\n').slice(0, 1024) : '*Aucun participant.*' })
+      .setFooter({ text: 'Iron Wolf Company • Participation clôturée' });
+  }
   const limite = Number(p.limite) > 0 ? Number(p.limite) : 0;   // 0 = illimité
   const complet = limite > 0 && users.length >= limite;
   const compteur = limite > 0 ? `${users.length}/${limite}` : `${users.length}`;
@@ -757,15 +765,21 @@ function _participationEmbed(contratId) {
 }
 function _participationRows(contratId) {
   const p = (loadDB().contratsParticipants || {})[contratId] || {};
+  if (p.closed) return []; // panneau clôturé → plus aucun bouton
   const limite = Number(p.limite) > 0 ? Number(p.limite) : 0;
   const complet = limite > 0 && (Array.isArray(p.users) ? p.users.length : 0) >= limite;
-  return [new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`cpart_join::${contratId}`).setLabel(complet ? 'Complet' : 'Je participe').setEmoji(complet ? '🔒' : '✅').setStyle(ButtonStyle.Success).setDisabled(complet),
-    new ButtonBuilder().setCustomId(`cpart_leave::${contratId}`).setLabel('Je ne participe pas').setEmoji('❌').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`cpart_limit::${contratId}`).setLabel(limite > 0 ? `Places (${limite})` : 'Places').setEmoji('🔢').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`cpart_notify::${contratId}`).setLabel('Notifier').setEmoji('📣').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`cpart_op::${contratId}`).setLabel('Créer l\'opération').setEmoji('⚔️').setStyle(ButtonStyle.Secondary),
-  )];
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`cpart_join::${contratId}`).setLabel(complet ? 'Complet' : 'Je participe').setEmoji(complet ? '🔒' : '✅').setStyle(ButtonStyle.Success).setDisabled(complet),
+      new ButtonBuilder().setCustomId(`cpart_leave::${contratId}`).setLabel('Je ne participe pas').setEmoji('❌').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`cpart_limit::${contratId}`).setLabel(limite > 0 ? `Places (${limite})` : 'Places').setEmoji('🔢').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`cpart_notify::${contratId}`).setLabel('Notifier').setEmoji('📣').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`cpart_op::${contratId}`).setLabel('Créer l\'opération').setEmoji('⚔️').setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`cpart_close::${contratId}`).setLabel('Clôturer').setEmoji('🔒').setStyle(ButtonStyle.Danger),
+    ),
+  ];
 }
 // Rafraîchit le panneau de participation en place (après un changement de limite via modal).
 async function _rafraichirPanelParticipation(client, contratId) {
@@ -780,6 +794,26 @@ async function _rafraichirPanelParticipation(client, contratId) {
     return true;
   } catch { return false; }
 }
+// 🔒 Clôture le panneau de participation : fige la liste, retire les boutons. Utilisé
+// manuellement (bouton Clôturer) et automatiquement à la création de l'opération.
+async function _cloturerPanelParticipation(client, contratId, raison) {
+  try {
+    const db = loadDB();
+    if (!db.contratsParticipants) db.contratsParticipants = {};
+    if (!db.contratsParticipants[contratId]) db.contratsParticipants[contratId] = { objet: '', users: [] };
+    const rec = db.contratsParticipants[contratId];
+    rec.closed = true;
+    if (raison) rec.closeRaison = raison;
+    saveDB(db);
+    if (!rec.msgId || !rec.channelId) return false;
+    const ch = await client.channels.fetch(rec.channelId).catch(() => null);
+    if (!ch) return false;
+    const msg = await ch.messages.fetch(rec.msgId).catch(() => null);
+    if (!msg) return false;
+    await msg.edit({ embeds: [_participationEmbed(contratId)], components: [] }).catch(() => {});
+    return true;
+  } catch { return false; }
+}
 
 // ⚔️ Créer une opération depuis le panneau de participation d'un contrat, en assignant les participants.
 async function _cpartCreerOpBouton(interaction) {
@@ -787,7 +821,14 @@ async function _cpartCreerOpBouton(interaction) {
     const contratId = interaction.customId.split('::').slice(1).join('::');
     const peut = isDirection(interaction.member) || interaction.member?.roles?.cache?.some(r => /confr|officier|op[eé]rateur|fondateur|fl[eé]au|conseil|panseur/i.test(r.name || ''));
     if (!peut) { await interaction.reply({ content: '🔒 Réservé à la Direction / aux officiers.', flags: MessageFlags.Ephemeral }).catch(() => {}); return; }
-    const rec = (loadDB().contratsParticipants || {})[contratId] || { users: [] };
+    // Mémorise le message du panneau pour pouvoir le clôturer après création de l'op.
+    const dbm = loadDB();
+    if (!dbm.contratsParticipants) dbm.contratsParticipants = {};
+    if (!dbm.contratsParticipants[contratId]) dbm.contratsParticipants[contratId] = { objet: '', users: [] };
+    dbm.contratsParticipants[contratId].msgId = interaction.message?.id || dbm.contratsParticipants[contratId].msgId;
+    dbm.contratsParticipants[contratId].channelId = interaction.channelId || dbm.contratsParticipants[contratId].channelId;
+    saveDB(dbm);
+    const rec = dbm.contratsParticipants[contratId] || { users: [] };
     const defaults = (Array.isArray(rec.users) ? rec.users : []).filter(Boolean).slice(0, 25);
     const menu = new UserSelectMenuBuilder().setCustomId(`cpart_opsel::${contratId}`).setPlaceholder('👥 Qui participe à l\'opération ?').setMinValues(1).setMaxValues(25);
     if (defaults.length) { try { menu.setDefaultUsers(...defaults); } catch {} }
@@ -807,7 +848,9 @@ async function _cpartCreerOpSelect(interaction) {
     if (!op) { await interaction.editReply({ content: '⚠️ Impossible de créer l\'opération (réessaie).' }).catch(() => {}); return; }
     let dm = 0;
     for (const uid of membres) { const u = await interaction.client.users.fetch(uid).catch(() => null); if (u) { const ok = await u.send({ content: `⚔️ **Tu es assigné à une opération** (contrat ${contratId}).\nLa préparation se fait dans #operations. — Iron Wolf Company` }).catch(() => null); if (ok) dm++; } }
-    await interaction.editReply({ content: `✅ Opération créée avec **${membres.length} participant(s)** assigné(s) — à préparer dans #operations.${dm ? ` · ${dm} prévenu(s) en MP` : ''}` }).catch(() => {});
+    // 🔒 L'opération est lancée → on clôture automatiquement le panneau de participation.
+    await _cloturerPanelParticipation(interaction.client, contratId, `✅ Opération lancée — recrutement clôturé (${membres.length} engagé·e·s).`).catch(() => {});
+    await interaction.editReply({ content: `✅ Opération créée avec **${membres.length} participant(s)** assigné(s) — à préparer dans #operations.${dm ? ` · ${dm} prévenu(s) en MP` : ''}\n🔒 Le panneau de participation a été **clôturé**.` }).catch(() => {});
   } catch (e) { console.log('❌ cpart_opsel:', e.message); }
 }
 
@@ -6045,6 +6088,11 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     if (!db.contratsParticipants[contratId]) db.contratsParticipants[contratId] = { objet: '', users: [] };
     const rec = db.contratsParticipants[contratId];
     if (!Array.isArray(rec.users)) rec.users = [];
+    // Participation clôturée → on ne touche plus à la liste (garde-fou si panneau périmé).
+    if (rec.closed) {
+      await interaction.reply({ content: '🔒 La participation à ce contrat est **clôturée**.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      return;
+    }
     // Mémorise le message du panneau pour pouvoir le rafraîchir plus tard (modal « Places »).
     rec.msgId = interaction.message?.id || rec.msgId; rec.channelId = interaction.channelId || rec.channelId;
     const uid = interaction.user.id; const idx = rec.users.indexOf(uid);
@@ -6059,6 +6107,22 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     if (!join && idx !== -1) rec.users.splice(idx, 1);
     saveDB(db);
     await interaction.update({ embeds: [_participationEmbed(contratId)], components: _participationRows(contratId) }).catch(() => {});
+    return;
+  }
+  // 🔒 Clôturer le panneau de participation (Direction / officiers)
+  if (interaction.isButton?.() && interaction.customId.startsWith('cpart_close::')) {
+    const contratId = interaction.customId.split('::').slice(1).join('::');
+    const peut = isDirection(interaction.member) || interaction.member?.roles?.cache?.some(r => /confr|officier|op[eé]rateur|fondateur|fl[eé]au|conseil|panseur/i.test(r.name || ''));
+    if (!peut) { await interaction.reply({ content: '🔒 Réservé à la Direction / aux officiers.', flags: MessageFlags.Ephemeral }).catch(() => {}); return; }
+    const db = loadDB();
+    if (!db.contratsParticipants) db.contratsParticipants = {};
+    if (!db.contratsParticipants[contratId]) db.contratsParticipants[contratId] = { objet: '', users: [] };
+    const rec = db.contratsParticipants[contratId];
+    rec.closed = true;
+    rec.closeRaison = `🔒 Recrutement clôturé par ${interaction.member?.displayName || 'la Direction'}.`;
+    rec.msgId = interaction.message?.id || rec.msgId; rec.channelId = interaction.channelId || rec.channelId;
+    saveDB(db);
+    await interaction.update({ embeds: [_participationEmbed(contratId)], components: [] }).catch(() => {});
     return;
   }
   // 🔢 Fixer / lever le nombre de places de l'opération (Direction / officiers) → modal
