@@ -3836,12 +3836,26 @@ client.on('messageCreate', async message => {
       }
     }
   } catch {}
-  // 🎯 Salon « notes → opérations » : toute note (assez longue) postée ici génère
-  // AUTOMATIQUEMENT une opération détaillée + sa préparation dans #operations.
+  // 🎯 Salon « notes → opérations » : une note postée ici génère AUTOMATIQUEMENT
+  // une opération détaillée + sa préparation dans #operations. On accepte aussi
+  // les « Résumé de la note » postés par le bot (sinon rien ne se déclenche, car
+  // les notes de ce salon viennent du bot). Anti-boucle : la carte d'opération
+  // produite a pour titre « OPÉRATION … » → elle ne re-déclenche pas.
   try {
-    if (message.guild && !message.author?.bot && message.channel?.id === SALON_NOTES_OPS) {
-      const texteNote = (message.content || '').trim();
-      if (texteNote.length >= 25) { _noteVersOperation(message.guild, message.channel, texteNote, message.author.id, true).catch(() => {}); return; }
+    if (message.guild && message.channel?.id === SALON_NOTES_OPS) {
+      const emb0 = message.embeds?.[0];
+      const estNoteOp = (emb0 && /r[ée]sum[ée] de la note/i.test(emb0.title || ''))       // résumé façon plan
+                     || (message.attachments?.some?.(a => (a.name || '').toLowerCase().endsWith('.txt'))) // note en fichier
+                     || (!message.author?.bot && (message.content || '').trim().length >= 25);            // note écrite à la main
+      if (estNoteOp) {
+        (async () => {
+          try {
+            const t = (await _lireTexteNote(message)) || (message.content || '');
+            if (String(t).trim().length >= 25) await _noteVersOperation(message.guild, message.channel, String(t).trim(), message.author?.id || null, true);
+          } catch (e) { console.log('❌ auto note→op:', e.message); }
+        })();
+        return;
+      }
     }
   } catch {}
   // Nettoyeur : « !nettoyage » ouvre le panneau de configuration (Direction).
