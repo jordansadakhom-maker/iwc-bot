@@ -134,6 +134,9 @@ catch (e) { console.log('⚠️ nettoyeur non chargé:', e.message); }
 let groupes = {};
 try { groupes = require('./groupes'); console.log('✅ Module groupes (registre) chargé'); }
 catch (e) { console.log('⚠️ groupes non chargé:', e.message); }
+let prestations = {};
+try { prestations = require('./prestations'); console.log('✅ Module prestations (catalogue) chargé'); }
+catch (e) { console.log('⚠️ prestations non chargé:', e.message); }
 
 let recapHebdo = {};
 try { recapHebdo = require('./recap-hebdo'); console.log('✅ Module récap hebdo chargé'); }
@@ -2798,6 +2801,8 @@ async function autoSetup(guild) {
   // Registre des armes (n° de série) — pose le panneau si un salon est configuré (SALON_ARMES).
   (async () => { try { const ok = await armes.installerPanneau?.(guild); if (ok) console.log('🔫 Registre des armes en place'); } catch {} })();
   (async () => { try { const ok = await groupes.installerPanneau?.(guild); if (ok) console.log('🗂️ Registre des groupes en place'); } catch {} })();
+  avis.installerPanneau?.(guild).then(() => console.log('⭐ Vitrine réputation clients en place')).catch(() => {});
+  (async () => { try { const ok = await prestations.installerPanneau?.(guild); if (ok) console.log('📜 Catalogue prestations & tarifs en place'); } catch {} })();
   // 🔒 Salon STRICTEMENT réservé aux Fondateurs : SEUL le rôle « Fondateur » (et le bot) voit/accède.
   // On ferme à @everyone ET on retire l'accès à tout autre rôle/membre. (Limite Discord : les rôles
   // « Administrateur » et le propriétaire du serveur passent toujours outre — impossible à bloquer par salon.)
@@ -4526,6 +4531,7 @@ client.on('interactionCreate', async interaction => {
   if (await modetest.routeInteraction?.(interaction)) return;
   if (await accueil.routeInteraction?.(interaction)) return;
   if (await avis.routeInteraction?.(interaction)) return;
+  if (await prestations.routeInteraction?.(interaction)) return;
   if (await assistant.routeInteraction?.(interaction)) return;
   if (await operations.routeInteraction?.(interaction)) return;
   if (await rumeurs.routeInteraction?.(interaction)) return;
