@@ -3222,6 +3222,46 @@ client.on('messageReactionAdd', async (reaction, user) => {
     return;
   }
 
+  // ── 🎯 sur une note → générer une OPÉRATION détaillée + la créer dans #operations (Direction) ──
+  if (reaction.emoji.name === '🎯') {
+    const msg = reaction.message;
+    const member = await guild.members.fetch(user.id).catch(() => null);
+    if (!member || !isDirection(member)) { try { await reaction.users.remove(user.id); } catch {} return; }
+    let texte = '';
+    try { texte = (await _lireTexteNote(msg)) || msg.content || ''; } catch { texte = msg.content || ''; }
+    texte = String(texte || '').trim();
+    if (texte.length < 15) return; // pas assez de matière pour une opération
+    try {
+      const att = msg.channel;
+      const notice = await att.send('🧠 Construction de l\'opération à partir de la note…').catch(() => null);
+      const op = await _genererOperationIA(texte);
+      if (notice) notice.delete().catch(() => {});
+      if (!op) { const m = await att.send('⚠️ Impossible de générer l\'opération (IA indisponible ou clé manquante).'); setTimeout(() => m.delete().catch(() => {}), 15000); return; }
+      // Crée réellement l'opération dans #operations (avec ses étapes de préparation)
+      const pseudo = {
+        id: 'OPN-' + Date.now().toString(36).slice(-6).toUpperCase(),
+        typeMission: op.type_mission || 'Autre',
+        objet: op.objectif || op.nom || 'Opération',
+        commanditaire: op.cible || '',
+        details: [
+          Array.isArray(op.plan_attaque) && op.plan_attaque.length ? 'Plan : ' + op.plan_attaque.join(' → ') : '',
+          op.plan_repli ? 'Repli : ' + op.plan_repli : '',
+          Array.isArray(op.materiel) && op.materiel.length ? 'Matériel : ' + op.materiel.join(', ') : '',
+          op.risques ? 'Risques : ' + op.risques : '',
+        ].filter(Boolean).join('\n').slice(0, 1500),
+        echeanceTexte: op.moment || null,
+        remuneration: '—',
+      };
+      let created = null;
+      try { created = await opsEtapes.creerOperationDepuisContrat?.(guild, pseudo, { parId: user.id, pole: op.pole === 'illegal' ? 'illegal' : 'legal' }); } catch (e) { console.log('⚠️ 🎯 création op:', e.message); }
+      await att.send({
+        content: created ? '🎯 **Opération créée** — préparation ouverte dans #operations.' : '🎯 **Proposition d\'opération** *(création auto indisponible — à lancer à la main).*',
+        embeds: [_embedOperationDetaillee(op, pseudo.id)],
+      }).catch(() => {});
+    } catch (e) { console.log('❌ 🎯 note→opération:', e.message); }
+    return;
+  }
+
   if (reaction.message.id === db.reglementMsgId && reaction.emoji.name === '✅') {
     await sendLog(guild, 'REGLEMENT_VALIDE', { userId: user.id, username: user.username });
     const logsCh = await getLogsCh(guild);
@@ -11482,6 +11522,60 @@ Regles :
     if (m) txt = m[0];
     return JSON.parse(txt);
   } catch (e) { console.log('❌ Analyse note IA:', e.message); return null; }
+}
+
+// À partir d'une note de terrain, génère un PLAN D'OPÉRATION détaillé et structuré (IA).
+async function _genererOperationIA(texte) {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  const note = (texte || '').slice(0, 4000);
+  const prompt = `Tu es un officier de planification tactique pour une compagnie de l'Ouest (RedM / Red Dead Redemption 2, univers fictif de jeu de rôle). À partir de la NOTE ci-dessous, construis une OPÉRATION complète, réaliste et bien détaillée (personnages et actions fictifs de jeu).
+
+NOTE :
+<<<${note}>>>
+
+Réponds UNIQUEMENT avec un objet JSON valide, sans texte ni backticks autour, au format EXACT :
+{"nom":"nom court et évocateur de l'opération","type_mission":"Attaque|Braquage|Escorte|Protection|Sécurisation|Enquête|Récupération|Embuscade|Infiltration|Autre","pole":"legal|illegal","objectif":"l'objectif principal en une phrase claire","cible":"la cible ou le lieu visé (ex : le manoir, un convoi, une personne)","lieu":"le lieu précis si connu, sinon déduis-le de la note","effectif":"nombre d'agents recommandé, ex : 4 à 6 agents","roles":["rôle 1 (ex : 2 tireurs en couverture)","rôle 2 (ex : 1 éclaireur)","..."],"plan_attaque":["étape 1 concrète","étape 2","étape 3","..."],"plan_repli":"le plan de repli / exfiltration en cas de problème","materiel":["matériel/arme 1","..."],"risques":"les principaux risques et comment les limiter","moment":"le meilleur moment (ex : de nuit, à l'aube)"}
+
+Règles :
+- "pole" = "illegal" si l'action est clandestine/violente/illégale (braquage, assaut, vol, élimination), "legal" sinon (escorte, protection, enquête légitime).
+- Sois CONCRET et opérationnel : des étapes actionnables, pas des généralités.
+- 4 à 8 étapes dans "plan_attaque". Écris en français, ton western sobre.`;
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1200, messages: [{ role: 'user', content: prompt }] }),
+    });
+    const data = await resp.json();
+    let txt = data.content?.[0]?.text || '';
+    txt = txt.replace(/```json|```/g, '').trim();
+    const m = txt.match(/\{[\s\S]*\}/);
+    if (m) txt = m[0];
+    return JSON.parse(txt);
+  } catch (e) { console.log('❌ Génération opération IA:', e.message); return null; }
+}
+// Construit l'embed détaillé d'une opération générée par l'IA.
+function _embedOperationDetaillee(op, contratId) {
+  const emo = { Attaque: '⚔️', Braquage: '💰', Escorte: '🐎', Protection: '💂', Sécurisation: '🏠', Enquête: '🔍', Récupération: '📦', Embuscade: '🌵', Infiltration: '🥷', Autre: '🎯' }[op.type_mission] || '🎯';
+  const liste = a => (Array.isArray(a) && a.length) ? a.map(x => `• ${x}`).join('\n') : '—';
+  const etapes = (Array.isArray(op.plan_attaque) && op.plan_attaque.length) ? op.plan_attaque.map((e, i) => `**${i + 1}.** ${e}`).join('\n') : '—';
+  const e = new EmbedBuilder().setColor(op.pole === 'illegal' ? 0x8B1A1A : 0x2C3E50)
+    .setTitle(`${emo} OPÉRATION — ${(op.nom || 'Sans nom').slice(0, 200)}`)
+    .setDescription(`*${(op.objectif || '—').slice(0, 500)}*`)
+    .addFields(
+      { name: '🎯 Cible', value: String(op.cible || '—').slice(0, 256), inline: true },
+      { name: '📍 Lieu', value: String(op.lieu || '—').slice(0, 256), inline: true },
+      { name: '👥 Effectif', value: String(op.effectif || '—').slice(0, 256), inline: true },
+      { name: '🧭 Rôles', value: liste(op.roles).slice(0, 1024) },
+      { name: '⚔️ Plan d\'attaque', value: etapes.slice(0, 1024) },
+      { name: '🏇 Plan de repli', value: String(op.plan_repli || '—').slice(0, 1024) },
+      { name: '🎒 Matériel', value: liste(op.materiel).slice(0, 1024), inline: true },
+      { name: '🕐 Moment', value: String(op.moment || '—').slice(0, 256), inline: true },
+      { name: '⚠️ Risques', value: String(op.risques || '—').slice(0, 1024) },
+    )
+    .setFooter({ text: `Iron Wolf Company • Opération générée${contratId ? ` • ${contratId}` : ''}` }).setTimestamp();
+  return e;
 }
 
 // Résume une note de terrain en quelques points clés (IA) — pour ne pas tout lire
