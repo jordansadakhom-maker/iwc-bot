@@ -6158,6 +6158,52 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     await interaction.update({ embeds: [_participationEmbed(contratId)], components: [] }).catch(() => {});
     return;
   }
+  // ✏️ Modifier une opération générée depuis une note (Direction) → modal pré-rempli
+  if (interaction.isButton?.() && interaction.customId.startsWith('opnote_edit::')) {
+    if (!isDirection(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return; }
+    const id = interaction.customId.split('::')[1];
+    const rec = (loadDB().opNotes || {})[id];
+    if (!rec?.op) { await interaction.reply({ content: '⚠️ Opération introuvable (peut-être trop ancienne).', flags: MessageFlags.Ephemeral }).catch(() => {}); return; }
+    const o = rec.op;
+    const modal = new ModalBuilder().setCustomId(`opnote_editmodal::${id}`).setTitle('✏️ Modifier l\'opération')
+      .addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('nom').setLabel('Nom de l\'opération').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(120).setValue(String(o.nom || '').slice(0, 120))),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objectif').setLabel('Objectif').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(400).setValue(String(o.objectif || '').slice(0, 400))),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('effectif').setLabel('Effectif / autorité').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(200).setValue(String(o.effectif || '').slice(0, 200))),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('plan').setLabel('Plan (une étape par ligne)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(1500).setValue((Array.isArray(o.plan_attaque) ? o.plan_attaque : []).join('\n').slice(0, 1500))),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('repli').setLabel('Plan de repli').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500).setValue(String(o.plan_repli || '').slice(0, 500))),
+      );
+    await interaction.showModal(modal).catch(() => {});
+    return;
+  }
+  if (interaction.isModalSubmit?.() && interaction.customId.startsWith('opnote_editmodal::')) {
+    if (!isDirection(interaction.member)) { await interaction.reply({ content: '🔒 Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return; }
+    const id = interaction.customId.split('::')[1];
+    const db = loadDB();
+    const rec = (db.opNotes || {})[id];
+    if (!rec?.op) { await interaction.reply({ content: '⚠️ Opération introuvable.', flags: MessageFlags.Ephemeral }).catch(() => {}); return; }
+    const o = rec.op; const g = k => (interaction.fields.getTextInputValue(k) || '').trim();
+    if (g('nom')) o.nom = g('nom');
+    o.objectif = g('objectif') || o.objectif;
+    o.effectif = g('effectif') || o.effectif;
+    const planRaw = g('plan'); if (planRaw) o.plan_attaque = planRaw.split('\n').map(s => s.replace(/^\s*(?:\d+[.)]|[-•])\s*/, '').trim()).filter(Boolean);
+    o.plan_repli = g('repli') || o.plan_repli;
+    rec.op = o;
+    // Répercute sur l'opération réelle (db.preparations)
+    const prep = (db.preparations || []).find(p => p.contratId === id);
+    if (prep) { prep.cible = o.objectif || prep.cible; prep.details = _opNoteDetails(o); }
+    saveDB(db);
+    // Rafraîchit la carte détaillée en place
+    try {
+      if (rec.channelId && rec.msgId) {
+        const ch = await interaction.client.channels.fetch(rec.channelId).catch(() => null);
+        const m = ch ? await ch.messages.fetch(rec.msgId).catch(() => null) : null;
+        if (m) await m.edit({ embeds: [_embedOperationDetaillee(o, id)] }).catch(() => {});
+      }
+    } catch {}
+    await interaction.reply({ content: '✏️ **Opération mise à jour** — la carte et la préparation dans #operations sont à jour.', flags: MessageFlags.Ephemeral }).catch(() => {});
+    return;
+  }
   // 🔢 Fixer / lever le nombre de places de l'opération (Direction / officiers) → modal
   if (interaction.isButton?.() && interaction.customId.startsWith('cpart_limit::')) {
     const contratId = interaction.customId.split('::').slice(1).join('::');
@@ -11587,11 +11633,33 @@ async function _noteVersOperation(guild, channel, texte, parId, auto) {
   };
   let created = null;
   try { created = await opsEtapes.creerOperationDepuisContrat?.(guild, pseudo, { parId, pole: op.pole === 'illegal' ? 'illegal' : 'legal' }); } catch (e) { console.log('⚠️ note→op create:', e.message); }
-  if (channel?.send) await channel.send({
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`opnote_edit::${pseudo.id}`).setLabel('Modifier l\'opération').setEmoji('✏️').setStyle(ButtonStyle.Secondary),
+  );
+  let carte = null;
+  if (channel?.send) carte = await channel.send({
     content: created ? `🎯 **Opération créée${auto ? ' automatiquement' : ''}** — préparation ouverte dans #operations.` : '🎯 **Proposition d\'opération** *(création auto indisponible — à lancer à la main).*',
     embeds: [_embedOperationDetaillee(op, pseudo.id)],
-  }).catch(() => {});
+    components: [row],
+  }).catch(() => null);
+  // Mémorise l'opération générée pour permettre sa re-modification (bouton ✏️).
+  try {
+    const db = loadDB();
+    if (!db.opNotes) db.opNotes = {};
+    db.opNotes[pseudo.id] = { op, contratId: pseudo.id, msgId: carte?.id || null, channelId: channel?.id || null };
+    const ids = Object.keys(db.opNotes); if (ids.length > 200) delete db.opNotes[ids[0]];
+    saveDB(db);
+  } catch {}
   return op;
+}
+// Reconstruit le champ « details » d'une opération (db.preparations) depuis le plan IA.
+function _opNoteDetails(op) {
+  return [
+    Array.isArray(op.plan_attaque) && op.plan_attaque.length ? 'Plan : ' + op.plan_attaque.join(' → ') : '',
+    op.plan_repli ? 'Repli : ' + op.plan_repli : '',
+    Array.isArray(op.materiel) && op.materiel.length ? 'Matériel : ' + op.materiel.join(', ') : '',
+    op.risques ? 'Risques : ' + op.risques : '',
+  ].filter(Boolean).join('\n').slice(0, 1500);
 }
 
 // Résume une note de terrain en quelques points clés (IA) — pour ne pas tout lire
