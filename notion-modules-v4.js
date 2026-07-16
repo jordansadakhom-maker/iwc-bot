@@ -312,6 +312,22 @@ async function checkRecrutementSuivi(guild) {
 // 4. CONTRATS — Rappels d'échéance automatiques
 // ═══════════════════════════════════════════════════════════════
 
+// Une échéance n'est « réelle » que si son année est plausible dans le monde
+// réel. Les dates RP (année en jeu, ex. 1904) ne doivent JAMAIS déclencher une
+// expiration automatique — sinon tout contrat daté en RP serait marqué
+// « expiré » alors qu'il est en cours.
+function _echeanceReelle(dateEcheance) {
+  if (!dateEcheance) return false;
+  const d = new Date(dateEcheance);
+  if (isNaN(d.getTime())) return false;
+  const anneeReelle = new Date().getFullYear();
+  const y = d.getFullYear();
+  // Fenêtre large : les dates RP (année en jeu ~1899-1911) sont à ~120 ans de
+  // l'année réelle, donc bien en dehors ; toute date réelle plausible reste
+  // dedans, même un contrat échu il y a plusieurs années.
+  return y >= anneeReelle - 50 && y <= anneeReelle + 30;
+}
+
 async function checkEcheancesContrats(guild) {
   try {
     const db  = loadDB();
@@ -319,9 +335,25 @@ async function checkEcheancesContrats(guild) {
     if (!db.contratsRappels) db.contratsRappels = {};
     let changed = false;
 
+    // ── Auto-réparation ──
+    // Restaure « en cours » les contrats marqués « expiré » à tort à cause
+    // d'une date RP (année en jeu). On efface aussi le drapeau de rappel pour
+    // qu'aucune nouvelle notification « Contrat expiré » ne parte.
+    for (const c of (db.contrats || [])) {
+      if (c.status === 'expire' && !_echeanceReelle(c.dateEcheance)) {
+        c.status = 'signe';
+        c.suivi  = 'En cours';
+        delete db.contratsRappels[`${c.id}_expire`];
+        changed = true;
+      }
+    }
+
     const contratsActifs = (db.contrats || []).filter(c => c.status === 'signe' && c.dateEcheance);
 
     for (const c of contratsActifs) {
+      // Ignorer les échéances RP / dates non réelles (année en jeu 1904, etc.).
+      if (!_echeanceReelle(c.dateEcheance)) continue;
+
       const echeance = new Date(c.dateEcheance);
       const joursRestants = Math.floor((echeance - now) / 86400000);
 
@@ -518,5 +550,6 @@ module.exports = {
   checkOperationsTimeout,
   posterAbsencePropre,
   getHistoriqueOpsProfilMembre,
+  __test: { _echeanceReelle },
 };
 
