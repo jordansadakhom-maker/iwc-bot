@@ -11587,9 +11587,10 @@ Règles :
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1200, messages: [{ role: 'user', content: prompt }] }),
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 3500, messages: [{ role: 'user', content: prompt }] }),
     });
     const data = await resp.json();
+    if (data?.error) { console.log('❌ Génération opération IA (API):', data.error?.message || JSON.stringify(data.error)); return null; }
     let txt = data.content?.[0]?.text || '';
     txt = txt.replace(/```json|```/g, '').trim();
     const m = txt.match(/\{[\s\S]*\}/);
@@ -11628,7 +11629,7 @@ async function _noteVersOperation(guild, channel, texte, parId, auto) {
   const op = await _genererOperationIA(texte);
   if (notice) notice.delete().catch(() => {});
   if (!op || !(op.objectif || op.nom)) {
-    if (!auto && channel?.send) { const m = await channel.send('⚠️ Impossible de générer l\'opération (IA indisponible ou clé manquante).').catch(() => null); if (m) setTimeout(() => m.delete().catch(() => {}), 15000); }
+    if (!auto && channel?.send) { const m = await channel.send('⚠️ La génération de l\'opération n\'a pas abouti — réessaie dans un instant (l\'IA a renvoyé une réponse incomplète).').catch(() => null); if (m) setTimeout(() => m.delete().catch(() => {}), 15000); }
     return null;
   }
   const pseudo = {
