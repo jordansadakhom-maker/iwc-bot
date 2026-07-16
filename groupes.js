@@ -116,7 +116,13 @@ function _filtreGroupes(groupes, terme) {
   if (!t) return groupes.slice();
   const mots = t.split(' ').filter(Boolean);
   return groupes.filter(g => {
-    const foin = _norm([g.nom, g.meneur, g.territoire, g.effectif, g.notes, _catInfo(g.categorie).label].join(' '));
+    const ia = g.ia || {};
+    // On cherche aussi dans le renseignement IA (traits, tenues, armement, lieu, activité…)
+    // pour retrouver un groupe par n'importe quel détail distinctif.
+    const foin = _norm([
+      g.nom, g.meneur, g.territoire, g.effectif, g.notes, _catInfo(g.categorie).label,
+      ia.tenues, ia.armement, ia.signes, ia.montures, ia.lieu, ia.activite, ia.trait_distinctif, ia.resume,
+    ].join(' '));
     return mots.every(m => foin.includes(m));
   });
 }
@@ -284,11 +290,41 @@ function _classementContenu(draft) {
 }
 
 // ─── Installation du panneau ───
+// Résout le salon du registre et GARANTIT qu'il existe :
+//   1. id mémorisé (db.registreGroupes.salonId)  2. id historique (SALON_GROUPES)
+//   3. par nom (recherche/registre/renseignement de groupes)  4. sinon on le CRÉE.
+// Un salon existant est renvoyé tel quel (texte OU forum) — aucun comportement changé.
+async function _resoudreSalon(guild) {
+  try {
+    const db = loadDB(); const r = _ensure(db);
+    for (const id of [r.salonId, SALON_GROUPES].filter(Boolean)) {
+      const ch = await guild.channels.fetch(id).catch(() => null);
+      if (ch) { if (r.salonId !== ch.id) { r.salonId = ch.id; persist(db); } return ch; }
+    }
+    // Par nom (le salon existe peut-être sous un autre id)
+    const parNom = guild.channels.cache.find(c => c.type === 0 && /recherche.?groupe|registre.?groupe|renseignement.?groupe/i.test(c.name || ''));
+    if (parNom) { r.salonId = parNom.id; persist(db); return parNom; }
+    // Sinon : créer un salon dédié, calqué sur les permissions d'un salon Direction de référence.
+    const refCh = guild.channels.cache.find(c => c.type === 0 && /tableau.?de.?bord|direction|renseignement/i.test(c.name || ''));
+    const overwrites = refCh ? [...refCh.permissionOverwrites.cache.values()].map(o => ({ id: o.id, allow: o.allow.bitfield, deny: o.deny.bitfield })) : undefined;
+    const cree = await guild.channels.create({
+      name: '🔎・recherche-groupes', type: 0, parent: refCh?.parentId || null,
+      topic: '🔎 Recherche & renseignement sur les autres groupes du serveur — fiches, recherche par nom, catégories.',
+      permissionOverwrites: overwrites,
+      reason: 'Salon dédié à la recherche de groupes (Iron Wolf Company)',
+    }).catch(e => { console.log('⚠️ groupes: création salon échouée', e.message); return null; });
+    if (cree) { r.salonId = cree.id; persist(db); console.log('🔎 Salon recherche-groupes créé'); }
+    return cree;
+  } catch (e) { console.log('⚠️ groupes _resoudreSalon:', e.message); return null; }
+}
+
 async function installerPanneau(guild) {
   try {
-    let ch = await guild.channels.fetch(SALON_GROUPES).catch(() => null);
-    if (!ch) ch = guild.channels.cache.get(SALON_GROUPES) || null;
-    if (!ch) { console.log('⚠️ groupes: salon introuvable', SALON_GROUPES); return false; }
+    const ch = await _resoudreSalon(guild);
+    if (!ch) { console.log('⚠️ groupes: aucun salon disponible (création impossible)'); return false; }
+    // Nom clair pour le rendre trouvable (salon référencé par id → renommage sans risque),
+    // uniquement si le nom actuel n'évoque pas déjà les groupes/renseignement.
+    try { if (ch.type === 0 && ch.manageable && !/groupe|renseignement|recherche/i.test(ch.name || '')) await ch.setName('🔎・recherche-groupes').catch(() => {}); } catch {}
     const db = loadDB(); const r = _ensure(db);
     const payload = { embeds: [_panelEmbed(r)], components: _panelRows() };
     // Forum → fil épinglé ; sinon salon texte.
@@ -577,7 +613,8 @@ function _demandeCatContenu() {
 async function onMessage(message) {
   try {
     if (!message.guild || message.author?.bot) return false;
-    if (message.channel?.id !== SALON_GROUPES) return false;
+    const salonId = (loadDB().registreGroupes?.salonId) || SALON_GROUPES;
+    if (message.channel?.id !== salonId) return false;
     if (!estGestion(message.member)) return false;
     const atts = message.attachments ? [...message.attachments.values()].filter(a => (a.contentType || '').startsWith('image')).slice(0, 4) : [];
     if (!atts.length) return false;
@@ -607,4 +644,4 @@ async function onMessage(message) {
   } catch (e) { console.log('❌ groupes onMessage:', e.message); return true; }
 }
 
-module.exports = { installerPanneau, routeInteraction, onMessage, SALON_GROUPES, _test: { _ensure, _filtreGroupes, _norm, _mapDng, _photoDescTexte, _cleanIA, _afficheEmbed, _ficheEmbed, _ficheComponents, _previewEmbed, _classementRows, BANNERS, CATS, DNG } };
+module.exports = { installerPanneau, routeInteraction, onMessage, SALON_GROUPES, _test: { _ensure, _filtreGroupes, _norm, _mapDng, _photoDescTexte, _cleanIA, _afficheEmbed, _ficheEmbed, _ficheComponents, _previewEmbed, _classementRows, _resoudreSalon, BANNERS, CATS, DNG } };
