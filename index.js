@@ -3231,34 +3231,8 @@ client.on('messageReactionAdd', async (reaction, user) => {
     try { texte = (await _lireTexteNote(msg)) || msg.content || ''; } catch { texte = msg.content || ''; }
     texte = String(texte || '').trim();
     if (texte.length < 15) return; // pas assez de matière pour une opération
-    try {
-      const att = msg.channel;
-      const notice = await att.send('🧠 Construction de l\'opération à partir de la note…').catch(() => null);
-      const op = await _genererOperationIA(texte);
-      if (notice) notice.delete().catch(() => {});
-      if (!op) { const m = await att.send('⚠️ Impossible de générer l\'opération (IA indisponible ou clé manquante).'); setTimeout(() => m.delete().catch(() => {}), 15000); return; }
-      // Crée réellement l'opération dans #operations (avec ses étapes de préparation)
-      const pseudo = {
-        id: 'OPN-' + Date.now().toString(36).slice(-6).toUpperCase(),
-        typeMission: op.type_mission || 'Autre',
-        objet: op.objectif || op.nom || 'Opération',
-        commanditaire: op.cible || '',
-        details: [
-          Array.isArray(op.plan_attaque) && op.plan_attaque.length ? 'Plan : ' + op.plan_attaque.join(' → ') : '',
-          op.plan_repli ? 'Repli : ' + op.plan_repli : '',
-          Array.isArray(op.materiel) && op.materiel.length ? 'Matériel : ' + op.materiel.join(', ') : '',
-          op.risques ? 'Risques : ' + op.risques : '',
-        ].filter(Boolean).join('\n').slice(0, 1500),
-        echeanceTexte: op.moment || null,
-        remuneration: '—',
-      };
-      let created = null;
-      try { created = await opsEtapes.creerOperationDepuisContrat?.(guild, pseudo, { parId: user.id, pole: op.pole === 'illegal' ? 'illegal' : 'legal' }); } catch (e) { console.log('⚠️ 🎯 création op:', e.message); }
-      await att.send({
-        content: created ? '🎯 **Opération créée** — préparation ouverte dans #operations.' : '🎯 **Proposition d\'opération** *(création auto indisponible — à lancer à la main).*',
-        embeds: [_embedOperationDetaillee(op, pseudo.id)],
-      }).catch(() => {});
-    } catch (e) { console.log('❌ 🎯 note→opération:', e.message); }
+    try { await _noteVersOperation(guild, msg.channel, texte, user.id, false); }
+    catch (e) { console.log('❌ 🎯 note→opération:', e.message); }
     return;
   }
 
@@ -3860,6 +3834,14 @@ client.on('messageCreate', async message => {
         if (mAct.status === 'inactif') mAct.status = 'actif';
         saveDB(dbAct);
       }
+    }
+  } catch {}
+  // 🎯 Salon « notes → opérations » : toute note (assez longue) postée ici génère
+  // AUTOMATIQUEMENT une opération détaillée + sa préparation dans #operations.
+  try {
+    if (message.guild && !message.author?.bot && message.channel?.id === SALON_NOTES_OPS) {
+      const texteNote = (message.content || '').trim();
+      if (texteNote.length >= 25) { _noteVersOperation(message.guild, message.channel, texteNote, message.author.id, true).catch(() => {}); return; }
     }
   } catch {}
   // Nettoyeur : « !nettoyage » ouvre le panneau de configuration (Direction).
@@ -11576,6 +11558,40 @@ function _embedOperationDetaillee(op, contratId) {
     )
     .setFooter({ text: `Iron Wolf Company • Opération générée${contratId ? ` • ${contratId}` : ''}` }).setTimestamp();
   return e;
+}
+
+// Salon où toute note postée génère AUTOMATIQUEMENT une opération détaillée.
+const SALON_NOTES_OPS = '1527400086080979027';
+// Génère l'opération depuis une note, la crée dans #operations et poste la carte détaillée.
+async function _noteVersOperation(guild, channel, texte, parId, auto) {
+  const notice = channel?.send ? await channel.send('🧠 Construction de l\'opération à partir de la note…').catch(() => null) : null;
+  const op = await _genererOperationIA(texte);
+  if (notice) notice.delete().catch(() => {});
+  if (!op || !(op.objectif || op.nom)) {
+    if (!auto && channel?.send) { const m = await channel.send('⚠️ Impossible de générer l\'opération (IA indisponible ou clé manquante).').catch(() => null); if (m) setTimeout(() => m.delete().catch(() => {}), 15000); }
+    return null;
+  }
+  const pseudo = {
+    id: 'OPN-' + Date.now().toString(36).slice(-6).toUpperCase(),
+    typeMission: op.type_mission || 'Autre',
+    objet: op.objectif || op.nom || 'Opération',
+    commanditaire: op.cible || '',
+    details: [
+      Array.isArray(op.plan_attaque) && op.plan_attaque.length ? 'Plan : ' + op.plan_attaque.join(' → ') : '',
+      op.plan_repli ? 'Repli : ' + op.plan_repli : '',
+      Array.isArray(op.materiel) && op.materiel.length ? 'Matériel : ' + op.materiel.join(', ') : '',
+      op.risques ? 'Risques : ' + op.risques : '',
+    ].filter(Boolean).join('\n').slice(0, 1500),
+    echeanceTexte: op.moment || null,
+    remuneration: '—',
+  };
+  let created = null;
+  try { created = await opsEtapes.creerOperationDepuisContrat?.(guild, pseudo, { parId, pole: op.pole === 'illegal' ? 'illegal' : 'legal' }); } catch (e) { console.log('⚠️ note→op create:', e.message); }
+  if (channel?.send) await channel.send({
+    content: created ? `🎯 **Opération créée${auto ? ' automatiquement' : ''}** — préparation ouverte dans #operations.` : '🎯 **Proposition d\'opération** *(création auto indisponible — à lancer à la main).*',
+    embeds: [_embedOperationDetaillee(op, pseudo.id)],
+  }).catch(() => {});
+  return op;
 }
 
 // Résume une note de terrain en quelques points clés (IA) — pour ne pas tout lire
