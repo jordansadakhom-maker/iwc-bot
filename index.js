@@ -702,6 +702,11 @@ async function _envoyerOffreClient(cible, contenu, contrat, row) {
   const embedDM = parch ? EmbedBuilder.from(base).setImage(`attachment://${parch.name}`) : base;
   return cible.send({ content: contenu, embeds: [embedDM], components: row ? [row] : [], files: parch ? [parch] : [] });
 }
+// Le contrat est émis AU NOM DE L'ORGANISATION (IWC / Confrérie), pas de la personne
+// qui a rempli le formulaire. Le rédacteur reste tracé dans les données (emetteurIC).
+function _emetteurOrg(c) {
+  return (c && (c.cc || c.type === 'confrerie' || String(c.id).startsWith('CF-'))) ? 'La Confrérie' : 'Iron Wolf Company';
+}
 function _contratOffreEmbed(contrat) {
   const ech = contrat.echeanceTexte || (contrat.dateEcheance ? fmtShort(contrat.dateEcheance) : 'Aucune');
   const e = new EmbedBuilder().setColor(contrat.contreOffre ? 0xC9A227 : 0x2C3E50)
@@ -710,7 +715,7 @@ function _contratOffreEmbed(contrat) {
     .addFields(
       { name: '🆔 Référence', value: `\`${contrat.id}\``, inline: true },
       { name: '📅 Date', value: fmtShort(new Date()), inline: true },
-      { name: '✍️ Émis par', value: contrat.emetteurIC || '—', inline: true },
+      { name: '✍️ Émis par', value: _emetteurOrg(contrat), inline: true },
       { name: '📋 Objet', value: contrat.objet || '—' },
       { name: '⏳ Échéance', value: ech, inline: true },
       { name: '💰 Prime proposée', value: contrat.prime || contrat.remuneration || '—', inline: true },
@@ -6224,6 +6229,20 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
       ajouterJournalIC(interaction.guild, { type: 'contrat', emoji: '🗑️', titre: `Contrat ${ref} supprimé`, description: String(c0.objet || c0.clientNom || c0.commanditaire || '').slice(0, 200), auteur: interaction.user.username }).catch(() => {});
       return interaction.update({ content: `🗑️ Contrat \`${ref}\` supprimé.`, embeds: [], components: [] }).catch(() => {});
     }
+    // ✏️ Corriger une erreur de saisie → formulaire pré-rempli
+    if (stageKey === 'modifier') {
+      const c0 = (loadDB().contrats || []).find(x => String(x.id) === ref);
+      if (!c0) return interaction.reply({ content: '❌ Contrat introuvable.', flags: MessageFlags.Ephemeral });
+      const modal = new ModalBuilder().setCustomId(`csuivi_edit::${ref}`).setTitle(`✏️ Corriger ${ref}`.slice(0, 45))
+        .addComponents(
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('objet').setLabel('Objet du contrat').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(1000).setValue(String(c0.objet || '').slice(0, 1000))),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('client').setLabel('Client / Commanditaire').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(200).setValue(String(c0.clientNom || c0.commanditaire || '').slice(0, 200))),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prime').setLabel('Prime / Rémunération').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(200).setValue(String(c0.remuneration || c0.prime || '').slice(0, 200))),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('echeance').setLabel('Échéance (JJ/MM/AAAA ou texte)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(60).setValue(String(c0.echeanceTexte || (c0.dateEcheance ? fmtShort(c0.dateEcheance) : '')).slice(0, 60))),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('details').setLabel('Détails / conditions').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(1000).setValue(String(c0.details || '').slice(0, 1000))),
+        );
+      return interaction.showModal(modal);
+    }
     const stageMap = { attente: 'En attente', cours: 'En cours', valide: 'Validé', honore: 'Honoré', abandon: 'Abandonné' };
     const stage = stageMap[stageKey];
     const dbX = loadDB(); const c = (dbX.contrats || []).find(x => String(x.id) === ref);
@@ -6246,6 +6265,40 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     _updatePanneauContrats(interaction.client).catch(() => {});
     if (stage === 'Validé') _alerteContratAEncaisser(interaction.guild, c).catch(() => {});
     return interaction.update(_contratSuiviPayload(c, `✅ Étape mise à jour : **${stage}** — synchronisé dans Notion.`));
+  }
+  // ✏️ Enregistrement d'une correction de contrat
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('csuivi_edit::')) {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    const ref = interaction.customId.split('::').slice(1).join('::');
+    const dbX = loadDB(); const c = (dbX.contrats || []).find(x => String(x.id) === ref);
+    if (!c) return interaction.reply({ content: "❌ Contrat introuvable.", flags: MessageFlags.Ephemeral });
+    const val = k => (interaction.fields.getTextInputValue(k) || '').trim();
+    const objet = val('objet'), client = val('client'), prime = val('prime'), echRaw = val('echeance'), details = val('details');
+    if (objet) c.objet = objet;
+    if (client) { if (c.commanditaire !== undefined && c.clientNom === undefined) c.commanditaire = client; else c.clientNom = client; }
+    if (prime) c.remuneration = prime;
+    c.details = details; // les détails peuvent légitimement être vidés
+    // Échéance : on tolère JJ/MM/AAAA, AAAA-MM-JJ, ou texte libre (échéance RP, « à convenir »…)
+    if (echRaw) {
+      c.echeanceTexte = echRaw;
+      const _mIso = echRaw.match(/(\d{4})-(\d{2})-(\d{2})/); const _mFr = echRaw.match(/(\d{1,2})[\/.](\d{1,2})[\/.](\d{2,4})/);
+      if (_mIso) c.dateEcheance = _mIso[0];
+      else if (_mFr) { const _y = _mFr[3].length === 2 ? '20' + _mFr[3] : _mFr[3]; c.dateEcheance = `${_y}-${String(_mFr[2]).padStart(2, '0')}-${String(_mFr[1]).padStart(2, '0')}`; }
+      else c.dateEcheance = null; // texte libre → pas de date structurée
+    } else { c.echeanceTexte = null; c.dateEcheance = null; }
+    c.modifieAt = new Date().toISOString(); c.modifiePar = interaction.user.username;
+    saveDB(dbX);
+    // Répercute la correction partout où le contrat est affiché
+    if (dbX.contratsParticipants?.[ref]) { dbX.contratsParticipants[ref].objet = c.objet || dbX.contratsParticipants[ref].objet; saveDB(dbX); }
+    _majContratForum(interaction.guild, c).catch(() => {});
+    _syncContratNotion(c, c.status || 'signe').catch(() => {});
+    _updateContratPanel(interaction.client).catch(() => {});
+    _updatePlanningContrats(interaction.client).catch(() => {});
+    _updatePanneauContrats(interaction.client).catch(() => {});
+    ajouterJournalIC(interaction.guild, { type: 'contrat', emoji: '✏️', titre: `Contrat ${c.id} corrigé`, description: String(c.objet || c.clientNom || c.commanditaire || '').slice(0, 200), auteur: interaction.user.username }).catch(() => {});
+    const note = '✏️ **Correction enregistrée** — mise à jour dans le forum, les panneaux et Notion.';
+    if (interaction.isFromMessage?.()) return interaction.update(_contratSuiviPayload(c, note)).catch(() => {});
+    return interaction.reply({ ..._contratSuiviPayload(c, note), flags: MessageFlags.Ephemeral }).catch(() => {});
   }
   if (interaction.isModalSubmit() && interaction.customId.startsWith('csuivi_montant::')) {
     if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
@@ -7241,7 +7294,8 @@ function _contratSuiviPayload(c, note) {
     { name: 'Pôle', value: pole, inline: true },
     { name: '📅 Échéance', value: ech, inline: true },
     { name: '🗓️ Créé le', value: cree, inline: true },
-    { name: '✍️ Émis par', value: String(emisPar).slice(0, 256), inline: true },
+    { name: '✍️ Émis par', value: _emetteurOrg(c), inline: true },
+    { name: '🖊️ Rédigé par', value: String(emisPar).slice(0, 256), inline: true },
     { name: '🖋️ Signé par', value: String(signePar).slice(0, 256), inline: true },
     { name: 'Étape actuelle', value: `${emo} **${stade}**`, inline: true },
   );
@@ -7260,6 +7314,7 @@ function _contratSuiviPayload(c, note) {
     new ButtonBuilder().setCustomId(`csuivi::suppr::${c.id}`).setLabel('🗑️ Supprimer').setStyle(ButtonStyle.Danger),
   );
   const row3 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`csuivi::modifier::${c.id}`).setLabel('✏️ Corriger une erreur').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('csuivi_retour').setLabel('↩️ Retour à la liste').setStyle(ButtonStyle.Secondary),
   );
   return { content: '', embeds: [embed], components: [row1, row2, row3] };
