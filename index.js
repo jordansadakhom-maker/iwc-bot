@@ -12526,7 +12526,7 @@ async function _assurerAccesVisiteur(guild) {
 
     // Salons d'entrée à rendre visibles pour les visiteurs
     const salonsEntree = [
-      { id: CH.RECRUTEMENT, nom: 'recrutement', ecrire: false },         // voir le panneau (les boutons suffisent)
+      { id: CH.RECRUTEMENT, nom: 'recrutement', ecrire: true },          // candidats : peuvent écrire leur candidature OU cliquer le bouton
       { id: '1511135557143629926', nom: 'règlement', ecrire: false },    // le salon règlement précis (pour lire + réagir ✅)
       { id: '1509243971472195584', nom: 'commencer-ici', ecrire: false },// le salon « Commencer ici » (pour lire le guide d'arrivée)
       { ch: getChById(guild, 'ARRIVEES', 'arrivees', 'arrivée'), nom: 'arrivée', ecrire: false }, // voir le message de bienvenue + lien règlement
@@ -12539,7 +12539,7 @@ async function _assurerAccesVisiteur(guild) {
         await ch.permissionOverwrites.edit(visiteurRole, {
           ViewChannel: true,           // voir le salon
           ReadMessageHistory: true,    // lire les messages (le panneau)
-          SendMessages: false,         // pas besoin d'écrire (juste cliquer les boutons)
+          SendMessages: s.ecrire === true, // écriture autorisée seulement là où c'est utile (recrutement)
           AddReactions: true,          // pour valider le règlement avec ✅
         });
         console.log(`✅ Accès Visiteur assuré : #${ch.name}`);
@@ -12555,7 +12555,7 @@ async function _assurerAccesVisiteur(guild) {
         await recrutCh.permissionOverwrites.edit(guild.roles.everyone, {
           ViewChannel: true,          // visible par tous les arrivants
           ReadMessageHistory: true,   // lire le panneau
-          SendMessages: false,        // pas d'écriture (juste cliquer « Candidature »)
+          SendMessages: true,         // peuvent poster leur candidature (ou cliquer « Candidature »)
         });
         console.log(`✅ Recrutement visible par @everyone : #${recrutCh.name}`);
       }
