@@ -435,6 +435,20 @@ function _gereCoffre(member) {
   return !!member?.roles?.cache?.some(r => ROLES.some(n => (r.name || '').includes(n)));
 }
 
+// Une échéance de contrat n'est « expirée » que si sa date est RÉELLE (année du
+// monde réel) et passée. Les dates RP (année en jeu, ex. 1904) ne comptent
+// jamais comme expirées — sinon tout contrat daté en RP paraîtrait « expiré ».
+function _contratExpire(c) {
+  if (!c || !c.dateEcheance) return false;
+  const d = new Date(c.dateEcheance);
+  if (isNaN(d.getTime())) return false;
+  const anneeReelle = new Date().getFullYear();
+  const y = d.getFullYear();
+  // Dates RP (année en jeu ~1904) très éloignées de l'année réelle → jamais expirées.
+  if (y < anneeReelle - 50 || y > anneeReelle + 30) return false;
+  return d < new Date();
+}
+
 // Une fiche de transaction (à CONSERVER comme registre) : carte Entrée/Sortie du coffre
 function _estFicheTx(m) {
   const e = m.embeds?.[0]; if (!e) return false;
@@ -603,7 +617,7 @@ async function handleContratsArchives(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const db = loadDB(); const statut = interaction.options?.getString('statut') || 'tous'; const page = Math.max(1, interaction.options?.getInteger('page') || 1); const perPage = 6;
   const contrats = db.contrats || [];
-  const filtered = statut === 'tous' ? contrats : contrats.filter(c => { if (statut === 'actif') return c.status === 'signe'; if (statut === 'refuse') return c.status === 'refuse'; if (statut === 'expire') return c.status === 'expire' || (c.dateEcheance && new Date(c.dateEcheance) < new Date()); return true; });
+  const filtered = statut === 'tous' ? contrats : contrats.filter(c => { if (statut === 'actif') return c.status === 'signe'; if (statut === 'refuse') return c.status === 'refuse'; if (statut === 'expire') return c.status === 'expire' || _contratExpire(c); return true; });
   if (!filtered.length) return interaction.editReply({ content: `📭 Aucun contrat trouvé pour le filtre **${statut}**.` });
   const totalPages = Math.ceil(filtered.length / perPage);
   const pageData   = filtered.sort((a, b) => new Date(b.signedAt || b.createdAt || 0) - new Date(a.signedAt || a.createdAt || 0)).slice((page - 1) * perPage, page * perPage);
@@ -621,7 +635,7 @@ async function handleDashboard(interaction) {
   const legal = db.coffre || 0; const illegal = 0;
   const opsEnCours = (db.operations || []).filter(o => o.status === 'en_cours').length; const opsPrepa = (db.operations || []).filter(o => o.status === 'preparation').length;
   const opsTerminees7j = (db.operations || []).filter(o => o.status === 'terminee' && o.endedAt && (now - new Date(o.endedAt).getTime()) < 7 * 86400000).length;
-  const contratsActifs = (db.contrats || []).filter(c => c.status === 'signe').length; const contratsExpires = (db.contrats || []).filter(c => c.status === 'signe' && c.dateEcheance && new Date(c.dateEcheance) < new Date()).length;
+  const contratsActifs = (db.contrats || []).filter(c => c.status === 'signe').length; const contratsExpires = (db.contrats || []).filter(c => c.status === 'signe' && _contratExpire(c)).length;
   const prochainRdv = (db.sessions || db.agenda || []).filter(s => new Date(s.date || s.heure) > new Date() && s.statut !== 'Annulé').sort((a, b) => new Date(a.date || a.heure) - new Date(b.date || b.heure))[0];
   const alertes = [candsEnAttente > 0 && `🔔 **${candsEnAttente}** candidature(s) en attente`, contratsExpires > 0 && `⚠️ **${contratsExpires}** contrat(s) expiré(s)`, inactifs > 0 && `💤 **${inactifs}** membre(s) inactif(s)`, opsEnCours > 0 && `🟢 **${opsEnCours}** opération(s) en cours`].filter(Boolean);
   const fillRate = Math.min(1, actifs / 20); const bar = '█'.repeat(Math.round(fillRate * 10)) + '░'.repeat(10 - Math.round(fillRate * 10));
