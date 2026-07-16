@@ -12546,6 +12546,21 @@ async function _assurerAccesVisiteur(guild) {
       } catch (e) { console.log(`⚠️ Accès Visiteur #${ch?.name}: ${e.message}`); }
     }
 
+    // 🔑 Le salon de RECRUTEMENT est la porte d'entrée : on le rend visible à TOUT LE MONDE
+    // (même un nouvel arrivant sans rôle Visiteur, ou dont l'attribution du rôle a échoué),
+    // sinon « les gens qui rejoignent ne voient pas » le panneau de candidature.
+    try {
+      const recrutCh = guild.channels.cache.get(CH.RECRUTEMENT) || guild.channels.cache.find(c => c.type === 0 && /recrutement/i.test(c.name || ''));
+      if (recrutCh) {
+        await recrutCh.permissionOverwrites.edit(guild.roles.everyone, {
+          ViewChannel: true,          // visible par tous les arrivants
+          ReadMessageHistory: true,   // lire le panneau
+          SendMessages: false,        // pas d'écriture (juste cliquer « Candidature »)
+        });
+        console.log(`✅ Recrutement visible par @everyone : #${recrutCh.name}`);
+      }
+    } catch (e) { console.log(`⚠️ Recrutement @everyone: ${e.message}`); }
+
     // Salon VOCAL d'attente : le visiteur doit pouvoir le voir, le rejoindre et parler
     const cleanV = x => (x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const vocalAttente = guild.channels.cache.find(c =>
