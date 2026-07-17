@@ -707,6 +707,170 @@ async function _posterDossier(guild, op) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  CYCLE DE VIE « EN COURS » → « TERMINÉE »
+//  Étape 3 validée → publication dans « opérations en cours »
+//  Étape 4 validée → l'opération DÉMARRE   ·   Étape 5 → elle se TERMINE
+//  (déplacée dans « opérations terminées », retirée du salon en cours)
+// ═══════════════════════════════════════════════════════════════
+const ETAPE_PUBLICATION = 2; // index 0-based → « étape 3 » (constitution de l'équipe)
+const ETAPE_DEMARRAGE   = 3; // « étape 4 »
+const REACT = {
+  present: { emoji: '✅', label: 'Présent' },
+  route:   { emoji: '🏇', label: 'En route' },
+  indispo: { emoji: '❌', label: 'Indisponible' },
+};
+
+// Normalise un nom de salon (minuscules, sans accents ni symboles) pour le matcher.
+function _normNom(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, ''); }
+// Résout un salon par mot-clé de nom ; le crée dans la catégorie de #operations s'il manque.
+async function _resoudreSalonNomme(guild, mot, nomCreation) {
+  const chans = [...guild.channels.cache.values()].filter(c => c && (c.type === 0 || c.type === 15));
+  let ch = chans.find(c => { const n = _normNom(c.name); return n.includes('op') && n.includes(mot); })
+        || chans.find(c => _normNom(c.name).includes(mot));
+  if (ch) return ch;
+  try {
+    const ref = _salonOps(guild);
+    const parent = ref?.parentId || null;
+    ch = await guild.channels.create({ name: nomCreation, type: 0, ...(parent ? { parent } : {}) }).catch(() => null);
+  } catch {}
+  return ch || null;
+}
+const _salonEnCours   = (guild) => _resoudreSalonNomme(guild, 'encours', '📡・opérations-en-cours');
+const _salonTerminees = (guild) => _resoudreSalonNomme(guild, 'termin', '📁・opérations-terminées');
+
+// Agents dont le @ apparaît dans les champs d'une étape (ex. l'étape 3 « équipe »).
+function _mentionsEtape(op, idx) {
+  const et = op.etapes && op.etapes[idx];
+  if (!et || !et.champs) return [];
+  const ids = new Set();
+  for (const v of Object.values(et.champs)) {
+    const toks = String(v || '').match(/<@!?(\d+)>/g) || [];
+    for (const t of toks) { const d = t.match(/(\d+)/); if (d) ids.add(d[1]); }
+  }
+  return [...ids];
+}
+
+// Fiche « opération » destinée aux agents (briefing des étapes 1→3 + présence).
+function _embedEnCours(op) {
+  const defs = _defs(op.categorie);
+  const phase = op.phaseOp || 'preparee';
+  const phaseTxt = phase === 'terminee' ? '✅ **Opération terminée**'
+    : phase === 'demarree' ? '🟢 **Opération EN COURS** — lancée'
+    : '🟡 **Opération préparée** — en attente de lancement';
+  const col = phase === 'terminee' ? COL.gris : phase === 'demarree' ? COL.vert : COL.or;
+  const e = new EmbedBuilder().setColor(col)
+    .setTitle(`${op.emoji} OPÉRATION — « ${_clip(op.cible, 70)} »`)
+    .setDescription(`${op.emoji} **${op.categorie}** · réf. \`${op.id}\`\n${phaseTxt}`);
+  for (let i = 0; i < Math.min(ETAPE_PUBLICATION + 1, op.etapes.length); i++) {
+    const et = op.etapes[i]; const def = defs[i] || { label: et.key, champs: [] };
+    const body = _resumeChamps(et, def);
+    if (body && !body.startsWith('*Rien')) e.addFields({ name: _clip(def.label, 250), value: _clip(body, 1020), inline: false });
+  }
+  const ag = op.agentsAssignes || [];
+  e.addFields({ name: '👥 Agents assignés', value: ag.length ? ag.map(a => `<@${a}>`).join(' ') : '*aucun @ détecté à l\'étape 3*', inline: false });
+  if (ag.length) {
+    const r = op.reactions || {};
+    const lignes = ag.map(a => { const s = r[a]; const rr = s ? REACT[s] : null; return `${rr ? rr.emoji : '⬜'} <@${a}>${rr ? ` — ${rr.label}` : ' — *en attente*'}`; });
+    e.addFields({ name: '📋 Présence', value: _clip(lignes.join('\n'), 1020), inline: false });
+  }
+  e.setFooter({ text: `Opération ${op.id} • Iron Wolf Company` }).setTimestamp();
+  return e;
+}
+
+// Boutons de présence — réservés (à la validation) aux agents @-mentionnés à l'étape 3.
+function _boutonsEnCours(op) {
+  if (op.phaseOp === 'terminee') return [];
+  return [new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`opx_react::present::${op.id}`).setLabel('Présent').setEmoji('✅').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`opx_react::route::${op.id}`).setLabel('En route').setEmoji('🏇').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`opx_react::indispo::${op.id}`).setLabel('Indisponible').setEmoji('❌').setStyle(ButtonStyle.Danger),
+  )];
+}
+
+// Récupère le message publié dans « en cours » (fil forum ou message texte).
+async function _msgEnCours(guild, op) {
+  if (!op.enCoursChannelId) return null;
+  const ch = await guild.channels.fetch(op.enCoursChannelId).catch(() => null);
+  if (!ch) return null;
+  if (op.enCoursThread && ch.fetchStarterMessage) return await ch.fetchStarterMessage().catch(() => null);
+  if (!op.enCoursMsgId) return null;
+  return await ch.messages.fetch(op.enCoursMsgId).catch(() => null);
+}
+async function _refreshEnCours(guild, op) {
+  try { const m = await _msgEnCours(guild, op); if (m) await m.edit({ embeds: [_embedEnCours(op)], components: _boutonsEnCours(op) }).catch(() => {}); } catch {}
+}
+
+// Étape 3 validée → publie l'opération dans « opérations en cours » + prévient les agents.
+async function _publierEnCours(guild, op) {
+  try {
+    if (op.publiee) return true;
+    op.agentsAssignes = _mentionsEtape(op, ETAPE_PUBLICATION);
+    const ch = await _salonEnCours(guild);
+    if (!ch) return false;
+    op.phaseOp = 'preparee';
+    const ping = op.agentsAssignes.length
+      ? `📡 ${op.emoji} **Nouvelle opération assignée** — ${op.agentsAssignes.map(a => `<@${a}>`).join(' ')}\nConfirmez votre présence avec les boutons ci-dessous.`
+      : `📡 ${op.emoji} **Nouvelle opération** — *(aucun agent @-mentionné à l'étape 3)*`;
+    const payload = { content: ping, embeds: [_embedEnCours(op)], components: _boutonsEnCours(op), allowedMentions: { users: op.agentsAssignes.slice(0, 50) } };
+    if (ch.type === 15 && ch.threads?.create) {
+      const post = await ch.threads.create({ name: `${op.emoji} ${_clip(op.cible, 70)}`.slice(0, 100), message: payload }).catch(() => null);
+      if (post) { op.enCoursChannelId = post.id; op.enCoursThread = true; const st = await post.fetchStarterMessage().catch(() => null); if (st) { op.enCoursMsgId = st.id; await st.pin().catch(() => {}); } }
+    } else if (typeof ch.send === 'function') {
+      const sent = await ch.send(payload).catch(() => null);
+      if (sent) { op.enCoursChannelId = ch.id; op.enCoursThread = false; op.enCoursMsgId = sent.id; }
+    }
+    op.publiee = !!op.enCoursChannelId;
+    return op.publiee;
+  } catch (e) { console.log('⚠️ _publierEnCours:', e.message); return false; }
+}
+
+// Étape 4 validée → l'opération démarre (mise à jour + top départ aux agents).
+async function _demarrerOperation(guild, op) {
+  try {
+    if (!op.publiee) await _publierEnCours(guild, op); // filet : publie si l'étape 3 n'avait rien produit
+    op.phaseOp = 'demarree'; op.demarreeAt = new Date().toISOString();
+    await _refreshEnCours(guild, op);
+    if (op.enCoursChannelId) {
+      const ch = await guild.channels.fetch(op.enCoursChannelId).catch(() => null);
+      const ping = (op.agentsAssignes || []).length ? op.agentsAssignes.map(a => `<@${a}>`).join(' ') : '';
+      if (ch?.send) await ch.send({ content: `🟢 **L'opération démarre !** ${ping}\nEn position — exécution en cours.`, allowedMentions: { users: (op.agentsAssignes || []).slice(0, 50) } }).catch(() => {});
+    }
+  } catch (e) { console.log('⚠️ _demarrerOperation:', e.message); }
+}
+
+// Étape 5 validée → l'opération se termine : archivée dans « terminées », retirée de « en cours ».
+async function _terminerOperation(guild, op) {
+  try {
+    op.phaseOp = 'terminee'; op.termineeAt = new Date().toISOString();
+    // 1) Archive dans « opérations terminées »
+    const chT = await _salonTerminees(guild);
+    if (chT) {
+      const payload = { content: `✅ ${op.emoji} **Opération terminée** — « ${_clip(op.cible, 70)} »`, embeds: [_embedEnCours(op)] };
+      if (chT.type === 15 && chT.threads?.create) {
+        const post = await chT.threads.create({ name: `✅ ${_clip(op.cible, 70)}`.slice(0, 100), message: payload }).catch(() => null);
+        if (post) op.termineeChannelId = post.id;
+      } else if (typeof chT.send === 'function') {
+        const sent = await chT.send(payload).catch(() => null);
+        if (sent) { op.termineeChannelId = chT.id; op.termineeMsgId = sent.id; }
+      }
+    }
+    // 2) Retire de « opérations en cours » → les agents n'y ont plus accès
+    if (op.enCoursChannelId) {
+      const ch = await guild.channels.fetch(op.enCoursChannelId).catch(() => null);
+      if (ch) {
+        if (op.enCoursThread) {
+          if (typeof ch.delete === 'function') await ch.delete('Opération terminée — archivée').catch(async () => { await ch.setArchived?.(true).catch(() => {}); await ch.setLocked?.(true).catch(() => {}); });
+        } else {
+          const msg = await ch.messages.fetch(op.enCoursMsgId).catch(() => null);
+          if (msg?.delete) await msg.delete().catch(() => {});
+        }
+      }
+      op.enCoursChannelId = null; op.enCoursMsgId = null;
+    }
+  } catch (e) { console.log('⚠️ _terminerOperation:', e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  PRIME → COFFRE (à l'achèvement, via le hook global de index.js)
 // ═══════════════════════════════════════════════════════════════
 function _montant(s) { const m = String(s || '').replace(/\s/g, '').match(/(\d[\d.]*)/); return m ? (parseInt(m[1].replace(/\./g, ''), 10) || 0) : 0; }
@@ -925,18 +1089,54 @@ async function routeInteraction(interaction) {
       const fini = _currentIdx(op) >= op.etapes.length;
       if (fini) op.status = 'termine';
       _persist(db);
-      await interaction.reply({ content: fini ? `✅ Étape ${idx + 1} validée. **Toutes les étapes sont validées** — je génère le dossier.` : `✅ Étape ${idx + 1} validée. L'étape ${idx + 2} est déverrouillée.`, flags: MessageFlags.Ephemeral }).catch(() => {});
+      // Message de confirmation adapté au nouveau cycle de vie.
+      const suite = fini ? '**Toutes les étapes sont validées** — je génère le dossier et j\'archive l\'opération.'
+        : idx === ETAPE_PUBLICATION ? '➡️ L\'opération part dans **« opérations en cours »** et les agents assignés sont prévenus.'
+        : idx === ETAPE_DEMARRAGE ? '🟢 **Début d\'opération** déclenché.'
+        : `L'étape ${idx + 2} est déverrouillée.`;
+      await interaction.reply({ content: `✅ Étape ${idx + 1} validée. ${suite}`, flags: MessageFlags.Ephemeral }).catch(() => {});
       await _refreshPanel(interaction.guild, op);
+      // ── Nouveau cycle de vie : publication / démarrage selon l'étape validée ──
+      try {
+        if (!fini && idx === ETAPE_PUBLICATION) { await _publierEnCours(interaction.guild, op); _persist(db); }
+        else if (!fini && idx === ETAPE_DEMARRAGE) { await _demarrerOperation(interaction.guild, op); _persist(db); }
+      } catch (e) { console.log('⚠️ cycle en cours:', e.message); }
       if (fini) {
         op.dossierGenere = true; _persist(db);
         await _posterDossier(interaction.guild, op).catch(() => {});
         await _crediterPrime(interaction.guild, op).catch(() => {});       // 💰 prime → coffre
         await _genererEtPosterRecit(interaction.guild, op).catch(() => {}); // 📜 compte-rendu RP
+        await _terminerOperation(interaction.guild, op).catch(() => {});    // 📁 archive → « terminées », retire de « en cours »
+        _persist(db);
         if ((op.agents || []).length) { // 🔔 rappel aux agents : mission terminée
           const ch = await interaction.guild.channels.fetch(op.threadId || op.channelId).catch(() => null);
           if (ch?.send) await ch.send({ content: `✅ ${op.agents.map(a => `<@${a}>`).join(' ')} — **opération terminée**, beau travail. Le dossier et le compte-rendu sont ci-dessus.`, allowedMentions: { users: op.agents.slice(0, 50) } }).catch(() => {});
         }
       }
+      return true;
+    }
+
+    // ── Réaction des agents sous l'opération « en cours » (présence) ──
+    if (interaction.isButton?.() && cid.startsWith('opx_react::')) {
+      const [, statut, id] = cid.split('::');
+      const db = loadDB();
+      const op = _find(db, id);
+      if (!op) { await _opDisparu(interaction); return true; }
+      const r = REACT[statut];
+      if (!r) { await interaction.reply({ content: '⛔ Réponse inconnue.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const uid = interaction.user.id;
+      const autorises = op.agentsAssignes || [];
+      // Seuls les agents dont le @ apparaît à l'étape 3 (ou la Direction) peuvent répondre.
+      if (!autorises.includes(uid) && !isDirection(interaction.member)) {
+        await interaction.reply({ content: '⛔ Seuls les **agents assignés** à cette opération (mentionnés à l\'étape 3) peuvent répondre.', flags: MessageFlags.Ephemeral }).catch(() => {});
+        return true;
+      }
+      if (op.phaseOp === 'terminee') { await interaction.reply({ content: 'ℹ️ Cette opération est terminée.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      op.reactions = op.reactions || {};
+      op.reactions[uid] = statut;
+      _persist(db);
+      await _refreshEnCours(interaction.guild, op);
+      await interaction.reply({ content: `${r.emoji} Réponse enregistrée : **${r.label}**.`, flags: MessageFlags.Ephemeral }).catch(() => {});
       return true;
     }
 
@@ -1032,3 +1232,4 @@ async function routeInteraction(interaction) {
 }
 
 module.exports = { init, routeInteraction, creerOperationDepuisContrat, tableauEmbed, STEP_TEMPLATES };
+module.exports.__test = { _mentionsEtape, _normNom, _resoudreSalonNomme, _salonEnCours, _salonTerminees, _embedEnCours, _boutonsEnCours, _publierEnCours, _demarrerOperation, _terminerOperation, REACT, ETAPE_PUBLICATION, ETAPE_DEMARRAGE }; // tests uniquement
