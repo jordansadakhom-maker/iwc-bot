@@ -362,6 +362,29 @@ async function _rafraichirDossier(guild, id, f) {
   } catch { return false; }
 }
 
+// Au démarrage : garantit que CHAQUE dossier déjà existant a son fil « fiche complète »
+// visible dans le salon (créé s'il manque, message d'ouverture rafraîchi). Idempotent,
+// paisible (petite pause entre chaque) — ne recrée jamais un fil déjà présent.
+async function installerDossiers(guild) {
+  try {
+    const ch = _ch(guild, MEDICAL_CHANNEL);
+    if (!ch || ch.type !== 15) return 0; // seulement en mode forum
+    const db = loadDB(); const sm = db.suiviMedical || {};
+    const ids = Object.keys(sm);
+    let n = 0;
+    for (const id of ids.slice(0, 60)) { // garde-fou anti-flood
+      try {
+        const before = sm[id].threadId;
+        await _rafraichirDossier(guild, id, sm[id]);
+        if (sm[id].threadId && sm[id].threadId !== before) n++; // nouveau fil créé
+      } catch {}
+      await new Promise(r => setTimeout(r, 450)); // pacing doux (rate limits)
+    }
+    saveDB(db); // persiste les f.threadId éventuellement créés
+    return n;
+  } catch (e) { console.log('❌ installerDossiers:', e.message); return 0; }
+}
+
 // Archive TOUS les fils du patient dans le forum (le fil mémorisé + les anciens
 // « En observation — X »), pour qu'ils disparaissent de la liste active. Réversible.
 async function _archiverFilsPatient(guild, id, gm) {
@@ -1616,5 +1639,5 @@ async function installerPanelDemande(channel) {
   return true;
 }
 
-module.exports = { installerPanel, installerExemple, installerPanelDemande, routeInteraction, checkRappelsMedicaux, MEDICAL_CHANNEL, ROLE_MEDECIN, _test: { _dossierThread, _posterAuDossier, _archiverFilsPatient } };
+module.exports = { installerPanel, installerExemple, installerPanelDemande, installerDossiers, routeInteraction, checkRappelsMedicaux, MEDICAL_CHANNEL, ROLE_MEDECIN, _test: { _dossierThread, _posterAuDossier, _archiverFilsPatient } };
 module.exports.__test = { _convalescenceJours, _bilanEmbed, _certificatHTML, _embedFiche, _dureeJours, _parseHonoLignes, _acteDecesHTML, _honorairesHTML, _ordonnanceHTML, _ordoModal, REMEDES }; // tests uniquement
