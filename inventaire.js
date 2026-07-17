@@ -865,6 +865,23 @@ async function _purgerPhotoPrecedente(ch, inv, saufId) {
   } catch {}
   if (inv && inv.photoMsg !== saufId) inv.photoMsg = null;
 }
+// Balaie le salon et supprime TOUTES les anciennes photos d'inventaire (messages
+// d'un membre contenant seulement des images), sauf la photo courante. Robuste au
+// redémarrage : ne dépend pas du suivi inv.photoMsg. Nécessite « Gérer les messages ».
+async function _purgerAnciennesPhotos(ch, saufId) {
+  try {
+    if (!ch?.messages?.fetch) return 0;
+    const recents = await ch.messages.fetch({ limit: 40 }).catch(() => null);
+    if (!recents) return 0;
+    let n = 0;
+    for (const m of recents.values()) {
+      if (m.id === saufId || m.author?.bot) continue;      // on garde la photo courante et les messages du bot
+      const imgs = m.attachments ? [...m.attachments.values()].filter(a => _estImage(a)) : [];
+      if (imgs.length && !(m.content || '').trim()) { await m.delete().catch(() => {}); n++; }
+    }
+    return n;
+  } catch { return 0; }
+}
 
 // ── Image(s) glissée(s) dans le salon → lecture IA → MISE À JOUR DIRECTE du coffre ──
 async function onMessage(message) {
@@ -894,6 +911,8 @@ async function onMessage(message) {
     await message.react("✅").catch(() => {});
     await _purgerRecapsPrecedents(message.channel, message.client.user.id);
     await _appliquerAuto(message.channel, items, message.author.id, db, inv, message.client);
+    // Nettoyage robuste : retire les anciennes photos d'inventaire accumulées (garde celle-ci).
+    await _purgerAnciennesPhotos(message.channel, message.id);
     return true;
   } catch { return claimed; }
 }
