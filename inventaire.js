@@ -460,18 +460,21 @@ async function _appliquerAuto(channel, items, by, db, inv, client) {
     inv.lectures = inv.lectures || {};
     // Retire un éventuel récap précédent encore affiché (pas d'empilement).
     for (const oldId of Object.keys(inv.lectures)) { const om = await channel.messages.fetch(oldId).catch(() => null); if (om) await om.delete().catch(() => {}); delete inv.lectures[oldId]; }
-    const { lignes, changes } = _appliquer(inv, items, 'add');
-    _journalAdd(inv, by, `📷 Ajout automatique depuis une capture (${items.length} lu(s) · ${lignes.length} changement(s))`);
+    // Validation automatique : le coffre = la photo (snapshot complet). On mémorise
+    // l'état précédent pour permettre l'annulation ou la bascule en « ajout ».
+    const beforeStock = JSON.parse(JSON.stringify(inv.stock || {}));
+    const { lignes, changes } = _appliquer(inv, items, 'replace');
+    _journalAdd(inv, by, `📸 Coffre = la photo (validation auto · ${items.length} lu(s) · ${lignes.length} changement(s))`);
     persist(db);
     await _refreshBoard(client, inv);
-    await _log(client, inv, `📷 Ajout **automatique** depuis une photo par <@${by}> (${items.length} objet(s) lu(s)) :\n${_recapDiff(lignes)}`);
+    await _log(client, inv, `📸 Coffre mis à jour **automatiquement = la photo** par <@${by}> (${items.length} objet(s) lu(s)) :\n${_recapDiff(lignes)}`);
     await _checkSeuils(client, inv, changes);
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('inva_exact').setLabel('Plutôt : coffre = la photo').setEmoji('📸').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('inva_undo').setLabel("Annuler l'ajout").setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('inva_add').setLabel('Plutôt : ajouter au stock').setEmoji('➕').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('inva_undo').setLabel('Annuler').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
     );
-    const m = await channel.send({ embeds: [_recapEmbed('add', lignes)], components: [row], allowedMentions: { parse: [] } }).catch(() => null);
-    if (m) { _prunePending(inv); inv.lectures[m.id] = { items, by, ts: Date.now(), applied: 'add' }; persist(db); setTimeout(() => { m.delete().catch(() => {}); }, 90000); }
+    const m = await channel.send({ embeds: [_recapEmbed('replace', lignes)], components: [row], allowedMentions: { parse: [] } }).catch(() => null);
+    if (m) { _prunePending(inv); inv.lectures[m.id] = { items, by, ts: Date.now(), applied: 'replace', beforeStock }; persist(db); setTimeout(() => { m.delete().catch(() => {}); }, 90000); }
     return { m, lignes };
   } catch (e) { console.log('⚠️ inventaire _appliquerAuto:', e.message); return null; }
 }
@@ -576,10 +579,10 @@ async function routeInteraction(interaction) {
       await _refreshBoard(interaction.client, inv);
       const items = await _lireImages(atts);
       if (!items || !items.length) { await interaction.editReply({ content: "📷 Capture(s) épinglée(s) ✅. Mais je n'ai pas réussi à lire d'objets dessus (peu net, ou clé IA absente) — saisis avec les boutons." }).catch(() => {}); return true; }
-      // AUTO : on applique directement (mode « ajout », jamais destructeur), sans validation.
+      // AUTO : validation directe — le coffre = la photo (snapshot complet).
       const res = await _appliquerAuto(ch, items, interaction.user.id, db, inv, interaction.client);
       const nbCh = res?.lignes?.length || 0;
-      await interaction.editReply({ content: `📷 Capture(s) lue(s) ✅ — **${items.length} objet(s) détecté(s)**, **${nbCh} changement(s)** ajoutés au coffre automatiquement dans <#${ch.id}>. Un filet de secours (📸 coffre = exact / ↩️ annuler) est dispo sur le récap.` }).catch(() => {});
+      await interaction.editReply({ content: `📷 Capture(s) lue(s) ✅ — **${items.length} objet(s) détecté(s)**, **${nbCh} changement(s)** : le coffre a été mis à jour **= la photo** dans <#${ch.id}>. Un filet de secours (➕ ajouter / ↩️ annuler) est dispo sur le récap.` }).catch(() => {});
       return true;
     }
 
@@ -744,39 +747,39 @@ async function routeInteraction(interaction) {
       return true;
     }
 
-    // ── Filet de secours après un AJOUT automatique par photo (inva_exact / inva_undo) ──
-    if (interaction.isButton?.() && ["inva_exact", "inva_undo"].includes(interaction.customId)) {
+    // ── Filet de secours après la mise à jour AUTO par photo (inva_add / inva_undo) ──
+    if (interaction.isButton?.() && ["inva_add", "inva_undo", "inva_exact"].includes(interaction.customId)) {
       const db = loadDB(); const inv = _ensure(db); _prunePending(inv);
       const pend = inv.lectures[interaction.message.id];
-      if (!pend) { await interaction.reply({ content: "⏳ Ce récap a expiré. Le coffre a bien reçu l'ajout ; corrige au besoin avec ✏️ sur le tableau.", flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      if (!pend) { await interaction.reply({ content: "⏳ Ce récap a expiré. Le coffre a bien été mis à jour ; corrige au besoin avec ✏️ sur le tableau.", flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       await interaction.deferUpdate().catch(() => {});
       const items = pend.items;
       delete inv.lectures[interaction.message.id];
 
       if (interaction.customId === "inva_undo") {
-        // On annule l'ajout : on RETRANCHE ce qui avait été ajouté.
-        for (const it of items) {
-          const b = inv.stock[it.categorie]; if (!b) continue;
-          const key = Object.keys(b).find(k => _norm(k) === _norm(it.nom));
-          if (key) { b[key] = Math.max(0, (b[key] || 0) - it.quantite); if (b[key] === 0) delete b[key]; }
+        // On restaure l'état EXACT d'avant la mise à jour par photo.
+        if (pend.beforeStock) inv.stock = pend.beforeStock;
+        else { // rétro-compat (anciens récaps en mode « ajout ») : on retranche la lecture
+          for (const it of items) { const b = inv.stock[it.categorie]; if (!b) continue; const key = Object.keys(b).find(k => _norm(k) === _norm(it.nom)); if (key) { b[key] = Math.max(0, (b[key] || 0) - it.quantite); if (b[key] === 0) delete b[key]; } }
         }
-        _journalAdd(inv, interaction.user.id, `↩️ Ajout par photo annulé (${items.length} objet(s) retranché(s))`);
+        _journalAdd(inv, interaction.user.id, `↩️ Mise à jour par photo annulée`);
         persist(db);
         await _refreshBoard(interaction.client, inv);
-        await _log(interaction.client, inv, `↩️ <@${interaction.user.id}> a annulé le dernier ajout par photo (${items.length} objet(s)).`);
-        await interaction.editReply({ content: "↩️ **Ajout annulé** — le coffre est revenu à son état précédent.", embeds: [], components: [] }).catch(() => {});
+        await _log(interaction.client, inv, `↩️ <@${interaction.user.id}> a annulé la dernière mise à jour par photo — coffre revenu à son état précédent.`);
+        await interaction.editReply({ content: "↩️ **Annulé** — le coffre est revenu à son état précédent.", embeds: [], components: [] }).catch(() => {});
         const _m = interaction.message; if (_m) setTimeout(() => { _m.delete().catch(() => {}); }, 15000);
         return true;
       }
 
-      // inva_exact : on repasse en « coffre = EXACTEMENT la photo » (replace efface tout puis pose la lecture).
-      const { lignes, changes } = _appliquer(inv, items, 'replace');
-      _journalAdd(inv, interaction.user.id, `📸 Coffre = la photo (exact) depuis un ajout auto (${items.length} lu(s) · ${lignes.length} changement(s))`);
+      // inva_add : basculer en « ajout au stock » — on repart de l'état d'avant + on ajoute la lecture.
+      if (pend.beforeStock) inv.stock = JSON.parse(JSON.stringify(pend.beforeStock));
+      const { lignes, changes } = _appliquer(inv, items, 'add');
+      _journalAdd(inv, interaction.user.id, `➕ Bascule en ajout au stock (${items.length} lu(s) · ${lignes.length} changement(s))`);
       persist(db);
       await _refreshBoard(interaction.client, inv);
-      await _log(interaction.client, inv, `📸 <@${interaction.user.id}> a basculé le coffre en « = la photo » (${items.length} objet(s) lu(s)) :\n${_recapDiff(lignes)}`);
+      await _log(interaction.client, inv, `➕ <@${interaction.user.id}> a basculé en « ajout au stock » (${items.length} objet(s) lu(s)) :\n${_recapDiff(lignes)}`);
       await _checkSeuils(interaction.client, inv, changes);
-      await interaction.editReply({ content: `📸 **Coffre = la photo** — ${lignes.length} changement(s).`, embeds: [_recapEmbed('replace', lignes)], components: [] }).catch(() => {});
+      await interaction.editReply({ content: `➕ **Ajouté au stock** — ${lignes.length} changement(s).`, embeds: [_recapEmbed('add', lignes)], components: [] }).catch(() => {});
       const _m2 = interaction.message; if (_m2) setTimeout(() => { _m2.delete().catch(() => {}); }, 60000);
       return true;
     }
@@ -921,8 +924,8 @@ async function onMessage(message) {
     inv.photoMsg = message.id; persist(db);
     const items = await _lireImages(imgs);
     if (!items || !items.length) { await message.reply({ content: "📷 Je n'ai pas réussi à lire d'objets sur cette/ces image(s). Essaie une capture plus nette, ou les boutons du tableau.", allowedMentions: { parse: [] } }).catch(() => {}); return true; }
-    // AUTO : on applique directement en mode « ajout » (jamais destructeur), sans validation.
-    // Un filet de secours (📸 exact / ↩️ annuler) reste sur le récap au cas où.
+    // AUTO : validation directe — le coffre = la photo (snapshot complet, sans clic).
+    // Un filet de secours (➕ ajouter au stock / ↩️ annuler) reste sur le récap au cas où.
     await message.react("✅").catch(() => {});
     await _purgerRecapsPrecedents(message.channel, message.client.user.id);
     await _appliquerAuto(message.channel, items, message.author.id, db, inv, message.client);
