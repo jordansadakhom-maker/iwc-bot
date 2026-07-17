@@ -172,12 +172,18 @@ async function _refreshBoard(client, inv) {
 // Rafraîchit le board au démarrage et le RÉPARE : si le tableau a disparu (message
 // supprimé, référence perdue après restauration), on le retrouve par son titre ou on le
 // repose entièrement — pour toujours avoir le panneau complet avec ses boutons.
-async function rafraichirBoardDemarrage(client) {
+async function rafraichirBoardDemarrage(clientOrGuild) {
   try {
-    const db = loadDB(); const inv = db.inventaire;
-    if (!inv || !inv.channelId) return;
-    const ch = await client.channels.fetch(inv.channelId).catch(() => null);
-    if (!ch?.send) return;
+    const client = clientOrGuild?.client || clientOrGuild;
+    const guild = (clientOrGuild?.channels && clientOrGuild?.roles) ? clientOrGuild : client?.guilds?.cache?.first?.();
+    const db = loadDB(); const inv = _ensure(db);
+    // Auto-restauration du salon (perdu après un redémarrage) : par id, sinon par nom « inventaire ».
+    let ch = inv.channelId ? await client?.channels?.fetch(inv.channelId).catch(() => null) : null;
+    if (!ch) {
+      const cand = guild?.channels?.cache?.find(c => c.type === 0 && /inventaire/i.test(c.name || ''));
+      if (cand) { inv.channelId = cand.id; persist(db); ch = cand; console.log("📦 Salon inventaire re-détecté au démarrage :", cand.name); }
+    }
+    if (!inv.channelId || !ch?.send) return;
     // Cherche le tableau (épingles + historique profond) et supprime les doublons éventuels
     const msg = await _dedupeBoards(client, inv, true);
     if (msg) {
@@ -889,7 +895,16 @@ async function onMessage(message) {
   try {
     if (!message || message.author?.bot) return false;
     const db = loadDB();
-    if (!db.inventaire || !db.inventaire.channelId || message.channelId !== db.inventaire.channelId) return false;
+    let inv0 = db.inventaire;
+    // Auto-restauration : si le salon du coffre n'est plus mémorisé (ex. après un
+    // redémarrage ou une recréation du salon), on l'adopte quand une image est
+    // postée dans un salon nommé « inventaire ». Sinon les photos n'étaient plus
+    // traitées du tout (aucune réaction, aucune mise à jour).
+    if ((!inv0 || !inv0.channelId) && /inventaire/i.test(message.channel?.name || '') && (message.attachments?.size || 0) > 0) {
+      inv0 = _ensure(db); inv0.channelId = message.channelId; persist(db);
+      console.log("📦 Salon inventaire ré-adopté via une photo :", message.channel?.name);
+    }
+    if (!inv0 || !inv0.channelId || message.channelId !== inv0.channelId) return false;
     const imgs = message.attachments ? [...message.attachments.values()].filter(a => _estImage(a)) : [];
     if (!imgs.length) return false;
     // C'est le salon du coffre et il y a une image : ce message appartient au coffre.
