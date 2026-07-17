@@ -63,6 +63,15 @@ const STATUTS = {
   inapte:      { label: '❌ Inapte',         couleur: 0xE74C3C },
 };
 
+// Emoji d'état pour le TITRE du fil (se met à jour à chaque changement de statut →
+// le titre ne peut jamais contredire la fiche). Le tag [id] rend le fil unique/retrouvable.
+const _EMOJI_STATUT = { apte: '✅', observation: '⚠️', inapte: '❌', non_teste: '🩺' };
+function _nomFil(gm, f, id) {
+  const em = _EMOJI_STATUT[f?.statut] || '🩺';
+  const nom = (gm?.displayName || f?.nomRP || String(id)).trim();
+  return `${em} ${nom} [${id}]`.slice(0, 100);
+}
+
 // Durée de convalescence estimée (jours) selon la gravité de la blessure.
 function _convalescenceJours(gravite) {
   const g = String(gravite || '').toLowerCase();
@@ -333,8 +342,7 @@ async function _dossierThread(guild, id, f) {
     try { const act = await ch.threads.fetchActive().catch(() => null); if (act?.threads) found = [...act.threads.values()].find(_match); } catch {}
     if (!found) { try { const arc = await ch.threads.fetchArchived().catch(() => null); if (arc?.threads) found = [...arc.threads.values()].find(_match); } catch {} }
     if (found) { if (found.archived) await found.setArchived(false).catch(() => {}); f.threadId = found.id; return found; }
-    const nomF = (nom || String(id)).slice(0, 70);
-    const t = await ch.threads.create({ name: `🩺 ${nomF} ${tag}`.slice(0, 100), message: { content: `<@&${ROLE_MEDECIN}>`, embeds: [_embedFiche(f, gm)], allowedMentions: { roles: [ROLE_MEDECIN] } } }).catch(() => null);
+    const t = await ch.threads.create({ name: _nomFil(gm, f, id), message: { content: `<@&${ROLE_MEDECIN}>`, embeds: [_embedFiche(f, gm)], allowedMentions: { roles: [ROLE_MEDECIN] } } }).catch(() => null);
     if (t) f.threadId = t.id;
     return t;
   } catch { return null; }
@@ -354,11 +362,43 @@ async function _posterAuDossier(guild, id, f, embed, ping) {
 async function _rafraichirDossier(guild, id, f) {
   try {
     const t = await _dossierThread(guild, id, f);
-    if (!t?.fetchStarterMessage) return false;
+    if (!t) return false;
     const gm = await guild.members.fetch(id).catch(() => null);
+    // Titre du fil = état courant → il ne peut plus « mentir » (ex : rester « En observation »
+    // alors que le patient est rétabli). On ne renomme que si le titre a réellement changé.
+    const voulu = _nomFil(gm, f, id);
+    const nm = t.name || '';
+    if (t.setName && nm !== voulu && !nm.includes('SUIVI MÉDICAL') && !nm.includes('EXEMPLE')) {
+      await t.setName(voulu).catch(() => {});
+    }
+    if (!t.fetchStarterMessage) return false;
     const starter = await t.fetchStarterMessage().catch(() => null);
     if (starter) { await starter.edit({ embeds: [_embedFiche(f, gm)] }).catch(() => {}); return true; }
     return false;
+  } catch { return false; }
+}
+
+// Corrige UNIQUEMENT le titre d'un fil de dossier clôturé/archivé (sans le rouvrir) :
+// renomme selon l'état courant puis ré-archive. Rattrape les anciens titres périmés.
+async function _corrigerNomFilArchive(guild, id, f) {
+  try {
+    const ch = _ch(guild, MEDICAL_CHANNEL);
+    if (!ch || ch.type !== 15) return false;
+    const gm = await guild.members.fetch(id).catch(() => null);
+    const voulu = _nomFil(gm, f, id);
+    const tag = `[${id}]`; const nom = (gm?.displayName || '').trim().toLowerCase();
+    const _match = (t) => { const nm = t.name || ''; return nm.includes(tag) || (nom && nm.toLowerCase().includes(nom)); };
+    let t = null;
+    if (f.threadId) t = await ch.threads.fetch(f.threadId).catch(() => null);
+    if (!t) { const act = await ch.threads.fetchActive().catch(() => null); if (act?.threads) t = [...act.threads.values()].find(_match); }
+    if (!t) { const arc = await ch.threads.fetchArchived().catch(() => null); if (arc?.threads) t = [...arc.threads.values()].find(_match); }
+    if (!t || !t.setName) return false;
+    f.threadId = t.id;
+    if ((t.name || '') === voulu) return false; // déjà bon
+    const etaitArchive = t.archived;
+    await t.setName(voulu).catch(() => {}); // renommer (peut désarchiver)
+    if (etaitArchive) await t.setArchived(true).catch(() => {}); // on le laisse archivé comme avant
+    return true;
   } catch { return false; }
 }
 
@@ -374,9 +414,15 @@ async function installerDossiers(guild) {
     let n = 0;
     for (const id of ids.slice(0, 60)) { // garde-fou anti-flood
       try {
-        const before = sm[id].threadId;
-        await _rafraichirDossier(guild, id, sm[id]);
-        if (sm[id].threadId && sm[id].threadId !== before) n++; // nouveau fil créé
+        const f = sm[id];
+        // Dossier clôturé/archivé : on NE le rouvre PAS — on corrige seulement un titre périmé.
+        if (f.clotureAt && f.statut === 'apte') {
+          await _corrigerNomFilArchive(guild, id, f);
+        } else {
+          const before = f.threadId;
+          await _rafraichirDossier(guild, id, f);
+          if (f.threadId && f.threadId !== before) n++; // nouveau fil créé
+        }
       } catch {}
       await new Promise(r => setTimeout(r, 450)); // pacing doux (rate limits)
     }
@@ -1640,4 +1686,4 @@ async function installerPanelDemande(channel) {
 }
 
 module.exports = { installerPanel, installerExemple, installerPanelDemande, installerDossiers, routeInteraction, checkRappelsMedicaux, MEDICAL_CHANNEL, ROLE_MEDECIN, _test: { _dossierThread, _posterAuDossier, _archiverFilsPatient } };
-module.exports.__test = { _convalescenceJours, _bilanEmbed, _certificatHTML, _embedFiche, _dureeJours, _parseHonoLignes, _acteDecesHTML, _honorairesHTML, _ordonnanceHTML, _ordoModal, REMEDES }; // tests uniquement
+module.exports.__test = { _convalescenceJours, _bilanEmbed, _certificatHTML, _embedFiche, _dureeJours, _parseHonoLignes, _acteDecesHTML, _honorairesHTML, _ordonnanceHTML, _ordoModal, REMEDES, _nomFil }; // tests uniquement
