@@ -289,12 +289,13 @@ function _boutonsTelegramme(rdv) {
     )];
   }
   if (['Annulé', 'Décliné', 'Lapin'].includes(rdv.statut)) return []; // clôturé
-  // En attente
+  // En attente — on peut confirmer, ou marquer directement « Traité » si le RDV a déjà été honoré.
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`rdvp_confirm::${rdv.id}`).setLabel('✅ Confirmer le RDV').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`rdvp_assign::${rdv.id}`).setLabel('👤 Assigner un agent').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`rdvp_reply::${rdv.id}`).setLabel('💬 Répondre').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`rdvp_honored::${rdv.id}`).setLabel('☑️ Traité (RDV honoré)').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`rdvp_decline::${rdv.id}`).setLabel('❌ Décliner').setStyle(ButtonStyle.Danger),
     ),
   ];

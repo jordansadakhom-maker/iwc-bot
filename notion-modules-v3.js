@@ -1022,11 +1022,14 @@ function _reconstruireRapportDepuisEmbed(message, rapId) {
   } catch { return null; }
 }
 async function _traiterValidationInfo(interaction, decision) {
-  const estDir = interaction.member?.roles?.cache?.some(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'].some(n => r.name.includes(n)));
-  if (!estDir) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {});
   const rapId = interaction.customId.replace(decision === 'confirme' ? 'info_confirmer_' : 'info_infirmer_', '');
   const db = loadDB();
   let rapport = (db.informateurs || []).find(r => r.id === rapId);
+  // Peuvent confirmer / infirmer : la Direction OU le rapporteur qui a transmis l'info
+  // (il garde la main sur ses propres renseignements).
+  const estDir = interaction.member?.roles?.cache?.some(r => ['Concepteur', 'Fléau', 'Fondateur', 'Directeur', 'Conseil', 'Officier'].some(n => r.name.includes(n)));
+  const estRapporteur = !!(rapport && rapport.rapporteurId && rapport.rapporteurId === interaction.user.id);
+  if (!estDir && !estRapporteur) return interaction.reply({ content: '❌ Réservé à la Direction ou au rapporteur de cette info.', flags: MessageFlags.Ephemeral }).catch(() => {});
   if (!rapport) {
     // Absent de la base (rapport d'avant le correctif, ou perdu) → on le reconstruit depuis l'embed
     rapport = _reconstruireRapportDepuisEmbed(interaction.message, rapId);
