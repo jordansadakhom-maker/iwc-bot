@@ -167,6 +167,31 @@ function _resultsEmbed(matches, terme, titre) {
   return e;
 }
 
+// Réponse de recherche « intuitive » : si des contacts correspondent → liste + menu détail ;
+// si RIEN ne correspond → on ne laisse pas l'utilisateur dans le vide : on lui propose de
+// CRÉER ce contact en un clic, et on lui montre le carnet existant à parcourir.
+function _reponseRecherche(rep, terme) {
+  const found = _filter(rep.contacts, terme);
+  if (found.length) return { embeds: [_resultsEmbed(found, terme)], components: [_selectVoir(found)].filter(Boolean) };
+  const total = (rep.contacts || []).length;
+  const e = new EmbedBuilder().setColor(COULEUR).setTitle(`🔎 Recherche — « ${terme.slice(0, 60)} »`).setFooter({ text: "Iron Wolf Company • répertoire" });
+  const btnCreer = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`contact_new_pre::${encodeURIComponent(terme.slice(0, 24))}`).setLabel(`➕ Créer « ${terme.slice(0, 30)} »`).setEmoji("🎴").setStyle(ButtonStyle.Success),
+  );
+  const comps = [];
+  if (!total) {
+    e.setDescription("Le carnet de contacts est **encore vide** — il n'y a rien à chercher pour l'instant.\nCommence par créer une fiche :");
+    comps.push(btnCreer);
+  } else {
+    e.setDescription(`Aucun contact ne correspond à **${terme.slice(0, 60)}**.\nTu peux **le créer** ci-dessous, ou parcourir les **${total}** contact(s) déjà au carnet :`);
+    const tri = (rep.contacts || []).slice().sort((a, b) => (a.nom || "").localeCompare(b.nom || ""));
+    const browse = _selectVoir(tri);
+    if (browse) comps.push(browse);
+    comps.push(btnCreer);
+  }
+  return { embeds: [e], components: comps };
+}
+
 // Menu « Voir une fiche en détail » à partir d'une liste de contacts.
 function _selectVoir(list) {
   const opts = (list || []).slice(0, 25).map(c => ({
@@ -273,10 +298,12 @@ function _richFiche(d) {
     v(d.notes, "—"),
   ].join("\n") + _histoContratsContact(d);
 }
-function _contactFormModal() {
+function _contactFormModal(nomPref) {
   const m = new ModalBuilder().setCustomId("contact_form").setTitle("🎴 Nouvelle fiche de contact");
+  const nomInput = new TextInputBuilder().setCustomId("nomsurnom").setLabel("Nom & surnom").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setPlaceholder("Cole Bradford « Le Coyote »");
+  if (nomPref) nomInput.setValue(String(nomPref).slice(0, 80));
   m.addComponents(
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("nomsurnom").setLabel("Nom & surnom").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setPlaceholder("Cole Bradford « Le Coyote »")),
+    new ActionRowBuilder().addComponents(nomInput),
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("telegramme").setLabel("Télégramme (numéro)").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(40).setPlaceholder("00000")),
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("metier").setLabel("Métier").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(60).setPlaceholder("Forgeron, contrebandier, shérif…")),
     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("secteur").setLabel("Secteur / lieu").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(60).setPlaceholder("Armadillo, Tumbleweed, Fort Mercer, Rio Bravo…")),
@@ -445,7 +472,7 @@ async function routeInteraction(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       const db = loadDB(); const rep = _ensure(db);
       const terme = (interaction.options.getString("recherche") || "").trim();
-      if (terme) { const found = _filter(rep.contacts, terme); const rows = [_selectVoir(found), _panelButtons()].filter(Boolean); await interaction.editReply({ embeds: [_resultsEmbed(found, terme)], components: rows }).catch(() => {}); return true; }
+      if (terme) { const r = _reponseRecherche(rep, terme); const rows = [...r.components]; if (rows.length < 5) rows.push(_panelButtons()); await interaction.editReply({ embeds: r.embeds, components: rows }).catch(() => {}); return true; }
       await interaction.editReply({ embeds: [_panelEmbed(rep)], components: [_panelButtons(), _filterRow()] }).catch(() => {});
       return true;
     }
@@ -495,9 +522,8 @@ async function routeInteraction(interaction) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
       const db = loadDB(); const rep = _ensure(db);
       const terme = (interaction.fields.getTextInputValue("terme") || "").trim();
-      const found = _filter(rep.contacts, terme);
-      const rows = [_selectVoir(found)].filter(Boolean);
-      await interaction.editReply({ embeds: [_resultsEmbed(found, terme)], components: rows }).catch(() => {});
+      const r = _reponseRecherche(rep, terme);
+      await interaction.editReply({ embeds: r.embeds, components: r.components }).catch(() => {});
       return true;
     }
 
@@ -590,6 +616,13 @@ async function routeInteraction(interaction) {
     if (interaction.isButton?.() && interaction.customId === "contact_new") {
       _pendingPhoto.delete(interaction.user.id);
       await interaction.showModal(_contactFormModal()).catch(() => {});
+      return true;
+    }
+    // Raccourci « Créer ce contact » depuis une recherche restée sans résultat (nom pré-rempli).
+    if (interaction.isButton?.() && (interaction.customId || "").startsWith("contact_new_pre::")) {
+      _pendingPhoto.delete(interaction.user.id);
+      let nom = ""; try { nom = decodeURIComponent(interaction.customId.slice("contact_new_pre::".length)); } catch { nom = interaction.customId.slice("contact_new_pre::".length); }
+      await interaction.showModal(_contactFormModal(nom)).catch(() => {});
       return true;
     }
     if (interaction.isModalSubmit?.() && (interaction.customId || "").startsWith("contact_form::e::")) {
@@ -1014,3 +1047,4 @@ async function proposerContactContrat(guild, contrat) {
 }
 
 module.exports = { repertoireCommands, routeInteraction, installerPanelContact, onMessage, traiterRapportTerrain, listerContacts, getContact, rafraichirFicheContact, ajouterContactAuto, proposerContactContrat };
+module.exports.__test = { _reponseRecherche, _filter, _contactFormModal }; // tests uniquement
