@@ -72,6 +72,45 @@ function _convalescenceJours(gravite) {
   return 3;
 }
 
+// Remèdes d'époque (RDR2 ~1904) — pré-remplissage d'ordonnance en un clic.
+const REMEDES = {
+  laudanum:      { label: 'Laudanum',              emoji: '🧪', desc: 'Douleur, anxiété, insomnie',   medicaments: "Laudanum (teinture d'opium)", posologie: "10 gouttes dans un verre d'eau, le soir", duree: '5 jours',  conseils: "Ne jamais dépasser la dose. Repos. Éviter l'alcool pendant le traitement." },
+  tonique:       { label: 'Tonique de santé',      emoji: '🍾', desc: 'Fatigue, convalescence',       medicaments: 'Tonique de santé',            posologie: 'Une rasade le matin et le midi',           duree: '7 jours',  conseils: "Bien s'alimenter et reprendre des forces progressivement." },
+  onguent:       { label: 'Onguent cicatrisant',   emoji: '🩹', desc: 'Plaies, coupures',             medicaments: 'Onguent cicatrisant',         posologie: 'Appliquer sur la plaie propre, matin et soir', duree: "Jusqu'à cicatrisation", conseils: 'Nettoyer et désinfecter la plaie avant chaque application. Changer le pansement.' },
+  quinine:       { label: 'Quinine',               emoji: '🌡️', desc: 'Fièvre, paludisme',            medicaments: 'Quinine',                     posologie: 'Un cachet trois fois par jour',            duree: '6 jours',  conseils: "Boire abondamment. Rester au repos jusqu'à disparition de la fièvre." },
+  arnica:        { label: "Teinture d'arnica",     emoji: '💜', desc: 'Contusions, hématomes',        medicaments: "Teinture d'arnica",           posologie: 'En compresse sur la zone, deux fois par jour', duree: '4 jours', conseils: 'Usage externe. Ne pas appliquer sur une plaie ouverte.' },
+  sirop:         { label: 'Sirop pectoral',        emoji: '🤧', desc: 'Toux, refroidissement',        medicaments: 'Sirop pectoral',              posologie: 'Une cuillère au coucher',                  duree: '5 jours',  conseils: "Se couvrir. Éviter le froid et l'humidité." },
+  antiseptique:  { label: 'Alcool antiseptique',   emoji: '🥃', desc: 'Désinfection des plaies',      medicaments: 'Alcool / whisky antiseptique', posologie: 'Nettoyer la plaie avant chaque soin',     duree: '—',        conseils: 'Usage externe uniquement.' },
+  reconstituant: { label: 'Repos & reconstituant', emoji: '🛌', desc: 'Épuisement, blessure grave',   medicaments: 'Bouillon, repos et reconstituant', posologie: 'Alitement et repas réguliers',        duree: "Selon l'état", conseils: 'Repos strict. Réexamen sous quelques jours.' },
+};
+
+// Convertit une durée écrite en nombre de jours (« 5 jours », « 2 semaines »…). null si non chiffrable.
+function _dureeJours(duree) {
+  const s = String(duree || '').toLowerCase();
+  const m = s.match(/(\d+)\s*(jours?|jrs?|semaines?|sem)/);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  if (!n || n > 60) return null;
+  return /sem/.test(m[2]) ? n * 7 : n;
+}
+
+// Formulaire d'ordonnance, éventuellement pré-rempli par un remède d'époque.
+function _ordoModal(id, p) {
+  p = p || {};
+  const inp = (cid, label, style, req, max, ph, val) => {
+    const t = new TextInputBuilder().setCustomId(cid).setLabel(label).setStyle(style).setRequired(req).setMaxLength(max);
+    if (ph) t.setPlaceholder(ph);
+    if (val) t.setValue(String(val).slice(0, max));
+    return new ActionRowBuilder().addComponents(t);
+  };
+  return new ModalBuilder().setCustomId(`med_ordo_modal::${id}`).setTitle('💊 Ordonnance médicale').addComponents(
+    inp('medicaments', 'Médicament(s)', TextInputStyle.Paragraph, true, 300, 'ex : Laudanum · onguent cicatrisant · tonique', p.medicaments),
+    inp('posologie', 'Posologie', TextInputStyle.Short, true, 150, 'ex : 2 gouttes matin et soir', p.posologie),
+    inp('duree', 'Durée du traitement', TextInputStyle.Short, false, 80, 'ex : 5 jours', p.duree),
+    inp('conseils', 'Conseils / recommandations', TextInputStyle.Paragraph, false, 400, 'ex : repos, éviter les efforts, revenir si fièvre', p.conseils),
+  );
+}
+
 // Prévient le PATIENT en MP de son changement de statut (discret, best-effort).
 // Ne notifie que sur un vrai changement, et jamais pour « non_teste ».
 async function _notifierPatientStatut(guild, id, f, ancien) {
@@ -418,6 +457,30 @@ async function checkRappelsMedicaux(guild) {
         try { await _posterAuDossier(guild, id, f, e, `<@&${ROLE_MEDECIN}>`); } catch {}
         try { await _notifierPatientStatut(guild, id, f, ancien); } catch {}
       }
+      // ── 💉 Rappel de traitement au patient (une fois par jour tant que l'ordonnance est active) ──
+      const ordo = (f.ordonnances && f.ordonnances.length) ? f.ordonnances[f.ordonnances.length - 1] : null;
+      if (ordo && ordo.at) {
+        const jours = _dureeJours(ordo.duree);
+        const finTraitement = jours ? ordo.at + jours * 86400000 : null;
+        const now = Date.now(); const heure = new Date(now).getHours();
+        const jourCle = _dateFR(now); // clé « jour » (une seule notif / jour)
+        // Seulement pendant la fenêtre de traitement chiffrable, en journée, et pas déjà envoyé aujourd'hui.
+        if (finTraitement && now < finTraitement && now > ordo.at + 3600000 && heure >= 8 && heure <= 22 && f.rappelTraitementJour !== jourCle) {
+          const u = await guild.client.users.fetch(id).catch(() => null);
+          if (u) {
+            await u.send([
+              "🩺 **Cabinet médical de l'Iron Wolf Company — rappel de traitement**",
+              '',
+              `💊 Pense à prendre ton traitement : **${_clip(ordo.medicaments || 'ton remède', 150)}**`,
+              ordo.posologie ? `📋 Posologie : ${_clip(ordo.posologie, 150)}` : '',
+              ordo.duree ? `⏳ Durée : ${_clip(ordo.duree, 80)}` : '',
+              '',
+              "*Message automatique et confidentiel — inutile d'y répondre. Bon rétablissement.*",
+            ].filter(Boolean).join('\n')).catch(() => {});
+            f.rappelTraitementJour = jourCle; changed = true;
+          }
+        }
+      }
     }
     if (changed) saveDB(db);
   } catch (e) { console.log('❌ checkRappelsMedicaux:', e.message); }
@@ -621,6 +684,124 @@ h1{text-align:center;font-size:1.8rem;letter-spacing:.04em;margin:.2em 0;color:#
 </body></html>`;
 }
 
+// ⚰️ Acte de décès en HTML autonome (parchemin solennel, imprimable → PDF).
+function _acteDecesHTML(f, gm, data) {
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const nom = gm?.displayName || f.nomRP || 'Défunt';
+  const row = (k, v) => v ? `<div class="row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>` : '';
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Acte de décès — ${esc(nom)}</title>
+<style>
+@media print{body{background:#fff;padding:0}.paper{box-shadow:none;margin:0}.print{display:none}}
+body{margin:0;background:#241a11;font-family:Georgia,'Times New Roman',serif;color:#241610;padding:24px}
+.paper{max-width:760px;margin:0 auto;background:#efe2c4;border:2px solid #3a2c1c;box-shadow:0 12px 40px #000a;padding:44px 48px;position:relative}
+.paper::before{content:'';position:absolute;inset:10px;border:1px double #5a4326;pointer-events:none}
+.cross{text-align:center;font-size:1.6rem;color:#3a2c1c;margin:0 0 4px}
+h1{text-align:center;font-size:1.8rem;letter-spacing:.08em;margin:.2em 0;color:#241610}
+.sub{text-align:center;font-style:italic;color:#4a3826;margin-bottom:4px}
+.gov{text-align:center;font-weight:bold;text-transform:uppercase;letter-spacing:.14em;font-size:.78rem;color:#4a3826;border-top:1px solid #5a4326;border-bottom:1px solid #5a4326;padding:6px 0;margin:14px 0}
+.pat{margin:16px 0;font-size:1.1rem;text-align:center}
+.pat .nom{font-size:1.5rem;font-weight:bold;letter-spacing:.04em;display:block;margin:6px 0}
+.sec{margin:10px 0}
+.row{display:flex;gap:8px;margin:5px 0;font-size:1rem}
+.row .k{font-weight:bold;min-width:170px;color:#3a2820}
+.concl{margin-top:16px;padding:12px;background:#e2d3ae;border-left:4px solid #3a2c1c;font-style:italic}
+.sign{margin-top:34px;text-align:right;font-style:italic;color:#3a2820}
+.foot{margin-top:18px;font-size:.7rem;text-align:center;color:#4a3826}
+.print{position:fixed;top:14px;right:14px;background:#3a2c1c;color:#efe2c4;border:0;padding:9px 14px;border-radius:6px;font-family:inherit;cursor:pointer}
+</style></head><body>
+<button class="print" onclick="window.print()">🖨️ Imprimer / PDF</button>
+<div class="paper">
+  <div class="cross">✝</div>
+  <h1>Acte de Décès</h1>
+  <div class="sub">Certificat officiel constatant le décès</div>
+  <div class="gov">État du Texas — Bureau Médical de Blackwater</div>
+  <div class="pat">Il est ici constaté le décès de<span class="nom">${esc(nom)}</span></div>
+  <div class="sec">
+    ${row('Date & lieu du décès', data.dateLieu)}
+    ${row('Cause du décès', data.cause)}
+    ${row('Circonstances', data.circonstances)}
+    ${row('Déclarant / témoin', data.temoin)}
+    ${row('Lieu de sépulture', data.inhumation)}
+  </div>
+  ${data.circonstances ? '' : ''}
+  <div class="concl">Le praticien soussigné atteste avoir constaté le décès et en avoir dressé le présent acte, conformément à la loi.</div>
+  <div class="sign">${esc(data.medecin || 'Dr. June McCall')},<br>praticien agréé — Bureau Médical de Blackwater</div>
+  <div class="foot">Acte officiel faisant foi auprès des autorités. Toute falsification est passible de poursuites (loi fédérale des É.-U.).<br>Iron Wolf Company · Suivi médical</div>
+</div>
+</body></html>`;
+}
+
+// Découpe les lignes de prestations « libellé — montant » et calcule le total.
+function _parseHonoLignes(txt) {
+  const lignes = []; let total = 0;
+  for (const raw of String(txt || '').split('\n')) {
+    const l = raw.trim(); if (!l) continue;
+    const m = l.match(/(\d+(?:[.,]\d{1,2})?)\s*\$?\s*$/);
+    let libelle = l, montant = null;
+    if (m) { montant = parseFloat(m[1].replace(',', '.')); libelle = l.slice(0, m.index).replace(/[—\-–:=·]\s*$/, '').trim() || l; if (!isNaN(montant)) total += montant; }
+    lignes.push({ libelle, montant });
+  }
+  return { lignes, total };
+}
+
+// 🧾 Note d'honoraires (facture d'époque, parchemin imprimable → PDF).
+function _honorairesHTML(f, gm, data) {
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const nom = gm?.displayName || f.nomRP || 'Patient';
+  const { lignes, total } = _parseHonoLignes(data.prestations);
+  const totalAff = (data.total && String(data.total).trim()) ? String(data.total).trim().replace(/\$/g, '') : total.toFixed(2).replace(/\.00$/, '');
+  const rows = lignes.map(x => `<tr><td>${esc(x.libelle)}</td><td class="mt">${x.montant != null ? esc(x.montant.toFixed(2).replace(/\.00$/, '')) + ' $' : '—'}</td></tr>`).join('');
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Note d'honoraires — ${esc(nom)}</title>
+<style>
+@media print{body{background:#fff;padding:0}.paper{box-shadow:none;margin:0}.print{display:none}}
+body{margin:0;background:#3a2c1c;font-family:Georgia,'Times New Roman',serif;color:#2a1c10;padding:24px}
+.paper{max-width:760px;margin:0 auto;background:#f3e6c8;border:2px solid #7a5a34;box-shadow:0 12px 40px #0008;padding:44px 48px;position:relative}
+.paper::before{content:'';position:absolute;inset:10px;border:1px double #9a7a4a;pointer-events:none}
+h1{text-align:center;font-size:1.9rem;letter-spacing:.04em;margin:.2em 0;color:#3a260f}
+.sub{text-align:center;font-style:italic;color:#5a4326;margin-bottom:4px}
+.gov{text-align:center;font-weight:bold;text-transform:uppercase;letter-spacing:.14em;font-size:.8rem;color:#6a4e2a;border-top:1px solid #9a7a4a;border-bottom:1px solid #9a7a4a;padding:6px 0;margin:14px 0}
+.pat{margin:14px 0;font-size:1rem;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+table{width:100%;border-collapse:collapse;margin:16px 0}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid #c9ad78;font-size:.98rem}
+th{text-transform:uppercase;letter-spacing:.08em;font-size:.72rem;color:#6a4e2a}
+.mt{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.total{text-align:right;font-size:1.25rem;font-weight:bold;margin-top:10px;color:#3a260f}
+.total span{border-top:3px double #7a5a34;padding-top:6px}
+.pay{margin-top:8px;font-style:italic;color:#5a4326}
+.concl{margin-top:16px;padding:12px;background:#e9d9b4;border-left:4px solid #7a5a34;font-style:italic}
+.sign{margin-top:32px;text-align:right;font-style:italic;color:#4a3420}
+.foot{margin-top:18px;font-size:.7rem;text-align:center;color:#6a4e2a}
+.print{position:fixed;top:14px;right:14px;background:#7a5a34;color:#f3e6c8;border:0;padding:9px 14px;border-radius:6px;font-family:inherit;cursor:pointer}
+</style></head><body>
+<button class="print" onclick="window.print()">🖨️ Imprimer / PDF</button>
+<div class="paper">
+  <h1>Note d'Honoraires</h1>
+  <div class="sub">Mémoire des soins et prestations médicales</div>
+  <div class="gov">Cabinet Médical — Iron Wolf Company</div>
+  <div class="pat"><span><b>Patient :</b> ${esc(nom)}</span><span><b>Date :</b> ${esc(_dateFR(Date.now()))}</span></div>
+  <table><thead><tr><th>Prestation</th><th class="mt">Montant</th></tr></thead><tbody>${rows || '<tr><td>—</td><td class="mt">—</td></tr>'}</tbody></table>
+  <div class="total"><span>TOTAL À RÉGLER : ${esc(totalAff)} $</span></div>
+  ${data.paiement ? `<div class="pay">Règlement : ${esc(data.paiement)}</div>` : ''}
+  ${data.notes ? `<div class="concl">${esc(data.notes)}</div>` : ''}
+  <div class="sign">${esc(data.medecin || 'Dr. June McCall')},<br>praticien agréé — Cabinet médical de l'Iron Wolf Company</div>
+  <div class="foot">Note à régler au cabinet. Merci de votre confiance.<br>Iron Wolf Company · Suivi médical</div>
+</div>
+</body></html>`;
+}
+
+// Sélecteur de membre de la Confrérie (réutilisé par l'acte de décès & la note d'honoraires).
+async function _envoyerSelecteurMembre(interaction, selectId, intro) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+  await interaction.guild.members.fetch().catch(() => {});
+  const role = interaction.guild.roles.cache.get(ROLE_CONFRERIE);
+  const membres = role ? [...role.members.values()].filter(m => !m.user.bot) : [];
+  if (!membres.length) { await interaction.editReply({ content: '⚠️ Aucun membre de la Confrérie trouvé (vérifie le rôle).' }).catch(() => {}); return false; }
+  const options = membres.slice(0, 25).map(m => ({ label: m.displayName.slice(0, 100), value: m.id }));
+  const row = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(selectId).setPlaceholder('Choisis un membre de la Confrérie').addOptions(options));
+  await interaction.editReply({ content: `${intro}${membres.length > 25 ? ' *(25 premiers affichés)*' : ''} :`, components: [row] }).catch(() => {});
+  return true;
+}
+
 async function installerPanel(guild) {
   const ch = _ch(guild, MEDICAL_CHANNEL);
   if (!ch) return;
@@ -634,6 +815,10 @@ async function installerPanel(guild) {
       '• **📨 Demandes en attente** — les demandes de RDV à traiter *(médecin & Direction)*.',
       '• **📊 Bilan** — statistiques médicales de la Confrérie *(médecin & Direction)*.',
       '• **🆘 Demander un RDV** — besoin de soins ? Décris ton motif, le médecin te recontacte *(tout le monde)*.',
+      '',
+      '📄 **Documents officiels** *(médecin & Direction)* :',
+      '• **⚰️ Acte de décès** — établir l\'acte officiel d\'un membre décédé.',
+      '• **🧾 Note d\'honoraires** — facturer les soins prodigués à un membre.',
     ].join('\n'));
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('med_select').setLabel('Ouvrir un dossier').setEmoji('🩺').setStyle(ButtonStyle.Primary),
@@ -642,20 +827,24 @@ async function installerPanel(guild) {
     new ButtonBuilder().setCustomId('med_bilan').setLabel('Bilan').setEmoji('📊').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('med_demande::open').setLabel('Demander un RDV').setEmoji('🆘').setStyle(ButtonStyle.Success),
   );
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('med_deces::open').setLabel('Acte de décès').setEmoji('⚰️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('med_honos::open').setLabel('Note d\'honoraires').setEmoji('🧾').setStyle(ButtonStyle.Secondary),
+  );
   // Forum (type 15) → post épinglé ; sinon salon classique → message. Mise à jour EN PLACE si déjà présent.
   if (ch.type === 15 && ch.threads?.create) {
     const act = await ch.threads.fetchActive().catch(() => null);
     const existing = act?.threads ? [...act.threads.values()].find(t => (t.name || '').includes('SUIVI MÉDICAL')) : null;
-    if (existing) { const st = await existing.fetchStarterMessage().catch(() => null); if (st) await st.edit({ embeds: [e], components: [row] }).catch(() => {}); return; }
-    const post = await ch.threads.create({ name: '🩺 SUIVI MÉDICAL', message: { embeds: [e], components: [row] } }).catch(() => null);
+    if (existing) { const st = await existing.fetchStarterMessage().catch(() => null); if (st) await st.edit({ embeds: [e], components: [row, row2] }).catch(() => {}); return; }
+    const post = await ch.threads.create({ name: '🩺 SUIVI MÉDICAL', message: { embeds: [e], components: [row, row2] } }).catch(() => null);
     if (post?.pin) await post.pin().catch(() => {});
     return;
   }
   if (!ch.send) return;
   const existing = await ch.messages.fetch({ limit: 30 }).catch(() => null);
   const panel = existing ? [...existing.values()].find(m => m.author?.id === moi && m.components?.length && (m.embeds?.[0]?.title || '').includes('Suivi médical')) : null;
-  if (panel) { await panel.edit({ embeds: [e], components: [row] }).catch(() => {}); return; }
-  await ch.send({ embeds: [e], components: [row] }).catch(() => {});
+  if (panel) { await panel.edit({ embeds: [e], components: [row, row2] }).catch(() => {}); return; }
+  await ch.send({ embeds: [e], components: [row, row2] }).catch(() => {});
 }
 
 async function _afficherFiche(interaction, id, viaUpdate) {
@@ -1248,18 +1437,25 @@ async function routeInteraction(interaction) {
       return true;
     }
 
-    // ── 💊 Ordonnance → formulaire ──
+    // ── 💊 Ordonnance → choix d'un remède d'époque (pré-remplissage) ou rédaction libre ──
     if (interaction.isButton?.() && cid.startsWith('med_ordo::')) {
       if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé au médecin et à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       const id = cid.split('::')[1];
-      const modal = new ModalBuilder().setCustomId(`med_ordo_modal::${id}`).setTitle('💊 Ordonnance médicale')
-        .addComponents(
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('medicaments').setLabel('Médicament(s)').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(300).setPlaceholder('ex : Laudanum · onguent cicatrisant · tonique')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('posologie').setLabel('Posologie').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(150).setPlaceholder('ex : 2 gouttes matin et soir')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duree').setLabel('Durée du traitement').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80).setPlaceholder('ex : 5 jours')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('conseils').setLabel('Conseils / recommandations').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(400).setPlaceholder('ex : repos, éviter les efforts, revenir si fièvre')),
-        );
-      await interaction.showModal(modal).catch(() => {});
+      const options = [
+        { label: 'Rédaction libre', value: 'libre', emoji: '✍️', description: "Ordonnance vierge, à remplir soi-même" },
+        ...Object.entries(REMEDES).map(([k, r]) => ({ label: r.label.slice(0, 100), value: k, emoji: r.emoji, description: _clip(r.desc, 100) })),
+      ];
+      const row = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`med_ordo_pick::${id}`).setPlaceholder('Choisis un remède d\'époque (ou rédaction libre)').addOptions(options));
+      await interaction.reply({ content: '💊 **Ordonnance** — choisis un remède pré-rempli (modifiable ensuite) ou pars d\'une page blanche :', components: [row], flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+    // Remède choisi → ouvre le formulaire, éventuellement pré-rempli.
+    if (interaction.isStringSelectMenu?.() && cid.startsWith('med_ordo_pick::')) {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const id = cid.split('::')[1];
+      const choix = interaction.values?.[0];
+      const preset = (choix && choix !== 'libre') ? REMEDES[choix] : null;
+      await interaction.showModal(_ordoModal(id, preset)).catch(() => {});
       return true;
     }
     if (interaction.isModalSubmit?.() && cid.startsWith('med_ordo_modal::')) {
@@ -1287,6 +1483,88 @@ async function routeInteraction(interaction) {
     if (interaction.isButton?.() && cid === 'med_bilan') {
       if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé au médecin et à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
       await interaction.reply({ embeds: [_bilanEmbed(loadDB())], flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+
+    // ── ⚰️ Acte de décès : sélection du membre → formulaire → parchemin ──
+    if (interaction.isButton?.() && cid === 'med_deces::open') {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé au médecin et à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      await _envoyerSelecteurMembre(interaction, 'med_deces_pick', '⚰️ **Acte de décès** — pour quel membre ?');
+      return true;
+    }
+    if (interaction.isStringSelectMenu?.() && cid === 'med_deces_pick') {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const id = interaction.values?.[0]; if (!id) return true;
+      const modal = new ModalBuilder().setCustomId(`med_deces_modal::${id}`).setTitle('⚰️ Acte de décès').addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('dateLieu').setLabel('Date et lieu du décès').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(120).setPlaceholder('ex : 14 Septembre 1904 — Blackwater')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('cause').setLabel('Cause du décès').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(150).setPlaceholder('ex : blessure par balle · maladie · vieillesse')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('circonstances').setLabel('Circonstances').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500).setPlaceholder('Récit bref des circonstances (facultatif)')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('temoin').setLabel('Déclarant / témoin').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('inhumation').setLabel('Lieu de sépulture').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(120)),
+      );
+      await interaction.showModal(modal).catch(() => {});
+      return true;
+    }
+    if (interaction.isModalSubmit?.() && cid.startsWith('med_deces_modal::')) {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const id = cid.split('::')[1];
+      const db = loadDB(); const f = _fiche(db, id);
+      const gm = await interaction.guild.members.fetch(id).catch(() => null);
+      const gv = k => (interaction.fields.getTextInputValue(k) || '').trim();
+      const data = { dateLieu: gv('dateLieu'), cause: gv('cause'), circonstances: gv('circonstances'), temoin: gv('temoin'), inhumation: gv('inhumation'), medecin: interaction.member?.displayName || 'Dr. June McCall' };
+      const html = _acteDecesHTML(f, gm, data);
+      const nom = (gm?.displayName || 'defunt').replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 40) || 'defunt';
+      const file = new AttachmentBuilder(Buffer.from(html, 'utf8'), { name: `acte-deces-${nom}.html` });
+      _log(f, `⚰️ Acte de décès établi — ${_clip(data.cause, 60)} (${_clip(data.dateLieu, 40)})`, data.medecin);
+      saveDB(db);
+      try {
+        const e = new EmbedBuilder().setColor(0x3a2c1c).setTitle('⚰️ Acte de décès établi')
+          .setDescription(`Le décès de ${gm ? `**${_clip(gm.displayName, 80)}**` : `<@${id}>`} a été constaté.`)
+          .addFields(
+            { name: '📅 Date & lieu', value: _clip(data.dateLieu || '—', 200), inline: false },
+            { name: '⚰️ Cause', value: _clip(data.cause || '—', 200), inline: false },
+          ).setFooter({ text: 'Iron Wolf Company · Suivi médical' }).setTimestamp();
+        await _posterAuDossier(interaction.guild, id, f, e, `<@&${ROLE_MEDECIN}>`);
+        await _rafraichirDossier(interaction.guild, id, f).catch(() => {});
+      } catch {}
+      await interaction.editReply({ content: `⚰️ **Acte de décès** de ${gm ? `**${_clip(gm.displayName, 60)}**` : 'ce membre'} — télécharge le fichier, ouvre-le dans un navigateur, puis **🖨️ Imprimer / PDF**.`, files: [file] }).catch(() => {});
+      return true;
+    }
+
+    // ── 🧾 Note d'honoraires : sélection du membre → formulaire → parchemin ──
+    if (interaction.isButton?.() && cid === 'med_honos::open') {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé au médecin et à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      await _envoyerSelecteurMembre(interaction, 'med_honos_pick', '🧾 **Note d\'honoraires** — pour quel patient ?');
+      return true;
+    }
+    if (interaction.isStringSelectMenu?.() && cid === 'med_honos_pick') {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const id = interaction.values?.[0]; if (!id) return true;
+      const modal = new ModalBuilder().setCustomId(`med_honos_modal::${id}`).setTitle('🧾 Note d\'honoraires').addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('prestations').setLabel('Prestations (une par ligne : soin — prix)').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(600).setPlaceholder('Consultation — 5\nExtraction de balle — 20\nOnguent — 3')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('total').setLabel('Montant total ($) — vide = calcul auto').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(20).setPlaceholder('ex : 28')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('paiement').setLabel('Règlement').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80).setPlaceholder('ex : réglé comptant · à crédit · acompte de 10 $')),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('notes').setLabel('Notes / mentions').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(300)),
+      );
+      await interaction.showModal(modal).catch(() => {});
+      return true;
+    }
+    if (interaction.isModalSubmit?.() && cid.startsWith('med_honos_modal::')) {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const id = cid.split('::')[1];
+      const db = loadDB(); const f = _fiche(db, id);
+      const gm = await interaction.guild.members.fetch(id).catch(() => null);
+      const gv = k => (interaction.fields.getTextInputValue(k) || '').trim();
+      const data = { prestations: gv('prestations'), total: gv('total'), paiement: gv('paiement'), notes: gv('notes'), medecin: interaction.member?.displayName || 'Dr. June McCall' };
+      const html = _honorairesHTML(f, gm, data);
+      const totalCalc = (data.total && data.total.trim()) ? data.total.trim() : (_parseHonoLignes(data.prestations).total.toFixed(2).replace(/\.00$/, '') + ' $');
+      const nom = (gm?.displayName || 'patient').replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 40) || 'patient';
+      const file = new AttachmentBuilder(Buffer.from(html, 'utf8'), { name: `note-honoraires-${nom}.html` });
+      _log(f, `🧾 Note d'honoraires établie — total ${_clip(totalCalc, 30)}`, data.medecin);
+      saveDB(db);
+      await interaction.editReply({ content: `🧾 **Note d'honoraires** de ${gm ? `**${_clip(gm.displayName, 60)}**` : 'ce patient'} — télécharge le fichier, ouvre-le dans un navigateur, puis **🖨️ Imprimer / PDF**.`, files: [file] }).catch(() => {});
       return true;
     }
 
@@ -1339,4 +1617,4 @@ async function installerPanelDemande(channel) {
 }
 
 module.exports = { installerPanel, installerExemple, installerPanelDemande, routeInteraction, checkRappelsMedicaux, MEDICAL_CHANNEL, ROLE_MEDECIN, _test: { _dossierThread, _posterAuDossier, _archiverFilsPatient } };
-module.exports.__test = { _convalescenceJours, _bilanEmbed, _certificatHTML, _embedFiche }; // tests uniquement
+module.exports.__test = { _convalescenceJours, _bilanEmbed, _certificatHTML, _embedFiche, _dureeJours, _parseHonoLignes, _acteDecesHTML, _honorairesHTML, _ordonnanceHTML, _ordoModal, REMEDES }; // tests uniquement
