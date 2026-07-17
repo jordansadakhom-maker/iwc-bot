@@ -107,12 +107,27 @@ function _log(f, action, par) { if (!f.historique) f.historique = []; f.historiq
 // (évite les RangeError « Invalid string length » de la validation discord.js).
 function _clip(v, n) { return String(v == null ? '' : v).slice(0, n); }
 function _idDmd() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+// État RP + jauge de vitalité (immersion) selon le statut / la convalescence.
+const VITALITE = {
+  apte:        { bar: '🟩🟩🟩🟩🟩', txt: 'Sur pied' },
+  observation: { bar: '🟩🟩🟩🟨⬜', txt: 'Convalescent' },
+  inapte:      { bar: '🟥🟥⬜⬜⬜', txt: 'Alité' },
+  non_teste:   { bar: '⬜⬜⬜⬜⬜', txt: 'Non évalué' },
+};
+function _vitalite(f) {
+  const v = VITALITE[f.statut] || VITALITE.non_teste;
+  // Blessure « critique » récente + inapte → « Entre la vie et la mort ».
+  if (f.statut === 'inapte' && (f.blessures || []).some(b => /critique/i.test(b.gravite || ''))) return { bar: '🟥⬜⬜⬜⬜', txt: 'Entre la vie et la mort' };
+  if (f.statut !== 'apte' && f.reposJusquAt && f.reposJusquAt > Date.now()) return { bar: v.bar, txt: 'Convalescent' };
+  return v;
+}
 function _embedFiche(f, gm) {
   const st = STATUTS[f.statut] || STATUTS.non_teste;
+  const v = _vitalite(f);
   const e = new EmbedBuilder().setColor(st.couleur).setTitle('🩺 Suivi médical — confidentiel')
     .setDescription(gm ? `**${_clip(gm.displayName, 80)}** · <@${gm.id}>` : 'Membre');
   const fields = [
-    { name: 'État', value: _clip(st.label, 100), inline: true },
+    { name: 'État', value: _clip(`${st.label}\n${v.bar} *${v.txt}*`, 100), inline: true },
     { name: 'Test d\'aptitude', value: f.testValide ? `✅ Validé${f.testDate ? ` (${_dateFR(f.testDate)})` : ''}` : '❌ Non validé', inline: true },
     { name: 'Prochain RDV', value: _clip((f.prochainRdv || '—') + (f.prochainRdvAt ? ' ⏰' : ''), 200), inline: true },
   ];
@@ -290,7 +305,20 @@ async function _posterAuDossier(guild, id, f, embed, ping) {
   try {
     const t = await _dossierThread(guild, id, f);
     const cible = t?.send ? t : _ch(guild, MEDICAL_CHANNEL);
-    if (cible?.send) { await cible.send({ content: ping || '', embeds: [embed], allowedMentions: ping ? { roles: [ROLE_MEDECIN] } : { parse: [] } }).catch(() => {}); return true; }
+    if (cible?.send) { await cible.send({ content: ping || '', embeds: [embed], allowedMentions: ping ? { roles: [ROLE_MEDECIN] } : { parse: [] } }).catch(() => {}); await _rafraichirDossier(guild, id, f).catch(() => {}); return true; }
+    return false;
+  } catch { return false; }
+}
+// LE dossier vivant = le message d'ouverture du fil patient (un seul par personne).
+// On le maintient toujours à jour (état, blessures, soins, ordonnances, notes) et on
+// crée le fil au besoin — ainsi chaque dossier existe et se met à jour tout seul.
+async function _rafraichirDossier(guild, id, f) {
+  try {
+    const t = await _dossierThread(guild, id, f);
+    if (!t?.fetchStarterMessage) return false;
+    const gm = await guild.members.fetch(id).catch(() => null);
+    const starter = await t.fetchStarterMessage().catch(() => null);
+    if (starter) { await starter.edit({ embeds: [_embedFiche(f, gm)] }).catch(() => {}); return true; }
     return false;
   } catch { return false; }
 }
@@ -773,6 +801,7 @@ async function routeInteraction(interaction) {
       await _afficherFiche(interaction, id, true); // accuse réception du bouton d'abord (évite « interaction a échoué »)
       await _alerteStatut(interaction.guild, id, f); // alerte si inapte / observation (dans le dossier du patient)
       await _notifierPatientStatut(interaction.guild, id, f, ancienStatut); // prévient le patient du changement
+      await _rafraichirDossier(interaction.guild, id, f).catch(() => {}); // dossier vivant maintenu à jour
       saveDB(db); // persiste le fil du dossier (f.threadId) éventuellement créé
       return true;
     }
@@ -839,6 +868,7 @@ async function routeInteraction(interaction) {
       f.notes = (interaction.fields.getTextInputValue('note') || '').trim();
       f.majPar = interaction.member?.displayName || interaction.user.username; f.majAt = Date.now();
       _log(f, 'Notes mises à jour', f.majPar); saveDB(db);
+      await _rafraichirDossier(interaction.guild, id, f).catch(() => {});
       const gm = await interaction.guild.members.fetch(id).catch(() => null);
       await interaction.editReply({ content: '✅ Notes enregistrées.', embeds: [_embedFiche(f, gm)], components: _actions(id) }).catch(() => {});
       return true;
@@ -1168,6 +1198,7 @@ async function routeInteraction(interaction) {
         _log(f, `Convalescence fixée : ${j} j (jusqu'au ${_dateFR(f.reposJusquAt)})`, par);
       }
       f.majPar = par; f.majAt = Date.now(); saveDB(db);
+      await _rafraichirDossier(interaction.guild, id, f).catch(() => {});
       const gm = await interaction.guild.members.fetch(id).catch(() => null);
       await interaction.editReply({ content: f.reposJusquAt ? `⏳ Convalescence fixée jusqu'au **${_dateFR(f.reposJusquAt)}**. Le patient repassera **apte** automatiquement à la fin.` : '✅ Convalescence levée.', embeds: [_embedFiche(f, gm)], components: _actions(id) }).catch(() => {});
       return true;
@@ -1247,6 +1278,7 @@ async function routeInteraction(interaction) {
       if (f.ordonnances.length > 20) f.ordonnances = f.ordonnances.slice(-20);
       _log(f, `Ordonnance : ${_clip(data.medicaments, 60)}${data.posologie ? ` (${_clip(data.posologie, 40)})` : ''}`, interaction.member?.displayName);
       saveDB(db);
+      await _rafraichirDossier(interaction.guild, id, f).catch(() => {});
       await interaction.editReply({ content: `💊 **Ordonnance** pour ${gm ? `**${_clip(gm.displayName, 60)}**` : 'ce patient'} — télécharge le fichier, ouvre-le dans un navigateur, puis **🖨️ Imprimer / PDF**.`, files: [file] }).catch(() => {});
       return true;
     }
