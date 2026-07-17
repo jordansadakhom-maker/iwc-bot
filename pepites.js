@@ -104,6 +104,24 @@ async function installerPanneau(guild) {
   try { const db = loadDB(); _ens(db); await _majPanneau(guild, db); } catch (e) { console.log('⚠️ pepites installerPanneau:', e.message); }
 }
 
+// Retire l'« onglet » Pépites : supprime le panneau épinglé s'il existe (idempotent).
+// Les données (db.pepites) restent intactes ; seul l'affichage disparaît.
+async function retirerPanneau(guild) {
+  try {
+    const db = loadDB(); const p = _ens(db);
+    const ch = await guild.channels.fetch(SALON_PEPITES).catch(() => null);
+    if (!ch?.messages) return;
+    const me = guild.client.user.id;
+    const estPanel = m => m.author?.id === me && (m.embeds?.[0]?.title || '').includes('PÉPITES');
+    let panel = null;
+    if (p.panelId) panel = await ch.messages.fetch(p.panelId).catch(() => null);
+    if (!panel) { const pins = await ch.messages.fetchPinned().catch(() => null); if (pins) panel = [...pins.values()].find(estPanel) || null; }
+    if (!panel) { const recent = await ch.messages.fetch({ limit: 30 }).catch(() => null); if (recent) panel = [...recent.values()].find(estPanel) || null; }
+    if (panel) await panel.delete().catch(() => {});
+    if (p.panelId) { p.panelId = null; saveDB(db); }
+  } catch (e) { console.log('⚠️ pepites retirerPanneau:', e.message); }
+}
+
 async function onMessage(message) {
   try {
     if (!message.guild || message.author?.bot || message.webhookId) return false;
@@ -162,4 +180,4 @@ async function routeInteraction(interaction) {
   } catch (e) { if ([10062, 40060].includes(e?.code)) return true; console.log('❌ pepites routeInteraction:', e.message); return true; }
 }
 
-module.exports = { onMessage, routeInteraction, installerPanneau, SALON_PEPITES };
+module.exports = { onMessage, routeInteraction, installerPanneau, retirerPanneau, SALON_PEPITES };

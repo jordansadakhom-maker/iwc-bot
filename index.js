@@ -2421,7 +2421,7 @@ Chaque commande ci-dessous ouvre un **formulaire** à remplir ; le document est 
 **\`/casier\`** 🗂️ — une fiche sur un membre ou sur une cible.
 **\`/ordre\`** 🎖️ — un ordre de mission destiné à des agents.
 **\`/carte\`** 🎴 — une carte de membre officielle.
-**\`/billet\`** 🃏 — le billet de La Confrérie, laissé après un coup.`,
+**\`/billet\`** 🃏 — le livre d'or de La Confrérie, laissé après un coup.`,
   `## 🩸 Le Code
 **\`/code\`** 📖 — affiche le Code de La Confrérie.
 > • Option \`membre\` → l'envoie en privé (MP) à quelqu'un.
@@ -2765,7 +2765,8 @@ async function autoSetup(guild) {
   _installerPosteCommandement(guild).then(() => console.log('🎖️ Poste de commandement Direction en place')).catch(() => {});
   direction.installerMemo?.(guild).then(() => console.log('📌 Mémo Direction en place')).catch(() => {});
   assistant.installerPanneau?.(guild).then(() => console.log('🤖 Panneau assistant IA en place')).catch(() => {});
-  pepites.installerPanneau?.(guild).then(() => console.log('💰 Panneau pépites en place')).catch(() => {});
+  // Onglet « Pépites » retiré (retour de test) : on supprime le panneau au lieu de l'installer. Données conservées.
+  pepites.retirerPanneau?.(guild).then(() => console.log('💰 Onglet pépites retiré')).catch(() => {});
   musique.installerPanneau?.(guild).then(() => console.log('🎶 Panneau musique en place')).catch(() => {});
   _installerPanneauContrats(guild).then(() => console.log('📜 Panneau « Contrats en cours » en place')).catch(() => {});
   _installerCataloguePrestations(guild).then(() => console.log('🤠 Catalogue des prestations (1518301186275676230) en place')).catch(() => {});
@@ -3975,7 +3976,8 @@ client.on('messageCreate', async message => {
   try { if (await _agendaPhotoOnMessage(message)) return; } catch {}
   try { if (await resumePhoto.onMessage?.(message)) return; } catch {}
   try { if (await inventaire.onMessage?.(message)) return; } catch {}
-  try { if (await pepites.onMessage?.(message)) return; } catch {}
+  // Onglet « Pépites » retiré : on ne recrée plus le panneau ni ne compte les chiffres postés dans #pépites.
+  // try { if (await pepites.onMessage?.(message)) return; } catch {}
   try { if (await musique.onMessage?.(message)) return; } catch {}
   try { if (await comptabilite.onMessage?.(message)) return; } catch {}
   try { if (await traque.onMessage?.(message)) return; } catch {}

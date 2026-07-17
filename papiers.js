@@ -125,14 +125,14 @@ const papiersCommands = [
   new SlashCommandBuilder().setName('casier').setDescription('🗂️ Créer une fiche (membre ou cible)'),
   new SlashCommandBuilder().setName('ordre').setDescription('🎖️ Émettre un ordre de mission'),
   new SlashCommandBuilder().setName('carte').setDescription('🎴 Délivrer une carte de membre'),
-  new SlashCommandBuilder().setName('billet').setDescription('🃏 Laisser le billet de la Confrérie'),
+  new SlashCommandBuilder().setName('billet').setDescription('🃏 Laisser le livre d\'or de la Confrérie'),
   new SlashCommandBuilder().setName('wanted').setDescription('🔫 Émettre un avis de recherche (Direction)'),
   new SlashCommandBuilder().setName('wanted-liste').setDescription('📋 Liste des avis de recherche actifs (dans ce salon)'),
   new SlashCommandBuilder().setName('code').setDescription('📖 Afficher le Code de la Confrérie').addUserOption(o => o.setName('membre').setDescription('Envoyer le Code en privé à ce membre (DM)').setRequired(false)).addBooleanOption(o => o.setName('tous').setDescription('Envoyer le Code à TOUS les membres en privé (Direction)').setRequired(false)),
   new SlashCommandBuilder().setName('papiers').setDescription('📒 Consulter les derniers papiers archivés')
     .addStringOption(o => o.setName('type').setDescription('Filtrer par type de papier').setRequired(false).addChoices(
       { name: 'Reçu', value: 'recu' }, { name: 'Dette', value: 'dette' }, { name: 'Fiche / Casier', value: 'casier' },
-      { name: 'Ordre de mission', value: 'ordre' }, { name: 'Carte de membre', value: 'carte' }, { name: 'Billet', value: 'billet' },
+      { name: 'Ordre de mission', value: 'ordre' }, { name: 'Carte de membre', value: 'carte' }, { name: 'Livre d\'or', value: 'billet' },
       { name: 'Avis de recherche', value: 'wanted' }, { name: 'Serment (Code)', value: 'code' },
     ))
     .addStringOption(o => o.setName('recherche').setDescription('Chercher un nom ou un mot-clé').setRequired(false)),
@@ -204,8 +204,8 @@ function buildModal(cmd) {
     );
   }
   if (cmd === 'billet') {
-    return new ModalBuilder().setCustomId('papier_modal_billet').setTitle('🃏 Billet de la Confrérie').addComponents(
-      ti('message', 'Mot à laisser (optionnel)', P, false, 'Laisse vide pour le billet standard.', 400),
+    return new ModalBuilder().setCustomId('papier_modal_billet').setTitle('🃏 Livre d\'or de la Confrérie').addComponents(
+      ti('message', 'Mot à laisser (optionnel)', P, false, 'Laisse vide pour le livre d\'or standard.', 400),
     );
   }
   return null;
@@ -302,7 +302,7 @@ function embedBillet(message, auteur) {
   const lignes = ['*« Pris aux puissants, rendu aux oubliés. »*', ''];
   if (message && message.trim()) { lignes.push(message.trim(), ''); }
   lignes.push('— **La Confrérie**');
-  return new EmbedBuilder().setColor(COL.rouge).setTitle('🃏 LE BILLET DE LA CONFRÉRIE')
+  return new EmbedBuilder().setColor(COL.rouge).setTitle('🃏 LE LIVRE D\'OR DE LA CONFRÉRIE')
     .setDescription(lignes.join('\n'))
     .setFooter({ text: `Laissé sur les lieux • ${fmtDate()}` }).setTimestamp();
 }
@@ -587,7 +587,7 @@ async function gererInteractionPapiers(interaction) {
       else if (type === 'casier') { embed = embedCasier({ nom: g('nom'), statut: g('statut'), description: g('description'), faits: g('faits'), notes: g('notes') }, auteur); label = 'Fiche / Casier'; }
       else if (type === 'ordre')  { embed = embedOrdre({ operation: g('operation'), objectif: g('objectif'), assignes: g('assignes'), quand: g('quand'), consignes: g('consignes') }, auteur); label = 'Ordre de mission'; }
       else if (type === 'carte')  { embed = embedCarte({ nom: g('nom'), grade: g('grade'), entree: g('entree'), mention: g('mention') }, auteur); label = 'Carte de membre'; }
-      else if (type === 'billet') { embed = embedBillet(g('message'), auteur); label = 'Billet de la Confrérie'; }
+      else if (type === 'billet') { embed = embedBillet(g('message'), auteur); label = 'Livre d\'or de la Confrérie'; }
       else if (type === 'wanted') { embed = embedWanted({ nom: g('nom'), crime: g('crime'), prime: g('prime'), position: g('position'), image: g('image') }); label = 'Avis de recherche'; }
       else if (type === 'dette') {
         embed = embedDette({ debiteur: g('debiteur'), creancier: g('creancier'), montant: g('montant'), echeance: g('echeance'), motif: g('motif') }, auteur);
@@ -937,7 +937,7 @@ function _panelPapiersPayload() {
       '__**🔍 Consulter**__',
       '« Consulter les derniers papiers » liste les derniers documents avec un lien direct vers chacun.',
       '',
-      '📌 *Reçu · Dette (signable) · Casier · Carte · Ordre de mission · Billet · Avis de recherche (Direction) · Code de la Confrérie.*',
+      '📌 *Reçu · Dette (signable) · Casier · Carte · Ordre de mission · Livre d\'or · Avis de recherche (Direction) · Code de la Confrérie.*',
     ].join('\n'))
     .setFooter({ text: 'Iron Wolf Company • Registre des papiers' });
   // 📄 Documents courants
@@ -950,7 +950,7 @@ function _panelPapiersPayload() {
   // 🎖️ Mission & Confrérie
   const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('papier_open_ordre').setLabel('Ordre de mission').setEmoji('🎖️').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('papier_open_billet').setLabel('Billet').setEmoji('🃏').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('papier_open_billet').setLabel('Livre d\'or').setEmoji('🃏').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('papier_open_wanted').setLabel('Avis de recherche').setEmoji('🔫').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId('papier_code_open').setLabel('Code').setEmoji('🪖').setStyle(ButtonStyle.Secondary),
   );
