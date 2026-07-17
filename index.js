@@ -836,6 +836,8 @@ async function _cpartCreerOpBouton(interaction) {
     dbm.contratsParticipants[contratId].msgId = interaction.message?.id || dbm.contratsParticipants[contratId].msgId;
     dbm.contratsParticipants[contratId].channelId = interaction.channelId || dbm.contratsParticipants[contratId].channelId;
     saveDB(dbm);
+    // Auto-remise à jour du panneau (ajoute les boutons récents : Places, Clôturer) sur les vieux panneaux.
+    try { await interaction.message?.edit({ embeds: [_participationEmbed(contratId)], components: _participationRows(contratId) }); } catch {}
     const rec = dbm.contratsParticipants[contratId] || { users: [] };
     const defaults = (Array.isArray(rec.users) ? rec.users : []).filter(Boolean).slice(0, 25);
     const menu = new UserSelectMenuBuilder().setCustomId(`cpart_opsel::${contratId}`).setPlaceholder('👥 Qui participe à l\'opération ?').setMinValues(1).setMaxValues(25);
@@ -6272,6 +6274,8 @@ La Direction lancera l'opération quand tout le monde sera prêt.`)
     const contratId = interaction.customId.split('::').slice(1).join('::');
     const peutNotifier = isDirection(interaction.member) || interaction.member?.roles?.cache?.some(r => /confr|officier|op[eé]rateur|fondateur|fl[eé]au|conseil|panseur/i.test(r.name || ''));
     if (!peutNotifier) { await interaction.reply({ content: '🔒 Réservé à la Direction / aux officiers.', flags: MessageFlags.Ephemeral }).catch(() => {}); return; }
+    // Auto-remise à jour du panneau (ajoute Places + Clôturer sur les vieux panneaux).
+    try { await interaction.message?.edit({ embeds: [_participationEmbed(contratId)], components: _participationRows(contratId) }); } catch {}
     const rec = (loadDB().contratsParticipants || {})[contratId] || { objet: '', users: [] };
     const users = (Array.isArray(rec.users) ? rec.users : []).slice(0, 50);
     if (!users.length) { await interaction.reply({ content: '🐺 Personne n\'a encore rejoint ce contrat — rien à notifier.', flags: MessageFlags.Ephemeral }).catch(() => {}); return; }
