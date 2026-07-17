@@ -3984,8 +3984,8 @@ client.on('messageCreate', async message => {
   try { if (await tenue.onMessage?.(message)) return; } catch {}
   // Registre des groupes : une photo postée dans le salon dédié → analyse IA détaillée.
   try { if (await groupes.onMessage?.(message)) return; } catch {}
-  // Salon Far West : capture Red Dead → cliché repeint par l'IA (Gemini), original retiré
-  try { if (await reddead.onMessage?.(message)) return; } catch {}
+  // Retouche photoréaliste (reddead « Le Photographe Far West ») RETIRÉE — fonctionnalité supprimée à la demande.
+  // try { if (await reddead.onMessage?.(message)) return; } catch {}
   // Répertoire : image déposée dans le fil d'une fiche → devient le portrait du contact
   try { if (await repertoire.onMessage?.(message)) return; } catch {}
   try { await carte.onMessage?.(message); } catch {}
