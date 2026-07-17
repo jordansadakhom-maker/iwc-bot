@@ -338,7 +338,22 @@ function _ficheRow(contactId) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`contact_edit::${contactId}`).setLabel("Modifier").setEmoji("✏️").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`contact_photo::${contactId}`).setLabel("Photo").setEmoji("📸").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`contact_del::${contactId}`).setLabel("Supprimer").setEmoji("🗑️").setStyle(ButtonStyle.Danger),
   );
+}
+// Supprime la fiche publiée dans le forum (fil dédié, sinon message) quand un contact est retiré du carnet.
+async function _supprimerFicheForum(guild, c) {
+  try {
+    const refs = c && c.ficheRefs; if (!guild || !refs) return;
+    if (refs.threadId) {
+      const th = await guild.channels.fetch(refs.threadId).catch(() => null);
+      if (th && typeof th.delete === "function") await th.delete("Contact retiré du carnet").catch(async () => { await th.setArchived?.(true).catch(() => {}); await th.setLocked?.(true).catch(() => {}); });
+    } else if (refs.channelId && refs.msgId) {
+      const ch = await guild.channels.fetch(refs.channelId).catch(() => null);
+      const msg = ch && await ch.messages.fetch(refs.msgId).catch(() => null);
+      if (msg?.delete) await msg.delete().catch(() => {});
+    }
+  } catch {}
 }
 // Modal pré-rempli pour MODIFIER une fiche existante (les champs à menus se rechoisissent ensuite).
 function _contactEditModal(d, draftId) {
@@ -566,11 +581,13 @@ async function routeInteraction(interaction) {
       const db = loadDB(); const rep = _ensure(db);
       const idx = rep.contacts.findIndex(x => x.id === cid);
       if (idx < 0) { await interaction.editReply({ content: "⚠️ Contact déjà supprimé.", components: [] }).catch(() => {}); return true; }
-      const nom = rep.contacts[idx].nom;
+      const removed = rep.contacts[idx];
+      const nom = removed.nom;
       rep.contacts.splice(idx, 1);
       persist(db);
+      if (interaction.guild) await _supprimerFicheForum(interaction.guild, removed); // retire aussi la fiche du forum (fini les fantômes)
       await _refreshPanel(interaction.client, rep);
-      await interaction.editReply({ content: `🗑️ **${nom}** retiré du carnet.`, components: [] }).catch(() => {});
+      await interaction.editReply({ content: `🗑️ **${nom}** retiré du carnet${removed.ficheRefs ? " — fiche du forum supprimée" : ""}.`, components: [] }).catch(() => {});
       return true;
     }
 
@@ -594,6 +611,7 @@ async function routeInteraction(interaction) {
         c.nom = nom; c.type = type; c.telegramme = telegramme; c.fiabilite = fiabilite; c.notes = notes; c.maj = Date.now(); c.par = interaction.user.id;
         persist(db);
         await _refreshPanel(interaction.client, rep);
+        if (interaction.guild) await rafraichirFicheContact(interaction.guild, c.id).catch(() => {}); // synchronise la fiche du forum
         await interaction.editReply({ content: `✏️ **${nom}** mis à jour dans le carnet.` }).catch(() => {});
         return true;
       }
@@ -693,6 +711,20 @@ async function routeInteraction(interaction) {
         userId: interaction.user.id, at: Date.now(),
       });
       await interaction.showModal(_contactEditModal(_contactDrafts.get(draftId), draftId)).catch(() => {});
+      return true;
+    }
+    // ── Supprimer une fiche publiée (bouton 🗑️ sur la fiche) → confirmation ──
+    if (interaction.isButton?.() && (interaction.customId || "").startsWith("contact_del::")) {
+      const cid = interaction.customId.split("::")[1];
+      const rep = _ensure(loadDB());
+      const c = (rep.contacts || []).find(x => x.id === cid);
+      if (!c) { await interaction.reply({ content: "⚠️ Fiche introuvable (déjà supprimée ?).", flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      if (!estDirection(interaction.member) && c.par !== interaction.user.id) { await interaction.reply({ content: "🔒 Seuls la Direction ou le créateur de la fiche peuvent la supprimer.", flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`repdel::y::${c.id}`).setLabel("Supprimer définitivement").setEmoji("🗑️").setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId("repdel::n").setLabel("Annuler").setStyle(ButtonStyle.Secondary),
+      );
+      await interaction.reply({ content: `⚠️ Retirer **${c.nom}** du carnet ?${c.ficheRefs ? " Sa fiche du forum sera aussi supprimée." : ""} C'est définitif.`, components: [row], flags: MessageFlags.Ephemeral }).catch(() => {});
       return true;
     }
     // ── Ajouter / changer la photo (portrait) d'une fiche publiée (bouton 📸) ──
@@ -1047,4 +1079,4 @@ async function proposerContactContrat(guild, contrat) {
 }
 
 module.exports = { repertoireCommands, routeInteraction, installerPanelContact, onMessage, traiterRapportTerrain, listerContacts, getContact, rafraichirFicheContact, ajouterContactAuto, proposerContactContrat };
-module.exports.__test = { _reponseRecherche, _filter, _contactFormModal }; // tests uniquement
+module.exports.__test = { _reponseRecherche, _filter, _contactFormModal, _ficheRow, _supprimerFicheForum }; // tests uniquement
