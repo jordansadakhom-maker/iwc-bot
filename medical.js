@@ -224,6 +224,7 @@ function _actions(id) {
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`med_repos::${id}`).setLabel('Convalescence').setEmoji('⏳').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`med_cert::${id}`).setLabel('Certificat d\'aptitude').setEmoji('📜').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`med_dossier::${id}`).setLabel('Dossier complet').setEmoji('📖').setStyle(ButtonStyle.Secondary),
     ),
   ];
 }
@@ -532,6 +533,62 @@ h1{text-align:center;font-size:1.9rem;letter-spacing:.04em;margin:.2em 0;color:#
   ${data.conseils ? `<div class="concl">${esc(data.conseils)}</div>` : ''}
   <div class="sign">${esc(medecin)},<br>praticien agréé — Bureau Médical de Blackwater</div>
   <div class="foot">Ordonnance nominative. Toute falsification est passible de poursuites.<br>Iron Wolf Company · Suivi médical confidentiel</div>
+</div>
+</body></html>`;
+}
+
+// Dossier médical COMPLET téléchargeable (parchemin) — consolide tout le suivi du patient.
+function _dossierMedicalHTML(f, gm) {
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const nom = gm?.displayName || f.nomRP || 'Patient';
+  const st = STATUTS[f.statut] || STATUTS.non_teste;
+  const GAUGE = { apte: { bar: '▰▰▰▰▰', txt: 'Bonne santé' }, observation: { bar: '▰▰▰▱▱', txt: 'Sous surveillance' }, inapte: { bar: '▰▱▱▱▱', txt: 'État préoccupant' }, non_teste: { bar: '▱▱▱▱▱', txt: 'Non évalué' } };
+  const g = GAUGE[f.statut] || GAUGE.non_teste;
+  const conv = f.reposJusquAt ? `Convalescence jusqu'au ${_dateFR(f.reposJusquAt)}${f.reposMotif ? ` — ${f.reposMotif}` : ''}` : '';
+  const sec = (titre, inner) => inner ? `<div class="sec"><h3>${esc(titre)}</h3>${inner}</div>` : '';
+  const li = arr => `<ul>${arr.map(x => `<li>${x}</li>`).join('')}</ul>`;
+  const blessures = (f.blessures || []).slice().reverse().map(b => `<b>${esc(b.date || '')}</b> — ${esc(b.desc || '')}${b.localisation ? ` <i>(${esc(b.localisation)})</i>` : ''}${b.gravite ? ` — gravité <b>${esc(b.gravite)}</b>` : ''}${b.par ? ` <span class="by">— ${esc(b.par)}</span>` : ''}`);
+  const soins = (f.suivis || []).slice().reverse().map(s => `<b>${esc(s.date || '')}</b> — ${esc(s.soin || '')}${s.etat ? `<br><i>État :</i> ${esc(s.etat)}` : ''}${s.traitement ? `<br><i>Traitement :</i> ${esc(s.traitement)}` : ''}${s.suite ? `<br><i>Suite :</i> ${esc(s.suite)}` : ''}${s.soignant ? ` <span class="by">— ${esc(s.soignant)}</span>` : ''}`);
+  const ordos = (f.ordonnances || []).slice().reverse().map(o => `<b>${esc(o.date || '')}</b> — ${esc(o.medicaments || '')}${o.posologie ? ` · <i>${esc(o.posologie)}</i>` : ''}${o.duree ? ` · ${esc(o.duree)}` : ''}${o.medecin ? ` <span class="by">— ${esc(o.medecin)}</span>` : ''}`);
+  const test = f.dernierTest?.input ? `<div class="row"><span class="k">Verdict</span><span class="v"><b>${esc(String(f.dernierTest.input.verdict || '—').toUpperCase())}</b></span></div><div class="row"><span class="k">Date &amp; lieu</span><span class="v">${esc(f.dernierTest.input.dateLieu || '—')}</span></div>` : '';
+  const body = [
+    sec('§ I — État de santé actuel', `<div class="row"><span class="k">Statut</span><span class="v">${esc(st.label)}</span></div><div class="row"><span class="k">Vitalité</span><span class="v">${g.bar} — ${esc(g.txt)}</span></div>${conv ? `<div class="row"><span class="k">Repos</span><span class="v">${esc(conv)}</span></div>` : ''}`),
+    sec('§ II — Antécédents & blessures', blessures.length ? li(blessures) : '<p class="obs">Aucune blessure consignée.</p>'),
+    sec('§ III — Soins & traitements reçus', soins.length ? li(soins) : '<p class="obs">Aucun soin consigné.</p>'),
+    sec('§ IV — Ordonnances délivrées', ordos.length ? li(ordos) : '<p class="obs">Aucune ordonnance délivrée.</p>'),
+    test ? sec('§ V — Examen d\'aptitude', test) : '',
+    f.notes ? sec('§ VI — Notes du praticien', `<p class="obs">${esc(f.notes)}</p>`) : '',
+  ].filter(Boolean).join('');
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dossier médical — ${esc(nom)}</title>
+<style>
+@media print{body{background:#fff;padding:0}.paper{box-shadow:none;margin:0}.print{display:none}}
+body{margin:0;background:#3a2c1c;font-family:Georgia,'Times New Roman',serif;color:#2a1c10;padding:24px}
+.paper{max-width:840px;margin:0 auto;background:#f3e6c8;border:2px solid #7a5a34;box-shadow:0 12px 40px #0008;padding:44px 48px;position:relative}
+.paper::before{content:'';position:absolute;inset:10px;border:1px double #9a7a4a;pointer-events:none}
+h1{text-align:center;font-size:1.8rem;letter-spacing:.04em;margin:.2em 0;color:#3a260f}
+.sub{text-align:center;font-style:italic;color:#5a4326;margin-bottom:4px}
+.gov{text-align:center;font-weight:bold;text-transform:uppercase;letter-spacing:.14em;font-size:.78rem;color:#6a4e2a;border-top:1px solid #9a7a4a;border-bottom:1px solid #9a7a4a;padding:6px 0;margin:14px 0}
+.pat{margin:14px 0;font-size:1.05rem}
+.sec{margin:16px 0;break-inside:avoid}
+.sec h3{font-size:1rem;color:#5a3f22;border-bottom:1px dashed #b89a63;padding-bottom:3px;margin-bottom:6px}
+.row{display:flex;gap:8px;margin:2px 0;font-size:.95rem}
+.row .k{font-weight:bold;min-width:120px;color:#4a3420}
+.sec ul{margin:4px 0;padding-left:20px}.sec li{margin:6px 0;font-size:.94rem;line-height:1.4}
+.by{color:#6a4e2a;font-style:italic;font-size:.85em}
+.obs{font-style:italic;color:#4a3420;margin:4px 0}
+.sign{margin-top:28px;text-align:right;font-style:italic;color:#4a3420}
+.foot{margin-top:18px;font-size:.7rem;text-align:center;color:#6a4e2a}
+.print{position:fixed;top:14px;right:14px;background:#7a5a34;color:#f3e6c8;border:0;padding:9px 14px;border-radius:6px;font-family:inherit;cursor:pointer}
+</style></head><body>
+<button class="print" onclick="window.print()">🖨️ Imprimer / PDF</button>
+<div class="paper">
+  <h1>Dossier Médical Confidentiel</h1>
+  <div class="sub">Suivi complet du patient — usage réservé au praticien</div>
+  <div class="gov">État du Texas — Bureau Médical de Blackwater</div>
+  <div class="pat"><b>Patient :</b> ${esc(nom)}<br><b>Dossier établi le :</b> ${esc(_dateFR(Date.now()))}</div>
+  ${body}
+  <div class="sign">Bureau Médical de Blackwater<br>Iron Wolf Company — Suivi médical</div>
+  <div class="foot">Document strictement confidentiel. La divulgation à un tiers non autorisé est passible de poursuites.<br>Iron Wolf Company · Suivi médical</div>
 </div>
 </body></html>`;
 }
@@ -1131,6 +1188,20 @@ async function routeInteraction(interaction) {
       return true;
     }
 
+    // ── 📖 Dossier médical complet (parchemin téléchargeable) ──
+    if (interaction.isButton?.() && cid.startsWith('med_dossier::')) {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé au médecin et à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const id = cid.split('::')[1];
+      const db = loadDB(); const f = _fiche(db, id);
+      const gm = await interaction.guild.members.fetch(id).catch(() => null);
+      const html = _dossierMedicalHTML(f, gm);
+      const nom = (gm?.displayName || 'patient').replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 40) || 'patient';
+      const file = new AttachmentBuilder(Buffer.from(html, 'utf8'), { name: `dossier-medical-${nom}.html` });
+      await interaction.editReply({ content: `📖 **Dossier médical complet** de ${gm ? `**${_clip(gm.displayName, 60)}**` : 'ce patient'} — blessures, soins, ordonnances, aptitude et notes consolidés. Télécharge, ouvre dans un navigateur, puis **🖨️ Imprimer / PDF**.`, files: [file] }).catch(() => {});
+      return true;
+    }
+
     // ── 📋 Historique médical complet ──
     if (interaction.isButton?.() && cid.startsWith('med_histo::')) {
       if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
@@ -1171,6 +1242,9 @@ async function routeInteraction(interaction) {
       const html = _ordonnanceHTML(f, gm, data);
       const nom = (gm?.displayName || 'patient').replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 40) || 'patient';
       const file = new AttachmentBuilder(Buffer.from(html, 'utf8'), { name: `ordonnance-${nom}.html` });
+      if (!f.ordonnances) f.ordonnances = [];
+      f.ordonnances.push({ date: _dateFR(Date.now()), at: Date.now(), medicaments: data.medicaments, posologie: data.posologie, duree: data.duree, conseils: data.conseils, medecin: data.medecin });
+      if (f.ordonnances.length > 20) f.ordonnances = f.ordonnances.slice(-20);
       _log(f, `Ordonnance : ${_clip(data.medicaments, 60)}${data.posologie ? ` (${_clip(data.posologie, 40)})` : ''}`, interaction.member?.displayName);
       saveDB(db);
       await interaction.editReply({ content: `💊 **Ordonnance** pour ${gm ? `**${_clip(gm.displayName, 60)}**` : 'ce patient'} — télécharge le fichier, ouvre-le dans un navigateur, puis **🖨️ Imprimer / PDF**.`, files: [file] }).catch(() => {});
