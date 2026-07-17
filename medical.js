@@ -214,10 +214,12 @@ function _actions(id) {
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`med_blessure::${id}`).setLabel('Signaler une blessure / un soin').setEmoji('🩹').setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId(`med_aptitude::${id}`).setLabel('Rédiger le test d\'aptitude').setEmoji('🧪').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`med_ordo::${id}`).setLabel('Ordonnance').setEmoji('💊').setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`med_suivi::${id}`).setLabel('Ajouter un suivi de soin').setEmoji('🩺').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`med_cloture::${id}`).setLabel('Archiver le dossier (rétabli)').setEmoji('🗂️').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`med_histo::${id}`).setLabel('Historique complet').setEmoji('📋').setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`med_repos::${id}`).setLabel('Convalescence').setEmoji('⏳').setStyle(ButtonStyle.Secondary),
@@ -486,6 +488,50 @@ h1{text-align:center;font-size:1.9rem;letter-spacing:.04em;margin:.2em 0;color:#
   ${r.conclusion ? `<div class="concl">${esc(r.conclusion)}</div>` : ''}
   <div class="sign">Dr. June McCall,<br>praticien agréé — Bureau Médical de Blackwater</div>
   <div class="foot">Établi de bonne foi, fait foi auprès des autorités. Toute falsification est passible de poursuites (loi fédérale des É.-U.).<br>Iron Wolf Company · Suivi médical confidentiel</div>
+</div>
+</body></html>`;
+}
+
+// Ordonnance médicale téléchargeable (parchemin, même style que le certificat).
+function _ordonnanceHTML(f, gm, data) {
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const nom = gm?.displayName || f.nomRP || 'Patient';
+  const medecin = data.medecin || 'Dr. June McCall';
+  const row = (k, v) => v ? `<div class="row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>` : '';
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ordonnance — ${esc(nom)}</title>
+<style>
+@media print{body{background:#fff;padding:0}.paper{box-shadow:none;margin:0}.print{display:none}}
+body{margin:0;background:#3a2c1c;font-family:Georgia,'Times New Roman',serif;color:#2a1c10;padding:24px}
+.paper{max-width:760px;margin:0 auto;background:#f3e6c8;border:2px solid #7a5a34;box-shadow:0 12px 40px #0008;padding:44px 48px;position:relative}
+.paper::before{content:'';position:absolute;inset:10px;border:1px double #9a7a4a;pointer-events:none}
+h1{text-align:center;font-size:1.9rem;letter-spacing:.04em;margin:.2em 0;color:#3a260f}
+.sub{text-align:center;font-style:italic;color:#5a4326;margin-bottom:4px}
+.gov{text-align:center;font-weight:bold;text-transform:uppercase;letter-spacing:.14em;font-size:.8rem;color:#6a4e2a;border-top:1px solid #9a7a4a;border-bottom:1px solid #9a7a4a;padding:6px 0;margin:14px 0}
+.pat{margin:14px 0;font-size:1.05rem}
+.rx{font-size:2.6rem;color:#5a3f22;margin:6px 0 0;font-weight:bold}
+.sec{margin:6px 0}
+.row{display:flex;gap:8px;margin:4px 0;font-size:1rem}
+.row .k{font-weight:bold;min-width:150px;color:#4a3420}
+.concl{margin-top:16px;padding:12px;background:#e9d9b4;border-left:4px solid #7a5a34;font-style:italic}
+.sign{margin-top:36px;text-align:right;font-style:italic;color:#4a3420}
+.foot{margin-top:18px;font-size:.7rem;text-align:center;color:#6a4e2a}
+.print{position:fixed;top:14px;right:14px;background:#7a5a34;color:#f3e6c8;border:0;padding:9px 14px;border-radius:6px;font-family:inherit;cursor:pointer}
+</style></head><body>
+<button class="print" onclick="window.print()">🖨️ Imprimer / PDF</button>
+<div class="paper">
+  <h1>Ordonnance Médicale</h1>
+  <div class="sub">Prescription nominative à présenter en pharmacie</div>
+  <div class="gov">État du Texas — Bureau Médical de Blackwater</div>
+  <div class="pat"><b>Patient :</b> ${esc(nom)}<br><b>Date :</b> ${esc(_dateFR(Date.now()))}</div>
+  <div class="rx">℞</div>
+  <div class="sec">
+    ${row('Médicament(s)', data.medicaments)}
+    ${row('Posologie', data.posologie)}
+    ${row('Durée du traitement', data.duree)}
+  </div>
+  ${data.conseils ? `<div class="concl">${esc(data.conseils)}</div>` : ''}
+  <div class="sign">${esc(medecin)},<br>praticien agréé — Bureau Médical de Blackwater</div>
+  <div class="foot">Ordonnance nominative. Toute falsification est passible de poursuites.<br>Iron Wolf Company · Suivi médical confidentiel</div>
 </div>
 </body></html>`;
 }
@@ -1082,6 +1128,52 @@ async function routeInteraction(interaction) {
       const nom = (gm?.displayName || f.dernierTest?.input?.patient || 'patient').replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 40) || 'patient';
       const file = new AttachmentBuilder(Buffer.from(html, 'utf8'), { name: `certificat-aptitude-${nom}.html` });
       await interaction.editReply({ content: `📜 **Certificat d'aptitude** de ${gm ? `**${_clip(gm.displayName, 60)}**` : 'ce membre'} — télécharge le fichier, ouvre-le dans un navigateur, puis clique **🖨️ Imprimer / PDF**.`, files: [file] }).catch(() => {});
+      return true;
+    }
+
+    // ── 📋 Historique médical complet ──
+    if (interaction.isButton?.() && cid.startsWith('med_histo::')) {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const id = cid.split('::')[1];
+      const db = loadDB(); const f = _fiche(db, id);
+      const gm = await interaction.guild.members.fetch(id).catch(() => null);
+      const hist = Array.isArray(f.historique) ? f.historique : [];
+      const e = new EmbedBuilder().setColor(0x8B5A2A).setTitle(`🕓 Historique médical — ${gm ? _clip(gm.displayName, 60) : id}`);
+      if (!hist.length) e.setDescription('*Aucun événement enregistré pour ce dossier.*');
+      else e.setDescription(_clip(hist.slice().reverse().map(h => `• \`${_clip(h.date, 40)}\` ${_clip(h.action, 150)}${h.par ? ` — *${_clip(h.par, 60)}*` : ''}`).join('\n'), 4000));
+      e.setFooter({ text: `${hist.length} événement(s) · Suivi médical confidentiel` });
+      await interaction.reply({ embeds: [e], flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+
+    // ── 💊 Ordonnance → formulaire ──
+    if (interaction.isButton?.() && cid.startsWith('med_ordo::')) {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé au médecin et à la Direction.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      const id = cid.split('::')[1];
+      const modal = new ModalBuilder().setCustomId(`med_ordo_modal::${id}`).setTitle('💊 Ordonnance médicale')
+        .addComponents(
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('medicaments').setLabel('Médicament(s)').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(300).setPlaceholder('ex : Laudanum · onguent cicatrisant · tonique')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('posologie').setLabel('Posologie').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(150).setPlaceholder('ex : 2 gouttes matin et soir')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duree').setLabel('Durée du traitement').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80).setPlaceholder('ex : 5 jours')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('conseils').setLabel('Conseils / recommandations').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(400).setPlaceholder('ex : repos, éviter les efforts, revenir si fièvre')),
+        );
+      await interaction.showModal(modal).catch(() => {});
+      return true;
+    }
+    if (interaction.isModalSubmit?.() && cid.startsWith('med_ordo_modal::')) {
+      if (!peutGerer(interaction.member)) { await interaction.reply({ content: '🔒 Réservé.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+      const id = cid.split('::')[1];
+      const db = loadDB(); const f = _fiche(db, id);
+      const gm = await interaction.guild.members.fetch(id).catch(() => null);
+      const gv = k => (interaction.fields.getTextInputValue(k) || '').trim();
+      const data = { medicaments: gv('medicaments'), posologie: gv('posologie'), duree: gv('duree'), conseils: gv('conseils'), medecin: interaction.member?.displayName || 'Dr. June McCall' };
+      const html = _ordonnanceHTML(f, gm, data);
+      const nom = (gm?.displayName || 'patient').replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 40) || 'patient';
+      const file = new AttachmentBuilder(Buffer.from(html, 'utf8'), { name: `ordonnance-${nom}.html` });
+      _log(f, `Ordonnance : ${_clip(data.medicaments, 60)}${data.posologie ? ` (${_clip(data.posologie, 40)})` : ''}`, interaction.member?.displayName);
+      saveDB(db);
+      await interaction.editReply({ content: `💊 **Ordonnance** pour ${gm ? `**${_clip(gm.displayName, 60)}**` : 'ce patient'} — télécharge le fichier, ouvre-le dans un navigateur, puis **🖨️ Imprimer / PDF**.`, files: [file] }).catch(() => {});
       return true;
     }
 
