@@ -281,7 +281,7 @@ function _actions(id) {
     ),
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`med_suivi::${id}`).setLabel('Ajouter un suivi de soin').setEmoji('🩺').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(`med_cloture::${id}`).setLabel('Archiver le dossier (rétabli)').setEmoji('🗂️').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`med_cloture::${id}`).setLabel('Clôturer le dossier (rétabli)').setEmoji('🗂️').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`med_histo::${id}`).setLabel('Historique complet').setEmoji('📋').setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder().addComponents(
@@ -446,6 +446,35 @@ async function _archiverFilsPatient(guild, id, gm) {
       const nm = (t.name || '');
       const match = nm.includes(tag) || (nom && nm.toLowerCase().includes(nom));
       if (match && t.setArchived && !t.archived) { await t.setArchived(true).catch(() => {}); n++; }
+    }
+  } catch {}
+  return n;
+}
+
+// SUPPRIME les fils du patient (actifs ET archivés) pour qu'ils DISPARAISSENT
+// vraiment du forum — dans un forum, un fil archivé reste visible. Sûr : la fiche
+// complète vit en base (db.suiviMedical) et le fil se recrée seul à la réouverture
+// ou à la prochaine blessure. Repli sur l'archivage si la suppression est refusée.
+async function _supprimerFilsPatient(guild, id, gm) {
+  let n = 0;
+  try {
+    const ch = _ch(guild, MEDICAL_CHANNEL);
+    if (!ch || ch.type !== 15 || !ch.threads?.fetchActive) return 0;
+    const tag = `[${id}]`;
+    const nom = (gm?.displayName || '').trim().toLowerCase();
+    const _match = (t) => { const nm = t.name || ''; return nm.includes(tag) || (nom && nm.toLowerCase().includes(nom)); };
+    const cibles = [];
+    try { const act = await ch.threads.fetchActive().catch(() => null); if (act?.threads) cibles.push(...[...act.threads.values()].filter(_match)); } catch {}
+    try { const arc = await ch.threads.fetchArchived().catch(() => null); if (arc?.threads) cibles.push(...[...arc.threads.values()].filter(_match)); } catch {}
+    const vus = new Set();
+    for (const t of cibles) {
+      if (vus.has(t.id)) continue; vus.add(t.id);
+      const nm = t.name || '';
+      if (nm.includes('SUIVI MÉDICAL') || nm.includes('EXEMPLE')) continue; // jamais le panneau ni l'exemple
+      let supprime = false;
+      if (t.delete) { try { await t.delete('Dossier médical clôturé (patient rétabli)'); supprime = true; } catch {} }
+      if (!supprime && t.setArchived && !t.archived) { await t.setArchived(true).catch(() => {}); } // repli : au moins l'archiver
+      if (supprime) n++;
     }
   } catch {}
   return n;
@@ -1191,17 +1220,15 @@ async function routeInteraction(interaction) {
       const par = interaction.member?.displayName || interaction.user.username;
       const gm = await interaction.guild.members.fetch(id).catch(() => null);
       f.statut = 'apte'; f.clotureAt = Date.now(); f.majPar = par; f.majAt = Date.now();
-      _log(f, '🗂️ Dossier archivé (patient rétabli)', par);
-      // Dernière note DANS le fil, puis on archive TOUS les fils du patient (fini l'affichage dans le forum).
-      const embClose = new EmbedBuilder().setColor(0x2ECC71).setTitle('🗂️ Dossier archivé — patient rétabli')
-        .setDescription(`${gm ? `**${_clip(gm.displayName, 80)}**` : `<@${id}>`} — dossier **clôturé et archivé** le ${_dateFR(Date.now())}. Statut : **✅ Apte**.\n*Tout l'historique (blessures, soins) reste consultable depuis le panneau médical.*`)
-        .addFields({ name: 'Clôturé par', value: _clip(par, 60), inline: true })
-        .setFooter({ text: 'Iron Wolf Company · Suivi médical' }).setTimestamp();
-      await _posterAuDossier(interaction.guild, id, f, embClose, '');
-      saveDB(db); // persiste le statut + threadId
-      const nb = await _archiverFilsPatient(interaction.guild, id, gm);
+      _log(f, '🗂️ Dossier clôturé (patient rétabli)', par);
+      saveDB(db); // persiste le statut
+      // On SUPPRIME le fil du forum (dans un forum, un fil archivé reste visible).
+      // La fiche complète reste en base → rien de perdu, elle se recrée à la réouverture.
+      const nb = await _supprimerFilsPatient(interaction.guild, id, gm);
+      f.threadId = null; // le fil a disparu ; il sera recréé au besoin
+      saveDB(db);
       await interaction.editReply({
-        content: `🗂️ **Dossier archivé.**${nb ? ` ${nb} fil(s) retiré(s) du forum « suivi-médical ».` : ''} Le patient est marqué **✅ Apte** et **tout l'historique reste consultable** en rouvrant son dossier ici. Il se rouvrira tout seul si une nouvelle blessure survient.`,
+        content: `🗂️ **Dossier clôturé.**${nb ? ` Le fil a été **retiré** du forum « suivi-médical ».` : ' *(aucun fil ouvert à retirer.)*'} Le patient est marqué **✅ Apte** et **tout l'historique reste consultable** en rouvrant son dossier ici. Le fil se recrée tout seul si une nouvelle blessure survient.`,
         embeds: [_embedFiche(f, gm)], components: _actions(id),
       }).catch(() => {});
       return true;
@@ -1685,5 +1712,5 @@ async function installerPanelDemande(channel) {
   return true;
 }
 
-module.exports = { installerPanel, installerExemple, installerPanelDemande, installerDossiers, routeInteraction, checkRappelsMedicaux, MEDICAL_CHANNEL, ROLE_MEDECIN, _test: { _dossierThread, _posterAuDossier, _archiverFilsPatient } };
+module.exports = { installerPanel, installerExemple, installerPanelDemande, installerDossiers, routeInteraction, checkRappelsMedicaux, MEDICAL_CHANNEL, ROLE_MEDECIN, _test: { _dossierThread, _posterAuDossier, _archiverFilsPatient, _supprimerFilsPatient } };
 module.exports.__test = { _convalescenceJours, _bilanEmbed, _certificatHTML, _embedFiche, _dureeJours, _parseHonoLignes, _acteDecesHTML, _honorairesHTML, _ordonnanceHTML, _ordoModal, REMEDES, _nomFil }; // tests uniquement
