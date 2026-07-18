@@ -34,7 +34,9 @@ export async function updateSession(request: NextRequest) {
 
   const requireAuth = process.env.REQUIRE_AUTH === "true";
   const path = request.nextUrl.pathname;
-  const isPublic = path === "/login" || path.startsWith("/auth");
+  // Pages accessibles SANS connexion, même quand le site est verrouillé :
+  // la connexion, le retour OAuth, et la prise de rendez-vous publique.
+  const isPublic = path === "/login" || path.startsWith("/auth") || path === "/rendez-vous";
 
   if (requireAuth && !user && !isPublic) {
     const redirectUrl = request.nextUrl.clone();
