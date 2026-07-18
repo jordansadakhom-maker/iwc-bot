@@ -79,6 +79,20 @@ function _phase(s) {
 }
 
 function _str(v, max) { if (v == null) return null; const s = String(v); return max ? s.slice(0, max) : s; }
+// Nettoie une valeur : renvoie null si vide ou « — » (placeholder du bot).
+function _nn(v, max) { const s = (v == null ? '' : String(v)).trim(); if (!s || s === '—') return null; return max ? s.slice(0, max) : s; }
+// Convertit une fiabilité texte du bot en note 0-5 (colonne INTEGER de RapportInfo).
+function _fiabiliteNum(v) {
+  const s = String(v || '').toLowerCase();
+  if (/non\s*confirm|infirm/.test(s)) return 2;   // « Non confirmée » (tester avant « confirm »)
+  if (/confirm/.test(s)) return 5;                // « Confirmée »
+  if (/bonne|élev|elev|haut/.test(s)) return 4;
+  if (/moyen/.test(s)) return 3;
+  if (/faible|bas/.test(s)) return 1;
+  const n = parseInt(s, 10);
+  if (!isNaN(n)) return Math.max(0, Math.min(5, n));
+  return 0;
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  Construction des lots à partir de db.js (tolérant aux formes variées)
@@ -162,7 +176,33 @@ function _construire(db) {
     });
   }
 
-  return { membres, coffres, contrats, operations };
+  // ── Renseignement : rapports d'informateurs (db.informateurs) ──
+  const rapports = (db.informateurs || [])
+    .filter(r => r && r.id)
+    .map(r => ({
+      id: String(r.id),
+      source: _nn(r.source, 200),
+      cible: _nn(r.cible, 200),
+      info: _str(r.info, 4000) || '—',
+      fiabilite: _fiabiliteNum(r.fiabilite),
+      statut: _str(r.statut || 'nouveau', 40),
+      rapporteurId: r.rapporteurId ? String(r.rapporteurId) : null,
+      createdAt: r.createdAt || undefined,
+    }));
+
+  // ── Renseignement : personnes traquées (db.traques) — champ « status » côté bot ──
+  const traques = (db.traques || [])
+    .filter(t => t && t.id)
+    .map(t => ({
+      id: String(t.id),
+      cible: _str(t.cible, 200) || '—',
+      prime: _nn(t.prime, 120),
+      dangerosite: _nn(t.dangerosite, 40),
+      statut: _str(t.status || t.statut || 'chasse', 40),
+      createdAt: t.createdAt || undefined,
+    }));
+
+  return { membres, coffres, contrats, operations, rapports, traques };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -179,16 +219,20 @@ async function syncAll(db) {
     let out;
     do {
       _redo = false;
-      const { membres, coffres, contrats, operations } = _construire(db);
+      const { membres, coffres, contrats, operations, rapports, traques } = _construire(db);
       const results = [];
       results.push(await _upsert('Membre', membres));    // 1. aucun FK bloquant (parrainId non fourni)
       results.push(await _upsert('Coffre', coffres));    // 2. indépendant
       results.push(await _upsert('Contrat', contrats));  // 3. indépendant
       results.push(await _upsert('Operation', operations)); // 4. FK → Membre + Contrat (déjà poussés)
-      // Nettoyage des fantômes : membres partis (seulement si roster connu), contrats/ops supprimés localement.
+      results.push(await _upsert('RapportInfo', rapports)); // 5. renseignement — indépendant
+      results.push(await _upsert('Traque', traques));       // 6. traques — indépendant
+      // Nettoyage des fantômes : membres partis (seulement si roster connu), contrats/ops/rapports/traques supprimés localement.
       if (_membresActuels) { try { await _reconcilier('Membre', membres.map(m => m.id)); } catch {} }
       try { await _reconcilier('Contrat', contrats.map(c => c.id)); } catch {}
       try { await _reconcilier('Operation', operations.map(o => o.id)); } catch {}
+      try { await _reconcilier('RapportInfo', rapports.map(r => r.id)); } catch {}
+      try { await _reconcilier('Traque', traques.map(t => t.id)); } catch {}
       const summary = results.map(r => `${r.table} ${r.ok ? r.count : '✗' + (r.status || '')}`).join(' · ');
       console.log(`🔄 Sync Supabase → ${summary}`);
       out = { ok: true, results };
