@@ -35,6 +35,18 @@ export function PageHeader({ titre, sous, actif, pole }: { titre: string; sous?:
   );
 }
 
+// En-tête de catégorie : un repère visuel pour regrouper les cartes par thème.
+export function SectionTitle({ children, tone = "var(--accent)", icon: Icon }: { children: React.ReactNode; tone?: string; icon?: LucideIcon }) {
+  return (
+    <div className="mt-2 flex items-center gap-3">
+      <span className="h-4 w-1 rounded-full" style={{ background: tone }} />
+      {Icon ? <Icon className="h-4 w-4" style={{ color: tone }} strokeWidth={2} /> : null}
+      <h2 className="text-[0.72rem] font-bold uppercase tracking-[0.16em] text-muted">{children}</h2>
+      <span className="h-px flex-1" style={{ background: "linear-gradient(90deg,var(--border),transparent)" }} />
+    </div>
+  );
+}
+
 export function Card({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
     <section

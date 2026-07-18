@@ -1,10 +1,10 @@
 "use client";
 
-import { FileText, Wallet, Landmark, Target, Plug, Inbox } from "lucide-react";
+import { FileText, Wallet, Landmark, Target, Plug, Inbox, Users, Activity, Coins } from "lucide-react";
 import clsx from "clsx";
 import type { DashData } from "@/lib/queries";
-import { BarresH, Donut } from "@/components/charts";
-import { PoleChip } from "@/components/ui";
+import { BarresH, Donut, Repartition } from "@/components/charts";
+import { PoleChip, SectionTitle } from "@/components/ui";
 
 function Card({ children, className, delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
   return (
@@ -56,45 +56,36 @@ function BandeauAttente({ connecte }: { connecte: boolean }) {
   );
 }
 
-const KPI_ICONS = [Wallet, Landmark, FileText, Target];
-
 function Kpis({ data }: { data: DashData }) {
   const K = data.connecte;
   const conf = data.pole === "confrerie";
   const kpis = [
-    { label: "Coffre commun", value: K ? money(data.coffres.commun) : "—" },
-    { label: conf ? "Coffre Confrérie" : "Coffre Iron Wolf", value: K ? money(conf ? data.coffres.illegal : data.coffres.legal) : "—" },
-    { label: "Contrats en cours", value: K ? String(data.contratsEnCours) : "—" },
-    { label: "Opérations actives", value: K ? String(data.opsActives) : "—" },
+    { label: "Coffre commun", value: K ? money(data.coffres.commun) : "—", icon: Wallet, tone: "#c98500" },
+    { label: conf ? "Coffre Confrérie" : "Coffre Iron Wolf", value: K ? money(conf ? data.coffres.illegal : data.coffres.legal) : "—", icon: Landmark, tone: conf ? "var(--oxblood)" : "#3987e5" },
+    { label: "Contrats en cours", value: K ? String(data.contratsEnCours) : "—", icon: FileText, tone: "#199e70" },
+    { label: "Opérations actives", value: K ? String(data.opsActives) : "—", icon: Target, tone: "#9085e9" },
   ];
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       {kpis.map((k, i) => {
-        const Icon = KPI_ICONS[i] ?? Wallet;
+        const Icon = k.icon;
         return (
           <Card key={k.label} delay={0.02 + i * 0.06}>
             <div className="flex items-center justify-between">
               <span className="text-[0.72rem] font-semibold uppercase tracking-[0.09em] text-muted">{k.label}</span>
-              <span className="grid h-[30px] w-[30px] place-items-center rounded-[9px] text-accent" style={{ background: "color-mix(in srgb,var(--accent) 15%,transparent)" }}>
-                <Icon className="h-4 w-4" strokeWidth={1.8} />
+              <span className="grid h-[32px] w-[32px] place-items-center rounded-[9px]" style={{ color: k.tone, background: `color-mix(in srgb,${k.tone} 15%,transparent)` }}>
+                <Icon className="h-4 w-4" strokeWidth={1.9} />
               </span>
             </div>
-            <div className={clsx("tabular mb-1 mt-3 font-num text-[1.9rem] font-semibold", K ? "text-ink" : "text-faint")}>{k.value}</div>
-            <div className="text-[0.72rem] text-faint">{K ? "À jour" : "En attente de la base"}</div>
+            <div className={clsx("tabular mb-1 mt-3 font-num text-[1.95rem] font-semibold", K ? "text-ink" : "text-faint")}>{k.value}</div>
+            <div className="flex items-center gap-1.5 text-[0.72rem] text-faint">
+              <span className="h-1.5 w-1.5 rounded-full" style={{ background: K ? "var(--good)" : "var(--faint)" }} />
+              {K ? "À jour" : "En attente de la base"}
+            </div>
           </Card>
         );
       })}
     </div>
-  );
-}
-
-function Tresorerie() {
-  // Pas encore de journal de transactions synchronisé — état vide honnête.
-  return (
-    <Card delay={0.16}>
-      <CardHeader titre="Trésorerie — 30 derniers jours" />
-      <Empty>La courbe de trésorerie se construira à partir des mouvements de coffre (entrées &amp; sorties) une fois l&apos;historique des transactions synchronisé.</Empty>
-    </Card>
   );
 }
 
@@ -168,15 +159,6 @@ function OpsBoard({ data }: { data: DashData }) {
   );
 }
 
-function NotifFeed() {
-  // Pas encore de flux de notifications synchronisé — état vide honnête.
-  return (
-    <Card delay={0.28}>
-      <CardHeader titre="Notifications récentes" />
-      <Empty>Les notifications de ton Discord (validations, RDV, changements de statut…) arriveront ici une fois le centre de notifications branché.</Empty>
-    </Card>
-  );
-}
 
 export function Dashboard({ data }: { data: DashData }) {
   return (
@@ -196,8 +178,11 @@ export function Dashboard({ data }: { data: DashData }) {
       </div>
 
       <BandeauAttente connecte={data.connecte} />
+
+      <SectionTitle tone="var(--accent)" icon={Coins}>Synthèse</SectionTitle>
       <Kpis data={data} />
 
+      <SectionTitle tone="#3987e5" icon={Users}>Effectifs &amp; activité</SectionTitle>
       <div className="grid items-start gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2" delay={0.16}>
           <CardHeader titre="Membres par grade" />
@@ -217,16 +202,16 @@ export function Dashboard({ data }: { data: DashData }) {
         </Card>
       </div>
 
-      <div className="grid items-start gap-4 lg:grid-cols-[1fr_2fr]">
+      <SectionTitle tone="#c98500" icon={Coins}>Finances</SectionTitle>
+      <div className="grid items-start gap-4 lg:grid-cols-2">
         <Card delay={0.22}>
-          <CardHeader titre="Coffres" />
+          <CardHeader titre="Soldes des coffres" />
           {data.connecte ? (
             <BarresH
               data={[
                 { label: "Commun", value: data.coffres.commun ?? 0 },
-                data.pole === "confrerie"
-                  ? { label: "Confrérie", value: data.coffres.illegal ?? 0 }
-                  : { label: "Iron Wolf", value: data.coffres.legal ?? 0 },
+                { label: "Iron Wolf", value: data.coffres.legal ?? 0 },
+                { label: "Confrérie", value: data.coffres.illegal ?? 0 },
               ]}
               format={money}
             />
@@ -234,12 +219,27 @@ export function Dashboard({ data }: { data: DashData }) {
             <Empty>Les soldes s&apos;afficheront à la connexion de la base.</Empty>
           )}
         </Card>
-        <Attention data={data} />
+        <Card delay={0.24}>
+          <CardHeader titre="Répartition de la trésorerie" />
+          {data.connecte && (data.coffres.commun || data.coffres.legal || data.coffres.illegal) ? (
+            <Repartition
+              data={[
+                { label: "Commun", value: data.coffres.commun ?? 0, color: "#c98500" },
+                { label: "Iron Wolf", value: data.coffres.legal ?? 0, color: "#3987e5" },
+                { label: "Confrérie", value: data.coffres.illegal ?? 0, color: "#e66767" },
+              ]}
+              format={money}
+            />
+          ) : (
+            <Empty>La répartition s&apos;affichera dès que les coffres seront alimentés.</Empty>
+          )}
+        </Card>
       </div>
 
+      <SectionTitle tone="#9085e9" icon={Activity}>Pilotage</SectionTitle>
       <div className="grid items-start gap-4 lg:grid-cols-[2fr_1fr]">
         <OpsBoard data={data} />
-        <NotifFeed />
+        <Attention data={data} />
       </div>
     </>
   );
