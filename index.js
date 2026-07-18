@@ -1022,6 +1022,7 @@ const SLASH_COMMANDS = [
     .addSubcommand(s => s.setName('programmer').setDescription('🕐 Programmer une opération à lancement automatique (Direction)')),
   new SlashCommandBuilder().setName('bilan-export').setDescription('📊 Exporter un Google Sheet (.xlsx) de tout : contrats, argent, opérations… (Direction)'),
   new SlashCommandBuilder().setName('synchro-web').setDescription('🔄 Vérifier / forcer la synchro du site web (Direction)'),
+  new SlashCommandBuilder().setName('recuperer-donnees').setDescription('🛟 Récupérer opérations/contrats/dossiers perdus depuis les sauvegardes (Direction)'),
 ].map(c => c.toJSON());
 
 async function registerSlashCommands(guild) {
@@ -1773,6 +1774,22 @@ async function handleSlashCommand(interaction) {
     } catch (e) {
       console.log('❌ /synchro-web:', e.message);
       return interaction.editReply({ content: `❌ Erreur pendant la synchro : ${e.message}` });
+    }
+  }
+  if (commandName === 'recuperer-donnees') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      const stats = await _recupererDonneesDepuisSnapshots();
+      const total = Object.values(stats).reduce((a, b) => a + b, 0);
+      if (!total) return interaction.editReply({ content: "ℹ️ Aucune donnée supplémentaire à récupérer : les sauvegardes ne contiennent rien de plus que ce qui est déjà en base. 👍" });
+      try { await _majMembresActuels([interaction.guild]); } catch {}
+      try { if (supabaseSync.estActif?.()) await supabaseSync.syncAll(loadDB()); } catch {}
+      const lignes = Object.entries(stats).map(([k, n]) => `• ${k} : **+${n}**`).join('\n');
+      return interaction.editReply({ content: `✅ **Récupération effectuée depuis les sauvegardes :**\n${lignes}\n\nLe site se met à jour automatiquement.` });
+    } catch (e) {
+      console.log('❌ /recuperer-donnees:', e.message);
+      return interaction.editReply({ content: `❌ Erreur pendant la récupération : ${e.message}` });
     }
   }
   if (commandName === 'contrats-importer') {
@@ -8708,6 +8725,38 @@ async function _majMembresActuels(guilds) {
       supabaseSync.setMembresActuels?.(roster.map(r => r.id));
     }
   } catch (e) { console.log('⚠️ maj roster membres:', e.message); }
+}
+
+// Récupère les données perdues (opérations, contrats, dossiers médicaux…) en
+// fusionnant, de façon ADDITIVE, les éléments absents des sauvegardes GitHub
+// (instantanés quotidiens). Ne supprime jamais rien : n'ajoute que ce qui manque.
+async function _recupererDonneesDepuisSnapshots() {
+  const snaps = await chargerTousSnapshots(); // [{nom, data}] du plus récent au plus ancien
+  const db = loadDB();
+  const stats = {};
+  const arrKeys = ['operations', 'preparations', 'contrats', 'affaires', 'informateurs', 'traques'];
+  for (const key of arrKeys) {
+    if (!Array.isArray(db[key])) db[key] = [];
+    const ids = new Set(db[key].map(x => x && x.id).filter(Boolean));
+    let added = 0;
+    for (const snap of snaps) {
+      const arr = snap.data && snap.data[key];
+      if (!Array.isArray(arr)) continue;
+      for (const item of arr) if (item && item.id && !ids.has(item.id)) { db[key].push(item); ids.add(item.id); added++; }
+    }
+    if (added) stats[key] = added;
+  }
+  // Dossiers médicaux (objet indexé par ID Discord)
+  if (!db.suiviMedical) db.suiviMedical = {};
+  let med = 0;
+  for (const snap of snaps) {
+    const sm = snap.data && snap.data.suiviMedical;
+    if (sm && typeof sm === 'object') for (const [id, f] of Object.entries(sm)) if (id && !db.suiviMedical[id] && f && typeof f === 'object') { db.suiviMedical[id] = f; med++; }
+  }
+  if (med) stats.suiviMedical = med;
+  saveDB(db);
+  try { await sauvegarderSurGitHub(); } catch {}
+  return stats;
 }
 
 async function _handleVersion(interaction) {
