@@ -32,7 +32,9 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const requireAuth = process.env.REQUIRE_AUTH === "true";
+  // Verrouillé PAR DÉFAUT : l'espace interne exige la connexion Discord.
+  // Pour déverrouiller exceptionnellement, définir REQUIRE_AUTH="false".
+  const requireAuth = process.env.REQUIRE_AUTH !== "false";
   const path = request.nextUrl.pathname;
   // Pages accessibles SANS connexion, même quand le site est verrouillé :
   // la connexion, le retour OAuth, et la prise de rendez-vous publique.
