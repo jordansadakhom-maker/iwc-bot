@@ -246,7 +246,7 @@ function _construire(db) {
       updatedAt: now,
     }));
 
-  // ── Répertoire : contacts (db.repertoire.contacts) ──
+  // ── Répertoire : contacts (db.repertoire.contacts) — format complet (Discord) ──
   const contacts = ((db.repertoire && db.repertoire.contacts) || [])
     .filter(c => c && c.id)
     .map(c => ({
@@ -257,6 +257,13 @@ function _construire(db) {
       secteur: _nn(c.secteur, 120),
       notes: _nn(c.notes, 2000),
       photoUrl: _nn(c.photoUrl, 500),
+      // Champs détaillés (colonnes optionnelles — repli automatique si absentes).
+      telegramme: _nn(c.telegramme, 120),
+      metier: _nn(c.metier, 120),
+      affiliation: _nn(c.affiliation, 120),
+      relation: _nn(c.relation, 120),
+      statutRP: _nn(c.statut, 60),
+      creeParNom: _nn(c.creeParNom, 120),
     }));
 
   // ── Rendez-vous du bot (db.rdvplus.rdvs). ⚠️ PAS de réconciliation sur Rdv :
@@ -322,7 +329,14 @@ async function syncAll(db) {
       results.push(await _upsert('RapportInfo', rapports)); // 5. renseignement — indépendant
       results.push(await _upsert('Traque', traques));       // 6. traques — indépendant
       results.push(await _upsert('DossierMedical', dossiers)); // 7. médical — indépendant
-      results.push(await _upsert('Contact', contacts));        // 8. répertoire — indépendant
+      // 8. Contacts — tente le format complet ; si les colonnes détaillées ne
+      //    sont pas encore créées (HTTP 400), repli sur les champs de base.
+      let rC = await _upsert('Contact', contacts);
+      if (!rC.ok && rC.status === 400) {
+        const base = contacts.map(({ telegramme, metier, affiliation, relation, statutRP, creeParNom, ...b }) => b);
+        rC = await _upsert('Contact', base);
+      }
+      results.push(rC);
       results.push(await _upsert('Rdv', rdvs));                // 9. rdv du bot (coexiste avec les demandes web)
       results.push(await _upsert('Arme', armes));              // 10. registre d'armes (table optionnelle — ignoré si absente)
       // Nettoyage des fantômes : membres partis (si roster connu), + entités supprimées localement.
