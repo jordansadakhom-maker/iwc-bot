@@ -255,7 +255,27 @@ function _construire(db) {
       createdAt: _isoOrUndef(r.createdAt),
     }));
 
-  return { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs };
+  // ── Inventaire : registre d'armes (db.registreArmes.armes) ──
+  const armes = ((db.registreArmes && db.registreArmes.armes) || [])
+    .filter(a => a && a.id)
+    .map(a => {
+      const app = String(a.appartenance || '').toLowerCase();
+      const pole = /confr/.test(app) ? 'illegal' : (/iron|wolf|loup/.test(app) ? 'legal' : null);
+      return {
+        id: String(a.id),
+        serie: _str(a.serie, 60) || '—',
+        type: _nn(a.type, 80),
+        categorie: _nn(a.categorie, 80),
+        appartenance: _nn(a.appartenance, 80),
+        membreId: a.membreId ? String(a.membreId) : null,
+        membreNom: _nn(a.membreNom, 120),
+        notes: _nn(a.notes, 500),
+        pole,
+        createdAt: _isoOrUndef(a.at),
+      };
+    });
+
+  return { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -272,7 +292,7 @@ async function syncAll(db) {
     let out;
     do {
       _redo = false;
-      const { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs } = _construire(db);
+      const { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes } = _construire(db);
       const results = [];
       results.push(await _upsert('Membre', membres));    // 1. aucun FK bloquant (parrainId non fourni)
       results.push(await _upsert('Coffre', coffres));    // 2. indépendant
@@ -283,6 +303,7 @@ async function syncAll(db) {
       results.push(await _upsert('DossierMedical', dossiers)); // 7. médical — indépendant
       results.push(await _upsert('Contact', contacts));        // 8. répertoire — indépendant
       results.push(await _upsert('Rdv', rdvs));                // 9. rdv du bot (coexiste avec les demandes web)
+      results.push(await _upsert('Arme', armes));              // 10. registre d'armes (table optionnelle — ignoré si absente)
       // Nettoyage des fantômes : membres partis (si roster connu), + entités supprimées localement.
       // ⚠️ On NE réconcilie PAS Rdv (préserve les demandes venues du site web).
       if (_membresActuels) { try { await _reconcilier('Membre', membres.map(m => m.id)); } catch {} }
@@ -292,6 +313,7 @@ async function syncAll(db) {
       try { await _reconcilier('Traque', traques.map(t => t.id)); } catch {}
       try { await _reconcilier('DossierMedical', dossiers.map(d => d.id)); } catch {}
       try { await _reconcilier('Contact', contacts.map(c => c.id)); } catch {}
+      try { await _reconcilier('Arme', armes.map(a => a.id)); } catch {}
       const summary = results.map(r => `${r.table} ${r.ok ? r.count : '✗' + (r.status || '')}`).join(' · ');
       console.log(`🔄 Sync Supabase → ${summary}`);
       out = { ok: true, results };

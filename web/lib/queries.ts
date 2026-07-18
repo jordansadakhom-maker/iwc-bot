@@ -310,15 +310,24 @@ export async function getAgenda(): Promise<AgendaData> {
 
 // ── Inventaire (page dédiée) ─────────────────────────────────────
 export type VehiculeItem = { id: string; nom: string; type: string | null; pole: string; etat: string | null; notes: string | null };
-export type InventaireData = { connecte: boolean; vehicules: VehiculeItem[] };
+export type ArmeItem = { id: string; serie: string; type: string | null; categorie: string | null; appartenance: string | null; membreNom: string | null; pole: string | null };
+export type InventaireData = { connecte: boolean; vehicules: VehiculeItem[]; armes: ArmeItem[] };
 
 export async function getInventaire(): Promise<InventaireData> {
-  if (!dataConfigured()) return { connecte: false, vehicules: [] };
+  if (!dataConfigured()) return { connecte: false, vehicules: [], armes: [] };
   const supabase = createAdminClient();
-  if (!supabase) return { connecte: false, vehicules: [] };
-  const { data, error } = await supabase.from("Vehicule").select("id,nom,type,pole,etat,notes").order("nom", { ascending: true });
-  if (error) return { connecte: false, vehicules: [] };
-  return { connecte: true, vehicules: (data || []) as VehiculeItem[] };
+  if (!supabase) return { connecte: false, vehicules: [], armes: [] };
+  const [vehR, armeR] = await Promise.all([
+    supabase.from("Vehicule").select("id,nom,type,pole,etat,notes").order("nom", { ascending: true }),
+    // La table Arme peut ne pas encore exister → on ignore l'erreur (liste vide).
+    supabase.from("Arme").select("id,serie,type,categorie,appartenance,membreNom,pole").order("serie", { ascending: true }),
+  ]);
+  if (vehR.error && armeR.error) return { connecte: false, vehicules: [], armes: [] };
+  return {
+    connecte: true,
+    vehicules: (vehR.data || []) as VehiculeItem[],
+    armes: armeR.error ? [] : ((armeR.data || []) as ArmeItem[]),
+  };
 }
 
 // ── Notifications (page dédiée) ──────────────────────────────────
