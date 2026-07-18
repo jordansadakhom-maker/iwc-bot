@@ -72,10 +72,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
         ))}
 
         <div className="mt-auto flex items-center gap-2.5 border-t border-border px-2 pb-0.5 pt-3">
-          <span className="h-2 w-2 rounded-full bg-good" />
-          <span className="text-[0.72rem] text-muted">
-            <b className="text-ink">5</b> membres en ligne · base synchronisée
-          </span>
+          <span className="h-2 w-2 rounded-full bg-faint" />
+          <span className="text-[0.72rem] text-muted">Base non connectée — Phase 1</span>
         </div>
       </aside>
 
@@ -125,7 +123,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
           <button className="relative grid h-10 w-10 place-items-center rounded-xl border border-border bg-surface text-muted hover:text-ink" aria-label="Notifications">
             <Bell className="h-[18px] w-[18px]" />
-            <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-lg border-2 border-bg bg-crit px-1 text-[0.6rem] font-extrabold text-white">3</span>
           </button>
 
           <div className="flex items-center gap-2.5 rounded-xl border border-border bg-surface py-[5px] pl-[5px] pr-1.5">
