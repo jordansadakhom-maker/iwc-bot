@@ -68,6 +68,10 @@ let creationRapide = {};
 try { creationRapide = require('./creation-rapide'); console.log('✅ Module création rapide chargé'); }
 catch (e) { console.log('⚠️ creation-rapide non chargé:', e.message); }
 
+let supabaseSync = {};
+try { supabaseSync = require('./supabase-sync'); console.log(`✅ Module Supabase sync chargé${supabaseSync.estActif?.() ? '' : ' (inactif — variables d\'env absentes)'}`); }
+catch (e) { console.log('⚠️ supabase-sync non chargé:', e.message); }
+
 let resumePhoto = {};
 try { resumePhoto = require('./resume-photo'); console.log('✅ Module résumé-photo chargé'); }
 catch (e) { console.log('⚠️ resume-photo non chargé:', e.message); }
@@ -6664,6 +6668,9 @@ client.once('clientReady', async () => {
       try { await sauvegarderSurGitHub?.(); } catch {}
     }
   } catch (e) { console.log('⚠️ correction inactifs:', e.message); }
+  // 🔄 Première synchronisation Supabase (plateforme web) — pousse les vraies
+  //    données (membres, coffres, contrats, opérations). No-op sans variables d'env.
+  try { supabaseSync.syncAll?.(loadDB()).catch(() => {}); } catch {}
   for (const guild of client.guilds.cache.values()) {
     await registerSlashCommands(guild).catch(e => console.log('registerSlashCommands error:', e.message));
     await autoSetup(guild).catch(e => console.log('autoSetup error:', e.message));
@@ -6694,6 +6701,9 @@ client.once('clientReady', async () => {
   cron.schedule('*/5 * * * *', async () => { try { await _updateContratPanel(client); } catch {} try { await _updatePlanningContrats(client); } catch {} try { await _updatePanneauContrats(client); } catch {} try { await comptabilite.refreshPanel?.(client); } catch {} });
   // Sauvegarde Gist FRÉQUENTE (toutes les 5 min) → réduit la perte de données à <5 min en cas de redémarrage brutal (sommeil Render, crash…).
   cron.schedule('*/5 * * * *', async () => { try { await sauvegarderSurGitHub(); } catch {} });
+  // 🔄 Synchronisation Supabase (plateforme web) toutes les 5 min — reflète les
+  //    coffres/contrats/opérations à jour. No-op sans variables d'env.
+  cron.schedule('*/5 * * * *', async () => { try { await supabaseSync.syncAll?.(loadDB()); } catch {} });
   cron.schedule('0 18 * * *', async () => {
     try { const u = await client.users.fetch('944208797084311583').catch(() => null); if (u) await u.send({ embeds: [_genererRecapEmbed(loadDB())] }).catch(() => {}); } catch {}
   }, { timezone: 'Europe/Paris' });

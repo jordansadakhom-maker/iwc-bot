@@ -15,7 +15,7 @@ function Crest({ className }: { className?: string }) {
   );
 }
 
-export function Shell({ children }: { children: React.ReactNode }) {
+export function Shell({ children, connecte = false }: { children: React.ReactNode; connecte?: boolean }) {
   const [pole, setPole] = useState<Pole>("iwc");
   const [open, setOpen] = useState(false);
   const path = usePathname();
@@ -72,8 +72,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
         ))}
 
         <div className="mt-auto flex items-center gap-2.5 border-t border-border px-2 pb-0.5 pt-3">
-          <span className="h-2 w-2 rounded-full bg-faint" />
-          <span className="text-[0.72rem] text-muted">Base non connectée — Phase 1</span>
+          <span className="h-2 w-2 rounded-full" style={{ background: connecte ? "var(--good)" : "var(--faint)" }} />
+          <span className="text-[0.72rem] text-muted">{connecte ? "Base connectée — données en direct" : "Base non connectée — Phase 1"}</span>
         </div>
       </aside>
 

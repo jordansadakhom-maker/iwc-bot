@@ -1,11 +1,9 @@
 /**
- * Navigation + jeux de données.
+ * Navigation + profil connecté.
  *
- * ⚠️ AUCUNE donnée inventée ici (pas de faux contrat, faux montant, fausse
- * opération). Les vraies valeurs viendront de la base partagée avec le bot
- * Discord (coffres, contrats, opérations, transactions…) une fois la Phase 1
- * branchée. Tant que `CONNECTE` est `false`, le tableau de bord affiche des
- * états « en attente » plutôt que des chiffres fictifs.
+ * ⚠️ AUCUNE donnée métier inventée ici. Les vraies valeurs (coffres, contrats,
+ * opérations, transactions…) sont lues depuis Supabase — voir `lib/queries.ts`,
+ * alimenté par le bot Discord via `supabase-sync.js`.
  */
 import {
   LayoutDashboard, LineChart, Target, Eye, Users, HeartPulse, CalendarDays,
@@ -46,31 +44,6 @@ export const NAV: NavGroup[] = [
 ];
 
 export type Pole = "iwc" | "confrerie";
-
-// Passe à `true` en Phase 1 quand la base réelle (Supabase, alimentée par le bot) est branchée.
-export const CONNECTE = false;
-
-// KPI : libellés uniquement — les valeurs viendront de la base.
-export const KPIS = [
-  { key: "coffre", label: "Coffre commun" },
-  { key: "conf", label: "Coffre Confrérie" },
-  { key: "contrats", label: "Contrats en cours" },
-  { key: "ops", label: "Opérations actives" },
-] as const;
-
-// Séries/listes VIDES tant que la base n'est pas connectée (aucune donnée fictive).
-export const TRESORERIE: { jour: number; solde: number }[] = [];
-
-export type Severity = "crit" | "warn" | "info";
-export const ATTENTION: { titre: string; detail: string; tag: string; sev: Severity }[] = [];
-
-export const OPERATIONS: {
-  preparation: { titre: string; type: string; etape: string; membres: string[] }[];
-  encours: { titre: string; type: string; etape: string; membres: string[] }[];
-  terminees: { titre: string; type: string; etape: string; membres: string[] }[];
-} = { preparation: [], encours: [], terminees: [] };
-
-export const NOTIFS: { titre: string; tag: string; quand: string; unread: boolean }[] = [];
 
 // Le profil connecté (réel) — remplacé par le compte Discord à la connexion en Phase 1.
 export const ME = { nom: "Jonas Caverly", initiales: "JC", role: "Fondateur" };
