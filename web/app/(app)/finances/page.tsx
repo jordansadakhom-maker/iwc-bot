@@ -6,10 +6,6 @@ import { FinancesCoffres } from "@/components/finances-coffres";
 
 export const dynamic = "force-dynamic";
 
-function money(n: number | null) {
-  return n === null || n === undefined ? "—" : "$" + n.toLocaleString("fr-FR");
-}
-
 export default async function FinancesPage() {
   const { connecte, coffres, pole } = await getFinances();
   const conf = pole === "confrerie";
@@ -37,7 +33,7 @@ export default async function FinancesPage() {
               { label: "Coffre Iron Wolf", value: coffres.legal ?? 0 },
               { label: "Coffre Confrérie", value: coffres.illegal ?? 0 },
             ]}
-            format={money}
+            money
           />
         </Card>
       ) : null}

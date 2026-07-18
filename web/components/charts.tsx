@@ -7,12 +7,16 @@ import { useState } from "react";
 
 // ── Barres horizontales (magnitude, teinte laiton par défaut ; couleur/ligne
 //    catégorielle possible). Survol : la barre s'illumine, sa valeur ressort. ──
+function fmt(n: number, money?: boolean) {
+  return money ? "$" + n.toLocaleString("fr-FR") : String(n);
+}
+
 export function BarresH({
   data,
-  format,
+  money,
 }: {
   data: { label: string; value: number; color?: string }[];
-  format?: (n: number) => string;
+  money?: boolean;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const max = Math.max(1, ...data.map((d) => d.value));
@@ -33,7 +37,7 @@ export function BarresH({
             <div className="mb-1 flex items-baseline justify-between gap-2 text-[0.78rem]">
               <span className="truncate text-muted">{d.label}</span>
               <span className={"font-num font-semibold " + (on ? "text-ink" : "text-ink")} style={on ? { color: base } : undefined}>
-                {format ? format(d.value) : d.value}
+                {fmt(d.value, money)}
               </span>
             </div>
             <div className="h-2.5 w-full overflow-hidden rounded-full" style={{ background: "color-mix(in srgb,var(--ink) 8%,transparent)" }}>
@@ -115,7 +119,7 @@ export function Donut({ data }: { data: { label: string; value: number; color: s
 
 // ── Répartition : une barre segmentée « parties d'un tout » (ex. pôles), avec
 //    séparateurs 2px de la surface et légende directe. ──
-export function Repartition({ data, format }: { data: { label: string; value: number; color: string }[]; format?: (n: number) => string }) {
+export function Repartition({ data, money }: { data: { label: string; value: number; color: string }[]; money?: boolean }) {
   const [hover, setHover] = useState<number | null>(null);
   const sum = data.reduce((a, d) => a + d.value, 0);
   return (
@@ -131,7 +135,7 @@ export function Repartition({ data, format }: { data: { label: string; value: nu
               onMouseLeave={() => setHover(null)}
               className="h-full transition-opacity"
               style={{ width: `${pct}%`, background: d.color, opacity: hover === null || hover === i ? 1 : 0.5 }}
-              title={`${d.label} : ${format ? format(d.value) : d.value}`}
+              title={`${d.label} : ${fmt(d.value, money)}`}
             />
           );
         })}
@@ -147,7 +151,7 @@ export function Repartition({ data, format }: { data: { label: string; value: nu
           >
             <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: d.color }} />
             <span className="text-muted">{d.label}</span>
-            <span className="font-num font-semibold text-ink">{format ? format(d.value) : d.value}</span>
+            <span className="font-num font-semibold text-ink">{fmt(d.value, money)}</span>
           </div>
         ))}
       </div>
