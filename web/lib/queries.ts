@@ -238,7 +238,7 @@ export async function getDashboard(): Promise<DashData> {
 }
 
 // ── Opérations & Contrats (page dédiée) ──────────────────────────
-export type OpDetail = { id: string; titre: string; type: string; etape: string; membres: number; prime: string | null };
+export type OpDetail = { id: string; titre: string; type: string; etape: string; phase: string; membres: number; prime: string | null };
 export type ContratDetail = { id: string; cible: string; commanditaire: string | null; statut: string; pole: string; remuneration: string | null };
 export type OperationsData = {
   connecte: boolean;
@@ -278,6 +278,7 @@ export async function getOperations(): Promise<OperationsData> {
       titre: o.cible || "Opération",
       type: o.categorie || "Opération",
       etape,
+      phase: col === "encours" ? "en_cours" : col === "terminees" ? (o.phase === "annulee" ? "annulee" : "terminee") : "preparation",
       membres: Array.isArray(o.agentsAssignes) ? o.agentsAssignes.length : 0,
       prime: o.prime ?? null,
     });
