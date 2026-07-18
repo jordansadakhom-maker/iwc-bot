@@ -100,7 +100,58 @@ const HANDLERS = {
     delete db.suiviMedical[id];
     return { ok: true, message: 'Dossier supprimé' };
   },
+
+  // ── Opérations ───────────────────────────────────────────
+  // Les opérations vivent dans db.operations (lancées/programmées) ET
+  // db.preparations (en préparation). On les retrouve par id dans les deux.
+  'operation.create': (db, p) => {
+    const cible = _s(p.cible, 200);
+    if (!cible) return { ok: false, message: 'titre manquant' };
+    if (!Array.isArray(db.operations)) db.operations = [];
+    const id = `web-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+    const pole = String(p.pole || '').toLowerCase().includes('ill') ? 'illegal' : 'legal';
+    const status = _phaseOp(p.phase);
+    db.operations.push({
+      id, name: cible, cible, objectif: _s(p.objectif, 500) || cible,
+      categorie: _s(p.categorie, 80) || 'Opération', pole, status,
+      participants: [], agents: [], remuneration: _s(p.prime, 120), lieu: _s(p.lieu, 120),
+      createdAt: new Date().toISOString(), createurNom: p.auteurNom || 'Site web', source: 'web',
+    });
+    return { ok: true, message: `Opération « ${cible.slice(0, 60)} » créée` };
+  },
+  'operation.update': (db, p) => {
+    const op = _findOp(db, p.id);
+    if (!op) return { ok: false, message: 'Opération introuvable' };
+    const ch = [];
+    if (p.cible !== undefined) { op.cible = _s(p.cible, 200); ch.push('titre'); }
+    if (p.categorie !== undefined) { op.categorie = _s(p.categorie, 80); ch.push('type'); }
+    if (p.prime !== undefined) { op.remuneration = _s(p.prime, 120); ch.push('prime'); }
+    if (p.objectif !== undefined) { op.objectif = _s(p.objectif, 500); }
+    if (p.lieu !== undefined) { op.lieu = _s(p.lieu, 120); }
+    if (p.phase !== undefined) { const s = _phaseOp(p.phase); op.status = s; ch.push(`phase → ${s}`); }
+    op.majPar = p.auteurNom || 'Site web'; op.majAt = Date.now();
+    return { ok: true, message: `Opération mise à jour (${ch.join(', ') || '—'})` };
+  },
+  'operation.delete': (db, p) => {
+    const id = String(p.id || '');
+    let i = (db.operations || []).findIndex(o => o && String(o.id) === id);
+    if (i >= 0) { db.operations.splice(i, 1); return { ok: true, message: 'Opération supprimée' }; }
+    i = (db.preparations || []).findIndex(o => o && String(o.id) === id);
+    if (i >= 0) { db.preparations.splice(i, 1); return { ok: true, message: 'Opération supprimée' }; }
+    return { ok: false, message: 'Opération introuvable' };
+  },
 };
+
+// Trouve une opération par id dans db.operations puis db.preparations.
+function _findOp(db, id) {
+  id = String(id || '');
+  return (db.operations || []).find(o => o && String(o.id) === id)
+    || (db.preparations || []).find(o => o && String(o.id) === id)
+    || null;
+}
+// Normalise une phase web vers un `status` reconnu par le bot (voir supabase-sync _phase).
+const _PHASES_OP = new Set(['preparation', 'en_cours', 'terminee', 'annulee']);
+function _phaseOp(s) { s = String(s || '').toLowerCase(); return _PHASES_OP.has(s) ? s : 'preparation'; }
 
 // Propage un changement vers Discord (best-effort, ne bloque jamais).
 async function _refletDiscord(guild, ref) {
