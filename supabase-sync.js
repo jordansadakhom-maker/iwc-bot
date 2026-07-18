@@ -63,6 +63,15 @@ function _pole(p) { p = String(p || '').toLowerCase(); return _POLES.has(p) ? p 
 const _STATUTS = new Set(['actif', 'absent', 'inactif', 'parti', 'visiteur']);
 function _statut(s) { s = String(s || '').toLowerCase(); return _STATUTS.has(s) ? s : 'actif'; }
 
+// Libellés des rendez-vous (clés db.rdvplus → texte lisible pour le site).
+const RDV_TYPES = { esc: 'Escorte de personne', cnv: 'Escorte de convoi', pro: 'Protection rapprochée', sec: "Sécurisation d'un lieu", enq: 'Enquête / filature', neg: 'Négociation / médiation', rec: 'Récupération de biens', bnt: 'Chasse à la prime', trv: 'Travail discret' };
+const RDV_LIEUX = { val: 'Valentine', str: 'Strawberry', rho: 'Rhodes', sd: 'Saint-Denis', bw: 'Blackwater', ann: 'Annesburg', vh: 'Van Horn', tum: 'Tumbleweed', arm: 'Armadillo', emr: 'Emerald Ranch', lag: 'Lagras', col: 'Colter', man: 'Manzanita Post', was: 'Wallace Station', rig: 'Riggs Station', dsc: 'Un lieu discret', aut: 'Autre' };
+
+function _isoOrUndef(v) {
+  if (!v) return undefined;
+  try { const d = (typeof v === 'number') ? new Date(v) : new Date(v); return isNaN(d.getTime()) ? undefined : d.toISOString(); } catch { return undefined; }
+}
+
 function _contratPole(c) {
   const p = String(c.pole || '').toLowerCase();
   if (p === 'legal' || p === 'illegal') return p;
@@ -202,7 +211,51 @@ function _construire(db) {
       createdAt: t.createdAt || undefined,
     }));
 
-  return { membres, coffres, contrats, operations, rapports, traques };
+  // ── Médical : dossiers (db.suiviMedical, indexé par ID Discord du membre) ──
+  const dossiers = Object.entries(db.suiviMedical || {})
+    .filter(([id, f]) => id && f && typeof f === 'object')
+    .map(([id, f]) => ({
+      id: String(id),
+      membreId: String(id),
+      statut: _str(f.statut || 'non_teste', 40),
+      blessures: Array.isArray(f.blessures) ? f.blessures : [],
+      suivis: Array.isArray(f.suivis) ? f.suivis : [],
+      ordonnances: Array.isArray(f.ordonnances) ? f.ordonnances : [],
+      historique: Array.isArray(f.historique) ? f.historique : [],
+      updatedAt: now,
+    }));
+
+  // ── Répertoire : contacts (db.repertoire.contacts) ──
+  const contacts = ((db.repertoire && db.repertoire.contacts) || [])
+    .filter(c => c && c.id)
+    .map(c => ({
+      id: String(c.id),
+      nom: _str(c.nom, 120) || 'Contact',
+      type: _str(c.type || 'Neutre', 40),
+      fiabilite: Math.max(0, Math.min(5, parseInt(c.fiabilite, 10) || 0)),
+      secteur: _nn(c.secteur, 120),
+      notes: _nn(c.notes, 2000),
+      photoUrl: _nn(c.photoUrl, 500),
+    }));
+
+  // ── Rendez-vous du bot (db.rdvplus.rdvs). ⚠️ PAS de réconciliation sur Rdv :
+  //    la table Rdv contient AUSSI les demandes du site web (ids distincts).
+  const rdvs = Object.values((db.rdvplus && db.rdvplus.rdvs) || {})
+    .filter(r => r && r.id)
+    .map(r => ({
+      id: String(r.id),
+      clientId: r.clientId ? String(r.clientId) : null,
+      nomRP: _nn(r.nomRP, 120),
+      type: RDV_TYPES[r.typeKey] || _nn(r.typeKey, 120) || 'Rendez-vous',
+      lieu: RDV_LIEUX[r.lieuKey] || _nn(r.lieuKey, 120),
+      creneau: _nn(r.souhaitTexte, 200),
+      statut: _str(r.statut || 'Planifié', 40),
+      agentId: (Array.isArray(r.agentIds) && r.agentIds[0]) ? String(r.agentIds[0]) : (r.agentId ? String(r.agentId) : null),
+      paiement: (r.paiement && typeof r.paiement === 'object') ? r.paiement : null,
+      createdAt: _isoOrUndef(r.createdAt),
+    }));
+
+  return { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -219,7 +272,7 @@ async function syncAll(db) {
     let out;
     do {
       _redo = false;
-      const { membres, coffres, contrats, operations, rapports, traques } = _construire(db);
+      const { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs } = _construire(db);
       const results = [];
       results.push(await _upsert('Membre', membres));    // 1. aucun FK bloquant (parrainId non fourni)
       results.push(await _upsert('Coffre', coffres));    // 2. indépendant
@@ -227,12 +280,18 @@ async function syncAll(db) {
       results.push(await _upsert('Operation', operations)); // 4. FK → Membre + Contrat (déjà poussés)
       results.push(await _upsert('RapportInfo', rapports)); // 5. renseignement — indépendant
       results.push(await _upsert('Traque', traques));       // 6. traques — indépendant
-      // Nettoyage des fantômes : membres partis (seulement si roster connu), contrats/ops/rapports/traques supprimés localement.
+      results.push(await _upsert('DossierMedical', dossiers)); // 7. médical — indépendant
+      results.push(await _upsert('Contact', contacts));        // 8. répertoire — indépendant
+      results.push(await _upsert('Rdv', rdvs));                // 9. rdv du bot (coexiste avec les demandes web)
+      // Nettoyage des fantômes : membres partis (si roster connu), + entités supprimées localement.
+      // ⚠️ On NE réconcilie PAS Rdv (préserve les demandes venues du site web).
       if (_membresActuels) { try { await _reconcilier('Membre', membres.map(m => m.id)); } catch {} }
       try { await _reconcilier('Contrat', contrats.map(c => c.id)); } catch {}
       try { await _reconcilier('Operation', operations.map(o => o.id)); } catch {}
       try { await _reconcilier('RapportInfo', rapports.map(r => r.id)); } catch {}
       try { await _reconcilier('Traque', traques.map(t => t.id)); } catch {}
+      try { await _reconcilier('DossierMedical', dossiers.map(d => d.id)); } catch {}
+      try { await _reconcilier('Contact', contacts.map(c => c.id)); } catch {}
       const summary = results.map(r => `${r.table} ${r.ok ? r.count : '✗' + (r.status || '')}`).join(' · ');
       console.log(`🔄 Sync Supabase → ${summary}`);
       out = { ok: true, results };
