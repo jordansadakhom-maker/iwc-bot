@@ -28,6 +28,12 @@ function setMembresActuels(ids) {
   else _membresActuels = null;
 }
 
+// Roster complet construit depuis les rôles Discord (grades) — source de vérité
+// des membres affichés sur le site : [{ id, nom, grade, pole, statut, joinedAt }].
+// null = non fourni → repli sur db.members.
+let _roster = null;
+function setMembresRoster(arr) { _roster = (Array.isArray(arr) && arr.length) ? arr : null; }
+
 // ── Upsert générique d'un lot de lignes dans une table PostgREST ──
 // Prefer: resolution=merge-duplicates → insère ou met à jour sur la clé primaire.
 async function _upsert(table, rows) {
@@ -109,19 +115,34 @@ function _fiabiliteNum(v) {
 function _construire(db) {
   const now = new Date().toISOString();
 
-  // ── Membres ── (uniquement ceux réellement présents sur le serveur si connu :
-  //    exclut les fondateurs codés en dur qui ont quitté, ex. « Thomas Galagan »)
-  const membres = Object.values(db.members || {})
-    .filter(m => m && m.id && (!_membresActuels || _membresActuels.has(String(m.id))))
-    .map(m => ({
-      id: String(m.id),
-      nomIC: _str(m.name || m.nom, 120) || 'Inconnu',
-      pole: _pole(m.pole),
-      grade: _str(m.rang || m.grade, 120),
-      statut: _statut(m.status || m.statut),
-      ancienneteAt: m.joinedAt || m.ancienneteAt || null,
+  // ── Membres ──
+  // Source de vérité = le roster construit depuis les rôles Discord (grades),
+  // si fourni : reflète EXACTEMENT la hiérarchie (les 9 gradés, pas seulement
+  // ceux présents dans db.members). Sinon repli sur db.members ∩ roster réel.
+  let membres;
+  if (_roster) {
+    membres = _roster.filter(r => r && r.id).map(r => ({
+      id: String(r.id),
+      nomIC: _str(r.nom, 120) || 'Inconnu',
+      pole: _pole(r.pole),
+      grade: _str(r.grade, 120),
+      statut: _statut(r.statut),
+      ancienneteAt: r.joinedAt || null,
       updatedAt: now,
     }));
+  } else {
+    membres = Object.values(db.members || {})
+      .filter(m => m && m.id && (!_membresActuels || _membresActuels.has(String(m.id))))
+      .map(m => ({
+        id: String(m.id),
+        nomIC: _str(m.name || m.nom, 120) || 'Inconnu',
+        pole: _pole(m.pole),
+        grade: _str(m.rang || m.grade, 120),
+        statut: _statut(m.status || m.statut),
+        ancienneteAt: m.joinedAt || m.ancienneteAt || null,
+        updatedAt: now,
+      }));
+  }
   const memberIds = new Set(membres.map(m => m.id));
 
   // ── Coffres (reflet fidèle — 0 reste 0) ──
@@ -306,7 +327,7 @@ async function syncAll(db) {
       results.push(await _upsert('Arme', armes));              // 10. registre d'armes (table optionnelle — ignoré si absente)
       // Nettoyage des fantômes : membres partis (si roster connu), + entités supprimées localement.
       // ⚠️ On NE réconcilie PAS Rdv (préserve les demandes venues du site web).
-      if (_membresActuels) { try { await _reconcilier('Membre', membres.map(m => m.id)); } catch {} }
+      if (_membresActuels || _roster) { try { await _reconcilier('Membre', membres.map(m => m.id)); } catch {} }
       try { await _reconcilier('Contrat', contrats.map(c => c.id)); } catch {}
       try { await _reconcilier('Operation', operations.map(o => o.id)); } catch {}
       try { await _reconcilier('RapportInfo', rapports.map(r => r.id)); } catch {}
@@ -398,4 +419,4 @@ async function marquerRdvTransmis(id) {
   return await _patch(`Rdv?id=eq.${encodeURIComponent(id)}`, { statut: 'transmis' });
 }
 
-module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, lireDemandesRdvWeb, marquerRdvTransmis };
+module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, lireDemandesRdvWeb, marquerRdvTransmis };
