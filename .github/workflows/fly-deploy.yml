@@ -10,6 +10,8 @@ name: Deploy to Fly.io
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'web/**'          # les changements du site (Vercel) ne redéploient pas le bot
   workflow_dispatch:
 
 jobs:
