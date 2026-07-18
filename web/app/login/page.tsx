@@ -1,8 +1,7 @@
-import Link from "next/link";
+import { LoginButton } from "@/components/login-button";
 
-// Écran de connexion — l'entrée de la plateforme. Le bouton pointera vers la
-// route d'authentification Discord OAuth (câblée dès que les clés Supabase +
-// l'app Discord sont en place, Phase 1).
+// Écran de connexion — l'entrée de la plateforme. Le bouton lance la connexion
+// Discord (OAuth Supabase).
 export const metadata = { title: "Connexion — IWC" };
 
 function Crest() {
@@ -40,16 +39,7 @@ export default function LoginPage() {
             Identifie-toi avec ton compte Discord. Tes rôles et ton pôle sont récupérés automatiquement.
           </p>
 
-          <Link
-            href="/api/auth/discord"
-            className="mt-6 flex w-full items-center justify-center gap-3 rounded-xl px-4 py-3 text-[0.95rem] font-semibold text-white transition hover:brightness-110"
-            style={{ background: "#5865F2" }}
-          >
-            <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5" aria-hidden>
-              <path d="M20.3 4.4A19.8 19.8 0 0 0 15.4 3l-.3.5c1.6.4 2.9 1 4.2 1.8-1.6-.8-3.3-1.3-5.1-1.5a18.5 18.5 0 0 0-4.4 0C8.2 3.9 6.5 4.4 5 5.2 6.2 4.5 7.6 3.9 9.1 3.5L8.9 3A19.8 19.8 0 0 0 4 4.4C1.7 7.8.9 11.2 1.1 14.5a19.9 19.9 0 0 0 6 3l.8-1.1c-.9-.3-1.7-.7-2.5-1.2l.6-.4c3.3 1.5 6.9 1.5 10.2 0l.6.4c-.8.5-1.6.9-2.5 1.2l.8 1.1c2.2-.7 4.2-1.7 6-3 .3-3.8-.6-7.2-2.4-10.1ZM8.5 12.6c-.9 0-1.7-.9-1.7-1.9s.8-1.9 1.7-1.9 1.7.9 1.7 1.9-.7 1.9-1.7 1.9Zm7 0c-.9 0-1.7-.9-1.7-1.9s.8-1.9 1.7-1.9 1.7.9 1.7 1.9-.7 1.9-1.7 1.9Z" />
-            </svg>
-            Se connecter avec Discord
-          </Link>
+          <LoginButton />
 
           <p className="mt-4 text-center text-[0.72rem] text-faint">
             Accès réservé aux membres de la Confrérie / Iron Wolf Company.
