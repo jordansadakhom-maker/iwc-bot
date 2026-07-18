@@ -45,5 +45,5 @@ export const NAV: NavGroup[] = [
 
 export type Pole = "iwc" | "confrerie";
 
-// Le profil connecté (réel) — remplacé par le compte Discord à la connexion en Phase 1.
-export const ME = { nom: "Jonas Caverly", initiales: "JC", role: "Fondateur" };
+// Profil par défaut affiché tant qu'aucun compte Discord n'est connecté.
+export const ME = { nom: "Jonas Caverly", initiales: "JC", role: "Fondateur", avatarUrl: null as string | null };

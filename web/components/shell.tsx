@@ -6,6 +6,9 @@ import { usePathname } from "next/navigation";
 import { Search, Bell, Menu } from "lucide-react";
 import clsx from "clsx";
 import { NAV, ME, type Pole } from "@/lib/data";
+import { LogoutButton } from "@/components/logout-button";
+
+type Profil = { nom: string; initiales: string; role: string; avatarUrl: string | null };
 
 function Crest({ className }: { className?: string }) {
   return (
@@ -15,8 +18,9 @@ function Crest({ className }: { className?: string }) {
   );
 }
 
-export function Shell({ children, connecte = false }: { children: React.ReactNode; connecte?: boolean }) {
+export function Shell({ children, connecte = false, profil = null }: { children: React.ReactNode; connecte?: boolean; profil?: Profil | null }) {
   const [pole, setPole] = useState<Pole>("iwc");
+  const me = profil ?? ME;
   const [open, setOpen] = useState(false);
   const path = usePathname();
 
@@ -126,14 +130,21 @@ export function Shell({ children, connecte = false }: { children: React.ReactNod
           </button>
 
           <div className="flex items-center gap-2.5 rounded-xl border border-border bg-surface py-[5px] pl-[5px] pr-1.5">
-            <div className="grid h-[30px] w-[30px] place-items-center rounded-lg text-[0.8rem] font-extrabold text-black/85" style={{ background: "linear-gradient(135deg,var(--accent),color-mix(in srgb,var(--accent) 30%,#000))" }}>
-              {ME.initiales}
-            </div>
+            {me.avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={me.avatarUrl} alt="" className="h-[30px] w-[30px] rounded-lg object-cover" />
+            ) : (
+              <div className="grid h-[30px] w-[30px] place-items-center rounded-lg text-[0.8rem] font-extrabold text-black/85" style={{ background: "linear-gradient(135deg,var(--accent),color-mix(in srgb,var(--accent) 30%,#000))" }}>
+                {me.initiales}
+              </div>
+            )}
             <div className="hidden leading-tight sm:block">
-              <b className="text-[0.8rem] font-semibold">{ME.nom}</b>
-              <span className="block text-[0.66rem] text-faint">{ME.role}</span>
+              <b className="text-[0.8rem] font-semibold">{me.nom}</b>
+              <span className="block text-[0.66rem] text-faint">{me.role}</span>
             </div>
           </div>
+
+          {profil ? <LogoutButton /> : null}
         </header>
 
         <main className="mx-auto flex w-full max-w-[1360px] flex-col gap-5 px-4 pb-10 pt-6 sm:px-6">{children}</main>
