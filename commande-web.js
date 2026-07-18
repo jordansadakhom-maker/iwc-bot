@@ -140,7 +140,62 @@ const HANDLERS = {
     if (i >= 0) { db.preparations.splice(i, 1); return { ok: true, message: 'Opération supprimée' }; }
     return { ok: false, message: 'Opération introuvable' };
   },
+
+  // ── Contrats ─────────────────────────────────────────────
+  'contrat.create': (db, p) => {
+    const objet = _s(p.cible, 300);
+    if (!objet) return { ok: false, message: 'objet manquant' };
+    if (!Array.isArray(db.contrats)) db.contrats = [];
+    const id = `web-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+    db.contrats.push({
+      id, objet, commanditaire: _s(p.commanditaire, 200), clientNom: _s(p.commanditaire, 200),
+      remuneration: _s(p.remuneration, 120), status: _statutContrat(p.statut),
+      pole: _poleC(p.pole), agents: [], createdAt: new Date().toISOString(),
+      createurNom: p.auteurNom || 'Site web', source: 'web',
+    });
+    return { ok: true, message: `Contrat « ${objet.slice(0, 50)} » créé` };
+  },
+  'contrat.update': (db, p) => {
+    const c = (db.contrats || []).find(x => x && String(x.id) === String(p.id));
+    if (!c) return { ok: false, message: 'Contrat introuvable' };
+    if (p.cible !== undefined) c.objet = _s(p.cible, 300);
+    if (p.commanditaire !== undefined) { c.commanditaire = _s(p.commanditaire, 200); c.clientNom = c.commanditaire; }
+    if (p.remuneration !== undefined) c.remuneration = _s(p.remuneration, 120);
+    if (p.statut !== undefined) c.status = _statutContrat(p.statut);
+    if (p.pole !== undefined) c.pole = _poleC(p.pole);
+    c.majPar = p.auteurNom || 'Site web'; c.majAt = Date.now();
+    return { ok: true, message: 'Contrat mis à jour' };
+  },
+  'contrat.delete': (db, p) => {
+    const i = (db.contrats || []).findIndex(x => x && String(x.id) === String(p.id));
+    if (i < 0) return { ok: false, message: 'Contrat introuvable' };
+    db.contrats.splice(i, 1);
+    return { ok: true, message: 'Contrat supprimé' };
+  },
+
+  // ── Coffres (finances) ───────────────────────────────────
+  'coffre.ajuster': (db, p) => {
+    const cible = String(p.cible || '').toLowerCase();
+    const montant = Math.round(Number(p.montant));
+    if (!Number.isFinite(montant)) return { ok: false, message: 'montant invalide' };
+    const mode = ['depot', 'retrait', 'set'].includes(p.mode) ? p.mode : 'depot';
+    const calc = (actuel) => mode === 'set' ? montant : mode === 'retrait' ? actuel - Math.abs(montant) : actuel + Math.abs(montant);
+    if (cible === 'commun') {
+      db.coffre = Math.max(0, calc(Math.round(Number(db.coffre) || 0)));
+    } else if (cible === 'legal' || cible === 'illegal') {
+      if (!db.coffres || typeof db.coffres !== 'object') db.coffres = {};
+      db.coffres[cible] = Math.max(0, calc(Math.round(Number(db.coffres[cible]) || 0)));
+    } else {
+      return { ok: false, message: 'coffre inconnu' };
+    }
+    return { ok: true, message: `Coffre ${cible} — ${mode}` };
+  },
 };
+
+const _POLES_C = new Set(['legal', 'illegal']);
+function _poleC(p) { p = String(p || '').toLowerCase(); return _POLES_C.has(p) ? p : (p.includes('ill') ? 'illegal' : 'legal'); }
+const _STATUTS_C = new Set(['en_attente', 'valide', 'signe', 'termine', 'annule', 'refuse']);
+function _statutContrat(s) { s = String(s || '').toLowerCase(); return _STATUTS_C.has(s) ? s : 'en_attente'; }
 
 // Trouve une opération par id dans db.operations puis db.preparations.
 function _findOp(db, id) {
