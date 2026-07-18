@@ -15,6 +15,8 @@ name: Redéploiement Render
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'web/**'          # les changements du site (Vercel) ne redémarrent pas le bot
   workflow_dispatch: {}   # permet aussi de le lancer à la main depuis l'onglet Actions
 
 jobs:
