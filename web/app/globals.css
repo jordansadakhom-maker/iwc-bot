@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   Design system IWC — « nuit frontière » + accent laiton/or.
+   Dark = identité principale ; light géré ; data-pole = bascule
+   Iron Wolf (or) ↔ Confrérie (rouge sang).
+   ============================================================ */
+:root {
+  --bg:#0e1116; --bg-2:#0a0d11; --surface:#161b22; --surface-2:#1b222c;
+  --border:#242d39; --border-2:#2e3a48;
+  --ink:#e9e3d4; --muted:#95a1b1; --faint:#66717f;
+  --brass:#c8a45c; --brass-hi:#e2c483; --oxblood:#b0413a; --steel:#6f9fc4;
+  --good:#54b085; --warn:#d8a53f; --crit:#cf4d40;
+  --accent:var(--brass); --accent-hi:var(--brass-hi);
+  --font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --font-display:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  --font-num:"SF Mono","Roboto Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg:#efe9dc; --bg-2:#e6dfce; --surface:#fbf8f1; --surface-2:#f3eee1;
+    --border:#dcd2bd; --border-2:#cabfa6; --ink:#2a2115; --muted:#6e6353; --faint:#978b76;
+    --brass:#96701f; --brass-hi:#b78d33; --oxblood:#98352f; --steel:#3f6f96;
+    --good:#3d8f68; --warn:#b9852a; --crit:#b23c30;
+  }
+}
+:root[data-theme="dark"] {
+  --bg:#0e1116; --bg-2:#0a0d11; --surface:#161b22; --surface-2:#1b222c;
+  --border:#242d39; --border-2:#2e3a48; --ink:#e9e3d4; --muted:#95a1b1; --faint:#66717f;
+  --brass:#c8a45c; --brass-hi:#e2c483; --oxblood:#b0413a; --steel:#6f9fc4;
+  --good:#54b085; --warn:#d8a53f; --crit:#cf4d40;
+}
+:root[data-theme="light"] {
+  --bg:#efe9dc; --bg-2:#e6dfce; --surface:#fbf8f1; --surface-2:#f3eee1;
+  --border:#dcd2bd; --border-2:#cabfa6; --ink:#2a2115; --muted:#6e6353; --faint:#978b76;
+  --brass:#96701f; --brass-hi:#b78d33; --oxblood:#98352f; --steel:#3f6f96;
+  --good:#3d8f68; --warn:#b9852a; --crit:#b23c30;
+}
+[data-pole="confrerie"] { --accent:var(--oxblood); --accent-hi:#d06a62; }
+[data-pole="iwc"] { --accent:var(--brass); --accent-hi:var(--brass-hi); }
+
+html, body { padding: 0; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+.tabular { font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+}

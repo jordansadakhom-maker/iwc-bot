@@ -1,0 +1,256 @@
+// ───────────────────────────────────────────────────────────────────────────
+//  Schéma de base IWC — source de vérité unique (PostgreSQL / Supabase).
+//  Bot Discord ET site web taperont dans cette base. Modèle INITIAL : on garde
+//  des colonnes Json pour les données déjà imbriquées (étapes, blessures…) afin
+//  de migrer sans perte, puis on « déplie » au fil des phases.
+// ───────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Pole {
+  legal      // Iron Wolf Company
+  illegal    // La Confrérie
+  both
+}
+
+enum StatutMembre {
+  actif
+  absent
+  inactif
+  parti
+  visiteur
+}
+
+enum PhaseOperation {
+  preparation
+  en_cours
+  terminee
+  annulee
+}
+
+enum SensTransaction {
+  entree
+  sortie
+}
+
+// ── Identité & accès ─────────────────────────────────────────────
+model Membre {
+  id           String        @id                    // ID Discord
+  nomIC        String
+  avatarUrl    String?
+  pole         Pole          @default(both)
+  grade        String?
+  statut       StatutMembre  @default(actif)
+  ancienneteAt DateTime?
+  parrainId    String?
+  parrain      Membre?       @relation("Parrainage", fields: [parrainId], references: [id])
+  filleuls     Membre[]      @relation("Parrainage")
+  roles        MembreRole[]
+  transactions Transaction[]
+  operations   Operation[]
+  notifications Notification[]
+  prefsNotif   Json?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model Role {
+  id      String       @id                            // ID du rôle Discord
+  nom     String
+  membres MembreRole[]
+}
+
+model MembreRole {
+  membre   Membre @relation(fields: [membreId], references: [id], onDelete: Cascade)
+  membreId String
+  role     Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  roleId   String
+
+  @@id([membreId, roleId])
+}
+
+// ── Finances ─────────────────────────────────────────────────────
+model Coffre {
+  id           String        @id @default(cuid())
+  pole         Pole          @unique
+  solde        Int           @default(0)
+  seuilAlerte  Int           @default(0)
+  transactions Transaction[]
+  updatedAt    DateTime      @updatedAt
+}
+
+model Transaction {
+  id        String          @id @default(cuid())
+  coffre    Coffre          @relation(fields: [coffreId], references: [id])
+  coffreId  String
+  sens      SensTransaction
+  montant   Int
+  motif     String?
+  auteur    Membre?         @relation(fields: [auteurId], references: [id])
+  auteurId  String?
+  pole      Pole
+  createdAt DateTime        @default(now())
+}
+
+model Facture {
+  id        String   @id @default(cuid())
+  reference String   @unique
+  clientNom String?
+  montant   Int
+  reglee    Boolean  @default(false)
+  contratId String?
+  createdAt DateTime @default(now())
+}
+
+// ── Contrats & opérations ────────────────────────────────────────
+model Contrat {
+  id            String    @id @default(cuid())
+  cible         String
+  motif         String?
+  remuneration  String?
+  statut        String    @default("en_attente")
+  pole          Pole
+  commanditaire String?
+  agents        String[]  @default([])
+  operation     Operation?
+  createdAt     DateTime  @default(now())
+}
+
+model Operation {
+  id             String         @id @default(cuid())
+  categorie      String
+  cible          String
+  phase          PhaseOperation @default(preparation)
+  prime          String?
+  contrat        Contrat?       @relation(fields: [contratId], references: [id])
+  contratId      String?        @unique
+  createur       Membre?        @relation(fields: [createurId], references: [id])
+  createurId     String?
+  agentsAssignes String[]       @default([])
+  etapes         Json?          // [{ index, champs, photos, valide, valideePar }]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+}
+
+model Traque {
+  id          String   @id @default(cuid())
+  cible       String
+  prime       String?
+  dangerosite String?
+  statut      String   @default("active")
+  createdAt   DateTime @default(now())
+}
+
+// ── Renseignement ────────────────────────────────────────────────
+model RapportInfo {
+  id          String   @id @default(cuid())
+  source      String?
+  cible       String?
+  info        String
+  fiabilite   Int      @default(0)
+  statut      String   @default("nouveau")   // nouveau | confirme | infirme
+  rapporteurId String?
+  createdAt   DateTime @default(now())
+}
+
+model Contact {
+  id        String   @id @default(cuid())
+  nom       String
+  type      String   @default("Neutre")
+  fiabilite Int      @default(0)
+  secteur   String?
+  notes     String?
+  photoUrl  String?
+  createdAt DateTime @default(now())
+}
+
+// ── Terrain ──────────────────────────────────────────────────────
+model DossierMedical {
+  id         String   @id @default(cuid())
+  membreId   String   @unique
+  statut     String   @default("non_teste")
+  blessures  Json?
+  suivis     Json?
+  ordonnances Json?
+  historique Json?
+  updatedAt  DateTime @updatedAt
+}
+
+model Rdv {
+  id           String   @id @default(cuid())
+  clientId     String?
+  nomRP        String?
+  type         String?
+  lieu         String?
+  creneau      String?
+  statut       String   @default("Planifié")
+  agentId      String?
+  paiement     Json?
+  satisfaction String?
+  createdAt    DateTime @default(now())
+}
+
+model Vehicule {
+  id        String   @id @default(cuid())
+  nom       String
+  type      String?
+  pole      Pole
+  etat      String?  @default("disponible")
+  notes     String?
+  createdAt DateTime @default(now())
+}
+
+// ── Vie de faction ───────────────────────────────────────────────
+model Candidature {
+  id        String   @id @default(cuid())
+  nomRP     String
+  pole      Pole
+  statut    String   @default("en_attente")
+  contenu   Json?
+  createdAt DateTime @default(now())
+}
+
+model Sanction {
+  id        String   @id @default(cuid())
+  membreId  String
+  type      String   // avertissement, casier…
+  motif     String?
+  parId     String?
+  createdAt DateTime @default(now())
+}
+
+// ── Transversal : le ciment du site ──────────────────────────────
+model Notification {
+  id          String   @id @default(cuid())
+  destinataire Membre? @relation(fields: [membreId], references: [id])
+  membreId    String?
+  roleCible   String?  // notification adressée à un rôle plutôt qu'à une personne
+  pole        Pole?
+  type        String
+  titre       String
+  corps       String?
+  lien        String?
+  lu          Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([membreId, lu])
+  @@index([roleCible])
+}
+
+model JournalAudit {
+  id        String   @id @default(cuid())
+  acteurId  String?
+  action    String
+  cible     String?
+  details   Json?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
