@@ -1765,6 +1765,7 @@ async function handleSlashCommand(interaction) {
     }
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     try {
+      await _majMembresActuels([interaction.guild]);
       const r = await supabaseSync.syncAll(loadDB());
       const lignes = (r?.results || []).map(x => `• ${x.table} : ${x.ok ? `**${x.count}**` : '❌ échec' + (x.status ? ` (HTTP ${x.status})` : '')}`).join('\n');
       return interaction.editReply({ content: `✅ **Synchro du site effectuée.**\n${lignes || '—'}\n\nLe tableau de bord et les pages du site (Opérations, Membres, Finances) reflètent maintenant ces données.` });
@@ -6688,9 +6689,9 @@ client.once('clientReady', async () => {
       try { await sauvegarderSurGitHub?.(); } catch {}
     }
   } catch (e) { console.log('⚠️ correction inactifs:', e.message); }
-  // 🔄 Première synchronisation Supabase (plateforme web) — pousse les vraies
-  //    données (membres, coffres, contrats, opérations). No-op sans variables d'env.
-  try { supabaseSync.syncAll?.(loadDB()).catch(() => {}); } catch {}
+  // 🔄 Première synchronisation Supabase (plateforme web) — d'abord le roster
+  //    RÉEL du serveur (exclut les anciens membres), puis les vraies données.
+  try { await _majMembresActuels(client.guilds.cache.values()); await supabaseSync.syncAll?.(loadDB()); } catch {}
   for (const guild of client.guilds.cache.values()) {
     await registerSlashCommands(guild).catch(e => console.log('registerSlashCommands error:', e.message));
     await autoSetup(guild).catch(e => console.log('autoSetup error:', e.message));
@@ -6723,7 +6724,7 @@ client.once('clientReady', async () => {
   cron.schedule('*/5 * * * *', async () => { try { await sauvegarderSurGitHub(); } catch {} });
   // 🔄 Synchronisation Supabase (plateforme web) toutes les 5 min — reflète les
   //    coffres/contrats/opérations à jour. No-op sans variables d'env.
-  cron.schedule('*/5 * * * *', async () => { try { await supabaseSync.syncAll?.(loadDB()); } catch {} });
+  cron.schedule('*/5 * * * *', async () => { try { await _majMembresActuels(client.guilds.cache.values()); await supabaseSync.syncAll?.(loadDB()); } catch {} });
   // 📨 Demandes de RDV venues du site web → notifier l'équipe dans #agenda (toutes les 2 min).
   cron.schedule('*/2 * * * *', async () => {
     for (const g of client.guilds.cache.values()) await rdvWeb.verifierDemandesRdvWeb?.(g).catch(() => {});
@@ -8662,6 +8663,20 @@ async function buildMembresDiscordMap(guild) {
     }
     if (updated > 0) console.log(`✅ MEMBRES_DISCORD_MAP enrichi : +${updated} entrées`);
   } catch (e) { console.log('❌ buildMembresDiscordMap:', e.message); }
+}
+
+// Récupère la liste des membres RÉELLEMENT présents sur le(s) serveur(s) et la
+// transmet au module de synchro → seuls les membres actuels sont poussés vers
+// le site (les anciens, ex. fondateurs partis, sont exclus puis supprimés).
+async function _majMembresActuels(guilds) {
+  try {
+    const ids = new Set();
+    for (const guild of guilds) {
+      const membres = await guild.members.fetch().catch(() => null);
+      if (membres) for (const [id, m] of membres) if (!m.user.bot) ids.add(id);
+    }
+    if (ids.size) supabaseSync.setMembresActuels?.([...ids]);
+  } catch (e) { console.log('⚠️ maj membres actuels:', e.message); }
 }
 
 async function _handleVersion(interaction) {

@@ -19,6 +19,15 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SE
 
 function estActif() { return !!(SUPABASE_URL && SUPABASE_KEY); }
 
+// Liste des IDs de membres RÉELLEMENT présents sur le serveur Discord.
+// Renseignée par index.js (via guild.members.fetch). null = inconnu → on ne
+// filtre pas (sécurité : ne jamais vider par erreur si la récupération échoue).
+let _membresActuels = null;
+function setMembresActuels(ids) {
+  if (Array.isArray(ids) && ids.length) _membresActuels = new Set(ids.map(String));
+  else _membresActuels = null;
+}
+
 // ── Upsert générique d'un lot de lignes dans une table PostgREST ──
 // Prefer: resolution=merge-duplicates → insère ou met à jour sur la clé primaire.
 async function _upsert(table, rows) {
@@ -77,9 +86,10 @@ function _str(v, max) { if (v == null) return null; const s = String(v); return 
 function _construire(db) {
   const now = new Date().toISOString();
 
-  // ── Membres ──
+  // ── Membres ── (uniquement ceux réellement présents sur le serveur si connu :
+  //    exclut les fondateurs codés en dur qui ont quitté, ex. « Thomas Galagan »)
   const membres = Object.values(db.members || {})
-    .filter(m => m && m.id)
+    .filter(m => m && m.id && (!_membresActuels || _membresActuels.has(String(m.id))))
     .map(m => ({
       id: String(m.id),
       nomIC: _str(m.name || m.nom, 120) || 'Inconnu',
@@ -175,6 +185,10 @@ async function syncAll(db) {
       results.push(await _upsert('Coffre', coffres));    // 2. indépendant
       results.push(await _upsert('Contrat', contrats));  // 3. indépendant
       results.push(await _upsert('Operation', operations)); // 4. FK → Membre + Contrat (déjà poussés)
+      // Nettoyage des fantômes : membres partis (seulement si roster connu), contrats/ops supprimés localement.
+      if (_membresActuels) { try { await _reconcilier('Membre', membres.map(m => m.id)); } catch {} }
+      try { await _reconcilier('Contrat', contrats.map(c => c.id)); } catch {}
+      try { await _reconcilier('Operation', operations.map(o => o.id)); } catch {}
       const summary = results.map(r => `${r.table} ${r.ok ? r.count : '✗' + (r.status || '')}`).join(' · ');
       console.log(`🔄 Sync Supabase → ${summary}`);
       out = { ok: true, results };
@@ -219,6 +233,32 @@ async function _patch(pathAndQuery, body) {
   } catch (e) { console.log(`⚠️ Supabase PATCH ${pathAndQuery}: ${e.message}`); return false; }
 }
 
+async function _del(pathAndQuery) {
+  if (!estActif()) return false;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${pathAndQuery}`, {
+      method: 'DELETE',
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, Prefer: 'return=minimal' },
+    });
+    return res.ok;
+  } catch (e) { console.log(`⚠️ Supabase DELETE ${pathAndQuery}: ${e.message}`); return false; }
+}
+
+// Supprime de Supabase les lignes d'une table dont l'ID n'est plus présent
+// localement → la base reflète EXACTEMENT l'état actuel (plus de fantômes).
+async function _reconcilier(table, idsGardes) {
+  // Sécurité : ne jamais tout supprimer si la liste à garder est vide
+  // (état transitoire suspect) — évite un vidage accidentel de la table.
+  if (!Array.isArray(idsGardes) || idsGardes.length === 0) return 0;
+  const enBase = await _get(`${table}?select=id`);
+  if (!Array.isArray(enBase)) return 0;
+  const garder = new Set(idsGardes.map(String));
+  const aSupprimer = enBase.map(r => r && r.id).filter(id => id != null && !garder.has(String(id)));
+  for (const id of aSupprimer) await _del(`${table}?id=eq.${encodeURIComponent(id)}`);
+  if (aSupprimer.length) console.log(`🧹 Supabase ${table}: ${aSupprimer.length} obsolète(s) supprimé(s)`);
+  return aSupprimer.length;
+}
+
 // Demandes de RDV « nouvelles » (créées par le site). On filtre la source côté
 // bot (paiement.source === 'web') pour rester robuste. La table Rdv n'est
 // alimentée que par le site aujourd'hui.
@@ -233,4 +273,4 @@ async function marquerRdvTransmis(id) {
   return await _patch(`Rdv?id=eq.${encodeURIComponent(id)}`, { statut: 'transmis' });
 }
 
-module.exports = { estActif, syncAll, scheduleSync, lireDemandesRdvWeb, marquerRdvTransmis };
+module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, lireDemandesRdvWeb, marquerRdvTransmis };
