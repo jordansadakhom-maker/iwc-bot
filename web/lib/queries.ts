@@ -22,7 +22,19 @@ export type DashData = {
   membresCount: number;
   operations: { preparation: OpCard[]; encours: OpCard[]; terminees: OpCard[] };
   attention: AttentionItem[];
+  membresParGrade: { label: string; value: number }[];
+  opsParPhase: { label: string; value: number; color: string }[];
 };
+
+// Ordre hiérarchique canonique + libellé court pour les graphiques.
+const ORDRE_GRADES: [string, string][] = [
+  ["Fondateur", "Fondateur"],
+  ["Le Conseil — Directeur / Co-Directeur", "Le Conseil"],
+  ["Officier de Terrain", "Officier de Terrain"],
+  ["Agent Confirmé", "Agent Confirmé"],
+  ["Opérateur", "Opérateur"],
+  ["Recrue — Probatoire", "Recrue"],
+];
 
 export type Profil = { nom: string; initiales: string; role: string; avatarUrl: string | null };
 
@@ -34,6 +46,8 @@ const EMPTY: DashData = {
   membresCount: 0,
   operations: { preparation: [], encours: [], terminees: [] },
   attention: [],
+  membresParGrade: [],
+  opsParPhase: [],
 };
 
 // Les données sont lues côté serveur avec la clé service (contourne la RLS).
@@ -106,7 +120,7 @@ export async function getDashboard(): Promise<DashData> {
     supabase.from("Coffre").select("id,pole,solde"),
     supabase.from("Contrat").select("id,cible,statut,pole,commanditaire"),
     supabase.from("Operation").select("id,categorie,cible,phase,agentsAssignes"),
-    supabase.from("Membre").select("id"),
+    supabase.from("Membre").select("id,grade"),
   ]);
 
   // Base injoignable → état vide honnête.
@@ -121,7 +135,14 @@ export async function getDashboard(): Promise<DashData> {
   const coffres = (coffresR.data || []) as CoffreRow[];
   const contrats = (contratsR.data || []) as ContratRow[];
   const operations = (operationsR.data || []) as OperationRow[];
-  const membres = (membresR.data || []) as { id: string }[];
+  const membres = (membresR.data || []) as { id: string; grade: string | null }[];
+
+  // Répartition des membres par grade (dans l'ordre hiérarchique, grades non vides).
+  const gradeCount = new Map<string, number>();
+  for (const m of membres) gradeCount.set(m.grade || "—", (gradeCount.get(m.grade || "—") || 0) + 1);
+  const membresParGrade = ORDRE_GRADES
+    .map(([g, court]) => ({ label: court, value: gradeCount.get(g) || 0 }))
+    .filter((x) => x.value > 0);
 
   const findSolde = (id: string) => coffres.find((c) => c.id === id)?.solde ?? null;
 
@@ -168,6 +189,12 @@ export async function getDashboard(): Promise<DashData> {
     membresCount: membres.length,
     operations: board,
     attention: attention.slice(0, 8),
+    membresParGrade,
+    opsParPhase: [
+      { label: "Préparation", value: board.preparation.length, color: "#c98500" },
+      { label: "En cours", value: board.encours.length, color: "#3987e5" },
+      { label: "Terminées", value: board.terminees.length, color: "#199e70" },
+    ],
   };
 }
 

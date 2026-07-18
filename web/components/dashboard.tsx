@@ -3,6 +3,7 @@
 import { FileText, Wallet, Landmark, Target, Plug, Inbox } from "lucide-react";
 import clsx from "clsx";
 import type { DashData } from "@/lib/queries";
+import { BarresH, Donut } from "@/components/charts";
 
 function Card({ children, className, delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
   return (
@@ -192,8 +193,41 @@ export function Dashboard({ data }: { data: DashData }) {
       <BandeauAttente connecte={data.connecte} />
       <Kpis data={data} />
 
-      <div className="grid items-start gap-4 lg:grid-cols-[2fr_1fr]">
-        <Tresorerie />
+      <div className="grid items-start gap-4 lg:grid-cols-3">
+        <Card className="lg:col-span-2" delay={0.16}>
+          <CardHeader titre="Membres par grade" />
+          {data.membresParGrade.length ? (
+            <BarresH data={data.membresParGrade} />
+          ) : (
+            <Empty>La répartition par grade s&apos;affichera dès la synchronisation des membres.</Empty>
+          )}
+        </Card>
+        <Card delay={0.2}>
+          <CardHeader titre="Opérations par phase" />
+          {data.opsParPhase.some((p) => p.value > 0) ? (
+            <Donut data={data.opsParPhase} />
+          ) : (
+            <Empty>Aucune opération en cours.</Empty>
+          )}
+        </Card>
+      </div>
+
+      <div className="grid items-start gap-4 lg:grid-cols-[1fr_2fr]">
+        <Card delay={0.22}>
+          <CardHeader titre="Coffres" />
+          {data.connecte ? (
+            <BarresH
+              data={[
+                { label: "Commun", value: data.coffres.commun ?? 0 },
+                { label: "Iron Wolf", value: data.coffres.legal ?? 0 },
+                { label: "Confrérie", value: data.coffres.illegal ?? 0 },
+              ]}
+              format={money}
+            />
+          ) : (
+            <Empty>Les soldes s&apos;afficheront à la connexion de la base.</Empty>
+          )}
+        </Card>
         <Attention data={data} />
       </div>
 
