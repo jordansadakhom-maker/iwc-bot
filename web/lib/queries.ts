@@ -232,6 +232,28 @@ export async function getMembres(): Promise<MembresData> {
   return { connecte: true, membres: (data || []) as MembreDetail[] };
 }
 
+// ── Renseignement (page dédiée) ──────────────────────────────────
+export type RapportItem = { id: string; source: string | null; cible: string | null; info: string; fiabilite: number; statut: string; createdAt: string };
+export type TraqueItem = { id: string; cible: string; prime: string | null; dangerosite: string | null; statut: string };
+export type RenseignementData = { connecte: boolean; rapports: RapportItem[]; traques: TraqueItem[] };
+
+export async function getRenseignement(): Promise<RenseignementData> {
+  const vide: RenseignementData = { connecte: false, rapports: [], traques: [] };
+  if (!dataConfigured()) return vide;
+  const supabase = createAdminClient();
+  if (!supabase) return vide;
+  const [rapportsR, traquesR] = await Promise.all([
+    supabase.from("RapportInfo").select("id,source,cible,info,fiabilite,statut,createdAt").order("createdAt", { ascending: false }).limit(100),
+    supabase.from("Traque").select("id,cible,prime,dangerosite,statut").order("createdAt", { ascending: false }).limit(100),
+  ]);
+  if (rapportsR.error && traquesR.error) return vide;
+  return {
+    connecte: true,
+    rapports: ((rapportsR.data || []) as RapportItem[]),
+    traques: ((traquesR.data || []) as TraqueItem[]),
+  };
+}
+
 // ── Finances (page dédiée) ───────────────────────────────────────
 export type FinancesData = { connecte: boolean; coffres: { commun: number | null; legal: number | null; illegal: number | null } };
 
