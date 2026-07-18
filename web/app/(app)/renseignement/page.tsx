@@ -4,11 +4,20 @@ import { PageHeader, Card, CardHeader, Empty, Badge } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-const STATUT_RAPPORT: Record<string, "good" | "warn" | "muted" | "accent"> = {
-  nouveau: "warn", confirme: "good", confirmé: "good", verifie: "good", infirme: "muted", infirmé: "muted", archive: "muted", archivé: "muted",
+const STATUT_RAPPORT: Record<string, "good" | "warn" | "muted"> = {
+  nouveau: "warn", confirme: "good", infirme: "muted",
+};
+const STATUT_RAPPORT_LABEL: Record<string, string> = {
+  nouveau: "Nouveau", confirme: "Confirmé", infirme: "Infirmé",
 };
 const STATUT_TRAQUE: Record<string, "good" | "warn" | "oxblood" | "muted"> = {
-  active: "oxblood", en_cours: "warn", capture: "good", capturé: "good", neutralise: "muted", neutralisé: "muted", cloture: "muted", clôturé: "muted",
+  chasse: "oxblood", reperee: "warn", capturee: "good", eliminee: "muted", abandonnee: "muted",
+};
+const STATUT_TRAQUE_LABEL: Record<string, string> = {
+  chasse: "En chasse", reperee: "Repérée", capturee: "Capturée", eliminee: "Éliminée", abandonnee: "Abandonnée",
+};
+const DANGER_LABEL: Record<string, string> = {
+  faible: "Faible", moyen: "Moyen", eleve: "Élevé", extreme: "Extrême",
 };
 
 // Fiabilité affichée sur 5 crans (échelle courante des sources RP).
@@ -49,7 +58,7 @@ export default async function RenseignementPage() {
                       </div>
                       <p className="mt-1 text-[0.82rem] leading-relaxed text-muted">{r.info}</p>
                     </div>
-                    <Badge tone={STATUT_RAPPORT[r.statut?.toLowerCase()] ?? "muted"}>{r.statut}</Badge>
+                    <Badge tone={STATUT_RAPPORT[r.statut?.toLowerCase()] ?? "muted"}>{STATUT_RAPPORT_LABEL[r.statut?.toLowerCase()] ?? r.statut}</Badge>
                   </div>
                   <div className="mt-2 flex items-center gap-2 text-[0.72rem] text-faint">
                     <span>Fiabilité</span> <Fiabilite n={r.fiabilite} />
@@ -72,11 +81,11 @@ export default async function RenseignementPage() {
                 <div key={t.id} className="rounded-[11px] border border-border bg-surface-2 px-3 py-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-[0.88rem] font-semibold">{t.cible}</div>
-                    <Badge tone={STATUT_TRAQUE[t.statut?.toLowerCase()] ?? "muted"}>{t.statut}</Badge>
+                    <Badge tone={STATUT_TRAQUE[t.statut?.toLowerCase()] ?? "muted"}>{STATUT_TRAQUE_LABEL[t.statut?.toLowerCase()] ?? t.statut}</Badge>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-[0.72rem] text-muted">
                     {t.prime ? <span className="font-num rounded-md px-1.5 py-0.5" style={{ background: "color-mix(in srgb,var(--accent) 15%,transparent)", color: "var(--accent)" }}>Prime : {t.prime}</span> : null}
-                    {t.dangerosite ? <span>Dangerosité : {t.dangerosite}</span> : null}
+                    {t.dangerosite ? <span>Dangerosité : {DANGER_LABEL[t.dangerosite.toLowerCase()] ?? t.dangerosite}</span> : null}
                   </div>
                 </div>
               ))}
