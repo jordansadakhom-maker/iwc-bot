@@ -4,6 +4,7 @@ import { FileText, Wallet, Landmark, Target, Plug, Inbox } from "lucide-react";
 import clsx from "clsx";
 import type { DashData } from "@/lib/queries";
 import { BarresH, Donut } from "@/components/charts";
+import { PoleChip } from "@/components/ui";
 
 function Card({ children, className, delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
   return (
@@ -59,9 +60,10 @@ const KPI_ICONS = [Wallet, Landmark, FileText, Target];
 
 function Kpis({ data }: { data: DashData }) {
   const K = data.connecte;
+  const conf = data.pole === "confrerie";
   const kpis = [
     { label: "Coffre commun", value: K ? money(data.coffres.commun) : "—" },
-    { label: "Coffre Confrérie", value: K ? money(data.coffres.illegal) : "—" },
+    { label: conf ? "Coffre Confrérie" : "Coffre Iron Wolf", value: K ? money(conf ? data.coffres.illegal : data.coffres.legal) : "—" },
     { label: "Contrats en cours", value: K ? String(data.contratsEnCours) : "—" },
     { label: "Opérations actives", value: K ? String(data.opsActives) : "—" },
   ];
@@ -184,10 +186,13 @@ export function Dashboard({ data }: { data: DashData }) {
           <h1 className="font-display text-[1.9rem] tracking-[0.01em]" style={{ textWrap: "balance" } as React.CSSProperties}>Tableau de bord</h1>
           <div className="mt-1 text-[0.85rem] text-muted">Vue d&apos;ensemble de la maison{data.connecte ? ` · ${data.membresCount} membre(s)` : ""}</div>
         </div>
-        <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-[0.72rem] text-muted">
-          <span className="h-2 w-2 rounded-full" style={{ background: data.connecte ? "var(--good)" : "var(--faint)" }} />
-          {data.connecte ? "Données en direct" : "Base non connectée"}
-        </span>
+        <div className="flex items-center gap-2">
+          <PoleChip pole={data.pole} />
+          <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-[0.72rem] text-muted">
+            <span className="h-2 w-2 rounded-full" style={{ background: data.connecte ? "var(--good)" : "var(--faint)" }} />
+            {data.connecte ? "Données en direct" : "Base non connectée"}
+          </span>
+        </div>
       </div>
 
       <BandeauAttente connecte={data.connecte} />
@@ -219,8 +224,9 @@ export function Dashboard({ data }: { data: DashData }) {
             <BarresH
               data={[
                 { label: "Commun", value: data.coffres.commun ?? 0 },
-                { label: "Iron Wolf", value: data.coffres.legal ?? 0 },
-                { label: "Confrérie", value: data.coffres.illegal ?? 0 },
+                data.pole === "confrerie"
+                  ? { label: "Confrérie", value: data.coffres.illegal ?? 0 }
+                  : { label: "Iron Wolf", value: data.coffres.legal ?? 0 },
               ]}
               format={money}
             />

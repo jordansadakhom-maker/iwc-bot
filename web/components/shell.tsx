@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Search, Bell, Menu } from "lucide-react";
 import clsx from "clsx";
 import { NAV, ME, type Pole } from "@/lib/data";
@@ -18,11 +18,21 @@ function Crest({ className }: { className?: string }) {
   );
 }
 
-export function Shell({ children, connecte = false, profil = null }: { children: React.ReactNode; connecte?: boolean; profil?: Profil | null }) {
-  const [pole, setPole] = useState<Pole>("iwc");
+export function Shell({ children, connecte = false, profil = null, initialPole = "iwc" }: { children: React.ReactNode; connecte?: boolean; profil?: Profil | null; initialPole?: Pole }) {
+  const [pole, setPole] = useState<Pole>(initialPole);
   const me = profil ?? ME;
   const [open, setOpen] = useState(false);
   const path = usePathname();
+  const router = useRouter();
+
+  // Change de pôle : mémorise le choix dans un cookie puis rafraîchit les
+  // données côté serveur (les pages relisent le cookie et filtrent par pôle).
+  function choisirPole(p: Pole) {
+    if (p === pole) return;
+    setPole(p);
+    document.cookie = `iwc_pole=${p === "confrerie" ? "confrerie" : "iwc"}; path=/; max-age=31536000; samesite=lax`;
+    router.refresh();
+  }
 
   return (
     <div data-pole={pole} className="min-h-screen grid grid-cols-1 lg:grid-cols-[264px_1fr]">
@@ -108,7 +118,7 @@ export function Shell({ children, connecte = false, profil = null }: { children:
             {(["iwc", "confrerie"] as Pole[]).map((p) => (
               <button
                 key={p}
-                onClick={() => setPole(p)}
+                onClick={() => choisirPole(p)}
                 className={clsx(
                   "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[0.78rem] font-semibold transition",
                   pole === p ? "text-ink" : "text-muted",

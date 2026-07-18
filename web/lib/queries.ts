@@ -8,14 +8,42 @@
  * portent l'identité du membre connecté (compatible sécurité RLS).
  */
 import "server-only";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+
+// ── Pôle actif (Iron Wolf légal / La Confrérie illégal) ──────────
+// Choisi par le bouton du header, mémorisé dans un cookie côté client.
+// Sert à filtrer les données qui ONT réellement un pôle (contrats, coffres,
+// opérations liées à un contrat, armes, véhicules). Les données partagées
+// (membres, renseignement, médical, agenda) ne sont jamais masquées.
+export type PoleWeb = "iwc" | "confrerie";
+
+export async function getPole(): Promise<PoleWeb> {
+  try {
+    const c = await cookies();
+    return c.get("iwc_pole")?.value === "confrerie" ? "confrerie" : "iwc";
+  } catch {
+    return "iwc";
+  }
+}
+// Valeur de pôle en base pour le côté actif.
+function poleDb(p: PoleWeb): "legal" | "illegal" {
+  return p === "confrerie" ? "illegal" : "legal";
+}
+// Une ligne appartient-elle au pôle actif ? (« both » ou vide → visible partout)
+function matchPole(rowPole: string | null | undefined, actif: "legal" | "illegal"): boolean {
+  const p = String(rowPole || "").toLowerCase();
+  if (!p || p === "both" || p === "commun") return true;
+  return p === actif;
+}
 
 export type OpCard = { titre: string; type: string; etape: string; membres: string[] };
 export type AttentionItem = { titre: string; detail: string; tag: string; sev: "crit" | "warn" | "info" };
 
 export type DashData = {
   connecte: boolean;
+  pole: PoleWeb;
   coffres: { commun: number | null; legal: number | null; illegal: number | null };
   contratsEnCours: number;
   opsActives: number;
@@ -40,6 +68,7 @@ export type Profil = { nom: string; initiales: string; role: string; avatarUrl: 
 
 const EMPTY: DashData = {
   connecte: false,
+  pole: "iwc",
   coffres: { commun: null, legal: null, illegal: null },
   contratsEnCours: 0,
   opsActives: 0,
@@ -115,27 +144,36 @@ export async function getDashboard(): Promise<DashData> {
   if (!dataConfigured()) return EMPTY;
   const supabase = createAdminClient();
   if (!supabase) return EMPTY;
+  const pole = await getPole();
+  const actif = poleDb(pole);
 
   const [coffresR, contratsR, operationsR, membresR] = await Promise.all([
     supabase.from("Coffre").select("id,pole,solde"),
     supabase.from("Contrat").select("id,cible,statut,pole,commanditaire"),
-    supabase.from("Operation").select("id,categorie,cible,phase,agentsAssignes"),
+    supabase.from("Operation").select("id,categorie,cible,phase,agentsAssignes,contratId"),
     supabase.from("Membre").select("id,grade"),
   ]);
 
   // Base injoignable → état vide honnête.
   if (coffresR.error && contratsR.error && operationsR.error && membresR.error) {
-    return EMPTY;
+    return { ...EMPTY, pole };
   }
 
   type CoffreRow = { id: string; pole: string; solde: number };
   type ContratRow = { id: string; cible: string; statut: string; pole: string; commanditaire: string | null };
-  type OperationRow = { id: string; categorie: string; cible: string; phase: string; agentsAssignes: string[] };
+  type OperationRow = { id: string; categorie: string; cible: string; phase: string; agentsAssignes: string[]; contratId: string | null };
 
   const coffres = (coffresR.data || []) as CoffreRow[];
-  const contrats = (contratsR.data || []) as ContratRow[];
-  const operations = (operationsR.data || []) as OperationRow[];
+  const contratsAll = (contratsR.data || []) as ContratRow[];
+  const operationsAll = (operationsR.data || []) as OperationRow[];
   const membres = (membresR.data || []) as { id: string; grade: string | null }[];
+
+  // Filtre pôle : contrats du côté actif ; opérations selon le pôle de leur
+  // contrat lié (sans contrat → visibles dans les deux pôles).
+  const contratPole = new Map<string, string>();
+  for (const c of contratsAll) contratPole.set(String(c.id), String(c.pole || "legal"));
+  const contrats = contratsAll.filter((c) => matchPole(c.pole, actif));
+  const operations = operationsAll.filter((o) => matchPole(o.contratId ? contratPole.get(String(o.contratId)) : null, actif));
 
   // Répartition des membres par grade (dans l'ordre hiérarchique, grades non vides).
   const gradeCount = new Map<string, number>();
@@ -183,6 +221,7 @@ export async function getDashboard(): Promise<DashData> {
 
   return {
     connecte: true,
+    pole,
     coffres: { commun: findSolde("coffre_commun"), legal: findSolde("coffre_legal"), illegal: findSolde("coffre_illegal") },
     contratsEnCours,
     opsActives,
@@ -203,27 +242,36 @@ export type OpDetail = { id: string; titre: string; type: string; etape: string;
 export type ContratDetail = { id: string; cible: string; commanditaire: string | null; statut: string; pole: string; remuneration: string | null };
 export type OperationsData = {
   connecte: boolean;
+  pole: PoleWeb;
   operations: { preparation: OpDetail[]; encours: OpDetail[]; terminees: OpDetail[] };
   contrats: ContratDetail[];
 };
 
 export async function getOperations(): Promise<OperationsData> {
-  const vide: OperationsData = { connecte: false, operations: { preparation: [], encours: [], terminees: [] }, contrats: [] };
+  const vide: OperationsData = { connecte: false, pole: "iwc", operations: { preparation: [], encours: [], terminees: [] }, contrats: [] };
   if (!dataConfigured()) return vide;
   const supabase = createAdminClient();
   if (!supabase) return vide;
+  const pole = await getPole();
+  const actif = poleDb(pole);
 
   const [opsR, contratsR] = await Promise.all([
-    supabase.from("Operation").select("id,categorie,cible,phase,agentsAssignes,prime").order("createdAt", { ascending: false }),
+    supabase.from("Operation").select("id,categorie,cible,phase,agentsAssignes,prime,contratId").order("createdAt", { ascending: false }),
     supabase.from("Contrat").select("id,cible,statut,pole,commanditaire,remuneration").order("createdAt", { ascending: false }),
   ]);
-  if (opsR.error && contratsR.error) return vide;
+  if (opsR.error && contratsR.error) return { ...vide, pole };
 
-  type OpRow = { id: string; categorie: string; cible: string; phase: string; agentsAssignes: string[]; prime: string | null };
+  type OpRow = { id: string; categorie: string; cible: string; phase: string; agentsAssignes: string[]; prime: string | null; contratId: string | null };
   type CoRow = { id: string; cible: string; statut: string; pole: string; commanditaire: string | null; remuneration: string | null };
+
+  // Pôle de chaque contrat → sert à rattacher les opérations à un pôle.
+  const contratPole = new Map<string, string>();
+  for (const c of (contratsR.data || []) as CoRow[]) contratPole.set(String(c.id), String(c.pole || "legal"));
 
   const board: OperationsData["operations"] = { preparation: [], encours: [], terminees: [] };
   for (const o of (opsR.data || []) as OpRow[]) {
+    // Opération sans contrat lié → visible dans les deux pôles.
+    if (!matchPole(o.contratId ? contratPole.get(String(o.contratId)) : null, actif)) continue;
     const { col, etape } = phaseLabel(o.phase);
     board[col].push({
       id: o.id,
@@ -234,16 +282,18 @@ export async function getOperations(): Promise<OperationsData> {
       prime: o.prime ?? null,
     });
   }
-  const contrats: ContratDetail[] = ((contratsR.data || []) as CoRow[]).map((c) => ({
-    id: c.id,
-    cible: c.cible || "Contrat",
-    commanditaire: c.commanditaire ?? null,
-    statut: c.statut || "en_attente",
-    pole: c.pole || "legal",
-    remuneration: c.remuneration ?? null,
-  }));
+  const contrats: ContratDetail[] = ((contratsR.data || []) as CoRow[])
+    .filter((c) => matchPole(c.pole, actif))
+    .map((c) => ({
+      id: c.id,
+      cible: c.cible || "Contrat",
+      commanditaire: c.commanditaire ?? null,
+      statut: c.statut || "en_attente",
+      pole: c.pole || "legal",
+      remuneration: c.remuneration ?? null,
+    }));
 
-  return { connecte: true, operations: board, contrats };
+  return { connecte: true, pole, operations: board, contrats };
 }
 
 // ── Membres & RH (page dédiée) ───────────────────────────────────
@@ -282,13 +332,20 @@ export async function getRenseignement(): Promise<RenseignementData> {
 }
 
 // ── Médical (page dédiée) ────────────────────────────────────────
-export type DossierItem = { id: string; nom: string; statut: string; blessures: number; ordonnances: number; suivis: number };
+export type Blessure = { date?: string; desc?: string; localisation?: string; gravite?: string };
+export type Suivi = { date?: string; soin?: string; soignant?: string; etat?: string; traitement?: string; suite?: string };
+export type Ordonnance = { medicaments?: string; posologie?: string; duree?: string; conseils?: string };
+export type Histo = { date?: string; action?: string; par?: string };
+export type DossierItem = {
+  id: string; nom: string; statut: string;
+  blessures: Blessure[]; ordonnances: Ordonnance[]; suivis: Suivi[]; historique: Histo[];
+  notes: string | null; testValide: boolean | null; prochainRdv: string | null;
+  reposJusquAt: string | null; reposMotif: string | null; majPar: string | null;
+};
 export type MedicalData = { connecte: boolean; dossiers: DossierItem[] };
 
-function _count(v: unknown): number {
-  if (Array.isArray(v)) return v.length;
-  if (v && typeof v === "object") return Object.keys(v).length;
-  return 0;
+function _arr<T>(v: unknown): T[] {
+  return Array.isArray(v) ? (v as T[]) : [];
 }
 
 export async function getMedical(): Promise<MedicalData> {
@@ -296,20 +353,28 @@ export async function getMedical(): Promise<MedicalData> {
   const supabase = createAdminClient();
   if (!supabase) return { connecte: false, dossiers: [] };
   const [dossiersR, membresR] = await Promise.all([
-    supabase.from("DossierMedical").select("id,membreId,statut,blessures,ordonnances,suivis").order("updatedAt", { ascending: false }),
+    // select("*") : robuste que les colonnes détaillées existent ou non.
+    supabase.from("DossierMedical").select("*").order("updatedAt", { ascending: false }),
     supabase.from("Membre").select("id,nomIC"),
   ]);
   if (dossiersR.error) return { connecte: false, dossiers: [] };
   const noms = new Map<string, string>();
   for (const m of (membresR.data || []) as { id: string; nomIC: string }[]) noms.set(m.id, m.nomIC);
-  type DRow = { id: string; membreId: string; statut: string; blessures: unknown; ordonnances: unknown; suivis: unknown };
+  type DRow = Record<string, unknown>;
   const dossiers: DossierItem[] = ((dossiersR.data || []) as DRow[]).map((d) => ({
-    id: d.id,
-    nom: noms.get(d.membreId) || d.membreId || "Patient",
-    statut: d.statut || "—",
-    blessures: _count(d.blessures),
-    ordonnances: _count(d.ordonnances),
-    suivis: _count(d.suivis),
+    id: String(d.id),
+    nom: noms.get(String(d.membreId)) || String(d.membreId) || "Patient",
+    statut: (d.statut as string) || "—",
+    blessures: _arr<Blessure>(d.blessures),
+    ordonnances: _arr<Ordonnance>(d.ordonnances),
+    suivis: _arr<Suivi>(d.suivis),
+    historique: _arr<Histo>(d.historique),
+    notes: (d.notes as string) ?? null,
+    testValide: typeof d.testValide === "boolean" ? d.testValide : null,
+    prochainRdv: (d.prochainRdv as string) ?? null,
+    reposJusquAt: (d.reposJusquAt as string) ?? null,
+    reposMotif: (d.reposMotif as string) ?? null,
+    majPar: (d.majPar as string) ?? null,
   }));
   return { connecte: true, dossiers };
 }
@@ -358,23 +423,24 @@ export async function getAgenda(): Promise<AgendaData> {
 // ── Inventaire (page dédiée) ─────────────────────────────────────
 export type VehiculeItem = { id: string; nom: string; type: string | null; pole: string; etat: string | null; notes: string | null };
 export type ArmeItem = { id: string; serie: string; type: string | null; categorie: string | null; appartenance: string | null; membreNom: string | null; pole: string | null };
-export type InventaireData = { connecte: boolean; vehicules: VehiculeItem[]; armes: ArmeItem[] };
+export type InventaireData = { connecte: boolean; pole: PoleWeb; vehicules: VehiculeItem[]; armes: ArmeItem[] };
 
 export async function getInventaire(): Promise<InventaireData> {
-  if (!dataConfigured()) return { connecte: false, vehicules: [], armes: [] };
+  if (!dataConfigured()) return { connecte: false, pole: "iwc", vehicules: [], armes: [] };
   const supabase = createAdminClient();
-  if (!supabase) return { connecte: false, vehicules: [], armes: [] };
+  if (!supabase) return { connecte: false, pole: "iwc", vehicules: [], armes: [] };
+  const pole = await getPole();
+  const actif = poleDb(pole);
   const [vehR, armeR] = await Promise.all([
     supabase.from("Vehicule").select("id,nom,type,pole,etat,notes").order("nom", { ascending: true }),
     // La table Arme peut ne pas encore exister → on ignore l'erreur (liste vide).
     supabase.from("Arme").select("id,serie,type,categorie,appartenance,membreNom,pole").order("serie", { ascending: true }),
   ]);
-  if (vehR.error && armeR.error) return { connecte: false, vehicules: [], armes: [] };
-  return {
-    connecte: true,
-    vehicules: (vehR.data || []) as VehiculeItem[],
-    armes: armeR.error ? [] : ((armeR.data || []) as ArmeItem[]),
-  };
+  if (vehR.error && armeR.error) return { connecte: false, pole, vehicules: [], armes: [] };
+  // Une arme/un véhicule sans pôle défini reste visible dans les deux pôles.
+  const vehicules = ((vehR.data || []) as VehiculeItem[]).filter((v) => matchPole(v.pole, actif));
+  const armes = armeR.error ? [] : ((armeR.data || []) as ArmeItem[]).filter((a) => matchPole(a.pole, actif));
+  return { connecte: true, pole, vehicules, armes };
 }
 
 // ── Notifications (page dédiée) ──────────────────────────────────
@@ -391,14 +457,15 @@ export async function getNotifications(): Promise<NotificationsData> {
 }
 
 // ── Finances (page dédiée) ───────────────────────────────────────
-export type FinancesData = { connecte: boolean; coffres: { commun: number | null; legal: number | null; illegal: number | null } };
+export type FinancesData = { connecte: boolean; pole: PoleWeb; coffres: { commun: number | null; legal: number | null; illegal: number | null } };
 
 export async function getFinances(): Promise<FinancesData> {
-  if (!dataConfigured()) return { connecte: false, coffres: { commun: null, legal: null, illegal: null } };
+  const pole = await getPole();
+  if (!dataConfigured()) return { connecte: false, pole, coffres: { commun: null, legal: null, illegal: null } };
   const supabase = createAdminClient();
-  if (!supabase) return { connecte: false, coffres: { commun: null, legal: null, illegal: null } };
+  if (!supabase) return { connecte: false, pole, coffres: { commun: null, legal: null, illegal: null } };
   const { data, error } = await supabase.from("Coffre").select("id,solde");
-  if (error) return { connecte: false, coffres: { commun: null, legal: null, illegal: null } };
+  if (error) return { connecte: false, pole, coffres: { commun: null, legal: null, illegal: null } };
   const find = (id: string) => (data || []).find((c: { id: string; solde: number }) => c.id === id)?.solde ?? null;
-  return { connecte: true, coffres: { commun: find("coffre_commun"), legal: find("coffre_legal"), illegal: find("coffre_illegal") } };
+  return { connecte: true, pole, coffres: { commun: find("coffre_commun"), legal: find("coffre_legal"), illegal: find("coffre_illegal") } };
 }
