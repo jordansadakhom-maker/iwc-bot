@@ -1,6 +1,7 @@
-import { Boxes, Crosshair, Car } from "lucide-react";
+import { Car } from "lucide-react";
 import { getInventaire } from "@/lib/queries";
 import { PageHeader, Card, CardHeader, Empty, Badge } from "@/components/ui";
+import { Armurerie } from "@/components/armurerie";
 
 export const dynamic = "force-dynamic";
 
@@ -9,42 +10,10 @@ export default async function InventairePage() {
 
   return (
     <>
-      <PageHeader titre="Inventaire" sous="Registre d'armes &amp; véhicules" actif={connecte} pole={pole} />
+      <PageHeader titre="Armurerie &amp; Inventaire" sous="Registre d'armes croqué à l'encre &amp; véhicules" actif={connecte} pole={pole} />
 
       <Card>
-        <CardHeader titre="Registre d'armes" compteur={armes.length} />
-        {armes.length === 0 ? (
-          <Empty icon={Crosshair}>
-            Aucune arme synchronisée. Une fois la table créée (voir instructions), ton registre d&apos;armes Discord (numéros de série, détenteurs) s&apos;affichera ici.
-          </Empty>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] border-collapse text-left text-[0.85rem]">
-              <thead>
-                <tr className="text-[0.7rem] uppercase tracking-[0.06em] text-faint">
-                  <th className="border-b border-border px-2.5 py-2 font-semibold">N° de série</th>
-                  <th className="border-b border-border px-2.5 py-2 font-semibold">Type</th>
-                  <th className="border-b border-border px-2.5 py-2 font-semibold">Catégorie</th>
-                  <th className="border-b border-border px-2.5 py-2 font-semibold">Appartenance</th>
-                  <th className="border-b border-border px-2.5 py-2 font-semibold">Détenteur</th>
-                </tr>
-              </thead>
-              <tbody>
-                {armes.map((a) => (
-                  <tr key={a.id} className="hover:bg-[color-mix(in_srgb,var(--ink)_4%,transparent)]">
-                    <td className="border-b border-border px-2.5 py-2.5 font-num font-medium">{a.serie}</td>
-                    <td className="border-b border-border px-2.5 py-2.5">{a.type || "—"}</td>
-                    <td className="border-b border-border px-2.5 py-2.5 text-muted">{a.categorie || "—"}</td>
-                    <td className="border-b border-border px-2.5 py-2.5">
-                      {a.pole ? <Badge tone={a.pole === "illegal" ? "oxblood" : "accent"}>{a.appartenance || (a.pole === "illegal" ? "Confrérie" : "Iron Wolf")}</Badge> : <span className="text-muted">{a.appartenance || "—"}</span>}
-                    </td>
-                    <td className="border-b border-border px-2.5 py-2.5 text-muted">{a.membreNom || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <Armurerie armes={armes} />
       </Card>
 
       <Card>

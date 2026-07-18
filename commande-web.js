@@ -277,6 +277,40 @@ Object.assign(HANDLERS, {
     const [removed] = r.contacts.splice(i, 1);
     return { ok: true, message: 'Contact supprimé', discord: { type: 'contact-del', contact: removed } };
   },
+
+  // ── Armes (db.registreArmes.armes) ───────────────────────
+  'arme.create': (db, p) => {
+    const serie = _s(p.serie, 60);
+    if (!serie) return { ok: false, message: 'n° de série manquant' };
+    if (!db.registreArmes || typeof db.registreArmes !== 'object') db.registreArmes = {};
+    if (!Array.isArray(db.registreArmes.armes)) db.registreArmes.armes = [];
+    const id = `web-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+    db.registreArmes.armes.push({
+      id, serie, type: _s(p.type, 80) || '—', categorie: _s(p.categorie, 80) || 'Autre',
+      appartenance: _s(p.appartenance, 80), membreId: null, membreNom: _s(p.membreNom, 120),
+      notes: _s(p.notes, 500), par: null, at: Date.now(), source: 'web',
+    });
+    return { ok: true, message: `Arme ${serie} enregistrée` };
+  },
+  'arme.update': (db, p) => {
+    const a = (db.registreArmes && Array.isArray(db.registreArmes.armes) ? db.registreArmes.armes : []).find(x => x && String(x.id) === String(p.id));
+    if (!a) return { ok: false, message: 'Arme introuvable' };
+    if (p.serie !== undefined) a.serie = _s(p.serie, 60) || a.serie;
+    if (p.type !== undefined) a.type = _s(p.type, 80);
+    if (p.categorie !== undefined) a.categorie = _s(p.categorie, 80);
+    if (p.appartenance !== undefined) a.appartenance = _s(p.appartenance, 80);
+    if (p.membreNom !== undefined) a.membreNom = _s(p.membreNom, 120);
+    if (p.notes !== undefined) a.notes = _s(p.notes, 500);
+    return { ok: true, message: 'Arme mise à jour' };
+  },
+  'arme.delete': (db, p) => {
+    const arr = (db.registreArmes && Array.isArray(db.registreArmes.armes)) ? db.registreArmes.armes : null;
+    if (!arr) return { ok: false, message: 'Arme introuvable' };
+    const i = arr.findIndex(x => x && String(x.id) === String(p.id));
+    if (i < 0) return { ok: false, message: 'Arme introuvable' };
+    arr.splice(i, 1);
+    return { ok: true, message: 'Arme supprimée' };
+  },
 });
 
 // Trouve une opération par id dans db.operations puis db.preparations.

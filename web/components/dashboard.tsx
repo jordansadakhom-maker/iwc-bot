@@ -213,7 +213,7 @@ export function Dashboard({ data }: { data: DashData }) {
                 { label: "Iron Wolf", value: data.coffres.legal ?? 0 },
                 { label: "Confrérie", value: data.coffres.illegal ?? 0 },
               ]}
-              format={money}
+              money
             />
           ) : (
             <Empty>Les soldes s&apos;afficheront à la connexion de la base.</Empty>
@@ -228,7 +228,7 @@ export function Dashboard({ data }: { data: DashData }) {
                 { label: "Iron Wolf", value: data.coffres.legal ?? 0, color: "#3987e5" },
                 { label: "Confrérie", value: data.coffres.illegal ?? 0, color: "#e66767" },
               ]}
-              format={money}
+              money
             />
           ) : (
             <Empty>La répartition s&apos;affichera dès que les coffres seront alimentés.</Empty>
