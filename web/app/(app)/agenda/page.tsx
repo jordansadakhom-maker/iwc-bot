@@ -1,6 +1,7 @@
 import { CalendarDays, Users } from "lucide-react";
 import { getAgenda } from "@/lib/queries";
 import { PageHeader, Card, CardHeader, Empty, Badge } from "@/components/ui";
+import { ContactsGrid } from "@/components/contacts-grid";
 
 export const dynamic = "force-dynamic";
 
@@ -70,20 +71,10 @@ export default async function AgendaPage() {
         {contacts.length === 0 ? (
           <Empty icon={Users}>Aucun contact synchronisé. Ton répertoire Discord (alliés, clients, indics…) s&apos;affichera ici.</Empty>
         ) : (
-          <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
-            {contacts.map((c) => (
-              <div key={c.id} className="rounded-[11px] border border-border bg-surface-2 px-3 py-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0 truncate text-[0.88rem] font-semibold">{c.nom}</div>
-                  <Badge tone="muted">{c.type}</Badge>
-                </div>
-                <div className="mt-2 flex items-center justify-between gap-2 text-[0.72rem] text-muted">
-                  {c.secteur ? <span className="truncate">{c.secteur}</span> : <span className="text-faint">—</span>}
-                  <Stars n={c.fiabilite} />
-                </div>
-              </div>
-            ))}
-          </div>
+          <>
+            <p className="mb-3 text-[0.76rem] text-faint">Clique sur un contact pour voir sa fiche complète.</p>
+            <ContactsGrid contacts={contacts} />
+          </>
         )}
       </Card>
     </>

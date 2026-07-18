@@ -316,7 +316,11 @@ export async function getMedical(): Promise<MedicalData> {
 
 // ── Agenda & Clients (page dédiée) ───────────────────────────────
 export type RdvItem = { id: string; nomRP: string | null; type: string | null; lieu: string | null; creneau: string | null; statut: string; source: string | null };
-export type ContactItem = { id: string; nom: string; type: string; fiabilite: number; secteur: string | null };
+export type ContactItem = {
+  id: string; nom: string; type: string; fiabilite: number; secteur: string | null;
+  notes: string | null; telegramme: string | null; metier: string | null;
+  affiliation: string | null; relation: string | null; statutRP: string | null; creeParNom: string | null;
+};
 export type AgendaData = { connecte: boolean; rdvs: RdvItem[]; contacts: ContactItem[] };
 
 export async function getAgenda(): Promise<AgendaData> {
@@ -325,14 +329,30 @@ export async function getAgenda(): Promise<AgendaData> {
   if (!supabase) return { connecte: false, rdvs: [], contacts: [] };
   const [rdvR, contactR] = await Promise.all([
     supabase.from("Rdv").select("id,nomRP,type,lieu,creneau,statut,paiement").order("createdAt", { ascending: false }).limit(100),
-    supabase.from("Contact").select("id,nom,type,fiabilite,secteur").order("nom", { ascending: true }).limit(200),
+    // select("*") : robuste que les colonnes détaillées existent ou non.
+    supabase.from("Contact").select("*").order("nom", { ascending: true }).limit(400),
   ]);
   if (rdvR.error && contactR.error) return { connecte: false, rdvs: [], contacts: [] };
   type RRow = { id: string; nomRP: string | null; type: string | null; lieu: string | null; creneau: string | null; statut: string; paiement: { source?: string } | null };
   const rdvs: RdvItem[] = ((rdvR.data || []) as RRow[]).map((r) => ({
     id: r.id, nomRP: r.nomRP, type: r.type, lieu: r.lieu, creneau: r.creneau, statut: r.statut || "Planifié", source: r.paiement?.source ?? null,
   }));
-  return { connecte: true, rdvs, contacts: ((contactR.data || []) as ContactItem[]) };
+  type CRaw = Record<string, unknown>;
+  const contacts: ContactItem[] = ((contactR.data || []) as CRaw[]).map((c) => ({
+    id: String(c.id),
+    nom: (c.nom as string) || "Contact",
+    type: (c.type as string) || "Neutre",
+    fiabilite: Number(c.fiabilite) || 0,
+    secteur: (c.secteur as string) ?? null,
+    notes: (c.notes as string) ?? null,
+    telegramme: (c.telegramme as string) ?? null,
+    metier: (c.metier as string) ?? null,
+    affiliation: (c.affiliation as string) ?? null,
+    relation: (c.relation as string) ?? null,
+    statutRP: (c.statutRP as string) ?? null,
+    creeParNom: (c.creeParNom as string) ?? null,
+  }));
+  return { connecte: true, rdvs, contacts };
 }
 
 // ── Inventaire (page dédiée) ─────────────────────────────────────
