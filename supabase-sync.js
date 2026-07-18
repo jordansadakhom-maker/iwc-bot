@@ -447,4 +447,24 @@ async function marquerRdvTransmis(id) {
   return await _patch(`Rdv?id=eq.${encodeURIComponent(id)}`, { statut: 'transmis' });
 }
 
-module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, lireDemandesRdvWeb, marquerRdvTransmis };
+// ── Demandes d'ajout de contact venues du site (table DemandeContact) ──
+// Le site (espace interne) insère une fiche à créer ; le bot la relève, crée la
+// vraie fiche (répertoire + forum Discord) puis la marque « cree ». La table est
+// NEUVE et n'est jamais réconciliée → aucune donnée existante n'est touchée.
+async function lireDemandesContactWeb() {
+  const rows = await _get('DemandeContact?statut=eq.nouveau&order=createdAt.asc&limit=25');
+  return Array.isArray(rows) ? rows : [];
+}
+async function marquerDemandeContactTraitee(id, contactId) {
+  const body = { statut: 'cree' };
+  if (contactId) body.contactId = String(contactId);
+  let ok = await _patch(`DemandeContact?id=eq.${encodeURIComponent(id)}`, body);
+  // Repli si la colonne contactId n'existe pas encore.
+  if (!ok && contactId) ok = await _patch(`DemandeContact?id=eq.${encodeURIComponent(id)}`, { statut: 'cree' });
+  return ok;
+}
+async function marquerDemandeContactEchec(id) {
+  return await _patch(`DemandeContact?id=eq.${encodeURIComponent(id)}`, { statut: 'echec' });
+}
+
+module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec };
