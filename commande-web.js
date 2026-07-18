@@ -17,6 +17,7 @@ let dbMod = {}; try { dbMod = require('./db'); } catch {}
 const loadDB = dbMod.loadDB || (() => ({}));
 const saveDB = dbMod.saveDB || (() => {});
 let medical = null; try { medical = require('./medical'); } catch {}
+let repertoire = null; try { repertoire = require('./repertoire'); } catch {}
 
 // ── Utilitaires ──
 function _s(v, max) { if (v == null) return ''; const s = String(v).trim(); return max ? s.slice(0, max) : s; }
@@ -196,6 +197,87 @@ const _POLES_C = new Set(['legal', 'illegal']);
 function _poleC(p) { p = String(p || '').toLowerCase(); return _POLES_C.has(p) ? p : (p.includes('ill') ? 'illegal' : 'legal'); }
 const _STATUTS_C = new Set(['en_attente', 'valide', 'signe', 'termine', 'annule', 'refuse']);
 function _statutContrat(s) { s = String(s || '').toLowerCase(); return _STATUTS_C.has(s) ? s : 'en_attente'; }
+function _fiab05(v) { return Math.max(0, Math.min(5, parseInt(v, 10) || 0)); }
+const _STATUTS_T = new Set(['chasse', 'capturee', 'eliminee', 'abandonnee']);
+function _statutTraque(s) { s = String(s || '').toLowerCase(); return _STATUTS_T.has(s) ? s : 'chasse'; }
+
+// ── Renseignement + Contacts : handlers additionnels ──
+Object.assign(HANDLERS, {
+  // Rapports d'informateurs (db.informateurs)
+  'rapport.create': (db, p) => {
+    const info = _s(p.info, 4000);
+    if (!info) return { ok: false, message: 'info manquante' };
+    if (!Array.isArray(db.informateurs)) db.informateurs = [];
+    const id = `web-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+    db.informateurs.push({ id, source: _s(p.source, 200), cible: _s(p.cible, 200), info, fiabilite: _fiab05(p.fiabilite), statut: _s(p.statut, 40) || 'nouveau', createdAt: new Date().toISOString(), source_web: true });
+    return { ok: true, message: 'Rapport ajouté' };
+  },
+  'rapport.update': (db, p) => {
+    const r = (db.informateurs || []).find(x => x && String(x.id) === String(p.id));
+    if (!r) return { ok: false, message: 'Rapport introuvable' };
+    if (p.source !== undefined) r.source = _s(p.source, 200);
+    if (p.cible !== undefined) r.cible = _s(p.cible, 200);
+    if (p.info !== undefined) r.info = _s(p.info, 4000);
+    if (p.fiabilite !== undefined) r.fiabilite = _fiab05(p.fiabilite);
+    if (p.statut !== undefined) r.statut = _s(p.statut, 40);
+    return { ok: true, message: 'Rapport mis à jour' };
+  },
+  'rapport.delete': (db, p) => {
+    const i = (db.informateurs || []).findIndex(x => x && String(x.id) === String(p.id));
+    if (i < 0) return { ok: false, message: 'Rapport introuvable' };
+    db.informateurs.splice(i, 1);
+    return { ok: true, message: 'Rapport supprimé' };
+  },
+  // Personnes traquées (db.traques)
+  'traque.create': (db, p) => {
+    const cible = _s(p.cible, 200);
+    if (!cible) return { ok: false, message: 'cible manquante' };
+    if (!Array.isArray(db.traques)) db.traques = [];
+    const id = `web-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+    db.traques.push({ id, cible, prime: _s(p.prime, 120), dangerosite: _s(p.dangerosite, 40), status: _statutTraque(p.statut), createdAt: new Date().toISOString() });
+    return { ok: true, message: 'Traque ajoutée' };
+  },
+  'traque.update': (db, p) => {
+    const t = (db.traques || []).find(x => x && String(x.id) === String(p.id));
+    if (!t) return { ok: false, message: 'Traque introuvable' };
+    if (p.cible !== undefined) t.cible = _s(p.cible, 200);
+    if (p.prime !== undefined) t.prime = _s(p.prime, 120);
+    if (p.dangerosite !== undefined) t.dangerosite = _s(p.dangerosite, 40);
+    if (p.statut !== undefined) t.status = _statutTraque(p.statut);
+    return { ok: true, message: 'Traque mise à jour' };
+  },
+  'traque.delete': (db, p) => {
+    const i = (db.traques || []).findIndex(x => x && String(x.id) === String(p.id));
+    if (i < 0) return { ok: false, message: 'Traque introuvable' };
+    db.traques.splice(i, 1);
+    return { ok: true, message: 'Traque supprimée' };
+  },
+  // Contacts (db.repertoire.contacts) — édition / suppression (l'ajout passe par DemandeContact)
+  'contact.update': (db, p) => {
+    const r = db.repertoire; const c = (r && Array.isArray(r.contacts)) ? r.contacts.find(x => x && String(x.id) === String(p.id)) : null;
+    if (!c) return { ok: false, message: 'Contact introuvable' };
+    if (p.nom !== undefined) c.nom = _s(p.nom, 120);
+    if (p.type !== undefined) c.type = _s(p.type, 40);
+    if (p.telegramme !== undefined) c.telegramme = _s(p.telegramme, 120);
+    if (p.metier !== undefined) c.metier = _s(p.metier, 120);
+    if (p.secteur !== undefined) c.secteur = _s(p.secteur, 120);
+    if (p.affiliation !== undefined) c.affiliation = _s(p.affiliation, 120);
+    if (p.relation !== undefined) c.relation = _s(p.relation, 120);
+    if (p.statutRP !== undefined) c.statut = _s(p.statutRP, 60);
+    if (p.notes !== undefined) c.notes = _s(p.notes, 2000);
+    if (p.fiabilite !== undefined) c.fiabilite = _fiab05(p.fiabilite);
+    c.maj = Date.now();
+    return { ok: true, message: 'Contact mis à jour', discord: { type: 'contact', id: String(c.id) } };
+  },
+  'contact.delete': (db, p) => {
+    const r = db.repertoire;
+    if (!r || !Array.isArray(r.contacts)) return { ok: false, message: 'Contact introuvable' };
+    const i = r.contacts.findIndex(x => x && String(x.id) === String(p.id));
+    if (i < 0) return { ok: false, message: 'Contact introuvable' };
+    const [removed] = r.contacts.splice(i, 1);
+    return { ok: true, message: 'Contact supprimé', discord: { type: 'contact-del', contact: removed } };
+  },
+});
 
 // Trouve une opération par id dans db.operations puis db.preparations.
 function _findOp(db, id) {
@@ -214,6 +296,10 @@ async function _refletDiscord(guild, ref) {
     if (!guild || !ref) return;
     if (ref.type === 'medical' && medical?.rafraichirDossierWeb) {
       await medical.rafraichirDossierWeb(guild, ref.id).catch(() => {});
+    } else if (ref.type === 'contact' && repertoire?.rafraichirFicheContact) {
+      await repertoire.rafraichirFicheContact(guild, ref.id).catch(() => {});
+    } else if (ref.type === 'contact-del' && repertoire?.supprimerFicheContactWeb && ref.contact) {
+      await repertoire.supprimerFicheContactWeb(guild, ref.contact).catch(() => {});
     }
   } catch {}
 }

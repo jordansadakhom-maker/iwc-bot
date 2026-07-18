@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { envoyerCommande, type CommandeResult } from "@/lib/commandes";
 
 // Ajoute une fiche de contact DEPUIS LE SITE (espace interne, membre connecté).
 // On enregistre la demande dans Supabase (table DemandeContact) ; le bot Discord
@@ -84,4 +85,18 @@ export async function ajouterContact(data: ContactInput): Promise<ContactResult>
     return { ok: false, error: "Envoi impossible pour le moment. Réessaie dans un instant." };
   }
   return { ok: true };
+}
+
+// ── Modifier / supprimer un contact existant (via la file de commandes) ──
+export async function modifierContact(
+  id: string,
+  patch: { nom?: string; type?: string; telegramme?: string; metier?: string; secteur?: string; affiliation?: string; relation?: string; statutRP?: string; notes?: string; fiabilite?: number }
+): Promise<CommandeResult> {
+  if (!id) return { ok: false, error: "Contact introuvable." };
+  return envoyerCommande("contact.update", { id, ...patch });
+}
+
+export async function supprimerContact(id: string): Promise<CommandeResult> {
+  if (!id) return { ok: false, error: "Contact introuvable." };
+  return envoyerCommande("contact.delete", { id });
 }
