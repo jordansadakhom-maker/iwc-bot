@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { LoginButton } from "@/components/login-button";
 
 // Écran de connexion — l'entrée de la plateforme. Le bouton lance la connexion
@@ -45,6 +46,13 @@ export default function LoginPage() {
             Accès réservé aux membres de la Confrérie / Iron Wolf Company.
           </p>
         </section>
+
+        <div className="mt-6 rounded-card border border-border bg-surface p-4 text-center">
+          <p className="text-[0.82rem] text-muted">Tu es un client&nbsp;?</p>
+          <Link href="/rendez-vous" className="mt-1 inline-block text-[0.88rem] font-semibold text-accent hover:underline">
+            Prendre rendez-vous →
+          </Link>
+        </div>
 
         <p className="mt-6 text-center text-[0.72rem] text-faint">Iron Wolf Company · Suivi confidentiel</p>
       </div>

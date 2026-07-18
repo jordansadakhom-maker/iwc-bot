@@ -72,6 +72,10 @@ let supabaseSync = {};
 try { supabaseSync = require('./supabase-sync'); console.log(`✅ Module Supabase sync chargé${supabaseSync.estActif?.() ? '' : ' (inactif — variables d\'env absentes)'}`); }
 catch (e) { console.log('⚠️ supabase-sync non chargé:', e.message); }
 
+let rdvWeb = {};
+try { rdvWeb = require('./rdv-web'); console.log('✅ Module RDV web chargé'); }
+catch (e) { console.log('⚠️ rdv-web non chargé:', e.message); }
+
 let resumePhoto = {};
 try { resumePhoto = require('./resume-photo'); console.log('✅ Module résumé-photo chargé'); }
 catch (e) { console.log('⚠️ resume-photo non chargé:', e.message); }
@@ -6704,6 +6708,10 @@ client.once('clientReady', async () => {
   // 🔄 Synchronisation Supabase (plateforme web) toutes les 5 min — reflète les
   //    coffres/contrats/opérations à jour. No-op sans variables d'env.
   cron.schedule('*/5 * * * *', async () => { try { await supabaseSync.syncAll?.(loadDB()); } catch {} });
+  // 📨 Demandes de RDV venues du site web → notifier l'équipe dans #agenda (toutes les 2 min).
+  cron.schedule('*/2 * * * *', async () => {
+    for (const g of client.guilds.cache.values()) await rdvWeb.verifierDemandesRdvWeb?.(g).catch(() => {});
+  });
   cron.schedule('0 18 * * *', async () => {
     try { const u = await client.users.fetch('944208797084311583').catch(() => null); if (u) await u.send({ embeds: [_genererRecapEmbed(loadDB())] }).catch(() => {}); } catch {}
   }, { timezone: 'Europe/Paris' });

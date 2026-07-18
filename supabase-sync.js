@@ -193,4 +193,44 @@ function scheduleSync(db, delay = 15000) {
   _timer = setTimeout(() => { _timer = null; syncAll(db).catch(() => {}); }, delay);
 }
 
-module.exports = { estActif, syncAll, scheduleSync };
+// ═══════════════════════════════════════════════════════════════
+//  Lecture (pull) — utilisé pour relever les demandes de RDV du site web
+// ═══════════════════════════════════════════════════════════════
+async function _get(pathAndQuery) {
+  if (!estActif()) return null;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${pathAndQuery}`, {
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+    });
+    if (!res.ok) { console.log(`⚠️ Supabase GET ${pathAndQuery}: HTTP ${res.status}`); return null; }
+    return await res.json();
+  } catch (e) { console.log(`⚠️ Supabase GET ${pathAndQuery}: ${e.message}`); return null; }
+}
+
+async function _patch(pathAndQuery, body) {
+  if (!estActif()) return false;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${pathAndQuery}`, {
+      method: 'PATCH',
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify(body),
+    });
+    return res.ok;
+  } catch (e) { console.log(`⚠️ Supabase PATCH ${pathAndQuery}: ${e.message}`); return false; }
+}
+
+// Demandes de RDV « nouvelles » (créées par le site). On filtre la source côté
+// bot (paiement.source === 'web') pour rester robuste. La table Rdv n'est
+// alimentée que par le site aujourd'hui.
+async function lireDemandesRdvWeb() {
+  const rows = await _get('Rdv?statut=eq.nouveau&order=createdAt.asc&limit=25');
+  if (!Array.isArray(rows)) return [];
+  return rows.filter(r => r && r.paiement && r.paiement.source === 'web');
+}
+
+// Marque une demande comme transmise à Discord (évite de re-notifier).
+async function marquerRdvTransmis(id) {
+  return await _patch(`Rdv?id=eq.${encodeURIComponent(id)}`, { statut: 'transmis' });
+}
+
+module.exports = { estActif, syncAll, scheduleSync, lireDemandesRdvWeb, marquerRdvTransmis };
