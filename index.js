@@ -8681,13 +8681,33 @@ async function buildMembresDiscordMap(guild) {
 // le site (les anciens, ex. fondateurs partis, sont exclus puis supprimés).
 async function _majMembresActuels(guilds) {
   try {
-    const ids = new Set();
+    const clean = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const grades = notionV3.GRADES_UNIFIES || [];
+    const db = loadDB();
+    const seen = new Set();
+    const roster = [];
     for (const guild of guilds) {
-      const membres = await guild.members.fetch().catch(() => null);
-      if (membres) for (const [id, m] of membres) if (!m.user.bot) ids.add(id);
+      const membres = await guild.members.fetch().catch(() => null); // remplit le cache des rôles
+      if (!membres) continue;
+      for (const g of grades) {
+        const role = guild.roles.cache.find(r => g.match.some(m => clean(r.name) === clean(m)))
+          || guild.roles.cache.find(r => g.match.some(m => clean(r.name).includes(clean(m))));
+        if (!role) continue;
+        for (const m of role.members.values()) {
+          if (m.user.bot || seen.has(m.id)) continue; // chaque membre dans son grade le plus élevé
+          seen.add(m.id);
+          const mem = db.members[m.id] || {};
+          const pole = m.roles.cache.some(r => /confr[ée]rie|confrerie/i.test(r.name)) ? 'illegal'
+            : (mem.pole === 'illegal' ? 'illegal' : 'legal');
+          roster.push({ id: m.id, nom: mem.name || m.displayName, grade: g.nom, pole, statut: mem.status || 'actif', joinedAt: mem.joinedAt || null });
+        }
+      }
     }
-    if (ids.size) supabaseSync.setMembresActuels?.([...ids]);
-  } catch (e) { console.log('⚠️ maj membres actuels:', e.message); }
+    if (roster.length) {
+      supabaseSync.setMembresRoster?.(roster);
+      supabaseSync.setMembresActuels?.(roster.map(r => r.id));
+    }
+  } catch (e) { console.log('⚠️ maj roster membres:', e.message); }
 }
 
 async function _handleVersion(interaction) {
