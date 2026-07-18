@@ -1158,5 +1158,8 @@ async function reconstruireContactsDepuisForum(guild) {
   }
 }
 
-module.exports = { repertoireCommands, routeInteraction, installerPanelContact, onMessage, traiterRapportTerrain, listerContacts, getContact, rafraichirFicheContact, ajouterContactAuto, proposerContactContrat, reconstruireContactsDepuisForum };
+// Supprime la fiche forum d'un contact retiré depuis le site (best-effort).
+async function supprimerFicheContactWeb(guild, contact) { try { await _supprimerFicheForum(guild, contact); } catch {} }
+
+module.exports = { repertoireCommands, routeInteraction, installerPanelContact, onMessage, traiterRapportTerrain, listerContacts, getContact, rafraichirFicheContact, ajouterContactAuto, proposerContactContrat, reconstruireContactsDepuisForum, supprimerFicheContactWeb };
 module.exports.__test = { _reponseRecherche, _filter, _contactFormModal, _ficheRow, _supprimerFicheForum }; // tests uniquement
