@@ -1231,5 +1231,5 @@ async function routeInteraction(interaction) {
   }
 }
 
-module.exports = { init, routeInteraction, creerOperationDepuisContrat, tableauEmbed, STEP_TEMPLATES };
+module.exports = { init, routeInteraction, creerOperationDepuisContrat, tableauEmbed, STEP_TEMPLATES, CATEGORIES };
 module.exports.__test = { _mentionsEtape, _normNom, _resoudreSalonNomme, _salonEnCours, _salonTerminees, _embedEnCours, _boutonsEnCours, _publierEnCours, _demarrerOperation, _terminerOperation, REACT, ETAPE_PUBLICATION, ETAPE_DEMARRAGE }; // tests uniquement
