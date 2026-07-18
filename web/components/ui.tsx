@@ -3,17 +3,34 @@ import clsx from "clsx";
 
 // Primitives d'interface partagées par les pages (serveur-compatibles, sans hooks).
 
-export function PageHeader({ titre, sous, actif }: { titre: string; sous?: string; actif?: boolean }) {
+export function PoleChip({ pole }: { pole: "iwc" | "confrerie" }) {
+  const conf = pole === "confrerie";
+  const c = conf ? "var(--oxblood)" : "var(--brass)";
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[0.7rem] font-semibold"
+      style={{ color: c, borderColor: "color-mix(in srgb," + c + " 45%,var(--border))", background: "color-mix(in srgb," + c + " 10%,transparent)" }}
+    >
+      <span>{conf ? "🔪" : "⚖️"}</span>
+      {conf ? "La Confrérie" : "Iron Wolf"}
+    </span>
+  );
+}
+
+export function PageHeader({ titre, sous, actif, pole }: { titre: string; sous?: string; actif?: boolean; pole?: "iwc" | "confrerie" }) {
   return (
     <div className="flex flex-wrap items-end justify-between gap-4">
       <div>
         <h1 className="font-display text-[1.9rem] tracking-[0.01em]">{titre}</h1>
         {sous ? <div className="mt-1 text-[0.85rem] text-muted">{sous}</div> : null}
       </div>
-      <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-[0.72rem] text-muted">
-        <span className="h-2 w-2 rounded-full" style={{ background: actif ? "var(--good)" : "var(--faint)" }} />
-        {actif ? "Données en direct" : "En attente de la base"}
-      </span>
+      <div className="flex items-center gap-2">
+        {pole ? <PoleChip pole={pole} /> : null}
+        <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-[0.72rem] text-muted">
+          <span className="h-2 w-2 rounded-full" style={{ background: actif ? "var(--good)" : "var(--faint)" }} />
+          {actif ? "Données en direct" : "En attente de la base"}
+        </span>
+      </div>
     </div>
   );
 }

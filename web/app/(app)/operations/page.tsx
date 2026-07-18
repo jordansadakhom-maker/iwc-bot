@@ -19,7 +19,7 @@ export default async function OperationsPage() {
 
   return (
     <>
-      <PageHeader titre="Opérations & Contrats" sous="Synchronisé avec ton salon #operations" actif={data.connecte} />
+      <PageHeader titre="Opérations & Contrats" sous="Synchronisé avec ton salon #operations" actif={data.connecte} pole={data.pole} />
 
       <Card>
         <CardHeader titre="Opérations" compteur={totalOps} />

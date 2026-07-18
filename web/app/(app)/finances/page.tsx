@@ -10,18 +10,22 @@ function money(n: number | null) {
 }
 
 export default async function FinancesPage() {
-  const { connecte, coffres } = await getFinances();
+  const { connecte, coffres, pole } = await getFinances();
+  const conf = pole === "confrerie";
+  // Vue « pôle actif » : coffre commun + le coffre du pôle choisi (le bouton
+  // Iron Wolf / Confrérie du header bascule réellement l'affichage).
   const cartes = [
     { label: "Coffre commun", val: coffres.commun, icon: Wallet, tone: "var(--accent)" },
-    { label: "Coffre Iron Wolf", val: coffres.legal, icon: Landmark, tone: "var(--brass)" },
-    { label: "Coffre Confrérie", val: coffres.illegal, icon: Skull, tone: "var(--oxblood)" },
+    conf
+      ? { label: "Coffre Confrérie", val: coffres.illegal, icon: Skull, tone: "var(--oxblood)" }
+      : { label: "Coffre Iron Wolf", val: coffres.legal, icon: Landmark, tone: "var(--brass)" },
   ];
 
   return (
     <>
-      <PageHeader titre="Finances" sous="Coffres synchronisés avec Discord" actif={connecte} />
+      <PageHeader titre="Finances" sous="Coffres synchronisés avec Discord" actif={connecte} pole={pole} />
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2">
         {cartes.map((c) => {
           const Icon = c.icon;
           return (
@@ -41,7 +45,7 @@ export default async function FinancesPage() {
 
       {connecte ? (
         <Card>
-          <CardHeader titre="Comparatif des coffres" />
+          <CardHeader titre="Comparatif des coffres (tous pôles)" />
           <BarresH
             data={[
               { label: "Coffre commun", value: coffres.commun ?? 0 },

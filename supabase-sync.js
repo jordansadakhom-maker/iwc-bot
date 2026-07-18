@@ -243,6 +243,13 @@ function _construire(db) {
       suivis: Array.isArray(f.suivis) ? f.suivis : [],
       ordonnances: Array.isArray(f.ordonnances) ? f.ordonnances : [],
       historique: Array.isArray(f.historique) ? f.historique : [],
+      // Champs détaillés (colonnes optionnelles — repli automatique si absentes).
+      notes: _nn(f.notes, 2000),
+      testValide: !!f.testValide,
+      prochainRdv: _nn(f.prochainRdv, 200),
+      reposJusquAt: _isoOrUndef(f.reposJusquAt) || null,
+      reposMotif: _nn(f.reposMotif, 300),
+      majPar: _nn(f.majPar, 120),
       updatedAt: now,
     }));
 
@@ -328,7 +335,14 @@ async function syncAll(db) {
       results.push(await _upsert('Operation', operations)); // 4. FK → Membre + Contrat (déjà poussés)
       results.push(await _upsert('RapportInfo', rapports)); // 5. renseignement — indépendant
       results.push(await _upsert('Traque', traques));       // 6. traques — indépendant
-      results.push(await _upsert('DossierMedical', dossiers)); // 7. médical — indépendant
+      // 7. Médical — tente le format complet ; repli sur les champs de base si
+      //    les colonnes détaillées (notes, convalescence…) n'existent pas encore.
+      let rD = await _upsert('DossierMedical', dossiers);
+      if (!rD.ok && rD.status === 400) {
+        const base = dossiers.map(({ notes, testValide, prochainRdv, reposJusquAt, reposMotif, majPar, ...b }) => b);
+        rD = await _upsert('DossierMedical', base);
+      }
+      results.push(rD);
       // 8. Contacts — tente le format complet ; si les colonnes détaillées ne
       //    sont pas encore créées (HTTP 400), repli sur les champs de base.
       let rC = await _upsert('Contact', contacts);

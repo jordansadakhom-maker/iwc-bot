@@ -5,11 +5,11 @@ import { PageHeader, Card, CardHeader, Empty, Badge } from "@/components/ui";
 export const dynamic = "force-dynamic";
 
 export default async function InventairePage() {
-  const { connecte, vehicules, armes } = await getInventaire();
+  const { connecte, vehicules, armes, pole } = await getInventaire();
 
   return (
     <>
-      <PageHeader titre="Inventaire" sous="Registre d'armes &amp; véhicules" actif={connecte} />
+      <PageHeader titre="Inventaire" sous="Registre d'armes &amp; véhicules" actif={connecte} pole={pole} />
 
       <Card>
         <CardHeader titre="Registre d'armes" compteur={armes.length} />
