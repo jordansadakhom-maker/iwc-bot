@@ -64,6 +64,10 @@ let opsEtapes = {};
 try { opsEtapes = require('./operations-etapes'); console.log('✅ Module opérations-étapes chargé'); }
 catch (e) { console.log('⚠️ operations-etapes non chargé:', e.message); }
 
+let creationRapide = {};
+try { creationRapide = require('./creation-rapide'); console.log('✅ Module création rapide chargé'); }
+catch (e) { console.log('⚠️ creation-rapide non chargé:', e.message); }
+
 let resumePhoto = {};
 try { resumePhoto = require('./resume-photo'); console.log('✅ Module résumé-photo chargé'); }
 catch (e) { console.log('⚠️ resume-photo non chargé:', e.message); }
@@ -1012,7 +1016,7 @@ const SLASH_COMMANDS = [
 ].map(c => c.toJSON());
 
 async function registerSlashCommands(guild) {
-  const cmds = [...SLASH_COMMANDS, ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || []), ...(operations.operationsCommands || []), ...(rumeurs.rumeursCommands || []), ...(inventaire.inventaireCommands || []), ...(diagnostic.diagnosticCommands || []), ...(absences.absencesCommands || []), ...(repertoire.repertoireCommands || []), ...(monitoring.monitoringCommands || []), ...(telegramme.telegrammeCommands || []), ...(tableaubord.tableauCommands || []), ...(traque.traqueCommands || []), ...(comptabilite.comptaCommands || []), ...(evenements.evenementsCommands || []), ...(annonces.annoncesCommands || []), ...(journaux.journauxCommands || [])];
+  const cmds = [...SLASH_COMMANDS, ...(creationRapide.creationCommands || []), ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || []), ...(operations.operationsCommands || []), ...(rumeurs.rumeursCommands || []), ...(inventaire.inventaireCommands || []), ...(diagnostic.diagnosticCommands || []), ...(absences.absencesCommands || []), ...(repertoire.repertoireCommands || []), ...(monitoring.monitoringCommands || []), ...(telegramme.telegrammeCommands || []), ...(tableaubord.tableauCommands || []), ...(traque.traqueCommands || []), ...(comptabilite.comptaCommands || []), ...(evenements.evenementsCommands || []), ...(annonces.annoncesCommands || []), ...(journaux.journauxCommands || [])];
   try {
     const noms = cmds.map(c => c?.name || c?.toJSON?.()?.name).filter(Boolean);
     client._cmdNames = noms;
@@ -4566,6 +4570,7 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isUserSelectMenu?.() && (interaction.customId || '').startsWith('info_notify_sel_')) return notionV3.handleInformateurNotifySelect?.(interaction);
   if (await contratsConf.routeInteraction?.(interaction)) return;
   if (await opsEtapes.routeInteraction?.(interaction)) return;
+  if (await creationRapide.routeInteraction?.(interaction)) return;
   if (await chiffrement.routeInteraction?.(interaction)) return;
   if (await _routePosteCommandement(interaction)) return;
   if (await direction.routeInteraction?.(interaction)) return;
