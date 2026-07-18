@@ -1030,10 +1030,13 @@ async function ajouterContactAuto(guild, data) {
     const existe = (rep.contacts || []).find(c => _norm(c.nom) === _norm(nom));
     if (existe) return existe;
     const contactId = _id();
-    const d = { nomsurnom: nom, telegramme: data.telegramme || '', metier: data.metier || '', secteur: data.secteur || '', affiliation: data.affiliation || '', relation: data.relation || 'Affaire / professionnelle', fiabilite: '', statut: '', notes: data.notes || 'Ajouté automatiquement depuis un contrat.', creeParNom: data.creeParNom || 'Système', id: contactId };
+    const fiabNum = Math.max(0, Math.min(5, parseInt(data.fiabilite, 10) || 0));
+    const notes = (data.notes !== undefined && data.notes !== null) ? String(data.notes) : 'Ajouté automatiquement depuis un contrat.';
+    const d = { nomsurnom: nom, telegramme: data.telegramme || '', metier: data.metier || '', secteur: data.secteur || '', affiliation: data.affiliation || '', relation: data.relation || 'Affaire / professionnelle', fiabilite: fiabNum || '', statut: data.statut || '', notes, creeParNom: data.creeParNom || 'Système', id: contactId };
     let refs = null;
     try { const r = await _publierFiche({ guild }, d, _richFiche(d), contactId, null, {}); refs = r?.refs || null; } catch {}
-    const contact = { id: contactId, nom, type: _deriveType(d), telegramme: d.telegramme, fiabilite: 0, notes: d.notes, metier: d.metier, secteur: d.secteur, affiliation: d.affiliation, relation: d.relation, statut: d.statut, creeParNom: d.creeParNom, par: null, maj: Date.now(), ficheRefs: refs };
+    const type = data.type ? _matchType(data.type) : _deriveType(d);
+    const contact = { id: contactId, nom, type, telegramme: d.telegramme, fiabilite: fiabNum, notes: d.notes, metier: d.metier, secteur: d.secteur, affiliation: d.affiliation, relation: d.relation, statut: d.statut, creeParNom: d.creeParNom, par: null, maj: Date.now(), ficheRefs: refs };
     rep.contacts.push(contact); persist(db);
     return contact;
   } catch { return null; }
