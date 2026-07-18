@@ -6,6 +6,11 @@
 const fs = require('fs');
 const DB_PATH = './data.json';
 
+// Synchro site web (Supabase) — best-effort, no-op sans variables d'env.
+// Requis ici pour pousser les changements en quasi temps réel après chaque écriture.
+let _supabaseSync = null;
+try { _supabaseSync = require('./supabase-sync'); } catch {}
+
 const DEFAULT_DB = {
   members: {
     "696325126047662081": { "id": "696325126047662081", "name": "Colt Kane",      "status": "actif", "rang": "Le Conseil — Directeur", "pole": "legal",   "joinedAt": "2026-05-01T00:00:00.000Z", "lastActivity": "2026-05-31T00:00:00.000Z" },
@@ -80,6 +85,8 @@ function saveDB(data) {
   // Sauvegarde cloud rapide après tout changement → survit à un redémarrage
   // (conteneur Render éphémère). Debounce ~12s : regroupe les rafales d'écritures.
   scheduleCloudBackup();
+  // Synchro site web (Supabase) en quasi temps réel — debounce interne ~15s.
+  try { _supabaseSync?.scheduleSync?.(data); } catch {}
 }
 
 // ── Sauvegarde cloud rapide (debounce) déclenchée après chaque changement ──

@@ -1021,6 +1021,7 @@ const SLASH_COMMANDS = [
     .addSubcommand(s => s.setName('suivi').setDescription('🗂️ Tableau de suivi des opérations par étapes (avancement)'))
     .addSubcommand(s => s.setName('programmer').setDescription('🕐 Programmer une opération à lancement automatique (Direction)')),
   new SlashCommandBuilder().setName('bilan-export').setDescription('📊 Exporter un Google Sheet (.xlsx) de tout : contrats, argent, opérations… (Direction)'),
+  new SlashCommandBuilder().setName('synchro-web').setDescription('🔄 Vérifier / forcer la synchro du site web (Direction)'),
 ].map(c => c.toJSON());
 
 async function registerSlashCommands(guild) {
@@ -1755,6 +1756,21 @@ async function handleSlashCommand(interaction) {
     } catch (e) {
       console.log('❌ /bilan:', e.message);
       return interaction.editReply({ content: `❌ Erreur lors de la génération du bilan : ${e.message}` });
+    }
+  }
+  if (commandName === 'synchro-web') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    if (!supabaseSync.estActif?.()) {
+      return interaction.reply({ content: "⚠️ **Synchro du site INACTIVE.**\nLes variables `SUPABASE_URL` et `SUPABASE_SERVICE_KEY` ne sont pas configurées sur l'hébergeur (Render).\n\n➡️ Ajoute-les dans **Render → ton service → Environment**, puis **redéploie** le bot. Le site se remplira ensuite tout seul.", flags: MessageFlags.Ephemeral });
+    }
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      const r = await supabaseSync.syncAll(loadDB());
+      const lignes = (r?.results || []).map(x => `• ${x.table} : ${x.ok ? `**${x.count}**` : '❌ échec' + (x.status ? ` (HTTP ${x.status})` : '')}`).join('\n');
+      return interaction.editReply({ content: `✅ **Synchro du site effectuée.**\n${lignes || '—'}\n\nLe tableau de bord et les pages du site (Opérations, Membres, Finances) reflètent maintenant ces données.` });
+    } catch (e) {
+      console.log('❌ /synchro-web:', e.message);
+      return interaction.editReply({ content: `❌ Erreur pendant la synchro : ${e.message}` });
     }
   }
   if (commandName === 'contrats-importer') {
