@@ -1766,6 +1766,7 @@ async function handleSlashCommand(interaction) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     try {
       await _majMembresActuels([interaction.guild]);
+      try { await repertoire.reconstruireContactsDepuisForum?.(interaction.guild); } catch {}
       const r = await supabaseSync.syncAll(loadDB());
       const lignes = (r?.results || []).map(x => `• ${x.table} : ${x.ok ? `**${x.count}**` : '❌ échec' + (x.status ? ` (HTTP ${x.status})` : '')}`).join('\n');
       return interaction.editReply({ content: `✅ **Synchro du site effectuée.**\n${lignes || '—'}\n\nLe tableau de bord et les pages du site (Opérations, Membres, Finances) reflètent maintenant ces données.` });
@@ -6691,7 +6692,17 @@ client.once('clientReady', async () => {
   } catch (e) { console.log('⚠️ correction inactifs:', e.message); }
   // 🔄 Première synchronisation Supabase (plateforme web) — d'abord le roster
   //    RÉEL du serveur (exclut les anciens membres), puis les vraies données.
-  try { await _majMembresActuels(client.guilds.cache.values()); await supabaseSync.syncAll?.(loadDB()); } catch {}
+  try {
+    await _majMembresActuels(client.guilds.cache.values());
+    // Récupération : si le répertoire est vide, reconstruire les contacts depuis le forum.
+    try {
+      const _db = loadDB();
+      if (!(_db.repertoire && Array.isArray(_db.repertoire.contacts) && _db.repertoire.contacts.length)) {
+        for (const g of client.guilds.cache.values()) await repertoire.reconstruireContactsDepuisForum?.(g).catch(() => {});
+      }
+    } catch {}
+    await supabaseSync.syncAll?.(loadDB());
+  } catch {}
   for (const guild of client.guilds.cache.values()) {
     await registerSlashCommands(guild).catch(e => console.log('registerSlashCommands error:', e.message));
     await autoSetup(guild).catch(e => console.log('autoSetup error:', e.message));

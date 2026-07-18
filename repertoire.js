@@ -1078,5 +1078,82 @@ async function proposerContactContrat(guild, contrat) {
   } catch (e) { console.log('⚠️ proposerContactContrat:', e.message); }
 }
 
-module.exports = { repertoireCommands, routeInteraction, installerPanelContact, onMessage, traiterRapportTerrain, listerContacts, getContact, rafraichirFicheContact, ajouterContactAuto, proposerContactContrat };
+// ── Reconstruction des contacts depuis le forum ────────────────────────────
+// Relit le forum `contacts-répertoire` et recrée les fiches manquantes dans
+// db.repertoire.contacts (utile si la mémoire du bot a été réinitialisée alors
+// que les posts du forum, eux, subsistent). Idempotent : n'importe pas deux
+// fois le même fil (repère via ficheRefs.threadId / id).
+function _extractChamp(content, label) {
+  const re = new RegExp('\\*\\*' + label + '\\*\\*\\s*[—–-]\\s*(.+)');
+  const m = content.match(re);
+  if (!m) return '';
+  const v = m[1].trim();
+  return (!v || v === '—') ? '' : v;
+}
+
+async function reconstruireContactsDepuisForum(guild) {
+  try {
+    const forum = guild.channels.cache.get(FORUM_REPERTOIRE) || await guild.channels.fetch(FORUM_REPERTOIRE).catch(() => null);
+    if (!forum || !forum.threads) return 0;
+    const threads = new Map();
+    const actifs = await forum.threads.fetchActive().catch(() => null);
+    if (actifs) for (const [id, t] of actifs.threads) threads.set(id, t);
+    let before; // pagination des archives
+    for (let page = 0; page < 6; page++) {
+      const arch = await forum.threads.fetchArchived({ limit: 100, before }).catch(() => null);
+      if (!arch || !arch.threads.size) break;
+      for (const [id, t] of arch.threads) threads.set(id, t);
+      before = [...arch.threads.values()].pop()?.archivedTimestamp;
+      if (!arch.hasMore) break;
+    }
+    if (!threads.size) return 0;
+
+    const db = loadDB();
+    const rep = _ensure(db);
+    const dejaImporte = new Set(rep.contacts.map(c => c?.ficheRefs?.threadId || c?.id).filter(Boolean));
+    let n = 0;
+    for (const [tid, thread] of threads) {
+      if (dejaImporte.has(tid)) continue;
+      const msg = await thread.fetchStarterMessage().catch(() => null);
+      const content = msg?.content || '';
+      const nom = (thread.name || _extractChamp(content, '') || 'Contact').replace(/^🎴\s*/, '').slice(0, 80).trim() || 'Contact';
+      const affiliation = _extractChamp(content, 'Affiliation');
+      const relation = _extractChamp(content, 'Relation');
+      let telegramme = _extractChamp(content, 'Télégramme');
+      if (!telegramme && /^\s*\d{3,}\s*$/.test(content)) telegramme = content.trim();
+      const fiabRaw = _extractChamp(content, 'Fiabilité');
+      const contact = {
+        id: tid,
+        nom,
+        type: _deriveType({ affiliation, relation }) || 'Neutre',
+        telegramme,
+        metier: _extractChamp(content, 'Métier'),
+        secteur: _extractChamp(content, 'Secteur'),
+        affiliation,
+        relation,
+        statut: _extractChamp(content, 'Statut'),
+        fiabilite: (fiabRaw.match(/⭐/g) || []).length,
+        notes: (content.split(/\*\*Notes\*\*/)[1] || '').split('\n').slice(1).join('\n').trim().slice(0, 1000),
+        dernierContact: _extractChamp(content, 'Dernier contact'),
+        creeParNom: _extractChamp(content, 'Fiche établie par'),
+        photoUrl: msg?.attachments?.first()?.url || null,
+        par: null,
+        maj: Date.now(),
+        ficheRefs: { threadId: tid, channelId: FORUM_REPERTOIRE, msgId: msg?.id || null },
+        importeForum: true,
+      };
+      rep.contacts.push(contact);
+      dejaImporte.add(tid);
+      n++;
+    }
+    if (n > 0) persist(db);
+    console.log(`🎴 Contacts reconstruits depuis le forum : +${n}`);
+    return n;
+  } catch (e) {
+    console.log('❌ reconstruireContactsDepuisForum:', e.message);
+    return 0;
+  }
+}
+
+module.exports = { repertoireCommands, routeInteraction, installerPanelContact, onMessage, traiterRapportTerrain, listerContacts, getContact, rafraichirFicheContact, ajouterContactAuto, proposerContactContrat, reconstruireContactsDepuisForum };
 module.exports.__test = { _reponseRecherche, _filter, _contactFormModal, _ficheRow, _supprimerFicheForum }; // tests uniquement
