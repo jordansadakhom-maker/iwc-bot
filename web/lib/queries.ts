@@ -337,7 +337,7 @@ export type Suivi = { date?: string; soin?: string; soignant?: string; etat?: st
 export type Ordonnance = { medicaments?: string; posologie?: string; duree?: string; conseils?: string };
 export type Histo = { date?: string; action?: string; par?: string };
 export type DossierItem = {
-  id: string; nom: string; statut: string;
+  id: string; membreId: string; nom: string; statut: string;
   blessures: Blessure[]; ordonnances: Ordonnance[]; suivis: Suivi[]; historique: Histo[];
   notes: string | null; testValide: boolean | null; prochainRdv: string | null;
   reposJusquAt: string | null; reposMotif: string | null; majPar: string | null;
@@ -363,6 +363,7 @@ export async function getMedical(): Promise<MedicalData> {
   type DRow = Record<string, unknown>;
   const dossiers: DossierItem[] = ((dossiersR.data || []) as DRow[]).map((d) => ({
     id: String(d.id),
+    membreId: String(d.membreId ?? d.id),
     nom: noms.get(String(d.membreId)) || String(d.membreId) || "Patient",
     statut: (d.statut as string) || "—",
     blessures: _arr<Blessure>(d.blessures),

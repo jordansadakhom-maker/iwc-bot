@@ -1712,5 +1712,15 @@ async function installerPanelDemande(channel) {
   return true;
 }
 
-module.exports = { installerPanel, installerExemple, installerPanelDemande, installerDossiers, routeInteraction, checkRappelsMedicaux, MEDICAL_CHANNEL, ROLE_MEDECIN, _test: { _dossierThread, _posterAuDossier, _archiverFilsPatient, _supprimerFilsPatient } };
+// Rafraîchit le fil de forum d'UN dossier (après une modif venue du site).
+async function rafraichirDossierWeb(guild, id) {
+  try {
+    const db = loadDB();
+    const f = db.suiviMedical && db.suiviMedical[String(id)];
+    if (!f) return false;
+    return await _rafraichirDossier(guild, String(id), f);
+  } catch { return false; }
+}
+
+module.exports = { installerPanel, installerExemple, installerPanelDemande, installerDossiers, routeInteraction, checkRappelsMedicaux, rafraichirDossierWeb, MEDICAL_CHANNEL, ROLE_MEDECIN, _test: { _dossierThread, _posterAuDossier, _archiverFilsPatient, _supprimerFilsPatient } };
 module.exports.__test = { _convalescenceJours, _bilanEmbed, _certificatHTML, _embedFiche, _dureeJours, _parseHonoLignes, _acteDecesHTML, _honorairesHTML, _ordonnanceHTML, _ordoModal, REMEDES, _nomFil }; // tests uniquement
