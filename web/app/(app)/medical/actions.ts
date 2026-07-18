@@ -1,0 +1,42 @@
+"use server";
+
+import { envoyerCommande, type CommandeResult } from "@/lib/commandes";
+
+// Actions médicales → déposées dans la file de commandes, appliquées par le bot
+// (dossier Discord + base) puis resynchronisées sur le site.
+
+export async function creerDossier(membreId: string, statut: string): Promise<CommandeResult> {
+  if (!membreId) return { ok: false, error: "Aucun membre sélectionné." };
+  return envoyerCommande("medical.create", { membreId, statut: statut || "non_teste" });
+}
+
+export async function majDossier(
+  membreId: string,
+  patch: { statut?: string; notes?: string; prochainRdv?: string; testValide?: boolean }
+): Promise<CommandeResult> {
+  if (!membreId) return { ok: false, error: "Dossier introuvable." };
+  return envoyerCommande("medical.update", { membreId, ...patch });
+}
+
+export async function ajouterBlessure(
+  membreId: string,
+  b: { desc: string; localisation?: string; gravite?: string; statut?: string }
+): Promise<CommandeResult> {
+  if (!membreId) return { ok: false, error: "Dossier introuvable." };
+  if (!b.desc || b.desc.trim().length < 2) return { ok: false, error: "Décris la blessure." };
+  return envoyerCommande("medical.addBlessure", { membreId, ...b });
+}
+
+export async function ajouterOrdonnance(
+  membreId: string,
+  o: { medicaments: string; posologie?: string; duree?: string; conseils?: string }
+): Promise<CommandeResult> {
+  if (!membreId) return { ok: false, error: "Dossier introuvable." };
+  if (!o.medicaments || o.medicaments.trim().length < 2) return { ok: false, error: "Indique le médicament." };
+  return envoyerCommande("medical.addOrdonnance", { membreId, ...o });
+}
+
+export async function supprimerDossier(membreId: string): Promise<CommandeResult> {
+  if (!membreId) return { ok: false, error: "Dossier introuvable." };
+  return envoyerCommande("medical.delete", { membreId });
+}

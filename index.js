@@ -80,6 +80,10 @@ let contactWeb = {};
 try { contactWeb = require('./contact-web'); console.log('✅ Module contact web chargé'); }
 catch (e) { console.log('⚠️ contact-web non chargé:', e.message); }
 
+let commandeWeb = {};
+try { commandeWeb = require('./commande-web'); console.log('✅ Module commande web chargé'); }
+catch (e) { console.log('⚠️ commande-web non chargé:', e.message); }
+
 let resumePhoto = {};
 try { resumePhoto = require('./resume-photo'); console.log('✅ Module résumé-photo chargé'); }
 catch (e) { console.log('⚠️ resume-photo non chargé:', e.message); }
@@ -6765,6 +6769,12 @@ client.once('clientReady', async () => {
   cron.schedule('*/2 * * * *', async () => {
     for (const g of client.guilds.cache.values()) await contactWeb.verifierDemandesContactWeb?.(g).catch(() => {});
   });
+  // ⚡ Commandes CRUD venues du site (créer/modifier/supprimer) → appliquées toutes les 30 s.
+  if (commandeWeb.appliquerCommandesWeb) {
+    setInterval(async () => {
+      try { const g = client.guilds.cache.first(); if (g) await commandeWeb.appliquerCommandesWeb(g); } catch {}
+    }, 30000);
+  }
   cron.schedule('0 18 * * *', async () => {
     try { const u = await client.users.fetch('944208797084311583').catch(() => null); if (u) await u.send({ embeds: [_genererRecapEmbed(loadDB())] }).catch(() => {}); } catch {}
   }, { timezone: 'Europe/Paris' });

@@ -467,4 +467,17 @@ async function marquerDemandeContactEchec(id) {
   return await _patch(`DemandeContact?id=eq.${encodeURIComponent(id)}`, { statut: 'echec' });
 }
 
-module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec };
+// ── File de commandes venues du site (table CommandeWeb) ──
+// Le site dépose des commandes (créer/modifier/supprimer) ; le bot les applique
+// à data.json puis resynchronise. Table NEUVE, jamais réconciliée.
+async function lireCommandesWeb() {
+  const rows = await _get('CommandeWeb?statut=eq.nouveau&order=createdAt.asc&limit=50');
+  return Array.isArray(rows) ? rows : [];
+}
+async function marquerCommandeWeb(id, statut, resultat) {
+  const body = { statut };
+  if (resultat != null) body.resultat = String(resultat).slice(0, 500);
+  return await _patch(`CommandeWeb?id=eq.${encodeURIComponent(id)}`, body);
+}
+
+module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb };
