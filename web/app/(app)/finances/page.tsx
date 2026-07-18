@@ -1,6 +1,7 @@
 import { Wallet, Landmark, Skull, LineChart } from "lucide-react";
 import { getFinances } from "@/lib/queries";
 import { PageHeader, Card, CardHeader, Empty } from "@/components/ui";
+import { BarresH } from "@/components/charts";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,20 @@ export default async function FinancesPage() {
           );
         })}
       </div>
+
+      {connecte ? (
+        <Card>
+          <CardHeader titre="Comparatif des coffres" />
+          <BarresH
+            data={[
+              { label: "Coffre commun", value: coffres.commun ?? 0 },
+              { label: "Coffre Iron Wolf", value: coffres.legal ?? 0 },
+              { label: "Coffre Confrérie", value: coffres.illegal ?? 0 },
+            ]}
+            format={money}
+          />
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader titre="Mouvements — 30 derniers jours" />

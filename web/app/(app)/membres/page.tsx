@@ -1,8 +1,18 @@
 import { Users } from "lucide-react";
 import { getMembres } from "@/lib/queries";
 import { PageHeader, Card, CardHeader, Empty, Badge } from "@/components/ui";
+import { BarresH } from "@/components/charts";
 
 export const dynamic = "force-dynamic";
+
+const ORDRE_GRADES: [string, string][] = [
+  ["Fondateur", "Fondateur"],
+  ["Le Conseil — Directeur / Co-Directeur", "Le Conseil"],
+  ["Officier de Terrain", "Officier de Terrain"],
+  ["Agent Confirmé", "Agent Confirmé"],
+  ["Opérateur", "Opérateur"],
+  ["Recrue — Probatoire", "Recrue"],
+];
 
 const STATUT_TONE: Record<string, "good" | "warn" | "muted"> = {
   actif: "good", absent: "warn", inactif: "muted", parti: "muted", visiteur: "muted",
@@ -43,9 +53,19 @@ export default async function MembresPage() {
     );
   }
 
+  const gradeCount = new Map<string, number>();
+  for (const m of membres) gradeCount.set(m.grade || "—", (gradeCount.get(m.grade || "—") || 0) + 1);
+  const parGrade = ORDRE_GRADES.map(([g, court]) => ({ label: court, value: gradeCount.get(g) || 0 })).filter((x) => x.value > 0);
+
   return (
     <>
       <PageHeader titre="Membres & RH" sous={connecte ? `${membres.length} membre(s) synchronisé(s) depuis Discord` : "Synchronisé avec ton serveur Discord"} actif={connecte} />
+      {parGrade.length > 0 ? (
+        <Card>
+          <CardHeader titre="Répartition par grade" />
+          <BarresH data={parGrade} />
+        </Card>
+      ) : null}
       {membres.length === 0 ? (
         <Card>
           <Empty icon={Users}>
