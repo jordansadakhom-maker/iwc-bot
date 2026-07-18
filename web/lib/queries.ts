@@ -254,6 +254,86 @@ export async function getRenseignement(): Promise<RenseignementData> {
   };
 }
 
+// ── Médical (page dédiée) ────────────────────────────────────────
+export type DossierItem = { id: string; nom: string; statut: string; blessures: number; ordonnances: number; suivis: number };
+export type MedicalData = { connecte: boolean; dossiers: DossierItem[] };
+
+function _count(v: unknown): number {
+  if (Array.isArray(v)) return v.length;
+  if (v && typeof v === "object") return Object.keys(v).length;
+  return 0;
+}
+
+export async function getMedical(): Promise<MedicalData> {
+  if (!dataConfigured()) return { connecte: false, dossiers: [] };
+  const supabase = createAdminClient();
+  if (!supabase) return { connecte: false, dossiers: [] };
+  const [dossiersR, membresR] = await Promise.all([
+    supabase.from("DossierMedical").select("id,membreId,statut,blessures,ordonnances,suivis").order("updatedAt", { ascending: false }),
+    supabase.from("Membre").select("id,nomIC"),
+  ]);
+  if (dossiersR.error) return { connecte: false, dossiers: [] };
+  const noms = new Map<string, string>();
+  for (const m of (membresR.data || []) as { id: string; nomIC: string }[]) noms.set(m.id, m.nomIC);
+  type DRow = { id: string; membreId: string; statut: string; blessures: unknown; ordonnances: unknown; suivis: unknown };
+  const dossiers: DossierItem[] = ((dossiersR.data || []) as DRow[]).map((d) => ({
+    id: d.id,
+    nom: noms.get(d.membreId) || d.membreId || "Patient",
+    statut: d.statut || "—",
+    blessures: _count(d.blessures),
+    ordonnances: _count(d.ordonnances),
+    suivis: _count(d.suivis),
+  }));
+  return { connecte: true, dossiers };
+}
+
+// ── Agenda & Clients (page dédiée) ───────────────────────────────
+export type RdvItem = { id: string; nomRP: string | null; type: string | null; lieu: string | null; creneau: string | null; statut: string; source: string | null };
+export type ContactItem = { id: string; nom: string; type: string; fiabilite: number; secteur: string | null };
+export type AgendaData = { connecte: boolean; rdvs: RdvItem[]; contacts: ContactItem[] };
+
+export async function getAgenda(): Promise<AgendaData> {
+  if (!dataConfigured()) return { connecte: false, rdvs: [], contacts: [] };
+  const supabase = createAdminClient();
+  if (!supabase) return { connecte: false, rdvs: [], contacts: [] };
+  const [rdvR, contactR] = await Promise.all([
+    supabase.from("Rdv").select("id,nomRP,type,lieu,creneau,statut,paiement").order("createdAt", { ascending: false }).limit(100),
+    supabase.from("Contact").select("id,nom,type,fiabilite,secteur").order("nom", { ascending: true }).limit(200),
+  ]);
+  if (rdvR.error && contactR.error) return { connecte: false, rdvs: [], contacts: [] };
+  type RRow = { id: string; nomRP: string | null; type: string | null; lieu: string | null; creneau: string | null; statut: string; paiement: { source?: string } | null };
+  const rdvs: RdvItem[] = ((rdvR.data || []) as RRow[]).map((r) => ({
+    id: r.id, nomRP: r.nomRP, type: r.type, lieu: r.lieu, creneau: r.creneau, statut: r.statut || "Planifié", source: r.paiement?.source ?? null,
+  }));
+  return { connecte: true, rdvs, contacts: ((contactR.data || []) as ContactItem[]) };
+}
+
+// ── Inventaire (page dédiée) ─────────────────────────────────────
+export type VehiculeItem = { id: string; nom: string; type: string | null; pole: string; etat: string | null; notes: string | null };
+export type InventaireData = { connecte: boolean; vehicules: VehiculeItem[] };
+
+export async function getInventaire(): Promise<InventaireData> {
+  if (!dataConfigured()) return { connecte: false, vehicules: [] };
+  const supabase = createAdminClient();
+  if (!supabase) return { connecte: false, vehicules: [] };
+  const { data, error } = await supabase.from("Vehicule").select("id,nom,type,pole,etat,notes").order("nom", { ascending: true });
+  if (error) return { connecte: false, vehicules: [] };
+  return { connecte: true, vehicules: (data || []) as VehiculeItem[] };
+}
+
+// ── Notifications (page dédiée) ──────────────────────────────────
+export type NotifItem = { id: string; type: string; titre: string; corps: string | null; lu: boolean; createdAt: string };
+export type NotificationsData = { connecte: boolean; notifs: NotifItem[] };
+
+export async function getNotifications(): Promise<NotificationsData> {
+  if (!dataConfigured()) return { connecte: false, notifs: [] };
+  const supabase = createAdminClient();
+  if (!supabase) return { connecte: false, notifs: [] };
+  const { data, error } = await supabase.from("Notification").select("id,type,titre,corps,lu,createdAt").order("createdAt", { ascending: false }).limit(100);
+  if (error) return { connecte: false, notifs: [] };
+  return { connecte: true, notifs: (data || []) as NotifItem[] };
+}
+
 // ── Finances (page dédiée) ───────────────────────────────────────
 export type FinancesData = { connecte: boolean; coffres: { commun: number | null; legal: number | null; illegal: number | null } };
 
