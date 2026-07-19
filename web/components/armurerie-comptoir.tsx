@@ -113,6 +113,7 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
   const [q, setQ] = useState("");
   const [cart, setCart] = useState<Record<string, number>>({});
   const [client, setClient] = useState("");
+  const [clientId, setClientId] = useState("");
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
@@ -132,11 +133,11 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
     if (!lignes.length) return;
     setBusy(true);
     const payload: LigneCaisse[] = lignes.map((l) => ({ produitId: l.p.id, nom: l.p.nom, categorie: l.p.categorie, prix: l.p.prix, cout: l.p.cout, qte: l.n, aLaDemande: l.p.aLaDemande }));
-    const r = await validerCaisse(payload, client, notes);
+    const r = await validerCaisse(payload, clientId ? "" : client, notes, clientId || undefined);
     setBusy(false);
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
-    setCart({}); setClient(""); setNotes("");
-    setFlash(`Vente encaissée : ${money(r.total || vente)} → coffre de l'armurerie + registre.`);
+    setCart({}); setClient(""); setClientId(""); setNotes("");
+    setFlash(`Vente encaissée : ${money(r.total || vente)} → coffre + registre + facture + compta + impôts.`);
     router.refresh();
   }
 
@@ -194,8 +195,14 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
             <div className="flex justify-between"><span className="font-semibold">Bénéfice</span><span className="font-num font-bold" style={{ color: "var(--good)" }}>{money(benefice)}</span></div>
           </div>
           <div className="mt-2.5 flex flex-col gap-2">
-            <input className={inputCls} value={client} onChange={(e) => setClient(e.target.value)} placeholder="Client (nom & prénom) — optionnel" list="arm-clients" maxLength={120} />
-            <datalist id="arm-clients">{clients.map((c) => <option key={c.id} value={c.nom} />)}</datalist>
+            {clients.length ? (
+              <select className={inputCls} value={clientId} onChange={(e) => setClientId(e.target.value)}>
+                <option value="">Client de passage…</option>
+                {clients.map((c) => <option key={c.id} value={c.id}>{c.nom}{c.carteIdentite ? " 📇" : ""}</option>)}
+              </select>
+            ) : null}
+            {!clientId ? <input className={inputCls} value={client} onChange={(e) => setClient(e.target.value)} placeholder="Nom du client de passage — optionnel" maxLength={120} /> : null}
+            {clientId ? <p className="text-[0.7rem] text-faint">📇 Client fiché — sa carte d&apos;identité &amp; son télégramme seront joints au registre.</p> : null}
             <input className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes — optionnel" maxLength={200} />
             <button onClick={valider} disabled={busy || !lignes.length} className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-[0.86rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--good)" }}>
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Encaisser {money(vente)}
@@ -528,6 +535,7 @@ function ClientModal({ client, achats = [], onClose, router }: { client?: ArmCli
 function VentesTab({ ventes, clients, router }: { ventes: ArmVente[]; clients: ArmClient[]; router: Router }) {
   const [sel, setSel] = useState<ArmVente | null>(null);
   const [nouveau, setNouveau] = useState(false);
+  const cliById = new Map(clients.map((c) => [c.id, c]));
 
   function exporter() {
     const l = [
@@ -572,17 +580,28 @@ function VentesTab({ ventes, clients, router }: { ventes: ArmVente[]; clients: A
               </tr>
             </thead>
             <tbody>
-              {ventes.map((v) => (
-                <tr key={v.id} onClick={() => setSel(v)} className="cursor-pointer hover:bg-[color-mix(in_srgb,var(--ink)_4%,transparent)]">
-                  <td className="border-b border-border px-2.5 py-2 text-muted">{v.dateVente}</td>
-                  <td className="border-b border-border px-2.5 py-2 font-medium">{v.acquereur}</td>
-                  <td className="border-b border-border px-2.5 py-2 text-muted">{[v.marque, v.modele].filter(Boolean).join(" ") || "—"}</td>
-                  <td className="border-b border-border px-2.5 py-2"><span className="mono text-[0.76rem]">{v.numeroSerie}</span></td>
-                  <td className="border-b border-border px-2.5 py-2 text-muted">{v.vendeur || "—"}</td>
-                  <td className="border-b border-border px-2.5 py-2 text-faint">{v.telegramme || "—"}</td>
-                  <td className="border-b border-border px-2.5 py-2 font-num">{money(v.prix)}</td>
-                </tr>
-              ))}
+              {ventes.map((v) => {
+                const cli = v.clientId ? cliById.get(v.clientId) : null;
+                return (
+                  <tr key={v.id} onClick={() => setSel(v)} className="cursor-pointer hover:bg-[color-mix(in_srgb,var(--ink)_4%,transparent)]">
+                    <td className="border-b border-border px-2.5 py-2 text-muted">{v.dateVente}</td>
+                    <td className="border-b border-border px-2.5 py-2 font-medium">
+                      <span className="flex items-center gap-2">
+                        {cli?.carteIdentite ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={cli.carteIdentite} alt="CNI" className="h-7 w-7 shrink-0 rounded-[5px] border border-border object-cover" />
+                        ) : null}
+                        {v.acquereur}
+                      </span>
+                    </td>
+                    <td className="border-b border-border px-2.5 py-2 text-muted">{[v.marque, v.modele].filter(Boolean).join(" ") || "—"}</td>
+                    <td className="border-b border-border px-2.5 py-2"><span className="mono text-[0.76rem]">{v.numeroSerie}</span></td>
+                    <td className="border-b border-border px-2.5 py-2 text-muted">{v.vendeur || "—"}</td>
+                    <td className="border-b border-border px-2.5 py-2 text-faint">{v.telegramme || (cli?.telegramme ?? "—")}</td>
+                    <td className="border-b border-border px-2.5 py-2 font-num">{money(v.prix)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
