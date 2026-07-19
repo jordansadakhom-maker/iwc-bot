@@ -93,24 +93,32 @@ export async function supprimerClient(id: string): Promise<ArmResult> {
 }
 
 // ── Ventes (registre officiel — Décret N°2) ──────────────────────
-export async function creerVente(d: { clientId?: string; acquereur: string; dateVente?: string; marque?: string; modele?: string; categorie?: string; numeroSerie?: string; vendeur?: string; telegramme?: string; prix?: number; notes?: string; photo?: string }): Promise<ArmResult> {
+export async function creerVente(d: { clientId?: string; acquereur: string; dateVente?: string; marque?: string; modele?: string; categorie?: string; numeroSerie?: string; vendeur?: string; telegramme?: string; prix?: number; quantite?: number; prixUnitaire?: number; notes?: string; photo?: string }): Promise<ArmResult> {
   if (!d.acquereur || d.acquereur.trim().length < 2) return { ok: false, error: "Nom de l'acquéreur requis (Décret N°2)." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
   const id = newId("vte");
+  const qte = Math.max(1, Math.round(Number(d.quantite) || 1));
+  const pu = d.prixUnitaire != null ? Math.max(0, round2(Number(d.prixUnitaire) || 0)) : null;
+  const total = pu != null ? round2(pu * qte) : Math.max(0, round2(Number(d.prix) || 0));
   const row: Record<string, unknown> = {
     id, clientId: s(d.clientId, 60), acquereur: s(d.acquereur, 120),
     dateVente: s(d.dateVente, 40) || new Date().toLocaleDateString("fr-FR"),
     marque: s(d.marque, 80), modele: s(d.modele, 80), categorie: s(d.categorie, 60),
     numeroSerie: s(d.numeroSerie, 80) || null, vendeur: s(d.vendeur, 120), telegramme: s(d.telegramme, 60),
-    prix: Math.max(0, round2(Number(d.prix) || 0)), notes: s(d.notes, 1000), statut: "enregistree",
+    quantite: qte, prixUnitaire: pu != null ? pu : (qte ? round2(total / qte) : total),
+    prix: total, notes: s(d.notes, 1000), statut: "enregistree",
   };
   if (d.photo) row.photo = s(d.photo, 600);
   let ins = await admin.from("ArmurerieVente").insert(row);
-  if (ins.error && d.photo && /photo/i.test(ins.error.message)) { delete row.photo; ins = await admin.from("ArmurerieVente").insert(row); }
+  for (let i = 0; i < 3 && ins.error && /photo|quantite|prixUnitaire/i.test(ins.error.message); i++) {
+    const m = ins.error.message;
+    if (/photo/i.test(m)) delete row.photo; else if (/quantite/i.test(m)) delete row.quantite; else if (/prixUnitaire/i.test(m)) delete row.prixUnitaire;
+    ins = await admin.from("ArmurerieVente").insert(row);
+  }
   if (ins.error) return { ok: false, error: tableErr(ins.error.message, "ventes") };
   // Crédite automatiquement le coffre de l'armurerie du montant de la vente.
-  const prix = Math.max(0, round2(Number(d.prix) || 0));
+  const prix = total;
   if (prix > 0) {
     const arme = [s(d.marque, 80), s(d.modele, 80)].filter(Boolean).join(" ") || "arme";
     try { await _mouvementCoffre(admin, prix, "entree", `Vente — ${arme} à ${s(d.acquereur, 120)}`, s(d.vendeur, 120) || (await auteurNom())); } catch {}
@@ -139,11 +147,22 @@ export async function majVente(id: string, patch: Record<string, unknown>): Prom
   if (!admin) return { ok: false, error: "Service indisponible." };
   const up: Record<string, unknown> = {};
   for (const k of ["acquereur", "dateVente", "marque", "modele", "categorie", "numeroSerie", "vendeur", "telegramme", "notes", "statut", "clientId"]) if (k in patch) up[k] = s(patch[k], 1000);
-  if ("prix" in patch) up.prix = Math.max(0, round2(Number(patch.prix) || 0));
+  if ("quantite" in patch) up.quantite = Math.max(1, Math.round(Number(patch.quantite) || 1));
+  if ("prixUnitaire" in patch) up.prixUnitaire = Math.max(0, round2(Number(patch.prixUnitaire) || 0));
+  // Total = PU × quantité si l'un des deux est fourni ; sinon prix explicite.
+  if ("prixUnitaire" in patch || "quantite" in patch) {
+    const pu = Number((up.prixUnitaire ?? patch.prixUnitaire) as number) || 0;
+    const qt = Number((up.quantite ?? patch.quantite) as number) || 1;
+    up.prix = Math.max(0, round2(pu * qt));
+  } else if ("prix" in patch) up.prix = Math.max(0, round2(Number(patch.prix) || 0));
   if ("photo" in patch) up.photo = patch.photo ? s(patch.photo, 600) : null;
-  let { error } = await admin.from("ArmurerieVente").update(up).eq("id", id);
-  if (error && "photo" in up && /photo/i.test(error.message)) { delete up.photo; ({ error } = await admin.from("ArmurerieVente").update(up).eq("id", id)); }
-  return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+  let res = await admin.from("ArmurerieVente").update(up).eq("id", id);
+  for (let i = 0; i < 3 && res.error && /photo|quantite|prixUnitaire/i.test(res.error.message); i++) {
+    const m = res.error.message;
+    if (/photo/i.test(m)) delete up.photo; else if (/quantite/i.test(m)) delete up.quantite; else if (/prixUnitaire/i.test(m)) delete up.prixUnitaire;
+    res = await admin.from("ArmurerieVente").update(up).eq("id", id);
+  }
+  return res.error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
 }
 export async function supprimerVente(id: string): Promise<ArmResult> {
   const admin = createAdminClient();
@@ -494,13 +513,18 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
       const row: Record<string, unknown> = {
         id: newId("vte"), clientId: cid, acquereur: cli, dateVente: dateV, marque: s(l.nom, 80), modele: null,
         categorie: s(l.categorie, 60), numeroSerie: serie || null, ticket,
+        quantite: q, prixUnitaire: round2(Number(l.prix) || 0),
         vendeur, telegramme: cliTel, prix: montant, notes: s(notes, 1000), statut: "enregistree",
       };
       if (photo) row.photo = photo; // photo de l'acquéreur (si colonne migrée)
       let insV = await admin.from("ArmurerieVente").insert(row);
-      // Repli si des colonnes récentes (ticket, photo) ne sont pas migrées.
-      for (let i = 0; i < 2 && insV.error && /ticket|photo/i.test(insV.error.message); i++) {
-        if (/ticket/i.test(insV.error.message)) delete row.ticket; else if (/photo/i.test(insV.error.message)) delete row.photo;
+      // Repli si des colonnes récentes (ticket, photo, quantite, prixUnitaire) ne sont pas migrées.
+      for (let i = 0; i < 4 && insV.error && /ticket|photo|quantite|prixUnitaire/i.test(insV.error.message); i++) {
+        const m = insV.error.message;
+        if (/ticket/i.test(m)) delete row.ticket;
+        else if (/photo/i.test(m)) delete row.photo;
+        else if (/quantite/i.test(m)) delete row.quantite;
+        else if (/prixUnitaire/i.test(m)) delete row.prixUnitaire;
         insV = await admin.from("ArmurerieVente").insert(row);
       }
       if (l.produitId && !l.aLaDemande) {
