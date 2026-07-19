@@ -82,12 +82,13 @@ function AjustModal({ coffre, onClose, router }: { coffre: { cible: Cible; label
     if (!r.ok) { setErr(r.error || "Impossible."); return; }
     setOk(true); router.refresh();
   }
+  const nouveauLibelle = money(apercu());
 
   return (
     <Modal titre={`Ajuster — ${coffre.label}`} onClose={onClose} max={420}>
       {ok ? (
         <div className="flex flex-col gap-3">
-          <Flash>Coffre ajusté — le solde se met à jour dans ~30 s.</Flash>
+          <Flash>Coffre mis à jour — nouveau solde : <b className="font-num">{nouveauLibelle}</b>. Le bot confirme dans les secondes qui suivent.</Flash>
           <div className="flex justify-end"><button onClick={onClose} className="rounded-lg px-3 py-1.5 text-[0.8rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}>Fermer</button></div>
         </div>
       ) : (
