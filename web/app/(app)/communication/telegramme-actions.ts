@@ -17,6 +17,24 @@ export async function repondreTelegramme(rdvId: string, texte: string): Promise<
   return { ok: true, info: "Réponse transmise — elle est livrée au client en message privé (~30 s)." };
 }
 
+// Réponse à un télégramme ENVOYÉ DEPUIS LE SITE (pas de MP Discord possible) :
+// on conserve la trace ; l'équipe recontacte via le moyen indiqué par l'expéditeur.
+export async function repondreTelegrammeWeb(idPrefixe: string, texte: string, parNom: string): Promise<TgResult> {
+  const t = (texte || "").trim();
+  const id = (idPrefixe || "").replace(/^web-/, "");
+  if (!id) return { ok: false, error: "Télégramme introuvable." };
+  if (t.length < 1) return { ok: false, error: "Écris une réponse." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { data, error } = await admin.from("TelegrammeWeb").select("reponses").eq("id", id).maybeSingle();
+  if (error || !data) return { ok: false, error: "Télégramme introuvable." };
+  const reponses = Array.isArray((data as { reponses?: unknown[] }).reponses) ? ((data as { reponses: unknown[] }).reponses) : [];
+  reponses.push({ texte: t.slice(0, 2000), par: (parNom || "Équipe").slice(0, 120), at: Date.now() });
+  const { error: e2 } = await admin.from("TelegrammeWeb").update({ reponses }).eq("id", id);
+  if (e2) return { ok: false, error: "Enregistrement impossible." };
+  return { ok: true, info: "Réponse conservée (trace). Recontacte l'expéditeur via son moyen de contact." };
+}
+
 // ── Extraction lieu / heure depuis le texte d'un télégramme ──
 const LIEUX = [
   "Valentine", "Strawberry", "Rhodes", "Saint-Denis", "Saint Denis", "Blackwater", "Annesburg",

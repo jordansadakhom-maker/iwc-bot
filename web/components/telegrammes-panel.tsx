@@ -6,7 +6,7 @@ import { MessageSquare, Loader2, Send, Globe, CalendarPlus, Check, StickyNote } 
 import type { TelegrammeItem } from "@/lib/queries";
 import { Modal, Flash, inputCls } from "@/components/edit-ui";
 import { Badge } from "@/components/ui";
-import { repondreTelegramme, creerRdvDepuisTelegramme } from "@/app/(app)/communication/telegramme-actions";
+import { repondreTelegramme, repondreTelegrammeWeb, creerRdvDepuisTelegramme } from "@/app/(app)/communication/telegramme-actions";
 
 type Router = ReturnType<typeof useRouter>;
 
@@ -63,7 +63,7 @@ function TgModal({ tg, onClose, router }: { tg: TelegrammeItem; onClose: () => v
   async function repondre() {
     if (texte.trim().length < 1) return;
     setBusy("rep");
-    const r = await repondreTelegramme(tg.id, texte);
+    const r = tg.source === "web" ? await repondreTelegrammeWeb(tg.id, texte, "Équipe") : await repondreTelegramme(tg.id, texte);
     setBusy(null);
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
     setEnvoyes((p) => [...p, texte]); setTexte("");
@@ -82,7 +82,7 @@ function TgModal({ tg, onClose, router }: { tg: TelegrammeItem; onClose: () => v
       {flash ? <div className="mb-3"><Flash>{flash}</Flash></div> : null}
 
       <div className="mb-3 flex items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-1.5 text-[0.74rem] text-faint"><Globe className="h-3.5 w-3.5" /> Reçu sur Discord · relayé ici</span>
+        <span className="inline-flex items-center gap-1.5 text-[0.74rem] text-faint"><Globe className="h-3.5 w-3.5" /> {tg.source === "web" ? "Envoyé depuis le site" : "Reçu sur Discord · relayé ici"}</span>
         {rdvFait ? (
           <Badge tone="good">RDV créé</Badge>
         ) : (
@@ -91,6 +91,10 @@ function TgModal({ tg, onClose, router }: { tg: TelegrammeItem; onClose: () => v
           </button>
         )}
       </div>
+
+      {tg.source === "web" && tg.contact ? (
+        <div className="mb-3 rounded-[8px] border border-border bg-surface-2 px-2.5 py-1.5 text-[0.8rem]"><span className="text-faint">📇 Répondre à : </span>{tg.contact}</div>
+      ) : null}
 
       {/* Fil de conversation */}
       <div className="flex max-h-[46vh] flex-col gap-2 overflow-y-auto rounded-[10px] border border-border bg-surface-2 p-3">

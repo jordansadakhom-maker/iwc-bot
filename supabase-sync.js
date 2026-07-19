@@ -598,4 +598,13 @@ async function marquerCommandeWeb(id, statut, resultat) {
   return await _patch(`CommandeWeb?id=eq.${encodeURIComponent(id)}`, body);
 }
 
-module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb };
+// ── Télégrammes envoyés depuis le site (table TelegrammeWeb) ──
+async function lireTelegrammesWeb() {
+  const rows = await _get('TelegrammeWeb?statut=eq.nouveau&order=createdAt.asc&limit=25');
+  return Array.isArray(rows) ? rows : [];
+}
+async function marquerTelegrammeWebTransmis(id) {
+  return await _patch(`TelegrammeWeb?id=eq.${encodeURIComponent(id)}`, { statut: 'transmis' });
+}
+
+module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis };
