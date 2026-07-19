@@ -497,14 +497,13 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
   }
 }
 
-// Lecture IA d'une carte d'identité (RDR2/Louisiane) : extrait nom, prénom, etc.
-// pour pré-remplir l'acquéreur à l'encaissement, sans avoir à retaper.
-export async function lireCarteIdentite(url: string): Promise<{ ok: boolean; nom?: string; prenom?: string; dateNaissance?: string; residence?: string; error?: string }> {
+// Appelle Claude (vision) sur une image (téléchargée puis envoyée en base64,
+// robuste et indépendant de la version d'API) et renvoie le texte produit.
+async function _vision(url: string, system: string, userText: string): Promise<{ ok: boolean; txt?: string; error?: string }> {
   if (!/^https?:\/\//.test(String(url || ""))) return { ok: false, error: "Photo invalide." };
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return { ok: false, error: "Lecture automatique indisponible (variable ANTHROPIC_API_KEY absente sur Vercel)." };
   try {
-    // On télécharge la photo et on l'envoie en base64 (robuste, indépendant de la version d'API).
     const img = await fetch(url);
     if (!img.ok) return { ok: false, error: "Photo inaccessible." };
     const ct = img.headers.get("content-type") || "";
@@ -515,22 +514,43 @@ export async function lireCarteIdentite(url: string): Promise<{ ok: boolean; nom
       method: "POST",
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
       body: JSON.stringify({
-        model: "claude-sonnet-5", max_tokens: 400,
-        system: "Tu lis une carte d'identité de jeu de rôle (RDR2, État de Louisiane). Réponds UNIQUEMENT par un JSON compact, sans texte autour : {\"nom\":\"\",\"prenom\":\"\",\"dateNaissance\":\"\",\"pays\":\"\",\"residence\":\"\"}. Recopie exactement ce qui est écrit ; laisse la valeur vide si un champ est illisible ou absent.",
+        model: "claude-sonnet-5", max_tokens: 400, system,
         messages: [{ role: "user", content: [
           { type: "image", source: { type: "base64", media_type: media, data: b64 } },
-          { type: "text", text: "Lis cette carte d'identité et renvoie le JSON." },
+          { type: "text", text: userText },
         ] }],
       }),
     });
-    if (!res.ok) { const t = await res.text().catch(() => ""); console.error("lireCarteIdentite:", res.status, t.slice(0, 200)); return { ok: false, error: "Lecture impossible pour le moment." }; }
+    if (!res.ok) { const t = await res.text().catch(() => ""); console.error("_vision:", res.status, t.slice(0, 200)); return { ok: false, error: "Lecture impossible pour le moment." }; }
     const data = await res.json();
     const txt = ((data?.content || []) as { type: string; text?: string }[]).filter((b) => b.type === "text").map((b) => b.text || "").join("");
-    const m = txt.match(/\{[\s\S]*\}/);
-    if (!m) return { ok: false, error: "Carte illisible — saisis le nom à la main." };
+    return { ok: true, txt };
+  } catch (e) { console.error("_vision:", (e as Error).message); return { ok: false, error: "Lecture injoignable pour le moment." }; }
+}
+
+// Lecture IA d'une carte d'identité (RDR2/Louisiane) : extrait nom, prénom, etc.
+export async function lireCarteIdentite(url: string): Promise<{ ok: boolean; nom?: string; prenom?: string; dateNaissance?: string; residence?: string; error?: string }> {
+  const r = await _vision(url, "Tu lis une carte d'identité de jeu de rôle (RDR2, État de Louisiane). Réponds UNIQUEMENT par un JSON compact, sans texte autour : {\"nom\":\"\",\"prenom\":\"\",\"dateNaissance\":\"\",\"pays\":\"\",\"residence\":\"\"}. Recopie exactement ce qui est écrit ; laisse la valeur vide si un champ est illisible ou absent.", "Lis cette carte d'identité et renvoie le JSON.");
+  if (!r.ok) return { ok: false, error: r.error };
+  const m = (r.txt || "").match(/\{[\s\S]*\}/);
+  if (!m) return { ok: false, error: "Carte illisible — saisis le nom à la main." };
+  try {
     const j = JSON.parse(m[0]) as Record<string, unknown>;
     return { ok: true, nom: s(j.nom, 80) || "", prenom: s(j.prenom, 80) || "", dateNaissance: s(j.dateNaissance, 40) || "", residence: s(j.residence, 120) || "" };
-  } catch (e) { console.error("lireCarteIdentite:", (e as Error).message); return { ok: false, error: "Lecture injoignable pour le moment." }; }
+  } catch { return { ok: false, error: "Carte illisible — saisis le nom à la main." }; }
+}
+
+// Lecture IA du numéro de série d'une arme sur une capture.
+export async function lireNumeroSerie(url: string): Promise<{ ok: boolean; serie?: string; error?: string }> {
+  const r = await _vision(url, "Tu lis une capture d'écran de jeu (RDR2/RedM) où figure le NUMÉRO DE SÉRIE d'une arme. Réponds UNIQUEMENT par un JSON compact : {\"serie\":\"\"}. Recopie exactement le numéro de série (lettres/chiffres, garde tirets et espaces). Laisse vide si tu ne le trouves pas.", "Lis le numéro de série de l'arme et renvoie le JSON.");
+  if (!r.ok) return { ok: false, error: r.error };
+  const m = (r.txt || "").match(/\{[\s\S]*\}/);
+  if (!m) return { ok: false, error: "Numéro illisible — saisis-le à la main." };
+  try {
+    const j = JSON.parse(m[0]) as Record<string, unknown>;
+    const serie = s(j.serie, 60) || "";
+    return serie ? { ok: true, serie } : { ok: false, error: "Numéro non détecté — saisis-le à la main." };
+  } catch { return { ok: false, error: "Numéro illisible — saisis-le à la main." }; }
 }
 
 // ═══════════════════════════════════════════════════════════════

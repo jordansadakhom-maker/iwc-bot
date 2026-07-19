@@ -20,7 +20,7 @@ import {
   creerVente, majVente, supprimerVente,
   creerContrat, envoyerContrat, marquerContrat, supprimerContrat,
   ajusterCoffreArmurerie,
-  creerProduit, majProduit, supprimerProduit, importerCatalogue, importerRecettes, validerCaisse, fabriquerProduit, lireCarteIdentite, type LigneCaisse,
+  creerProduit, majProduit, supprimerProduit, importerCatalogue, importerRecettes, validerCaisse, fabriquerProduit, lireCarteIdentite, lireNumeroSerie, type LigneCaisse,
 } from "@/app/(app)/armurerie/actions";
 
 type Router = ReturnType<typeof useRouter>;
@@ -135,9 +135,21 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
   const [clientId, setClientId] = useState("");
   const [notes, setNotes] = useState("");
   const [serie, setSerie] = useState("");
+  const [serieLisant, setSerieLisant] = useState(false);
+  const [serieLu, setSerieLu] = useState<string | null>(null);
   const [photo, setPhoto] = useState("");
   const [lisant, setLisant] = useState(false);
   const [lu, setLu] = useState<string | null>(null);
+
+  // Photo du numéro de série → l'IA lit le numéro et remplit le champ.
+  async function onSeriePhoto(url: string) {
+    setSerieLu(null); setSerieLisant(true);
+    const r = await lireNumeroSerie(url);
+    setSerieLisant(false);
+    if (!r.ok) { setSerieLu(r.error || "Lecture impossible."); return; }
+    setSerie(r.serie || "");
+    setSerieLu(`🔫 N° lu : ${r.serie}`);
+  }
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
 
@@ -173,7 +185,7 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
     const r = await validerCaisse(payload, clientId ? "" : client, notes, clientId || undefined, { serie: serie.trim() || undefined, photo: photo || undefined });
     setBusy(false);
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
-    setCart({}); setPxEdit({}); setClient(""); setClientId(""); setNotes(""); setSerie(""); setPhoto(""); setLu(null);
+    setCart({}); setPxEdit({}); setClient(""); setClientId(""); setNotes(""); setSerie(""); setPhoto(""); setLu(null); setSerieLu(null);
     setFlash(`Vente encaissée : ${money(r.total || vente)} → coffre + registre + facture + compta + impôts.`);
     router.refresh();
   }
@@ -254,7 +266,14 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
             ) : null}
             {!clientId ? <input className={inputCls} value={client} onChange={(e) => setClient(e.target.value)} placeholder="Nom du client de passage — optionnel" maxLength={120} /> : null}
             {clientId ? <p className="text-[0.7rem] text-faint">📇 Client fiché — sa carte d&apos;identité &amp; son télégramme seront joints au registre.</p> : null}
-            <input className={inputCls} value={serie} onChange={(e) => setSerie(e.target.value)} placeholder="N° de série de l'arme — optionnel" maxLength={60} />
+            <div>
+              <input className={inputCls} value={serie} onChange={(e) => setSerie(e.target.value)} placeholder="N° de série de l'arme — optionnel" maxLength={60} />
+              <div className="mt-1">
+                <PhotoDrop dossier="armurerie-series" onUploaded={onSeriePhoto} compact label="Ou glisse une photo du n° de série — l'IA le lit" />
+                {serieLisant ? <div className="mt-1 flex items-center gap-1.5 text-[0.7rem] text-faint"><Loader2 className="h-3 w-3 animate-spin" /> Lecture du numéro…</div> : null}
+                {serieLu && !serieLisant ? <div className="mt-1 text-[0.7rem]" style={{ color: serieLu.startsWith("🔫") ? "var(--good)" : "var(--oxblood)" }}>{serieLu}</div> : null}
+              </div>
+            </div>
             <div>
               <div className="mb-1 text-[0.66rem] uppercase tracking-[0.05em] text-faint">Carte d&apos;identité / photo — l&apos;IA remplit le nom</div>
               {photo ? (
