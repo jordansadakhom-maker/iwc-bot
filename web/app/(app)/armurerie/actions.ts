@@ -527,9 +527,15 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
         else if (/prixUnitaire/i.test(m)) delete row.prixUnitaire;
         insV = await admin.from("ArmurerieVente").insert(row);
       }
-      if (l.produitId && !l.aLaDemande) {
-        const { data } = await admin.from("ArmurerieProduit").select("stock").eq("id", l.produitId).maybeSingle();
-        if (data) await admin.from("ArmurerieProduit").update({ stock: Math.max(0, (Number((data as { stock: number }).stock) || 0) - q) }).eq("id", l.produitId);
+      if (l.produitId) {
+        const { data } = await admin.from("ArmurerieProduit").select("stock,recette").eq("id", l.produitId).maybeSingle();
+        const ps = data ? Number((data as { stock?: number }).stock) || 0 : 0;
+        if (data && !l.aLaDemande) await admin.from("ArmurerieProduit").update({ stock: Math.max(0, ps - q) }).eq("id", l.produitId);
+        // Fabrication à la demande : la part non couverte par le stock fini consomme
+        // les ressources de la recette (le stock déjà fabriqué, lui, ne re-consomme rien).
+        const toFab = l.aLaDemande ? q : Math.max(0, q - ps);
+        const recette = data && Array.isArray((data as { recette?: unknown }).recette) ? (data as { recette: { ingredient?: string; qte?: number }[] }).recette : [];
+        if (toFab > 0 && recette.length) { try { await _consommerRecetteLignes(admin, recette, toFab); } catch { /* la vente reste enregistrée même si le décompte des ressources échoue */ } }
       }
       // Comptabilité : le crédit du coffre alimente automatiquement le grand livre.
       try { await _mouvementCoffre(admin, montant, "entree", `Vente : ${s(l.nom, 80)} ×${q} — ${cli}`, vendeur); } catch { /* vente enregistrée même si le coffre n'est pas prêt */ }
@@ -1021,6 +1027,23 @@ function _matchRes(ing: string, ressources: ResRow[]): ResRow | null {
     if (pool.length === 1 || _tokens(pool[0].nom).length !== _tokens(pool[1].nom).length) return pool[0];
   }
   return null;
+}
+// Décompte des ressources d'une recette (× n unités) à la vente. Best-effort :
+// ne descend jamais sous 0, ignore les ingrédients introuvables au catalogue.
+async function _consommerRecetteLignes(admin: ReturnType<typeof createAdminClient>, recette: { ingredient?: string; qte?: number }[], n: number): Promise<void> {
+  if (!admin) return;
+  const lignes = (Array.isArray(recette) ? recette : []).filter((l) => l && String(l.ingredient || "").trim() && Number(l.qte) > 0);
+  if (!lignes.length || n <= 0) return;
+  const { data } = await admin.from("ArmurerieRessource").select("id,nom,stock");
+  const rs: ResRow[] = (Array.isArray(data) ? data : []).map((r) => ({ id: String((r as { id: string }).id), nom: String((r as { nom: string }).nom), stock: Number((r as { stock?: number }).stock) || 0 }));
+  for (const l of lignes) {
+    const r = _matchRes(String(l.ingredient), rs);
+    if (!r) continue;
+    const besoin = Math.max(0, Math.round(Number(l.qte) * n));
+    const nv = Math.max(0, (Number(r.stock) || 0) - besoin);
+    await admin.from("ArmurerieRessource").update({ stock: nv }).eq("id", r.id);
+    r.stock = nv; // maj du cache si la même ressource revient dans la recette
+  }
 }
 export async function fabriquerProduit(produitId: string, qte: number): Promise<ArmResult & { q?: number; consommes?: string[]; ignores?: string[]; manques?: string[] }> {
   const q = Math.max(1, Math.round(Number(qte) || 0));
