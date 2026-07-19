@@ -344,20 +344,22 @@ function EcritureModal({ onClose, router }: { onClose: () => void; router: Route
 // Graphique d'évolution des comptes : recettes & dépenses cumulées sur la période.
 type PtC = { t: number; rec: number; dep: number; net: number };
 const dJour = (t: number) => { try { return new Date(t).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }); } catch { return ""; } };
+const dHeure = (t: number) => { try { return new Date(t).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
 function niceMax(v: number) { if (v <= 0) return 1; const pow = Math.pow(10, Math.floor(Math.log10(v))); const n = v / pow; const step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10; return step * pow; }
 function ComptaChart({ mouvements }: { mouvements: ArmMouvement[] }) {
   const [hover, setHover] = useState<number | null>(null);
   const points = useMemo<PtC[]>(() => {
-    const byDay = new Map<string, { rec: number; dep: number; t: number }>();
-    for (const m of mouvements) {
-      if (!m.createdAt) continue;
-      const key = new Date(m.createdAt).toISOString().slice(0, 10);
-      const cur = byDay.get(key) || { rec: 0, dep: 0, t: new Date(key).getTime() };
-      if (m.sens === "entree") cur.rec += m.montant; else cur.dep += m.montant;
-      byDay.set(key, cur);
-    }
+    // Cumul mouvement par mouvement (chronologique) : le graphe s'affiche dès le
+    // 1er mouvement, même sur une seule journée. On préfixe un point d'origine à 0.
+    const sorted = mouvements.filter((m) => m.createdAt).slice().sort((a, b) => new Date(a.createdAt!).getTime() - new Date(b.createdAt!).getTime());
+    if (!sorted.length) return [];
+    const pts: PtC[] = [{ t: new Date(sorted[0].createdAt!).getTime(), rec: 0, dep: 0, net: 0 }];
     let cr = 0, cd = 0;
-    return [...byDay.values()].sort((a, b) => a.t - b.t).map((v) => { cr = round2(cr + v.rec); cd = round2(cd + v.dep); return { t: v.t, rec: cr, dep: cd, net: round2(cr - cd) }; });
+    for (const m of sorted) {
+      if (m.sens === "entree") cr = round2(cr + m.montant); else cd = round2(cd + m.montant);
+      pts.push({ t: new Date(m.createdAt!).getTime(), rec: cr, dep: cd, net: round2(cr - cd) });
+    }
+    return pts;
   }, [mouvements]);
 
   if (points.length < 2) return null;
@@ -421,7 +423,7 @@ function ComptaChart({ mouvements }: { mouvements: ArmMouvement[] }) {
       </svg>
       {hp ? (
         <div className="pointer-events-none absolute z-10 rounded-lg border border-border bg-surface px-2 py-1 text-[0.68rem] shadow-lg" style={{ left: `${(x(hover!) / W) * 100}%`, top: 30, transform: `translateX(${hover! > n / 2 ? "-105%" : "5%"})` }}>
-          <div className="mb-0.5 font-semibold text-muted">{dJour(hp.t)}</div>
+          <div className="mb-0.5 font-semibold text-muted">{dJour(hp.t)} · {dHeure(hp.t)}</div>
           <div className="flex items-center justify-between gap-3"><span style={{ color: "var(--good)" }}>Recettes</span><span className="font-num">{money(hp.rec)}</span></div>
           <div className="flex items-center justify-between gap-3"><span style={{ color: "var(--oxblood)" }}>Dépenses</span><span className="font-num">{money(hp.dep)}</span></div>
           <div className="mt-0.5 flex items-center justify-between gap-3 border-t border-border pt-0.5"><span className="font-semibold">Net</span><span className="font-num font-semibold" style={{ color: hp.net >= 0 ? "var(--good)" : "var(--oxblood)" }}>{money(hp.net)}</span></div>
