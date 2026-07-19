@@ -83,7 +83,7 @@ export function EmployesTab({ employes, router }: { employes: ArmEmploye[]; rout
         </div>
       )}
       {nouveau ? <EmployeModal onClose={() => setNouveau(false)} router={router} /> : null}
-      {sel ? <EmployeModal employe={sel} onClose={() => setSel(null)} router={router} /> : null}
+      {sel ? <EmployeModal key={sel.id} employe={sel} onClose={() => setSel(null)} router={router} /> : null}
     </>
   );
 }
@@ -668,7 +668,7 @@ export function BlocNotesTab({ notes, router }: { notes: ArmNote[]; router: Rout
         </div>
       )}
       {nouveau ? <NoteModal onClose={() => setNouveau(false)} router={router} /> : null}
-      {sel ? <NoteModal note={sel} onClose={() => setSel(null)} router={router} /> : null}
+      {sel ? <NoteModal key={sel.id} note={sel} onClose={() => setSel(null)} router={router} /> : null}
     </>
   );
 }
@@ -868,7 +868,7 @@ export function RessourcesTab({ ressources, router }: { ressources: ArmRessource
         </div>
       </div>
       {nouveau ? <RessourceModal onClose={() => setNouveau(false)} router={router} /> : null}
-      {modif ? <RessourceModal ressource={modif} onClose={() => setModif(null)} router={router} /> : null}
+      {modif ? <RessourceModal key={modif.id} ressource={modif} onClose={() => setModif(null)} router={router} /> : null}
     </>
   );
 }
@@ -994,7 +994,7 @@ export function CarnetCommandesTab({ commandes, produits, clients, router }: { c
         </div>
       )}
       {nouveau ? <CommandeModal produits={produits} clients={clients} onClose={() => setNouveau(false)} router={router} /> : null}
-      {sel ? <CommandeModal commande={sel} produits={produits} clients={clients} onClose={() => setSel(null)} router={router} /> : null}
+      {sel ? <CommandeModal key={sel.id} commande={sel} produits={produits} clients={clients} onClose={() => setSel(null)} router={router} /> : null}
     </>
   );
 }
