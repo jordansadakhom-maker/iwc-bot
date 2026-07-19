@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarClock, MapPin, User, MessageSquare, Loader2, Send, Globe, Users, ImageIcon, Check } from "lucide-react";
+import { CalendarClock, MapPin, User, MessageSquare, Loader2, Send, Globe, Users, ImageIcon, Check, Hourglass } from "lucide-react";
 import type { RdvComm, MembreLite } from "@/lib/queries";
 import { Modal, Flash, Picker, inputCls } from "@/components/edit-ui";
 import { Badge } from "@/components/ui";
@@ -122,7 +122,7 @@ function RdvModal({ rdv, membres, onClose, router }: { rdv: RdvComm; membres: Me
     const g = groupe || null;
     if (!ids.length && !g) { setFlash("Choisis au moins une personne ou un pôle."); return; }
     setBusy("assign");
-    const r = await assignerRdv(rdv.id, ids, noms, g, { nom: rdv.nomRP, lieu: rdv.lieu, creneau: rdv.creneau });
+    const r = await assignerRdv(rdv.id, ids, noms, g, { nom: rdv.nomRP, lieu: rdv.lieu, creneau: rdv.creneau, duree: rdv.duree });
     setBusy(null);
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
     setAssignes([...new Set([...assignes, ...noms, ...(g ? [g === "illegal" ? "Pôle Confrérie" : "Pôle Iron Wolf"] : [])])]);
@@ -141,6 +141,7 @@ function RdvModal({ rdv, membres, onClose, router }: { rdv: RdvComm; membres: Me
       {flash ? <div className="mb-3"><Flash>{flash}</Flash></div> : null}
       <div className="flex flex-col gap-1.5 rounded-[10px] border border-border bg-surface-2 px-3 py-2.5 text-[0.84rem]">
         {rdv.type ? <div><span className="text-faint">Prestation :</span> {rdv.type}</div> : null}
+        {rdv.duree ? <div className="flex items-center gap-1.5"><Hourglass className="h-3.5 w-3.5 text-faint" /> Durée : {rdv.duree}</div> : null}
         {rdv.creneau ? <div className="flex items-center gap-1.5"><CalendarClock className="h-3.5 w-3.5 text-faint" /> {rdv.creneau}</div> : null}
         {rdv.lieu ? <div className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-faint" /> {rdv.lieu}</div> : null}
         {rdv.contact ? <div className="flex items-center gap-1.5"><User className="h-3.5 w-3.5 text-faint" /> {rdv.contact}</div> : null}

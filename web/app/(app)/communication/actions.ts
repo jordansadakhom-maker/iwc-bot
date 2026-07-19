@@ -76,7 +76,7 @@ export async function assignerRdv(
   membreIds: string[],
   membresNoms: string[],
   groupe: string | null,
-  meta: { nom?: string | null; lieu?: string | null; creneau?: string | null },
+  meta: { nom?: string | null; lieu?: string | null; creneau?: string | null; duree?: string | null },
 ): Promise<CommResult> {
   if (!id) return { ok: false, error: "RDV introuvable." };
   const ids = (Array.isArray(membreIds) ? membreIds : []).map(String).filter(Boolean).slice(0, 15);
@@ -84,10 +84,10 @@ export async function assignerRdv(
   if (!ids.length && !g) return { ok: false, error: "Choisis au moins une personne ou un pôle." };
   const r = await _patchPaiement(id, { assignes: membresNoms.slice(0, 15), assignesIds: ids, assignesGroupe: g });
   if (!r.ok) return r;
-  // Ping Discord (best-effort, via la file de commandes).
+  // Ping Discord VISIBLE + MP (best-effort, via la file de commandes).
   await envoyerCommande("rdv.assigner", {
     membreIds: ids, groupe: g,
-    rdvNom: meta.nom || null, rdvLieu: meta.lieu || null, rdvCreneau: meta.creneau || null,
+    rdvNom: meta.nom || null, rdvLieu: meta.lieu || null, rdvCreneau: meta.creneau || null, rdvDuree: meta.duree || null,
   });
   return { ok: true };
 }

@@ -59,7 +59,10 @@ export default async function AgendaPage() {
                     </td>
                     <td className="border-b border-border px-2.5 py-2.5 text-muted">{r.type || "—"}</td>
                     <td className="border-b border-border px-2.5 py-2.5 text-muted">{r.lieu || "—"}</td>
-                    <td className="border-b border-border px-2.5 py-2.5 text-muted">{r.creneau || "—"}</td>
+                    <td className="border-b border-border px-2.5 py-2.5 text-muted">
+                      {r.creneau || "—"}
+                      {r.duree ? <span className="block text-[0.72rem] text-faint">⏳ {r.duree}</span> : null}
+                    </td>
                     <td className="border-b border-border px-2.5 py-2.5"><Badge tone={RDV_TONE[r.statut?.toLowerCase()] ?? "muted"}>{r.statut}</Badge></td>
                     <td className="border-b border-border px-2.5 py-2.5"><AgendaLieuPhoto id={r.id} lieuPhoto={r.lieuPhoto} lieu={r.lieu} /></td>
                   </tr>

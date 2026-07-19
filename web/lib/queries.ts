@@ -508,7 +508,7 @@ export async function getMedical(): Promise<MedicalData> {
 }
 
 // ── Agenda & Clients (page dédiée) ───────────────────────────────
-export type RdvItem = { id: string; nomRP: string | null; type: string | null; lieu: string | null; creneau: string | null; statut: string; source: string | null; lieuPhoto: string | null; assignes: string[] };
+export type RdvItem = { id: string; nomRP: string | null; type: string | null; lieu: string | null; creneau: string | null; statut: string; source: string | null; lieuPhoto: string | null; assignes: string[]; duree: string | null };
 export type ContactItem = {
   id: string; nom: string; type: string; fiabilite: number; secteur: string | null;
   notes: string | null; telegramme: string | null; metier: string | null;
@@ -533,6 +533,7 @@ export async function getAgenda(): Promise<AgendaData> {
       id: r.id, nomRP: r.nomRP, type: r.type, lieu: r.lieu, creneau: r.creneau, statut: r.statut || "Planifié",
       source: (p.source as string) ?? null, lieuPhoto: (p.lieuPhoto as string) ?? null,
       assignes: Array.isArray(p.assignes) ? (p.assignes as string[]) : [],
+      duree: (p.duree as string) ?? null,
     };
   });
   type CRaw = Record<string, unknown>;
@@ -559,7 +560,7 @@ export type MembreLite = { id: string; nom: string };
 export type RdvComm = {
   id: string; nomRP: string | null; type: string | null; lieu: string | null; creneau: string | null;
   statut: string; source: string | null; contact: string | null; message: string | null; reponses: Reponse[]; createdAt: string | null;
-  assignes: string[]; lieuPhoto: string | null;
+  assignes: string[]; lieuPhoto: string | null; duree: string | null;
 };
 export type CommunicationData = { connecte: boolean; rdvs: RdvComm[]; membres: MembreLite[] };
 
@@ -583,6 +584,7 @@ export async function getCommunication(): Promise<CommunicationData> {
       reponses: reps, createdAt: r.createdAt,
       assignes: Array.isArray(p.assignes) ? (p.assignes as string[]) : [],
       lieuPhoto: (p.lieuPhoto as string) ?? null,
+      duree: (p.duree as string) ?? null,
     };
   });
   const membres: MembreLite[] = ((membreR.data || []) as { id: string; nomIC: string }[]).map((m) => ({ id: String(m.id), nom: m.nomIC || String(m.id) }));
