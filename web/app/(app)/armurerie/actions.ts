@@ -24,7 +24,11 @@ async function auteurNom(): Promise<string> {
 // Crédite (entree) ou débite (sortie) le coffre PROPRE de l'armurerie + journal.
 // Remonte les erreurs d'écriture (table manquante, RLS…) au lieu de les avaler,
 // pour ne plus jamais afficher un « succès » alors que rien n'a bougé.
-async function _mouvementCoffre(admin: Admin, montant: number, sens: "entree" | "sortie", motif: string, auteur: string) {
+// nature : ventilation comptable d'une SORTIE — "produit" (achat qui entre en
+// stock : armes, matières, ressources) ou "charge" (frais : paies, impôts…).
+// Nul pour les recettes. Écriture résiliente : si la colonne « nature » n'existe
+// pas encore (migration SQL non appliquée), on réinsère sans — rien ne casse.
+async function _mouvementCoffre(admin: Admin, montant: number, sens: "entree" | "sortie", motif: string, auteur: string, nature?: "produit" | "charge" | null) {
   const m = Math.abs(round2(Number(montant) || 0));
   if (!m) return;
   const { data, error: eLire } = await admin.from("ArmurerieCoffre").select("solde").eq("id", "vanhorn").maybeSingle();
@@ -33,8 +37,12 @@ async function _mouvementCoffre(admin: Admin, montant: number, sens: "entree" | 
   const nouveau = Math.max(0, sens === "sortie" ? actuel - m : actuel + m);
   const { error: eUp } = await admin.from("ArmurerieCoffre").upsert({ id: "vanhorn", solde: nouveau, updatedAt: new Date().toISOString() }, { onConflict: "id" });
   if (eUp) throw new Error(eUp.message);
-  const { error: eJ } = await admin.from("ArmurerieMouvementCoffre").insert({ id: newId("mvt"), sens, montant: m, motif: s(motif, 200), auteur: s(auteur, 120), createdAt: new Date().toISOString() });
-  if (eJ) throw new Error(eJ.message);
+  const base: Record<string, unknown> = { id: newId("mvt"), sens, montant: m, motif: s(motif, 200), auteur: s(auteur, 120), createdAt: new Date().toISOString() };
+  const nat = sens === "sortie" && (nature === "produit" || nature === "charge") ? nature : null;
+  const avecNat: Record<string, unknown> = nat ? { ...base, nature: nat } : base;
+  let ins = await admin.from("ArmurerieMouvementCoffre").insert(avecNat);
+  if (ins.error && nat && /nature/i.test(ins.error.message)) ins = await admin.from("ArmurerieMouvementCoffre").insert(base);
+  if (ins.error) throw new Error(ins.error.message);
 }
 
 // Comptoir de l'armurerie de Van Horn — registre PRIVÉ de l'entreprise, écrit
@@ -572,7 +580,7 @@ export async function payerPaie(id: string): Promise<ArmResult> {
   const p = data as { statut: string; montant: number; employeNom: string };
   if (p.statut === "paye") return { ok: false, error: "Cette paie est déjà versée." };
   const montant = Math.max(0, round2(Number(p.montant) || 0));
-  try { if (montant > 0) await _mouvementCoffre(admin, montant, "sortie", `Paie — ${p.employeNom}`, await auteurNom()); }
+  try { if (montant > 0) await _mouvementCoffre(admin, montant, "sortie", `Paie — ${p.employeNom}`, await auteurNom(), "charge"); }
   catch (e) { return { ok: false, error: erpErr((e as Error).message || "") }; }
   await admin.from("ArmureriePaie").update({ statut: "paye", payeAt: nowISO() }).eq("id", id);
   return { ok: true };
@@ -607,7 +615,7 @@ export async function payerImpot(id: string): Promise<ArmResult> {
   const im = data as { statut: string; montant: number; libelle: string };
   if (im.statut === "paye") return { ok: false, error: "Cet impôt est déjà réglé." };
   const montant = Math.max(0, round2(Number(im.montant) || 0));
-  try { if (montant > 0) await _mouvementCoffre(admin, montant, "sortie", `Impôt — ${im.libelle || "cycle"}`, await auteurNom()); }
+  try { if (montant > 0) await _mouvementCoffre(admin, montant, "sortie", `Impôt — ${im.libelle || "cycle"}`, await auteurNom(), "charge"); }
   catch (e) { return { ok: false, error: erpErr((e as Error).message || "") }; }
   await admin.from("ArmurerieImpot").update({ statut: "paye", payeAt: nowISO() }).eq("id", id);
   return { ok: true };
@@ -620,12 +628,13 @@ export async function supprimerImpot(id: string): Promise<ArmResult> {
 }
 
 // ── Comptabilité : écriture manuelle (recette / dépense) ─────────
-export async function ajouterEcriture(montant: number, sens: "entree" | "sortie", motif: string): Promise<ArmResult> {
+export async function ajouterEcriture(montant: number, sens: "entree" | "sortie", motif: string, nature?: "produit" | "charge" | null): Promise<ArmResult> {
   const m = Math.abs(round2(Number(montant) || 0));
   if (m <= 0) return { ok: false, error: "Montant invalide." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
-  try { await _mouvementCoffre(admin, m, sens, s(motif, 200) || (sens === "entree" ? "Recette" : "Dépense"), await auteurNom()); return { ok: true }; }
+  const nat = sens === "sortie" ? (nature === "charge" ? "charge" : "produit") : null;
+  try { await _mouvementCoffre(admin, m, sens, s(motif, 200) || (sens === "entree" ? "Recette" : "Dépense"), await auteurNom(), nat); return { ok: true }; }
   catch (e) { return { ok: false, error: erpErr((e as Error).message || "") }; }
 }
 
@@ -709,22 +718,40 @@ export async function supprimerRessource(id: string): Promise<ArmResult> {
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
 // Tarifs des ressources nécessaires (catégorisés). « mine: true » = remise 5 % applicable.
+// Prix 0 = à renseigner (jamais inventé).
 const RESSOURCES: { nom: string; cat: string; prix: number; mine?: boolean }[] = [
+  // ── Minerais (de la mine — remise 5 %) ──
   { nom: "Charbon", cat: "Minerais", prix: 0.11, mine: true },
-  { nom: "Lingots et verre", cat: "Métaux & verre", prix: 0.88, mine: true },
-  { nom: "Cordes", cat: "Textile", prix: 0.48 },
+  { nom: "Lingot de fer", cat: "Minerais", prix: 0, mine: true },
+  { nom: "Lingot de cuivre", cat: "Minerais", prix: 0, mine: true },
+  { nom: "Lingot de zinc", cat: "Minerais", prix: 0, mine: true },
+  { nom: "Soufre", cat: "Minerais", prix: 0, mine: true },
+  // ── Métaux & verre ──
+  { nom: "Verre", cat: "Métaux & verre", prix: 0 },
+  // ── Bois ──
   { nom: "Bois (couteau, cattleman…)", cat: "Bois", prix: 0.22 },
   { nom: "Bois amélioré (grosses armes)", cat: "Bois", prix: 2 },
+  { nom: "Pièce de bois", cat: "Bois", prix: 0 },
+  // ── Textile ──
+  { nom: "Cordes", cat: "Textile", prix: 0.48 },
+  // ── Composants ──
   { nom: "Carquois", cat: "Composants", prix: 1 },
   { nom: "Arc", cat: "Composants", prix: 7 },
 ];
-export async function importerRessources(): Promise<ArmResult> {
+// Ajoute les ressources ABSENTES (par nom normalisé) — re-cliquable sans doublon,
+// ne touche pas aux prix/quantités déjà saisis.
+export async function importerRessources(): Promise<ArmResult & { n?: number }> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
-  const rows = RESSOURCES.map((r) => ({ id: newId("res"), nom: r.nom, categorie: r.cat, prix: round2(r.prix), mine: !!r.mine }));
-  const { error } = await admin.from("ArmurerieRessource").insert(rows);
-  if (error) return { ok: false, error: erpErr(error.message) };
-  return { ok: true };
+  const { data: existants } = await admin.from("ArmurerieRessource").select("id,nom");
+  const parNom = new Set((existants || []).map((r) => _norm(String((r as { nom: string }).nom))));
+  const manquants = RESSOURCES.filter((r) => !parNom.has(_norm(r.nom)));
+  if (manquants.length) {
+    const rows = manquants.map((r) => ({ id: newId("res"), nom: r.nom, categorie: r.cat, prix: round2(r.prix), mine: !!r.mine }));
+    const { error } = await admin.from("ArmurerieRessource").insert(rows);
+    if (error) return { ok: false, error: erpErr(error.message) };
+  }
+  return { ok: true, n: manquants.length };
 }
 // Régler un achat de ressources : la remise ne s'applique QU'AUX ressources de la
 // mine, puis on débite le coffre (→ dépense automatique en comptabilité).
@@ -743,7 +770,7 @@ export async function acheterRessources(lignes: LigneRessource[], remisePct: num
   const resume = items.map((l) => `${s(l.nom, 40)} ×${Math.max(1, Math.round(Number(l.qte) || 1))}`).join(", ");
   const motif = (remise > 0 ? `Achat ressources (remise mine −${pct}%) : ` : "Achat ressources : ") + resume;
   try {
-    await _mouvementCoffre(admin, net, "sortie", motif.slice(0, 200), await auteurNom());
+    await _mouvementCoffre(admin, net, "sortie", motif.slice(0, 200), await auteurNom(), "produit");
     return { ok: true, net, brut, remise };
   } catch (e) { return { ok: false, error: erpErr((e as Error).message || "") }; }
 }

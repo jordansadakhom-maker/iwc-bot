@@ -130,6 +130,7 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
 function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clients: ArmClient[]; router: Router }) {
   const [q, setQ] = useState("");
   const [cart, setCart] = useState<Record<string, number>>({});
+  const [pxEdit, setPxEdit] = useState<Record<string, string>>({}); // prix unitaire ajusté à la vente
   const [client, setClient] = useState("");
   const [clientId, setClientId] = useState("");
   const [notes, setNotes] = useState("");
@@ -140,7 +141,8 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
   const filtres = produits.filter((p) => p.nom.toLowerCase().includes(q.trim().toLowerCase()));
   const cats = [...new Set(filtres.map((p) => p.categorie))];
   const lignes = Object.entries(cart).filter(([, n]) => n > 0).map(([id, n]) => ({ p: byId.get(id)!, n })).filter((l) => l.p);
-  const vente = lignes.reduce((s, l) => s + l.p.prix * l.n, 0);
+  const pu = (p: ArmProduit) => { const v = pxEdit[p.id]; return v === undefined ? p.prix : Math.max(0, Math.round((Number(v) || 0) * 100) / 100); };
+  const vente = lignes.reduce((s, l) => s + pu(l.p) * l.n, 0);
   const cout = lignes.reduce((s, l) => s + l.p.cout * l.n, 0);
   const benefice = vente - cout;
 
@@ -150,11 +152,11 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
   async function valider() {
     if (!lignes.length) return;
     setBusy(true);
-    const payload: LigneCaisse[] = lignes.map((l) => ({ produitId: l.p.id, nom: l.p.nom, categorie: l.p.categorie, prix: l.p.prix, cout: l.p.cout, qte: l.n, aLaDemande: l.p.aLaDemande }));
+    const payload: LigneCaisse[] = lignes.map((l) => ({ produitId: l.p.id, nom: l.p.nom, categorie: l.p.categorie, prix: pu(l.p), cout: l.p.cout, qte: l.n, aLaDemande: l.p.aLaDemande }));
     const r = await validerCaisse(payload, clientId ? "" : client, notes, clientId || undefined);
     setBusy(false);
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
-    setCart({}); setClient(""); setClientId(""); setNotes("");
+    setCart({}); setPxEdit({}); setClient(""); setClientId(""); setNotes("");
     setFlash(`Vente encaissée : ${money(r.total || vente)} → coffre + registre + facture + compta + impôts.`);
     router.refresh();
   }
@@ -195,14 +197,22 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
           {lignes.length === 0 ? (
             <p className="py-4 text-center text-[0.8rem] text-faint">Panier vide. Clique un produit pour l&apos;ajouter.</p>
           ) : (
-            <div className="mb-2 flex flex-col gap-1.5">
+            <div className="mb-2 flex flex-col gap-2">
               {lignes.map((l) => (
-                <div key={l.p.id} className="flex items-center gap-2 text-[0.82rem]">
-                  <span className="min-w-0 flex-1 truncate">{l.p.nom}</span>
-                  <button onClick={() => sub(l.p.id)} className="grid h-5 w-5 place-items-center rounded border border-border text-muted hover:text-ink"><Minus className="h-3 w-3" /></button>
-                  <span className="w-5 text-center font-num">{l.n}</span>
-                  <button onClick={() => add(l.p.id)} className="grid h-5 w-5 place-items-center rounded border border-border text-muted hover:text-ink"><Plus className="h-3 w-3" /></button>
-                  <span className="w-14 shrink-0 text-right font-num">{money(l.p.prix * l.n)}</span>
+                <div key={l.p.id} className="flex flex-col gap-1 border-b border-border/60 pb-1.5 text-[0.82rem]">
+                  <div className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate font-medium">{l.p.nom}</span>
+                    <button onClick={() => sub(l.p.id)} className="grid h-5 w-5 place-items-center rounded border border-border text-muted hover:text-ink"><Minus className="h-3 w-3" /></button>
+                    <span className="w-5 text-center font-num">{l.n}</span>
+                    <button onClick={() => add(l.p.id)} className="grid h-5 w-5 place-items-center rounded border border-border text-muted hover:text-ink"><Plus className="h-3 w-3" /></button>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[0.72rem] text-faint">
+                    <span>PU</span>
+                    <input type="number" min={0} step="0.01" value={pxEdit[l.p.id] ?? String(l.p.prix)} onChange={(e) => setPxEdit((o) => ({ ...o, [l.p.id]: e.target.value }))} onFocus={(e) => e.currentTarget.select()} className={inputCls + " !w-20 !px-1.5 !py-0.5 text-right font-num !text-[0.78rem]"} title="Prix unitaire — modifiable pour cette vente" />
+                    <span>$</span>
+                    {pu(l.p) !== l.p.prix ? <span className="text-[0.62rem]" style={{ color: "var(--accent)" }}>(tarif {money(l.p.prix)})</span> : null}
+                    <span className="ml-auto font-num text-[0.84rem] font-semibold text-ink">{money(pu(l.p) * l.n)}</span>
+                  </div>
                 </div>
               ))}
             </div>
