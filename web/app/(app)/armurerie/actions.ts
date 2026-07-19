@@ -702,16 +702,18 @@ export async function supprimerTache(id: string): Promise<ArmResult> {
 }
 
 // ── Ressources (matières premières nécessaires au craft) ─────────
-export async function creerRessource(d: { nom: string; categorie?: string; prix?: number; mine?: boolean }): Promise<ArmResult> {
+export async function creerRessource(d: { nom: string; categorie?: string; prix?: number; mine?: boolean; stock?: number }): Promise<ArmResult> {
   if (!d.nom || d.nom.trim().length < 1) return { ok: false, error: "Nom de la ressource requis." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
   const id = newId("res");
-  const { error } = await admin.from("ArmurerieRessource").insert({ id, nom: s(d.nom, 120), categorie: s(d.categorie, 60) || "Divers", prix: Math.max(0, round2(Number(d.prix) || 0)), mine: !!d.mine });
+  const row: Record<string, unknown> = { id, nom: s(d.nom, 120), categorie: s(d.categorie, 60) || "Divers", prix: Math.max(0, round2(Number(d.prix) || 0)), mine: !!d.mine, stock: Math.max(0, Math.round(Number(d.stock) || 0)) };
+  let { error } = await admin.from("ArmurerieRessource").insert(row);
+  if (error && /stock/i.test(error.message)) { delete row.stock; ({ error } = await admin.from("ArmurerieRessource").insert(row)); }
   if (error) return { ok: false, error: erpErr(error.message) };
   return { ok: true, id };
 }
-export async function majRessource(id: string, patch: { nom?: string; categorie?: string; prix?: number; mine?: boolean }): Promise<ArmResult> {
+export async function majRessource(id: string, patch: { nom?: string; categorie?: string; prix?: number; mine?: boolean; stock?: number }): Promise<ArmResult> {
   if (!id) return { ok: false, error: "Ressource introuvable." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
@@ -720,7 +722,9 @@ export async function majRessource(id: string, patch: { nom?: string; categorie?
   if ("categorie" in patch) up.categorie = s(patch.categorie, 60);
   if ("prix" in patch) up.prix = Math.max(0, round2(Number(patch.prix) || 0));
   if ("mine" in patch) up.mine = !!patch.mine;
-  const { error } = await admin.from("ArmurerieRessource").update(up).eq("id", id);
+  if ("stock" in patch) up.stock = Math.max(0, Math.round(Number(patch.stock) || 0));
+  let { error } = await admin.from("ArmurerieRessource").update(up).eq("id", id);
+  if (error && "stock" in up && /stock/i.test(error.message)) { delete up.stock; ({ error } = await admin.from("ArmurerieRessource").update(up).eq("id", id)); }
   return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
 }
 export async function supprimerRessource(id: string): Promise<ArmResult> {
@@ -767,7 +771,7 @@ export async function importerRessources(): Promise<ArmResult & { n?: number }> 
 }
 // Régler un achat de ressources : la remise ne s'applique QU'AUX ressources de la
 // mine, puis on débite le coffre (→ dépense automatique en comptabilité).
-export type LigneRessource = { nom: string; qte: number; prix: number; mine?: boolean };
+export type LigneRessource = { id?: string; nom: string; qte: number; prix: number; mine?: boolean };
 export async function acheterRessources(lignes: LigneRessource[], remisePct: number): Promise<ArmResult & { net?: number; brut?: number; remise?: number }> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
@@ -783,8 +787,76 @@ export async function acheterRessources(lignes: LigneRessource[], remisePct: num
   const motif = (remise > 0 ? `Achat ressources (remise mine −${pct}%) : ` : "Achat ressources : ") + resume;
   try {
     await _mouvementCoffre(admin, net, "sortie", motif.slice(0, 200), await auteurNom(), "produit");
+    // Créditer le stock des ressources achetées (best-effort ; ignoré si colonne absente).
+    try {
+      const ids = items.map((i) => i.id).filter(Boolean) as string[];
+      if (ids.length) {
+        const { data: rs } = await admin.from("ArmurerieRessource").select("id,stock").in("id", ids);
+        if (Array.isArray(rs)) {
+          const byId = new Map(rs.map((r) => [String((r as { id: string }).id), Number((r as { stock?: number }).stock) || 0]));
+          for (const it of items) { if (!it.id) continue; const add = Math.max(0, Math.round(Number(it.qte) || 0)); await admin.from("ArmurerieRessource").update({ stock: (byId.get(String(it.id)) || 0) + add }).eq("id", it.id); }
+        }
+      }
+    } catch { /* stock ressource non activé — on ignore */ }
     return { ok: true, net, brut, remise };
   } catch (e) { return { ok: false, error: erpErr((e as Error).message || "") }; }
+}
+
+// ── Fabrication : consomme les ressources en stock, ajoute le produit fini ──
+const _STOP = new Set(["de", "du", "des", "d", "l", "la", "le", "les", "a", "au", "aux", "en", "pour"]);
+function _tokens(x: string): string[] {
+  return String(x).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").split(/[^a-z0-9]+/).filter((t) => t && !_STOP.has(t));
+}
+type ResRow = { id: string; nom: string; stock?: number };
+// Trouve LA ressource correspondant à un ingrédient (match sûr, sinon null).
+function _matchRes(ing: string, ressources: ResRow[]): ResRow | null {
+  const n = _norm(ing);
+  const exact = ressources.filter((r) => _norm(r.nom) === n);
+  if (exact.length === 1) return exact[0];
+  const it = _tokens(ing);
+  if (!it.length) return null;
+  const cand = ressources.filter((r) => { const rt = new Set(_tokens(r.nom)); return it.every((t) => rt.has(t)); });
+  if (cand.length === 1) return cand[0];
+  if (cand.length > 1) {
+    const starts = cand.filter((r) => { const rn = _norm(r.nom); return rn.startsWith(n) || n.startsWith(rn); });
+    const pool = (starts.length ? starts : cand).slice().sort((a, b) => _tokens(a.nom).length - _tokens(b.nom).length);
+    if (pool.length === 1 || _tokens(pool[0].nom).length !== _tokens(pool[1].nom).length) return pool[0];
+  }
+  return null;
+}
+export async function fabriquerProduit(produitId: string, qte: number): Promise<ArmResult & { q?: number; consommes?: string[]; ignores?: string[]; manques?: string[] }> {
+  const q = Math.max(1, Math.round(Number(qte) || 0));
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  // Produit + recette (résilient si la colonne recette n'est pas migrée).
+  let pr = await admin.from("ArmurerieProduit").select("id,nom,stock,aLaDemande,recette").eq("id", produitId).maybeSingle();
+  if (pr.error && /recette/i.test(pr.error.message)) pr = await admin.from("ArmurerieProduit").select("id,nom,stock,aLaDemande").eq("id", produitId).maybeSingle();
+  const prod = pr.data as { id: string; nom: string; stock: number; aLaDemande: boolean; recette?: unknown } | null;
+  if (!prod) return { ok: false, error: "Produit introuvable." };
+  const recette = Array.isArray(prod.recette) ? (prod.recette as { ingredient?: string; qte?: number }[]) : [];
+  const lignes = recette.filter((l) => l && String(l.ingredient || "").trim() && Number(l.qte) > 0);
+  if (!lignes.length) return { ok: false, error: "Ce produit n'a pas de recette — impossible de fabriquer." };
+  // Ressources + stock (résilient si la colonne stock n'est pas migrée).
+  let rr = await admin.from("ArmurerieRessource").select("id,nom,stock");
+  const stockActif = !(rr.error && /stock/i.test(rr.error.message));
+  if (!stockActif) rr = await admin.from("ArmurerieRessource").select("id,nom");
+  const ressources = (rr.data || []) as ResRow[];
+  const consommes: string[] = [], ignores: string[] = [], manques: string[] = [];
+  for (const l of lignes) {
+    const besoin = Math.max(0, Math.round(Number(l.qte) * q));
+    if (!besoin) continue;
+    const r = _matchRes(String(l.ingredient), ressources);
+    if (!r) { ignores.push(`${l.ingredient} ×${besoin}`); continue; }
+    if (!stockActif) { ignores.push(`${r.nom} ×${besoin}`); continue; }
+    const dispo = Number(r.stock) || 0;
+    if (dispo < besoin) manques.push(`${r.nom} (manque ${besoin - dispo})`);
+    const { error } = await admin.from("ArmurerieRessource").update({ stock: Math.max(0, dispo - besoin) }).eq("id", r.id);
+    if (error) { ignores.push(`${r.nom} (erreur)`); continue; }
+    r.stock = Math.max(0, dispo - besoin);
+    consommes.push(`${r.nom} −${besoin}`);
+  }
+  if (!prod.aLaDemande) await admin.from("ArmurerieProduit").update({ stock: Math.max(0, (Number(prod.stock) || 0) + q) }).eq("id", produitId);
+  return { ok: true, q, consommes, ignores, manques };
 }
 
 // ── Carnet de commande (bons de commande client) ─────────────────
