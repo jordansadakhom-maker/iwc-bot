@@ -175,3 +175,102 @@ function tableErr(msg: string, quoi: string): string {
   if (/does not exist|relation|Armurerie/i.test(msg)) return `La table des ${quoi} n'est pas encore créée — exécute armurerie-vh.sql dans Supabase.`;
   return "Enregistrement impossible pour le moment.";
 }
+
+// ── Produits (catalogue de la Caisse) ────────────────────────────
+export async function creerProduit(d: { nom: string; categorie?: string; prix?: number; cout?: number; stock?: number; aLaDemande?: boolean }): Promise<ArmResult> {
+  if (!d.nom || d.nom.trim().length < 1) return { ok: false, error: "Nom du produit requis." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const id = newId("prd");
+  const { error } = await admin.from("ArmurerieProduit").insert({
+    id, nom: s(d.nom, 120), categorie: s(d.categorie, 60) || "Divers",
+    prix: Math.max(0, Math.round(Number(d.prix) || 0)), cout: Math.max(0, Math.round(Number(d.cout) || 0)),
+    stock: Math.max(0, Math.round(Number(d.stock) || 0)), aLaDemande: !!d.aLaDemande,
+  });
+  if (error) return { ok: false, error: tableErr(error.message, "produits") };
+  return { ok: true, id };
+}
+export async function majProduit(id: string, patch: Record<string, unknown>): Promise<ArmResult> {
+  if (!id) return { ok: false, error: "Produit introuvable." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const up: Record<string, unknown> = {};
+  if ("nom" in patch) up.nom = s(patch.nom, 120);
+  if ("categorie" in patch) up.categorie = s(patch.categorie, 60);
+  if ("prix" in patch) up.prix = Math.max(0, Math.round(Number(patch.prix) || 0));
+  if ("cout" in patch) up.cout = Math.max(0, Math.round(Number(patch.cout) || 0));
+  if ("stock" in patch) up.stock = Math.max(0, Math.round(Number(patch.stock) || 0));
+  if ("aLaDemande" in patch) up.aLaDemande = !!patch.aLaDemande;
+  const { error } = await admin.from("ArmurerieProduit").update(up).eq("id", id);
+  return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+}
+export async function supprimerProduit(id: string): Promise<ArmResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { error } = await admin.from("ArmurerieProduit").delete().eq("id", id);
+  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+}
+
+// Catalogue type RDR2 (prix de référence) — importé en un clic si le catalogue est vide.
+const CATALOGUE: { nom: string; cat: string; prix: number; aLaDemande?: boolean }[] = [
+  { nom: "Fusil à verrou", cat: "Fusils", prix: 300 }, { nom: "Fusil à répétition", cat: "Fusils", prix: 215 },
+  { nom: "Fusil à pompe", cat: "Fusils", prix: 275 }, { nom: "Fusil double canon", cat: "Fusils", prix: 200 },
+  { nom: "Fusil springfield", cat: "Fusils", prix: 230 }, { nom: "Fusil éléphant", cat: "Fusils", prix: 400 },
+  { nom: "Carabine Litchfield", cat: "Carabines", prix: 130 }, { nom: "Carabine Lancaster", cat: "Carabines", prix: 150 },
+  { nom: "Carabine Evans", cat: "Carabines", prix: 140 }, { nom: "Carabine à répétition", cat: "Carabines", prix: 50 },
+  { nom: "Pistolet Mauser", cat: "Pistolets", prix: 75 }, { nom: "Pistolet Volcanic", cat: "Pistolets", prix: 60 },
+  { nom: "Pistolet 1899", cat: "Pistolets", prix: 85 }, { nom: "Canon scié", cat: "Pistolets", prix: 70 },
+  { nom: "Revolver Cattleman", cat: "Revolvers", prix: 17 }, { nom: "Revolver Navy", cat: "Revolvers", prix: 80 },
+  { nom: "Revolver Schofield", cat: "Revolvers", prix: 50 }, { nom: "Revolver LeMat", cat: "Revolvers", prix: 90 },
+  { nom: "Revolver Double Action", cat: "Revolvers", prix: 20 },
+  { nom: "Boîte de munitions de Revolver", cat: "Munitions", prix: 5 }, { nom: "Boîte de munitions de Pistolet", cat: "Munitions", prix: 5 },
+  { nom: "Boîte de munitions de Carabine", cat: "Munitions", prix: 5 }, { nom: "Boîte de munitions de Fusil", cat: "Munitions", prix: 5 },
+  { nom: "Boîte de munitions de Pompe", cat: "Munitions", prix: 5 },
+  { nom: "Jumelles", cat: "Matériel", prix: 5 }, { nom: "Lanterne", cat: "Matériel", prix: 5 },
+  { nom: "Menottes", cat: "Matériel", prix: 3 }, { nom: "Lasso", cat: "Matériel", prix: 5 },
+  { nom: "Couteau", cat: "Divers", prix: 5 }, { nom: "Hachette", cat: "Divers", prix: 6 },
+  { nom: "Arc", cat: "Divers", prix: 10, aLaDemande: true }, { nom: "Carquois", cat: "Divers", prix: 2, aLaDemande: true },
+  { nom: "Pack Chasseur", cat: "Divers", prix: 18 },
+];
+export async function importerCatalogue(): Promise<ArmResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const rows = CATALOGUE.map((p) => ({ id: newId("prd"), nom: p.nom, categorie: p.cat, prix: p.prix, cout: 0, stock: 0, aLaDemande: !!p.aLaDemande }));
+  const { error } = await admin.from("ArmurerieProduit").insert(rows);
+  if (error) return { ok: false, error: tableErr(error.message, "produits") };
+  return { ok: true };
+}
+
+// ── Caisse (point de vente) ──────────────────────────────────────
+export type LigneCaisse = { produitId?: string; nom: string; categorie?: string; prix: number; cout?: number; qte: number; aLaDemande?: boolean };
+export async function validerCaisse(lignes: LigneCaisse[], client: string, notes: string): Promise<ArmResult & { total?: number }> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const items = (Array.isArray(lignes) ? lignes : []).filter((l) => l && Number(l.qte) > 0);
+  if (!items.length) return { ok: false, error: "Le panier est vide." };
+  const nom = await auteurNom();
+  const dateV = new Date().toLocaleDateString("fr-FR");
+  const cli = s(client, 120) || "Client de passage";
+  let total = 0;
+  try {
+    for (const l of items) {
+      const q = Math.max(1, Math.round(Number(l.qte) || 1));
+      const montant = Math.max(0, Math.round((Number(l.prix) || 0) * q));
+      total += montant;
+      await admin.from("ArmurerieVente").insert({
+        id: newId("vte"), acquereur: cli, dateVente: dateV, marque: s(l.nom, 80), modele: null,
+        categorie: s(l.categorie, 60), numeroSerie: `VTE-${Date.now().toString(36).slice(-4)}`,
+        vendeur: nom, prix: montant, notes: s(notes, 1000), statut: "enregistree",
+      });
+      if (l.produitId && !l.aLaDemande) {
+        const { data } = await admin.from("ArmurerieProduit").select("stock").eq("id", l.produitId).maybeSingle();
+        if (data) await admin.from("ArmurerieProduit").update({ stock: Math.max(0, (Number((data as { stock: number }).stock) || 0) - q) }).eq("id", l.produitId);
+      }
+      await _mouvementCoffre(admin, montant, "entree", `Vente : ${s(l.nom, 80)} ×${q} — ${cli}`, nom);
+    }
+    return { ok: true, total };
+  } catch (e) {
+    const msg = (e as Error).message || "";
+    return { ok: false, error: /Armurerie|does not exist/i.test(msg) ? "Tables armurerie manquantes — exécute armurerie-vh.sql." : "Vente impossible pour le moment." };
+  }
+}

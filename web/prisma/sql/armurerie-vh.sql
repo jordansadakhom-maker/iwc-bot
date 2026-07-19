@@ -75,3 +75,16 @@ CREATE TABLE IF NOT EXISTS "ArmurerieMouvementCoffre" (
   "createdAt" TIMESTAMPTZ DEFAULT now()
 );
 ALTER TABLE "ArmurerieMouvementCoffre" ENABLE ROW LEVEL SECURITY;
+
+-- Catalogue produits (Caisse / point de vente)
+CREATE TABLE IF NOT EXISTS "ArmurerieProduit" (
+  "id"        TEXT PRIMARY KEY,
+  "nom"       TEXT NOT NULL,
+  "categorie" TEXT DEFAULT 'Divers',
+  "prix"      INTEGER DEFAULT 0,   -- prix de vente
+  "cout"      INTEGER DEFAULT 0,   -- coût matières
+  "stock"     INTEGER DEFAULT 0,
+  "aLaDemande" BOOLEAN DEFAULT false,
+  "createdAt" TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE "ArmurerieProduit" ENABLE ROW LEVEL SECURITY;

@@ -3,10 +3,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Users, ScrollText, FileSignature, Plus, Loader2, Trash2, IdCard, Send, Check, X,
-  Download, CircleDollarSign, Vault, ArrowDownRight, ArrowUpRight, History,
+  Users, ScrollText, FileSignature, Plus, Minus, Loader2, Trash2, IdCard, Send, Check, X,
+  Download, CircleDollarSign, Vault, ArrowDownRight, ArrowUpRight, History, ShoppingCart, Package, Search,
 } from "lucide-react";
-import type { ArmClient, ArmVente, ArmContrat, ArmMouvement } from "@/lib/queries";
+import type { ArmClient, ArmVente, ArmContrat, ArmMouvement, ArmProduit } from "@/lib/queries";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { Badge } from "@/components/ui";
 import { PhotoDrop } from "@/components/photo-drop";
@@ -15,6 +15,7 @@ import {
   creerVente, majVente, supprimerVente,
   creerContrat, envoyerContrat, marquerContrat, supprimerContrat,
   ajusterCoffreArmurerie,
+  creerProduit, majProduit, supprimerProduit, importerCatalogue, validerCaisse, type LigneCaisse,
 } from "@/app/(app)/armurerie/actions";
 
 type Router = ReturnType<typeof useRouter>;
@@ -30,12 +31,16 @@ const ctrTone = (s: string): "good" | "warn" | "accent" | "oxblood" | "muted" =>
   s === "signe" ? "good" : s === "envoye" ? "accent" : s === "refuse" ? "oxblood" : "muted";
 const ctrLabel = (s: string) => s === "signe" ? "Signé" : s === "envoye" ? "Envoyé" : s === "refuse" ? "Refusé" : "Brouillon";
 
-export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouvementsCoffre }: { clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvementsCoffre: ArmMouvement[] }) {
+type TabKey = "caisse" | "produits" | "ventes" | "clients" | "contrats";
+
+export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouvementsCoffre, produits }: { clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvementsCoffre: ArmMouvement[]; produits: ArmProduit[] }) {
   const router = useRouter();
-  const [tab, setTab] = useState<"clients" | "ventes" | "contrats">("ventes");
+  const [tab, setTab] = useState<TabKey>("caisse");
   const signes = contrats.filter((c) => c.statut === "signe").length;
 
-  const TABS: { key: typeof tab; label: string; icon: typeof Users; n: number }[] = [
+  const TABS: { key: TabKey; label: string; icon: typeof Users; n: number }[] = [
+    { key: "caisse", label: "Caisse", icon: ShoppingCart, n: produits.length },
+    { key: "produits", label: "Produits", icon: Package, n: produits.length },
     { key: "ventes", label: "Registre des ventes", icon: ScrollText, n: ventes.length },
     { key: "clients", label: "Fichier clients", icon: Users, n: clients.length },
     { key: "contrats", label: "Contrats", icon: FileSignature, n: contrats.length },
@@ -67,10 +72,199 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
         })}
       </div>
 
+      {tab === "caisse" ? <CaisseTab produits={produits} clients={clients} router={router} /> : null}
+      {tab === "produits" ? <ProduitsTab produits={produits} router={router} /> : null}
       {tab === "clients" ? <ClientsTab clients={clients} ventes={ventes} router={router} /> : null}
       {tab === "ventes" ? <VentesTab ventes={ventes} clients={clients} router={router} /> : null}
       {tab === "contrats" ? <ContratsTab contrats={contrats} clients={clients} router={router} /> : null}
     </>
+  );
+}
+
+// ═══════════════════ CAISSE (point de vente) ═══════════════════
+function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clients: ArmClient[]; router: Router }) {
+  const [q, setQ] = useState("");
+  const [cart, setCart] = useState<Record<string, number>>({});
+  const [client, setClient] = useState("");
+  const [notes, setNotes] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [flash, setFlash] = useState<string | null>(null);
+
+  const byId = new Map(produits.map((p) => [p.id, p]));
+  const filtres = produits.filter((p) => p.nom.toLowerCase().includes(q.trim().toLowerCase()));
+  const cats = [...new Set(filtres.map((p) => p.categorie))];
+  const lignes = Object.entries(cart).filter(([, n]) => n > 0).map(([id, n]) => ({ p: byId.get(id)!, n })).filter((l) => l.p);
+  const vente = lignes.reduce((s, l) => s + l.p.prix * l.n, 0);
+  const cout = lignes.reduce((s, l) => s + l.p.cout * l.n, 0);
+  const benefice = vente - cout;
+
+  const add = (id: string) => setCart((c) => ({ ...c, [id]: (c[id] || 0) + 1 }));
+  const sub = (id: string) => setCart((c) => ({ ...c, [id]: Math.max(0, (c[id] || 0) - 1) }));
+
+  async function valider() {
+    if (!lignes.length) return;
+    setBusy(true);
+    const payload: LigneCaisse[] = lignes.map((l) => ({ produitId: l.p.id, nom: l.p.nom, categorie: l.p.categorie, prix: l.p.prix, cout: l.p.cout, qte: l.n, aLaDemande: l.p.aLaDemande }));
+    const r = await validerCaisse(payload, client, notes);
+    setBusy(false);
+    if (!r.ok) { setFlash(r.error || "Échec."); return; }
+    setCart({}); setClient(""); setNotes("");
+    setFlash(`Vente encaissée : ${money(r.total || vente)} → coffre de l'armurerie + registre.`);
+    router.refresh();
+  }
+
+  if (produits.length === 0) {
+    return <Vide icon={ShoppingCart} texte="La caisse a besoin d'un catalogue. Va dans l'onglet « Produits » pour ajouter tes armes/munitions (ou importer le catalogue type)." />;
+  }
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+      {/* Grille produits */}
+      <div>
+        <div className="relative mb-3">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
+          <input className={inputCls + " pl-8"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un produit…" />
+        </div>
+        {cats.map((cat) => (
+          <div key={cat} className="mb-3">
+            <div className="mb-1.5 text-[0.72rem] uppercase tracking-[0.08em] text-faint">{cat}</div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {filtres.filter((p) => p.categorie === cat).map((p) => (
+                <button key={p.id} onClick={() => add(p.id)} className="rounded-[10px] border border-border bg-surface-2 px-2.5 py-2 text-left transition hover:-translate-y-0.5 hover:border-border-2">
+                  <div className="truncate text-[0.8rem] font-semibold">{p.nom}</div>
+                  <div className="mt-0.5 text-[0.66rem] text-faint">{p.aLaDemande ? "à la demande" : `stock ${p.stock}`}{cart[p.id] ? ` · ${cart[p.id]} au panier` : ""}</div>
+                  <div className="mt-1 font-num text-[0.9rem] font-bold" style={{ color: "var(--accent)" }}>{money(p.prix)}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Panier */}
+      <div className="lg:sticky lg:top-4 lg:self-start">
+        <div className="rounded-[14px] border border-border bg-surface-2 p-3.5">
+          <div className="mb-2 flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[0.05em] text-muted"><ShoppingCart className="h-4 w-4" /> Panier</div>
+          {flash ? <div className="mb-2"><Flash>{flash}</Flash></div> : null}
+          {lignes.length === 0 ? (
+            <p className="py-4 text-center text-[0.8rem] text-faint">Panier vide. Clique un produit pour l&apos;ajouter.</p>
+          ) : (
+            <div className="mb-2 flex flex-col gap-1.5">
+              {lignes.map((l) => (
+                <div key={l.p.id} className="flex items-center gap-2 text-[0.82rem]">
+                  <span className="min-w-0 flex-1 truncate">{l.p.nom}</span>
+                  <button onClick={() => sub(l.p.id)} className="grid h-5 w-5 place-items-center rounded border border-border text-muted hover:text-ink"><Minus className="h-3 w-3" /></button>
+                  <span className="w-5 text-center font-num">{l.n}</span>
+                  <button onClick={() => add(l.p.id)} className="grid h-5 w-5 place-items-center rounded border border-border text-muted hover:text-ink"><Plus className="h-3 w-3" /></button>
+                  <span className="w-14 shrink-0 text-right font-num">{money(l.p.prix * l.n)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex flex-col gap-1 border-t border-border pt-2 text-[0.84rem]">
+            <div className="flex justify-between text-faint"><span>Coût matières</span><span className="font-num">−{money(cout)}</span></div>
+            <div className="flex justify-between"><span className="text-faint">Vente</span><span className="font-num font-semibold">{money(vente)}</span></div>
+            <div className="flex justify-between"><span className="font-semibold">Bénéfice</span><span className="font-num font-bold" style={{ color: "var(--good)" }}>{money(benefice)}</span></div>
+          </div>
+          <div className="mt-2.5 flex flex-col gap-2">
+            <input className={inputCls} value={client} onChange={(e) => setClient(e.target.value)} placeholder="Client (nom & prénom) — optionnel" list="arm-clients" maxLength={120} />
+            <datalist id="arm-clients">{clients.map((c) => <option key={c.id} value={c.nom} />)}</datalist>
+            <input className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes — optionnel" maxLength={200} />
+            <button onClick={valider} disabled={busy || !lignes.length} className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-[0.86rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--good)" }}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Encaisser {money(vente)}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════ PRODUITS (catalogue) ═══════════════════
+function ProduitsTab({ produits, router }: { produits: ArmProduit[]; router: Router }) {
+  const [sel, setSel] = useState<ArmProduit | null>(null);
+  const [nouveau, setNouveau] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const cats = [...new Set(produits.map((p) => p.categorie))];
+
+  async function importer() { setBusy(true); const r = await importerCatalogue(); setBusy(false); if (r.ok) router.refresh(); }
+
+  return (
+    <>
+      <div className="mb-3 flex justify-end gap-2">
+        {produits.length === 0 ? <button onClick={importer} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Importer le catalogue type</button> : null}
+        <button onClick={() => setNouveau(true)} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Plus className="h-3.5 w-3.5" /> Nouveau produit</button>
+      </div>
+      {produits.length === 0 ? (
+        <Vide icon={Package} texte="Aucun produit. Importe le catalogue type (armes & munitions RDR2) ou ajoute tes produits — ils alimenteront la Caisse." />
+      ) : (
+        <div className="flex flex-col gap-3">
+          {cats.map((cat) => (
+            <div key={cat}>
+              <div className="mb-1.5 text-[0.72rem] uppercase tracking-[0.08em] text-faint">{cat}</div>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                {produits.filter((p) => p.categorie === cat).map((p) => (
+                  <button key={p.id} onClick={() => setSel(p)} className="flex items-center justify-between gap-2 rounded-[10px] border border-border bg-surface-2 px-3 py-2 text-left transition hover:border-border-2">
+                    <div className="min-w-0"><div className="truncate text-[0.84rem] font-medium">{p.nom}</div><div className="text-[0.68rem] text-faint">{p.aLaDemande ? "à la demande" : `stock ${p.stock}`}{p.cout ? ` · coût ${money(p.cout)}` : ""}</div></div>
+                    <span className="shrink-0 font-num text-[0.86rem] font-bold" style={{ color: "var(--accent)" }}>{money(p.prix)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {nouveau ? <ProduitModal onClose={() => setNouveau(false)} router={router} /> : null}
+      {sel ? <ProduitModal produit={sel} onClose={() => setSel(null)} router={router} /> : null}
+    </>
+  );
+}
+
+function ProduitModal({ produit, onClose, router }: { produit?: ArmProduit; onClose: () => void; router: Router }) {
+  const editing = !!produit;
+  const [nom, setNom] = useState(produit?.nom || "");
+  const [categorie, setCategorie] = useState(produit?.categorie || "Divers");
+  const [prix, setPrix] = useState(produit ? String(produit.prix) : "");
+  const [cout, setCout] = useState(produit ? String(produit.cout) : "");
+  const [stock, setStock] = useState(produit ? String(produit.stock) : "");
+  const [aLaDemande, setALaDemande] = useState(!!produit?.aLaDemande);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function enregistrer() {
+    setErr(null);
+    if (nom.trim().length < 1) { setErr("Nom du produit requis."); return; }
+    setBusy("save");
+    const data = { nom, categorie, prix: Number(prix) || 0, cout: Number(cout) || 0, stock: Number(stock) || 0, aLaDemande };
+    const r = editing ? await majProduit(produit!.id, data) : await creerProduit(data);
+    setBusy(null);
+    if (!r.ok) { setErr(r.error || "Impossible."); return; }
+    router.refresh(); onClose();
+  }
+  async function supprimer() { setBusy("del"); const r = await supprimerProduit(produit!.id); setBusy(null); if (!r.ok) { setErr(r.error || "Échec."); return; } router.refresh(); onClose(); }
+
+  return (
+    <Modal titre={editing ? produit!.nom : "📦 Nouveau produit"} onClose={onClose}>
+      <div className="flex flex-col gap-3">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Champ label="Nom *"><input className={inputCls} value={nom} onChange={(e) => setNom(e.target.value)} maxLength={120} autoFocus /></Champ>
+          <Champ label="Catégorie"><input className={inputCls} value={categorie} onChange={(e) => setCategorie(e.target.value)} placeholder="Revolvers, Munitions…" maxLength={60} /></Champ>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Champ label="Prix de vente ($)"><input className={inputCls} type="number" min={0} value={prix} onChange={(e) => setPrix(e.target.value)} /></Champ>
+          <Champ label="Coût matières ($)"><input className={inputCls} type="number" min={0} value={cout} onChange={(e) => setCout(e.target.value)} /></Champ>
+          <Champ label="Stock"><input className={inputCls} type="number" min={0} value={stock} onChange={(e) => setStock(e.target.value)} disabled={aLaDemande} /></Champ>
+        </div>
+        <label className="inline-flex items-center gap-2 text-[0.82rem]">
+          <input type="checkbox" checked={aLaDemande} onChange={(e) => setALaDemande(e.target.checked)} /> Produit « à la demande » (pas de stock décompté)
+        </label>
+        {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
+        <div className="mt-1 flex items-center justify-between border-t border-border pt-3">
+          {editing ? <button onClick={supprimer} disabled={busy === "del"} className="inline-flex items-center gap-1.5 text-[0.76rem] text-faint hover:text-ink"><Trash2 className="h-3.5 w-3.5" /> Supprimer</button> : <span />}
+          <button onClick={enregistrer} disabled={busy === "save"} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{busy === "save" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} {editing ? "Enregistrer" : "Ajouter"}</button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
