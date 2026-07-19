@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Send, CheckCircle2, Loader2 } from "lucide-react";
 import { envoyerTelegrammeWeb } from "./actions";
 
@@ -14,12 +14,15 @@ export function TelegrammeForm() {
   const [err, setErr] = useState<string | null>(null);
   const [form, setForm] = useState({ nom: "", moyen: MOYENS[0], contact: "", message: "", website: "" });
   const set = <K extends keyof typeof form>(k: K, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const montRef = useRef(0);
+  useEffect(() => { montRef.current = Date.now(); }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setLoading(true); setErr(null);
     try {
       const contactFinal = form.contact.trim() ? `${form.moyen} : ${form.contact.trim()}` : "";
-      const r = await envoyerTelegrammeWeb({ ...form, contact: contactFinal });
+      const ms = montRef.current ? Date.now() - montRef.current : 9999;
+      const r = await envoyerTelegrammeWeb({ ...form, contact: contactFinal, ms });
       if (r.ok) setDone(true); else setErr(r.error || "Une erreur est survenue.");
     } catch { setErr("Envoi impossible pour le moment. Réessaie dans un instant."); }
     finally { setLoading(false); }

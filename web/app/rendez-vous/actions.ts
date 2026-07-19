@@ -18,6 +18,7 @@ export type RdvInput = {
   message: string;
   // Anti-spam : champ piège, doit rester vide (rempli = robot).
   website?: string;
+  ms?: number; // temps de remplissage (anti-robot)
 };
 
 export type RdvResult = { ok: boolean; error?: string };
@@ -25,6 +26,7 @@ export type RdvResult = { ok: boolean; error?: string };
 export async function soumettreRdv(data: RdvInput): Promise<RdvResult> {
   // Honeypot : si rempli, on fait semblant d'accepter sans rien enregistrer.
   if (data.website && data.website.trim()) return { ok: true };
+  if (typeof data.ms === "number" && data.ms >= 0 && data.ms < 1500) return { ok: true }; // rempli trop vite = robot
 
   const nomRP = (data.nomRP || "").trim();
   const contact = (data.contact || "").trim();

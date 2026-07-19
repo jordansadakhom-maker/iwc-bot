@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { CalendarCheck, CheckCircle2, Loader2 } from "lucide-react";
 import { soumettreRdv } from "./actions";
 
@@ -48,6 +48,8 @@ export function BookingForm() {
   function set<K extends keyof typeof form>(k: K, v: string) {
     setForm((f) => ({ ...f, [k]: v }));
   }
+  const montRef = useRef(0);
+  useEffect(() => { montRef.current = Date.now(); }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -55,7 +57,8 @@ export function BookingForm() {
     setErr(null);
     try {
       const contactFinal = `${form.moyen} : ${form.contact.trim()}`;
-      const res = await soumettreRdv({ ...form, contact: contactFinal });
+      const ms = montRef.current ? Date.now() - montRef.current : 9999;
+      const res = await soumettreRdv({ ...form, contact: contactFinal, ms });
       if (res.ok) setDone(true);
       else setErr(res.error || "Une erreur est survenue.");
     } catch {
