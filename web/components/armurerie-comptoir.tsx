@@ -440,7 +440,7 @@ function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[];
         </div>
       )}
       {nouveau ? <ProduitModal ressources={ressources} onClose={() => setNouveau(false)} router={router} /> : null}
-      {sel ? <ProduitModal produit={sel} ressources={ressources} onClose={() => setSel(null)} router={router} /> : null}
+      {sel ? <ProduitModal key={sel.id} produit={sel} ressources={ressources} onClose={() => setSel(null)} router={router} /> : null}
     </>
   );
 }
@@ -702,7 +702,7 @@ function ClientsTab({ clients, ventes, router }: { clients: ArmClient[]; ventes:
         </div>
       )}
       {nouveau ? <ClientModal onClose={() => setNouveau(false)} router={router} /> : null}
-      {sel ? <ClientModal client={sel} achats={ventes.filter((v) => v.clientId === sel.id)} onClose={() => setSel(null)} router={router} /> : null}
+      {sel ? <ClientModal key={sel.id} client={sel} achats={ventes.filter((v) => v.clientId === sel.id)} onClose={() => setSel(null)} router={router} /> : null}
     </>
   );
 }
@@ -900,7 +900,7 @@ function VentesTab({ ventes, clients, router }: { ventes: ArmVente[]; clients: A
        </div>
       )}
       {nouveau ? <VenteModal clients={clients} onClose={() => setNouveau(false)} router={router} /> : null}
-      {sel ? <VenteModal vente={sel} clients={clients} onClose={() => setSel(null)} router={router} /> : null}
+      {sel ? <VenteModal key={sel.id} vente={sel} clients={clients} onClose={() => setSel(null)} router={router} /> : null}
     </>
   );
 }
@@ -1018,7 +1018,7 @@ function ContratsTab({ contrats, clients, router }: { contrats: ArmContrat[]; cl
         </div>
       )}
       {nouveau ? <ContratModal clients={clients} onClose={() => setNouveau(false)} router={router} /> : null}
-      {sel ? <ContratModal contrat={sel} clients={clients} onClose={() => setSel(null)} router={router} /> : null}
+      {sel ? <ContratModal key={sel.id} contrat={sel} clients={clients} onClose={() => setSel(null)} router={router} /> : null}
     </>
   );
 }
