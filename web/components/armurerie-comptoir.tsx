@@ -238,10 +238,24 @@ function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[];
   const [nouveau, setNouveau] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  const [override, setOverride] = useState<Record<string, number>>({});
+  const [qbusy, setQbusy] = useState<string | null>(null);
   const cats = [...new Set(produits.map((p) => p.categorie))];
 
   async function importer() { setBusy("cat"); const r = await importerCatalogue(); setBusy(null); if (r.ok) { setFlash(r.n ? `${r.n} produit(s) ajouté(s).` : "Catalogue déjà à jour."); router.refresh(); } else setFlash(r.error || "Échec."); }
   async function importerRec() { setBusy("rec"); const r = await importerRecettes(); setBusy(null); if (r.ok) { setFlash(`${r.n ?? 0} recettes appliquées aux produits.`); router.refresh(); } else setFlash(r.error || "Échec."); }
+  // Ajustement rapide de la quantité en stock (optimiste ; +/− ou ±10).
+  async function ajusterStock(p: ArmProduit, delta: number) {
+    const courant = override[p.id] ?? p.stock;
+    const suivant = Math.max(0, courant + delta);
+    if (suivant === courant) return;
+    setOverride((o) => ({ ...o, [p.id]: suivant }));
+    setQbusy(p.id);
+    const r = await majProduit(p.id, { stock: suivant });
+    setQbusy(null);
+    if (!r.ok) { setOverride((o) => ({ ...o, [p.id]: courant })); setFlash(r.error || "Échec."); return; }
+    router.refresh();
+  }
 
   return (
     <>
@@ -260,21 +274,37 @@ function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[];
               <div className="mb-1.5 text-[0.72rem] uppercase tracking-[0.08em] text-faint">{cat}</div>
               <div className="flex flex-col gap-2">
                 {produits.filter((p) => p.categorie === cat).map((p) => {
-                  const enStock = p.aLaDemande || p.stock > 0;
+                  const stock = override[p.id] ?? p.stock;
+                  const enStock = p.aLaDemande || stock > 0;
                   const rec = p.recette && p.recette.length ? coutRecette(p.recette, ressources) : null;
                   const marge = rec ? p.prix - rec.cout : null;
+                  const stepBtn = "grid h-6 w-6 place-items-center rounded-md border border-border bg-surface hover:border-border-2 disabled:opacity-40";
                   return (
-                    <button key={p.id} onClick={() => setSel(p)} className="flex items-center gap-3 rounded-[10px] border border-border bg-surface-2 px-3.5 py-2.5 text-left transition hover:border-border-2">
-                      <div className="min-w-0 flex-1"><div className="truncate text-[0.88rem] font-semibold">{p.nom}</div>{rec ? <div className="text-[0.66rem] text-faint">🔨 craft {money(rec.cout)}{rec.manquants.length ? " +" : ""}</div> : p.cout ? <div className="text-[0.66rem] text-faint">coût {money(p.cout)}</div> : null}</div>
-                      <span className="hidden shrink-0 rounded-full border border-border px-2 py-0.5 text-[0.66rem] text-muted sm:inline">Niveau {p.niveau}</span>
-                      <span className="shrink-0 rounded-full px-2 py-0.5 text-[0.66rem] font-semibold" style={{ color: enStock ? "var(--good)" : "var(--oxblood)", background: `color-mix(in srgb,${enStock ? "var(--good)" : "var(--oxblood)"} 14%,transparent)` }}>{p.aLaDemande ? "à la demande" : p.stock}</span>
-                      <div className="hidden shrink-0 text-right sm:block"><div className="text-[0.58rem] uppercase tracking-[0.05em] text-faint">Prix de vente</div><div className="font-num text-[0.9rem] font-bold" style={{ color: "var(--accent)" }}>{money(p.prix)}</div></div>
-                      {rec ? (
-                        <div className="hidden shrink-0 text-right md:block"><div className="text-[0.58rem] uppercase tracking-[0.05em] text-faint">Marge{rec.manquants.length ? "*" : ""}</div><div className="font-num text-[0.82rem] font-semibold" style={{ color: (marge ?? 0) >= 0 ? "var(--good)" : "var(--oxblood)" }}>{money(marge ?? 0)}</div></div>
+                    <div key={p.id} className="flex items-center gap-3 rounded-[10px] border border-border bg-surface-2 px-3.5 py-2.5 transition hover:border-border-2">
+                      <button onClick={() => setSel(p)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                        <div className="min-w-0 flex-1"><div className="truncate text-[0.88rem] font-semibold">{p.nom}</div>{rec ? <div className="text-[0.66rem] text-faint">🔨 craft {money(rec.cout)}{rec.manquants.length ? " +" : ""}</div> : p.cout ? <div className="text-[0.66rem] text-faint">coût {money(p.cout)}</div> : null}</div>
+                        <span className="hidden shrink-0 rounded-full border border-border px-2 py-0.5 text-[0.66rem] text-muted sm:inline">Niveau {p.niveau}</span>
+                      </button>
+                      {p.aLaDemande ? (
+                        <span className="shrink-0 rounded-full px-2 py-0.5 text-[0.66rem] font-semibold" style={{ color: "var(--good)", background: "color-mix(in srgb,var(--good) 14%,transparent)" }}>à la demande</span>
                       ) : (
-                        <div className="hidden shrink-0 text-right md:block"><div className="text-[0.58rem] uppercase tracking-[0.05em] text-faint">Fourchette ±10%</div><div className="font-num text-[0.72rem] text-muted">{money(fourchette(p.prix)[0])} → {money(fourchette(p.prix)[1])}</div></div>
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          <button title="−10" onClick={() => ajusterStock(p, -10)} disabled={qbusy === p.id} className={`${stepBtn} hidden sm:grid`}><span className="text-[0.62rem] font-bold leading-none">−10</span></button>
+                          <button title="Retirer 1" onClick={() => ajusterStock(p, -1)} disabled={qbusy === p.id} className={stepBtn}><Minus className="h-3.5 w-3.5" /></button>
+                          <span className="w-9 text-center font-num text-[0.95rem] font-bold tabular-nums" style={{ color: enStock ? "var(--good)" : "var(--oxblood)" }}>{qbusy === p.id ? <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" /> : stock}</span>
+                          <button title="Ajouter 1" onClick={() => ajusterStock(p, 1)} disabled={qbusy === p.id} className={stepBtn}><Plus className="h-3.5 w-3.5" /></button>
+                          <button title="+10" onClick={() => ajusterStock(p, 10)} disabled={qbusy === p.id} className={`${stepBtn} hidden sm:grid`}><span className="text-[0.62rem] font-bold leading-none">+10</span></button>
+                        </div>
                       )}
-                    </button>
+                      <button onClick={() => setSel(p)} className="hidden shrink-0 items-center gap-3 text-right sm:flex">
+                        <div><div className="text-[0.58rem] uppercase tracking-[0.05em] text-faint">Prix de vente</div><div className="font-num text-[0.9rem] font-bold" style={{ color: "var(--accent)" }}>{money(p.prix)}</div></div>
+                        {rec ? (
+                          <div className="hidden text-right md:block"><div className="text-[0.58rem] uppercase tracking-[0.05em] text-faint">Marge{rec.manquants.length ? "*" : ""}</div><div className="font-num text-[0.82rem] font-semibold" style={{ color: (marge ?? 0) >= 0 ? "var(--good)" : "var(--oxblood)" }}>{money(marge ?? 0)}</div></div>
+                        ) : (
+                          <div className="hidden text-right md:block"><div className="text-[0.58rem] uppercase tracking-[0.05em] text-faint">Fourchette ±10%</div><div className="font-num text-[0.72rem] text-muted">{money(fourchette(p.prix)[0])} → {money(fourchette(p.prix)[1])}</div></div>
+                        )}
+                      </button>
+                    </div>
                   );
                 })}
               </div>

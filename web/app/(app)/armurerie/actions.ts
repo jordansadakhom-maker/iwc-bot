@@ -232,81 +232,100 @@ export async function supprimerProduit(id: string): Promise<ArmResult> {
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
 
-// Catalogue officiel de l'armurerie (prix de vente client) — importé en un clic.
+// Stock officiel de l'armurerie, catégorisé (Armes / Accessoires / Munitions /
+// Composants / Ressources). Prix de vente/base connus ; 0 = à renseigner.
 const CATALOGUE: { nom: string; cat: string; prix: number; niveau?: number }[] = [
-  // Revolvers
-  { nom: "Revolver Cattleman", cat: "Revolvers", prix: 17, niveau: 0 },
-  { nom: "Revolver Cattleman Mexican", cat: "Revolvers", prix: 20, niveau: 1 },
-  { nom: "Revolver Double Action", cat: "Revolvers", prix: 20, niveau: 0 },
-  { nom: "Revolver Schofield", cat: "Revolvers", prix: 50, niveau: 1 },
-  { nom: "Revolver Navy", cat: "Revolvers", prix: 80, niveau: 1 },
-  { nom: "Revolver LeMat", cat: "Revolvers", prix: 90, niveau: 2 },
-  // Pistolets
-  { nom: "Pistolet Volcanic", cat: "Pistolets", prix: 60, niveau: 1 },
-  { nom: "Pistolet semi-automatique", cat: "Pistolets", prix: 70, niveau: 2 },
-  { nom: "Canon scié", cat: "Pistolets", prix: 70, niveau: 3 },
-  { nom: "Pistolet Mauser", cat: "Pistolets", prix: 75, niveau: 1 },
-  { nom: "Pistolet 1899", cat: "Pistolets", prix: 85, niveau: 2 },
-  // Carabines
-  { nom: "Carabine à répétition", cat: "Carabines", prix: 50, niveau: 2 },
-  { nom: "Carabine Litchfield", cat: "Carabines", prix: 130, niveau: 2 },
-  { nom: "Carabine Evans", cat: "Carabines", prix: 140, niveau: 2 },
-  { nom: "Carabine Lancaster", cat: "Carabines", prix: 150, niveau: 2 },
-  // Fusils
-  { nom: "Fusil à petit gibier", cat: "Fusils", prix: 50, niveau: 0 },
-  { nom: "Fusil double canon", cat: "Fusils", prix: 200, niveau: 2 },
-  { nom: "Fusil double canon exotique", cat: "Fusils", prix: 200, niveau: 2 },
-  { nom: "Fusil à répétition", cat: "Fusils", prix: 215, niveau: 2 },
-  { nom: "Fusil springfield", cat: "Fusils", prix: 230, niveau: 3 },
-  { nom: "Fusil semi-automatique", cat: "Fusils", prix: 250, niveau: 1 },
-  { nom: "Fusil à pompe", cat: "Fusils", prix: 275, niveau: 2 },
-  { nom: "Fusil à verrou", cat: "Fusils", prix: 300, niveau: 3 },
-  { nom: "Fusil éléphant", cat: "Fusils", prix: 400, niveau: 3 },
-  // Corps à corps
-  { nom: "Hachette de chasseur", cat: "Corps à corps", prix: 4, niveau: 0 },
-  { nom: "Couteau de lancé", cat: "Corps à corps", prix: 4, niveau: 0 },
-  { nom: "Couteau", cat: "Corps à corps", prix: 5, niveau: 0 },
-  { nom: "Hachette", cat: "Corps à corps", prix: 6, niveau: 0 },
-  // Matériel
-  { nom: "Carquois", cat: "Matériel", prix: 2, niveau: 0 },
-  { nom: "Menottes", cat: "Matériel", prix: 3, niveau: 0 },
-  { nom: "Jumelles", cat: "Matériel", prix: 5, niveau: 0 },
-  { nom: "Lanterne", cat: "Matériel", prix: 5, niveau: 0 },
-  { nom: "Lasso", cat: "Matériel", prix: 5, niveau: 0 },
-  { nom: "Ceinture Hachette", cat: "Matériel", prix: 8, niveau: 0 },
-  { nom: "Ceinture Couteau de lancé", cat: "Matériel", prix: 10, niveau: 0 },
-  { nom: "Ceinture Hachette de chasseur", cat: "Matériel", prix: 10, niveau: 0 },
-  { nom: "Jumelles Améliorées", cat: "Matériel", prix: 10, niveau: 1 },
-  { nom: "Lasso Amélioré", cat: "Matériel", prix: 10, niveau: 1 },
-  // Packs
-  { nom: "Pack Chasseur", cat: "Packs", prix: 18, niveau: 0 },
-  { nom: "Pack L'arrivant", cat: "Packs", prix: 25, niveau: 0 },
-  { nom: "Pack chasseur ultime", cat: "Packs", prix: 35, niveau: 0 },
-  { nom: "Pack Guerrier", cat: "Packs", prix: 95, niveau: 0 },
-  // Munitions
-  { nom: "Boîte de munitions de Pistolet", cat: "Munitions", prix: 5, niveau: 0 },
-  { nom: "Boîte de munitions de Revolver", cat: "Munitions", prix: 5, niveau: 0 },
+  // ── ARMES ──
+  { nom: "Couteau de lancé", cat: "Armes", prix: 4, niveau: 0 },
+  { nom: "Couteau", cat: "Armes", prix: 5, niveau: 0 },
+  { nom: "Machette", cat: "Armes", prix: 0, niveau: 0 },
+  { nom: "Hachette", cat: "Armes", prix: 6, niveau: 0 },
+  { nom: "Hachette de chasseur", cat: "Armes", prix: 4, niveau: 0 },
+  { nom: "Arc", cat: "Armes", prix: 10, niveau: 0 },
+  { nom: "Revolver Cattleman", cat: "Armes", prix: 17, niveau: 0 },
+  { nom: "Revolver Cattleman Mexican", cat: "Armes", prix: 20, niveau: 1 },
+  { nom: "Revolver Double Action", cat: "Armes", prix: 20, niveau: 0 },
+  { nom: "Revolver Schofield", cat: "Armes", prix: 50, niveau: 1 },
+  { nom: "Revolver Navy", cat: "Armes", prix: 80, niveau: 1 },
+  { nom: "Navy Crossover", cat: "Armes", prix: 0, niveau: 0 },
+  { nom: "Revolver LeMat", cat: "Armes", prix: 90, niveau: 2 },
+  { nom: "Pistolet Volcanic", cat: "Armes", prix: 60, niveau: 1 },
+  { nom: "Pistolet semi-automatique", cat: "Armes", prix: 70, niveau: 2 },
+  { nom: "Pistolet Mauser", cat: "Armes", prix: 75, niveau: 1 },
+  { nom: "Pistolet 1899", cat: "Armes", prix: 85, niveau: 2 },
+  { nom: "Canon scié", cat: "Armes", prix: 70, niveau: 3 },
+  { nom: "Carabine à répétition", cat: "Armes", prix: 50, niveau: 2 },
+  { nom: "Carabine Litchfield", cat: "Armes", prix: 130, niveau: 2 },
+  { nom: "Carabine Evans", cat: "Armes", prix: 140, niveau: 2 },
+  { nom: "Carabine Lancaster", cat: "Armes", prix: 150, niveau: 2 },
+  { nom: "Fusil à petit gibier", cat: "Armes", prix: 50, niveau: 0 },
+  { nom: "Fusil double canon", cat: "Armes", prix: 200, niveau: 2 },
+  { nom: "Fusil à répétition", cat: "Armes", prix: 215, niveau: 2 },
+  { nom: "Fusil springfield", cat: "Armes", prix: 230, niveau: 3 },
+  { nom: "Fusil semi-automatique", cat: "Armes", prix: 250, niveau: 1 },
+  { nom: "Fusil à pompe", cat: "Armes", prix: 275, niveau: 2 },
+  { nom: "Fusil à verrou", cat: "Armes", prix: 300, niveau: 3 },
+  // ── ACCESSOIRES ──
+  { nom: "Ceinture de couteau de lancé", cat: "Accessoires", prix: 10, niveau: 0 },
+  { nom: "Ceinture pour hachette", cat: "Accessoires", prix: 8, niveau: 0 },
+  { nom: "Ceinture pour hachette de chasseur", cat: "Accessoires", prix: 10, niveau: 0 },
+  { nom: "Menottes", cat: "Accessoires", prix: 3, niveau: 0 },
+  { nom: "Jumelles", cat: "Accessoires", prix: 5, niveau: 0 },
+  { nom: "Jumelles amélioré", cat: "Accessoires", prix: 10, niveau: 1 },
+  { nom: "Caméra", cat: "Accessoires", prix: 0, niveau: 0 },
+  { nom: "Caméra amélioré", cat: "Accessoires", prix: 0, niveau: 1 },
+  { nom: "Lasso", cat: "Accessoires", prix: 5, niveau: 0 },
+  { nom: "Lasso amélioré", cat: "Accessoires", prix: 10, niveau: 1 },
+  { nom: "Lanterne", cat: "Accessoires", prix: 5, niveau: 0 },
+  // ── MUNITIONS ──
   { nom: "Boîte de munitions de Carabine", cat: "Munitions", prix: 5, niveau: 0 },
   { nom: "Boîte de munitions de Fusil", cat: "Munitions", prix: 5, niveau: 0 },
+  { nom: "Boîte de munitions de Pistolet", cat: "Munitions", prix: 5, niveau: 0 },
   { nom: "Boîte de munitions de Pompe", cat: "Munitions", prix: 5, niveau: 0 },
-  // Matières & divers
-  { nom: "Laiton", cat: "Matières", prix: 3.52, niveau: 0 },
-  { nom: "Pièce d'arme", cat: "Matières", prix: 0, niveau: 0 },
-  { nom: "Don", cat: "Divers", prix: 0, niveau: 0 },
+  { nom: "Boîte de munitions de Revolver", cat: "Munitions", prix: 5, niveau: 0 },
+  { nom: "Boîte de munitions de petit gibier", cat: "Munitions", prix: 5, niveau: 0 },
+  { nom: "Flèches", cat: "Munitions", prix: 0, niveau: 0 },
+  // ── COMPOSANTS ──
+  { nom: "Laiton", cat: "Composants", prix: 3.52, niveau: 0 },
+  { nom: "Composants d'armes", cat: "Composants", prix: 0, niveau: 0 },
+  { nom: "Pièce d'arme", cat: "Composants", prix: 0, niveau: 0 },
+  { nom: "Poudre", cat: "Composants", prix: 0, niveau: 0 },
+  // ── RESSOURCES ──
+  { nom: "Lingot de fer", cat: "Ressources", prix: 0, niveau: 0 },
+  { nom: "Lingot de cuivre", cat: "Ressources", prix: 0, niveau: 0 },
+  { nom: "Lingot de zinc", cat: "Ressources", prix: 0, niveau: 0 },
+  { nom: "Plomb", cat: "Ressources", prix: 0, niveau: 0 },
+  { nom: "Soufre", cat: "Ressources", prix: 0, niveau: 0 },
+  { nom: "Charbon", cat: "Ressources", prix: 0.11, niveau: 0 },
+  { nom: "Bois", cat: "Ressources", prix: 0.22, niveau: 0 },
+  { nom: "Bois amélioré", cat: "Ressources", prix: 2, niveau: 0 },
+  { nom: "Pièce de bois", cat: "Ressources", prix: 0, niveau: 0 },
+  { nom: "Verre", cat: "Ressources", prix: 0, niveau: 0 },
+  { nom: "Corde", cat: "Ressources", prix: 0.48, niveau: 0 },
+  { nom: "Cuir", cat: "Ressources", prix: 0, niveau: 0 },
 ];
-// Idempotent : n'ajoute que les produits ABSENTS (comparaison par nom normalisé),
-// donc re-cliquable pour compléter le catalogue (ex : munitions) sans doublon.
-export async function importerCatalogue(): Promise<ArmResult & { n?: number }> {
+// Ajoute les produits ABSENTS (par nom normalisé) ET recatégorise ceux qui
+// existent déjà selon le catalogue canonique (catégorie SEULE — prix/stock/recette
+// intacts). Re-cliquable sans doublon.
+export async function importerCatalogue(): Promise<ArmResult & { n?: number; recat?: number }> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
-  const { data: existants } = await admin.from("ArmurerieProduit").select("nom");
-  const dejaLa = new Set((existants || []).map((p) => _norm(String((p as { nom: string }).nom))));
-  const manquants = CATALOGUE.filter((p) => !dejaLa.has(_norm(p.nom)));
-  if (!manquants.length) return { ok: true, n: 0 };
-  const rows = manquants.map((p) => ({ id: newId("prd"), nom: p.nom, categorie: p.cat, prix: round2(p.prix), cout: 0, stock: 0, aLaDemande: false, niveau: p.niveau || 0 }));
-  const { error } = await admin.from("ArmurerieProduit").insert(rows);
-  if (error) return { ok: false, error: tableErr(error.message, "produits") };
-  return { ok: true, n: manquants.length };
+  const { data: existants } = await admin.from("ArmurerieProduit").select("id,nom,categorie");
+  const parNom = new Map((existants || []).map((p) => [_norm(String((p as { nom: string }).nom)), p as { id: string; nom: string; categorie: string }]));
+  // 1) recatégoriser l'existant
+  let recat = 0;
+  for (const c of CATALOGUE) {
+    const ex = parNom.get(_norm(c.nom));
+    if (ex && ex.categorie !== c.cat) { const { error } = await admin.from("ArmurerieProduit").update({ categorie: c.cat }).eq("id", ex.id); if (!error) recat++; }
+  }
+  // 2) ajouter les manquants
+  const manquants = CATALOGUE.filter((p) => !parNom.has(_norm(p.nom)));
+  if (manquants.length) {
+    const rows = manquants.map((p) => ({ id: newId("prd"), nom: p.nom, categorie: p.cat, prix: round2(p.prix), cout: 0, stock: 0, aLaDemande: false, niveau: p.niveau || 0 }));
+    const { error } = await admin.from("ArmurerieProduit").insert(rows);
+    if (error) return { ok: false, error: tableErr(error.message, "produits") };
+  }
+  return { ok: true, n: manquants.length, recat };
 }
 
 // ── Recettes de craft (ingrédients requis par arme/objet) ────────
