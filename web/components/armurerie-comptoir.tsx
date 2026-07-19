@@ -5,15 +5,15 @@ import { useRouter } from "next/navigation";
 import {
   Users, ScrollText, FileSignature, Plus, Minus, Loader2, Trash2, IdCard, Send, Check, X,
   Download, CircleDollarSign, Vault, ArrowDownRight, ArrowUpRight, History, ShoppingCart, Package, Search,
-  Clock, BadgeDollarSign, Landmark, StickyNote, ListTodo, Activity, Wallet,
+  Clock, BadgeDollarSign, Landmark, StickyNote, ListTodo, Activity, Wallet, ClipboardList,
 } from "lucide-react";
-import type { ArmClient, ArmVente, ArmContrat, ArmMouvement, ArmProduit, ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache } from "@/lib/queries";
+import type { ArmClient, ArmVente, ArmContrat, ArmMouvement, ArmProduit, ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache, ArmCommande } from "@/lib/queries";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { cents } from "@/lib/format";
 import { Badge } from "@/components/ui";
 import { PhotoDrop } from "@/components/photo-drop";
 import {
-  EmployesTab, PointageTab, ComptabiliteTab, PaiesTab, ImpotsTab, BlocNotesTab, TachesTab, ActiviteTab,
+  EmployesTab, PointageTab, ComptabiliteTab, PaiesTab, ImpotsTab, BlocNotesTab, TachesTab, ActiviteTab, CarnetCommandesTab,
 } from "@/components/armurerie-erp";
 import {
   creerClient, majClient, supprimerClient,
@@ -36,9 +36,9 @@ const ctrTone = (s: string): "good" | "warn" | "accent" | "oxblood" | "muted" =>
   s === "signe" ? "good" : s === "envoye" ? "accent" : s === "refuse" ? "oxblood" : "muted";
 const ctrLabel = (s: string) => s === "signe" ? "Signé" : s === "envoye" ? "Envoyé" : s === "refuse" ? "Refusé" : "Brouillon";
 
-type TabKey = "caisse" | "produits" | "ventes" | "clients" | "contrats" | "employes" | "pointage" | "paies" | "comptabilite" | "impots" | "notes" | "taches" | "activite";
+type TabKey = "caisse" | "produits" | "commandes" | "ventes" | "clients" | "contrats" | "employes" | "pointage" | "paies" | "comptabilite" | "impots" | "notes" | "taches" | "activite";
 
-export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouvementsCoffre, produits, employes, pointages, paies, impots, notes, taches }: { clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvementsCoffre: ArmMouvement[]; produits: ArmProduit[]; employes: ArmEmploye[]; pointages: ArmPointage[]; paies: ArmPaie[]; impots: ArmImpot[]; notes: ArmNote[]; taches: ArmTache[] }) {
+export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouvementsCoffre, produits, employes, pointages, paies, impots, notes, taches, commandes }: { clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvementsCoffre: ArmMouvement[]; produits: ArmProduit[]; employes: ArmEmploye[]; pointages: ArmPointage[]; paies: ArmPaie[]; impots: ArmImpot[]; notes: ArmNote[]; taches: ArmTache[]; commandes: ArmCommande[] }) {
   const router = useRouter();
   const [tab, setTab] = useState<TabKey>("caisse");
   const signes = contrats.filter((c) => c.statut === "signe").length;
@@ -49,6 +49,7 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
   const TABS: { key: TabKey; label: string; icon: typeof Users; n: number }[] = [
     { key: "caisse", label: "Caisse", icon: ShoppingCart, n: produits.length },
     { key: "produits", label: "Produits", icon: Package, n: produits.length },
+    { key: "commandes", label: "Carnet de commande", icon: ClipboardList, n: commandes.filter((c) => c.statut === "en_attente" || c.statut === "prete").length },
     { key: "ventes", label: "Registre des ventes", icon: ScrollText, n: ventes.length },
     { key: "clients", label: "Fichier clients", icon: Users, n: clients.length },
     { key: "contrats", label: "Contrats", icon: FileSignature, n: contrats.length },
@@ -90,6 +91,7 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
 
       {tab === "caisse" ? <CaisseTab produits={produits} clients={clients} router={router} /> : null}
       {tab === "produits" ? <ProduitsTab produits={produits} router={router} /> : null}
+      {tab === "commandes" ? <CarnetCommandesTab commandes={commandes} produits={produits} clients={clients.map((c) => ({ id: c.id, nom: c.nom }))} router={router} /> : null}
       {tab === "clients" ? <ClientsTab clients={clients} ventes={ventes} router={router} /> : null}
       {tab === "ventes" ? <VentesTab ventes={ventes} clients={clients} router={router} /> : null}
       {tab === "contrats" ? <ContratsTab contrats={contrats} clients={clients} router={router} /> : null}

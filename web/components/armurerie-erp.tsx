@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import {
   Users, Plus, Loader2, Trash2, Check, Download, Clock, Play, Square,
   BadgeDollarSign, Landmark, StickyNote, ListTodo, Activity, Pin, PinOff, Pencil,
-  ArrowDownRight, ArrowUpRight, CircleDollarSign, Wallet,
+  ArrowDownRight, ArrowUpRight, CircleDollarSign, Wallet, ClipboardList, X,
 } from "lucide-react";
-import type { ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache, ArmMouvement, ArmVente } from "@/lib/queries";
+import type { ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache, ArmMouvement, ArmVente, ArmProduit, ArmCommande, ArmCommandeLigne } from "@/lib/queries";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
 import { Badge } from "@/components/ui";
 import { cents } from "@/lib/format";
@@ -19,6 +19,7 @@ import {
   ajouterEcriture,
   creerNote, majNote, supprimerNote,
   creerTache, basculerTache, supprimerTache,
+  creerCommande, majCommande, marquerCommande, supprimerCommande,
 } from "@/app/(app)/armurerie/actions";
 
 type Router = ReturnType<typeof useRouter>;
@@ -626,6 +627,166 @@ export function TachesTab({ taches, router }: { taches: ArmTache[]; router: Rout
         </div>
       )}
     </>
+  );
+}
+
+// ═══════════════════ CARNET DE COMMANDE ═══════════════════
+const CMD_STATUTS = [
+  { key: "en_attente", label: "En attente", tone: "warn" as const },
+  { key: "prete", label: "Prête", tone: "accent" as const },
+  { key: "livree", label: "Livrée", tone: "good" as const },
+  { key: "annulee", label: "Annulée", tone: "muted" as const },
+];
+const cmdStatut = (s: string) => CMD_STATUTS.find((x) => x.key === s) || CMD_STATUTS[0];
+
+export function CarnetCommandesTab({ commandes, produits, clients, router }: { commandes: ArmCommande[]; produits: ArmProduit[]; clients: { id: string; nom: string }[]; router: Router }) {
+  const [sel, setSel] = useState<ArmCommande | null>(null);
+  const [nouveau, setNouveau] = useState(false);
+  const enAttente = commandes.filter((c) => c.statut === "en_attente" || c.statut === "prete");
+  const totalAttente = enAttente.reduce((s, c) => s + c.total, 0);
+  const livrees = commandes.filter((c) => c.statut === "livree");
+
+  return (
+    <>
+      <div className="mb-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+        <Stat label="En cours" value={String(enAttente.length)} tone="var(--warn)" icon={ClipboardList} />
+        <Stat label="Montant en cours" value={money(totalAttente)} tone="var(--accent)" icon={CircleDollarSign} />
+        <Stat label="Livrées" value={String(livrees.length)} tone="var(--good)" icon={Check} />
+      </div>
+      <TopBar>
+        <p className="text-[0.74rem] italic text-faint">Bons de commande client — objets, quantités, prix unitaire et total par pile.</p>
+        <Btn onClick={() => setNouveau(true)}><Plus className="h-3.5 w-3.5" /> Nouvelle commande</Btn>
+      </TopBar>
+      {commandes.length === 0 ? (
+        <Vide icon={ClipboardList} texte="Aucune commande. Crée un bon de commande : catégorie, client, puis la liste des objets avec quantité et prix unitaire — le total se calcule tout seul." />
+      ) : (
+        <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
+          {commandes.map((c) => {
+            const st = cmdStatut(c.statut);
+            const nbPieces = c.lignes.reduce((s, l) => s + l.qte, 0);
+            return (
+              <button key={c.id} onClick={() => setSel(c)} className="rounded-[12px] border border-border bg-surface-2 px-3.5 py-3 text-left transition hover:-translate-y-0.5 hover:border-border-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-[0.88rem] font-semibold">{[c.clientPrenom, c.clientNom].filter(Boolean).join(" ")}</span>
+                  <Badge tone={st.tone}>{st.label}</Badge>
+                </div>
+                {c.categorie ? <div className="mt-0.5 text-[0.72rem] text-faint">{c.categorie}</div> : null}
+                <div className="mt-1.5 text-[0.74rem] text-muted">{c.lignes.length} objet{c.lignes.length > 1 ? "s" : ""} · {nbPieces} pièce{nbPieces > 1 ? "s" : ""}</div>
+                <div className="mt-1 font-num text-[1rem] font-bold" style={{ color: "var(--accent)" }}>{money(c.total)}</div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {nouveau ? <CommandeModal produits={produits} clients={clients} onClose={() => setNouveau(false)} router={router} /> : null}
+      {sel ? <CommandeModal commande={sel} produits={produits} clients={clients} onClose={() => setSel(null)} router={router} /> : null}
+    </>
+  );
+}
+
+function CommandeModal({ commande, produits, clients, onClose, router }: { commande?: ArmCommande; produits: ArmProduit[]; clients: { id: string; nom: string }[]; onClose: () => void; router: Router }) {
+  const editing = !!commande;
+  const [categorie, setCategorie] = useState(commande?.categorie || "");
+  const [clientNom, setClientNom] = useState(commande?.clientNom || "");
+  const [clientPrenom, setClientPrenom] = useState(commande?.clientPrenom || "");
+  const [statut, setStatut] = useState(commande?.statut || "en_attente");
+  const [notes, setNotes] = useState(commande?.notes || "");
+  const [lignes, setLignes] = useState<ArmCommandeLigne[]>(commande?.lignes?.length ? commande.lignes : [{ objet: "", qte: 1, prixUnitaire: 0 }]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [confirmDel, setConfirmDel] = useState(false);
+
+  const prixParNom = new Map(produits.map((p) => [p.nom.toLowerCase(), p.prix]));
+  const total = lignes.reduce((s, l) => s + (Number(l.qte) || 0) * (Number(l.prixUnitaire) || 0), 0);
+
+  function setLigne(i: number, patch: Partial<ArmCommandeLigne>) {
+    setLignes((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  }
+  function setObjet(i: number, objet: string) {
+    setLignes((ls) => ls.map((l, idx) => {
+      if (idx !== i) return l;
+      const prix = prixParNom.get(objet.trim().toLowerCase());
+      return { ...l, objet, prixUnitaire: (!l.prixUnitaire && prix != null) ? prix : l.prixUnitaire };
+    }));
+  }
+  const addLigne = () => setLignes((ls) => [...ls, { objet: "", qte: 1, prixUnitaire: 0 }]);
+  const delLigne = (i: number) => setLignes((ls) => ls.length > 1 ? ls.filter((_, idx) => idx !== i) : ls);
+
+  async function enregistrer() {
+    setErr(null);
+    if (clientNom.trim().length < 2) { setErr("Indique le nom du client."); return; }
+    const propres = lignes.filter((l) => l.objet.trim() || l.qte);
+    if (!propres.length) { setErr("Ajoute au moins un objet."); return; }
+    setBusy("save");
+    const data = { categorie, clientNom, clientPrenom, lignes: propres, statut, notes };
+    const r = editing ? await majCommande(commande!.id, data) : await creerCommande(data);
+    setBusy(null);
+    if (!r.ok) { setErr(r.error || "Impossible."); return; }
+    router.refresh(); onClose();
+  }
+  async function marquer(st: string) { setBusy("st"); const r = await marquerCommande(commande!.id, st); setBusy(null); if (r.ok) { setStatut(st); router.refresh(); } }
+  async function supprimer() { setBusy("del"); const r = await supprimerCommande(commande!.id); setBusy(null); if (!r.ok) { setErr(r.error || "Échec."); return; } router.refresh(); onClose(); }
+
+  return (
+    <Modal titre={editing ? `Commande — ${[commande!.clientPrenom, commande!.clientNom].filter(Boolean).join(" ")}` : "🧾 Nouveau bon de commande"} onClose={onClose} max={640}>
+      <div className="flex flex-col gap-3">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Champ label="Catégorie"><input className={inputCls} value={categorie} onChange={(e) => setCategorie(e.target.value)} placeholder="Armes, Munitions, Sur mesure…" maxLength={80} list="cmd-cats" /><datalist id="cmd-cats"><option value="Armes" /><option value="Munitions" /><option value="Matériel" /><option value="Sur mesure" /><option value="Réparation" /></datalist></Champ>
+          <Champ label="Prénom du client"><input className={inputCls} value={clientPrenom} onChange={(e) => setClientPrenom(e.target.value)} maxLength={120} /></Champ>
+          <Champ label="Nom du client *"><input className={inputCls} value={clientNom} onChange={(e) => setClientNom(e.target.value)} maxLength={120} list="cmd-clients" /><datalist id="cmd-clients">{clients.map((c) => <option key={c.id} value={c.nom} />)}</datalist></Champ>
+        </div>
+
+        {/* Liste d'objets */}
+        <div className="rounded-[10px] border border-border bg-surface-2 p-2.5">
+          <div className="mb-1.5 hidden grid-cols-[1fr_58px_92px_92px_28px] gap-2 px-1 text-[0.66rem] uppercase tracking-[0.05em] text-faint sm:grid">
+            <span>Objet</span><span className="text-center">Qté</span><span className="text-right">Prix unit.</span><span className="text-right">Total pile</span><span />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {lignes.map((l, i) => {
+              const pile = (Number(l.qte) || 0) * (Number(l.prixUnitaire) || 0);
+              return (
+                <div key={i} className="grid grid-cols-[1fr_58px_92px_92px_28px] items-center gap-2">
+                  <input className={inputCls + " !px-2 !py-1.5"} value={l.objet} onChange={(e) => setObjet(i, e.target.value)} placeholder="Objet…" maxLength={120} list="cmd-objets" />
+                  <input className={inputCls + " !px-1.5 !py-1.5 text-center"} type="number" min={0} value={l.qte || ""} onChange={(e) => setLigne(i, { qte: Math.max(0, Math.round(Number(e.target.value) || 0)) })} />
+                  <input className={inputCls + " !px-2 !py-1.5 text-right"} type="number" min={0} step="0.01" value={l.prixUnitaire || ""} onChange={(e) => setLigne(i, { prixUnitaire: Math.max(0, Number(e.target.value) || 0) })} />
+                  <span className="truncate text-right font-num text-[0.82rem] font-semibold" style={{ color: "var(--accent)" }}>{money(pile)}</span>
+                  <button onClick={() => delLigne(i)} className="grid h-6 w-6 place-items-center rounded text-faint hover:text-ink" title="Retirer"><X className="h-3.5 w-3.5" /></button>
+                </div>
+              );
+            })}
+          </div>
+          <datalist id="cmd-objets">{produits.map((p) => <option key={p.id} value={p.nom} />)}</datalist>
+          <button onClick={addLigne} className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-border px-2.5 py-1.5 text-[0.76rem] font-semibold text-muted hover:border-border-2 hover:text-ink"><Plus className="h-3.5 w-3.5" /> Ajouter un objet</button>
+        </div>
+
+        {/* Total général */}
+        <div className="flex items-center justify-between rounded-[10px] border px-3.5 py-2.5" style={{ borderColor: "color-mix(in srgb,var(--accent) 40%,var(--border))", background: "color-mix(in srgb,var(--accent) 8%,var(--surface-2))" }}>
+          <span className="text-[0.82rem] font-semibold uppercase tracking-[0.05em] text-muted">Total de la commande</span>
+          <span className="font-num text-[1.3rem] font-bold" style={{ color: "var(--accent)" }}>{money(total)}</span>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Statut</span>
+            <div className="flex flex-wrap gap-1.5">
+              {CMD_STATUTS.map((st) => (
+                <button key={st.key} onClick={() => editing ? marquer(st.key) : setStatut(st.key)} disabled={busy === "st"} className="rounded-lg px-2.5 py-1 text-[0.74rem] font-semibold transition" style={{ color: statut === st.key ? "#000" : "var(--muted)", background: statut === st.key ? "var(--accent)" : "var(--surface)", border: "1px solid var(--border)" }}>{st.label}</button>
+              ))}
+            </div>
+          </div>
+          <Champ label="Notes"><input className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={1000} placeholder="Délai, acompte…" /></Champ>
+        </div>
+
+        {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
+        <div className="mt-1 flex items-center justify-between border-t border-border pt-3">
+          {editing ? (confirmDel ? (
+            <div className="flex items-center gap-2 text-[0.78rem]"><span className="text-muted">Supprimer ?</span>
+              <button onClick={supprimer} disabled={busy === "del"} className="rounded-lg px-2.5 py-1 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--oxblood)" }}>{busy === "del" ? "…" : "Oui"}</button>
+              <button onClick={() => setConfirmDel(false)} className="text-[0.76rem] text-muted hover:text-ink">Annuler</button></div>
+          ) : <button onClick={() => setConfirmDel(true)} className="inline-flex items-center gap-1.5 text-[0.76rem] text-faint hover:text-ink"><Trash2 className="h-3.5 w-3.5" /> Supprimer</button>) : <span />}
+          <button onClick={enregistrer} disabled={busy === "save"} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{busy === "save" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} {editing ? "Enregistrer" : "Créer la commande"}</button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

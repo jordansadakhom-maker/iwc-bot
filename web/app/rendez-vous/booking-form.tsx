@@ -7,16 +7,22 @@ import { soumettreRdv } from "./actions";
 const PRESTATIONS = [
   "Sécurité / Garde du corps",
   "Escorte de convoi",
+  "Protection d'événement",
   "Achat / Vente d'arme",
-  "Cours de tir",
+  "Cours de tir / Formation",
   "Chasse de prime / Traque",
+  "Récupération / Recouvrement",
+  "Enquête / Renseignement",
   "Soin médical",
+  "🐺 Rejoindre la compagnie (recrutement)",
   "Autre demande",
 ];
 
 // Durée estimée — sert à adapter les tarifs au taux horaire.
 const DUREES = [
+  "≈ 30 min",
   "≈ 1 heure",
+  "≈ 1 h 30",
   "≈ 2 heures",
   "≈ 3 heures",
   "Demi-journée",
@@ -24,6 +30,9 @@ const DUREES = [
   "Plusieurs jours",
   "À définir ensemble",
 ];
+
+// Moyen de contact préféré.
+const MOYENS = ["Discord", "Télégramme", "Autre"];
 
 const inputCls =
   "w-full rounded-xl border border-border bg-surface-2 px-3.5 py-2.5 text-[0.9rem] text-ink outline-none placeholder:text-faint focus:border-[color-mix(in_srgb,var(--accent)_55%,var(--border))]";
@@ -33,7 +42,7 @@ export function BookingForm() {
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [form, setForm] = useState({
-    nomRP: "", prestation: PRESTATIONS[0], creneau: "", duree: DUREES[0], lieu: "", contact: "", message: "", website: "",
+    nomRP: "", prestation: PRESTATIONS[0], creneau: "", duree: DUREES[1], lieu: "", moyen: MOYENS[0], contact: "", message: "", website: "",
   });
 
   function set<K extends keyof typeof form>(k: K, v: string) {
@@ -45,7 +54,8 @@ export function BookingForm() {
     setLoading(true);
     setErr(null);
     try {
-      const res = await soumettreRdv(form);
+      const contactFinal = `${form.moyen} : ${form.contact.trim()}`;
+      const res = await soumettreRdv({ ...form, contact: contactFinal });
       if (res.ok) setDone(true);
       else setErr(res.error || "Une erreur est survenue.");
     } catch {
@@ -64,10 +74,10 @@ export function BookingForm() {
         <h2 className="font-display text-xl">Demande envoyée&nbsp;!</h2>
         <p className="max-w-sm text-[0.88rem] leading-relaxed text-muted">
           Merci <b>{form.nomRP}</b>. Ta demande de rendez-vous a bien été transmise à la maison.
-          Un membre te recontactera via <b>{form.contact}</b> dès que possible.
+          Un membre te recontactera via <b>{form.moyen}</b> ({form.contact}) dès que possible.
         </p>
         <button
-          onClick={() => { setDone(false); setForm({ nomRP: "", prestation: PRESTATIONS[0], creneau: "", duree: DUREES[0], lieu: "", contact: "", message: "", website: "" }); }}
+          onClick={() => { setDone(false); setForm({ nomRP: "", prestation: PRESTATIONS[0], creneau: "", duree: DUREES[1], lieu: "", moyen: MOYENS[0], contact: "", message: "", website: "" }); }}
           className="mt-2 rounded-xl border border-border bg-surface px-4 py-2 text-[0.85rem] text-muted hover:text-ink"
         >
           Faire une autre demande
@@ -110,7 +120,12 @@ export function BookingForm() {
 
       <div>
         <label className="mb-1.5 block text-[0.76rem] font-semibold uppercase tracking-[0.06em] text-muted">Comment te contacter&nbsp;? *</label>
-        <input className={inputCls} required value={form.contact} onChange={(e) => set("contact", e.target.value)} placeholder="Pseudo Discord, ou autre moyen de te joindre" />
+        <div className="grid gap-2 sm:grid-cols-[130px_1fr]">
+          <select className={inputCls} value={form.moyen} onChange={(e) => set("moyen", e.target.value)}>
+            {MOYENS.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+          <input className={inputCls} required value={form.contact} onChange={(e) => set("contact", e.target.value)} placeholder={form.moyen === "Télégramme" ? "N° ou nom de télégramme" : form.moyen === "Discord" ? "Ton pseudo Discord" : "Comment te joindre"} />
+        </div>
       </div>
 
       <div>

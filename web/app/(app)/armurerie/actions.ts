@@ -488,3 +488,61 @@ export async function supprimerTache(id: string): Promise<ArmResult> {
   const { error } = await admin.from("ArmurerieTache").delete().eq("id", id);
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
+
+// ── Carnet de commande (bons de commande client) ─────────────────
+type LigneCmd = { objet: string; qte: number; prixUnitaire: number };
+function _nettoyerLignes(lignes: unknown): { lignes: LigneCmd[]; total: number } {
+  const arr = Array.isArray(lignes) ? lignes : [];
+  const out: LigneCmd[] = [];
+  let total = 0;
+  for (const l of arr) {
+    const o = (l || {}) as Record<string, unknown>;
+    const objet = String(o.objet ?? "").trim().slice(0, 120);
+    const qte = Math.max(0, Math.round(Number(o.qte) || 0));
+    const prixUnitaire = Math.max(0, round2(Number(o.prixUnitaire) || 0));
+    if (!objet && !qte) continue;
+    out.push({ objet: objet || "Article", qte, prixUnitaire });
+    total += qte * prixUnitaire;
+  }
+  return { lignes: out, total: round2(total) };
+}
+export async function creerCommande(d: { categorie?: string; clientNom: string; clientPrenom?: string; lignes: LigneCmd[]; statut?: string; notes?: string }): Promise<ArmResult> {
+  if (!d.clientNom || d.clientNom.trim().length < 2) return { ok: false, error: "Indique le nom du client." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { lignes, total } = _nettoyerLignes(d.lignes);
+  if (!lignes.length) return { ok: false, error: "Ajoute au moins un objet à la commande." };
+  const id = newId("cmd");
+  const { error } = await admin.from("ArmurerieCommande").insert({
+    id, categorie: s(d.categorie, 80), clientNom: s(d.clientNom, 120), clientPrenom: s(d.clientPrenom, 120),
+    lignes, total, statut: s(d.statut, 40) || "en_attente", notes: s(d.notes, 1000),
+  });
+  if (error) return { ok: false, error: tableErr(error.message, "commandes") };
+  return { ok: true, id };
+}
+export async function majCommande(id: string, d: { categorie?: string; clientNom?: string; clientPrenom?: string; lignes?: LigneCmd[]; statut?: string; notes?: string }): Promise<ArmResult> {
+  if (!id) return { ok: false, error: "Commande introuvable." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const up: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+  if ("categorie" in d) up.categorie = s(d.categorie, 80);
+  if ("clientNom" in d) up.clientNom = s(d.clientNom, 120);
+  if ("clientPrenom" in d) up.clientPrenom = s(d.clientPrenom, 120);
+  if ("statut" in d) up.statut = s(d.statut, 40);
+  if ("notes" in d) up.notes = s(d.notes, 1000);
+  if ("lignes" in d) { const { lignes, total } = _nettoyerLignes(d.lignes); up.lignes = lignes; up.total = total; }
+  const { error } = await admin.from("ArmurerieCommande").update(up).eq("id", id);
+  return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+}
+export async function marquerCommande(id: string, statut: string): Promise<ArmResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { error } = await admin.from("ArmurerieCommande").update({ statut: s(statut, 40) || "en_attente", updatedAt: new Date().toISOString() }).eq("id", id);
+  return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+}
+export async function supprimerCommande(id: string): Promise<ArmResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { error } = await admin.from("ArmurerieCommande").delete().eq("id", id);
+  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+}

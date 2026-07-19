@@ -45,7 +45,11 @@ export default function RendezVousPage() {
           <BookingForm />
         </section>
 
-        <p className="mt-6 text-center text-[0.72rem] text-faint">
+        <p className="mt-5 text-center text-[0.8rem] text-muted">
+          Juste une question ou un message&nbsp;?{" "}
+          <Link href="/telegramme" className="font-semibold text-accent hover:underline">Envoie un télégramme</Link>
+        </p>
+        <p className="mt-2 text-center text-[0.72rem] text-faint">
           Membre de la maison&nbsp;?{" "}
           <Link href="/login" className="text-accent hover:underline">Espace connecté</Link>
         </p>
