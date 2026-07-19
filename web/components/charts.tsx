@@ -4,11 +4,12 @@
 // thème clair/sombre via tokens, libellés directs + survol interactif.
 
 import { useState } from "react";
+import { cents } from "@/lib/format";
 
 // ── Barres horizontales (magnitude, teinte laiton par défaut ; couleur/ligne
 //    catégorielle possible). Survol : la barre s'illumine, sa valeur ressort. ──
 function fmt(n: number, money?: boolean) {
-  return money ? "$" + n.toLocaleString("fr-FR") : String(n);
+  return money ? "$" + cents(n) : String(n);
 }
 
 export function BarresH({

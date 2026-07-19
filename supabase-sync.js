@@ -146,12 +146,13 @@ function _construire(db) {
   const memberIds = new Set(membres.map(m => m.id));
 
   // ── Coffres (reflet fidèle — 0 reste 0) ──
+  const _r2 = (x) => Math.round((Number(x) || 0) * 100) / 100; // conserve les centimes
   const coffres = [
-    { id: 'coffre_commun', pole: 'both', solde: Math.round(Number(db.coffre) || 0), updatedAt: now },
+    { id: 'coffre_commun', pole: 'both', solde: _r2(db.coffre), updatedAt: now },
   ];
   if (db.coffres && typeof db.coffres === 'object') {
-    coffres.push({ id: 'coffre_legal', pole: 'legal', solde: Math.round(Number(db.coffres.legal) || 0), updatedAt: now });
-    coffres.push({ id: 'coffre_illegal', pole: 'illegal', solde: Math.round(Number(db.coffres.illegal) || 0), updatedAt: now });
+    coffres.push({ id: 'coffre_legal', pole: 'legal', solde: _r2(db.coffres.legal), updatedAt: now });
+    coffres.push({ id: 'coffre_illegal', pole: 'illegal', solde: _r2(db.coffres.illegal), updatedAt: now });
   }
 
   // ── Contrats ──

@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { envoyerCommande } from "@/lib/commandes";
+import { round2 } from "@/lib/format";
 
 type Admin = NonNullable<ReturnType<typeof createAdminClient>>;
 
@@ -24,7 +25,7 @@ async function auteurNom(): Promise<string> {
 // Remonte les erreurs d'écriture (table manquante, RLS…) au lieu de les avaler,
 // pour ne plus jamais afficher un « succès » alors que rien n'a bougé.
 async function _mouvementCoffre(admin: Admin, montant: number, sens: "entree" | "sortie", motif: string, auteur: string) {
-  const m = Math.abs(Math.round(Number(montant) || 0));
+  const m = Math.abs(round2(Number(montant) || 0));
   if (!m) return;
   const { data, error: eLire } = await admin.from("ArmurerieCoffre").select("solde").eq("id", "vanhorn").maybeSingle();
   if (eLire) throw new Error(eLire.message);
@@ -87,11 +88,11 @@ export async function creerVente(d: { clientId?: string; acquereur: string; date
     dateVente: s(d.dateVente, 40) || new Date().toLocaleDateString("fr-FR"),
     marque: s(d.marque, 80), modele: s(d.modele, 80), categorie: s(d.categorie, 60),
     numeroSerie: s(d.numeroSerie, 80), vendeur: s(d.vendeur, 120), telegramme: s(d.telegramme, 60),
-    prix: Math.max(0, Math.round(Number(d.prix) || 0)), notes: s(d.notes, 1000), statut: "enregistree",
+    prix: Math.max(0, round2(Number(d.prix) || 0)), notes: s(d.notes, 1000), statut: "enregistree",
   });
   if (error) return { ok: false, error: tableErr(error.message, "ventes") };
   // Crédite automatiquement le coffre de l'armurerie du montant de la vente.
-  const prix = Math.max(0, Math.round(Number(d.prix) || 0));
+  const prix = Math.max(0, round2(Number(d.prix) || 0));
   if (prix > 0) {
     const arme = [s(d.marque, 80), s(d.modele, 80)].filter(Boolean).join(" ") || "arme";
     try { await _mouvementCoffre(admin, prix, "entree", `Vente — ${arme} à ${s(d.acquereur, 120)}`, s(d.vendeur, 120) || (await auteurNom())); } catch {}
@@ -101,7 +102,7 @@ export async function creerVente(d: { clientId?: string; acquereur: string; date
 
 // Dépôt / retrait manuel sur le coffre de l'armurerie.
 export async function ajusterCoffreArmurerie(montant: number, mode: "depot" | "retrait", motif: string): Promise<ArmResult> {
-  const m = Math.abs(Math.round(Number(montant) || 0));
+  const m = Math.abs(round2(Number(montant) || 0));
   if (m <= 0) return { ok: false, error: "Montant invalide." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
@@ -120,7 +121,7 @@ export async function majVente(id: string, patch: Record<string, unknown>): Prom
   if (!admin) return { ok: false, error: "Service indisponible." };
   const up: Record<string, unknown> = {};
   for (const k of ["acquereur", "dateVente", "marque", "modele", "categorie", "numeroSerie", "vendeur", "telegramme", "notes", "statut", "clientId"]) if (k in patch) up[k] = s(patch[k], 1000);
-  if ("prix" in patch) up.prix = Math.max(0, Math.round(Number(patch.prix) || 0));
+  if ("prix" in patch) up.prix = Math.max(0, round2(Number(patch.prix) || 0));
   const { error } = await admin.from("ArmurerieVente").update(up).eq("id", id);
   return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
 }
@@ -139,7 +140,7 @@ export async function creerContrat(d: { clientId?: string; clientNom: string; cl
   const id = newId("ctr");
   const { error } = await admin.from("ArmurerieContrat").insert({
     id, clientId: s(d.clientId, 60), clientNom: s(d.clientNom, 120), clientDiscordId: s(d.clientDiscordId, 40),
-    arme: s(d.arme, 120), numeroSerie: s(d.numeroSerie, 80), prix: Math.max(0, Math.round(Number(d.prix) || 0)),
+    arme: s(d.arme, 120), numeroSerie: s(d.numeroSerie, 80), prix: Math.max(0, round2(Number(d.prix) || 0)),
     conditions: s(d.conditions, 2000), statut: "brouillon",
   });
   if (error) return { ok: false, error: tableErr(error.message, "contrats") };
@@ -189,7 +190,7 @@ export async function creerProduit(d: { nom: string; categorie?: string; prix?: 
   const id = newId("prd");
   const { error } = await admin.from("ArmurerieProduit").insert({
     id, nom: s(d.nom, 120), categorie: s(d.categorie, 60) || "Divers",
-    prix: Math.max(0, Math.round(Number(d.prix) || 0)), cout: Math.max(0, Math.round(Number(d.cout) || 0)),
+    prix: Math.max(0, round2(Number(d.prix) || 0)), cout: Math.max(0, round2(Number(d.cout) || 0)),
     stock: Math.max(0, Math.round(Number(d.stock) || 0)), aLaDemande: !!d.aLaDemande,
   });
   if (error) return { ok: false, error: tableErr(error.message, "produits") };
@@ -202,8 +203,8 @@ export async function majProduit(id: string, patch: Record<string, unknown>): Pr
   const up: Record<string, unknown> = {};
   if ("nom" in patch) up.nom = s(patch.nom, 120);
   if ("categorie" in patch) up.categorie = s(patch.categorie, 60);
-  if ("prix" in patch) up.prix = Math.max(0, Math.round(Number(patch.prix) || 0));
-  if ("cout" in patch) up.cout = Math.max(0, Math.round(Number(patch.cout) || 0));
+  if ("prix" in patch) up.prix = Math.max(0, round2(Number(patch.prix) || 0));
+  if ("cout" in patch) up.cout = Math.max(0, round2(Number(patch.cout) || 0));
   if ("stock" in patch) up.stock = Math.max(0, Math.round(Number(patch.stock) || 0));
   if ("aLaDemande" in patch) up.aLaDemande = !!patch.aLaDemande;
   const { error } = await admin.from("ArmurerieProduit").update(up).eq("id", id);
@@ -260,7 +261,7 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
   try {
     for (const l of items) {
       const q = Math.max(1, Math.round(Number(l.qte) || 1));
-      const montant = Math.max(0, Math.round((Number(l.prix) || 0) * q));
+      const montant = Math.max(0, round2((Number(l.prix) || 0) * q));
       total += montant;
       await admin.from("ArmurerieVente").insert({
         id: newId("vte"), acquereur: cli, dateVente: dateV, marque: s(l.nom, 80), modele: null,
@@ -299,7 +300,7 @@ export async function creerEmploye(d: { nom: string; discordId?: string; role?: 
   const { error } = await admin.from("ArmurerieEmploye").insert({
     id, nom: s(d.nom, 120), discordId: s(d.discordId, 40), role: s(d.role, 60) || "Armurier",
     commission: Math.max(0, Math.min(100, Math.round(Number(d.commission) || 0))),
-    salaireBase: Math.max(0, Math.round(Number(d.salaireBase) || 0)), actif: true,
+    salaireBase: Math.max(0, round2(Number(d.salaireBase) || 0)), actif: true,
   });
   if (error) return { ok: false, error: erpErr(error.message) };
   return { ok: true, id };
@@ -313,7 +314,7 @@ export async function majEmploye(id: string, patch: Record<string, unknown>): Pr
   if ("discordId" in patch) up.discordId = s(patch.discordId, 40);
   if ("role" in patch) up.role = s(patch.role, 60);
   if ("commission" in patch) up.commission = Math.max(0, Math.min(100, Math.round(Number(patch.commission) || 0)));
-  if ("salaireBase" in patch) up.salaireBase = Math.max(0, Math.round(Number(patch.salaireBase) || 0));
+  if ("salaireBase" in patch) up.salaireBase = Math.max(0, round2(Number(patch.salaireBase) || 0));
   if ("actif" in patch) up.actif = !!patch.actif;
   const { error } = await admin.from("ArmurerieEmploye").update(up).eq("id", id);
   return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
@@ -359,14 +360,14 @@ export async function creerPaie(d: { employeId?: string; employeNom: string; per
   if (!d.employeNom || d.employeNom.trim().length < 2) return { ok: false, error: "Indique l'employé." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
-  const commission = Math.max(0, Math.round(Number(d.commission) || 0));
-  const base = Math.max(0, Math.round(Number(d.base) || 0));
-  const prime = Math.max(0, Math.round(Number(d.prime) || 0));
-  const montant = commission + base + prime;
+  const commission = Math.max(0, round2(Number(d.commission) || 0));
+  const base = Math.max(0, round2(Number(d.base) || 0));
+  const prime = Math.max(0, round2(Number(d.prime) || 0));
+  const montant = round2(commission + base + prime);
   const id = newId("pay");
   const { error } = await admin.from("ArmureriePaie").insert({
     id, employeId: s(d.employeId, 60), employeNom: s(d.employeNom, 120), periode: s(d.periode, 80),
-    ventes: Math.max(0, Math.round(Number(d.ventes) || 0)), commission, base, prime, montant,
+    ventes: Math.max(0, round2(Number(d.ventes) || 0)), commission, base, prime, montant,
     statut: "du", notes: s(d.notes, 500),
   });
   if (error) return { ok: false, error: erpErr(error.message) };
@@ -379,7 +380,7 @@ export async function payerPaie(id: string): Promise<ArmResult> {
   if (error || !data) return { ok: false, error: "Fiche de paie introuvable." };
   const p = data as { statut: string; montant: number; employeNom: string };
   if (p.statut === "paye") return { ok: false, error: "Cette paie est déjà versée." };
-  const montant = Math.max(0, Math.round(Number(p.montant) || 0));
+  const montant = Math.max(0, round2(Number(p.montant) || 0));
   try { if (montant > 0) await _mouvementCoffre(admin, montant, "sortie", `Paie — ${p.employeNom}`, await auteurNom()); }
   catch (e) { return { ok: false, error: erpErr((e as Error).message || "") }; }
   await admin.from("ArmureriePaie").update({ statut: "paye", payeAt: nowISO() }).eq("id", id);
@@ -396,9 +397,9 @@ export async function supprimerPaie(id: string): Promise<ArmResult> {
 export async function creerImpot(d: { libelle?: string; debut?: string; fin?: string; chiffreAffaires?: number; taux?: number; notes?: string }): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
-  const ca = Math.max(0, Math.round(Number(d.chiffreAffaires) || 0));
+  const ca = Math.max(0, round2(Number(d.chiffreAffaires) || 0));
   const taux = Math.max(0, Math.min(100, Math.round(Number(d.taux) || 0)));
-  const montant = Math.round((ca * taux) / 100);
+  const montant = round2((ca * taux) / 100);
   const id = newId("imp");
   const { error } = await admin.from("ArmurerieImpot").insert({
     id, libelle: s(d.libelle, 80) || "Cycle fiscal", debut: s(d.debut, 40), fin: s(d.fin, 40),
@@ -414,7 +415,7 @@ export async function payerImpot(id: string): Promise<ArmResult> {
   if (error || !data) return { ok: false, error: "Déclaration introuvable." };
   const im = data as { statut: string; montant: number; libelle: string };
   if (im.statut === "paye") return { ok: false, error: "Cet impôt est déjà réglé." };
-  const montant = Math.max(0, Math.round(Number(im.montant) || 0));
+  const montant = Math.max(0, round2(Number(im.montant) || 0));
   try { if (montant > 0) await _mouvementCoffre(admin, montant, "sortie", `Impôt — ${im.libelle || "cycle"}`, await auteurNom()); }
   catch (e) { return { ok: false, error: erpErr((e as Error).message || "") }; }
   await admin.from("ArmurerieImpot").update({ statut: "paye", payeAt: nowISO() }).eq("id", id);
@@ -429,7 +430,7 @@ export async function supprimerImpot(id: string): Promise<ArmResult> {
 
 // ── Comptabilité : écriture manuelle (recette / dépense) ─────────
 export async function ajouterEcriture(montant: number, sens: "entree" | "sortie", motif: string): Promise<ArmResult> {
-  const m = Math.abs(Math.round(Number(montant) || 0));
+  const m = Math.abs(round2(Number(montant) || 0));
   if (m <= 0) return { ok: false, error: "Montant invalide." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };

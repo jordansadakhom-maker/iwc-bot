@@ -8,7 +8,8 @@ import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
 import { creerFacture, supprimerFacture } from "@/app/(app)/finances/actions";
 
 type Router = ReturnType<typeof useRouter>;
-const money = (n: number) => "$" + n.toLocaleString("fr-FR");
+import { cents } from "@/lib/format";
+const money = (n: number) => "$" + cents(n);
 const dateFR = (s: string | null) => { if (!s) return "—"; try { return new Date(s).toLocaleDateString("fr-FR"); } catch { return "—"; } };
 
 export function FacturesListe({ factures, total }: { factures: FactureItem[]; total: number }) {

@@ -5,6 +5,7 @@ import clsx from "clsx";
 import type { DashData } from "@/lib/queries";
 import { BarresH, Donut, Repartition } from "@/components/charts";
 import { PoleChip, SectionTitle, Ornement } from "@/components/ui";
+import { cents } from "@/lib/format";
 
 function Card({ children, className, delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
   return (
@@ -37,7 +38,7 @@ function Empty({ children }: { children: React.ReactNode }) {
 
 function money(n: number | null): string {
   if (n === null || n === undefined) return "—";
-  return "$" + n.toLocaleString("fr-FR");
+  return "$" + cents(n);
 }
 
 // Bandeau honnête : tant que la base n'est pas branchée, aucune donnée n'est inventée.

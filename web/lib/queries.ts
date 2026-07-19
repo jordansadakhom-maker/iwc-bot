@@ -728,7 +728,7 @@ export async function getNotificationsFeed(): Promise<FeedData> {
   if (!factR.error) for (const f of (factR.data || []) as Raw[]) {
     items.push({
       id: `fac-${f.id}`, type: "facture", icon: "🧾", titre: `Facture ${(f.numero as string) || ""}`.trim(),
-      detail: `${(f.objet as string) || "Prestation"} · ${(Number(f.montant) || 0).toLocaleString("fr-FR")}$`,
+      detail: `${(f.objet as string) || "Prestation"} · ${(Number(f.montant) || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}$`,
       at: (f.createdAt as string) || null, lien: "/finances", tone: "good",
     });
   }

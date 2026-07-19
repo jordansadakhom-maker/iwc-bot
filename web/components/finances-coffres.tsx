@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Wallet, Landmark, Skull, Loader2, Pencil } from "lucide-react";
 import { Modal, Flash, Picker, inputCls } from "@/components/edit-ui";
 import { ajusterCoffre } from "@/app/(app)/finances/actions";
+import { cents, round2 } from "@/lib/format";
 
 type Cible = "commun" | "legal" | "illegal";
 type Router = ReturnType<typeof useRouter>;
@@ -12,7 +13,7 @@ type Router = ReturnType<typeof useRouter>;
 const ICONS = { commun: Wallet, legal: Landmark, illegal: Skull } as const;
 
 function money(n: number | null) {
-  return n === null || n === undefined ? "—" : "$" + n.toLocaleString("fr-FR");
+  return n === null || n === undefined ? "—" : "$" + cents(n);
 }
 
 export function FinancesCoffres({
@@ -64,7 +65,7 @@ function AjustModal({ coffre, onClose, router }: { coffre: { cible: Cible; label
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState(false);
 
-  const n = Math.round(Number(montant));
+  const n = round2(Number(montant.replace(",", ".")));
   const apercu = () => {
     const base = coffre.val ?? 0;
     if (!Number.isFinite(n)) return base;
@@ -104,7 +105,7 @@ function AjustModal({ coffre, onClose, router }: { coffre: { cible: Cible; label
           </div>
           <label className="flex flex-col gap-1">
             <span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Montant ($)</span>
-            <input className={inputCls} value={montant} onChange={(e) => setMontant(e.target.value.replace(/[^0-9]/g, ""))} placeholder="0" inputMode="numeric" autoFocus />
+            <input className={inputCls} value={montant} onChange={(e) => setMontant(e.target.value.replace(/[^0-9.,]/g, ""))} placeholder="0,00" inputMode="decimal" autoFocus />
           </label>
           {montant ? <div className="text-[0.8rem] text-muted">Nouveau solde : <b className="font-num text-ink">{money(apercu())}</b></div> : null}
           {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}

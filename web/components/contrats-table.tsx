@@ -7,6 +7,7 @@ import type { ContratDetail } from "@/lib/queries";
 import { Badge } from "@/components/ui";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { creerContrat, majContrat, supprimerContrat, majSuiviContrat, honorerContrat } from "@/app/(app)/operations/actions";
+import { cents } from "@/lib/format";
 
 const dateFR = (s: string | null) => { if (!s) return null; try { return new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" }); } catch { return null; } };
 
@@ -33,7 +34,7 @@ function ContratDetailBloc({ c }: { c: ContratDetail }) {
         <Badge tone={SUIVI_TONE[c.suivi || suiviDeStatut(c.statut)] ?? "muted"}>{c.suivi || suiviDeStatut(c.statut)}</Badge>
         {c.remuneration ? <span className="ml-auto font-num text-[0.86rem] font-semibold" style={{ color: "var(--accent)" }}>{c.remuneration}</span> : null}
       </div>
-      {c.remuVerseAuCoffre ? <div className="flex items-center gap-1.5 text-[0.8rem]" style={{ color: "var(--good)" }}><Landmark className="h-3.5 w-3.5" /> {c.remuVerseAuCoffre.toLocaleString("fr-FR")}$ versés au coffre</div> : null}
+      {c.remuVerseAuCoffre ? <div className="flex items-center gap-1.5 text-[0.8rem]" style={{ color: "var(--good)" }}><Landmark className="h-3.5 w-3.5" /> {cents(c.remuVerseAuCoffre)}$ versés au coffre</div> : null}
       <div className="text-[0.86rem] leading-relaxed text-ink">{c.cible}</div>
       {c.commanditaire ? <div className="text-[0.8rem] text-muted"><span className="text-faint">Commanditaire : </span>{c.commanditaire}</div> : null}
       {c.motif ? <div className="text-[0.82rem] leading-relaxed text-muted"><span className="text-faint">Détails / conditions : </span>{c.motif}</div> : null}
@@ -209,7 +210,7 @@ function EditModal({ contrat, onClose, router }: { contrat: ContratDetail; onClo
     setBusy(null);
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
     setSuivi("Honoré"); setHonorer(false);
-    setFlash(`Contrat honoré : ${m.toLocaleString("fr-FR")}$ versés au coffre + facture créée.`); router.refresh();
+    setFlash(`Contrat honoré : ${cents(m)}$ versés au coffre + facture créée.`); router.refresh();
   }
   async function supprimer() {
     setBusy("del");
@@ -251,7 +252,7 @@ function EditModal({ contrat, onClose, router }: { contrat: ContratDetail; onClo
             <button onClick={() => setHonorer(false)} className="rounded-lg border border-border bg-surface px-2.5 py-2 text-[0.78rem] text-muted hover:text-ink">Annuler</button>
           </div>
         ) : null}
-        {dejaHonore ? <p className="flex items-center gap-1.5 text-[0.78rem]" style={{ color: "var(--good)" }}><Check className="h-3.5 w-3.5" /> Contrat honoré — {contrat.remuVerseAuCoffre?.toLocaleString("fr-FR")}$ au coffre.</p> : null}
+        {dejaHonore ? <p className="flex items-center gap-1.5 text-[0.78rem]" style={{ color: "var(--good)" }}><Check className="h-3.5 w-3.5" /> Contrat honoré — {cents(contrat.remuVerseAuCoffre || 0)}$ au coffre.</p> : null}
       </div>
 
       <div className="mb-2 border-t border-border pt-3 text-[0.72rem] uppercase tracking-[0.06em] text-faint">Modifier</div>
