@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Boxes, Plus, Minus, Loader2, Camera, AlertTriangle, History, X, Check } from "lucide-react";
+import { Boxes, Plus, Minus, Loader2, Camera, AlertTriangle, History, X, Check, SlidersHorizontal } from "lucide-react";
 import type { StockItem, MouvementItem } from "@/lib/queries";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { PhotoDrop } from "@/components/photo-drop";
@@ -12,25 +12,46 @@ type Router = ReturnType<typeof useRouter>;
 
 const CATS = ["Armes", "Munitions", "Provisions", "Médecine", "Matériel", "Commun"];
 const CAT_EMOJI: Record<string, string> = { Armes: "🔫", Munitions: "🧨", Provisions: "🥫", "Médecine": "💊", "Matériel": "🧰", Commun: "🎒" };
+const CHIPS = [1, 5, 10, 25, 50, 100];
+const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
 const dateFR = (s: string | null) => { if (!s) return ""; try { return new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
 
 export function InventaireStock({ stock, mouvements }: { stock: StockItem[]; mouvements: MouvementItem[] }) {
   const router = useRouter();
+  // État OPTIMISTE : on affiche le changement à l'instant, le bot applique en ~10 s.
+  const [items, setItems] = useState<StockItem[]>(stock);
   const [flash, setFlash] = useState<string | null>(null);
   const [nouveau, setNouveau] = useState(false);
   const [photo, setPhoto] = useState(false);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [stepItem, setStepItem] = useState<StockItem | null>(null);
   const [journal, setJournal] = useState(false);
+  const [pending, setPending] = useState(0);
 
-  const total = stock.reduce((s, i) => s + i.quantite, 0);
-  const parCat = CATS.map((c) => ({ cat: c, items: stock.filter((s) => s.categorie === c).sort((a, b) => a.nom.localeCompare(b.nom)) })).filter((g) => g.items.length);
+  const total = items.reduce((s, i) => s + i.quantite, 0);
+  const parCat = CATS.map((c) => ({ cat: c, items: items.filter((s) => s.categorie === c && s.quantite > 0).sort((a, b) => a.nom.localeCompare(b.nom)) })).filter((g) => g.items.length);
 
-  async function bouger(it: StockItem, mode: "add" | "remove") {
-    setBusyId(it.id + mode);
-    const r = await ajusterStock(it.categorie, it.nom, mode, 1);
-    setBusyId(null);
-    setFlash(r.ok ? `${it.nom} ${mode === "add" ? "+1" : "−1"} — mise à jour dans ~30 s.` : (r.error || "Échec."));
-    if (r.ok) router.refresh();
+  // Applique un mouvement en optimiste + envoie au bot (best-effort).
+  async function applique(categorie: string, nom: string, mode: "add" | "remove" | "set", qte: number) {
+    const q = Math.abs(Math.round(qte)) || 0;
+    if (mode !== "set" && q === 0) return;
+    // 1) mise à jour immédiate à l'écran
+    setItems((prev) => {
+      const i = prev.findIndex((x) => x.categorie === categorie && norm(x.nom) === norm(nom));
+      if (i === -1) {
+        if (mode === "remove" || q === 0) return prev;
+        return [...prev, { id: `tmp-${norm(nom)}-${categorie}`, categorie, nom, quantite: mode === "set" ? q : q, seuil: null }];
+      }
+      const copy = [...prev];
+      const cur = copy[i];
+      const apres = mode === "add" ? cur.quantite + q : mode === "remove" ? Math.max(0, cur.quantite - q) : q;
+      copy[i] = { ...cur, quantite: apres };
+      return copy;
+    });
+    // 2) envoi au bot
+    setPending((p) => p + 1);
+    const r = await ajusterStock(categorie, nom, mode, q);
+    setPending((p) => Math.max(0, p - 1));
+    if (!r.ok) { setFlash(r.error || "Échec — le changement pourrait ne pas être enregistré."); }
   }
 
   return (
@@ -39,6 +60,7 @@ export function InventaireStock({ stock, mouvements }: { stock: StockItem[]; mou
         <div className="flex items-center gap-2.5">
           <h3 className="text-[0.8rem] font-semibold uppercase tracking-[0.06em] text-muted">Coffre commun — stock</h3>
           <span className="font-num text-[0.8rem] text-faint">{total} objet{total > 1 ? "s" : ""}</span>
+          {pending > 0 ? <span className="inline-flex items-center gap-1 text-[0.72rem] text-faint"><Loader2 className="h-3 w-3 animate-spin" /> synchronisation…</span> : null}
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setPhoto(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-ink transition hover:border-border-2"><Camera className="h-3.5 w-3.5" /> Photo → stock</button>
@@ -46,9 +68,9 @@ export function InventaireStock({ stock, mouvements }: { stock: StockItem[]; mou
         </div>
       </div>
 
-      {flash ? <div className="mb-3"><Flash>{flash}</Flash></div> : null}
+      {flash ? <div className="mb-3"><Flash tone="bad">{flash}</Flash></div> : null}
 
-      {stock.length === 0 ? (
+      {items.filter((i) => i.quantite > 0).length === 0 ? (
         <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
           <Boxes className="h-6 w-6 text-faint" strokeWidth={1.6} />
           <p className="max-w-md text-[0.82rem] leading-relaxed text-muted">Le coffre est vide (ou pas encore synchronisé). Ajoute un objet, ou glisse une photo du coffre en jeu pour le remplir automatiquement.</p>
@@ -67,13 +89,10 @@ export function InventaireStock({ stock, mouvements }: { stock: StockItem[]; mou
                         <div className="truncate text-[0.84rem] font-medium">{it.nom}</div>
                         {bas ? <div className="flex items-center gap-1 text-[0.68rem]" style={{ color: "var(--warn)" }}><AlertTriangle className="h-3 w-3" /> sous le seuil ({it.seuil})</div> : null}
                       </div>
-                      <button onClick={() => bouger(it, "remove")} disabled={!!busyId} className="grid h-6 w-6 place-items-center rounded-md border border-border text-muted hover:text-ink disabled:opacity-40" aria-label="Retirer 1">
-                        {busyId === it.id + "remove" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Minus className="h-3.5 w-3.5" />}
-                      </button>
-                      <span className="min-w-[1.6rem] text-center font-num text-[0.9rem] font-semibold">{it.quantite}</span>
-                      <button onClick={() => bouger(it, "add")} disabled={!!busyId} className="grid h-6 w-6 place-items-center rounded-md border border-border text-muted hover:text-ink disabled:opacity-40" aria-label="Ajouter 1">
-                        {busyId === it.id + "add" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-                      </button>
+                      <button onClick={() => applique(it.categorie, it.nom, "remove", 1)} className="grid h-6 w-6 place-items-center rounded-md border border-border text-muted hover:text-ink" aria-label="Retirer 1"><Minus className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => setStepItem(it)} className="min-w-[2rem] rounded-md px-1 text-center font-num text-[0.9rem] font-semibold hover:bg-[color-mix(in_srgb,var(--ink)_6%,transparent)]" title="Montant exact">{it.quantite}</button>
+                      <button onClick={() => applique(it.categorie, it.nom, "add", 1)} className="grid h-6 w-6 place-items-center rounded-md border border-border text-muted hover:text-ink" aria-label="Ajouter 1"><Plus className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => setStepItem(it)} className="grid h-6 w-6 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Montant exact"><SlidersHorizontal className="h-3.5 w-3.5" /></button>
                     </div>
                   );
                 })}
@@ -99,27 +118,53 @@ export function InventaireStock({ stock, mouvements }: { stock: StockItem[]; mou
         </div>
       ) : null}
 
-      {nouveau ? <NouveauModal onClose={() => setNouveau(false)} router={router} setFlash={setFlash} /> : null}
+      {nouveau ? <NouveauModal onClose={() => setNouveau(false)} onCreer={(cat, nom, q) => applique(cat, nom, "add", q)} /> : null}
       {photo ? <PhotoModal onClose={() => setPhoto(false)} router={router} setFlash={setFlash} /> : null}
+      {stepItem ? <StepModal item={stepItem} onClose={() => setStepItem(null)} onApply={(mode, q) => { applique(stepItem.categorie, stepItem.nom, mode, q); setStepItem(null); }} /> : null}
     </>
   );
 }
 
-function NouveauModal({ onClose, router, setFlash }: { onClose: () => void; router: Router; setFlash: (s: string) => void }) {
+// Montant EXACT : ajouter / retirer / corriger à, avec des raccourcis (5, 10, 25…).
+function StepModal({ item, onClose, onApply }: { item: StockItem; onClose: () => void; onApply: (mode: "add" | "remove" | "set", q: number) => void }) {
+  const [mode, setMode] = useState<"add" | "remove" | "set">("add");
+  const [qte, setQte] = useState("");
+  const modeLabel = mode === "add" ? "Ajouter" : mode === "remove" ? "Retirer" : "Corriger à";
+  const apercu = (() => { const q = Math.abs(parseInt(qte, 10) || 0); return mode === "add" ? item.quantite + q : mode === "remove" ? Math.max(0, item.quantite - q) : q; })();
+
+  return (
+    <Modal titre={`${item.nom} · ${item.quantite} en stock`} onClose={onClose}>
+      <div className="flex flex-col gap-3">
+        <Picker options={[{ key: "add", label: "➕ Ajouter" }, { key: "remove", label: "➖ Retirer" }, { key: "set", label: "✏️ Corriger à" }]} value={mode} onChange={(v) => setMode(v as "add" | "remove" | "set")} />
+        <div className="flex flex-wrap gap-1.5">
+          {CHIPS.map((c) => (
+            <button key={c} onClick={() => setQte(String(c))} className="rounded-lg border px-3 py-1.5 text-[0.82rem] font-semibold transition" style={{ color: qte === String(c) ? "#000" : "var(--accent)", background: qte === String(c) ? "var(--accent)" : "transparent", borderColor: "color-mix(in srgb,var(--accent) 40%,var(--border))" }}>{c}</button>
+          ))}
+        </div>
+        <Champ label="Quantité exacte"><input className={inputCls} type="number" min={0} value={qte} onChange={(e) => setQte(e.target.value)} placeholder="Ex : 25" autoFocus /></Champ>
+        <p className="text-[0.8rem] text-muted">{modeLabel} <b>{Math.abs(parseInt(qte, 10) || 0)}</b> → nouveau stock : <b className="font-num" style={{ color: "var(--accent)" }}>{apercu}</b></p>
+        <div className="mt-1 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2">Annuler</button>
+          <button onClick={() => onApply(mode, parseInt(qte, 10) || 0)} disabled={qte === "" || (mode !== "set" && (parseInt(qte, 10) || 0) <= 0)} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--accent)" }}>
+            <Check className="h-3.5 w-3.5" /> Valider
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function NouveauModal({ onClose, onCreer }: { onClose: () => void; onCreer: (cat: string, nom: string, q: number) => void }) {
   const [categorie, setCategorie] = useState("Commun");
   const [nom, setNom] = useState("");
   const [qte, setQte] = useState("1");
-  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function creer() {
+  function creer() {
     setErr(null);
     if (nom.trim().length < 1) { setErr("Donne un nom à l'objet."); return; }
-    setBusy(true);
-    const r = await ajusterStock(categorie, nom, "add", Number(qte) || 1);
-    setBusy(false);
-    if (!r.ok) { setErr(r.error || "Impossible."); return; }
-    setFlash(`${nom} ajouté — mise à jour dans ~30 s.`); router.refresh(); onClose();
+    onCreer(categorie, nom.trim(), Number(qte) || 1);
+    onClose();
   }
 
   return (
@@ -128,13 +173,17 @@ function NouveauModal({ onClose, router, setFlash }: { onClose: () => void; rout
         <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Catégorie</span>
           <Picker options={CATS.map((c) => ({ key: c, label: `${CAT_EMOJI[c]} ${c}` }))} value={categorie} onChange={setCategorie} /></div>
         <Champ label="Objet *"><input className={inputCls} value={nom} onChange={(e) => setNom(e.target.value)} placeholder="Carabine Repeater, Balles .44, Conserves…" maxLength={120} autoFocus /></Champ>
-        <Champ label="Quantité"><input className={inputCls} type="number" min={1} value={qte} onChange={(e) => setQte(e.target.value)} /></Champ>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Quantité</span>
+          <div className="flex flex-wrap gap-1.5">
+            {CHIPS.map((c) => <button key={c} onClick={() => setQte(String(c))} className="rounded-lg border px-3 py-1.5 text-[0.82rem] font-semibold transition" style={{ color: qte === String(c) ? "#000" : "var(--accent)", background: qte === String(c) ? "var(--accent)" : "transparent", borderColor: "color-mix(in srgb,var(--accent) 40%,var(--border))" }}>{c}</button>)}
+          </div>
+          <input className={inputCls} type="number" min={1} value={qte} onChange={(e) => setQte(e.target.value)} />
+        </div>
         {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
         <div className="mt-1 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2">Annuler</button>
-          <button onClick={creer} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>
-            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" strokeWidth={2} />} Ajouter
-          </button>
+          <button onClick={creer} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Plus className="h-3.5 w-3.5" strokeWidth={2} /> Ajouter</button>
         </div>
       </div>
     </Modal>
@@ -153,13 +202,13 @@ function PhotoModal({ onClose, router, setFlash }: { onClose: () => void; router
     const r = await lirePhotosInventaire(urls);
     setBusy(false);
     if (!r.ok) { setErr(r.error || "Impossible."); return; }
-    setFlash("Photo(s) transmise(s) — l'IA lit le coffre et met à jour le stock (~30 s)."); router.refresh(); onClose();
+    setFlash("Photo(s) transmise(s) — l'IA lit le coffre et met à jour le stock (~10 s)."); router.refresh(); onClose();
   }
 
   return (
     <Modal titre="📸 Photo → mise à jour du coffre" onClose={onClose}>
       <div className="flex flex-col gap-3">
-        <p className="text-[0.8rem] text-muted">Glisse 1 à 2 captures de l&apos;inventaire du coffre en jeu. L&apos;IA lit les objets et <b>ajoute</b> les quantités au stock.</p>
+        <p className="text-[0.8rem] text-muted">Glisse ou prends en photo 1 à 2 captures de l&apos;inventaire du coffre en jeu. L&apos;IA lit les objets et <b>ajoute</b> les quantités au stock.</p>
         {urls.length < 2 ? <PhotoDrop dossier="inventaire" onUploaded={(u) => setUrls((p) => [...p, u])} label="Glisse une capture du coffre" /> : null}
         {urls.length ? (
           <div className="flex flex-wrap gap-2">
