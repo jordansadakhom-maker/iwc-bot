@@ -497,6 +497,42 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
   }
 }
 
+// Lecture IA d'une carte d'identité (RDR2/Louisiane) : extrait nom, prénom, etc.
+// pour pré-remplir l'acquéreur à l'encaissement, sans avoir à retaper.
+export async function lireCarteIdentite(url: string): Promise<{ ok: boolean; nom?: string; prenom?: string; dateNaissance?: string; residence?: string; error?: string }> {
+  if (!/^https?:\/\//.test(String(url || ""))) return { ok: false, error: "Photo invalide." };
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) return { ok: false, error: "Lecture automatique indisponible (variable ANTHROPIC_API_KEY absente sur Vercel)." };
+  try {
+    // On télécharge la photo et on l'envoie en base64 (robuste, indépendant de la version d'API).
+    const img = await fetch(url);
+    if (!img.ok) return { ok: false, error: "Photo inaccessible." };
+    const ct = img.headers.get("content-type") || "";
+    const media = /png/i.test(ct) ? "image/png" : /webp/i.test(ct) ? "image/webp" : /gif/i.test(ct) ? "image/gif" : "image/jpeg";
+    const b64 = Buffer.from(await img.arrayBuffer()).toString("base64");
+    if (!b64 || b64.length > 6_000_000) return { ok: false, error: "Photo trop lourde ou illisible." };
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-5", max_tokens: 400,
+        system: "Tu lis une carte d'identité de jeu de rôle (RDR2, État de Louisiane). Réponds UNIQUEMENT par un JSON compact, sans texte autour : {\"nom\":\"\",\"prenom\":\"\",\"dateNaissance\":\"\",\"pays\":\"\",\"residence\":\"\"}. Recopie exactement ce qui est écrit ; laisse la valeur vide si un champ est illisible ou absent.",
+        messages: [{ role: "user", content: [
+          { type: "image", source: { type: "base64", media_type: media, data: b64 } },
+          { type: "text", text: "Lis cette carte d'identité et renvoie le JSON." },
+        ] }],
+      }),
+    });
+    if (!res.ok) { const t = await res.text().catch(() => ""); console.error("lireCarteIdentite:", res.status, t.slice(0, 200)); return { ok: false, error: "Lecture impossible pour le moment." }; }
+    const data = await res.json();
+    const txt = ((data?.content || []) as { type: string; text?: string }[]).filter((b) => b.type === "text").map((b) => b.text || "").join("");
+    const m = txt.match(/\{[\s\S]*\}/);
+    if (!m) return { ok: false, error: "Carte illisible — saisis le nom à la main." };
+    const j = JSON.parse(m[0]) as Record<string, unknown>;
+    return { ok: true, nom: s(j.nom, 80) || "", prenom: s(j.prenom, 80) || "", dateNaissance: s(j.dateNaissance, 40) || "", residence: s(j.residence, 120) || "" };
+  } catch (e) { console.error("lireCarteIdentite:", (e as Error).message); return { ok: false, error: "Lecture injoignable pour le moment." }; }
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  MODULE ERP — employés, pointage, paies, impôts, comptabilité,
 //  bloc-notes, tâches. Tables neuves (armurerie-erp.sql), site-native.
