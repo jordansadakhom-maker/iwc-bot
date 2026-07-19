@@ -322,6 +322,29 @@ Object.assign(HANDLERS, {
     arr.splice(i, 1);
     return { ok: true, message: 'Arme supprimée' };
   },
+
+  // ── Factures (db.factures) ───────────────────────────────
+  'facture.create': (db, p) => {
+    const objet = _s(p.objet, 500);
+    if (!objet) return { ok: false, message: 'objet manquant' };
+    if (!Array.isArray(db.factures)) db.factures = [];
+    const n = db.factures.filter(f => f && f.numero && f.numero !== 'FAC-000').length + 1;
+    const numero = `FAC-${String(n).padStart(3, '0')}`;
+    const id = `web-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+    db.factures.push({
+      id, numero, objet, montant: Math.round(Number(p.montant) || 0),
+      clientNom: _s(p.clientNom, 200) || 'Client', type: _s(p.type, 80) || 'Manuelle',
+      remuneration: _s(p.remuneration, 120), createdAt: Date.now(), source: 'web',
+    });
+    return { ok: true, message: `Facture ${numero} créée` };
+  },
+  'facture.delete': (db, p) => {
+    if (!Array.isArray(db.factures)) return { ok: false, message: 'Facture introuvable' };
+    const i = db.factures.findIndex(x => x && (String(x.id) === String(p.id) || x.numero === p.id));
+    if (i < 0) return { ok: false, message: 'Facture introuvable' };
+    db.factures.splice(i, 1);
+    return { ok: true, message: 'Facture supprimée' };
+  },
 });
 
 // Trouve une opération par id dans db.operations puis db.preparations.

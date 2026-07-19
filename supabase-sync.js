@@ -318,7 +318,22 @@ function _construire(db) {
       };
     });
 
-  return { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes };
+  // ── Finances : factures (db.factures) — exclut l'exemple FAC-000 ──
+  const factures = (db.factures || [])
+    .filter(f => f && (f.id || f.numero) && f.numero !== 'FAC-000')
+    .map(f => ({
+      id: String(f.id || f.numero),
+      numero: _str(f.numero, 40) || '—',
+      objet: _str(f.objet, 500) || 'Prestation',
+      montant: Math.round(Number(f.montant) || 0),
+      clientNom: _nn(f.clientNom, 200),
+      type: _nn(f.type, 80),
+      remuneration: _nn(f.remuneration, 120),
+      ref: _nn(f.ref, 120),
+      createdAt: _isoOrUndef(f.createdAt),
+    }));
+
+  return { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes, factures };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -335,7 +350,7 @@ async function syncAll(db) {
     let out;
     do {
       _redo = false;
-      const { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes } = _construire(db);
+      const { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes, factures } = _construire(db);
       const results = [];
       results.push(await _upsert('Membre', membres));    // 1. aucun FK bloquant (parrainId non fourni)
       results.push(await _upsert('Coffre', coffres));    // 2. indépendant
@@ -367,6 +382,7 @@ async function syncAll(db) {
       results.push(rC);
       results.push(await _upsert('Rdv', rdvs));                // 9. rdv du bot (coexiste avec les demandes web)
       results.push(await _upsert('Arme', armes));              // 10. registre d'armes (table optionnelle — ignoré si absente)
+      results.push(await _upsert('Facture', factures));        // 11. factures (table optionnelle — ignoré si absente)
       // Nettoyage des fantômes : membres partis (si roster connu), + entités supprimées localement.
       // ⚠️ On NE réconcilie PAS Rdv (préserve les demandes venues du site web).
       if (_membresActuels || _roster) { try { await _reconcilier('Membre', membres.map(m => m.id)); } catch {} }
@@ -377,6 +393,7 @@ async function syncAll(db) {
       try { await _reconcilier('DossierMedical', dossiers.map(d => d.id)); } catch {}
       try { await _reconcilier('Contact', contacts.map(c => c.id)); } catch {}
       try { await _reconcilier('Arme', armes.map(a => a.id)); } catch {}
+      try { await _reconcilier('Facture', factures.map(f => f.id)); } catch {}
       const summary = results.map(r => `${r.table} ${r.ok ? r.count : '✗' + (r.status || '')}`).join(' · ');
       console.log(`🔄 Sync Supabase → ${summary}`);
       out = { ok: true, results };

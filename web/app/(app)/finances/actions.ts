@@ -12,3 +12,14 @@ export async function ajusterCoffre(
   if (!Number.isFinite(montant) || montant < 0) return { ok: false, error: "Montant invalide." };
   return envoyerCommande("coffre.ajuster", { cible, montant: Math.round(montant), mode });
 }
+
+// ── Factures ──
+export async function creerFacture(data: { objet: string; montant: number; clientNom?: string; type?: string; remuneration?: string }): Promise<CommandeResult> {
+  if (!data.objet || data.objet.trim().length < 2) return { ok: false, error: "Indique l'objet de la facture." };
+  if (!Number.isFinite(data.montant) || data.montant < 0) return { ok: false, error: "Montant invalide." };
+  return envoyerCommande("facture.create", { ...data, montant: Math.round(data.montant) });
+}
+export async function supprimerFacture(id: string): Promise<CommandeResult> {
+  if (!id) return { ok: false, error: "Facture introuvable." };
+  return envoyerCommande("facture.delete", { id });
+}
