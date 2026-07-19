@@ -689,17 +689,20 @@ export async function getFactures(): Promise<FacturesData> {
 export type ArmClient = { id: string; nom: string; telegramme: string | null; discordId: string | null; carteIdentite: string | null; statut: string; notes: string | null; createdAt: string | null };
 export type ArmVente = { id: string; clientId: string | null; acquereur: string; dateVente: string | null; marque: string | null; modele: string | null; categorie: string | null; numeroSerie: string | null; vendeur: string | null; telegramme: string | null; prix: number; notes: string | null; statut: string; createdAt: string | null };
 export type ArmContrat = { id: string; clientId: string | null; clientNom: string; clientDiscordId: string | null; arme: string | null; numeroSerie: string | null; prix: number; conditions: string | null; statut: string; envoyeAt: string | null; signeAt: string | null; createdAt: string | null };
-export type ArmurerieData = { connecte: boolean; clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number };
+export type ArmMouvement = { id: string; sens: string; montant: number; motif: string | null; auteur: string | null; createdAt: string | null };
+export type ArmurerieData = { connecte: boolean; clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvementsCoffre: ArmMouvement[] };
 
 export async function getArmurerie(): Promise<ArmurerieData> {
-  const vide: ArmurerieData = { connecte: false, clients: [], ventes: [], contrats: [], ca: 0 };
+  const vide: ArmurerieData = { connecte: false, clients: [], ventes: [], contrats: [], ca: 0, coffre: 0, mouvementsCoffre: [] };
   if (!dataConfigured()) return vide;
   const supabase = createAdminClient();
   if (!supabase) return vide;
-  const [clientR, venteR, contratR] = await Promise.all([
+  const [clientR, venteR, contratR, coffreR, mvtR] = await Promise.all([
     supabase.from("ArmurerieClient").select("*").order("nom", { ascending: true }),
     supabase.from("ArmurerieVente").select("*").order("createdAt", { ascending: false }).limit(500),
     supabase.from("ArmurerieContrat").select("*").order("createdAt", { ascending: false }).limit(300),
+    supabase.from("ArmurerieCoffre").select("solde").eq("id", "vanhorn").maybeSingle(),
+    supabase.from("ArmurerieMouvementCoffre").select("*").order("createdAt", { ascending: false }).limit(40),
   ]);
   // Tables neuves : si absentes (400/404), on renvoie « connecté » avec des listes vides.
   type Raw = Record<string, unknown>;
@@ -722,8 +725,13 @@ export async function getArmurerie(): Promise<ArmurerieData> {
     envoyeAt: (c.envoyeAt as string) ?? null, signeAt: (c.signeAt as string) ?? null, createdAt: (c.createdAt as string) ?? null,
   }));
   const ca = ventes.reduce((s, v) => s + v.prix, 0);
+  const coffre = coffreR.error || !coffreR.data ? 0 : Number((coffreR.data as { solde: number }).solde) || 0;
+  const mouvementsCoffre: ArmMouvement[] = mvtR.error ? [] : ((mvtR.data || []) as Raw[]).map((m) => ({
+    id: String(m.id), sens: (m.sens as string) || "entree", montant: Number(m.montant) || 0,
+    motif: (m.motif as string) ?? null, auteur: (m.auteur as string) ?? null, createdAt: (m.createdAt as string) ?? null,
+  }));
   const connecte = !(clientR.error && venteR.error && contratR.error) || dataConfigured();
-  return { connecte, clients, ventes, contrats, ca };
+  return { connecte, clients, ventes, contrats, ca, coffre, mouvementsCoffre };
 }
 
 // ── Finances (page dédiée) ───────────────────────────────────────

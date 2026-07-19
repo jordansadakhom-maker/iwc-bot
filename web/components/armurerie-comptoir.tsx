@@ -4,9 +4,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Users, ScrollText, FileSignature, Plus, Loader2, Trash2, IdCard, Send, Check, X,
-  Download, CircleDollarSign,
+  Download, CircleDollarSign, Vault, ArrowDownRight, ArrowUpRight, History,
 } from "lucide-react";
-import type { ArmClient, ArmVente, ArmContrat } from "@/lib/queries";
+import type { ArmClient, ArmVente, ArmContrat, ArmMouvement } from "@/lib/queries";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { Badge } from "@/components/ui";
 import { PhotoDrop } from "@/components/photo-drop";
@@ -14,6 +14,7 @@ import {
   creerClient, majClient, supprimerClient,
   creerVente, majVente, supprimerVente,
   creerContrat, envoyerContrat, marquerContrat, supprimerContrat,
+  ajusterCoffreArmurerie,
 } from "@/app/(app)/armurerie/actions";
 
 type Router = ReturnType<typeof useRouter>;
@@ -29,7 +30,7 @@ const ctrTone = (s: string): "good" | "warn" | "accent" | "oxblood" | "muted" =>
   s === "signe" ? "good" : s === "envoye" ? "accent" : s === "refuse" ? "oxblood" : "muted";
 const ctrLabel = (s: string) => s === "signe" ? "Signé" : s === "envoye" ? "Envoyé" : s === "refuse" ? "Refusé" : "Brouillon";
 
-export function ArmurerieComptoir({ clients, ventes, contrats, ca }: { clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number }) {
+export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouvementsCoffre }: { clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvementsCoffre: ArmMouvement[] }) {
   const router = useRouter();
   const [tab, setTab] = useState<"clients" | "ventes" | "contrats">("ventes");
   const signes = contrats.filter((c) => c.statut === "signe").length;
@@ -42,6 +43,9 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca }: { clients: 
 
   return (
     <>
+      {/* Coffre propre à l'armurerie */}
+      <CoffreArmurerie solde={coffre} mouvements={mouvementsCoffre} router={router} />
+
       {/* KPIs */}
       <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
         <Kpi label="Chiffre d'affaires" value={money(ca)} tone="var(--accent)" icon={CircleDollarSign} />
@@ -67,6 +71,86 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca }: { clients: 
       {tab === "ventes" ? <VentesTab ventes={ventes} clients={clients} router={router} /> : null}
       {tab === "contrats" ? <ContratsTab contrats={contrats} clients={clients} router={router} /> : null}
     </>
+  );
+}
+
+function CoffreArmurerie({ solde, mouvements, router }: { solde: number; mouvements: ArmMouvement[]; router: Router }) {
+  const [open, setOpen] = useState(false);
+  const [journal, setJournal] = useState(false);
+  const dateFR = (s: string | null) => { if (!s) return ""; try { return new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
+  return (
+    <div className="mb-4 rounded-[14px] border px-4 py-3.5" style={{ borderColor: "color-mix(in srgb,var(--brass) 40%,var(--border))", background: "linear-gradient(135deg,color-mix(in srgb,var(--brass) 12%,var(--surface-2)),var(--surface-2))" }}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="grid h-11 w-11 place-items-center rounded-[10px] border" style={{ borderColor: "color-mix(in srgb,var(--brass) 45%,var(--border))", background: "color-mix(in srgb,var(--brass) 14%,transparent)" }}>
+            <Vault className="h-5 w-5" style={{ color: "var(--brass)" }} />
+          </span>
+          <div>
+            <div className="text-[0.68rem] uppercase tracking-[0.1em] text-faint">Coffre de l&apos;armurerie · séparé</div>
+            <div className="font-num text-[1.6rem] font-bold leading-none" style={{ color: "var(--brass)" }}>{money(solde)}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {mouvements.length ? <button onClick={() => setJournal((j) => !j)} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[0.76rem] font-semibold text-muted hover:text-ink"><History className="h-3.5 w-3.5" /> Journal</button> : null}
+          <button onClick={() => setOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[0.78rem] font-semibold text-black/85" style={{ background: "var(--brass)" }}><Plus className="h-3.5 w-3.5" /> Dépôt / Retrait</button>
+        </div>
+      </div>
+      {journal && mouvements.length ? (
+        <div className="mt-3 flex flex-col gap-1 border-t border-border pt-3">
+          {mouvements.slice(0, 12).map((m) => {
+            const entree = m.sens === "entree";
+            return (
+              <div key={m.id} className="flex items-center gap-2.5 text-[0.8rem]">
+                {entree ? <ArrowDownRight className="h-4 w-4 shrink-0" style={{ color: "var(--good)" }} /> : <ArrowUpRight className="h-4 w-4 shrink-0" style={{ color: "var(--oxblood)" }} />}
+                <span className="min-w-0 flex-1 truncate">{m.motif || (entree ? "Entrée" : "Sortie")}</span>
+                {m.auteur ? <span className="hidden shrink-0 text-[0.7rem] text-faint sm:inline">{m.auteur}</span> : null}
+                <span className="shrink-0 font-num font-semibold" style={{ color: entree ? "var(--good)" : "var(--oxblood)" }}>{entree ? "+" : "−"}{money(m.montant)}</span>
+                <span className="hidden shrink-0 text-[0.68rem] text-faint md:inline">{dateFR(m.createdAt)}</span>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+      {open ? <CoffreModal onClose={() => setOpen(false)} router={router} /> : null}
+    </div>
+  );
+}
+
+function CoffreModal({ onClose, router }: { onClose: () => void; router: Router }) {
+  const [mode, setMode] = useState<"depot" | "retrait">("depot");
+  const [montant, setMontant] = useState("");
+  const [motif, setMotif] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function valider() {
+    setErr(null);
+    if (!(Number(montant) > 0)) { setErr("Montant invalide."); return; }
+    setBusy(true);
+    const r = await ajusterCoffreArmurerie(Number(montant), mode, motif);
+    setBusy(false);
+    if (!r.ok) { setErr(r.error || "Impossible."); return; }
+    router.refresh(); onClose();
+  }
+  return (
+    <Modal titre="🏦 Coffre de l'armurerie" onClose={onClose}>
+      <div className="flex flex-col gap-3">
+        <div className="flex gap-2">
+          <button onClick={() => setMode("depot")} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[0.8rem] font-semibold" style={{ color: mode === "depot" ? "#000" : "var(--good)", background: mode === "depot" ? "var(--good)" : "transparent", borderColor: "color-mix(in srgb,var(--good) 45%,var(--border))" }}><ArrowDownRight className="h-3.5 w-3.5" /> Dépôt</button>
+          <button onClick={() => setMode("retrait")} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[0.8rem] font-semibold" style={{ color: mode === "retrait" ? "#fff" : "var(--oxblood)", background: mode === "retrait" ? "var(--oxblood)" : "transparent", borderColor: "color-mix(in srgb,var(--oxblood) 45%,var(--border))" }}><ArrowUpRight className="h-3.5 w-3.5" /> Retrait</button>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Champ label="Montant ($)"><input className={inputCls} type="number" min={1} value={montant} onChange={(e) => setMontant(e.target.value)} autoFocus /></Champ>
+          <Champ label="Motif"><input className={inputCls} value={motif} onChange={(e) => setMotif(e.target.value)} placeholder="Réassort, salaire, réparation…" maxLength={200} /></Champ>
+        </div>
+        {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
+        <div className="mt-1 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2">Annuler</button>
+          <button onClick={valider} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: mode === "retrait" ? "var(--oxblood)" : "var(--good)" }}>
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Vault className="h-3.5 w-3.5" />} Valider
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

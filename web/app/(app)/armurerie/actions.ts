@@ -1,7 +1,35 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import { envoyerCommande } from "@/lib/commandes";
+
+type Admin = NonNullable<ReturnType<typeof createAdminClient>>;
+
+async function auteurNom(): Promise<string> {
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return "Comptoir";
+    const meta = (user.user_metadata || {}) as Record<string, unknown>;
+    let nom = (meta.full_name || meta.name || meta.user_name || "Membre") as string;
+    const discordId = (meta.provider_id || meta.sub || "") as string;
+    const admin = createAdminClient();
+    if (discordId && admin) { const { data } = await admin.from("Membre").select("nomIC").eq("id", String(discordId)).maybeSingle(); if (data?.nomIC) nom = data.nomIC as string; }
+    return String(nom).slice(0, 120);
+  } catch { return "Comptoir"; }
+}
+
+// Crédite (entree) ou débite (sortie) le coffre PROPRE de l'armurerie + journal.
+async function _mouvementCoffre(admin: Admin, montant: number, sens: "entree" | "sortie", motif: string, auteur: string) {
+  const m = Math.abs(Math.round(Number(montant) || 0));
+  if (!m) return;
+  const { data } = await admin.from("ArmurerieCoffre").select("solde").eq("id", "vanhorn").maybeSingle();
+  const actuel = data ? Number((data as { solde: number }).solde) || 0 : 0;
+  const nouveau = Math.max(0, sens === "sortie" ? actuel - m : actuel + m);
+  await admin.from("ArmurerieCoffre").upsert({ id: "vanhorn", solde: nouveau, updatedAt: new Date().toISOString() }, { onConflict: "id" });
+  await admin.from("ArmurerieMouvementCoffre").insert({ id: newId("mvt"), sens, montant: m, motif: s(motif, 200), auteur: s(auteur, 120), createdAt: new Date().toISOString() });
+}
 
 // Comptoir de l'armurerie de Van Horn — registre PRIVÉ de l'entreprise, écrit
 // directement dans Supabase (tables neuves, jamais touchées par le bot). Seul
@@ -57,7 +85,29 @@ export async function creerVente(d: { clientId?: string; acquereur: string; date
     prix: Math.max(0, Math.round(Number(d.prix) || 0)), notes: s(d.notes, 1000), statut: "enregistree",
   });
   if (error) return { ok: false, error: tableErr(error.message, "ventes") };
+  // Crédite automatiquement le coffre de l'armurerie du montant de la vente.
+  const prix = Math.max(0, Math.round(Number(d.prix) || 0));
+  if (prix > 0) {
+    const arme = [s(d.marque, 80), s(d.modele, 80)].filter(Boolean).join(" ") || "arme";
+    try { await _mouvementCoffre(admin, prix, "entree", `Vente — ${arme} à ${s(d.acquereur, 120)}`, s(d.vendeur, 120) || (await auteurNom())); } catch {}
+  }
   return { ok: true, id };
+}
+
+// Dépôt / retrait manuel sur le coffre de l'armurerie.
+export async function ajusterCoffreArmurerie(montant: number, mode: "depot" | "retrait", motif: string): Promise<ArmResult> {
+  const m = Math.abs(Math.round(Number(montant) || 0));
+  if (m <= 0) return { ok: false, error: "Montant invalide." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  try {
+    await _mouvementCoffre(admin, m, mode === "retrait" ? "sortie" : "entree", s(motif, 200) || (mode === "retrait" ? "Retrait" : "Dépôt"), await auteurNom());
+    return { ok: true };
+  } catch (e) {
+    const msg = (e as Error).message || "";
+    if (/ArmurerieCoffre|does not exist|relation/i.test(msg)) return { ok: false, error: "La table du coffre n'est pas encore créée — exécute le SQL de l'armurerie." };
+    return { ok: false, error: "Enregistrement impossible pour le moment." };
+  }
 }
 export async function majVente(id: string, patch: Record<string, unknown>): Promise<ArmResult> {
   if (!id) return { ok: false, error: "Vente introuvable." };
