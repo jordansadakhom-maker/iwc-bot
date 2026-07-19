@@ -887,7 +887,7 @@ function VentesTab({ ventes, clients, router }: { ventes: ArmVente[]; clients: A
                       </span>
                     </td>
                     <td className="border-b border-border px-2.5 py-2 text-muted">{[v.marque, v.modele].filter(Boolean).join(" ") || "—"}</td>
-                    <td className="border-b border-border px-2.5 py-2"><span className="mono text-[0.76rem]">{v.numeroSerie}</span></td>
+                    <td className="border-b border-border px-2.5 py-2"><span className="mono text-[0.76rem]">{v.numeroSerie || "—"}</span></td>
                     <td className="border-b border-border px-2.5 py-2 text-muted">{v.vendeur || "—"}</td>
                     <td className="border-b border-border px-2.5 py-2 text-faint">{v.telegramme || (cli?.telegramme ?? "—")}</td>
                     <td className="border-b border-border px-2.5 py-2 font-num">{money(v.prix)}</td>
