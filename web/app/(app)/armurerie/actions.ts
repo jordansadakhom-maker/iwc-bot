@@ -469,7 +469,7 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
       total += montant;
       const row: Record<string, unknown> = {
         id: newId("vte"), clientId: cid, acquereur: cli, dateVente: dateV, marque: s(l.nom, 80), modele: null,
-        categorie: s(l.categorie, 60), numeroSerie: serie || `VTE-${Date.now().toString(36).slice(-4)}`,
+        categorie: s(l.categorie, 60), numeroSerie: serie || null,
         vendeur, telegramme: cliTel, prix: montant, notes: s(notes, 1000), statut: "enregistree",
       };
       if (photo) row.photo = photo; // photo de l'acquéreur (si colonne migrée)

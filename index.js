@@ -1004,7 +1004,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('recap').setDescription('📊 Ton récap : ce qui demande ton attention (Direction)'),
   new SlashCommandBuilder().setName('stats-agent').setDescription('📊 Statistiques de renseignement par agent')
     .addStringOption(o => o.setName('agent').setDescription('Nom d\'un agent précis (optionnel)').setRequired(false)),
-  new SlashCommandBuilder().setName('panel-rdv-client').setDescription('📅 Installer le panneau de prise de RDV client (Direction)'),
+  new SlashCommandBuilder().setName('panel-rdv-client').setDescription('🧹 Retirer le panneau de prise de RDV client (Direction)'),
   new SlashCommandBuilder().setName('panneau-rdv-medical').setDescription('🩺 Installer le bouton « Demander un RDV médical » (Direction)'),
   new SlashCommandBuilder().setName('rdv-nettoyer').setDescription('🧹 Désépingler tous les vieux télégrammes du salon demandes (Direction)'),
   new SlashCommandBuilder().setName('engagement').setDescription("✒️ Envoyer un contrat d'engagement à signer (Direction)").addUserOption(o => o.setName('membre').setDescription('Membre qui doit signer').setRequired(true)),
@@ -2037,10 +2037,10 @@ async function handleSlashCommand(interaction) {
 
   if (commandName === 'panel-rdv-client') {
     if (!isDirection(interaction.member)) return interaction.reply({ content: '❌ Réservé à la Direction.', flags: MessageFlags.Ephemeral });
-    // Toujours installer le panneau dans le salon dédié aux demandes clients
-    const salonForm = interaction.guild.channels.cache.get('1512171267560702013') || interaction.channel;
-    await salonForm.send(_rdvClientPayload());
-    return interaction.reply({ content: `✅ Panneau de prise de RDV installé dans ${salonForm}.`, flags: MessageFlags.Ephemeral });
+    // Panneau retiré à la demande : la commande nettoie désormais le salon.
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    await _majPanneauxRdvClient(interaction.guild);
+    return interaction.editReply({ content: '🧹 Panneau « Nous contacter / RDV » retiré du salon.' });
   }
 
   if (commandName === 'panneau-rdv-medical') {
@@ -2932,7 +2932,7 @@ async function autoSetup(guild) {
   } catch {}
   _installerPanelAgenda(guild).then(() => console.log('📅 Panneau agenda installé')).catch(() => {});
   _setupComptaChannel(guild).then(() => console.log('💰 Salon comptabilité prêt')).catch(() => {});
-  _majPanneauxRdvClient(guild).then(() => console.log('📨 Panneaux RDV client à jour')).catch(() => {});
+  _majPanneauxRdvClient(guild).then(() => console.log('🧹 Panneau RDV client retiré')).catch(() => {});
   _installerPanelVisiteurs(guild).then(() => console.log('👋 Panneau visiteurs installé')).catch(() => {});
   _setupGradesIllegalPanel(guild).then(() => console.log('🕯️ Panneau grades de l\'ombre à jour')).catch(() => {});
   checkAutoPatchNote(guild).catch(() => {});
@@ -9026,7 +9026,7 @@ async function _handleAide(interaction) {
   if (isLeg || isDir) embed.addFields({ name: '⚖️ Pôle Légal', value: '`/solde` · `/stats` · `/op liste` · `/op detail`', inline: false });
   if (isIll || isDir) embed.addFields({ name: '🔒 Confrérie', value: '`/solde` · `/stats` · `/op liste`', inline: false });
   if (isDir) embed.addFields({ name: '🎖️ Direction', value: '`/promo` · `/retro` · `/avertir` · `/annuler-absence`\n`/dashboard` · `/bilan` · `/contrats-archives` · `/rapport`\n`/contrats-sync` · `/notion-test` · `/synchroniser` · `/purge` · `/sync` · `/version`', inline: false });
-  if (isDir) embed.addFields({ name: '🤝 RDV Client', value: '`/panel-rdv-client` — Installer le panneau\n`/rdv-nettoyer` — Nettoyer les vieux télégrammes', inline: false });
+  if (isDir) embed.addFields({ name: '🤝 RDV Client', value: '`/panel-rdv-client` — Retirer le panneau\n`/rdv-nettoyer` — Nettoyer les vieux télégrammes', inline: false });
   if (isFleau) embed.addFields({ name: '💀 Fléau & Concepteur', value: '`/op programmer` · `/patch` · ⚙️ config coffre', inline: false });
   embed.addFields({ name: '🎙️ Micro de terrain', value: 'Programme PC : capture les voix RP et les envoie ici en rapports', inline: false });
   embed.addFields({ name: '🤖 Automatismes', value: 'Trésorerie · Fiches · Identité IC · Plans · Rappels RDV · Absences auto · Briefing 20h · Archivage', inline: false });
@@ -10998,23 +10998,17 @@ function _rdvClientPayload() {
   return { embeds: [embed], components: [row] };
 }
 
-// Fusionne les panneaux du salon rendez-vous-client en UN SEUL panneau unifié
+// Panneau « Nous contacter / RDV » RETIRÉ à la demande : on supprime tout panneau
+// existant dans le salon rendez-vous-client et on n'en repose plus.
 async function _majPanneauxRdvClient(guild) {
   try {
     const ch = guild.channels.cache.get('1512171267560702013'); if (!ch?.messages) return;
     const me = guild.client.user.id;
     const msgs = await ch.messages.fetch({ limit: 30 }).catch(() => null); if (!msgs) return;
     const aBouton = (m, id) => m.components?.some(r => r.components?.some(c => c.customId === id));
-    // Le panneau unifié = celui qui porte le bouton « télégramme »
-    const avecTele = [...msgs.values()].filter(m => m.author.id === me && aBouton(m, 'rdvclient_demande'));
-    const unifie = avecTele[0] || null;
-    for (const m of avecTele.slice(1)) await m.delete().catch(() => {}); // dédoublonne
-    // Supprime l'ancien panneau séparé « Besoin de nos services » (rdvp_book seul, sans télégramme)
     for (const m of msgs.values()) {
-      if (m.author.id === me && aBouton(m, 'rdvp_book') && !aBouton(m, 'rdvclient_demande')) await m.delete().catch(() => {});
+      if (m.author.id === me && (aBouton(m, 'rdvclient_demande') || aBouton(m, 'rdvp_book') || aBouton(m, 'rdvclient_suivi'))) await m.delete().catch(() => {});
     }
-    if (unifie) await unifie.edit(_rdvClientPayload()).catch(() => {});
-    else await ch.send(_rdvClientPayload()).catch(() => {});
   } catch (e) { console.log('⚠️ _majPanneauxRdvClient:', e.message); }
 }
 
