@@ -250,6 +250,18 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
 
 // ═══════════════════ PRODUITS (catalogue) ═══════════════════
 const CAT_ORDRE = ["Armes", "Accessoires", "Munitions", "Composants", "Ressources"];
+// Sous-catégorisation des ARMES par type (regroupe fusils avec fusils, etc.).
+const SOUS_ORDRE_ARMES = ["Revolvers", "Pistolets", "Carabines", "Fusils", "Couteaux & haches", "Arcs", "Autres"];
+function sousTypeArme(nom: string): string {
+  const n = nom.toLowerCase();
+  if (n.includes("revolver")) return "Revolvers";
+  if (n.includes("pistolet")) return "Pistolets";
+  if (n.includes("carabine")) return "Carabines";
+  if (n.includes("fusil") || n.includes("canon sci") || n.includes("pompe")) return "Fusils";
+  if (n.includes("couteau") || n.includes("machette") || n.includes("hachette") || n.includes("hache")) return "Couteaux & haches";
+  if (n.includes("arc")) return "Arcs";
+  return "Autres";
+}
 const SEUIL_BAS = 3;   // stock ≤ ce seuil = « stock bas »
 const CIBLE_REASSORT = 5;   // niveau visé lors d'un réassort
 function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[]; ressources: ArmRessource[]; router: Router }) {
@@ -339,6 +351,22 @@ function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[];
     );
   }
 
+  // Corps d'une catégorie : pour « Armes », on sous-groupe par type (Revolvers,
+  // Pistolets, Carabines, Fusils…) ; sinon liste simple.
+  function corpsCategorie(cat: string, shown: ArmProduit[]) {
+    if (cat !== "Armes") return shown.map((p) => carte(p));
+    const groupes: Record<string, ArmProduit[]> = {};
+    shown.forEach((p) => { const st = sousTypeArme(p.nom); (groupes[st] = groupes[st] || []).push(p); });
+    const keys = Object.keys(groupes).sort((a, b) => SOUS_ORDRE_ARMES.indexOf(a) - SOUS_ORDRE_ARMES.indexOf(b));
+    if (keys.length <= 1) return shown.map((p) => carte(p));
+    return keys.map((k) => (
+      <div key={k} className="flex flex-col gap-2">
+        <div className="mt-1 flex items-center gap-1.5 px-0.5 text-[0.64rem] font-semibold uppercase tracking-[0.09em] text-faint">{k}<span className="rounded-full bg-surface-2 px-1.5 py-0.5">{groupes[k].length}</span></div>
+        {groupes[k].map((p) => carte(p))}
+      </div>
+    ));
+  }
+
   return (
     <>
       <div className="mb-3 flex flex-wrap justify-end gap-2">
@@ -390,7 +418,7 @@ function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[];
                   <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[0.64rem] font-semibold text-faint">{query ? `${shown.length}/${items.length}` : items.length} réf.</span>
                   <span className="ml-auto text-[0.68rem] text-faint"><b className="font-num text-muted">{totalStock}</b> en stock</span>
                 </button>
-                {ouvert ? <div className="flex flex-col gap-2 border-t border-border p-2.5">{shown.map((p) => carte(p))}</div> : null}
+                {ouvert ? <div className="flex flex-col gap-2 border-t border-border p-2.5">{corpsCategorie(cat, shown)}</div> : null}
               </div>
             );
           })}
