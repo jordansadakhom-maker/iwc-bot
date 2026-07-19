@@ -375,7 +375,30 @@ function _construire(db) {
     jr.forEach((j, i) => { if (j) invMouv.push({ id: `invm:${j.t || 'x'}:${i}`.slice(0, 120), texte: _str(j.txt, 300), par: _nn(j.who, 120), createdAt: _isoOrUndef(j.t) }); });
   }
 
-  return { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes, factures, telegrammes, invItems, invMouv };
+  // ── Portefeuilles perso (db.economie) ──
+  const portefeuilles = Object.entries(db.economie || {})
+    .filter(([id, w]) => id && w && typeof w === 'object')
+    .map(([id, w]) => ({
+      id: String(id),
+      solde: Math.round(Number(w.solde) || 0),
+      historique: Array.isArray(w.historique) ? w.historique.slice(-30) : [],
+      updatedAt: now,
+    }));
+
+  // ── Journal de trésorerie (db.tresorerieLedger) ──
+  const transactions = (Array.isArray(db.tresorerieLedger) ? db.tresorerieLedger : [])
+    .slice(-200)
+    .map((t, i) => ({
+      id: `tx:${t.date || 'x'}:${i}`.slice(0, 120),
+      sens: _str(t.sens, 20) || 'entree',
+      montant: Math.round(Number(t.montant) || 0),
+      poste: _nn(t.posteLabel || t.posteKey, 60),
+      motif: _nn(t.motif, 200),
+      auteur: _nn(t.auteur, 120),
+      createdAt: _isoOrUndef(t.date),
+    }));
+
+  return { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes, factures, telegrammes, invItems, invMouv, portefeuilles, transactions };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -392,7 +415,7 @@ async function syncAll(db) {
     let out;
     do {
       _redo = false;
-      const { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes, factures, telegrammes, invItems, invMouv } = _construire(db);
+      const { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes, factures, telegrammes, invItems, invMouv, portefeuilles, transactions } = _construire(db);
       const results = [];
       results.push(await _upsert('Membre', membres));    // 1. aucun FK bloquant (parrainId non fourni)
       results.push(await _upsert('Coffre', coffres));    // 2. indépendant
@@ -441,6 +464,8 @@ async function syncAll(db) {
       results.push(await _upsert('Telegramme', telegrammes));  // 12. télégrammes (table optionnelle — ignoré si absente)
       results.push(await _upsert('InventaireItem', invItems)); // 13. stock du coffre commun (table optionnelle)
       results.push(await _upsert('InventaireMouvement', invMouv)); // 14. mouvements de stock (table optionnelle)
+      results.push(await _upsert('Portefeuille', portefeuilles)); // 15. portefeuilles perso (table optionnelle)
+      results.push(await _upsert('Transaction', transactions));    // 16. journal de trésorerie (table optionnelle)
       // Nettoyage des fantômes : membres partis (si roster connu), + entités supprimées localement.
       // ⚠️ On NE réconcilie PAS Rdv (préserve les demandes venues du site web).
       if (_membresActuels || _roster) { try { await _reconcilier('Membre', membres.map(m => m.id)); } catch {} }
@@ -454,6 +479,8 @@ async function syncAll(db) {
       try { await _reconcilier('Facture', factures.map(f => f.id)); } catch {}
       try { await _reconcilier('Telegramme', telegrammes.map(t => t.id)); } catch {}
       try { await _reconcilier('InventaireItem', invItems.map(i => i.id)); } catch {}
+      try { await _reconcilier('Portefeuille', portefeuilles.map(w => w.id)); } catch {}
+      try { await _reconcilier('Transaction', transactions.map(t => t.id)); } catch {}
       const summary = results.map(r => `${r.table} ${r.ok ? r.count : '✗' + (r.status || '')}`).join(' · ');
       console.log(`🔄 Sync Supabase → ${summary}`);
       out = { ok: true, results };

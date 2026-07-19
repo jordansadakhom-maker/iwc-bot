@@ -245,6 +245,42 @@ const HANDLERS = {
     return { ok: true, message: `Contrat honoré : +${montant}$ au coffre · ${numero}` };
   },
 
+  // ── Portefeuilles perso (db.economie) ────────────────────
+  // Paiement entre membres (comme /payer) : l'émetteur = le membre connecté.
+  'wallet.payer': (db, p) => {
+    const deId = String(p.auteurId || '');
+    const versId = _s(p.membreId, 40);
+    const montant = Math.round(Number(p.montant) || 0);
+    if (!deId) return { ok: false, message: 'Connecte-toi pour payer.' };
+    if (!versId) return { ok: false, message: 'Destinataire manquant' };
+    if (deId === versId) return { ok: false, message: 'Impossible de te payer toi-même.' };
+    if (montant <= 0) return { ok: false, message: 'Montant invalide' };
+    if (!db.economie) db.economie = {};
+    const de = db.economie[deId] || (db.economie[deId] = { solde: 0, historique: [] });
+    if ((de.solde || 0) < montant) return { ok: false, message: 'Solde insuffisant' };
+    const vers = db.economie[versId] || (db.economie[versId] = { solde: 0, historique: [] });
+    const date = new Date().toLocaleDateString('fr-FR');
+    const raison = _s(p.raison, 120) || 'Paiement';
+    if (!Array.isArray(de.historique)) de.historique = [];
+    if (!Array.isArray(vers.historique)) vers.historique = [];
+    de.solde = (de.solde || 0) - montant; de.historique.push({ date, montant: -montant, raison: `Vers ${_s(p.versNom, 80) || versId} : ${raison}` });
+    vers.solde = (vers.solde || 0) + montant; vers.historique.push({ date, montant, raison: `De ${p.auteurNom || 'Membre'} : ${raison}` });
+    return { ok: true, message: `${montant}$ envoyés` };
+  },
+  // Créditer / débiter un portefeuille (comme /argent — Direction).
+  'wallet.ajuster': (db, p) => {
+    const id = _s(p.membreId, 40);
+    const montant = Math.round(Number(p.montant) || 0); // peut être négatif
+    if (!id) return { ok: false, message: 'Membre manquant' };
+    if (!montant) return { ok: false, message: 'Montant nul' };
+    if (!db.economie) db.economie = {};
+    const c = db.economie[id] || (db.economie[id] = { solde: 0, historique: [] });
+    if (!Array.isArray(c.historique)) c.historique = [];
+    c.solde = Math.max(0, (c.solde || 0) + montant);
+    c.historique.push({ date: new Date().toLocaleDateString('fr-FR'), montant, raison: _s(p.raison, 120) || (montant > 0 ? 'Crédit Direction' : 'Débit Direction') });
+    return { ok: true, message: `Portefeuille ajusté (${montant > 0 ? '+' : ''}${montant}$)` };
+  },
+
   // ── Coffres (finances) ───────────────────────────────────
   'coffre.ajuster': (db, p) => {
     const cible = String(p.cible || '').toLowerCase();
@@ -527,6 +563,7 @@ async function appliquerCommandesWeb(guild) {
       if (!h) { await supa.marquerCommandeWeb(c.id, 'echec', `type inconnu : ${c.type}`); continue; }
       const payload = (c.payload && typeof c.payload === 'object') ? { ...c.payload } : {};
       if (!payload.auteurNom && c.auteurNom) payload.auteurNom = c.auteurNom;
+      if (!payload.auteurId && c.auteurId) payload.auteurId = c.auteurId;
       const db = loadDB();
       const res = await h(db, payload, { guild });
       if (res && res.ok) {

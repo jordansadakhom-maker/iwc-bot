@@ -698,3 +698,37 @@ export async function getFinances(): Promise<FinancesData> {
   const find = (id: string) => (data || []).find((c: { id: string; solde: number }) => c.id === id)?.solde ?? null;
   return { connecte: true, pole, coffres: { commun: find("coffre_commun"), legal: find("coffre_legal"), illegal: find("coffre_illegal") } };
 }
+
+// ── Portefeuilles perso + journal de trésorerie ──────────────────
+export type MvtPerso = { date?: string; montant?: number; raison?: string };
+export type Portefeuille = { id: string; nom: string; solde: number; historique: MvtPerso[] };
+export type Transaction = { id: string; sens: string; montant: number; poste: string | null; motif: string | null; auteur: string | null; createdAt: string | null };
+export type PortefeuillesData = { connecte: boolean; portefeuilles: Portefeuille[]; transactions: Transaction[]; membres: MembreLite[]; total: number };
+
+export async function getPortefeuilles(): Promise<PortefeuillesData> {
+  const vide: PortefeuillesData = { connecte: false, portefeuilles: [], transactions: [], membres: [], total: 0 };
+  if (!dataConfigured()) return vide;
+  const supabase = createAdminClient();
+  if (!supabase) return vide;
+  const [walletR, txR, membreR] = await Promise.all([
+    supabase.from("Portefeuille").select("*").order("solde", { ascending: false }),
+    supabase.from("Transaction").select("*").order("createdAt", { ascending: false }).limit(60),
+    supabase.from("Membre").select("id,nomIC").order("nomIC", { ascending: true }),
+  ]);
+  const noms = new Map<string, string>();
+  const membres: MembreLite[] = ((membreR.data || []) as { id: string; nomIC: string }[]).map((m) => {
+    noms.set(String(m.id), m.nomIC || String(m.id));
+    return { id: String(m.id), nom: m.nomIC || String(m.id) };
+  });
+  type Raw = Record<string, unknown>;
+  const portefeuilles: Portefeuille[] = walletR.error ? [] : ((walletR.data || []) as Raw[]).map((w) => ({
+    id: String(w.id), nom: noms.get(String(w.id)) || String(w.id), solde: Number(w.solde) || 0,
+    historique: Array.isArray(w.historique) ? (w.historique as MvtPerso[]).slice(-15).reverse() : [],
+  }));
+  const transactions: Transaction[] = txR.error ? [] : ((txR.data || []) as Raw[]).map((t) => ({
+    id: String(t.id), sens: (t.sens as string) || "entree", montant: Number(t.montant) || 0,
+    poste: (t.poste as string) ?? null, motif: (t.motif as string) ?? null, auteur: (t.auteur as string) ?? null, createdAt: (t.createdAt as string) ?? null,
+  }));
+  const total = portefeuilles.reduce((s, w) => s + w.solde, 0);
+  return { connecte: true, portefeuilles, transactions, membres, total };
+}
