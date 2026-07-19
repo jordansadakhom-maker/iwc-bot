@@ -6,18 +6,20 @@ import { envoyerTelegrammeWeb } from "./actions";
 
 const inputCls =
   "w-full rounded-xl border border-border bg-surface-2 px-3.5 py-2.5 text-[0.9rem] text-ink outline-none placeholder:text-faint focus:border-[color-mix(in_srgb,var(--accent)_55%,var(--border))]";
+const MOYENS = ["Discord", "Télégramme", "Autre"];
 
 export function TelegrammeForm() {
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [form, setForm] = useState({ nom: "", contact: "", message: "", website: "" });
+  const [form, setForm] = useState({ nom: "", moyen: MOYENS[0], contact: "", message: "", website: "" });
   const set = <K extends keyof typeof form>(k: K, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setLoading(true); setErr(null);
     try {
-      const r = await envoyerTelegrammeWeb(form);
+      const contactFinal = form.contact.trim() ? `${form.moyen} : ${form.contact.trim()}` : "";
+      const r = await envoyerTelegrammeWeb({ ...form, contact: contactFinal });
       if (r.ok) setDone(true); else setErr(r.error || "Une erreur est survenue.");
     } catch { setErr("Envoi impossible pour le moment. Réessaie dans un instant."); }
     finally { setLoading(false); }
@@ -28,8 +30,8 @@ export function TelegrammeForm() {
       <div className="flex flex-col items-center gap-3 py-6 text-center">
         <span className="grid h-14 w-14 place-items-center rounded-2xl" style={{ color: "var(--good)", background: "color-mix(in srgb,var(--good) 16%,transparent)" }}><CheckCircle2 className="h-7 w-7" strokeWidth={1.8} /></span>
         <h2 className="font-display text-xl">Télégramme envoyé&nbsp;!</h2>
-        <p className="max-w-sm text-[0.88rem] leading-relaxed text-muted">Merci <b>{form.nom}</b>. Ton télégramme est parti vers la maison. Un membre te répondra{form.contact ? <> via <b>{form.contact}</b></> : ""} dès que possible.</p>
-        <button onClick={() => { setDone(false); setForm({ nom: "", contact: "", message: "", website: "" }); }} className="mt-2 rounded-xl border border-border bg-surface px-4 py-2 text-[0.85rem] text-muted hover:text-ink">Envoyer un autre télégramme</button>
+        <p className="max-w-sm text-[0.88rem] leading-relaxed text-muted">Merci <b>{form.nom}</b>. Ton télégramme est parti vers la maison. Un membre te répondra{form.contact ? <> via <b>{form.moyen}</b> ({form.contact})</> : ""} dès que possible.</p>
+        <button onClick={() => { setDone(false); setForm({ nom: "", moyen: MOYENS[0], contact: "", message: "", website: "" }); }} className="mt-2 rounded-xl border border-border bg-surface px-4 py-2 text-[0.85rem] text-muted hover:text-ink">Envoyer un autre télégramme</button>
       </div>
     );
   }
@@ -41,8 +43,11 @@ export function TelegrammeForm() {
         <input className={inputCls} required value={form.nom} onChange={(e) => set("nom", e.target.value)} placeholder="Nom &amp; prénom du personnage" />
       </div>
       <div>
-        <label className="mb-1.5 block text-[0.76rem] font-semibold uppercase tracking-[0.06em] text-muted">Comment te répondre&nbsp;? (optionnel)</label>
-        <input className={inputCls} value={form.contact} onChange={(e) => set("contact", e.target.value)} placeholder="Pseudo Discord, ou autre moyen" />
+        <label className="mb-1.5 block text-[0.76rem] font-semibold uppercase tracking-[0.06em] text-muted">Comment te joindre&nbsp;? (optionnel)</label>
+        <div className="grid gap-2 sm:grid-cols-[130px_1fr]">
+          <select className={inputCls} value={form.moyen} onChange={(e) => set("moyen", e.target.value)}>{MOYENS.map((m) => <option key={m} value={m}>{m}</option>)}</select>
+          <input className={inputCls} value={form.contact} onChange={(e) => set("contact", e.target.value)} placeholder={form.moyen === "Télégramme" ? "N° ou nom de télégramme" : form.moyen === "Discord" ? "Ton pseudo Discord" : "Comment te joindre"} />
+        </div>
       </div>
       <div>
         <label className="mb-1.5 block text-[0.76rem] font-semibold uppercase tracking-[0.06em] text-muted">Ton télégramme *</label>
