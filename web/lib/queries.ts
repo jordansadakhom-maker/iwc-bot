@@ -332,6 +332,38 @@ export async function getRenseignement(): Promise<RenseignementData> {
   };
 }
 
+// ── Avis de recherche / Wanted (page dédiée) ─────────────────────
+export type AvisItem = {
+  id: string; cible: string; prime: string | null; dangerosite: string | null; statut: string;
+  photo: string | null; position: string | null; vivantMort: string | null;
+  commanditaire: string | null; signalement: string | null; chasseurs: number;
+};
+export type AvisData = { connecte: boolean; avis: AvisItem[] };
+
+export async function getAvisRecherche(): Promise<AvisData> {
+  if (!dataConfigured()) return { connecte: false, avis: [] };
+  const supabase = createAdminClient();
+  if (!supabase) return { connecte: false, avis: [] };
+  // select("*") : robuste que les colonnes riches existent ou non.
+  const { data, error } = await supabase.from("Traque").select("*").order("createdAt", { ascending: false }).limit(200);
+  if (error) return { connecte: false, avis: [] };
+  type Raw = Record<string, unknown>;
+  const avis: AvisItem[] = ((data || []) as Raw[]).map((t) => ({
+    id: String(t.id),
+    cible: (t.cible as string) || "Inconnu",
+    prime: (t.prime as string) ?? null,
+    dangerosite: (t.dangerosite as string) ?? null,
+    statut: (t.statut as string) || "chasse",
+    photo: (t.photo as string) ?? null,
+    position: (t.position as string) ?? null,
+    vivantMort: (t.vivantMort as string) ?? null,
+    commanditaire: (t.commanditaire as string) ?? null,
+    signalement: (t.signalement as string) ?? null,
+    chasseurs: Number(t.chasseurs) || 0,
+  }));
+  return { connecte: true, avis };
+}
+
 // ── Médical (page dédiée) ────────────────────────────────────────
 export type Blessure = { date?: string; desc?: string; localisation?: string; gravite?: string };
 export type Suivi = { date?: string; soin?: string; soignant?: string; etat?: string; traitement?: string; suite?: string };

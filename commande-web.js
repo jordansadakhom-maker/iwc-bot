@@ -233,9 +233,15 @@ Object.assign(HANDLERS, {
     const cible = _s(p.cible, 200);
     if (!cible) return { ok: false, message: 'cible manquante' };
     if (!Array.isArray(db.traques)) db.traques = [];
-    const id = `web-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
-    db.traques.push({ id, cible, prime: _s(p.prime, 120), dangerosite: _s(p.dangerosite, 40), status: _statutTraque(p.statut), createdAt: new Date().toISOString() });
-    return { ok: true, message: 'Traque ajoutée' };
+    const id = `AR-${Date.now().toString().slice(-6)}`;
+    db.traques.push({
+      id, cible, prime: _s(p.prime, 120) || '—', dangerosite: _s(p.dangerosite, 40) || 'moyen',
+      status: _statutTraque(p.statut), position: _s(p.position, 200) || '—',
+      vivantMort: _s(p.vivantMort, 40) || 'Indifférent', commanditaire: _s(p.commanditaire, 200) || '—',
+      signalement: _s(p.signalement, 2000), photo: _s(p.photo, 500) || null,
+      chasseurs: [], pistes: [], createdAt: new Date().toISOString(), source: 'web',
+    });
+    return { ok: true, message: `Avis de recherche émis : ${cible.slice(0, 50)}` };
   },
   'traque.update': (db, p) => {
     const t = (db.traques || []).find(x => x && String(x.id) === String(p.id));
@@ -244,7 +250,12 @@ Object.assign(HANDLERS, {
     if (p.prime !== undefined) t.prime = _s(p.prime, 120);
     if (p.dangerosite !== undefined) t.dangerosite = _s(p.dangerosite, 40);
     if (p.statut !== undefined) t.status = _statutTraque(p.statut);
-    return { ok: true, message: 'Traque mise à jour' };
+    if (p.position !== undefined) t.position = _s(p.position, 200);
+    if (p.vivantMort !== undefined) t.vivantMort = _s(p.vivantMort, 40);
+    if (p.commanditaire !== undefined) t.commanditaire = _s(p.commanditaire, 200);
+    if (p.signalement !== undefined) t.signalement = _s(p.signalement, 2000);
+    if (p.photo !== undefined) t.photo = _s(p.photo, 500) || null;
+    return { ok: true, message: 'Avis de recherche mis à jour' };
   },
   'traque.delete': (db, p) => {
     const i = (db.traques || []).findIndex(x => x && String(x.id) === String(p.id));
