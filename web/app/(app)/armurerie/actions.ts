@@ -274,3 +274,211 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
     return { ok: false, error: /Armurerie|does not exist/i.test(msg) ? "Tables armurerie manquantes — exécute armurerie-vh.sql." : "Vente impossible pour le moment." };
   }
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  MODULE ERP — employés, pointage, paies, impôts, comptabilité,
+//  bloc-notes, tâches. Tables neuves (armurerie-erp.sql), site-native.
+// ═══════════════════════════════════════════════════════════════
+const nowISO = () => new Date().toISOString();
+function erpErr(msg: string): string {
+  if (/does not exist|relation|Armurerie/i.test(msg)) return "Cette section n'est pas encore prête — exécute armurerie-erp.sql dans Supabase.";
+  return "Enregistrement impossible pour le moment.";
+}
+
+// ── Employés ─────────────────────────────────────────────────────
+export async function creerEmploye(d: { nom: string; discordId?: string; role?: string; commission?: number; salaireBase?: number }): Promise<ArmResult> {
+  if (!d.nom || d.nom.trim().length < 2) return { ok: false, error: "Nom de l'employé requis." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const id = newId("emp");
+  const { error } = await admin.from("ArmurerieEmploye").insert({
+    id, nom: s(d.nom, 120), discordId: s(d.discordId, 40), role: s(d.role, 60) || "Armurier",
+    commission: Math.max(0, Math.min(100, Math.round(Number(d.commission) || 0))),
+    salaireBase: Math.max(0, Math.round(Number(d.salaireBase) || 0)), actif: true,
+  });
+  if (error) return { ok: false, error: erpErr(error.message) };
+  return { ok: true, id };
+}
+export async function majEmploye(id: string, patch: Record<string, unknown>): Promise<ArmResult> {
+  if (!id) return { ok: false, error: "Employé introuvable." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const up: Record<string, unknown> = { updatedAt: nowISO() };
+  if ("nom" in patch) up.nom = s(patch.nom, 120);
+  if ("discordId" in patch) up.discordId = s(patch.discordId, 40);
+  if ("role" in patch) up.role = s(patch.role, 60);
+  if ("commission" in patch) up.commission = Math.max(0, Math.min(100, Math.round(Number(patch.commission) || 0)));
+  if ("salaireBase" in patch) up.salaireBase = Math.max(0, Math.round(Number(patch.salaireBase) || 0));
+  if ("actif" in patch) up.actif = !!patch.actif;
+  const { error } = await admin.from("ArmurerieEmploye").update(up).eq("id", id);
+  return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+}
+export async function supprimerEmploye(id: string): Promise<ArmResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { error } = await admin.from("ArmurerieEmploye").delete().eq("id", id);
+  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+}
+
+// ── Pointage (prise / fin de service) ────────────────────────────
+export async function pointerService(employeId: string, employeNom: string): Promise<ArmResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  // Refuse un double pointage ouvert pour le même employé.
+  const { data: ouvert } = await admin.from("ArmureriePointage").select("id").eq("employeId", employeId).is("fin", null).limit(1);
+  if (Array.isArray(ouvert) && ouvert.length) return { ok: false, error: "Service déjà en cours pour cet employé." };
+  const id = newId("ptg");
+  const { error } = await admin.from("ArmureriePointage").insert({ id, employeId: s(employeId, 60), employeNom: s(employeNom, 120), debut: nowISO(), fin: null, minutes: 0 });
+  if (error) return { ok: false, error: erpErr(error.message) };
+  return { ok: true, id };
+}
+export async function terminerService(id: string): Promise<ArmResult> {
+  if (!id) return { ok: false, error: "Pointage introuvable." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { data } = await admin.from("ArmureriePointage").select("debut").eq("id", id).maybeSingle();
+  const debut = data ? new Date(String((data as { debut: string }).debut)).getTime() : Date.now();
+  const minutes = Math.max(0, Math.round((Date.now() - debut) / 60000));
+  const { error } = await admin.from("ArmureriePointage").update({ fin: nowISO(), minutes }).eq("id", id);
+  return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+}
+export async function supprimerPointage(id: string): Promise<ArmResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { error } = await admin.from("ArmureriePointage").delete().eq("id", id);
+  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+}
+
+// ── Paies (commission sur CA + fixe + prime) ─────────────────────
+export async function creerPaie(d: { employeId?: string; employeNom: string; periode?: string; ventes?: number; commission?: number; base?: number; prime?: number; notes?: string }): Promise<ArmResult> {
+  if (!d.employeNom || d.employeNom.trim().length < 2) return { ok: false, error: "Indique l'employé." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const commission = Math.max(0, Math.round(Number(d.commission) || 0));
+  const base = Math.max(0, Math.round(Number(d.base) || 0));
+  const prime = Math.max(0, Math.round(Number(d.prime) || 0));
+  const montant = commission + base + prime;
+  const id = newId("pay");
+  const { error } = await admin.from("ArmureriePaie").insert({
+    id, employeId: s(d.employeId, 60), employeNom: s(d.employeNom, 120), periode: s(d.periode, 80),
+    ventes: Math.max(0, Math.round(Number(d.ventes) || 0)), commission, base, prime, montant,
+    statut: "du", notes: s(d.notes, 500),
+  });
+  if (error) return { ok: false, error: erpErr(error.message) };
+  return { ok: true, id };
+}
+export async function payerPaie(id: string): Promise<ArmResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { data, error } = await admin.from("ArmureriePaie").select("*").eq("id", id).maybeSingle();
+  if (error || !data) return { ok: false, error: "Fiche de paie introuvable." };
+  const p = data as { statut: string; montant: number; employeNom: string };
+  if (p.statut === "paye") return { ok: false, error: "Cette paie est déjà versée." };
+  const montant = Math.max(0, Math.round(Number(p.montant) || 0));
+  try { if (montant > 0) await _mouvementCoffre(admin, montant, "sortie", `Paie — ${p.employeNom}`, await auteurNom()); }
+  catch (e) { return { ok: false, error: erpErr((e as Error).message || "") }; }
+  await admin.from("ArmureriePaie").update({ statut: "paye", payeAt: nowISO() }).eq("id", id);
+  return { ok: true };
+}
+export async function supprimerPaie(id: string): Promise<ArmResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { error } = await admin.from("ArmureriePaie").delete().eq("id", id);
+  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+}
+
+// ── Impôts (cycle fiscal : CA × taux) ────────────────────────────
+export async function creerImpot(d: { libelle?: string; debut?: string; fin?: string; chiffreAffaires?: number; taux?: number; notes?: string }): Promise<ArmResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const ca = Math.max(0, Math.round(Number(d.chiffreAffaires) || 0));
+  const taux = Math.max(0, Math.min(100, Math.round(Number(d.taux) || 0)));
+  const montant = Math.round((ca * taux) / 100);
+  const id = newId("imp");
+  const { error } = await admin.from("ArmurerieImpot").insert({
+    id, libelle: s(d.libelle, 80) || "Cycle fiscal", debut: s(d.debut, 40), fin: s(d.fin, 40),
+    chiffreAffaires: ca, taux, montant, statut: "du", notes: s(d.notes, 500),
+  });
+  if (error) return { ok: false, error: erpErr(error.message) };
+  return { ok: true, id };
+}
+export async function payerImpot(id: string): Promise<ArmResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { data, error } = await admin.from("ArmurerieImpot").select("*").eq("id", id).maybeSingle();
+  if (error || !data) return { ok: false, error: "Déclaration introuvable." };
+  const im = data as { statut: string; montant: number; libelle: string };
+  if (im.statut === "paye") return { ok: false, error: "Cet impôt est déjà réglé." };
+  const montant = Math.max(0, Math.round(Number(im.montant) || 0));
+  try { if (montant > 0) await _mouvementCoffre(admin, montant, "sortie", `Impôt — ${im.libelle || "cycle"}`, await auteurNom()); }
+  catch (e) { return { ok: false, error: erpErr((e as Error).message || "") }; }
+  await admin.from("ArmurerieImpot").update({ statut: "paye", payeAt: nowISO() }).eq("id", id);
+  return { ok: true };
+}
+export async function supprimerImpot(id: string): Promise<ArmResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { error } = await admin.from("ArmurerieImpot").delete().eq("id", id);
+  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+}
+
+// ── Comptabilité : écriture manuelle (recette / dépense) ─────────
+export async function ajouterEcriture(montant: number, sens: "entree" | "sortie", motif: string): Promise<ArmResult> {
+  const m = Math.abs(Math.round(Number(montant) || 0));
+  if (m <= 0) return { ok: false, error: "Montant invalide." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  try { await _mouvementCoffre(admin, m, sens, s(motif, 200) || (sens === "entree" ? "Recette" : "Dépense"), await auteurNom()); return { ok: true }; }
+  catch (e) { return { ok: false, error: erpErr((e as Error).message || "") }; }
+}
+
+// ── Bloc-notes ───────────────────────────────────────────────────
+export async function creerNote(d: { titre?: string; contenu: string }): Promise<ArmResult> {
+  if (!d.contenu || d.contenu.trim().length < 1) return { ok: false, error: "Écris le contenu de la note." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const id = newId("note");
+  const { error } = await admin.from("ArmurerieNote").insert({ id, titre: s(d.titre, 120), contenu: s(d.contenu, 4000), epingle: false, auteur: await auteurNom() });
+  if (error) return { ok: false, error: erpErr(error.message) };
+  return { ok: true, id };
+}
+export async function majNote(id: string, patch: { titre?: string; contenu?: string; epingle?: boolean }): Promise<ArmResult> {
+  if (!id) return { ok: false, error: "Note introuvable." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const up: Record<string, unknown> = { updatedAt: nowISO() };
+  if ("titre" in patch) up.titre = s(patch.titre, 120);
+  if ("contenu" in patch) up.contenu = s(patch.contenu, 4000);
+  if ("epingle" in patch) up.epingle = !!patch.epingle;
+  const { error } = await admin.from("ArmurerieNote").update(up).eq("id", id);
+  return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+}
+export async function supprimerNote(id: string): Promise<ArmResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { error } = await admin.from("ArmurerieNote").delete().eq("id", id);
+  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+}
+
+// ── Tâches ───────────────────────────────────────────────────────
+export async function creerTache(d: { texte: string; assigneA?: string }): Promise<ArmResult> {
+  if (!d.texte || d.texte.trim().length < 1) return { ok: false, error: "Décris la tâche." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const id = newId("tsk");
+  const { error } = await admin.from("ArmurerieTache").insert({ id, texte: s(d.texte, 300), fait: false, assigneA: s(d.assigneA, 120), auteur: await auteurNom() });
+  if (error) return { ok: false, error: erpErr(error.message) };
+  return { ok: true, id };
+}
+export async function basculerTache(id: string, fait: boolean): Promise<ArmResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { error } = await admin.from("ArmurerieTache").update({ fait: !!fait }).eq("id", id);
+  return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+}
+export async function supprimerTache(id: string): Promise<ArmResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { error } = await admin.from("ArmurerieTache").delete().eq("id", id);
+  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+}

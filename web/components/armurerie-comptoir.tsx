@@ -5,11 +5,15 @@ import { useRouter } from "next/navigation";
 import {
   Users, ScrollText, FileSignature, Plus, Minus, Loader2, Trash2, IdCard, Send, Check, X,
   Download, CircleDollarSign, Vault, ArrowDownRight, ArrowUpRight, History, ShoppingCart, Package, Search,
+  Clock, BadgeDollarSign, Landmark, StickyNote, ListTodo, Activity, Wallet,
 } from "lucide-react";
-import type { ArmClient, ArmVente, ArmContrat, ArmMouvement, ArmProduit } from "@/lib/queries";
+import type { ArmClient, ArmVente, ArmContrat, ArmMouvement, ArmProduit, ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache } from "@/lib/queries";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { Badge } from "@/components/ui";
 import { PhotoDrop } from "@/components/photo-drop";
+import {
+  EmployesTab, PointageTab, ComptabiliteTab, PaiesTab, ImpotsTab, BlocNotesTab, TachesTab, ActiviteTab,
+} from "@/components/armurerie-erp";
 import {
   creerClient, majClient, supprimerClient,
   creerVente, majVente, supprimerVente,
@@ -31,12 +35,15 @@ const ctrTone = (s: string): "good" | "warn" | "accent" | "oxblood" | "muted" =>
   s === "signe" ? "good" : s === "envoye" ? "accent" : s === "refuse" ? "oxblood" : "muted";
 const ctrLabel = (s: string) => s === "signe" ? "Signé" : s === "envoye" ? "Envoyé" : s === "refuse" ? "Refusé" : "Brouillon";
 
-type TabKey = "caisse" | "produits" | "ventes" | "clients" | "contrats";
+type TabKey = "caisse" | "produits" | "ventes" | "clients" | "contrats" | "employes" | "pointage" | "paies" | "comptabilite" | "impots" | "notes" | "taches" | "activite";
 
-export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouvementsCoffre, produits }: { clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvementsCoffre: ArmMouvement[]; produits: ArmProduit[] }) {
+export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouvementsCoffre, produits, employes, pointages, paies, impots, notes, taches }: { clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvementsCoffre: ArmMouvement[]; produits: ArmProduit[]; employes: ArmEmploye[]; pointages: ArmPointage[]; paies: ArmPaie[]; impots: ArmImpot[]; notes: ArmNote[]; taches: ArmTache[] }) {
   const router = useRouter();
   const [tab, setTab] = useState<TabKey>("caisse");
   const signes = contrats.filter((c) => c.statut === "signe").length;
+  const paiesDues = paies.filter((p) => p.statut !== "paye").length;
+  const impotsDus = impots.filter((i) => i.statut !== "paye").length;
+  const tachesAFaire = taches.filter((t) => !t.fait).length;
 
   const TABS: { key: TabKey; label: string; icon: typeof Users; n: number }[] = [
     { key: "caisse", label: "Caisse", icon: ShoppingCart, n: produits.length },
@@ -44,6 +51,14 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
     { key: "ventes", label: "Registre des ventes", icon: ScrollText, n: ventes.length },
     { key: "clients", label: "Fichier clients", icon: Users, n: clients.length },
     { key: "contrats", label: "Contrats", icon: FileSignature, n: contrats.length },
+    { key: "employes", label: "Employés", icon: Users, n: employes.length },
+    { key: "pointage", label: "Pointage", icon: Clock, n: pointages.filter((p) => !p.fin).length },
+    { key: "paies", label: "Paies", icon: BadgeDollarSign, n: paiesDues },
+    { key: "comptabilite", label: "Comptabilité", icon: Wallet, n: mouvementsCoffre.length },
+    { key: "impots", label: "Impôts", icon: Landmark, n: impotsDus },
+    { key: "notes", label: "Bloc-notes", icon: StickyNote, n: notes.length },
+    { key: "taches", label: "Tâches", icon: ListTodo, n: tachesAFaire },
+    { key: "activite", label: "Activité", icon: Activity, n: 0 },
   ];
 
   return (
@@ -66,7 +81,7 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
           return (
             <button key={t.key} onClick={() => setTab(t.key)} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[0.82rem] font-semibold transition"
               style={{ color: on ? "#000" : "var(--muted)", background: on ? "var(--accent)" : "transparent" }}>
-              <t.icon className="h-3.5 w-3.5" /> {t.label} <span className="font-num opacity-70">{t.n}</span>
+              <t.icon className="h-3.5 w-3.5" /> {t.label} {t.n ? <span className="font-num opacity-70">{t.n}</span> : null}
             </button>
           );
         })}
@@ -77,6 +92,14 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
       {tab === "clients" ? <ClientsTab clients={clients} ventes={ventes} router={router} /> : null}
       {tab === "ventes" ? <VentesTab ventes={ventes} clients={clients} router={router} /> : null}
       {tab === "contrats" ? <ContratsTab contrats={contrats} clients={clients} router={router} /> : null}
+      {tab === "employes" ? <EmployesTab employes={employes} router={router} /> : null}
+      {tab === "pointage" ? <PointageTab employes={employes} pointages={pointages} router={router} /> : null}
+      {tab === "paies" ? <PaiesTab paies={paies} employes={employes} ventes={ventes} router={router} /> : null}
+      {tab === "comptabilite" ? <ComptabiliteTab mouvements={mouvementsCoffre} ca={ca} router={router} /> : null}
+      {tab === "impots" ? <ImpotsTab impots={impots} ca={ca} router={router} /> : null}
+      {tab === "notes" ? <BlocNotesTab notes={notes} router={router} /> : null}
+      {tab === "taches" ? <TachesTab taches={taches} router={router} /> : null}
+      {tab === "activite" ? <ActiviteTab mouvements={mouvementsCoffre} ventes={ventes} pointages={pointages} paies={paies} /> : null}
     </>
   );
 }
