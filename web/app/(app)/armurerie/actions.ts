@@ -183,7 +183,7 @@ function tableErr(msg: string, quoi: string): string {
 }
 
 // ── Produits (catalogue de la Caisse) ────────────────────────────
-export async function creerProduit(d: { nom: string; categorie?: string; prix?: number; cout?: number; stock?: number; aLaDemande?: boolean }): Promise<ArmResult> {
+export async function creerProduit(d: { nom: string; categorie?: string; prix?: number; cout?: number; stock?: number; aLaDemande?: boolean; niveau?: number }): Promise<ArmResult> {
   if (!d.nom || d.nom.trim().length < 1) return { ok: false, error: "Nom du produit requis." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
@@ -192,6 +192,7 @@ export async function creerProduit(d: { nom: string; categorie?: string; prix?: 
     id, nom: s(d.nom, 120), categorie: s(d.categorie, 60) || "Divers",
     prix: Math.max(0, round2(Number(d.prix) || 0)), cout: Math.max(0, round2(Number(d.cout) || 0)),
     stock: Math.max(0, Math.round(Number(d.stock) || 0)), aLaDemande: !!d.aLaDemande,
+    niveau: Math.max(0, Math.min(3, Math.round(Number(d.niveau) || 0))),
   });
   if (error) return { ok: false, error: tableErr(error.message, "produits") };
   return { ok: true, id };
@@ -207,6 +208,7 @@ export async function majProduit(id: string, patch: Record<string, unknown>): Pr
   if ("cout" in patch) up.cout = Math.max(0, round2(Number(patch.cout) || 0));
   if ("stock" in patch) up.stock = Math.max(0, Math.round(Number(patch.stock) || 0));
   if ("aLaDemande" in patch) up.aLaDemande = !!patch.aLaDemande;
+  if ("niveau" in patch) up.niveau = Math.max(0, Math.min(3, Math.round(Number(patch.niveau) || 0)));
   const { error } = await admin.from("ArmurerieProduit").update(up).eq("id", id);
   return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
 }
@@ -217,31 +219,66 @@ export async function supprimerProduit(id: string): Promise<ArmResult> {
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
 
-// Catalogue type RDR2 (prix de référence) — importé en un clic si le catalogue est vide.
-const CATALOGUE: { nom: string; cat: string; prix: number; aLaDemande?: boolean }[] = [
-  { nom: "Fusil à verrou", cat: "Fusils", prix: 300 }, { nom: "Fusil à répétition", cat: "Fusils", prix: 215 },
-  { nom: "Fusil à pompe", cat: "Fusils", prix: 275 }, { nom: "Fusil double canon", cat: "Fusils", prix: 200 },
-  { nom: "Fusil springfield", cat: "Fusils", prix: 230 }, { nom: "Fusil éléphant", cat: "Fusils", prix: 400 },
-  { nom: "Carabine Litchfield", cat: "Carabines", prix: 130 }, { nom: "Carabine Lancaster", cat: "Carabines", prix: 150 },
-  { nom: "Carabine Evans", cat: "Carabines", prix: 140 }, { nom: "Carabine à répétition", cat: "Carabines", prix: 50 },
-  { nom: "Pistolet Mauser", cat: "Pistolets", prix: 75 }, { nom: "Pistolet Volcanic", cat: "Pistolets", prix: 60 },
-  { nom: "Pistolet 1899", cat: "Pistolets", prix: 85 }, { nom: "Canon scié", cat: "Pistolets", prix: 70 },
-  { nom: "Revolver Cattleman", cat: "Revolvers", prix: 17 }, { nom: "Revolver Navy", cat: "Revolvers", prix: 80 },
-  { nom: "Revolver Schofield", cat: "Revolvers", prix: 50 }, { nom: "Revolver LeMat", cat: "Revolvers", prix: 90 },
-  { nom: "Revolver Double Action", cat: "Revolvers", prix: 20 },
-  { nom: "Boîte de munitions de Revolver", cat: "Munitions", prix: 5 }, { nom: "Boîte de munitions de Pistolet", cat: "Munitions", prix: 5 },
-  { nom: "Boîte de munitions de Carabine", cat: "Munitions", prix: 5 }, { nom: "Boîte de munitions de Fusil", cat: "Munitions", prix: 5 },
-  { nom: "Boîte de munitions de Pompe", cat: "Munitions", prix: 5 },
-  { nom: "Jumelles", cat: "Matériel", prix: 5 }, { nom: "Lanterne", cat: "Matériel", prix: 5 },
-  { nom: "Menottes", cat: "Matériel", prix: 3 }, { nom: "Lasso", cat: "Matériel", prix: 5 },
-  { nom: "Couteau", cat: "Divers", prix: 5 }, { nom: "Hachette", cat: "Divers", prix: 6 },
-  { nom: "Arc", cat: "Divers", prix: 10, aLaDemande: true }, { nom: "Carquois", cat: "Divers", prix: 2, aLaDemande: true },
-  { nom: "Pack Chasseur", cat: "Divers", prix: 18 },
+// Catalogue officiel de l'armurerie (prix de vente client) — importé en un clic.
+const CATALOGUE: { nom: string; cat: string; prix: number; niveau?: number }[] = [
+  // Revolvers
+  { nom: "Revolver Cattleman", cat: "Revolvers", prix: 17, niveau: 0 },
+  { nom: "Revolver Cattleman Mexican", cat: "Revolvers", prix: 20, niveau: 1 },
+  { nom: "Revolver Double Action", cat: "Revolvers", prix: 20, niveau: 0 },
+  { nom: "Revolver Schofield", cat: "Revolvers", prix: 50, niveau: 1 },
+  { nom: "Revolver Navy", cat: "Revolvers", prix: 80, niveau: 1 },
+  { nom: "Revolver LeMat", cat: "Revolvers", prix: 90, niveau: 2 },
+  // Pistolets
+  { nom: "Pistolet Volcanic", cat: "Pistolets", prix: 60, niveau: 1 },
+  { nom: "Pistolet semi-automatique", cat: "Pistolets", prix: 70, niveau: 2 },
+  { nom: "Canon scié", cat: "Pistolets", prix: 70, niveau: 3 },
+  { nom: "Pistolet Mauser", cat: "Pistolets", prix: 75, niveau: 1 },
+  { nom: "Pistolet 1899", cat: "Pistolets", prix: 85, niveau: 2 },
+  // Carabines
+  { nom: "Carabine à répétition", cat: "Carabines", prix: 50, niveau: 2 },
+  { nom: "Carabine Litchfield", cat: "Carabines", prix: 130, niveau: 2 },
+  { nom: "Carabine Evans", cat: "Carabines", prix: 140, niveau: 2 },
+  { nom: "Carabine Lancaster", cat: "Carabines", prix: 150, niveau: 2 },
+  // Fusils
+  { nom: "Fusil à petit gibier", cat: "Fusils", prix: 50, niveau: 0 },
+  { nom: "Fusil double canon", cat: "Fusils", prix: 200, niveau: 2 },
+  { nom: "Fusil double canon exotique", cat: "Fusils", prix: 200, niveau: 2 },
+  { nom: "Fusil à répétition", cat: "Fusils", prix: 215, niveau: 2 },
+  { nom: "Fusil springfield", cat: "Fusils", prix: 230, niveau: 3 },
+  { nom: "Fusil semi-automatique", cat: "Fusils", prix: 250, niveau: 1 },
+  { nom: "Fusil à pompe", cat: "Fusils", prix: 275, niveau: 2 },
+  { nom: "Fusil à verrou", cat: "Fusils", prix: 300, niveau: 3 },
+  { nom: "Fusil éléphant", cat: "Fusils", prix: 400, niveau: 3 },
+  // Corps à corps
+  { nom: "Hachette de chasseur", cat: "Corps à corps", prix: 4, niveau: 0 },
+  { nom: "Couteau de lancé", cat: "Corps à corps", prix: 4, niveau: 0 },
+  { nom: "Couteau", cat: "Corps à corps", prix: 5, niveau: 0 },
+  { nom: "Hachette", cat: "Corps à corps", prix: 6, niveau: 0 },
+  // Matériel
+  { nom: "Carquois", cat: "Matériel", prix: 2, niveau: 0 },
+  { nom: "Menottes", cat: "Matériel", prix: 3, niveau: 0 },
+  { nom: "Jumelles", cat: "Matériel", prix: 5, niveau: 0 },
+  { nom: "Lanterne", cat: "Matériel", prix: 5, niveau: 0 },
+  { nom: "Lasso", cat: "Matériel", prix: 5, niveau: 0 },
+  { nom: "Ceinture Hachette", cat: "Matériel", prix: 8, niveau: 0 },
+  { nom: "Ceinture Couteau de lancé", cat: "Matériel", prix: 10, niveau: 0 },
+  { nom: "Ceinture Hachette de chasseur", cat: "Matériel", prix: 10, niveau: 0 },
+  { nom: "Jumelles Améliorées", cat: "Matériel", prix: 10, niveau: 1 },
+  { nom: "Lasso Amélioré", cat: "Matériel", prix: 10, niveau: 1 },
+  // Packs
+  { nom: "Pack Chasseur", cat: "Packs", prix: 18, niveau: 0 },
+  { nom: "Pack L'arrivant", cat: "Packs", prix: 25, niveau: 0 },
+  { nom: "Pack chasseur ultime", cat: "Packs", prix: 35, niveau: 0 },
+  { nom: "Pack Guerrier", cat: "Packs", prix: 95, niveau: 0 },
+  // Matières & divers
+  { nom: "Laiton", cat: "Matières", prix: 3.52, niveau: 0 },
+  { nom: "Pièce d'arme", cat: "Matières", prix: 0, niveau: 0 },
+  { nom: "Don", cat: "Divers", prix: 0, niveau: 0 },
 ];
 export async function importerCatalogue(): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
-  const rows = CATALOGUE.map((p) => ({ id: newId("prd"), nom: p.nom, categorie: p.cat, prix: p.prix, cout: 0, stock: 0, aLaDemande: !!p.aLaDemande }));
+  const rows = CATALOGUE.map((p) => ({ id: newId("prd"), nom: p.nom, categorie: p.cat, prix: round2(p.prix), cout: 0, stock: 0, aLaDemande: false, niveau: p.niveau || 0 }));
   const { error } = await admin.from("ArmurerieProduit").insert(rows);
   if (error) return { ok: false, error: tableErr(error.message, "produits") };
   return { ok: true };

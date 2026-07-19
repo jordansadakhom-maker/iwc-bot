@@ -25,6 +25,7 @@ import {
 
 type Router = ReturnType<typeof useRouter>;
 const money = (n: number) => `${cents(n)}$`;
+const fourchette = (n: number): [number, number] => [Math.round(n * 90) / 100, Math.round(n * 110) / 100];
 const CATS = ["Revolver", "Pistolet", "Fusil à répétition", "Fusil à pompe", "Carabine", "Fusil de précision", "Autre"];
 const STATUTS_CLIENT = [
   { key: "actif", label: "Actif", tone: "var(--good)" },
@@ -228,13 +229,20 @@ function ProduitsTab({ produits, router }: { produits: ArmProduit[]; router: Rou
           {cats.map((cat) => (
             <div key={cat}>
               <div className="mb-1.5 text-[0.72rem] uppercase tracking-[0.08em] text-faint">{cat}</div>
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                {produits.filter((p) => p.categorie === cat).map((p) => (
-                  <button key={p.id} onClick={() => setSel(p)} className="flex items-center justify-between gap-2 rounded-[10px] border border-border bg-surface-2 px-3 py-2 text-left transition hover:border-border-2">
-                    <div className="min-w-0"><div className="truncate text-[0.84rem] font-medium">{p.nom}</div><div className="text-[0.68rem] text-faint">{p.aLaDemande ? "à la demande" : `stock ${p.stock}`}{p.cout ? ` · coût ${money(p.cout)}` : ""}</div></div>
-                    <span className="shrink-0 font-num text-[0.86rem] font-bold" style={{ color: "var(--accent)" }}>{money(p.prix)}</span>
-                  </button>
-                ))}
+              <div className="flex flex-col gap-2">
+                {produits.filter((p) => p.categorie === cat).map((p) => {
+                  const [lo, hi] = fourchette(p.prix);
+                  const enStock = p.aLaDemande || p.stock > 0;
+                  return (
+                    <button key={p.id} onClick={() => setSel(p)} className="flex items-center gap-3 rounded-[10px] border border-border bg-surface-2 px-3.5 py-2.5 text-left transition hover:border-border-2">
+                      <div className="min-w-0 flex-1"><div className="truncate text-[0.88rem] font-semibold">{p.nom}</div>{p.cout ? <div className="text-[0.66rem] text-faint">coût {money(p.cout)}</div> : null}</div>
+                      <span className="hidden shrink-0 rounded-full border border-border px-2 py-0.5 text-[0.66rem] text-muted sm:inline">Niveau {p.niveau}</span>
+                      <span className="shrink-0 rounded-full px-2 py-0.5 text-[0.66rem] font-semibold" style={{ color: enStock ? "var(--good)" : "var(--oxblood)", background: `color-mix(in srgb,${enStock ? "var(--good)" : "var(--oxblood)"} 14%,transparent)` }}>{p.aLaDemande ? "à la demande" : p.stock}</span>
+                      <div className="hidden shrink-0 text-right sm:block"><div className="text-[0.58rem] uppercase tracking-[0.05em] text-faint">Prix de vente</div><div className="font-num text-[0.9rem] font-bold" style={{ color: "var(--accent)" }}>{money(p.prix)}</div></div>
+                      <div className="hidden shrink-0 text-right md:block"><div className="text-[0.58rem] uppercase tracking-[0.05em] text-faint">Fourchette ±10%</div><div className="font-num text-[0.72rem] text-muted">{money(lo)} → {money(hi)}</div></div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -253,6 +261,7 @@ function ProduitModal({ produit, onClose, router }: { produit?: ArmProduit; onCl
   const [prix, setPrix] = useState(produit ? String(produit.prix) : "");
   const [cout, setCout] = useState(produit ? String(produit.cout) : "");
   const [stock, setStock] = useState(produit ? String(produit.stock) : "");
+  const [niveau, setNiveau] = useState(produit ? String(produit.niveau) : "0");
   const [aLaDemande, setALaDemande] = useState(!!produit?.aLaDemande);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -261,7 +270,7 @@ function ProduitModal({ produit, onClose, router }: { produit?: ArmProduit; onCl
     setErr(null);
     if (nom.trim().length < 1) { setErr("Nom du produit requis."); return; }
     setBusy("save");
-    const data = { nom, categorie, prix: Number(prix) || 0, cout: Number(cout) || 0, stock: Number(stock) || 0, aLaDemande };
+    const data = { nom, categorie, prix: Number(prix) || 0, cout: Number(cout) || 0, stock: Number(stock) || 0, aLaDemande, niveau: Number(niveau) || 0 };
     const r = editing ? await majProduit(produit!.id, data) : await creerProduit(data);
     setBusy(null);
     if (!r.ok) { setErr(r.error || "Impossible."); return; }
@@ -276,10 +285,14 @@ function ProduitModal({ produit, onClose, router }: { produit?: ArmProduit; onCl
           <Champ label="Nom *"><input className={inputCls} value={nom} onChange={(e) => setNom(e.target.value)} maxLength={120} autoFocus /></Champ>
           <Champ label="Catégorie"><input className={inputCls} value={categorie} onChange={(e) => setCategorie(e.target.value)} placeholder="Revolvers, Munitions…" maxLength={60} /></Champ>
         </div>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           <Champ label="Prix de vente ($)"><input className={inputCls} type="number" min={0} step="0.01" value={prix} onChange={(e) => setPrix(e.target.value)} /></Champ>
+          <Champ label="Niveau de craft"><select className={inputCls} value={niveau} onChange={(e) => setNiveau(e.target.value)}>{[0, 1, 2, 3].map((n) => <option key={n} value={n}>Niveau {n}</option>)}</select></Champ>
+        </div>
+        {prix ? <p className="text-[0.74rem] text-faint">Fourchette ±10% : <b className="font-num text-muted">{money(fourchette(Number(prix) || 0)[0])} → {money(fourchette(Number(prix) || 0)[1])}</b></p> : null}
+        <div className="grid gap-3 sm:grid-cols-2">
           <Champ label="Coût matières ($)"><input className={inputCls} type="number" min={0} step="0.01" value={cout} onChange={(e) => setCout(e.target.value)} /></Champ>
-          <Champ label="Stock"><input className={inputCls} type="number" min={0} value={stock} onChange={(e) => setStock(e.target.value)} disabled={aLaDemande} /></Champ>
+          <Champ label="Stock (craftables)"><input className={inputCls} type="number" min={0} value={stock} onChange={(e) => setStock(e.target.value)} disabled={aLaDemande} /></Champ>
         </div>
         <label className="inline-flex items-center gap-2 text-[0.82rem]">
           <input type="checkbox" checked={aLaDemande} onChange={(e) => setALaDemande(e.target.checked)} /> Produit « à la demande » (pas de stock décompté)

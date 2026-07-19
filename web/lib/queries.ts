@@ -774,7 +774,7 @@ export type ArmClient = { id: string; nom: string; telegramme: string | null; di
 export type ArmVente = { id: string; clientId: string | null; acquereur: string; dateVente: string | null; marque: string | null; modele: string | null; categorie: string | null; numeroSerie: string | null; vendeur: string | null; telegramme: string | null; prix: number; notes: string | null; statut: string; createdAt: string | null };
 export type ArmContrat = { id: string; clientId: string | null; clientNom: string; clientDiscordId: string | null; arme: string | null; numeroSerie: string | null; prix: number; conditions: string | null; statut: string; envoyeAt: string | null; signeAt: string | null; createdAt: string | null };
 export type ArmMouvement = { id: string; sens: string; montant: number; motif: string | null; auteur: string | null; createdAt: string | null };
-export type ArmProduit = { id: string; nom: string; categorie: string; prix: number; cout: number; stock: number; aLaDemande: boolean };
+export type ArmProduit = { id: string; nom: string; categorie: string; prix: number; cout: number; stock: number; aLaDemande: boolean; niveau: number };
 export type ArmEmploye = { id: string; nom: string; discordId: string | null; role: string | null; commission: number; salaireBase: number; actif: boolean; createdAt: string | null };
 export type ArmPointage = { id: string; employeId: string | null; employeNom: string; debut: string | null; fin: string | null; minutes: number; createdAt: string | null };
 export type ArmPaie = { id: string; employeId: string | null; employeNom: string; periode: string | null; ventes: number; commission: number; base: number; prime: number; montant: number; statut: string; notes: string | null; payeAt: string | null; createdAt: string | null };
@@ -833,7 +833,7 @@ export async function getArmurerie(): Promise<ArmurerieData> {
   }));
   const produits: ArmProduit[] = prodR.error ? [] : ((prodR.data || []) as Raw[]).map((p) => ({
     id: String(p.id), nom: (p.nom as string) || "Produit", categorie: (p.categorie as string) || "Divers",
-    prix: Number(p.prix) || 0, cout: Number(p.cout) || 0, stock: Number(p.stock) || 0, aLaDemande: !!p.aLaDemande,
+    prix: Number(p.prix) || 0, cout: Number(p.cout) || 0, stock: Number(p.stock) || 0, aLaDemande: !!p.aLaDemande, niveau: Number(p.niveau) || 0,
   }));
   const employes: ArmEmploye[] = empR.error ? [] : ((empR.data || []) as Raw[]).map((e) => ({
     id: String(e.id), nom: (e.nom as string) || "Employé", discordId: (e.discordId as string) ?? null,
