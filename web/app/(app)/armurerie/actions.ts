@@ -93,20 +93,22 @@ export async function supprimerClient(id: string): Promise<ArmResult> {
 }
 
 // ── Ventes (registre officiel — Décret N°2) ──────────────────────
-export async function creerVente(d: { clientId?: string; acquereur: string; dateVente?: string; marque?: string; modele?: string; categorie?: string; numeroSerie?: string; vendeur?: string; telegramme?: string; prix?: number; notes?: string }): Promise<ArmResult> {
+export async function creerVente(d: { clientId?: string; acquereur: string; dateVente?: string; marque?: string; modele?: string; categorie?: string; numeroSerie?: string; vendeur?: string; telegramme?: string; prix?: number; notes?: string; photo?: string }): Promise<ArmResult> {
   if (!d.acquereur || d.acquereur.trim().length < 2) return { ok: false, error: "Nom de l'acquéreur requis (Décret N°2)." };
-  if (!d.numeroSerie || d.numeroSerie.trim().length < 1) return { ok: false, error: "Le n° de série est obligatoire (Décret N°2)." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
   const id = newId("vte");
-  const { error } = await admin.from("ArmurerieVente").insert({
+  const row: Record<string, unknown> = {
     id, clientId: s(d.clientId, 60), acquereur: s(d.acquereur, 120),
     dateVente: s(d.dateVente, 40) || new Date().toLocaleDateString("fr-FR"),
     marque: s(d.marque, 80), modele: s(d.modele, 80), categorie: s(d.categorie, 60),
-    numeroSerie: s(d.numeroSerie, 80), vendeur: s(d.vendeur, 120), telegramme: s(d.telegramme, 60),
+    numeroSerie: s(d.numeroSerie, 80) || null, vendeur: s(d.vendeur, 120), telegramme: s(d.telegramme, 60),
     prix: Math.max(0, round2(Number(d.prix) || 0)), notes: s(d.notes, 1000), statut: "enregistree",
-  });
-  if (error) return { ok: false, error: tableErr(error.message, "ventes") };
+  };
+  if (d.photo) row.photo = s(d.photo, 600);
+  let ins = await admin.from("ArmurerieVente").insert(row);
+  if (ins.error && d.photo && /photo/i.test(ins.error.message)) { delete row.photo; ins = await admin.from("ArmurerieVente").insert(row); }
+  if (ins.error) return { ok: false, error: tableErr(ins.error.message, "ventes") };
   // Crédite automatiquement le coffre de l'armurerie du montant de la vente.
   const prix = Math.max(0, round2(Number(d.prix) || 0));
   if (prix > 0) {
@@ -138,7 +140,9 @@ export async function majVente(id: string, patch: Record<string, unknown>): Prom
   const up: Record<string, unknown> = {};
   for (const k of ["acquereur", "dateVente", "marque", "modele", "categorie", "numeroSerie", "vendeur", "telegramme", "notes", "statut", "clientId"]) if (k in patch) up[k] = s(patch[k], 1000);
   if ("prix" in patch) up.prix = Math.max(0, round2(Number(patch.prix) || 0));
-  const { error } = await admin.from("ArmurerieVente").update(up).eq("id", id);
+  if ("photo" in patch) up.photo = patch.photo ? s(patch.photo, 600) : null;
+  let { error } = await admin.from("ArmurerieVente").update(up).eq("id", id);
+  if (error && "photo" in up && /photo/i.test(error.message)) { delete up.photo; ({ error } = await admin.from("ArmurerieVente").update(up).eq("id", id)); }
   return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
 }
 export async function supprimerVente(id: string): Promise<ArmResult> {
