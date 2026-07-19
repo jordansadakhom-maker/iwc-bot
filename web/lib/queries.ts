@@ -775,20 +775,32 @@ export type ArmVente = { id: string; clientId: string | null; acquereur: string;
 export type ArmContrat = { id: string; clientId: string | null; clientNom: string; clientDiscordId: string | null; arme: string | null; numeroSerie: string | null; prix: number; conditions: string | null; statut: string; envoyeAt: string | null; signeAt: string | null; createdAt: string | null };
 export type ArmMouvement = { id: string; sens: string; montant: number; motif: string | null; auteur: string | null; createdAt: string | null };
 export type ArmProduit = { id: string; nom: string; categorie: string; prix: number; cout: number; stock: number; aLaDemande: boolean };
-export type ArmurerieData = { connecte: boolean; clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvementsCoffre: ArmMouvement[]; produits: ArmProduit[] };
+export type ArmEmploye = { id: string; nom: string; discordId: string | null; role: string | null; commission: number; salaireBase: number; actif: boolean; createdAt: string | null };
+export type ArmPointage = { id: string; employeId: string | null; employeNom: string; debut: string | null; fin: string | null; minutes: number; createdAt: string | null };
+export type ArmPaie = { id: string; employeId: string | null; employeNom: string; periode: string | null; ventes: number; commission: number; base: number; prime: number; montant: number; statut: string; notes: string | null; payeAt: string | null; createdAt: string | null };
+export type ArmImpot = { id: string; libelle: string | null; debut: string | null; fin: string | null; chiffreAffaires: number; taux: number; montant: number; statut: string; payeAt: string | null; notes: string | null; createdAt: string | null };
+export type ArmNote = { id: string; titre: string | null; contenu: string; epingle: boolean; auteur: string | null; createdAt: string | null; updatedAt: string | null };
+export type ArmTache = { id: string; texte: string; fait: boolean; assigneA: string | null; auteur: string | null; createdAt: string | null };
+export type ArmurerieData = { connecte: boolean; clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvementsCoffre: ArmMouvement[]; produits: ArmProduit[]; employes: ArmEmploye[]; pointages: ArmPointage[]; paies: ArmPaie[]; impots: ArmImpot[]; notes: ArmNote[]; taches: ArmTache[] };
 
 export async function getArmurerie(): Promise<ArmurerieData> {
-  const vide: ArmurerieData = { connecte: false, clients: [], ventes: [], contrats: [], ca: 0, coffre: 0, mouvementsCoffre: [], produits: [] };
+  const vide: ArmurerieData = { connecte: false, clients: [], ventes: [], contrats: [], ca: 0, coffre: 0, mouvementsCoffre: [], produits: [], employes: [], pointages: [], paies: [], impots: [], notes: [], taches: [] };
   if (!dataConfigured()) return vide;
   const supabase = createAdminClient();
   if (!supabase) return vide;
-  const [clientR, venteR, contratR, coffreR, mvtR, prodR] = await Promise.all([
+  const [clientR, venteR, contratR, coffreR, mvtR, prodR, empR, ptgR, paieR, impR, noteR, tacheR] = await Promise.all([
     supabase.from("ArmurerieClient").select("*").order("nom", { ascending: true }),
     supabase.from("ArmurerieVente").select("*").order("createdAt", { ascending: false }).limit(500),
     supabase.from("ArmurerieContrat").select("*").order("createdAt", { ascending: false }).limit(300),
     supabase.from("ArmurerieCoffre").select("solde").eq("id", "vanhorn").maybeSingle(),
-    supabase.from("ArmurerieMouvementCoffre").select("*").order("createdAt", { ascending: false }).limit(40),
+    supabase.from("ArmurerieMouvementCoffre").select("*").order("createdAt", { ascending: false }).limit(400),
     supabase.from("ArmurerieProduit").select("*").order("nom", { ascending: true }),
+    supabase.from("ArmurerieEmploye").select("*").order("nom", { ascending: true }),
+    supabase.from("ArmureriePointage").select("*").order("debut", { ascending: false }).limit(200),
+    supabase.from("ArmureriePaie").select("*").order("createdAt", { ascending: false }).limit(200),
+    supabase.from("ArmurerieImpot").select("*").order("createdAt", { ascending: false }).limit(100),
+    supabase.from("ArmurerieNote").select("*").order("updatedAt", { ascending: false }).limit(100),
+    supabase.from("ArmurerieTache").select("*").order("createdAt", { ascending: false }).limit(200),
   ]);
   // Tables neuves : si absentes (400/404), on renvoie « connecté » avec des listes vides.
   type Raw = Record<string, unknown>;
@@ -820,8 +832,36 @@ export async function getArmurerie(): Promise<ArmurerieData> {
     id: String(p.id), nom: (p.nom as string) || "Produit", categorie: (p.categorie as string) || "Divers",
     prix: Number(p.prix) || 0, cout: Number(p.cout) || 0, stock: Number(p.stock) || 0, aLaDemande: !!p.aLaDemande,
   }));
+  const employes: ArmEmploye[] = empR.error ? [] : ((empR.data || []) as Raw[]).map((e) => ({
+    id: String(e.id), nom: (e.nom as string) || "Employé", discordId: (e.discordId as string) ?? null,
+    role: (e.role as string) ?? null, commission: Number(e.commission) || 0, salaireBase: Number(e.salaireBase) || 0,
+    actif: e.actif !== false, createdAt: (e.createdAt as string) ?? null,
+  }));
+  const pointages: ArmPointage[] = ptgR.error ? [] : ((ptgR.data || []) as Raw[]).map((p) => ({
+    id: String(p.id), employeId: (p.employeId as string) ?? null, employeNom: (p.employeNom as string) || "—",
+    debut: (p.debut as string) ?? null, fin: (p.fin as string) ?? null, minutes: Number(p.minutes) || 0, createdAt: (p.createdAt as string) ?? null,
+  }));
+  const paies: ArmPaie[] = paieR.error ? [] : ((paieR.data || []) as Raw[]).map((p) => ({
+    id: String(p.id), employeId: (p.employeId as string) ?? null, employeNom: (p.employeNom as string) || "—",
+    periode: (p.periode as string) ?? null, ventes: Number(p.ventes) || 0, commission: Number(p.commission) || 0,
+    base: Number(p.base) || 0, prime: Number(p.prime) || 0, montant: Number(p.montant) || 0,
+    statut: (p.statut as string) || "du", notes: (p.notes as string) ?? null, payeAt: (p.payeAt as string) ?? null, createdAt: (p.createdAt as string) ?? null,
+  }));
+  const impots: ArmImpot[] = impR.error ? [] : ((impR.data || []) as Raw[]).map((i) => ({
+    id: String(i.id), libelle: (i.libelle as string) ?? null, debut: (i.debut as string) ?? null, fin: (i.fin as string) ?? null,
+    chiffreAffaires: Number(i.chiffreAffaires) || 0, taux: Number(i.taux) || 0, montant: Number(i.montant) || 0,
+    statut: (i.statut as string) || "du", payeAt: (i.payeAt as string) ?? null, notes: (i.notes as string) ?? null, createdAt: (i.createdAt as string) ?? null,
+  }));
+  const notes: ArmNote[] = noteR.error ? [] : ((noteR.data || []) as Raw[]).map((n) => ({
+    id: String(n.id), titre: (n.titre as string) ?? null, contenu: (n.contenu as string) || "", epingle: !!n.epingle,
+    auteur: (n.auteur as string) ?? null, createdAt: (n.createdAt as string) ?? null, updatedAt: (n.updatedAt as string) ?? null,
+  }));
+  const taches: ArmTache[] = tacheR.error ? [] : ((tacheR.data || []) as Raw[]).map((t) => ({
+    id: String(t.id), texte: (t.texte as string) || "", fait: !!t.fait, assigneA: (t.assigneA as string) ?? null,
+    auteur: (t.auteur as string) ?? null, createdAt: (t.createdAt as string) ?? null,
+  }));
   const connecte = !(clientR.error && venteR.error && contratR.error) || dataConfigured();
-  return { connecte, clients, ventes, contrats, ca, coffre, mouvementsCoffre, produits };
+  return { connecte, clients, ventes, contrats, ca, coffre, mouvementsCoffre, produits, employes, pointages, paies, impots, notes, taches };
 }
 
 // ── Finances (page dédiée) ───────────────────────────────────────
