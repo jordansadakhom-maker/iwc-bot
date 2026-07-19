@@ -298,15 +298,16 @@ const HANDLERS = {
   // ── Coffres (finances) ───────────────────────────────────
   'coffre.ajuster': (db, p) => {
     const cible = String(p.cible || '').toLowerCase();
-    const montant = Math.round(Number(p.montant));
+    const r2 = (x) => Math.round((Number(x) || 0) * 100) / 100; // arrondi au centime
+    const montant = r2(p.montant);
     if (!Number.isFinite(montant)) return { ok: false, message: 'montant invalide' };
     const mode = ['depot', 'retrait', 'set'].includes(p.mode) ? p.mode : 'depot';
     const calc = (actuel) => mode === 'set' ? montant : mode === 'retrait' ? actuel - Math.abs(montant) : actuel + Math.abs(montant);
     if (cible === 'commun') {
-      db.coffre = Math.max(0, calc(Math.round(Number(db.coffre) || 0)));
+      db.coffre = Math.max(0, r2(calc(r2(db.coffre))));
     } else if (cible === 'legal' || cible === 'illegal') {
       if (!db.coffres || typeof db.coffres !== 'object') db.coffres = {};
-      db.coffres[cible] = Math.max(0, calc(Math.round(Number(db.coffres[cible]) || 0)));
+      db.coffres[cible] = Math.max(0, r2(calc(r2(db.coffres[cible]))));
     } else {
       return { ok: false, message: 'coffre inconnu' };
     }

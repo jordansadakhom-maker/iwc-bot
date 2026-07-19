@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import type { ArmClient, ArmVente, ArmContrat, ArmMouvement, ArmProduit, ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache } from "@/lib/queries";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
+import { cents } from "@/lib/format";
 import { Badge } from "@/components/ui";
 import { PhotoDrop } from "@/components/photo-drop";
 import {
@@ -23,7 +24,7 @@ import {
 } from "@/app/(app)/armurerie/actions";
 
 type Router = ReturnType<typeof useRouter>;
-const money = (n: number) => `${n.toLocaleString("fr-FR")}$`;
+const money = (n: number) => `${cents(n)}$`;
 const CATS = ["Revolver", "Pistolet", "Fusil à répétition", "Fusil à pompe", "Carabine", "Fusil de précision", "Autre"];
 const STATUTS_CLIENT = [
   { key: "actif", label: "Actif", tone: "var(--good)" },
@@ -274,8 +275,8 @@ function ProduitModal({ produit, onClose, router }: { produit?: ArmProduit; onCl
           <Champ label="Catégorie"><input className={inputCls} value={categorie} onChange={(e) => setCategorie(e.target.value)} placeholder="Revolvers, Munitions…" maxLength={60} /></Champ>
         </div>
         <div className="grid gap-3 sm:grid-cols-3">
-          <Champ label="Prix de vente ($)"><input className={inputCls} type="number" min={0} value={prix} onChange={(e) => setPrix(e.target.value)} /></Champ>
-          <Champ label="Coût matières ($)"><input className={inputCls} type="number" min={0} value={cout} onChange={(e) => setCout(e.target.value)} /></Champ>
+          <Champ label="Prix de vente ($)"><input className={inputCls} type="number" min={0} step="0.01" value={prix} onChange={(e) => setPrix(e.target.value)} /></Champ>
+          <Champ label="Coût matières ($)"><input className={inputCls} type="number" min={0} step="0.01" value={cout} onChange={(e) => setCout(e.target.value)} /></Champ>
           <Champ label="Stock"><input className={inputCls} type="number" min={0} value={stock} onChange={(e) => setStock(e.target.value)} disabled={aLaDemande} /></Champ>
         </div>
         <label className="inline-flex items-center gap-2 text-[0.82rem]">
@@ -356,7 +357,7 @@ function CoffreModal({ onClose, router }: { onClose: () => void; router: Router 
           <button onClick={() => setMode("retrait")} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[0.8rem] font-semibold" style={{ color: mode === "retrait" ? "#fff" : "var(--oxblood)", background: mode === "retrait" ? "var(--oxblood)" : "transparent", borderColor: "color-mix(in srgb,var(--oxblood) 45%,var(--border))" }}><ArrowUpRight className="h-3.5 w-3.5" /> Retrait</button>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Champ label="Montant ($)"><input className={inputCls} type="number" min={1} value={montant} onChange={(e) => setMontant(e.target.value)} autoFocus /></Champ>
+          <Champ label="Montant ($)"><input className={inputCls} type="number" min={0} step="0.01" value={montant} onChange={(e) => setMontant(e.target.value)} autoFocus /></Champ>
           <Champ label="Motif"><input className={inputCls} value={motif} onChange={(e) => setMotif(e.target.value)} placeholder="Réassort, salaire, réparation…" maxLength={200} /></Champ>
         </div>
         {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
@@ -639,7 +640,7 @@ function VenteModal({ vente, clients, onClose, router }: { vente?: ArmVente; cli
         <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Catégorie</span><Picker options={CATS.map((c) => ({ key: c, label: c }))} value={categorie} onChange={setCategorie} /></div>
         <div className="grid gap-3 sm:grid-cols-2">
           <Champ label="N° de série (gravé) *"><input className={inputCls + " mono"} value={numeroSerie} onChange={(e) => setNumeroSerie(e.target.value)} placeholder="Ex : VH-04471" maxLength={80} /></Champ>
-          <Champ label="Prix ($)"><input className={inputCls} type="number" min={0} value={prix} onChange={(e) => setPrix(e.target.value)} /></Champ>
+          <Champ label="Prix ($)"><input className={inputCls} type="number" min={0} step="0.01" value={prix} onChange={(e) => setPrix(e.target.value)} /></Champ>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <Champ label="Vendeur (armurier)"><input className={inputCls} value={vendeur} onChange={(e) => setVendeur(e.target.value)} maxLength={120} /></Champ>
@@ -781,7 +782,7 @@ function ContratModal({ contrat, clients, onClose, router }: { contrat?: ArmCont
             <Champ label="Arme"><input className={inputCls} value={arme} onChange={(e) => setArme(e.target.value)} placeholder="Cattleman Revolver" maxLength={120} /></Champ>
             <Champ label="N° de série"><input className={inputCls + " mono"} value={numeroSerie} onChange={(e) => setNumeroSerie(e.target.value)} maxLength={80} /></Champ>
           </div>
-          <Champ label="Prix ($)"><input className={inputCls} type="number" min={0} value={prix} onChange={(e) => setPrix(e.target.value)} /></Champ>
+          <Champ label="Prix ($)"><input className={inputCls} type="number" min={0} step="0.01" value={prix} onChange={(e) => setPrix(e.target.value)} /></Champ>
           <Champ label="Conditions"><textarea className={inputCls + " min-h-[60px] resize-y"} value={conditions} onChange={(e) => setConditions(e.target.value)} maxLength={2000} placeholder="Modalités de paiement, garanties, clauses…" /></Champ>
           {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
           <div className="flex justify-end">

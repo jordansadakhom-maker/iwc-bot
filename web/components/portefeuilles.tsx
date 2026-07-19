@@ -8,7 +8,8 @@ import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
 import { payerMembre, ajusterArgent } from "@/app/(app)/finances/actions";
 
 type Router = ReturnType<typeof useRouter>;
-const money = (n: number) => `${n.toLocaleString("fr-FR")}$`;
+import { cents } from "@/lib/format";
+const money = (n: number) => `${cents(n)}$`;
 const dateFR = (s: string | null) => { if (!s) return ""; try { return new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
 
 export function Portefeuilles({ portefeuilles, transactions, membres, total }: { portefeuilles: Portefeuille[]; transactions: Transaction[]; membres: MembreLite[]; total: number }) {

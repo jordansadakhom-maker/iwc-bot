@@ -6,6 +6,7 @@ import { X, Target, Plus, Loader2, Trash2, MapPin, Users, CalendarClock, Link2, 
 import type { OpDetail, EtapeDetail, MembreLite } from "@/lib/queries";
 import { Badge } from "@/components/ui";
 import { creerOperation, majOperation, supprimerOperation, assignerOperation, terminerOperation } from "@/app/(app)/operations/actions";
+import { cents } from "@/lib/format";
 
 const dateFR = (s: string | null) => { if (!s) return null; try { return new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" }); } catch { return null; } };
 
@@ -321,7 +322,7 @@ function EditModal({ op, membres, onClose, router }: { op: OpDetail; membres: Me
     setBusy(null);
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
     setPhase("terminee"); setTerminer(false);
-    setFlash(`Opération terminée${Number(montantPrime) > 0 ? ` · ${Number(montantPrime).toLocaleString("fr-FR")}$ au coffre` : ""}.`); router.refresh();
+    setFlash(`Opération terminée${Number(montantPrime) > 0 ? ` · ${cents(Number(montantPrime))}$ au coffre` : ""}.`); router.refresh();
   }
 
   async function changerPhaseLocale(ph: string) {

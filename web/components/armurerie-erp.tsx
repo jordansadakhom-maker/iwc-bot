@@ -10,6 +10,7 @@ import {
 import type { ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache, ArmMouvement, ArmVente } from "@/lib/queries";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
 import { Badge } from "@/components/ui";
+import { cents } from "@/lib/format";
 import {
   creerEmploye, majEmploye, supprimerEmploye,
   pointerService, terminerService, supprimerPointage,
@@ -21,7 +22,7 @@ import {
 } from "@/app/(app)/armurerie/actions";
 
 type Router = ReturnType<typeof useRouter>;
-const money = (n: number) => `${(Math.round(n) || 0).toLocaleString("fr-FR")}$`;
+const money = (n: number) => `${cents(n)}$`;
 const dateFR = (s: string | null) => { if (!s) return ""; try { return new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
 const heureFR = (s: string | null) => { if (!s) return ""; try { return new Date(s).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
 const hm = (min: number) => { const h = Math.floor(min / 60); const m = min % 60; return h ? `${h} h ${String(m).padStart(2, "0")}` : `${m} min`; };
@@ -117,7 +118,7 @@ function EmployeModal({ employe, onClose, router }: { employe?: ArmEmploye; onCl
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <Champ label="Commission sur ventes (%)"><input className={inputCls} type="number" min={0} max={100} value={commission} onChange={(e) => setCommission(e.target.value)} /></Champ>
-          <Champ label="Salaire fixe ($ / période)"><input className={inputCls} type="number" min={0} value={salaireBase} onChange={(e) => setSalaireBase(e.target.value)} /></Champ>
+          <Champ label="Salaire fixe ($ / période)"><input className={inputCls} type="number" min={0} step="0.01" value={salaireBase} onChange={(e) => setSalaireBase(e.target.value)} /></Champ>
         </div>
         <Champ label="ID Discord (optionnel)"><input className={inputCls} value={discordId} onChange={(e) => setDiscordId(e.target.value)} maxLength={40} placeholder="18 chiffres" /></Champ>
         <label className="inline-flex items-center gap-2 text-[0.82rem]"><input type="checkbox" checked={actif} onChange={(e) => setActif(e.target.checked)} /> Employé actif (apparaît au pointage)</label>
@@ -297,7 +298,7 @@ function EcritureModal({ onClose, router }: { onClose: () => void; router: Route
           <button onClick={() => setSens("sortie")} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[0.8rem] font-semibold" style={{ color: sens === "sortie" ? "#fff" : "var(--oxblood)", background: sens === "sortie" ? "var(--oxblood)" : "transparent", borderColor: "color-mix(in srgb,var(--oxblood) 45%,var(--border))" }}><ArrowUpRight className="h-3.5 w-3.5" /> Dépense</button>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Champ label="Montant ($)"><input className={inputCls} type="number" min={1} value={montant} onChange={(e) => setMontant(e.target.value)} autoFocus /></Champ>
+          <Champ label="Montant ($)"><input className={inputCls} type="number" min={0} step="0.01" value={montant} onChange={(e) => setMontant(e.target.value)} autoFocus /></Champ>
           <Champ label="Libellé"><input className={inputCls} value={motif} onChange={(e) => setMotif(e.target.value)} placeholder="Réassort poudre, réparation…" maxLength={200} /></Champ>
         </div>
         <p className="text-[0.74rem] text-faint">L&apos;écriture met à jour le coffre de l&apos;armurerie.</p>
@@ -396,7 +397,7 @@ function PaieModal({ employes, ventes, onClose, router }: { employes: ArmEmploye
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <Champ label="Période"><input className={inputCls} value={periode} onChange={(e) => setPeriode(e.target.value)} placeholder="Ex : 1–15 juillet" maxLength={80} /></Champ>
-          <Champ label="Prime ($)"><input className={inputCls} type="number" min={0} value={prime} onChange={(e) => setPrime(e.target.value)} /></Champ>
+          <Champ label="Prime ($)"><input className={inputCls} type="number" min={0} step="0.01" value={prime} onChange={(e) => setPrime(e.target.value)} /></Champ>
         </div>
         <div className="rounded-[10px] border border-border bg-surface-2 p-3 text-[0.82rem]">
           <div className="flex justify-between text-faint"><span>Ventes rattachées ({emp?.nom || "—"})</span><span className="font-num">{money(caEmploye)}</span></div>
@@ -494,7 +495,7 @@ function ImpotModal({ ca, onClose, router }: { ca: number; onClose: () => void; 
           <Champ label="Fin de cycle"><input className={inputCls} value={fin} onChange={(e) => setFin(e.target.value)} placeholder="15/07" maxLength={40} /></Champ>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Champ label="Chiffre d'affaires ($)"><input className={inputCls} type="number" min={0} value={chiffre} onChange={(e) => setChiffre(e.target.value)} /></Champ>
+          <Champ label="Chiffre d'affaires ($)"><input className={inputCls} type="number" min={0} step="0.01" value={chiffre} onChange={(e) => setChiffre(e.target.value)} /></Champ>
           <Champ label="Taux d'imposition (%)"><input className={inputCls} type="number" min={0} max={100} value={taux} onChange={(e) => setTaux(e.target.value)} /></Champ>
         </div>
         <button onClick={() => setChiffre(String(ca || 0))} className="self-start text-[0.74rem] text-faint underline hover:text-ink">Utiliser le CA total ({money(ca)})</button>
