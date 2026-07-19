@@ -445,7 +445,7 @@ async function _accumulerImpot(admin: Admin, montant: number) {
 
 // ── Caisse (point de vente) — tout est automatisé à l'encaissement ─
 export type LigneCaisse = { produitId?: string; nom: string; categorie?: string; prix: number; cout?: number; qte: number; aLaDemande?: boolean };
-export async function validerCaisse(lignes: LigneCaisse[], client: string, notes: string, clientId?: string, opts?: { serie?: string; photo?: string }): Promise<ArmResult & { total?: number }> {
+export async function validerCaisse(lignes: LigneCaisse[], client: string, notes: string, clientId?: string, opts?: { serie?: string; photo?: string }): Promise<ArmResult & { total?: number; ticket?: string }> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
   const items = (Array.isArray(lignes) ? lignes : []).filter((l) => l && Number(l.qte) > 0);
@@ -466,6 +466,7 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
   }
 
   let total = 0;
+  const ticket = "FAC-" + Date.now().toString(36).toUpperCase().slice(-6); // n° de facture commun aux lignes de ce règlement
   try {
     for (const l of items) {
       const q = Math.max(1, Math.round(Number(l.qte) || 1));
@@ -473,12 +474,16 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
       total += montant;
       const row: Record<string, unknown> = {
         id: newId("vte"), clientId: cid, acquereur: cli, dateVente: dateV, marque: s(l.nom, 80), modele: null,
-        categorie: s(l.categorie, 60), numeroSerie: serie || null,
+        categorie: s(l.categorie, 60), numeroSerie: serie || null, ticket,
         vendeur, telegramme: cliTel, prix: montant, notes: s(notes, 1000), statut: "enregistree",
       };
       if (photo) row.photo = photo; // photo de l'acquéreur (si colonne migrée)
       let insV = await admin.from("ArmurerieVente").insert(row);
-      if (insV.error && photo && /photo/i.test(insV.error.message)) { delete row.photo; insV = await admin.from("ArmurerieVente").insert(row); }
+      // Repli si des colonnes récentes (ticket, photo) ne sont pas migrées.
+      for (let i = 0; i < 2 && insV.error && /ticket|photo/i.test(insV.error.message); i++) {
+        if (/ticket/i.test(insV.error.message)) delete row.ticket; else if (/photo/i.test(insV.error.message)) delete row.photo;
+        insV = await admin.from("ArmurerieVente").insert(row);
+      }
       if (l.produitId && !l.aLaDemande) {
         const { data } = await admin.from("ArmurerieProduit").select("stock").eq("id", l.produitId).maybeSingle();
         if (data) await admin.from("ArmurerieProduit").update({ stock: Math.max(0, (Number((data as { stock: number }).stock) || 0) - q) }).eq("id", l.produitId);
@@ -494,7 +499,7 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
     } catch { /* best-effort */ }
     // Impôts : accumulation automatique du cycle fiscal en cours.
     try { await _accumulerImpot(admin, total); } catch { /* best-effort */ }
-    return { ok: true, total };
+    return { ok: true, total, ticket };
   } catch (e) {
     const msg = (e as Error).message || "";
     return { ok: false, error: /Armurerie|does not exist/i.test(msg) ? "Tables armurerie manquantes — exécute armurerie-vh.sql." : "Vente impossible pour le moment." };

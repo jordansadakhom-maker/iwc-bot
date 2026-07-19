@@ -771,7 +771,7 @@ export async function getFactures(): Promise<FacturesData> {
 
 // ── Armurerie de Van Horn (comptoir : clients, ventes, contrats) ──
 export type ArmClient = { id: string; nom: string; telegramme: string | null; discordId: string | null; carteIdentite: string | null; statut: string; notes: string | null; createdAt: string | null };
-export type ArmVente = { id: string; clientId: string | null; acquereur: string; dateVente: string | null; marque: string | null; modele: string | null; categorie: string | null; numeroSerie: string | null; vendeur: string | null; telegramme: string | null; prix: number; notes: string | null; statut: string; photo: string | null; createdAt: string | null };
+export type ArmVente = { id: string; clientId: string | null; acquereur: string; dateVente: string | null; marque: string | null; modele: string | null; categorie: string | null; numeroSerie: string | null; vendeur: string | null; telegramme: string | null; prix: number; notes: string | null; statut: string; photo: string | null; ticket: string | null; createdAt: string | null };
 export type ArmContrat = { id: string; clientId: string | null; clientNom: string; clientDiscordId: string | null; arme: string | null; numeroSerie: string | null; prix: number; conditions: string | null; statut: string; envoyeAt: string | null; signeAt: string | null; createdAt: string | null };
 export type ArmMouvement = { id: string; sens: string; montant: number; motif: string | null; auteur: string | null; nature: string | null; createdAt: string | null };
 export type ArmRecetteLigne = { ingredient: string; qte: number };
@@ -820,7 +820,7 @@ export async function getArmurerie(): Promise<ArmurerieData> {
     dateVente: (v.dateVente as string) ?? null, marque: (v.marque as string) ?? null, modele: (v.modele as string) ?? null,
     categorie: (v.categorie as string) ?? null, numeroSerie: (v.numeroSerie as string) ?? null, vendeur: (v.vendeur as string) ?? null,
     telegramme: (v.telegramme as string) ?? null, prix: Number(v.prix) || 0, notes: (v.notes as string) ?? null,
-    statut: (v.statut as string) || "enregistree", photo: (v.photo as string) ?? null, createdAt: (v.createdAt as string) ?? null,
+    statut: (v.statut as string) || "enregistree", photo: (v.photo as string) ?? null, ticket: (v.ticket as string) ?? null, createdAt: (v.createdAt as string) ?? null,
   }));
   const contrats: ArmContrat[] = contratR.error ? [] : ((contratR.data || []) as Raw[]).map((c) => ({
     id: String(c.id), clientId: (c.clientId as string) ?? null, clientNom: (c.clientNom as string) || "Client",
