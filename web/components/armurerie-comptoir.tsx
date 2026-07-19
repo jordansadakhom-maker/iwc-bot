@@ -18,7 +18,7 @@ import {
 import {
   creerClient, majClient, supprimerClient,
   creerVente, majVente, supprimerVente,
-  creerContrat, envoyerContrat, marquerContrat, supprimerContrat,
+  creerContrat, envoyerContrat, marquerContrat, supprimerContrat, honorerContrat,
   ajusterCoffreArmurerie,
   creerProduit, majProduit, supprimerProduit, importerCatalogue, importerRecettes, validerCaisse, fabriquerProduit, lireCarteIdentite, lireNumeroSerie, type LigneCaisse,
 } from "@/app/(app)/armurerie/actions";
@@ -84,8 +84,8 @@ const STATUTS_CLIENT = [
 ];
 const clientTone = (s: string): "good" | "warn" | "oxblood" => /interdit/.test(s) ? "oxblood" : /surveill/.test(s) ? "warn" : "good";
 const ctrTone = (s: string): "good" | "warn" | "accent" | "oxblood" | "muted" =>
-  s === "signe" ? "good" : s === "envoye" ? "accent" : s === "refuse" ? "oxblood" : "muted";
-const ctrLabel = (s: string) => s === "signe" ? "Signé" : s === "envoye" ? "Envoyé" : s === "refuse" ? "Refusé" : "Brouillon";
+  s === "honore" ? "good" : s === "signe" ? "good" : s === "envoye" ? "accent" : s === "refuse" ? "oxblood" : "muted";
+const ctrLabel = (s: string) => s === "honore" ? "Honoré ✓" : s === "signe" ? "Signé" : s === "envoye" ? "Envoyé" : s === "refuse" ? "Refusé" : "Brouillon";
 
 type TabKey = "caisse" | "produits" | "ressources" | "commandes" | "ventes" | "clients" | "contrats" | "employes" | "pointage" | "paies" | "comptabilite" | "impots" | "notes" | "taches" | "activite";
 
@@ -147,7 +147,7 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
       {tab === "commandes" ? <CarnetCommandesTab commandes={commandes} produits={produits} clients={clients.map((c) => ({ id: c.id, nom: c.nom }))} router={router} /> : null}
       {tab === "clients" ? <ClientsTab clients={clients} ventes={ventes} router={router} /> : null}
       {tab === "ventes" ? <VentesTab ventes={ventes} clients={clients} router={router} /> : null}
-      {tab === "contrats" ? <ContratsTab contrats={contrats} clients={clients} router={router} /> : null}
+      {tab === "contrats" ? <ContratsTab contrats={contrats} clients={clients} produits={produits} router={router} /> : null}
       {tab === "employes" ? <EmployesTab employes={employes} router={router} /> : null}
       {tab === "pointage" ? <PointageTab employes={employes} pointages={pointages} router={router} /> : null}
       {tab === "paies" ? <PaiesTab paies={paies} employes={employes} ventes={ventes} router={router} /> : null}
@@ -1220,37 +1220,84 @@ function VenteModal({ vente, clients, onClose, router }: { vente?: ArmVente; cli
 }
 
 // ═══════════════════ CONTRATS ═══════════════════
-function ContratsTab({ contrats, clients, router }: { contrats: ArmContrat[]; clients: ArmClient[]; router: Router }) {
+const CTR_FILTRES = [
+  { key: "tous", label: "Tous" },
+  { key: "brouillon", label: "Brouillons" },
+  { key: "envoye", label: "Envoyés" },
+  { key: "signe", label: "Signés" },
+  { key: "honore", label: "Honorés" },
+  { key: "refuse", label: "Refusés" },
+];
+function ContratsTab({ contrats, clients, produits, router }: { contrats: ArmContrat[]; clients: ArmClient[]; produits: ArmProduit[]; router: Router }) {
   const [sel, setSel] = useState<ArmContrat | null>(null);
   const [nouveau, setNouveau] = useState(false);
+  const [filtre, setFiltre] = useState("tous");
+  const cliById = new Map(clients.map((c) => [c.id, c]));
+
+  // Statistiques : valeur en cours (signés non honorés), valeur honorée, à envoyer.
+  const enAttente = contrats.filter((c) => c.statut === "signe").reduce((s, c) => s + c.prix, 0);
+  const honore = contrats.filter((c) => c.statut === "honore").reduce((s, c) => s + c.prix, 0);
+  const aRelancer = contrats.filter((c) => c.statut === "envoye").length;
+  const compte = (k: string) => k === "tous" ? contrats.length : contrats.filter((c) => (c.statut || "brouillon") === k).length;
+  const liste = filtre === "tous" ? contrats : contrats.filter((c) => (c.statut || "brouillon") === filtre);
+
   return (
     <>
-      <div className="mb-3 flex justify-end">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <p className="mr-auto text-[0.74rem] italic text-faint">Contrats de vente — rédige, envoie au client sur Discord pour signature, puis honore (→ vente + facture).</p>
         <button onClick={() => setNouveau(true)} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Plus className="h-3.5 w-3.5" /> Nouveau contrat</button>
       </div>
+      {contrats.length ? (
+        <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <StatMini label="Signés en attente" valeur={money(enAttente)} tone="var(--good)" />
+          <StatMini label="Honorés (encaissés)" valeur={money(honore)} tone="var(--brass)" />
+          <StatMini label="Envoyés à relancer" valeur={String(aRelancer)} tone="var(--accent)" />
+          <StatMini label="Total contrats" valeur={String(contrats.length)} tone="var(--muted)" />
+        </div>
+      ) : null}
+      {contrats.length ? (
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {CTR_FILTRES.map((f) => { const n = compte(f.key); return (
+            <button key={f.key} onClick={() => setFiltre(f.key)} className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[0.72rem] font-semibold transition" style={{ borderColor: filtre === f.key ? "var(--accent)" : "var(--border)", background: filtre === f.key ? "color-mix(in srgb,var(--accent) 12%,transparent)" : "var(--surface-2)", color: filtre === f.key ? "var(--accent)" : "var(--muted)" }}>{f.label}<span className="rounded-full bg-surface px-1.5 text-[0.64rem] text-faint">{n}</span></button>
+          ); })}
+        </div>
+      ) : null}
       {contrats.length === 0 ? (
-        <Vide icon={FileSignature} texte="Aucun contrat. Rédige un contrat de vente et envoie-le au client par télégramme (message privé Discord) pour signature." />
+        <Vide icon={FileSignature} texte="Aucun contrat. Rédige un contrat de vente et envoie-le au client sur Discord (MP) pour signature — puis honore-le pour l'inscrire au registre." />
+      ) : liste.length === 0 ? (
+        <p className="py-8 text-center text-[0.82rem] text-faint">Aucun contrat « {CTR_FILTRES.find((f) => f.key === filtre)?.label} ».</p>
       ) : (
         <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
-          {contrats.map((c) => (
-            <button key={c.id} onClick={() => setSel(c)} className="rounded-[12px] border border-border bg-surface-2 px-3.5 py-3 text-left transition hover:-translate-y-0.5 hover:border-border-2">
+          {liste.map((c) => { const cli = c.clientId ? cliById.get(c.clientId) : null; return (
+            <button key={c.id} onClick={() => setSel(c)} className="flex flex-col gap-1 rounded-[12px] border border-border bg-surface-2 px-3.5 py-3 text-left transition hover:-translate-y-0.5 hover:border-border-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="min-w-0 truncate text-[0.88rem] font-semibold">{c.clientNom}</span>
                 <Badge tone={ctrTone(c.statut)}>{ctrLabel(c.statut)}</Badge>
               </div>
-              <div className="mt-1 truncate text-[0.76rem] text-muted">{c.arme || "Arme à définir"}{c.numeroSerie ? ` · ${c.numeroSerie}` : ""}</div>
-              {c.prix ? <div className="mt-1 font-num text-[0.82rem] font-semibold" style={{ color: "var(--accent)" }}>{money(c.prix)}</div> : null}
+              <div className="truncate text-[0.76rem] text-muted">{c.arme || "Arme à définir"}{c.numeroSerie ? ` · ${c.numeroSerie}` : ""}</div>
+              <div className="flex items-center justify-between gap-2">
+                {c.prix ? <span className="font-num text-[0.82rem] font-semibold" style={{ color: "var(--accent)" }}>{money(c.prix)}</span> : <span />}
+                <span className="text-[0.62rem] text-faint">{(c.clientDiscordId || cli?.discordId) ? "💬 Discord" : "✍️ manuel"}</span>
+              </div>
             </button>
-          ))}
+          ); })}
         </div>
       )}
-      {nouveau ? <ContratModal clients={clients} onClose={() => setNouveau(false)} router={router} /> : null}
-      {sel ? <ContratModal key={sel.id} contrat={sel} clients={clients} onClose={() => setSel(null)} router={router} /> : null}
+      {nouveau ? <ContratModal clients={clients} produits={produits} onClose={() => setNouveau(false)} router={router} /> : null}
+      {sel ? <ContratModal key={sel.id} contrat={sel} clients={clients} produits={produits} onClose={() => setSel(null)} router={router} /> : null}
     </>
   );
 }
+function StatMini({ label, valeur, tone }: { label: string; valeur: string; tone: string }) {
+  return (
+    <div className="rounded-[12px] border border-border bg-surface-2 px-3 py-2">
+      <div className="text-[0.6rem] uppercase tracking-[0.05em] text-faint">{label}</div>
+      <div className="font-num text-[1.05rem] font-bold" style={{ color: tone }}>{valeur}</div>
+    </div>
+  );
+}
 
-function ContratModal({ contrat, clients, onClose, router }: { contrat?: ArmContrat; clients: ArmClient[]; onClose: () => void; router: Router }) {
+function ContratModal({ contrat, clients, produits, onClose, router }: { contrat?: ArmContrat; clients: ArmClient[]; produits: ArmProduit[]; onClose: () => void; router: Router }) {
   const editing = !!contrat;
   const [clientId, setClientId] = useState(contrat?.clientId || "");
   const [clientNom, setClientNom] = useState(contrat?.clientNom || "");
@@ -1262,19 +1309,34 @@ function ContratModal({ contrat, clients, onClose, router }: { contrat?: ArmCont
   const [busy, setBusy] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [apercu, setApercu] = useState(false);
+  const st = contrat?.statut || "brouillon";
+  const cli = editing && contrat!.clientId ? clients.find((c) => c.id === contrat!.clientId) : null;
+  const peutEnvoyer = !!(contrat?.clientDiscordId || cli?.discordId);
 
   function choisir(id: string) {
     setClientId(id);
     const c = clients.find((x) => x.id === id);
     if (c) { setClientNom(c.nom); if (c.discordId) setClientDiscordId(c.discordId); }
   }
-  async function creer() {
+  // Choisir une arme du catalogue → renseigne le prix de vente automatiquement.
+  function onArme(v: string) {
+    setArme(v);
+    const p = produits.find((x) => x.nom.toLowerCase() === v.trim().toLowerCase());
+    if (p) setPrix(String(p.prix));
+  }
+  async function creer(envoyerApres: boolean) {
     setErr(null);
     if (clientNom.trim().length < 2) { setErr("Indique le nom du client."); return; }
-    setBusy("save");
+    if (envoyerApres && !clientDiscordId.trim()) { setErr("Renseigne l'ID Discord du client pour l'envoi en MP."); return; }
+    setBusy(envoyerApres ? "createsend" : "save");
     const r = await creerContrat({ clientId: clientId || undefined, clientNom, clientDiscordId, arme, numeroSerie, prix: Number(prix) || 0, conditions });
-    setBusy(null);
-    if (!r.ok) { setErr(r.error || "Impossible."); return; }
+    if (!r.ok) { setBusy(null); setErr(r.error || "Impossible."); return; }
+    if (envoyerApres && r.id) {
+      const e = await envoyerContrat(r.id);
+      setBusy(null);
+      if (!e.ok) { setErr("Contrat créé, mais l'envoi Discord a échoué : " + (e.error || "")); router.refresh(); return; }
+    } else setBusy(null);
     router.refresh(); onClose();
   }
   async function envoyer() {
@@ -1282,14 +1344,21 @@ function ContratModal({ contrat, clients, onClose, router }: { contrat?: ArmCont
     const r = await envoyerContrat(contrat!.id);
     setBusy(null);
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
-    setFlash("Contrat envoyé au client en message privé — en attente de signature."); router.refresh();
+    setFlash("Contrat envoyé au client en message privé Discord — en attente de signature."); router.refresh();
   }
-  async function marquer(st: "signe" | "refuse") {
-    setBusy(st);
-    const r = await marquerContrat(contrat!.id, st);
+  async function marquer(stt: "signe" | "refuse") {
+    setBusy(stt);
+    const r = await marquerContrat(contrat!.id, stt);
     setBusy(null);
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
-    setFlash(st === "signe" ? "Contrat marqué signé." : "Contrat marqué refusé."); router.refresh();
+    setFlash(stt === "signe" ? "Contrat marqué signé." : "Contrat marqué refusé."); router.refresh();
+  }
+  async function honorer() {
+    setBusy("honor");
+    const r = await honorerContrat(contrat!.id);
+    setBusy(null);
+    if (!r.ok) { setFlash(r.error || "Échec."); return; }
+    setFlash(`Contrat honoré → vente de ${money(r.total || contrat!.prix)} inscrite au registre + facture + coffre + ressources décomptées.`); router.refresh();
   }
   async function supprimer() {
     setBusy("del");
@@ -1300,22 +1369,37 @@ function ContratModal({ contrat, clients, onClose, router }: { contrat?: ArmCont
   }
 
   return (
+    <>
     <Modal titre={editing ? `Contrat — ${contrat!.clientNom}` : "📜 Nouveau contrat de vente"} onClose={onClose} max={540}>
       {flash ? <div className="mb-3"><Flash>{flash}</Flash></div> : null}
       {editing ? (
-        <div className="mb-3 flex flex-col gap-2 rounded-[12px] border border-border bg-surface-2 px-3.5 py-3">
-          <div className="flex items-center justify-between"><span className="text-[0.86rem] font-semibold">{contrat!.clientNom}</span><Badge tone={ctrTone(contrat!.statut)}>{ctrLabel(contrat!.statut)}</Badge></div>
-          {contrat!.arme ? <div className="text-[0.82rem] text-muted">{contrat!.arme}{contrat!.numeroSerie ? ` · ${contrat!.numeroSerie}` : ""}</div> : null}
-          {contrat!.prix ? <div className="font-num text-[0.84rem] font-semibold" style={{ color: "var(--accent)" }}>{money(contrat!.prix)}</div> : null}
-          {contrat!.conditions ? <div className="text-[0.8rem] text-muted"><span className="text-faint">Conditions : </span>{contrat!.conditions}</div> : null}
-          <div className="mt-1 flex flex-wrap gap-2 border-t border-border pt-2">
-            {contrat!.statut === "brouillon" || contrat!.statut === "refuse" ? (
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-2 rounded-[12px] border border-border bg-surface-2 px-3.5 py-3">
+            <div className="flex items-center justify-between"><span className="text-[0.86rem] font-semibold">{contrat!.clientNom}</span><Badge tone={ctrTone(st)}>{ctrLabel(st)}</Badge></div>
+            {contrat!.arme ? <div className="text-[0.82rem] text-muted">{contrat!.arme}{contrat!.numeroSerie ? ` · ${contrat!.numeroSerie}` : ""}</div> : null}
+            {contrat!.prix ? <div className="font-num text-[0.84rem] font-semibold" style={{ color: "var(--accent)" }}>{money(contrat!.prix)}</div> : null}
+            {contrat!.conditions ? <div className="text-[0.8rem] text-muted"><span className="text-faint">Conditions : </span>{contrat!.conditions}</div> : null}
+            <div className="text-[0.68rem] text-faint">{peutEnvoyer ? "💬 Client joignable sur Discord — envoi en MP possible." : "✍️ Pas d'ID Discord — signature à faire à la main."}</div>
+          </div>
+          {/* Pipeline visuel */}
+          <div className="flex items-center gap-1 text-[0.62rem] font-semibold uppercase tracking-[0.05em]">
+            {["brouillon", "envoye", "signe", "honore"].map((k, i) => { const done = ["brouillon", "envoye", "signe", "honore"].indexOf(st) >= i; return (
+              <span key={k} className="flex items-center gap-1">
+                <span className="rounded-full px-2 py-0.5" style={{ background: done ? "color-mix(in srgb,var(--good) 16%,transparent)" : "var(--surface-2)", color: done ? "var(--good)" : "var(--faint)" }}>{ctrLabel(k).replace(" ✓", "")}</span>
+                {i < 3 ? <span className="text-faint">→</span> : null}
+              </span>
+            ); })}
+          </div>
+          <div className="flex flex-wrap gap-2 border-t border-border pt-2">
+            {st === "brouillon" || st === "refuse" || st === "envoye" ? (
               <button onClick={envoyer} disabled={busy === "send"} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[0.78rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>
-                {busy === "send" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Envoyer au client
+                {busy === "send" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} {st === "envoye" ? "Renvoyer" : "Envoyer sur Discord"}
               </button>
             ) : null}
-            {contrat!.statut !== "signe" ? <button onClick={() => marquer("signe")} disabled={busy === "signe"} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[0.78rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--good)" }}>{busy === "signe" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Marquer signé</button> : null}
-            {contrat!.statut !== "refuse" ? <button onClick={() => marquer("refuse")} disabled={busy === "refuse"} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[0.78rem] font-semibold hover:border-border-2">{busy === "refuse" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />} Refusé</button> : null}
+            <button onClick={() => setApercu(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[0.78rem] font-semibold hover:border-border-2"><FileSignature className="h-3.5 w-3.5" /> Aperçu / Imprimer</button>
+            {st !== "signe" && st !== "honore" ? <button onClick={() => marquer("signe")} disabled={busy === "signe"} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[0.78rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--good)" }}>{busy === "signe" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Marquer signé</button> : null}
+            {st === "signe" ? <button onClick={honorer} disabled={busy === "honor"} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[0.78rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--brass)" }}>{busy === "honor" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CircleDollarSign className="h-3.5 w-3.5" />} Honorer (encaisser)</button> : null}
+            {st !== "refuse" && st !== "honore" ? <button onClick={() => marquer("refuse")} disabled={busy === "refuse"} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[0.78rem] font-semibold hover:border-border-2">{busy === "refuse" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />} Refusé</button> : null}
             <button onClick={supprimer} disabled={busy === "del"} className="ml-auto inline-flex items-center gap-1.5 text-[0.76rem] text-faint hover:text-ink"><Trash2 className="h-3.5 w-3.5" /> Supprimer</button>
           </div>
         </div>
@@ -1325,27 +1409,70 @@ function ContratModal({ contrat, clients, onClose, router }: { contrat?: ArmCont
             <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Client</span>
               <select className={inputCls} value={clientId} onChange={(e) => choisir(e.target.value)}>
                 <option value="">— Saisir manuellement —</option>
-                {clients.map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}
+                {clients.map((c) => <option key={c.id} value={c.id}>{c.nom}{c.discordId ? " 💬" : ""}</option>)}
               </select></div>
           ) : null}
           <div className="grid gap-3 sm:grid-cols-2">
             <Champ label="Nom du client *"><input className={inputCls} value={clientNom} onChange={(e) => setClientNom(e.target.value)} maxLength={120} /></Champ>
             <Champ label="ID Discord du client"><input className={inputCls} value={clientDiscordId} onChange={(e) => setClientDiscordId(e.target.value)} placeholder="Pour l'envoi en MP" maxLength={40} /></Champ>
           </div>
+          {clientDiscordId.trim() ? <p className="-mt-1 text-[0.68rem]" style={{ color: "var(--good)" }}>💬 Le contrat pourra être envoyé directement au client sur Discord.</p> : null}
           <div className="grid gap-3 sm:grid-cols-2">
-            <Champ label="Arme"><input className={inputCls} value={arme} onChange={(e) => setArme(e.target.value)} placeholder="Cattleman Revolver" maxLength={120} /></Champ>
-            <Champ label="N° de série"><input className={inputCls + " mono"} value={numeroSerie} onChange={(e) => setNumeroSerie(e.target.value)} maxLength={80} /></Champ>
+            <Champ label="Arme (choisis dans le catalogue)"><input className={inputCls} value={arme} onChange={(e) => onArme(e.target.value)} list="ctr-armes" placeholder="Cattleman Revolver…" maxLength={120} /></Champ>
+            <Champ label="N° de série"><input className={inputCls + " mono"} value={numeroSerie} onChange={(e) => setNumeroSerie(e.target.value)} placeholder="Optionnel" maxLength={80} /></Champ>
           </div>
+          <datalist id="ctr-armes">{produits.map((p) => <option key={p.id} value={p.nom} />)}</datalist>
           <Champ label="Prix ($)"><input className={inputCls} type="number" min={0} step="0.01" value={prix} onChange={(e) => setPrix(e.target.value)} /></Champ>
           <Champ label="Conditions"><textarea className={inputCls + " min-h-[60px] resize-y"} value={conditions} onChange={(e) => setConditions(e.target.value)} maxLength={2000} placeholder="Modalités de paiement, garanties, clauses…" /></Champ>
           {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
-          <div className="flex justify-end">
-            <button onClick={creer} disabled={busy === "save"} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>
-              {busy === "save" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileSignature className="h-3.5 w-3.5" />} Rédiger le contrat
+          <div className="flex flex-wrap justify-end gap-2">
+            <button onClick={() => creer(false)} disabled={!!busy} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2 disabled:opacity-60">
+              {busy === "save" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileSignature className="h-3.5 w-3.5" />} Rédiger
+            </button>
+            <button onClick={() => creer(true)} disabled={!!busy || !clientDiscordId.trim()} title={clientDiscordId.trim() ? "" : "Renseigne l'ID Discord du client"} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-40" style={{ background: "var(--accent)" }}>
+              {busy === "createsend" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Rédiger &amp; envoyer sur Discord
             </button>
           </div>
         </div>
       )}
+    </Modal>
+    {apercu && editing ? <ContratDoc contrat={contrat!} onClose={() => setApercu(false)} /> : null}
+    </>
+  );
+}
+// Contrat de vente imprimable (document officiel, signatures compagnie + client).
+function ContratDoc({ contrat, onClose }: { contrat: ArmContrat; onClose: () => void }) {
+  const num = `CTR-${contrat.id.slice(-6).toUpperCase()}`;
+  return (
+    <Modal titre="📜 Contrat de vente" onClose={onClose} max={640}>
+      <style>{`@media print{body *{visibility:hidden!important}#ctr-doc,#ctr-doc *{visibility:visible!important}#ctr-doc{position:fixed;inset:0;margin:0;padding:26px}.no-print{display:none!important}}`}</style>
+      <div id="ctr-doc" className="flex flex-col gap-3 text-[0.86rem]">
+        <div className="flex items-start justify-between gap-3 border-b-2 pb-2" style={{ borderColor: "var(--brass)" }}>
+          <div>
+            <div className="font-display text-[1.1rem] font-bold" style={{ color: "var(--brass)" }}>🐺 Iron Wolf Company</div>
+            <div className="text-[0.72rem] text-muted">Armurerie de Van Horn — Contrat de vente d&apos;arme à feu</div>
+          </div>
+          <div className="text-right"><div className="text-[0.66rem] uppercase tracking-[0.08em] text-faint">Contrat n°</div><div className="mono text-[0.92rem] font-bold">{num}</div></div>
+        </div>
+        <p className="text-[0.82rem] leading-relaxed text-muted">Entre la <b className="text-ink">Iron Wolf Company</b> (le Vendeur) et <b className="text-ink">{contrat.clientNom}</b> (l&apos;Acquéreur), il est convenu la vente de l&apos;arme désignée ci-dessous, conformément au Décret N°2 de l&apos;État de Louisiane.</p>
+        <table className="w-full border-collapse text-[0.84rem]">
+          <tbody>
+            <tr><td className="border-b border-border py-1.5 text-faint">Arme</td><td className="border-b border-border py-1.5 text-right font-semibold">{contrat.arme || "—"}</td></tr>
+            <tr><td className="border-b border-border py-1.5 text-faint">N° de série</td><td className="border-b border-border py-1.5 text-right mono">{contrat.numeroSerie || "—"}</td></tr>
+            <tr><td className="border-b border-border py-1.5 text-faint">Prix convenu</td><td className="border-b border-border py-1.5 text-right font-num font-bold" style={{ color: "var(--brass)" }}>{money(contrat.prix)}</td></tr>
+          </tbody>
+        </table>
+        {contrat.conditions ? <div><div className="text-[0.66rem] uppercase tracking-[0.05em] text-faint">Conditions</div><div className="text-[0.82rem] text-muted">{contrat.conditions}</div></div> : null}
+        <div className="mt-6 grid grid-cols-2 gap-6 text-[0.72rem]">
+          <div className="border-t border-border pt-1 text-center text-faint">Pour la Compagnie<div className="mt-6 font-display text-[0.95rem] italic text-ink">Iron Wolf Company</div></div>
+          <div className="border-t border-border pt-1 text-center text-faint">L&apos;Acquéreur<div className="mt-6 font-display text-[0.95rem] italic text-ink">{contrat.clientNom}</div></div>
+        </div>
+        <p className="mt-1 text-center text-[0.62rem] italic text-faint">« La force est dans l&apos;ombre. » — Contrat établi par l&apos;Iron Wolf Company.</p>
+      </div>
+      <div className="no-print mt-3 flex justify-end gap-2">
+        <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2">Fermer</button>
+        <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Download className="h-3.5 w-3.5" /> Imprimer / PDF</button>
+      </div>
     </Modal>
   );
 }

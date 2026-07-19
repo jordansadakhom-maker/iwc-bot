@@ -215,6 +215,30 @@ export async function supprimerContrat(id: string): Promise<ArmResult> {
   const { error } = await admin.from("ArmurerieContrat").delete().eq("id", id);
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
+// Honorer un contrat signé → l'inscrit comme VENTE (registre + facture + coffre +
+// compta + impôts + décompte des ressources) et marque le contrat « honoré ».
+export async function honorerContrat(id: string): Promise<ArmResult & { total?: number; ticket?: string }> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { data, error } = await admin.from("ArmurerieContrat").select("*").eq("id", id).maybeSingle();
+  if (error || !data) return { ok: false, error: "Contrat introuvable." };
+  const c = data as Record<string, unknown>;
+  if (c.statut === "honore") return { ok: false, error: "Contrat déjà honoré." };
+  const arme = String(c.arme || "").trim() || "Arme";
+  // Associer l'arme à un produit du catalogue (pour décompter stock & ressources).
+  let produitId: string | undefined, categorie: string | undefined, aLaDemande = false;
+  try {
+    const { data: prods } = await admin.from("ArmurerieProduit").select("id,nom,categorie,aLaDemande");
+    const rs = ((prods || []) as { id: string; nom: string }[]).map((p) => ({ id: String(p.id), nom: String(p.nom) }));
+    const m = _matchRes(arme, rs);
+    if (m) { const full = (prods as { id: string; categorie?: string; aLaDemande?: boolean }[]).find((p) => String(p.id) === m.id); if (full) { produitId = full.id; categorie = full.categorie; aLaDemande = !!full.aLaDemande; } }
+  } catch { /* le produit n'a pas pu être associé — vente en texte libre */ }
+  const ligne: LigneCaisse = { produitId, nom: arme, categorie, prix: Math.max(0, round2(Number(c.prix) || 0)), qte: 1, aLaDemande };
+  const res = await validerCaisse([ligne], c.clientId ? "" : String(c.clientNom || ""), `Contrat honoré${c.conditions ? " — " + String(c.conditions) : ""}`.slice(0, 1000), (c.clientId as string) || undefined, { serie: (c.numeroSerie as string) || undefined });
+  if (!res.ok) return res;
+  await admin.from("ArmurerieContrat").update({ statut: "honore" }).eq("id", id);
+  return { ok: true, total: res.total, ticket: res.ticket };
+}
 
 function tableErr(msg: string, quoi: string): string {
   if (/does not exist|relation|Armurerie/i.test(msg)) return `La table des ${quoi} n'est pas encore créée — exécute armurerie-vh.sql dans Supabase.`;
