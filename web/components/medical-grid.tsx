@@ -2,84 +2,124 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { X, Bandage, Pill, Stethoscope, Clock, History, UserPlus, Loader2, Trash2, Plus } from "lucide-react";
+import { X, Bandage, Pill, Stethoscope, Clock, History, UserPlus, Loader2, Trash2, Plus, HeartPulse, CalendarClock, ClipboardCheck, Search, Activity } from "lucide-react";
 import type { DossierItem } from "@/lib/queries";
-import { creerDossier, majDossier, ajouterBlessure, ajouterOrdonnance, supprimerDossier } from "@/app/(app)/medical/actions";
+import { creerDossier, majDossier, ajouterBlessure, ajouterOrdonnance, ajouterSuivi, supprimerDossier } from "@/app/(app)/medical/actions";
 
-const STATUTS: { key: string; label: string; tone: string }[] = [
-  { key: "apte", label: "Apte", tone: "var(--good)" },
-  { key: "observation", label: "Observation", tone: "var(--warn)" },
-  { key: "inapte", label: "Inapte", tone: "var(--oxblood)" },
-  { key: "non_teste", label: "Non testé", tone: "var(--muted)" },
+const STATUTS: { key: string; label: string; tone: string; vit: number | null }[] = [
+  { key: "apte", label: "Apte", tone: "var(--good)", vit: 90 },
+  { key: "observation", label: "Observation", tone: "var(--warn)", vit: 55 },
+  { key: "inapte", label: "Inapte", tone: "var(--oxblood)", vit: 20 },
+  { key: "non_teste", label: "Non testé", tone: "var(--muted)", vit: null },
 ];
-const toneOf = (k: string) => STATUTS.find((s) => s.key === (k || "").toLowerCase())?.tone || "var(--muted)";
-const labelOf = (k: string) => STATUTS.find((s) => s.key === (k || "").toLowerCase())?.label || k;
+const sInfo = (k: string) => STATUTS.find((s) => s.key === (k || "").toLowerCase()) || STATUTS[3];
+const toneOf = (k: string) => sInfo(k).tone;
+const labelOf = (k: string) => sInfo(k).label;
+
+// 8 remèdes préréglés (comme sur Discord) — pré-remplissent posologie & durée.
+const REMEDES = [
+  { nom: "Laudanum", poso: "10 gouttes matin & soir", duree: "3 jours" },
+  { nom: "Tonique de santé", poso: "1 flacon par jour", duree: "5 jours" },
+  { nom: "Onguent", poso: "Application locale 2×/jour", duree: "7 jours" },
+  { nom: "Quinine", poso: "1 dose par jour", duree: "5 jours" },
+  { nom: "Arnica", poso: "Sur l'hématome, 2×/jour", duree: "4 jours" },
+  { nom: "Sirop apaisant", poso: "1 cuillère au coucher", duree: "3 jours" },
+  { nom: "Antiseptique", poso: "Nettoyage de plaie 2×/jour", duree: "jusqu'à cicatrisation" },
+  { nom: "Reconstituant", poso: "1 dose au réveil", duree: "7 jours" },
+];
+const GRAVITES = [
+  { key: "bénigne", label: "Bénigne", tone: "var(--warn)", statut: null },
+  { key: "modérée", label: "Modérée", tone: "#d95926", statut: "observation" },
+  { key: "grave", label: "Grave", tone: "var(--oxblood)", statut: "inapte" },
+];
 
 const inputCls =
   "w-full rounded-[9px] border border-border bg-surface-2 px-2.5 py-1.5 text-[0.84rem] text-ink outline-none placeholder:text-faint focus:border-[color-mix(in_srgb,var(--accent)_55%,var(--border))]";
 
+type Router = ReturnType<typeof useRouter>;
+
 function StatutBadge({ statut }: { statut: string }) {
   const c = toneOf(statut);
+  return <span className="rounded-md px-1.5 py-0.5 text-[0.62rem] font-bold uppercase tracking-[0.04em]" style={{ color: c, background: "color-mix(in srgb," + c + " 16%,transparent)" }}>{labelOf(statut)}</span>;
+}
+
+function Vitalite({ statut, compact = false }: { statut: string; compact?: boolean }) {
+  const s = sInfo(statut);
+  const pct = s.vit ?? 0;
   return (
-    <span className="rounded-md px-1.5 py-0.5 text-[0.62rem] font-bold uppercase tracking-[0.04em]" style={{ color: c, background: "color-mix(in srgb," + c + " 16%,transparent)" }}>
-      {labelOf(statut)}
-    </span>
+    <div className={compact ? "" : "flex items-center gap-2"}>
+      <div className="h-2 w-full overflow-hidden rounded-full" style={{ background: "color-mix(in srgb,var(--ink) 10%,transparent)" }}>
+        <div className="h-full rounded-full transition-all" style={{ width: `${s.vit == null ? 0 : pct}%`, background: s.tone }} />
+      </div>
+      {!compact ? <span className="shrink-0 font-num text-[0.72rem] text-faint">{s.vit == null ? "?" : `${pct}%`}</span> : null}
+    </div>
   );
 }
 
-function Section({ titre, icon: Icon, children, action }: { titre: string; icon: typeof Bandage; children: React.ReactNode; action?: React.ReactNode }) {
-  return (
-    <div className="mt-3 border-t border-border pt-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5 text-[0.72rem] uppercase tracking-[0.05em] text-faint">
-          <Icon className="h-3.5 w-3.5" strokeWidth={1.8} /> {titre}
-        </div>
-        {action}
-      </div>
-      <div className="flex flex-col gap-1.5">{children}</div>
-    </div>
-  );
+function Flash({ children, tone = "good" }: { children: React.ReactNode; tone?: "good" | "bad" }) {
+  const c = tone === "bad" ? "var(--oxblood)" : "var(--good)";
+  return <div className="rounded-lg border px-3 py-2 text-[0.78rem]" style={{ color: c, borderColor: "color-mix(in srgb," + c + " 40%,var(--border))", background: "color-mix(in srgb," + c + " 8%,transparent)" }}>{children}</div>;
 }
 
 export function MedicalGrid({ dossiers, membresLibres }: { dossiers: DossierItem[]; membresLibres: { id: string; nom: string }[] }) {
   const router = useRouter();
   const [sel, setSel] = useState<DossierItem | null>(null);
   const [nouveau, setNouveau] = useState(false);
+  const [q, setQ] = useState("");
+  const [filtre, setFiltre] = useState<string | null>(null);
+
+  const counts = STATUTS.map((s) => ({ ...s, n: dossiers.filter((d) => (d.statut || "").toLowerCase() === s.key).length }));
+  const convalescents = dossiers.filter((d) => d.reposJusquAt).length;
+  const filtres = dossiers
+    .filter((d) => !filtre || (d.statut || "").toLowerCase() === filtre)
+    .filter((d) => !q.trim() || d.nom.toLowerCase().includes(q.trim().toLowerCase()));
 
   return (
     <>
-      <div className="mb-3 flex justify-end">
-        <button
-          onClick={() => setNouveau(true)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-ink transition hover:border-border-2"
-        >
+      {/* Vue d'ensemble */}
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
+        {counts.map((c) => (
+          <button key={c.key} onClick={() => setFiltre(filtre === c.key ? null : c.key)} className="rounded-[11px] border px-3 py-2 text-left transition"
+            style={{ borderColor: filtre === c.key ? c.tone : "var(--border)", background: filtre === c.key ? `color-mix(in srgb,${c.tone} 12%,transparent)` : "var(--surface-2)" }}>
+            <div className="font-num text-[1.2rem] font-bold" style={{ color: c.tone }}>{c.n}</div>
+            <div className="text-[0.68rem] uppercase tracking-[0.04em] text-faint">{c.label}</div>
+          </button>
+        ))}
+        <div className="rounded-[11px] border border-border bg-surface-2 px-3 py-2">
+          <div className="font-num text-[1.2rem] font-bold" style={{ color: "var(--warn)" }}>{convalescents}</div>
+          <div className="text-[0.68rem] uppercase tracking-[0.04em] text-faint">Convalescence</div>
+        </div>
+      </div>
+
+      <div className="mb-3 flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
+          <input className={inputCls + " pl-8"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un patient…" />
+        </div>
+        <button onClick={() => setNouveau(true)} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-2 text-[0.76rem] font-semibold text-ink transition hover:border-border-2">
           <UserPlus className="h-3.5 w-3.5" strokeWidth={1.8} /> Nouveau dossier
         </button>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {dossiers.map((d) => (
-          <button
-            key={d.id}
-            onClick={() => setSel(d)}
-            className="rounded-[12px] border border-border bg-surface-2 px-3.5 py-3 text-left transition hover:-translate-y-0.5 hover:border-border-2"
-          >
+        {filtres.map((d) => (
+          <button key={d.id} onClick={() => setSel(d)} className="rounded-[12px] border border-border bg-surface-2 px-3.5 py-3 text-left transition hover:-translate-y-0.5 hover:border-border-2">
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0 truncate text-[0.92rem] font-semibold">{d.nom}</div>
               <StatutBadge statut={d.statut} />
             </div>
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.74rem] text-muted">
-              <span className="inline-flex items-center gap-1.5"><Bandage className="h-3.5 w-3.5 text-faint" strokeWidth={1.8} /> {d.blessures.length} blessure(s)</span>
-              <span className="inline-flex items-center gap-1.5"><Pill className="h-3.5 w-3.5 text-faint" strokeWidth={1.8} /> {d.ordonnances.length} ordo.</span>
-              <span className="inline-flex items-center gap-1.5"><Stethoscope className="h-3.5 w-3.5 text-faint" strokeWidth={1.8} /> {d.suivis.length} soin(s)</span>
+            <div className="mt-2.5"><Vitalite statut={d.statut} /></div>
+            <div className="mt-2.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[0.74rem] text-muted">
+              <span className="inline-flex items-center gap-1.5"><Bandage className="h-3.5 w-3.5 text-faint" strokeWidth={1.8} /> {d.blessures.length}</span>
+              <span className="inline-flex items-center gap-1.5"><Pill className="h-3.5 w-3.5 text-faint" strokeWidth={1.8} /> {d.ordonnances.length}</span>
+              <span className="inline-flex items-center gap-1.5"><Stethoscope className="h-3.5 w-3.5 text-faint" strokeWidth={1.8} /> {d.suivis.length}</span>
+              {d.testValide ? <span className="inline-flex items-center gap-1" style={{ color: "var(--good)" }}><ClipboardCheck className="h-3.5 w-3.5" /> testé</span> : null}
             </div>
-            {d.reposJusquAt ? (
-              <div className="mt-2 inline-flex items-center gap-1.5 text-[0.72rem]" style={{ color: "var(--warn)" }}>
-                <Clock className="h-3.5 w-3.5" strokeWidth={1.8} /> Convalescence
-              </div>
-            ) : null}
+            {d.prochainRdv ? <div className="mt-2 inline-flex items-center gap-1.5 text-[0.72rem]" style={{ color: "var(--steel)" }}><CalendarClock className="h-3.5 w-3.5" /> RDV : {d.prochainRdv}</div> : null}
+            {d.reposJusquAt ? <div className="mt-1 inline-flex items-center gap-1.5 text-[0.72rem]" style={{ color: "var(--warn)" }}><Clock className="h-3.5 w-3.5" /> Convalescence</div> : null}
           </button>
         ))}
+        {filtres.length === 0 ? <p className="col-span-full px-1 py-6 text-center text-[0.84rem] text-faint">Aucun patient{filtre ? ` « ${labelOf(filtre)} »` : ""}{q ? ` pour « ${q} »` : ""}.</p> : null}
       </div>
 
       {sel ? <DetailModal dossier={sel} onClose={() => setSel(null)} router={router} /> : null}
@@ -88,12 +128,13 @@ export function MedicalGrid({ dossiers, membresLibres }: { dossiers: DossierItem
   );
 }
 
-type Router = ReturnType<typeof useRouter>;
-
-function Flash({ children }: { children: React.ReactNode }) {
+function StatutPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
-    <div className="rounded-lg border px-3 py-2 text-[0.78rem]" style={{ color: "var(--good)", borderColor: "color-mix(in srgb,var(--good) 40%,var(--border))", background: "color-mix(in srgb,var(--good) 8%,transparent)" }}>
-      {children}
+    <div className="flex flex-wrap gap-1.5">
+      {STATUTS.map((s) => {
+        const on = value === s.key;
+        return <button key={s.key} onClick={() => onChange(s.key)} className="rounded-lg border px-2.5 py-1.5 text-[0.78rem] font-semibold transition" style={{ color: on ? "#000" : s.tone, background: on ? s.tone : "transparent", borderColor: "color-mix(in srgb," + s.tone + " 45%,var(--border))" }}>{s.label}</button>;
+      })}
     </div>
   );
 }
@@ -112,37 +153,27 @@ function NouveauModal({ membres, onClose, router }: { membres: { id: string; nom
     const r = await creerDossier(membreId, statut);
     setBusy(false);
     if (!r.ok) { setErr(r.error || "Impossible."); return; }
-    setOk(true);
-    router.refresh();
+    setOk(true); router.refresh();
   }
 
   return (
     <Modal onClose={onClose} titre="🩺 Nouveau dossier médical">
       {ok ? (
-        <div className="flex flex-col gap-3">
-          <Flash>Dossier créé — il apparaîtra ici et sur Discord dans ~30 s.</Flash>
-          <div className="flex justify-end"><button onClick={onClose} className="rounded-lg px-3 py-1.5 text-[0.8rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}>Fermer</button></div>
-        </div>
+        <div className="flex flex-col gap-3"><Flash>Dossier créé — il apparaîtra ici dans ~10 s.</Flash><div className="flex justify-end"><button onClick={onClose} className="rounded-lg px-3 py-1.5 text-[0.8rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}>Fermer</button></div></div>
       ) : (
         <div className="flex flex-col gap-3">
-          <label className="flex flex-col gap-1">
-            <span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Membre</span>
+          <label className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Membre</span>
             <select className={inputCls} value={membreId} onChange={(e) => setMembreId(e.target.value)} autoFocus>
               <option value="">— Choisir —</option>
               {membres.map((m) => <option key={m.id} value={m.id}>{m.nom}</option>)}
-            </select>
-          </label>
-          <div className="flex flex-col gap-1">
-            <span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Statut initial</span>
-            <StatutPicker value={statut} onChange={setStatut} />
-          </div>
+            </select></label>
+          <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Statut initial</span><StatutPicker value={statut} onChange={setStatut} /></div>
           {membres.length === 0 ? <p className="text-[0.78rem] text-faint">Tous les membres ont déjà un dossier.</p> : null}
           {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
           <div className="mt-1 flex justify-end gap-2">
             <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2">Annuler</button>
             <button onClick={creer} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>
-              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" strokeWidth={2} />}
-              Créer le dossier
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" strokeWidth={2} />} Créer le dossier
             </button>
           </div>
         </div>
@@ -151,175 +182,211 @@ function NouveauModal({ membres, onClose, router }: { membres: { id: string; nom
   );
 }
 
-function StatutPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {STATUTS.map((s) => {
-        const on = value === s.key;
-        return (
-          <button
-            key={s.key}
-            onClick={() => onChange(s.key)}
-            className="rounded-lg border px-2.5 py-1.5 text-[0.78rem] font-semibold transition"
-            style={{ color: on ? "#000" : s.tone, background: on ? s.tone : "transparent", borderColor: "color-mix(in srgb," + s.tone + " 45%,var(--border))" }}
-          >
-            {s.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
+const TABS = [
+  { key: "vue", label: "Vue", icon: HeartPulse },
+  { key: "blessures", label: "Blessures", icon: Bandage },
+  { key: "ordonnances", label: "Ordonnances", icon: Pill },
+  { key: "soins", label: "Soins", icon: Stethoscope },
+  { key: "histo", label: "Historique", icon: History },
+] as const;
 
 function DetailModal({ dossier, onClose, router }: { dossier: DossierItem; onClose: () => void; router: Router }) {
   const id = dossier.membreId;
+  const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("vue");
   const [statut, setStatut] = useState(dossier.statut);
   const [notes, setNotes] = useState(dossier.notes || "");
+  const [prochainRdv, setProchainRdv] = useState(dossier.prochainRdv || "");
+  const [testValide, setTestValide] = useState(!!dossier.testValide);
+  const [reposMotif, setReposMotif] = useState(dossier.reposMotif || "");
   const [blessures, setBlessures] = useState(dossier.blessures);
   const [ordos, setOrdos] = useState(dossier.ordonnances);
+  const [suivis, setSuivis] = useState(dossier.suivis);
   const [busy, setBusy] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  const [flashBad, setFlashBad] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
 
-  // formulaires
   const [bDesc, setBDesc] = useState(""); const [bLoc, setBLoc] = useState(""); const [bGrav, setBGrav] = useState("");
   const [oMed, setOMed] = useState(""); const [oPoso, setOPoso] = useState(""); const [oDuree, setODuree] = useState("");
+  const [sSoin, setSSoin] = useState(""); const [sSoignant, setSSoignant] = useState(""); const [sEtat, setSEtat] = useState("");
 
-  const notify = (m: string) => { setFlash(m); };
+  const notify = (m: string, bad = false) => { setFlash(m); setFlashBad(bad); };
 
-  async function changerStatut(s: string) {
-    if (s === statut) return;
-    const prev = statut; setStatut(s); setBusy("statut");
-    const r = await majDossier(id, { statut: s });
+  async function patch(p: Record<string, unknown>, key: string, msg: string) {
+    setBusy(key);
+    const r = await majDossier(id, p);
     setBusy(null);
-    if (!r.ok) { setStatut(prev); setFlash(r.error || "Échec."); return; }
-    notify("Statut enregistré — mise à jour dans ~30 s.");
+    notify(r.ok ? msg : (r.error || "Échec."), !r.ok);
+    return r.ok;
   }
-  async function sauverNotes() {
-    setBusy("notes");
-    const r = await majDossier(id, { notes });
-    setBusy(null);
-    notify(r.ok ? "Notes enregistrées — mise à jour dans ~30 s." : (r.error || "Échec."));
-  }
+  async function changerStatut(s: string) { if (s === statut) return; const prev = statut; setStatut(s); if (!(await patch({ statut: s }, "statut", "Statut enregistré."))) setStatut(prev); }
   async function addBlessure() {
-    if (bDesc.trim().length < 2) { setFlash("Décris la blessure."); return; }
+    if (bDesc.trim().length < 2) { notify("Décris la blessure.", true); return; }
     setBusy("blessure");
-    const r = await ajouterBlessure(id, { desc: bDesc, localisation: bLoc, gravite: bGrav });
+    const g = GRAVITES.find((x) => x.key === bGrav);
+    const r = await ajouterBlessure(id, { desc: bDesc, localisation: bLoc, gravite: bGrav, statut: g?.statut || undefined });
     setBusy(null);
-    if (!r.ok) { setFlash(r.error || "Échec."); return; }
+    if (!r.ok) { notify(r.error || "Échec.", true); return; }
     setBlessures((p) => [...p, { date: "à l'instant", desc: bDesc, localisation: bLoc, gravite: bGrav }]);
-    setBDesc(""); setBLoc(""); setBGrav("");
-    notify("Blessure ajoutée — mise à jour dans ~30 s.");
+    if (g?.statut) setStatut(g.statut);
+    setBDesc(""); setBLoc(""); setBGrav(""); notify("Blessure ajoutée.");
   }
   async function addOrdo() {
-    if (oMed.trim().length < 2) { setFlash("Indique le médicament."); return; }
+    if (oMed.trim().length < 2) { notify("Indique le médicament.", true); return; }
     setBusy("ordo");
     const r = await ajouterOrdonnance(id, { medicaments: oMed, posologie: oPoso, duree: oDuree });
     setBusy(null);
-    if (!r.ok) { setFlash(r.error || "Échec."); return; }
+    if (!r.ok) { notify(r.error || "Échec.", true); return; }
     setOrdos((p) => [...p, { medicaments: oMed, posologie: oPoso, duree: oDuree }]);
-    setOMed(""); setOPoso(""); setODuree("");
-    notify("Ordonnance ajoutée — mise à jour dans ~30 s.");
+    setOMed(""); setOPoso(""); setODuree(""); notify("Ordonnance ajoutée.");
   }
-  async function supprimer() {
-    setBusy("del");
-    const r = await supprimerDossier(id);
+  async function addSuivi() {
+    if (sSoin.trim().length < 2) { notify("Décris le soin.", true); return; }
+    setBusy("suivi");
+    const r = await ajouterSuivi(id, { soin: sSoin, soignant: sSoignant, etat: sEtat });
     setBusy(null);
-    if (!r.ok) { setFlash(r.error || "Échec."); return; }
-    router.refresh();
-    onClose();
+    if (!r.ok) { notify(r.error || "Échec.", true); return; }
+    setSuivis((p) => [...p, { date: "à l'instant", soin: sSoin, soignant: sSoignant, etat: sEtat }]);
+    setSSoin(""); setSSoignant(""); setSEtat(""); notify("Soin enregistré.");
   }
+  async function supprimer() { setBusy("del"); const r = await supprimerDossier(id); setBusy(null); if (!r.ok) { notify(r.error || "Échec.", true); return; } router.refresh(); onClose(); }
 
   return (
-    <Modal onClose={onClose} titre={dossier.nom}>
-      <div className="mb-3"><StatutBadge statut={statut} /></div>
+    <Modal onClose={onClose} titre={dossier.nom} max={620}>
+      <div className="mb-3 flex items-center gap-3">
+        <StatutBadge statut={statut} />
+        <div className="flex-1"><Vitalite statut={statut} /></div>
+      </div>
+      {flash ? <div className="mb-3"><Flash tone={flashBad ? "bad" : "good"}>{flash}</Flash></div> : null}
 
-      {flash ? <div className="mb-3"><Flash>{flash}</Flash></div> : null}
-
-      <div className="flex flex-col gap-1">
-        <span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Statut d&apos;aptitude</span>
-        <StatutPicker value={statut} onChange={changerStatut} />
+      {/* Onglets */}
+      <div className="mb-3 flex flex-wrap gap-1 border-b border-border pb-2">
+        {TABS.map((t) => {
+          const on = tab === t.key;
+          const n = t.key === "blessures" ? blessures.length : t.key === "ordonnances" ? ordos.length : t.key === "soins" ? suivis.length : t.key === "histo" ? dossier.historique.length : 0;
+          return (
+            <button key={t.key} onClick={() => setTab(t.key)} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.78rem] font-semibold transition" style={{ color: on ? "#000" : "var(--muted)", background: on ? "var(--accent)" : "transparent" }}>
+              <t.icon className="h-3.5 w-3.5" /> {t.label}{n ? <span className="font-num opacity-70">{n}</span> : null}
+            </button>
+          );
+        })}
       </div>
 
-      <div className="mt-3 flex flex-col gap-1">
-        <span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Notes du médecin</span>
-        <textarea className={inputCls + " min-h-[70px] resize-y"} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Observations, consignes…" maxLength={2000} />
-        <div className="flex justify-end">
-          <button onClick={sauverNotes} disabled={busy === "notes"} className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">
-            {busy === "notes" ? <Loader2 className="h-3 w-3 animate-spin" /> : null} Enregistrer les notes
-          </button>
-        </div>
-      </div>
-
-      <Section titre="Blessures / soins" icon={Bandage}>
-        {blessures.slice().reverse().map((b, i) => (
-          <div key={i} className="rounded-[9px] border border-border bg-surface-2 px-2.5 py-2 text-[0.82rem]">
-            <div className="flex items-start justify-between gap-2">
-              <span className="font-medium">{b.desc || "Blessure"}</span>
-              {b.gravite ? <span className="shrink-0 text-[0.7rem] font-semibold" style={{ color: "var(--oxblood)" }}>{b.gravite}</span> : null}
+      {tab === "vue" ? (
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Statut d&apos;aptitude</span><StatutPicker value={statut} onChange={changerStatut} /></div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Prochain RDV</span>
+              <div className="flex gap-1.5">
+                <input className={inputCls} value={prochainRdv} onChange={(e) => setProchainRdv(e.target.value)} placeholder="Ex : lundi 14h" maxLength={200} />
+                <button onClick={() => patch({ prochainRdv }, "rdv", "RDV enregistré.")} disabled={busy === "rdv"} className="shrink-0 rounded-lg border border-border bg-surface-2 px-2 text-[0.74rem] font-semibold hover:border-border-2">OK</button>
+              </div>
+            </label>
+            <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Test d&apos;aptitude</span>
+              <button onClick={() => { const v = !testValide; setTestValide(v); patch({ testValide: v }, "test", v ? "Test validé." : "Test retiré."); }} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[0.8rem] font-semibold" style={{ color: testValide ? "#000" : "var(--good)", background: testValide ? "var(--good)" : "transparent", borderColor: "color-mix(in srgb,var(--good) 45%,var(--border))" }}>
+                <ClipboardCheck className="h-3.5 w-3.5" /> {testValide ? "Test validé" : "Marquer testé"}
+              </button>
             </div>
-            <div className="mt-0.5 text-[0.72rem] text-faint">{[b.date, b.localisation].filter(Boolean).join(" · ") || "—"}</div>
           </div>
-        ))}
-        <div className="rounded-[9px] border border-dashed border-border p-2">
-          <input className={inputCls} value={bDesc} onChange={(e) => setBDesc(e.target.value)} placeholder="Nouvelle blessure (ex : balle dans l'épaule)" maxLength={300} />
-          <div className="mt-1.5 grid grid-cols-2 gap-1.5">
-            <input className={inputCls} value={bLoc} onChange={(e) => setBLoc(e.target.value)} placeholder="Localisation" maxLength={120} />
-            <input className={inputCls} value={bGrav} onChange={(e) => setBGrav(e.target.value)} placeholder="Gravité (bénigne/grave…)" maxLength={40} />
+          <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Convalescence / repos</span>
+            <div className="flex gap-1.5">
+              <input className={inputCls} value={reposMotif} onChange={(e) => setReposMotif(e.target.value)} placeholder="Motif (ex : fracture, 4 jours de repos)" maxLength={300} />
+              <button onClick={() => patch({ reposMotif, reposJusquAt: reposMotif ? new Date(Date.now() + 4 * 864e5).toISOString() : null }, "repos", reposMotif ? "Convalescence enregistrée." : "Convalescence levée.")} disabled={busy === "repos"} className="shrink-0 rounded-lg border border-border bg-surface-2 px-2 text-[0.74rem] font-semibold hover:border-border-2">OK</button>
+            </div>
           </div>
-          <div className="mt-1.5 flex justify-end">
-            <button onClick={addBlessure} disabled={busy === "blessure"} className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">
-              {busy === "blessure" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />} Ajouter
-            </button>
+          <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Notes du médecin</span>
+            <textarea className={inputCls + " min-h-[70px] resize-y"} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Observations, consignes…" maxLength={2000} />
+            <div className="flex justify-end"><button onClick={() => patch({ notes }, "notes", "Notes enregistrées.")} disabled={busy === "notes"} className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">{busy === "notes" ? <Loader2 className="h-3 w-3 animate-spin" /> : null} Enregistrer</button></div>
           </div>
         </div>
-      </Section>
+      ) : null}
 
-      <Section titre="Ordonnances" icon={Pill}>
-        {ordos.slice().reverse().map((o, i) => (
-          <div key={i} className="rounded-[9px] border border-border bg-surface-2 px-2.5 py-2 text-[0.82rem]">
-            <div className="font-medium">{o.medicaments || "Traitement"}</div>
-            <div className="mt-0.5 text-[0.72rem] text-muted">{[o.posologie, o.duree].filter(Boolean).join(" · ") || "—"}</div>
-          </div>
-        ))}
-        <div className="rounded-[9px] border border-dashed border-border p-2">
-          <input className={inputCls} value={oMed} onChange={(e) => setOMed(e.target.value)} placeholder="Médicament (ex : Laudanum)" maxLength={300} />
-          <div className="mt-1.5 grid grid-cols-2 gap-1.5">
-            <input className={inputCls} value={oPoso} onChange={(e) => setOPoso(e.target.value)} placeholder="Posologie" maxLength={150} />
-            <input className={inputCls} value={oDuree} onChange={(e) => setODuree(e.target.value)} placeholder="Durée" maxLength={80} />
-          </div>
-          <div className="mt-1.5 flex justify-end">
-            <button onClick={addOrdo} disabled={busy === "ordo"} className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">
-              {busy === "ordo" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />} Ajouter
-            </button>
+      {tab === "blessures" ? (
+        <div className="flex flex-col gap-2">
+          {blessures.slice().reverse().map((b, i) => {
+            const g = GRAVITES.find((x) => x.key === (b.gravite || "").toLowerCase());
+            return (
+              <div key={i} className="rounded-[9px] border border-border bg-surface-2 px-2.5 py-2 text-[0.82rem]">
+                <div className="flex items-start justify-between gap-2">
+                  <span className="font-medium">{b.desc || "Blessure"}</span>
+                  {b.gravite ? <span className="shrink-0 rounded px-1.5 py-0.5 text-[0.66rem] font-bold uppercase" style={{ color: g?.tone || "var(--oxblood)", background: `color-mix(in srgb,${g?.tone || "var(--oxblood)"} 15%,transparent)` }}>{b.gravite}</span> : null}
+                </div>
+                <div className="mt-0.5 text-[0.72rem] text-faint">{[b.date, b.localisation].filter(Boolean).join(" · ") || "—"}</div>
+              </div>
+            );
+          })}
+          {blessures.length === 0 ? <p className="text-[0.8rem] text-faint">Aucune blessure enregistrée.</p> : null}
+          <div className="rounded-[9px] border border-dashed border-border p-2">
+            <input className={inputCls} value={bDesc} onChange={(e) => setBDesc(e.target.value)} placeholder="Nouvelle blessure (ex : balle dans l'épaule)" maxLength={300} />
+            <input className={inputCls + " mt-1.5"} value={bLoc} onChange={(e) => setBLoc(e.target.value)} placeholder="Localisation" maxLength={120} />
+            <div className="mt-1.5 flex items-center gap-1.5">
+              <span className="text-[0.72rem] text-faint">Gravité :</span>
+              {GRAVITES.map((g) => <button key={g.key} onClick={() => setBGrav(g.key)} className="rounded-lg border px-2 py-1 text-[0.74rem] font-semibold" style={{ color: bGrav === g.key ? "#000" : g.tone, background: bGrav === g.key ? g.tone : "transparent", borderColor: `color-mix(in srgb,${g.tone} 45%,var(--border))` }}>{g.label}</button>)}
+            </div>
+            <div className="mt-1.5 flex justify-end"><button onClick={addBlessure} disabled={busy === "blessure"} className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">{busy === "blessure" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />} Ajouter</button></div>
           </div>
         </div>
-      </Section>
+      ) : null}
 
-      {dossier.historique.length ? (
-        <Section titre="Historique" icon={History}>
-          {dossier.historique.slice().reverse().slice(0, 10).map((h, i) => (
-            <div key={i} className="flex items-baseline gap-2 text-[0.78rem]">
-              <span className="shrink-0 font-num text-[0.7rem] text-faint">{h.date || ""}</span>
-              <span className="text-muted">{h.action || ""}{h.par ? ` — ${h.par}` : ""}</span>
+      {tab === "ordonnances" ? (
+        <div className="flex flex-col gap-2">
+          {ordos.slice().reverse().map((o, i) => (
+            <div key={i} className="rounded-[9px] border border-border bg-surface-2 px-2.5 py-2 text-[0.82rem]">
+              <div className="font-medium">{o.medicaments || "Traitement"}</div>
+              <div className="mt-0.5 text-[0.72rem] text-muted">{[o.posologie, o.duree].filter(Boolean).join(" · ") || "—"}</div>
             </div>
           ))}
-        </Section>
+          {ordos.length === 0 ? <p className="text-[0.8rem] text-faint">Aucune ordonnance.</p> : null}
+          <div className="rounded-[9px] border border-dashed border-border p-2">
+            <div className="mb-1.5 flex flex-wrap gap-1">
+              {REMEDES.map((r) => <button key={r.nom} onClick={() => { setOMed(r.nom); setOPoso(r.poso); setODuree(r.duree); }} className="rounded-md border border-border bg-surface px-2 py-1 text-[0.72rem] hover:border-border-2">{r.nom}</button>)}
+            </div>
+            <input className={inputCls} value={oMed} onChange={(e) => setOMed(e.target.value)} placeholder="Médicament" maxLength={300} />
+            <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+              <input className={inputCls} value={oPoso} onChange={(e) => setOPoso(e.target.value)} placeholder="Posologie" maxLength={150} />
+              <input className={inputCls} value={oDuree} onChange={(e) => setODuree(e.target.value)} placeholder="Durée" maxLength={80} />
+            </div>
+            <div className="mt-1.5 flex justify-end"><button onClick={addOrdo} disabled={busy === "ordo"} className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">{busy === "ordo" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />} Prescrire</button></div>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === "soins" ? (
+        <div className="flex flex-col gap-2">
+          {suivis.slice().reverse().map((s, i) => (
+            <div key={i} className="rounded-[9px] border border-border bg-surface-2 px-2.5 py-2 text-[0.82rem]">
+              <div className="flex items-start justify-between gap-2"><span className="font-medium">{s.soin || "Soin"}</span>{s.etat ? <span className="shrink-0 text-[0.7rem]" style={{ color: "var(--good)" }}>{s.etat}</span> : null}</div>
+              <div className="mt-0.5 text-[0.72rem] text-faint">{[s.date, s.soignant].filter(Boolean).join(" · ") || "—"}</div>
+            </div>
+          ))}
+          {suivis.length === 0 ? <p className="text-[0.8rem] text-faint">Aucun soin enregistré.</p> : null}
+          <div className="rounded-[9px] border border-dashed border-border p-2">
+            <input className={inputCls} value={sSoin} onChange={(e) => setSSoin(e.target.value)} placeholder="Soin prodigué (ex : suture, extraction de balle)" maxLength={300} />
+            <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+              <input className={inputCls} value={sSoignant} onChange={(e) => setSSoignant(e.target.value)} placeholder="Soignant" maxLength={120} />
+              <input className={inputCls} value={sEtat} onChange={(e) => setSEtat(e.target.value)} placeholder="État après soin" maxLength={120} />
+            </div>
+            <div className="mt-1.5 flex justify-end"><button onClick={addSuivi} disabled={busy === "suivi"} className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">{busy === "suivi" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />} Enregistrer le soin</button></div>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === "histo" ? (
+        <div className="flex flex-col gap-1.5">
+          {dossier.historique.slice().reverse().map((h, i) => (
+            <div key={i} className="flex items-baseline gap-2 text-[0.8rem]"><Activity className="h-3 w-3 shrink-0 text-faint" /><span className="shrink-0 font-num text-[0.7rem] text-faint">{h.date || ""}</span><span className="text-muted">{h.action || ""}{h.par ? ` — ${h.par}` : ""}</span></div>
+          ))}
+          {dossier.historique.length === 0 ? <p className="text-[0.8rem] text-faint">Aucun historique.</p> : null}
+        </div>
       ) : null}
 
       <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
         {confirmDel ? (
-          <div className="flex items-center gap-2 text-[0.78rem]">
-            <span className="text-muted">Supprimer ce dossier ?</span>
-            <button onClick={supprimer} disabled={busy === "del"} className="rounded-lg px-2.5 py-1 text-[0.76rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--oxblood)" }}>
-              {busy === "del" ? "…" : "Oui, supprimer"}
-            </button>
-            <button onClick={() => setConfirmDel(false)} className="text-[0.76rem] text-muted hover:text-ink">Annuler</button>
-          </div>
+          <div className="flex items-center gap-2 text-[0.78rem]"><span className="text-muted">Supprimer ce dossier ?</span>
+            <button onClick={supprimer} disabled={busy === "del"} className="rounded-lg px-2.5 py-1 text-[0.76rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--oxblood)" }}>{busy === "del" ? "…" : "Oui, supprimer"}</button>
+            <button onClick={() => setConfirmDel(false)} className="text-[0.76rem] text-muted hover:text-ink">Annuler</button></div>
         ) : (
-          <button onClick={() => setConfirmDel(true)} className="inline-flex items-center gap-1.5 text-[0.76rem] text-faint hover:text-ink">
-            <Trash2 className="h-3.5 w-3.5" /> Supprimer le dossier
-          </button>
+          <button onClick={() => setConfirmDel(true)} className="inline-flex items-center gap-1.5 text-[0.76rem] text-faint hover:text-ink"><Trash2 className="h-3.5 w-3.5" /> Supprimer</button>
         )}
         <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-[0.8rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}>Fermer</button>
       </div>
@@ -327,19 +394,13 @@ function DetailModal({ dossier, onClose, router }: { dossier: DossierItem; onClo
   );
 }
 
-function Modal({ titre, children, onClose }: { titre: string; children: React.ReactNode; onClose: () => void }) {
+function Modal({ titre, children, onClose, max = 540 }: { titre: string; children: React.ReactNode; onClose: () => void; max?: number }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
-      <div
-        className="max-h-[88vh] w-full max-w-[540px] overflow-y-auto rounded-card border border-border bg-surface p-5 shadow-card"
-        style={{ background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,#000))" }}
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="max-h-[88vh] w-full overflow-y-auto rounded-card border border-border bg-surface p-5 shadow-card" style={{ maxWidth: max, background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,#000))" }} onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <div className="font-display text-xl">{titre}</div>
-          <button onClick={onClose} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border text-muted hover:text-ink" aria-label="Fermer">
-            <X className="h-4 w-4" />
-          </button>
+          <button onClick={onClose} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border text-muted hover:text-ink" aria-label="Fermer"><X className="h-4 w-4" /></button>
         </div>
         {children}
       </div>
