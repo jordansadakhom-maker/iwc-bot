@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Boxes, Plus, Minus, Loader2, Camera, AlertTriangle, History, X, Check, SlidersHorizontal } from "lucide-react";
+import { Boxes, Plus, Minus, Loader2, Camera, AlertTriangle, History, X, Check, SlidersHorizontal, Search, ChevronDown } from "lucide-react";
 import type { StockItem, MouvementItem } from "@/lib/queries";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { PhotoDrop } from "@/components/photo-drop";
@@ -26,9 +26,13 @@ export function InventaireStock({ stock, mouvements }: { stock: StockItem[]; mou
   const [stepItem, setStepItem] = useState<StockItem | null>(null);
   const [journal, setJournal] = useState(false);
   const [pending, setPending] = useState(0);
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState<Record<string, boolean>>({});
 
   const total = items.reduce((s, i) => s + i.quantite, 0);
   const parCat = CATS.map((c) => ({ cat: c, items: items.filter((s) => s.categorie === c && s.quantite > 0).sort((a, b) => a.nom.localeCompare(b.nom)) })).filter((g) => g.items.length);
+  const query = q.trim().toLowerCase();
+  const trouves = query ? items.filter((i) => i.quantite > 0 && i.nom.toLowerCase().includes(query)).sort((a, b) => a.nom.localeCompare(b.nom)) : [];
 
   // Applique un mouvement en optimiste + envoie au bot (best-effort).
   async function applique(categorie: string, nom: string, mode: "add" | "remove" | "set", qte: number) {
@@ -70,35 +74,60 @@ export function InventaireStock({ stock, mouvements }: { stock: StockItem[]; mou
 
       {flash ? <div className="mb-3"><Flash tone="bad">{flash}</Flash></div> : null}
 
+      {/* Recherche + tout déplier / replier */}
+      {items.filter((i) => i.quantite > 0).length > 0 ? (
+        <div className="mb-3 flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
+            <input className={inputCls + " pl-8"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un objet…" />
+          </div>
+          {!query ? (
+            <button
+              onClick={() => { const allOpen = parCat.every((g) => open[g.cat]); const next: Record<string, boolean> = {}; parCat.forEach((g) => (next[g.cat] = !allOpen)); setOpen(next); }}
+              className="shrink-0 rounded-lg border border-border bg-surface-2 px-2.5 py-2 text-[0.74rem] font-semibold text-muted hover:text-ink"
+            >
+              {parCat.every((g) => open[g.cat]) && parCat.length ? "Tout replier" : "Tout déplier"}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       {items.filter((i) => i.quantite > 0).length === 0 ? (
         <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
           <Boxes className="h-6 w-6 text-faint" strokeWidth={1.6} />
           <p className="max-w-md text-[0.82rem] leading-relaxed text-muted">Le coffre est vide (ou pas encore synchronisé). Ajoute un objet, ou glisse une photo du coffre en jeu pour le remplir automatiquement.</p>
         </div>
+      ) : query ? (
+        // Résultats de recherche (à plat, toutes catégories)
+        trouves.length === 0 ? (
+          <p className="px-1 py-6 text-center text-[0.84rem] text-faint">Aucun objet ne correspond à « {q} ».</p>
+        ) : (
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {trouves.map((it) => <ItemCard key={it.id} it={it} applique={applique} onStep={setStepItem} showCat />)}
+          </div>
+        )
       ) : (
-        <div className="flex flex-col gap-4">
-          {parCat.map((g) => (
-            <div key={g.cat}>
-              <div className="mb-1.5 text-[0.72rem] uppercase tracking-[0.08em] text-muted">{CAT_EMOJI[g.cat]} {g.cat} <span className="ml-1 font-num text-faint">{g.items.reduce((s, i) => s + i.quantite, 0)}</span></div>
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                {g.items.map((it) => {
-                  const bas = it.seuil != null && it.quantite <= it.seuil;
-                  return (
-                    <div key={it.id} className="flex items-center gap-2 rounded-[10px] border border-border bg-surface-2 px-2.5 py-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-[0.84rem] font-medium">{it.nom}</div>
-                        {bas ? <div className="flex items-center gap-1 text-[0.68rem]" style={{ color: "var(--warn)" }}><AlertTriangle className="h-3 w-3" /> sous le seuil ({it.seuil})</div> : null}
-                      </div>
-                      <button onClick={() => applique(it.categorie, it.nom, "remove", 1)} className="grid h-6 w-6 place-items-center rounded-md border border-border text-muted hover:text-ink" aria-label="Retirer 1"><Minus className="h-3.5 w-3.5" /></button>
-                      <button onClick={() => setStepItem(it)} className="min-w-[2rem] rounded-md px-1 text-center font-num text-[0.9rem] font-semibold hover:bg-[color-mix(in_srgb,var(--ink)_6%,transparent)]" title="Montant exact">{it.quantite}</button>
-                      <button onClick={() => applique(it.categorie, it.nom, "add", 1)} className="grid h-6 w-6 place-items-center rounded-md border border-border text-muted hover:text-ink" aria-label="Ajouter 1"><Plus className="h-3.5 w-3.5" /></button>
-                      <button onClick={() => setStepItem(it)} className="grid h-6 w-6 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Montant exact"><SlidersHorizontal className="h-3.5 w-3.5" /></button>
-                    </div>
-                  );
-                })}
+        // Catégories repliables (accordéon)
+        <div className="flex flex-col gap-2">
+          {parCat.map((g) => {
+            const ouvert = !!open[g.cat];
+            const totCat = g.items.reduce((s, i) => s + i.quantite, 0);
+            return (
+              <div key={g.cat} className="overflow-hidden rounded-[12px] border border-border">
+                <button onClick={() => setOpen((o) => ({ ...o, [g.cat]: !o[g.cat] }))} className="flex w-full items-center gap-2.5 bg-surface-2 px-3 py-2.5 text-left transition hover:bg-[color-mix(in_srgb,var(--ink)_4%,var(--surface-2))]">
+                  <span className="text-[1.05rem]">{CAT_EMOJI[g.cat]}</span>
+                  <span className="text-[0.88rem] font-semibold">{g.cat}</span>
+                  <span className="text-[0.72rem] text-faint">{g.items.length} objet{g.items.length > 1 ? "s" : ""} · {totCat} u.</span>
+                  <ChevronDown className={"ml-auto h-4 w-4 text-faint transition-transform " + (ouvert ? "rotate-180" : "")} strokeWidth={2} />
+                </button>
+                {ouvert ? (
+                  <div className="grid gap-2 border-t border-border p-2.5 sm:grid-cols-2 xl:grid-cols-3">
+                    {g.items.map((it) => <ItemCard key={it.id} it={it} applique={applique} onStep={setStepItem} />)}
+                  </div>
+                ) : null}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -122,6 +151,24 @@ export function InventaireStock({ stock, mouvements }: { stock: StockItem[]; mou
       {photo ? <PhotoModal onClose={() => setPhoto(false)} router={router} setFlash={setFlash} /> : null}
       {stepItem ? <StepModal item={stepItem} onClose={() => setStepItem(null)} onApply={(mode, q) => { applique(stepItem.categorie, stepItem.nom, mode, q); setStepItem(null); }} /> : null}
     </>
+  );
+}
+
+// Carte d'un objet : nom, quantité (clic = montant exact), −1 / +1.
+function ItemCard({ it, applique, onStep, showCat = false }: { it: StockItem; applique: (cat: string, nom: string, mode: "add" | "remove" | "set", q: number) => void; onStep: (it: StockItem) => void; showCat?: boolean }) {
+  const bas = it.seuil != null && it.quantite <= it.seuil;
+  return (
+    <div className="flex items-center gap-2 rounded-[10px] border border-border bg-surface-2 px-2.5 py-2">
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[0.84rem] font-medium">{it.nom}</div>
+        {showCat ? <div className="text-[0.66rem] uppercase tracking-[0.05em] text-faint">{CAT_EMOJI[it.categorie] || ""} {it.categorie}</div> : null}
+        {bas ? <div className="flex items-center gap-1 text-[0.68rem]" style={{ color: "var(--warn)" }}><AlertTriangle className="h-3 w-3" /> sous le seuil ({it.seuil})</div> : null}
+      </div>
+      <button onClick={() => applique(it.categorie, it.nom, "remove", 1)} className="grid h-6 w-6 place-items-center rounded-md border border-border text-muted hover:text-ink" aria-label="Retirer 1"><Minus className="h-3.5 w-3.5" /></button>
+      <button onClick={() => onStep(it)} className="min-w-[2rem] rounded-md px-1 text-center font-num text-[0.9rem] font-semibold hover:bg-[color-mix(in_srgb,var(--ink)_6%,transparent)]" title="Montant exact">{it.quantite}</button>
+      <button onClick={() => applique(it.categorie, it.nom, "add", 1)} className="grid h-6 w-6 place-items-center rounded-md border border-border text-muted hover:text-ink" aria-label="Ajouter 1"><Plus className="h-3.5 w-3.5" /></button>
+      <button onClick={() => onStep(it)} className="grid h-6 w-6 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Montant exact"><SlidersHorizontal className="h-3.5 w-3.5" /></button>
+    </div>
   );
 }
 
