@@ -84,6 +84,10 @@ let telegrammeWeb = {};
 try { telegrammeWeb = require('./telegramme-web'); console.log('✅ Module télégramme web chargé'); }
 catch (e) { console.log('⚠️ telegramme-web non chargé:', e.message); }
 
+let candidatureWeb = {};
+try { candidatureWeb = require('./candidature-web'); console.log('✅ Module candidatures web chargé'); }
+catch (e) { console.log('⚠️ candidature-web non chargé:', e.message); }
+
 let commandeWeb = {};
 try { commandeWeb = require('./commande-web'); console.log('✅ Module commande web chargé'); }
 catch (e) { console.log('⚠️ commande-web non chargé:', e.message); }
@@ -6772,6 +6776,10 @@ client.once('clientReady', async () => {
   // ✉️ Télégrammes envoyés depuis le site → notifier l'équipe dans le salon télégrammes (toutes les 2 min).
   cron.schedule('*/2 * * * *', async () => {
     for (const g of client.guilds.cache.values()) await telegrammeWeb.verifierTelegrammesWeb?.(g).catch(() => {});
+  });
+  // 🐺 Candidatures de recrutement déposées sur le site → notifier l'équipe (toutes les 2 min).
+  cron.schedule('*/2 * * * *', async () => {
+    for (const g of client.guilds.cache.values()) await candidatureWeb.verifierCandidaturesWeb?.(g).catch(() => {});
   });
   // 🎴 Nouvelles fiches de contact demandées depuis le site → créer la fiche (carnet + forum) (toutes les 2 min).
   cron.schedule('*/2 * * * *', async () => {

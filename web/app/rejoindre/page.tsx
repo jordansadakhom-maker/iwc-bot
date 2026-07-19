@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { TelegrammeForm } from "./telegramme-form";
+import { RejoindreForm } from "./rejoindre-form";
 
-// Page PUBLIQUE : envoyer un télégramme à la maison (sans connexion).
+// Page PUBLIQUE : rejoindre la Iron Wolf Company (candidature sans connexion).
 // Exemptée du verrouillage REQUIRE_AUTH via le middleware.
 export const metadata = {
-  title: "Envoyer un télégramme — Iron Wolf Company",
-  description: "Envoie un télégramme à la Iron Wolf Company : une question, une info, une demande — la maison te répond.",
+  title: "Rejoindre la compagnie — Iron Wolf Company",
+  description: "Postule pour rejoindre la Iron Wolf Company : sécurité, escorte, armement, chasse de prime. Dépose ta candidature, on te recontacte.",
 };
 
 function Crest() {
@@ -16,27 +16,27 @@ function Crest() {
   );
 }
 
-export default function TelegrammePage() {
+export default function RejoindrePage() {
   return (
     <main className="grid min-h-screen place-items-center px-5 py-10" style={{ background: "radial-gradient(1000px 520px at 50% -10%, color-mix(in srgb,var(--accent) 12%,transparent), transparent 62%), var(--bg)" }}>
-      <div className="w-full max-w-[480px]">
+      <div className="w-full max-w-[520px]">
         <div className="mb-6 flex flex-col items-center text-center">
           <div className="mb-4 grid h-16 w-16 place-items-center rounded-2xl border border-border-2 text-accent" style={{ background: "radial-gradient(circle at 30% 25%, color-mix(in srgb,var(--accent) 30%,transparent), transparent 70%), var(--surface)" }}>
             <Crest />
           </div>
-          <h1 className="font-display text-2xl tracking-[0.1em]">IRON WOLF COMPANY</h1>
-          <p className="mt-2 max-w-[340px] text-[0.86rem] leading-relaxed text-muted">
-            Une question, une information, une demande&nbsp;? Envoie-nous un télégramme — la maison te répond.
+          <h1 className="font-display text-2xl tracking-[0.1em]">REJOINDRE LA MEUTE</h1>
+          <p className="mt-2 max-w-[380px] text-[0.86rem] leading-relaxed text-muted">
+            La Iron Wolf Company recrute. Sécurité, escorte, armement, chasse de prime — si tu as du cœur au ventre, dépose ta candidature, on te recontacte.
           </p>
         </div>
 
         <section className="rounded-2xl border border-border bg-surface p-5 shadow-card sm:p-6" style={{ background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,#000))" }}>
-          <h2 className="mb-4 text-center font-display text-lg">Envoyer un télégramme</h2>
-          <TelegrammeForm />
+          <h2 className="mb-4 text-center font-display text-lg">Formulaire de candidature</h2>
+          <RejoindreForm />
         </section>
 
         <p className="mt-5 text-center text-[0.78rem] text-faint">
-          Besoin d&apos;un rendez-vous&nbsp;? <Link href="/rendez-vous" className="underline hover:text-ink">Prends rendez-vous</Link> · Envie de nous rejoindre&nbsp;? <Link href="/rejoindre" className="underline hover:text-ink">Postule ici</Link>
+          Besoin d&apos;une prestation&nbsp;? <Link href="/rendez-vous" className="underline hover:text-ink">Prends rendez-vous</Link> · Une question&nbsp;? <Link href="/telegramme" className="underline hover:text-ink">Envoie un télégramme</Link>
         </p>
       </div>
     </main>
