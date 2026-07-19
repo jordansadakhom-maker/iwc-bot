@@ -284,16 +284,45 @@ export async function importerCatalogue(): Promise<ArmResult> {
   return { ok: true };
 }
 
-// ── Caisse (point de vente) ──────────────────────────────────────
+// ── Impôts : accumulation automatique du cycle fiscal en cours ───
+// À chaque vente, on ajoute le CA au cycle « dû » en cours (ou on en ouvre un
+// nouveau, en héritant du dernier taux, 10 % par défaut) et on recalcule l'impôt.
+async function _accumulerImpot(admin: Admin, montant: number) {
+  const m = round2(montant);
+  if (m <= 0) return;
+  const { data: enCours } = await admin.from("ArmurerieImpot").select("*").eq("statut", "du").order("createdAt", { ascending: false }).limit(1).maybeSingle();
+  if (enCours) {
+    const e = enCours as { id: string; chiffreAffaires: number; taux: number };
+    const ca = round2((Number(e.chiffreAffaires) || 0) + m);
+    const taux = Number(e.taux) || 0;
+    await admin.from("ArmurerieImpot").update({ chiffreAffaires: ca, montant: round2((ca * taux) / 100) }).eq("id", e.id);
+  } else {
+    const { data: dernier } = await admin.from("ArmurerieImpot").select("taux").order("createdAt", { ascending: false }).limit(1).maybeSingle();
+    const taux = dernier ? (Number((dernier as { taux: number }).taux) || 0) : 10;
+    await admin.from("ArmurerieImpot").insert({ id: newId("imp"), libelle: "Ventes (cycle en cours)", chiffreAffaires: m, taux, montant: round2((m * taux) / 100), statut: "du" });
+  }
+}
+
+// ── Caisse (point de vente) — tout est automatisé à l'encaissement ─
 export type LigneCaisse = { produitId?: string; nom: string; categorie?: string; prix: number; cout?: number; qte: number; aLaDemande?: boolean };
-export async function validerCaisse(lignes: LigneCaisse[], client: string, notes: string): Promise<ArmResult & { total?: number }> {
+export async function validerCaisse(lignes: LigneCaisse[], client: string, notes: string, clientId?: string): Promise<ArmResult & { total?: number }> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
   const items = (Array.isArray(lignes) ? lignes : []).filter((l) => l && Number(l.qte) > 0);
   if (!items.length) return { ok: false, error: "Le panier est vide." };
-  const nom = await auteurNom();
+  const vendeur = await auteurNom();
   const dateV = new Date().toLocaleDateString("fr-FR");
-  const cli = s(client, 120) || "Client de passage";
+
+  // Client fiché → on rattache la vente (photo + télégramme au registre) ; sinon passage.
+  let cid: string | null = clientId ? s(clientId, 60) : null;
+  let cli = s(client, 120) || "Client de passage";
+  let cliTel: string | null = null;
+  if (cid) {
+    const { data: c } = await admin.from("ArmurerieClient").select("nom,telegramme").eq("id", cid).maybeSingle();
+    if (c) { cli = (c as { nom: string }).nom || cli; cliTel = (c as { telegramme: string | null }).telegramme ?? null; }
+    else cid = null;
+  }
+
   let total = 0;
   try {
     for (const l of items) {
@@ -301,16 +330,25 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
       const montant = Math.max(0, round2((Number(l.prix) || 0) * q));
       total += montant;
       await admin.from("ArmurerieVente").insert({
-        id: newId("vte"), acquereur: cli, dateVente: dateV, marque: s(l.nom, 80), modele: null,
+        id: newId("vte"), clientId: cid, acquereur: cli, dateVente: dateV, marque: s(l.nom, 80), modele: null,
         categorie: s(l.categorie, 60), numeroSerie: `VTE-${Date.now().toString(36).slice(-4)}`,
-        vendeur: nom, prix: montant, notes: s(notes, 1000), statut: "enregistree",
+        vendeur, telegramme: cliTel, prix: montant, notes: s(notes, 1000), statut: "enregistree",
       });
       if (l.produitId && !l.aLaDemande) {
         const { data } = await admin.from("ArmurerieProduit").select("stock").eq("id", l.produitId).maybeSingle();
         if (data) await admin.from("ArmurerieProduit").update({ stock: Math.max(0, (Number((data as { stock: number }).stock) || 0) - q) }).eq("id", l.produitId);
       }
-      try { await _mouvementCoffre(admin, montant, "entree", `Vente : ${s(l.nom, 80)} ×${q} — ${cli}`, nom); } catch { /* vente enregistrée même si le coffre n'est pas prêt */ }
+      // Comptabilité : le crédit du coffre alimente automatiquement le grand livre.
+      try { await _mouvementCoffre(admin, montant, "entree", `Vente : ${s(l.nom, 80)} ×${q} — ${cli}`, vendeur); } catch { /* vente enregistrée même si le coffre n'est pas prêt */ }
     }
+    total = round2(total);
+    // Facture automatique (système de factures de la compagnie, via le bot).
+    try {
+      const resume = items.map((l) => `${s(l.nom, 40)} ×${Math.max(1, Math.round(Number(l.qte) || 1))}`).join(", ");
+      await envoyerCommande("facture.create", { objet: `Vente armurerie — ${resume}`.slice(0, 300), montant: total, clientNom: cli, type: "Armurerie" });
+    } catch { /* best-effort */ }
+    // Impôts : accumulation automatique du cycle fiscal en cours.
+    try { await _accumulerImpot(admin, total); } catch { /* best-effort */ }
     return { ok: true, total };
   } catch (e) {
     const msg = (e as Error).message || "";
