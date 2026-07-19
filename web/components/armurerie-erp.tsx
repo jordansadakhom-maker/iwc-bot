@@ -364,12 +364,17 @@ function ComptaChart({ mouvements }: { mouvements: ArmMouvement[] }) {
   const W = 760, H = 240, PL = 54, PR = 58, PT = 16, PB = 26;
   const pw = W - PL - PR, ph = H - PT - PB;
   const n = points.length;
-  const ymax = niceMax(Math.max(...points.map((p) => Math.max(p.rec, p.dep)), 1));
+  const rawMax = Math.max(...points.flatMap((p) => [p.rec, p.dep, p.net]), 1);
+  const rawMin = Math.min(...points.flatMap((p) => [p.rec, p.dep, p.net]), 0);
+  const ymax = niceMax(rawMax);
+  const ymin = rawMin < 0 ? -niceMax(-rawMin) : 0;
+  const span = ymax - ymin || 1;
   const x = (i: number) => PL + (n === 1 ? pw / 2 : (i / (n - 1)) * pw);
-  const y = (v: number) => PT + (1 - v / ymax) * ph;
+  const y = (v: number) => PT + (1 - (v - ymin) / span) * ph;
   const path = (sel: (p: PtC) => number) => points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(sel(p)).toFixed(1)}`).join(" ");
   const recPath = path((p) => p.rec);
   const depPath = path((p) => p.dep);
+  const netPath = path((p) => p.net);
   const areaPath = `${recPath} L${x(n - 1).toFixed(1)},${y(0).toFixed(1)} L${x(0).toFixed(1)},${y(0).toFixed(1)} Z`;
   const last = points[n - 1];
   const hp = hover != null ? points[hover] : null;
@@ -381,6 +386,7 @@ function ComptaChart({ mouvements }: { mouvements: ArmMouvement[] }) {
         <div className="flex items-center gap-3 text-[0.68rem] text-faint">
           <span className="inline-flex items-center gap-1"><span className="inline-block h-1.5 w-3 rounded-sm" style={{ background: "var(--good)" }} /> Recettes</span>
           <span className="inline-flex items-center gap-1"><span className="inline-block h-0 w-3 border-t-2 border-dashed" style={{ borderColor: "var(--oxblood)" }} /> Dépenses</span>
+          <span className="inline-flex items-center gap-1"><span className="inline-block h-0 w-3 border-t-2 border-dotted" style={{ borderColor: "var(--accent)" }} /> Solde net</span>
         </div>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full select-none" style={{ height: "auto" }}
@@ -389,14 +395,17 @@ function ComptaChart({ mouvements }: { mouvements: ArmMouvement[] }) {
         {[0, 0.25, 0.5, 0.75, 1].map((g) => { const yy = PT + g * ph; return (
           <g key={g}>
             <line x1={PL} y1={yy} x2={W - PR} y2={yy} stroke="var(--border)" strokeWidth={1} />
-            <text x={PL - 6} y={yy + 3} textAnchor="end" fontSize={9} fill="var(--faint)">{cents(ymax * (1 - g))}$</text>
+            <text x={PL - 6} y={yy + 3} textAnchor="end" fontSize={9} fill="var(--faint)">{cents(ymax - g * span)}$</text>
           </g>
         ); })}
+        {ymin < 0 ? <line x1={PL} y1={y(0)} x2={W - PR} y2={y(0)} stroke="var(--muted)" strokeWidth={1} opacity={0.55} /> : null}
         <path d={areaPath} fill="var(--good)" opacity={0.1} />
         <path d={recPath} fill="none" stroke="var(--good)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
         <path d={depPath} fill="none" stroke="var(--oxblood)" strokeWidth={2} strokeDasharray="5 3" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={netPath} fill="none" stroke="var(--accent)" strokeWidth={2} strokeDasharray="1.5 3.5" strokeLinejoin="round" strokeLinecap="round" />
         <circle cx={x(n - 1)} cy={y(last.rec)} r={2.6} fill="var(--good)" />
         <circle cx={x(n - 1)} cy={y(last.dep)} r={2.6} fill="var(--oxblood)" />
+        <circle cx={x(n - 1)} cy={y(last.net)} r={2.6} fill="var(--accent)" />
         <text x={W - PR + 4} y={y(last.rec) + 3} fontSize={9} fill="var(--good)" className="font-semibold">{cents(last.rec)}</text>
         <text x={W - PR + 4} y={y(last.dep) + 3} fontSize={9} fill="var(--oxblood)" className="font-semibold">{cents(last.dep)}</text>
         <text x={PL} y={H - 7} textAnchor="start" fontSize={9} fill="var(--faint)">{dJour(points[0].t)}</text>
@@ -406,6 +415,7 @@ function ComptaChart({ mouvements }: { mouvements: ArmMouvement[] }) {
             <line x1={x(hover!)} y1={PT} x2={x(hover!)} y2={PT + ph} stroke="var(--muted)" strokeWidth={1} opacity={0.5} />
             <circle cx={x(hover!)} cy={y(hp.rec)} r={3.5} fill="var(--good)" stroke="var(--surface-2)" strokeWidth={1.5} />
             <circle cx={x(hover!)} cy={y(hp.dep)} r={3.5} fill="var(--oxblood)" stroke="var(--surface-2)" strokeWidth={1.5} />
+            <circle cx={x(hover!)} cy={y(hp.net)} r={3.5} fill="var(--accent)" stroke="var(--surface-2)" strokeWidth={1.5} />
           </g>
         ) : null}
       </svg>

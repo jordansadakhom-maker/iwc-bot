@@ -32,7 +32,7 @@ export default async function FinancesPage() {
             data={[
               { label: "Coffre commun", value: coffres.commun ?? 0 },
               { label: "Coffre Iron Wolf", value: coffres.legal ?? 0 },
-              { label: "Coffre Confrérie", value: coffres.illegal ?? 0 },
+              { label: "Coffre Van Horn", value: coffres.vanhorn ?? 0 },
             ]}
             money
           />
