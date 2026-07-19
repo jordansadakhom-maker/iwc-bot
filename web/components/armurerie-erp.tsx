@@ -711,6 +711,18 @@ function CommandeModal({ commande, produits, clients, onClose, router }: { comma
   }
   const addLigne = () => setLignes((ls) => [...ls, { objet: "", qte: 1, prixUnitaire: 0 }]);
   const delLigne = (i: number) => setLignes((ls) => ls.length > 1 ? ls.filter((_, idx) => idx !== i) : ls);
+  const catsProd = [...new Set(produits.map((p) => p.categorie))];
+  function ajouterProduit(p: ArmProduit) {
+    setLignes((ls) => {
+      const ligne = { objet: p.nom, qte: 1, prixUnitaire: p.prix };
+      // Remplace la 1re ligne si elle est encore vide, sinon ajoute à la suite.
+      if (ls.length === 1 && !ls[0].objet.trim() && !ls[0].prixUnitaire) return [ligne];
+      // Si l'article est déjà au panier, incrémente sa quantité.
+      const idx = ls.findIndex((l) => l.objet.trim().toLowerCase() === p.nom.toLowerCase());
+      if (idx >= 0) return ls.map((l, j) => j === idx ? { ...l, qte: (Number(l.qte) || 0) + 1 } : l);
+      return [...ls, ligne];
+    });
+  }
 
   async function enregistrer() {
     setErr(null);
@@ -756,7 +768,19 @@ function CommandeModal({ commande, produits, clients, onClose, router }: { comma
             })}
           </div>
           <datalist id="cmd-objets">{produits.map((p) => <option key={p.id} value={p.nom} />)}</datalist>
-          <button onClick={addLigne} className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-border px-2.5 py-1.5 text-[0.76rem] font-semibold text-muted hover:border-border-2 hover:text-ink"><Plus className="h-3.5 w-3.5" /> Ajouter un objet</button>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {produits.length ? (
+              <select value="" onChange={(e) => { const p = produits.find((x) => x.id === e.target.value); if (p) ajouterProduit(p); }} className={inputCls + " !py-1.5 sm:max-w-[320px]"} aria-label="Ajouter un article du catalogue">
+                <option value="">＋ Ajouter un article du catalogue…</option>
+                {catsProd.map((cat) => (
+                  <optgroup key={cat} label={cat}>
+                    {produits.filter((p) => p.categorie === cat).map((p) => <option key={p.id} value={p.id}>{p.nom} — {money(p.prix)}</option>)}
+                  </optgroup>
+                ))}
+              </select>
+            ) : null}
+            <button onClick={addLigne} className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-border px-2.5 py-1.5 text-[0.76rem] font-semibold text-muted hover:border-border-2 hover:text-ink"><Plus className="h-3.5 w-3.5" /> Ligne libre (sur mesure)</button>
+          </div>
         </div>
 
         {/* Total général */}
