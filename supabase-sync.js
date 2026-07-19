@@ -168,6 +168,9 @@ function _construire(db) {
       commanditaire: _str(c.commanditaire || c.clientNom, 200),
       agents: Array.isArray(c.agents) ? c.agents.map(String) : [],
       createdAt: c.createdAt || undefined,
+      // Suivi / pipeline (colonnes optionnelles — repli automatique si absentes).
+      suivi: _nn(c.suivi, 40),
+      remuVerseAuCoffre: c.remuVerseAuCoffre != null ? Math.round(Number(c.remuVerseAuCoffre)) : null,
     }));
   const contratIds = new Set(contrats.map(c => c.id));
 
@@ -208,6 +211,9 @@ function _construire(db) {
       lieu: _nn(o.lieu || o.lieuTexte, 200),
       pole: o.pole ? _pole(o.pole) : 'both',
       createurNom: _nn(o.createurNom || o.createdByNom, 120),
+      resultat: _nn(o.resultat, 120),
+      butin: _nn(o.butin, 120),
+      debrief: _nn(o.debrief || o.pertes, 800),
     });
   }
 
@@ -390,12 +396,18 @@ async function syncAll(db) {
       const results = [];
       results.push(await _upsert('Membre', membres));    // 1. aucun FK bloquant (parrainId non fourni)
       results.push(await _upsert('Coffre', coffres));    // 2. indépendant
-      results.push(await _upsert('Contrat', contrats));  // 3. indépendant
+      // 3. Contrats — tente le suivi complet ; repli si colonnes optionnelles absentes.
+      let rCo = await _upsert('Contrat', contrats);
+      if (!rCo.ok && rCo.status === 400) {
+        const base = contrats.map(({ suivi, remuVerseAuCoffre, ...b }) => b);
+        rCo = await _upsert('Contrat', base);
+      }
+      results.push(rCo);
       // 4. Opérations — FK → Membre + Contrat. Tente le détail complet ; repli si
       //    les colonnes optionnelles (objectif, lieu, pole, createurNom) n'existent pas.
       let rO = await _upsert('Operation', operations);
       if (!rO.ok && rO.status === 400) {
-        const base = operations.map(({ objectif, lieu, pole, createurNom, ...b }) => b);
+        const base = operations.map(({ objectif, lieu, pole, createurNom, resultat, butin, debrief, ...b }) => b);
         rO = await _upsert('Operation', base);
       }
       results.push(rO);

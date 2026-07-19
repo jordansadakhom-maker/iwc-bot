@@ -2,24 +2,38 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileText, Plus, Loader2, Trash2, Users, CalendarClock } from "lucide-react";
+import { FileText, Plus, Loader2, Trash2, Users, CalendarClock, Landmark, Check } from "lucide-react";
 import type { ContratDetail } from "@/lib/queries";
 import { Badge } from "@/components/ui";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
-import { creerContrat, majContrat, supprimerContrat } from "@/app/(app)/operations/actions";
+import { creerContrat, majContrat, supprimerContrat, majSuiviContrat, honorerContrat } from "@/app/(app)/operations/actions";
 
 const dateFR = (s: string | null) => { if (!s) return null; try { return new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" }); } catch { return null; } };
 
+// Pipeline de suivi (5 étapes, comme sur Discord).
+const SUIVI = ["En attente", "En cours", "Validé", "Honoré", "Abandonné"];
+const SUIVI_TONE: Record<string, "warn" | "accent" | "good" | "muted"> = {
+  "En attente": "warn", "En cours": "accent", "Validé": "good", "Honoré": "good", "Abandonné": "muted",
+};
+// Déduit l'étape de suivi depuis le statut brut quand elle n'est pas encore définie.
+function suiviDeStatut(statut: string): string {
+  const s = (statut || "").toLowerCase();
+  if (/honor/.test(s)) return "Honoré";
+  if (/signe|actif|cours|valide/.test(s)) return s.includes("valide") ? "Validé" : "En cours";
+  if (/refuse|annul|abandon|echou/.test(s)) return "Abandonné";
+  return "En attente";
+}
+
 function ContratDetailBloc({ c }: { c: ContratDetail }) {
   const cree = dateFR(c.createdAt);
-  const st = STATUTS.find((s) => s.key === (c.statut || "").toLowerCase());
   return (
     <div className="mb-4 flex flex-col gap-3 rounded-[12px] border border-border bg-surface-2 px-3.5 py-3">
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone={c.pole === "illegal" ? "oxblood" : "accent"}>{c.pole === "illegal" ? "🔪 Confrérie" : "⚖️ Iron Wolf"}</Badge>
-        <Badge tone={STATUT_TONE[c.statut?.toLowerCase()] ?? "muted"}>{st?.label || c.statut}</Badge>
+        <Badge tone={SUIVI_TONE[c.suivi || suiviDeStatut(c.statut)] ?? "muted"}>{c.suivi || suiviDeStatut(c.statut)}</Badge>
         {c.remuneration ? <span className="ml-auto font-num text-[0.86rem] font-semibold" style={{ color: "var(--accent)" }}>{c.remuneration}</span> : null}
       </div>
+      {c.remuVerseAuCoffre ? <div className="flex items-center gap-1.5 text-[0.8rem]" style={{ color: "var(--good)" }}><Landmark className="h-3.5 w-3.5" /> {c.remuVerseAuCoffre.toLocaleString("fr-FR")}$ versés au coffre</div> : null}
       <div className="text-[0.86rem] leading-relaxed text-ink">{c.cible}</div>
       {c.commanditaire ? <div className="text-[0.8rem] text-muted"><span className="text-faint">Commanditaire : </span>{c.commanditaire}</div> : null}
       {c.motif ? <div className="text-[0.82rem] leading-relaxed text-muted"><span className="text-faint">Détails / conditions : </span>{c.motif}</div> : null}
@@ -168,12 +182,34 @@ function EditModal({ contrat, onClose, router }: { contrat: ContratDetail; onClo
   const [busy, setBusy] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
+  const [suivi, setSuivi] = useState(contrat.suivi || suiviDeStatut(contrat.statut));
+  const [honorer, setHonorer] = useState(false);
+  const [montant, setMontant] = useState(String((contrat.remuneration || "").replace(/[^\d]/g, "") || ""));
+  const dejaHonore = !!contrat.remuVerseAuCoffre;
 
   async function push(patch: Record<string, string>, key: string) {
     setBusy(key);
     const r = await majContrat(contrat.id, patch);
     setBusy(null);
     setFlash(r.ok ? "Enregistré — mise à jour dans ~30 s." : (r.error || "Échec."));
+  }
+  async function changerSuivi(stage: string) {
+    if (stage === "Honoré") { setHonorer(true); return; }
+    const prev = suivi; setSuivi(stage); setBusy("suivi");
+    const r = await majSuiviContrat(contrat.id, stage);
+    setBusy(null);
+    if (!r.ok) { setSuivi(prev); setFlash(r.error || "Échec."); return; }
+    setFlash(`Suivi → ${stage} — mise à jour dans ~30 s.`); router.refresh();
+  }
+  async function confirmerHonorer() {
+    const m = Number(montant);
+    if (!m || m <= 0) { setFlash("Indique un montant."); return; }
+    setBusy("honorer");
+    const r = await honorerContrat(contrat.id, m);
+    setBusy(null);
+    if (!r.ok) { setFlash(r.error || "Échec."); return; }
+    setSuivi("Honoré"); setHonorer(false);
+    setFlash(`Contrat honoré : ${m.toLocaleString("fr-FR")}$ versés au coffre + facture créée.`); router.refresh();
   }
   async function supprimer() {
     setBusy("del");
@@ -187,6 +223,37 @@ function EditModal({ contrat, onClose, router }: { contrat: ContratDetail; onClo
     <Modal titre={contrat.cible} onClose={onClose}>
       {flash ? <div className="mb-3"><Flash>{flash}</Flash></div> : null}
       <ContratDetailBloc c={contrat} />
+
+      {/* Suivi / pipeline */}
+      <div className="mb-3 flex flex-col gap-2 border-t border-border pt-3">
+        <span className="text-[0.72rem] uppercase tracking-[0.06em] text-faint">Suivi {busy === "suivi" ? "· …" : ""}</span>
+        <div className="flex flex-wrap gap-1.5">
+          {SUIVI.map((s) => {
+            const on = suivi === s;
+            const tone = s === "Honoré" ? "var(--good)" : s === "Abandonné" ? "var(--muted)" : s === "Validé" ? "var(--good)" : s === "En cours" ? "var(--steel)" : "var(--warn)";
+            return (
+              <button key={s} onClick={() => changerSuivi(s)} disabled={dejaHonore && s !== "Honoré"} className="rounded-lg border px-2.5 py-1.5 text-[0.76rem] font-semibold transition disabled:opacity-40"
+                style={{ color: on ? "#000" : tone, background: on ? tone : "transparent", borderColor: "color-mix(in srgb," + tone + " 45%,var(--border))" }}>
+                {s}
+              </button>
+            );
+          })}
+        </div>
+        {honorer && !dejaHonore ? (
+          <div className="flex items-end gap-2 rounded-[10px] border border-border bg-surface-2 px-3 py-2.5">
+            <label className="flex flex-1 flex-col gap-1">
+              <span className="text-[0.7rem] text-faint">Montant à verser au coffre ($)</span>
+              <input className={inputCls} type="number" min={1} value={montant} onChange={(e) => setMontant(e.target.value)} placeholder="1200" autoFocus />
+            </label>
+            <button onClick={confirmerHonorer} disabled={busy === "honorer"} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[0.8rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--good)" }}>
+              {busy === "honorer" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Landmark className="h-4 w-4" />} Encaisser
+            </button>
+            <button onClick={() => setHonorer(false)} className="rounded-lg border border-border bg-surface px-2.5 py-2 text-[0.78rem] text-muted hover:text-ink">Annuler</button>
+          </div>
+        ) : null}
+        {dejaHonore ? <p className="flex items-center gap-1.5 text-[0.78rem]" style={{ color: "var(--good)" }}><Check className="h-3.5 w-3.5" /> Contrat honoré — {contrat.remuVerseAuCoffre?.toLocaleString("fr-FR")}$ au coffre.</p> : null}
+      </div>
+
       <div className="mb-2 border-t border-border pt-3 text-[0.72rem] uppercase tracking-[0.06em] text-faint">Modifier</div>
       <div className="flex flex-col gap-3">
         <Champ label="Objet"><input className={inputCls} value={cible} onChange={(e) => setCible(e.target.value)} maxLength={300} /></Champ>

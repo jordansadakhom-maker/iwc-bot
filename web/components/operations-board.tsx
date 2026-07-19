@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { X, Target, Plus, Loader2, Trash2, MapPin, Users, CalendarClock, Link2, CheckCircle2, Clock3, Lock } from "lucide-react";
-import type { OpDetail, EtapeDetail } from "@/lib/queries";
+import { X, Target, Plus, Loader2, Trash2, MapPin, Users, CalendarClock, Link2, CheckCircle2, Clock3, Lock, Send, Flag, Landmark, Check } from "lucide-react";
+import type { OpDetail, EtapeDetail, MembreLite } from "@/lib/queries";
 import { Badge } from "@/components/ui";
-import { creerOperation, majOperation, supprimerOperation } from "@/app/(app)/operations/actions";
+import { creerOperation, majOperation, supprimerOperation, assignerOperation, terminerOperation } from "@/app/(app)/operations/actions";
 
 const dateFR = (s: string | null) => { if (!s) return null; try { return new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" }); } catch { return null; } };
 
@@ -84,7 +84,7 @@ function Champ({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-export function OperationsBoard({ operations }: { operations: Board }) {
+export function OperationsBoard({ operations, membres = [] }: { operations: Board; membres?: MembreLite[] }) {
   const router = useRouter();
   const [sel, setSel] = useState<OpDetail | null>(null);
   const [nouveau, setNouveau] = useState(false);
@@ -138,7 +138,7 @@ export function OperationsBoard({ operations }: { operations: Board }) {
         </div>
       )}
 
-      {sel ? <EditModal op={sel} onClose={() => setSel(null)} router={router} /> : null}
+      {sel ? <EditModal op={sel} membres={membres} onClose={() => setSel(null)} router={router} /> : null}
       {nouveau ? <NouveauModal onClose={() => setNouveau(false)} router={router} /> : null}
     </>
   );
@@ -271,12 +271,20 @@ function OpDetailBloc({ op }: { op: OpDetail }) {
           {op.etapes.map((e, i) => <EtapeBloc key={i} e={e} i={i} />)}
         </div>
       ) : null}
-      {rien ? <p className="text-[0.8rem] text-faint">Aucun détail supplémentaire synchronisé pour cette opération.</p> : null}
+      {op.resultat || op.butin || op.debrief ? (
+        <div className="flex flex-col gap-1.5 rounded-[10px] border border-border bg-surface px-3 py-2.5">
+          <div className="flex items-center gap-1.5 text-[0.72rem] uppercase tracking-[0.05em] text-faint"><Flag className="h-3.5 w-3.5" /> Bilan</div>
+          {op.resultat ? <div className="text-[0.82rem]"><span className="text-faint">Résultat : </span>{op.resultat}</div> : null}
+          {op.butin ? <div className="text-[0.82rem]"><span className="text-faint">Butin : </span>{op.butin}</div> : null}
+          {op.debrief ? <div className="text-[0.82rem] text-muted"><span className="text-faint">Débrief : </span>{op.debrief}</div> : null}
+        </div>
+      ) : null}
+      {rien && !op.resultat && !op.butin ? <p className="text-[0.8rem] text-faint">Aucun détail supplémentaire synchronisé pour cette opération.</p> : null}
     </div>
   );
 }
 
-function EditModal({ op, onClose, router }: { op: OpDetail; onClose: () => void; router: Router }) {
+function EditModal({ op, membres, onClose, router }: { op: OpDetail; membres: MembreLite[]; onClose: () => void; router: Router }) {
   const [cible, setCible] = useState(op.titre);
   const [categorie, setCategorie] = useState(op.type);
   const [prime, setPrime] = useState(op.prime || "");
@@ -284,6 +292,37 @@ function EditModal({ op, onClose, router }: { op: OpDetail; onClose: () => void;
   const [busy, setBusy] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
+  // Assignation
+  const [q, setQ] = useState("");
+  const [choisis, setChoisis] = useState<Record<string, boolean>>({});
+  // Terminaison
+  const [terminer, setTerminer] = useState(false);
+  const [resultat, setResultat] = useState("Réussite complète");
+  const [butin, setButin] = useState(op.butin || "");
+  const [debrief, setDebrief] = useState(op.debrief || "");
+  const [montantPrime, setMontantPrime] = useState("");
+  const dispo = membres.filter((m) => !op.membresIds.includes(m.id));
+  const filtres = dispo.filter((m) => m.nom.toLowerCase().includes(q.toLowerCase())).slice(0, 40);
+  const nbChoisis = Object.values(choisis).filter(Boolean).length;
+
+  async function assigner() {
+    const ids = membres.filter((m) => choisis[m.id]).map((m) => m.id);
+    const noms = membres.filter((m) => choisis[m.id]).map((m) => m.nom);
+    if (!ids.length) return;
+    setBusy("assign");
+    const r = await assignerOperation(op.id, ids, noms);
+    setBusy(null);
+    if (!r.ok) { setFlash(r.error || "Échec."); return; }
+    setChoisis({}); setFlash("Agents assignés & prévenus — mise à jour dans ~30 s."); router.refresh();
+  }
+  async function confirmerTerminer() {
+    setBusy("terminer");
+    const r = await terminerOperation(op.id, { resultat, butin, debrief, montantPrime: Number(montantPrime) || 0 });
+    setBusy(null);
+    if (!r.ok) { setFlash(r.error || "Échec."); return; }
+    setPhase("terminee"); setTerminer(false);
+    setFlash(`Opération terminée${Number(montantPrime) > 0 ? ` · ${Number(montantPrime).toLocaleString("fr-FR")}$ au coffre` : ""}.`); router.refresh();
+  }
 
   async function changerPhaseLocale(ph: string) {
     if (ph === phase) return;
@@ -312,6 +351,55 @@ function EditModal({ op, onClose, router }: { op: OpDetail; onClose: () => void;
     <Modal titre={op.titre} onClose={onClose}>
       {flash ? <div className="mb-3"><Flash>{flash}</Flash></div> : null}
       <OpDetailBloc op={op} />
+
+      {/* Assigner des agents */}
+      {phase !== "terminee" && phase !== "annulee" ? (
+        <div className="mb-3 flex flex-col gap-2 border-t border-border pt-3">
+          <span className="text-[0.72rem] uppercase tracking-[0.06em] text-faint">Assigner des agents</span>
+          <input className={inputCls} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un membre…" />
+          <div className="max-h-36 overflow-y-auto rounded-[10px] border border-border bg-surface-2">
+            {filtres.length === 0 ? <p className="px-3 py-2 text-[0.78rem] text-faint">Aucun membre disponible.</p> : filtres.map((m) => (
+              <button key={m.id} onClick={() => setChoisis((c) => ({ ...c, [m.id]: !c[m.id] }))} className="flex w-full items-center gap-2 border-b border-border px-3 py-1.5 text-left text-[0.82rem] last:border-b-0 hover:bg-[color-mix(in_srgb,var(--ink)_4%,transparent)]">
+                <span className="grid h-4 w-4 place-items-center rounded border" style={{ borderColor: choisis[m.id] ? "var(--accent)" : "var(--border)", background: choisis[m.id] ? "var(--accent)" : "transparent" }}>{choisis[m.id] ? <Check className="h-3 w-3 text-black" /> : null}</span>
+                {m.nom}
+              </button>
+            ))}
+          </div>
+          <div className="flex justify-end">
+            <button onClick={assigner} disabled={busy === "assign" || nbChoisis === 0} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[0.8rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--accent)" }}>
+              {busy === "assign" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" strokeWidth={2} />} Assigner &amp; prévenir{nbChoisis ? ` (${nbChoisis})` : ""}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Terminer l'opération */}
+      {phase !== "terminee" && phase !== "annulee" ? (
+        <div className="mb-3 flex flex-col gap-2 border-t border-border pt-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[0.72rem] uppercase tracking-[0.06em] text-faint">Terminer l&apos;opération</span>
+            {!terminer ? <button onClick={() => setTerminer(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.76rem] font-semibold hover:border-border-2"><Flag className="h-3.5 w-3.5" /> Clôturer &amp; encaisser</button> : null}
+          </div>
+          {terminer ? (
+            <div className="flex flex-col gap-2.5 rounded-[10px] border border-border bg-surface-2 px-3 py-3">
+              <div className="flex flex-col gap-1"><span className="text-[0.7rem] text-faint">Résultat</span>
+                <Picker options={[{ key: "Réussite complète", label: "Réussite" }, { key: "Réussite partielle", label: "Partielle" }, { key: "Échec", label: "Échec" }, { key: "Abandonnée", label: "Abandon" }]} value={resultat} onChange={setResultat} /></div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Champ label="Butin / gains"><input className={inputCls} value={butin} onChange={(e) => setButin(e.target.value)} placeholder="$3000, 12 caisses…" maxLength={120} /></Champ>
+                <Champ label="Prime à verser au coffre ($)"><input className={inputCls} type="number" min={0} value={montantPrime} onChange={(e) => setMontantPrime(e.target.value)} placeholder="0" /></Champ>
+              </div>
+              <Champ label="Débrief"><textarea className={inputCls + " min-h-[50px] resize-y"} value={debrief} onChange={(e) => setDebrief(e.target.value)} placeholder="Compte-rendu, pertes, suites…" maxLength={800} /></Champ>
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setTerminer(false)} className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[0.78rem] text-muted hover:text-ink">Annuler</button>
+                <button onClick={confirmerTerminer} disabled={busy === "terminer"} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[0.8rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--good)" }}>
+                  {busy === "terminer" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Landmark className="h-4 w-4" />} Terminer{Number(montantPrime) > 0 ? " & encaisser" : ""}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="mb-2 border-t border-border pt-3 text-[0.72rem] uppercase tracking-[0.06em] text-faint">Modifier</div>
       <div className="flex flex-col gap-3">
         <Champ label="Titre / objectif"><input className={inputCls} value={cible} onChange={(e) => setCible(e.target.value)} maxLength={200} /></Champ>

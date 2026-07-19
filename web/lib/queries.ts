@@ -248,19 +248,22 @@ export type EtapeDetail = {
 };
 export type OpDetail = {
   id: string; titre: string; type: string; etape: string; phase: string;
-  membres: number; membresNoms: string[]; prime: string | null;
+  membres: number; membresNoms: string[]; membresIds: string[]; prime: string | null;
   objectif: string | null; lieu: string | null; pole: string;
   etapes: EtapeDetail[]; createurNom: string | null; createdAt: string | null; contratLie: string | null;
+  resultat: string | null; butin: string | null; debrief: string | null;
 };
 export type ContratDetail = {
   id: string; cible: string; commanditaire: string | null; statut: string; pole: string;
   remuneration: string | null; motif: string | null; agentsNoms: string[]; createdAt: string | null;
+  suivi: string | null; remuVerseAuCoffre: number | null;
 };
 export type OperationsData = {
   connecte: boolean;
   pole: PoleWeb;
   operations: { preparation: OpDetail[]; encours: OpDetail[]; terminees: OpDetail[] };
   contrats: ContratDetail[];
+  membres: MembreLite[];
 };
 
 // Libellés lisibles pour les identifiants de champs d'étape les plus courants
@@ -305,7 +308,7 @@ function _etapeDetail(raw: unknown, i: number): EtapeDetail {
 }
 
 export async function getOperations(): Promise<OperationsData> {
-  const vide: OperationsData = { connecte: false, pole: "iwc", operations: { preparation: [], encours: [], terminees: [] }, contrats: [] };
+  const vide: OperationsData = { connecte: false, pole: "iwc", operations: { preparation: [], encours: [], terminees: [] }, contrats: [], membres: [] };
   if (!dataConfigured()) return vide;
   const supabase = createAdminClient();
   if (!supabase) return vide;
@@ -351,6 +354,7 @@ export async function getOperations(): Promise<OperationsData> {
       phase: col === "encours" ? "en_cours" : col === "terminees" ? (phase === "annulee" ? "annulee" : "terminee") : "preparation",
       membres: agents.length,
       membresNoms: agents.map(resoudre),
+      membresIds: agents.map(String),
       prime: (o.prime as string) ?? null,
       objectif: (o.objectif as string) ?? null,
       lieu: (o.lieu as string) ?? null,
@@ -359,6 +363,9 @@ export async function getOperations(): Promise<OperationsData> {
       createurNom: (o.createurNom as string) ?? null,
       createdAt: (o.createdAt as string) ?? null,
       contratLie: contratId ? (contratNom.get(contratId) || contratId) : null,
+      resultat: (o.resultat as string) ?? null,
+      butin: (o.butin as string) ?? null,
+      debrief: (o.debrief as string) ?? null,
     });
   }
   const contrats: ContratDetail[] = ((contratsR.data || []) as Raw[])
@@ -375,10 +382,13 @@ export async function getOperations(): Promise<OperationsData> {
         motif: (c.motif as string) ?? null,
         agentsNoms: agents.map(resoudre),
         createdAt: (c.createdAt as string) ?? null,
+        suivi: (c.suivi as string) ?? null,
+        remuVerseAuCoffre: c.remuVerseAuCoffre == null ? null : Number(c.remuVerseAuCoffre),
       };
     });
 
-  return { connecte: true, pole, operations: board, contrats };
+  const membresLite: MembreLite[] = ((membresR.data || []) as { id: string; nomIC: string }[]).map((m) => ({ id: String(m.id), nom: m.nomIC || String(m.id) }));
+  return { connecte: true, pole, operations: board, contrats, membres: membresLite };
 }
 
 // ── Membres & RH (page dédiée) ───────────────────────────────────

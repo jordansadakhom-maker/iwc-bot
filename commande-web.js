@@ -144,6 +144,39 @@ const HANDLERS = {
     if (i >= 0) { db.preparations.splice(i, 1); return { ok: true, message: 'Opération supprimée' }; }
     return { ok: false, message: 'Opération introuvable' };
   },
+  // Assigner des agents à une opération → les inscrit + les prévient en MP.
+  'operation.assigner': async (db, p, ctx) => {
+    const op = _findOp(db, p.id);
+    if (!op) return { ok: false, message: 'Opération introuvable' };
+    const ids = (Array.isArray(p.membreIds) ? p.membreIds : []).map(String).filter(Boolean).slice(0, 20);
+    const noms = (Array.isArray(p.membresNoms) ? p.membresNoms : []).map(String);
+    if (!ids.length) return { ok: false, message: 'Personne à assigner' };
+    if (!Array.isArray(op.participants)) op.participants = [];
+    if (!Array.isArray(op.participantsIds)) op.participantsIds = [];
+    if (!Array.isArray(op.agents)) op.agents = [];
+    for (const id of ids) if (!op.participantsIds.includes(id)) { op.participantsIds.push(id); op.agents.push(id); }
+    for (const n of noms) if (!op.participants.includes(n)) op.participants.push(n);
+    let dm = 0;
+    const guild = ctx?.guild;
+    if (guild) for (const id of ids) { try { const m = await guild.members.fetch(id).catch(() => null); if (m) { await m.send(`🎯 **Tu es assigné(e) à une opération** — **${op.cible || op.name || 'Opération'}**${op.lieu ? ` · ${op.lieu}` : ''}\n_Assigné par ${p.auteurNom || 'la Direction'} depuis le site._`).catch(() => {}); dm++; } } catch {} }
+    op.majPar = p.auteurNom || 'Site web'; op.majAt = Date.now();
+    return { ok: true, message: `${ids.length} agent(s) assigné(s) (${dm} MP)` };
+  },
+  // Terminer une opération : résultat/butin/débrief + versement éventuel de la prime au coffre.
+  'operation.terminer': (db, p) => {
+    const op = _findOp(db, p.id);
+    if (!op) return { ok: false, message: 'Opération introuvable' };
+    op.status = 'terminee'; op.endedAt = Date.now();
+    op.resultat = _s(p.resultat, 120) || op.resultat || 'Réussite';
+    if (p.butin !== undefined) op.butin = _s(p.butin, 120);
+    if (p.pertes !== undefined) op.pertes = _s(p.pertes, 300);
+    if (p.debrief !== undefined) op.debrief = _s(p.debrief, 800);
+    let credit = 0;
+    const montant = Math.round(Number(p.montantPrime) || 0);
+    if (montant > 0 && !op.primeVerseeCoffre) { db.coffre = (Math.round(Number(db.coffre) || 0)) + montant; op.primeVerseeCoffre = montant; credit = montant; }
+    op.majPar = p.auteurNom || 'Site web'; op.majAt = Date.now();
+    return { ok: true, message: `Opération terminée${credit ? ` · +${credit}$ au coffre` : ''}` };
+  },
 
   // ── Contrats ─────────────────────────────────────────────
   'contrat.create': (db, p) => {
@@ -176,6 +209,41 @@ const HANDLERS = {
     db.contrats.splice(i, 1);
     return { ok: true, message: 'Contrat supprimé' };
   },
+  // Étape de suivi (pipeline En attente → En cours → Validé → Honoré → Abandonné).
+  'contrat.suivi': (db, p) => {
+    const c = (db.contrats || []).find(x => x && String(x.id) === String(p.id));
+    if (!c) return { ok: false, message: 'Contrat introuvable' };
+    const stage = _SUIVI.find(s => s.toLowerCase() === String(p.suivi || '').toLowerCase());
+    if (!stage) return { ok: false, message: 'Étape inconnue' };
+    if (stage === 'Honoré') return { ok: false, message: 'Utilise « Honorer » (montant requis)' };
+    c.suivi = stage;
+    if (stage === 'Validé') c.valideAt = Date.now();
+    c.majPar = p.auteurNom || 'Site web'; c.majAt = Date.now();
+    return { ok: true, message: `Suivi → ${stage}` };
+  },
+  // Honorer : crédite le coffre + crée une facture (comme sur Discord).
+  'contrat.honorer': (db, p) => {
+    const c = (db.contrats || []).find(x => x && String(x.id) === String(p.id));
+    if (!c) return { ok: false, message: 'Contrat introuvable' };
+    if (c.remuVerseAuCoffre) return { ok: false, message: 'Contrat déjà honoré' };
+    const montant = Math.round(Number(p.montant) || 0);
+    if (!Number.isFinite(montant) || montant <= 0) return { ok: false, message: 'Montant invalide' };
+    db.coffre = (Math.round(Number(db.coffre) || 0)) + montant;
+    c.suivi = 'Honoré'; c.remuVerseAuCoffre = montant; c.honoreAt = Date.now(); c.status = c.status || 'signe';
+    const pole = (c.cc || c.type === 'confrerie' || String(c.id).startsWith('CF-')) ? 'illegal' : 'legal';
+    if (!Array.isArray(db.factures)) db.factures = [];
+    const n = db.factures.filter(f => f && f.numero && f.numero !== 'FAC-000').length + 1;
+    const numero = `FAC-${String(n).padStart(3, '0')}`;
+    db.factures.push({
+      id: `web-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, numero,
+      objet: _s(c.objet || c.cible, 500) || 'Contrat', montant,
+      clientNom: _s(c.commanditaire || c.clientNom, 200) || 'Client',
+      type: pole === 'illegal' ? 'Contrat—Confrérie' : 'Contrat—IWC',
+      remuneration: _s(c.remuneration, 120), createdAt: Date.now(), source: 'web', contratId: String(c.id),
+    });
+    c.majPar = p.auteurNom || 'Site web'; c.majAt = Date.now();
+    return { ok: true, message: `Contrat honoré : +${montant}$ au coffre · ${numero}` };
+  },
 
   // ── Coffres (finances) ───────────────────────────────────
   'coffre.ajuster': (db, p) => {
@@ -200,6 +268,8 @@ const _POLES_C = new Set(['legal', 'illegal']);
 function _poleC(p) { p = String(p || '').toLowerCase(); return _POLES_C.has(p) ? p : (p.includes('ill') ? 'illegal' : 'legal'); }
 const _STATUTS_C = new Set(['en_attente', 'valide', 'signe', 'termine', 'annule', 'refuse']);
 function _statutContrat(s) { s = String(s || '').toLowerCase(); return _STATUTS_C.has(s) ? s : 'en_attente'; }
+// Pipeline de suivi des contrats (5 étapes, comme sur Discord).
+const _SUIVI = ['En attente', 'En cours', 'Validé', 'Honoré', 'Abandonné'];
 function _fiab05(v) { return Math.max(0, Math.min(5, parseInt(v, 10) || 0)); }
 const _STATUTS_T = new Set(['chasse', 'capturee', 'eliminee', 'abandonnee']);
 function _statutTraque(s) { s = String(s || '').toLowerCase(); return _STATUTS_T.has(s) ? s : 'chasse'; }

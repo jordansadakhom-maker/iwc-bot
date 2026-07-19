@@ -13,7 +13,7 @@ export default async function OperationsPage() {
       <PageHeader titre="Opérations & Contrats" sous="Créer et modifier tes opérations — en direct" actif={data.connecte} pole={data.pole} />
 
       <Card>
-        <OperationsBoard operations={data.operations} />
+        <OperationsBoard operations={data.operations} membres={data.membres} />
       </Card>
 
       <Card>
