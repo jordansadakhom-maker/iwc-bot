@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { UserPlus, CheckCircle2, Loader2 } from "lucide-react";
 import { envoyerCandidature } from "./actions";
 
@@ -15,11 +15,14 @@ export function RejoindreForm() {
   const [err, setErr] = useState<string | null>(null);
   const [form, setForm] = useState({ nomRP: "", age: "", moyen: MOYENS[0], contact: "", experience: "", motivation: "", disponibilites: "", website: "" });
   const set = <K extends keyof typeof form>(k: K, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const montRef = useRef(0);
+  useEffect(() => { montRef.current = Date.now(); }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setLoading(true); setErr(null);
     try {
-      const r = await envoyerCandidature(form);
+      const ms = montRef.current ? Date.now() - montRef.current : 9999;
+      const r = await envoyerCandidature({ ...form, ms });
       if (r.ok) setDone(true); else setErr(r.error || "Une erreur est survenue.");
     } catch { setErr("Envoi impossible pour le moment. Réessaie dans un instant."); }
     finally { setLoading(false); }

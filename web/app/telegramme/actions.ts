@@ -6,11 +6,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 // Écrit côté serveur (clé service) dans TelegrammeWeb. Le bot relève les
 // nouveaux télégrammes et prévient l'équipe dans le salon Discord dédié.
 
-export type TgInput = { nom: string; contact: string; message: string; website?: string };
+export type TgInput = { nom: string; contact: string; message: string; website?: string; ms?: number };
 export type TgResult = { ok: boolean; error?: string };
 
 export async function envoyerTelegrammeWeb(data: TgInput): Promise<TgResult> {
   if (data.website && data.website.trim()) return { ok: true }; // honeypot
+  if (typeof data.ms === "number" && data.ms >= 0 && data.ms < 1500) return { ok: true }; // rempli trop vite = robot
 
   const nom = (data.nom || "").trim();
   const message = (data.message || "").trim();

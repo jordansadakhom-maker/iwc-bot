@@ -10,11 +10,13 @@ export type CandInput = {
   nomRP: string; age?: string; moyen?: string; contact: string;
   experience?: string; motivation: string; disponibilites?: string;
   website?: string; // honeypot
+  ms?: number; // temps de remplissage (anti-robot)
 };
 export type CandResult = { ok: boolean; error?: string };
 
 export async function envoyerCandidature(data: CandInput): Promise<CandResult> {
   if (data.website && data.website.trim()) return { ok: true }; // honeypot
+  if (typeof data.ms === "number" && data.ms >= 0 && data.ms < 1500) return { ok: true }; // rempli trop vite = robot
 
   const nomRP = (data.nomRP || "").trim();
   const contact = (data.contact || "").trim();
