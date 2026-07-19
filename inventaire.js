@@ -34,6 +34,48 @@ const COULEUR = 0x8C6D3F;
 // Normalisation agressive : casse, accents, ponctuation et espaces ignorés
 // → « Balles .44 », « Balles.44 », « balles 44 » comptent comme le même objet.
 function _norm(x) { return (x || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, ""); }
+// Distance de Levenshtein (avec sortie rapide si trop long).
+function _lev(a, b) {
+  const m = a.length, n = b.length;
+  if (Math.abs(m - n) > 1) return 2;
+  const dp = Array.from({ length: m + 1 }, (_, i) => { const row = new Array(n + 1).fill(0); row[0] = i; return row; });
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++)
+    dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return dp[m][n];
+}
+// Deux noms d\u00e9signent-ils le m\u00eame objet ? (tol\u00e8re une lettre coup\u00e9e/faute de lecture IA)
+function _memeObjet(a, b) {
+  const na = _norm(a), nb = _norm(b);
+  if (!na || !nb) return na === nb;
+  if (na === nb) return true;
+  if (na.length >= 5 && nb.length >= 5 && _lev(na, nb) <= 1) return true; // ex : "achettedemelee" \u2194 "hachettedemelee"
+  return false;
+}
+// Fusionne les doublons proches d'un stock (garde le nom le plus complet, cumule les quantit\u00e9s).
+function _dedupeStock(inv) {
+  if (!inv || !inv.stock) return 0;
+  let fusions = 0;
+  for (const c of Object.keys(inv.stock)) {
+    const bucket = inv.stock[c]; if (!bucket || typeof bucket !== "object") continue;
+    const keys = Object.keys(bucket);
+    const traites = new Set();
+    for (let i = 0; i < keys.length; i++) {
+      const a = keys[i]; if (traites.has(a)) continue;
+      let canon = a; let total = bucket[a] || 0; const doublons = [];
+      for (let j = i + 1; j < keys.length; j++) {
+        const b = keys[j]; if (traites.has(b)) continue;
+        if (_memeObjet(a, b)) { doublons.push(b); total += bucket[b] || 0; traites.add(b); if (_norm(b).length > _norm(canon).length) canon = b; }
+      }
+      if (doublons.length) {
+        for (const d of doublons) delete bucket[d];
+        if (canon !== a) delete bucket[a];
+        bucket[canon] = total; fusions += doublons.length;
+      }
+    }
+  }
+  return fusions;
+}
 function _matchCat(input) {
   const ns = _norm(input); if (!ns) return null;
   return CATS.find(c => { const nc = _norm(c); return nc === ns || nc.startsWith(ns) || ns.startsWith(nc); }) || null;
@@ -177,6 +219,8 @@ async function rafraichirBoardDemarrage(clientOrGuild) {
     const client = clientOrGuild?.client || clientOrGuild;
     const guild = (clientOrGuild?.channels && clientOrGuild?.roles) ? clientOrGuild : client?.guilds?.cache?.first?.();
     const db = loadDB(); const inv = _ensure(db);
+    // Nettoyage des doublons proches (lettre coupée par l'IA, etc.) — auto-cicatrisant.
+    try { if (_dedupeStock(inv) > 0) persist(db); } catch {}
     // Auto-restauration du salon (perdu après un redémarrage) : par id, sinon par nom « inventaire ».
     let ch = inv.channelId ? await client?.channels?.fetch(inv.channelId).catch(() => null) : null;
     if (!ch) {
@@ -260,7 +304,7 @@ function _itemOptions(inv) {
 function _applyMov(inv, action, cat, objet, qte) {
   if (!inv.stock[cat]) inv.stock[cat] = {};
   const bucket = inv.stock[cat];
-  const existante = Object.keys(bucket).find(k => _norm(k) === _norm(objet)) || objet;
+  const existante = Object.keys(bucket).find(k => _memeObjet(k, objet)) || objet;
   const avant = bucket[existante] || 0;
   let apres;
   if (action === 'add') apres = avant + qte;
@@ -493,7 +537,7 @@ function _appliquer(inv, items, mode) {
   for (const it of items) {
     if (!inv.stock[it.categorie]) inv.stock[it.categorie] = {};
     const b = inv.stock[it.categorie];
-    const key = Object.keys(b).find(k => _norm(k) === _norm(it.nom)) || it.nom;
+    const key = Object.keys(b).find(k => _memeObjet(k, it.nom)) || it.nom;
     b[key] = (b[key] || 0) + it.quantite;
   }
   const after = _snapshot(inv);
@@ -957,6 +1001,7 @@ async function traiterPhotosWeb(db, urls, parNom) {
   if (!merged.length) return { ok: false, message: 'Aucun objet lu sur la ou les photo(s)' };
   let n = 0;
   for (const it of merged) { _applyMov(inv, 'add', it.categorie, it.nom, it.quantite); n += it.quantite; }
+  _dedupeStock(inv); // fusionne les doublons proches (ex : lettre coupée par la lecture IA)
   _journalAdd(inv, parNom || 'Site web', `📸 Photo lue depuis le site → +${n} objet(s) (${merged.length} lignes)`);
   return { ok: true, message: `+${n} objet(s) ajouté(s) depuis la photo (${merged.length} lignes)`, items: merged };
 }
