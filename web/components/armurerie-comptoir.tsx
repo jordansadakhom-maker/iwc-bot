@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Users, ScrollText, FileSignature, Plus, Minus, Loader2, Trash2, IdCard, Send, Check, X,
   Download, CircleDollarSign, Vault, ArrowDownRight, ArrowUpRight, History, ShoppingCart, Package, Search,
-  Clock, BadgeDollarSign, Landmark, StickyNote, ListTodo, Activity, Wallet, ClipboardList, Pickaxe, Hammer, ChevronDown,
+  Clock, BadgeDollarSign, Landmark, StickyNote, ListTodo, Activity, Wallet, ClipboardList, Pickaxe, Hammer, ChevronDown, AlertTriangle, TrendingUp,
 } from "lucide-react";
 import type { ArmClient, ArmVente, ArmContrat, ArmMouvement, ArmProduit, ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache, ArmCommande, ArmRessource, ArmRecetteLigne } from "@/lib/queries";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
@@ -198,12 +198,12 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
             <p className="py-4 text-center text-[0.8rem] text-faint">Panier vide. Clique un produit pour l&apos;ajouter.</p>
           ) : (
             <div className="mb-2 flex flex-col gap-2">
-              {lignes.map((l) => (
+              {lignes.map((l) => { const insuff = !l.p.aLaDemande && l.n > l.p.stock; return (
                 <div key={l.p.id} className="flex flex-col gap-1 border-b border-border/60 pb-1.5 text-[0.82rem]">
                   <div className="flex items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate font-medium">{l.p.nom}</span>
+                    <span className="min-w-0 flex-1 truncate font-medium">{l.p.nom}{insuff ? <span className="ml-1 text-[0.64rem] font-semibold" style={{ color: "var(--oxblood)" }} title={`Stock : ${l.p.stock}`}>· stock {l.p.stock}</span> : null}</span>
                     <button onClick={() => sub(l.p.id)} className="grid h-5 w-5 place-items-center rounded border border-border text-muted hover:text-ink"><Minus className="h-3 w-3" /></button>
-                    <span className="w-5 text-center font-num">{l.n}</span>
+                    <span className="w-5 text-center font-num" style={insuff ? { color: "var(--oxblood)" } : undefined}>{l.n}</span>
                     <button onClick={() => add(l.p.id)} className="grid h-5 w-5 place-items-center rounded border border-border text-muted hover:text-ink"><Plus className="h-3 w-3" /></button>
                   </div>
                   <div className="flex items-center gap-1.5 text-[0.72rem] text-faint">
@@ -214,9 +214,15 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
                     <span className="ml-auto font-num text-[0.84rem] font-semibold text-ink">{money(pu(l.p) * l.n)}</span>
                   </div>
                 </div>
-              ))}
+              ); })}
             </div>
           )}
+          {lignes.some((l) => !l.p.aLaDemande && l.n > l.p.stock) ? (
+            <div className="mb-2 flex items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-[0.72rem]" style={{ borderColor: "color-mix(in srgb,var(--oxblood) 40%,var(--border))", background: "color-mix(in srgb,var(--oxblood) 8%,transparent)", color: "var(--oxblood)" }}>
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>Stock insuffisant pour {lignes.filter((l) => !l.p.aLaDemande && l.n > l.p.stock).map((l) => l.p.nom).join(", ")}. La vente reste possible (le stock tombera à 0).</span>
+            </div>
+          ) : null}
           <div className="flex flex-col gap-1 border-t border-border pt-2 text-[0.84rem]">
             <div className="flex justify-between text-faint"><span>Coût matières</span><span className="font-num">−{money(cout)}</span></div>
             <div className="flex justify-between"><span className="text-faint">Vente</span><span className="font-num font-semibold">{money(vente)}</span></div>
@@ -244,6 +250,8 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
 
 // ═══════════════════ PRODUITS (catalogue) ═══════════════════
 const CAT_ORDRE = ["Armes", "Accessoires", "Munitions", "Composants", "Ressources"];
+const SEUIL_BAS = 3;   // stock ≤ ce seuil = « stock bas »
+const CIBLE_REASSORT = 5;   // niveau visé lors d'un réassort
 function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[]; ressources: ArmRessource[]; router: Router }) {
   const [sel, setSel] = useState<ArmProduit | null>(null);
   const [nouveau, setNouveau] = useState(false);
@@ -253,9 +261,26 @@ function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[];
   const [qbusy, setQbusy] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [reassort, setReassort] = useState(false);
   const query = q.trim().toLowerCase();
   const cats = [...new Set(produits.map((p) => p.categorie))].sort((a, b) => { const ia = CAT_ORDRE.indexOf(a), ib = CAT_ORDRE.indexOf(b); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b); });
   const toutOuvert = cats.length > 0 && cats.every((c) => open[c]);
+
+  // Alertes de stock + réassort suggéré (d'après les recettes).
+  const stockDe = (p: ArmProduit) => override[p.id] ?? p.stock;
+  const enRupture = produits.filter((p) => !p.aLaDemande && stockDe(p) === 0);
+  const enBas = produits.filter((p) => !p.aLaDemande && stockDe(p) > 0 && stockDe(p) <= SEUIL_BAS);
+  const ingredientsReassort = (() => {
+    const m = new Map<string, { nom: string; qte: number }>();
+    for (const p of [...enRupture, ...enBas]) {
+      if (!p.recette || !p.recette.length) continue;
+      const manque = Math.max(0, CIBLE_REASSORT - stockDe(p));
+      if (!manque) continue;
+      for (const l of p.recette) { if (!l.ingredient.trim() || !l.qte) continue; const k = _normIng(l.ingredient); const cur = m.get(k) || { nom: l.ingredient, qte: 0 }; cur.qte += l.qte * manque; m.set(k, cur); }
+    }
+    return [...m.values()].sort((a, b) => b.qte - a.qte);
+  })();
+  const coutReassort = ingredientsReassort.reduce((s2, l) => { const px = prixIngredient(l.nom, ressources); return s2 + (px == null ? 0 : px * l.qte); }, 0);
 
   async function importer() { setBusy("cat"); const r = await importerCatalogue(); setBusy(null); if (r.ok) { setFlash(r.n ? `${r.n} produit(s) ajouté(s).` : "Catalogue déjà à jour."); router.refresh(); } else setFlash(r.error || "Échec."); }
   async function importerRec() { setBusy("rec"); const r = await importerRecettes(); setBusy(null); if (r.ok) { setFlash(`${r.n ?? 0} recettes appliquées aux produits.`); router.refresh(); } else setFlash(r.error || "Échec."); }
@@ -282,7 +307,13 @@ function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[];
     return (
       <div key={p.id} className="flex items-center gap-3 rounded-[10px] border border-border bg-surface-2 px-3.5 py-2.5 transition hover:border-border-2">
         <button onClick={() => setSel(p)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-          <div className="min-w-0 flex-1"><div className="truncate text-[0.88rem] font-semibold">{p.nom}</div>{rec ? <div className="text-[0.66rem] text-faint">🔨 craft {money(rec.cout)}{rec.manquants.length ? " +" : ""}</div> : p.cout ? <div className="text-[0.66rem] text-faint">coût {money(p.cout)}</div> : null}</div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[0.88rem] font-semibold">{p.nom}</div>
+            <div className="flex items-center gap-1.5 text-[0.66rem] text-faint">
+              {rec ? <span>🔨 craft {money(rec.cout)}{rec.manquants.length ? " +" : ""}</span> : p.cout ? <span>coût {money(p.cout)}</span> : null}
+              {!p.aLaDemande && stock === 0 ? <span className="rounded px-1 font-semibold" style={{ color: "var(--oxblood)", background: "color-mix(in srgb,var(--oxblood) 15%,transparent)" }}>rupture</span> : !p.aLaDemande && stock <= SEUIL_BAS ? <span className="rounded px-1 font-semibold" style={{ color: "var(--warn)", background: "color-mix(in srgb,var(--warn) 16%,transparent)" }}>stock bas</span> : null}
+            </div>
+          </div>
           <span className="hidden shrink-0 rounded-full border border-border px-2 py-0.5 text-[0.66rem] text-muted sm:inline">Niveau {p.niveau}</span>
         </button>
         {p.aLaDemande ? (
@@ -324,17 +355,38 @@ function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[];
             <div className="relative flex-1"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" /><input className={inputCls + " pl-8"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un produit dans le stock…" /></div>
             <button onClick={() => setOpen(toutOuvert ? {} : Object.fromEntries(cats.map((c) => [c, true])))} className="shrink-0 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted hover:border-border-2">{toutOuvert ? "Tout replier" : "Tout déplier"}</button>
           </div>
+          {enRupture.length || enBas.length ? (
+            <div className="rounded-[12px] border px-3 py-2.5" style={{ borderColor: "color-mix(in srgb,var(--warn) 40%,var(--border))", background: "color-mix(in srgb,var(--warn) 8%,transparent)" }}>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.78rem]">
+                <span className="inline-flex items-center gap-1.5 font-semibold"><AlertTriangle className="h-4 w-4" style={{ color: "var(--warn)" }} /> Stock à surveiller</span>
+                {enRupture.length ? <span style={{ color: "var(--oxblood)" }}><b>{enRupture.length}</b> en rupture</span> : null}
+                {enBas.length ? <span style={{ color: "var(--warn)" }}><b>{enBas.length}</b> en stock bas (≤ {SEUIL_BAS})</span> : null}
+                {ingredientsReassort.length ? <button onClick={() => setReassort((v) => !v)} className="ml-auto rounded-lg border border-border bg-surface px-2 py-1 text-[0.72rem] font-semibold hover:border-border-2">{reassort ? "Masquer le réassort" : "Réassort suggéré"}</button> : null}
+              </div>
+              {reassort && ingredientsReassort.length ? (
+                <div className="mt-2 border-t border-border pt-2">
+                  <div className="mb-1.5 text-[0.7rem] text-faint">Ressources à fabriquer pour remonter les articles concernés à {CIBLE_REASSORT} u. (d&apos;après les recettes) :</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {ingredientsReassort.map((l) => { const px = prixIngredient(l.nom, ressources); return <span key={l.nom} className="rounded-full border border-border bg-surface px-2 py-0.5 text-[0.72rem]"><b className="font-num">{l.qte}</b> {l.nom}<span className="text-faint"> · {px == null ? "prix ?" : money(px * l.qte)}</span></span>; })}
+                  </div>
+                  <div className="mt-1.5 text-[0.74rem]">Coût estimé du réassort : <b className="font-num" style={{ color: "var(--accent)" }}>{money(coutReassort)}</b></div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {cats.map((cat) => {
             const items = produits.filter((p) => p.categorie === cat);
             const shown = query ? items.filter((p) => p.nom.toLowerCase().includes(query)) : items;
             if (query && shown.length === 0) return null;
             const ouvert = query ? true : !!open[cat];
             const totalStock = items.reduce((s2, p) => s2 + (p.aLaDemande ? 0 : (override[p.id] ?? p.stock)), 0);
+            const catRupture = items.some((p) => !p.aLaDemande && (override[p.id] ?? p.stock) === 0);
             return (
               <div key={cat} className="overflow-hidden rounded-[12px] border border-border bg-surface">
                 <button onClick={() => { if (!query) setOpen((o) => ({ ...o, [cat]: !o[cat] })); }} className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left transition hover:bg-surface-2">
                   <ChevronDown className={"h-4 w-4 shrink-0 text-faint transition-transform " + (ouvert ? "" : "-rotate-90")} strokeWidth={2} />
                   <span className="text-[0.82rem] font-semibold uppercase tracking-[0.05em]">{cat}</span>
+                  {catRupture ? <span title="Articles en rupture" className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "var(--oxblood)" }} /> : null}
                   <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[0.64rem] font-semibold text-faint">{query ? `${shown.length}/${items.length}` : items.length} réf.</span>
                   <span className="ml-auto text-[0.68rem] text-faint"><b className="font-num text-muted">{totalStock}</b> en stock</span>
                 </button>
@@ -659,6 +711,14 @@ function VentesTab({ ventes, clients, router }: { ventes: ArmVente[]; clients: A
   const [nouveau, setNouveau] = useState(false);
   const cliById = new Map(clients.map((c) => [c.id, c]));
 
+  // Top produits vendus (nombre de ventes + chiffre d'affaires).
+  const top = (() => {
+    const m = new Map<string, { nom: string; n: number; ca: number }>();
+    for (const v of ventes) { const nom = v.marque || "—"; const k = nom.toLowerCase(); const cur = m.get(k) || { nom, n: 0, ca: 0 }; cur.n += 1; cur.ca += v.prix; m.set(k, cur); }
+    return [...m.values()].sort((a, b) => b.n - a.n || b.ca - a.ca).slice(0, 5);
+  })();
+  const maxN = Math.max(...top.map((t) => t.n), 1);
+
   function exporter() {
     const l = [
       "ARMURERIE DE VAN HORN — REGISTRE OFFICIEL DES VENTES D'ARMES À FEU",
@@ -694,6 +754,22 @@ function VentesTab({ ventes, clients, router }: { ventes: ArmVente[]; clients: A
       {ventes.length === 0 ? (
         <Vide icon={ScrollText} texte="Le registre est vierge. Chaque vente d'arme doit y être inscrite (acquéreur, arme, n° de série, vendeur, télégramme)." />
       ) : (
+       <div className="flex flex-col gap-3">
+        {top.length ? (
+          <div className="rounded-[12px] border border-border bg-surface-2 p-3">
+            <div className="mb-1.5 flex items-center gap-1.5 text-[0.72rem] font-semibold uppercase tracking-[0.06em] text-muted"><TrendingUp className="h-4 w-4" style={{ color: "var(--accent)" }} /> Top produits vendus</div>
+            <div className="flex flex-col gap-1.5">
+              {top.map((t) => (
+                <div key={t.nom} className="flex items-center gap-2 text-[0.78rem]">
+                  <span className="w-32 shrink-0 truncate sm:w-44">{t.nom}</span>
+                  <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-surface"><div className="h-full rounded-full" style={{ width: `${Math.max(6, (t.n / maxN) * 100)}%`, background: "var(--accent)" }} /></div>
+                  <span className="w-8 shrink-0 text-right font-num text-muted">{t.n}×</span>
+                  <span className="w-20 shrink-0 text-right font-num font-semibold" style={{ color: "var(--good)" }}>{money(t.ca)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <div className="overflow-x-auto rounded-[12px] border border-border" style={{ background: "color-mix(in srgb,var(--brass) 5%,var(--surface-2))" }}>
           <table className="w-full min-w-[720px] border-collapse text-left text-[0.82rem]">
             <thead>
@@ -727,6 +803,7 @@ function VentesTab({ ventes, clients, router }: { ventes: ArmVente[]; clients: A
             </tbody>
           </table>
         </div>
+       </div>
       )}
       {nouveau ? <VenteModal clients={clients} onClose={() => setNouveau(false)} router={router} /> : null}
       {sel ? <VenteModal vente={sel} clients={clients} onClose={() => setSel(null)} router={router} /> : null}

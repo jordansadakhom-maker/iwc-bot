@@ -235,6 +235,14 @@ export function ComptabiliteTab({ mouvements, ca, router }: { mouvements: ArmMou
     const blob = new Blob([l.join("\n")], { type: "text/plain;charset=utf-8" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "comptabilite-van-horn.txt"; a.click(); URL.revokeObjectURL(a.href);
   }
+  function exporterCSV() {
+    const esc = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
+    const lignes = [["Date", "Sens", "Nature", "Libellé", "Par", "Montant"].join(";")];
+    filtres.forEach((m) => lignes.push([esc(dateFR(m.createdAt)), m.sens === "entree" ? "Recette" : "Dépense", m.sens === "sortie" && (m.nature === "produit" || m.nature === "charge") ? m.nature : "", esc(m.motif || ""), esc(m.auteur || ""), (m.sens === "entree" ? "" : "-") + (Number(m.montant) || 0).toFixed(2)].join(";")));
+    // BOM pour Excel + séparateur ; (locale FR)
+    const blob = new Blob(["﻿" + lignes.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "comptabilite-van-horn.csv"; a.click(); URL.revokeObjectURL(a.href);
+  }
 
   return (
     <>
@@ -252,7 +260,8 @@ export function ComptabiliteTab({ mouvements, ca, router }: { mouvements: ArmMou
           ))}
         </div>
         <div className="flex gap-2">
-          {filtres.length ? <Btn onClick={exporter} tone="ghost"><Download className="h-3.5 w-3.5" /> Exporter</Btn> : null}
+          {filtres.length ? <Btn onClick={exporter} tone="ghost"><Download className="h-3.5 w-3.5" /> .txt</Btn> : null}
+          {filtres.length ? <Btn onClick={exporterCSV} tone="ghost"><Download className="h-3.5 w-3.5" /> CSV</Btn> : null}
           <Btn onClick={() => setNouveau(true)}><Plus className="h-3.5 w-3.5" /> Écriture</Btn>
         </div>
       </TopBar>
