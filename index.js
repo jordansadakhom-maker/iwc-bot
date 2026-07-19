@@ -80,6 +80,10 @@ let contactWeb = {};
 try { contactWeb = require('./contact-web'); console.log('✅ Module contact web chargé'); }
 catch (e) { console.log('⚠️ contact-web non chargé:', e.message); }
 
+let telegrammeWeb = {};
+try { telegrammeWeb = require('./telegramme-web'); console.log('✅ Module télégramme web chargé'); }
+catch (e) { console.log('⚠️ telegramme-web non chargé:', e.message); }
+
 let commandeWeb = {};
 try { commandeWeb = require('./commande-web'); console.log('✅ Module commande web chargé'); }
 catch (e) { console.log('⚠️ commande-web non chargé:', e.message); }
@@ -6764,6 +6768,10 @@ client.once('clientReady', async () => {
   // 📨 Demandes de RDV venues du site web → notifier l'équipe dans #agenda (toutes les 2 min).
   cron.schedule('*/2 * * * *', async () => {
     for (const g of client.guilds.cache.values()) await rdvWeb.verifierDemandesRdvWeb?.(g).catch(() => {});
+  });
+  // ✉️ Télégrammes envoyés depuis le site → notifier l'équipe dans le salon télégrammes (toutes les 2 min).
+  cron.schedule('*/2 * * * *', async () => {
+    for (const g of client.guilds.cache.values()) await telegrammeWeb.verifierTelegrammesWeb?.(g).catch(() => {});
   });
   // 🎴 Nouvelles fiches de contact demandées depuis le site → créer la fiche (carnet + forum) (toutes les 2 min).
   cron.schedule('*/2 * * * *', async () => {

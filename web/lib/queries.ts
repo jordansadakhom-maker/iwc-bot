@@ -596,6 +596,7 @@ export type TgMessage = { from: string; name?: string; content?: string; at?: nu
 export type TelegrammeItem = {
   id: string; clientId: string | null; clientNom: string; statut: string;
   messages: TgMessage[]; rdvCree: boolean; createdAt: string | null; updatedAt: string | null;
+  source: "discord" | "web"; contact: string | null;
 };
 export type TelegrammesData = { connecte: boolean; telegrammes: TelegrammeItem[] };
 
@@ -603,11 +604,12 @@ export async function getTelegrammes(): Promise<TelegrammesData> {
   if (!dataConfigured()) return { connecte: false, telegrammes: [] };
   const supabase = createAdminClient();
   if (!supabase) return { connecte: false, telegrammes: [] };
-  // La table peut ne pas encore exister → repli silencieux (liste vide).
-  const { data, error } = await supabase.from("Telegramme").select("*").order("updatedAt", { ascending: false }).limit(100);
-  if (error) return { connecte: true, telegrammes: [] };
   type Raw = Record<string, unknown>;
-  const telegrammes: TelegrammeItem[] = ((data || []) as Raw[]).map((t) => ({
+  const [discR, webR] = await Promise.all([
+    supabase.from("Telegramme").select("*").order("updatedAt", { ascending: false }).limit(100),
+    supabase.from("TelegrammeWeb").select("*").order("createdAt", { ascending: false }).limit(60),
+  ]);
+  const discord: TelegrammeItem[] = discR.error ? [] : ((discR.data || []) as Raw[]).map((t) => ({
     id: String(t.id),
     clientId: (t.clientId as string) ?? null,
     clientNom: (t.clientNom as string) || "Client",
@@ -616,7 +618,23 @@ export async function getTelegrammes(): Promise<TelegrammesData> {
     rdvCree: !!t.rdvCree,
     createdAt: (t.createdAt as string) ?? null,
     updatedAt: (t.updatedAt as string) ?? null,
+    source: "discord", contact: null,
   }));
+  // Télégrammes envoyés depuis le site (message + réponses de l'équipe = trace).
+  const web: TelegrammeItem[] = webR.error ? [] : ((webR.data || []) as Raw[]).map((t) => {
+    const reps = Array.isArray(t.reponses) ? (t.reponses as { texte?: string; par?: string; at?: number }[]) : [];
+    const messages: TgMessage[] = [
+      { from: "client", content: (t.message as string) || "", at: t.createdAt ? new Date(t.createdAt as string).getTime() : undefined },
+      ...reps.map((r) => ({ from: "equipe", name: r.par, content: r.texte, at: r.at })),
+    ];
+    return {
+      id: `web-${String(t.id)}`, clientId: null, clientNom: (t.nom as string) || "Client",
+      statut: (t.statut as string) === "clos" ? "cloture" : "ouvert", messages,
+      rdvCree: false, createdAt: (t.createdAt as string) ?? null, updatedAt: (t.createdAt as string) ?? null,
+      source: "web", contact: (t.contact as string) ?? null,
+    };
+  });
+  const telegrammes = [...discord, ...web].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
   return { connecte: true, telegrammes };
 }
 
