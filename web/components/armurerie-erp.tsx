@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import {
   Users, Plus, Minus, Loader2, Trash2, Check, Download, Clock, Play, Square,
   BadgeDollarSign, Landmark, StickyNote, ListTodo, Activity, Pin, PinOff, Pencil,
-  ArrowDownRight, ArrowUpRight, CircleDollarSign, Wallet, ClipboardList, X, Pickaxe, Search,
+  ArrowDownRight, ArrowUpRight, CircleDollarSign, Wallet, ClipboardList, X, Pickaxe, Search, ScanLine, AlertTriangle,
 } from "lucide-react";
+import { PhotoDrop } from "@/components/photo-drop";
 import type { ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache, ArmMouvement, ArmVente, ArmProduit, ArmCommande, ArmCommandeLigne, ArmRessource } from "@/lib/queries";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
 import { Badge } from "@/components/ui";
@@ -21,6 +22,7 @@ import {
   creerTache, basculerTache, supprimerTache,
   creerCommande, majCommande, marquerCommande, supprimerCommande,
   creerRessource, majRessource, supprimerRessource, importerRessources, acheterRessources, type LigneRessource,
+  lireCoffreRessources, appliquerStockRessources,
 } from "@/app/(app)/armurerie/actions";
 
 type Router = ReturnType<typeof useRouter>;
@@ -751,6 +753,113 @@ export function TachesTab({ taches, router }: { taches: ArmTache[]; router: Rout
 }
 
 // ═══════════════════ RESSOURCES (achat à la mine) ═══════════════════
+// ── Scanner de coffre (photo → IA → stock) ──
+const _normR = (x: string) => String(x).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+const _STOPR = new Set(["de", "du", "des", "d", "l", "la", "le", "les", "a", "au", "aux", "en", "pour"]);
+const _toksR = (x: string) => _normR(x).split(" ").filter((t) => t && !_STOPR.has(t));
+// Associe un nom détecté à UNE ressource existante (sinon "" → à créer). Même logique
+// prudente que la fabrication : match exact, sinon sous-ensemble de tokens unique.
+function _matchRessource(nom: string, ressources: ArmRessource[]): string {
+  const n = _normR(nom);
+  const exact = ressources.find((r) => _normR(r.nom) === n);
+  if (exact) return exact.id;
+  const it = _toksR(nom);
+  if (!it.length) return "";
+  const cand = ressources.filter((r) => { const rt = new Set(_toksR(r.nom)); return it.every((t) => rt.has(t)); });
+  return cand.length === 1 ? cand[0].id : "";
+}
+// Catégorie proposée pour une ressource créée (organisation seulement ; prix reste 0).
+function _guessCatRes(nom: string): string {
+  const n = _normR(nom);
+  if (/lingot|charbon|soufre|plomb|minerai|poudre|\bfer\b|cuivre|zinc/.test(n)) return "Minerais";
+  if (/verre|laiton|acier|metal/.test(n)) return "Métaux & verre";
+  if (/bois|planche|buche/.test(n)) return "Bois";
+  if (/cuir|corde|tissu|coton|laine|peau/.test(n)) return "Textile";
+  if (/arme|canon|crosse|barillet|gachette|carquois|arc/.test(n)) return "Composants";
+  return "Divers";
+}
+
+type ScanRow = { nom: string; quantite: number; cible: string }; // cible: id ressource | "__new__" | "__skip__"
+function ScanCoffreModal({ lignes, ressources, onClose, router }: { lignes: { nom: string; quantite: number }[]; ressources: ArmRessource[]; onClose: () => void; router: Router }) {
+  const [mode, setMode] = useState<"add" | "set">("add");
+  const [rows, setRows] = useState<ScanRow[]>(() => lignes.map((l) => ({ nom: l.nom, quantite: l.quantite, cible: _matchRessource(l.nom, ressources) || "__new__" })));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const byId = useMemo(() => new Map(ressources.map((r) => [r.id, r])), [ressources]);
+
+  const set = (i: number, patch: Partial<ScanRow>) => setRows((rs) => rs.map((r, k) => (k === i ? { ...r, ...patch } : r)));
+  const nbMaj = rows.filter((r) => r.cible && r.cible !== "__new__" && r.cible !== "__skip__").length;
+  const nbNew = rows.filter((r) => r.cible === "__new__").length;
+
+  // Aperçu du stock résultant pour une ligne (avant d'appliquer).
+  function apercu(r: ScanRow): string {
+    if (r.cible === "__skip__") return "ignoré";
+    if (r.cible === "__new__") return `nouvelle · stock ${r.quantite}`;
+    const cur = Number(byId.get(r.cible)?.stock) || 0;
+    return mode === "add" ? `${cur} → ${cur + r.quantite}` : `${cur} → ${r.quantite}`;
+  }
+
+  async function appliquer() {
+    setErr(null); setBusy(true);
+    const items = rows.filter((r) => r.cible && r.cible !== "__new__" && r.cible !== "__skip__").map((r) => ({ id: r.cible, qte: r.quantite }));
+    const nouvelles = rows.filter((r) => r.cible === "__new__").map((r) => ({ nom: r.nom, categorie: _guessCatRes(r.nom), qte: r.quantite }));
+    if (!items.length && !nouvelles.length) { setBusy(false); setErr("Aucune ligne à appliquer."); return; }
+    const res = await appliquerStockRessources({ mode, items, nouvelles });
+    setBusy(false);
+    if (!res.ok) { setErr(res.error || "Échec."); return; }
+    router.refresh();
+    onClose();
+  }
+
+  return (
+    <Modal titre="📷 Stock lu depuis la photo" onClose={onClose} max={620}>
+      <p className="mb-2 text-[0.76rem] text-faint">Vérifie ce que l&apos;IA a lu, corrige au besoin, puis applique. Les objets absents du catalogue seront créés (prix à définir).</p>
+      <div className="mb-3 grid grid-cols-2 gap-2">
+        <button onClick={() => setMode("add")} className="rounded-lg border px-2.5 py-2 text-left text-[0.76rem] transition" style={{ borderColor: mode === "add" ? "var(--accent)" : "var(--border)", background: mode === "add" ? "color-mix(in srgb,var(--accent) 10%,transparent)" : "var(--surface-2)" }}>
+          <div className="font-semibold">➕ Ajouter (cumuler)</div>
+          <div className="text-[0.66rem] text-faint">additionne plusieurs coffres</div>
+        </button>
+        <button onClick={() => setMode("set")} className="rounded-lg border px-2.5 py-2 text-left text-[0.76rem] transition" style={{ borderColor: mode === "set" ? "var(--accent)" : "var(--border)", background: mode === "set" ? "color-mix(in srgb,var(--accent) 10%,transparent)" : "var(--surface-2)" }}>
+          <div className="font-semibold">🔄 Remplacer</div>
+          <div className="text-[0.66rem] text-faint">la photo = le total actuel</div>
+        </button>
+      </div>
+      <div className="flex max-h-[46vh] flex-col gap-1.5 overflow-y-auto pr-1">
+        {rows.map((r, i) => {
+          const inconnu = r.cible === "__new__";
+          return (
+            <div key={i} className="flex flex-col gap-1 rounded-lg border border-border bg-surface-2 p-2">
+              <div className="flex items-center gap-2">
+                <span className="min-w-0 flex-1 truncate text-[0.82rem] font-medium">{r.nom}{inconnu ? <span className="ml-1 inline-flex items-center gap-0.5 text-[0.62rem]" style={{ color: "var(--brass)" }}><AlertTriangle className="h-3 w-3" /> nouvelle</span> : null}</span>
+                <span className="text-[0.66rem] text-faint">×</span>
+                <input type="number" min={0} value={r.quantite} onChange={(e) => set(i, { quantite: Math.max(0, Math.round(Number(e.target.value) || 0)) })} onFocus={(e) => e.currentTarget.select()} className={inputCls + " !w-16 !px-1.5 !py-0.5 text-right font-num !text-[0.8rem]"} />
+              </div>
+              <div className="flex items-center gap-2">
+                <select value={r.cible} onChange={(e) => set(i, { cible: e.target.value })} className={inputCls + " !py-1 !text-[0.76rem]"}>
+                  <option value="__new__">➕ Créer « {r.nom} »</option>
+                  <option value="__skip__">Ignorer cette ligne</option>
+                  <optgroup label="Ressource existante">
+                    {ressources.map((rr) => <option key={rr.id} value={rr.id}>{rr.nom}</option>)}
+                  </optgroup>
+                </select>
+                <span className="shrink-0 font-num text-[0.72rem]" style={{ color: r.cible === "__skip__" ? "var(--faint)" : "var(--good)" }}>{apercu(r)}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {err ? <div className="mt-2"><Flash tone="bad">{err}</Flash></div> : null}
+      <div className="mt-3 flex items-center justify-between gap-2">
+        <span className="text-[0.7rem] text-faint">{nbMaj} mise(s) à jour{nbNew ? ` · ${nbNew} création(s)` : ""}</span>
+        <div className="flex gap-2">
+          <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2">Annuler</button>
+          <button onClick={appliquer} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--good)" }}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Appliquer</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 export function RessourcesTab({ ressources, router }: { ressources: ArmRessource[]; router: Router }) {
   const [q, setQ] = useState("");
   const [cart, setCart] = useState<Record<string, number>>({});
@@ -760,6 +869,17 @@ export function RessourcesTab({ ressources, router }: { ressources: ArmRessource
   const [flash, setFlash] = useState<string | null>(null);
   const [modif, setModif] = useState<ArmRessource | null>(null);
   const [nouveau, setNouveau] = useState(false);
+  const [scan, setScan] = useState<{ nom: string; quantite: number }[] | null>(null); // lignes lues sur une photo de coffre
+  const [scanBusy, setScanBusy] = useState(false);
+  const [scanErr, setScanErr] = useState<string | null>(null);
+
+  async function onScan(url: string) {
+    setScanErr(null); setScanBusy(true);
+    const r = await lireCoffreRessources(url);
+    setScanBusy(false);
+    if (!r.ok || !r.lignes?.length) { setScanErr(r.error || "Aucun objet détecté sur la capture."); return; }
+    setScan(r.lignes);
+  }
 
   const byId = new Map(ressources.map((r) => [r.id, r]));
   const filtres = ressources.filter((r) => r.nom.toLowerCase().includes(q.trim().toLowerCase()));
@@ -818,6 +938,14 @@ export function RessourcesTab({ ressources, router }: { ressources: ArmRessource
       <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
         {/* Grille des ressources par catégorie */}
         <div>
+          {/* Scanner de coffre : photo → l'IA lit les quantités → stock réactualisé */}
+          <div className="mb-3 rounded-[14px] border p-3.5" style={{ borderColor: "color-mix(in srgb,var(--accent) 35%,var(--border))", background: "color-mix(in srgb,var(--accent) 5%,var(--surface-2))" }}>
+            <div className="mb-1 flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[0.05em]" style={{ color: "var(--accent)" }}><ScanLine className="h-4 w-4" /> Réactualiser le stock par photo</div>
+            <p className="mb-2 text-[0.72rem] text-faint">Glisse une capture d&apos;un coffre : l&apos;IA lit chaque objet et sa quantité, tu confirmes, et le stock se met à jour tout seul. Dépose plusieurs coffres à la suite pour additionner (ex. le fer réparti dans deux coffres).</p>
+            <PhotoDrop dossier="armurerie-coffres" onUploaded={onScan} compact camera={false} label="Glisse une capture du coffre — l'IA lit les quantités" />
+            {scanBusy ? <div className="mt-1.5 flex items-center gap-1.5 text-[0.72rem] text-faint"><Loader2 className="h-3 w-3 animate-spin" /> Lecture du coffre…</div> : null}
+            {scanErr ? <div className="mt-1.5 text-[0.72rem]" style={{ color: "var(--oxblood)" }}>{scanErr}</div> : null}
+          </div>
           <div className="relative mb-3"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" /><input className={inputCls + " pl-8"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher une ressource…" /></div>
           {cats.map((cat) => (
             <div key={cat} className="mb-3">
@@ -869,6 +997,7 @@ export function RessourcesTab({ ressources, router }: { ressources: ArmRessource
       </div>
       {nouveau ? <RessourceModal onClose={() => setNouveau(false)} router={router} /> : null}
       {modif ? <RessourceModal key={modif.id} ressource={modif} onClose={() => setModif(null)} router={router} /> : null}
+      {scan ? <ScanCoffreModal lignes={scan} ressources={ressources} onClose={() => setScan(null)} router={router} /> : null}
     </>
   );
 }
