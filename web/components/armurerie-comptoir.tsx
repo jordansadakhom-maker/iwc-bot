@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import {
   Users, ScrollText, FileSignature, Plus, Minus, Loader2, Trash2, IdCard, Send, Check, X,
   Download, CircleDollarSign, Vault, ArrowDownRight, ArrowUpRight, History, ShoppingCart, Package, Search,
-  Clock, BadgeDollarSign, Landmark, StickyNote, ListTodo, Activity, Wallet, ClipboardList, Pickaxe,
+  Clock, BadgeDollarSign, Landmark, StickyNote, ListTodo, Activity, Wallet, ClipboardList, Pickaxe, Hammer,
 } from "lucide-react";
-import type { ArmClient, ArmVente, ArmContrat, ArmMouvement, ArmProduit, ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache, ArmCommande, ArmRessource } from "@/lib/queries";
+import type { ArmClient, ArmVente, ArmContrat, ArmMouvement, ArmProduit, ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache, ArmCommande, ArmRessource, ArmRecetteLigne } from "@/lib/queries";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { cents } from "@/lib/format";
 import { Badge } from "@/components/ui";
@@ -20,12 +20,28 @@ import {
   creerVente, majVente, supprimerVente,
   creerContrat, envoyerContrat, marquerContrat, supprimerContrat,
   ajusterCoffreArmurerie,
-  creerProduit, majProduit, supprimerProduit, importerCatalogue, validerCaisse, type LigneCaisse,
+  creerProduit, majProduit, supprimerProduit, importerCatalogue, importerRecettes, validerCaisse, type LigneCaisse,
 } from "@/app/(app)/armurerie/actions";
 
 type Router = ReturnType<typeof useRouter>;
 const money = (n: number) => `${cents(n)}$`;
 const fourchette = (n: number): [number, number] => [Math.round(n * 90) / 100, Math.round(n * 110) / 100];
+// Coût de fabrication d'une recette à partir des prix des ressources.
+const _normIng = (x: string) => x.toLowerCase().normalize("NFD").replace(/[^a-z0-9]/g, "");
+function prixIngredient(ing: string, ressources: ArmRessource[]): number | null {
+  const n = _normIng(ing);
+  let r = ressources.find((x) => _normIng(x.nom) === n);
+  if (!r) r = ressources.find((x) => { const rn = _normIng(x.nom); return rn.startsWith(n) || n.startsWith(rn); });
+  return r ? r.prix : null;
+}
+function coutRecette(recette: ArmRecetteLigne[], ressources: ArmRessource[]): { cout: number; manquants: string[] } {
+  let cout = 0; const manquants: string[] = [];
+  for (const l of recette) {
+    const p = prixIngredient(l.ingredient, ressources);
+    if (p == null) manquants.push(l.ingredient); else cout += p * l.qte;
+  }
+  return { cout: Math.round(cout * 100) / 100, manquants };
+}
 const CATS = ["Revolver", "Pistolet", "Fusil à répétition", "Fusil à pompe", "Carabine", "Fusil de précision", "Autre"];
 const STATUTS_CLIENT = [
   { key: "actif", label: "Actif", tone: "var(--good)" },
@@ -92,7 +108,7 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
       </div>
 
       {tab === "caisse" ? <CaisseTab produits={produits} clients={clients} router={router} /> : null}
-      {tab === "produits" ? <ProduitsTab produits={produits} router={router} /> : null}
+      {tab === "produits" ? <ProduitsTab produits={produits} ressources={ressources} router={router} /> : null}
       {tab === "ressources" ? <RessourcesTab ressources={ressources} router={router} /> : null}
       {tab === "commandes" ? <CarnetCommandesTab commandes={commandes} produits={produits} clients={clients.map((c) => ({ id: c.id, nom: c.nom }))} router={router} /> : null}
       {tab === "clients" ? <ClientsTab clients={clients} ventes={ventes} router={router} /> : null}
@@ -217,18 +233,22 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
 }
 
 // ═══════════════════ PRODUITS (catalogue) ═══════════════════
-function ProduitsTab({ produits, router }: { produits: ArmProduit[]; router: Router }) {
+function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[]; ressources: ArmRessource[]; router: Router }) {
   const [sel, setSel] = useState<ArmProduit | null>(null);
   const [nouveau, setNouveau] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
   const cats = [...new Set(produits.map((p) => p.categorie))];
 
-  async function importer() { setBusy(true); const r = await importerCatalogue(); setBusy(false); if (r.ok) router.refresh(); }
+  async function importer() { setBusy("cat"); const r = await importerCatalogue(); setBusy(null); if (r.ok) router.refresh(); }
+  async function importerRec() { setBusy("rec"); const r = await importerRecettes(); setBusy(null); if (r.ok) { setFlash(`${r.n ?? 0} recettes appliquées aux produits.`); router.refresh(); } else setFlash(r.error || "Échec."); }
 
   return (
     <>
-      <div className="mb-3 flex justify-end gap-2">
-        {produits.length === 0 ? <button onClick={importer} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Importer le catalogue type</button> : null}
+      <div className="mb-3 flex flex-wrap justify-end gap-2">
+        {flash ? <div className="mr-auto"><Flash>{flash}</Flash></div> : null}
+        {produits.length === 0 ? <button onClick={importer} disabled={!!busy} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">{busy === "cat" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Importer le catalogue type</button> : null}
+        {produits.length > 0 ? <button onClick={importerRec} disabled={!!busy} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">{busy === "rec" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Hammer className="h-3.5 w-3.5" />} Importer les recettes</button> : null}
         <button onClick={() => setNouveau(true)} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Plus className="h-3.5 w-3.5" /> Nouveau produit</button>
       </div>
       {produits.length === 0 ? (
@@ -240,15 +260,20 @@ function ProduitsTab({ produits, router }: { produits: ArmProduit[]; router: Rou
               <div className="mb-1.5 text-[0.72rem] uppercase tracking-[0.08em] text-faint">{cat}</div>
               <div className="flex flex-col gap-2">
                 {produits.filter((p) => p.categorie === cat).map((p) => {
-                  const [lo, hi] = fourchette(p.prix);
                   const enStock = p.aLaDemande || p.stock > 0;
+                  const rec = p.recette && p.recette.length ? coutRecette(p.recette, ressources) : null;
+                  const marge = rec ? p.prix - rec.cout : null;
                   return (
                     <button key={p.id} onClick={() => setSel(p)} className="flex items-center gap-3 rounded-[10px] border border-border bg-surface-2 px-3.5 py-2.5 text-left transition hover:border-border-2">
-                      <div className="min-w-0 flex-1"><div className="truncate text-[0.88rem] font-semibold">{p.nom}</div>{p.cout ? <div className="text-[0.66rem] text-faint">coût {money(p.cout)}</div> : null}</div>
+                      <div className="min-w-0 flex-1"><div className="truncate text-[0.88rem] font-semibold">{p.nom}</div>{rec ? <div className="text-[0.66rem] text-faint">🔨 craft {money(rec.cout)}{rec.manquants.length ? " +" : ""}</div> : p.cout ? <div className="text-[0.66rem] text-faint">coût {money(p.cout)}</div> : null}</div>
                       <span className="hidden shrink-0 rounded-full border border-border px-2 py-0.5 text-[0.66rem] text-muted sm:inline">Niveau {p.niveau}</span>
                       <span className="shrink-0 rounded-full px-2 py-0.5 text-[0.66rem] font-semibold" style={{ color: enStock ? "var(--good)" : "var(--oxblood)", background: `color-mix(in srgb,${enStock ? "var(--good)" : "var(--oxblood)"} 14%,transparent)` }}>{p.aLaDemande ? "à la demande" : p.stock}</span>
                       <div className="hidden shrink-0 text-right sm:block"><div className="text-[0.58rem] uppercase tracking-[0.05em] text-faint">Prix de vente</div><div className="font-num text-[0.9rem] font-bold" style={{ color: "var(--accent)" }}>{money(p.prix)}</div></div>
-                      <div className="hidden shrink-0 text-right md:block"><div className="text-[0.58rem] uppercase tracking-[0.05em] text-faint">Fourchette ±10%</div><div className="font-num text-[0.72rem] text-muted">{money(lo)} → {money(hi)}</div></div>
+                      {rec ? (
+                        <div className="hidden shrink-0 text-right md:block"><div className="text-[0.58rem] uppercase tracking-[0.05em] text-faint">Marge{rec.manquants.length ? "*" : ""}</div><div className="font-num text-[0.82rem] font-semibold" style={{ color: (marge ?? 0) >= 0 ? "var(--good)" : "var(--oxblood)" }}>{money(marge ?? 0)}</div></div>
+                      ) : (
+                        <div className="hidden shrink-0 text-right md:block"><div className="text-[0.58rem] uppercase tracking-[0.05em] text-faint">Fourchette ±10%</div><div className="font-num text-[0.72rem] text-muted">{money(fourchette(p.prix)[0])} → {money(fourchette(p.prix)[1])}</div></div>
+                      )}
                     </button>
                   );
                 })}
@@ -257,13 +282,13 @@ function ProduitsTab({ produits, router }: { produits: ArmProduit[]; router: Rou
           ))}
         </div>
       )}
-      {nouveau ? <ProduitModal onClose={() => setNouveau(false)} router={router} /> : null}
-      {sel ? <ProduitModal produit={sel} onClose={() => setSel(null)} router={router} /> : null}
+      {nouveau ? <ProduitModal ressources={ressources} onClose={() => setNouveau(false)} router={router} /> : null}
+      {sel ? <ProduitModal produit={sel} ressources={ressources} onClose={() => setSel(null)} router={router} /> : null}
     </>
   );
 }
 
-function ProduitModal({ produit, onClose, router }: { produit?: ArmProduit; onClose: () => void; router: Router }) {
+function ProduitModal({ produit, ressources, onClose, router }: { produit?: ArmProduit; ressources: ArmRessource[]; onClose: () => void; router: Router }) {
   const editing = !!produit;
   const [nom, setNom] = useState(produit?.nom || "");
   const [categorie, setCategorie] = useState(produit?.categorie || "Divers");
@@ -272,14 +297,21 @@ function ProduitModal({ produit, onClose, router }: { produit?: ArmProduit; onCl
   const [stock, setStock] = useState(produit ? String(produit.stock) : "");
   const [niveau, setNiveau] = useState(produit ? String(produit.niveau) : "0");
   const [aLaDemande, setALaDemande] = useState(!!produit?.aLaDemande);
+  const [recette, setRecette] = useState<ArmRecetteLigne[]>(produit?.recette?.length ? produit.recette : []);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+
+  const { cout: coutCraft, manquants } = coutRecette(recette.filter((l) => l.ingredient.trim() && l.qte), ressources);
+  const marge = (Number(prix) || 0) - coutCraft;
+  const setLigneR = (i: number, patch: Partial<ArmRecetteLigne>) => setRecette((ls) => ls.map((l, idx) => idx === i ? { ...l, ...patch } : l));
+  const addLigneR = () => setRecette((ls) => [...ls, { ingredient: "", qte: 1 }]);
+  const delLigneR = (i: number) => setRecette((ls) => ls.filter((_, idx) => idx !== i));
 
   async function enregistrer() {
     setErr(null);
     if (nom.trim().length < 1) { setErr("Nom du produit requis."); return; }
     setBusy("save");
-    const data = { nom, categorie, prix: Number(prix) || 0, cout: Number(cout) || 0, stock: Number(stock) || 0, aLaDemande, niveau: Number(niveau) || 0 };
+    const data = { nom, categorie, prix: Number(prix) || 0, cout: Number(cout) || 0, stock: Number(stock) || 0, aLaDemande, niveau: Number(niveau) || 0, recette: recette.filter((l) => l.ingredient.trim() && l.qte) };
     const r = editing ? await majProduit(produit!.id, data) : await creerProduit(data);
     setBusy(null);
     if (!r.ok) { setErr(r.error || "Impossible."); return; }
@@ -306,6 +338,32 @@ function ProduitModal({ produit, onClose, router }: { produit?: ArmProduit; onCl
         <label className="inline-flex items-center gap-2 text-[0.82rem]">
           <input type="checkbox" checked={aLaDemande} onChange={(e) => setALaDemande(e.target.checked)} /> Produit « à la demande » (pas de stock décompté)
         </label>
+
+        {/* Recette de craft */}
+        <div className="rounded-[10px] border border-border bg-surface-2 p-2.5">
+          <div className="mb-1.5 flex items-center gap-1.5 text-[0.72rem] font-semibold uppercase tracking-[0.05em] text-muted"><Hammer className="h-3.5 w-3.5" /> Recette de fabrication</div>
+          {recette.length === 0 ? <p className="py-1 text-[0.74rem] text-faint">Aucune recette. Ajoute les ingrédients (bois, pièce d&apos;arme, charbon, lingot fer…).</p> : (
+            <div className="flex flex-col gap-1.5">
+              {recette.map((l, i) => (
+                <div key={i} className="grid grid-cols-[1fr_58px_28px] items-center gap-2">
+                  <input className={inputCls + " !px-2 !py-1.5"} value={l.ingredient} onChange={(e) => setLigneR(i, { ingredient: e.target.value })} placeholder="Ingrédient…" maxLength={80} list="arm-ressources" />
+                  <input className={inputCls + " !px-1.5 !py-1.5 text-center"} type="number" min={0} value={l.qte || ""} onChange={(e) => setLigneR(i, { qte: Math.max(0, Math.round(Number(e.target.value) || 0)) })} />
+                  <button onClick={() => delLigneR(i)} className="grid h-6 w-6 place-items-center rounded text-faint hover:text-ink" title="Retirer"><X className="h-3.5 w-3.5" /></button>
+                </div>
+              ))}
+            </div>
+          )}
+          <datalist id="arm-ressources">{ressources.map((r) => <option key={r.id} value={r.nom} />)}</datalist>
+          <button onClick={addLigneR} className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-border px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted hover:border-border-2 hover:text-ink"><Plus className="h-3.5 w-3.5" /> Ajouter un ingrédient</button>
+          {recette.some((l) => l.ingredient.trim() && l.qte) ? (
+            <div className="mt-2 flex flex-col gap-0.5 border-t border-border pt-2 text-[0.82rem]">
+              <div className="flex justify-between text-faint"><span>Coût de fabrication</span><span className="font-num">{money(coutCraft)}{manquants.length ? " +" : ""}</span></div>
+              <div className="flex justify-between"><span className="font-semibold">Marge (prix − coût)</span><span className="font-num font-bold" style={{ color: marge >= 0 ? "var(--good)" : "var(--oxblood)" }}>{money(marge)}</span></div>
+              {manquants.length ? <p className="text-[0.68rem] text-faint">⚠️ Prix manquant pour : {manquants.join(", ")} — ajoute-les dans l&apos;onglet Ressources pour un coût exact.</p> : null}
+            </div>
+          ) : null}
+        </div>
+
         {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
         <div className="mt-1 flex items-center justify-between border-t border-border pt-3">
           {editing ? <button onClick={supprimer} disabled={busy === "del"} className="inline-flex items-center gap-1.5 text-[0.76rem] text-faint hover:text-ink"><Trash2 className="h-3.5 w-3.5" /> Supprimer</button> : <span />}

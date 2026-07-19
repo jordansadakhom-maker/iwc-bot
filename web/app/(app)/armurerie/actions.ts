@@ -183,7 +183,19 @@ function tableErr(msg: string, quoi: string): string {
 }
 
 // ── Produits (catalogue de la Caisse) ────────────────────────────
-export async function creerProduit(d: { nom: string; categorie?: string; prix?: number; cout?: number; stock?: number; aLaDemande?: boolean; niveau?: number }): Promise<ArmResult> {
+type LigneRecette = { ingredient: string; qte: number };
+function _nettoyerRecette(recette: unknown): LigneRecette[] {
+  const arr = Array.isArray(recette) ? recette : [];
+  const out: LigneRecette[] = [];
+  for (const l of arr) {
+    const o = (l || {}) as Record<string, unknown>;
+    const ingredient = String(o.ingredient ?? "").trim().slice(0, 80);
+    const qte = Math.max(0, Math.round(Number(o.qte) || 0));
+    if (ingredient && qte) out.push({ ingredient, qte });
+  }
+  return out;
+}
+export async function creerProduit(d: { nom: string; categorie?: string; prix?: number; cout?: number; stock?: number; aLaDemande?: boolean; niveau?: number; recette?: LigneRecette[] }): Promise<ArmResult> {
   if (!d.nom || d.nom.trim().length < 1) return { ok: false, error: "Nom du produit requis." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
@@ -192,7 +204,7 @@ export async function creerProduit(d: { nom: string; categorie?: string; prix?: 
     id, nom: s(d.nom, 120), categorie: s(d.categorie, 60) || "Divers",
     prix: Math.max(0, round2(Number(d.prix) || 0)), cout: Math.max(0, round2(Number(d.cout) || 0)),
     stock: Math.max(0, Math.round(Number(d.stock) || 0)), aLaDemande: !!d.aLaDemande,
-    niveau: Math.max(0, Math.min(3, Math.round(Number(d.niveau) || 0))),
+    niveau: Math.max(0, Math.min(3, Math.round(Number(d.niveau) || 0))), recette: _nettoyerRecette(d.recette),
   });
   if (error) return { ok: false, error: tableErr(error.message, "produits") };
   return { ok: true, id };
@@ -209,6 +221,7 @@ export async function majProduit(id: string, patch: Record<string, unknown>): Pr
   if ("stock" in patch) up.stock = Math.max(0, Math.round(Number(patch.stock) || 0));
   if ("aLaDemande" in patch) up.aLaDemande = !!patch.aLaDemande;
   if ("niveau" in patch) up.niveau = Math.max(0, Math.min(3, Math.round(Number(patch.niveau) || 0)));
+  if ("recette" in patch) up.recette = _nettoyerRecette(patch.recette);
   const { error } = await admin.from("ArmurerieProduit").update(up).eq("id", id);
   return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
 }
@@ -282,6 +295,65 @@ export async function importerCatalogue(): Promise<ArmResult> {
   const { error } = await admin.from("ArmurerieProduit").insert(rows);
   if (error) return { ok: false, error: tableErr(error.message, "produits") };
   return { ok: true };
+}
+
+// ── Recettes de craft (ingrédients requis par arme/objet) ────────
+// Noms d'ingrédients canoniques : Bois, Pièce d'arme, Charbon, Lingot fer,
+// Lingot zinc, Verre, Cordes. [nom produit, [[ingrédient, quantité], …]]
+const RECETTES: [string, [string, number][]][] = [
+  ["Ceinture Couteau de lancé", [["Bois", 5], ["Lingot fer", 3]]],
+  ["Couteau", [["Bois", 2], ["Lingot fer", 2]]],
+  ["Couteau de lancé", [["Bois", 2], ["Lingot fer", 2]]],
+  ["Hachette", [["Bois", 3], ["Lingot fer", 5]]],
+  ["Hachette de chasseur", [["Bois", 3], ["Lingot fer", 5]]],
+  ["Ceinture Hachette", [["Bois", 3], ["Lingot fer", 5]]],
+  ["Ceinture Hachette de chasseur", [["Bois", 3], ["Lingot fer", 5]]],
+  ["Machette", [["Bois", 2], ["Lingot fer", 5]]],
+  ["Lanterne", [["Bois", 1], ["Lingot fer", 1], ["Verre", 1]]],
+  ["Lasso", [["Cordes", 4], ["Bois", 4]]],
+  ["Lasso Amélioré", [["Cordes", 5], ["Bois", 10]]],
+  ["Jumelles", [["Lingot fer", 1], ["Lingot zinc", 1], ["Verre", 1]]],
+  ["Jumelles Améliorées", [["Lingot fer", 1], ["Lingot zinc", 2], ["Verre", 2]]],
+  ["Revolver Cattleman", [["Bois", 3], ["Pièce d'arme", 3], ["Lingot fer", 1]]],
+  ["Revolver Double Action", [["Bois", 3], ["Pièce d'arme", 3], ["Lingot fer", 5]]],
+  ["Revolver Schofield", [["Bois", 6], ["Pièce d'arme", 6], ["Charbon", 4], ["Lingot fer", 6]]],
+  ["Revolver Navy", [["Bois", 6], ["Pièce d'arme", 6], ["Charbon", 4], ["Lingot fer", 6]]],
+  ["Revolver LeMat", [["Bois", 10], ["Pièce d'arme", 10], ["Charbon", 4], ["Lingot fer", 6]]],
+  ["Pistolet Volcanic", [["Bois", 8], ["Pièce d'arme", 6], ["Charbon", 4], ["Lingot fer", 4]]],
+  ["Pistolet Mauser", [["Bois", 10], ["Pièce d'arme", 6], ["Charbon", 4], ["Lingot fer", 4]]],
+  ["Pistolet 1899", [["Bois", 10], ["Pièce d'arme", 8], ["Charbon", 4], ["Lingot fer", 4]]],
+  ["Pistolet semi-automatique", [["Bois", 20], ["Pièce d'arme", 20], ["Charbon", 25], ["Lingot fer", 25]]],
+  ["Canon scié", [["Bois", 5], ["Pièce d'arme", 5], ["Charbon", 2], ["Lingot fer", 3]]],
+  ["Carabine à répétition", [["Bois", 4], ["Pièce d'arme", 4], ["Charbon", 4], ["Lingot fer", 4]]],
+  ["Carabine Litchfield", [["Bois", 20], ["Pièce d'arme", 10], ["Charbon", 6], ["Lingot fer", 6]]],
+  ["Carabine Evans", [["Bois", 20], ["Pièce d'arme", 10], ["Charbon", 8], ["Lingot fer", 8]]],
+  ["Carabine Lancaster", [["Bois", 20], ["Pièce d'arme", 10], ["Charbon", 8], ["Lingot fer", 8]]],
+  ["Fusil à petit gibier", [["Bois", 5], ["Pièce d'arme", 5], ["Charbon", 5], ["Lingot fer", 5]]],
+  ["Fusil double canon", [["Bois", 20], ["Pièce d'arme", 10], ["Charbon", 20], ["Lingot fer", 20]]],
+  ["Fusil double canon exotique", [["Bois", 20], ["Pièce d'arme", 10], ["Charbon", 20], ["Lingot fer", 20]]],
+  ["Fusil à répétition", [["Bois", 15], ["Pièce d'arme", 30], ["Charbon", 15], ["Lingot fer", 15]]],
+  ["Fusil springfield", [["Bois", 15], ["Pièce d'arme", 15], ["Charbon", 15], ["Lingot fer", 15]]],
+  ["Fusil semi-automatique", [["Bois", 20], ["Pièce d'arme", 20], ["Charbon", 25], ["Lingot fer", 25]]],
+  ["Fusil à pompe", [["Bois", 20], ["Pièce d'arme", 20], ["Charbon", 30], ["Lingot fer", 30]]],
+  ["Fusil à verrou", [["Bois", 35], ["Pièce d'arme", 20], ["Charbon", 20], ["Lingot fer", 20]]],
+  ["Fusil éléphant", [["Bois", 35], ["Pièce d'arme", 20], ["Charbon", 20], ["Lingot fer", 20]]],
+];
+const _norm = (x: string) => String(x).toLowerCase().normalize("NFD").replace(/[^a-z0-9]/g, "");
+export async function importerRecettes(): Promise<ArmResult & { n?: number }> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { data: prods, error: e0 } = await admin.from("ArmurerieProduit").select("id,nom");
+  if (e0) return { ok: false, error: erpErr(e0.message) };
+  const byNorm = new Map((prods || []).map((p) => [_norm((p as { nom: string }).nom), (p as { id: string }).id]));
+  let n = 0;
+  for (const [nom, ing] of RECETTES) {
+    const id = byNorm.get(_norm(nom));
+    if (!id) continue;
+    const recette = ing.map(([ingredient, qte]) => ({ ingredient, qte }));
+    const { error } = await admin.from("ArmurerieProduit").update({ recette }).eq("id", id);
+    if (!error) n++;
+  }
+  return { ok: true, n };
 }
 
 // ── Impôts : accumulation automatique du cycle fiscal en cours ───
