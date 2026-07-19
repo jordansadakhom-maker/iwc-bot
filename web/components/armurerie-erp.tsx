@@ -10,7 +10,7 @@ import {
 import type { ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache, ArmMouvement, ArmVente, ArmProduit, ArmCommande, ArmCommandeLigne, ArmRessource } from "@/lib/queries";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
 import { Badge } from "@/components/ui";
-import { cents } from "@/lib/format";
+import { cents, round2 } from "@/lib/format";
 import {
   creerEmploye, majEmploye, supprimerEmploye,
   pointerService, terminerService, supprimerPointage,
@@ -259,6 +259,8 @@ export function ComptabiliteTab({ mouvements, ca, router }: { mouvements: ArmMou
       {filtres.length === 0 ? (
         <Vide icon={BadgeDollarSign} texte="Aucun mouvement sur la période. Les ventes, paies et impôts s'inscrivent ici automatiquement ; ajoute une écriture manuelle pour une recette ou une dépense." />
       ) : (
+        <>
+        <ComptaChart mouvements={filtres} />
         <div className="overflow-x-auto rounded-[12px] border border-border bg-surface-2">
           <table className="w-full min-w-[560px] border-collapse text-left text-[0.82rem]">
             <thead><tr className="text-[0.66rem] uppercase tracking-[0.06em] text-faint">{["Date", "Libellé", "Par", "Montant"].map((h) => <th key={h} className="border-b border-border px-2.5 py-2 font-semibold">{h}</th>)}</tr></thead>
@@ -277,6 +279,7 @@ export function ComptabiliteTab({ mouvements, ca, router }: { mouvements: ArmMou
             </tbody>
           </table>
         </div>
+        </>
       )}
       {nouveau ? <EcritureModal onClose={() => setNouveau(false)} router={router} /> : null}
     </>
@@ -327,6 +330,85 @@ function EcritureModal({ onClose, router }: { onClose: () => void; router: Route
         </div>
       </div>
     </Modal>
+  );
+}
+// Graphique d'évolution des comptes : recettes & dépenses cumulées sur la période.
+type PtC = { t: number; rec: number; dep: number; net: number };
+const dJour = (t: number) => { try { return new Date(t).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }); } catch { return ""; } };
+function niceMax(v: number) { if (v <= 0) return 1; const pow = Math.pow(10, Math.floor(Math.log10(v))); const n = v / pow; const step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10; return step * pow; }
+function ComptaChart({ mouvements }: { mouvements: ArmMouvement[] }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const points = useMemo<PtC[]>(() => {
+    const byDay = new Map<string, { rec: number; dep: number; t: number }>();
+    for (const m of mouvements) {
+      if (!m.createdAt) continue;
+      const key = new Date(m.createdAt).toISOString().slice(0, 10);
+      const cur = byDay.get(key) || { rec: 0, dep: 0, t: new Date(key).getTime() };
+      if (m.sens === "entree") cur.rec += m.montant; else cur.dep += m.montant;
+      byDay.set(key, cur);
+    }
+    let cr = 0, cd = 0;
+    return [...byDay.values()].sort((a, b) => a.t - b.t).map((v) => { cr = round2(cr + v.rec); cd = round2(cd + v.dep); return { t: v.t, rec: cr, dep: cd, net: round2(cr - cd) }; });
+  }, [mouvements]);
+
+  if (points.length < 2) return null;
+  const W = 760, H = 240, PL = 54, PR = 58, PT = 16, PB = 26;
+  const pw = W - PL - PR, ph = H - PT - PB;
+  const n = points.length;
+  const ymax = niceMax(Math.max(...points.map((p) => Math.max(p.rec, p.dep)), 1));
+  const x = (i: number) => PL + (n === 1 ? pw / 2 : (i / (n - 1)) * pw);
+  const y = (v: number) => PT + (1 - v / ymax) * ph;
+  const path = (sel: (p: PtC) => number) => points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(sel(p)).toFixed(1)}`).join(" ");
+  const recPath = path((p) => p.rec);
+  const depPath = path((p) => p.dep);
+  const areaPath = `${recPath} L${x(n - 1).toFixed(1)},${y(0).toFixed(1)} L${x(0).toFixed(1)},${y(0).toFixed(1)} Z`;
+  const last = points[n - 1];
+  const hp = hover != null ? points[hover] : null;
+
+  return (
+    <div className="relative mb-3 rounded-[12px] border border-border bg-surface-2 p-3">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-[0.72rem] font-semibold uppercase tracking-[0.06em] text-muted">Évolution des comptes (cumul sur la période)</div>
+        <div className="flex items-center gap-3 text-[0.68rem] text-faint">
+          <span className="inline-flex items-center gap-1"><span className="inline-block h-1.5 w-3 rounded-sm" style={{ background: "var(--good)" }} /> Recettes</span>
+          <span className="inline-flex items-center gap-1"><span className="inline-block h-0 w-3 border-t-2 border-dashed" style={{ borderColor: "var(--oxblood)" }} /> Dépenses</span>
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full select-none" style={{ height: "auto" }}
+        onMouseMove={(e) => { const rect = e.currentTarget.getBoundingClientRect(); const vbX = ((e.clientX - rect.left) / rect.width) * W; const i = Math.round(((vbX - PL) / pw) * (n - 1)); setHover(Math.max(0, Math.min(n - 1, i))); }}
+        onMouseLeave={() => setHover(null)}>
+        {[0, 0.25, 0.5, 0.75, 1].map((g) => { const yy = PT + g * ph; return (
+          <g key={g}>
+            <line x1={PL} y1={yy} x2={W - PR} y2={yy} stroke="var(--border)" strokeWidth={1} />
+            <text x={PL - 6} y={yy + 3} textAnchor="end" fontSize={9} fill="var(--faint)">{cents(ymax * (1 - g))}$</text>
+          </g>
+        ); })}
+        <path d={areaPath} fill="var(--good)" opacity={0.1} />
+        <path d={recPath} fill="none" stroke="var(--good)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+        <path d={depPath} fill="none" stroke="var(--oxblood)" strokeWidth={2} strokeDasharray="5 3" strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx={x(n - 1)} cy={y(last.rec)} r={2.6} fill="var(--good)" />
+        <circle cx={x(n - 1)} cy={y(last.dep)} r={2.6} fill="var(--oxblood)" />
+        <text x={W - PR + 4} y={y(last.rec) + 3} fontSize={9} fill="var(--good)" className="font-semibold">{cents(last.rec)}</text>
+        <text x={W - PR + 4} y={y(last.dep) + 3} fontSize={9} fill="var(--oxblood)" className="font-semibold">{cents(last.dep)}</text>
+        <text x={PL} y={H - 7} textAnchor="start" fontSize={9} fill="var(--faint)">{dJour(points[0].t)}</text>
+        <text x={W - PR} y={H - 7} textAnchor="end" fontSize={9} fill="var(--faint)">{dJour(last.t)}</text>
+        {hp ? (
+          <g>
+            <line x1={x(hover!)} y1={PT} x2={x(hover!)} y2={PT + ph} stroke="var(--muted)" strokeWidth={1} opacity={0.5} />
+            <circle cx={x(hover!)} cy={y(hp.rec)} r={3.5} fill="var(--good)" stroke="var(--surface-2)" strokeWidth={1.5} />
+            <circle cx={x(hover!)} cy={y(hp.dep)} r={3.5} fill="var(--oxblood)" stroke="var(--surface-2)" strokeWidth={1.5} />
+          </g>
+        ) : null}
+      </svg>
+      {hp ? (
+        <div className="pointer-events-none absolute z-10 rounded-lg border border-border bg-surface px-2 py-1 text-[0.68rem] shadow-lg" style={{ left: `${(x(hover!) / W) * 100}%`, top: 30, transform: `translateX(${hover! > n / 2 ? "-105%" : "5%"})` }}>
+          <div className="mb-0.5 font-semibold text-muted">{dJour(hp.t)}</div>
+          <div className="flex items-center justify-between gap-3"><span style={{ color: "var(--good)" }}>Recettes</span><span className="font-num">{money(hp.rec)}</span></div>
+          <div className="flex items-center justify-between gap-3"><span style={{ color: "var(--oxblood)" }}>Dépenses</span><span className="font-num">{money(hp.dep)}</span></div>
+          <div className="mt-0.5 flex items-center justify-between gap-3 border-t border-border pt-0.5"><span className="font-semibold">Net</span><span className="font-num font-semibold" style={{ color: hp.net >= 0 ? "var(--good)" : "var(--oxblood)" }}>{money(hp.net)}</span></div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
