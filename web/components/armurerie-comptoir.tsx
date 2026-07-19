@@ -238,7 +238,7 @@ function ClientModal({ client, achats = [], onClose, router }: { client?: ArmCli
     <Modal titre={editing ? client!.nom : "🗂️ Nouveau client"} onClose={onClose} max={520}>
       {flash ? <div className="mb-3"><Flash>{flash}</Flash></div> : null}
       <div className="flex flex-col gap-3">
-        {/* Carte d'identité */}
+        {/* Carte d'identité — capture de la CNI présentée par le client */}
         <div className="flex flex-col gap-1.5">
           <span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Carte d&apos;identité</span>
           {carte ? (
@@ -247,10 +247,10 @@ function ClientModal({ client, achats = [], onClose, router }: { client?: ArmCli
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={carte} alt="Carte d'identité" className="max-h-52 w-full rounded-[10px] border border-border object-contain" style={{ background: "var(--surface-2)" }} />
               </a>
-              <PhotoDrop dossier="armurerie-cni" onUploaded={majCarte} compact label="Remplacer la carte d'identité" />
+              <PhotoDrop dossier="armurerie-cni" onUploaded={majCarte} compact label="Remplacer la capture de la carte d'identité" />
             </div>
           ) : (
-            <PhotoDrop dossier="armurerie-cni" onUploaded={majCarte} label="Glisse une photo de la carte d'identité du client" />
+            <PhotoDrop dossier="armurerie-cni" onUploaded={majCarte} label="Importe la capture de la carte d'identité présentée par le client" />
           )}
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
