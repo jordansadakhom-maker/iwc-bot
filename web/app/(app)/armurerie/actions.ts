@@ -904,7 +904,7 @@ export async function appliquerStockRessources(payload: {
   mode?: "set" | "add";
   items?: { id: string; qte: number }[];
   nouvelles?: { nom: string; categorie?: string; qte: number }[];
-}): Promise<ArmResult & { maj?: number; crees?: number }> {
+}): Promise<ArmResult & { maj?: number; crees?: number; applied?: { id: string; avant: number }[]; creesIds?: string[] }> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
   const mode = payload?.mode === "set" ? "set" : "add";
@@ -912,6 +912,8 @@ export async function appliquerStockRessources(payload: {
   const nouvelles = (Array.isArray(payload?.nouvelles) ? payload!.nouvelles : []).filter((n) => n && String(n.nom || "").trim() && Number(n.qte) >= 0);
   if (!items.length && !nouvelles.length) return { ok: false, error: "Rien à mettre à jour." };
   let maj = 0, crees = 0;
+  const applied: { id: string; avant: number }[] = []; // pour l'annulation (retour à l'état d'avant)
+  const creesIds: string[] = [];
   try {
     if (items.length) {
       const ids = items.map((i) => i.id);
@@ -919,9 +921,10 @@ export async function appliquerStockRessources(payload: {
       const byId = new Map((rs || []).map((r) => [String((r as { id: string }).id), Number((r as { stock?: number }).stock) || 0]));
       for (const it of items) {
         const q = Math.max(0, Math.round(Number(it.qte) || 0));
-        const val = mode === "add" ? (byId.get(it.id) || 0) + q : q;
+        const avant = byId.get(it.id) || 0;
+        const val = mode === "add" ? avant + q : q;
         const { error } = await admin.from("ArmurerieRessource").update({ stock: val }).eq("id", it.id);
-        if (!error) maj++;
+        if (!error) { maj++; applied.push({ id: it.id, avant }); }
       }
     }
     if (nouvelles.length) {
@@ -932,9 +935,22 @@ export async function appliquerStockRessources(payload: {
       let ins = await admin.from("ArmurerieRessource").insert(rows);
       // Repli si la colonne « stock » n'est pas migrée : insère sans stock.
       if (ins.error && /stock/i.test(ins.error.message)) { rows.forEach((r) => delete r.stock); ins = await admin.from("ArmurerieRessource").insert(rows); }
-      if (!ins.error) crees = rows.length;
+      if (!ins.error) { crees = rows.length; for (const r of rows) creesIds.push(String(r.id)); }
     }
-    return { ok: true, maj, crees };
+    return { ok: true, maj, crees, applied, creesIds };
+  } catch (e) { return { ok: false, error: erpErr((e as Error).message || "") }; }
+}
+
+// Annuler le dernier scan : restaure le stock d'avant et supprime les ressources créées.
+export async function annulerStockRessources(payload: { restore?: { id: string; avant: number }[]; supprimer?: string[] }): Promise<ArmResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const restore = Array.isArray(payload?.restore) ? payload!.restore.filter((r) => r && r.id) : [];
+  const supprimer = Array.isArray(payload?.supprimer) ? payload!.supprimer.filter(Boolean) : [];
+  try {
+    for (const r of restore) await admin.from("ArmurerieRessource").update({ stock: Math.max(0, Math.round(Number(r.avant) || 0)) }).eq("id", r.id);
+    if (supprimer.length) await admin.from("ArmurerieRessource").delete().in("id", supprimer);
+    return { ok: true };
   } catch (e) { return { ok: false, error: erpErr((e as Error).message || "") }; }
 }
 
