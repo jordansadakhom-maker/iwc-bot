@@ -12,6 +12,7 @@ export type RdvInput = {
   nomRP: string;
   prestation: string;
   creneau: string;
+  duree?: string;
   lieu: string;
   contact: string;
   message: string;
@@ -51,6 +52,7 @@ export async function soumettreRdv(data: RdvInput): Promise<RdvResult> {
       source: "web",
       pole: "legal",
       contact: contact.slice(0, 200),
+      duree: (data.duree || "").trim().slice(0, 60) || null,
       message: message.slice(0, 2000),
       notifieDiscord: false,
     },

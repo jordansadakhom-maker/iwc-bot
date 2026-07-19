@@ -14,6 +14,17 @@ const PRESTATIONS = [
   "Autre demande",
 ];
 
+// Durée estimée — sert à adapter les tarifs au taux horaire.
+const DUREES = [
+  "≈ 1 heure",
+  "≈ 2 heures",
+  "≈ 3 heures",
+  "Demi-journée",
+  "Journée complète",
+  "Plusieurs jours",
+  "À définir ensemble",
+];
+
 const inputCls =
   "w-full rounded-xl border border-border bg-surface-2 px-3.5 py-2.5 text-[0.9rem] text-ink outline-none placeholder:text-faint focus:border-[color-mix(in_srgb,var(--accent)_55%,var(--border))]";
 
@@ -22,7 +33,7 @@ export function BookingForm() {
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [form, setForm] = useState({
-    nomRP: "", prestation: PRESTATIONS[0], creneau: "", lieu: "", contact: "", message: "", website: "",
+    nomRP: "", prestation: PRESTATIONS[0], creneau: "", duree: DUREES[0], lieu: "", contact: "", message: "", website: "",
   });
 
   function set<K extends keyof typeof form>(k: K, v: string) {
@@ -56,7 +67,7 @@ export function BookingForm() {
           Un membre te recontactera via <b>{form.contact}</b> dès que possible.
         </p>
         <button
-          onClick={() => { setDone(false); setForm({ nomRP: "", prestation: PRESTATIONS[0], creneau: "", lieu: "", contact: "", message: "", website: "" }); }}
+          onClick={() => { setDone(false); setForm({ nomRP: "", prestation: PRESTATIONS[0], creneau: "", duree: DUREES[0], lieu: "", contact: "", message: "", website: "" }); }}
           className="mt-2 rounded-xl border border-border bg-surface px-4 py-2 text-[0.85rem] text-muted hover:text-ink"
         >
           Faire une autre demande
@@ -85,9 +96,16 @@ export function BookingForm() {
           <input className={inputCls} value={form.creneau} onChange={(e) => set("creneau", e.target.value)} placeholder="Ex. samedi soir, en journée…" />
         </div>
         <div>
-          <label className="mb-1.5 block text-[0.76rem] font-semibold uppercase tracking-[0.06em] text-muted">Lieu (facultatif)</label>
-          <input className={inputCls} value={form.lieu} onChange={(e) => set("lieu", e.target.value)} placeholder="Ex. Valentine, Rhodes…" />
+          <label className="mb-1.5 block text-[0.76rem] font-semibold uppercase tracking-[0.06em] text-muted">Durée estimée</label>
+          <select className={inputCls} value={form.duree} onChange={(e) => set("duree", e.target.value)}>
+            {DUREES.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
         </div>
+      </div>
+
+      <div>
+        <label className="mb-1.5 block text-[0.76rem] font-semibold uppercase tracking-[0.06em] text-muted">Lieu (facultatif)</label>
+        <input className={inputCls} value={form.lieu} onChange={(e) => set("lieu", e.target.value)} placeholder="Ex. Valentine, Rhodes…" />
       </div>
 
       <div>

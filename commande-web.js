@@ -506,19 +506,30 @@ Object.assign(HANDLERS, {
     const guild = ctx?.guild;
     if (!guild) return { ok: false, message: 'Serveur indisponible' };
     if (!membreIds.length && !p.groupe) return { ok: false, message: 'Personne à assigner' };
-    const info = `${p.rdvNom ? `**${p.rdvNom}**` : 'Rendez-vous'}${p.rdvLieu ? ` · ${p.rdvLieu}` : ''}${p.rdvCreneau ? ` · ${p.rdvCreneau}` : ''}`;
+    const info = `${p.rdvNom ? `**${p.rdvNom}**` : 'Rendez-vous'}${p.rdvLieu ? ` · ${p.rdvLieu}` : ''}${p.rdvCreneau ? ` · ${p.rdvCreneau}` : ''}${p.rdvDuree ? ` · ⏳ ${p.rdvDuree}` : ''}`;
+    // MP à chaque agent assigné
     let dm = 0;
     for (const id of membreIds.slice(0, 15)) {
       try { const m = await guild.members.fetch(id).catch(() => null); if (m) { await m.send(`📅 **Tu es assigné(e) à un rendez-vous** — ${info}\n_Assigné par ${p.auteurNom || 'la Direction'} depuis le site._`).catch(() => {}); dm++; } } catch {}
     }
-    if (p.groupe === 'legal' || p.groupe === 'illegal') {
+    // Notification VISIBLE sur Discord (salon agenda) : ping des personnes + du pôle
+    const roleId = p.groupe === 'illegal' ? '1508898841993281658' : (p.groupe === 'legal' ? '1508756436082102303' : null);
+    const ch = guild.channels.cache.get('1509638226132996178')
+      || guild.channels.cache.find(c => c.isTextBased?.() && /agenda|planning|rendez|rdv/i.test(c.name))
+      || guild.channels.cache.get('1518349707686973470')
+      || guild.systemChannel;
+    const mentions = [...membreIds.slice(0, 15).map(id => `<@${id}>`), roleId ? `<@&${roleId}>` : ''].filter(Boolean).join(' ');
+    let posted = false;
+    if (ch?.send) {
       try {
-        const roleId = p.groupe === 'illegal' ? '1508898841993281658' : '1508756436082102303';
-        const ch = guild.channels.cache.get('1518349707686973470') || guild.systemChannel;
-        if (ch?.send) await ch.send({ content: `<@&${roleId}> 📅 Rendez-vous à couvrir — ${info}`, allowedMentions: { roles: [roleId] } }).catch(() => {});
+        await ch.send({
+          content: `${mentions} 📅 **Rendez-vous à couvrir** — ${info}\n_Assigné par ${p.auteurNom || 'la Direction'} depuis le site._`,
+          allowedMentions: { users: membreIds.slice(0, 15), roles: roleId ? [roleId] : [] },
+        });
+        posted = true;
       } catch {}
     }
-    return { ok: true, message: `Assignation transmise (${dm} MP${p.groupe ? ' + ping pôle' : ''})` };
+    return { ok: true, message: `Assignation transmise (${dm} MP${posted ? ' + notif Discord' : ''}${roleId ? ' + ping pôle' : ''})` };
   },
 
   // ── Armurerie de Van Horn : envoi d'un contrat de vente au client (MP) ──
