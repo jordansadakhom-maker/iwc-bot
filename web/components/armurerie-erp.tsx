@@ -754,6 +754,7 @@ export function TachesTab({ taches, router }: { taches: ArmTache[]; router: Rout
 export function RessourcesTab({ ressources, router }: { ressources: ArmRessource[]; router: Router }) {
   const [q, setQ] = useState("");
   const [cart, setCart] = useState<Record<string, number>>({});
+  const [pxEdit, setPxEdit] = useState<Record<string, string>>({}); // prix unitaire ajusté pour cet achat
   const [remise, setRemise] = useState("5");
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
@@ -764,8 +765,9 @@ export function RessourcesTab({ ressources, router }: { ressources: ArmRessource
   const filtres = ressources.filter((r) => r.nom.toLowerCase().includes(q.trim().toLowerCase()));
   const cats = [...new Set(filtres.map((r) => r.categorie))];
   const lignes = Object.entries(cart).filter(([, n]) => n > 0).map(([id, n]) => ({ r: byId.get(id)!, n })).filter((l) => l.r);
-  const brut = lignes.reduce((s, l) => s + l.r.prix * l.n, 0);
-  const brutMine = lignes.filter((l) => l.r.mine).reduce((s, l) => s + l.r.prix * l.n, 0); // seules les ressources de la mine ont la remise
+  const pu = (r: ArmRessource) => { const v = pxEdit[r.id]; return v === undefined ? r.prix : Math.max(0, Math.round((Number(v) || 0) * 100) / 100); };
+  const brut = lignes.reduce((s, l) => s + pu(l.r) * l.n, 0);
+  const brutMine = lignes.filter((l) => l.r.mine).reduce((s, l) => s + pu(l.r) * l.n, 0); // seules les ressources de la mine ont la remise
   const pct = Math.max(0, Math.min(100, Number(remise) || 0));
   const remiseM = Math.round(brutMine * pct) / 100;
   const net = Math.round((brut - remiseM) * 100) / 100;
@@ -784,11 +786,11 @@ export function RessourcesTab({ ressources, router }: { ressources: ArmRessource
   async function regler() {
     if (!lignes.length) return;
     setBusy(true);
-    const payload: LigneRessource[] = lignes.map((l) => ({ id: l.r.id, nom: l.r.nom, qte: l.n, prix: l.r.prix, mine: l.r.mine }));
+    const payload: LigneRessource[] = lignes.map((l) => ({ id: l.r.id, nom: l.r.nom, qte: l.n, prix: pu(l.r), mine: l.r.mine }));
     const r = await acheterRessources(payload, pct);
     setBusy(false);
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
-    setCart({});
+    setCart({}); setPxEdit({});
     setFlash(`Payé à la mine : ${money(r.net ?? net)} (remise ${pct}% = −${money(r.remise ?? remiseM)}) → débité du coffre + dépense en comptabilité.`);
     router.refresh();
   }
@@ -836,12 +838,20 @@ export function RessourcesTab({ ressources, router }: { ressources: ArmRessource
             {lignes.length === 0 ? <p className="py-4 text-center text-[0.8rem] text-faint">Clique une ressource pour la calculer.</p> : (
               <div className="mb-2 flex flex-col gap-1.5">
                 {lignes.map((l) => (
-                  <div key={l.r.id} className="flex items-center gap-1.5 text-[0.82rem]">
-                    <span className="min-w-0 flex-1 truncate">{l.r.nom}</span>
-                    <button onClick={() => sub(l.r.id)} className="grid h-5 w-5 shrink-0 place-items-center rounded border border-border text-muted hover:text-ink"><Minus className="h-3 w-3" /></button>
-                    <input className={inputCls + " !w-11 !px-1 !py-0.5 text-center"} type="number" min={0} value={l.n} onChange={(e) => setQte(l.r.id, Number(e.target.value))} />
-                    <button onClick={() => add(l.r.id)} className="grid h-5 w-5 shrink-0 place-items-center rounded border border-border text-muted hover:text-ink"><Plus className="h-3 w-3" /></button>
-                    <span className="w-16 shrink-0 text-right font-num">{money(l.r.prix * l.n)}</span>
+                  <div key={l.r.id} className="flex flex-col gap-1 border-b border-border/60 pb-1.5">
+                    <div className="flex items-center gap-1.5 text-[0.82rem]">
+                      <span className="min-w-0 flex-1 truncate">{l.r.nom}</span>
+                      <button onClick={() => sub(l.r.id)} className="grid h-5 w-5 shrink-0 place-items-center rounded border border-border text-muted hover:text-ink"><Minus className="h-3 w-3" /></button>
+                      <input className={inputCls + " !w-11 !px-1 !py-0.5 text-center"} type="number" min={0} value={l.n} onChange={(e) => setQte(l.r.id, Number(e.target.value))} />
+                      <button onClick={() => add(l.r.id)} className="grid h-5 w-5 shrink-0 place-items-center rounded border border-border text-muted hover:text-ink"><Plus className="h-3 w-3" /></button>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-[0.72rem] text-faint">
+                      <span>Prix à l&apos;unité</span>
+                      <input type="number" min={0} step="0.01" value={pxEdit[l.r.id] ?? String(l.r.prix)} onChange={(e) => setPxEdit((o) => ({ ...o, [l.r.id]: e.target.value }))} onFocus={(e) => e.currentTarget.select()} className={inputCls + " !w-16 !px-1.5 !py-0.5 text-right font-num !text-[0.76rem]"} title="Prix unitaire — modifiable pour cet achat" />
+                      <span>$/u</span>
+                      {pu(l.r) !== l.r.prix ? <span className="text-[0.62rem]" style={{ color: "var(--accent)" }}>(tarif {money(l.r.prix)})</span> : null}
+                      <span className="ml-auto font-num text-[0.82rem] font-semibold text-ink">{money(pu(l.r) * l.n)}</span>
+                    </div>
                   </div>
                 ))}
               </div>
