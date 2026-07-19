@@ -641,8 +641,8 @@ export async function lireNumeroSerie(url: string): Promise<{ ok: boolean; serie
 export async function lireCoffreRessources(url: string): Promise<{ ok: boolean; lignes?: { nom: string; quantite: number }[]; error?: string }> {
   const r = await _vision(
     url,
-    "Tu regardes une capture d'écran d'un coffre / inventaire d'un jeu (RDR2/RedM). Chaque case affiche le NOM d'un objet et une quantité notée « x123 ». Réponds UNIQUEMENT par un JSON compact, sans texte autour : {\"lignes\":[{\"nom\":\"Nom exact\",\"quantite\":123}]}. Recopie le nom EXACTEMENT tel qu'il est écrit. La quantité est le nombre qui suit « x » (ex : « x91 » → 91). IGNORE le poids en kg. Ne liste QUE les objets réellement visibles — n'en invente aucun, ignore les cases vides.",
-    "Liste tous les objets du coffre avec leur quantité et renvoie le JSON.",
+    "Tu regardes une capture d'écran qui liste des matières / objets avec leur STOCK. Ça peut être : (a) un coffre/inventaire de jeu (RDR2/RedM) où le stock est noté « x123 », ou (b) un panneau web de gestion (type Reckless RP) où le stock est noté « Stock : 123 », « 123 en stock », ou un simple nombre à côté du nom. Pour CHAQUE ligne, relève le NOM exact de la matière et sa QUANTITÉ EN STOCK. Réponds UNIQUEMENT par un JSON compact, sans texte autour : {\"lignes\":[{\"nom\":\"Nom exact\",\"quantite\":123}]}. Recopie le nom EXACTEMENT. IMPORTANT : relève bien le STOCK — surtout PAS une quantité de recette (« QTÉ / UNITÉ », « ×6 »), PAS un coût unitaire, PAS un prix de vente, PAS un poids en kg. Ne liste QUE ce qui est réellement visible — n'invente rien.",
+    "Relève chaque matière et son STOCK (pas les quantités de recette ni les prix), et renvoie le JSON.",
     1024,
   );
   if (!r.ok) return { ok: false, error: r.error };

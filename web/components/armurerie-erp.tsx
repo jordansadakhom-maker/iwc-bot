@@ -973,7 +973,7 @@ export function RessourcesTab({ ressources, router }: { ressources: ArmRessource
           {/* Scanner de coffre : photo → l'IA lit les quantités → stock réactualisé */}
           <div className="mb-3 rounded-[14px] border p-3.5" style={{ borderColor: "color-mix(in srgb,var(--accent) 35%,var(--border))", background: "color-mix(in srgb,var(--accent) 5%,var(--surface-2))" }}>
             <div className="mb-1 flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[0.05em]" style={{ color: "var(--accent)" }}><ScanLine className="h-4 w-4" /> Réactualiser le stock par photo</div>
-            <p className="mb-2 text-[0.72rem] text-faint">Glisse <b>une ou plusieurs</b> captures de coffre d&apos;un coup : l&apos;IA lit chaque objet et sa quantité, et le stock est mis à jour <b>automatiquement</b>. Les quantités d&apos;une même ressource vue sur plusieurs photos <b>s&apos;additionnent</b> (ex. le fer réparti dans deux coffres).</p>
+            <p className="mb-2 text-[0.72rem] text-faint">Glisse <b>une ou plusieurs</b> captures — un <b>coffre en jeu</b> (« x123 ») <b>ou le panneau de stock</b> (Reckless…, « Stock : 123 ») : l&apos;IA lit chaque matière et son stock, et met à jour <b>automatiquement</b>. Pour un total exact, choisis <b>🔄 Remplacer</b> ; pour cumuler plusieurs coffres, <b>➕ Ajouter</b>.</p>
             {/* Mode d'application de la photo */}
             <div className="mb-2 flex flex-wrap gap-1.5">
               {([["add", "➕ Ajouter (auto)"], ["set", "🔄 Remplacer"], ["review", "👁 Vérifier d'abord"]] as const).map(([k, label]) => (
