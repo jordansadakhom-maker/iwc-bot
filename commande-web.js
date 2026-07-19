@@ -18,6 +18,9 @@ const loadDB = dbMod.loadDB || (() => ({}));
 const saveDB = dbMod.saveDB || (() => {});
 let medical = null; try { medical = require('./medical'); } catch {}
 let repertoire = null; try { repertoire = require('./repertoire'); } catch {}
+let telegramme = null; try { telegramme = require('./telegramme'); } catch {}
+let inventaire = null; try { inventaire = require('./inventaire'); } catch {}
+function _normInv(x) { return String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, ''); }
 
 // ── Utilitaires ──
 function _s(v, max) { if (v == null) return ''; const s = String(v).trim(); return max ? s.slice(0, max) : s; }
@@ -345,6 +348,72 @@ Object.assign(HANDLERS, {
     db.factures.splice(i, 1);
     return { ok: true, message: 'Facture supprimée' };
   },
+
+  // ── Télégrammes (db.conversations) ────────────────────────
+  // Répondre depuis le site → correction IA + MP au client + trace + reflet fil.
+  'telegramme.repondre': async (db, p, ctx) => {
+    const rdvId = _s(p.rdvId, 80);
+    const texte = _s(p.texte, 2000);
+    if (!rdvId || !texte) return { ok: false, message: 'rdvId ou texte manquant' };
+    if (!telegramme?.repondreDepuisWeb || !ctx?.guild?.client) return { ok: false, message: 'Télégrammes indisponibles' };
+    return await telegramme.repondreDepuisWeb(ctx.guild.client, db, rdvId, texte, p.auteurNom || 'Équipe');
+  },
+  // Marque un télégramme comme ayant donné un RDV (persisté côté bot).
+  'telegramme.marquerRdv': (db, p) => {
+    if (!telegramme?.marquerRdvCree) return { ok: false, message: 'Indisponible' };
+    return telegramme.marquerRdvCree(db, _s(p.rdvId, 80));
+  },
+
+  // ── Inventaire du coffre commun (db.inventaire.stock) ─────
+  'inventaire.ajuster': (db, p) => {
+    const cat = _s(p.categorie, 40) || 'Commun';
+    const nom = _s(p.nom, 120);
+    if (!nom) return { ok: false, message: 'objet manquant' };
+    const mode = ['add', 'remove', 'set'].includes(p.mode) ? p.mode : 'add';
+    const qte = Math.abs(parseInt(p.quantite, 10) || 0);
+    if (!db.inventaire) db.inventaire = {};
+    if (!db.inventaire.stock) db.inventaire.stock = {};
+    if (!db.inventaire.stock[cat]) db.inventaire.stock[cat] = {};
+    const bucket = db.inventaire.stock[cat];
+    const key = Object.keys(bucket).find(k => _normInv(k) === _normInv(nom)) || nom;
+    const avant = bucket[key] || 0;
+    const apres = mode === 'add' ? avant + qte : mode === 'remove' ? Math.max(0, avant - qte) : qte;
+    if (apres <= 0) delete bucket[key]; else bucket[key] = apres;
+    if (!Array.isArray(db.inventaire.journal)) db.inventaire.journal = [];
+    db.inventaire.journal.unshift({ t: Date.now(), who: p.auteurNom || 'Site web', txt: `${mode === 'remove' ? '−' : mode === 'set' ? '=' : '+'}${qte} ${nom} (${cat}) → ${apres}` });
+    if (db.inventaire.journal.length > 60) db.inventaire.journal = db.inventaire.journal.slice(0, 60);
+    return { ok: true, message: `Stock : ${nom} → ${apres}`, discord: { type: 'inventaire' } };
+  },
+  // Lecture IA d'une ou deux photos téléversées (URLs Supabase Storage) → +stock.
+  'inventaire.photo': async (db, p) => {
+    const urls = Array.isArray(p.urls) ? p.urls : (p.url ? [p.url] : []);
+    if (!urls.length) return { ok: false, message: 'aucune photo' };
+    if (!inventaire?.traiterPhotosWeb) return { ok: false, message: 'Lecture photo indisponible' };
+    const r = await inventaire.traiterPhotosWeb(db, urls, p.auteurNom || 'Site web');
+    if (r && r.ok) r.discord = { type: 'inventaire' };
+    return r;
+  },
+
+  // ── Rendez-vous : assigner / pinguer les concernés sur Discord ─────
+  'rdv.assigner': async (db, p, ctx) => {
+    const membreIds = Array.isArray(p.membreIds) ? p.membreIds.map(String) : [];
+    const guild = ctx?.guild;
+    if (!guild) return { ok: false, message: 'Serveur indisponible' };
+    if (!membreIds.length && !p.groupe) return { ok: false, message: 'Personne à assigner' };
+    const info = `${p.rdvNom ? `**${p.rdvNom}**` : 'Rendez-vous'}${p.rdvLieu ? ` · ${p.rdvLieu}` : ''}${p.rdvCreneau ? ` · ${p.rdvCreneau}` : ''}`;
+    let dm = 0;
+    for (const id of membreIds.slice(0, 15)) {
+      try { const m = await guild.members.fetch(id).catch(() => null); if (m) { await m.send(`📅 **Tu es assigné(e) à un rendez-vous** — ${info}\n_Assigné par ${p.auteurNom || 'la Direction'} depuis le site._`).catch(() => {}); dm++; } } catch {}
+    }
+    if (p.groupe === 'legal' || p.groupe === 'illegal') {
+      try {
+        const roleId = p.groupe === 'illegal' ? '1508898841993281658' : '1508756436082102303';
+        const ch = guild.channels.cache.get('1518349707686973470') || guild.systemChannel;
+        if (ch?.send) await ch.send({ content: `<@&${roleId}> 📅 Rendez-vous à couvrir — ${info}`, allowedMentions: { roles: [roleId] } }).catch(() => {});
+      } catch {}
+    }
+    return { ok: true, message: `Assignation transmise (${dm} MP${p.groupe ? ' + ping pôle' : ''})` };
+  },
 });
 
 // Trouve une opération par id dans db.operations puis db.preparations.
@@ -368,6 +437,8 @@ async function _refletDiscord(guild, ref) {
       await repertoire.rafraichirFicheContact(guild, ref.id).catch(() => {});
     } else if (ref.type === 'contact-del' && repertoire?.supprimerFicheContactWeb && ref.contact) {
       await repertoire.supprimerFicheContactWeb(guild, ref.contact).catch(() => {});
+    } else if (ref.type === 'inventaire' && inventaire?.rafraichirBoardDemarrage) {
+      await inventaire.rafraichirBoardDemarrage(guild).catch(() => {});
     }
   } catch {}
 }
@@ -387,7 +458,7 @@ async function appliquerCommandesWeb(guild) {
       const payload = (c.payload && typeof c.payload === 'object') ? { ...c.payload } : {};
       if (!payload.auteurNom && c.auteurNom) payload.auteurNom = c.auteurNom;
       const db = loadDB();
-      const res = h(db, payload, { guild });
+      const res = await h(db, payload, { guild });
       if (res && res.ok) {
         saveDB(db);
         didChange = true;

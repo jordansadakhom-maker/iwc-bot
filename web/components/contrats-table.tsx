@@ -2,11 +2,39 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileText, Plus, Loader2, Trash2 } from "lucide-react";
+import { FileText, Plus, Loader2, Trash2, Users, CalendarClock } from "lucide-react";
 import type { ContratDetail } from "@/lib/queries";
 import { Badge } from "@/components/ui";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { creerContrat, majContrat, supprimerContrat } from "@/app/(app)/operations/actions";
+
+const dateFR = (s: string | null) => { if (!s) return null; try { return new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" }); } catch { return null; } };
+
+function ContratDetailBloc({ c }: { c: ContratDetail }) {
+  const cree = dateFR(c.createdAt);
+  const st = STATUTS.find((s) => s.key === (c.statut || "").toLowerCase());
+  return (
+    <div className="mb-4 flex flex-col gap-3 rounded-[12px] border border-border bg-surface-2 px-3.5 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone={c.pole === "illegal" ? "oxblood" : "accent"}>{c.pole === "illegal" ? "🔪 Confrérie" : "⚖️ Iron Wolf"}</Badge>
+        <Badge tone={STATUT_TONE[c.statut?.toLowerCase()] ?? "muted"}>{st?.label || c.statut}</Badge>
+        {c.remuneration ? <span className="ml-auto font-num text-[0.86rem] font-semibold" style={{ color: "var(--accent)" }}>{c.remuneration}</span> : null}
+      </div>
+      <div className="text-[0.86rem] leading-relaxed text-ink">{c.cible}</div>
+      {c.commanditaire ? <div className="text-[0.8rem] text-muted"><span className="text-faint">Commanditaire : </span>{c.commanditaire}</div> : null}
+      {c.motif ? <div className="text-[0.82rem] leading-relaxed text-muted"><span className="text-faint">Détails / conditions : </span>{c.motif}</div> : null}
+      {c.agentsNoms.length ? (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-1.5 text-[0.72rem] uppercase tracking-[0.05em] text-faint"><Users className="h-3.5 w-3.5" /> Agents ({c.agentsNoms.length})</div>
+          <div className="flex flex-wrap gap-1.5">
+            {c.agentsNoms.map((n, i) => <span key={i} className="rounded-full border border-border bg-surface px-2 py-0.5 text-[0.76rem]">{n}</span>)}
+          </div>
+        </div>
+      ) : null}
+      {cree ? <div className="flex items-center gap-1.5 text-[0.78rem] text-muted"><CalendarClock className="h-3.5 w-3.5 text-faint" /> {cree}</div> : null}
+    </div>
+  );
+}
 
 type Router = ReturnType<typeof useRouter>;
 
@@ -156,8 +184,10 @@ function EditModal({ contrat, onClose, router }: { contrat: ContratDetail; onClo
   }
 
   return (
-    <Modal titre="Modifier le contrat" onClose={onClose}>
+    <Modal titre={contrat.cible} onClose={onClose}>
       {flash ? <div className="mb-3"><Flash>{flash}</Flash></div> : null}
+      <ContratDetailBloc c={contrat} />
+      <div className="mb-2 border-t border-border pt-3 text-[0.72rem] uppercase tracking-[0.06em] text-faint">Modifier</div>
       <div className="flex flex-col gap-3">
         <Champ label="Objet"><input className={inputCls} value={cible} onChange={(e) => setCible(e.target.value)} maxLength={300} /></Champ>
         <div className="grid gap-3 sm:grid-cols-2">

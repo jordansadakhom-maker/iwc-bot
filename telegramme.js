@@ -534,4 +534,57 @@ function marquerFixe(rdvId) {
   return false;
 }
 
-module.exports = { ouvrirConversation, ajouterAuFil, cloturerAuto, marquerFixe, onMessage, routeInteraction, telegrammeCommands, verifierInactivite };
+// ═══════════════════════════════════════════════════════════════
+//  RÉPONSE DEPUIS LE SITE WEB (appelé par commande-web.js)
+//  Le site dépose une réponse ; on la corrige, on la livre au client en MP,
+//  on la trace dans la conversation (db.conversations) et on la reflète dans le
+//  fil Discord. MUTE le `db` passé (l'appelant le sauvegarde) — aucune écriture ici.
+// ═══════════════════════════════════════════════════════════════
+async function repondreDepuisWeb(client, db, rdvId, texte, parNom) {
+  const store = _store(db);
+  const conv = store[rdvId];
+  if (!conv) return { ok: false, message: 'Conversation introuvable' };
+  if (conv.status !== 'ouvert') return { ok: false, message: 'Conversation clôturée' };
+  const brut = String(texte || '').trim();
+  if (!brut) return { ok: false, message: 'Message vide' };
+
+  const corrige = await _corriger(brut).catch(() => brut);
+  const nom = String(parNom || 'Équipe').slice(0, 80);
+
+  // Livraison en MP au client
+  let livre = false;
+  try {
+    const user = await client.users.fetch(conv.demandeurId).catch(() => null);
+    if (user) {
+      const sent = await user.send({ embeds: [_embedMP('✉ TÉLÉGRAMME — IRON WOLF COMPANY', [corrige.slice(0, 3500) || '*(vide)*', '', '*Répondez à ce message pour continuer.*'], conv.rdvId)] }).catch(() => null);
+      livre = !!sent;
+    }
+  } catch {}
+
+  // Trace (visible aussi sur le site après resync)
+  _logMsg(conv, 'equipe', nom, corrige);
+  conv.lastActivityAt = Date.now();
+
+  // Reflet dans le fil Discord (best-effort)
+  try {
+    if (conv.threadId) {
+      const thread = await client.channels.fetch(conv.threadId).catch(() => null);
+      if (thread?.isThread?.()) {
+        await thread.send({ content: `🌐 **${nom}** (depuis le site)${livre ? '' : ' — ⚠️ MP non livré au client'} :\n> ${corrige.slice(0, 1500)}` }).catch(() => {});
+      }
+    }
+  } catch {}
+
+  return { ok: true, message: livre ? 'Réponse livrée au client' : 'Réponse enregistrée (MP client non livré)', livre };
+}
+
+// Marque une conversation comme ayant donné lieu à un RDV (persisté côté bot).
+function marquerRdvCree(db, rdvId) {
+  const store = _store(db);
+  const conv = store[rdvId];
+  if (!conv) return { ok: false, message: 'Conversation introuvable' };
+  conv.rdvCree = true;
+  return { ok: true, message: 'Télégramme marqué (RDV créé)' };
+}
+
+module.exports = { ouvrirConversation, ajouterAuFil, cloturerAuto, marquerFixe, onMessage, routeInteraction, telegrammeCommands, verifierInactivite, repondreDepuisWeb, marquerRdvCree };
