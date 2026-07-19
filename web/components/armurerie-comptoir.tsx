@@ -28,10 +28,15 @@ const money = (n: number) => `${cents(n)}$`;
 const fourchette = (n: number): [number, number] => [Math.round(n * 95) / 100, Math.round(n * 105) / 100];
 // Coût de fabrication d'une recette à partir des prix des ressources.
 const _normIng = (x: string) => x.toLowerCase().normalize("NFD").replace(/[^a-z0-9]/g, "");
+// Appariement ingrédient ⇄ ressource : MÊME logique que le serveur (fabriquerProduit),
+// pour que l'affichage (coût, fabricable) prédise exactement ce que fera « Fabriquer ».
+// Indispensable car les recettes disent « Lingot fer » quand le catalogue dit
+// « Lingot de fer » — le « de » ne doit pas empêcher la correspondance.
+const _STOP_ING = new Set(["de", "du", "des", "d", "l", "la", "le", "les", "a", "au", "aux", "en", "pour", "et"]);
+const _toksIng = (x: string) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").split(/[^a-z0-9]+/).filter((t) => t && !_STOP_ING.has(t));
+const _normIngB = (x: string) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
 function prixIngredient(ing: string, ressources: ArmRessource[]): number | null {
-  const n = _normIng(ing);
-  let r = ressources.find((x) => _normIng(x.nom) === n);
-  if (!r) r = ressources.find((x) => { const rn = _normIng(x.nom); return rn.startsWith(n) || n.startsWith(rn); });
+  const r = ressourceDe(ing, ressources);
   return r ? r.prix : null;
 }
 function coutRecette(recette: ArmRecetteLigne[], ressources: ArmRessource[]): { cout: number; manquants: string[] } {
@@ -41,6 +46,35 @@ function coutRecette(recette: ArmRecetteLigne[], ressources: ArmRessource[]): { 
     if (p == null) manquants.push(l.ingredient); else cout += p * l.qte;
   }
   return { cout: Math.round(cout * 100) / 100, manquants };
+}
+// La ressource correspondant à un ingrédient, avec son stock (logique serveur : match
+// exact, sinon sous-ensemble de tokens unique — sinon le nom le plus court).
+function ressourceDe(ing: string, ressources: ArmRessource[]): ArmRessource | null {
+  const n = _normIngB(ing);
+  const exact = ressources.filter((r) => _normIngB(r.nom) === n);
+  if (exact.length) return exact[0];
+  const it = _toksIng(ing);
+  if (!it.length) return null;
+  const cand = ressources.filter((r) => { const rt = new Set(_toksIng(r.nom)); return it.every((t) => rt.has(t)); });
+  if (cand.length === 1) return cand[0];
+  if (cand.length > 1) {
+    const pool = cand.slice().sort((a, b) => _toksIng(a.nom).length - _toksIng(b.nom).length);
+    if (_toksIng(pool[0].nom).length !== _toksIng(pool[1].nom).length) return pool[0];
+  }
+  return null;
+}
+// Nombre d'unités fabricables MAINTENANT avec le stock de ressources en main.
+//  null → aucune recette exploitable ; sinon un entier ≥ 0 (0 = ingrédient manquant/à sec).
+function fabricableDe(p: ArmProduit, ressources: ArmRessource[]): number | null {
+  const rec = (p.recette || []).filter((l) => l.ingredient.trim() && l.qte > 0);
+  if (!rec.length) return null;
+  let mini = Infinity;
+  for (const l of rec) {
+    const r = ressourceDe(l.ingredient, ressources);
+    if (!r) return 0; // ingrédient absent du catalogue → non fabricable pour l'instant
+    mini = Math.min(mini, Math.floor((Number(r.stock) || 0) / l.qte));
+  }
+  return Number.isFinite(mini) ? mini : null;
 }
 const CATS = ["Revolver", "Pistolet", "Fusil à répétition", "Fusil à pompe", "Carabine", "Fusil de précision", "Autre"];
 const STATUTS_CLIENT = [
@@ -350,9 +384,14 @@ function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[];
   const toutOuvert = cats.length > 0 && cats.every((c) => open[c]);
 
   // Alertes de stock + réassort suggéré (d'après les recettes).
+  // « Rupture » ne veut PLUS dire « 0 en stock » : un article qu'on peut fabriquer
+  // avec les ressources en main n'est pas en rupture. On ne compte en rupture que ce
+  // qu'on ne peut ni avoir en stock ni fabriquer maintenant.
   const stockDe = (p: ArmProduit) => override[p.id] ?? p.stock;
-  const enRupture = produits.filter((p) => !p.aLaDemande && stockDe(p) === 0);
-  const enBas = produits.filter((p) => !p.aLaDemande && stockDe(p) > 0 && stockDe(p) <= SEUIL_BAS);
+  const fabDe = (p: ArmProduit) => fabricableDe(p, ressources) ?? 0;
+  const enRupture = produits.filter((p) => !p.aLaDemande && stockDe(p) === 0 && fabDe(p) === 0);
+  const enBas = produits.filter((p) => !p.aLaDemande && stockDe(p) > 0 && stockDe(p) <= SEUIL_BAS && fabDe(p) === 0);
+  const fabricablesN = produits.filter((p) => !p.aLaDemande && fabDe(p) > 0).length; // vendables via fabrication
   const ingredientsReassort = (() => {
     const m = new Map<string, { nom: string; qte: number }>();
     for (const p of [...enRupture, ...enBas]) {
@@ -383,7 +422,8 @@ function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[];
   // Une ligne produit (nom + niveau, stepper de stock, prix & marge/fourchette).
   function carte(p: ArmProduit) {
     const stock = override[p.id] ?? p.stock;
-    const enStock = p.aLaDemande || stock > 0;
+    const fab = fabricableDe(p, ressources) ?? 0;         // fabricable maintenant depuis les ressources
+    const dispo = p.aLaDemande || stock > 0 || fab > 0;   // vendable maintenant (stock OU fabricable)
     const rec = p.recette && p.recette.length ? coutRecette(p.recette, ressources) : null;
     const marge = rec ? p.prix - rec.cout : null;
     const stepBtn = "grid h-6 w-6 place-items-center rounded-md border border-border bg-surface hover:border-border-2 disabled:opacity-40";
@@ -394,7 +434,11 @@ function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[];
             <div className="truncate text-[0.88rem] font-semibold">{p.nom}</div>
             <div className="flex items-center gap-1.5 text-[0.66rem] text-faint">
               {rec ? <span>🔨 craft {money(rec.cout)}{rec.manquants.length ? " +" : ""}</span> : p.cout ? <span>coût {money(p.cout)}</span> : null}
-              {!p.aLaDemande && stock === 0 ? <span className="rounded px-1 font-semibold" style={{ color: "var(--oxblood)", background: "color-mix(in srgb,var(--oxblood) 15%,transparent)" }}>rupture</span> : !p.aLaDemande && stock <= SEUIL_BAS ? <span className="rounded px-1 font-semibold" style={{ color: "var(--warn)", background: "color-mix(in srgb,var(--warn) 16%,transparent)" }}>stock bas</span> : null}
+              {p.aLaDemande ? null
+                : fab > 0 ? <span className="rounded px-1 font-semibold" style={{ color: "var(--good)", background: "color-mix(in srgb,var(--good) 14%,transparent)" }} title="Fabricable maintenant avec les ressources en stock">🔨 ×{fab} fabricable</span>
+                : stock === 0 ? <span className="rounded px-1 font-semibold" style={{ color: "var(--oxblood)", background: "color-mix(in srgb,var(--oxblood) 15%,transparent)" }} title="Ni en stock, ni fabricable (ressources manquantes)">rupture</span>
+                : stock <= SEUIL_BAS ? <span className="rounded px-1 font-semibold" style={{ color: "var(--warn)", background: "color-mix(in srgb,var(--warn) 16%,transparent)" }}>stock bas</span>
+                : null}
             </div>
           </div>
           <span className="hidden shrink-0 rounded-full border border-border px-2 py-0.5 text-[0.66rem] text-muted sm:inline">Niveau {p.niveau}</span>
@@ -405,7 +449,7 @@ function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[];
           <div className="flex shrink-0 items-center gap-1.5">
             <button title="−10" onClick={() => ajusterStock(p, -10)} disabled={qbusy === p.id} className={`${stepBtn} hidden sm:grid`}><span className="text-[0.62rem] font-bold leading-none">−10</span></button>
             <button title="Retirer 1" onClick={() => ajusterStock(p, -1)} disabled={qbusy === p.id} className={stepBtn}><Minus className="h-3.5 w-3.5" /></button>
-            <span className="w-9 text-center font-num text-[0.95rem] font-bold tabular-nums" style={{ color: enStock ? "var(--good)" : "var(--oxblood)" }}>{qbusy === p.id ? <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" /> : stock}</span>
+            <span className="w-9 text-center font-num text-[0.95rem] font-bold tabular-nums" style={{ color: stock > 0 ? "var(--good)" : dispo ? "var(--muted)" : "var(--oxblood)" }}>{qbusy === p.id ? <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" /> : stock}</span>
             <button title="Ajouter 1" onClick={() => ajusterStock(p, 1)} disabled={qbusy === p.id} className={stepBtn}><Plus className="h-3.5 w-3.5" /></button>
             <button title="+10" onClick={() => ajusterStock(p, 10)} disabled={qbusy === p.id} className={`${stepBtn} hidden sm:grid`}><span className="text-[0.62rem] font-bold leading-none">+10</span></button>
           </div>
@@ -458,7 +502,8 @@ function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[];
             <div className="rounded-[12px] border px-3 py-2.5" style={{ borderColor: "color-mix(in srgb,var(--warn) 40%,var(--border))", background: "color-mix(in srgb,var(--warn) 8%,transparent)" }}>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.78rem]">
                 <span className="inline-flex items-center gap-1.5 font-semibold"><AlertTriangle className="h-4 w-4" style={{ color: "var(--warn)" }} /> Stock à surveiller</span>
-                {enRupture.length ? <span style={{ color: "var(--oxblood)" }}><b>{enRupture.length}</b> en rupture</span> : null}
+                {fabricablesN ? <span style={{ color: "var(--good)" }}>🔨 <b>{fabricablesN}</b> fabricables maintenant</span> : null}
+                {enRupture.length ? <span style={{ color: "var(--oxblood)" }} title="Ni en stock, ni fabricable (ressources manquantes)"><b>{enRupture.length}</b> en rupture</span> : null}
                 {enBas.length ? <span style={{ color: "var(--warn)" }}><b>{enBas.length}</b> en stock bas (≤ {SEUIL_BAS})</span> : null}
                 {ingredientsReassort.length ? <button onClick={() => setReassort((v) => !v)} className="ml-auto rounded-lg border border-border bg-surface px-2 py-1 text-[0.72rem] font-semibold hover:border-border-2">{reassort ? "Masquer le réassort" : "Réassort suggéré"}</button> : null}
               </div>
@@ -479,7 +524,8 @@ function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[];
             if (query && shown.length === 0) return null;
             const ouvert = query ? true : !!open[cat];
             const totalStock = items.reduce((s2, p) => s2 + (p.aLaDemande ? 0 : (override[p.id] ?? p.stock)), 0);
-            const catRupture = items.some((p) => !p.aLaDemande && (override[p.id] ?? p.stock) === 0);
+            const totalFab = items.reduce((s2, p) => s2 + Math.max(0, fabricableDe(p, ressources) ?? 0), 0);
+            const catRupture = items.some((p) => !p.aLaDemande && (override[p.id] ?? p.stock) === 0 && (fabricableDe(p, ressources) ?? 0) === 0);
             return (
               <div key={cat} className="overflow-hidden rounded-[12px] border border-border bg-surface">
                 <button onClick={() => { if (!query) setOpen((o) => ({ ...o, [cat]: !o[cat] })); }} className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left transition hover:bg-surface-2">
@@ -487,7 +533,7 @@ function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[];
                   <span className="text-[0.82rem] font-semibold uppercase tracking-[0.05em]">{cat}</span>
                   {catRupture ? <span title="Articles en rupture" className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "var(--oxblood)" }} /> : null}
                   <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[0.64rem] font-semibold text-faint">{query ? `${shown.length}/${items.length}` : items.length} réf.</span>
-                  <span className="ml-auto text-[0.68rem] text-faint"><b className="font-num text-muted">{totalStock}</b> en stock</span>
+                  <span className="ml-auto text-[0.68rem] text-faint"><b className="font-num text-muted">{totalStock}</b> en stock{totalFab ? <> · <b className="font-num" style={{ color: "var(--good)" }}>{totalFab}</b> fabricable</> : null}</span>
                 </button>
                 {ouvert ? <div className="flex flex-col gap-2 border-t border-border p-2.5">{corpsCategorie(cat, shown)}</div> : null}
               </div>
