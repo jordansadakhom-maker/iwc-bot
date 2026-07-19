@@ -2,6 +2,7 @@ import { getArmurerie } from "@/lib/queries";
 import { PageHeader, Card } from "@/components/ui";
 import { ArmurerieComptoir } from "@/components/armurerie-comptoir";
 
+// Relance de déploiement (mise en ligne « fabricable » Produits/Caisse).
 export const dynamic = "force-dynamic";
 
 export default async function ArmureriePage() {
