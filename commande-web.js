@@ -520,6 +520,36 @@ Object.assign(HANDLERS, {
     }
     return { ok: true, message: `Assignation transmise (${dm} MP${p.groupe ? ' + ping pôle' : ''})` };
   },
+
+  // ── Armurerie de Van Horn : envoi d'un contrat de vente au client (MP) ──
+  'armurerie.contrat': async (db, p, ctx) => {
+    const guild = ctx?.guild;
+    const did = _s(p.clientDiscordId, 40);
+    if (!guild || !did) return { ok: false, message: 'Client Discord introuvable' };
+    const prix = Math.round(Number(p.prix) || 0);
+    const lignes = [
+      '```', '   ARMURERIE DE VAN HORN   ', '```',
+      '📜 **CONTRAT DE VENTE D\'ARME À FEU**',
+      '*Conforme au Décret N°2 — État de Louisiane*',
+      '',
+      `**Acquéreur :** ${_s(p.clientNom, 120) || '—'}`,
+      _s(p.arme, 120) ? `**Arme :** ${_s(p.arme, 120)}` : null,
+      _s(p.numeroSerie, 80) ? `**N° de série :** ${_s(p.numeroSerie, 80)}` : null,
+      prix > 0 ? `**Prix :** ${prix.toLocaleString('fr-FR')}$` : null,
+      _s(p.conditions, 1500) ? `\n**Conditions :**\n${_s(p.conditions, 1500)}` : null,
+      '',
+      'En acceptant ce contrat, vous reconnaissez être l\'acquéreur légal de l\'arme désignée et acceptez son inscription au registre officiel des ventes.',
+      '',
+      '✍️ *Pour **signer**, répondez « JE SIGNE » à ce message. Pour refuser, répondez « JE REFUSE ».*',
+    ].filter(x => x != null);
+    try {
+      const user = await guild.client.users.fetch(did).catch(() => null);
+      if (!user) return { ok: false, message: 'Client introuvable sur Discord' };
+      const sent = await user.send(lignes.join('\n')).catch(() => null);
+      if (!sent) return { ok: false, message: 'MP du client fermés — envoi impossible' };
+      return { ok: true, message: 'Contrat envoyé au client en message privé' };
+    } catch (e) { return { ok: false, message: e.message }; }
+  },
 });
 
 // Trouve une opération par id dans db.operations puis db.preparations.

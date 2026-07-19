@@ -685,6 +685,47 @@ export async function getFactures(): Promise<FacturesData> {
   return { connecte: true, factures, total };
 }
 
+// ── Armurerie de Van Horn (comptoir : clients, ventes, contrats) ──
+export type ArmClient = { id: string; nom: string; telegramme: string | null; discordId: string | null; carteIdentite: string | null; statut: string; notes: string | null; createdAt: string | null };
+export type ArmVente = { id: string; clientId: string | null; acquereur: string; dateVente: string | null; marque: string | null; modele: string | null; categorie: string | null; numeroSerie: string | null; vendeur: string | null; telegramme: string | null; prix: number; notes: string | null; statut: string; createdAt: string | null };
+export type ArmContrat = { id: string; clientId: string | null; clientNom: string; clientDiscordId: string | null; arme: string | null; numeroSerie: string | null; prix: number; conditions: string | null; statut: string; envoyeAt: string | null; signeAt: string | null; createdAt: string | null };
+export type ArmurerieData = { connecte: boolean; clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number };
+
+export async function getArmurerie(): Promise<ArmurerieData> {
+  const vide: ArmurerieData = { connecte: false, clients: [], ventes: [], contrats: [], ca: 0 };
+  if (!dataConfigured()) return vide;
+  const supabase = createAdminClient();
+  if (!supabase) return vide;
+  const [clientR, venteR, contratR] = await Promise.all([
+    supabase.from("ArmurerieClient").select("*").order("nom", { ascending: true }),
+    supabase.from("ArmurerieVente").select("*").order("createdAt", { ascending: false }).limit(500),
+    supabase.from("ArmurerieContrat").select("*").order("createdAt", { ascending: false }).limit(300),
+  ]);
+  // Tables neuves : si absentes (400/404), on renvoie « connecté » avec des listes vides.
+  type Raw = Record<string, unknown>;
+  const clients: ArmClient[] = clientR.error ? [] : ((clientR.data || []) as Raw[]).map((c) => ({
+    id: String(c.id), nom: (c.nom as string) || "Client", telegramme: (c.telegramme as string) ?? null,
+    discordId: (c.discordId as string) ?? null, carteIdentite: (c.carteIdentite as string) ?? null,
+    statut: (c.statut as string) || "actif", notes: (c.notes as string) ?? null, createdAt: (c.createdAt as string) ?? null,
+  }));
+  const ventes: ArmVente[] = venteR.error ? [] : ((venteR.data || []) as Raw[]).map((v) => ({
+    id: String(v.id), clientId: (v.clientId as string) ?? null, acquereur: (v.acquereur as string) || "—",
+    dateVente: (v.dateVente as string) ?? null, marque: (v.marque as string) ?? null, modele: (v.modele as string) ?? null,
+    categorie: (v.categorie as string) ?? null, numeroSerie: (v.numeroSerie as string) ?? null, vendeur: (v.vendeur as string) ?? null,
+    telegramme: (v.telegramme as string) ?? null, prix: Number(v.prix) || 0, notes: (v.notes as string) ?? null,
+    statut: (v.statut as string) || "enregistree", createdAt: (v.createdAt as string) ?? null,
+  }));
+  const contrats: ArmContrat[] = contratR.error ? [] : ((contratR.data || []) as Raw[]).map((c) => ({
+    id: String(c.id), clientId: (c.clientId as string) ?? null, clientNom: (c.clientNom as string) || "Client",
+    clientDiscordId: (c.clientDiscordId as string) ?? null, arme: (c.arme as string) ?? null, numeroSerie: (c.numeroSerie as string) ?? null,
+    prix: Number(c.prix) || 0, conditions: (c.conditions as string) ?? null, statut: (c.statut as string) || "brouillon",
+    envoyeAt: (c.envoyeAt as string) ?? null, signeAt: (c.signeAt as string) ?? null, createdAt: (c.createdAt as string) ?? null,
+  }));
+  const ca = ventes.reduce((s, v) => s + v.prix, 0);
+  const connecte = !(clientR.error && venteR.error && contratR.error) || dataConfigured();
+  return { connecte, clients, ventes, contrats, ca };
+}
+
 // ── Finances (page dédiée) ───────────────────────────────────────
 export type FinancesData = { connecte: boolean; pole: PoleWeb; coffres: { commun: number | null; legal: number | null; illegal: number | null } };
 
