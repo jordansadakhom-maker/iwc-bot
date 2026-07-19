@@ -1,5 +1,5 @@
-import Link from "next/link";
 import { TelegrammeForm } from "./telegramme-form";
+import { PublicNav } from "@/components/public-nav";
 
 // Page PUBLIQUE : envoyer un télégramme à la maison (sans connexion).
 // Exemptée du verrouillage REQUIRE_AUTH via le middleware.
@@ -30,14 +30,12 @@ export default function TelegrammePage() {
           </p>
         </div>
 
+        <PublicNav active="telegramme" />
+
         <section className="rounded-2xl border border-border bg-surface p-5 shadow-card sm:p-6" style={{ background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,#000))" }}>
           <h2 className="mb-4 text-center font-display text-lg">Envoyer un télégramme</h2>
           <TelegrammeForm />
         </section>
-
-        <p className="mt-5 text-center text-[0.78rem] text-faint">
-          Besoin d&apos;un rendez-vous&nbsp;? <Link href="/rendez-vous" className="underline hover:text-ink">Prends rendez-vous</Link> · Envie de nous rejoindre&nbsp;? <Link href="/rejoindre" className="underline hover:text-ink">Postule ici</Link>
-        </p>
       </div>
     </main>
   );
