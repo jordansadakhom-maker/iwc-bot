@@ -954,6 +954,7 @@ function VenteModal({ vente, clients, onClose, router }: { vente?: ArmVente; cli
   const [telegramme, setTelegramme] = useState(vente?.telegramme || "");
   const [prix, setPrix] = useState(vente ? String(vente.prix) : "");
   const [notes, setNotes] = useState(vente?.notes || "");
+  const [photo, setPhoto] = useState(vente?.photo || "");
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
@@ -966,9 +967,8 @@ function VenteModal({ vente, clients, onClose, router }: { vente?: ArmVente; cli
   async function enregistrer() {
     setErr(null);
     if (acquereur.trim().length < 2) { setErr("Nom de l'acquéreur requis (Décret N°2)."); return; }
-    if (numeroSerie.trim().length < 1) { setErr("Le n° de série est obligatoire (Décret N°2)."); return; }
     setBusy("save");
-    const data = { clientId: clientId || undefined, acquereur, dateVente, marque, modele, categorie, numeroSerie, vendeur, telegramme, prix: Number(prix) || 0, notes };
+    const data = { clientId: clientId || undefined, acquereur, dateVente, marque, modele, categorie, numeroSerie, vendeur, telegramme, prix: Number(prix) || 0, notes, photo: photo || undefined };
     const r = editing ? await majVente(vente!.id, data) : await creerVente(data);
     setBusy(null);
     if (!r.ok) { setErr(r.error || "Impossible."); return; }
@@ -985,6 +985,19 @@ function VenteModal({ vente, clients, onClose, router }: { vente?: ArmVente; cli
   return (
     <Modal titre={editing ? `Vente — ${vente!.acquereur}` : "🖋️ Inscrire une vente au registre"} onClose={onClose} max={560}>
       <div className="flex flex-col gap-3">
+        <div className="flex items-start gap-3 rounded-[12px] border border-border bg-surface-2 p-3">
+          {photo ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={photo} alt={acquereur || "Acquéreur"} className="h-24 w-24 shrink-0 rounded-[10px] border border-border object-cover" />
+          ) : (
+            <div className="grid h-24 w-24 shrink-0 place-items-center rounded-[10px] border border-dashed border-border text-center text-[0.62rem] leading-tight text-faint">Aucune<br />photo</div>
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="text-[0.66rem] uppercase tracking-[0.05em] text-faint">Photo de l&apos;acquéreur / carte d&apos;identité</div>
+            <div className="mt-1"><PhotoDrop dossier="armurerie-ventes" onUploaded={setPhoto} compact label={photo ? "Remplacer la photo" : "Glisser une photo de la personne"} /></div>
+            {photo ? <button onClick={() => setPhoto("")} className="mt-1 text-[0.7rem] text-faint hover:text-ink">Retirer la photo</button> : null}
+          </div>
+        </div>
         {clients.length ? (
           <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Client (facultatif — pré-remplit)</span>
             <select className={inputCls} value={clientId} onChange={(e) => choisirClient(e.target.value)}>
@@ -1002,7 +1015,7 @@ function VenteModal({ vente, clients, onClose, router }: { vente?: ArmVente; cli
         </div>
         <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Catégorie</span><Picker options={CATS.map((c) => ({ key: c, label: c }))} value={categorie} onChange={setCategorie} /></div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Champ label="N° de série (gravé) *"><input className={inputCls + " mono"} value={numeroSerie} onChange={(e) => setNumeroSerie(e.target.value)} placeholder="Ex : VH-04471" maxLength={80} /></Champ>
+          <Champ label="N° de série"><input className={inputCls + " mono"} value={numeroSerie} onChange={(e) => setNumeroSerie(e.target.value)} placeholder="Optionnel" maxLength={80} /></Champ>
           <Champ label="Prix ($)"><input className={inputCls} type="number" min={0} step="0.01" value={prix} onChange={(e) => setPrix(e.target.value)} /></Champ>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
