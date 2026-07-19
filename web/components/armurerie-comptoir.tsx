@@ -141,7 +141,7 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
         })}
       </div>
 
-      {tab === "caisse" ? <CaisseTab produits={produits} clients={clients} router={router} /> : null}
+      {tab === "caisse" ? <CaisseTab produits={produits} ressources={ressources} clients={clients} router={router} /> : null}
       {tab === "produits" ? <ProduitsTab produits={produits} ressources={ressources} router={router} /> : null}
       {tab === "ressources" ? <RessourcesTab ressources={ressources} router={router} /> : null}
       {tab === "commandes" ? <CarnetCommandesTab commandes={commandes} produits={produits} clients={clients.map((c) => ({ id: c.id, nom: c.nom }))} router={router} /> : null}
@@ -161,7 +161,7 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
 }
 
 // ═══════════════════ CAISSE (point de vente) ═══════════════════
-function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clients: ArmClient[]; router: Router }) {
+function CaisseTab({ produits, ressources, clients, router }: { produits: ArmProduit[]; ressources: ArmRessource[]; clients: ArmClient[]; router: Router }) {
   const [q, setQ] = useState("");
   const [cart, setCart] = useState<Record<string, number>>({});
   const [pxEdit, setPxEdit] = useState<Record<string, string>>({}); // prix unitaire ajusté à la vente
@@ -254,13 +254,18 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
           <div key={cat} className="mb-3">
             <div className="mb-1.5 text-[0.72rem] uppercase tracking-[0.08em] text-faint">{cat}</div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {filtres.filter((p) => p.categorie === cat).map((p) => (
-                <button key={p.id} onClick={() => add(p.id)} className="rounded-[10px] border border-border bg-surface-2 px-2.5 py-2 text-left transition hover:-translate-y-0.5 hover:border-border-2">
-                  <div className="truncate text-[0.8rem] font-semibold">{p.nom}</div>
-                  <div className="mt-0.5 text-[0.66rem] text-faint">{p.aLaDemande ? "à la demande" : `stock ${p.stock}`}{cart[p.id] ? ` · ${cart[p.id]} au panier` : ""}</div>
-                  <div className="mt-1 font-num text-[0.9rem] font-bold" style={{ color: "var(--accent)" }}>{money(p.prix)}</div>
-                </button>
-              ))}
+              {filtres.filter((p) => p.categorie === cat).map((p) => {
+                const f = p.aLaDemande ? 0 : (fabricableDe(p, ressources) ?? 0); // fabricable depuis les ressources
+                const rupture = !p.aLaDemande && p.stock === 0 && f === 0;
+                const dispo = p.aLaDemande ? "à la demande" : p.stock > 0 ? `stock ${p.stock}${f > 0 ? ` · +${f} fab.` : ""}` : f > 0 ? `🔨 ${f} fabricable` : "rupture";
+                return (
+                  <button key={p.id} onClick={() => add(p.id)} className="rounded-[10px] border border-border bg-surface-2 px-2.5 py-2 text-left transition hover:-translate-y-0.5 hover:border-border-2">
+                    <div className="truncate text-[0.8rem] font-semibold">{p.nom}</div>
+                    <div className="mt-0.5 text-[0.66rem]" style={{ color: rupture ? "var(--oxblood)" : p.stock === 0 && f > 0 ? "var(--good)" : "var(--faint)" }}>{dispo}{cart[p.id] ? ` · ${cart[p.id]} au panier` : ""}</div>
+                    <div className="mt-1 font-num text-[0.9rem] font-bold" style={{ color: "var(--accent)" }}>{money(p.prix)}</div>
+                  </button>
+                );
+              })}
             </div>
           </div>
         ))}
