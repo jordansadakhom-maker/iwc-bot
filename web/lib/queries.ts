@@ -873,6 +873,25 @@ export async function getArmurerie(): Promise<ArmurerieData> {
   return { connecte, clients, ventes, contrats, ca, coffre, mouvementsCoffre, produits, employes, pointages, paies, impots, notes, taches, commandes };
 }
 
+// ── Recrutement (candidatures déposées sur /rejoindre) ───────────
+export type CandidatureItem = { id: string; nomRP: string; age: string | null; moyen: string | null; contact: string | null; experience: string | null; motivation: string | null; disponibilites: string | null; statut: string; notes: string | null; createdAt: string | null };
+export type CandidaturesData = { connecte: boolean; candidatures: CandidatureItem[] };
+
+export async function getCandidatures(): Promise<CandidaturesData> {
+  if (!dataConfigured()) return { connecte: false, candidatures: [] };
+  const supabase = createAdminClient();
+  if (!supabase) return { connecte: false, candidatures: [] };
+  const { data, error } = await supabase.from("Candidature").select("*").order("createdAt", { ascending: false }).limit(300);
+  if (error) return { connecte: true, candidatures: [] };
+  const candidatures: CandidatureItem[] = ((data || []) as Record<string, unknown>[]).map((c) => ({
+    id: String(c.id), nomRP: (c.nomRP as string) || "Candidat", age: (c.age as string) ?? null,
+    moyen: (c.moyen as string) ?? null, contact: (c.contact as string) ?? null, experience: (c.experience as string) ?? null,
+    motivation: (c.motivation as string) ?? null, disponibilites: (c.disponibilites as string) ?? null,
+    statut: (c.statut as string) || "nouveau", notes: (c.notes as string) ?? null, createdAt: (c.createdAt as string) ?? null,
+  }));
+  return { connecte: true, candidatures };
+}
+
 // ── Finances (page dédiée) ───────────────────────────────────────
 export type FinancesData = { connecte: boolean; pole: PoleWeb; coffres: { commun: number | null; legal: number | null; illegal: number | null } };
 

@@ -49,6 +49,10 @@ export default function RendezVousPage() {
           Juste une question ou un message&nbsp;?{" "}
           <Link href="/telegramme" className="font-semibold text-accent hover:underline">Envoie un télégramme</Link>
         </p>
+        <p className="mt-2 text-center text-[0.8rem] text-muted">
+          Envie de porter l&apos;étoile&nbsp;?{" "}
+          <Link href="/rejoindre" className="font-semibold text-accent hover:underline">Rejoins la compagnie</Link>
+        </p>
         <p className="mt-2 text-center text-[0.72rem] text-faint">
           Membre de la maison&nbsp;?{" "}
           <Link href="/login" className="text-accent hover:underline">Espace connecté</Link>

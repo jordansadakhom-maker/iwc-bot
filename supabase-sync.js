@@ -608,4 +608,13 @@ async function marquerTelegrammeWebTransmis(id) {
   return await _patch(`TelegrammeWeb?id=eq.${encodeURIComponent(id)}`, { statut: 'transmis' });
 }
 
-module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis };
+// ── Candidatures de recrutement déposées sur le site (table Candidature) ──
+async function lireCandidaturesWeb() {
+  const rows = await _get('Candidature?notifieDiscord=is.false&order=createdAt.asc&limit=25');
+  return Array.isArray(rows) ? rows : [];
+}
+async function marquerCandidatureTransmise(id) {
+  return await _patch(`Candidature?id=eq.${encodeURIComponent(id)}`, { notifieDiscord: true });
+}
+
+module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise };
