@@ -963,6 +963,7 @@ const SLASH_COMMANDS = [
   new SlashCommandBuilder().setName('synthese').setDescription('🧠 Synthèse IA des infos sur un sujet ou une personne')
     .addStringOption(o => o.setName('sujet').setDescription('Nom de personne, lieu, ou thème').setRequired(true)),
   new SlashCommandBuilder().setName('rapport').setDescription('Envoie le rapport quotidien en DM (Direction)'),
+  new SlashCommandBuilder().setName('point-stock').setDescription("📦 Poster le point stock de l'armurerie de Van Horn (ruptures + stock bas)"),
   new SlashCommandBuilder().setName('promo').setDescription('Ouvre la gestion du grade d\'un membre (Concepteur/Fléau)').addUserOption(o => o.setName('membre').setDescription('Membre').setRequired(true)),
   new SlashCommandBuilder().setName('tresor').setDescription('💰 Enregistrer une transaction'),
   new SlashCommandBuilder().setName('dashboard').setDescription('🐺 Tableau de bord complet de la faction'),
@@ -2237,6 +2238,16 @@ async function handleSlashCommand(interaction) {
     const solde = db.coffre || 0;
     await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x57F287).setTitle('🏦 Coffre commun — IWC').addFields({ name: '💰 Solde', value: `**$${solde.toLocaleString('fr-FR')}**`, inline: false }).setFooter({ text: `IWC • ${fmtShort(new Date())}` })], flags: isDirection(interaction.member) ? undefined : MessageFlags.Ephemeral });
     return;
+  }
+  if (commandName === 'point-stock') {
+    if (!isMembre(interaction.member)) return interaction.reply({ content: '❌ Réservé aux membres IWC.', flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      const r = await rupturesArm.verifierRupturesArmurerie?.(client, { force: true });
+      if (!r || r.ok === false) return interaction.editReply('⚠️ Lecture du stock impossible — vérifie que les variables Supabase du bot sont bien configurées.');
+      if (r.envoye) return interaction.editReply(`✅ Point stock posté dans le salon dédié — 🔴 ${r.ruptures} en rupture · 🟠 ${r.bas} en stock bas.`);
+      return interaction.editReply(`⚠️ Lecture OK (${r.ruptures} rupture, ${r.bas} stock bas) mais l'envoi au salon a échoué. Vérifie que le bot voit le salon 1509244143199715499 et peut y écrire.`);
+    } catch (e) { return interaction.editReply('❌ Échec : ' + (e.message || 'inconnu')); }
   }
   if (commandName === 'moi') return _handleMoi(interaction);
   if (commandName === 'journal-salon') {
