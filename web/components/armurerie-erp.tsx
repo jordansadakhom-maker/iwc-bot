@@ -22,7 +22,7 @@ import {
   creerTache, basculerTache, supprimerTache,
   creerCommande, majCommande, marquerCommande, supprimerCommande,
   creerRessource, majRessource, supprimerRessource, importerRessources, acheterRessources, type LigneRessource,
-  lireCoffreRessources, appliquerStockRessources,
+  lireCoffreRessources, appliquerStockRessources, annulerStockRessources,
 } from "@/app/(app)/armurerie/actions";
 
 type Router = ReturnType<typeof useRouter>;
@@ -869,16 +869,42 @@ export function RessourcesTab({ ressources, router }: { ressources: ArmRessource
   const [flash, setFlash] = useState<string | null>(null);
   const [modif, setModif] = useState<ArmRessource | null>(null);
   const [nouveau, setNouveau] = useState(false);
-  const [scan, setScan] = useState<{ nom: string; quantite: number }[] | null>(null); // lignes lues sur une photo de coffre
+  const [scan, setScan] = useState<{ nom: string; quantite: number }[] | null>(null); // « Vérifier d'abord » : ouvre le tableau
   const [scanBusy, setScanBusy] = useState(false);
   const [scanErr, setScanErr] = useState<string | null>(null);
+  const [scanMode, setScanMode] = useState<"add" | "set" | "review">("add"); // par défaut : ajout automatique
+  const [undo, setUndo] = useState<{ restore: { id: string; avant: number }[]; supprimer: string[]; resume: string } | null>(null);
 
+  // Photo de coffre → lecture IA → application AUTOMATIQUE (ajout par défaut).
+  // « Vérifier d'abord » ouvre le tableau de contrôle ; sinon on ajoute direct + Annuler possible.
   async function onScan(url: string) {
-    setScanErr(null); setScanBusy(true);
+    setScanErr(null); setUndo(null); setScanBusy(true);
     const r = await lireCoffreRessources(url);
+    if (!r.ok || !r.lignes?.length) { setScanBusy(false); setScanErr(r.error || "Aucun objet détecté sur la capture."); return; }
+    if (scanMode === "review") { setScanBusy(false); setScan(r.lignes); return; }
+    // Appariement automatique : ce qui matche une ressource → mise à jour ; le reste → création (prix 0).
+    const items: { id: string; qte: number }[] = [];
+    const nouvelles: { nom: string; categorie: string; qte: number }[] = [];
+    for (const l of r.lignes) {
+      const id = _matchRessource(l.nom, ressources);
+      if (id) items.push({ id, qte: l.quantite });
+      else nouvelles.push({ nom: l.nom, categorie: _guessCatRes(l.nom), qte: l.quantite });
+    }
+    const res = await appliquerStockRessources({ mode: scanMode, items, nouvelles });
     setScanBusy(false);
-    if (!r.ok || !r.lignes?.length) { setScanErr(r.error || "Aucun objet détecté sur la capture."); return; }
-    setScan(r.lignes);
+    if (!res.ok) { setScanErr(res.error || "Application impossible."); return; }
+    const sg = scanMode === "add" ? "+" : "=";
+    const resume = r.lignes.map((l) => `${l.nom} ${sg}${l.quantite}`).join(" · ");
+    setUndo({ restore: res.applied || [], supprimer: res.creesIds || [], resume });
+    router.refresh();
+  }
+  async function annulerScan() {
+    if (!undo) return;
+    setScanBusy(true);
+    const r = await annulerStockRessources({ restore: undo.restore, supprimer: undo.supprimer });
+    setScanBusy(false);
+    if (!r.ok) { setScanErr(r.error || "Annulation impossible."); return; }
+    setUndo(null); router.refresh();
   }
 
   const byId = new Map(ressources.map((r) => [r.id, r]));
@@ -941,10 +967,27 @@ export function RessourcesTab({ ressources, router }: { ressources: ArmRessource
           {/* Scanner de coffre : photo → l'IA lit les quantités → stock réactualisé */}
           <div className="mb-3 rounded-[14px] border p-3.5" style={{ borderColor: "color-mix(in srgb,var(--accent) 35%,var(--border))", background: "color-mix(in srgb,var(--accent) 5%,var(--surface-2))" }}>
             <div className="mb-1 flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[0.05em]" style={{ color: "var(--accent)" }}><ScanLine className="h-4 w-4" /> Réactualiser le stock par photo</div>
-            <p className="mb-2 text-[0.72rem] text-faint">Glisse une capture d&apos;un coffre : l&apos;IA lit chaque objet et sa quantité, tu confirmes, et le stock se met à jour tout seul. Dépose plusieurs coffres à la suite pour additionner (ex. le fer réparti dans deux coffres).</p>
-            <PhotoDrop dossier="armurerie-coffres" onUploaded={onScan} compact camera={false} label="Glisse une capture du coffre — l'IA lit les quantités" />
-            {scanBusy ? <div className="mt-1.5 flex items-center gap-1.5 text-[0.72rem] text-faint"><Loader2 className="h-3 w-3 animate-spin" /> Lecture du coffre…</div> : null}
+            <p className="mb-2 text-[0.72rem] text-faint">Glisse une capture d&apos;un coffre : l&apos;IA lit chaque objet et sa quantité, et le stock est mis à jour <b>automatiquement</b>. Dépose plusieurs coffres à la suite pour additionner (ex. le fer réparti dans deux coffres).</p>
+            {/* Mode d'application de la photo */}
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {([["add", "➕ Ajouter (auto)"], ["set", "🔄 Remplacer"], ["review", "👁 Vérifier d'abord"]] as const).map(([k, label]) => (
+                <button key={k} onClick={() => setScanMode(k)} className="rounded-lg border px-2 py-1 text-[0.7rem] font-semibold transition" style={{ borderColor: scanMode === k ? "var(--accent)" : "var(--border)", background: scanMode === k ? "color-mix(in srgb,var(--accent) 12%,transparent)" : "var(--surface-2)", color: scanMode === k ? "var(--accent)" : "var(--muted)" }}>{label}</button>
+              ))}
+            </div>
+            <PhotoDrop dossier="armurerie-coffres" onUploaded={onScan} compact camera={false} label={scanMode === "review" ? "Glisse une capture — tu vérifieras avant d'appliquer" : scanMode === "set" ? "Glisse une capture — remplace le stock automatiquement" : "Glisse une capture — ajoutée automatiquement au stock"} />
+            {scanBusy ? <div className="mt-1.5 flex items-center gap-1.5 text-[0.72rem] text-faint"><Loader2 className="h-3 w-3 animate-spin" /> Lecture &amp; mise à jour…</div> : null}
             {scanErr ? <div className="mt-1.5 text-[0.72rem]" style={{ color: "var(--oxblood)" }}>{scanErr}</div> : null}
+            {undo && !scanBusy ? (
+              <div className="mt-2 flex items-start gap-2 rounded-lg border px-2.5 py-2 text-[0.72rem]" style={{ borderColor: "color-mix(in srgb,var(--good) 40%,var(--border))", background: "color-mix(in srgb,var(--good) 8%,transparent)" }}>
+                <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: "var(--good)" }} />
+                <div className="min-w-0 flex-1">
+                  <div style={{ color: "var(--good)" }}>Stock mis à jour depuis la photo.</div>
+                  <div className="truncate text-faint" title={undo.resume}>{undo.resume}</div>
+                </div>
+                <button onClick={annulerScan} className="shrink-0 rounded-md border border-border bg-surface px-2 py-1 font-semibold hover:border-border-2">Annuler</button>
+                <button onClick={() => setUndo(null)} className="shrink-0 text-faint hover:text-ink" title="Fermer"><X className="h-3.5 w-3.5" /></button>
+              </div>
+            ) : null}
           </div>
           <div className="relative mb-3"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" /><input className={inputCls + " pl-8"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher une ressource…" /></div>
           {cats.map((cat) => (
