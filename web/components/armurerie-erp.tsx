@@ -3,11 +3,11 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Users, Plus, Loader2, Trash2, Check, Download, Clock, Play, Square,
+  Users, Plus, Minus, Loader2, Trash2, Check, Download, Clock, Play, Square,
   BadgeDollarSign, Landmark, StickyNote, ListTodo, Activity, Pin, PinOff, Pencil,
-  ArrowDownRight, ArrowUpRight, CircleDollarSign, Wallet, ClipboardList, X,
+  ArrowDownRight, ArrowUpRight, CircleDollarSign, Wallet, ClipboardList, X, Pickaxe, Search,
 } from "lucide-react";
-import type { ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache, ArmMouvement, ArmVente, ArmProduit, ArmCommande, ArmCommandeLigne } from "@/lib/queries";
+import type { ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache, ArmMouvement, ArmVente, ArmProduit, ArmCommande, ArmCommandeLigne, ArmRessource } from "@/lib/queries";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
 import { Badge } from "@/components/ui";
 import { cents } from "@/lib/format";
@@ -20,6 +20,7 @@ import {
   creerNote, majNote, supprimerNote,
   creerTache, basculerTache, supprimerTache,
   creerCommande, majCommande, marquerCommande, supprimerCommande,
+  creerRessource, majRessource, supprimerRessource, importerRessources, acheterRessources, type LigneRessource,
 } from "@/app/(app)/armurerie/actions";
 
 type Router = ReturnType<typeof useRouter>;
@@ -627,6 +628,149 @@ export function TachesTab({ taches, router }: { taches: ArmTache[]; router: Rout
         </div>
       )}
     </>
+  );
+}
+
+// ═══════════════════ RESSOURCES (achat à la mine) ═══════════════════
+export function RessourcesTab({ ressources, router }: { ressources: ArmRessource[]; router: Router }) {
+  const [q, setQ] = useState("");
+  const [cart, setCart] = useState<Record<string, number>>({});
+  const [remise, setRemise] = useState("5");
+  const [busy, setBusy] = useState(false);
+  const [flash, setFlash] = useState<string | null>(null);
+  const [modif, setModif] = useState<ArmRessource | null>(null);
+  const [nouveau, setNouveau] = useState(false);
+
+  const byId = new Map(ressources.map((r) => [r.id, r]));
+  const filtres = ressources.filter((r) => r.nom.toLowerCase().includes(q.trim().toLowerCase()));
+  const lignes = Object.entries(cart).filter(([, n]) => n > 0).map(([id, n]) => ({ r: byId.get(id)!, n })).filter((l) => l.r);
+  const brut = lignes.reduce((s, l) => s + l.r.prix * l.n, 0);
+  const pct = Math.max(0, Math.min(100, Number(remise) || 0));
+  const remiseM = Math.round(brut * pct) / 100;
+  const net = Math.round((brut - remiseM) * 100) / 100;
+
+  const add = (id: string) => setCart((c) => ({ ...c, [id]: (c[id] || 0) + 1 }));
+  const sub = (id: string) => setCart((c) => ({ ...c, [id]: Math.max(0, (c[id] || 0) - 1) }));
+  const setQte = (id: string, v: number) => setCart((c) => ({ ...c, [id]: Math.max(0, Math.round(v) || 0) }));
+
+  async function importer() { setBusy(true); const r = await importerRessources(); setBusy(false); if (r.ok) router.refresh(); else setFlash(r.error || "Échec."); }
+  async function regler() {
+    if (!lignes.length) return;
+    setBusy(true);
+    const payload: LigneRessource[] = lignes.map((l) => ({ nom: l.r.nom, qte: l.n, prix: l.r.prix }));
+    const r = await acheterRessources(payload, pct);
+    setBusy(false);
+    if (!r.ok) { setFlash(r.error || "Échec."); return; }
+    setCart({});
+    setFlash(`Payé à la mine : ${money(r.net ?? net)} (remise ${pct}% = −${money(r.remise ?? remiseM)}) → débité du coffre + dépense en comptabilité.`);
+    router.refresh();
+  }
+
+  if (ressources.length === 0) {
+    return (
+      <>
+        <div className="mb-3 flex justify-end"><Btn onClick={importer} disabled={busy}>{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Importer les tarifs de la mine</Btn></div>
+        {flash ? <div className="mb-3"><Flash>{flash}</Flash></div> : null}
+        <Vide icon={Pickaxe} texte="Aucune ressource. Importe les tarifs de la mine (charbon, lingots & verre, cordes, bois…) ou ajoute les tiens — tu pourras calculer combien payer, remise de 5 % appliquée." />
+        {nouveau ? <RessourceModal onClose={() => setNouveau(false)} router={router} /> : null}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <TopBar>
+        <p className="text-[0.74rem] italic text-faint">Achat de matières à la mine (remise de 5 % du responsable). Clique une ressource pour l&apos;ajouter au calcul.</p>
+        <Btn onClick={() => setNouveau(true)}><Plus className="h-3.5 w-3.5" /> Ressource</Btn>
+      </TopBar>
+      <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
+        {/* Grille des ressources */}
+        <div>
+          <div className="relative mb-3"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" /><input className={inputCls + " pl-8"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher une ressource…" /></div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {filtres.map((r) => (
+              <div key={r.id} className="rounded-[10px] border border-border bg-surface-2 px-2.5 py-2">
+                <button onClick={() => add(r.id)} className="block w-full text-left transition hover:-translate-y-0.5">
+                  <div className="truncate text-[0.8rem] font-semibold">{r.nom}</div>
+                  <div className="mt-0.5 font-num text-[0.92rem] font-bold" style={{ color: "var(--accent)" }}>{money(r.prix)}<span className="text-[0.6rem] font-normal text-faint"> /u</span></div>
+                  {cart[r.id] ? <div className="text-[0.62rem] text-faint">{cart[r.id]} au calcul</div> : null}
+                </button>
+                <button onClick={() => setModif(r)} className="mt-1 text-[0.62rem] text-faint hover:text-ink">éditer</button>
+              </div>
+            ))}
+          </div>
+        </div>
+        {/* Panier / calcul */}
+        <div className="lg:sticky lg:top-4 lg:self-start">
+          <div className="rounded-[14px] border border-border bg-surface-2 p-3.5">
+            <div className="mb-2 flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[0.05em] text-muted"><Pickaxe className="h-4 w-4" /> Achat à la mine</div>
+            {flash ? <div className="mb-2"><Flash>{flash}</Flash></div> : null}
+            {lignes.length === 0 ? <p className="py-4 text-center text-[0.8rem] text-faint">Clique une ressource pour la calculer.</p> : (
+              <div className="mb-2 flex flex-col gap-1.5">
+                {lignes.map((l) => (
+                  <div key={l.r.id} className="flex items-center gap-1.5 text-[0.82rem]">
+                    <span className="min-w-0 flex-1 truncate">{l.r.nom}</span>
+                    <button onClick={() => sub(l.r.id)} className="grid h-5 w-5 shrink-0 place-items-center rounded border border-border text-muted hover:text-ink"><Minus className="h-3 w-3" /></button>
+                    <input className={inputCls + " !w-11 !px-1 !py-0.5 text-center"} type="number" min={0} value={l.n} onChange={(e) => setQte(l.r.id, Number(e.target.value))} />
+                    <button onClick={() => add(l.r.id)} className="grid h-5 w-5 shrink-0 place-items-center rounded border border-border text-muted hover:text-ink"><Plus className="h-3 w-3" /></button>
+                    <span className="w-16 shrink-0 text-right font-num">{money(l.r.prix * l.n)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex flex-col gap-1 border-t border-border pt-2 text-[0.84rem]">
+              <div className="flex justify-between text-faint"><span>Total brut</span><span className="font-num">{money(brut)}</span></div>
+              <div className="flex items-center justify-between text-faint"><span className="inline-flex items-center gap-1">Remise <input className={inputCls + " !w-11 !px-1 !py-0.5 text-center"} type="number" min={0} max={100} value={remise} onChange={(e) => setRemise(e.target.value)} /> %</span><span className="font-num" style={{ color: "var(--good)" }}>−{money(remiseM)}</span></div>
+              <div className="flex justify-between"><span className="font-semibold">Net à payer</span><span className="font-num font-bold" style={{ color: "var(--accent)" }}>{money(net)}</span></div>
+            </div>
+            <button onClick={regler} disabled={busy || !lignes.length} className="mt-2.5 inline-flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-[0.86rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--good)" }}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Régler {money(net)}</button>
+            <p className="mt-1 text-center text-[0.62rem] text-faint">Débité du coffre + inscrit en dépense (comptabilité).</p>
+          </div>
+        </div>
+      </div>
+      {nouveau ? <RessourceModal onClose={() => setNouveau(false)} router={router} /> : null}
+      {modif ? <RessourceModal ressource={modif} onClose={() => setModif(null)} router={router} /> : null}
+    </>
+  );
+}
+function RessourceModal({ ressource, onClose, router }: { ressource?: ArmRessource; onClose: () => void; router: Router }) {
+  const editing = !!ressource;
+  const [nom, setNom] = useState(ressource?.nom || "");
+  const [prix, setPrix] = useState(ressource ? String(ressource.prix) : "");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [confirmDel, setConfirmDel] = useState(false);
+
+  async function enregistrer() {
+    setErr(null);
+    if (nom.trim().length < 1) { setErr("Nom de la ressource requis."); return; }
+    setBusy("save");
+    const data = { nom, prix: Number(prix) || 0 };
+    const r = editing ? await majRessource(ressource!.id, data) : await creerRessource(data);
+    setBusy(null);
+    if (!r.ok) { setErr(r.error || "Impossible."); return; }
+    router.refresh(); onClose();
+  }
+  async function supprimer() { setBusy("del"); const r = await supprimerRessource(ressource!.id); setBusy(null); if (!r.ok) { setErr(r.error || "Échec."); return; } router.refresh(); onClose(); }
+
+  return (
+    <Modal titre={editing ? ressource!.nom : "⛏️ Nouvelle ressource"} onClose={onClose}>
+      <div className="flex flex-col gap-3">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Champ label="Nom *"><input className={inputCls} value={nom} onChange={(e) => setNom(e.target.value)} maxLength={120} autoFocus /></Champ>
+          <Champ label="Prix d'achat à la mine ($ / u)"><input className={inputCls} type="number" min={0} step="0.01" value={prix} onChange={(e) => setPrix(e.target.value)} /></Champ>
+        </div>
+        {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
+        <div className="mt-1 flex items-center justify-between border-t border-border pt-3">
+          {editing ? (confirmDel ? (
+            <div className="flex items-center gap-2 text-[0.78rem]"><span className="text-muted">Supprimer ?</span>
+              <button onClick={supprimer} disabled={busy === "del"} className="rounded-lg px-2.5 py-1 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--oxblood)", color: "#fff" }}>{busy === "del" ? "…" : "Oui"}</button>
+              <button onClick={() => setConfirmDel(false)} className="text-[0.76rem] text-muted hover:text-ink">Annuler</button></div>
+          ) : <button onClick={() => setConfirmDel(true)} className="inline-flex items-center gap-1.5 text-[0.76rem] text-faint hover:text-ink"><Trash2 className="h-3.5 w-3.5" /> Supprimer</button>) : <span />}
+          <button onClick={enregistrer} disabled={busy === "save"} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{busy === "save" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} {editing ? "Enregistrer" : "Ajouter"}</button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
