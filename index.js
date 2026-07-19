@@ -88,6 +88,10 @@ let candidatureWeb = {};
 try { candidatureWeb = require('./candidature-web'); console.log('✅ Module candidatures web chargé'); }
 catch (e) { console.log('⚠️ candidature-web non chargé:', e.message); }
 
+let rupturesArm = {};
+try { rupturesArm = require('./ruptures-armurerie'); console.log('✅ Module ruptures armurerie chargé'); }
+catch (e) { console.log('⚠️ ruptures-armurerie non chargé:', e.message); }
+
 let commandeWeb = {};
 try { commandeWeb = require('./commande-web'); console.log('✅ Module commande web chargé'); }
 catch (e) { console.log('⚠️ commande-web non chargé:', e.message); }
@@ -6911,6 +6915,9 @@ client.once('clientReady', async () => {
   cron.schedule('0 13 * * *', async () => { try { await ripoux.tickQuotidien?.(client); } catch (e) { console.log('⚠️ ripoux tick:', e.message); } }, { timezone: 'Europe/Paris' });
   // Télégrammes : relance de confirmation de clôture après 3 jours sans réponse (10h)
   cron.schedule('0 10 * * *', async () => { try { await telegramme.verifierInactivite?.(client); } catch (e) { console.log('⚠️ télégramme inactivité:', e.message); } }, { timezone: 'Europe/Paris' });
+
+  // Armurerie de Van Horn : point stock quotidien (ruptures + stock bas) → salon dédié (9h30)
+  cron.schedule('30 9 * * *', async () => { try { await rupturesArm.verifierRupturesArmurerie?.(client); } catch (e) { console.log('⚠️ ruptures armurerie:', e.message); } }, { timezone: 'Europe/Paris' });
 
   // [CORRECTION] Résumés hebdo → #journal-de-bord via ajouterJournalIC
   cron.schedule('0 8 * * 1', async () => {
