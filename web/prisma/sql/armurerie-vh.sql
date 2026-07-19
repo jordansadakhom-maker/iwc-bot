@@ -56,3 +56,22 @@ CREATE TABLE IF NOT EXISTS "ArmurerieContrat" (
   "createdAt"       TIMESTAMPTZ DEFAULT now()
 );
 ALTER TABLE "ArmurerieContrat" ENABLE ROW LEVEL SECURITY;
+
+-- Coffre PROPRE à l'armurerie (totalement séparé des coffres de la compagnie)
+CREATE TABLE IF NOT EXISTS "ArmurerieCoffre" (
+  "id"        TEXT PRIMARY KEY,          -- 'vanhorn'
+  "solde"     INTEGER DEFAULT 0,
+  "updatedAt" TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE "ArmurerieCoffre" ENABLE ROW LEVEL SECURITY;
+
+-- Journal du coffre de l'armurerie (ventes, dépenses, dépôts/retraits)
+CREATE TABLE IF NOT EXISTS "ArmurerieMouvementCoffre" (
+  "id"        TEXT PRIMARY KEY,
+  "sens"      TEXT,                      -- entree / sortie
+  "montant"   INTEGER DEFAULT 0,
+  "motif"     TEXT,
+  "auteur"    TEXT,
+  "createdAt" TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE "ArmurerieMouvementCoffre" ENABLE ROW LEVEL SECURITY;
