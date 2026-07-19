@@ -140,6 +140,8 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
   const [photo, setPhoto] = useState("");
   const [lisant, setLisant] = useState(false);
   const [lu, setLu] = useState<string | null>(null);
+  const [factureSnap, setFactureSnap] = useState<ArmVente[] | null>(null); // facture du dernier règlement encaissé
+  const [factureOpen, setFactureOpen] = useState(false);
 
   // Photo du numéro de série → l'IA lit le numéro et remplit le champ.
   async function onSeriePhoto(url: string) {
@@ -185,6 +187,18 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
     const r = await validerCaisse(payload, clientId ? "" : client, notes, clientId || undefined, { serie: serie.trim() || undefined, photo: photo || undefined });
     setBusy(false);
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
+    // Facture immédiate : instantané du règlement (signé compagnie + client, imprimable / PDF).
+    const cliObj = clientId ? clients.find((c) => c.id === clientId) : null;
+    const acq = (cliObj?.nom || client || "Client de passage").trim();
+    const dateV = new Date().toLocaleDateString("fr-FR");
+    const snap: ArmVente[] = lignes.map((l, i) => ({
+      id: `${r.ticket || "FAC"}-${i}`, clientId: clientId || null, acquereur: acq, dateVente: dateV,
+      marque: l.p.nom, modele: l.n > 1 ? `×${l.n}` : null, categorie: l.p.categorie,
+      numeroSerie: serie.trim() || null, vendeur: null, telegramme: cliObj?.telegramme || null,
+      prix: pu(l.p) * l.n, notes: notes || null, statut: "enregistree",
+      photo: photo || cliObj?.carteIdentite || null, ticket: r.ticket || null, createdAt: null,
+    }));
+    setFactureSnap(snap); setFactureOpen(false);
     setCart({}); setPxEdit({}); setClient(""); setClientId(""); setNotes(""); setSerie(""); setPhoto(""); setLu(null); setSerieLu(null);
     setFlash(`Vente encaissée : ${money(r.total || vente)} → coffre + registre + facture + compta + impôts.`);
     router.refresh();
@@ -223,6 +237,11 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
         <div className="rounded-[14px] border border-border bg-surface-2 p-3.5">
           <div className="mb-2 flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[0.05em] text-muted"><ShoppingCart className="h-4 w-4" /> Panier</div>
           {flash ? <div className="mb-2"><Flash>{flash}</Flash></div> : null}
+          {factureSnap ? (
+            <button onClick={() => setFactureOpen(true)} className="mb-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-[0.8rem] font-semibold" style={{ borderColor: "color-mix(in srgb,var(--brass) 45%,var(--border))", color: "var(--brass)" }}>
+              🧾 Voir / imprimer la facture
+            </button>
+          ) : null}
           {lignes.length === 0 ? (
             <p className="py-4 text-center text-[0.8rem] text-faint">Panier vide. Clique un produit pour l&apos;ajouter.</p>
           ) : (
@@ -295,6 +314,7 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
           </div>
         </div>
       </div>
+      {factureOpen && factureSnap ? <FactureModal ventes={factureSnap} onClose={() => setFactureOpen(false)} /> : null}
     </div>
   );
 }
@@ -755,6 +775,13 @@ function ClientModal({ client, achats = [], onClose, router }: { client?: ArmCli
   const [flash, setFlash] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
+  const [facture, setFacture] = useState<ArmVente[] | null>(null);
+  // Regroupe les achats par facture (ticket) — un règlement = une facture.
+  const transactions = (() => {
+    const m = new Map<string, ArmVente[]>();
+    for (const a of achats) { const k = a.ticket || a.id; (m.get(k) || m.set(k, []).get(k)!).push(a); }
+    return [...m.values()].sort((a, b) => (b[0].createdAt || "").localeCompare(a[0].createdAt || ""));
+  })();
 
   async function enregistrer() {
     setErr(null);
@@ -779,6 +806,7 @@ function ClientModal({ client, achats = [], onClose, router }: { client?: ArmCli
   }
 
   return (
+    <>
     <Modal titre={editing ? client!.nom : "🗂️ Nouveau client"} onClose={onClose} max={520}>
       {flash ? <div className="mb-3"><Flash>{flash}</Flash></div> : null}
       <div className="flex flex-col gap-3">
@@ -805,15 +833,27 @@ function ClientModal({ client, achats = [], onClose, router }: { client?: ArmCli
         <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Statut</span><Picker options={STATUTS_CLIENT} value={statut} onChange={setStatut} /></div>
         <Champ label="Notes"><textarea className={inputCls + " min-h-[50px] resize-y"} value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} placeholder="Antécédents, préférences, mises en garde…" /></Champ>
 
-        {editing && achats.length ? (
-          <div className="flex flex-col gap-1 border-t border-border pt-2">
-            <span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Historique d&apos;achats ({achats.length})</span>
-            {achats.map((a) => (
-              <div key={a.id} className="flex items-center justify-between gap-2 text-[0.78rem]">
-                <span className="min-w-0 truncate text-muted">{[a.marque, a.modele].filter(Boolean).join(" ") || "Arme"} · <span className="mono text-faint">{a.numeroSerie}</span></span>
-                <span className="shrink-0 font-num">{money(a.prix)}</span>
-              </div>
-            ))}
+        {editing && transactions.length ? (
+          <div className="flex flex-col gap-2 border-t border-border pt-2">
+            <span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Factures &amp; achats ({transactions.length})</span>
+            {transactions.map((t) => {
+              const tot = t.reduce((s, a) => s + a.prix, 0);
+              return (
+                <div key={t[0].ticket || t[0].id} className="rounded-[10px] border border-border bg-surface-2 p-2.5">
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="text-[0.7rem] text-faint"><span className="mono">{t[0].ticket || `VTE-${t[0].id.slice(-6)}`}</span> · {t[0].dateVente}</span>
+                    <button onClick={() => setFacture(t)} className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface px-2 py-1 text-[0.7rem] font-semibold hover:border-border-2">🧾 Facture</button>
+                  </div>
+                  {t.map((a) => (
+                    <div key={a.id} className="flex items-center justify-between gap-2 text-[0.78rem]">
+                      <span className="min-w-0 truncate text-muted">{[a.marque, a.modele].filter(Boolean).join(" ") || "Arme"}{a.numeroSerie ? <> · <span className="mono text-faint">{a.numeroSerie}</span></> : null}</span>
+                      <span className="shrink-0 font-num">{money(a.prix)}</span>
+                    </div>
+                  ))}
+                  <div className="mt-1 flex justify-between border-t border-border pt-1 text-[0.78rem] font-semibold"><span>Total</span><span className="font-num" style={{ color: "var(--accent)" }}>{money(tot)}</span></div>
+                </div>
+              );
+            })}
           </div>
         ) : null}
 
@@ -832,6 +872,78 @@ function ClientModal({ client, achats = [], onClose, router }: { client?: ArmCli
         </div>
       </div>
     </Modal>
+    {facture ? <FactureModal ventes={facture} client={client} onClose={() => setFacture(null)} /> : null}
+    </>
+  );
+}
+
+// ═══════════════════ FACTURE (document imprimable) ═══════════════════
+// Regroupe les lignes d'un même règlement (même ticket) en une facture signée.
+function FactureModal({ ventes, client, onClose }: { ventes: ArmVente[]; client?: ArmClient | null; onClose: () => void }) {
+  if (!ventes.length) return null;
+  const v0 = ventes[0];
+  const total = ventes.reduce((s, v) => s + v.prix, 0);
+  const photo = ventes.find((v) => v.photo)?.photo || client?.carteIdentite || null;
+  const tel = ventes.find((v) => v.telegramme)?.telegramme || client?.telegramme || null;
+  const notes = ventes.find((v) => v.notes)?.notes || "";
+  const num = v0.ticket || `VTE-${v0.id.slice(-6)}`;
+  return (
+    <Modal titre="🧾 Facture" onClose={onClose} max={640}>
+      <style>{`@media print{body *{visibility:hidden!important}#facture-doc,#facture-doc *{visibility:visible!important}#facture-doc{position:fixed;inset:0;margin:0;padding:26px}.no-print{display:none!important}}`}</style>
+      <div id="facture-doc" className="flex flex-col gap-3">
+        <div className="flex items-start justify-between gap-3 border-b-2 pb-2" style={{ borderColor: "var(--brass)" }}>
+          <div>
+            <div className="font-display text-[1.1rem] font-bold" style={{ color: "var(--brass)" }}>🐺 Iron Wolf Company</div>
+            <div className="text-[0.72rem] text-muted">Armurerie de Van Horn — Bureau de Saint-Denis</div>
+          </div>
+          <div className="text-right">
+            <div className="text-[0.66rem] uppercase tracking-[0.08em] text-faint">Facture</div>
+            <div className="mono text-[0.92rem] font-bold">{num}</div>
+            <div className="text-[0.72rem] text-muted">{v0.dateVente}</div>
+          </div>
+        </div>
+        <div className="flex items-start gap-3">
+          {photo ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={photo} alt="Client" className="h-16 w-16 shrink-0 rounded-[8px] border border-border object-cover" />
+          ) : null}
+          <div className="min-w-0 text-[0.82rem]">
+            <div className="text-[0.64rem] uppercase tracking-[0.05em] text-faint">Client</div>
+            <div className="font-semibold">{v0.acquereur}</div>
+            {tel ? <div className="text-[0.74rem] text-muted">Télégramme : {tel}</div> : null}
+            {notes ? <div className="text-[0.72rem] text-faint">{notes}</div> : null}
+          </div>
+        </div>
+        <table className="w-full border-collapse text-[0.82rem]">
+          <thead><tr className="text-[0.6rem] uppercase tracking-[0.05em] text-faint">
+            <th className="border-b border-border py-1 text-left font-semibold">Désignation</th>
+            <th className="border-b border-border py-1 text-left font-semibold">N° série</th>
+            <th className="border-b border-border py-1 text-right font-semibold">Prix</th>
+          </tr></thead>
+          <tbody>
+            {ventes.map((v) => (
+              <tr key={v.id}>
+                <td className="border-b border-border py-1.5">{[v.marque, v.modele].filter(Boolean).join(" ") || "Article"}</td>
+                <td className="border-b border-border py-1.5 mono text-[0.74rem] text-muted">{v.numeroSerie || "—"}</td>
+                <td className="border-b border-border py-1.5 text-right font-num">{money(v.prix)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="flex items-center justify-between border-t-2 pt-2 text-[0.98rem] font-bold" style={{ borderColor: "var(--brass)" }}>
+          <span>Total réglé</span><span className="font-num" style={{ color: "var(--brass)" }}>{money(total)}</span>
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-6 text-[0.72rem]">
+          <div className="border-t border-border pt-1 text-center text-faint">Pour la Compagnie<div className="mt-5 font-display text-[0.95rem] italic text-ink">{v0.vendeur || "Iron Wolf Company"}</div></div>
+          <div className="border-t border-border pt-1 text-center text-faint">Le Client<div className="mt-5 font-display text-[0.95rem] italic text-ink">{v0.acquereur}</div></div>
+        </div>
+        <p className="mt-1 text-center text-[0.62rem] italic text-faint">Facture établie et signée par l&apos;Iron Wolf Company. « La force est dans l&apos;ombre. »</p>
+      </div>
+      <div className="no-print mt-3 flex justify-end gap-2">
+        <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2">Fermer</button>
+        <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Download className="h-3.5 w-3.5" /> Imprimer / PDF</button>
+      </div>
+    </Modal>
   );
 }
 
@@ -839,7 +951,9 @@ function ClientModal({ client, achats = [], onClose, router }: { client?: ArmCli
 function VentesTab({ ventes, clients, router }: { ventes: ArmVente[]; clients: ArmClient[]; router: Router }) {
   const [sel, setSel] = useState<ArmVente | null>(null);
   const [nouveau, setNouveau] = useState(false);
+  const [facture, setFacture] = useState<ArmVente[] | null>(null);
   const cliById = new Map(clients.map((c) => [c.id, c]));
+  const groupeDe = (v: ArmVente) => v.ticket ? ventes.filter((x) => x.ticket === v.ticket) : [v];
 
   // Top produits vendus (nombre de ventes + chiffre d'affaires).
   const top = (() => {
@@ -926,7 +1040,12 @@ function VentesTab({ ventes, clients, router }: { ventes: ArmVente[]; clients: A
                     <td className="border-b border-border px-2.5 py-2"><span className="mono text-[0.76rem]">{v.numeroSerie || "—"}</span></td>
                     <td className="border-b border-border px-2.5 py-2 text-muted">{v.vendeur || "—"}</td>
                     <td className="border-b border-border px-2.5 py-2 text-faint">{v.telegramme || (cli?.telegramme ?? "—")}</td>
-                    <td className="border-b border-border px-2.5 py-2 font-num">{money(v.prix)}</td>
+                    <td className="border-b border-border px-2.5 py-2">
+                      <div className="flex items-center justify-end gap-2">
+                        <span className="font-num">{money(v.prix)}</span>
+                        <button onClick={(e) => { e.stopPropagation(); setFacture(groupeDe(v)); }} title="Voir la facture" className="rounded-md border border-border bg-surface px-1.5 py-0.5 text-[0.72rem] hover:border-border-2">🧾</button>
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
@@ -937,6 +1056,7 @@ function VentesTab({ ventes, clients, router }: { ventes: ArmVente[]; clients: A
       )}
       {nouveau ? <VenteModal clients={clients} onClose={() => setNouveau(false)} router={router} /> : null}
       {sel ? <VenteModal key={sel.id} vente={sel} clients={clients} onClose={() => setSel(null)} router={router} /> : null}
+      {facture ? <FactureModal ventes={facture} client={facture[0].clientId ? cliById.get(facture[0].clientId) : null} onClose={() => setFacture(null)} /> : null}
     </>
   );
 }
