@@ -1,13 +1,13 @@
-import { LineChart } from "lucide-react";
-import { getFinances } from "@/lib/queries";
-import { PageHeader, Card, CardHeader, Empty } from "@/components/ui";
+import { getFinances, getFactures } from "@/lib/queries";
+import { PageHeader, Card, CardHeader } from "@/components/ui";
 import { BarresH } from "@/components/charts";
 import { FinancesCoffres } from "@/components/finances-coffres";
+import { FacturesListe } from "@/components/factures-liste";
 
 export const dynamic = "force-dynamic";
 
 export default async function FinancesPage() {
-  const { connecte, coffres, pole } = await getFinances();
+  const [{ connecte, coffres, pole }, fact] = await Promise.all([getFinances(), getFactures()]);
   const conf = pole === "confrerie";
   // Vue « pôle actif » : coffre commun + le coffre du pôle choisi (le bouton
   // Iron Wolf / Confrérie du header bascule réellement l'affichage).
@@ -39,10 +39,7 @@ export default async function FinancesPage() {
       ) : null}
 
       <Card>
-        <CardHeader titre="Mouvements — 30 derniers jours" />
-        <Empty icon={LineChart}>
-          Le détail des entrées et sorties (avec courbe et export) s&apos;affichera ici une fois l&apos;historique des transactions synchronisé. Les soldes ci-dessus, eux, sont déjà en direct.
-        </Empty>
+        <FacturesListe factures={fact.factures} total={fact.total} />
       </Card>
     </>
   );

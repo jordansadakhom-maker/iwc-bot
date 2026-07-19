@@ -454,6 +454,34 @@ export async function getAgenda(): Promise<AgendaData> {
   return { connecte: true, rdvs, contacts };
 }
 
+// ── Communication : rendez-vous clients (table Rdv) ──────────────
+export type Reponse = { texte: string; par?: string; at?: string };
+export type RdvComm = {
+  id: string; nomRP: string | null; type: string | null; lieu: string | null; creneau: string | null;
+  statut: string; source: string | null; contact: string | null; message: string | null; reponses: Reponse[]; createdAt: string | null;
+};
+export type CommunicationData = { connecte: boolean; rdvs: RdvComm[] };
+
+export async function getCommunication(): Promise<CommunicationData> {
+  if (!dataConfigured()) return { connecte: false, rdvs: [] };
+  const supabase = createAdminClient();
+  if (!supabase) return { connecte: false, rdvs: [] };
+  const { data, error } = await supabase.from("Rdv").select("id,nomRP,type,lieu,creneau,statut,paiement,createdAt").order("createdAt", { ascending: false }).limit(200);
+  if (error) return { connecte: false, rdvs: [] };
+  type Row = { id: string; nomRP: string | null; type: string | null; lieu: string | null; creneau: string | null; statut: string; paiement: Record<string, unknown> | null; createdAt: string | null };
+  const rdvs: RdvComm[] = ((data || []) as Row[]).map((r) => {
+    const p = (r.paiement || {}) as Record<string, unknown>;
+    const reps = Array.isArray(p.reponses) ? (p.reponses as Reponse[]) : [];
+    return {
+      id: String(r.id), nomRP: r.nomRP, type: r.type, lieu: r.lieu, creneau: r.creneau,
+      statut: r.statut || "nouveau", source: (p.source as string) ?? null,
+      contact: (p.contact as string) ?? null, message: (p.message as string) ?? null,
+      reponses: reps, createdAt: r.createdAt,
+    };
+  });
+  return { connecte: true, rdvs };
+}
+
 // ── Inventaire (page dédiée) ─────────────────────────────────────
 export type VehiculeItem = { id: string; nom: string; type: string | null; pole: string; etat: string | null; notes: string | null };
 export type ArmeItem = { id: string; serie: string; type: string | null; categorie: string | null; appartenance: string | null; membreNom: string | null; pole: string | null };
@@ -488,6 +516,30 @@ export async function getNotifications(): Promise<NotificationsData> {
   const { data, error } = await supabase.from("Notification").select("id,type,titre,corps,lu,createdAt").order("createdAt", { ascending: false }).limit(100);
   if (error) return { connecte: false, notifs: [] };
   return { connecte: true, notifs: (data || []) as NotifItem[] };
+}
+
+// ── Factures ─────────────────────────────────────────────────────
+export type FactureItem = { id: string; numero: string; objet: string; montant: number; clientNom: string | null; type: string | null; createdAt: string | null };
+export type FacturesData = { connecte: boolean; factures: FactureItem[]; total: number };
+
+export async function getFactures(): Promise<FacturesData> {
+  if (!dataConfigured()) return { connecte: false, factures: [], total: 0 };
+  const supabase = createAdminClient();
+  if (!supabase) return { connecte: false, factures: [], total: 0 };
+  const { data, error } = await supabase.from("Facture").select("*").order("createdAt", { ascending: false }).limit(300);
+  if (error) return { connecte: false, factures: [], total: 0 };
+  type Raw = Record<string, unknown>;
+  const factures: FactureItem[] = ((data || []) as Raw[]).map((f) => ({
+    id: String(f.id),
+    numero: (f.numero as string) || "—",
+    objet: (f.objet as string) || "Prestation",
+    montant: Number(f.montant) || 0,
+    clientNom: (f.clientNom as string) ?? null,
+    type: (f.type as string) ?? null,
+    createdAt: (f.createdAt as string) ?? null,
+  }));
+  const total = factures.reduce((s, f) => s + f.montant, 0);
+  return { connecte: true, factures, total };
 }
 
 // ── Finances (page dédiée) ───────────────────────────────────────
