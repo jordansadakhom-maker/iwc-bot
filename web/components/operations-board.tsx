@@ -2,10 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { X, Target, Plus, Loader2, Trash2 } from "lucide-react";
-import type { OpDetail } from "@/lib/queries";
+import { X, Target, Plus, Loader2, Trash2, MapPin, Users, CalendarClock, Link2, CheckCircle2, Clock3, Lock } from "lucide-react";
+import type { OpDetail, EtapeDetail } from "@/lib/queries";
 import { Badge } from "@/components/ui";
 import { creerOperation, majOperation, supprimerOperation } from "@/app/(app)/operations/actions";
+
+const dateFR = (s: string | null) => { if (!s) return null; try { return new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" }); } catch { return null; } };
 
 type Board = { preparation: OpDetail[]; encours: OpDetail[]; terminees: OpDetail[] };
 type Router = ReturnType<typeof useRouter>;
@@ -196,6 +198,84 @@ function NouveauModal({ onClose, router }: { onClose: () => void; router: Router
   );
 }
 
+function MetaLigne({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
+  return <div className="flex items-center gap-1.5 text-[0.8rem] text-muted">{icon}{children}</div>;
+}
+
+function EtapeBloc({ e, i }: { e: EtapeDetail; i: number }) {
+  const tone = e.statut === "validee" ? "var(--good)" : e.statut === "encours" ? "var(--steel)" : "var(--faint)";
+  const Icon = e.statut === "validee" ? CheckCircle2 : e.statut === "encours" ? Clock3 : Lock;
+  return (
+    <div className="rounded-[10px] border border-border bg-surface-2 px-3 py-2.5">
+      <div className="flex items-center gap-2">
+        <Icon className="h-3.5 w-3.5 shrink-0" style={{ color: tone }} />
+        <span className="text-[0.82rem] font-semibold">{e.titre}</span>
+        <span className="ml-auto text-[0.66rem] uppercase tracking-[0.05em]" style={{ color: tone }}>
+          {e.statut === "validee" ? "Validée" : e.statut === "encours" ? "En cours" : "À venir"}
+        </span>
+      </div>
+      {e.valideePar ? <div className="mt-0.5 pl-5 text-[0.68rem] text-faint">Validée par {e.valideePar}</div> : null}
+      {e.champs.length ? (
+        <div className="mt-2 flex flex-col gap-1.5 pl-5">
+          {e.champs.map((c, k) => (
+            <div key={k} className="text-[0.8rem]">
+              <span className="text-faint">{c.label} : </span>
+              <span className="text-ink">{c.valeur}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {e.photos.length ? (
+        <div className="mt-2 flex flex-wrap gap-2 pl-5">
+          {e.photos.map((ph, k) => (
+            <a key={k} href={ph.url} target="_blank" rel="noreferrer" className="block">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={ph.url} alt={ph.name} className="h-16 w-16 rounded-[8px] border border-border object-cover transition hover:brightness-110" />
+            </a>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function OpDetailBloc({ op }: { op: OpDetail }) {
+  const cree = dateFR(op.createdAt);
+  const poleLabel = op.pole === "illegal" ? "🔪 La Confrérie" : op.pole === "legal" ? "⚖️ Iron Wolf" : null;
+  const rien = !op.objectif && !op.lieu && op.membresNoms.length === 0 && op.etapes.length === 0 && !cree && !op.createurNom && !op.contratLie;
+  return (
+    <div className="mb-4 flex flex-col gap-3 rounded-[12px] border border-border bg-surface-2 px-3.5 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge>{op.type}</Badge>
+        <Badge tone={op.phase === "en_cours" ? "accent" : op.phase === "terminee" ? "good" : op.phase === "annulee" ? "muted" : "warn"}>{op.etape}</Badge>
+        {poleLabel ? <span className="text-[0.74rem] text-faint">{poleLabel}</span> : null}
+        {op.prime ? <span className="ml-auto font-num text-[0.86rem] font-semibold" style={{ color: "var(--accent)" }}>{op.prime}</span> : null}
+      </div>
+      {op.objectif ? <div className="text-[0.86rem] leading-relaxed text-ink"><span className="text-faint">Objectif : </span>{op.objectif}</div> : null}
+      <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+        {op.lieu ? <MetaLigne icon={<MapPin className="h-3.5 w-3.5 text-faint" />}>{op.lieu}</MetaLigne> : null}
+        {op.contratLie ? <MetaLigne icon={<Link2 className="h-3.5 w-3.5 text-faint" />}>Contrat : {op.contratLie}</MetaLigne> : null}
+        {cree ? <MetaLigne icon={<CalendarClock className="h-3.5 w-3.5 text-faint" />}>{cree}{op.createurNom ? ` · ${op.createurNom}` : ""}</MetaLigne> : null}
+      </div>
+      {op.membresNoms.length ? (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-1.5 text-[0.72rem] uppercase tracking-[0.05em] text-faint"><Users className="h-3.5 w-3.5" /> Agents assignés ({op.membresNoms.length})</div>
+          <div className="flex flex-wrap gap-1.5">
+            {op.membresNoms.map((n, i) => <span key={i} className="rounded-full border border-border bg-surface px-2 py-0.5 text-[0.76rem]">{n}</span>)}
+          </div>
+        </div>
+      ) : null}
+      {op.etapes.length ? (
+        <div className="flex flex-col gap-2">
+          <div className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Préparation par étapes</div>
+          {op.etapes.map((e, i) => <EtapeBloc key={i} e={e} i={i} />)}
+        </div>
+      ) : null}
+      {rien ? <p className="text-[0.8rem] text-faint">Aucun détail supplémentaire synchronisé pour cette opération.</p> : null}
+    </div>
+  );
+}
+
 function EditModal({ op, onClose, router }: { op: OpDetail; onClose: () => void; router: Router }) {
   const [cible, setCible] = useState(op.titre);
   const [categorie, setCategorie] = useState(op.type);
@@ -229,8 +309,10 @@ function EditModal({ op, onClose, router }: { op: OpDetail; onClose: () => void;
   }
 
   return (
-    <Modal titre="Modifier l'opération" onClose={onClose}>
+    <Modal titre={op.titre} onClose={onClose}>
       {flash ? <div className="mb-3"><Flash>{flash}</Flash></div> : null}
+      <OpDetailBloc op={op} />
+      <div className="mb-2 border-t border-border pt-3 text-[0.72rem] uppercase tracking-[0.06em] text-faint">Modifier</div>
       <div className="flex flex-col gap-3">
         <Champ label="Titre / objectif"><input className={inputCls} value={cible} onChange={(e) => setCible(e.target.value)} maxLength={200} /></Champ>
         <div className="grid gap-3 sm:grid-cols-2">

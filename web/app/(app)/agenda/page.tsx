@@ -3,6 +3,7 @@ import { getAgenda } from "@/lib/queries";
 import { PageHeader, Card, CardHeader, Empty, Badge } from "@/components/ui";
 import { ContactsGrid } from "@/components/contacts-grid";
 import { ContactNouveau } from "@/components/contact-nouveau";
+import { AgendaLieuPhoto } from "@/components/agenda-lieu-photo";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +47,7 @@ export default async function AgendaPage() {
                   <th className="border-b border-border px-2.5 py-2 font-semibold">Lieu</th>
                   <th className="border-b border-border px-2.5 py-2 font-semibold">Créneau</th>
                   <th className="border-b border-border px-2.5 py-2 font-semibold">Statut</th>
+                  <th className="border-b border-border px-2.5 py-2 font-semibold">Lieu (photo)</th>
                 </tr>
               </thead>
               <tbody>
@@ -59,6 +61,7 @@ export default async function AgendaPage() {
                     <td className="border-b border-border px-2.5 py-2.5 text-muted">{r.lieu || "—"}</td>
                     <td className="border-b border-border px-2.5 py-2.5 text-muted">{r.creneau || "—"}</td>
                     <td className="border-b border-border px-2.5 py-2.5"><Badge tone={RDV_TONE[r.statut?.toLowerCase()] ?? "muted"}>{r.statut}</Badge></td>
+                    <td className="border-b border-border px-2.5 py-2.5"><AgendaLieuPhoto id={r.id} lieuPhoto={r.lieuPhoto} lieu={r.lieu} /></td>
                   </tr>
                 ))}
               </tbody>

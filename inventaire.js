@@ -935,6 +935,32 @@ async function onMessage(message) {
   } catch { return claimed; }
 }
 
-module.exports = { inventaireCommands, routeInteraction, onMessage, rafraichirBoardDemarrage };
+// ═══════════════════════════════════════════════════════════════
+//  PHOTOS DEPUIS LE SITE WEB (appelé par commande-web.js)
+//  Le site téléverse 1-2 photos (Supabase Storage) et transmet leurs URLs.
+//  On les lit par IA et on AJOUTE les quantités lues au coffre (additif, sûr).
+//  MUTE le `db` passé (l'appelant sauvegarde). Retourne un résumé.
+// ═══════════════════════════════════════════════════════════════
+async function traiterPhotosWeb(db, urls, parNom) {
+  const inv = _ensure(db);
+  const lists = [];
+  for (const url of (Array.isArray(urls) ? urls : []).slice(0, 3)) {
+    try {
+      const buf = await _imageBytes(String(url));
+      if (!buf) { console.log('⚠️ inventaire web: téléchargement image échoué'); continue; }
+      const mt = _sniffMt(buf) || 'image/png';
+      const items = await _analyserImage(buf.toString('base64'), mt);
+      if (items && items.length) lists.push(items);
+    } catch (e) { console.log('⚠️ inventaire web photo:', e.message); }
+  }
+  const merged = _merge(lists);
+  if (!merged.length) return { ok: false, message: 'Aucun objet lu sur la ou les photo(s)' };
+  let n = 0;
+  for (const it of merged) { _applyMov(inv, 'add', it.categorie, it.nom, it.quantite); n += it.quantite; }
+  _journalAdd(inv, parNom || 'Site web', `📸 Photo lue depuis le site → +${n} objet(s) (${merged.length} lignes)`);
+  return { ok: true, message: `+${n} objet(s) ajouté(s) depuis la photo (${merged.length} lignes)`, items: merged };
+}
+
+module.exports = { inventaireCommands, routeInteraction, onMessage, rafraichirBoardDemarrage, traiterPhotosWeb };
 // Exposé pour les tests uniquement (aucun effet sur le fonctionnement).
 module.exports.__test = { _boardEmbed, _chunkLignes, _appliquer, _ensure, _counts };

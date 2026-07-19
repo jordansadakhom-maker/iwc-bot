@@ -14,3 +14,21 @@ export async function supprimerArme(id: string): Promise<CommandeResult> {
   if (!id) return { ok: false, error: "Arme introuvable." };
   return envoyerCommande("arme.delete", { id });
 }
+
+// ── Stock du coffre commun (inventaire, séparé du registre d'armes) ──
+const CATS = ["Armes", "Munitions", "Provisions", "Médecine", "Matériel", "Commun"];
+
+export async function ajusterStock(categorie: string, nom: string, mode: string, quantite: number): Promise<CommandeResult> {
+  const n = (nom || "").trim();
+  if (!n) return { ok: false, error: "Nom d'objet manquant." };
+  const cat = CATS.includes(categorie) ? categorie : "Commun";
+  const m = ["add", "remove", "set"].includes(mode) ? mode : "add";
+  const q = Math.abs(Math.round(Number(quantite) || 0));
+  return envoyerCommande("inventaire.ajuster", { categorie: cat, nom: n.slice(0, 120), mode: m, quantite: q });
+}
+
+export async function lirePhotosInventaire(urls: string[]): Promise<CommandeResult> {
+  const list = (Array.isArray(urls) ? urls : []).filter((u) => /^https?:\/\//.test(u)).slice(0, 3);
+  if (!list.length) return { ok: false, error: "Aucune photo." };
+  return envoyerCommande("inventaire.photo", { urls: list });
+}

@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { envoyerCommande } from "@/lib/commandes";
 
 // Gestion des rendez-vous clients (pris sur le site) — trace conservée.
 // Les demandes web vivent dans Supabase (table Rdv) ; on les met à jour
@@ -54,4 +55,46 @@ export async function repondreRdv(id: string, texte: string): Promise<CommResult
   const { error: e2 } = await admin.from("Rdv").update({ paiement: { ...paiement, reponses } }).eq("id", id);
   if (e2) { console.error("repondreRdv:", e2.message); return { ok: false, error: "Enregistrement impossible." }; }
   return { ok: true };
+}
+
+// Lit le paiement JSON d'un RDV, applique un patch, réécrit. Renvoie le nouvel objet.
+async function _patchPaiement(id: string, patch: Record<string, unknown>): Promise<CommResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { data, error: e1 } = await admin.from("Rdv").select("paiement").eq("id", id).maybeSingle();
+  if (e1) return { ok: false, error: "RDV introuvable." };
+  const paiement = (data?.paiement && typeof data.paiement === "object" ? data.paiement : {}) as Record<string, unknown>;
+  const { error: e2 } = await admin.from("Rdv").update({ paiement: { ...paiement, ...patch } }).eq("id", id);
+  if (e2) { console.error("_patchPaiement:", e2.message); return { ok: false, error: "Enregistrement impossible." }; }
+  return { ok: true };
+}
+
+// Assigne des membres (et/ou un pôle) à un RDV : enregistre sur le RDV + demande
+// au bot de pinguer / DM les concernés sur Discord.
+export async function assignerRdv(
+  id: string,
+  membreIds: string[],
+  membresNoms: string[],
+  groupe: string | null,
+  meta: { nom?: string | null; lieu?: string | null; creneau?: string | null },
+): Promise<CommResult> {
+  if (!id) return { ok: false, error: "RDV introuvable." };
+  const ids = (Array.isArray(membreIds) ? membreIds : []).map(String).filter(Boolean).slice(0, 15);
+  const g = groupe === "legal" || groupe === "illegal" ? groupe : null;
+  if (!ids.length && !g) return { ok: false, error: "Choisis au moins une personne ou un pôle." };
+  const r = await _patchPaiement(id, { assignes: membresNoms.slice(0, 15), assignesIds: ids, assignesGroupe: g });
+  if (!r.ok) return r;
+  // Ping Discord (best-effort, via la file de commandes).
+  await envoyerCommande("rdv.assigner", {
+    membreIds: ids, groupe: g,
+    rdvNom: meta.nom || null, rdvLieu: meta.lieu || null, rdvCreneau: meta.creneau || null,
+  });
+  return { ok: true };
+}
+
+// Enregistre l'URL d'une photo du lieu du RDV (Supabase Storage).
+export async function definirLieuPhotoRdv(id: string, url: string): Promise<CommResult> {
+  if (!id) return { ok: false, error: "RDV introuvable." };
+  if (!/^https?:\/\//.test(url || "")) return { ok: false, error: "Photo invalide." };
+  return _patchPaiement(id, { lieuPhoto: url });
 }

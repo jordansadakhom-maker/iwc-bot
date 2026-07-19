@@ -203,6 +203,11 @@ function _construire(db) {
       etapes: o.etapes || null,
       createdAt: o.createdAt || undefined,
       updatedAt: now,
+      // Détail complet (colonnes optionnelles — repli automatique si absentes).
+      objectif: _nn(o.objectif || o.briefing, 2000),
+      lieu: _nn(o.lieu || o.lieuTexte, 200),
+      pole: o.pole ? _pole(o.pole) : 'both',
+      createurNom: _nn(o.createurNom || o.createdByNom, 120),
     });
   }
 
@@ -333,7 +338,38 @@ function _construire(db) {
       createdAt: _isoOrUndef(f.createdAt),
     }));
 
-  return { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes, factures };
+  // ── Télégrammes (db.conversations) → relayés sur le site ──
+  const telegrammes = Object.values(db.conversations || {})
+    .filter(c => c && c.rdvId)
+    .map(c => ({
+      id: String(c.rdvId),
+      clientId: c.demandeurId ? String(c.demandeurId) : null,
+      clientNom: _nn(c.nomRP, 120) || 'Client',
+      statut: _str(c.status || 'ouvert', 40),
+      messages: Array.isArray(c.messages) ? c.messages : [],
+      rdvCree: !!c.rdvCree,
+      salonId: c.parentChannelId ? String(c.parentChannelId) : null,
+      createdAt: _isoOrUndef(c.createdAt),
+      updatedAt: now,
+    }));
+
+  // ── Inventaire du coffre commun (db.inventaire.stock) → items + mouvements ──
+  const invItems = [];
+  const invMouv = [];
+  if (db.inventaire && db.inventaire.stock && typeof db.inventaire.stock === 'object') {
+    for (const [cat, bucket] of Object.entries(db.inventaire.stock)) {
+      if (!bucket || typeof bucket !== 'object') continue;
+      for (const [nom, q] of Object.entries(bucket)) {
+        const norm = String(nom).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
+        const seuil = (db.inventaire.seuils && db.inventaire.seuils[norm] != null) ? Number(db.inventaire.seuils[norm]) : null;
+        invItems.push({ id: `inv:${cat}:${norm}`.slice(0, 120), categorie: _str(cat, 40) || 'Commun', nom: _str(nom, 120) || 'Objet', quantite: Math.round(Number(q)) || 0, seuil, updatedAt: now });
+      }
+    }
+    const jr = Array.isArray(db.inventaire.journal) ? db.inventaire.journal.slice(0, 60) : [];
+    jr.forEach((j, i) => { if (j) invMouv.push({ id: `invm:${j.t || 'x'}:${i}`.slice(0, 120), texte: _str(j.txt, 300), par: _nn(j.who, 120), createdAt: _isoOrUndef(j.t) }); });
+  }
+
+  return { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes, factures, telegrammes, invItems, invMouv };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -350,12 +386,19 @@ async function syncAll(db) {
     let out;
     do {
       _redo = false;
-      const { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes, factures } = _construire(db);
+      const { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes, factures, telegrammes, invItems, invMouv } = _construire(db);
       const results = [];
       results.push(await _upsert('Membre', membres));    // 1. aucun FK bloquant (parrainId non fourni)
       results.push(await _upsert('Coffre', coffres));    // 2. indépendant
       results.push(await _upsert('Contrat', contrats));  // 3. indépendant
-      results.push(await _upsert('Operation', operations)); // 4. FK → Membre + Contrat (déjà poussés)
+      // 4. Opérations — FK → Membre + Contrat. Tente le détail complet ; repli si
+      //    les colonnes optionnelles (objectif, lieu, pole, createurNom) n'existent pas.
+      let rO = await _upsert('Operation', operations);
+      if (!rO.ok && rO.status === 400) {
+        const base = operations.map(({ objectif, lieu, pole, createurNom, ...b }) => b);
+        rO = await _upsert('Operation', base);
+      }
+      results.push(rO);
       results.push(await _upsert('RapportInfo', rapports)); // 5. renseignement — indépendant
       // 6. Traques / avis de recherche — format complet, repli si colonnes riches absentes.
       let rT = await _upsert('Traque', traques);
@@ -383,6 +426,9 @@ async function syncAll(db) {
       results.push(await _upsert('Rdv', rdvs));                // 9. rdv du bot (coexiste avec les demandes web)
       results.push(await _upsert('Arme', armes));              // 10. registre d'armes (table optionnelle — ignoré si absente)
       results.push(await _upsert('Facture', factures));        // 11. factures (table optionnelle — ignoré si absente)
+      results.push(await _upsert('Telegramme', telegrammes));  // 12. télégrammes (table optionnelle — ignoré si absente)
+      results.push(await _upsert('InventaireItem', invItems)); // 13. stock du coffre commun (table optionnelle)
+      results.push(await _upsert('InventaireMouvement', invMouv)); // 14. mouvements de stock (table optionnelle)
       // Nettoyage des fantômes : membres partis (si roster connu), + entités supprimées localement.
       // ⚠️ On NE réconcilie PAS Rdv (préserve les demandes venues du site web).
       if (_membresActuels || _roster) { try { await _reconcilier('Membre', membres.map(m => m.id)); } catch {} }
@@ -394,6 +440,8 @@ async function syncAll(db) {
       try { await _reconcilier('Contact', contacts.map(c => c.id)); } catch {}
       try { await _reconcilier('Arme', armes.map(a => a.id)); } catch {}
       try { await _reconcilier('Facture', factures.map(f => f.id)); } catch {}
+      try { await _reconcilier('Telegramme', telegrammes.map(t => t.id)); } catch {}
+      try { await _reconcilier('InventaireItem', invItems.map(i => i.id)); } catch {}
       const summary = results.map(r => `${r.table} ${r.ok ? r.count : '✗' + (r.status || '')}`).join(' · ');
       console.log(`🔄 Sync Supabase → ${summary}`);
       out = { ok: true, results };
