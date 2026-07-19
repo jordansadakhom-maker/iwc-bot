@@ -365,6 +365,21 @@ async function httpHandle(req, res, client) {
     const tok = u.searchParams.get('k') || '';
     const info = _tokInfo(tok); const level = info?.level || null;
     const guild = client.guilds.cache.first();
+    // 🔗 Pont site web : le site (déjà authentifié en Discord) demande un jeton carte
+    // pour un utilisateur, via un secret partagé. Le bot fait autorité sur le niveau.
+    if (u.pathname === '/carte/site-token') {
+      const secret = process.env.CARTE_SITE_SECRET || '';
+      const given = u.searchParams.get('secret') || '';
+      if (!secret || given !== secret) { res.writeHead(403, { 'Content-Type': 'application/json' }); res.end('{"error":"forbidden"}'); return true; }
+      const uid = String(u.searchParams.get('uid') || '').replace(/[^0-9]/g, '').slice(0, 32);
+      if (!uid) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end('{"error":"uid"}'); return true; }
+      let member = null;
+      try { member = guild ? (guild.members.cache.get(uid) || await guild.members.fetch(uid).catch(() => null)) : null; } catch {}
+      const { tok: t2, level: lvl } = creerToken(member || { id: uid });
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ tok: t2, level: lvl }));
+      return true;
+    }
     if (u.pathname === '/carte/image') {
       if (!level) { res.writeHead(403); res.end('expired'); return true; }
       const buf = guild ? await _baseMapBuffer(guild) : null;

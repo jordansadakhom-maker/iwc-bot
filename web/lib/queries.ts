@@ -113,6 +113,19 @@ export async function isBaseConnected(): Promise<boolean> {
   }
 }
 
+// ID Discord du membre connecté (pour les ponts avec le bot, ex. la carte).
+export async function getSessionDiscordId(): Promise<string | null> {
+  if (!authConfigured()) return null;
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+    const meta = (user.user_metadata || {}) as Record<string, unknown>;
+    const discordId = (meta.provider_id || meta.sub || "") as string;
+    return discordId ? String(discordId) : null;
+  } catch { return null; }
+}
+
 // Profil du membre connecté (compte Discord + fiche Membre si elle existe).
 export async function getSessionProfile(): Promise<Profil | null> {
   if (!authConfigured()) return null;
