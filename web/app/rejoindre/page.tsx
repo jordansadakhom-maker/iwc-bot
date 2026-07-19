@@ -1,5 +1,5 @@
-import Link from "next/link";
 import { RejoindreForm } from "./rejoindre-form";
+import { PublicNav } from "@/components/public-nav";
 
 // Page PUBLIQUE : rejoindre la Iron Wolf Company (candidature sans connexion).
 // Exemptée du verrouillage REQUIRE_AUTH via le middleware.
@@ -30,14 +30,12 @@ export default function RejoindrePage() {
           </p>
         </div>
 
+        <PublicNav active="rejoindre" />
+
         <section className="rounded-2xl border border-border bg-surface p-5 shadow-card sm:p-6" style={{ background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,#000))" }}>
           <h2 className="mb-4 text-center font-display text-lg">Formulaire de candidature</h2>
           <RejoindreForm />
         </section>
-
-        <p className="mt-5 text-center text-[0.78rem] text-faint">
-          Besoin d&apos;une prestation&nbsp;? <Link href="/rendez-vous" className="underline hover:text-ink">Prends rendez-vous</Link> · Une question&nbsp;? <Link href="/telegramme" className="underline hover:text-ink">Envoie un télégramme</Link>
-        </p>
       </div>
     </main>
   );
