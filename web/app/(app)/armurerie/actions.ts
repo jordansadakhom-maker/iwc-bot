@@ -31,14 +31,22 @@ async function auteurNom(): Promise<string> {
 async function _mouvementCoffre(admin: Admin, montant: number, sens: "entree" | "sortie", motif: string, auteur: string, nature?: "produit" | "charge" | null) {
   const m = Math.abs(round2(Number(montant) || 0));
   if (!m) return;
+  const nat = sens === "sortie" && (nature === "produit" || nature === "charge") ? nature : null;
+  const id = newId("mvt");
+  // Voie ATOMIQUE : une fonction SQL met à jour le solde ET journalise en une seule
+  // transaction (pas de course entre deux mouvements simultanés).
+  const rpc = await admin.rpc("armurerie_coffre_mouvement", { p_id: id, p_montant: m, p_sens: sens, p_motif: s(motif, 200), p_auteur: s(auteur, 120), p_nature: nat });
+  if (!rpc.error) return;
+  // Fonction non installée (migration SQL pas encore passée) → repli lecture/écriture.
+  const absente = rpc.error.code === "PGRST202" || /schema cache|not find|does not exist/i.test(rpc.error.message || "");
+  if (!absente) throw new Error(rpc.error.message);
   const { data, error: eLire } = await admin.from("ArmurerieCoffre").select("solde").eq("id", "vanhorn").maybeSingle();
   if (eLire) throw new Error(eLire.message);
   const actuel = data ? Number((data as { solde: number }).solde) || 0 : 0;
   const nouveau = Math.max(0, sens === "sortie" ? actuel - m : actuel + m);
   const { error: eUp } = await admin.from("ArmurerieCoffre").upsert({ id: "vanhorn", solde: nouveau, updatedAt: new Date().toISOString() }, { onConflict: "id" });
   if (eUp) throw new Error(eUp.message);
-  const base: Record<string, unknown> = { id: newId("mvt"), sens, montant: m, motif: s(motif, 200), auteur: s(auteur, 120), createdAt: new Date().toISOString() };
-  const nat = sens === "sortie" && (nature === "produit" || nature === "charge") ? nature : null;
+  const base: Record<string, unknown> = { id, sens, montant: m, motif: s(motif, 200), auteur: s(auteur, 120), createdAt: new Date().toISOString() };
   const avecNat: Record<string, unknown> = nat ? { ...base, nature: nat } : base;
   let ins = await admin.from("ArmurerieMouvementCoffre").insert(avecNat);
   if (ins.error && nat && /nature/i.test(ins.error.message)) ins = await admin.from("ArmurerieMouvementCoffre").insert(base);
@@ -208,12 +216,15 @@ export async function creerProduit(d: { nom: string; categorie?: string; prix?: 
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
   const id = newId("prd");
-  const { error } = await admin.from("ArmurerieProduit").insert({
+  const row: Record<string, unknown> = {
     id, nom: s(d.nom, 120), categorie: s(d.categorie, 60) || "Divers",
     prix: Math.max(0, round2(Number(d.prix) || 0)), cout: Math.max(0, round2(Number(d.cout) || 0)),
     stock: Math.max(0, Math.round(Number(d.stock) || 0)), aLaDemande: !!d.aLaDemande,
     niveau: Math.max(0, Math.min(3, Math.round(Number(d.niveau) || 0))), recette: _nettoyerRecette(d.recette),
-  });
+  };
+  let { error } = await admin.from("ArmurerieProduit").insert(row);
+  // Colonne « recette » pas encore migrée ? on réinsère sans — le produit se crée quand même.
+  if (error && /recette/i.test(error.message)) { delete row.recette; ({ error } = await admin.from("ArmurerieProduit").insert(row)); }
   if (error) return { ok: false, error: tableErr(error.message, "produits") };
   return { ok: true, id };
 }
@@ -230,7 +241,8 @@ export async function majProduit(id: string, patch: Record<string, unknown>): Pr
   if ("aLaDemande" in patch) up.aLaDemande = !!patch.aLaDemande;
   if ("niveau" in patch) up.niveau = Math.max(0, Math.min(3, Math.round(Number(patch.niveau) || 0)));
   if ("recette" in patch) up.recette = _nettoyerRecette(patch.recette);
-  const { error } = await admin.from("ArmurerieProduit").update(up).eq("id", id);
+  let { error } = await admin.from("ArmurerieProduit").update(up).eq("id", id);
+  if (error && "recette" in up && /recette/i.test(error.message)) { delete up.recette; ({ error } = await admin.from("ArmurerieProduit").update(up).eq("id", id)); }
   return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
 }
 export async function supprimerProduit(id: string): Promise<ArmResult> {
