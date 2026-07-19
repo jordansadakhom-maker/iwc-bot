@@ -441,13 +441,15 @@ async function _accumulerImpot(admin: Admin, montant: number) {
 
 // ── Caisse (point de vente) — tout est automatisé à l'encaissement ─
 export type LigneCaisse = { produitId?: string; nom: string; categorie?: string; prix: number; cout?: number; qte: number; aLaDemande?: boolean };
-export async function validerCaisse(lignes: LigneCaisse[], client: string, notes: string, clientId?: string): Promise<ArmResult & { total?: number }> {
+export async function validerCaisse(lignes: LigneCaisse[], client: string, notes: string, clientId?: string, opts?: { serie?: string; photo?: string }): Promise<ArmResult & { total?: number }> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
   const items = (Array.isArray(lignes) ? lignes : []).filter((l) => l && Number(l.qte) > 0);
   if (!items.length) return { ok: false, error: "Le panier est vide." };
   const vendeur = await auteurNom();
   const dateV = new Date().toLocaleDateString("fr-FR");
+  const serie = s(opts?.serie, 60);
+  const photo = opts?.photo ? s(opts.photo, 600) : null;
 
   // Client fiché → on rattache la vente (photo + télégramme au registre) ; sinon passage.
   let cid: string | null = clientId ? s(clientId, 60) : null;
@@ -465,11 +467,14 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
       const q = Math.max(1, Math.round(Number(l.qte) || 1));
       const montant = Math.max(0, round2((Number(l.prix) || 0) * q));
       total += montant;
-      await admin.from("ArmurerieVente").insert({
+      const row: Record<string, unknown> = {
         id: newId("vte"), clientId: cid, acquereur: cli, dateVente: dateV, marque: s(l.nom, 80), modele: null,
-        categorie: s(l.categorie, 60), numeroSerie: `VTE-${Date.now().toString(36).slice(-4)}`,
+        categorie: s(l.categorie, 60), numeroSerie: serie || `VTE-${Date.now().toString(36).slice(-4)}`,
         vendeur, telegramme: cliTel, prix: montant, notes: s(notes, 1000), statut: "enregistree",
-      });
+      };
+      if (photo) row.photo = photo; // photo de l'acquéreur (si colonne migrée)
+      let insV = await admin.from("ArmurerieVente").insert(row);
+      if (insV.error && photo && /photo/i.test(insV.error.message)) { delete row.photo; insV = await admin.from("ArmurerieVente").insert(row); }
       if (l.produitId && !l.aLaDemande) {
         const { data } = await admin.from("ArmurerieProduit").select("stock").eq("id", l.produitId).maybeSingle();
         if (data) await admin.from("ArmurerieProduit").update({ stock: Math.max(0, (Number((data as { stock: number }).stock) || 0) - q) }).eq("id", l.produitId);
