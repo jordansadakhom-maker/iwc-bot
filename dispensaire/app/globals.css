@@ -79,3 +79,12 @@ a { color: var(--accent); }
 .btn-accent:hover { filter: brightness(1.06); }
 
 .tabnum { font-variant-numeric: tabular-nums; }
+
+/* Document imprimable (certificat) : à l'impression, on ne garde que lui. */
+@media print {
+  body { background: #fff !important; }
+  body * { visibility: hidden; }
+  .imprimable, .imprimable * { visibility: visible; }
+  .imprimable { position: absolute; inset: 0; margin: 0; border: none; box-shadow: none; }
+  .no-print { display: none !important; }
+}

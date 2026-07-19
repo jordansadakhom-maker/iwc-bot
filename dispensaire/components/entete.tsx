@@ -2,14 +2,14 @@ import Link from "next/link";
 
 export const ONGLETS = [
   { href: "/", label: "Accueil", pret: true },
-  { href: "/stockage", label: "Stockage", pret: false },
-  { href: "/facturation", label: "Facturation F.D.O.", pret: false },
-  { href: "/repertoire", label: "Répertoire", pret: false },
-  { href: "/rh", label: "Personnel", pret: false, prive: true },
-  { href: "/certificats", label: "Certificats", pret: false },
-  { href: "/documents", label: "Documents", pret: false },
-  { href: "/ventes", label: "Ventes de bandages", pret: false },
-  { href: "/factures", label: "Factures en retard", pret: false, prive: true },
+  { href: "/stockage", label: "Stockage", pret: true },
+  { href: "/facturation", label: "Facturation F.D.O.", pret: true },
+  { href: "/repertoire", label: "Répertoire", pret: true },
+  { href: "/rh", label: "Personnel", pret: true, prive: true },
+  { href: "/certificats", label: "Certificats", pret: true },
+  { href: "/documents", label: "Documents", pret: true },
+  { href: "/ventes", label: "Ventes de bandages", pret: true },
+  { href: "/factures", label: "Factures en retard", pret: true, prive: true },
 ];
 
 export function Entete({ actif }: { actif: string }) {

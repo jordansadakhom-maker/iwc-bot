@@ -103,6 +103,19 @@ create table if not exists "DispFacture" (
   "createdAt" timestamptz default now()
 );
 
+-- Certificats médicaux remplis (archive des documents émis)
+create table if not exists "DispCertificat" (
+  "id" text primary key,
+  "patient" text not null,
+  "praticien" text,
+  "type" text,                               -- Aptitude / Repos / Blessure / Décès…
+  "diagnostic" text,
+  "prescription" text,
+  "observations" text,
+  "dateActe" date,
+  "createdAt" timestamptz default now()
+);
+
 -- RLS : activées, lecture publique + écriture via clé service (côté serveur).
 alter table "DispSalarie"      enable row level security;
 alter table "DispPointage"     enable row level security;
@@ -113,3 +126,4 @@ alter table "DispRepertoire"   enable row level security;
 alter table "DispDocument"     enable row level security;
 alter table "DispVenteBandage" enable row level security;
 alter table "DispFacture"      enable row level security;
+alter table "DispCertificat"   enable row level security;
