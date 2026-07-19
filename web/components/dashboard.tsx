@@ -1,10 +1,10 @@
 "use client";
 
-import { FileText, Wallet, Landmark, Target, Plug, Inbox, Users, Activity, Coins } from "lucide-react";
+import { FileText, Wallet, Landmark, Target, Plug, Inbox, Users, Activity, Coins, Compass } from "lucide-react";
 import clsx from "clsx";
 import type { DashData } from "@/lib/queries";
 import { BarresH, Donut, Repartition } from "@/components/charts";
-import { PoleChip, SectionTitle } from "@/components/ui";
+import { PoleChip, SectionTitle, Ornement } from "@/components/ui";
 
 function Card({ children, className, delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
   return (
@@ -163,18 +163,26 @@ function OpsBoard({ data }: { data: DashData }) {
 export function Dashboard({ data }: { data: DashData }) {
   return (
     <>
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="font-display text-[1.9rem] tracking-[0.01em]" style={{ textWrap: "balance" } as React.CSSProperties}>Tableau de bord</h1>
-          <div className="mt-1 text-[0.85rem] text-muted">Vue d&apos;ensemble de la maison{data.connecte ? ` · ${data.membresCount} membre(s)` : ""}</div>
+      <div>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full border" style={{ borderColor: "color-mix(in srgb,var(--accent) 55%,var(--border))", background: "radial-gradient(circle at 30% 25%, color-mix(in srgb,var(--accent) 24%,transparent), color-mix(in srgb,var(--surface) 92%,#000) 72%)", boxShadow: "inset 0 0 0 1px color-mix(in srgb,var(--accent) 20%,transparent)" }}>
+              <Compass className="h-[22px] w-[22px]" style={{ color: "var(--accent)" }} strokeWidth={1.7} />
+            </span>
+            <div>
+              <h1 className="font-display text-[1.9rem] leading-none tracking-[0.01em]" style={{ textWrap: "balance" } as React.CSSProperties}>Tableau de bord</h1>
+              <div className="mt-1.5 font-display text-[0.9rem] italic text-muted">Poste de commandement de la maison{data.connecte ? ` · ${data.membresCount} âme(s) sous ta bannière` : ""}</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <PoleChip pole={data.pole} />
+            <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-[0.72rem] text-muted">
+              <span className="h-2 w-2 rounded-full" style={{ background: data.connecte ? "var(--good)" : "var(--faint)" }} />
+              {data.connecte ? "Données en direct" : "Base non connectée"}
+            </span>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <PoleChip pole={data.pole} />
-          <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-[0.72rem] text-muted">
-            <span className="h-2 w-2 rounded-full" style={{ background: data.connecte ? "var(--good)" : "var(--faint)" }} />
-            {data.connecte ? "Données en direct" : "Base non connectée"}
-          </span>
-        </div>
+        <Ornement className="mt-3.5" />
       </div>
 
       <BandeauAttente connecte={data.connecte} />
