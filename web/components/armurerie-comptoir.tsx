@@ -227,9 +227,9 @@ function CaisseTab({ produits, ressources, clients, router }: { produits: ArmPro
     const dateV = new Date().toLocaleDateString("fr-FR");
     const snap: ArmVente[] = lignes.map((l, i) => ({
       id: `${r.ticket || "FAC"}-${i}`, clientId: clientId || null, acquereur: acq, dateVente: dateV,
-      marque: l.p.nom, modele: l.n > 1 ? `×${l.n}` : null, categorie: l.p.categorie,
+      marque: l.p.nom, modele: null, categorie: l.p.categorie,
       numeroSerie: serie.trim() || null, vendeur: null, telegramme: cliObj?.telegramme || null,
-      prix: pu(l.p) * l.n, notes: notes || null, statut: "enregistree",
+      prix: pu(l.p) * l.n, quantite: l.n, prixUnitaire: pu(l.p), notes: notes || null, statut: "enregistree",
       photo: photo || cliObj?.carteIdentite || null, ticket: r.ticket || null, createdAt: null,
     }));
     setFactureSnap(snap); setFactureOpen(false);
@@ -897,7 +897,7 @@ function ClientModal({ client, achats = [], onClose, router }: { client?: ArmCli
                   </div>
                   {t.map((a) => (
                     <div key={a.id} className="flex items-center justify-between gap-2 text-[0.78rem]">
-                      <span className="min-w-0 truncate text-muted">{[a.marque, a.modele].filter(Boolean).join(" ") || "Arme"}{a.numeroSerie ? <> · <span className="mono text-faint">{a.numeroSerie}</span></> : null}</span>
+                      <span className="min-w-0 truncate text-muted">{[a.marque, a.modele].filter(Boolean).join(" ") || "Arme"}{a.quantite > 1 ? <span className="font-num"> ×{a.quantite}</span> : null}{a.numeroSerie ? <> · <span className="mono text-faint">{a.numeroSerie}</span></> : null}</span>
                       <span className="shrink-0 font-num">{money(a.prix)}</span>
                     </div>
                   ))}
@@ -968,15 +968,17 @@ function FactureModal({ ventes, client, onClose }: { ventes: ArmVente[]; client?
         <table className="w-full border-collapse text-[0.82rem]">
           <thead><tr className="text-[0.6rem] uppercase tracking-[0.05em] text-faint">
             <th className="border-b border-border py-1 text-left font-semibold">Désignation</th>
-            <th className="border-b border-border py-1 text-left font-semibold">N° série</th>
-            <th className="border-b border-border py-1 text-right font-semibold">Prix</th>
+            <th className="border-b border-border py-1 text-right font-semibold">Qté</th>
+            <th className="border-b border-border py-1 text-right font-semibold">P.U.</th>
+            <th className="border-b border-border py-1 text-right font-semibold">Total</th>
           </tr></thead>
           <tbody>
             {ventes.map((v) => (
               <tr key={v.id}>
-                <td className="border-b border-border py-1.5">{[v.marque, v.modele].filter(Boolean).join(" ") || "Article"}</td>
-                <td className="border-b border-border py-1.5 mono text-[0.74rem] text-muted">{v.numeroSerie || "—"}</td>
-                <td className="border-b border-border py-1.5 text-right font-num">{money(v.prix)}</td>
+                <td className="border-b border-border py-1.5">{[v.marque, v.modele].filter(Boolean).join(" ") || "Article"}{v.numeroSerie ? <div className="mono text-[0.68rem] text-faint">N° {v.numeroSerie}</div> : null}</td>
+                <td className="border-b border-border py-1.5 text-right font-num tabular-nums">{v.quantite}</td>
+                <td className="border-b border-border py-1.5 text-right font-num tabular-nums">{money(v.prixUnitaire)}</td>
+                <td className="border-b border-border py-1.5 text-right font-num tabular-nums font-semibold">{money(v.prix)}</td>
               </tr>
             ))}
           </tbody>
@@ -1027,7 +1029,8 @@ function VentesTab({ ventes, clients, router }: { ventes: ArmVente[]; clients: A
       l.push(`  N° de série ....... ${v.numeroSerie || "—"}`);
       l.push(`  Vendeur ........... ${v.vendeur || "—"}`);
       l.push(`  N° télégramme ..... ${v.telegramme || "—"}`);
-      l.push(`  Prix .............. ${money(v.prix)}`);
+      l.push(`  Quantité .......... ${v.quantite}${v.quantite > 1 ? ` × ${money(v.prixUnitaire)}` : ""}`);
+      l.push(`  Total ............. ${money(v.prix)}`);
       if (v.notes) l.push(`  Notes ............. ${v.notes}`);
       l.push("");
     });
@@ -1087,13 +1090,13 @@ function VentesTab({ ventes, clients, router }: { ventes: ArmVente[]; clients: A
                         {v.acquereur}
                       </span>
                     </td>
-                    <td className="border-b border-border px-2.5 py-2 text-muted">{[v.marque, v.modele].filter(Boolean).join(" ") || "—"}</td>
+                    <td className="border-b border-border px-2.5 py-2 text-muted">{[v.marque, v.modele].filter(Boolean).join(" ") || "—"}{v.quantite > 1 ? <span className="ml-1 font-num text-faint">×{v.quantite}</span> : null}</td>
                     <td className="border-b border-border px-2.5 py-2"><span className="mono text-[0.76rem]">{v.numeroSerie || "—"}</span></td>
                     <td className="border-b border-border px-2.5 py-2 text-muted">{v.vendeur || "—"}</td>
                     <td className="border-b border-border px-2.5 py-2 text-faint">{v.telegramme || (cli?.telegramme ?? "—")}</td>
                     <td className="border-b border-border px-2.5 py-2">
                       <div className="flex items-center justify-end gap-2">
-                        <span className="font-num">{money(v.prix)}</span>
+                        <span className="text-right"><span className="font-num">{money(v.prix)}</span>{v.quantite > 1 ? <span className="block text-[0.64rem] text-faint">{v.quantite} × {money(v.prixUnitaire)}</span> : null}</span>
                         <button onClick={(e) => { e.stopPropagation(); setFacture(groupeDe(v)); }} title="Voir la facture" className="rounded-md border border-border bg-surface px-1.5 py-0.5 text-[0.72rem] hover:border-border-2">🧾</button>
                       </div>
                     </td>
@@ -1123,8 +1126,10 @@ function VenteModal({ vente, clients, onClose, router }: { vente?: ArmVente; cli
   const [numeroSerie, setNumeroSerie] = useState(vente?.numeroSerie || "");
   const [vendeur, setVendeur] = useState(vente?.vendeur || "");
   const [telegramme, setTelegramme] = useState(vente?.telegramme || "");
-  const [prix, setPrix] = useState(vente ? String(vente.prix) : "");
+  const [quantite, setQuantite] = useState(vente ? String(vente.quantite || 1) : "1");
+  const [prixUnitaire, setPrixUnitaire] = useState(vente ? String(vente.prixUnitaire ?? vente.prix) : "");
   const [notes, setNotes] = useState(vente?.notes || "");
+  const totalVente = Math.max(0, Math.round((Number(quantite) || 1) * (Number(prixUnitaire) || 0) * 100) / 100);
   const [photo, setPhoto] = useState(vente?.photo || "");
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -1139,7 +1144,7 @@ function VenteModal({ vente, clients, onClose, router }: { vente?: ArmVente; cli
     setErr(null);
     if (acquereur.trim().length < 2) { setErr("Nom de l'acquéreur requis (Décret N°2)."); return; }
     setBusy("save");
-    const data = { clientId: clientId || undefined, acquereur, dateVente, marque, modele, categorie, numeroSerie, vendeur, telegramme, prix: Number(prix) || 0, notes, photo: photo || undefined };
+    const data = { clientId: clientId || undefined, acquereur, dateVente, marque, modele, categorie, numeroSerie, vendeur, telegramme, quantite: Number(quantite) || 1, prixUnitaire: Number(prixUnitaire) || 0, prix: totalVente, notes, photo: photo || undefined };
     const r = editing ? await majVente(vente!.id, data) : await creerVente(data);
     setBusy(null);
     if (!r.ok) { setErr(r.error || "Impossible."); return; }
@@ -1185,10 +1190,12 @@ function VenteModal({ vente, clients, onClose, router }: { vente?: ArmVente; cli
           <Champ label="Modèle"><input className={inputCls} value={modele} onChange={(e) => setModele(e.target.value)} maxLength={80} /></Champ>
         </div>
         <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Catégorie</span><Picker options={CATS.map((c) => ({ key: c, label: c }))} value={categorie} onChange={setCategorie} /></div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Champ label="N° de série"><input className={inputCls + " mono"} value={numeroSerie} onChange={(e) => setNumeroSerie(e.target.value)} placeholder="Optionnel" maxLength={80} /></Champ>
-          <Champ label="Prix ($)"><input className={inputCls} type="number" min={0} step="0.01" value={prix} onChange={(e) => setPrix(e.target.value)} /></Champ>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Champ label="Quantité"><input className={inputCls} type="number" min={1} step="1" value={quantite} onChange={(e) => setQuantite(e.target.value)} /></Champ>
+          <Champ label="Prix unitaire ($)"><input className={inputCls} type="number" min={0} step="0.01" value={prixUnitaire} onChange={(e) => setPrixUnitaire(e.target.value)} /></Champ>
+          <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Total</span><div className="flex h-full min-h-[38px] items-center rounded-lg border border-border bg-surface-2 px-3 font-num text-[0.95rem] font-bold" style={{ color: "var(--accent)" }}>{money(totalVente)}</div></div>
         </div>
+        <Champ label="N° de série"><input className={inputCls + " mono"} value={numeroSerie} onChange={(e) => setNumeroSerie(e.target.value)} placeholder="Optionnel" maxLength={80} /></Champ>
         <div className="grid gap-3 sm:grid-cols-2">
           <Champ label="Vendeur (armurier)"><input className={inputCls} value={vendeur} onChange={(e) => setVendeur(e.target.value)} maxLength={120} /></Champ>
           <Champ label="N° télégramme du client"><input className={inputCls} value={telegramme} onChange={(e) => setTelegramme(e.target.value)} maxLength={60} /></Champ>
