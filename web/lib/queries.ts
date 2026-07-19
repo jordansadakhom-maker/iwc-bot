@@ -900,17 +900,22 @@ export async function getCandidatures(): Promise<CandidaturesData> {
 }
 
 // ── Finances (page dédiée) ───────────────────────────────────────
-export type FinancesData = { connecte: boolean; pole: PoleWeb; coffres: { commun: number | null; legal: number | null; illegal: number | null } };
+export type FinancesData = { connecte: boolean; pole: PoleWeb; coffres: { commun: number | null; legal: number | null; illegal: number | null; vanhorn: number | null } };
 
 export async function getFinances(): Promise<FinancesData> {
   const pole = await getPole();
-  if (!dataConfigured()) return { connecte: false, pole, coffres: { commun: null, legal: null, illegal: null } };
+  const vide: FinancesData = { connecte: false, pole, coffres: { commun: null, legal: null, illegal: null, vanhorn: null } };
+  if (!dataConfigured()) return vide;
   const supabase = createAdminClient();
-  if (!supabase) return { connecte: false, pole, coffres: { commun: null, legal: null, illegal: null } };
-  const { data, error } = await supabase.from("Coffre").select("id,solde");
-  if (error) return { connecte: false, pole, coffres: { commun: null, legal: null, illegal: null } };
-  const find = (id: string) => (data || []).find((c: { id: string; solde: number }) => c.id === id)?.solde ?? null;
-  return { connecte: true, pole, coffres: { commun: find("coffre_commun"), legal: find("coffre_legal"), illegal: find("coffre_illegal") } };
+  if (!supabase) return vide;
+  const [coffreR, vhR] = await Promise.all([
+    supabase.from("Coffre").select("id,solde"),
+    supabase.from("ArmurerieCoffre").select("solde").eq("id", "vanhorn").maybeSingle(),
+  ]);
+  if (coffreR.error) return vide;
+  const find = (id: string) => (coffreR.data || []).find((c: { id: string; solde: number }) => c.id === id)?.solde ?? null;
+  const vanhorn = vhR.error || !vhR.data ? null : Number((vhR.data as { solde: number }).solde) || 0;
+  return { connecte: true, pole, coffres: { commun: find("coffre_commun"), legal: find("coffre_legal"), illegal: find("coffre_illegal"), vanhorn } };
 }
 
 // ── Portefeuilles perso + journal de trésorerie ──────────────────
