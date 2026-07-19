@@ -25,20 +25,25 @@ function _liste(items) {
   return txt.length > 1000 ? txt.slice(0, 980) + `\n… (+${lignes.length} au total)` : (txt || '—');
 }
 
-async function verifierRupturesArmurerie(client) {
+// options.force = true → poste même s'il n'y a aucune alerte (test manuel).
+// Renvoie { ok, envoye, ruptures, bas } pour permettre un retour à l'appelant.
+async function verifierRupturesArmurerie(client, options = {}) {
+  const force = !!options.force;
   let rows;
-  try { rows = await lireProduitsArmurerie(); } catch { return; }
-  if (!Array.isArray(rows) || !rows.length) return;
+  try { rows = await lireProduitsArmurerie(); } catch { return { ok: false, raison: 'lecture' }; }
+  if (!Array.isArray(rows)) return { ok: false, raison: 'lecture' };
 
   const ruptures = rows.filter(p => _dispo(p) && _stock(p) === 0);
   const bas = rows.filter(p => _dispo(p) && _stock(p) > 0 && _stock(p) <= SEUIL_BAS);
-  if (!ruptures.length && !bas.length) return; // rien à signaler → silence
+  if (!ruptures.length && !bas.length && !force) return { ok: true, envoye: false, ruptures: 0, bas: 0 }; // rien à signaler → silence
 
+  const rien = !ruptures.length && !bas.length;
   const e = new EmbedBuilder()
-    .setColor(ruptures.length ? 0x9b2d30 : 0xc58a1a)
+    .setColor(ruptures.length ? 0x9b2d30 : rien ? 0x2f8f5b : 0xc58a1a)
     .setTitle('📦 Armurerie de Van Horn — point stock')
     .setTimestamp()
     .setFooter({ text: 'Iron Wolf Company · Réappro quotidien' });
+  if (rien) e.setDescription('✅ Aucune rupture ni stock bas — tout est approvisionné.');
   if (ruptures.length) e.addFields({ name: `🔴 En rupture (${ruptures.length})`, value: _liste(ruptures) });
   if (bas.length) e.addFields({ name: `🟠 Stock bas ≤ ${SEUIL_BAS} (${bas.length})`, value: _liste(bas) });
 
@@ -48,9 +53,10 @@ async function verifierRupturesArmurerie(client) {
     if (ch && ch.isTextBased?.()) { await ch.send({ content: '📦 **Point stock de l\'armurerie**', embeds: [e] }); livre = true; }
   } catch (err) { console.log('⚠️ ruptures-armurerie salon:', err.message); }
   if (!livre) {
-    try { const u = await client.users.fetch(FONDATEUR_ID).catch(() => null); if (u) { await u.send({ content: '📦 **Point stock de l\'armurerie** — *salon introuvable.*', embeds: [e] }); } }
+    try { const u = await client.users.fetch(FONDATEUR_ID).catch(() => null); if (u) { await u.send({ content: '📦 **Point stock de l\'armurerie** — *salon introuvable.*', embeds: [e] }); livre = true; } }
     catch (err) { console.log('⚠️ ruptures-armurerie MP:', err.message); }
   }
+  return { ok: true, envoye: livre, ruptures: ruptures.length, bas: bas.length };
 }
 
 module.exports = { verifierRupturesArmurerie };
