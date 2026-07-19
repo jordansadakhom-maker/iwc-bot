@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { MessageSquare, UserPlus } from "lucide-react";
 import { BookingForm } from "./booking-form";
 
 // Page PUBLIQUE de prise de rendez-vous — accessible sans connexion (exemptée
@@ -45,15 +46,17 @@ export default function RendezVousPage() {
           <BookingForm />
         </section>
 
-        <p className="mt-5 text-center text-[0.8rem] text-muted">
-          Juste une question ou un message&nbsp;?{" "}
-          <Link href="/telegramme" className="font-semibold text-accent hover:underline">Envoie un télégramme</Link>
-        </p>
-        <p className="mt-2 text-center text-[0.8rem] text-muted">
-          Envie de porter l&apos;étoile&nbsp;?{" "}
-          <Link href="/rejoindre" className="font-semibold text-accent hover:underline">Rejoins la compagnie</Link>
-        </p>
-        <p className="mt-2 text-center text-[0.72rem] text-faint">
+        <div className="mt-4 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+          <Link href="/telegramme" className="flex items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3 transition hover:-translate-y-0.5 hover:border-accent" style={{ background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 90%,#000))" }}>
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-accent" style={{ background: "color-mix(in srgb,var(--accent) 14%,transparent)" }}><MessageSquare className="h-5 w-5" strokeWidth={1.8} /></span>
+            <span className="min-w-0"><span className="block text-[0.86rem] font-semibold">Envoyer un télégramme</span><span className="block text-[0.72rem] text-faint">Une question, un message</span></span>
+          </Link>
+          <Link href="/rejoindre" className="flex items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3 transition hover:-translate-y-0.5 hover:border-accent" style={{ background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 90%,#000))" }}>
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-accent" style={{ background: "color-mix(in srgb,var(--accent) 14%,transparent)" }}><UserPlus className="h-5 w-5" strokeWidth={1.8} /></span>
+            <span className="min-w-0"><span className="block text-[0.86rem] font-semibold">Rejoindre la compagnie</span><span className="block text-[0.72rem] text-faint">Déposer une candidature</span></span>
+          </Link>
+        </div>
+        <p className="mt-4 text-center text-[0.72rem] text-faint">
           Membre de la maison&nbsp;?{" "}
           <Link href="/login" className="text-accent hover:underline">Espace connecté</Link>
         </p>
