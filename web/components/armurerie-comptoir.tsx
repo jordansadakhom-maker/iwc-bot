@@ -20,7 +20,7 @@ import {
   creerVente, majVente, supprimerVente,
   creerContrat, envoyerContrat, marquerContrat, supprimerContrat,
   ajusterCoffreArmurerie,
-  creerProduit, majProduit, supprimerProduit, importerCatalogue, importerRecettes, validerCaisse, fabriquerProduit, type LigneCaisse,
+  creerProduit, majProduit, supprimerProduit, importerCatalogue, importerRecettes, validerCaisse, fabriquerProduit, lireCarteIdentite, type LigneCaisse,
 } from "@/app/(app)/armurerie/actions";
 
 type Router = ReturnType<typeof useRouter>;
@@ -136,8 +136,23 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
   const [notes, setNotes] = useState("");
   const [serie, setSerie] = useState("");
   const [photo, setPhoto] = useState("");
+  const [lisant, setLisant] = useState(false);
+  const [lu, setLu] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
+
+  // Photo de carte d'identité déposée → l'IA lit le nom/prénom et pré-remplit.
+  async function onPhoto(url: string) {
+    setPhoto(url); setLu(null); setLisant(true);
+    const r = await lireCarteIdentite(url);
+    setLisant(false);
+    if (!r.ok) { setLu(r.error || "Lecture impossible."); return; }
+    const nomComplet = `${r.prenom || ""} ${r.nom || ""}`.trim();
+    if (nomComplet && !clientId) setClient(nomComplet);
+    const extra = [r.dateNaissance ? `né(e) ${r.dateNaissance}` : "", r.residence ? `réside : ${r.residence}` : ""].filter(Boolean).join(" · ");
+    if (extra && !notes) setNotes(extra);
+    setLu(nomComplet ? `📇 Identité lue : ${nomComplet}${extra ? " — " + extra : ""}` : "Carte lue, mais nom non détecté — saisis-le à la main.");
+  }
 
   const byId = new Map(produits.map((p) => [p.id, p]));
   const filtres = produits.filter((p) => p.nom.toLowerCase().includes(q.trim().toLowerCase()));
@@ -158,7 +173,7 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
     const r = await validerCaisse(payload, clientId ? "" : client, notes, clientId || undefined, { serie: serie.trim() || undefined, photo: photo || undefined });
     setBusy(false);
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
-    setCart({}); setPxEdit({}); setClient(""); setClientId(""); setNotes(""); setSerie(""); setPhoto("");
+    setCart({}); setPxEdit({}); setClient(""); setClientId(""); setNotes(""); setSerie(""); setPhoto(""); setLu(null);
     setFlash(`Vente encaissée : ${money(r.total || vente)} → coffre + registre + facture + compta + impôts.`);
     router.refresh();
   }
@@ -241,16 +256,18 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
             {clientId ? <p className="text-[0.7rem] text-faint">📇 Client fiché — sa carte d&apos;identité &amp; son télégramme seront joints au registre.</p> : null}
             <input className={inputCls} value={serie} onChange={(e) => setSerie(e.target.value)} placeholder="N° de série de l'arme — optionnel" maxLength={60} />
             <div>
-              <div className="mb-1 text-[0.66rem] uppercase tracking-[0.05em] text-faint">Photo de l&apos;acquéreur — optionnel</div>
+              <div className="mb-1 text-[0.66rem] uppercase tracking-[0.05em] text-faint">Carte d&apos;identité / photo — l&apos;IA remplit le nom</div>
               {photo ? (
                 <div className="flex items-center gap-2">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={photo} alt="Acquéreur" className="h-14 w-14 rounded-[8px] border border-border object-cover" />
-                  <button onClick={() => setPhoto("")} className="text-[0.72rem] text-faint hover:text-ink">Retirer</button>
+                  <button onClick={() => { setPhoto(""); setLu(null); }} className="text-[0.72rem] text-faint hover:text-ink">Retirer</button>
                 </div>
               ) : (
-                <PhotoDrop dossier="armurerie-ventes" onUploaded={setPhoto} compact label="Photo de la personne (facultatif)" />
+                <PhotoDrop dossier="armurerie-ventes" onUploaded={onPhoto} compact label="Glisse la carte d'identité — le nom se remplit tout seul" />
               )}
+              {lisant ? <div className="mt-1 flex items-center gap-1.5 text-[0.7rem] text-faint"><Loader2 className="h-3 w-3 animate-spin" /> Lecture de la carte…</div> : null}
+              {lu && !lisant ? <div className="mt-1 text-[0.7rem]" style={{ color: lu.startsWith("📇") ? "var(--good)" : "var(--oxblood)" }}>{lu}</div> : null}
             </div>
             <input className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes — optionnel" maxLength={200} />
             <button onClick={valider} disabled={busy || !lignes.length} className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-[0.86rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--good)" }}>
