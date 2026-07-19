@@ -23,3 +23,19 @@ export async function supprimerFacture(id: string): Promise<CommandeResult> {
   if (!id) return { ok: false, error: "Facture introuvable." };
   return envoyerCommande("facture.delete", { id });
 }
+
+// ── Portefeuilles perso ──
+// Payer un autre membre (l'émetteur = le membre connecté, résolu côté bot).
+export async function payerMembre(membreId: string, versNom: string, montant: number, raison: string): Promise<CommandeResult> {
+  if (!membreId) return { ok: false, error: "Choisis un destinataire." };
+  const m = Math.round(Number(montant) || 0);
+  if (m <= 0) return { ok: false, error: "Montant invalide." };
+  return envoyerCommande("wallet.payer", { membreId, versNom, montant: m, raison: (raison || "").slice(0, 120) });
+}
+// Créditer / débiter un portefeuille (Direction).
+export async function ajusterArgent(membreId: string, montant: number, raison: string): Promise<CommandeResult> {
+  if (!membreId) return { ok: false, error: "Choisis un membre." };
+  const m = Math.round(Number(montant) || 0);
+  if (!m) return { ok: false, error: "Montant nul." };
+  return envoyerCommande("wallet.ajuster", { membreId, montant: m, raison: (raison || "").slice(0, 120) });
+}
