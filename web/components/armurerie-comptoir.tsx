@@ -134,6 +134,8 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
   const [client, setClient] = useState("");
   const [clientId, setClientId] = useState("");
   const [notes, setNotes] = useState("");
+  const [serie, setSerie] = useState("");
+  const [photo, setPhoto] = useState("");
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
 
@@ -153,10 +155,10 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
     if (!lignes.length) return;
     setBusy(true);
     const payload: LigneCaisse[] = lignes.map((l) => ({ produitId: l.p.id, nom: l.p.nom, categorie: l.p.categorie, prix: pu(l.p), cout: l.p.cout, qte: l.n, aLaDemande: l.p.aLaDemande }));
-    const r = await validerCaisse(payload, clientId ? "" : client, notes, clientId || undefined);
+    const r = await validerCaisse(payload, clientId ? "" : client, notes, clientId || undefined, { serie: serie.trim() || undefined, photo: photo || undefined });
     setBusy(false);
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
-    setCart({}); setPxEdit({}); setClient(""); setClientId(""); setNotes("");
+    setCart({}); setPxEdit({}); setClient(""); setClientId(""); setNotes(""); setSerie(""); setPhoto("");
     setFlash(`Vente encaissée : ${money(r.total || vente)} → coffre + registre + facture + compta + impôts.`);
     router.refresh();
   }
@@ -237,6 +239,19 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
             ) : null}
             {!clientId ? <input className={inputCls} value={client} onChange={(e) => setClient(e.target.value)} placeholder="Nom du client de passage — optionnel" maxLength={120} /> : null}
             {clientId ? <p className="text-[0.7rem] text-faint">📇 Client fiché — sa carte d&apos;identité &amp; son télégramme seront joints au registre.</p> : null}
+            <input className={inputCls} value={serie} onChange={(e) => setSerie(e.target.value)} placeholder="N° de série de l'arme — optionnel" maxLength={60} />
+            <div>
+              <div className="mb-1 text-[0.66rem] uppercase tracking-[0.05em] text-faint">Photo de l&apos;acquéreur — optionnel</div>
+              {photo ? (
+                <div className="flex items-center gap-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={photo} alt="Acquéreur" className="h-14 w-14 rounded-[8px] border border-border object-cover" />
+                  <button onClick={() => setPhoto("")} className="text-[0.72rem] text-faint hover:text-ink">Retirer</button>
+                </div>
+              ) : (
+                <PhotoDrop dossier="armurerie-ventes" onUploaded={setPhoto} compact label="Photo de la personne (facultatif)" />
+              )}
+            </div>
             <input className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes — optionnel" maxLength={200} />
             <button onClick={valider} disabled={busy || !lignes.length} className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-[0.86rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--good)" }}>
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Encaisser {money(vente)}
@@ -864,9 +879,9 @@ function VentesTab({ ventes, clients, router }: { ventes: ArmVente[]; clients: A
                     <td className="border-b border-border px-2.5 py-2 text-muted">{v.dateVente}</td>
                     <td className="border-b border-border px-2.5 py-2 font-medium">
                       <span className="flex items-center gap-2">
-                        {cli?.carteIdentite ? (
+                        {v.photo || cli?.carteIdentite ? (
                           // eslint-disable-next-line @next/next/no-img-element
-                          <img src={cli.carteIdentite} alt="CNI" className="h-7 w-7 shrink-0 rounded-[5px] border border-border object-cover" />
+                          <img src={v.photo || cli!.carteIdentite!} alt="Acquéreur" className="h-7 w-7 shrink-0 rounded-[5px] border border-border object-cover" />
                         ) : null}
                         {v.acquereur}
                       </span>
