@@ -841,22 +841,31 @@ export async function fabriquerProduit(produitId: string, qte: number): Promise<
   const stockActif = !(rr.error && /stock/i.test(rr.error.message));
   if (!stockActif) rr = await admin.from("ArmurerieRessource").select("id,nom");
   const ressources = (rr.data || []) as ResRow[];
-  const consommes: string[] = [], ignores: string[] = [], manques: string[] = [];
+  // 1) Planifier : associer chaque ingrédient à sa ressource, calculer le besoin.
+  const plan: { r: ResRow; besoin: number }[] = [];
+  const ignores: string[] = [];
   for (const l of lignes) {
     const besoin = Math.max(0, Math.round(Number(l.qte) * q));
     if (!besoin) continue;
     const r = _matchRes(String(l.ingredient), ressources);
     if (!r) { ignores.push(`${l.ingredient} ×${besoin}`); continue; }
     if (!stockActif) { ignores.push(`${r.nom} ×${besoin}`); continue; }
-    const dispo = Number(r.stock) || 0;
-    if (dispo < besoin) manques.push(`${r.nom} (manque ${besoin - dispo})`);
-    const { error } = await admin.from("ArmurerieRessource").update({ stock: Math.max(0, dispo - besoin) }).eq("id", r.id);
-    if (error) { ignores.push(`${r.nom} (erreur)`); continue; }
-    r.stock = Math.max(0, dispo - besoin);
-    consommes.push(`${r.nom} −${besoin}`);
+    plan.push({ r, besoin });
+  }
+  // 2) Bloquer si une ressource suivie n'a pas assez de stock (rien n'est déduit).
+  const manques = plan.filter((p) => (Number(p.r.stock) || 0) < p.besoin).map((p) => `${p.r.nom} (besoin ${p.besoin}, dispo ${Number(p.r.stock) || 0})`);
+  if (manques.length) return { ok: false, error: `Fabrication impossible — stock de ressources insuffisant : ${manques.join(", ")}.`, manques };
+  // 3) Appliquer : déduire les ressources, puis ajouter le produit fini.
+  const consommes: string[] = [];
+  for (const p of plan) {
+    const dispo = Number(p.r.stock) || 0;
+    const { error } = await admin.from("ArmurerieRessource").update({ stock: Math.max(0, dispo - p.besoin) }).eq("id", p.r.id);
+    if (error) return { ok: false, error: `Erreur lors de la déduction de ${p.r.nom}.`, consommes };
+    p.r.stock = dispo - p.besoin;
+    consommes.push(`${p.r.nom} −${p.besoin}`);
   }
   if (!prod.aLaDemande) await admin.from("ArmurerieProduit").update({ stock: Math.max(0, (Number(prod.stock) || 0) + q) }).eq("id", produitId);
-  return { ok: true, q, consommes, ignores, manques };
+  return { ok: true, q, consommes, ignores, manques: [] };
 }
 
 // ── Carnet de commande (bons de commande client) ─────────────────
