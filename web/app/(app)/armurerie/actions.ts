@@ -508,7 +508,7 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
 
 // Appelle Claude (vision) sur une image (téléchargée puis envoyée en base64,
 // robuste et indépendant de la version d'API) et renvoie le texte produit.
-async function _vision(url: string, system: string, userText: string): Promise<{ ok: boolean; txt?: string; error?: string }> {
+async function _vision(url: string, system: string, userText: string, maxTokens = 400): Promise<{ ok: boolean; txt?: string; error?: string }> {
   if (!/^https?:\/\//.test(String(url || ""))) return { ok: false, error: "Photo invalide." };
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return { ok: false, error: "Lecture automatique indisponible (variable ANTHROPIC_API_KEY absente sur Vercel)." };
@@ -523,7 +523,7 @@ async function _vision(url: string, system: string, userText: string): Promise<{
       method: "POST",
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
       body: JSON.stringify({
-        model: "claude-sonnet-5", max_tokens: 400, system,
+        model: "claude-sonnet-5", max_tokens: maxTokens, system,
         messages: [{ role: "user", content: [
           { type: "image", source: { type: "base64", media_type: media, data: b64 } },
           { type: "text", text: userText },
@@ -560,6 +560,29 @@ export async function lireNumeroSerie(url: string): Promise<{ ok: boolean; serie
     const serie = s(j.serie, 60) || "";
     return serie ? { ok: true, serie } : { ok: false, error: "Numéro non détecté — saisis-le à la main." };
   } catch { return { ok: false, error: "Numéro illisible — saisis-le à la main." }; }
+}
+
+// Lecture IA d'une capture de coffre / inventaire (RDR2/RedM) : liste chaque objet
+// visible avec sa quantité (le nombre après « x »). Sert à réactualiser le stock des
+// ressources sans saisie à la main.
+export async function lireCoffreRessources(url: string): Promise<{ ok: boolean; lignes?: { nom: string; quantite: number }[]; error?: string }> {
+  const r = await _vision(
+    url,
+    "Tu regardes une capture d'écran d'un coffre / inventaire d'un jeu (RDR2/RedM). Chaque case affiche le NOM d'un objet et une quantité notée « x123 ». Réponds UNIQUEMENT par un JSON compact, sans texte autour : {\"lignes\":[{\"nom\":\"Nom exact\",\"quantite\":123}]}. Recopie le nom EXACTEMENT tel qu'il est écrit. La quantité est le nombre qui suit « x » (ex : « x91 » → 91). IGNORE le poids en kg. Ne liste QUE les objets réellement visibles — n'en invente aucun, ignore les cases vides.",
+    "Liste tous les objets du coffre avec leur quantité et renvoie le JSON.",
+    1024,
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  const m = (r.txt || "").match(/\{[\s\S]*\}/);
+  if (!m) return { ok: false, error: "Capture illisible — réessaie avec une image plus nette." };
+  try {
+    const j = JSON.parse(m[0]) as { lignes?: unknown };
+    const arr = Array.isArray(j.lignes) ? j.lignes : [];
+    const lignes = arr
+      .map((x) => { const o = (x || {}) as Record<string, unknown>; return { nom: s(o.nom, 80) || "", quantite: Math.max(0, Math.round(Number(o.quantite) || 0)) }; })
+      .filter((l) => l.nom);
+    return lignes.length ? { ok: true, lignes } : { ok: false, error: "Aucun objet détecté sur la capture." };
+  } catch { return { ok: false, error: "Capture illisible — réessaie avec une image plus nette." }; }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -869,6 +892,49 @@ export async function acheterRessources(lignes: LigneRessource[], remisePct: num
       }
     } catch { /* stock ressource non activé — on ignore */ }
     return { ok: true, net, brut, remise };
+  } catch (e) { return { ok: false, error: erpErr((e as Error).message || "") }; }
+}
+
+// Réactualiser le stock des ressources depuis une capture de coffre (lecture IA).
+//  · mode "add"  → cumule (utile pour additionner plusieurs coffres)
+//  · mode "set"  → remplace (la photo = le total actuel)
+// Les objets détectés absents du catalogue sont créés (prix 0 = « à définir » : rien
+// d'inventé). Additif : ne touche qu'au stock (et crée les manquants).
+export async function appliquerStockRessources(payload: {
+  mode?: "set" | "add";
+  items?: { id: string; qte: number }[];
+  nouvelles?: { nom: string; categorie?: string; qte: number }[];
+}): Promise<ArmResult & { maj?: number; crees?: number }> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const mode = payload?.mode === "set" ? "set" : "add";
+  const items = (Array.isArray(payload?.items) ? payload!.items : []).filter((i) => i && i.id && Number(i.qte) >= 0);
+  const nouvelles = (Array.isArray(payload?.nouvelles) ? payload!.nouvelles : []).filter((n) => n && String(n.nom || "").trim() && Number(n.qte) >= 0);
+  if (!items.length && !nouvelles.length) return { ok: false, error: "Rien à mettre à jour." };
+  let maj = 0, crees = 0;
+  try {
+    if (items.length) {
+      const ids = items.map((i) => i.id);
+      const { data: rs } = await admin.from("ArmurerieRessource").select("id,stock").in("id", ids);
+      const byId = new Map((rs || []).map((r) => [String((r as { id: string }).id), Number((r as { stock?: number }).stock) || 0]));
+      for (const it of items) {
+        const q = Math.max(0, Math.round(Number(it.qte) || 0));
+        const val = mode === "add" ? (byId.get(it.id) || 0) + q : q;
+        const { error } = await admin.from("ArmurerieRessource").update({ stock: val }).eq("id", it.id);
+        if (!error) maj++;
+      }
+    }
+    if (nouvelles.length) {
+      const rows: Record<string, unknown>[] = nouvelles.map((n) => ({
+        id: newId("res"), nom: s(n.nom, 80), categorie: s(n.categorie, 60) || "Divers",
+        prix: 0, mine: false, stock: Math.max(0, Math.round(Number(n.qte) || 0)),
+      }));
+      let ins = await admin.from("ArmurerieRessource").insert(rows);
+      // Repli si la colonne « stock » n'est pas migrée : insère sans stock.
+      if (ins.error && /stock/i.test(ins.error.message)) { rows.forEach((r) => delete r.stock); ins = await admin.from("ArmurerieRessource").insert(rows); }
+      if (!ins.error) crees = rows.length;
+    }
+    return { ok: true, maj, crees };
   } catch (e) { return { ok: false, error: erpErr((e as Error).message || "") }; }
 }
 
