@@ -508,7 +508,7 @@ export async function getMedical(): Promise<MedicalData> {
 }
 
 // ── Agenda & Clients (page dédiée) ───────────────────────────────
-export type RdvItem = { id: string; nomRP: string | null; type: string | null; lieu: string | null; creneau: string | null; statut: string; source: string | null; lieuPhoto: string | null; assignes: string[]; duree: string | null };
+export type RdvItem = { id: string; nomRP: string | null; type: string | null; lieu: string | null; creneau: string | null; statut: string; source: string | null; lieuPhoto: string | null; assignes: string[]; duree: string | null; contact: string | null; message: string | null };
 export type ContactItem = {
   id: string; nom: string; type: string; fiabilite: number; secteur: string | null;
   notes: string | null; telegramme: string | null; metier: string | null;
@@ -533,7 +533,7 @@ export async function getAgenda(): Promise<AgendaData> {
       id: r.id, nomRP: r.nomRP, type: r.type, lieu: r.lieu, creneau: r.creneau, statut: r.statut || "Planifié",
       source: (p.source as string) ?? null, lieuPhoto: (p.lieuPhoto as string) ?? null,
       assignes: Array.isArray(p.assignes) ? (p.assignes as string[]) : [],
-      duree: (p.duree as string) ?? null,
+      duree: (p.duree as string) ?? null, contact: (p.contact as string) ?? null, message: (p.message as string) ?? null,
     };
   });
   type CRaw = Record<string, unknown>;
@@ -661,6 +661,70 @@ export async function getNotifications(): Promise<NotificationsData> {
   const { data, error } = await supabase.from("Notification").select("id,type,titre,corps,lu,createdAt").order("createdAt", { ascending: false }).limit(100);
   if (error) return { connecte: false, notifs: [] };
   return { connecte: true, notifs: (data || []) as NotifItem[] };
+}
+
+// ── Centre de notifications : flux réel agrégé ───────────────────
+export type FeedItem = {
+  id: string; type: string; icon: string; titre: string; detail: string;
+  at: string | null; lien: string; tone: "accent" | "good" | "warn" | "muted" | "oxblood";
+};
+export type FeedData = { connecte: boolean; items: FeedItem[] };
+
+export async function getNotificationsFeed(): Promise<FeedData> {
+  if (!dataConfigured()) return { connecte: false, items: [] };
+  const supabase = createAdminClient();
+  if (!supabase) return { connecte: false, items: [] };
+  const [tgR, rdvR, factR, opR] = await Promise.all([
+    supabase.from("Telegramme").select("*").order("updatedAt", { ascending: false }).limit(60),
+    supabase.from("Rdv").select("id,nomRP,type,creneau,statut,paiement,createdAt").order("createdAt", { ascending: false }).limit(40),
+    supabase.from("Facture").select("*").order("createdAt", { ascending: false }).limit(20),
+    supabase.from("Operation").select("id,cible,phase,updatedAt").order("updatedAt", { ascending: false }).limit(20),
+  ]);
+  type Raw = Record<string, unknown>;
+  const items: FeedItem[] = [];
+
+  // Télégrammes : chaque conversation + son dernier message + état (ouvert / clôturé).
+  if (!tgR.error) for (const t of (tgR.data || []) as Raw[]) {
+    const msgs = Array.isArray(t.messages) ? (t.messages as { from?: string; content?: string }[]) : [];
+    const dernier = [...msgs].reverse().find((m) => m.content);
+    const clos = /clotur|classe/i.test(String(t.statut || ""));
+    items.push({
+      id: `tg-${t.id}`, type: clos ? "telegramme-clos" : "telegramme", icon: clos ? "📁" : "✉️",
+      titre: `Télégramme — ${(t.clientNom as string) || "Client"}${clos ? " (clôturé)" : ""}`,
+      detail: dernier?.content ? `${dernier.from === "equipe" ? "Nous : " : ""}${dernier.content.slice(0, 120)}` : `${msgs.length} message(s)`,
+      at: (t.updatedAt as string) || (t.createdAt as string) || null, lien: "/communication", tone: clos ? "muted" : "warn",
+    });
+  }
+  // Rendez-vous reçus (site / télégramme).
+  if (!rdvR.error) for (const r of (rdvR.data || []) as Raw[]) {
+    const p = (r.paiement || {}) as Record<string, unknown>;
+    const src = (p.source as string) || "";
+    if (src !== "web" && src !== "telegramme") continue;
+    items.push({
+      id: `rdv-${r.id}`, type: "rdv", icon: "📅", titre: `Demande de RDV — ${(r.nomRP as string) || "Client"}`,
+      detail: [r.type, r.creneau, p.duree].filter(Boolean).join(" · ") || "Nouvelle demande",
+      at: (r.createdAt as string) || null, lien: "/communication", tone: "accent",
+    });
+  }
+  // Factures créées.
+  if (!factR.error) for (const f of (factR.data || []) as Raw[]) {
+    items.push({
+      id: `fac-${f.id}`, type: "facture", icon: "🧾", titre: `Facture ${(f.numero as string) || ""}`.trim(),
+      detail: `${(f.objet as string) || "Prestation"} · ${(Number(f.montant) || 0).toLocaleString("fr-FR")}$`,
+      at: (f.createdAt as string) || null, lien: "/finances", tone: "good",
+    });
+  }
+  // Opérations terminées récemment.
+  if (!opR.error) for (const o of (opR.data || []) as Raw[]) {
+    if (String(o.phase) !== "terminee") continue;
+    items.push({
+      id: `op-${o.id}`, type: "operation", icon: "🎯", titre: `Opération terminée — ${(o.cible as string) || "Opération"}`,
+      detail: "Clôturée", at: (o.updatedAt as string) || null, lien: "/operations", tone: "good",
+    });
+  }
+
+  items.sort((a, b) => (b.at || "").localeCompare(a.at || ""));
+  return { connecte: true, items: items.slice(0, 80) };
 }
 
 // ── Factures ─────────────────────────────────────────────────────
