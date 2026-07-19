@@ -875,17 +875,23 @@ export function RessourcesTab({ ressources, router }: { ressources: ArmRessource
   const [scanMode, setScanMode] = useState<"add" | "set" | "review">("add"); // par défaut : ajout automatique
   const [undo, setUndo] = useState<{ restore: { id: string; avant: number }[]; supprimer: string[]; resume: string } | null>(null);
 
-  // Photo de coffre → lecture IA → application AUTOMATIQUE (ajout par défaut).
-  // « Vérifier d'abord » ouvre le tableau de contrôle ; sinon on ajoute direct + Annuler possible.
-  async function onScan(url: string) {
+  // Une ou PLUSIEURS photos de coffre → lecture IA → application AUTOMATIQUE (ajout par
+  // défaut). Plusieurs photos se cumulent (les quantités d'une même ressource s'additionnent).
+  // « Vérifier d'abord » ouvre le tableau de contrôle ; sinon on applique direct + Annuler.
+  async function onScanMany(urls: string[]) {
     setScanErr(null); setUndo(null); setScanBusy(true);
-    const r = await lireCoffreRessources(url);
-    if (!r.ok || !r.lignes?.length) { setScanBusy(false); setScanErr(r.error || "Aucun objet détecté sur la capture."); return; }
-    if (scanMode === "review") { setScanBusy(false); setScan(r.lignes); return; }
-    // Appariement automatique : ce qui matche une ressource → mise à jour ; le reste → création (prix 0).
+    const raw: { nom: string; quantite: number }[] = [];
+    let lus = 0;
+    for (const url of urls) { const r = await lireCoffreRessources(url); if (r.ok && r.lignes?.length) { raw.push(...r.lignes); lus++; } }
+    if (!raw.length) { setScanBusy(false); setScanErr(`Aucun objet détecté sur ${urls.length > 1 ? "les captures" : "la capture"}.`); return; }
+    // Cumul par nom (une même ressource vue sur plusieurs photos → quantités additionnées).
+    const parNom = new Map<string, { nom: string; quantite: number }>();
+    for (const l of raw) { const k = l.nom.trim().toLowerCase(); const cur = parNom.get(k) || { nom: l.nom, quantite: 0 }; cur.quantite += l.quantite; parNom.set(k, cur); }
+    const agg = [...parNom.values()];
+    if (scanMode === "review") { setScanBusy(false); setScan(agg); return; }
     const items: { id: string; qte: number }[] = [];
     const nouvelles: { nom: string; categorie: string; qte: number }[] = [];
-    for (const l of r.lignes) {
+    for (const l of agg) {
       const id = _matchRessource(l.nom, ressources);
       if (id) items.push({ id, qte: l.quantite });
       else nouvelles.push({ nom: l.nom, categorie: _guessCatRes(l.nom), qte: l.quantite });
@@ -894,8 +900,8 @@ export function RessourcesTab({ ressources, router }: { ressources: ArmRessource
     setScanBusy(false);
     if (!res.ok) { setScanErr(res.error || "Application impossible."); return; }
     const sg = scanMode === "add" ? "+" : "=";
-    const resume = r.lignes.map((l) => `${l.nom} ${sg}${l.quantite}`).join(" · ");
-    setUndo({ restore: res.applied || [], supprimer: res.creesIds || [], resume });
+    const resume = agg.map((l) => `${l.nom} ${sg}${l.quantite}`).join(" · ");
+    setUndo({ restore: res.applied || [], supprimer: res.creesIds || [], resume: (lus > 1 ? `${lus} photos · ` : "") + resume });
     router.refresh();
   }
   async function annulerScan() {
@@ -967,14 +973,14 @@ export function RessourcesTab({ ressources, router }: { ressources: ArmRessource
           {/* Scanner de coffre : photo → l'IA lit les quantités → stock réactualisé */}
           <div className="mb-3 rounded-[14px] border p-3.5" style={{ borderColor: "color-mix(in srgb,var(--accent) 35%,var(--border))", background: "color-mix(in srgb,var(--accent) 5%,var(--surface-2))" }}>
             <div className="mb-1 flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[0.05em]" style={{ color: "var(--accent)" }}><ScanLine className="h-4 w-4" /> Réactualiser le stock par photo</div>
-            <p className="mb-2 text-[0.72rem] text-faint">Glisse une capture d&apos;un coffre : l&apos;IA lit chaque objet et sa quantité, et le stock est mis à jour <b>automatiquement</b>. Dépose plusieurs coffres à la suite pour additionner (ex. le fer réparti dans deux coffres).</p>
+            <p className="mb-2 text-[0.72rem] text-faint">Glisse <b>une ou plusieurs</b> captures de coffre d&apos;un coup : l&apos;IA lit chaque objet et sa quantité, et le stock est mis à jour <b>automatiquement</b>. Les quantités d&apos;une même ressource vue sur plusieurs photos <b>s&apos;additionnent</b> (ex. le fer réparti dans deux coffres).</p>
             {/* Mode d'application de la photo */}
             <div className="mb-2 flex flex-wrap gap-1.5">
               {([["add", "➕ Ajouter (auto)"], ["set", "🔄 Remplacer"], ["review", "👁 Vérifier d'abord"]] as const).map(([k, label]) => (
                 <button key={k} onClick={() => setScanMode(k)} className="rounded-lg border px-2 py-1 text-[0.7rem] font-semibold transition" style={{ borderColor: scanMode === k ? "var(--accent)" : "var(--border)", background: scanMode === k ? "color-mix(in srgb,var(--accent) 12%,transparent)" : "var(--surface-2)", color: scanMode === k ? "var(--accent)" : "var(--muted)" }}>{label}</button>
               ))}
             </div>
-            <PhotoDrop dossier="armurerie-coffres" onUploaded={onScan} compact camera={false} label={scanMode === "review" ? "Glisse une capture — tu vérifieras avant d'appliquer" : scanMode === "set" ? "Glisse une capture — remplace le stock automatiquement" : "Glisse une capture — ajoutée automatiquement au stock"} />
+            <PhotoDrop dossier="armurerie-coffres" multiple onUploaded={(u) => onScanMany([u])} onManyUploaded={onScanMany} compact camera={false} label={scanMode === "review" ? "Glisse une ou plusieurs captures — tu vérifieras avant d'appliquer" : scanMode === "set" ? "Glisse une ou plusieurs captures — remplace le stock automatiquement" : "Glisse une ou plusieurs captures — ajoutées automatiquement au stock"} />
             {scanBusy ? <div className="mt-1.5 flex items-center gap-1.5 text-[0.72rem] text-faint"><Loader2 className="h-3 w-3 animate-spin" /> Lecture &amp; mise à jour…</div> : null}
             {scanErr ? <div className="mt-1.5 text-[0.72rem]" style={{ color: "var(--oxblood)" }}>{scanErr}</div> : null}
             {undo && !scanBusy ? (

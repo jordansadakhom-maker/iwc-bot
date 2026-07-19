@@ -445,7 +445,7 @@ async function _accumulerImpot(admin: Admin, montant: number) {
 
 // ── Caisse (point de vente) — tout est automatisé à l'encaissement ─
 export type LigneCaisse = { produitId?: string; nom: string; categorie?: string; prix: number; cout?: number; qte: number; aLaDemande?: boolean };
-export async function validerCaisse(lignes: LigneCaisse[], client: string, notes: string, clientId?: string, opts?: { serie?: string; photo?: string }): Promise<ArmResult & { total?: number; ticket?: string }> {
+export async function validerCaisse(lignes: LigneCaisse[], client: string, notes: string, clientId?: string, opts?: { serie?: string; photo?: string }): Promise<ArmResult & { total?: number; ticket?: string; ficheCreee?: boolean }> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
   const items = (Array.isArray(lignes) ? lignes : []).filter((l) => l && Number(l.qte) > 0);
@@ -463,6 +463,25 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
     const { data: c } = await admin.from("ArmurerieClient").select("nom,telegramme").eq("id", cid).maybeSingle();
     if (c) { cli = (c as { nom: string }).nom || cli; cliTel = (c as { telegramme: string | null }).telegramme ?? null; }
     else cid = null;
+  }
+  // Pas de client fiché mais un NOM saisi (ou lu sur la carte) → on crée/retrouve
+  // automatiquement sa fiche à l'encaissement, pour que le dossier + la facture y
+  // apparaissent. La photo déposée sert de carte d'identité rangée.
+  let ficheCreee = false;
+  if (!cid && cli && !/^client de passage$/i.test(cli)) {
+    const { data: dup } = await admin.from("ArmurerieClient").select("id,nom,telegramme").ilike("nom", cli).limit(1);
+    const found = Array.isArray(dup) && dup.length ? (dup[0] as { id: string; nom: string; telegramme: string | null }) : null;
+    if (found) { cid = found.id; cli = found.nom || cli; cliTel = found.telegramme ?? cliTel; }
+    else {
+      const newCid = newId("cli");
+      const row: Record<string, unknown> = { id: newCid, nom: cli, statut: "actif" };
+      if (notes) row.notes = s(notes, 2000);
+      if (photo) row.carteIdentite = photo; // la photo déposée = sa carte d'identité
+      let insC = await admin.from("ArmurerieClient").insert(row);
+      // Repli si la colonne carteIdentite n'est pas migrée.
+      if (insC.error && /carteIdentite/i.test(insC.error.message)) { delete row.carteIdentite; insC = await admin.from("ArmurerieClient").insert(row); }
+      if (!insC.error) { cid = newCid; ficheCreee = true; }
+    }
   }
 
   let total = 0;
@@ -499,7 +518,7 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
     } catch { /* best-effort */ }
     // Impôts : accumulation automatique du cycle fiscal en cours.
     try { await _accumulerImpot(admin, total); } catch { /* best-effort */ }
-    return { ok: true, total, ticket };
+    return { ok: true, total, ticket, ficheCreee };
   } catch (e) {
     const msg = (e as Error).message || "";
     return { ok: false, error: /Armurerie|does not exist/i.test(msg) ? "Tables armurerie manquantes — exécute armurerie-vh.sql." : "Vente impossible pour le moment." };
@@ -915,14 +934,17 @@ export async function appliquerStockRessources(payload: {
   const applied: { id: string; avant: number }[] = []; // pour l'annulation (retour à l'état d'avant)
   const creesIds: string[] = [];
   try {
-    if (items.length) {
-      const ids = items.map((i) => i.id);
+    // Cumul des doublons d'id : plusieurs photos peuvent lister la même ressource → on somme.
+    const itemAgg = new Map<string, number>();
+    for (const it of items) itemAgg.set(it.id, (itemAgg.get(it.id) || 0) + Math.max(0, Math.round(Number(it.qte) || 0)));
+    const itemsU = [...itemAgg.entries()].map(([id, qte]) => ({ id, qte }));
+    if (itemsU.length) {
+      const ids = itemsU.map((i) => i.id);
       const { data: rs } = await admin.from("ArmurerieRessource").select("id,stock").in("id", ids);
       const byId = new Map((rs || []).map((r) => [String((r as { id: string }).id), Number((r as { stock?: number }).stock) || 0]));
-      for (const it of items) {
-        const q = Math.max(0, Math.round(Number(it.qte) || 0));
+      for (const it of itemsU) {
         const avant = byId.get(it.id) || 0;
-        const val = mode === "add" ? avant + q : q;
+        const val = mode === "add" ? avant + it.qte : it.qte;
         const { error } = await admin.from("ArmurerieRessource").update({ stock: val }).eq("id", it.id);
         if (!error) { maj++; applied.push({ id: it.id, avant }); }
       }

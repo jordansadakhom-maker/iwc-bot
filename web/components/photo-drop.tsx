@@ -11,12 +11,16 @@ import { uploadPhoto } from "@/app/(app)/actions-upload";
 export function PhotoDrop({
   dossier,
   onUploaded,
+  onManyUploaded,
+  multiple = false,
   label = "Glisse une photo ici ou clique pour choisir",
   compact = false,
   camera = true,
 }: {
   dossier: string;
   onUploaded: (url: string) => void;
+  onManyUploaded?: (urls: string[]) => void; // appelé une fois avec toutes les URLs (mode multiple)
+  multiple?: boolean;
   label?: string;
   compact?: boolean;
   camera?: boolean;
@@ -38,10 +42,26 @@ export function PhotoDrop({
     onUploaded(r.url);
   }, [dossier, onUploaded]);
 
+  // Envoi de plusieurs fichiers d'un coup → une seule notification avec toutes les URLs.
+  const envoyerPlusieurs = useCallback(async (files: File[]) => {
+    if (!files.length) return;
+    setErr(null); setBusy(true);
+    const urls: string[] = [];
+    for (const file of files) {
+      const fd = new FormData(); fd.set("file", file); fd.set("dossier", dossier);
+      const r = await uploadPhoto(fd);
+      if (r.ok && r.url) urls.push(r.url);
+    }
+    setBusy(false);
+    if (!urls.length) { setErr("Envoi impossible."); return; }
+    if (onManyUploaded) onManyUploaded(urls); else urls.forEach((u) => onUploaded(u));
+  }, [dossier, onManyUploaded, onUploaded]);
+
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault(); setDrag(false);
-    const f = e.dataTransfer.files?.[0];
-    if (f) envoyer(f);
+    const fs = Array.from(e.dataTransfer.files || []);
+    if (!fs.length) return;
+    if (multiple) envoyerPlusieurs(fs); else envoyer(fs[0]);
   };
 
   return (
@@ -77,7 +97,7 @@ export function PhotoDrop({
       ) : null}
 
       {/* Choisir un fichier / galerie */}
-      <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) envoyer(f); e.target.value = ""; }} />
+      <input ref={inputRef} type="file" multiple={multiple} accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={(e) => { const fs = Array.from(e.target.files || []); if (fs.length) { if (multiple) envoyerPlusieurs(fs); else envoyer(fs[0]); } e.target.value = ""; }} />
       {/* Appareil photo (mobile : ouvre directement la caméra arrière) */}
       <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) envoyer(f); e.target.value = ""; }} />
 
