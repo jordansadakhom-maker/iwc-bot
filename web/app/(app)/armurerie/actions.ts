@@ -564,6 +564,69 @@ export async function supprimerTache(id: string): Promise<ArmResult> {
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
 
+// ── Ressources (matières premières achetées à la mine) ───────────
+export async function creerRessource(d: { nom: string; prix?: number }): Promise<ArmResult> {
+  if (!d.nom || d.nom.trim().length < 1) return { ok: false, error: "Nom de la ressource requis." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const id = newId("res");
+  const { error } = await admin.from("ArmurerieRessource").insert({ id, nom: s(d.nom, 120), prix: Math.max(0, round2(Number(d.prix) || 0)) });
+  if (error) return { ok: false, error: erpErr(error.message) };
+  return { ok: true, id };
+}
+export async function majRessource(id: string, patch: { nom?: string; prix?: number }): Promise<ArmResult> {
+  if (!id) return { ok: false, error: "Ressource introuvable." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const up: Record<string, unknown> = { updatedAt: nowISO() };
+  if ("nom" in patch) up.nom = s(patch.nom, 120);
+  if ("prix" in patch) up.prix = Math.max(0, round2(Number(patch.prix) || 0));
+  const { error } = await admin.from("ArmurerieRessource").update(up).eq("id", id);
+  return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+}
+export async function supprimerRessource(id: string): Promise<ArmResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { error } = await admin.from("ArmurerieRessource").delete().eq("id", id);
+  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+}
+// Tarifs de la mine (le responsable fait une remise de 5 %).
+const RESSOURCES: { nom: string; prix: number }[] = [
+  { nom: "Charbon", prix: 0.11 },
+  { nom: "Lingots et verre", prix: 0.88 },
+  { nom: "Cordes", prix: 0.48 },
+  { nom: "Bois (couteau, cattleman…)", prix: 0.22 },
+  { nom: "Bois amélioré (grosses armes)", prix: 2 },
+  { nom: "Carquois", prix: 1 },
+  { nom: "Arc", prix: 7 },
+];
+export async function importerRessources(): Promise<ArmResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const rows = RESSOURCES.map((r) => ({ id: newId("res"), nom: r.nom, prix: round2(r.prix) }));
+  const { error } = await admin.from("ArmurerieRessource").insert(rows);
+  if (error) return { ok: false, error: erpErr(error.message) };
+  return { ok: true };
+}
+// Régler un achat de ressources à la mine : applique la remise puis débite le coffre
+// (→ dépense automatique en comptabilité).
+export type LigneRessource = { nom: string; qte: number; prix: number };
+export async function acheterRessources(lignes: LigneRessource[], remisePct: number): Promise<ArmResult & { net?: number; brut?: number; remise?: number }> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const items = (Array.isArray(lignes) ? lignes : []).filter((l) => l && Number(l.qte) > 0);
+  if (!items.length) return { ok: false, error: "Sélectionne au moins une ressource." };
+  const pct = Math.max(0, Math.min(100, round2(Number(remisePct) || 0)));
+  const brut = round2(items.reduce((s2, l) => s2 + (Number(l.qte) || 0) * (Number(l.prix) || 0), 0));
+  const remise = round2((brut * pct) / 100);
+  const net = round2(brut - remise);
+  const resume = items.map((l) => `${s(l.nom, 40)} ×${Math.max(1, Math.round(Number(l.qte) || 1))}`).join(", ");
+  try {
+    await _mouvementCoffre(admin, net, "sortie", `Approvisionnement mine (−${pct}%) : ${resume}`.slice(0, 200), await auteurNom());
+    return { ok: true, net, brut, remise };
+  } catch (e) { return { ok: false, error: erpErr((e as Error).message || "") }; }
+}
+
 // ── Carnet de commande (bons de commande client) ─────────────────
 type LigneCmd = { objet: string; qte: number; prixUnitaire: number };
 function _nettoyerLignes(lignes: unknown): { lignes: LigneCmd[]; total: number } {
