@@ -301,42 +301,49 @@ export async function importerCatalogue(): Promise<ArmResult> {
 // Noms d'ingrédients canoniques : Bois, Pièce d'arme, Charbon, Lingot fer,
 // Lingot zinc, Verre, Cordes. [nom produit, [[ingrédient, quantité], …]]
 const RECETTES: [string, [string, number][]][] = [
+  // ── Intermédiaires & matières ──
+  ["Pièce d'arme", [["Bois", 3], ["Lingot fer", 4], ["Lingot zinc", 4]]],
+  ["Laiton", [["Lingot fer", 1], ["Lingot zinc", 1]]],
+  // ── Outils & objets ──
   ["Ceinture Couteau de lancé", [["Bois", 5], ["Lingot fer", 3]]],
   ["Couteau", [["Bois", 2], ["Lingot fer", 2]]],
   ["Couteau de lancé", [["Bois", 2], ["Lingot fer", 2]]],
-  ["Hachette", [["Bois", 3], ["Lingot fer", 5]]],
-  ["Hachette de chasseur", [["Bois", 3], ["Lingot fer", 5]]],
+  ["Hachette", [["Bois", 2], ["Lingot fer", 3]]],
+  ["Hachette de chasseur", [["Bois", 2], ["Lingot fer", 3]]],
   ["Ceinture Hachette", [["Bois", 3], ["Lingot fer", 5]]],
   ["Ceinture Hachette de chasseur", [["Bois", 3], ["Lingot fer", 5]]],
   ["Machette", [["Bois", 2], ["Lingot fer", 5]]],
+  ["Menottes", [["Lingot fer", 1]]],
   ["Lanterne", [["Bois", 1], ["Lingot fer", 1], ["Verre", 1]]],
   ["Lasso", [["Cordes", 4], ["Bois", 4]]],
   ["Lasso Amélioré", [["Cordes", 5], ["Bois", 10]]],
   ["Jumelles", [["Lingot fer", 1], ["Lingot zinc", 1], ["Verre", 1]]],
   ["Jumelles Améliorées", [["Lingot fer", 1], ["Lingot zinc", 2], ["Verre", 2]]],
+  // ── Revolvers ──
   ["Revolver Cattleman", [["Bois", 3], ["Pièce d'arme", 3], ["Lingot fer", 1]]],
   ["Revolver Double Action", [["Bois", 3], ["Pièce d'arme", 3], ["Lingot fer", 5]]],
   ["Revolver Schofield", [["Bois", 6], ["Pièce d'arme", 6], ["Charbon", 4], ["Lingot fer", 6]]],
-  ["Revolver Navy", [["Bois", 6], ["Pièce d'arme", 6], ["Charbon", 4], ["Lingot fer", 6]]],
+  ["Revolver Navy", [["Bois", 10], ["Pièce d'arme", 10], ["Charbon", 10], ["Lingot fer", 10]]],
   ["Revolver LeMat", [["Bois", 10], ["Pièce d'arme", 10], ["Charbon", 4], ["Lingot fer", 6]]],
+  // ── Pistolets ──
   ["Pistolet Volcanic", [["Bois", 8], ["Pièce d'arme", 6], ["Charbon", 4], ["Lingot fer", 4]]],
   ["Pistolet Mauser", [["Bois", 10], ["Pièce d'arme", 6], ["Charbon", 4], ["Lingot fer", 4]]],
   ["Pistolet 1899", [["Bois", 10], ["Pièce d'arme", 8], ["Charbon", 4], ["Lingot fer", 4]]],
-  ["Pistolet semi-automatique", [["Bois", 20], ["Pièce d'arme", 20], ["Charbon", 25], ["Lingot fer", 25]]],
+  ["Pistolet semi-automatique", [["Bois", 10], ["Pièce d'arme", 4], ["Charbon", 4], ["Lingot fer", 4]]],
   ["Canon scié", [["Bois", 5], ["Pièce d'arme", 5], ["Charbon", 2], ["Lingot fer", 3]]],
+  // ── Carabines ──
   ["Carabine à répétition", [["Bois", 4], ["Pièce d'arme", 4], ["Charbon", 4], ["Lingot fer", 4]]],
   ["Carabine Litchfield", [["Bois", 20], ["Pièce d'arme", 10], ["Charbon", 6], ["Lingot fer", 6]]],
   ["Carabine Evans", [["Bois", 20], ["Pièce d'arme", 10], ["Charbon", 8], ["Lingot fer", 8]]],
   ["Carabine Lancaster", [["Bois", 20], ["Pièce d'arme", 10], ["Charbon", 8], ["Lingot fer", 8]]],
+  // ── Fusils ──
   ["Fusil à petit gibier", [["Bois", 5], ["Pièce d'arme", 5], ["Charbon", 5], ["Lingot fer", 5]]],
   ["Fusil double canon", [["Bois", 20], ["Pièce d'arme", 10], ["Charbon", 20], ["Lingot fer", 20]]],
-  ["Fusil double canon exotique", [["Bois", 20], ["Pièce d'arme", 10], ["Charbon", 20], ["Lingot fer", 20]]],
   ["Fusil à répétition", [["Bois", 15], ["Pièce d'arme", 30], ["Charbon", 15], ["Lingot fer", 15]]],
   ["Fusil springfield", [["Bois", 15], ["Pièce d'arme", 15], ["Charbon", 15], ["Lingot fer", 15]]],
   ["Fusil semi-automatique", [["Bois", 20], ["Pièce d'arme", 20], ["Charbon", 25], ["Lingot fer", 25]]],
   ["Fusil à pompe", [["Bois", 20], ["Pièce d'arme", 20], ["Charbon", 30], ["Lingot fer", 30]]],
   ["Fusil à verrou", [["Bois", 35], ["Pièce d'arme", 20], ["Charbon", 20], ["Lingot fer", 20]]],
-  ["Fusil éléphant", [["Bois", 35], ["Pièce d'arme", 20], ["Charbon", 20], ["Lingot fer", 20]]],
 ];
 const _norm = (x: string) => String(x).toLowerCase().normalize("NFD").replace(/[^a-z0-9]/g, "");
 export async function importerRecettes(): Promise<ArmResult & { n?: number }> {
