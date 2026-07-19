@@ -773,7 +773,7 @@ export async function getFactures(): Promise<FacturesData> {
 export type ArmClient = { id: string; nom: string; telegramme: string | null; discordId: string | null; carteIdentite: string | null; statut: string; notes: string | null; createdAt: string | null };
 export type ArmVente = { id: string; clientId: string | null; acquereur: string; dateVente: string | null; marque: string | null; modele: string | null; categorie: string | null; numeroSerie: string | null; vendeur: string | null; telegramme: string | null; prix: number; notes: string | null; statut: string; createdAt: string | null };
 export type ArmContrat = { id: string; clientId: string | null; clientNom: string; clientDiscordId: string | null; arme: string | null; numeroSerie: string | null; prix: number; conditions: string | null; statut: string; envoyeAt: string | null; signeAt: string | null; createdAt: string | null };
-export type ArmMouvement = { id: string; sens: string; montant: number; motif: string | null; auteur: string | null; createdAt: string | null };
+export type ArmMouvement = { id: string; sens: string; montant: number; motif: string | null; auteur: string | null; nature: string | null; createdAt: string | null };
 export type ArmRecetteLigne = { ingredient: string; qte: number };
 export type ArmProduit = { id: string; nom: string; categorie: string; prix: number; cout: number; stock: number; aLaDemande: boolean; niveau: number; recette: ArmRecetteLigne[] };
 export type ArmEmploye = { id: string; nom: string; discordId: string | null; role: string | null; commission: number; salaireBase: number; actif: boolean; createdAt: string | null };
@@ -832,7 +832,7 @@ export async function getArmurerie(): Promise<ArmurerieData> {
   const coffre = coffreR.error || !coffreR.data ? 0 : Number((coffreR.data as { solde: number }).solde) || 0;
   const mouvementsCoffre: ArmMouvement[] = mvtR.error ? [] : ((mvtR.data || []) as Raw[]).map((m) => ({
     id: String(m.id), sens: (m.sens as string) || "entree", montant: Number(m.montant) || 0,
-    motif: (m.motif as string) ?? null, auteur: (m.auteur as string) ?? null, createdAt: (m.createdAt as string) ?? null,
+    motif: (m.motif as string) ?? null, auteur: (m.auteur as string) ?? null, nature: (m.nature as string) ?? null, createdAt: (m.createdAt as string) ?? null,
   }));
   const produits: ArmProduit[] = prodR.error ? [] : ((prodR.data || []) as Raw[]).map((p) => ({
     id: String(p.id), nom: (p.nom as string) || "Produit", categorie: (p.categorie as string) || "Divers",

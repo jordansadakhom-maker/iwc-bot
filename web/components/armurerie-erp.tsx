@@ -221,22 +221,27 @@ export function ComptabiliteTab({ mouvements, ca, router }: { mouvements: ArmMou
   }, [mouvements, periode]);
 
   const recettes = filtres.filter((m) => m.sens === "entree").reduce((s, m) => s + m.montant, 0);
-  const depenses = filtres.filter((m) => m.sens === "sortie").reduce((s, m) => s + m.montant, 0);
+  const sorties = filtres.filter((m) => m.sens === "sortie");
+  const depProduit = sorties.filter((m) => m.nature === "produit").reduce((s, m) => s + m.montant, 0);
+  const depCharge = sorties.filter((m) => m.nature === "charge").reduce((s, m) => s + m.montant, 0);
+  const depAutre = sorties.filter((m) => m.nature !== "produit" && m.nature !== "charge").reduce((s, m) => s + m.montant, 0);
+  const depenses = depProduit + depCharge + depAutre;
   const net = recettes - depenses;
 
   function exporter() {
     const l = ["ARMURERIE DE VAN HORN — GRAND LIVRE COMPTABLE", `Période : ${periode === "tout" ? "totale" : periode + " derniers jours"}`, "=".repeat(60), ""];
-    filtres.forEach((m) => l.push(`${dateFR(m.createdAt).padEnd(20)} ${(m.sens === "entree" ? "+" : "−")}${money(m.montant).padEnd(10)} ${m.motif || ""}${m.auteur ? ` (${m.auteur})` : ""}`));
-    l.push("", `Recettes : ${money(recettes)}`, `Dépenses : ${money(depenses)}`, `Résultat net : ${money(net)}`);
+    filtres.forEach((m) => l.push(`${dateFR(m.createdAt).padEnd(20)} ${(m.sens === "entree" ? "+" : "−")}${money(m.montant).padEnd(10)} ${m.sens === "sortie" && (m.nature === "produit" || m.nature === "charge") ? `[${m.nature}] ` : ""}${m.motif || ""}${m.auteur ? ` (${m.auteur})` : ""}`));
+    l.push("", `Recettes : ${money(recettes)}`, `Dépenses produit : ${money(depProduit)}`, `Dépenses charge : ${money(depCharge + depAutre)}`, `Dépenses totales : ${money(depenses)}`, `Résultat net : ${money(net)}`);
     const blob = new Blob([l.join("\n")], { type: "text/plain;charset=utf-8" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "comptabilite-van-horn.txt"; a.click(); URL.revokeObjectURL(a.href);
   }
 
   return (
     <>
-      <div className="mb-3 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+      <div className="mb-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-5">
         <Stat label="Recettes" value={money(recettes)} tone="var(--good)" icon={ArrowDownRight} />
-        <Stat label="Dépenses" value={money(depenses)} tone="var(--oxblood)" icon={ArrowUpRight} />
+        <Stat label="Dépenses produit" value={money(depProduit)} tone="var(--oxblood)" icon={ClipboardList} />
+        <Stat label="Dépenses charge" value={money(depCharge + depAutre)} tone="var(--oxblood)" icon={ArrowUpRight} />
         <Stat label="Résultat net" value={money(net)} tone={net >= 0 ? "var(--good)" : "var(--oxblood)"} icon={Wallet} />
         <Stat label="CA cumulé" value={money(ca)} tone="var(--accent)" icon={CircleDollarSign} />
       </div>
@@ -263,7 +268,7 @@ export function ComptabiliteTab({ mouvements, ca, router }: { mouvements: ArmMou
                 return (
                   <tr key={m.id} className="hover:bg-[color-mix(in_srgb,var(--ink)_4%,transparent)]">
                     <td className="border-b border-border px-2.5 py-2 text-faint">{dateFR(m.createdAt)}</td>
-                    <td className="border-b border-border px-2.5 py-2">{m.motif || (entree ? "Recette" : "Dépense")}</td>
+                    <td className="border-b border-border px-2.5 py-2"><span className="align-middle">{m.motif || (entree ? "Recette" : "Dépense")}</span>{!entree && (m.nature === "produit" || m.nature === "charge") ? <span className="ml-1.5 inline-block rounded-full px-1.5 py-0.5 align-middle text-[0.6rem] font-semibold uppercase tracking-[0.04em]" style={{ color: m.nature === "produit" ? "var(--accent)" : "var(--oxblood)", background: `color-mix(in srgb,${m.nature === "produit" ? "var(--accent)" : "var(--oxblood)"} 14%,transparent)` }}>{m.nature}</span> : null}</td>
                     <td className="border-b border-border px-2.5 py-2 text-faint">{m.auteur || "—"}</td>
                     <td className="border-b border-border px-2.5 py-2 font-num font-semibold" style={{ color: entree ? "var(--good)" : "var(--oxblood)" }}>{entree ? "+" : "−"}{money(m.montant)}</td>
                   </tr>
@@ -279,6 +284,7 @@ export function ComptabiliteTab({ mouvements, ca, router }: { mouvements: ArmMou
 }
 function EcritureModal({ onClose, router }: { onClose: () => void; router: Router }) {
   const [sens, setSens] = useState<"entree" | "sortie">("sortie");
+  const [nature, setNature] = useState<"produit" | "charge">("produit");
   const [montant, setMontant] = useState("");
   const [motif, setMotif] = useState("");
   const [busy, setBusy] = useState(false);
@@ -287,7 +293,7 @@ function EcritureModal({ onClose, router }: { onClose: () => void; router: Route
     setErr(null);
     if (!(Number(montant) > 0)) { setErr("Montant invalide."); return; }
     setBusy(true);
-    const r = await ajouterEcriture(Number(montant), sens, motif);
+    const r = await ajouterEcriture(Number(montant), sens, motif, sens === "sortie" ? nature : null);
     setBusy(false);
     if (!r.ok) { setErr(r.error || "Impossible."); return; }
     router.refresh(); onClose();
@@ -299,6 +305,16 @@ function EcritureModal({ onClose, router }: { onClose: () => void; router: Route
           <button onClick={() => setSens("entree")} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[0.8rem] font-semibold" style={{ color: sens === "entree" ? "#000" : "var(--good)", background: sens === "entree" ? "var(--good)" : "transparent", borderColor: "color-mix(in srgb,var(--good) 45%,var(--border))" }}><ArrowDownRight className="h-3.5 w-3.5" /> Recette</button>
           <button onClick={() => setSens("sortie")} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[0.8rem] font-semibold" style={{ color: sens === "sortie" ? "#fff" : "var(--oxblood)", background: sens === "sortie" ? "var(--oxblood)" : "transparent", borderColor: "color-mix(in srgb,var(--oxblood) 45%,var(--border))" }}><ArrowUpRight className="h-3.5 w-3.5" /> Dépense</button>
         </div>
+        {sens === "sortie" ? (
+          <div>
+            <div className="mb-1 text-[0.68rem] uppercase tracking-[0.06em] text-faint">Nature de la dépense</div>
+            <div className="flex gap-2">
+              <button onClick={() => setNature("produit")} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[0.78rem] font-semibold" style={{ color: nature === "produit" ? "#000" : "var(--accent)", background: nature === "produit" ? "var(--accent)" : "transparent", borderColor: "color-mix(in srgb,var(--accent) 45%,var(--border))" }}><ClipboardList className="h-3.5 w-3.5" /> Produit (stock)</button>
+              <button onClick={() => setNature("charge")} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[0.78rem] font-semibold" style={{ color: nature === "charge" ? "#fff" : "var(--oxblood)", background: nature === "charge" ? "var(--oxblood)" : "transparent", borderColor: "color-mix(in srgb,var(--oxblood) 45%,var(--border))" }}><Wallet className="h-3.5 w-3.5" /> Charge (frais)</button>
+            </div>
+            <p className="mt-1 text-[0.68rem] text-faint">Produit = achat qui entre en stock (armes, matières, ressources). Charge = frais (réparation, loyer, salaires…).</p>
+          </div>
+        ) : null}
         <div className="grid gap-3 sm:grid-cols-2">
           <Champ label="Montant ($)"><input className={inputCls} type="number" min={0} step="0.01" value={montant} onChange={(e) => setMontant(e.target.value)} autoFocus /></Champ>
           <Champ label="Libellé"><input className={inputCls} value={motif} onChange={(e) => setMotif(e.target.value)} placeholder="Réassort poudre, réparation…" maxLength={200} /></Champ>
@@ -655,7 +671,13 @@ export function RessourcesTab({ ressources, router }: { ressources: ArmRessource
   const sub = (id: string) => setCart((c) => ({ ...c, [id]: Math.max(0, (c[id] || 0) - 1) }));
   const setQte = (id: string, v: number) => setCart((c) => ({ ...c, [id]: Math.max(0, Math.round(v) || 0) }));
 
-  async function importer() { setBusy(true); const r = await importerRessources(); setBusy(false); if (r.ok) router.refresh(); else setFlash(r.error || "Échec."); }
+  async function importer() { setBusy(true); const r = await importerRessources(); setBusy(false); if (r.ok) { setFlash(r.n ? `${r.n} ressource(s) ajoutée(s).` : "Ressources déjà à jour."); router.refresh(); } else setFlash(r.error || "Échec."); }
+  async function majPrix(r: ArmRessource, prix: number) {
+    if (prix === r.prix) return;
+    const res = await majRessource(r.id, { prix });
+    if (!res.ok) { setFlash(res.error || "Échec."); return; }
+    router.refresh();
+  }
   async function regler() {
     if (!lignes.length) return;
     setBusy(true);
@@ -683,7 +705,10 @@ export function RessourcesTab({ ressources, router }: { ressources: ArmRessource
     <>
       <TopBar>
         <p className="text-[0.74rem] italic text-faint">Matières premières nécessaires (par catégorie). Clique une ressource pour calculer le coût d&apos;un achat — remise mine 5 % applicable.</p>
-        <Btn onClick={() => setNouveau(true)}><Plus className="h-3.5 w-3.5" /> Ressource</Btn>
+        <div className="flex gap-2">
+          <Btn onClick={importer} tone="ghost" disabled={busy}>{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Compléter</Btn>
+          <Btn onClick={() => setNouveau(true)}><Plus className="h-3.5 w-3.5" /> Ressource</Btn>
+        </div>
       </TopBar>
       <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
         {/* Grille des ressources par catégorie */}
@@ -694,14 +719,7 @@ export function RessourcesTab({ ressources, router }: { ressources: ArmRessource
               <div className="mb-1.5 text-[0.72rem] uppercase tracking-[0.08em] text-faint">{cat}</div>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {filtres.filter((r) => r.categorie === cat).map((r) => (
-                  <div key={r.id} className="rounded-[10px] border border-border bg-surface-2 px-2.5 py-2">
-                    <button onClick={() => add(r.id)} className="block w-full text-left transition hover:-translate-y-0.5">
-                      <div className="flex items-center gap-1"><span className="min-w-0 truncate text-[0.8rem] font-semibold">{r.nom}</span>{r.mine ? <span title="De la mine — remise applicable" className="shrink-0 text-[0.66rem]">⛏️</span> : null}</div>
-                      <div className="mt-0.5 font-num text-[0.92rem] font-bold" style={{ color: "var(--accent)" }}>{money(r.prix)}<span className="text-[0.6rem] font-normal text-faint"> /u</span></div>
-                      {cart[r.id] ? <div className="text-[0.62rem] text-faint">{cart[r.id]} au calcul</div> : null}
-                    </button>
-                    <button onClick={() => setModif(r)} className="mt-1 text-[0.62rem] text-faint hover:text-ink">éditer</button>
-                  </div>
+                  <RessourceCard key={r.id + ":" + r.prix} r={r} auCalcul={cart[r.id] || 0} onAdd={() => add(r.id)} onEdit={() => setModif(r)} onPrix={(v) => majPrix(r, v)} />
                 ))}
               </div>
             </div>
@@ -739,6 +757,32 @@ export function RessourcesTab({ ressources, router }: { ressources: ArmRessource
       {nouveau ? <RessourceModal onClose={() => setNouveau(false)} router={router} /> : null}
       {modif ? <RessourceModal ressource={modif} onClose={() => setModif(null)} router={router} /> : null}
     </>
+  );
+}
+// Carte ressource : ajout au calcul (clic sur le nom) + prix unitaire modifiable en ligne.
+function RessourceCard({ r, auCalcul, onAdd, onEdit, onPrix }: { r: ArmRessource; auCalcul: number; onAdd: () => void; onEdit: () => void; onPrix: (v: number) => Promise<void> }) {
+  const [prix, setPrix] = useState(String(r.prix));
+  const [saving, setSaving] = useState(false);
+  async function save() {
+    const v = Math.max(0, Math.round((Number(prix) || 0) * 100) / 100);
+    if (v === r.prix) { setPrix(String(r.prix)); return; }
+    setSaving(true);
+    await onPrix(v);
+    setSaving(false);
+  }
+  return (
+    <div className="rounded-[10px] border border-border bg-surface-2 px-2.5 py-2">
+      <button onClick={onAdd} className="block w-full text-left transition hover:-translate-y-0.5">
+        <div className="flex items-center gap-1"><span className="min-w-0 truncate text-[0.8rem] font-semibold">{r.nom}</span>{r.mine ? <span title="De la mine — remise applicable" className="shrink-0 text-[0.66rem]">⛏️</span> : null}</div>
+        {auCalcul ? <div className="mt-0.5 text-[0.62rem] text-faint">{auCalcul} au calcul</div> : null}
+      </button>
+      <div className="mt-1 flex items-center gap-1">
+        <input type="number" min={0} step="0.01" value={prix} onChange={(e) => setPrix(e.target.value)} onFocus={(e) => e.currentTarget.select()} onBlur={save} onKeyDown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }} className={inputCls + " !w-[4.4rem] !px-1.5 !py-0.5 font-num !text-[0.84rem] font-bold"} style={{ color: "var(--accent)" }} title="Prix unitaire — clique pour modifier" />
+        <span className="text-[0.6rem] text-faint">$/u</span>
+        {saving ? <Loader2 className="h-3 w-3 animate-spin text-faint" /> : null}
+        <button onClick={onEdit} className="ml-auto text-faint hover:text-ink" title="Éditer (nom, catégorie, mine)"><Pencil className="h-3.5 w-3.5" /></button>
+      </div>
+    </div>
   );
 }
 function RessourceModal({ ressource, onClose, router }: { ressource?: ArmRessource; onClose: () => void; router: Router }) {
