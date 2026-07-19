@@ -12,10 +12,19 @@ export async function creerDossier(membreId: string, statut: string): Promise<Co
 
 export async function majDossier(
   membreId: string,
-  patch: { statut?: string; notes?: string; prochainRdv?: string; testValide?: boolean }
+  patch: { statut?: string; notes?: string; prochainRdv?: string; testValide?: boolean; reposJusquAt?: string | null; reposMotif?: string }
 ): Promise<CommandeResult> {
   if (!membreId) return { ok: false, error: "Dossier introuvable." };
   return envoyerCommande("medical.update", { membreId, ...patch });
+}
+
+export async function ajouterSuivi(
+  membreId: string,
+  s: { soin: string; soignant?: string; etat?: string; traitement?: string }
+): Promise<CommandeResult> {
+  if (!membreId) return { ok: false, error: "Dossier introuvable." };
+  if (!s.soin || s.soin.trim().length < 2) return { ok: false, error: "Décris le soin prodigué." };
+  return envoyerCommande("medical.addSuivi", { membreId, ...s });
 }
 
 export async function ajouterBlessure(

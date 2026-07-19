@@ -69,9 +69,23 @@ const HANDLERS = {
     if (p.notes !== undefined) { f.notes = _s(p.notes, 2000); changes.push('notes'); }
     if (p.prochainRdv !== undefined) { f.prochainRdv = _s(p.prochainRdv, 200) || null; changes.push('prochain RDV'); }
     if (p.testValide !== undefined) { f.testValide = !!p.testValide; if (f.testValide && !f.testDate) f.testDate = Date.now(); changes.push('test'); }
+    if (p.reposJusquAt !== undefined) { f.reposJusquAt = p.reposJusquAt ? new Date(p.reposJusquAt).toISOString() : null; changes.push('convalescence'); }
+    if (p.reposMotif !== undefined) { f.reposMotif = _s(p.reposMotif, 300) || null; }
     f.majPar = p.auteurNom || 'Site web'; f.majAt = Date.now();
     if (changes.length) _medLog(f, `Mise à jour depuis le site (${changes.join(', ')})`, p.auteurNom);
     return { ok: true, message: 'Dossier mis à jour', discord: { type: 'medical', id } };
+  },
+  'medical.addSuivi': (db, p) => {
+    const id = _s(p.membreId, 40);
+    if (!id) return { ok: false, message: 'membreId manquant' };
+    const soin = _s(p.soin, 300);
+    if (!soin) return { ok: false, message: 'soin manquant' };
+    const f = _medFiche(db, id);
+    if (!Array.isArray(f.suivis)) f.suivis = [];
+    f.suivis.push({ date: _dateFR(), soin, soignant: _s(p.soignant, 120), etat: _s(p.etat, 120), traitement: _s(p.traitement, 300) });
+    f.majPar = p.auteurNom || 'Site web'; f.majAt = Date.now();
+    _medLog(f, `Soin depuis le site : ${soin.slice(0, 80)}`, p.auteurNom);
+    return { ok: true, message: 'Soin ajouté', discord: { type: 'medical', id } };
   },
   'medical.addBlessure': (db, p) => {
     const id = _s(p.membreId, 40);
