@@ -1,16 +1,40 @@
 "use server";
 
 import { envoyerCommande, type CommandeResult } from "@/lib/commandes";
+import { createAdminClient } from "@/lib/supabase/admin";
 
-// Ajuste un coffre (dépôt / retrait / montant exact). Appliqué par le bot.
+// Ajuste un coffre (dépôt / retrait / montant exact).
+// Double écriture : 1) reflet INSTANTANÉ dans la table Coffre (le site montre le
+// nouveau solde tout de suite) ; 2) commande filée au bot, qui reste la SOURCE DE
+// VÉRITÉ (data.json) et re-pousse le coffre à sa prochaine synchro — il confirme
+// ou corrige le reflet. « Ne rien dérégler » : le bot a toujours le dernier mot.
 export async function ajusterCoffre(
   cible: "commun" | "legal" | "illegal",
   montant: number,
   mode: "depot" | "retrait" | "set"
-): Promise<CommandeResult> {
+): Promise<CommandeResult & { solde?: number }> {
   if (!["commun", "legal", "illegal"].includes(cible)) return { ok: false, error: "Coffre inconnu." };
   if (!Number.isFinite(montant) || montant < 0) return { ok: false, error: "Montant invalide." };
-  return envoyerCommande("coffre.ajuster", { cible, montant: Math.round(montant), mode });
+  const m = Math.round(montant);
+
+  // 1) Reflet instantané dans la table Coffre (service role → contourne RLS).
+  let solde: number | undefined;
+  const admin = createAdminClient();
+  if (admin) {
+    try {
+      const id = cible === "commun" ? "coffre_commun" : cible === "legal" ? "coffre_legal" : "coffre_illegal";
+      const pole = cible === "commun" ? "both" : cible;
+      const { data } = await admin.from("Coffre").select("solde").eq("id", id).maybeSingle();
+      const actuel = data ? Number((data as { solde: number }).solde) || 0 : 0;
+      solde = Math.max(0, mode === "set" ? m : mode === "retrait" ? actuel - m : actuel + m);
+      await admin.from("Coffre").upsert({ id, pole, solde, seuilAlerte: 0, updatedAt: new Date().toISOString() }, { onConflict: "id" });
+    } catch { solde = undefined; }
+  }
+
+  // 2) Commande filée au bot (source de vérité).
+  const r = await envoyerCommande("coffre.ajuster", { cible, montant: m, mode });
+  if (!r.ok) return r;
+  return { ok: true, solde };
 }
 
 // ── Factures ──

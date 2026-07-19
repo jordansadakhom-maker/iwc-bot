@@ -21,14 +21,19 @@ async function auteurNom(): Promise<string> {
 }
 
 // Crédite (entree) ou débite (sortie) le coffre PROPRE de l'armurerie + journal.
+// Remonte les erreurs d'écriture (table manquante, RLS…) au lieu de les avaler,
+// pour ne plus jamais afficher un « succès » alors que rien n'a bougé.
 async function _mouvementCoffre(admin: Admin, montant: number, sens: "entree" | "sortie", motif: string, auteur: string) {
   const m = Math.abs(Math.round(Number(montant) || 0));
   if (!m) return;
-  const { data } = await admin.from("ArmurerieCoffre").select("solde").eq("id", "vanhorn").maybeSingle();
+  const { data, error: eLire } = await admin.from("ArmurerieCoffre").select("solde").eq("id", "vanhorn").maybeSingle();
+  if (eLire) throw new Error(eLire.message);
   const actuel = data ? Number((data as { solde: number }).solde) || 0 : 0;
   const nouveau = Math.max(0, sens === "sortie" ? actuel - m : actuel + m);
-  await admin.from("ArmurerieCoffre").upsert({ id: "vanhorn", solde: nouveau, updatedAt: new Date().toISOString() }, { onConflict: "id" });
-  await admin.from("ArmurerieMouvementCoffre").insert({ id: newId("mvt"), sens, montant: m, motif: s(motif, 200), auteur: s(auteur, 120), createdAt: new Date().toISOString() });
+  const { error: eUp } = await admin.from("ArmurerieCoffre").upsert({ id: "vanhorn", solde: nouveau, updatedAt: new Date().toISOString() }, { onConflict: "id" });
+  if (eUp) throw new Error(eUp.message);
+  const { error: eJ } = await admin.from("ArmurerieMouvementCoffre").insert({ id: newId("mvt"), sens, montant: m, motif: s(motif, 200), auteur: s(auteur, 120), createdAt: new Date().toISOString() });
+  if (eJ) throw new Error(eJ.message);
 }
 
 // Comptoir de l'armurerie de Van Horn — registre PRIVÉ de l'entreprise, écrit
@@ -266,7 +271,7 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
         const { data } = await admin.from("ArmurerieProduit").select("stock").eq("id", l.produitId).maybeSingle();
         if (data) await admin.from("ArmurerieProduit").update({ stock: Math.max(0, (Number((data as { stock: number }).stock) || 0) - q) }).eq("id", l.produitId);
       }
-      await _mouvementCoffre(admin, montant, "entree", `Vente : ${s(l.nom, 80)} ×${q} — ${cli}`, nom);
+      try { await _mouvementCoffre(admin, montant, "entree", `Vente : ${s(l.nom, 80)} ×${q} — ${cli}`, nom); } catch { /* vente enregistrée même si le coffre n'est pas prêt */ }
     }
     return { ok: true, total };
   } catch (e) {
