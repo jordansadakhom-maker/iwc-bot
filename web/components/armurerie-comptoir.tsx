@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Users, ScrollText, FileSignature, Plus, Minus, Loader2, Trash2, IdCard, Send, Check, X,
   Download, CircleDollarSign, Vault, ArrowDownRight, ArrowUpRight, History, ShoppingCart, Package, Search,
-  Clock, BadgeDollarSign, Landmark, StickyNote, ListTodo, Activity, Wallet, ClipboardList, Pickaxe, Hammer,
+  Clock, BadgeDollarSign, Landmark, StickyNote, ListTodo, Activity, Wallet, ClipboardList, Pickaxe, Hammer, ChevronDown,
 } from "lucide-react";
 import type { ArmClient, ArmVente, ArmContrat, ArmMouvement, ArmProduit, ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache, ArmCommande, ArmRessource, ArmRecetteLigne } from "@/lib/queries";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
@@ -25,7 +25,7 @@ import {
 
 type Router = ReturnType<typeof useRouter>;
 const money = (n: number) => `${cents(n)}$`;
-const fourchette = (n: number): [number, number] => [Math.round(n * 90) / 100, Math.round(n * 110) / 100];
+const fourchette = (n: number): [number, number] => [Math.round(n * 95) / 100, Math.round(n * 105) / 100];
 // Coût de fabrication d'une recette à partir des prix des ressources.
 const _normIng = (x: string) => x.toLowerCase().normalize("NFD").replace(/[^a-z0-9]/g, "");
 function prixIngredient(ing: string, ressources: ArmRessource[]): number | null {
@@ -243,6 +243,7 @@ function CaisseTab({ produits, clients, router }: { produits: ArmProduit[]; clie
 }
 
 // ═══════════════════ PRODUITS (catalogue) ═══════════════════
+const CAT_ORDRE = ["Armes", "Accessoires", "Munitions", "Composants", "Ressources"];
 function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[]; ressources: ArmRessource[]; router: Router }) {
   const [sel, setSel] = useState<ArmProduit | null>(null);
   const [nouveau, setNouveau] = useState(false);
@@ -250,7 +251,11 @@ function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[];
   const [flash, setFlash] = useState<string | null>(null);
   const [override, setOverride] = useState<Record<string, number>>({});
   const [qbusy, setQbusy] = useState<string | null>(null);
-  const cats = [...new Set(produits.map((p) => p.categorie))];
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const query = q.trim().toLowerCase();
+  const cats = [...new Set(produits.map((p) => p.categorie))].sort((a, b) => { const ia = CAT_ORDRE.indexOf(a), ib = CAT_ORDRE.indexOf(b); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b); });
+  const toutOuvert = cats.length > 0 && cats.every((c) => open[c]);
 
   async function importer() { setBusy("cat"); const r = await importerCatalogue(); setBusy(null); if (r.ok) { setFlash(r.n ? `${r.n} produit(s) ajouté(s).` : "Catalogue déjà à jour."); router.refresh(); } else setFlash(r.error || "Échec."); }
   async function importerRec() { setBusy("rec"); const r = await importerRecettes(); setBusy(null); if (r.ok) { setFlash(`${r.n ?? 0} recettes appliquées aux produits.`); router.refresh(); } else setFlash(r.error || "Échec."); }
@@ -267,6 +272,42 @@ function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[];
     router.refresh();
   }
 
+  // Une ligne produit (nom + niveau, stepper de stock, prix & marge/fourchette).
+  function carte(p: ArmProduit) {
+    const stock = override[p.id] ?? p.stock;
+    const enStock = p.aLaDemande || stock > 0;
+    const rec = p.recette && p.recette.length ? coutRecette(p.recette, ressources) : null;
+    const marge = rec ? p.prix - rec.cout : null;
+    const stepBtn = "grid h-6 w-6 place-items-center rounded-md border border-border bg-surface hover:border-border-2 disabled:opacity-40";
+    return (
+      <div key={p.id} className="flex items-center gap-3 rounded-[10px] border border-border bg-surface-2 px-3.5 py-2.5 transition hover:border-border-2">
+        <button onClick={() => setSel(p)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+          <div className="min-w-0 flex-1"><div className="truncate text-[0.88rem] font-semibold">{p.nom}</div>{rec ? <div className="text-[0.66rem] text-faint">🔨 craft {money(rec.cout)}{rec.manquants.length ? " +" : ""}</div> : p.cout ? <div className="text-[0.66rem] text-faint">coût {money(p.cout)}</div> : null}</div>
+          <span className="hidden shrink-0 rounded-full border border-border px-2 py-0.5 text-[0.66rem] text-muted sm:inline">Niveau {p.niveau}</span>
+        </button>
+        {p.aLaDemande ? (
+          <span className="shrink-0 rounded-full px-2 py-0.5 text-[0.66rem] font-semibold" style={{ color: "var(--good)", background: "color-mix(in srgb,var(--good) 14%,transparent)" }}>à la demande</span>
+        ) : (
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button title="−10" onClick={() => ajusterStock(p, -10)} disabled={qbusy === p.id} className={`${stepBtn} hidden sm:grid`}><span className="text-[0.62rem] font-bold leading-none">−10</span></button>
+            <button title="Retirer 1" onClick={() => ajusterStock(p, -1)} disabled={qbusy === p.id} className={stepBtn}><Minus className="h-3.5 w-3.5" /></button>
+            <span className="w-9 text-center font-num text-[0.95rem] font-bold tabular-nums" style={{ color: enStock ? "var(--good)" : "var(--oxblood)" }}>{qbusy === p.id ? <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" /> : stock}</span>
+            <button title="Ajouter 1" onClick={() => ajusterStock(p, 1)} disabled={qbusy === p.id} className={stepBtn}><Plus className="h-3.5 w-3.5" /></button>
+            <button title="+10" onClick={() => ajusterStock(p, 10)} disabled={qbusy === p.id} className={`${stepBtn} hidden sm:grid`}><span className="text-[0.62rem] font-bold leading-none">+10</span></button>
+          </div>
+        )}
+        <button onClick={() => setSel(p)} className="hidden shrink-0 items-center gap-3 text-right sm:flex">
+          <div><div className="text-[0.58rem] uppercase tracking-[0.05em] text-faint">Prix de vente</div><div className="font-num text-[0.9rem] font-bold" style={{ color: "var(--accent)" }}>{money(p.prix)}</div></div>
+          {rec ? (
+            <div className="hidden text-right md:block"><div className="text-[0.58rem] uppercase tracking-[0.05em] text-faint">Marge{rec.manquants.length ? "*" : ""}</div><div className="font-num text-[0.82rem] font-semibold" style={{ color: (marge ?? 0) >= 0 ? "var(--good)" : "var(--oxblood)" }}>{money(marge ?? 0)}</div></div>
+          ) : (
+            <div className="hidden text-right md:block"><div className="text-[0.58rem] uppercase tracking-[0.05em] text-faint">Fourchette ±5%</div><div className="font-num text-[0.72rem] text-muted">{money(fourchette(p.prix)[0])} → {money(fourchette(p.prix)[1])}</div></div>
+          )}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="mb-3 flex flex-wrap justify-end gap-2">
@@ -278,48 +319,29 @@ function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[];
       {produits.length === 0 ? (
         <Vide icon={Package} texte="Aucun produit. Importe le catalogue type (armes & munitions RDR2) ou ajoute tes produits — ils alimenteront la Caisse." />
       ) : (
-        <div className="flex flex-col gap-3">
-          {cats.map((cat) => (
-            <div key={cat}>
-              <div className="mb-1.5 text-[0.72rem] uppercase tracking-[0.08em] text-faint">{cat}</div>
-              <div className="flex flex-col gap-2">
-                {produits.filter((p) => p.categorie === cat).map((p) => {
-                  const stock = override[p.id] ?? p.stock;
-                  const enStock = p.aLaDemande || stock > 0;
-                  const rec = p.recette && p.recette.length ? coutRecette(p.recette, ressources) : null;
-                  const marge = rec ? p.prix - rec.cout : null;
-                  const stepBtn = "grid h-6 w-6 place-items-center rounded-md border border-border bg-surface hover:border-border-2 disabled:opacity-40";
-                  return (
-                    <div key={p.id} className="flex items-center gap-3 rounded-[10px] border border-border bg-surface-2 px-3.5 py-2.5 transition hover:border-border-2">
-                      <button onClick={() => setSel(p)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-                        <div className="min-w-0 flex-1"><div className="truncate text-[0.88rem] font-semibold">{p.nom}</div>{rec ? <div className="text-[0.66rem] text-faint">🔨 craft {money(rec.cout)}{rec.manquants.length ? " +" : ""}</div> : p.cout ? <div className="text-[0.66rem] text-faint">coût {money(p.cout)}</div> : null}</div>
-                        <span className="hidden shrink-0 rounded-full border border-border px-2 py-0.5 text-[0.66rem] text-muted sm:inline">Niveau {p.niveau}</span>
-                      </button>
-                      {p.aLaDemande ? (
-                        <span className="shrink-0 rounded-full px-2 py-0.5 text-[0.66rem] font-semibold" style={{ color: "var(--good)", background: "color-mix(in srgb,var(--good) 14%,transparent)" }}>à la demande</span>
-                      ) : (
-                        <div className="flex shrink-0 items-center gap-1.5">
-                          <button title="−10" onClick={() => ajusterStock(p, -10)} disabled={qbusy === p.id} className={`${stepBtn} hidden sm:grid`}><span className="text-[0.62rem] font-bold leading-none">−10</span></button>
-                          <button title="Retirer 1" onClick={() => ajusterStock(p, -1)} disabled={qbusy === p.id} className={stepBtn}><Minus className="h-3.5 w-3.5" /></button>
-                          <span className="w-9 text-center font-num text-[0.95rem] font-bold tabular-nums" style={{ color: enStock ? "var(--good)" : "var(--oxblood)" }}>{qbusy === p.id ? <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" /> : stock}</span>
-                          <button title="Ajouter 1" onClick={() => ajusterStock(p, 1)} disabled={qbusy === p.id} className={stepBtn}><Plus className="h-3.5 w-3.5" /></button>
-                          <button title="+10" onClick={() => ajusterStock(p, 10)} disabled={qbusy === p.id} className={`${stepBtn} hidden sm:grid`}><span className="text-[0.62rem] font-bold leading-none">+10</span></button>
-                        </div>
-                      )}
-                      <button onClick={() => setSel(p)} className="hidden shrink-0 items-center gap-3 text-right sm:flex">
-                        <div><div className="text-[0.58rem] uppercase tracking-[0.05em] text-faint">Prix de vente</div><div className="font-num text-[0.9rem] font-bold" style={{ color: "var(--accent)" }}>{money(p.prix)}</div></div>
-                        {rec ? (
-                          <div className="hidden text-right md:block"><div className="text-[0.58rem] uppercase tracking-[0.05em] text-faint">Marge{rec.manquants.length ? "*" : ""}</div><div className="font-num text-[0.82rem] font-semibold" style={{ color: (marge ?? 0) >= 0 ? "var(--good)" : "var(--oxblood)" }}>{money(marge ?? 0)}</div></div>
-                        ) : (
-                          <div className="hidden text-right md:block"><div className="text-[0.58rem] uppercase tracking-[0.05em] text-faint">Fourchette ±10%</div><div className="font-num text-[0.72rem] text-muted">{money(fourchette(p.prix)[0])} → {money(fourchette(p.prix)[1])}</div></div>
-                        )}
-                      </button>
-                    </div>
-                  );
-                })}
+        <div className="flex flex-col gap-2.5">
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" /><input className={inputCls + " pl-8"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un produit dans le stock…" /></div>
+            <button onClick={() => setOpen(toutOuvert ? {} : Object.fromEntries(cats.map((c) => [c, true])))} className="shrink-0 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted hover:border-border-2">{toutOuvert ? "Tout replier" : "Tout déplier"}</button>
+          </div>
+          {cats.map((cat) => {
+            const items = produits.filter((p) => p.categorie === cat);
+            const shown = query ? items.filter((p) => p.nom.toLowerCase().includes(query)) : items;
+            if (query && shown.length === 0) return null;
+            const ouvert = query ? true : !!open[cat];
+            const totalStock = items.reduce((s2, p) => s2 + (p.aLaDemande ? 0 : (override[p.id] ?? p.stock)), 0);
+            return (
+              <div key={cat} className="overflow-hidden rounded-[12px] border border-border bg-surface">
+                <button onClick={() => { if (!query) setOpen((o) => ({ ...o, [cat]: !o[cat] })); }} className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left transition hover:bg-surface-2">
+                  <ChevronDown className={"h-4 w-4 shrink-0 text-faint transition-transform " + (ouvert ? "" : "-rotate-90")} strokeWidth={2} />
+                  <span className="text-[0.82rem] font-semibold uppercase tracking-[0.05em]">{cat}</span>
+                  <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[0.64rem] font-semibold text-faint">{query ? `${shown.length}/${items.length}` : items.length} réf.</span>
+                  <span className="ml-auto text-[0.68rem] text-faint"><b className="font-num text-muted">{totalStock}</b> en stock</span>
+                </button>
+                {ouvert ? <div className="flex flex-col gap-2 border-t border-border p-2.5">{shown.map((p) => carte(p))}</div> : null}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
       {nouveau ? <ProduitModal ressources={ressources} onClose={() => setNouveau(false)} router={router} /> : null}
@@ -370,7 +392,7 @@ function ProduitModal({ produit, ressources, onClose, router }: { produit?: ArmP
           <Champ label="Prix de vente ($)"><input className={inputCls} type="number" min={0} step="0.01" value={prix} onChange={(e) => setPrix(e.target.value)} /></Champ>
           <Champ label="Niveau de craft"><select className={inputCls} value={niveau} onChange={(e) => setNiveau(e.target.value)}>{[0, 1, 2, 3].map((n) => <option key={n} value={n}>Niveau {n}</option>)}</select></Champ>
         </div>
-        {prix ? <p className="text-[0.74rem] text-faint">Fourchette ±10% : <b className="font-num text-muted">{money(fourchette(Number(prix) || 0)[0])} → {money(fourchette(Number(prix) || 0)[1])}</b></p> : null}
+        {prix ? <p className="text-[0.74rem] text-faint">Fourchette ±5% : <b className="font-num text-muted">{money(fourchette(Number(prix) || 0)[0])} → {money(fourchette(Number(prix) || 0)[1])}</b></p> : null}
         <div className="grid gap-3 sm:grid-cols-2">
           <Champ label="Coût matières ($)"><input className={inputCls} type="number" min={0} step="0.01" value={cout} onChange={(e) => setCout(e.target.value)} /></Champ>
           <Champ label="Stock (craftables)"><input className={inputCls} type="number" min={0} value={stock} onChange={(e) => setStock(e.target.value)} disabled={aLaDemande} /></Champ>
