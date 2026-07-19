@@ -617,4 +617,10 @@ async function marquerCandidatureTransmise(id) {
   return await _patch(`Candidature?id=eq.${encodeURIComponent(id)}`, { notifieDiscord: true });
 }
 
-module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise };
+// ── Produits de l'armurerie de Van Horn (pour l'alerte réappro quotidienne) ──
+async function lireProduitsArmurerie() {
+  const rows = await _get('ArmurerieProduit?select=id,nom,categorie,stock,aLaDemande&order=categorie.asc&limit=1000');
+  return Array.isArray(rows) ? rows : [];
+}
+
+module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise, lireProduitsArmurerie };
