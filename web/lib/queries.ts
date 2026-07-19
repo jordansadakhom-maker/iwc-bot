@@ -783,7 +783,7 @@ export type ArmNote = { id: string; titre: string | null; contenu: string; eping
 export type ArmTache = { id: string; texte: string; fait: boolean; assigneA: string | null; auteur: string | null; createdAt: string | null };
 export type ArmCommandeLigne = { objet: string; qte: number; prixUnitaire: number };
 export type ArmCommande = { id: string; categorie: string | null; clientNom: string; clientPrenom: string | null; lignes: ArmCommandeLigne[]; total: number; statut: string; notes: string | null; createdAt: string | null };
-export type ArmRessource = { id: string; nom: string; prix: number };
+export type ArmRessource = { id: string; nom: string; categorie: string; prix: number; mine: boolean };
 export type ArmurerieData = { connecte: boolean; clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvementsCoffre: ArmMouvement[]; produits: ArmProduit[]; employes: ArmEmploye[]; pointages: ArmPointage[]; paies: ArmPaie[]; impots: ArmImpot[]; notes: ArmNote[]; taches: ArmTache[]; commandes: ArmCommande[]; ressources: ArmRessource[] };
 
 export async function getArmurerie(): Promise<ArmurerieData> {
@@ -872,7 +872,7 @@ export async function getArmurerie(): Promise<ArmurerieData> {
     total: Number(c.total) || 0, statut: (c.statut as string) || "en_attente", notes: (c.notes as string) ?? null, createdAt: (c.createdAt as string) ?? null,
   }));
   const ressources: ArmRessource[] = ressR.error ? [] : ((ressR.data || []) as Raw[]).map((r) => ({
-    id: String(r.id), nom: (r.nom as string) || "Ressource", prix: Number(r.prix) || 0,
+    id: String(r.id), nom: (r.nom as string) || "Ressource", categorie: (r.categorie as string) || "Divers", prix: Number(r.prix) || 0, mine: !!r.mine,
   }));
   const connecte = !(clientR.error && venteR.error && contratR.error) || dataConfigured();
   return { connecte, clients, ventes, contrats, ca, coffre, mouvementsCoffre, produits, employes, pointages, paies, impots, notes, taches, commandes, ressources };
