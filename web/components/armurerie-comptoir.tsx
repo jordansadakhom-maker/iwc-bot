@@ -234,7 +234,7 @@ function CaisseTab({ produits, ressources, clients, router }: { produits: ArmPro
     }));
     setFactureSnap(snap); setFactureOpen(false);
     setCart({}); setPxEdit({}); setClient(""); setClientId(""); setNotes(""); setSerie(""); setPhoto(""); setLu(null); setSerieLu(null);
-    setFlash(`Vente encaissée : ${money(r.total || vente)} → coffre + registre + facture + compta + impôts.`);
+    setFlash(`Vente encaissée : ${money(r.total || vente)} → coffre + registre + facture + compta + impôts${r.ficheCreee ? " + fiche client créée" : ""}.`);
     router.refresh();
   }
 
