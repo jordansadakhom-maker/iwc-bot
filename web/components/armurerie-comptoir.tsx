@@ -20,7 +20,7 @@ import {
   creerVente, majVente, supprimerVente,
   creerContrat, envoyerContrat, marquerContrat, supprimerContrat,
   ajusterCoffreArmurerie,
-  creerProduit, majProduit, supprimerProduit, importerCatalogue, importerRecettes, validerCaisse, type LigneCaisse,
+  creerProduit, majProduit, supprimerProduit, importerCatalogue, importerRecettes, validerCaisse, fabriquerProduit, type LigneCaisse,
 } from "@/app/(app)/armurerie/actions";
 
 type Router = ReturnType<typeof useRouter>;
@@ -413,6 +413,7 @@ function ProduitModal({ produit, ressources, onClose, router }: { produit?: ArmP
   const [aLaDemande, setALaDemande] = useState(!!produit?.aLaDemande);
   const [recette, setRecette] = useState<ArmRecetteLigne[]>(produit?.recette?.length ? produit.recette : []);
   const [qteFab, setQteFab] = useState("1");
+  const [fabResult, setFabResult] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -435,6 +436,19 @@ function ProduitModal({ produit, ressources, onClose, router }: { produit?: ArmP
     router.refresh(); onClose();
   }
   async function supprimer() { setBusy("del"); const r = await supprimerProduit(produit!.id); setBusy(null); if (!r.ok) { setErr(r.error || "Échec."); return; } router.refresh(); onClose(); }
+  async function fabriquer() {
+    if (!produit || qFab < 1) return;
+    setBusy("fab"); setFabResult(null);
+    const r = await fabriquerProduit(produit.id, qFab);
+    setBusy(null);
+    if (!r.ok) { setFabResult("❌ " + (r.error || "Échec.")); return; }
+    const parts = [`✅ ${r.q} ${produit.nom} ajouté(s) au stock.`];
+    if (r.consommes?.length) parts.push(`Consommé : ${r.consommes.join(", ")}.`);
+    if (r.manques?.length) parts.push(`⚠️ Stock ressource insuffisant : ${r.manques.join(", ")}.`);
+    if (r.ignores?.length) parts.push(`Non déduit (ressource sans stock/inconnue) : ${r.ignores.join(", ")}.`);
+    setFabResult(parts.join(" "));
+    router.refresh();
+  }
 
   return (
     <Modal titre={editing ? produit!.nom : "📦 Nouveau produit"} onClose={onClose}>
@@ -505,6 +519,10 @@ function ProduitModal({ produit, ressources, onClose, router }: { produit?: ArmP
                     <span className="font-num text-[1rem] font-bold" style={{ color: "var(--accent)" }}>{money(coutCraft * qFab)}{manquants.length ? " +" : ""}</span>
                   </div>
                   {manquants.length ? <p className="mt-0.5 text-[0.66rem] text-faint">+ prix inconnu pour {manquants.join(", ")} — renseigne-les dans Ressources pour un total exact.</p> : null}
+                  {editing ? (
+                    <button onClick={fabriquer} disabled={busy === "fab"} className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--good)" }}>{busy === "fab" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Hammer className="h-3.5 w-3.5" />} Fabriquer {qFab} — déduit les ressources, +{qFab} au stock</button>
+                  ) : <p className="mt-2 text-center text-[0.68rem] text-faint">Enregistre d&apos;abord le produit pour pouvoir le fabriquer.</p>}
+                  {fabResult ? <p className="mt-1.5 text-[0.72rem] leading-relaxed" style={{ color: fabResult.startsWith("❌") ? "var(--oxblood)" : "var(--muted)" }}>{fabResult}</p> : null}
                 </>
               ) : <p className="py-1 text-center text-[0.74rem] text-faint">Indique une quantité.</p>}
             </div>

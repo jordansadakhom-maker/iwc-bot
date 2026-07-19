@@ -19,10 +19,13 @@ const SEUIL_BAS = 3;
 function _stock(p) { return Number(p.stock) || 0; }
 function _dispo(p) { return !p.aLaDemande; }
 function _liste(items) {
-  // Regroupe l'affichage par catégorie, tronqué au format d'un champ d'embed.
+  // Tronqué proprement à une frontière de ligne (limite d'un champ d'embed = 1024).
   const lignes = items.map(p => `• **${String(p.nom || 'Produit')}**${p.categorie ? ` _(${p.categorie})_` : ''} — ${_stock(p)}`);
-  const txt = lignes.join('\n');
-  return txt.length > 1000 ? txt.slice(0, 980) + `\n… (+${lignes.length} au total)` : (txt || '—');
+  const out = []; let len = 0;
+  for (const l of lignes) { if (len + l.length + 1 > 950) break; out.push(l); len += l.length + 1; }
+  const reste = lignes.length - out.length;
+  if (reste > 0) out.push(`… (+${reste} de plus)`);
+  return out.join('\n') || '—';
 }
 
 // options.force = true → poste même s'il n'y a aucune alerte (test manuel).

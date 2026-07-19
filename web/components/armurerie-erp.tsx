@@ -784,7 +784,7 @@ export function RessourcesTab({ ressources, router }: { ressources: ArmRessource
   async function regler() {
     if (!lignes.length) return;
     setBusy(true);
-    const payload: LigneRessource[] = lignes.map((l) => ({ nom: l.r.nom, qte: l.n, prix: l.r.prix, mine: l.r.mine }));
+    const payload: LigneRessource[] = lignes.map((l) => ({ id: l.r.id, nom: l.r.nom, qte: l.n, prix: l.r.prix, mine: l.r.mine }));
     const r = await acheterRessources(payload, pct);
     setBusy(false);
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
@@ -877,7 +877,7 @@ function RessourceCard({ r, auCalcul, onAdd, onEdit, onPrix }: { r: ArmRessource
     <div className="rounded-[10px] border border-border bg-surface-2 px-2.5 py-2">
       <button onClick={onAdd} className="block w-full text-left transition hover:-translate-y-0.5">
         <div className="flex items-center gap-1"><span className="min-w-0 truncate text-[0.8rem] font-semibold">{r.nom}</span>{r.mine ? <span title="De la mine — remise applicable" className="shrink-0 text-[0.66rem]">⛏️</span> : null}</div>
-        {auCalcul ? <div className="mt-0.5 text-[0.62rem] text-faint">{auCalcul} au calcul</div> : null}
+        <div className="mt-0.5 text-[0.62rem] text-faint">stock <b className="font-num" style={{ color: r.stock > 0 ? "var(--good)" : "var(--muted)" }}>{r.stock}</b>{auCalcul ? <span> · {auCalcul} au calcul</span> : null}</div>
       </button>
       <div className="mt-1 flex items-center gap-1">
         <input type="number" min={0} step="0.01" value={prix} onChange={(e) => setPrix(e.target.value)} onFocus={(e) => e.currentTarget.select()} onBlur={save} onKeyDown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }} className={inputCls + " !w-[4.4rem] !px-1.5 !py-0.5 font-num !text-[0.84rem] font-bold"} style={{ color: "var(--accent)" }} title="Prix unitaire — clique pour modifier" />
@@ -893,6 +893,7 @@ function RessourceModal({ ressource, onClose, router }: { ressource?: ArmRessour
   const [nom, setNom] = useState(ressource?.nom || "");
   const [categorie, setCategorie] = useState(ressource?.categorie || "Divers");
   const [prix, setPrix] = useState(ressource ? String(ressource.prix) : "");
+  const [stock, setStock] = useState(ressource ? String(ressource.stock) : "");
   const [mine, setMine] = useState(!!ressource?.mine);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -902,7 +903,7 @@ function RessourceModal({ ressource, onClose, router }: { ressource?: ArmRessour
     setErr(null);
     if (nom.trim().length < 1) { setErr("Nom de la ressource requis."); return; }
     setBusy("save");
-    const data = { nom, categorie, prix: Number(prix) || 0, mine };
+    const data = { nom, categorie, prix: Number(prix) || 0, stock: Number(stock) || 0, mine };
     const r = editing ? await majRessource(ressource!.id, data) : await creerRessource(data);
     setBusy(null);
     if (!r.ok) { setErr(r.error || "Impossible."); return; }
@@ -918,6 +919,7 @@ function RessourceModal({ ressource, onClose, router }: { ressource?: ArmRessour
           <Champ label="Catégorie"><input className={inputCls} value={categorie} onChange={(e) => setCategorie(e.target.value)} placeholder="Bois, Métaux, Minerais…" maxLength={60} list="res-cats" /><datalist id="res-cats"><option value="Minerais" /><option value="Métaux & verre" /><option value="Bois" /><option value="Textile" /><option value="Composants" /><option value="Divers" /></datalist></Champ>
           <Champ label="Prix unitaire ($ / u)"><input className={inputCls} type="number" min={0} step="0.01" value={prix} onChange={(e) => setPrix(e.target.value)} /></Champ>
         </div>
+        <Champ label="Stock (unités en réserve)"><input className={inputCls} type="number" min={0} value={stock} onChange={(e) => setStock(e.target.value)} placeholder="0" /></Champ>
         <label className="inline-flex items-center gap-2 text-[0.82rem]"><input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} /> ⛏️ Ressource de la mine (la remise de 5 % s&apos;applique dessus)</label>
         {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
         <div className="mt-1 flex items-center justify-between border-t border-border pt-3">
