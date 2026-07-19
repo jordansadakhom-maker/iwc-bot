@@ -412,11 +412,14 @@ function ProduitModal({ produit, ressources, onClose, router }: { produit?: ArmP
   const [niveau, setNiveau] = useState(produit ? String(produit.niveau) : "0");
   const [aLaDemande, setALaDemande] = useState(!!produit?.aLaDemande);
   const [recette, setRecette] = useState<ArmRecetteLigne[]>(produit?.recette?.length ? produit.recette : []);
+  const [qteFab, setQteFab] = useState("1");
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const { cout: coutCraft, manquants } = coutRecette(recette.filter((l) => l.ingredient.trim() && l.qte), ressources);
+  const recetteValide = recette.filter((l) => l.ingredient.trim() && l.qte);
+  const { cout: coutCraft, manquants } = coutRecette(recetteValide, ressources);
   const marge = (Number(prix) || 0) - coutCraft;
+  const qFab = Math.max(0, Math.round(Number(qteFab) || 0));
   const setLigneR = (i: number, patch: Partial<ArmRecetteLigne>) => setRecette((ls) => ls.map((l, idx) => idx === i ? { ...l, ...patch } : l));
   const addLigneR = () => setRecette((ls) => [...ls, { ingredient: "", qte: 1 }]);
   const delLigneR = (i: number) => setRecette((ls) => ls.filter((_, idx) => idx !== i));
@@ -469,11 +472,41 @@ function ProduitModal({ produit, ressources, onClose, router }: { produit?: ArmP
           )}
           <datalist id="arm-ressources">{ressources.map((r) => <option key={r.id} value={r.nom} />)}</datalist>
           <button onClick={addLigneR} className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-border px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted hover:border-border-2 hover:text-ink"><Plus className="h-3.5 w-3.5" /> Ajouter un ingrédient</button>
-          {recette.some((l) => l.ingredient.trim() && l.qte) ? (
+          {recetteValide.length ? (
             <div className="mt-2 flex flex-col gap-0.5 border-t border-border pt-2 text-[0.82rem]">
-              <div className="flex justify-between text-faint"><span>Coût de fabrication</span><span className="font-num">{money(coutCraft)}{manquants.length ? " +" : ""}</span></div>
+              <div className="flex justify-between text-faint"><span>Coût de fabrication (1 u.)</span><span className="font-num">{money(coutCraft)}{manquants.length ? " +" : ""}</span></div>
               <div className="flex justify-between"><span className="font-semibold">Marge (prix − coût)</span><span className="font-num font-bold" style={{ color: marge >= 0 ? "var(--good)" : "var(--oxblood)" }}>{money(marge)}</span></div>
               {manquants.length ? <p className="text-[0.68rem] text-faint">⚠️ Prix manquant pour : {manquants.join(", ")} — ajoute-les dans l&apos;onglet Ressources pour un coût exact.</p> : null}
+            </div>
+          ) : null}
+          {/* Calculateur : ressources & coût exacts pour une quantité à fabriquer */}
+          {recetteValide.length ? (
+            <div className="mt-2 rounded-[8px] border border-border bg-surface p-2.5">
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <span className="text-[0.72rem] font-semibold uppercase tracking-[0.05em] text-muted">🧮 Fabriquer une quantité</span>
+                <label className="flex items-center gap-1.5 text-[0.74rem] text-faint">Quantité
+                  <input className={inputCls + " !w-16 !px-1.5 !py-1 text-center font-num"} type="number" min={0} value={qteFab} onChange={(e) => setQteFab(e.target.value)} onFocus={(e) => e.currentTarget.select()} />
+                </label>
+              </div>
+              {qFab > 0 ? (
+                <>
+                  <div className="flex flex-col gap-1">
+                    {recetteValide.map((l, i) => { const total = l.qte * qFab; const px = prixIngredient(l.ingredient, ressources); return (
+                      <div key={i} className="flex items-center gap-2 text-[0.78rem]">
+                        <span className="min-w-0 flex-1 truncate">{l.ingredient}</span>
+                        <span className="font-num text-faint">{l.qte}×{qFab} =</span>
+                        <span className="w-10 shrink-0 text-right font-num font-semibold">{total}</span>
+                        <span className="w-20 shrink-0 text-right font-num" style={{ color: px == null ? "var(--faint)" : "var(--muted)" }}>{px == null ? "prix ?" : money(px * total)}</span>
+                      </div>
+                    ); })}
+                  </div>
+                  <div className="mt-1.5 flex items-center justify-between border-t border-border pt-1.5 text-[0.86rem]">
+                    <span className="font-semibold">Coût total — {qFab} u.</span>
+                    <span className="font-num text-[1rem] font-bold" style={{ color: "var(--accent)" }}>{money(coutCraft * qFab)}{manquants.length ? " +" : ""}</span>
+                  </div>
+                  {manquants.length ? <p className="mt-0.5 text-[0.66rem] text-faint">+ prix inconnu pour {manquants.join(", ")} — renseigne-les dans Ressources pour un total exact.</p> : null}
+                </>
+              ) : <p className="py-1 text-center text-[0.74rem] text-faint">Indique une quantité.</p>}
             </div>
           ) : null}
         </div>
