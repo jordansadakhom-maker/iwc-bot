@@ -220,7 +220,8 @@ function _construire(db) {
       createdAt: r.createdAt || undefined,
     }));
 
-  // ── Renseignement : personnes traquées (db.traques) — champ « status » côté bot ──
+  // ── Renseignement / Avis de recherche : personnes traquées (db.traques) ──
+  //    « status » côté bot. Champs riches (affiche WANTED) en colonnes optionnelles.
   const traques = (db.traques || [])
     .filter(t => t && t.id)
     .map(t => ({
@@ -230,6 +231,13 @@ function _construire(db) {
       dangerosite: _nn(t.dangerosite, 40),
       statut: _str(t.status || t.statut || 'chasse', 40),
       createdAt: t.createdAt || undefined,
+      // Affiche « avis de recherche » : colonnes optionnelles (repli auto si absentes).
+      photo: _nn(t.photo || t.photoUrl, 500),
+      position: _nn(t.position, 200),
+      vivantMort: _nn(t.vivantMort, 40),
+      commanditaire: _nn(t.commanditaire, 200),
+      signalement: _nn(t.signalement || t.resume, 2000),
+      chasseurs: Array.isArray(t.chasseurs) ? t.chasseurs.length : 0,
     }));
 
   // ── Médical : dossiers (db.suiviMedical, indexé par ID Discord du membre) ──
@@ -334,7 +342,13 @@ async function syncAll(db) {
       results.push(await _upsert('Contrat', contrats));  // 3. indépendant
       results.push(await _upsert('Operation', operations)); // 4. FK → Membre + Contrat (déjà poussés)
       results.push(await _upsert('RapportInfo', rapports)); // 5. renseignement — indépendant
-      results.push(await _upsert('Traque', traques));       // 6. traques — indépendant
+      // 6. Traques / avis de recherche — format complet, repli si colonnes riches absentes.
+      let rT = await _upsert('Traque', traques);
+      if (!rT.ok && rT.status === 400) {
+        const base = traques.map(({ photo, position, vivantMort, commanditaire, signalement, chasseurs, ...b }) => b);
+        rT = await _upsert('Traque', base);
+      }
+      results.push(rT);
       // 7. Médical — tente le format complet ; repli sur les champs de base si
       //    les colonnes détaillées (notes, convalescence…) n'existent pas encore.
       let rD = await _upsert('DossierMedical', dossiers);

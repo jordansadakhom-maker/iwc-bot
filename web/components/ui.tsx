@@ -1,6 +1,6 @@
 import {
   Inbox, Star, Coins, Target, Eye, Users, HeartPulse, CalendarDays, Crosshair,
-  Sparkles, Bell, FileText, Megaphone, ShieldCheck, type LucideIcon,
+  Sparkles, Bell, FileText, Megaphone, ShieldCheck, Skull, type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
 
@@ -10,6 +10,7 @@ import clsx from "clsx";
 // section un sceau distinct, sans rien changer aux pages.
 const EMBLEMES: [RegExp, LucideIcon][] = [
   [/finance/i, Coins], [/op[ée]ration|contrat/i, Target], [/renseign/i, Eye],
+  [/avis|recherch|wanted/i, Skull],
   [/membre/i, Users], [/m[ée]dical/i, HeartPulse], [/agenda|client/i, CalendarDays],
   [/armurerie|inventaire|arme/i, Crosshair], [/assistant/i, Sparkles],
   [/notification/i, Bell], [/document/i, FileText], [/communication/i, Megaphone],
