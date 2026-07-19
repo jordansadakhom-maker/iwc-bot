@@ -283,18 +283,30 @@ const CATALOGUE: { nom: string; cat: string; prix: number; niveau?: number }[] =
   { nom: "Pack L'arrivant", cat: "Packs", prix: 25, niveau: 0 },
   { nom: "Pack chasseur ultime", cat: "Packs", prix: 35, niveau: 0 },
   { nom: "Pack Guerrier", cat: "Packs", prix: 95, niveau: 0 },
+  // Munitions
+  { nom: "Boîte de munitions de Pistolet", cat: "Munitions", prix: 5, niveau: 0 },
+  { nom: "Boîte de munitions de Revolver", cat: "Munitions", prix: 5, niveau: 0 },
+  { nom: "Boîte de munitions de Carabine", cat: "Munitions", prix: 5, niveau: 0 },
+  { nom: "Boîte de munitions de Fusil", cat: "Munitions", prix: 5, niveau: 0 },
+  { nom: "Boîte de munitions de Pompe", cat: "Munitions", prix: 5, niveau: 0 },
   // Matières & divers
   { nom: "Laiton", cat: "Matières", prix: 3.52, niveau: 0 },
   { nom: "Pièce d'arme", cat: "Matières", prix: 0, niveau: 0 },
   { nom: "Don", cat: "Divers", prix: 0, niveau: 0 },
 ];
-export async function importerCatalogue(): Promise<ArmResult> {
+// Idempotent : n'ajoute que les produits ABSENTS (comparaison par nom normalisé),
+// donc re-cliquable pour compléter le catalogue (ex : munitions) sans doublon.
+export async function importerCatalogue(): Promise<ArmResult & { n?: number }> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
-  const rows = CATALOGUE.map((p) => ({ id: newId("prd"), nom: p.nom, categorie: p.cat, prix: round2(p.prix), cout: 0, stock: 0, aLaDemande: false, niveau: p.niveau || 0 }));
+  const { data: existants } = await admin.from("ArmurerieProduit").select("nom");
+  const dejaLa = new Set((existants || []).map((p) => _norm(String((p as { nom: string }).nom))));
+  const manquants = CATALOGUE.filter((p) => !dejaLa.has(_norm(p.nom)));
+  if (!manquants.length) return { ok: true, n: 0 };
+  const rows = manquants.map((p) => ({ id: newId("prd"), nom: p.nom, categorie: p.cat, prix: round2(p.prix), cout: 0, stock: 0, aLaDemande: false, niveau: p.niveau || 0 }));
   const { error } = await admin.from("ArmurerieProduit").insert(rows);
   if (error) return { ok: false, error: tableErr(error.message, "produits") };
-  return { ok: true };
+  return { ok: true, n: manquants.length };
 }
 
 // ── Recettes de craft (ingrédients requis par arme/objet) ────────
@@ -304,6 +316,12 @@ const RECETTES: [string, [string, number][]][] = [
   // ── Intermédiaires & matières ──
   ["Pièce d'arme", [["Bois", 3], ["Lingot fer", 4], ["Lingot zinc", 4]]],
   ["Laiton", [["Lingot fer", 1], ["Lingot zinc", 1]]],
+  // ── Munitions ──
+  ["Boîte de munitions de Pistolet", [["Lingot fer", 1], ["Poudre", 1]]],
+  ["Boîte de munitions de Revolver", [["Lingot plomb", 1], ["Poudre", 1]]],
+  ["Boîte de munitions de Carabine", [["Lingot plomb", 1], ["Poudre", 1]]],
+  ["Boîte de munitions de Fusil", [["Lingot plomb", 1], ["Poudre", 1]]],
+  ["Boîte de munitions de Pompe", [["Lingot plomb", 1], ["Poudre", 1]]],
   // ── Outils & objets ──
   ["Ceinture Couteau de lancé", [["Bois", 5], ["Lingot fer", 3]]],
   ["Couteau", [["Bois", 2], ["Lingot fer", 2]]],
