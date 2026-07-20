@@ -160,6 +160,16 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
   );
 }
 
+// Normalise un nom pour comparer (sans accents, minuscules, espaces compactés).
+function normNom(v: string) { return (v || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim(); }
+// Retrouve un client existant à partir d'un nom lu (égalité, ou l'un contient l'autre).
+function matchNomClient(clients: ArmClient[], nomLu: string): ArmClient | null {
+  const a = normNom(nomLu); if (a.length < 2) return null;
+  let best: ArmClient | null = null;
+  for (const c of clients) { const b = normNom(c.nom); if (!b) continue; if (b === a) return c; if (!best && (b.includes(a) || a.includes(b))) best = c; }
+  return best;
+}
+
 // ═══════════════════ CAISSE (point de vente) ═══════════════════
 function CaisseTab({ produits, ressources, clients, router }: { produits: ArmProduit[]; ressources: ArmRessource[]; clients: ArmClient[]; router: Router }) {
   const [q, setQ] = useState("");
@@ -196,10 +206,17 @@ function CaisseTab({ produits, ressources, clients, router }: { produits: ArmPro
     setLisant(false);
     if (!r.ok) { setLu(r.error || "Lecture impossible."); return; }
     const nomComplet = `${r.prenom || ""} ${r.nom || ""}`.trim();
-    if (nomComplet && !clientId) setClient(nomComplet);
     const extra = [r.dateNaissance ? `né(e) ${r.dateNaissance}` : "", r.residence ? `réside : ${r.residence}` : ""].filter(Boolean).join(" · ");
     if (extra && !notes) setNotes(extra);
-    setLu(nomComplet ? `📇 Identité lue : ${nomComplet}${extra ? " — " + extra : ""}` : "Carte lue, mais nom non détecté — saisis-le à la main.");
+    // Client déjà fiché ? On rattache la vente à son dossier (les achats s'accumulent).
+    const dejaClient = nomComplet ? matchNomClient(clients, nomComplet) : null;
+    if (dejaClient) {
+      setClientId(dejaClient.id); setClient("");
+      setLu(`📇 Client retrouvé : ${dejaClient.nom} — la vente s'ajoute à son dossier.`);
+    } else {
+      if (nomComplet && !clientId) setClient(nomComplet);
+      setLu(nomComplet ? `📇 Identité lue : ${nomComplet}${extra ? " — " + extra : ""} (nouveau client)` : "Carte lue, mais nom non détecté — saisis-le à la main.");
+    }
   }
 
   const byId = new Map(produits.map((p) => [p.id, p]));
@@ -782,46 +799,97 @@ function Kpi({ label, value, tone, icon: Icon }: { label: string; value: string;
 function ClientsTab({ clients, ventes, router }: { clients: ArmClient[]; ventes: ArmVente[]; router: Router }) {
   const [sel, setSel] = useState<ArmClient | null>(null);
   const [nouveau, setNouveau] = useState(false);
+  const [prefill, setPrefill] = useState<{ nom?: string; notes?: string; carte?: string } | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanMsg, setScanMsg] = useState<string | null>(null);
+  const [scanTone, setScanTone] = useState<"ok" | "new" | "err">("ok");
+  const [q, setQ] = useState("");
+
+  // Scan d'une pièce d'identité → retrouve le client fiché et ouvre son dossier complet
+  // (mis à jour avec la nouvelle capture). Sinon, prépare une fiche pré-remplie.
+  async function onScanCarte(url: string) {
+    setScanning(true); setScanTone("ok"); setScanMsg("Lecture de la pièce d'identité…");
+    const r = await lireCarteIdentite(url);
+    setScanning(false);
+    if (!r.ok) { setScanTone("err"); setScanMsg(r.error || "Lecture impossible."); return; }
+    const nomComplet = `${r.prenom || ""} ${r.nom || ""}`.trim();
+    if (!nomComplet) { setScanTone("err"); setScanMsg("Carte lue, mais nom non détecté — ajoute le client à la main."); return; }
+    const found = matchNomClient(clients, nomComplet);
+    if (found) {
+      await majClient(found.id, { carteIdentite: url }); // met à jour sa capture
+      setScanTone("ok"); setScanMsg(`Client retrouvé : ${found.nom} — dossier ouvert et mis à jour.`);
+      setSel({ ...found, carteIdentite: url });
+      router.refresh();
+    } else {
+      const extra = [r.dateNaissance ? `né(e) ${r.dateNaissance}` : "", r.residence ? `réside : ${r.residence}` : ""].filter(Boolean).join(" · ");
+      setPrefill({ nom: nomComplet, notes: extra, carte: url });
+      setScanTone("new"); setScanMsg(`Aucune fiche pour ${nomComplet} — nouvelle fiche pré-remplie.`);
+      setNouveau(true);
+    }
+  }
+
+  const filtre = q.trim().toLowerCase();
+  const liste = filtre ? clients.filter((c) => (c.nom + " " + (c.telegramme || "")).toLowerCase().includes(filtre)) : clients;
+
   return (
     <>
-      <div className="mb-3 flex justify-end">
-        <button onClick={() => setNouveau(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold hover:border-border-2"><Plus className="h-3.5 w-3.5" /> Nouveau client</button>
-      </div>
-      {clients.length === 0 ? (
-        <Vide icon={Users} texte="Aucun client fiché. Ajoute un client — tu pourras ranger sa carte d'identité et retrouver ses achats." />
-      ) : (
-        <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
-          {clients.map((c) => (
-            <button key={c.id} onClick={() => setSel(c)} className="flex items-center gap-3 rounded-[12px] border border-border bg-surface-2 px-3 py-2.5 text-left transition hover:-translate-y-0.5 hover:border-border-2">
-              {c.carteIdentite ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={c.carteIdentite} alt="CNI" className="h-11 w-11 shrink-0 rounded-[8px] border border-border object-cover" />
-              ) : (
-                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-[8px] border border-dashed border-border text-faint"><IdCard className="h-5 w-5" /></span>
-              )}
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[0.88rem] font-semibold">{c.nom}</div>
-                <div className="truncate text-[0.72rem] text-faint">{c.telegramme ? `☎ ${c.telegramme}` : "Pas de télégramme"}</div>
-              </div>
-              <Badge tone={clientTone(c.statut)}>{STATUTS_CLIENT.find((s) => s.key === c.statut)?.label || c.statut}</Badge>
-            </button>
-          ))}
+      {/* Scanner une pièce d'identité — retrouve le dossier du client */}
+      <div className="mb-3 rounded-[12px] border border-border bg-surface-2 p-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 text-[0.82rem] font-semibold"><IdCard className="h-4 w-4" style={{ color: "var(--accent)" }} /> Scanner une pièce d&apos;identité</div>
+          <button onClick={() => { setPrefill(null); setNouveau(true); }} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[0.76rem] font-semibold hover:border-border-2"><Plus className="h-3.5 w-3.5" /> Nouveau client</button>
         </div>
+        <p className="mb-2 text-[0.74rem] text-faint">Glisse la carte : si la personne a déjà acheté chez nous, son <b>dossier complet s&apos;ouvre</b> et se met à jour. Sinon, une fiche pré-remplie est créée. Chaque achat reste rangé par facture &amp; date.</p>
+        <PhotoDrop dossier="armurerie-cni" onUploaded={onScanCarte} compact label={scanning ? "Lecture en cours…" : "Glisser la pièce d'identité — l'IA la lit et retrouve le client"} />
+        {scanMsg ? <p className="mt-2 text-[0.78rem]" style={{ color: scanTone === "err" ? "var(--oxblood)" : scanTone === "new" ? "var(--brass)" : "var(--good)" }}>{scanMsg}</p> : null}
+      </div>
+
+      {clients.length === 0 ? (
+        <Vide icon={Users} texte="Aucun client fiché. Scanne une pièce d'identité ou ajoute un client — tu pourras ranger sa carte et retrouver ses achats." />
+      ) : (
+        <>
+          <div className="relative mb-3">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
+            <input className={inputCls + " pl-8"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un client…" />
+          </div>
+          {liste.length === 0 ? <Vide icon={Users} texte="Aucun client ne correspond à ta recherche." /> : (
+          <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
+            {liste.map((c) => {
+              const nAchats = ventes.filter((v) => v.clientId === c.id).length;
+              return (
+              <button key={c.id} onClick={() => setSel(c)} className="flex items-center gap-3 rounded-[12px] border border-border bg-surface-2 px-3 py-2.5 text-left transition hover:-translate-y-0.5 hover:border-border-2">
+                {c.carteIdentite ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={c.carteIdentite} alt="CNI" className="h-11 w-11 shrink-0 rounded-[8px] border border-border object-cover" />
+                ) : (
+                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-[8px] border border-dashed border-border text-faint"><IdCard className="h-5 w-5" /></span>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[0.88rem] font-semibold">{c.nom}</div>
+                  <div className="truncate text-[0.72rem] text-faint">{c.telegramme ? `☎ ${c.telegramme}` : "Pas de télégramme"}{nAchats ? ` · ${nAchats} achat${nAchats > 1 ? "s" : ""}` : ""}</div>
+                </div>
+                <Badge tone={clientTone(c.statut)}>{STATUTS_CLIENT.find((s) => s.key === c.statut)?.label || c.statut}</Badge>
+              </button>
+              );
+            })}
+          </div>
+          )}
+        </>
       )}
-      {nouveau ? <ClientModal onClose={() => setNouveau(false)} router={router} /> : null}
+      {nouveau ? <ClientModal prefill={prefill || undefined} onClose={() => { setNouveau(false); setPrefill(null); }} router={router} /> : null}
       {sel ? <ClientModal key={sel.id} client={sel} achats={ventes.filter((v) => v.clientId === sel.id)} onClose={() => setSel(null)} router={router} /> : null}
     </>
   );
 }
 
-function ClientModal({ client, achats = [], onClose, router }: { client?: ArmClient; achats?: ArmVente[]; onClose: () => void; router: Router }) {
+function ClientModal({ client, achats = [], onClose, router, prefill }: { client?: ArmClient; achats?: ArmVente[]; onClose: () => void; router: Router; prefill?: { nom?: string; notes?: string; carte?: string } }) {
   const editing = !!client;
-  const [nom, setNom] = useState(client?.nom || "");
+  const [nom, setNom] = useState(client?.nom || prefill?.nom || "");
   const [telegramme, setTelegramme] = useState(client?.telegramme || "");
   const [discordId, setDiscordId] = useState(client?.discordId || "");
   const [statut, setStatut] = useState(client?.statut || "actif");
-  const [notes, setNotes] = useState(client?.notes || "");
-  const [carte, setCarte] = useState<string | null>(client?.carteIdentite || null);
+  const [notes, setNotes] = useState(client?.notes || prefill?.notes || "");
+  const [carte, setCarte] = useState<string | null>(client?.carteIdentite || prefill?.carte || null);
   const [busy, setBusy] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
