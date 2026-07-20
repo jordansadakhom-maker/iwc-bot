@@ -15,7 +15,7 @@ function quand(iso: string) {
   return d.toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit" }) + " " + d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 }
 
-export function Ventes({ ventes }: { ventes: VenteBandage[] }) {
+export function Ventes({ ventes, patients = [] }: { ventes: VenteBandage[]; patients?: string[] }) {
   const router = useRouter();
   const toast = useToast();
   const [isPending, start] = useTransition();
@@ -50,7 +50,8 @@ export function Ventes({ ventes }: { ventes: VenteBandage[] }) {
           <p className="mb-3 text-[0.8rem] text-[var(--muted)]">Limite légale : <b>{LIMITE_BANDAGES} bandages par personne et par semaine.</b></p>
           <div className="mb-2"><ChampMoi moi={moi} onChange={setMoi} /></div>
           <label className="mb-1 block text-[0.68rem] uppercase tracking-[0.08em] text-[var(--faint)]">Patient</label>
-          <input className="inp mb-2" value={patient} onChange={(e) => setPatient(e.target.value)} placeholder="Prénom Nom" onKeyDown={(e) => { if (e.key === "Enter") vendre(); }} />
+          <input className="inp mb-2" list="disp-patients" value={patient} onChange={(e) => setPatient(e.target.value)} placeholder="Prénom Nom" onKeyDown={(e) => { if (e.key === "Enter") vendre(); }} />
+          <datalist id="disp-patients">{patients.map((n) => <option key={n} value={n} />)}</datalist>
           {patient.trim() ? <p className="mb-2 text-[0.78rem] text-[var(--muted)]">Déjà cette semaine : <b style={{ color: dejaCePatient >= LIMITE_BANDAGES ? "var(--oxblood)" : "var(--ink)" }}>{dejaCePatient}/{LIMITE_BANDAGES}</b></p> : null}
           <label className="mb-1 block text-[0.68rem] uppercase tracking-[0.08em] text-[var(--faint)]">Quantité</label>
           <input className="inp mb-3 tabnum" type="number" min={1} max={LIMITE_BANDAGES} value={qte} onChange={(e) => setQte(e.target.value)} />

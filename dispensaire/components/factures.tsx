@@ -34,7 +34,7 @@ function LigneFacture({ code, f, refresh, today }: { code: string; f: FactureRow
   );
 }
 
-export function Factures() {
+export function Factures({ patients = [] }: { patients?: string[] }) {
   const toast = useToast();
   const [code, setCode] = useState("");
   const [saisie, setSaisie] = useState("");
@@ -94,7 +94,8 @@ export function Factures() {
       <div className="rounded-[8px] border border-[var(--line)] bg-[var(--card)] p-4">
         <h2 className="mb-3 flex items-center gap-2 font-display text-[1.05rem]"><Plus className="h-4 w-4 text-[var(--muted)]" /> Nouvelle facture patient</h2>
         <div className="grid gap-2 sm:grid-cols-2">
-          <input className="inp" value={nouv.patient} onChange={(e) => setNouv({ ...nouv, patient: e.target.value })} placeholder="Patient" />
+          <input className="inp" list="disp-patients-f" value={nouv.patient} onChange={(e) => setNouv({ ...nouv, patient: e.target.value })} placeholder="Patient" />
+          <datalist id="disp-patients-f">{patients.map((n) => <option key={n} value={n} />)}</datalist>
           <input className="inp tabnum" type="number" step="0.01" min={0} value={nouv.montant} onChange={(e) => setNouv({ ...nouv, montant: e.target.value })} placeholder="Montant $" />
           <input className="inp" value={nouv.motif} onChange={(e) => setNouv({ ...nouv, motif: e.target.value })} placeholder="Motif (soin, opération…)" />
           <label className="text-[0.72rem] text-[var(--faint)]">Échéance de paiement<input className="inp mt-0.5" type="date" value={nouv.echeance} onChange={(e) => setNouv({ ...nouv, echeance: e.target.value })} /></label>
