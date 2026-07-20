@@ -21,11 +21,11 @@ const vide = { type: "Certificat médical", patient: "", praticien: "", dateActe
 function aujourdhui() { try { return new Date().toISOString().slice(0, 10); } catch { return ""; } }
 function joli(d: string) { if (!d) return "—"; const [y, m, j] = d.split("-"); return `${j}/${m}/${y}`; }
 
-export function Certificats({ archive, patients = [] }: { archive: Certificat[]; patients?: string[] }) {
+export function Certificats({ archive, patients = [], initialPatient = "" }: { archive: Certificat[]; patients?: string[]; initialPatient?: string }) {
   const [moi] = useMoi();
   const { run, isPending } = useAction();
   const toast = useToast();
-  const [f, setF] = useState({ ...vide, praticien: "", dateActe: aujourdhui() });
+  const [f, setF] = useState({ ...vide, patient: initialPatient, praticien: "", dateActe: aujourdhui() });
   const [copie, setCopie] = useState(false);
 
   const praticien = f.praticien || moi;

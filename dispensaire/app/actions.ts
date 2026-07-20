@@ -214,6 +214,21 @@ export async function supprimerPatient(id: string): Promise<R> {
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
 
+// Dossier d'un patient : certificats émis + bandages (semaine / total). Non protégé.
+export type DossierCertif = { id: string; type: string | null; dateActe: string | null; diagnostic: string | null; praticien: string | null };
+export async function getDossierPatient(nom: string): Promise<{ ok: boolean; certificats?: DossierCertif[]; bandagesSemaine?: number; bandagesTotal?: number }> {
+  const n = str(nom, 120); if (n.length < 2) return { ok: false };
+  const sb = db(); if (!sb) return { ok: false };
+  const [certs, bAll, bWeek] = await Promise.all([
+    sb.from("DispCertificat").select("id,type,dateActe,diagnostic,praticien,createdAt").ilike("patient", n).order("createdAt", { ascending: false }).limit(20),
+    sb.from("DispVenteBandage").select("quantite").ilike("patient", n),
+    sb.from("DispVenteBandage").select("quantite").ilike("patient", n).gte("createdAt", debutSemaine().toISOString()),
+  ]);
+  const sum = (rows: unknown) => ((rows as { quantite?: unknown }[]) || []).reduce((a, r) => a + num(r.quantite), 0);
+  const certificats = ((certs.data as Record<string, unknown>[]) || []).map((r) => ({ id: String(r.id), type: r.type == null ? null : String(r.type), dateActe: r.dateActe == null ? null : String(r.dateActe), diagnostic: r.diagnostic == null ? null : String(r.diagnostic), praticien: r.praticien == null ? null : String(r.praticien) }));
+  return { ok: true, certificats, bandagesSemaine: sum(bWeek.data), bandagesTotal: sum(bAll.data) };
+}
+
 // ═══ Facturation F.D.O. : shérifs par bureau ═════════════════════
 export async function ajouterSherif(p: { bureau?: string; nom: string; prixSoin?: number }): Promise<R> {
   const nom = str(p.nom, 120);
