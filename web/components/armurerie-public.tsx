@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { cents } from "@/lib/format";
-import type { ArmProduit, ArmRessource, ArmClient, ArmVente, ArmContrat } from "@/lib/queries";
+import type { ArmProduit, ArmRessource, ArmClient, ArmVente, ArmContrat, ArmMouvement } from "@/lib/queries";
 
 const money = (n: number) => `${cents(n)}$`;
 
@@ -14,7 +14,7 @@ function groupBy<T>(arr: T[], key: (t: T) => string): { nom: string; items: T[] 
 
 const clientStatut = (s: string) => /interdit/.test(s) ? { t: "Interdit", c: "var(--oxblood)" } : /surveill/.test(s) ? { t: "Surveillance", c: "var(--warn)" } : { t: "Actif", c: "var(--good)" };
 
-export function ArmureriePublic({ produits, ressources, clients, ventes, contrats }: { produits: ArmProduit[]; ressources: ArmRessource[]; clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[] }) {
+export function ArmureriePublic({ produits, ressources, clients, ventes, contrats, ca, coffre, mouvements }: { produits: ArmProduit[]; ressources: ArmRessource[]; clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvements: ArmMouvement[] }) {
   const TABS = [
     { k: "tarifs", label: "Tarifs" },
     { k: "stock", label: "Produits & stock" },
@@ -22,6 +22,7 @@ export function ArmureriePublic({ produits, ressources, clients, ventes, contrat
     { k: "clients", label: "Fichier clients" },
     { k: "ventes", label: "Registre des ventes" },
     { k: "contrats", label: "Contrats" },
+    { k: "finances", label: "Finances" },
   ];
   const [tab, setTab] = useState("tarifs");
 
@@ -50,7 +51,43 @@ export function ArmureriePublic({ produits, ressources, clients, ventes, contrat
       {tab === "clients" ? <Clients clients={clients} ventes={ventes} /> : null}
       {tab === "ventes" ? <Ventes ventes={ventes} /> : null}
       {tab === "contrats" ? <Contrats contrats={contrats} /> : null}
+      {tab === "finances" ? <Finances ca={ca} coffre={coffre} mouvements={mouvements} /> : null}
     </div>
+  );
+}
+
+function Finances({ ca, coffre, mouvements }: { ca: number; coffre: number; mouvements: ArmMouvement[] }) {
+  const dateCourte = (iso: string | null) => { if (!iso) return ""; const d = new Date(iso); return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) + " " + d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); };
+  return (
+    <>
+      <div className="mb-4 grid grid-cols-2 gap-3">
+        <div className="rounded-2xl border border-border bg-surface p-4">
+          <div className="text-[0.64rem] uppercase tracking-[0.06em] text-faint">Chiffre d&apos;affaires</div>
+          <div className="mt-0.5 font-num text-[1.6rem] font-bold tabular-nums" style={{ color: "var(--accent)" }}>{money(ca)}</div>
+        </div>
+        <div className="rounded-2xl border border-border bg-surface p-4">
+          <div className="text-[0.64rem] uppercase tracking-[0.06em] text-faint">Solde du coffre</div>
+          <div className="mt-0.5 font-num text-[1.6rem] font-bold tabular-nums" style={{ color: coffre < 0 ? "var(--oxblood)" : "var(--good)" }}>{money(coffre)}</div>
+        </div>
+      </div>
+      <Bloc titre="Comptabilité — mouvements du coffre" n={mouvements.length}>
+        {mouvements.length === 0 ? <Vide>Aucun mouvement enregistré.</Vide> : (
+          <ul className="max-h-[560px] divide-y divide-border overflow-auto">
+            {mouvements.slice(0, 300).map((m) => {
+              const entree = m.sens === "entree";
+              return (
+                <li key={m.id} className="flex items-center gap-3 px-4 py-2 text-[0.83rem]">
+                  <span className="w-24 shrink-0 text-right font-num tabular-nums font-bold" style={{ color: entree ? "var(--good)" : "var(--oxblood)" }}>{entree ? "+" : "−"}{money(m.montant)}</span>
+                  <span className="min-w-0 flex-1 truncate">{m.motif || (entree ? "Entrée" : "Sortie")}{m.nature ? <span className="text-faint"> · {m.nature}</span> : null}</span>
+                  <span className="hidden shrink-0 text-[0.74rem] text-faint sm:inline">{m.auteur || ""}</span>
+                  <span className="shrink-0 text-[0.72rem] text-faint tabular-nums">{dateCourte(m.createdAt)}</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Bloc>
+    </>
   );
 }
 
