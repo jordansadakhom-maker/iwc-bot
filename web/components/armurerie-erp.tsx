@@ -306,6 +306,7 @@ function ImportRecklessModal({ onClose, router }: { onClose: () => void; router:
   const [lecture, setLecture] = useState(false);
   const [lu, setLu] = useState<{ recettes: number; depenses: number; benefice: number; categories: { nom: string; montant: number }[] } | null>(null);
   const [libelle, setLibelle] = useState("");
+  const [mode, setMode] = useState<"detail" | "total">("detail");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -322,10 +323,21 @@ function ImportRecklessModal({ onClose, router }: { onClose: () => void; router:
     setErr(null); setBusy(true);
     const suffixe = libelle.trim() ? " — " + libelle.trim() : "";
     let ok = true;
-    if (lu.recettes > 0) { const r = await ajouterEcriture(lu.recettes, "entree", "Recettes Reckless" + suffixe, null); if (!r.ok) ok = false; }
-    if (lu.depenses > 0) { const r = await ajouterEcriture(lu.depenses, "sortie", "Dépenses Reckless" + suffixe, "charge"); if (!r.ok) ok = false; }
+    // Écritures séquentielles (le coffre est mis à jour à chaque fois).
+    async function ecr(montant: number, sens: "entree" | "sortie", motif: string, nature: "charge" | null) {
+      if (montant > 0.005) { const r = await ajouterEcriture(round2(montant), sens, motif, nature); if (!r.ok) ok = false; }
+    }
+    if (mode === "detail" && lu.categories.length) {
+      let sum = 0;
+      for (const c of lu.categories) { if (c.montant > 0) { sum += c.montant; await ecr(c.montant, "entree", "Reckless — " + c.nom + suffixe, null); } }
+      // Le tableau Reckless masque des lignes (« + N autres ») : on regroupe le reste pour coller au total.
+      await ecr((lu.recettes || sum) - sum, "entree", "Reckless — autres catégories" + suffixe, null);
+    } else {
+      await ecr(lu.recettes, "entree", "Recettes Reckless" + suffixe, null);
+    }
+    await ecr(lu.depenses, "sortie", "Dépenses Reckless" + suffixe, "charge");
     setBusy(false);
-    if (!ok) { setErr("Une écriture n'a pas pu être enregistrée."); return; }
+    if (!ok) { setErr("Une ou plusieurs écritures n'ont pas pu être enregistrées."); return; }
     router.refresh(); onClose();
   }
 
@@ -350,6 +362,14 @@ function ImportRecklessModal({ onClose, router }: { onClose: () => void; router:
                 </ul>
               </div>
             ) : null}
+            <div>
+              <div className="mb-1 text-[0.6rem] uppercase tracking-[0.05em] text-faint">Import des recettes</div>
+              <div className="flex gap-2">
+                <button onClick={() => setMode("detail")} className="flex-1 rounded-lg border px-2.5 py-1.5 text-[0.76rem] font-semibold" style={mode === "detail" ? { color: "#000", background: "var(--accent)", borderColor: "var(--accent)" } : { color: "var(--muted)", borderColor: "var(--border)" }}>Détail par catégorie</button>
+                <button onClick={() => setMode("total")} className="flex-1 rounded-lg border px-2.5 py-1.5 text-[0.76rem] font-semibold" style={mode === "total" ? { color: "#000", background: "var(--accent)", borderColor: "var(--accent)" } : { color: "var(--muted)", borderColor: "var(--border)" }}>Recette unique</button>
+              </div>
+              <p className="mt-1 text-[0.68rem] text-faint">{mode === "detail" ? "Une écriture par catégorie (Vente service, Revolver Navy…). Les lignes masquées (« + N autres ») sont regroupées pour coller au total." : "Une seule écriture pour le total des recettes."}</p>
+            </div>
             <Champ label="Libellé (date / cycle)"><input className={inputCls} value={libelle} onChange={(e) => setLibelle(e.target.value)} maxLength={120} /></Champ>
             <p className="text-[0.7rem] text-faint">⚠ À importer une seule fois par cycle, pour ne pas compter deux fois les mêmes montants.</p>
           </div>
