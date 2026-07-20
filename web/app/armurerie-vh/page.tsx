@@ -25,7 +25,7 @@ function Crest() {
 }
 
 export default async function ArmurerieVanHornPage() {
-  const { connecte, produits, ressources, clients, ventes, contrats, ca, coffre, mouvementsCoffre } = await getArmurerie();
+  const { connecte, produits, ressources, clients, ventes, contrats, ca, coffre, mouvementsCoffre, impots } = await getArmurerie();
 
   return (
     <main className="min-h-screen px-5 py-10" style={{ background: "radial-gradient(1100px 560px at 50% -12%, color-mix(in srgb,var(--accent) 12%,transparent), transparent 62%), var(--bg)" }}>
@@ -44,7 +44,7 @@ export default async function ArmurerieVanHornPage() {
         {!connecte ? (
           <div className="rounded-2xl border border-border bg-surface p-8 text-center text-[0.9rem] text-muted">Armurerie momentanément indisponible.</div>
         ) : (
-          <ArmureriePublic produits={produits} ressources={ressources} clients={clients} ventes={ventes} contrats={contrats} ca={ca} coffre={coffre} mouvements={mouvementsCoffre} />
+          <ArmureriePublic produits={produits} ressources={ressources} clients={clients} ventes={ventes} contrats={contrats} ca={ca} coffre={coffre} mouvements={mouvementsCoffre} impots={impots} />
         )}
 
         <footer className="mt-8 text-center text-[0.72rem] text-faint">

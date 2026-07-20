@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { cents } from "@/lib/format";
-import type { ArmProduit, ArmRessource, ArmClient, ArmVente, ArmContrat, ArmMouvement } from "@/lib/queries";
+import type { ArmProduit, ArmRessource, ArmClient, ArmVente, ArmContrat, ArmMouvement, ArmImpot } from "@/lib/queries";
 
 const money = (n: number) => `${cents(n)}$`;
 
@@ -14,7 +14,7 @@ function groupBy<T>(arr: T[], key: (t: T) => string): { nom: string; items: T[] 
 
 const clientStatut = (s: string) => /interdit/.test(s) ? { t: "Interdit", c: "var(--oxblood)" } : /surveill/.test(s) ? { t: "Surveillance", c: "var(--warn)" } : { t: "Actif", c: "var(--good)" };
 
-export function ArmureriePublic({ produits, ressources, clients, ventes, contrats, ca, coffre, mouvements }: { produits: ArmProduit[]; ressources: ArmRessource[]; clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvements: ArmMouvement[] }) {
+export function ArmureriePublic({ produits, ressources, clients, ventes, contrats, ca, coffre, mouvements, impots }: { produits: ArmProduit[]; ressources: ArmRessource[]; clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvements: ArmMouvement[]; impots: ArmImpot[] }) {
   const TABS = [
     { k: "tarifs", label: "Tarifs" },
     { k: "stock", label: "Produits & stock" },
@@ -51,16 +51,18 @@ export function ArmureriePublic({ produits, ressources, clients, ventes, contrat
       {tab === "clients" ? <Clients clients={clients} ventes={ventes} /> : null}
       {tab === "ventes" ? <Ventes ventes={ventes} /> : null}
       {tab === "contrats" ? <Contrats contrats={contrats} /> : null}
-      {tab === "finances" ? <Finances ca={ca} coffre={coffre} mouvements={mouvements} /> : null}
+      {tab === "finances" ? <Finances ca={ca} coffre={coffre} mouvements={mouvements} impots={impots} /> : null}
     </div>
   );
 }
 
-function Finances({ ca, coffre, mouvements }: { ca: number; coffre: number; mouvements: ArmMouvement[] }) {
+function Finances({ ca, coffre, mouvements, impots }: { ca: number; coffre: number; mouvements: ArmMouvement[]; impots: ArmImpot[] }) {
   const dateCourte = (iso: string | null) => { if (!iso) return ""; const d = new Date(iso); return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) + " " + d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); };
+  const impotsDus = impots.filter((i) => i.statut !== "paye").reduce((s, i) => s + i.montant, 0);
+  const periode = (i: ArmImpot) => i.libelle || [i.debut, i.fin].filter(Boolean).join(" → ") || "Cycle fiscal";
   return (
     <>
-      <div className="mb-4 grid grid-cols-2 gap-3">
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
         <div className="rounded-2xl border border-border bg-surface p-4">
           <div className="text-[0.64rem] uppercase tracking-[0.06em] text-faint">Chiffre d&apos;affaires</div>
           <div className="mt-0.5 font-num text-[1.6rem] font-bold tabular-nums" style={{ color: "var(--accent)" }}>{money(ca)}</div>
@@ -69,10 +71,32 @@ function Finances({ ca, coffre, mouvements }: { ca: number; coffre: number; mouv
           <div className="text-[0.64rem] uppercase tracking-[0.06em] text-faint">Solde du coffre</div>
           <div className="mt-0.5 font-num text-[1.6rem] font-bold tabular-nums" style={{ color: coffre < 0 ? "var(--oxblood)" : "var(--good)" }}>{money(coffre)}</div>
         </div>
+        <div className="col-span-2 rounded-2xl border border-border bg-surface p-4 sm:col-span-1">
+          <div className="text-[0.64rem] uppercase tracking-[0.06em] text-faint">Impôts à payer</div>
+          <div className="mt-0.5 font-num text-[1.6rem] font-bold tabular-nums" style={{ color: impotsDus > 0 ? "var(--warn)" : "var(--good)" }}>{money(impotsDus)}</div>
+        </div>
       </div>
+
+      <Bloc titre="Impôts — cycles fiscaux" n={impots.length}>
+        {impots.length === 0 ? <Vide>Aucun impôt enregistré.</Vide> : (
+          <ul className="divide-y divide-border">
+            {impots.map((i) => {
+              const paye = i.statut === "paye";
+              return (
+                <li key={i.id} className="flex items-center gap-3 px-4 py-2.5 text-[0.84rem]">
+                  <span className="min-w-0 flex-1"><span className="font-medium">{periode(i)}</span><span className="block truncate text-[0.72rem] text-faint">CA {money(i.chiffreAffaires)} · taux {i.taux}%</span></span>
+                  <span className="shrink-0 rounded-md px-1.5 py-0.5 text-[0.6rem] font-bold uppercase" style={paye ? { color: "var(--good)", background: "color-mix(in srgb,var(--good) 16%,transparent)" } : { color: "var(--warn)", background: "color-mix(in srgb,var(--warn) 16%,transparent)" }}>{paye ? "Payé" : "À payer"}</span>
+                  <span className="w-24 shrink-0 text-right font-num tabular-nums font-bold" style={{ color: "var(--accent)" }}>{money(i.montant)}</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Bloc>
+
       <Bloc titre="Comptabilité — mouvements du coffre" n={mouvements.length}>
         {mouvements.length === 0 ? <Vide>Aucun mouvement enregistré.</Vide> : (
-          <ul className="max-h-[560px] divide-y divide-border overflow-auto">
+          <ul className="max-h-[520px] divide-y divide-border overflow-auto">
             {mouvements.slice(0, 300).map((m) => {
               const entree = m.sens === "entree";
               return (
