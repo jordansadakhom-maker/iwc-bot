@@ -333,7 +333,7 @@ function ImportRecklessModal({ onClose, router }: { onClose: () => void; router:
     // les lignes masquées (« + N autres ») pour coller au total.
     async function coteDetaille(total: number, sens: "entree" | "sortie", nature: "charge" | null) {
       let sum = 0;
-      for (const c of lu!.categories) { if (c.montant > 0) { sum += c.montant; await ecr(c.montant, sens, "Reckless — " + c.nom + suffixe, nature); } }
+      for (const c of lu!.categories) { if (c.montant > 0 && c.nom.trim()) { sum += c.montant; await ecr(c.montant, sens, "Reckless — " + c.nom.trim() + suffixe, nature); } }
       await ecr((total || sum) - sum, sens, "Reckless — autres " + (sens === "entree" ? "recettes" : "dépenses") + suffixe, nature);
     }
     const detailOn = mode === "detail" && lu.categories.length > 0;
@@ -348,6 +348,14 @@ function ImportRecklessModal({ onClose, router }: { onClose: () => void; router:
     router.refresh(); onClose();
   }
 
+  // Édition des valeurs lues (pour corriger un chiffre mal lu avant d'enregistrer).
+  const setCat = (i: number, patch: Partial<{ nom: string; montant: number }>) => setLu((l) => (l ? { ...l, categories: l.categories.map((c, j) => (j === i ? { ...c, ...patch } : c)) } : l));
+  const delCat = (i: number) => setLu((l) => (l ? { ...l, categories: l.categories.filter((_, j) => j !== i) } : l));
+  const addCat = () => setLu((l) => (l ? { ...l, categories: [...l.categories, { nom: "", montant: 0 }] } : l));
+  const sommeCat = lu ? lu.categories.reduce((s, c) => s + (Number(c.montant) || 0), 0) : 0;
+  const sideTotal = lu ? (detailSide === "recettes" ? lu.recettes : lu.depenses) : 0;
+  const reste = round2(sideTotal - sommeCat);
+
   return (
     <Modal titre="📸 Importer une capture Reckless" onClose={onClose}>
       <div className="flex flex-col gap-3">
@@ -356,19 +364,12 @@ function ImportRecklessModal({ onClose, router }: { onClose: () => void; router:
         {lecture ? <p className="text-[0.8rem] text-faint">⏳ Lecture de la capture…</p> : null}
         {lu ? (
           <div className="flex flex-col gap-2 rounded-[12px] border border-border bg-surface-2 p-3">
-            <div className="grid grid-cols-3 gap-2 text-center">
-              <div><div className="text-[0.6rem] uppercase tracking-[0.05em] text-faint">Recettes</div><div className="font-num text-[1.05rem] font-bold" style={{ color: "var(--good)" }}>{money(lu.recettes)}</div></div>
-              <div><div className="text-[0.6rem] uppercase tracking-[0.05em] text-faint">Dépenses</div><div className="font-num text-[1.05rem] font-bold" style={{ color: "var(--oxblood)" }}>{money(lu.depenses)}</div></div>
-              <div><div className="text-[0.6rem] uppercase tracking-[0.05em] text-faint">Bénéfice</div><div className="font-num text-[1.05rem] font-bold" style={{ color: lu.benefice >= 0 ? "var(--good)" : "var(--oxblood)" }}>{money(lu.benefice)}</div></div>
+            <p className="text-[0.68rem] text-faint">Vérifie / corrige les chiffres lus — <b className="text-ink">ce que tu valides est exactement ce qui sera enregistré</b>.</p>
+            <div className="grid grid-cols-3 gap-2">
+              <label className="text-[0.6rem] uppercase tracking-[0.05em] text-faint">Recettes ($)<input className={inputCls + " mt-0.5"} type="number" step="0.01" min={0} value={lu.recettes} onChange={(e) => setLu({ ...lu, recettes: Number(e.target.value) || 0 })} /></label>
+              <label className="text-[0.6rem] uppercase tracking-[0.05em] text-faint">Dépenses ($)<input className={inputCls + " mt-0.5"} type="number" step="0.01" min={0} value={lu.depenses} onChange={(e) => setLu({ ...lu, depenses: Number(e.target.value) || 0 })} /></label>
+              <div className="text-[0.6rem] uppercase tracking-[0.05em] text-faint">Bénéfice<div className="mt-1.5 font-num text-[1.05rem] font-bold" style={{ color: lu.recettes - lu.depenses >= 0 ? "var(--good)" : "var(--oxblood)" }}>{money(lu.recettes - lu.depenses)}</div></div>
             </div>
-            {lu.categories.length ? (
-              <div className="border-t border-border pt-2">
-                <div className="mb-1 text-[0.6rem] uppercase tracking-[0.05em] text-faint">Détail lu (catégories) — pour information</div>
-                <ul className="flex max-h-[160px] flex-col gap-0.5 overflow-auto text-[0.78rem]">
-                  {lu.categories.map((c, i) => <li key={i} className="flex justify-between gap-2"><span className="min-w-0 truncate text-muted">{c.nom}</span><span className="font-num">{money(c.montant)}</span></li>)}
-                </ul>
-              </div>
-            ) : null}
             <div>
               <div className="mb-1 text-[0.6rem] uppercase tracking-[0.05em] text-faint">Import</div>
               <div className="flex gap-2">
@@ -386,6 +387,24 @@ function ImportRecklessModal({ onClose, router }: { onClose: () => void; router:
               ) : null}
               <p className="mt-1 text-[0.68rem] text-faint">{mode === "detail" ? `Une écriture par ${detailSide === "recettes" ? "recette" : "dépense"} lue (le « + N autres » masqué est regroupé pour coller au total). L'autre côté est enregistré en un seul montant.` : "Une écriture pour le total des recettes, une pour le total des dépenses."}</p>
             </div>
+            {mode === "detail" ? (
+              <div className="border-t border-border pt-2">
+                <div className="mb-1 flex items-center justify-between text-[0.6rem] uppercase tracking-[0.05em] text-faint">
+                  <span>Détail des {detailSide}</span>
+                  <span style={{ color: reste < -0.005 ? "var(--oxblood)" : "var(--faint)" }}>somme {money(sommeCat)} / {money(sideTotal)}{reste > 0.005 ? ` · reste ${money(reste)} regroupé` : reste < -0.005 ? " · dépasse le total !" : ""}</span>
+                </div>
+                <ul className="flex max-h-[220px] flex-col gap-1 overflow-auto">
+                  {lu.categories.map((c, i) => (
+                    <li key={i} className="flex items-center gap-1.5">
+                      <input className={inputCls + " flex-1"} value={c.nom} onChange={(e) => setCat(i, { nom: e.target.value })} placeholder="Catégorie" />
+                      <input className={inputCls} style={{ width: 92 }} type="number" step="0.01" min={0} value={c.montant} onChange={(e) => setCat(i, { montant: Number(e.target.value) || 0 })} />
+                      <button onClick={() => delCat(i)} className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-border text-faint hover:border-border-2 hover:text-ink"><X className="h-3.5 w-3.5" /></button>
+                    </li>
+                  ))}
+                </ul>
+                <button onClick={addCat} className="mt-1.5 inline-flex items-center gap-1 text-[0.72rem] font-semibold text-accent hover:underline"><Plus className="h-3.5 w-3.5" /> Ajouter une ligne</button>
+              </div>
+            ) : null}
             <Champ label="Libellé (date / cycle)"><input className={inputCls} value={libelle} onChange={(e) => setLibelle(e.target.value)} maxLength={120} /></Champ>
             <p className="text-[0.7rem] text-faint">⚠ À importer une seule fois par cycle, pour ne pas compter deux fois les mêmes montants.</p>
           </div>
