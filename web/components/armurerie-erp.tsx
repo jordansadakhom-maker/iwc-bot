@@ -23,6 +23,7 @@ import {
   creerCommande, majCommande, marquerCommande, supprimerCommande,
   creerRessource, majRessource, supprimerRessource, importerRessources, acheterRessources, type LigneRessource,
   lireCoffreRessources, appliquerStockRessources, annulerStockRessources,
+  lireFinancesReckless,
 } from "@/app/(app)/armurerie/actions";
 
 type Router = ReturnType<typeof useRouter>;
@@ -215,6 +216,7 @@ export function PointageTab({ employes, pointages, router }: { employes: ArmEmpl
 export function ComptabiliteTab({ mouvements, ca, router }: { mouvements: ArmMouvement[]; ca: number; router: Router }) {
   const [periode, setPeriode] = useState<"7" | "30" | "tout">("30");
   const [nouveau, setNouveau] = useState(false);
+  const [importR, setImportR] = useState(false);
 
   const filtres = useMemo(() => {
     if (periode === "tout") return mouvements;
@@ -264,6 +266,7 @@ export function ComptabiliteTab({ mouvements, ca, router }: { mouvements: ArmMou
         <div className="flex gap-2">
           {filtres.length ? <Btn onClick={exporter} tone="ghost"><Download className="h-3.5 w-3.5" /> .txt</Btn> : null}
           {filtres.length ? <Btn onClick={exporterCSV} tone="ghost"><Download className="h-3.5 w-3.5" /> CSV</Btn> : null}
+          <Btn onClick={() => setImportR(true)} tone="ghost"><ScanLine className="h-3.5 w-3.5" /> Capture Reckless</Btn>
           <Btn onClick={() => setNouveau(true)}><Plus className="h-3.5 w-3.5" /> Écriture</Btn>
         </div>
       </TopBar>
@@ -293,7 +296,71 @@ export function ComptabiliteTab({ mouvements, ca, router }: { mouvements: ArmMou
         </>
       )}
       {nouveau ? <EcritureModal onClose={() => setNouveau(false)} router={router} /> : null}
+      {importR ? <ImportRecklessModal onClose={() => setImportR(false)} router={router} /> : null}
     </>
+  );
+}
+
+// Importe les recettes/dépenses depuis une capture du tableau de bord Reckless.
+function ImportRecklessModal({ onClose, router }: { onClose: () => void; router: Router }) {
+  const [lecture, setLecture] = useState(false);
+  const [lu, setLu] = useState<{ recettes: number; depenses: number; benefice: number; categories: { nom: string; montant: number }[] } | null>(null);
+  const [libelle, setLibelle] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function onPhoto(url: string) {
+    setErr(null); setLu(null); setLecture(true);
+    const r = await lireFinancesReckless(url);
+    setLecture(false);
+    if (!r.ok) { setErr(r.error || "Lecture impossible."); return; }
+    setLu({ recettes: r.recettes || 0, depenses: r.depenses || 0, benefice: r.benefice || 0, categories: r.categories || [] });
+    setLibelle(new Date().toLocaleDateString("fr-FR"));
+  }
+  async function enregistrer() {
+    if (!lu) return;
+    setErr(null); setBusy(true);
+    const suffixe = libelle.trim() ? " — " + libelle.trim() : "";
+    let ok = true;
+    if (lu.recettes > 0) { const r = await ajouterEcriture(lu.recettes, "entree", "Recettes Reckless" + suffixe, null); if (!r.ok) ok = false; }
+    if (lu.depenses > 0) { const r = await ajouterEcriture(lu.depenses, "sortie", "Dépenses Reckless" + suffixe, "charge"); if (!r.ok) ok = false; }
+    setBusy(false);
+    if (!ok) { setErr("Une écriture n'a pas pu être enregistrée."); return; }
+    router.refresh(); onClose();
+  }
+
+  return (
+    <Modal titre="📸 Importer une capture Reckless" onClose={onClose}>
+      <div className="flex flex-col gap-3">
+        <p className="text-[0.8rem] text-muted">Glisse une capture du tableau de bord financier Reckless : l&apos;IA lit les <b>recettes</b> et <b>dépenses</b>, puis les inscrit en comptabilité (1 recette + 1 dépense).</p>
+        <PhotoDrop dossier="armurerie-compta" onUploaded={onPhoto} label={lecture ? "Lecture en cours…" : "Glisser la capture du tableau de bord Reckless"} />
+        {lecture ? <p className="text-[0.8rem] text-faint">⏳ Lecture de la capture…</p> : null}
+        {lu ? (
+          <div className="flex flex-col gap-2 rounded-[12px] border border-border bg-surface-2 p-3">
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div><div className="text-[0.6rem] uppercase tracking-[0.05em] text-faint">Recettes</div><div className="font-num text-[1.05rem] font-bold" style={{ color: "var(--good)" }}>{money(lu.recettes)}</div></div>
+              <div><div className="text-[0.6rem] uppercase tracking-[0.05em] text-faint">Dépenses</div><div className="font-num text-[1.05rem] font-bold" style={{ color: "var(--oxblood)" }}>{money(lu.depenses)}</div></div>
+              <div><div className="text-[0.6rem] uppercase tracking-[0.05em] text-faint">Bénéfice</div><div className="font-num text-[1.05rem] font-bold" style={{ color: lu.benefice >= 0 ? "var(--good)" : "var(--oxblood)" }}>{money(lu.benefice)}</div></div>
+            </div>
+            {lu.categories.length ? (
+              <div className="border-t border-border pt-2">
+                <div className="mb-1 text-[0.6rem] uppercase tracking-[0.05em] text-faint">Détail lu (catégories) — pour information</div>
+                <ul className="flex max-h-[160px] flex-col gap-0.5 overflow-auto text-[0.78rem]">
+                  {lu.categories.map((c, i) => <li key={i} className="flex justify-between gap-2"><span className="min-w-0 truncate text-muted">{c.nom}</span><span className="font-num">{money(c.montant)}</span></li>)}
+                </ul>
+              </div>
+            ) : null}
+            <Champ label="Libellé (date / cycle)"><input className={inputCls} value={libelle} onChange={(e) => setLibelle(e.target.value)} maxLength={120} /></Champ>
+            <p className="text-[0.7rem] text-faint">⚠ À importer une seule fois par cycle, pour ne pas compter deux fois les mêmes montants.</p>
+          </div>
+        ) : null}
+        {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2">Fermer</button>
+          <button onClick={enregistrer} disabled={!lu || busy} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--accent)" }}>{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Enregistrer en comptabilité</button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 function EcritureModal({ onClose, router }: { onClose: () => void; router: Router }) {
