@@ -895,6 +895,28 @@ export async function getArmurerie(): Promise<ArmurerieData> {
   return { connecte, clients, ventes, contrats, ca, coffre, mouvementsCoffre, produits, employes, pointages, paies, impots, notes, taches, commandes, ressources };
 }
 
+// ── Vitrine publique de l'armurerie de Van Horn (tarifs, lecture seule) ──
+// N'expose QUE ce qui est vendable : nom, catégorie, prix, disponibilité.
+// Aucune donnée interne (coût, marge, clients, stock chiffré, recettes).
+export type BoutiqueItem = { nom: string; categorie: string; prix: number; dispo: "stock" | "commande" };
+export type BoutiqueData = { connecte: boolean; items: BoutiqueItem[] };
+export async function getArmurerieBoutique(): Promise<BoutiqueData> {
+  if (!dataConfigured()) return { connecte: false, items: [] };
+  const supabase = createAdminClient();
+  if (!supabase) return { connecte: false, items: [] };
+  const { data, error } = await supabase.from("ArmurerieProduit").select("nom,categorie,prix,stock,aLaDemande").order("categorie", { ascending: true }).order("nom", { ascending: true });
+  if (error) return { connecte: false, items: [] };
+  const items: BoutiqueItem[] = ((data || []) as Record<string, unknown>[])
+    .map((p) => ({
+      nom: String(p.nom || "").trim(),
+      categorie: String(p.categorie || "Divers").trim() || "Divers",
+      prix: Number(p.prix) || 0,
+      dispo: (!p.aLaDemande && (Number(p.stock) || 0) > 0 ? "stock" : "commande") as "stock" | "commande",
+    }))
+    .filter((i) => i.nom);
+  return { connecte: true, items };
+}
+
 // ── Recrutement (candidatures déposées sur /rejoindre) ───────────
 export type CandidatureItem = { id: string; nomRP: string; age: string | null; moyen: string | null; contact: string | null; experience: string | null; motivation: string | null; disponibilites: string | null; statut: string; notes: string | null; createdAt: string | null };
 export type CandidaturesData = { connecte: boolean; candidatures: CandidatureItem[] };
