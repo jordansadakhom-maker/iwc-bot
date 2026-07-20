@@ -17,6 +17,7 @@ const clientStatut = (s: string) => /interdit/.test(s) ? { t: "Interdit", c: "va
 export function ArmureriePublic({ produits, ressources, clients, ventes, contrats, ca, coffre, mouvements, impots }: { produits: ArmProduit[]; ressources: ArmRessource[]; clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvements: ArmMouvement[]; impots: ArmImpot[] }) {
   const TABS = [
     { k: "tarifs", label: "Tarifs" },
+    { k: "caisse", label: "Caisse" },
     { k: "stock", label: "Produits & stock" },
     { k: "ressources", label: "Ressources" },
     { k: "clients", label: "Fichier clients" },
@@ -46,6 +47,7 @@ export function ArmureriePublic({ produits, ressources, clients, ventes, contrat
       </div>
 
       {tab === "tarifs" ? <Tarifs produits={produits} /> : null}
+      {tab === "caisse" ? <Caisse produits={produits} /> : null}
       {tab === "stock" ? <Stock produits={produits} /> : null}
       {tab === "ressources" ? <Ressources ressources={ressources} /> : null}
       {tab === "clients" ? <Clients clients={clients} ventes={ventes} /> : null}
@@ -127,6 +129,68 @@ function Bloc({ titre, n, children }: { titre: string; n?: number; children: Rea
   );
 }
 const Vide = ({ children }: { children: React.ReactNode }) => <p className="px-4 py-6 text-center text-[0.86rem] italic text-faint">{children}</p>;
+
+function Caisse({ produits }: { produits: ArmProduit[] }) {
+  const [q, setQ] = useState("");
+  const [cart, setCart] = useState<Record<string, number>>({});
+  const byId = new Map(produits.map((p) => [p.id, p]));
+  const filtres = produits.filter((p) => p.nom.toLowerCase().includes(q.trim().toLowerCase()));
+  const cats = groupBy(filtres, (p) => p.categorie);
+  const lignes = Object.entries(cart).filter(([, n]) => n > 0).map(([id, n]) => ({ p: byId.get(id)!, n })).filter((l) => l.p);
+  const total = lignes.reduce((s, l) => s + l.p.prix * l.n, 0);
+  const add = (id: string) => setCart((c) => ({ ...c, [id]: (c[id] || 0) + 1 }));
+  const sub = (id: string) => setCart((c) => ({ ...c, [id]: Math.max(0, (c[id] || 0) - 1) }));
+
+  if (!produits.length) return <Bloc titre="Caisse"><Vide>Aucun produit au catalogue.</Vide></Bloc>;
+  return (
+    <div>
+      <div className="mb-4 flex items-center justify-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-center text-[0.76rem] text-muted">🛒 Aperçu du comptoir — compose un panier pour voir le total. <b className="text-ink">L&apos;encaissement réel se fait dans l&apos;espace connecté.</b></div>
+      <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
+        <div>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un produit…" className="mb-3 w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-[0.86rem] text-ink outline-none focus:border-brass" />
+          {cats.map((cat) => (
+            <div key={cat.nom} className="mb-3">
+              <div className="mb-1.5 text-[0.68rem] uppercase tracking-[0.08em] text-faint">{cat.nom}</div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {cat.items.map((p) => (
+                  <button key={p.id} onClick={() => add(p.id)} className="rounded-[10px] border border-border bg-surface-2 px-2.5 py-2 text-left transition hover:-translate-y-0.5 hover:border-border-2">
+                    <div className="truncate text-[0.8rem] font-semibold">{p.nom}</div>
+                    <div className="mt-0.5 text-[0.64rem]" style={{ color: cart[p.id] ? "var(--good)" : "var(--faint)" }}>{!p.aLaDemande && p.stock > 0 ? `stock ${p.stock}` : "à la demande"}{cart[p.id] ? ` · ${cart[p.id]} au panier` : ""}</div>
+                    <div className="mt-1 font-num text-[0.9rem] font-bold tabular-nums" style={{ color: "var(--accent)" }}>{p.prix > 0 ? money(p.prix) : "—"}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <aside className="lg:sticky lg:top-4 lg:self-start">
+          <div className="rounded-2xl border border-border bg-surface-2 p-3.5">
+            <div className="mb-2 text-[0.8rem] font-semibold uppercase tracking-[0.05em] text-muted">🛒 Panier</div>
+            {lignes.length === 0 ? <p className="py-4 text-center text-[0.8rem] italic text-faint">Panier vide — clique un produit.</p> : (
+              <ul className="mb-2 flex flex-col gap-1.5">
+                {lignes.map((l) => (
+                  <li key={l.p.id} className="flex items-center gap-2 text-[0.8rem]">
+                    <span className="min-w-0 flex-1 truncate">{l.p.nom}</span>
+                    <button onClick={() => sub(l.p.id)} className="grid h-6 w-6 place-items-center rounded-md border border-border hover:border-brass">−</button>
+                    <span className="w-5 text-center font-num tabular-nums">{l.n}</span>
+                    <button onClick={() => add(l.p.id)} className="grid h-6 w-6 place-items-center rounded-md border border-border hover:border-brass">+</button>
+                    <span className="w-16 shrink-0 text-right font-num tabular-nums">{money(l.p.prix * l.n)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex items-center justify-between border-t border-border pt-2 text-[0.92rem] font-bold">
+              <span>Total</span><span className="font-num tabular-nums" style={{ color: "var(--accent)" }}>{money(total)}</span>
+            </div>
+            <button disabled className="mt-3 flex w-full cursor-not-allowed items-center justify-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-[0.8rem] font-semibold text-faint">🔒 Encaisser — connexion requise</button>
+            {lignes.length ? <button onClick={() => setCart({})} className="mt-1.5 w-full rounded-lg px-3 py-1.5 text-[0.74rem] text-faint hover:text-ink">Vider le panier</button> : null}
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
 
 function Tarifs({ produits }: { produits: ArmProduit[] }) {
   const cats = groupBy(produits, (p) => p.categorie);
