@@ -661,11 +661,11 @@ export async function lireCoffreRessources(url: string): Promise<{ ok: boolean; 
 // Lecture IA du TABLEAU DE BORD FINANCIER (panel Reckless RP) : recettes,
 // dépenses, bénéfice + détail « Top catégories ». Sert à mettre à jour la
 // comptabilité depuis une simple capture d'écran.
-export async function lireFinancesReckless(url: string): Promise<{ ok: boolean; recettes?: number; depenses?: number; benefice?: number; categories?: { nom: string; montant: number }[]; error?: string }> {
+export async function lireFinancesReckless(url: string): Promise<{ ok: boolean; recettes?: number; depenses?: number; benefice?: number; categories?: { nom: string; montant: number }[]; detailType?: "recettes" | "depenses"; error?: string }> {
   const r = await _vision(
     url,
-    "Tu regardes une capture du TABLEAU DE BORD FINANCIER d'une armurerie (panel de gestion type Reckless RP). Relève : le total des RECETTES, le total des DÉPENSES, le BÉNÉFICE (peut être négatif), et la liste « Top catégories » (le nom de chaque ligne et son montant en dollars). Réponds UNIQUEMENT par un JSON compact, sans texte autour : {\"recettes\":0,\"depenses\":0,\"benefice\":0,\"categories\":[{\"nom\":\"Nom exact\",\"montant\":0}]}. Recopie les nombres SANS le symbole $, sans les % et sans séparateur de milliers (ex. « $803.20 » → 803.20). N'invente rien : laisse 0 ou une liste vide si absent.",
-    "Relève recettes, dépenses, bénéfice et le détail des catégories, puis renvoie le JSON.",
+    "Tu regardes une capture du TABLEAU DE BORD FINANCIER d'une armurerie (panel de gestion type Reckless RP). Relève : le total des RECETTES, le total des DÉPENSES, le BÉNÉFICE (peut être négatif), et la liste « Top catégories » (le nom de chaque ligne et son montant en dollars). Indique aussi \"detailType\" : « recettes » ou « depenses » selon ce que montre le panneau « Top catégories » — regarde le libellé au centre du cercle (« TOTAL RECETTES » ou « TOTAL DÉPENSES ») et l'onglet actif Recettes/Dépenses. Réponds UNIQUEMENT par un JSON compact, sans texte autour : {\"recettes\":0,\"depenses\":0,\"benefice\":0,\"detailType\":\"recettes\",\"categories\":[{\"nom\":\"Nom exact\",\"montant\":0}]}. Recopie les nombres SANS le symbole $, sans les % et sans séparateur de milliers (ex. « $803.20 » → 803.20). N'invente rien : laisse 0 ou une liste vide si absent.",
+    "Relève recettes, dépenses, bénéfice, le type du détail (recettes/depenses) et les catégories, puis renvoie le JSON.",
     900,
   );
   if (!r.ok) return { ok: false, error: r.error };
@@ -679,8 +679,9 @@ export async function lireFinancesReckless(url: string): Promise<{ ok: boolean; 
     if (!Number.isFinite(benefice)) benefice = recettes - depenses;
     const arr = Array.isArray(j.categories) ? j.categories : [];
     const categories = arr.map((x) => { const o = (x || {}) as Record<string, unknown>; return { nom: s(o.nom, 80) || "", montant: toNum(o.montant) }; }).filter((c) => c.nom);
+    const detailType: "recettes" | "depenses" = /dep/i.test(String(j.detailType || "")) ? "depenses" : "recettes";
     if (!recettes && !depenses && !categories.length) return { ok: false, error: "Aucun chiffre détecté sur la capture." };
-    return { ok: true, recettes, depenses, benefice: round2(benefice), categories };
+    return { ok: true, recettes, depenses, benefice: round2(benefice), categories, detailType };
   } catch { return { ok: false, error: "Capture illisible — réessaie avec une image plus nette." }; }
 }
 

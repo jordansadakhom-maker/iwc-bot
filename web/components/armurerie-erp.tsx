@@ -307,6 +307,7 @@ function ImportRecklessModal({ onClose, router }: { onClose: () => void; router:
   const [lu, setLu] = useState<{ recettes: number; depenses: number; benefice: number; categories: { nom: string; montant: number }[] } | null>(null);
   const [libelle, setLibelle] = useState("");
   const [mode, setMode] = useState<"detail" | "total">("detail");
+  const [detailSide, setDetailSide] = useState<"recettes" | "depenses">("recettes");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -316,6 +317,7 @@ function ImportRecklessModal({ onClose, router }: { onClose: () => void; router:
     setLecture(false);
     if (!r.ok) { setErr(r.error || "Lecture impossible."); return; }
     setLu({ recettes: r.recettes || 0, depenses: r.depenses || 0, benefice: r.benefice || 0, categories: r.categories || [] });
+    setDetailSide(r.detailType || "recettes");
     setLibelle(new Date().toLocaleDateString("fr-FR"));
   }
   async function enregistrer() {
@@ -327,15 +329,20 @@ function ImportRecklessModal({ onClose, router }: { onClose: () => void; router:
     async function ecr(montant: number, sens: "entree" | "sortie", motif: string, nature: "charge" | null) {
       if (montant > 0.005) { const r = await ajouterEcriture(round2(montant), sens, motif, nature); if (!r.ok) ok = false; }
     }
-    if (mode === "detail" && lu.categories.length) {
+    // Enregistre un côté (recette/dépense) au détail des catégories lues, en regroupant
+    // les lignes masquées (« + N autres ») pour coller au total.
+    async function coteDetaille(total: number, sens: "entree" | "sortie", nature: "charge" | null) {
       let sum = 0;
-      for (const c of lu.categories) { if (c.montant > 0) { sum += c.montant; await ecr(c.montant, "entree", "Reckless — " + c.nom + suffixe, null); } }
-      // Le tableau Reckless masque des lignes (« + N autres ») : on regroupe le reste pour coller au total.
-      await ecr((lu.recettes || sum) - sum, "entree", "Reckless — autres catégories" + suffixe, null);
-    } else {
-      await ecr(lu.recettes, "entree", "Recettes Reckless" + suffixe, null);
+      for (const c of lu!.categories) { if (c.montant > 0) { sum += c.montant; await ecr(c.montant, sens, "Reckless — " + c.nom + suffixe, nature); } }
+      await ecr((total || sum) - sum, sens, "Reckless — autres " + (sens === "entree" ? "recettes" : "dépenses") + suffixe, nature);
     }
-    await ecr(lu.depenses, "sortie", "Dépenses Reckless" + suffixe, "charge");
+    const detailOn = mode === "detail" && lu.categories.length > 0;
+    // Recettes
+    if (detailOn && detailSide === "recettes") await coteDetaille(lu.recettes, "entree", null);
+    else await ecr(lu.recettes, "entree", "Recettes Reckless" + suffixe, null);
+    // Dépenses
+    if (detailOn && detailSide === "depenses") await coteDetaille(lu.depenses, "sortie", "charge");
+    else await ecr(lu.depenses, "sortie", "Dépenses Reckless" + suffixe, "charge");
     setBusy(false);
     if (!ok) { setErr("Une ou plusieurs écritures n'ont pas pu être enregistrées."); return; }
     router.refresh(); onClose();
@@ -363,12 +370,21 @@ function ImportRecklessModal({ onClose, router }: { onClose: () => void; router:
               </div>
             ) : null}
             <div>
-              <div className="mb-1 text-[0.6rem] uppercase tracking-[0.05em] text-faint">Import des recettes</div>
+              <div className="mb-1 text-[0.6rem] uppercase tracking-[0.05em] text-faint">Import</div>
               <div className="flex gap-2">
-                <button onClick={() => setMode("detail")} className="flex-1 rounded-lg border px-2.5 py-1.5 text-[0.76rem] font-semibold" style={mode === "detail" ? { color: "#000", background: "var(--accent)", borderColor: "var(--accent)" } : { color: "var(--muted)", borderColor: "var(--border)" }}>Détail par catégorie</button>
-                <button onClick={() => setMode("total")} className="flex-1 rounded-lg border px-2.5 py-1.5 text-[0.76rem] font-semibold" style={mode === "total" ? { color: "#000", background: "var(--accent)", borderColor: "var(--accent)" } : { color: "var(--muted)", borderColor: "var(--border)" }}>Recette unique</button>
+                <button onClick={() => setMode("detail")} className="flex-1 rounded-lg border px-2.5 py-1.5 text-[0.76rem] font-semibold" style={mode === "detail" ? { color: "#000", background: "var(--accent)", borderColor: "var(--accent)" } : { color: "var(--muted)", borderColor: "var(--border)" }}>Détaillé (par catégorie)</button>
+                <button onClick={() => setMode("total")} className="flex-1 rounded-lg border px-2.5 py-1.5 text-[0.76rem] font-semibold" style={mode === "total" ? { color: "#000", background: "var(--accent)", borderColor: "var(--accent)" } : { color: "var(--muted)", borderColor: "var(--border)" }}>Totaux uniquement</button>
               </div>
-              <p className="mt-1 text-[0.68rem] text-faint">{mode === "detail" ? "Une écriture par catégorie (Vente service, Revolver Navy…). Les lignes masquées (« + N autres ») sont regroupées pour coller au total." : "Une seule écriture pour le total des recettes."}</p>
+              {mode === "detail" ? (
+                <div className="mt-2">
+                  <div className="mb-1 text-[0.6rem] uppercase tracking-[0.05em] text-faint">Le détail lu concerne</div>
+                  <div className="flex gap-2">
+                    <button onClick={() => setDetailSide("recettes")} className="flex-1 rounded-lg border px-2.5 py-1.5 text-[0.76rem] font-semibold" style={detailSide === "recettes" ? { color: "#000", background: "var(--good)", borderColor: "var(--good)" } : { color: "var(--muted)", borderColor: "var(--border)" }}>Recettes</button>
+                    <button onClick={() => setDetailSide("depenses")} className="flex-1 rounded-lg border px-2.5 py-1.5 text-[0.76rem] font-semibold" style={detailSide === "depenses" ? { color: "#fff", background: "var(--oxblood)", borderColor: "var(--oxblood)" } : { color: "var(--muted)", borderColor: "var(--border)" }}>Dépenses</button>
+                  </div>
+                </div>
+              ) : null}
+              <p className="mt-1 text-[0.68rem] text-faint">{mode === "detail" ? `Une écriture par ${detailSide === "recettes" ? "recette" : "dépense"} lue (le « + N autres » masqué est regroupé pour coller au total). L'autre côté est enregistré en un seul montant.` : "Une écriture pour le total des recettes, une pour le total des dépenses."}</p>
             </div>
             <Champ label="Libellé (date / cycle)"><input className={inputCls} value={libelle} onChange={(e) => setLibelle(e.target.value)} maxLength={120} /></Champ>
             <p className="text-[0.7rem] text-faint">⚠ À importer une seule fois par cycle, pour ne pas compter deux fois les mêmes montants.</p>
