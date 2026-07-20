@@ -576,6 +576,40 @@ Object.assign(HANDLERS, {
       return { ok: true, message: 'Contrat envoyé au client en message privé' };
     } catch (e) { return { ok: false, message: e.message }; }
   },
+
+  // ── Opérations : envoi d'une feuille de contrat au commanditaire (MP) ──
+  'operation.contrat': async (db, p, ctx) => {
+    const guild = ctx?.guild;
+    const did = _s(p.clientDiscordId, 40);
+    if (!guild || !did) return { ok: false, message: 'Commanditaire Discord introuvable' };
+    const clientPropose = p.sens === 'client_propose'; // le client propose, la Compagnie s'engage
+    const lignes = [
+      '```', '   IRON WOLF COMPANY   ', '```',
+      '📜 **CONTRAT D\'OPÉRATION**',
+      _s(p.pole, 40) === 'illegal' ? '*La Confrérie*' : '*Iron Wolf Company — sécurité, escorte & chasse de prime*',
+      '',
+      `**Commanditaire :** ${_s(p.commanditaire, 120) || '—'}`,
+      _s(p.categorie, 120) ? `**Type de mission :** ${_s(p.categorie, 120)}` : null,
+      _s(p.objectif, 800) ? `**Objectif :** ${_s(p.objectif, 800)}` : null,
+      _s(p.lieu, 200) ? `**Lieu :** ${_s(p.lieu, 200)}` : null,
+      _s(p.agentsNoms, 500) ? `**Agents engagés :** ${_s(p.agentsNoms, 500)}` : null,
+      _s(p.remuneration, 120) ? `**Rémunération :** ${_s(p.remuneration, 120)}` : null,
+      _s(p.conditions, 1500) ? `\n**Conditions :**\n${_s(p.conditions, 1500)}` : null,
+      '',
+      clientPropose
+        ? 'La Iron Wolf Company s\'engage à mener à bien la mission ci-dessus aux conditions convenues.'
+        : 'En acceptant ce contrat, vous confiez la mission ci-dessus à la Iron Wolf Company aux conditions convenues.',
+      '',
+      '✍️ *Pour **signer**, répondez « JE SIGNE » à ce message. Pour refuser, répondez « JE REFUSE ».*',
+    ].filter(x => x != null);
+    try {
+      const user = await guild.client.users.fetch(did).catch(() => null);
+      if (!user) return { ok: false, message: 'Commanditaire introuvable sur Discord' };
+      const sent = await user.send(lignes.join('\n')).catch(() => null);
+      if (!sent) return { ok: false, message: 'MP du commanditaire fermés — envoi impossible' };
+      return { ok: true, message: 'Contrat d\'opération envoyé au commanditaire en message privé' };
+    } catch (e) { return { ok: false, message: e.message }; }
+  },
 });
 
 // Trouve une opération par id dans db.operations puis db.preparations.
