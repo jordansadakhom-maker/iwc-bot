@@ -658,6 +658,32 @@ export async function lireCoffreRessources(url: string): Promise<{ ok: boolean; 
   } catch { return { ok: false, error: "Capture illisible — réessaie avec une image plus nette." }; }
 }
 
+// Lecture IA du TABLEAU DE BORD FINANCIER (panel Reckless RP) : recettes,
+// dépenses, bénéfice + détail « Top catégories ». Sert à mettre à jour la
+// comptabilité depuis une simple capture d'écran.
+export async function lireFinancesReckless(url: string): Promise<{ ok: boolean; recettes?: number; depenses?: number; benefice?: number; categories?: { nom: string; montant: number }[]; error?: string }> {
+  const r = await _vision(
+    url,
+    "Tu regardes une capture du TABLEAU DE BORD FINANCIER d'une armurerie (panel de gestion type Reckless RP). Relève : le total des RECETTES, le total des DÉPENSES, le BÉNÉFICE (peut être négatif), et la liste « Top catégories » (le nom de chaque ligne et son montant en dollars). Réponds UNIQUEMENT par un JSON compact, sans texte autour : {\"recettes\":0,\"depenses\":0,\"benefice\":0,\"categories\":[{\"nom\":\"Nom exact\",\"montant\":0}]}. Recopie les nombres SANS le symbole $, sans les % et sans séparateur de milliers (ex. « $803.20 » → 803.20). N'invente rien : laisse 0 ou une liste vide si absent.",
+    "Relève recettes, dépenses, bénéfice et le détail des catégories, puis renvoie le JSON.",
+    900,
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  const m = (r.txt || "").match(/\{[\s\S]*\}/);
+  if (!m) return { ok: false, error: "Capture illisible — réessaie avec une image plus nette." };
+  const toNum = (v: unknown) => { const n = Number(String(v ?? "").replace(/[^0-9.,-]/g, "").replace(",", ".")); return Number.isFinite(n) ? round2(Math.abs(n)) : 0; };
+  try {
+    const j = JSON.parse(m[0]) as Record<string, unknown>;
+    const recettes = toNum(j.recettes), depenses = toNum(j.depenses);
+    let benefice = Number(String(j.benefice ?? "").replace(/[^0-9.,-]/g, "").replace(",", "."));
+    if (!Number.isFinite(benefice)) benefice = recettes - depenses;
+    const arr = Array.isArray(j.categories) ? j.categories : [];
+    const categories = arr.map((x) => { const o = (x || {}) as Record<string, unknown>; return { nom: s(o.nom, 80) || "", montant: toNum(o.montant) }; }).filter((c) => c.nom);
+    if (!recettes && !depenses && !categories.length) return { ok: false, error: "Aucun chiffre détecté sur la capture." };
+    return { ok: true, recettes, depenses, benefice: round2(benefice), categories };
+  } catch { return { ok: false, error: "Capture illisible — réessaie avec une image plus nette." }; }
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  MODULE ERP — employés, pointage, paies, impôts, comptabilité,
 //  bloc-notes, tâches. Tables neuves (armurerie-erp.sql), site-native.
