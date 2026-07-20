@@ -103,6 +103,22 @@ create table if not exists "DispFacture" (
   "createdAt" timestamptz default now()
 );
 
+-- Fiches patients (créées/complétées depuis une photo de carte d'identité)
+create table if not exists "DispPatient" (
+  "id" text primary key,
+  "prenom" text,
+  "nom" text,
+  "dateNaissance" text,
+  "sexe" text,
+  "nationalite" text,
+  "numero" text,                             -- n° de carte d'identité
+  "telegramme" text,
+  "groupeSanguin" text,
+  "allergies" text,
+  "notes" text,                              -- antécédents / notes médicales
+  "createdAt" timestamptz default now()
+);
+
 -- Certificats médicaux remplis (archive des documents émis)
 create table if not exists "DispCertificat" (
   "id" text primary key,
@@ -126,4 +142,5 @@ alter table "DispRepertoire"   enable row level security;
 alter table "DispDocument"     enable row level security;
 alter table "DispVenteBandage" enable row level security;
 alter table "DispFacture"      enable row level security;
+alter table "DispPatient"      enable row level security;
 alter table "DispCertificat"   enable row level security;

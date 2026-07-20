@@ -172,6 +172,48 @@ export async function appliquerScanStock(items: { nom: string; quantite: number 
   return { ok: true, appliques, crees };
 }
 
+// ═══ Lecture d'une carte d'identité par l'IA ═════════════════════
+export async function lireCartePhoto(base64: string, mediaType: string): Promise<{ ok: boolean; error?: string; fiche?: { prenom: string; nom: string; dateNaissance: string; sexe: string; nationalite: string; numero: string } }> {
+  if (!base64) return { ok: false, error: "Photo manquante." };
+  if (!process.env.ANTHROPIC_API_KEY) return { ok: false, error: "Lecture par photo non configurée — ajoute la variable ANTHROPIC_API_KEY sur Vercel." };
+  const system = 'Tu lis une carte d\'identité (univers western / jeu de rôle). Renvoie UNIQUEMENT un objet JSON {"prenom":string,"nom":string,"dateNaissance":string,"sexe":string,"nationalite":string,"numero":string}. Recopie fidèlement le texte lu. Mets une chaîne vide "" pour tout champ absent ou illisible. Aucune autre sortie que le JSON.';
+  let txt = "";
+  try { txt = await _vision(base64, mediaType, system, "Lis cette carte d'identité et renvoie les informations en JSON.", 500); }
+  catch (e) { const m = String((e as Error).message || ""); return { ok: false, error: m.startsWith("api-") ? "L'IA a refusé la lecture (" + m + ")." : "Lecture impossible." }; }
+  const match = /\{[\s\S]*\}/.exec(txt);
+  let o: Record<string, unknown> = {};
+  try { o = JSON.parse(match ? match[0] : txt) as Record<string, unknown>; } catch { return { ok: false, error: "Carte illisible — réessaie avec une photo plus nette." }; }
+  const fiche = { prenom: str(o.prenom, 80), nom: str(o.nom, 80), dateNaissance: str(o.dateNaissance, 40), sexe: str(o.sexe, 20), nationalite: str(o.nationalite, 60), numero: str(o.numero, 40) };
+  if (!fiche.prenom && !fiche.nom && !fiche.numero) return { ok: false, error: "Aucune information détectée sur la carte." };
+  return { ok: true, fiche };
+}
+
+// ═══ Fiches patients ═════════════════════════════════════════════
+type PatientIn = { prenom?: string; nom?: string; dateNaissance?: string; sexe?: string; nationalite?: string; numero?: string; telegramme?: string; groupeSanguin?: string; allergies?: string; notes?: string };
+function patientRow(p: PatientIn): Record<string, unknown> {
+  return {
+    prenom: str(p.prenom, 80) || null, nom: str(p.nom, 80) || null, dateNaissance: str(p.dateNaissance, 40) || null,
+    sexe: str(p.sexe, 20) || null, nationalite: str(p.nationalite, 60) || null, numero: str(p.numero, 40) || null,
+    telegramme: str(p.telegramme, 60) || null, groupeSanguin: str(p.groupeSanguin, 12) || null,
+    allergies: str(p.allergies, 400) || null, notes: str(p.notes, 800) || null,
+  };
+}
+export async function ajouterPatient(p: PatientIn): Promise<R> {
+  if (!str(p.prenom, 80) && !str(p.nom, 80)) return { ok: false, error: "Indique au moins un nom ou prénom." };
+  const sb = db(); if (!sb) return { ok: false, error: "Base non configurée." };
+  return insertR(sb, "DispPatient", { id: newId("pat"), ...patientRow(p), createdAt: new Date().toISOString() });
+}
+export async function majPatient(id: string, p: PatientIn): Promise<R> {
+  const sb = db(); if (!sb) return { ok: false, error: "Base non configurée." };
+  const { error } = await sb.from("DispPatient").update(patientRow(p)).eq("id", id);
+  return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+}
+export async function supprimerPatient(id: string): Promise<R> {
+  const sb = db(); if (!sb) return { ok: false, error: "Base non configurée." };
+  const { error } = await sb.from("DispPatient").delete().eq("id", id);
+  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+}
+
 // ═══ Facturation F.D.O. : shérifs par bureau ═════════════════════
 export async function ajouterSherif(p: { bureau?: string; nom: string; prixSoin?: number }): Promise<R> {
   const nom = str(p.nom, 120);

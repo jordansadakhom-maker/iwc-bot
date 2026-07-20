@@ -2,6 +2,7 @@ import Link from "next/link";
 
 export const ONGLETS = [
   { href: "/", label: "Accueil", pret: true },
+  { href: "/patients", label: "Patients", pret: true },
   { href: "/stockage", label: "Stockage", pret: true },
   { href: "/facturation", label: "Facturation F.D.O.", pret: true },
   { href: "/repertoire", label: "Répertoire", pret: true },

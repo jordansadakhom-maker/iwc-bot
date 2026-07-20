@@ -21,7 +21,7 @@ const vide = { type: "Certificat médical", patient: "", praticien: "", dateActe
 function aujourdhui() { try { return new Date().toISOString().slice(0, 10); } catch { return ""; } }
 function joli(d: string) { if (!d) return "—"; const [y, m, j] = d.split("-"); return `${j}/${m}/${y}`; }
 
-export function Certificats({ archive }: { archive: Certificat[] }) {
+export function Certificats({ archive, patients = [] }: { archive: Certificat[]; patients?: string[] }) {
   const [moi] = useMoi();
   const { run, isPending } = useAction();
   const toast = useToast();
@@ -64,7 +64,7 @@ export function Certificats({ archive }: { archive: Certificat[] }) {
               {TYPES.map((t) => <button key={t} className={`chip ${f.type === t ? "on" : ""}`} onClick={() => choisirType(t)}>{t.replace("Certificat ", "").replace("Constat ", "Constat ")}</button>)}
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <label className="text-[0.72rem] text-[var(--faint)]">Patient<input className="inp mt-0.5" value={f.patient} onChange={(e) => set("patient", e.target.value)} placeholder="Prénom Nom" /></label>
+              <label className="text-[0.72rem] text-[var(--faint)]">Patient<input className="inp mt-0.5" list="disp-patients" value={f.patient} onChange={(e) => set("patient", e.target.value)} placeholder="Prénom Nom" /><datalist id="disp-patients">{patients.map((n) => <option key={n} value={n} />)}</datalist></label>
               <label className="text-[0.72rem] text-[var(--faint)]">Date de l&apos;acte<input className="inp mt-0.5" type="date" value={f.dateActe} onChange={(e) => set("dateActe", e.target.value)} /></label>
             </div>
             <label className="text-[0.72rem] text-[var(--faint)]">Praticien<input className="inp mt-0.5" value={f.praticien} onChange={(e) => set("praticien", e.target.value)} placeholder={moi || "Nom du praticien"} /></label>
