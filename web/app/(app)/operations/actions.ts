@@ -81,3 +81,17 @@ export async function honorerContrat(id: string, montant: number): Promise<Comma
   if (m <= 0) return { ok: false, error: "Indique un montant à verser au coffre." };
   return envoyerCommande("contrat.honorer", { id, montant: m });
 }
+
+// Envoyer une FEUILLE DE CONTRAT d'opération au commanditaire en MP Discord
+// (le bot le DM ; le commanditaire répond « JE SIGNE »). Réutilise la file de
+// commandes, comme l'envoi de contrat d'armurerie.
+export async function envoyerContratOperation(data: {
+  operationId?: string; commanditaire: string; clientDiscordId: string;
+  categorie?: string; objectif?: string; lieu?: string; pole?: string;
+  remuneration?: string; agentsNoms?: string; conditions?: string; sens?: string;
+}): Promise<CommandeResult> {
+  const did = String(data.clientDiscordId || "").trim();
+  if (!did) return { ok: false, error: "Renseigne l'ID Discord du commanditaire pour l'envoi." };
+  if (!data.commanditaire || data.commanditaire.trim().length < 2) return { ok: false, error: "Indique le nom du commanditaire." };
+  return envoyerCommande("operation.contrat", { ...data, clientDiscordId: did });
+}

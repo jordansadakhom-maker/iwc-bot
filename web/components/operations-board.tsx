@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { X, Target, Plus, Loader2, Trash2, MapPin, Users, CalendarClock, Link2, CheckCircle2, Clock3, Lock, Send, Flag, Landmark, Check } from "lucide-react";
+import { X, Target, Plus, Loader2, Trash2, MapPin, Users, CalendarClock, Link2, CheckCircle2, Clock3, Lock, Send, Flag, Landmark, Check, ScrollText, Download } from "lucide-react";
 import type { OpDetail, EtapeDetail, MembreLite } from "@/lib/queries";
 import { Badge } from "@/components/ui";
-import { creerOperation, majOperation, supprimerOperation, assignerOperation, terminerOperation } from "@/app/(app)/operations/actions";
+import { creerOperation, majOperation, supprimerOperation, assignerOperation, terminerOperation, envoyerContratOperation } from "@/app/(app)/operations/actions";
 import { cents } from "@/lib/format";
 
 const dateFR = (s: string | null) => { if (!s) return null; try { return new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" }); } catch { return null; } };
@@ -302,6 +302,13 @@ function EditModal({ op, membres, onClose, router }: { op: OpDetail; membres: Me
   const [butin, setButin] = useState(op.butin || "");
   const [debrief, setDebrief] = useState(op.debrief || "");
   const [montantPrime, setMontantPrime] = useState("");
+  // Feuille de contrat d'opération
+  const [ctrOuvert, setCtrOuvert] = useState(false);
+  const [commanditaire, setCommanditaire] = useState("");
+  const [ctrDiscord, setCtrDiscord] = useState("");
+  const [ctrRemu, setCtrRemu] = useState(op.prime || "");
+  const [ctrConditions, setCtrConditions] = useState("");
+  const [ctrSens, setCtrSens] = useState<"client_signe" | "client_propose">("client_signe");
   const dispo = membres.filter((m) => !op.membresIds.includes(m.id));
   const filtres = dispo.filter((m) => m.nom.toLowerCase().includes(q.toLowerCase())).slice(0, 40);
   const nbChoisis = Object.values(choisis).filter(Boolean).length;
@@ -347,8 +354,22 @@ function EditModal({ op, membres, onClose, router }: { op: OpDetail; membres: Me
     router.refresh();
     onClose();
   }
+  async function envoyerCtr() {
+    if (commanditaire.trim().length < 2) { setFlash("Indique le nom du commanditaire."); return; }
+    if (!ctrDiscord.trim()) { setFlash("Indique l'ID Discord du commanditaire pour l'envoi."); return; }
+    setBusy("ctr");
+    const r = await envoyerContratOperation({
+      operationId: op.id, commanditaire, clientDiscordId: ctrDiscord,
+      categorie: op.type, objectif: op.objectif || op.titre, lieu: op.lieu || "",
+      pole: op.pole, remuneration: ctrRemu, agentsNoms: op.membresNoms.join(", "),
+      conditions: ctrConditions, sens: ctrSens,
+    });
+    setBusy(null);
+    setFlash(r.ok ? "Contrat envoyé au commanditaire en MP — signature dans ~30 s." : (r.error || "Échec."));
+  }
 
   return (
+    <>
     <Modal titre={op.titre} onClose={onClose}>
       {flash ? <div className="mb-3"><Flash>{flash}</Flash></div> : null}
       <OpDetailBloc op={op} />
@@ -401,6 +422,26 @@ function EditModal({ op, membres, onClose, router }: { op: OpDetail; membres: Me
         </div>
       ) : null}
 
+      {/* Feuille de contrat d'opération */}
+      <div className="mb-3 flex flex-col gap-2 border-t border-border pt-3">
+        <span className="flex items-center gap-1.5 text-[0.72rem] uppercase tracking-[0.06em] text-faint"><ScrollText className="h-3.5 w-3.5" /> Feuille de contrat</span>
+        <p className="-mt-1 text-[0.72rem] text-faint">Remplie automatiquement depuis la mission (type, lieu, agents, objectif). Ajoute le client et les conditions, puis imprime-la ou envoie-la à signer.</p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Champ label="Commanditaire (client)"><input className={inputCls} value={commanditaire} onChange={(e) => setCommanditaire(e.target.value)} placeholder="Nom du donneur d'ordre" maxLength={120} /></Champ>
+          <Champ label="ID Discord (pour l'envoi)"><input className={inputCls} value={ctrDiscord} onChange={(e) => setCtrDiscord(e.target.value)} placeholder="Optionnel — 18 chiffres" maxLength={40} /></Champ>
+        </div>
+        <Champ label="Rémunération convenue"><input className={inputCls} value={ctrRemu} onChange={(e) => setCtrRemu(e.target.value)} placeholder="Ex : 2000$, 50% à la signature…" maxLength={120} /></Champ>
+        <Champ label="Conditions particulières"><textarea className={inputCls + " min-h-[46px] resize-y"} value={ctrConditions} onChange={(e) => setCtrConditions(e.target.value)} placeholder="Clauses, délais, discrétion…" maxLength={1500} /></Champ>
+        <div className="flex flex-col gap-1">
+          <span className="text-[0.7rem] text-faint">Sens du contrat</span>
+          <Picker options={[{ key: "client_signe", label: "On l'envoie au client" }, { key: "client_propose", label: "Le client propose" }]} value={ctrSens} onChange={(v) => setCtrSens(v as "client_signe" | "client_propose")} />
+        </div>
+        <div className="flex flex-wrap justify-end gap-2">
+          <button onClick={() => { if (commanditaire.trim().length < 2) { setFlash("Indique le nom du commanditaire."); return; } setCtrOuvert(true); }} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.8rem] font-semibold hover:border-border-2"><ScrollText className="h-4 w-4" /> Aperçu / Imprimer</button>
+          <button onClick={envoyerCtr} disabled={busy === "ctr"} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[0.8rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--accent)" }}>{busy === "ctr" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Envoyer au commanditaire</button>
+        </div>
+      </div>
+
       <div className="mb-2 border-t border-border pt-3 text-[0.72rem] uppercase tracking-[0.06em] text-faint">Modifier</div>
       <div className="flex flex-col gap-3">
         <Champ label="Titre / objectif"><input className={inputCls} value={cible} onChange={(e) => setCible(e.target.value)} maxLength={200} /></Champ>
@@ -431,6 +472,57 @@ function EditModal({ op, membres, onClose, router }: { op: OpDetail; membres: Me
           )}
           <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-[0.8rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}>Fermer</button>
         </div>
+      </div>
+    </Modal>
+    {ctrOuvert ? <ContratOpDoc op={op} commanditaire={commanditaire} remuneration={ctrRemu} conditions={ctrConditions} sens={ctrSens} onClose={() => setCtrOuvert(false)} /> : null}
+    </>
+  );
+}
+
+// Feuille de contrat d'opération — document imprimable (même mécanisme que ContratDoc de l'armurerie).
+function ContratOpDoc({ op, commanditaire, remuneration, conditions, sens, onClose }: { op: OpDetail; commanditaire: string; remuneration: string; conditions: string; sens: "client_signe" | "client_propose"; onClose: () => void }) {
+  const num = `CTR-OP-${op.id.slice(-6).toUpperCase()}`;
+  const confrerie = op.pole === "illegal";
+  const intro = sens === "client_propose"
+    ? `Entre ${commanditaire || "le Commanditaire"} (le Commanditaire) et la ${confrerie ? "Confrérie" : "Iron Wolf Company"} (le Prestataire), il est convenu la mission ci-après, que le Prestataire s'engage à mener à bien aux conditions énoncées.`
+    : `Entre la ${confrerie ? "Confrérie" : "Iron Wolf Company"} (le Prestataire) et ${commanditaire || "le Commanditaire"} (le Commanditaire), il est convenu la mission ci-après, aux conditions énoncées.`;
+  const L = (k: string, v?: string | null) => (v ? (
+    <tr><td className="border-b border-border py-1.5 pr-3 align-top text-faint">{k}</td><td className="border-b border-border py-1.5 font-medium">{v}</td></tr>
+  ) : null);
+  return (
+    <Modal titre="📜 Contrat d'opération" onClose={onClose}>
+      <style>{`@media print{body *{visibility:hidden!important}#op-ctr-doc,#op-ctr-doc *{visibility:visible!important}#op-ctr-doc{position:fixed;inset:0;margin:0;padding:26px}.no-print{display:none!important}}`}</style>
+      <div id="op-ctr-doc" className="flex flex-col gap-3 text-[0.86rem]">
+        <div className="flex items-start justify-between gap-3 border-b-2 pb-2" style={{ borderColor: "var(--brass)" }}>
+          <div>
+            <div className="font-display text-[1.1rem] font-bold" style={{ color: "var(--brass)" }}>🐺 {confrerie ? "La Confrérie" : "Iron Wolf Company"}</div>
+            <div className="text-[0.72rem] text-muted">{confrerie ? "Opérations discrètes" : "Sécurité · Escorte · Chasse de prime"} — Contrat d&apos;opération</div>
+          </div>
+          <div className="text-right">
+            <div className="text-[0.66rem] uppercase tracking-[0.08em] text-faint">Contrat</div>
+            <div className="mono text-[0.9rem] font-bold">{num}</div>
+          </div>
+        </div>
+        <p className="text-[0.82rem] leading-relaxed text-muted">{intro}</p>
+        <table className="w-full border-collapse">
+          <tbody>
+            {L("Type de mission", op.type)}
+            {L("Objectif", op.objectif || op.titre)}
+            {L("Lieu", op.lieu || null)}
+            {L("Agents engagés", op.membresNoms.length ? op.membresNoms.join(", ") : null)}
+            {L("Rémunération convenue", remuneration || op.prime || null)}
+          </tbody>
+        </table>
+        {conditions ? <div><div className="text-[0.66rem] uppercase tracking-[0.06em] text-faint">Conditions</div><p className="whitespace-pre-wrap text-[0.82rem]">{conditions}</p></div> : null}
+        <div className="mt-4 grid grid-cols-2 gap-6 text-[0.72rem]">
+          <div className="border-t border-border pt-1 text-center text-faint">Pour la Compagnie<div className="mt-5 font-display text-[0.95rem] italic text-ink">{confrerie ? "La Confrérie" : "Iron Wolf Company"}</div></div>
+          <div className="border-t border-border pt-1 text-center text-faint">Le Commanditaire<div className="mt-5 font-display text-[0.95rem] italic text-ink">{commanditaire || "—"}</div></div>
+        </div>
+        <p className="mt-1 text-center text-[0.62rem] italic text-faint">Contrat établi par l&apos;Iron Wolf Company. « La force est dans l&apos;ombre. »</p>
+      </div>
+      <div className="no-print mt-3 flex justify-end gap-2">
+        <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2">Fermer</button>
+        <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Download className="h-3.5 w-3.5" /> Imprimer / PDF</button>
       </div>
     </Modal>
   );
