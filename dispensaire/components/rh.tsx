@@ -5,17 +5,20 @@ import { Lock, UserPlus, Pencil, Trash2, X, Archive, ArchiveRestore, Send, Landm
 import { chargerRH, ajouterSalarie, majSalarie, supprimerSalarie } from "@/app/actions";
 import type { Salarie } from "@/lib/data";
 import { Bloc, Vide } from "./ui";
+import { useConfirm, useToast } from "./ux";
 
 const NIVEAUX = ["Interne", "Infirmier", "Médecin", "Médecin-chef", "Chirurgien", "Directeur"];
 
 function LigneSalarie({ code, s, refresh }: { code: string; s: Salarie; refresh: () => void }) {
+  const confirm = useConfirm();
+  const toast = useToast();
   const [edit, setEdit] = useState(false);
-  const [f, setF] = useState({ nom: s.nom, niveau: s.niveau || "", qualifications: s.qualifications || "", compteBancaire: s.compteBancaire || "", telegramme: s.telegramme || "" });
   const [busy, setBusy] = useState(false);
+  const [f, setF] = useState({ nom: s.nom, niveau: s.niveau || "", qualifications: s.qualifications || "", compteBancaire: s.compteBancaire || "", telegramme: s.telegramme || "" });
 
-  async function sauver() { setBusy(true); const r = await majSalarie(code, s.id, f); setBusy(false); if (r.ok) { setEdit(false); refresh(); } }
-  async function toggleActif() { await majSalarie(code, s.id, { actif: !s.actif }); refresh(); }
-  async function suppr() { if (confirm(`Supprimer définitivement ${s.nom} ? (préfère « archiver »)`)) { await supprimerSalarie(code, s.id); refresh(); } }
+  async function sauver() { setBusy(true); const r = await majSalarie(code, s.id, f); setBusy(false); if (r.ok) { setEdit(false); toast("Salarié mis à jour.", "ok"); refresh(); } else toast(r.error || "Échec.", "err"); }
+  async function toggleActif() { const r = await majSalarie(code, s.id, { actif: !s.actif }); if (r.ok) { toast(s.actif ? "Archivé." : "Réactivé.", "ok"); refresh(); } else toast(r.error || "Échec.", "err"); }
+  async function suppr() { if (!(await confirm(`Supprimer définitivement ${s.nom} ? (préfère « archiver »)`, { danger: true, ok: "Supprimer" }))) return; const r = await supprimerSalarie(code, s.id); if (r.ok) { toast("Supprimé.", "ok"); refresh(); } else toast(r.error || "Échec.", "err"); }
 
   if (edit) return (
     <li className="grid gap-2 border-b border-[var(--line)]/60 px-4 py-3 last:border-0 sm:grid-cols-2">
@@ -25,14 +28,14 @@ function LigneSalarie({ code, s, refresh }: { code: string; s: Salarie; refresh:
       <input className="inp" value={f.compteBancaire} onChange={(e) => setF({ ...f, compteBancaire: e.target.value })} placeholder="N° compte bancaire" />
       <input className="inp" value={f.telegramme} onChange={(e) => setF({ ...f, telegramme: e.target.value })} placeholder="N° télégramme" />
       <div className="flex gap-2 sm:col-span-2">
-        <button className="btn-accent btn" onClick={sauver} disabled={busy}>Enregistrer</button>
+        <button className="btn-accent btn" onClick={sauver} disabled={busy}>{busy ? <span className="spin" /> : null} Enregistrer</button>
         <button className="btn" onClick={() => setEdit(false)}><X className="h-4 w-4" /> Annuler</button>
       </div>
     </li>
   );
 
   return (
-    <li className={`flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--line)]/60 px-4 py-3 last:border-0 ${s.actif ? "" : "opacity-55"}`}>
+    <li className={`rise flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--line)]/60 px-4 py-3 last:border-0 ${s.actif ? "" : "opacity-55"}`}>
       <span className="min-w-0 flex-1">
         <span className="font-medium">{s.nom}</span>
         {s.niveau ? <span className="ml-2 rounded-full border border-[var(--line)] px-2 py-0.5 text-[0.7rem] text-[var(--accent)]">{s.niveau}</span> : null}
@@ -51,6 +54,7 @@ function LigneSalarie({ code, s, refresh }: { code: string; s: Salarie; refresh:
 }
 
 export function RH() {
+  const toast = useToast();
   const [code, setCode] = useState("");
   const [saisie, setSaisie] = useState("");
   const [unlocked, setUnlocked] = useState(false);
@@ -66,17 +70,15 @@ export function RH() {
     try { sessionStorage.setItem("disp_code", c); } catch {}
     return true;
   }, []);
-
   useEffect(() => { try { const c = sessionStorage.getItem("disp_code"); if (c) charger(c); } catch {} }, [charger]);
-
   const refresh = () => charger(code);
 
   async function deverrouiller() { setBusy(true); await charger(saisie.trim()); setBusy(false); }
   async function ajouter() {
-    if (!nouv.nom.trim()) { setErr("Nom requis."); return; }
+    if (!nouv.nom.trim()) { toast("Nom requis.", "err"); return; }
     setBusy(true); const r = await ajouterSalarie(code, nouv); setBusy(false);
-    if (!r.ok) { setErr(r.error || "Échec."); return; }
-    setNouv({ nom: "", niveau: "", qualifications: "", compteBancaire: "", telegramme: "" }); refresh();
+    if (!r.ok) { toast(r.error || "Échec.", "err"); return; }
+    toast("Salarié ajouté.", "ok"); setNouv({ nom: "", niveau: "", qualifications: "", compteBancaire: "", telegramme: "" }); refresh();
   }
 
   if (!unlocked) return (
@@ -86,7 +88,7 @@ export function RH() {
       <p className="mb-4 mt-1 text-[0.84rem] text-[var(--muted)]">Accès réservé aux membres habilités. Saisis le code du dispensaire.</p>
       <div className="flex gap-2">
         <input className="inp" type="password" value={saisie} onChange={(e) => setSaisie(e.target.value)} placeholder="Code d'accès" onKeyDown={(e) => { if (e.key === "Enter") deverrouiller(); }} autoFocus />
-        <button className="btn-accent btn" onClick={deverrouiller} disabled={busy}>Ouvrir</button>
+        <button className="btn-accent btn" onClick={deverrouiller} disabled={busy}>{busy ? <span className="spin" /> : null} Ouvrir</button>
       </div>
       {err ? <p className="mt-2 text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
     </div>
@@ -106,8 +108,7 @@ export function RH() {
           <input className="inp" value={nouv.telegramme} onChange={(e) => setNouv({ ...nouv, telegramme: e.target.value })} placeholder="N° télégramme" />
         </div>
         <div className="mt-2 flex items-center gap-2">
-          <button className="btn-accent btn" onClick={ajouter} disabled={busy}><UserPlus className="h-4 w-4" /> Ajouter le salarié</button>
-          {err ? <span className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</span> : null}
+          <button className="btn-accent btn" onClick={ajouter} disabled={busy}>{busy ? <span className="spin" /> : <UserPlus className="h-4 w-4" />} Ajouter le salarié</button>
         </div>
       </div>
 

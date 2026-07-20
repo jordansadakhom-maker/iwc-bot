@@ -5,17 +5,20 @@ import { Lock, ReceiptText, Plus, Trash2, Check, RotateCcw, AlertTriangle, Circl
 import { chargerFactures, ajouterFacture, marquerPayee, supprimerFacture } from "@/app/actions";
 import type { FactureRow } from "@/lib/data";
 import { Bloc, Vide } from "./ui";
+import { useConfirm, useToast } from "./ux";
 
 const prix = (n: number) => `${n.toFixed(2).replace(".", ",")} $`;
 function aujourdhui() { try { return new Date().toISOString().slice(0, 10); } catch { return ""; } }
 function joli(d: string | null) { if (!d) return "—"; const [y, m, j] = d.split("-"); return `${j}/${m}/${y}`; }
 
 function LigneFacture({ code, f, refresh, today }: { code: string; f: FactureRow; refresh: () => void; today: string }) {
+  const confirm = useConfirm();
+  const toast = useToast();
   const enRetard = !f.paye && !!f.echeance && f.echeance < today;
-  async function toggle() { await marquerPayee(code, f.id, !f.paye); refresh(); }
-  async function suppr() { if (confirm(`Supprimer la facture de ${f.patient} ?`)) { await supprimerFacture(code, f.id); refresh(); } }
+  async function toggle() { const r = await marquerPayee(code, f.id, !f.paye); if (r.ok) { toast(f.paye ? "Remise en impayée." : "Marquée payée.", "ok"); refresh(); } else toast(r.error || "Échec.", "err"); }
+  async function suppr() { if (!(await confirm(`Supprimer la facture de ${f.patient} ?`, { danger: true, ok: "Supprimer" }))) return; const r = await supprimerFacture(code, f.id); if (r.ok) { toast("Supprimée.", "ok"); refresh(); } else toast(r.error || "Échec.", "err"); }
   return (
-    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--line)]/60 px-4 py-2.5 last:border-0">
+    <li className="rise flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--line)]/60 px-4 py-2.5 last:border-0">
       {enRetard ? <AlertTriangle className="h-4 w-4 shrink-0" style={{ color: "var(--oxblood)" }} /> : <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: f.paye ? "var(--good)" : "var(--warn)" }} />}
       <span className="min-w-0 flex-1">
         <span className={`font-medium ${f.paye ? "line-through opacity-60" : ""}`}>{f.patient}</span>
@@ -32,6 +35,7 @@ function LigneFacture({ code, f, refresh, today }: { code: string; f: FactureRow
 }
 
 export function Factures() {
+  const toast = useToast();
   const [code, setCode] = useState("");
   const [saisie, setSaisie] = useState("");
   const [unlocked, setUnlocked] = useState(false);
@@ -59,10 +63,10 @@ export function Factures() {
 
   async function deverrouiller() { setBusy(true); await charger(saisie.trim()); setBusy(false); }
   async function ajouter() {
-    if (nouv.patient.trim().length < 2) { setErr("Nom du patient requis."); return; }
+    if (nouv.patient.trim().length < 2) { toast("Nom du patient requis.", "err"); return; }
     setBusy(true); const r = await ajouterFacture(code, { patient: nouv.patient, montant: Number(nouv.montant), motif: nouv.motif, echeance: nouv.echeance }); setBusy(false);
-    if (!r.ok) { setErr(r.error || "Échec."); return; }
-    setNouv({ patient: "", montant: "", motif: "", echeance: "" }); setErr(null); refresh();
+    if (!r.ok) { toast(r.error || "Échec.", "err"); return; }
+    toast("Facture enregistrée.", "ok"); setNouv({ patient: "", montant: "", motif: "", echeance: "" }); refresh();
   }
 
   if (!unlocked) return (
@@ -72,7 +76,7 @@ export function Factures() {
       <p className="mb-4 mt-1 text-[0.84rem] text-[var(--muted)]">Accès réservé aux chefs. Saisis le code du dispensaire.</p>
       <div className="flex gap-2">
         <input className="inp" type="password" value={saisie} onChange={(e) => setSaisie(e.target.value)} placeholder="Code d'accès" onKeyDown={(e) => { if (e.key === "Enter") deverrouiller(); }} autoFocus />
-        <button className="btn-accent btn" onClick={deverrouiller} disabled={busy}>Ouvrir</button>
+        <button className="btn-accent btn" onClick={deverrouiller} disabled={busy}>{busy ? <span className="spin" /> : null} Ouvrir</button>
       </div>
       {err ? <p className="mt-2 text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
     </div>
@@ -96,8 +100,7 @@ export function Factures() {
           <label className="text-[0.72rem] text-[var(--faint)]">Échéance de paiement<input className="inp mt-0.5" type="date" value={nouv.echeance} onChange={(e) => setNouv({ ...nouv, echeance: e.target.value })} /></label>
         </div>
         <div className="mt-2 flex items-center gap-2">
-          <button className="btn-accent btn" onClick={ajouter} disabled={busy}><Plus className="h-4 w-4" /> Enregistrer</button>
-          {err ? <span className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</span> : null}
+          <button className="btn-accent btn" onClick={ajouter} disabled={busy}>{busy ? <span className="spin" /> : <Plus className="h-4 w-4" />} Enregistrer</button>
         </div>
       </div>
 

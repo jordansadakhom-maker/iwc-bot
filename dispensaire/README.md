@@ -9,7 +9,10 @@ Il réutilise **la même base Supabase** que le site principal (tables préfixé
 
 1. **Accueil** — prise / fin de service (chrono des heures) + stocks en alerte.
 2. **Stockage** — coffres, matières premières, matériel, nourriture ; `+/‑` avec
-   traçabilité (qui a pris/ajouté quoi) et seuils d'alerte.
+   traçabilité (qui a pris/ajouté quoi) et seuils d'alerte ; correction directe
+   d'une quantité au clic ; filtres par catégorie ; **« Scanner une photo »** :
+   glisser une photo du coffre/panneau → l'IA lit les quantités et met à jour le
+   stock (nécessite `ANTHROPIC_API_KEY`).
 3. **Facturation F.D.O.** — shérifs par bureau + prix du soin.
 4. **Répertoire** — coordonnées des entreprises (mine, menuiserie…).
 5. **Personnel** 🔒 — salariés, niveaux, qualifications, n° compte bancaire et
@@ -31,6 +34,7 @@ Il réutilise **la même base Supabase** que le site principal (tables préfixé
    - `DISP_CODE_CHEF` — le code des onglets Personnel / Factures.
    - `DISP_DISCORD_WEBHOOK` *(optionnel)* — URL de webhook Discord pour les
      certificats (Salon → Paramètres → Intégrations → Webhooks).
+   - `ANTHROPIC_API_KEY` *(optionnel)* — active « Scanner une photo » du stock.
 3. Dans Supabase → **SQL Editor**, exécuter **une fois** `dispensaire/sql/init.sql`
    (additif et idempotent : il ne touche pas aux tables existantes).
 4. Déployer. Le site s'ouvre sur l'Accueil ; les onglets se remplissent au fur et

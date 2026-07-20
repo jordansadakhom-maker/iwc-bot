@@ -76,5 +76,33 @@ export async function getVentesSemaine(): Promise<VenteBandage[]> {
   return ((data as Raw[]) || []).map((r) => ({ id: String(r.id), patient: String(r.patient || "—"), quantite: n(r.quantite), auteur: s(r.auteur), createdAt: String(r.createdAt || "") }));
 }
 
+export type Certificat = { id: string; patient: string; type: string | null; praticien: string | null; dateActe: string | null; diagnostic: string | null; createdAt: string };
+export async function getCertificats(limit = 15): Promise<Certificat[]> {
+  const sb = db(); if (!sb) return [];
+  const { data } = await sb.from("DispCertificat").select("*").order("createdAt", { ascending: false }).limit(limit);
+  return ((data as Raw[]) || []).map((r) => ({ id: String(r.id), patient: String(r.patient || "—"), type: s(r.type), praticien: s(r.praticien), dateActe: s(r.dateActe), diagnostic: s(r.diagnostic), createdAt: String(r.createdAt || "") }));
+}
+
+export type Resume = { articles: number; alertes: number; enService: number; ventesSemaine: number; facturesRetard: number; salaries: number };
+export async function getResume(): Promise<Resume> {
+  const vide: Resume = { articles: 0, alertes: 0, enService: 0, ventesSemaine: 0, facturesRetard: 0, salaries: 0 };
+  const sb = db(); if (!sb) return vide;
+  const today = new Date().toISOString().slice(0, 10);
+  const [stock, services, ventes, factures, salaries] = await Promise.all([
+    getStock(), getServicesEnCours(), getVentesSemaine(),
+    sb.from("DispFacture").select("echeance,paye"),
+    sb.from("DispSalarie").select("id").eq("actif", true),
+  ]);
+  const facturesRetard = ((factures.data as Raw[]) || []).filter((f) => f.paye !== true && f.echeance && String(f.echeance) < today).length;
+  return {
+    articles: stock.length,
+    alertes: stock.filter((x) => x.seuil > 0 && x.quantite <= x.seuil).length,
+    enService: services.length,
+    ventesSemaine: ventes.reduce((a, v) => a + v.quantite, 0),
+    facturesRetard,
+    salaries: ((salaries.data as Raw[]) || []).length,
+  };
+}
+
 export { LIMITE_BANDAGES };
 export const dbPrete = configured;
