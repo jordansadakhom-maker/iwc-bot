@@ -145,7 +145,7 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
       {tab === "produits" ? <ProduitsTab produits={produits} ressources={ressources} router={router} /> : null}
       {tab === "ressources" ? <RessourcesTab ressources={ressources} router={router} /> : null}
       {tab === "commandes" ? <CarnetCommandesTab commandes={commandes} produits={produits} clients={clients.map((c) => ({ id: c.id, nom: c.nom }))} router={router} /> : null}
-      {tab === "clients" ? <ClientsTab clients={clients} ventes={ventes} router={router} /> : null}
+      {tab === "clients" ? <ClientsTab clients={clients} ventes={ventes} contrats={contrats} router={router} /> : null}
       {tab === "ventes" ? <VentesTab ventes={ventes} clients={clients} router={router} /> : null}
       {tab === "contrats" ? <ContratsTab contrats={contrats} clients={clients} produits={produits} router={router} /> : null}
       {tab === "employes" ? <EmployesTab employes={employes} router={router} /> : null}
@@ -796,7 +796,7 @@ function Kpi({ label, value, tone, icon: Icon }: { label: string; value: string;
 }
 
 // ═══════════════════ CLIENTS ═══════════════════
-function ClientsTab({ clients, ventes, router }: { clients: ArmClient[]; ventes: ArmVente[]; router: Router }) {
+function ClientsTab({ clients, ventes, contrats, router }: { clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; router: Router }) {
   const [sel, setSel] = useState<ArmClient | null>(null);
   const [nouveau, setNouveau] = useState(false);
   const [prefill, setPrefill] = useState<{ nom?: string; notes?: string; carte?: string } | null>(null);
@@ -876,13 +876,13 @@ function ClientsTab({ clients, ventes, router }: { clients: ArmClient[]; ventes:
           )}
         </>
       )}
-      {nouveau ? <ClientModal prefill={prefill || undefined} onClose={() => { setNouveau(false); setPrefill(null); }} router={router} /> : null}
-      {sel ? <ClientModal key={sel.id} client={sel} achats={ventes.filter((v) => v.clientId === sel.id)} onClose={() => setSel(null)} router={router} /> : null}
+      {nouveau ? <ClientModal prefill={prefill || undefined} contrats={contrats} onClose={() => { setNouveau(false); setPrefill(null); }} router={router} /> : null}
+      {sel ? <ClientModal key={sel.id} client={sel} achats={ventes.filter((v) => v.clientId === sel.id)} contrats={contrats} onClose={() => setSel(null)} router={router} /> : null}
     </>
   );
 }
 
-function ClientModal({ client, achats = [], onClose, router, prefill }: { client?: ArmClient; achats?: ArmVente[]; onClose: () => void; router: Router; prefill?: { nom?: string; notes?: string; carte?: string } }) {
+function ClientModal({ client, achats = [], contrats = [], onClose, router, prefill }: { client?: ArmClient; achats?: ArmVente[]; contrats?: ArmContrat[]; onClose: () => void; router: Router; prefill?: { nom?: string; notes?: string; carte?: string } }) {
   const editing = !!client;
   const [nom, setNom] = useState(client?.nom || prefill?.nom || "");
   const [telegramme, setTelegramme] = useState(client?.telegramme || "");
@@ -895,12 +895,18 @@ function ClientModal({ client, achats = [], onClose, router, prefill }: { client
   const [err, setErr] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
   const [facture, setFacture] = useState<ArmVente[] | null>(null);
+  const [dossierOpen, setDossierOpen] = useState(false);
   // Regroupe les achats par facture (ticket) — un règlement = une facture.
   const transactions = (() => {
     const m = new Map<string, ArmVente[]>();
     for (const a of achats) { const k = a.ticket || a.id; (m.get(k) || m.set(k, []).get(k)!).push(a); }
     return [...m.values()].sort((a, b) => (b[0].createdAt || "").localeCompare(a[0].createdAt || ""));
   })();
+  // Fidélité : total dépensé, nb de factures, dernier achat, contrats du client.
+  const totalDepense = achats.reduce((s, a) => s + a.prix, 0);
+  const dernierAchat = transactions[0]?.[0]?.dateVente || null;
+  const fidele = transactions.length >= 3 || totalDepense >= 500;
+  const contratsClient = editing ? contrats.filter((c) => c.clientId === client!.id) : [];
 
   async function enregistrer() {
     setErr(null);
@@ -952,6 +958,32 @@ function ClientModal({ client, achats = [], onClose, router, prefill }: { client
         <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Statut</span><Picker options={STATUTS_CLIENT} value={statut} onChange={setStatut} /></div>
         <Champ label="Notes"><textarea className={inputCls + " min-h-[50px] resize-y"} value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} placeholder="Antécédents, préférences, mises en garde…" /></Champ>
 
+        {editing && (achats.length || contratsClient.length) ? (
+          <div className="flex flex-col gap-2 border-t border-border pt-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Fidélité</span>
+              {fidele ? <Badge tone="accent">★ Client fidèle</Badge> : null}
+              <button onClick={() => setDossierOpen(true)} className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.72rem] font-semibold hover:border-border-2"><Download className="h-3.5 w-3.5" /> Imprimer le dossier</button>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <StatMini label="Total dépensé" valeur={money(totalDepense)} tone="var(--accent)" />
+              <StatMini label="Factures" valeur={String(transactions.length)} tone="var(--ink)" />
+              <StatMini label="Dernier achat" valeur={dernierAchat || "—"} tone="var(--ink)" />
+            </div>
+            {contratsClient.length ? (
+              <div className="flex flex-col gap-1">
+                <span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Contrats ({contratsClient.length})</span>
+                {contratsClient.map((c) => (
+                  <div key={c.id} className="flex items-center justify-between gap-2 rounded-[8px] border border-border bg-surface-2 px-2.5 py-1.5 text-[0.78rem]">
+                    <span className="min-w-0 truncate">{c.arme || "Arme"}{c.numeroSerie ? <span className="mono text-faint"> · {c.numeroSerie}</span> : null}</span>
+                    <span className="flex shrink-0 items-center gap-2"><span className="font-num">{money(c.prix)}</span><Badge tone="muted">{c.statut}</Badge></span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         {editing && transactions.length ? (
           <div className="flex flex-col gap-2 border-t border-border pt-2">
             <span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Factures &amp; achats ({transactions.length})</span>
@@ -992,7 +1024,84 @@ function ClientModal({ client, achats = [], onClose, router, prefill }: { client
       </div>
     </Modal>
     {facture ? <FactureModal ventes={facture} client={client} onClose={() => setFacture(null)} /> : null}
+    {dossierOpen && client ? <DossierClientModal client={client} transactions={transactions} contrats={contratsClient} totalDepense={totalDepense} onClose={() => setDossierOpen(false)} /> : null}
     </>
+  );
+}
+
+// ═══════════════════ DOSSIER CLIENT (document imprimable) ═══════════════════
+// Fiche complète : identité + carte + fidélité + tout l'historique (par facture/date) + contrats.
+function DossierClientModal({ client, transactions, contrats, totalDepense, onClose }: { client: ArmClient; transactions: ArmVente[][]; contrats: ArmContrat[]; totalDepense: number; onClose: () => void }) {
+  const nAchats = transactions.reduce((s, t) => s + t.length, 0);
+  return (
+    <Modal titre="🗂️ Dossier client" onClose={onClose} max={680}>
+      <style>{`@media print{body *{visibility:hidden!important}#dossier-doc,#dossier-doc *{visibility:visible!important}#dossier-doc{position:fixed;inset:0;margin:0;padding:26px;overflow:auto}.no-print{display:none!important}}`}</style>
+      <div id="dossier-doc" className="flex flex-col gap-3">
+        <div className="flex items-start justify-between gap-3 border-b-2 pb-2" style={{ borderColor: "var(--brass)" }}>
+          <div>
+            <div className="font-display text-[1.1rem] font-bold" style={{ color: "var(--brass)" }}>🐺 Iron Wolf Company</div>
+            <div className="text-[0.72rem] text-muted">Armurerie de Van Horn — Bureau de Saint-Denis</div>
+          </div>
+          <div className="text-right">
+            <div className="text-[0.66rem] uppercase tracking-[0.08em] text-faint">Dossier client</div>
+            <div className="text-[0.72rem] text-muted">Édité le {new Date().toLocaleDateString("fr-FR")}</div>
+          </div>
+        </div>
+        <div className="flex items-start gap-3">
+          {client.carteIdentite ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={client.carteIdentite} alt="Carte d'identité" className="h-20 w-20 shrink-0 rounded-[8px] border border-border object-cover" />
+          ) : null}
+          <div className="min-w-0 text-[0.82rem]">
+            <div className="text-[0.64rem] uppercase tracking-[0.05em] text-faint">Client</div>
+            <div className="font-display text-[1.05rem] font-bold">{client.nom}</div>
+            {client.telegramme ? <div className="text-[0.74rem] text-muted">Télégramme : {client.telegramme}</div> : null}
+            <div className="text-[0.74rem] text-muted">Statut : {STATUTS_CLIENT.find((s) => s.key === client.statut)?.label || client.statut}</div>
+            {client.notes ? <div className="mt-0.5 text-[0.72rem] text-faint">{client.notes}</div> : null}
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <StatMini label="Total dépensé" valeur={money(totalDepense)} tone="var(--brass)" />
+          <StatMini label="Factures" valeur={String(transactions.length)} tone="var(--ink)" />
+          <StatMini label="Articles achetés" valeur={String(nAchats)} tone="var(--ink)" />
+        </div>
+
+        <div className="mt-1 text-[0.66rem] uppercase tracking-[0.05em] text-faint">Historique des achats</div>
+        {transactions.length ? transactions.map((t) => {
+          const tot = t.reduce((s, a) => s + a.prix, 0);
+          return (
+            <div key={t[0].ticket || t[0].id} className="rounded-[8px] border border-border p-2">
+              <div className="mb-1 flex items-center justify-between text-[0.7rem] text-faint"><span className="mono">{t[0].ticket || `VTE-${t[0].id.slice(-6)}`}</span><span>{t[0].dateVente}</span></div>
+              {t.map((a) => (
+                <div key={a.id} className="flex items-center justify-between gap-2 text-[0.78rem]">
+                  <span className="min-w-0 truncate">{[a.marque, a.modele].filter(Boolean).join(" ") || "Article"}{a.quantite > 1 ? <span className="font-num"> ×{a.quantite}</span> : null}{a.numeroSerie ? <span className="mono text-faint"> · N° {a.numeroSerie}</span> : null}</span>
+                  <span className="shrink-0 font-num">{money(a.prix)}</span>
+                </div>
+              ))}
+              <div className="mt-1 flex justify-between border-t border-border pt-1 text-[0.78rem] font-semibold"><span>Total facture</span><span className="font-num">{money(tot)}</span></div>
+            </div>
+          );
+        }) : <p className="text-[0.78rem] italic text-faint">Aucun achat enregistré.</p>}
+
+        {contrats.length ? (
+          <>
+            <div className="mt-1 text-[0.66rem] uppercase tracking-[0.05em] text-faint">Contrats</div>
+            {contrats.map((c) => (
+              <div key={c.id} className="flex items-center justify-between gap-2 rounded-[8px] border border-border px-2 py-1.5 text-[0.78rem]">
+                <span className="min-w-0 truncate">{c.arme || "Arme"}{c.numeroSerie ? <span className="mono text-faint"> · {c.numeroSerie}</span> : null} — {c.statut}</span>
+                <span className="shrink-0 font-num">{money(c.prix)}</span>
+              </div>
+            ))}
+          </>
+        ) : null}
+
+        <p className="mt-2 text-center text-[0.62rem] italic text-faint">Dossier tenu par l&apos;Iron Wolf Company — Armurerie de Van Horn. « La force est dans l&apos;ombre. »</p>
+      </div>
+      <div className="no-print mt-3 flex justify-end gap-2">
+        <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2">Fermer</button>
+        <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Download className="h-3.5 w-3.5" /> Imprimer / PDF</button>
+      </div>
+    </Modal>
   );
 }
 
