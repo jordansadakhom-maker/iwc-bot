@@ -17,7 +17,7 @@ import {
   pointerService, terminerService, supprimerPointage,
   creerPaie, payerPaie, supprimerPaie,
   creerImpot, payerImpot, supprimerImpot,
-  ajouterEcriture,
+  ajouterEcriture, reajusterFinancesReckless,
   creerNote, majNote, supprimerNote,
   creerTache, basculerTache, supprimerTache,
   creerCommande, majCommande, marquerCommande, supprimerCommande,
@@ -324,27 +324,25 @@ function ImportRecklessModal({ onClose, router }: { onClose: () => void; router:
     if (!lu) return;
     setErr(null); setBusy(true);
     const suffixe = libelle.trim() ? " — " + libelle.trim() : "";
-    let ok = true;
-    // Écritures séquentielles (le coffre est mis à jour à chaque fois).
-    async function ecr(montant: number, sens: "entree" | "sortie", motif: string, nature: "charge" | null) {
-      if (montant > 0.005) { const r = await ajouterEcriture(round2(montant), sens, motif, nature); if (!r.ok) ok = false; }
-    }
-    // Enregistre un côté (recette/dépense) au détail des catégories lues, en regroupant
-    // les lignes masquées (« + N autres ») pour coller au total.
-    async function coteDetaille(total: number, sens: "entree" | "sortie", nature: "charge" | null) {
+    type Mvt = { montant: number; sens: "entree" | "sortie"; motif: string; nature: "produit" | "charge" | null };
+    const mvts: Mvt[] = [];
+    // Construit un côté (recette/dépense) : au détail des catégories, en regroupant les
+    // lignes masquées (« + N autres ») pour coller au total.
+    function coteDetaille(total: number, sens: "entree" | "sortie", nature: "charge" | null) {
       let sum = 0;
-      for (const c of lu!.categories) { if (c.montant > 0 && c.nom.trim()) { sum += c.montant; await ecr(c.montant, sens, "Reckless — " + c.nom.trim() + suffixe, nature); } }
-      await ecr((total || sum) - sum, sens, "Reckless — autres " + (sens === "entree" ? "recettes" : "dépenses") + suffixe, nature);
+      for (const c of lu!.categories) { if (c.montant > 0 && c.nom.trim()) { sum += c.montant; mvts.push({ montant: c.montant, sens, motif: "Reckless — " + c.nom.trim() + suffixe, nature }); } }
+      const reste = round2((total || sum) - sum);
+      if (reste > 0.005) mvts.push({ montant: reste, sens, motif: "Reckless — autres " + (sens === "entree" ? "recettes" : "dépenses") + suffixe, nature });
     }
     const detailOn = mode === "detail" && lu.categories.length > 0;
-    // Recettes
-    if (detailOn && detailSide === "recettes") await coteDetaille(lu.recettes, "entree", null);
-    else await ecr(lu.recettes, "entree", "Recettes Reckless" + suffixe, null);
-    // Dépenses
-    if (detailOn && detailSide === "depenses") await coteDetaille(lu.depenses, "sortie", "charge");
-    else await ecr(lu.depenses, "sortie", "Dépenses Reckless" + suffixe, "charge");
+    if (detailOn && detailSide === "recettes") coteDetaille(lu.recettes, "entree", null);
+    else if (lu.recettes > 0) mvts.push({ montant: lu.recettes, sens: "entree", motif: "Recettes Reckless" + suffixe, nature: null });
+    if (detailOn && detailSide === "depenses") coteDetaille(lu.depenses, "sortie", "charge");
+    else if (lu.depenses > 0) mvts.push({ montant: lu.depenses, sens: "sortie", motif: "Dépenses Reckless" + suffixe, nature: "charge" });
+
+    const r = await reajusterFinancesReckless(mvts);
     setBusy(false);
-    if (!ok) { setErr("Une ou plusieurs écritures n'ont pas pu être enregistrées."); return; }
+    if (!r.ok) { setErr(r.error || "Enregistrement impossible."); return; }
     router.refresh(); onClose();
   }
 
@@ -359,7 +357,7 @@ function ImportRecklessModal({ onClose, router }: { onClose: () => void; router:
   return (
     <Modal titre="📸 Importer une capture Reckless" onClose={onClose}>
       <div className="flex flex-col gap-3">
-        <p className="text-[0.8rem] text-muted">Glisse une capture du tableau de bord financier Reckless : l&apos;IA lit les <b>recettes</b> et <b>dépenses</b>, puis les inscrit en comptabilité (1 recette + 1 dépense).</p>
+        <p className="text-[0.8rem] text-muted">Glisse une capture du tableau de bord financier Reckless : l&apos;IA lit les <b>recettes</b> et <b>dépenses</b>, puis <b>réajuste</b> ta comptabilité pour coller à Reckless. Réimporter <b>remplace</b> l&apos;import précédent (jamais de doublon).</p>
         <PhotoDrop dossier="armurerie-compta" onUploaded={onPhoto} label={lecture ? "Lecture en cours…" : "Glisser la capture du tableau de bord Reckless"} />
         {lecture ? <p className="text-[0.8rem] text-faint">⏳ Lecture de la capture…</p> : null}
         {lu ? (
@@ -406,13 +404,13 @@ function ImportRecklessModal({ onClose, router }: { onClose: () => void; router:
               </div>
             ) : null}
             <Champ label="Libellé (date / cycle)"><input className={inputCls} value={libelle} onChange={(e) => setLibelle(e.target.value)} maxLength={120} /></Champ>
-            <p className="text-[0.7rem] text-faint">⚠ À importer une seule fois par cycle, pour ne pas compter deux fois les mêmes montants.</p>
+            <p className="text-[0.7rem] text-faint">↻ Réajustement : cet import <b>remplace</b> le précédent import Reckless — ta compta reste synchro, sans doubler. Tes autres écritures (ventes, paies…) ne sont pas touchées.</p>
           </div>
         ) : null}
         {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2">Fermer</button>
-          <button onClick={enregistrer} disabled={!lu || busy} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--accent)" }}>{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Enregistrer en comptabilité</button>
+          <button onClick={enregistrer} disabled={!lu || busy} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--accent)" }}>{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Réajuster la comptabilité</button>
         </div>
       </div>
     </Modal>

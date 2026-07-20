@@ -843,6 +843,40 @@ export async function ajouterEcriture(montant: number, sens: "entree" | "sortie"
   catch (e) { return { ok: false, error: erpErr((e as Error).message || "") }; }
 }
 
+// Réajuste la comptabilité depuis une capture Reckless : REMPLACE l'import Reckless
+// précédent (mouvements dont le motif contient « Reckless ») par les nouveaux, et
+// recale le solde du coffre. Idempotent : réimporter re-synchronise sans doubler.
+export async function reajusterFinancesReckless(mouvements: { montant: number; sens: "entree" | "sortie"; motif: string; nature: "produit" | "charge" | null }[]): Promise<ArmResult & { remplaces?: number }> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const lignes = (mouvements || []).filter((n) => (Number(n.montant) || 0) > 0.005);
+  if (!lignes.length) return { ok: false, error: "Rien à enregistrer." };
+  try {
+    const auteur = await auteurNom();
+    // 1. Ancien import Reckless (à remplacer) + son effet net sur le solde.
+    const { data: anc } = await admin.from("ArmurerieMouvementCoffre").select("id,sens,montant").ilike("motif", "%Reckless%");
+    const anciens = (anc || []) as { id: string; sens: string; montant: number }[];
+    const prevNet = anciens.reduce((sm, m) => sm + (m.sens === "entree" ? Number(m.montant) || 0 : -(Number(m.montant) || 0)), 0);
+    if (anciens.length) await admin.from("ArmurerieMouvementCoffre").delete().ilike("motif", "%Reckless%");
+    // 2. Recale le solde : retire l'ancien net, ajoute le nouveau.
+    const newNet = lignes.reduce((sm, n) => sm + (n.sens === "entree" ? n.montant : -n.montant), 0);
+    const { data: cof } = await admin.from("ArmurerieCoffre").select("solde").eq("id", "vanhorn").maybeSingle();
+    const solde = cof ? Number((cof as { solde: number }).solde) || 0 : 0;
+    await admin.from("ArmurerieCoffre").upsert({ id: "vanhorn", solde: Math.max(0, round2(solde - prevNet + newNet)), updatedAt: nowISO() }, { onConflict: "id" });
+    // 3. Inscrit les nouveaux mouvements.
+    const now = nowISO();
+    for (const n of lignes) {
+      const nat = n.sens === "sortie" && (n.nature === "produit" || n.nature === "charge") ? n.nature : null;
+      const base: Record<string, unknown> = { id: newId("mvt"), sens: n.sens, montant: round2(n.montant), motif: s(n.motif, 200), auteur, createdAt: now };
+      const row = nat ? { ...base, nature: nat } : base;
+      let ins = await admin.from("ArmurerieMouvementCoffre").insert(row);
+      if (ins.error && nat && /nature/i.test(ins.error.message)) ins = await admin.from("ArmurerieMouvementCoffre").insert(base);
+      if (ins.error) throw new Error(ins.error.message);
+    }
+    return { ok: true, remplaces: anciens.length };
+  } catch (e) { return { ok: false, error: erpErr((e as Error).message || "") }; }
+}
+
 // ── Bloc-notes ───────────────────────────────────────────────────
 export async function creerNote(d: { titre?: string; contenu: string }): Promise<ArmResult> {
   if (!d.contenu || d.contenu.trim().length < 1) return { ok: false, error: "Écris le contenu de la note." };
