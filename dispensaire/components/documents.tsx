@@ -1,20 +1,19 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { FolderOpen, Plus, Trash2, ExternalLink } from "lucide-react";
 import { ajouterDocument, supprimerDocument } from "@/app/actions";
 import type { Doc } from "@/lib/data";
 import { Bloc, Vide } from "./ui";
+import { useAction, useConfirm, useToast } from "./ux";
 
 const CATS = ["Règlement", "Procédure", "Contrat", "Formation", "Autre"];
 
 export function Documents({ docs }: { docs: Doc[] }) {
-  const router = useRouter();
-  const refresh = () => router.refresh();
+  const { run, isPending } = useAction();
+  const confirm = useConfirm();
+  const toast = useToast();
   const [nouv, setNouv] = useState({ titre: "", categorie: "", url: "", notes: "" });
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
 
   const groupes = useMemo(() => {
     const map = new Map<string, Doc[]>();
@@ -22,13 +21,10 @@ export function Documents({ docs }: { docs: Doc[] }) {
     return [...map.entries()];
   }, [docs]);
 
-  async function ajouter() {
-    if (!nouv.titre.trim()) { setErr("Titre requis."); return; }
-    setBusy(true); const r = await ajouterDocument(nouv); setBusy(false);
-    if (!r.ok) { setErr(r.error || "Échec."); return; }
-    setNouv({ titre: "", categorie: "", url: "", notes: "" }); setErr(null); refresh();
+  function ajouter() {
+    if (!nouv.titre.trim()) { toast("Titre requis.", "err"); return; }
+    run(() => ajouterDocument(nouv), "Document ajouté.").then((ok) => { if (ok) setNouv({ titre: "", categorie: "", url: "", notes: "" }); });
   }
-  async function suppr(id: string, titre: string) { if (confirm(`Supprimer « ${titre} » ?`)) { await supprimerDocument(id); refresh(); } }
 
   return (
     <div className="flex flex-col gap-5">
@@ -44,8 +40,7 @@ export function Documents({ docs }: { docs: Doc[] }) {
           <textarea className="inp sm:col-span-2" rows={2} value={nouv.notes} onChange={(e) => setNouv({ ...nouv, notes: e.target.value })} placeholder="Description / notes" />
         </div>
         <div className="mt-2 flex items-center gap-2">
-          <button className="btn-accent btn" onClick={ajouter} disabled={busy}><Plus className="h-4 w-4" /> Ajouter</button>
-          {err ? <span className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</span> : null}
+          <button className="btn-accent btn" onClick={ajouter} disabled={isPending}>{isPending ? <span className="spin" /> : <Plus className="h-4 w-4" />} Ajouter</button>
         </div>
       </div>
 
@@ -56,13 +51,13 @@ export function Documents({ docs }: { docs: Doc[] }) {
           <Bloc key={cat} titre={cat} icon={<FolderOpen className="h-4 w-4 text-[var(--muted)]" />} compteur={list.length}>
             <ul>
               {list.map((d) => (
-                <li key={d.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--line)]/60 px-4 py-3 last:border-0">
+                <li key={d.id} className="rise flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--line)]/60 px-4 py-3 last:border-0">
                   <span className="min-w-0 flex-1">
                     <span className="font-medium">{d.titre}</span>
                     {d.url ? <a href={d.url} target="_blank" rel="noreferrer" className="ml-2 inline-flex items-center gap-1 text-[0.8rem]" style={{ color: "var(--accent)" }}><ExternalLink className="h-3 w-3" /> ouvrir</a> : null}
                     {d.notes ? <div className="text-[0.82rem] italic text-[var(--faint)]">{d.notes}</div> : null}
                   </span>
-                  <button className="btn !px-2 !py-1" onClick={() => suppr(d.id, d.titre)} title="Supprimer" style={{ color: "var(--oxblood)" }}><Trash2 className="h-3.5 w-3.5" /></button>
+                  <button className="btn !px-2 !py-1" title="Supprimer" style={{ color: "var(--oxblood)" }} onClick={async () => { if (await confirm(`Supprimer « ${d.titre} » ?`, { danger: true, ok: "Supprimer" })) run(() => supprimerDocument(d.id), "Supprimé."); }}><Trash2 className="h-3.5 w-3.5" /></button>
                 </li>
               ))}
             </ul>

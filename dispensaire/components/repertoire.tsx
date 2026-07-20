@@ -1,24 +1,19 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { BookUser, Pencil, Trash2, Plus, X, Send } from "lucide-react";
 import { ajouterRepertoire, majRepertoire, supprimerRepertoire } from "@/app/actions";
 import type { Repert } from "@/lib/data";
 import { Bloc, Vide } from "./ui";
+import { useAction, useConfirm, useToast } from "./ux";
 
 const CATS = ["Mine", "Menuiserie", "Forgeron", "Armurerie", "Épicerie", "Écurie", "Banque", "Journal", "Autre"];
 
-function Fiche({ r, refresh }: { r: Repert; refresh: () => void }) {
+function Fiche({ r }: { r: Repert }) {
+  const { run, isPending } = useAction();
+  const confirm = useConfirm();
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState({ entreprise: r.entreprise, categorie: r.categorie || "", contact: r.contact || "", telegramme: r.telegramme || "", notes: r.notes || "" });
-  const [busy, setBusy] = useState(false);
-
-  async function sauver() {
-    setBusy(true); const res = await majRepertoire(r.id, f); setBusy(false);
-    if (res.ok) { setEdit(false); refresh(); }
-  }
-  async function suppr() { if (confirm(`Supprimer ${r.entreprise} ?`)) { await supprimerRepertoire(r.id); refresh(); } }
 
   if (edit) return (
     <li className="grid gap-2 border-b border-[var(--line)]/60 px-4 py-3 last:border-0 sm:grid-cols-2">
@@ -28,14 +23,14 @@ function Fiche({ r, refresh }: { r: Repert; refresh: () => void }) {
       <input className="inp" value={f.telegramme} onChange={(e) => setF({ ...f, telegramme: e.target.value })} placeholder="N° télégramme" />
       <textarea className="inp sm:col-span-2" rows={2} value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder="Notes" />
       <div className="flex gap-2 sm:col-span-2">
-        <button className="btn-accent btn" onClick={sauver} disabled={busy}>Enregistrer</button>
+        <button className="btn-accent btn" disabled={isPending} onClick={() => run(() => majRepertoire(r.id, f), "Modifié.").then((ok) => { if (ok) setEdit(false); })}>Enregistrer</button>
         <button className="btn" onClick={() => setEdit(false)}><X className="h-4 w-4" /> Annuler</button>
       </div>
     </li>
   );
 
   return (
-    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--line)]/60 px-4 py-3 last:border-0">
+    <li className="rise flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--line)]/60 px-4 py-3 last:border-0">
       <span className="min-w-0 flex-1">
         <span className="font-medium">{r.entreprise}</span>
         {r.contact ? <span className="text-[0.82rem] text-[var(--muted)]"> · {r.contact}</span> : null}
@@ -43,17 +38,15 @@ function Fiche({ r, refresh }: { r: Repert; refresh: () => void }) {
         {r.notes ? <div className="text-[0.8rem] italic text-[var(--faint)]">{r.notes}</div> : null}
       </span>
       <button className="btn !px-2 !py-1" onClick={() => setEdit(true)} title="Modifier"><Pencil className="h-3.5 w-3.5" /></button>
-      <button className="btn !px-2 !py-1" onClick={suppr} title="Supprimer" style={{ color: "var(--oxblood)" }}><Trash2 className="h-3.5 w-3.5" /></button>
+      <button className="btn !px-2 !py-1" title="Supprimer" style={{ color: "var(--oxblood)" }} onClick={async () => { if (await confirm(`Supprimer ${r.entreprise} ?`, { danger: true, ok: "Supprimer" })) run(() => supprimerRepertoire(r.id), "Supprimé."); }}><Trash2 className="h-3.5 w-3.5" /></button>
     </li>
   );
 }
 
 export function Repertoire({ entrees }: { entrees: Repert[] }) {
-  const router = useRouter();
-  const refresh = () => router.refresh();
+  const { run, isPending } = useAction();
+  const toast = useToast();
   const [nouv, setNouv] = useState({ entreprise: "", categorie: "", contact: "", telegramme: "", notes: "" });
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
 
   const groupes = useMemo(() => {
     const map = new Map<string, Repert[]>();
@@ -61,11 +54,9 @@ export function Repertoire({ entrees }: { entrees: Repert[] }) {
     return [...map.entries()];
   }, [entrees]);
 
-  async function ajouter() {
-    if (!nouv.entreprise.trim()) { setErr("Nom d'entreprise requis."); return; }
-    setBusy(true); const r = await ajouterRepertoire(nouv); setBusy(false);
-    if (!r.ok) { setErr(r.error || "Échec."); return; }
-    setNouv({ entreprise: "", categorie: "", contact: "", telegramme: "", notes: "" }); setErr(null); refresh();
+  function ajouter() {
+    if (!nouv.entreprise.trim()) { toast("Nom d'entreprise requis.", "err"); return; }
+    run(() => ajouterRepertoire(nouv), "Entreprise ajoutée.").then((ok) => { if (ok) setNouv({ entreprise: "", categorie: "", contact: "", telegramme: "", notes: "" }); });
   }
 
   return (
@@ -83,8 +74,7 @@ export function Repertoire({ entrees }: { entrees: Repert[] }) {
           <textarea className="inp sm:col-span-2" rows={2} value={nouv.notes} onChange={(e) => setNouv({ ...nouv, notes: e.target.value })} placeholder="Notes (horaires, tarifs négociés…)" />
         </div>
         <div className="mt-2 flex items-center gap-2">
-          <button className="btn-accent btn" onClick={ajouter} disabled={busy}><Plus className="h-4 w-4" /> Ajouter</button>
-          {err ? <span className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</span> : null}
+          <button className="btn-accent btn" onClick={ajouter} disabled={isPending}>{isPending ? <span className="spin" /> : <Plus className="h-4 w-4" />} Ajouter</button>
         </div>
       </div>
 
@@ -93,7 +83,7 @@ export function Repertoire({ entrees }: { entrees: Repert[] }) {
       ) : (
         groupes.map(([cat, list]) => (
           <Bloc key={cat} titre={cat} icon={<BookUser className="h-4 w-4 text-[var(--muted)]" />} compteur={list.length}>
-            <ul>{list.map((r) => <Fiche key={r.id} r={r} refresh={refresh} />)}</ul>
+            <ul>{list.map((r) => <Fiche key={r.id} r={r} />)}</ul>
           </Bloc>
         ))
       )}

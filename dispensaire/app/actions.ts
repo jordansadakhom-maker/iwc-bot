@@ -89,6 +89,89 @@ export async function ajusterStock(stockId: string, delta: number, auteur: strin
   return { ok: true };
 }
 
+export async function definirStock(stockId: string, quantite: number, auteur: string): Promise<R> {
+  const q = Math.max(0, Math.round(num(quantite)));
+  const sb = db(); if (!sb) return { ok: false, error: "Base non configurée." };
+  const { data } = await sb.from("DispStock").select("nom,quantite").eq("id", stockId).maybeSingle();
+  if (!data) return { ok: false, error: "Article introuvable." };
+  const avant = num((data as { quantite: number }).quantite);
+  if (avant === q) return { ok: true };
+  await sb.from("DispStock").update({ quantite: q }).eq("id", stockId);
+  await insertR(sb, "DispMouvement", { id: newId("mvt"), stockId, stockNom: String((data as { nom: string }).nom || ""), delta: q - avant, quantiteApres: q, auteur: str(auteur, 120) || "—", motif: "correction manuelle", createdAt: new Date().toISOString() });
+  return { ok: true };
+}
+
+// ═══ Lecture d'une photo d'inventaire par l'IA ═══════════════════
+async function _vision(base64: string, mediaType: string, system: string, userText: string, maxTokens = 900): Promise<string> {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) throw new Error("no-key");
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-sonnet-5", max_tokens: maxTokens, system,
+      messages: [{ role: "user", content: [
+        { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
+        { type: "text", text: userText },
+      ] }],
+    }),
+  });
+  if (!res.ok) throw new Error("api-" + res.status);
+  const j = await res.json();
+  return String((((j as { content?: { text?: string }[] }).content) || []).map((c) => c.text || "").join(""));
+}
+
+export async function lireStockPhoto(base64: string, mediaType: string): Promise<{ ok: boolean; error?: string; items?: { nom: string; quantite: number }[] }> {
+  if (!base64) return { ok: false, error: "Photo manquante." };
+  if (!process.env.ANTHROPIC_API_KEY) return { ok: false, error: "Lecture par photo non configurée — ajoute la variable ANTHROPIC_API_KEY sur Vercel." };
+  const system = 'Tu lis une photo d\'inventaire (coffre de jeu ou panneau web). Tu renvoies UNIQUEMENT un tableau JSON d\'objets {"nom":string,"quantite":number} : un par article visible avec sa quantité en stock. Ignore prix, coûts, poids (kg) et recettes. « x123 » ou « Stock : 123 » signifie quantité 123. Aucune autre sortie que le JSON.';
+  let txt = "";
+  try { txt = await _vision(base64, mediaType, system, "Liste en JSON les articles et leurs quantités visibles sur cette photo.", 1100); }
+  catch (e) { const m = String((e as Error).message || ""); return { ok: false, error: m.startsWith("api-") ? "L'IA a refusé la lecture (" + m + ")." : "Lecture impossible." }; }
+  const match = /\[[\s\S]*\]/.exec(txt);
+  let arr: unknown = [];
+  try { arr = JSON.parse(match ? match[0] : txt); } catch { return { ok: false, error: "Lecture illisible — réessaie avec une photo plus nette." }; }
+  const items = (Array.isArray(arr) ? arr : []).map((x) => { const o = x as Record<string, unknown>; return { nom: str(o.nom, 120), quantite: Math.max(0, Math.round(num(o.quantite))) }; }).filter((i) => i.nom.length > 0);
+  if (!items.length) return { ok: false, error: "Aucun article détecté sur la photo." };
+  return { ok: true, items };
+}
+
+const _STOP = new Set(["de", "du", "la", "le", "les", "des", "d", "l", "un", "une", "a", "en"]);
+const _norm = (v: string) => v.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9 ]/g, " ");
+const _toks = (v: string) => _norm(v).split(/\s+/).filter((w) => w && !_STOP.has(w));
+function _match(nom: string, rows: { id: string; nom: string }[]): { id: string; nom: string } | null {
+  const a = _toks(nom); if (!a.length) return null;
+  let best: { id: string; nom: string } | null = null, bestScore = 0;
+  for (const r of rows) { const b = _toks(r.nom); if (!b.length) continue; const inter = a.filter((w) => b.includes(w)).length; const score = inter / Math.max(a.length, b.length); if (score > bestScore) { bestScore = score; best = r; } }
+  return bestScore >= 0.5 ? best : null;
+}
+
+export async function appliquerScanStock(items: { nom: string; quantite: number }[], mode: "add" | "set", auteur: string): Promise<{ ok: boolean; error?: string; appliques?: number; crees?: number }> {
+  const sb = db(); if (!sb) return { ok: false, error: "Base non configurée." };
+  const list = (items || []).map((i) => ({ nom: str(i.nom, 120), quantite: Math.max(0, Math.round(num(i.quantite))) })).filter((i) => i.nom);
+  if (!list.length) return { ok: false, error: "Rien à appliquer." };
+  const { data } = await sb.from("DispStock").select("id,nom,quantite");
+  const rows = ((data as Record<string, unknown>[]) || []).map((r) => ({ id: String(r.id), nom: String(r.nom || ""), quantite: num(r.quantite) }));
+  let appliques = 0, crees = 0;
+  const qui = str(auteur, 120) || "scan";
+  for (const it of list) {
+    const m = _match(it.nom, rows);
+    if (m) {
+      const ref = rows.find((r) => r.id === m.id)!;
+      const apres = Math.max(0, mode === "add" ? ref.quantite + it.quantite : it.quantite);
+      await sb.from("DispStock").update({ quantite: apres }).eq("id", m.id);
+      await insertR(sb, "DispMouvement", { id: newId("mvt"), stockId: m.id, stockNom: m.nom, delta: apres - ref.quantite, quantiteApres: apres, auteur: qui, motif: "scan photo", createdAt: new Date().toISOString() });
+      ref.quantite = apres; appliques++;
+    } else {
+      const id = newId("stk");
+      await insertR(sb, "DispStock", { id, nom: it.nom, categorie: "Matière", quantite: it.quantite, seuil: 0, createdAt: new Date().toISOString() });
+      await insertR(sb, "DispMouvement", { id: newId("mvt"), stockId: id, stockNom: it.nom, delta: it.quantite, quantiteApres: it.quantite, auteur: qui, motif: "scan photo (nouvel article)", createdAt: new Date().toISOString() });
+      rows.push({ id, nom: it.nom, quantite: it.quantite }); crees++;
+    }
+  }
+  return { ok: true, appliques, crees };
+}
+
 // ═══ Facturation F.D.O. : shérifs par bureau ═════════════════════
 export async function ajouterSherif(p: { bureau?: string; nom: string; prixSoin?: number }): Promise<R> {
   const nom = str(p.nom, 120);
