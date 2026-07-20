@@ -76,6 +76,13 @@ export async function getVentesSemaine(): Promise<VenteBandage[]> {
   return ((data as Raw[]) || []).map((r) => ({ id: String(r.id), patient: String(r.patient || "—"), quantite: n(r.quantite), auteur: s(r.auteur), createdAt: String(r.createdAt || "") }));
 }
 
+export type Patient = { id: string; prenom: string | null; nom: string | null; dateNaissance: string | null; sexe: string | null; nationalite: string | null; numero: string | null; telegramme: string | null; groupeSanguin: string | null; allergies: string | null; notes: string | null; createdAt: string };
+export async function getPatients(): Promise<Patient[]> {
+  const sb = db(); if (!sb) return [];
+  const { data } = await sb.from("DispPatient").select("*").order("nom", { ascending: true }).order("prenom", { ascending: true });
+  return ((data as Raw[]) || []).map((r) => ({ id: String(r.id), prenom: s(r.prenom), nom: s(r.nom), dateNaissance: s(r.dateNaissance), sexe: s(r.sexe), nationalite: s(r.nationalite), numero: s(r.numero), telegramme: s(r.telegramme), groupeSanguin: s(r.groupeSanguin), allergies: s(r.allergies), notes: s(r.notes), createdAt: String(r.createdAt || "") }));
+}
+
 export type Certificat = { id: string; patient: string; type: string | null; praticien: string | null; dateActe: string | null; diagnostic: string | null; createdAt: string };
 export async function getCertificats(limit = 15): Promise<Certificat[]> {
   const sb = db(); if (!sb) return [];

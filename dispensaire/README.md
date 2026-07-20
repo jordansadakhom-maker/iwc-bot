@@ -7,7 +7,11 @@ Il réutilise **la même base Supabase** que le site principal (tables préfixé
 
 ## Onglets
 
-1. **Accueil** — prise / fin de service (chrono des heures) + stocks en alerte.
+1. **Accueil** — tableau de bord (vignettes de synthèse) + prise / fin de service
+   (chrono des heures) + stocks en alerte.
+1bis. **Patients** — fiches patients : **scanner une photo de carte d'identité**
+   → l'IA remplit nom, prénom, date de naissance, sexe, nationalité, n° de carte ;
+   + dossier médical (groupe sanguin, allergies, notes). *(scan : `ANTHROPIC_API_KEY`)*
 2. **Stockage** — coffres, matières premières, matériel, nourriture ; `+/‑` avec
    traçabilité (qui a pris/ajouté quoi) et seuils d'alerte ; correction directe
    d'une quantité au clic ; filtres par catégorie ; **« Scanner une photo »** :
