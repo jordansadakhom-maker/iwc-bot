@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getVitrine } from "@/lib/queries";
 import { Vitrine } from "@/components/vitrine";
@@ -29,8 +28,10 @@ export const metadata: Metadata = {
   },
 };
 
-// Racine PUBLIQUE : page de couverture pour les visiteurs, redirection vers le
-// tableau de bord pour les membres connectés.
+// Racine PUBLIQUE : la page de couverture est TOUJOURS affichée (visiteurs comme
+// membres). Les membres connectés voient simplement un bouton « Mon tableau de
+// bord » en haut pour rejoindre l'espace interne. Ordre voulu : couverture d'abord,
+// recrutement ensuite (via les boutons « Rejoindre la meute »).
 export default async function Home() {
   let connecte = false;
   try {
@@ -38,8 +39,7 @@ export default async function Home() {
     const { data } = await supabase.auth.getUser();
     connecte = !!data.user;
   } catch {}
-  if (connecte) redirect("/dashboard");
 
   const stats = await getVitrine();
-  return <Vitrine stats={stats} />;
+  return <Vitrine stats={stats} connecte={connecte} />;
 }

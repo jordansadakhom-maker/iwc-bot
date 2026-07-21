@@ -41,7 +41,7 @@ function Carte({ icon: Icon, titre, texte }: { icon: LucideIcon; titre: string; 
 const CTA_PRIMAIRE = "inline-flex items-center justify-center gap-2 rounded-xl px-6 py-3.5 text-[0.95rem] font-semibold text-black transition hover:brightness-110";
 const CTA_SECONDAIRE = "inline-flex items-center justify-center gap-2 rounded-xl border border-border-2 bg-surface px-6 py-3.5 text-[0.95rem] font-semibold text-ink transition hover:border-accent";
 
-export function Vitrine({ stats }: { stats: VitrineData }) {
+export function Vitrine({ stats, connecte = false }: { stats: VitrineData; connecte?: boolean }) {
   const chiffres = [
     stats.membres && stats.membres > 0 ? { valeur: stats.membres, label: "membres dans la meute" } : null,
     stats.operations && stats.operations > 0 ? { valeur: stats.operations, label: "opérations menées" } : null,
@@ -58,7 +58,13 @@ export function Vitrine({ stats }: { stats: VitrineData }) {
           </span>
           <span className="font-display text-[0.98rem] font-semibold tracking-[0.18em]">IRON WOLF C<span className="text-accent">°</span></span>
         </div>
-        <Link href="/login" className="rounded-lg border border-border px-3.5 py-2 text-[0.8rem] font-semibold text-muted transition hover:border-accent hover:text-ink">Espace membre</Link>
+        {connecte ? (
+          <Link href="/dashboard" className="inline-flex items-center gap-1.5 rounded-lg border border-border-2 px-3.5 py-2 text-[0.8rem] font-semibold text-ink transition hover:border-accent">
+            <Target className="h-[0.95rem] w-[0.95rem] text-accent" /> Mon tableau de bord
+          </Link>
+        ) : (
+          <Link href="/login" className="rounded-lg border border-border px-3.5 py-2 text-[0.8rem] font-semibold text-muted transition hover:border-accent hover:text-ink">Espace membre</Link>
+        )}
       </header>
 
       {/* HÉRO */}
