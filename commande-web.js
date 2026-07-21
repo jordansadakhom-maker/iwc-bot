@@ -96,33 +96,46 @@ ${note}`;
   } catch (e) { console.log('❌ Résumé riche (web):', e.message); return null; }
 }
 
-// Poste le « Résumé de la note » (façon Discord) puis la transcription INTÉGRALE
-// dans un fil — pour qu'une longue scène ne soit jamais tronquée. Best-effort :
-// n'interrompt jamais le flux principal.
-async function _posterResumeNoteWeb(ch, agent, texteComplet) {
+// Poste le « Résumé de la note » (façon Discord) + la transcription INTÉGRALE dans
+// un fil, ET enregistre le rapport sur le SITE (table RapportTerrain → historique).
+// Best-effort : n'interrompt jamais le flux principal.
+async function _posterEtEnregistrer(ch, p) {
+  const agent = _s(p.agent, 120) || 'Agent (site)';
+  const full = String(p.texte || '');
+  let resume = null;
   try {
-    const full = String(texteComplet || '');
-    if (!ch || full.length < 250) return; // scène courte → le rapport suffit
-    const resume = await _resumeRicheIA(full);
-    let msg = null;
-    if (resume && EmbedBuilder) {
+    // Résumé structuré uniquement si la scène a de la matière (sinon rapport seul).
+    if (full.length >= 250) resume = await _resumeRicheIA(full);
+    if (ch && resume && EmbedBuilder) {
       const emb = new EmbedBuilder()
         .setColor(0xC9A227)
         .setTitle('📋 Résumé de la note')
         .setDescription(resume.slice(0, 4000))
         .setFooter({ text: `${agent} • résumé automatique` });
-      msg = await ch.send({ embeds: [emb], allowedMentions: { parse: [] } }).catch(() => null);
-    }
-    // Transcription intégrale dans un fil (rien n'est perdu, même très long).
-    if (full.length > 1200) {
-      let fil = null;
-      try {
-        if (msg && typeof msg.startThread === 'function') fil = await msg.startThread({ name: `📜 Transcription — ${agent}`.slice(0, 100), autoArchiveDuration: 1440 });
-        else if (ch.threads && typeof ch.threads.create === 'function') fil = await ch.threads.create({ name: `📜 Transcription — ${agent}`.slice(0, 100), autoArchiveDuration: 1440 });
-      } catch { /* pas de permission de fil → on abandonne proprement */ }
-      if (fil) { const blocs = full.match(/[\s\S]{1,1850}/g) || []; for (const b of blocs) await fil.send({ content: b }).catch(() => {}); }
+      const msg = await ch.send({ embeds: [emb], allowedMentions: { parse: [] } }).catch(() => null);
+      // Transcription intégrale dans un fil (rien n'est perdu, même très long).
+      if (full.length > 1200) {
+        let fil = null;
+        try {
+          if (msg && typeof msg.startThread === 'function') fil = await msg.startThread({ name: `📜 Transcription — ${agent}`.slice(0, 100), autoArchiveDuration: 1440 });
+          else if (ch.threads && typeof ch.threads.create === 'function') fil = await ch.threads.create({ name: `📜 Transcription — ${agent}`.slice(0, 100), autoArchiveDuration: 1440 });
+        } catch { /* pas de permission de fil → on abandonne proprement */ }
+        if (fil) { const blocs = full.match(/[\s\S]{1,1850}/g) || []; for (const b of blocs) await fil.send({ content: b }).catch(() => {}); }
+      }
     }
   } catch (e) { console.log('❌ Résumé note web:', e.message); }
+  // Historique sur le site (toujours, même scène courte).
+  try {
+    if (supa.enregistrerRapportTerrain && full.length >= 2) {
+      await supa.enregistrerRapportTerrain({
+        id: `rt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        agent, cible: _s(p.cible, 200) || null, lieu: _s(p.lieu, 200) || null,
+        priorite: _s(p.priorite, 20) || 'normale', texte: full.slice(0, 20000),
+        resume: resume ? resume.slice(0, 6000) : null, source: p.source === 'micro' ? 'micro' : 'jeu',
+        createdAt: new Date().toISOString(),
+      });
+    }
+  } catch (e) { console.log('❌ Enregistrement rapport terrain:', e.message); }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -803,8 +816,8 @@ Object.assign(HANDLERS, {
       if (!hook) return { ok: false, message: 'Webhook indisponible — donne au bot la permission « Gérer les webhooks » sur ce salon.' };
       const contenu = _contenuMicro(cible, lieu, texte, priorite, agent);
       await hook.send({ content: contenu, username: `🎙️ ${agent}`, allowedMentions: { parse: [] } });
-      // Longue note → résumé structuré + transcription intégrale dans un fil.
-      await _posterResumeNoteWeb(ch, agent, texte);
+      // Résumé + transcription dans un fil + enregistrement dans l'historique du site.
+      await _posterEtEnregistrer(ch, { agent, cible, lieu, priorite, texte, source: 'micro' });
       return { ok: true, message: 'Note vocale transmise — rapport de terrain + résumé générés.' };
     } catch (e) { return { ok: false, message: e.message }; }
   },
@@ -851,8 +864,8 @@ Object.assign(HANDLERS, {
       if (!hook) return { ok: false, message: 'Webhook indisponible — donne au bot « Gérer les webhooks » sur le salon.' };
       const contenu = _contenuMicro(cible, lieu, texte, priorite, agent);
       await hook.send({ content: contenu, username: `🎙️ ${agent}`, allowedMentions: { parse: [] } });
-      // Longue scène → résumé structuré + transcription intégrale dans un fil.
-      await _posterResumeNoteWeb(ch, agent, texte);
+      // Résumé + transcription dans un fil + enregistrement dans l'historique du site.
+      await _posterEtEnregistrer(ch, { agent, cible, lieu, priorite, texte, source: 'jeu' });
       return { ok: true, message: 'Son du jeu transcrit — rapport de terrain + résumé générés.' };
     } catch (e) { return { ok: false, message: e.message }; }
   },

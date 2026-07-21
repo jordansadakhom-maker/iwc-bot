@@ -103,10 +103,9 @@ export function CaptureJeu() {
       streamRef.current = stream;
       chunksRef.current = [];
       const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : (MediaRecorder.isTypeSupported("audio/ogg") ? "audio/ogg" : "");
-      // 32 kbps : la voix reste parfaitement claire pour la transcription, et le
-      // fichier reste léger → on peut enregistrer une très longue scène sans
-      // atteindre la limite d'envoi (≈ 2 h par capture).
-      const opts: MediaRecorderOptions = { audioBitsPerSecond: 32000 };
+      // 48 kbps : voix bien nette pour la transcription, fichier léger → on peut
+      // enregistrer une longue scène sans atteindre la limite d'envoi (≈ 1 h+).
+      const opts: MediaRecorderOptions = { audioBitsPerSecond: 48000 };
       if (mime) opts.mimeType = mime;
       const rec = new MediaRecorder(new MediaStream(audio), opts);
       rec.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunksRef.current.push(e.data); };
