@@ -50,7 +50,10 @@ function fichierVersMp3(inputBuffer) {
       const ffmpegPath = require('ffmpeg-static');
       const { spawn } = require('child_process');
       if (!ffmpegPath || !inputBuffer || !inputBuffer.length) return resolve(null);
-      const ff = spawn(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-ac', '1', '-ar', '16000', '-f', 'mp3', 'pipe:1']);
+      // 32 kbps mono 16 kHz : voix parfaitement transcriptible par Whisper et
+      // fichier léger (~0,25 Mo/min) → on tient de longues scènes sous la limite
+      // Whisper de 25 Mo (≈ 100 min par capture).
+      const ff = spawn(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-ac', '1', '-ar', '16000', '-b:a', '32k', '-f', 'mp3', 'pipe:1']);
       const out = [];
       ff.stdout.on('data', d => out.push(d));
       ff.on('error', () => resolve(null));
