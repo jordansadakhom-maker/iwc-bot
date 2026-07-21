@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarClock, MapPin, User, MessageSquare, Loader2, Send, Globe, Users, ImageIcon, Check, Hourglass } from "lucide-react";
+import { CalendarClock, MapPin, User, MessageSquare, Loader2, Send, Globe, Users, ImageIcon, Check, Hourglass, Archive } from "lucide-react";
 import type { RdvComm, MembreLite } from "@/lib/queries";
 import { Modal, Flash, Picker, inputCls } from "@/components/edit-ui";
 import { Badge } from "@/components/ui";
 import { PhotoDrop } from "@/components/photo-drop";
-import { majStatutRdv, repondreRdv, assignerRdv, definirLieuPhotoRdv } from "@/app/(app)/communication/actions";
+import { majStatutRdv, repondreRdv, assignerRdv, definirLieuPhotoRdv, cloturerRdv } from "@/app/(app)/communication/actions";
 
 type Router = ReturnType<typeof useRouter>;
 
@@ -95,6 +95,8 @@ function RdvModal({ rdv, membres, onClose, router }: { rdv: RdvComm; membres: Me
   const [q, setQ] = useState("");
   const [choisis, setChoisis] = useState<Record<string, boolean>>({});
   const [groupe, setGroupe] = useState<string>("");
+  // Clôture
+  const [resultat, setResultat] = useState("");
 
   const filtres = membres.filter((m) => m.nom.toLowerCase().includes(q.toLowerCase())).slice(0, 40);
   const nbChoisis = Object.values(choisis).filter(Boolean).length;
@@ -134,6 +136,13 @@ function RdvModal({ rdv, membres, onClose, router }: { rdv: RdvComm; membres: Me
     const r = await definirLieuPhotoRdv(rdv.id, url);
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
     setFlash("Photo du lieu enregistrée."); router.refresh();
+  }
+  async function cloturer() {
+    setBusy("cloture");
+    const r = await cloturerRdv(rdv.id, resultat);
+    setBusy(null);
+    if (!r.ok) { setFlash(r.error || "Échec."); return; }
+    router.refresh(); onClose();
   }
 
   return (
@@ -216,6 +225,18 @@ function RdvModal({ rdv, membres, onClose, router }: { rdv: RdvComm; membres: Me
           <textarea className={inputCls + " min-h-[44px] resize-y"} value={texte} onChange={(e) => setTexte(e.target.value)} placeholder="Écris une réponse / une note (gardée en trace)…" maxLength={2000} />
           <button onClick={repondre} disabled={busy === "rep"} className="inline-flex shrink-0 items-center gap-1 rounded-lg px-3 py-2 text-[0.8rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>
             {busy === "rep" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" strokeWidth={2} />}
+          </button>
+        </div>
+      </div>
+
+      {/* Clôturer → part au journal de bord */}
+      <div className="mt-3 rounded-[10px] border border-border bg-surface-2 p-3">
+        <div className="mb-1.5 flex items-center gap-1.5 text-[0.72rem] uppercase tracking-[0.05em] text-faint"><Archive className="h-3.5 w-3.5" /> Clôturer le rendez-vous</div>
+        <p className="mb-2 text-[0.74rem] text-faint">Il quitte l&apos;agenda et passe au <b className="text-muted">Journal de bord</b> (avec son résultat) — suivi conservé, salon allégé.</p>
+        <textarea className={inputCls + " min-h-[44px] resize-y"} value={resultat} onChange={(e) => setResultat(e.target.value)} placeholder="Résultat / bilan (facultatif) : prestation honorée, no-show, incident…" maxLength={1200} />
+        <div className="mt-2 flex justify-end">
+          <button onClick={cloturer} disabled={busy === "cloture"} className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[0.8rem] font-semibold disabled:opacity-60" style={{ borderColor: "color-mix(in srgb,var(--good) 45%,var(--border))", color: "var(--good)" }}>
+            {busy === "cloture" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Archive className="h-4 w-4" />} Clôturer &amp; archiver
           </button>
         </div>
       </div>

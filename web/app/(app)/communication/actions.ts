@@ -11,7 +11,7 @@ import { envoyerCommande } from "@/lib/commandes";
 
 export type CommResult = { ok: boolean; error?: string };
 
-const STATUTS = ["nouveau", "confirme", "honore", "annule", "lapin"];
+const STATUTS = ["nouveau", "confirme", "honore", "annule", "lapin", "cloture"];
 
 async function auteurNom(): Promise<string> {
   try {
@@ -37,6 +37,23 @@ export async function majStatutRdv(id: string, statut: string): Promise<CommResu
   if (!admin) return { ok: false, error: "Service indisponible." };
   const { error } = await admin.from("Rdv").update({ statut }).eq("id", id);
   if (error) { console.error("majStatutRdv:", error.message); return { ok: false, error: "Enregistrement impossible." }; }
+  return { ok: true };
+}
+
+// Clôture un rendez-vous : il quitte la liste active et bascule dans le JOURNAL
+// DE BORD (avec son résultat, la date de clôture et l'auteur). Garde une trace
+// totale sans encombrer l'agenda ni le salon Discord.
+export async function cloturerRdv(id: string, resultat: string): Promise<CommResult> {
+  if (!id) return { ok: false, error: "RDV introuvable." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { data } = await admin.from("Rdv").select("paiement").eq("id", id).maybeSingle();
+  const paiement = (data?.paiement && typeof data.paiement === "object" ? data.paiement : {}) as Record<string, unknown>;
+  const { error } = await admin.from("Rdv").update({
+    statut: "cloture",
+    paiement: { ...paiement, resultat: String(resultat || "").slice(0, 1200), closedAt: new Date().toISOString(), closedBy: await auteurNom() },
+  }).eq("id", id);
+  if (error) { console.error("cloturerRdv:", error.message); return { ok: false, error: "Enregistrement impossible." }; }
   return { ok: true };
 }
 
