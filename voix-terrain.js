@@ -43,6 +43,24 @@ function _pcmVersMp3(pcm) {
   });
 }
 
+// Fichier audio quelconque (webm/ogg/mp4/wav…) -> MP3 mono 16 kHz (Whisper-friendly).
+function fichierVersMp3(inputBuffer) {
+  return new Promise((resolve) => {
+    try {
+      const ffmpegPath = require('ffmpeg-static');
+      const { spawn } = require('child_process');
+      if (!ffmpegPath || !inputBuffer || !inputBuffer.length) return resolve(null);
+      const ff = spawn(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-ac', '1', '-ar', '16000', '-f', 'mp3', 'pipe:1']);
+      const out = [];
+      ff.stdout.on('data', d => out.push(d));
+      ff.on('error', () => resolve(null));
+      ff.on('close', () => { const b = Buffer.concat(out); resolve(b.length > 800 ? b : null); });
+      ff.stdin.on('error', () => {});
+      ff.stdin.write(inputBuffer); ff.stdin.end();
+    } catch { resolve(null); }
+  });
+}
+
 // Transcription OpenAI Whisper (français). Renvoie le texte, ou '' si échec.
 async function _whisper(mp3) {
   const key = process.env.OPENAI_API_KEY;
@@ -187,4 +205,4 @@ async function routeInteraction(interaction) {
   }
 }
 
-module.exports = { voixCommands, routeInteraction };
+module.exports = { voixCommands, routeInteraction, whisper: _whisper, fichierVersMp3 };
