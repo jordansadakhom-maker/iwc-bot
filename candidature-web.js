@@ -14,6 +14,16 @@ const { EmbedBuilder } = require('discord.js');
 const { lireCandidaturesWeb, marquerCandidatureTransmise } = require('./supabase-sync');
 
 const FONDATEUR_ID = '944208797084311583'; // repli MP
+// Rôles à pinguer pour qu'on soit alerté sur Discord même sans le site ouvert.
+const PING_ROLES = ['Fondateur', 'Conseil', 'Directeur', 'Officier'];
+function _ping(guild) {
+  const ids = new Set();
+  for (const motif of PING_ROLES) {
+    const r = guild.roles.cache.find(x => x.name && x.name.includes(motif));
+    if (r) ids.add(r.id);
+  }
+  return [...ids].map(id => `<@&${id}>`).join(' ');
+}
 
 function _peutEcrire(guild, ch) {
   try {
@@ -51,10 +61,11 @@ async function verifierCandidaturesWeb(guild) {
   try { rows = await lireCandidaturesWeb(); } catch { return; }
   if (!Array.isArray(rows) || !rows.length) return;
   const salon = _salon(guild);
+  const ping = salon ? _ping(guild) : '';
   for (const c of rows) {
     let livre = false;
     if (salon) {
-      try { await salon.send({ content: '🐺 **Nouvelle candidature reçue** (site web).', embeds: [_embed(c)] }); livre = true; }
+      try { await salon.send({ content: `${ping ? ping + ' — ' : ''}🐺 **Nouvelle candidature reçue** (site web).`, embeds: [_embed(c)], allowedMentions: { parse: ['roles'] } }); livre = true; }
       catch (e) { console.log('⚠️ candidature-web salon:', e.message); }
     }
     if (!livre) {
