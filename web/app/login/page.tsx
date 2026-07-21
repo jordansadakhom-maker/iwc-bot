@@ -23,7 +23,7 @@ export default function LoginPage() {
       }}
     >
       <div className="w-full max-w-[420px]">
-        <div className="mb-7 flex flex-col items-center text-center">
+        <Link href="/" className="mb-7 flex flex-col items-center text-center transition hover:opacity-90">
           <div
             className="mb-4 grid h-16 w-16 place-items-center rounded-2xl border border-border-2 text-accent"
             style={{ background: "radial-gradient(circle at 30% 25%, color-mix(in srgb,var(--accent) 30%,transparent), transparent 70%), var(--surface)" }}
@@ -32,7 +32,7 @@ export default function LoginPage() {
           </div>
           <h1 className="font-display text-2xl tracking-[0.1em]">IRON WOLF COMPANY</h1>
           <p className="mt-1 text-[0.66rem] uppercase tracking-[0.22em] text-faint">Poste de commandement</p>
-        </div>
+        </Link>
 
         <section className="rounded-card border border-border bg-surface p-6 shadow-card" style={{ background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,#000))" }}>
           <h2 className="text-center text-lg font-semibold">Connexion</h2>
@@ -54,7 +54,10 @@ export default function LoginPage() {
           </Link>
         </div>
 
-        <p className="mt-6 text-center text-[0.72rem] text-faint">Iron Wolf Company · Suivi confidentiel</p>
+        <p className="mt-6 text-center text-[0.78rem]">
+          <Link href="/" className="font-semibold text-accent hover:underline">← Retour à l&apos;accueil (présentation)</Link>
+        </p>
+        <p className="mt-3 text-center text-[0.72rem] text-faint">Iron Wolf Company · Suivi confidentiel</p>
       </div>
     </main>
   );
