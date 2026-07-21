@@ -1,45 +1,37 @@
-import { getSessionDiscordId } from "@/lib/queries";
-import { PageHeader } from "@/components/ui";
+import { Map as MapIcon } from "lucide-react";
+import { getCarte } from "@/lib/queries";
+import { PageHeader, Card, Empty } from "@/components/ui";
+import { CarteInteractive } from "@/components/carte-interactive";
 
-// Carte interactive : on intègre la vraie carte servie par le bot (points, planques,
-// itinéraires). Le site demande au bot un jeton personnel (secret partagé), en
-// respectant le niveau d'accès Discord de l'utilisateur, puis l'affiche en iframe.
+// Carte interactive NATIVE : lieux (récoltes, vendeurs, planques, coups…) et
+// itinéraires réels de la compagnie, synchronisés depuis le bot. On peut zoomer,
+// se déplacer, filtrer par type et cliquer un lieu pour le détail.
+// Pour un fond de carte pixel-exact, définir NEXT_PUBLIC_CARTE_IMAGE_URL (l'image
+// de la carte RDR2 utilisée sur Discord) — sinon un fond stylisé est affiché.
 export const dynamic = "force-dynamic";
 
 export default async function CartePage() {
-  const botUrl = (process.env.BOT_CARTE_URL || "https://iwc-bot.fly.dev").replace(/\/+$/, "");
-  const secret = process.env.CARTE_SITE_SECRET || "";
-  const uid = await getSessionDiscordId();
-
-  let tok: string | null = null;
-  let motif: "config" | "auth" | "bot" | null = null;
-  if (!secret) motif = "config";
-  else if (!uid) motif = "auth";
-  else {
-    try {
-      const r = await fetch(`${botUrl}/carte/site-token?secret=${encodeURIComponent(secret)}&uid=${encodeURIComponent(uid)}`, { cache: "no-store" });
-      if (r.ok) { const j = (await r.json().catch(() => ({}))) as { tok?: string }; tok = j?.tok || null; if (!tok) motif = "bot"; }
-      else motif = "bot";
-    } catch { motif = "bot"; }
-  }
+  const data = await getCarte();
+  const imageUrl = process.env.NEXT_PUBLIC_CARTE_IMAGE_URL || null;
+  const total = data.points.length + data.routes.length;
 
   return (
     <>
-      <PageHeader titre="Carte interactive" sous="Points, planques, itinéraires — la carte de la Confrérie, en direct depuis le bot." actif={!!tok} />
-      {tok ? (
-        <div className="overflow-hidden rounded-[14px] border border-border bg-surface-2" style={{ height: "calc(100vh - 200px)", minHeight: 480 }}>
-          <iframe src={`${botUrl}/carte?k=${encodeURIComponent(tok)}`} title="Carte interactive de la Confrérie" className="h-full w-full" style={{ border: 0 }} allow="fullscreen" />
-        </div>
+      <PageHeader
+        titre="Carte interactive"
+        sous={data.connecte ? `${data.points.length} lieu(x) · ${data.routes.length} itinéraire(s)${data.peutConfidentiel ? " · accès confidentiel" : ""}` : "Lieux & itinéraires de la compagnie"}
+        actif={data.connecte}
+      />
+      {total > 0 ? (
+        <CarteInteractive data={data} imageUrl={imageUrl} />
       ) : (
-        <div className="rounded-[14px] border border-border bg-surface-2 p-6 text-[0.9rem] text-muted">
-          {motif === "config" ? (
-            <>La carte n&apos;est pas encore reliée. Il manque la variable <code className="rounded bg-surface px-1">CARTE_SITE_SECRET</code> (à définir côté site <b>et</b> côté bot, avec la même valeur).</>
-          ) : motif === "auth" ? (
-            <>Connecte-toi avec Discord pour accéder à la carte.</>
-          ) : (
-            <>La carte est momentanément injoignable (le serveur du bot ne répond pas, ou l&apos;adresse <code className="rounded bg-surface px-1">BOT_CARTE_URL</code> est incorrecte). Réessaie dans un instant.</>
-          )}
-        </div>
+        <Card>
+          <Empty icon={MapIcon}>
+            {data.connecte
+              ? "Aucun lieu sur la carte pour l'instant. Ajoute des lieux et itinéraires depuis le salon carte de Discord : ils apparaîtront ici automatiquement."
+              : "La carte se remplira dès que le bot aura synchronisé les lieux (exécute carte.sql côté base, puis redéploie le bot)."}
+          </Empty>
+        </Card>
       )}
     </>
   );

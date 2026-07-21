@@ -1235,3 +1235,39 @@ export async function getAcces(): Promise<Acces> {
     return { direction, officier, medecin, peutRenseignement: officier, peutMedical: direction || medecin };
   } catch { return ouvert; }
 }
+
+// ── Carte interactive (lieux + itinéraires réels du bot) ─────────
+export type CartePoint = { id: string; type: string; niveau: string; nom: string; region: string | null; lieu: string | null; notes: string | null; x: number | null; y: number | null };
+export type CarteRoute = { id: string; type: string; niveau: string; nom: string; notes: string | null; points: { x: number; y: number }[] };
+export type CarteData = { connecte: boolean; points: CartePoint[]; routes: CarteRoute[]; peutConfidentiel: boolean };
+
+export async function getCarte(): Promise<CarteData> {
+  const vide: CarteData = { connecte: false, points: [], routes: [], peutConfidentiel: false };
+  if (!dataConfigured()) return vide;
+  const supabase = createAdminClient();
+  if (!supabase) return vide;
+  const acces = await getAcces();
+  const peutConfidentiel = acces.direction;
+  const [pR, rR] = await Promise.all([
+    supabase.from("CartePoint").select("*").limit(1000),
+    supabase.from("CarteRoute").select("*").limit(400),
+  ]);
+  // Tables pas encore créées → page vide (aucune donnée inventée).
+  if (pR.error && rR.error) return vide;
+  const num = (v: unknown): number | null => (v == null || Number.isNaN(Number(v)) ? null : Number(v));
+  let points: CartePoint[] = ((pR.data || []) as Record<string, unknown>[]).map((p) => ({
+    id: String(p.id), type: String(p.type || "autre"), niveau: String(p.niveau || "public"),
+    nom: String(p.nom || "Lieu"), region: (p.region as string) ?? null, lieu: (p.lieu as string) ?? null,
+    notes: (p.notes as string) ?? null, x: num(p.x), y: num(p.y),
+  }));
+  let routes: CarteRoute[] = ((rR.data || []) as Record<string, unknown>[]).map((r) => ({
+    id: String(r.id), type: String(r.type || "autre"), niveau: String(r.niveau || "public"),
+    nom: String(r.nom || "Itinéraire"), notes: (r.notes as string) ?? null,
+    points: Array.isArray(r.points) ? (r.points as { x: number; y: number }[]).filter((pt) => pt && Number.isFinite(Number(pt.x)) && Number.isFinite(Number(pt.y))) : [],
+  }));
+  if (!peutConfidentiel) {
+    points = points.filter((p) => p.niveau !== "confidentiel");
+    routes = routes.filter((r) => r.niveau !== "confidentiel");
+  }
+  return { connecte: true, points, routes, peutConfidentiel };
+}

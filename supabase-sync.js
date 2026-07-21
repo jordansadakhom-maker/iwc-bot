@@ -438,7 +438,41 @@ function _construire(db) {
       createdAt: _isoOrUndef(t.date),
     }));
 
-  return { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes, factures, telegrammes, invItems, invMouv, portefeuilles, transactions };
+  // ── Carte : lieux (points) + itinéraires (routes) ──
+  const cartePoints = ((db.carte && Array.isArray(db.carte.points)) ? db.carte.points : [])
+    .filter(p => p && p.id)
+    .slice(0, 800)
+    .map(p => ({
+      id: String(p.id),
+      type: _str(p.type, 40) || 'autre',
+      niveau: _str(p.niveau, 20) || 'public',
+      nom: _str(p.nom, 200) || 'Lieu',
+      region: _nn(p.region, 60),
+      lieu: _nn(p.lieu, 200),
+      notes: _nn(p.notes, 500),
+      x: (p.x != null && isFinite(Number(p.x))) ? Math.round(Number(p.x) * 100) / 100 : null,
+      y: (p.y != null && isFinite(Number(p.y))) ? Math.round(Number(p.y) * 100) / 100 : null,
+      createdAt: p.createdAt || undefined,
+      updatedAt: now,
+    }));
+  const carteRoutes = ((db.carte && Array.isArray(db.carte.routes)) ? db.carte.routes : [])
+    .filter(r => r && r.id)
+    .slice(0, 300)
+    .map(r => ({
+      id: String(r.id),
+      type: _str(r.type, 40) || 'autre',
+      niveau: _str(r.niveau, 20) || 'public',
+      nom: _str(r.nom, 200) || 'Itinéraire',
+      notes: _nn(r.notes, 500),
+      points: Array.isArray(r.points)
+        ? r.points.filter(pt => pt && isFinite(Number(pt.x)) && isFinite(Number(pt.y)))
+            .slice(0, 120).map(pt => ({ x: Math.round(Number(pt.x) * 100) / 100, y: Math.round(Number(pt.y) * 100) / 100 }))
+        : [],
+      createdAt: r.createdAt || undefined,
+      updatedAt: now,
+    }));
+
+  return { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes, factures, telegrammes, invItems, invMouv, portefeuilles, transactions, cartePoints, carteRoutes };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -455,7 +489,7 @@ async function syncAll(db) {
     let out;
     do {
       _redo = false;
-      const { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes, factures, telegrammes, invItems, invMouv, portefeuilles, transactions } = _construire(db);
+      const { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes, factures, telegrammes, invItems, invMouv, portefeuilles, transactions, cartePoints, carteRoutes } = _construire(db);
       const results = [];
       // 1. Membres — aucun FK bloquant ; repli si la colonne optionnelle
       //    `absence` n'existe pas encore (HTTP 400) pour ne jamais vider le roster.
@@ -513,6 +547,8 @@ async function syncAll(db) {
       results.push(await _upsert('InventaireMouvement', invMouv)); // 14. mouvements de stock (table optionnelle)
       results.push(await _upsert('Portefeuille', portefeuilles)); // 15. portefeuilles perso (table optionnelle)
       results.push(await _upsert('Transaction', transactions));    // 16. journal de trésorerie (table optionnelle)
+      results.push(await _upsert('CartePoint', cartePoints));       // 17. carte : lieux (table optionnelle)
+      results.push(await _upsert('CarteRoute', carteRoutes));       // 18. carte : itinéraires (table optionnelle)
       // Nettoyage des fantômes : membres partis (si roster connu), + entités supprimées localement.
       // ⚠️ On NE réconcilie PAS Rdv (préserve les demandes venues du site web).
       if (_membresActuels || _roster) { try { await _reconcilier('Membre', membres.map(m => m.id)); } catch {} }
@@ -528,6 +564,8 @@ async function syncAll(db) {
       try { await _reconcilier('InventaireItem', invItems.map(i => i.id)); } catch {}
       try { await _reconcilier('Portefeuille', portefeuilles.map(w => w.id)); } catch {}
       try { await _reconcilier('Transaction', transactions.map(t => t.id)); } catch {}
+      try { await _reconcilier('CartePoint', cartePoints.map(p => p.id)); } catch {}
+      try { await _reconcilier('CarteRoute', carteRoutes.map(r => r.id)); } catch {}
       const summary = results.map(r => `${r.table} ${r.ok ? r.count : '✗' + (r.status || '')}`).join(' · ');
       console.log(`🔄 Sync Supabase → ${summary}`);
       out = { ok: true, results };
