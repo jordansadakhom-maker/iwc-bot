@@ -37,8 +37,12 @@ export async function updateSession(request: NextRequest) {
   const requireAuth = process.env.REQUIRE_AUTH !== "false";
   const path = request.nextUrl.pathname;
   // Pages accessibles SANS connexion, même quand le site est verrouillé :
-  // la connexion, le retour OAuth, et la prise de rendez-vous publique.
-  const isPublic = path === "/" || path === "/login" || path.startsWith("/auth") || path === "/rendez-vous" || path === "/telegramme" || path === "/rejoindre" || path === "/armurerie-vh";
+  // la connexion, le retour OAuth, la prise de rendez-vous publique — ET les
+  // routes de métadonnées (image d'aperçu Discord, manifeste + icône PWA), sinon
+  // le crawler Discord (anonyme) est redirigé vers /login et l'embed n'a pas
+  // d'image, et l'appli ne peut pas s'installer.
+  const isPublic = path === "/" || path === "/login" || path.startsWith("/auth") || path === "/rendez-vous" || path === "/telegramme" || path === "/rejoindre" || path === "/armurerie-vh"
+    || path === "/opengraph-image" || path === "/manifest.webmanifest" || path === "/pwa-icon" || path === "/icon" || path === "/apple-icon";
 
   if (requireAuth && !user && !isPublic) {
     const redirectUrl = request.nextUrl.clone();
