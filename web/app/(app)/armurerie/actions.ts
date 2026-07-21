@@ -59,7 +59,7 @@ async function _mouvementCoffre(admin: Admin, montant: number, sens: "entree" | 
 // directement dans Supabase (tables neuves, jamais touchées par le bot). Seul
 // l'envoi d'un contrat au client passe par le bot (message privé Discord).
 
-export type ArmResult = { ok: boolean; error?: string; id?: string };
+export type ArmResult = { ok: boolean; error?: string; id?: string; message?: string; enAttente?: boolean };
 
 function s(v: unknown, max = 300): string | null { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; }
 function newId(prefix: string) { return `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
@@ -201,10 +201,12 @@ export async function envoyerContrat(id: string): Promise<ArmResult> {
   const cmd = await envoyerCommande("armurerie.contrat", {
     contratId: id, clientDiscordId: data.clientDiscordId, clientNom: data.clientNom,
     arme: data.arme, numeroSerie: data.numeroSerie, prix: data.prix, conditions: data.conditions,
-  });
+  }, { attendre: true });
+  // Retour temps réel : on ne marque « envoyé » que si le MP est réellement parti
+  // (ou toujours en file). Un échec (MP fermés…) remonte tel quel.
   if (!cmd.ok) return { ok: false, error: cmd.error };
   await admin.from("ArmurerieContrat").update({ statut: "envoye", envoyeAt: new Date().toISOString() }).eq("id", id);
-  return { ok: true };
+  return { ok: true, enAttente: cmd.enAttente, message: cmd.enAttente ? "Contrat déposé — envoi au client en cours…" : (cmd.message || "Contrat remis au client en message privé.") };
 }
 export async function marquerContrat(id: string, statut: "signe" | "refuse" | "brouillon"): Promise<ArmResult> {
   const admin = createAdminClient();

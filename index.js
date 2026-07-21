@@ -3900,6 +3900,10 @@ client.on('messageCreate', async message => {
   } catch {}
   // Sécurité+ : anti-spam / anti-scam (ne consomme le message QUE s'il a été supprimé)
   try { if (await securitePlus.onMessage(message)) return; } catch {}
+  // 📜 Signature de contrat en MP (« JE SIGNE » / « JE REFUSE ») : le client
+  // répond à son contrat (armurerie ou opération), le bot le marque signé et
+  // confirme. Ne consomme le message que si un contrat en attente correspond.
+  try { if (!message.guild && !message.author?.bot && commandeWeb.traiterSignatureContratMP && await commandeWeb.traiterSignatureContratMP(message)) return; } catch {}
   // Nettoyeur : planifie la suppression du bruit du bot (ne consomme rien, ne touche qu'aux messages du bot)
   try { nettoyeur.onMessage?.(message); } catch {}
   // Panneaux collants : on garde le panneau en bas du salon (ne consomme rien)
@@ -6800,12 +6804,13 @@ client.once('clientReady', async () => {
   cron.schedule('*/2 * * * *', async () => {
     for (const g of client.guilds.cache.values()) await contactWeb.verifierDemandesContactWeb?.(g).catch(() => {});
   });
-  // ⚡ Commandes CRUD venues du site (créer/modifier/supprimer) → appliquées toutes les 10 s
-  //    (quasi-instantané côté site, combiné à l'affichage optimiste des composants).
+  // ⚡ Commandes CRUD venues du site (créer/modifier/supprimer) → appliquées toutes
+  //    les 3 s. Le site peut ainsi attendre le vrai verdict (« temps réel ») pour
+  //    les envois de contrats, tout en gardant l'affichage optimiste ailleurs.
   if (commandeWeb.appliquerCommandesWeb) {
     setInterval(async () => {
       try { const g = client.guilds.cache.first(); if (g) await commandeWeb.appliquerCommandesWeb(g); } catch {}
-    }, 10000);
+    }, 3000);
   }
   cron.schedule('0 18 * * *', async () => {
     try { const u = await client.users.fetch('944208797084311583').catch(() => null); if (u) await u.send({ embeds: [_genererRecapEmbed(loadDB())] }).catch(() => {}); } catch {}
