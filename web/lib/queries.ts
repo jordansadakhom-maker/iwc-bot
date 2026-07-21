@@ -1067,15 +1067,39 @@ export async function getPortefeuilles(): Promise<PortefeuillesData> {
 export type VitrineData = { membres: number | null; operations: number | null; armes: number | null };
 export async function getVitrine(): Promise<VitrineData> {
   const admin = createAdminClient();
-  if (!admin) return { membres: null, operations: null, armes: null };
+  // Chiffres affichés sur la couverture. On peut FORCER une valeur via une
+  // variable d'environnement (le Fondateur fait autorité sur le chiffre public) ;
+  // sinon on compte la vraie base. Les MEMBRES excluent les visiteurs et les
+  // partis (« la meute » = les vrais membres, pas les gens de passage).
+  const envNum = (n: string): number | undefined => {
+    const v = process.env[n];
+    if (v == null || v === "") return undefined;
+    const x = parseInt(v, 10);
+    return Number.isFinite(x) && x >= 0 ? x : undefined;
+  };
+  const oMembres = envNum("NEXT_PUBLIC_VITRINE_MEMBRES");
+  const oOps = envNum("NEXT_PUBLIC_VITRINE_OPERATIONS");
+  const oArmes = envNum("NEXT_PUBLIC_VITRINE_ARMES");
+  if (!admin) return { membres: oMembres ?? null, operations: oOps ?? null, armes: oArmes ?? null };
   async function compte(table: string): Promise<number | null> {
     try {
       const { count, error } = await admin!.from(table).select("*", { count: "exact", head: true });
       return error ? null : (typeof count === "number" ? count : null);
     } catch { return null; }
   }
-  const [membres, operations, armes] = await Promise.all([compte("Membre"), compte("Operation"), compte("Arme")]);
-  return { membres, operations, armes };
+  // Membres = la meute réelle : on exclut les visiteurs et les partis.
+  async function compteMembres(): Promise<number | null> {
+    try {
+      const { count, error } = await admin!.from("Membre").select("*", { count: "exact", head: true }).not("statut", "in", "(visiteur,parti)");
+      return error ? null : (typeof count === "number" ? count : null);
+    } catch { return null; }
+  }
+  const [membres, operations, armes] = await Promise.all([compteMembres(), compte("Operation"), compte("Arme")]);
+  return {
+    membres: oMembres ?? membres,
+    operations: oOps ?? operations,
+    armes: oArmes ?? armes,
+  };
 }
 
 // ── Alertes actionnables (cloche du header) ──────────────────────
