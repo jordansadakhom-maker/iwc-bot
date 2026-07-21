@@ -721,4 +721,17 @@ async function marquerContratArmurerie(id, statut) {
   return await _patch(`ArmurerieContrat?id=eq.${encodeURIComponent(id)}`, body);
 }
 
-module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, majRosterMembre, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise, lireProduitsArmurerie, lireContratArmurerieEnAttente, marquerContratArmurerie };
+// ── Rendez-vous de l'armurerie (rappels 45 min / 15 min avant) ──
+// Le RDV est pris sur le SITE (table ArmurerieRdv). Le bot lit les RDV « à venir »
+// pour envoyer les rappels dans #agenda. Table NEUVE, jamais réconciliée.
+async function lireRdvArmurerieARappeler() {
+  const rows = await _get('ArmurerieRdv?statut=eq.a_venir&order=dateRdv.asc&limit=100');
+  return Array.isArray(rows) ? rows : [];
+}
+// Marque un rappel comme envoyé (champ 'rappel45' ou 'rappel15') → jamais répété.
+async function marquerRappelRdvArmurerie(id, champ) {
+  const body = {}; body[champ] = true;
+  return await _patch(`ArmurerieRdv?id=eq.${encodeURIComponent(id)}`, body);
+}
+
+module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, majRosterMembre, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise, lireProduitsArmurerie, lireContratArmurerieEnAttente, marquerContratArmurerie, lireRdvArmurerieARappeler, marquerRappelRdvArmurerie };

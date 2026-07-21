@@ -80,6 +80,10 @@ let contactWeb = {};
 try { contactWeb = require('./contact-web'); console.log('✅ Module contact web chargé'); }
 catch (e) { console.log('⚠️ contact-web non chargé:', e.message); }
 
+let rdvArmurerie = {};
+try { rdvArmurerie = require('./rdv-armurerie'); console.log('✅ Module rappels RDV armurerie chargé'); }
+catch (e) { console.log('⚠️ rdv-armurerie non chargé:', e.message); }
+
 let telegrammeWeb = {};
 try { telegrammeWeb = require('./telegramme-web'); console.log('✅ Module télégramme web chargé'); }
 catch (e) { console.log('⚠️ telegramme-web non chargé:', e.message); }
@@ -6795,6 +6799,8 @@ client.once('clientReady', async () => {
   cron.schedule('* * * * *', async () => {
     for (const g of client.guilds.cache.values()) await notionV5.checkOpsProgrammees?.(g).catch(() => {});
     for (const g of client.guilds.cache.values()) await annonces.checkReminders?.(g).catch(() => {});
+    // Rappels des rendez-vous de l'armurerie (45 min & 15 min avant l'heure).
+    for (const g of client.guilds.cache.values()) await rdvArmurerie.checkRappelsArmurerie?.(g).catch(() => {});
   });
   cron.schedule('*/5 * * * *', async () => {
     for (const g of client.guilds.cache.values()) await checkAgenda(g).catch(() => {});

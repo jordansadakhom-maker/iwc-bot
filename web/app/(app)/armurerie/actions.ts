@@ -1238,3 +1238,53 @@ export async function supprimerCommande(id: string): Promise<ArmResult> {
   const { error } = await admin.from("ArmurerieCommande").delete().eq("id", id);
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
+
+// ── Rendez-vous du comptoir (agenda armurerie) ───────────────────
+// Le RDV est site-native (table ArmurerieRdv). Le bot lit les RDV « à venir »
+// pour envoyer les rappels 45 min / 15 min avant l'heure. `dateRdv` arrive en
+// ISO absolu (le navigateur convertit l'heure locale) → aucun décalage de fuseau.
+export async function creerRdv(d: { clientPrenom?: string; clientNom: string; telegramme?: string; carteIdentite?: string; commande?: string; lieu?: string; dateRdv: string; notes?: string }): Promise<ArmResult> {
+  if (!d.clientNom || d.clientNom.trim().length < 2) return { ok: false, error: "Indique le nom du client." };
+  const quand = d.dateRdv ? new Date(d.dateRdv) : null;
+  if (!quand || isNaN(quand.getTime())) return { ok: false, error: "Choisis la date et l'heure du rendez-vous." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const id = newId("rdv");
+  const { error } = await admin.from("ArmurerieRdv").insert({
+    id, clientPrenom: s(d.clientPrenom, 120), clientNom: s(d.clientNom, 120), telegramme: s(d.telegramme, 120),
+    carteIdentite: s(d.carteIdentite, 500), commande: s(d.commande, 1000), lieu: s(d.lieu, 200),
+    dateRdv: quand.toISOString(), notes: s(d.notes, 1000), statut: "a_venir", rappel45: false, rappel15: false,
+  });
+  if (error) return { ok: false, error: tableErr(error.message, "rendez-vous") };
+  return { ok: true, id };
+}
+export async function majRdv(id: string, d: { clientPrenom?: string; clientNom?: string; telegramme?: string; carteIdentite?: string; commande?: string; lieu?: string; dateRdv?: string; notes?: string; statut?: string }): Promise<ArmResult> {
+  if (!id) return { ok: false, error: "Rendez-vous introuvable." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const up: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+  if ("clientPrenom" in d) up.clientPrenom = s(d.clientPrenom, 120);
+  if ("clientNom" in d) up.clientNom = s(d.clientNom, 120);
+  if ("telegramme" in d) up.telegramme = s(d.telegramme, 120);
+  if ("carteIdentite" in d) up.carteIdentite = s(d.carteIdentite, 500);
+  if ("commande" in d) up.commande = s(d.commande, 1000);
+  if ("lieu" in d) up.lieu = s(d.lieu, 200);
+  if ("notes" in d) up.notes = s(d.notes, 1000);
+  if ("statut" in d) up.statut = s(d.statut, 40);
+  // Changer l'heure ré-arme les rappels (ils repartiront pour la nouvelle heure).
+  if ("dateRdv" in d && d.dateRdv) { const q = new Date(d.dateRdv); if (!isNaN(q.getTime())) { up.dateRdv = q.toISOString(); up.rappel45 = false; up.rappel15 = false; } }
+  const { error } = await admin.from("ArmurerieRdv").update(up).eq("id", id);
+  return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+}
+export async function marquerRdv(id: string, statut: string): Promise<ArmResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { error } = await admin.from("ArmurerieRdv").update({ statut: s(statut, 40) || "a_venir", updatedAt: new Date().toISOString() }).eq("id", id);
+  return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+}
+export async function supprimerRdv(id: string): Promise<ArmResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { error } = await admin.from("ArmurerieRdv").delete().eq("id", id);
+  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+}
