@@ -13,6 +13,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 const supa = require('./supabase-sync');
+let EmbedBuilder = null; try { ({ EmbedBuilder } = require('discord.js')); } catch {}
 let dbMod = {}; try { dbMod = require('./db'); } catch {}
 const loadDB = dbMod.loadDB || (() => ({}));
 const saveDB = dbMod.saveDB || (() => {});
@@ -49,6 +50,80 @@ function _medLog(f, action, par) {
   if (!Array.isArray(f.historique)) f.historique = [];
   f.historique.push({ date: _dateFR(), action, par: par || 'Site web' });
   if (f.historique.length > 40) f.historique = f.historique.slice(-40);
+}
+
+// ── Notes vocales du site : rapport riche + transcription intégrale ──────────
+// Construit le contenu au format du logiciel (🎙️||cible||lieu||info||prio||agent)
+// en gardant la structure intacte : on assainit les « || » internes et on borne
+// l'info pour rester sous la limite Discord (2000). Le texte COMPLET, lui, part
+// dans le résumé + le fil (jamais tronqué).
+function _contenuMicro(cible, lieu, texte, priorite, agent) {
+  const t = String(texte || '').replace(/\|\|/g, ' ');
+  const overhead = `🎙️||${cible}||${lieu}||||${priorite}||${agent}`.length;
+  const budget = Math.max(0, 1850 - overhead);
+  const info = t.length > budget ? t.slice(0, budget) : t;
+  return `🎙️||${cible}||${lieu}||${info}||${priorite}||${agent}`;
+}
+
+// Résumé de renseignement RICHE (mêmes sections que sur Discord) à partir de la
+// transcription. Anthropic (rapide). N'INVENTE RIEN : n'affiche que ce qui est
+// réellement dit. Renvoie du texte à puces, ou null.
+async function _resumeRicheIA(texte) {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  const note = _s(texte, 8000);
+  if (note.length < 40) return null;
+  const prompt = `Tu es un analyste de renseignement pour un serveur de jeu de rôle Far West (RedM, univers Red Dead Redemption 2). Voici une conversation captée sur le terrain (voix des joueurs en jeu). Rédige un RÉSUMÉ structuré en français pour quelqu'un qui n'a pas le temps de tout écouter.
+
+Utilise UNIQUEMENT ces sections (dans cet ordre) et n'affiche une section QUE si elle contient une information réellement présente dans la conversation :
+Personnes & Groupes
+Lieux
+Incidents & Menaces
+Contrats & Affaires
+Armes & Ressources
+Informations commerciales
+
+Sous chaque section gardée, des puces courtes commençant par « • ». N'INVENTE JAMAIS : si une information n'est pas dite, ne l'écris pas. Pas d'introduction ni de conclusion. Si vraiment rien d'exploitable, réponds seulement « • Rien de notable. ».
+
+CONVERSATION :
+${note}`;
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 700, messages: [{ role: 'user', content: prompt }] }),
+    });
+    const data = await resp.json();
+    return (data.content?.[0]?.text || '').trim() || null;
+  } catch (e) { console.log('❌ Résumé riche (web):', e.message); return null; }
+}
+
+// Poste le « Résumé de la note » (façon Discord) puis la transcription INTÉGRALE
+// dans un fil — pour qu'une longue scène ne soit jamais tronquée. Best-effort :
+// n'interrompt jamais le flux principal.
+async function _posterResumeNoteWeb(ch, agent, texteComplet) {
+  try {
+    const full = String(texteComplet || '');
+    if (!ch || full.length < 250) return; // scène courte → le rapport suffit
+    const resume = await _resumeRicheIA(full);
+    let msg = null;
+    if (resume && EmbedBuilder) {
+      const emb = new EmbedBuilder()
+        .setColor(0xC9A227)
+        .setTitle('📋 Résumé de la note')
+        .setDescription(resume.slice(0, 4000))
+        .setFooter({ text: `${agent} • résumé automatique` });
+      msg = await ch.send({ embeds: [emb], allowedMentions: { parse: [] } }).catch(() => null);
+    }
+    // Transcription intégrale dans un fil (rien n'est perdu, même très long).
+    if (full.length > 1200) {
+      let fil = null;
+      try {
+        if (msg && typeof msg.startThread === 'function') fil = await msg.startThread({ name: `📜 Transcription — ${agent}`.slice(0, 100), autoArchiveDuration: 1440 });
+        else if (ch.threads && typeof ch.threads.create === 'function') fil = await ch.threads.create({ name: `📜 Transcription — ${agent}`.slice(0, 100), autoArchiveDuration: 1440 });
+      } catch { /* pas de permission de fil → on abandonne proprement */ }
+      if (fil) { const blocs = full.match(/[\s\S]{1,1850}/g) || []; for (const b of blocs) await fil.send({ content: b }).catch(() => {}); }
+    }
+  } catch (e) { console.log('❌ Résumé note web:', e.message); }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -712,7 +787,7 @@ Object.assign(HANDLERS, {
   'note.vocale': async (db, p, ctx) => {
     const guild = ctx?.guild;
     if (!guild) return { ok: false, message: 'Serveur indisponible' };
-    const texte = _s(p.texte, 3500);
+    const texte = _s(p.texte, 20000);
     if (!texte || texte.length < 3) return { ok: false, message: 'Note vide — parle un peu plus.' };
     const CH = '1511491314351472701'; // salon des transcriptions (entrée du Réseau)
     const ch = guild.channels.cache.get(CH) || await guild.channels.fetch(CH).catch(() => null);
@@ -727,9 +802,11 @@ Object.assign(HANDLERS, {
       if (hooks) hook = [...hooks.values()].find(h => h.token && /note|web|iwc|transcri/i.test(h.name || '')) || [...hooks.values()].find(h => h.token) || null;
       if (!hook) hook = await ch.createWebhook({ name: 'IWC Notes Web' }).catch(() => null);
       if (!hook) return { ok: false, message: 'Webhook indisponible — donne au bot la permission « Gérer les webhooks » sur ce salon.' };
-      const contenu = `🎙️||${cible}||${lieu}||${texte}||${priorite}||${agent}`;
-      await hook.send({ content: contenu.slice(0, 1950), username: `🎙️ ${agent}`, allowedMentions: { parse: [] } });
-      return { ok: true, message: 'Note vocale transmise — le réseau la transforme en rapport de terrain.' };
+      const contenu = _contenuMicro(cible, lieu, texte, priorite, agent);
+      await hook.send({ content: contenu, username: `🎙️ ${agent}`, allowedMentions: { parse: [] } });
+      // Longue note → résumé structuré + transcription intégrale dans un fil.
+      await _posterResumeNoteWeb(ch, agent, texte);
+      return { ok: true, message: 'Note vocale transmise — rapport de terrain + résumé générés.' };
     } catch (e) { return { ok: false, message: e.message }; }
   },
 
@@ -755,7 +832,7 @@ Object.assign(HANDLERS, {
       if (!buf.length) return { ok: false, message: 'Audio vide' };
       const mp3 = await voix.fichierVersMp3(buf);
       if (!mp3) return { ok: false, message: 'Conversion audio impossible (ffmpeg).' };
-      const texte = _s(await voix.whisper(mp3), 3500);
+      const texte = _s(await voix.whisper(mp3), 20000);
       if (!texte || texte.length < 2) return { ok: false, message: 'Aucune parole détectée dans l\'audio.' };
       const CH = '1511491314351472701';
       const ch = guild.channels.cache.get(CH) || await guild.channels.fetch(CH).catch(() => null);
@@ -764,9 +841,11 @@ Object.assign(HANDLERS, {
       let hook = hooks ? ([...hooks.values()].find(h => h.token && /note|web|iwc|transcri/i.test(h.name || '')) || [...hooks.values()].find(h => h.token)) : null;
       if (!hook) hook = await ch.createWebhook({ name: 'IWC Notes Web' }).catch(() => null);
       if (!hook) return { ok: false, message: 'Webhook indisponible — donne au bot « Gérer les webhooks » sur le salon.' };
-      const contenu = `🎙️||${cible}||${lieu}||${texte}||${priorite}||${agent}`;
-      await hook.send({ content: contenu.slice(0, 1950), username: `🎙️ ${agent}`, allowedMentions: { parse: [] } });
-      return { ok: true, message: 'Son du jeu transcrit — le réseau en fait un rapport de terrain.' };
+      const contenu = _contenuMicro(cible, lieu, texte, priorite, agent);
+      await hook.send({ content: contenu, username: `🎙️ ${agent}`, allowedMentions: { parse: [] } });
+      // Longue scène → résumé structuré + transcription intégrale dans un fil.
+      await _posterResumeNoteWeb(ch, agent, texte);
+      return { ok: true, message: 'Son du jeu transcrit — rapport de terrain + résumé générés.' };
     } catch (e) { return { ok: false, message: e.message }; }
   },
 });
