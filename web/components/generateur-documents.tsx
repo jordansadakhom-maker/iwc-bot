@@ -1,11 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { FileText, ScrollText, Megaphone, Mail, Skull, Sparkles, Printer, Copy, Check, Loader2, RefreshCw } from "lucide-react";
-import { genererDocument, type DocType } from "@/app/(app)/documents/actions";
+import { FileText, ScrollText, Megaphone, Mail, Skull, Sparkles, Printer, Copy, Check, Loader2, RefreshCw, Medal, ScanLine, Send } from "lucide-react";
+import { genererDocument, genererDepuisCapture, genererRapportMission, envoyerDocument, type DocType } from "@/app/(app)/documents/actions";
+import { PhotoDrop } from "@/components/photo-drop";
 
-const TYPES: { key: DocType; label: string; sous: string; icon: typeof FileText }[] = [
+type Mode = DocType | "mission";
+type OpLite = { id: string; titre: string; lieu: string | null };
+
+const TYPES: { key: Mode; label: string; sous: string; icon: typeof FileText }[] = [
   { key: "rapport", label: "Rapport d'opération", sous: "Compte-rendu après mission", icon: FileText },
+  { key: "mission", label: "Rapport de mission", sous: "Bilan immersif d'une opération", icon: Medal },
   { key: "ordre", label: "Ordre de mission", sous: "Briefing à distribuer", icon: ScrollText },
   { key: "communique", label: "Communiqué", sous: "Annonce publique", icon: Megaphone },
   { key: "lettre", label: "Lettre officielle", sous: "Courrier d'époque", icon: Mail },
@@ -14,30 +19,57 @@ const TYPES: { key: DocType; label: string; sous: string; icon: typeof FileText 
 
 const inputCls = "w-full rounded-xl border border-border bg-surface-2 px-3.5 py-2.5 text-[0.88rem] text-ink outline-none placeholder:text-faint focus:border-[color-mix(in_srgb,var(--accent)_55%,var(--border))]";
 
-export function GenerateurDocuments() {
-  const [type, setType] = useState<DocType>("rapport");
+export function GenerateurDocuments({ operations = [] }: { operations?: OpLite[] }) {
+  const [type, setType] = useState<Mode>("rapport");
   const [sujet, setSujet] = useState("");
   const [details, setDetails] = useState("");
   const [pole, setPole] = useState<"iwc" | "confrerie">("iwc");
+  const [opId, setOpId] = useState("");
   const [texte, setTexte] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"gen" | "capture" | "envoi" | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [copie, setCopie] = useState(false);
+  const [destinataire, setDestinataire] = useState("");
+  const [envoiFlash, setEnvoiFlash] = useState<string | null>(null);
 
   async function generer() {
     setErr(null);
+    if (type === "mission") {
+      if (!opId) { setErr("Choisis une opération."); return; }
+      setBusy("gen");
+      const r = await genererRapportMission(opId);
+      setBusy(null);
+      if (!r.ok) { setErr(r.error || "Échec."); return; }
+      setTexte(r.texte || "");
+      return;
+    }
     if (sujet.trim().length < 2) { setErr("Indique un sujet / titre."); return; }
-    setBusy(true);
-    const r = await genererDocument(type, { sujet, details, pole });
-    setBusy(false);
+    setBusy("gen");
+    const r = await genererDocument(type as DocType, { sujet, details, pole });
+    setBusy(null);
     if (!r.ok) { setErr(r.error || "Échec."); return; }
     setTexte(r.texte || "");
   }
 
-  function imprimer() { if (typeof window !== "undefined") window.print(); }
-  async function copier() {
-    try { await navigator.clipboard.writeText(texte); setCopie(true); setTimeout(() => setCopie(false), 1500); } catch {}
+  async function analyserCapture(url: string) {
+    setErr(null); setBusy("capture");
+    const r = await genererDepuisCapture(url, pole);
+    setBusy(null);
+    if (!r.ok) { setErr(r.error || "Lecture impossible."); return; }
+    setTexte(r.texte || "");
   }
+
+  async function envoyer() {
+    setEnvoiFlash(null);
+    if (!destinataire.trim()) { setEnvoiFlash("Indique l'ID Discord du destinataire."); return; }
+    setBusy("envoi");
+    const r = await envoyerDocument(destinataire, TYPES.find((t) => t.key === type)?.label || "Document", texte);
+    setBusy(null);
+    setEnvoiFlash(r.ok ? ((r as { message?: string }).message || "Document envoyé en message privé.") : (r.error || "Échec de l'envoi."));
+  }
+
+  function imprimer() { if (typeof window !== "undefined") window.print(); }
+  async function copier() { try { await navigator.clipboard.writeText(texte); setCopie(true); setTimeout(() => setCopie(false), 1500); } catch {} }
 
   const libelle = TYPES.find((t) => t.key === type)?.label || "Document";
 
@@ -46,7 +78,7 @@ export function GenerateurDocuments() {
       <style>{`@media print{body *{visibility:hidden!important}#doc-imprimable,#doc-imprimable *{visibility:visible!important}#doc-imprimable{position:fixed;inset:0;margin:0;padding:30px 40px}.no-print{display:none!important}}`}</style>
 
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,340px)_1fr]">
-        {/* ── Panneau de composition ── */}
+        {/* ── Composition ── */}
         <div className="no-print flex flex-col gap-4 rounded-card border border-border bg-surface p-4 shadow-card">
           <div>
             <div className="mb-2 text-[0.66rem] uppercase tracking-[0.06em] text-faint">Type de document</div>
@@ -68,15 +100,31 @@ export function GenerateurDocuments() {
             </div>
           </div>
 
-          <label className="block">
-            <span className="mb-1 block text-[0.66rem] uppercase tracking-[0.06em] text-faint">Sujet / titre</span>
-            <input className={inputCls} value={sujet} onChange={(e) => setSujet(e.target.value)} placeholder="Ex. Escorte de la diligence de Rhodes" maxLength={160} />
-          </label>
-
-          <label className="block">
-            <span className="mb-1 block text-[0.66rem] uppercase tracking-[0.06em] text-faint">Éléments à intégrer <span className="text-faint/70">(facultatif)</span></span>
-            <textarea className={inputCls + " min-h-[120px] resize-y leading-relaxed"} value={details} onChange={(e) => setDetails(e.target.value)} placeholder="Agents, lieu, résultat, montant, consignes… L'IA ne fabrique rien : ce que tu ne donnes pas reste général." maxLength={2000} />
-          </label>
+          {type === "mission" ? (
+            <label className="block">
+              <span className="mb-1 block text-[0.66rem] uppercase tracking-[0.06em] text-faint">Opération</span>
+              {operations.length === 0 ? (
+                <p className="rounded-xl border border-border bg-surface-2 px-3 py-2.5 text-[0.8rem] text-faint">Aucune opération à rapporter pour l&apos;instant.</p>
+              ) : (
+                <select className={inputCls} value={opId} onChange={(e) => setOpId(e.target.value)}>
+                  <option value="">— Choisir une opération —</option>
+                  {operations.map((o) => <option key={o.id} value={o.id}>{o.titre}{o.lieu ? ` · ${o.lieu}` : ""}</option>)}
+                </select>
+              )}
+              <p className="mt-1 text-[0.68rem] text-faint">Le rapport reprend les faits réels de l&apos;opération (résultat, butin, pertes…) et les met en récit — sans rien inventer.</p>
+            </label>
+          ) : (
+            <>
+              <label className="block">
+                <span className="mb-1 block text-[0.66rem] uppercase tracking-[0.06em] text-faint">Sujet / titre</span>
+                <input className={inputCls} value={sujet} onChange={(e) => setSujet(e.target.value)} placeholder="Ex. Escorte de la diligence de Rhodes" maxLength={160} />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-[0.66rem] uppercase tracking-[0.06em] text-faint">Éléments à intégrer <span className="text-faint/70">(facultatif)</span></span>
+                <textarea className={inputCls + " min-h-[100px] resize-y leading-relaxed"} value={details} onChange={(e) => setDetails(e.target.value)} placeholder="Agents, lieu, résultat, montant, consignes… L'IA ne fabrique rien." maxLength={2000} />
+              </label>
+            </>
+          )}
 
           <div>
             <div className="mb-1 text-[0.66rem] uppercase tracking-[0.06em] text-faint">Émetteur</div>
@@ -91,10 +139,20 @@ export function GenerateurDocuments() {
 
           {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
 
-          <button onClick={generer} disabled={busy} className="inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-[0.9rem] font-semibold text-black/85 transition hover:brightness-110 disabled:opacity-60" style={{ background: "linear-gradient(180deg,var(--accent-hi),var(--accent))" }}>
-            {busy ? <Loader2 className="h-[1.05rem] w-[1.05rem] animate-spin" /> : texte ? <RefreshCw className="h-[1.05rem] w-[1.05rem]" /> : <Sparkles className="h-[1.05rem] w-[1.05rem]" />}
-            {busy ? "Rédaction en cours…" : texte ? "Régénérer" : "Générer le document"}
+          <button onClick={generer} disabled={busy !== null} className="inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-[0.9rem] font-semibold text-black/85 transition hover:brightness-110 disabled:opacity-60" style={{ background: "linear-gradient(180deg,var(--accent-hi),var(--accent))" }}>
+            {busy === "gen" ? <Loader2 className="h-[1.05rem] w-[1.05rem] animate-spin" /> : texte ? <RefreshCw className="h-[1.05rem] w-[1.05rem]" /> : <Sparkles className="h-[1.05rem] w-[1.05rem]" />}
+            {busy === "gen" ? "Rédaction en cours…" : texte ? "Régénérer" : "Générer le document"}
           </button>
+
+          {/* Analyser une capture */}
+          <div className="border-t border-border pt-3">
+            <div className="mb-1.5 flex items-center gap-1.5 text-[0.66rem] uppercase tracking-[0.06em] text-faint"><ScanLine className="h-3.5 w-3.5" /> Ou : analyser une capture</div>
+            {busy === "capture" ? (
+              <div className="flex items-center justify-center gap-2 rounded-xl border border-border bg-surface-2 py-4 text-[0.82rem] text-muted"><Loader2 className="h-4 w-4 animate-spin" /> L&apos;IA lit la capture…</div>
+            ) : (
+              <PhotoDrop dossier="documents-captures" onUploaded={analyserCapture} label="Glisse une capture — l'IA l'analyse et rédige le document qui correspond" />
+            )}
+          </div>
         </div>
 
         {/* ── Aperçu / édition ── */}
@@ -111,8 +169,19 @@ export function GenerateurDocuments() {
 
           {texte ? (
             <>
-              <textarea className="no-print h-[62vh] w-full resize-none border-0 bg-transparent px-5 py-4 font-display text-[0.95rem] leading-relaxed text-ink outline-none" value={texte} onChange={(e) => setTexte(e.target.value)} />
-              {/* Version imprimable (papier) */}
+              <textarea className="no-print h-[52vh] w-full resize-none border-0 bg-transparent px-5 py-4 font-display text-[0.95rem] leading-relaxed text-ink outline-none" value={texte} onChange={(e) => setTexte(e.target.value)} />
+              {/* Envoyer à quelqu'un */}
+              <div className="no-print border-t border-border px-4 py-3">
+                <div className="mb-1.5 flex items-center gap-1.5 text-[0.66rem] uppercase tracking-[0.06em] text-faint"><Send className="h-3.5 w-3.5" /> Envoyer à quelqu&apos;un (message privé Discord)</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input className={inputCls + " flex-1"} value={destinataire} onChange={(e) => setDestinataire(e.target.value)} placeholder="ID Discord du destinataire" />
+                  <button onClick={envoyer} disabled={busy === "envoi"} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2.5 text-[0.82rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>
+                    {busy === "envoi" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Envoyer
+                  </button>
+                </div>
+                {envoiFlash ? <p className="mt-1.5 text-[0.78rem]" style={{ color: /envoy|priv/i.test(envoiFlash) ? "var(--good)" : "var(--oxblood)" }}>{envoiFlash}</p> : null}
+              </div>
+              {/* Version imprimable */}
               <div id="doc-imprimable" className="hidden" aria-hidden>
                 <div style={{ fontFamily: "Iowan Old Style, Palatino, Georgia, serif", color: "#1a1206", whiteSpace: "pre-wrap", fontSize: "13pt", lineHeight: 1.55 }}>
                   <div style={{ textAlign: "center", letterSpacing: "3px", fontWeight: 700, fontSize: "12pt", borderBottom: "2px solid #1a1206", paddingBottom: "8px", marginBottom: "18px" }}>
@@ -125,7 +194,7 @@ export function GenerateurDocuments() {
           ) : (
             <div className="flex flex-col items-center gap-3 px-6 py-20 text-center">
               <span className="grid h-14 w-14 place-items-center rounded-2xl text-accent" style={{ background: "color-mix(in srgb,var(--accent) 12%,transparent)" }}><Sparkles className="h-6 w-6" /></span>
-              <p className="max-w-sm text-[0.88rem] text-muted">Choisis un type, donne un sujet (et quelques éléments), puis <b className="text-ink">Générer</b>. Le document apparaîtra ici, modifiable et prêt à imprimer — sans jamais rien inventer.</p>
+              <p className="max-w-sm text-[0.88rem] text-muted">Choisis un type et génère, <b className="text-ink">rapporte une opération</b>, ou <b className="text-ink">glisse une capture</b> à analyser. Le document apparaîtra ici — modifiable, imprimable et envoyable, sans jamais rien inventer.</p>
             </div>
           )}
         </div>
