@@ -15,6 +15,8 @@ const supa = require('./supabase-sync');
 const SALON_AGENDA = '1509638226132996178';       // #agenda (même salon que les RDV web)
 const FONDATEUR_ID = '944208797084311583';
 const PING_ROLES = ['Fondateur', 'Conseil', 'Directeur', 'Officier'];
+// Lien vers le site (pour « répondre / gérer sur le site » depuis Discord).
+const SITE_URL = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || process.env.SITE_URL || 'https://iwc-bot-psi.vercel.app';
 
 // Chaîne de mentions des rôles à prévenir (ceux qui existent sur le serveur).
 function _ping(guild) {
@@ -64,12 +66,14 @@ async function checkRappelsArmurerie(guild) {
       const emb = new EmbedBuilder()
         .setColor(urgent ? 0xED4245 : 0xC9A227)
         .setTitle(`🗓️ Rappel rendez-vous — ${tag}`)
+        .setURL(`${SITE_URL}/armurerie`)
         .setDescription(`**${nom}** a rendez-vous à l'armurerie de Van Horn.`)
         .addFields(
           { name: '🕐 Heure', value: _fmtHeure(r.dateRdv), inline: false },
           ...(r.commande ? [{ name: '🧾 Commande', value: String(r.commande).slice(0, 1000), inline: false }] : []),
           ...(r.lieu ? [{ name: '📍 Lieu', value: String(r.lieu).slice(0, 200), inline: true }] : []),
           ...(r.telegramme ? [{ name: '📨 Contact', value: String(r.telegramme).slice(0, 120), inline: true }] : []),
+          { name: '🔗 Gérer sur le site', value: `[Ouvrir l'armurerie → Rendez-vous](${SITE_URL}/armurerie)`, inline: false },
         )
         .setFooter({ text: 'IWC · Armurerie de Van Horn' })
         .setTimestamp();
