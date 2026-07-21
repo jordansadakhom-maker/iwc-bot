@@ -72,17 +72,16 @@ async function _resumeRicheIA(texte) {
   if (!process.env.ANTHROPIC_API_KEY) return null;
   const note = _s(texte, 8000);
   if (note.length < 40) return null;
-  const prompt = `Tu es un analyste de renseignement pour un serveur de jeu de rôle Far West (RedM, univers Red Dead Redemption 2). Voici une conversation captée sur le terrain (voix des joueurs en jeu). Rédige un RÉSUMÉ structuré en français pour quelqu'un qui n'a pas le temps de tout écouter.
+  const prompt = `Tu es un analyste de renseignement pour un serveur de jeu de rôle Far West (RedM, univers Red Dead Redemption 2). Voici une conversation captée sur le terrain (voix des joueurs en jeu). Résume-la en français pour quelqu'un qui n'a pas le temps de tout écouter.
 
-Utilise UNIQUEMENT ces sections (dans cet ordre) et n'affiche une section QUE si elle contient une information réellement présente dans la conversation :
-Personnes & Groupes
-Lieux
-Incidents & Menaces
-Contrats & Affaires
-Armes & Ressources
-Informations commerciales
+FORMAT EXACT (en Markdown) :
+- Première ligne, TOUJOURS ce titre tel quel : ## RÉSUMÉ — RAPPORT IRON WOLF COMPANY
+- Puis des SECTIONS thématiques : le titre de section en **gras** sur sa propre ligne, et en dessous des puces courtes commençant par « • ».
+- N'affiche une section QUE si elle contient une info réelle. Choisis les sections pertinentes parmi, par exemple : **Personnes & Contacts** · **Lieux** · **Entreprises & Activités** · **Ressources & Équipement** · **Opérations & Contrats** · **Contrats & Missions** · **Finances & Impôts** · **Menaces & Sécurité** · **Situation**.
 
-Sous chaque section gardée, des puces courtes commençant par « • ». N'INVENTE JAMAIS : si une information n'est pas dite, ne l'écris pas. Pas d'introduction ni de conclusion. Si vraiment rien d'exploitable, réponds seulement « • Rien de notable. ».
+RÈGLE : conserve TOUJOURS, sans jamais les oublier : les NOMS de personnes/groupes (avec leur rôle si dit), les LIEUX, les TÉLÉGRAMMES / numéros, les CONTRATS / missions / deals, les MENACES / cibles / alliances, les SOMMES d'argent, les ARMES / ressources / livraisons. Ne coupe que le bavardage inutile (politesses, hésitations, répétitions).
+
+N'INVENTE JAMAIS : si une info n'est pas dite, ne l'écris pas. Si la conversation ne contient vraiment rien d'exploitable (bavardage, publicité, hors-sujet), réponds UNIQUEMENT « • Rien de notable. » (sans le titre).
 
 CONVERSATION :
 ${note}`;
@@ -90,7 +89,7 @@ ${note}`;
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 700, messages: [{ role: 'user', content: prompt }] }),
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 800, messages: [{ role: 'user', content: prompt }] }),
     });
     const data = await resp.json();
     return (data.content?.[0]?.text || '').trim() || null;
