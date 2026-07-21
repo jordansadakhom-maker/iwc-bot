@@ -176,7 +176,7 @@ export function CaptureJeu() {
         </li>
       </ol>
       <p className="-mt-2 mb-4 text-[0.76rem] text-faint">💻 PC uniquement (Chrome/Edge). Rien n&apos;est diffusé : seul le son est enregistré puis transcrit. Le jeu peut être dans une autre appli — l&apos;audio système capte tout le son du PC.</p>
-      <p className="-mt-3 mb-4 flex items-start gap-1.5 text-[0.76rem]" style={{ color: "var(--good)" }}><span aria-hidden>👥</span> <span>Une seule personne sur place suffit : la voix de proximité du jeu fait entendre <b>tous les joueurs autour</b> dans son casque, donc sa capture les enregistre tous. Pas besoin que chacun le fasse.</span></p>
+      <p className="-mt-3 mb-4 flex items-start gap-1.5 text-[0.76rem]" style={{ color: "var(--good)" }}><span aria-hidden>👥</span> <span>Une seule personne suffit <b>par lieu</b> : la voix de proximité fait entendre <b>tous les joueurs autour d&apos;elle</b>, donc sa capture les enregistre tous — pas besoin que chacun le fasse. Si l&apos;équipe est éclatée sur la carte, il faut <b>un « capteur » par endroit</b> (chacun tague son lieu ci-dessous) : la proximité ne capte que ce qui est proche.</span></p>
 
       <div className="flex flex-col items-center gap-3 rounded-[12px] border border-border bg-surface-2 px-4 py-6">
         {phase === "rec" ? (
