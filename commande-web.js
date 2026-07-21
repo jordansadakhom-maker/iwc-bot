@@ -832,8 +832,17 @@ Object.assign(HANDLERS, {
       if (!buf.length) return { ok: false, message: 'Audio vide' };
       const mp3 = await voix.fichierVersMp3(buf);
       if (!mp3) return { ok: false, message: 'Conversion audio impossible (ffmpeg).' };
-      const texte = _s(await voix.whisper(mp3), 20000);
-      if (!texte || texte.length < 2) return { ok: false, message: 'Aucune parole détectée dans l\'audio.' };
+      // Transcription avec erreur PRÉCISE (clé absente / refusée / quota) affichée
+      // telle quelle sur le site — pour savoir exactement quoi corriger.
+      let texte = '';
+      if (voix.whisperDetaille) {
+        const w = await voix.whisperDetaille(mp3);
+        if (!w.ok) return { ok: false, message: 'Transcription impossible — ' + w.error };
+        texte = _s(w.texte, 20000);
+      } else {
+        texte = _s(await voix.whisper(mp3), 20000);
+      }
+      if (!texte || texte.length < 2) return { ok: false, message: 'Aucune parole détectée (le son du jeu était peut-être muet — vérifie « Partager l\'audio du système »).' };
       const CH = '1511491314351472701';
       const ch = guild.channels.cache.get(CH) || await guild.channels.fetch(CH).catch(() => null);
       if (!ch || typeof ch.fetchWebhooks !== 'function') return { ok: false, message: 'Salon des notes introuvable' };
