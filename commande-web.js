@@ -623,6 +623,27 @@ Object.assign(HANDLERS, {
       return { ok: true, message: 'Contrat d\'opération envoyé au commanditaire en message privé' };
     } catch (e) { return { ok: false, message: e.message }; }
   },
+
+  // ── Documents : envoyer un document rédigé sur le site à quelqu'un (MP) ──
+  'document.envoyer': async (db, p, ctx) => {
+    const guild = ctx?.guild;
+    const did = _s(p.clientDiscordId, 40);
+    if (!guild || !did) return { ok: false, message: 'Destinataire introuvable' };
+    const titre = _s(p.titre, 120) || 'Document';
+    const texte = _s(p.texte, 3500);
+    if (!texte) return { ok: false, message: 'Document vide' };
+    try {
+      const user = await guild.client.users.fetch(did).catch(() => null);
+      if (!user) return { ok: false, message: 'Destinataire introuvable sur Discord' };
+      // Discord limite un message à 2000 caractères → on tronçonne proprement.
+      const full = `📄 **${titre}**\n_Envoyé par ${p.auteurNom || 'la Iron Wolf Company'}_\n\n${texte}`;
+      let rest = full, sent = null;
+      while (rest.length > 1900) { let cut = rest.lastIndexOf('\n', 1900); if (cut < 500) cut = 1900; sent = await user.send(rest.slice(0, cut)).catch(() => null); if (!sent) break; rest = rest.slice(cut); }
+      if (rest && (sent || full.length <= 1900)) sent = await user.send(rest).catch(() => null);
+      if (!sent) return { ok: false, message: 'MP du destinataire fermés — envoi impossible' };
+      return { ok: true, message: 'Document envoyé en message privé' };
+    } catch (e) { return { ok: false, message: e.message }; }
+  },
 });
 
 // Trouve une opération par id dans db.operations puis db.preparations.
