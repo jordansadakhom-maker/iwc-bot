@@ -103,6 +103,12 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
     router.refresh();
   }
 
+  // Compteur de notifications PAR page : on regroupe les alertes en direct par
+  // destination (href) pour afficher une pastille sur l'onglet concerné dans la
+  // barre de gauche (ex. « Armurerie », « Communication », « Recrutement »).
+  const notifParHref: Record<string, number> = {};
+  for (const a of alertesLive.items) notifParHref[a.href] = (notifParHref[a.href] || 0) + a.count;
+
   return (
     <div data-pole={pole} className="min-h-screen grid grid-cols-1 lg:grid-cols-[264px_1fr]">
       {/* ============ SIDEBAR ============ */}
@@ -135,6 +141,8 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
             {items.map((it) => {
               const active = path === it.href;
               const Icon = it.icon;
+              const notif = notifParHref[it.href] || 0;   // alertes en direct pour cette page
+              const badge = notif || it.badge || 0;
               return (
                 <Link
                   key={it.href}
@@ -149,9 +157,13 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
                 >
                   <Icon className="h-[18px] w-[18px] shrink-0 opacity-90" strokeWidth={1.8} />
                   <span>{it.label}</span>
-                  {it.badge ? (
-                    <span className="ml-auto grid h-[18px] min-w-[18px] place-items-center rounded-full bg-accent px-1.5 text-[0.64rem] font-extrabold text-black/85">
-                      {it.badge}
+                  {badge ? (
+                    <span
+                      className="ml-auto grid h-[18px] min-w-[18px] place-items-center rounded-full px-1.5 text-[0.64rem] font-extrabold text-black/85"
+                      style={{ background: notif ? "var(--oxblood)" : "var(--accent)", color: notif ? "#fff" : undefined }}
+                      title={notif ? `${notif} à traiter` : undefined}
+                    >
+                      {badge > 99 ? "99+" : badge}
                     </span>
                   ) : null}
                 </Link>

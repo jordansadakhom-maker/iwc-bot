@@ -1117,7 +1117,9 @@ export async function getAlertes(): Promise<AlertesData> {
     try { const { count, error } = await fn(); return error ? 0 : (count ?? 0); } catch { return 0; }
   };
   const iso7 = new Date(Date.now() - 7 * 86400000).toISOString();
-  const [contrats, impots, paies, ruptures, candids, rdvs, telegrammes] = await Promise.all([
+  const nowIso = new Date().toISOString();
+  const iso24 = new Date(Date.now() + 24 * 86400000).toISOString(); // fenêtre « dans les 24 h »
+  const [contrats, impots, paies, ruptures, candids, rdvs, telegrammes, rdvArm] = await Promise.all([
     safe(() => admin.from("ArmurerieContrat").select("*", { count: "exact", head: true }).eq("statut", "envoye")),
     safe(() => admin.from("ArmurerieImpot").select("*", { count: "exact", head: true }).neq("statut", "paye")),
     safe(() => admin.from("ArmureriePaie").select("*", { count: "exact", head: true }).neq("statut", "paye")),
@@ -1125,8 +1127,10 @@ export async function getAlertes(): Promise<AlertesData> {
     safe(() => admin.from("Candidature").select("*", { count: "exact", head: true }).gte("createdAt", iso7)),
     safe(() => admin.from("Rdv").select("*", { count: "exact", head: true }).eq("statut", "nouveau")),
     safe(() => admin.from("TelegrammeWeb").select("*", { count: "exact", head: true }).gte("createdAt", iso7)),
+    safe(() => admin.from("ArmurerieRdv").select("*", { count: "exact", head: true }).eq("statut", "a_venir").gte("dateRdv", nowIso).lte("dateRdv", iso24)),
   ]);
   const items: Alerte[] = [];
+  if (rdvArm) items.push({ key: "rdvArm", label: `${rdvArm} rendez-vous armurerie dans les 24 h`, count: rdvArm, href: "/armurerie", tone: "warn" });
   if (rdvs) items.push({ key: "rdvs", label: `${rdvs} rendez-vous à traiter`, count: rdvs, href: "/communication", tone: "warn" });
   if (contrats) items.push({ key: "contrats", label: `${contrats} contrat(s) en attente de signature`, count: contrats, href: "/armurerie", tone: "accent" });
   if (impots) items.push({ key: "impots", label: `${impots} impôt(s) à régler`, count: impots, href: "/armurerie", tone: "oxblood" });
