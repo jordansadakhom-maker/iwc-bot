@@ -1,0 +1,12 @@
+-- ═══════════════════════════════════════════════════════════════
+--  MEMBRES — Détail d'absence sur le site (retour prévu, raison,
+--  absence programmée). Reflète le panneau Discord #absences pour que la
+--  page « Absences » du site montre qui manque à l'appel et quand il revient.
+--
+--  Alimenté par la synchro du bot (roster) : { jusqu, raison, depuis,
+--  programmee: { debut, fin, raison } } ou NULL si présent.
+--  À exécuter UNE FOIS dans Supabase → SQL Editor. Additif & idempotent.
+--  Sans cette colonne, la synchro se replie automatiquement (aucun blocage) —
+--  la page Absences se rabat alors sur le statut « absent » seul.
+-- ═══════════════════════════════════════════════════════════════
+ALTER TABLE IF EXISTS "Membre" ADD COLUMN IF NOT EXISTS "absence" jsonb;

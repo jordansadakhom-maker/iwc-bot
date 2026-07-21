@@ -271,6 +271,7 @@ export type ContratDetail = {
   id: string; cible: string; commanditaire: string | null; statut: string; pole: string;
   remuneration: string | null; motif: string | null; agentsNoms: string[]; createdAt: string | null;
   suivi: string | null; remuVerseAuCoffre: number | null;
+  categorie: string | null; risque: string | null; echeance: string | null;
 };
 export type OperationsData = {
   connecte: boolean;
@@ -399,6 +400,9 @@ export async function getOperations(): Promise<OperationsData> {
         createdAt: (c.createdAt as string) ?? null,
         suivi: (c.suivi as string) ?? null,
         remuVerseAuCoffre: c.remuVerseAuCoffre == null ? null : Number(c.remuVerseAuCoffre),
+        categorie: (c.categorie as string) ?? null,
+        risque: (c.risque as string) ?? null,
+        echeance: (c.echeance as string) ?? null,
       };
     });
 
@@ -409,7 +413,7 @@ export async function getOperations(): Promise<OperationsData> {
 // ── Membres & RH (page dédiée) ───────────────────────────────────
 // Fiche RH : champ SITE-NATIVE porté par la table Membre, JAMAIS écrit par le
 // bot (il ne l'envoie pas dans sa synchro → jamais écrasé). Édité depuis le site.
-export type FicheRH = { specialite?: string; statutInterne?: string; salaire?: number; notes?: string };
+export type FicheRH = { specialite?: string; statutInterne?: string; salaire?: number; notes?: string; medecin?: boolean };
 export type MembreDetail = { id: string; nomIC: string; grade: string | null; pole: string; statut: string; ficheRH: FicheRH | null };
 export type MembresData = { connecte: boolean; membres: MembreDetail[] };
 
@@ -435,6 +439,52 @@ export async function getMembres(): Promise<MembresData> {
     ficheRH: (m.ficheRH && typeof m.ficheRH === "object") ? (m.ficheRH as FicheRH) : null,
   }));
   return { connecte: true, membres };
+}
+
+// ── Absences (page dédiée) ───────────────────────────────────────
+// Reflet du panneau Discord #absences. La colonne « absence » (site + bot) porte
+// le détail { jusqu, raison, depuis, programmee }. Sélection résiliente : si la
+// colonne n'existe pas encore, on retombe sur le seul statut « absent ».
+export type AbsenceDetail = {
+  jusqu: string | null; raison: string | null; depuis: string | null;
+  programmee: { debut: string | null; fin: string | null; raison: string | null } | null;
+};
+export type MembreAbsence = { id: string; nom: string; grade: string | null; pole: string; statut: string; absence: AbsenceDetail | null };
+export type AbsencesData = { connecte: boolean; absents: MembreAbsence[]; programmees: MembreAbsence[]; tous: MembreLite[] };
+
+export async function getAbsences(): Promise<AbsencesData> {
+  const vide: AbsencesData = { connecte: false, absents: [], programmees: [], tous: [] };
+  if (!dataConfigured()) return vide;
+  const supabase = createAdminClient();
+  if (!supabase) return vide;
+  let rows: Record<string, unknown>[] | null = null;
+  const avec = await supabase.from("Membre").select("id,nomIC,grade,pole,statut,absence").order("nomIC", { ascending: true });
+  if (avec.error) {
+    const base = await supabase.from("Membre").select("id,nomIC,grade,pole,statut").order("nomIC", { ascending: true });
+    if (base.error) return vide;
+    rows = (base.data || []) as Record<string, unknown>[];
+  } else {
+    rows = (avec.data || []) as Record<string, unknown>[];
+  }
+  const norm = (m: Record<string, unknown>): MembreAbsence => {
+    const a = (m.absence && typeof m.absence === "object") ? (m.absence as Record<string, unknown>) : null;
+    const p = a && a.programmee && typeof a.programmee === "object" ? (a.programmee as Record<string, unknown>) : null;
+    return {
+      id: String(m.id), nom: String(m.nomIC || m.id), grade: (m.grade as string) ?? null,
+      pole: String(m.pole || ""), statut: String(m.statut || ""),
+      absence: a ? {
+        jusqu: (a.jusqu as string) || null, raison: (a.raison as string) || null, depuis: (a.depuis as string) || null,
+        programmee: p ? { debut: (p.debut as string) || null, fin: (p.fin as string) || null, raison: (p.raison as string) || null } : null,
+      } : null,
+    };
+  };
+  const membres = rows.filter((m) => String(m.statut || "") !== "parti").map(norm);
+  const absents = membres.filter((m) => m.statut === "absent")
+    .sort((a, b) => (a.absence?.jusqu || "~").localeCompare(b.absence?.jusqu || "~"));
+  const programmees = membres.filter((m) => m.statut !== "absent" && m.absence?.programmee)
+    .sort((a, b) => (a.absence?.programmee?.debut || "").localeCompare(b.absence?.programmee?.debut || ""));
+  const tous: MembreLite[] = membres.map((m) => ({ id: m.id, nom: m.nom }));
+  return { connecte: true, absents, programmees, tous };
 }
 
 // ── Renseignement (page dédiée) ──────────────────────────────────
@@ -1158,4 +1208,66 @@ export async function getStatistiques(): Promise<StatistiquesData> {
     coffres,
     coffreEvolution,
   };
+}
+
+// ── Accès par rôle (permissions du site) ─────────────────────────
+// Déduit du grade du membre connecté (+ flag « médecin » sur sa fiche RH).
+// PRINCIPE ANTI-VERROUILLAGE : au moindre doute (pas de session, grade inconnu,
+// erreur), on OUVRE tout — on ne bloque jamais personne par erreur.
+export type Acces = { direction: boolean; officier: boolean; medecin: boolean; peutRenseignement: boolean; peutMedical: boolean };
+export async function getAcces(): Promise<Acces> {
+  const ouvert: Acces = { direction: true, officier: true, medecin: true, peutRenseignement: true, peutMedical: true };
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return ouvert;
+    const meta = (user.user_metadata || {}) as Record<string, unknown>;
+    const did = String(meta.provider_id || meta.sub || "");
+    const admin = createAdminClient();
+    if (!admin || !did) return ouvert;
+    const { data } = await admin.from("Membre").select("grade,ficheRH").eq("id", did).maybeSingle();
+    const grade = String((data?.grade as string) || "").toLowerCase();
+    if (!grade) return ouvert; // grade inconnu → on n'enferme personne
+    const f = data?.ficheRH as Record<string, unknown> | null;
+    const medecin = !!(f && typeof f === "object" && f.medecin);
+    const direction = /fondateur|conseil|directeur|fl[eé]au|concepteur/.test(grade);
+    const officier = direction || /officier|instructeur/.test(grade);
+    return { direction, officier, medecin, peutRenseignement: officier, peutMedical: direction || medecin };
+  } catch { return ouvert; }
+}
+
+// ── Carte interactive (lieux + itinéraires réels du bot) ─────────
+export type CartePoint = { id: string; type: string; niveau: string; nom: string; region: string | null; lieu: string | null; notes: string | null; x: number | null; y: number | null };
+export type CarteRoute = { id: string; type: string; niveau: string; nom: string; notes: string | null; points: { x: number; y: number }[] };
+export type CarteData = { connecte: boolean; points: CartePoint[]; routes: CarteRoute[]; peutConfidentiel: boolean };
+
+export async function getCarte(): Promise<CarteData> {
+  const vide: CarteData = { connecte: false, points: [], routes: [], peutConfidentiel: false };
+  if (!dataConfigured()) return vide;
+  const supabase = createAdminClient();
+  if (!supabase) return vide;
+  const acces = await getAcces();
+  const peutConfidentiel = acces.direction;
+  const [pR, rR] = await Promise.all([
+    supabase.from("CartePoint").select("*").limit(1000),
+    supabase.from("CarteRoute").select("*").limit(400),
+  ]);
+  // Tables pas encore créées → page vide (aucune donnée inventée).
+  if (pR.error && rR.error) return vide;
+  const num = (v: unknown): number | null => (v == null || Number.isNaN(Number(v)) ? null : Number(v));
+  let points: CartePoint[] = ((pR.data || []) as Record<string, unknown>[]).map((p) => ({
+    id: String(p.id), type: String(p.type || "autre"), niveau: String(p.niveau || "public"),
+    nom: String(p.nom || "Lieu"), region: (p.region as string) ?? null, lieu: (p.lieu as string) ?? null,
+    notes: (p.notes as string) ?? null, x: num(p.x), y: num(p.y),
+  }));
+  let routes: CarteRoute[] = ((rR.data || []) as Record<string, unknown>[]).map((r) => ({
+    id: String(r.id), type: String(r.type || "autre"), niveau: String(r.niveau || "public"),
+    nom: String(r.nom || "Itinéraire"), notes: (r.notes as string) ?? null,
+    points: Array.isArray(r.points) ? (r.points as { x: number; y: number }[]).filter((pt) => pt && Number.isFinite(Number(pt.x)) && Number.isFinite(Number(pt.y))) : [],
+  }));
+  if (!peutConfidentiel) {
+    points = points.filter((p) => p.niveau !== "confidentiel");
+    routes = routes.filter((r) => r.niveau !== "confidentiel");
+  }
+  return { connecte: true, points, routes, peutConfidentiel };
 }

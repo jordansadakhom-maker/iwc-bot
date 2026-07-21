@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FileText, Wallet, Landmark, Target, Plug, Inbox, Users, Activity, Coins, Compass } from "lucide-react";
 import clsx from "clsx";
 import type { DashData, FeedItem } from "@/lib/queries";
@@ -19,11 +20,17 @@ function Card({ children, className, delay = 0 }: { children: React.ReactNode; c
   );
 }
 
-function CardHeader({ titre, action }: { titre: string; action?: string }) {
+function CardHeader({ titre, action, href }: { titre: string; action?: string; href?: string }) {
   return (
     <div className="mb-3.5 flex items-center justify-between gap-2.5">
       <h3 className="text-[0.8rem] font-semibold uppercase tracking-[0.06em] text-muted">{titre}</h3>
-      {action ? <span className="cursor-pointer text-[0.74rem] text-accent">{action}</span> : null}
+      {action ? (
+        href ? (
+          <Link href={href} className="cursor-pointer text-[0.74rem] text-accent transition hover:text-brass-hi hover:underline">{action} →</Link>
+        ) : (
+          <span className="text-[0.74rem] text-accent">{action}</span>
+        )
+      ) : null}
     </div>
   );
 }
@@ -103,13 +110,13 @@ function Attention({ data }: { data: DashData }) {
   const items = data.attention;
   return (
     <Card delay={0.22}>
-      <CardHeader titre="Ce qui demande ton attention" action={items.length ? "Tout voir" : undefined} />
+      <CardHeader titre="Ce qui demande ton attention" action={items.length ? "Tout voir" : undefined} href="/operations" />
       {items.length === 0 ? (
         <Empty>Validations de contrats et opérations en préparation remonteront ici automatiquement.</Empty>
       ) : (
         <div className="flex flex-col">
           {items.map((a, i) => (
-            <div key={i} className={clsx("flex cursor-pointer items-start gap-3 rounded-[10px] px-2 py-3 hover:bg-[color-mix(in_srgb,var(--ink)_5%,transparent)]", i > 0 && "border-t border-border")}>
+            <Link href="/operations" key={i} className={clsx("flex cursor-pointer items-start gap-3 rounded-[10px] px-2 py-3 transition hover:bg-[color-mix(in_srgb,var(--ink)_5%,transparent)]", i > 0 && "border-t border-border")}>
               <span className="w-[3px] shrink-0 self-stretch rounded" style={{ background: SEV_STRIPE[a.sev] }} />
               <div>
                 <div className="text-[0.85rem] font-medium">{a.titre}</div>
@@ -118,7 +125,7 @@ function Attention({ data }: { data: DashData }) {
               <span className={clsx("ml-auto self-center whitespace-nowrap rounded-full px-2 py-[3px] text-[0.64rem] font-bold uppercase tracking-[0.04em]", SEV_LABEL[a.sev])} style={{ background: SEV_BG[a.sev] }}>
                 {a.tag}
               </span>
-            </div>
+            </Link>
           ))}
         </div>
       )}
@@ -131,7 +138,7 @@ function OpsBoard({ data }: { data: DashData }) {
   const total = ops.preparation.length + ops.encours.length + ops.terminees.length;
   return (
     <Card delay={0.24}>
-      <CardHeader titre="Opérations" action={total ? "Ouvrir le tableau" : undefined} />
+      <CardHeader titre="Opérations" action={total ? "Ouvrir le tableau" : undefined} href="/operations" />
       {total === 0 ? (
         <Empty>Les opérations de ton salon #operations apparaîtront ici : préparation par étapes, en cours, puis terminées.</Empty>
       ) : (
@@ -144,13 +151,13 @@ function OpsBoard({ data }: { data: DashData }) {
                   {label} <span className="ml-auto font-num text-faint">{ops[col].length}</span>
                 </div>
                 {ops[col].map((o, i) => (
-                  <div key={`${o.titre}-${i}`} className="mb-2.5 cursor-pointer rounded-[11px] border border-border bg-surface-2 px-3 py-2.5 transition hover:-translate-y-0.5 hover:border-border-2">
+                  <Link href="/operations" key={`${o.titre}-${i}`} className="mb-2.5 block cursor-pointer rounded-[11px] border border-border bg-surface-2 px-3 py-2.5 transition hover:-translate-y-0.5 hover:border-border-2">
                     <div className="text-[0.83rem] font-semibold">{o.titre}</div>
                     <div className="mt-2 flex items-center gap-2 text-[0.7rem] text-muted">
                       <span className="rounded-md px-1.5 py-0.5 text-[0.62rem] font-bold" style={{ background: "color-mix(in srgb,var(--accent) 16%,transparent)", color: "var(--accent)" }}>{o.type}</span>
                       {o.membres.length ? <span>{o.membres.length} agent(s)</span> : null}
                     </div>
-                  </div>
+                  </Link>
                 ))}
               </div>
             );

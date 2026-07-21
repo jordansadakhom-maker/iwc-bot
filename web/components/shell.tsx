@@ -8,9 +8,19 @@ import clsx from "clsx";
 import { NAV, ME, type Pole } from "@/lib/data";
 import { LogoutButton } from "@/components/logout-button";
 import { CommandPalette } from "@/components/command-palette";
-import type { AlertesData } from "@/lib/queries";
+import type { AlertesData, Acces } from "@/lib/queries";
 
 type Profil = { nom: string; initiales: string; role: string; avatarUrl: string | null };
+
+// Accès par défaut : tout ouvert (anti-verrouillage — si le grade n'est pas connu,
+// on n'enferme personne). Le vrai calcul se fait côté serveur (getAcces).
+const ACCES_OUVERT: Acces = { direction: true, officier: true, medecin: true, peutRenseignement: true, peutMedical: true };
+// Pages réservées → permission requise pour VOIR l'entrée de menu.
+const NAV_RESTRICT: Record<string, keyof Acces> = {
+  "/renseignement": "peutRenseignement",
+  "/wanted": "peutRenseignement",
+  "/medical": "peutMedical",
+};
 
 function Crest({ className }: { className?: string }) {
   return (
@@ -20,7 +30,7 @@ function Crest({ className }: { className?: string }) {
   );
 }
 
-export function Shell({ children, connecte = false, profil = null, initialPole = "iwc", alertes = { total: 0, items: [] } }: { children: React.ReactNode; connecte?: boolean; profil?: Profil | null; initialPole?: Pole; alertes?: AlertesData }) {
+export function Shell({ children, connecte = false, profil = null, initialPole = "iwc", alertes = { total: 0, items: [] }, acces = ACCES_OUVERT }: { children: React.ReactNode; connecte?: boolean; profil?: Profil | null; initialPole?: Pole; alertes?: AlertesData; acces?: Acces }) {
   const [pole, setPole] = useState<Pole>(initialPole);
   const me = profil ?? ME;
   const [open, setOpen] = useState(false);
@@ -67,10 +77,16 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
           </div>
         </div>
 
-        {NAV.map((group) => (
+        {NAV.map((group) => {
+          const items = group.items.filter((it) => {
+            const perm = NAV_RESTRICT[it.href];
+            return !perm || acces[perm];
+          });
+          if (!items.length) return null;
+          return (
           <div key={group.title}>
             <div className="px-2.5 pb-1.5 pt-3.5 text-[0.62rem] uppercase tracking-[0.18em] text-faint">{group.title}</div>
-            {group.items.map((it) => {
+            {items.map((it) => {
               const active = path === it.href;
               const Icon = it.icon;
               return (
@@ -96,7 +112,8 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
               );
             })}
           </div>
-        ))}
+          );
+        })}
 
         <div className="mt-auto flex items-center gap-2.5 border-t border-border px-2 pb-0.5 pt-3">
           <span className="h-2 w-2 rounded-full" style={{ background: connecte ? "var(--good)" : "var(--faint)" }} />

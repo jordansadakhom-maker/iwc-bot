@@ -20,6 +20,8 @@ export async function majFicheMembre(id: string, fiche: FicheRH): Promise<FicheR
     statutInterne: clean(fiche.statutInterne, 60),
     salaire: Math.max(0, Math.round(Number(fiche.salaire) || 0)),
     notes: clean(fiche.notes, 1500),
+    // Habilitation médecin : donne accès à l'onglet Médical (voir getAcces).
+    medecin: !!fiche.medecin,
   };
 
   const { error } = await admin.from("Membre").update({ ficheRH: propre }).eq("id", membreId);

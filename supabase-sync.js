@@ -33,6 +33,14 @@ function setMembresActuels(ids) {
 // null = non fourni → repli sur db.members.
 let _roster = null;
 function setMembresRoster(arr) { _roster = (Array.isArray(arr) && arr.length) ? arr : null; }
+// Met à jour à chaud une entrée du roster en cache (ex : statut/absence après une
+// commande web) pour que la resynchro immédiate reflète le changement sans
+// attendre la prochaine reconstruction complète du roster.
+function majRosterMembre(id, patch) {
+  if (!_roster || !id || !patch || typeof patch !== 'object') return;
+  const e = _roster.find(r => r && String(r.id) === String(id));
+  if (e) Object.assign(e, patch);
+}
 
 // ── Upsert générique d'un lot de lignes dans une table PostgREST ──
 // Prefer: resolution=merge-duplicates → insère ou met à jour sur la clé primaire.
@@ -68,6 +76,23 @@ function _pole(p) { p = String(p || '').toLowerCase(); return _POLES.has(p) ? p 
 
 const _STATUTS = new Set(['actif', 'absent', 'inactif', 'parti', 'visiteur']);
 function _statut(s) { s = String(s || '').toLowerCase(); return _STATUTS.has(s) ? s : 'actif'; }
+
+// Détail d'absence normalisé pour le site : { jusqu, raison, depuis, programmee }
+// ou null s'il n'y a rien de significatif à remonter (ni absence en cours ni
+// absence programmée). Réutilisé pour le roster (objet déjà prêt) et le repli
+// db.members (champs plats absentJusqu / absentRaison / absenceProgrammee).
+function _absence(a, statut) {
+  if (!a || typeof a !== 'object') return null;
+  const prog = a.programmee && typeof a.programmee === 'object'
+    ? { debut: a.programmee.debut || null, fin: a.programmee.fin || null, raison: _str(a.programmee.raison, 200) || null }
+    : null;
+  const jusqu = a.jusqu || null;
+  const raison = _str(a.raison, 200) || null;
+  const depuis = a.depuis || null;
+  const estAbsent = String(statut || '').toLowerCase() === 'absent';
+  if (!estAbsent && !jusqu && !raison && !prog) return null;
+  return { jusqu, raison, depuis, programmee: prog };
+}
 
 // Libellés des rendez-vous (clés db.rdvplus → texte lisible pour le site).
 const RDV_TYPES = { esc: 'Escorte de personne', cnv: 'Escorte de convoi', pro: 'Protection rapprochée', sec: "Sécurisation d'un lieu", enq: 'Enquête / filature', neg: 'Négociation / médiation', rec: 'Récupération de biens', bnt: 'Chasse à la prime', trv: 'Travail discret' };
@@ -129,6 +154,8 @@ function _construire(db) {
       statut: _statut(r.statut),
       ancienneteAt: r.joinedAt || null,
       updatedAt: now,
+      // Détail d'absence (colonne optionnelle — repli automatique si absente).
+      absence: _absence(r.absence),
     }));
   } else {
     membres = Object.values(db.members || {})
@@ -141,6 +168,11 @@ function _construire(db) {
         statut: _statut(m.status || m.statut),
         ancienneteAt: m.joinedAt || m.ancienneteAt || null,
         updatedAt: now,
+        // Détail d'absence (colonne optionnelle — repli automatique si absente).
+        absence: _absence({
+          jusqu: m.absentJusqu || null, raison: m.absentRaison || null, depuis: m.absentDepuis || null,
+          programmee: m.absenceProgrammee || null,
+        }, m.status || m.statut),
       }));
   }
   const memberIds = new Set(membres.map(m => m.id));
@@ -161,7 +193,7 @@ function _construire(db) {
     .map(c => ({
       id: String(c.id),
       cible: _str(c.objet || c.cible || c.titre || c.commanditaire || 'Contrat', 300),
-      motif: _str(c.details, 2000),
+      motif: _str(c.details || c.motif, 2000),
       remuneration: c.remuneration != null ? _str(c.remuneration, 120)
         : (c.montant != null ? `$${Number(c.montant).toLocaleString('fr-FR')}` : null),
       statut: _str(c.status || c.statut || 'en_attente', 60),
@@ -172,6 +204,10 @@ function _construire(db) {
       // Suivi / pipeline (colonnes optionnelles — repli automatique si absentes).
       suivi: _nn(c.suivi, 40),
       remuVerseAuCoffre: c.remuVerseAuCoffre != null ? Math.round(Number(c.remuVerseAuCoffre)) : null,
+      // Champs du formulaire Discord (colonnes optionnelles — repli si absentes).
+      categorie: _nn(c.type || c.categorie || c.typeMission, 80),
+      risque: _nn(c.risk || c.risque, 40),
+      echeance: _nn(c.echeanceTexte || c.echeance, 60),
     }));
   const contratIds = new Set(contrats.map(c => c.id));
 
@@ -402,7 +438,41 @@ function _construire(db) {
       createdAt: _isoOrUndef(t.date),
     }));
 
-  return { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes, factures, telegrammes, invItems, invMouv, portefeuilles, transactions };
+  // ── Carte : lieux (points) + itinéraires (routes) ──
+  const cartePoints = ((db.carte && Array.isArray(db.carte.points)) ? db.carte.points : [])
+    .filter(p => p && p.id)
+    .slice(0, 800)
+    .map(p => ({
+      id: String(p.id),
+      type: _str(p.type, 40) || 'autre',
+      niveau: _str(p.niveau, 20) || 'public',
+      nom: _str(p.nom, 200) || 'Lieu',
+      region: _nn(p.region, 60),
+      lieu: _nn(p.lieu, 200),
+      notes: _nn(p.notes, 500),
+      x: (p.x != null && isFinite(Number(p.x))) ? Math.round(Number(p.x) * 100) / 100 : null,
+      y: (p.y != null && isFinite(Number(p.y))) ? Math.round(Number(p.y) * 100) / 100 : null,
+      createdAt: p.createdAt || undefined,
+      updatedAt: now,
+    }));
+  const carteRoutes = ((db.carte && Array.isArray(db.carte.routes)) ? db.carte.routes : [])
+    .filter(r => r && r.id)
+    .slice(0, 300)
+    .map(r => ({
+      id: String(r.id),
+      type: _str(r.type, 40) || 'autre',
+      niveau: _str(r.niveau, 20) || 'public',
+      nom: _str(r.nom, 200) || 'Itinéraire',
+      notes: _nn(r.notes, 500),
+      points: Array.isArray(r.points)
+        ? r.points.filter(pt => pt && isFinite(Number(pt.x)) && isFinite(Number(pt.y)))
+            .slice(0, 120).map(pt => ({ x: Math.round(Number(pt.x) * 100) / 100, y: Math.round(Number(pt.y) * 100) / 100 }))
+        : [],
+      createdAt: r.createdAt || undefined,
+      updatedAt: now,
+    }));
+
+  return { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes, factures, telegrammes, invItems, invMouv, portefeuilles, transactions, cartePoints, carteRoutes };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -419,14 +489,21 @@ async function syncAll(db) {
     let out;
     do {
       _redo = false;
-      const { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes, factures, telegrammes, invItems, invMouv, portefeuilles, transactions } = _construire(db);
+      const { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes, factures, telegrammes, invItems, invMouv, portefeuilles, transactions, cartePoints, carteRoutes } = _construire(db);
       const results = [];
-      results.push(await _upsert('Membre', membres));    // 1. aucun FK bloquant (parrainId non fourni)
+      // 1. Membres — aucun FK bloquant ; repli si la colonne optionnelle
+      //    `absence` n'existe pas encore (HTTP 400) pour ne jamais vider le roster.
+      let rM = await _upsert('Membre', membres);
+      if (!rM.ok && rM.status === 400) {
+        const base = membres.map(({ absence, ...b }) => b);
+        rM = await _upsert('Membre', base);
+      }
+      results.push(rM);
       results.push(await _upsert('Coffre', coffres));    // 2. indépendant
       // 3. Contrats — tente le suivi complet ; repli si colonnes optionnelles absentes.
       let rCo = await _upsert('Contrat', contrats);
       if (!rCo.ok && rCo.status === 400) {
-        const base = contrats.map(({ suivi, remuVerseAuCoffre, ...b }) => b);
+        const base = contrats.map(({ suivi, remuVerseAuCoffre, categorie, risque, echeance, ...b }) => b);
         rCo = await _upsert('Contrat', base);
       }
       results.push(rCo);
@@ -470,6 +547,8 @@ async function syncAll(db) {
       results.push(await _upsert('InventaireMouvement', invMouv)); // 14. mouvements de stock (table optionnelle)
       results.push(await _upsert('Portefeuille', portefeuilles)); // 15. portefeuilles perso (table optionnelle)
       results.push(await _upsert('Transaction', transactions));    // 16. journal de trésorerie (table optionnelle)
+      results.push(await _upsert('CartePoint', cartePoints));       // 17. carte : lieux (table optionnelle)
+      results.push(await _upsert('CarteRoute', carteRoutes));       // 18. carte : itinéraires (table optionnelle)
       // Nettoyage des fantômes : membres partis (si roster connu), + entités supprimées localement.
       // ⚠️ On NE réconcilie PAS Rdv (préserve les demandes venues du site web).
       if (_membresActuels || _roster) { try { await _reconcilier('Membre', membres.map(m => m.id)); } catch {} }
@@ -485,6 +564,8 @@ async function syncAll(db) {
       try { await _reconcilier('InventaireItem', invItems.map(i => i.id)); } catch {}
       try { await _reconcilier('Portefeuille', portefeuilles.map(w => w.id)); } catch {}
       try { await _reconcilier('Transaction', transactions.map(t => t.id)); } catch {}
+      try { await _reconcilier('CartePoint', cartePoints.map(p => p.id)); } catch {}
+      try { await _reconcilier('CarteRoute', carteRoutes.map(r => r.id)); } catch {}
       const summary = results.map(r => `${r.table} ${r.ok ? r.count : '✗' + (r.status || '')}`).join(' · ');
       console.log(`🔄 Sync Supabase → ${summary}`);
       out = { ok: true, results };
@@ -640,4 +721,4 @@ async function marquerContratArmurerie(id, statut) {
   return await _patch(`ArmurerieContrat?id=eq.${encodeURIComponent(id)}`, body);
 }
 
-module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise, lireProduitsArmurerie, lireContratArmurerieEnAttente, marquerContratArmurerie };
+module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, majRosterMembre, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise, lireProduitsArmurerie, lireContratArmurerieEnAttente, marquerContratArmurerie };

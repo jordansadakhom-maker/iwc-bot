@@ -31,13 +31,16 @@ function ContratDetailBloc({ c }: { c: ContratDetail }) {
     <div className="mb-4 flex flex-col gap-3 rounded-[12px] border border-border bg-surface-2 px-3.5 py-3">
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone={c.pole === "illegal" ? "oxblood" : "accent"}>{c.pole === "illegal" ? "🔪 Confrérie" : "⚖️ Iron Wolf"}</Badge>
+        {c.categorie ? <Badge tone="muted">{c.categorie}</Badge> : null}
+        {c.risque ? <Badge tone={c.risque === "sanglant" ? "oxblood" : c.risque === "risque" ? "warn" : "good"}>{RISQUE_LABEL[c.risque] || c.risque}</Badge> : null}
         <Badge tone={SUIVI_TONE[c.suivi || suiviDeStatut(c.statut)] ?? "muted"}>{c.suivi || suiviDeStatut(c.statut)}</Badge>
         {c.remuneration ? <span className="ml-auto font-num text-[0.86rem] font-semibold" style={{ color: "var(--accent)" }}>{c.remuneration}</span> : null}
       </div>
       {c.remuVerseAuCoffre ? <div className="flex items-center gap-1.5 text-[0.8rem]" style={{ color: "var(--good)" }}><Landmark className="h-3.5 w-3.5" /> {cents(c.remuVerseAuCoffre)}$ versés au coffre</div> : null}
       <div className="text-[0.86rem] leading-relaxed text-ink">{c.cible}</div>
       {c.commanditaire ? <div className="text-[0.8rem] text-muted"><span className="text-faint">Commanditaire : </span>{c.commanditaire}</div> : null}
-      {c.motif ? <div className="text-[0.82rem] leading-relaxed text-muted"><span className="text-faint">Détails / conditions : </span>{c.motif}</div> : null}
+      {c.echeance ? <div className="text-[0.8rem] text-muted"><span className="text-faint">Échéance : </span>{c.echeance}</div> : null}
+      {c.motif ? <div className="text-[0.82rem] leading-relaxed text-muted"><span className="text-faint">Consignes / détails : </span>{c.motif}</div> : null}
       {c.agentsNoms.length ? (
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-1.5 text-[0.72rem] uppercase tracking-[0.05em] text-faint"><Users className="h-3.5 w-3.5" /> Agents ({c.agentsNoms.length})</div>
@@ -68,6 +71,24 @@ const POLES = [
 const STATUT_TONE: Record<string, "good" | "warn" | "muted" | "accent" | "oxblood"> = {
   en_attente: "warn", valide: "good", signe: "good", termine: "muted", annule: "muted", refuse: "oxblood",
 };
+// Types de mission — identiques au bot Discord, adaptés au pôle (légal = missions
+// Iron Wolf, Confrérie = missions clandestines).
+const TYPES_LEGAL = [
+  "Escorte de personne", "Escorte de convoi", "Protection rapprochée", "Sécurisation d'un lieu",
+  "Enquête / filature", "Négociation / médiation", "Récupération de biens", "Chasse à la prime", "Travail discret", "Autre",
+];
+const TYPES_CONFRERIE = [
+  "Contrebande", "Sabotage", "Vol organisé", "Élimination", "Extorsion / Racket",
+  "Espionnage / Filature", "Protection", "Chasseur de primes", "Récupération de dette", "Autre",
+];
+const typesPour = (pole: string) => (pole === "illegal" ? TYPES_CONFRERIE : TYPES_LEGAL);
+// Niveau de risque — Confrérie uniquement (comme sur Discord).
+const RISQUES = [
+  { key: "discret", label: "🟢 Discret", tone: "var(--good)" },
+  { key: "risque", label: "🟠 Risqué", tone: "var(--warn)" },
+  { key: "sanglant", label: "🔴 Sanglant", tone: "var(--oxblood)" },
+];
+const RISQUE_LABEL: Record<string, string> = { discret: "🟢 Discret", risque: "🟠 Risqué", sanglant: "🔴 Sanglant" };
 
 export function ContratsTable({ contrats }: { contrats: ContratDetail[] }) {
   const router = useRouter();
@@ -126,27 +147,45 @@ export function ContratsTable({ contrats }: { contrats: ContratDetail[] }) {
 }
 
 function NouveauModal({ onClose, router }: { onClose: () => void; router: Router }) {
+  const [pole, setPole] = useState("legal");
+  const [categorie, setCategorie] = useState("");
+  const [risque, setRisque] = useState("discret");
   const [cible, setCible] = useState("");
   const [commanditaire, setCommanditaire] = useState("");
   const [remuneration, setRemuneration] = useState("");
+  const [echeance, setEcheance] = useState("");
+  const [details, setDetails] = useState("");
   const [statut, setStatut] = useState("en_attente");
-  const [pole, setPole] = useState("legal");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState(false);
+  const conf = pole === "illegal";
+  const types = typesPour(pole);
+
+  function changerPole(p: string) {
+    setPole(p);
+    // Si le type sélectionné n'existe pas dans le nouveau pôle, on le réinitialise.
+    if (categorie && !typesPour(p).includes(categorie)) setCategorie("");
+  }
 
   async function creer() {
     setErr(null);
-    if (cible.trim().length < 2) { setErr("Donne un objet au contrat."); return; }
+    if (cible.trim().length < 2) { setErr("Donne un objet à la mission."); return; }
     setBusy(true);
-    const r = await creerContrat({ cible, commanditaire, remuneration, statut, pole });
+    const r = await creerContrat({
+      cible, commanditaire, remuneration, statut, pole,
+      categorie: categorie || undefined,
+      risque: conf ? risque : undefined,
+      echeance: echeance || undefined,
+      details: details || undefined,
+    });
     setBusy(false);
     if (!r.ok) { setErr(r.error || "Impossible."); return; }
     setOk(true); router.refresh();
   }
 
   return (
-    <Modal titre="📜 Nouveau contrat" onClose={onClose}>
+    <Modal titre="📜 Nouveau contrat" onClose={onClose} max={560}>
       {ok ? (
         <div className="flex flex-col gap-3">
           <Flash>Contrat créé — il apparaîtra ici dans ~30 s.</Flash>
@@ -154,12 +193,27 @@ function NouveauModal({ onClose, router }: { onClose: () => void; router: Router
         </div>
       ) : (
         <div className="flex flex-col gap-3">
-          <Champ label="Objet *"><input className={inputCls} value={cible} onChange={(e) => setCible(e.target.value)} placeholder="Escorte d'un convoi de médicaments" maxLength={300} autoFocus /></Champ>
+          {/* Étape 1 — pôle & type de mission (comme sur Discord : type puis risque) */}
+          <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Pôle</span><Picker options={POLES} value={pole} onChange={changerPole} /></div>
+          <Champ label="Type de mission">
+            <select className={inputCls} value={categorie} onChange={(e) => setCategorie(e.target.value)}>
+              <option value="">— Choisir un type —</option>
+              {types.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </Champ>
+          {conf ? (
+            <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Niveau de risque</span><Picker options={RISQUES} value={risque} onChange={setRisque} /></div>
+          ) : null}
+
+          {/* Étape 2 — le modal Discord : commanditaire, objet, prime, échéance, consignes */}
+          <Champ label="Commanditaire"><input className={inputCls} value={commanditaire} onChange={(e) => setCommanditaire(e.target.value)} placeholder={conf ? "Vide = anonyme & confidentiel" : "M. Ross"} maxLength={200} /></Champ>
+          <Champ label="Objet de la mission *"><input className={inputCls} value={cible} onChange={(e) => setCible(e.target.value)} placeholder={conf ? "Ex : récupérer la cargaison volée à Valentine…" : "Escorte d'un convoi de médicaments"} maxLength={300} autoFocus /></Champ>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Champ label="Commanditaire"><input className={inputCls} value={commanditaire} onChange={(e) => setCommanditaire(e.target.value)} placeholder="M. Ross" maxLength={200} /></Champ>
-            <Champ label="Rémunération"><input className={inputCls} value={remuneration} onChange={(e) => setRemuneration(e.target.value)} placeholder="$1200" maxLength={120} /></Champ>
+            <Champ label="Prime / Rémunération"><input className={inputCls} value={remuneration} onChange={(e) => setRemuneration(e.target.value)} placeholder={conf ? "2000$ + part du butin" : "$1200"} maxLength={120} /></Champ>
+            <Champ label="Échéance (optionnel)"><input className={inputCls} value={echeance} onChange={(e) => setEcheance(e.target.value)} placeholder="30/08/2026" maxLength={60} /></Champ>
           </div>
-          <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Pôle</span><Picker options={POLES} value={pole} onChange={setPole} /></div>
+          <Champ label="Consignes / détails (optionnel)"><textarea className={inputCls + " min-h-[80px] resize-y leading-relaxed"} value={details} onChange={(e) => setDetails(e.target.value)} placeholder="Lieu, cible, méthode, contacts, infos utiles…" maxLength={2000} /></Champ>
+
           <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Statut</span><Picker options={STATUTS} value={statut} onChange={setStatut} /></div>
           {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
           <div className="mt-1 flex justify-end gap-2">
@@ -180,6 +234,9 @@ function EditModal({ contrat, onClose, router }: { contrat: ContratDetail; onClo
   const [remuneration, setRemuneration] = useState(contrat.remuneration || "");
   const [statut, setStatut] = useState((contrat.statut || "en_attente").toLowerCase());
   const [pole, setPole] = useState(contrat.pole === "illegal" ? "illegal" : "legal");
+  const [categorie, setCategorie] = useState(contrat.categorie || "");
+  const [echeance, setEcheance] = useState(contrat.echeance || "");
+  const [details, setDetails] = useState(contrat.motif || "");
   const [busy, setBusy] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
@@ -257,13 +314,21 @@ function EditModal({ contrat, onClose, router }: { contrat: ContratDetail; onClo
 
       <div className="mb-2 border-t border-border pt-3 text-[0.72rem] uppercase tracking-[0.06em] text-faint">Modifier</div>
       <div className="flex flex-col gap-3">
+        <Champ label="Type de mission">
+          <select className={inputCls} value={categorie} onChange={(e) => setCategorie(e.target.value)}>
+            <option value="">— Non précisé —</option>
+            {(typesPour(pole).includes(categorie) || !categorie ? typesPour(pole) : [categorie, ...typesPour(pole)]).map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </Champ>
         <Champ label="Objet"><input className={inputCls} value={cible} onChange={(e) => setCible(e.target.value)} maxLength={300} /></Champ>
         <div className="grid gap-3 sm:grid-cols-2">
           <Champ label="Commanditaire"><input className={inputCls} value={commanditaire} onChange={(e) => setCommanditaire(e.target.value)} maxLength={200} /></Champ>
           <Champ label="Rémunération"><input className={inputCls} value={remuneration} onChange={(e) => setRemuneration(e.target.value)} maxLength={120} /></Champ>
         </div>
+        <Champ label="Échéance"><input className={inputCls} value={echeance} onChange={(e) => setEcheance(e.target.value)} placeholder="30/08/2026" maxLength={60} /></Champ>
+        <Champ label="Consignes / détails"><textarea className={inputCls + " min-h-[70px] resize-y leading-relaxed"} value={details} onChange={(e) => setDetails(e.target.value)} maxLength={2000} /></Champ>
         <div className="flex justify-end">
-          <button onClick={() => push({ cible, commanditaire, remuneration }, "save")} disabled={busy === "save"} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">
+          <button onClick={() => push({ cible, commanditaire, remuneration, categorie, echeance, details }, "save")} disabled={busy === "save"} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">
             {busy === "save" ? <Loader2 className="h-3 w-3 animate-spin" /> : null} Enregistrer
           </button>
         </div>

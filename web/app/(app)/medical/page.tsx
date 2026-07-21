@@ -1,11 +1,14 @@
 import { HeartPulse } from "lucide-react";
-import { getMedical, getMembres } from "@/lib/queries";
+import { getMedical, getMembres, getAcces } from "@/lib/queries";
 import { PageHeader, Card, CardHeader, Empty } from "@/components/ui";
 import { MedicalGrid } from "@/components/medical-grid";
+import { AccesReserve } from "@/components/acces-reserve";
 
 export const dynamic = "force-dynamic";
 
 export default async function MedicalPage() {
+  const acces = await getAcces();
+  if (!acces.peutMedical) return <AccesReserve titre="Médical" detail="Les dossiers médicaux sont réservés au médecin de la compagnie et à la Direction." />;
   const [{ connecte, dossiers }, { membres }] = await Promise.all([getMedical(), getMembres()]);
   // Membres proposables pour un nouveau dossier (ceux sans dossier existant).
   const avecDossier = new Set(dossiers.map((d) => d.membreId));

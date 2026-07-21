@@ -8793,7 +8793,10 @@ async function _majMembresActuels(guilds) {
           const mem = db.members[m.id] || {};
           const pole = m.roles.cache.some(r => /confr[ée]rie|confrerie/i.test(r.name)) ? 'illegal'
             : (mem.pole === 'illegal' ? 'illegal' : 'legal');
-          roster.push({ id: m.id, nom: mem.name || m.displayName, grade: g.nom, pole, statut: mem.status || 'actif', joinedAt: mem.joinedAt || null });
+          const _abs = (mem.status === 'absent' || mem.absenceProgrammee)
+            ? { jusqu: mem.absentJusqu || null, raison: mem.absentRaison || null, depuis: mem.absentDepuis || null, programmee: mem.absenceProgrammee || null }
+            : null;
+          roster.push({ id: m.id, nom: mem.name || m.displayName, grade: g.nom, pole, statut: mem.status || 'actif', joinedAt: mem.joinedAt || null, absence: _abs });
         }
       }
     }

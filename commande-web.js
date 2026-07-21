@@ -20,11 +20,24 @@ let medical = null; try { medical = require('./medical'); } catch {}
 let repertoire = null; try { repertoire = require('./repertoire'); } catch {}
 let telegramme = null; try { telegramme = require('./telegramme'); } catch {}
 let inventaire = null; try { inventaire = require('./inventaire'); } catch {}
+let absences = null; try { absences = require('./absences'); } catch {}
 function _normInv(x) { return String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, ''); }
 
 // ── Utilitaires ──
 function _s(v, max) { if (v == null) return ''; const s = String(v).trim(); return max ? s.slice(0, max) : s; }
 function _dateFR() { try { return new Date().toLocaleDateString('fr-FR'); } catch { return ''; } }
+function _isoOrNull(v) { if (!v) return null; try { const d = new Date(v); return isNaN(d.getTime()) ? null : d.toISOString(); } catch { return null; } }
+// Reflet d'absence d'un membre (statut + détail) pour la mise à chaud du roster
+// mis en cache — la resynchro immédiate reflète le changement sans attendre la
+// prochaine reconstruction du roster.
+function _absencePatch(m) {
+  return {
+    statut: (m && m.status) || 'actif',
+    absence: (m && (m.status === 'absent' || m.absenceProgrammee))
+      ? { jusqu: m.absentJusqu || null, raison: m.absentRaison || null, depuis: m.absentDepuis || null, programmee: m.absenceProgrammee || null }
+      : null,
+  };
+}
 const _STATUTS_MED = new Set(['non_teste', 'apte', 'observation', 'inapte']);
 function _statutMed(s) { s = String(s || '').toLowerCase(); return _STATUTS_MED.has(s) ? s : 'non_teste'; }
 function _medFiche(db, id) {
@@ -202,6 +215,9 @@ const HANDLERS = {
       id, objet, commanditaire: _s(p.commanditaire, 200), clientNom: _s(p.commanditaire, 200),
       remuneration: _s(p.remuneration, 120), status: _statutContrat(p.statut),
       pole: _poleC(p.pole), agents: [], createdAt: new Date().toISOString(),
+      // Mêmes champs que le formulaire Discord (type, risque, échéance, consignes).
+      type: _s(p.categorie, 80) || null, risk: _s(p.risque, 40) || null,
+      echeanceTexte: _s(p.echeance, 60) || null, details: _s(p.details, 2000) || null,
       createurNom: p.auteurNom || 'Site web', source: 'web',
     });
     return { ok: true, message: `Contrat « ${objet.slice(0, 50)} » créé` };
@@ -214,6 +230,10 @@ const HANDLERS = {
     if (p.remuneration !== undefined) c.remuneration = _s(p.remuneration, 120);
     if (p.statut !== undefined) c.status = _statutContrat(p.statut);
     if (p.pole !== undefined) c.pole = _poleC(p.pole);
+    if (p.categorie !== undefined) c.type = _s(p.categorie, 80) || null;
+    if (p.risque !== undefined) c.risk = _s(p.risque, 40) || null;
+    if (p.echeance !== undefined) c.echeanceTexte = _s(p.echeance, 60) || null;
+    if (p.details !== undefined) c.details = _s(p.details, 2000) || null;
     c.majPar = p.auteurNom || 'Site web'; c.majAt = Date.now();
     return { ok: true, message: 'Contrat mis à jour' };
   },
@@ -411,6 +431,46 @@ Object.assign(HANDLERS, {
     if (i < 0) return { ok: false, message: 'Contact introuvable' };
     const [removed] = r.contacts.splice(i, 1);
     return { ok: true, message: 'Contact supprimé', discord: { type: 'contact-del', contact: removed } };
+  },
+
+  // ── Absences (db.members[id]) — déclarer / lever depuis le site ──
+  // Même modèle que le panneau Discord #absences : status='absent' + absentJusqu
+  // + absentRaison (immédiate) ou absenceProgrammee (à venir). Le tableau Discord
+  // est rafraîchi et le roster mis à chaud pour un reflet immédiat sur le site.
+  'absence.declarer': (db, p) => {
+    const id = _s(p.membreId, 40);
+    if (!id) return { ok: false, message: 'membreId manquant' };
+    if (!db.members || !db.members[id]) return { ok: false, message: 'Membre inconnu du bot' };
+    const m = db.members[id];
+    const raison = _s(p.raison, 200);
+    const jusqu = _isoOrNull(p.jusqu);
+    const debut = _isoOrNull(p.debut);
+    const debutFutur = debut && new Date(debut).getTime() > Date.now() + 3600000; // > 1 h dans le futur
+    if (debutFutur) {
+      // Absence PROGRAMMÉE : ne touche pas au statut actuel (le membre reste actif).
+      m.absenceProgrammee = { debut, fin: jusqu || null, raison: raison || '' };
+      try { supa.majRosterMembre?.(id, _absencePatch(m)); } catch {}
+      return { ok: true, message: 'Absence programmée enregistrée', discord: { type: 'absences' } };
+    }
+    m.status = 'absent';
+    m.absentDepuis = new Date().toISOString();
+    m.absentJusqu = jusqu || null;
+    if (raison) m.absentRaison = raison;
+    m.lastActivity = new Date().toISOString();
+    try { supa.majRosterMembre?.(id, _absencePatch(m)); } catch {}
+    return { ok: true, message: 'Absence déclarée', discord: { type: 'absences' } };
+  },
+  'absence.retour': (db, p) => {
+    const id = _s(p.membreId, 40);
+    if (!id) return { ok: false, message: 'membreId manquant' };
+    const m = db.members && db.members[id];
+    if (!m) return { ok: false, message: 'Membre inconnu du bot' };
+    if (m.status !== 'absent' && !m.absenceProgrammee) return { ok: false, message: 'Aucune absence à lever' };
+    m.status = 'actif';
+    delete m.absentJusqu; delete m.absentRaison; delete m.absentMode; delete m.absentDepuis; delete m.absenceProgrammee;
+    m.lastActivity = new Date().toISOString();
+    try { supa.majRosterMembre?.(id, _absencePatch(m)); } catch {}
+    return { ok: true, message: 'Absence levée — de retour', discord: { type: 'absences' } };
   },
 
   // ── Armes (db.registreArmes.armes) ───────────────────────
@@ -669,6 +729,8 @@ async function _refletDiscord(guild, ref) {
       await repertoire.supprimerFicheContactWeb(guild, ref.contact).catch(() => {});
     } else if (ref.type === 'inventaire' && inventaire?.rafraichirBoardDemarrage) {
       await inventaire.rafraichirBoardDemarrage(guild).catch(() => {});
+    } else if (ref.type === 'absences' && absences?.rafraichirTableau) {
+      await absences.rafraichirTableau(guild).catch(() => {});
     }
   } catch {}
 }
