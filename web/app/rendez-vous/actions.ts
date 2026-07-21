@@ -14,6 +14,7 @@ export type RdvInput = {
   creneau: string;
   duree?: string;
   lieu: string;
+  lieuPhoto?: string; // URL d'une capture d'écran du lieu (Supabase Storage)
   contact: string;
   message: string;
   // Anti-spam : champ piège, doit rester vide (rempli = robot).
@@ -42,6 +43,12 @@ export async function soumettreRdv(data: RdvInput): Promise<RdvResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible. Réessaie dans un instant." };
 
+  // Capture du lieu : on n'accepte qu'une URL issue de NOTRE stockage Supabase
+  // (téléversée via uploadPhoto), jamais une adresse arbitraire.
+  const supaUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  const photoBrut = (data.lieuPhoto || "").trim();
+  const lieuPhoto = supaUrl && photoBrut.startsWith(supaUrl) ? photoBrut.slice(0, 500) : null;
+
   const id = crypto.randomUUID();
   const { error } = await admin.from("Rdv").insert({
     id,
@@ -56,6 +63,7 @@ export async function soumettreRdv(data: RdvInput): Promise<RdvResult> {
       contact: contact.slice(0, 200),
       duree: (data.duree || "").trim().slice(0, 60) || null,
       message: message.slice(0, 2000),
+      lieuPhoto,
       notifieDiscord: false,
     },
   });

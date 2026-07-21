@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { CalendarCheck, CheckCircle2, Loader2 } from "lucide-react";
+import { CalendarCheck, CheckCircle2, Loader2, X } from "lucide-react";
 import { soumettreRdv } from "./actions";
+import { PhotoDrop } from "@/components/photo-drop";
 
 const PRESTATIONS = [
   "Sécurité / Garde du corps",
@@ -42,7 +43,7 @@ export function BookingForm() {
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [form, setForm] = useState({
-    nomRP: "", prestation: PRESTATIONS[0], creneau: "", duree: DUREES[1], lieu: "", moyen: MOYENS[0], contact: "", message: "", website: "",
+    nomRP: "", prestation: PRESTATIONS[0], creneau: "", duree: DUREES[1], lieu: "", lieuPhoto: "", moyen: MOYENS[0], contact: "", message: "", website: "",
   });
 
   function set<K extends keyof typeof form>(k: K, v: string) {
@@ -80,7 +81,7 @@ export function BookingForm() {
           Un membre te recontactera via <b>{form.moyen}</b> ({form.contact}) dès que possible.
         </p>
         <button
-          onClick={() => { setDone(false); setForm({ nomRP: "", prestation: PRESTATIONS[0], creneau: "", duree: DUREES[1], lieu: "", moyen: MOYENS[0], contact: "", message: "", website: "" }); }}
+          onClick={() => { setDone(false); setForm({ nomRP: "", prestation: PRESTATIONS[0], creneau: "", duree: DUREES[1], lieu: "", lieuPhoto: "", moyen: MOYENS[0], contact: "", message: "", website: "" }); }}
           className="mt-2 rounded-xl border border-border bg-surface px-4 py-2 text-[0.85rem] text-muted hover:text-ink"
         >
           Faire une autre demande
@@ -119,6 +120,19 @@ export function BookingForm() {
       <div>
         <label className="mb-1.5 block text-[0.76rem] font-semibold uppercase tracking-[0.06em] text-muted">Lieu (facultatif)</label>
         <input className={inputCls} value={form.lieu} onChange={(e) => set("lieu", e.target.value)} placeholder="Ex. Valentine, Rhodes…" />
+        <div className="mt-2">
+          {form.lieuPhoto ? (
+            <div className="relative">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={form.lieuPhoto} alt="Capture du lieu" className="max-h-48 w-full rounded-xl border border-border object-cover" />
+              <button type="button" onClick={() => set("lieuPhoto", "")} className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-lg bg-black/65 px-2 py-1 text-[0.7rem] font-semibold text-white backdrop-blur">
+                <X className="h-3 w-3" /> Retirer
+              </button>
+            </div>
+          ) : (
+            <PhotoDrop dossier="rdv-lieux" compact camera label="📷 Glisse une capture d'écran du lieu (facultatif)" onUploaded={(url) => set("lieuPhoto", url)} />
+          )}
+        </div>
       </div>
 
       <div>
