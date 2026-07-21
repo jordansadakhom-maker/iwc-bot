@@ -271,6 +271,7 @@ export type ContratDetail = {
   id: string; cible: string; commanditaire: string | null; statut: string; pole: string;
   remuneration: string | null; motif: string | null; agentsNoms: string[]; createdAt: string | null;
   suivi: string | null; remuVerseAuCoffre: number | null;
+  categorie: string | null; risque: string | null; echeance: string | null;
 };
 export type OperationsData = {
   connecte: boolean;
@@ -399,6 +400,9 @@ export async function getOperations(): Promise<OperationsData> {
         createdAt: (c.createdAt as string) ?? null,
         suivi: (c.suivi as string) ?? null,
         remuVerseAuCoffre: c.remuVerseAuCoffre == null ? null : Number(c.remuVerseAuCoffre),
+        categorie: (c.categorie as string) ?? null,
+        risque: (c.risque as string) ?? null,
+        echeance: (c.echeance as string) ?? null,
       };
     });
 

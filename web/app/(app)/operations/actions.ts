@@ -47,9 +47,10 @@ export async function terminerOperation(
   return envoyerCommande("operation.terminer", { id, ...data, montantPrime: Math.max(0, Math.round(Number(data.montantPrime) || 0)) });
 }
 
-// ── Contrats ──
+// ── Contrats ── (mêmes champs que le formulaire Discord)
 export async function creerContrat(data: {
   cible: string; commanditaire?: string; remuneration?: string; statut?: string; pole?: string;
+  categorie?: string; risque?: string; echeance?: string; details?: string;
 }): Promise<CommandeResult> {
   if (!data.cible || data.cible.trim().length < 2) return { ok: false, error: "Donne un objet au contrat." };
   return envoyerCommande("contrat.create", { ...data });
@@ -57,7 +58,10 @@ export async function creerContrat(data: {
 
 export async function majContrat(
   id: string,
-  patch: { cible?: string; commanditaire?: string; remuneration?: string; statut?: string; pole?: string }
+  patch: {
+    cible?: string; commanditaire?: string; remuneration?: string; statut?: string; pole?: string;
+    categorie?: string; risque?: string; echeance?: string; details?: string;
+  }
 ): Promise<CommandeResult> {
   if (!id) return { ok: false, error: "Contrat introuvable." };
   return envoyerCommande("contrat.update", { id, ...patch });

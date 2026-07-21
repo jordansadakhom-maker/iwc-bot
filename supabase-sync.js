@@ -193,7 +193,7 @@ function _construire(db) {
     .map(c => ({
       id: String(c.id),
       cible: _str(c.objet || c.cible || c.titre || c.commanditaire || 'Contrat', 300),
-      motif: _str(c.details, 2000),
+      motif: _str(c.details || c.motif, 2000),
       remuneration: c.remuneration != null ? _str(c.remuneration, 120)
         : (c.montant != null ? `$${Number(c.montant).toLocaleString('fr-FR')}` : null),
       statut: _str(c.status || c.statut || 'en_attente', 60),
@@ -204,6 +204,10 @@ function _construire(db) {
       // Suivi / pipeline (colonnes optionnelles — repli automatique si absentes).
       suivi: _nn(c.suivi, 40),
       remuVerseAuCoffre: c.remuVerseAuCoffre != null ? Math.round(Number(c.remuVerseAuCoffre)) : null,
+      // Champs du formulaire Discord (colonnes optionnelles — repli si absentes).
+      categorie: _nn(c.type || c.categorie || c.typeMission, 80),
+      risque: _nn(c.risk || c.risque, 40),
+      echeance: _nn(c.echeanceTexte || c.echeance, 60),
     }));
   const contratIds = new Set(contrats.map(c => c.id));
 
@@ -465,7 +469,7 @@ async function syncAll(db) {
       // 3. Contrats — tente le suivi complet ; repli si colonnes optionnelles absentes.
       let rCo = await _upsert('Contrat', contrats);
       if (!rCo.ok && rCo.status === 400) {
-        const base = contrats.map(({ suivi, remuVerseAuCoffre, ...b }) => b);
+        const base = contrats.map(({ suivi, remuVerseAuCoffre, categorie, risque, echeance, ...b }) => b);
         rCo = await _upsert('Contrat', base);
       }
       results.push(rCo);

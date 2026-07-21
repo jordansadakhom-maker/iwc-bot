@@ -215,6 +215,9 @@ const HANDLERS = {
       id, objet, commanditaire: _s(p.commanditaire, 200), clientNom: _s(p.commanditaire, 200),
       remuneration: _s(p.remuneration, 120), status: _statutContrat(p.statut),
       pole: _poleC(p.pole), agents: [], createdAt: new Date().toISOString(),
+      // Mêmes champs que le formulaire Discord (type, risque, échéance, consignes).
+      type: _s(p.categorie, 80) || null, risk: _s(p.risque, 40) || null,
+      echeanceTexte: _s(p.echeance, 60) || null, details: _s(p.details, 2000) || null,
       createurNom: p.auteurNom || 'Site web', source: 'web',
     });
     return { ok: true, message: `Contrat « ${objet.slice(0, 50)} » créé` };
@@ -227,6 +230,10 @@ const HANDLERS = {
     if (p.remuneration !== undefined) c.remuneration = _s(p.remuneration, 120);
     if (p.statut !== undefined) c.status = _statutContrat(p.statut);
     if (p.pole !== undefined) c.pole = _poleC(p.pole);
+    if (p.categorie !== undefined) c.type = _s(p.categorie, 80) || null;
+    if (p.risque !== undefined) c.risk = _s(p.risque, 40) || null;
+    if (p.echeance !== undefined) c.echeanceTexte = _s(p.echeance, 60) || null;
+    if (p.details !== undefined) c.details = _s(p.details, 2000) || null;
     c.majPar = p.auteurNom || 'Site web'; c.majAt = Date.now();
     return { ok: true, message: 'Contrat mis à jour' };
   },
