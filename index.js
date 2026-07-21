@@ -3957,6 +3957,25 @@ client.on('messageCreate', async message => {
       return;
     }
   } catch {}
+  // Import des dossiers médicaux depuis le salon (forum) → rattrape sur le site
+  // les dossiers de June qui n'étaient pas dans les données. Réservé Direction.
+  try {
+    if (message.guild && !message.author?.bot && /^!importer-medical\b/i.test((message.content || '').trim())) {
+      if (!isDirection(message.member)) { await message.reply({ content: "❌ Réservé à la Direction.", allowedMentions: { parse: [] } }).catch(() => {}); return; }
+      if (!medical?.importerDossiersDuSalon) { await message.reply({ content: "Module médical indisponible.", allowedMentions: { parse: [] } }).catch(() => {}); return; }
+      const wait = await message.reply({ content: "🩺 Import des dossiers médicaux en cours… (lecture du salon, ça peut prendre un moment)", allowedMentions: { parse: [] } }).catch(() => null);
+      try {
+        const res = await medical.importerDossiersDuSalon(message.guild);
+        if (res?.ok) { try { await supabaseSync.syncAll(loadDB()); } catch {} }
+        const txt = res?.ok ? `✅ ${res.message}\n_Dossiers synchronisés sur le site._` : `❌ ${res?.message || "Échec de l'import."}`;
+        if (wait?.edit) await wait.edit({ content: txt.slice(0, 1900), allowedMentions: { parse: [] } }).catch(() => {});
+        else await message.reply({ content: txt.slice(0, 1900), allowedMentions: { parse: [] } }).catch(() => {});
+      } catch (e) {
+        if (wait?.edit) await wait.edit({ content: "❌ " + (e.message || "Erreur pendant l'import"), allowedMentions: { parse: [] } }).catch(() => {});
+      }
+      return;
+    }
+  } catch {}
   // Réinitialisation du registre (sans commande slash, pour ne pas dépasser la limite Discord) :
   // un responsable tape « !reset-registre » → confirmation par boutons.
   try {

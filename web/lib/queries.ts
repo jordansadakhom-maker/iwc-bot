@@ -522,7 +522,8 @@ export async function getMedical(): Promise<MedicalData> {
   const dossiers: DossierItem[] = ((dossiersR.data || []) as DRow[]).map((d) => ({
     id: String(d.id),
     membreId: String(d.membreId ?? d.id),
-    nom: noms.get(String(d.membreId)) || String(d.membreId) || "Patient",
+    // nomRP (importé / patient non-membre) prioritaire, sinon nom du membre.
+    nom: (d.nomRP as string) || noms.get(String(d.membreId)) || String(d.membreId) || "Patient",
     statut: (d.statut as string) || "—",
     blessures: _arr<Blessure>(d.blessures),
     ordonnances: _arr<Ordonnance>(d.ordonnances),

@@ -1722,5 +1722,98 @@ async function rafraichirDossierWeb(guild, id) {
   } catch { return false; }
 }
 
-module.exports = { installerPanel, installerExemple, installerPanelDemande, installerDossiers, routeInteraction, checkRappelsMedicaux, rafraichirDossierWeb, MEDICAL_CHANNEL, ROLE_MEDECIN, _test: { _dossierThread, _posterAuDossier, _archiverFilsPatient, _supprimerFilsPatient } };
+// ═══════════════════════════════════════════════════════════════
+//  IMPORT : reconstruit les dossiers médicaux à partir des fils du salon
+//  (forum = un fil par patient). Récupère les dossiers de June « perdus »
+//  (pas dans db.suiviMedical) sans rien inventer : nom + statut depuis le
+//  titre du fil, détail (résumé, blessures, ordonnances) extrait par l'IA
+//  du contenu réel du fil. Additif : ne SUPPRIME rien, ne fait que compléter.
+// ═══════════════════════════════════════════════════════════════
+async function _iaDossier(nom, corpus) {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) return null;
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-5', max_tokens: 700,
+        system: "Tu lis le dossier médical d'un patient (compagnie de l'Ouest, RDR2). Extrais UNIQUEMENT ce qui est écrit, sans rien inventer. Réponds en JSON compact et RIEN d'autre : {\"resume\":\"synthèse en 1-3 phrases\",\"blessures\":[{\"desc\":\"\",\"gravite\":\"\"}],\"ordonnances\":[{\"medicaments\":\"\",\"posologie\":\"\"}]}. Listes vides si rien n'est mentionné.",
+        messages: [{ role: 'user', content: `PATIENT : ${nom}\n\nCONTENU DU DOSSIER :\n${corpus}\n\nDonne le JSON.` }],
+      }),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const txt = (data?.content || []).filter(c => c.type === 'text').map(c => c.text).join('');
+    const m = txt.match(/\{[\s\S]*\}/);
+    return m ? JSON.parse(m[0]) : null;
+  } catch { return null; }
+}
+
+const _STAT_EMOJI = { '✅': 'apte', '⚠️': 'observation', '❌': 'inapte', '🩺': 'non_teste', '⏳': 'non_teste' };
+
+async function importerDossiersDuSalon(guild) {
+  const ch = _ch(guild, MEDICAL_CHANNEL);
+  if (!ch) return { ok: false, message: 'Salon médical introuvable.' };
+  if (ch.type !== 15) return { ok: false, message: "Le salon médical n'est pas un forum : import automatique impossible." };
+  // Tous les fils (actifs + archivés).
+  const fils = [];
+  try { const a = await ch.threads.fetchActive().catch(() => null); if (a?.threads) fils.push(...a.threads.values()); } catch {}
+  try {
+    let before;
+    for (let i = 0; i < 15; i++) {
+      const arc = await ch.threads.fetchArchived({ limit: 100, before }).catch(() => null);
+      if (!arc?.threads?.size) break;
+      const arr = [...arc.threads.values()];
+      fils.push(...arr);
+      before = arr[arr.length - 1]?.id;
+      if (!arc.hasMore) break;
+    }
+  } catch {}
+  const vus = new Set();
+  const uniques = fils.filter(t => { if (vus.has(t.id)) return false; vus.add(t.id); return true; });
+
+  const db = loadDB();
+  if (!db.suiviMedical) db.suiviMedical = {};
+  let cree = 0, complete = 0;
+  for (const t of uniques) {
+    try {
+      const nom0 = String(t.name || '');
+      const tag = nom0.match(/\[(\d{5,25})\]/);
+      const emoji = Object.keys(_STAT_EMOJI).find(e => nom0.startsWith(e));
+      const statut = _STAT_EMOJI[emoji] || 'non_teste';
+      const nomRP = nom0.replace(/\[[^\]]*\]/g, '').replace(/^[^\p{L}]+/u, '').trim().slice(0, 120) || 'Patient';
+      const key = tag ? tag[1] : ('med-' + t.id);
+      const dejaLa = !!db.suiviMedical[key];
+
+      // Corpus = message d'ouverture + jusqu'à 30 messages du fil.
+      let corpus = '';
+      const push = (msg) => { if (!msg) return; if (msg.content) corpus += '\n' + msg.content; (msg.embeds || []).forEach(e => { corpus += '\n' + (e.title || '') + '\n' + (e.description || '') + '\n' + (e.fields || []).map(f => `${f.name}: ${f.value}`).join('\n'); }); };
+      push(await t.fetchStarterMessage().catch(() => null));
+      try { const msgs = await t.messages.fetch({ limit: 30 }).catch(() => null); if (msgs) [...msgs.values()].reverse().forEach(push); } catch {}
+      corpus = corpus.trim().slice(0, 5000);
+
+      const f = db.suiviMedical[key] || { statut: 'non_teste', testValide: false, testDate: null, prochainRdv: null, notes: '', historique: [], blessures: [], ordonnances: [], suivis: [] };
+      if (!f.nomRP) f.nomRP = nomRP;
+      if (!f.statut || f.statut === 'non_teste') f.statut = statut;
+      if (!f.threadId) f.threadId = t.id;
+
+      if (corpus.length > 20) {
+        const ex = await _iaDossier(nomRP, corpus);
+        if (ex) {
+          if ((!f.notes || !f.notes.trim()) && ex.resume) f.notes = String(ex.resume).slice(0, 2000);
+          if ((!f.blessures || !f.blessures.length) && Array.isArray(ex.blessures)) f.blessures = ex.blessures.filter(b => b && b.desc).slice(0, 15).map(b => ({ date: _dateFR(Date.now()), desc: String(b.desc).slice(0, 200), gravite: String(b.gravite || '').slice(0, 40) }));
+          if ((!f.ordonnances || !f.ordonnances.length) && Array.isArray(ex.ordonnances)) f.ordonnances = ex.ordonnances.filter(o => o && o.medicaments).slice(0, 15).map(o => ({ date: _dateFR(Date.now()), medicaments: String(o.medicaments).slice(0, 200), posologie: String(o.posologie || '').slice(0, 200) }));
+        }
+      }
+
+      if (!dejaLa) { _log(f, 'Dossier importé du salon médical', 'Import'); db.suiviMedical[key] = f; cree++; }
+      else { complete++; }
+    } catch {}
+  }
+  saveDB(db);
+  return { ok: true, message: `Import terminé : ${cree} nouveau(x) dossier(s), ${complete} déjà présent(s) complété(s) · ${uniques.length} fils scannés.`, cree, complete, scannes: uniques.length };
+}
+
+module.exports = { installerPanel, installerExemple, installerPanelDemande, installerDossiers, routeInteraction, checkRappelsMedicaux, rafraichirDossierWeb, importerDossiersDuSalon, MEDICAL_CHANNEL, ROLE_MEDECIN, _test: { _dossierThread, _posterAuDossier, _archiverFilsPatient, _supprimerFilsPatient } };
 module.exports.__test = { _convalescenceJours, _bilanEmbed, _certificatHTML, _embedFiche, _dureeJours, _parseHonoLignes, _acteDecesHTML, _honorairesHTML, _ordonnanceHTML, _ordoModal, REMEDES, _nomFil }; // tests uniquement

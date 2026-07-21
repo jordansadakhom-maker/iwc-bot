@@ -258,6 +258,7 @@ function _construire(db) {
     .map(([id, f]) => ({
       id: String(id),
       membreId: String(id),
+      nomRP: _nn(f.nomRP, 120),
       statut: _str(f.statut || 'non_teste', 40),
       blessures: Array.isArray(f.blessures) ? f.blessures : [],
       suivis: Array.isArray(f.suivis) ? f.suivis : [],
@@ -447,7 +448,7 @@ async function syncAll(db) {
       //    les colonnes détaillées (notes, convalescence…) n'existent pas encore.
       let rD = await _upsert('DossierMedical', dossiers);
       if (!rD.ok && rD.status === 400) {
-        const base = dossiers.map(({ notes, testValide, prochainRdv, reposJusquAt, reposMotif, majPar, ...b }) => b);
+        const base = dossiers.map(({ nomRP, notes, testValide, prochainRdv, reposJusquAt, reposMotif, majPar, ...b }) => b);
         rD = await _upsert('DossierMedical', base);
       }
       results.push(rD);
