@@ -43,3 +43,34 @@ export async function uploadPhoto(formData: FormData): Promise<UploadResult> {
     return { ok: false, error: "Envoi impossible pour le moment." };
   }
 }
+
+// Téléversement d'un extrait AUDIO (son du jeu capté sur le site) vers le même
+// bucket. Le bot le télécharge ensuite, le transcrit (Whisper) et en fait un
+// rapport de terrain. Formats navigateur courants (webm/ogg/mp4/wav).
+const MAX_AUDIO = 24 * 1024 * 1024; // 24 Mo (limite Whisper : 25 Mo)
+const MIME_AUDIO = /^(audio|video)\/(webm|ogg|mp4|mpeg|wav|x-wav|x-m4a|mp3)/i;
+
+export async function uploadAudio(formData: FormData): Promise<UploadResult> {
+  const file = formData.get("file");
+  if (!(file instanceof File)) return { ok: false, error: "Aucun audio reçu." };
+  if (file.size > MAX_AUDIO) return { ok: false, error: "Extrait trop long (max ~24 Mo). Enregistre une scène plus courte." };
+  if (file.type && !MIME_AUDIO.test(file.type)) return { ok: false, error: "Format audio non pris en charge." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  const ext = (file.type.split("/").pop() || "webm").replace(/[^a-z0-9]/gi, "").slice(0, 5) || "webm";
+  const path = `audio/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  try {
+    const buf = Buffer.from(await file.arrayBuffer());
+    const { error } = await admin.storage.from(BUCKET).upload(path, buf, { contentType: file.type || "audio/webm", upsert: false });
+    if (error) {
+      console.error("uploadAudio:", error.message);
+      if (/bucket/i.test(error.message)) return { ok: false, error: "Le stockage n'est pas encore prêt (bucket « iwc » à créer)." };
+      return { ok: false, error: "Envoi impossible pour le moment." };
+    }
+    const { data } = admin.storage.from(BUCKET).getPublicUrl(path);
+    return { ok: true, url: data.publicUrl };
+  } catch (e) {
+    console.error("uploadAudio:", (e as Error).message);
+    return { ok: false, error: "Envoi impossible pour le moment." };
+  }
+}

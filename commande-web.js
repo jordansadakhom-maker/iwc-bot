@@ -732,6 +732,43 @@ Object.assign(HANDLERS, {
       return { ok: true, message: 'Note vocale transmise — le réseau la transforme en rapport de terrain.' };
     } catch (e) { return { ok: false, message: e.message }; }
   },
+
+  // ── Son du jeu capté sur le site (voix des joueurs en jeu) : un fichier audio
+  //    (téléversé sur Supabase Storage) est TÉLÉCHARGÉ, transcrit via Whisper,
+  //    puis posté au format du logiciel → rapport de terrain immersif par IA.
+  'note.audio': async (db, p, ctx) => {
+    const guild = ctx?.guild;
+    if (!guild) return { ok: false, message: 'Serveur indisponible' };
+    const url = _s(p.url, 500);
+    if (!/^https?:\/\//.test(url)) return { ok: false, message: 'Audio introuvable' };
+    if (!process.env.OPENAI_API_KEY) return { ok: false, message: 'Transcription non configurée (OPENAI_API_KEY manquante sur le bot).' };
+    let voix = null; try { voix = require('./voix-terrain'); } catch {}
+    if (!voix || !voix.whisper || !voix.fichierVersMp3) return { ok: false, message: 'Transcription indisponible' };
+    const agent = _s(p.auteurNom, 120) || 'Agent (site)';
+    const cible = _s(p.cible, 120);
+    const lieu = _s(p.lieu, 120);
+    const priorite = ['normale', 'importante', 'urgente'].includes(String(p.priorite)) ? p.priorite : 'normale';
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) return { ok: false, message: 'Téléchargement audio impossible' };
+      const buf = Buffer.from(await resp.arrayBuffer());
+      if (!buf.length) return { ok: false, message: 'Audio vide' };
+      const mp3 = await voix.fichierVersMp3(buf);
+      if (!mp3) return { ok: false, message: 'Conversion audio impossible (ffmpeg).' };
+      const texte = _s(await voix.whisper(mp3), 3500);
+      if (!texte || texte.length < 2) return { ok: false, message: 'Aucune parole détectée dans l\'audio.' };
+      const CH = '1511491314351472701';
+      const ch = guild.channels.cache.get(CH) || await guild.channels.fetch(CH).catch(() => null);
+      if (!ch || typeof ch.fetchWebhooks !== 'function') return { ok: false, message: 'Salon des notes introuvable' };
+      const hooks = await ch.fetchWebhooks().catch(() => null);
+      let hook = hooks ? ([...hooks.values()].find(h => h.token && /note|web|iwc|transcri/i.test(h.name || '')) || [...hooks.values()].find(h => h.token)) : null;
+      if (!hook) hook = await ch.createWebhook({ name: 'IWC Notes Web' }).catch(() => null);
+      if (!hook) return { ok: false, message: 'Webhook indisponible — donne au bot « Gérer les webhooks » sur le salon.' };
+      const contenu = `🎙️||${cible}||${lieu}||${texte}||${priorite}||${agent}`;
+      await hook.send({ content: contenu.slice(0, 1950), username: `🎙️ ${agent}`, allowedMentions: { parse: [] } });
+      return { ok: true, message: 'Son du jeu transcrit — le réseau en fait un rapport de terrain.' };
+    } catch (e) { return { ok: false, message: e.message }; }
+  },
 });
 
 // Trouve une opération par id dans db.operations puis db.preparations.
