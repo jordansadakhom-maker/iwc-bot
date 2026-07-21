@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Sparkles, Loader2, Send, Check, HelpCircle, ArrowRight } from "lucide-react";
 import { demander, executer } from "@/app/(app)/assistant/actions";
 import type { Action, Interpretation } from "@/lib/assistant";
+import { MicButton } from "@/components/mic-dictee";
 
 const EXEMPLES = [
   "Passe l'opération Corbeau en cours",
@@ -79,16 +80,23 @@ export function AssistantConsole() {
           maxLength={2000}
         />
         <div className="mt-2.5 flex items-center justify-between gap-3">
-          <span className="hidden text-[0.72rem] text-faint sm:block">⌘/Ctrl + Entrée pour interpréter</span>
-          <button
-            onClick={interpreter}
-            disabled={busy}
-            className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.84rem] font-semibold text-black/85 disabled:opacity-60"
-            style={{ background: "var(--accent)" }}
-          >
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" strokeWidth={2} />}
-            {busy ? "Réflexion…" : "Interpréter"}
-          </button>
+          <span className="hidden text-[0.72rem] text-faint sm:block">⌘/Ctrl + Entrée pour interpréter · 🎙️ ou dicte à la voix</span>
+          <div className="flex items-center gap-2">
+            <MicButton
+              onText={(t) => { setErr(null); setTexte((v) => (v ? v.trim() + " " : "") + t); }}
+              onError={(m) => setErr(m)}
+              title="Dicter un ordre au micro"
+            />
+            <button
+              onClick={interpreter}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.84rem] font-semibold text-black/85 disabled:opacity-60"
+              style={{ background: "var(--accent)" }}
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" strokeWidth={2} />}
+              {busy ? "Réflexion…" : "Interpréter"}
+            </button>
+          </div>
         </div>
 
         {!res && !done ? (
