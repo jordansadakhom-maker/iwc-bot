@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Search, Bell, BellRing, Menu, ArrowRight, CheckCircle2 } from "lucide-react";
+import { Search, Bell, BellRing, Menu, ArrowRight, CheckCircle2, Volume2, VolumeX } from "lucide-react";
 import clsx from "clsx";
 import { NAV, ME, type Pole } from "@/lib/data";
 import { LogoutButton } from "@/components/logout-button";
@@ -40,21 +40,56 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
   const path = usePathname();
   const router = useRouter();
 
-  // ── Notifications « en direct » : la cloche se rafraîchit toute seule et, si
-  //    l'utilisateur l'a autorisé, une notification navigateur s'affiche à chaque
-  //    NOUVEL élément (mêmes alertes que les pings Discord). ────────────────────
+  // ── Notifications « en direct » : la cloche se rafraîchit toute seule. À chaque
+  //    NOUVEL élément → notification navigateur (si autorisée) + petit son. Les
+  //    alertes « lues » (page visitée ou cloche ouverte) disparaissent des
+  //    pastilles ; elles réapparaissent si un nouvel élément arrive. ────────────
   const [alertesLive, setAlertesLive] = useState<AlertesData>(alertes);
   const [notifPerm, setNotifPerm] = useState<"default" | "granted" | "denied" | "unsupported">("default");
-  const vusRef = useRef<Record<string, number>>({});
+  const [vus, setVus] = useState<Record<string, number>>({});   // compte « lu » par clé (persisté)
+  const [sonActif, setSonActif] = useState(true);               // son des notifications
+  const vusRef = useRef(vus); vusRef.current = vus;
+  const sonActifRef = useRef(sonActif); sonActifRef.current = sonActif;
+  const notifiesRef = useRef<Record<string, number>>({});       // dédup son/notif navigateur (≠ « lu »)
+  const audioRef = useRef<AudioContext | null>(null);
 
+  // Petit « ding » synthétisé (aucun fichier externe → compatible CSP). Ne joue
+  // que si l'utilisateur a déjà interagi avec la page (règle d'autoplay).
+  function jouerDing() {
+    const ctx = audioRef.current;
+    if (!ctx || ctx.state !== "running") return;
+    const t0 = ctx.currentTime;
+    ([[880, 0], [1174.7, 0.12]] as [number, number][]).forEach(([f, dt]) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = "sine"; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t0 + dt);
+      g.gain.exponentialRampToValueAtTime(0.16, t0 + dt + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.28);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(t0 + dt); o.stop(t0 + dt + 0.3);
+    });
+  }
+
+  // Charge l'état « lu » + préférence son, et prépare l'audio au 1er clic/touche.
   useEffect(() => {
     if (typeof Notification !== "undefined") setNotifPerm(Notification.permission as "default" | "granted" | "denied");
     else setNotifPerm("unsupported");
-    // Base de référence : on ne notifie QUE les hausses après le chargement.
+    try { const v = localStorage.getItem("iwc.alertes.vus"); if (v) setVus(JSON.parse(v)); } catch { /* ignore */ }
+    try { const s = localStorage.getItem("iwc.alertes.son"); if (s != null) setSonActif(s === "1"); } catch { /* ignore */ }
+    // Base de dédup son/notif : on n'alerte QUE les hausses après le chargement.
     const base: Record<string, number> = {};
     for (const it of alertes.items) base[it.key] = it.count;
-    vusRef.current = base;
+    notifiesRef.current = base;
+    function unlock() {
+      if (!audioRef.current) { try { const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext; audioRef.current = new AC(); } catch { /* ignore */ } }
+      audioRef.current?.resume?.().catch(() => {});
+    }
+    window.addEventListener("pointerdown", unlock);
+    window.addEventListener("keydown", unlock);
+    return () => { window.removeEventListener("pointerdown", unlock); window.removeEventListener("keydown", unlock); };
   }, [alertes]);
+
+  useEffect(() => { try { localStorage.setItem("iwc.alertes.vus", JSON.stringify(vus)); } catch { /* ignore */ } }, [vus]);
 
   useEffect(() => {
     let stop = false;
@@ -64,18 +99,45 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
         if (stop) return;
         setAlertesLive(fresh);
         const peutNotifier = typeof Notification !== "undefined" && Notification.permission === "granted";
+        let duNouveau = false;
         for (const it of fresh.items) {
-          const avant = vusRef.current[it.key] || 0;
-          if (it.count > avant && peutNotifier && document.visibilityState !== "visible") {
-            try { new Notification("Iron Wolf Company", { body: it.label, tag: it.key }); } catch { /* ignore */ }
+          const dejaAlerte = notifiesRef.current[it.key] || 0;
+          if (it.count > dejaAlerte) {
+            duNouveau = true;
+            if (peutNotifier && document.visibilityState !== "visible") {
+              try { new Notification("Iron Wolf Company", { body: it.label, tag: it.key }); } catch { /* ignore */ }
+            }
+            notifiesRef.current[it.key] = it.count;
           }
-          vusRef.current[it.key] = it.count;
         }
+        if (duNouveau && sonActifRef.current) jouerDing();
       } catch { /* silencieux */ }
     }
     const id = window.setInterval(tic, 25000);
     return () => { stop = true; window.clearInterval(id); };
   }, []);
+
+  // « Lu » = on marque les alertes d'une page dès qu'on y arrive.
+  const basePath = (h: string) => h.split(/[?#]/)[0];
+  useEffect(() => {
+    setVus((prev) => {
+      let changed = false; const next = { ...prev };
+      for (const it of alertesLive.items) {
+        if (basePath(it.href) === path && (next[it.key] || 0) < it.count) { next[it.key] = it.count; changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [path, alertesLive]);
+
+  // Ouvrir la cloche = « j'ai lu » → on marque tout comme lu.
+  useEffect(() => {
+    if (!bellOpen) return;
+    setVus((prev) => { const next = { ...prev }; for (const it of alertesLive.items) next[it.key] = it.count; return next; });
+  }, [bellOpen, alertesLive]);
+
+  function basculerSon() {
+    setSonActif((v) => { const nv = !v; try { localStorage.setItem("iwc.alertes.son", nv ? "1" : "0"); } catch { /* ignore */ } if (nv) jouerDing(); return nv; });
+  }
 
   function activerNotifs() {
     if (typeof Notification === "undefined") return;
@@ -103,11 +165,16 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
     router.refresh();
   }
 
-  // Compteur de notifications PAR page : on regroupe les alertes en direct par
-  // destination (href) pour afficher une pastille sur l'onglet concerné dans la
-  // barre de gauche (ex. « Armurerie », « Communication », « Recrutement »).
+  // Compteur de notifications NON LUES par page (destination) → pastille sur
+  // l'onglet concerné. Une alerte « lue » (vus >= count) ne compte plus.
   const notifParHref: Record<string, number> = {};
-  for (const a of alertesLive.items) notifParHref[a.href] = (notifParHref[a.href] || 0) + a.count;
+  let totalNonLu = 0;
+  for (const a of alertesLive.items) {
+    if ((vus[a.key] || 0) >= a.count) continue; // déjà lue
+    const bp = basePath(a.href);
+    notifParHref[bp] = (notifParHref[bp] || 0) + a.count;
+    totalNonLu += a.count;
+  }
 
   return (
     <div data-pole={pole} className="min-h-screen grid grid-cols-1 lg:grid-cols-[264px_1fr]">
@@ -226,9 +293,9 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
           <div className="relative">
             <button onClick={() => setBellOpen((v) => !v)} className="relative grid h-10 w-10 place-items-center rounded-xl border border-border bg-surface text-muted hover:text-ink" aria-label="Notifications">
               <Bell className="h-[18px] w-[18px]" />
-              {alertesLive.total > 0 ? (
-                <span className="absolute -right-1 -top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full px-1 text-[0.6rem] font-extrabold text-black/85" style={{ background: "var(--accent)" }}>
-                  {alertesLive.total > 99 ? "99+" : alertesLive.total}
+              {totalNonLu > 0 ? (
+                <span className="absolute -right-1 -top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full px-1 text-[0.6rem] font-extrabold text-white" style={{ background: "var(--oxblood)" }}>
+                  {totalNonLu > 99 ? "99+" : totalNonLu}
                 </span>
               ) : null}
             </button>
@@ -238,7 +305,12 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
                 <div className="absolute right-0 z-40 mt-2 w-[330px] overflow-hidden rounded-2xl border border-border-2 bg-surface shadow-2xl">
                   <div className="flex items-center justify-between border-b border-border px-4 py-3">
                     <span className="text-[0.82rem] font-semibold">À traiter</span>
-                    <span className="text-[0.7rem] text-faint">{alertesLive.total} en attente · en direct</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[0.7rem] text-faint">{alertesLive.total} en cours · en direct</span>
+                      <button onClick={basculerSon} title={sonActif ? "Couper le son des notifications" : "Activer le son des notifications"} className="grid h-6 w-6 place-items-center rounded-md border border-border text-muted hover:text-ink">
+                        {sonActif ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
                   </div>
                   {notifPerm === "default" || notifPerm === "denied" ? (
                     <button onClick={activerNotifs} className="flex w-full items-center gap-2 border-b border-border bg-[color-mix(in_srgb,var(--accent)_8%,transparent)] px-4 py-2.5 text-left text-[0.76rem] text-accent hover:bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]">

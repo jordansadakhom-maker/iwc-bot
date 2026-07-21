@@ -69,3 +69,12 @@ body > * { position: relative; z-index: 1; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }
+
+/* Notifications : la zone visée par une notification (#ancre) est mise en avant
+   d'un flash discret à l'arrivée, et se cale sous l'en-tête collant. */
+:target { scroll-margin-top: 92px; border-radius: 16px; animation: iwc-flash 1.8s ease-out 1; }
+@keyframes iwc-flash {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 65%, transparent); }
+  12%  { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 65%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}

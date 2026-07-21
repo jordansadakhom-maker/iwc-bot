@@ -12,14 +12,18 @@ export default async function CommunicationPage() {
     <>
       <PageHeader titre="Communication" sous="Rendez-vous des clients & télégrammes — avec trace" actif={connecte} />
 
-      <Card>
-        <RdvManager rdvs={rdvs} membres={membres} />
-      </Card>
+      <div id="rdv-clients">
+        <Card>
+          <RdvManager rdvs={rdvs} membres={membres} />
+        </Card>
+      </div>
 
-      <Card>
-        <CardHeader titre="Télégrammes" compteur={tg.telegrammes.length} />
-        <TelegrammesPanel telegrammes={tg.telegrammes} />
-      </Card>
+      <div id="telegrammes">
+        <Card>
+          <CardHeader titre="Télégrammes" compteur={tg.telegrammes.length} />
+          <TelegrammesPanel telegrammes={tg.telegrammes} />
+        </Card>
+      </div>
     </>
   );
 }

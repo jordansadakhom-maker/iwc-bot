@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Users, ScrollText, FileSignature, Plus, Minus, Loader2, Trash2, IdCard, Send, Check, X,
   Download, CircleDollarSign, Vault, ArrowDownRight, ArrowUpRight, History, ShoppingCart, Package, Search,
@@ -88,10 +88,16 @@ const ctrTone = (s: string): "good" | "warn" | "accent" | "oxblood" | "muted" =>
 const ctrLabel = (s: string) => s === "honore" ? "Honoré ✓" : s === "signe" ? "Signé" : s === "envoye" ? "Envoyé" : s === "refuse" ? "Refusé" : "Brouillon";
 
 type TabKey = "caisse" | "produits" | "ressources" | "commandes" | "rdv" | "ventes" | "clients" | "contrats" | "employes" | "pointage" | "paies" | "comptabilite" | "impots" | "notes" | "taches" | "activite";
+const TAB_KEYS = new Set<TabKey>(["caisse", "produits", "ressources", "commandes", "rdv", "ventes", "clients", "contrats", "employes", "pointage", "paies", "comptabilite", "impots", "notes", "taches", "activite"]);
 
 export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouvementsCoffre, produits, employes, pointages, paies, impots, notes, taches, commandes, ressources, rdvs }: { clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvementsCoffre: ArmMouvement[]; produits: ArmProduit[]; employes: ArmEmploye[]; pointages: ArmPointage[]; paies: ArmPaie[]; impots: ArmImpot[]; notes: ArmNote[]; taches: ArmTache[]; commandes: ArmCommande[]; ressources: ArmRessource[]; rdvs: ArmRdv[] }) {
   const router = useRouter();
-  const [tab, setTab] = useState<TabKey>("caisse");
+  // Onglet ouvert au démarrage depuis l'URL (?tab=…), ex. une notification qui
+  // pointe droit vers « Impôts » ou « Rendez-vous ».
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const [tab, setTab] = useState<TabKey>(() => (tabParam && TAB_KEYS.has(tabParam as TabKey)) ? (tabParam as TabKey) : "caisse");
+  useEffect(() => { if (tabParam && TAB_KEYS.has(tabParam as TabKey)) setTab(tabParam as TabKey); }, [tabParam]);
   const signes = contrats.filter((c) => c.statut === "signe").length;
   const paiesDues = paies.filter((p) => p.statut !== "paye").length;
   const impotsDus = impots.filter((i) => i.statut !== "paye").length;

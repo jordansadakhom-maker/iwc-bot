@@ -1129,15 +1129,17 @@ export async function getAlertes(): Promise<AlertesData> {
     safe(() => admin.from("TelegrammeWeb").select("*", { count: "exact", head: true }).gte("createdAt", iso7)),
     safe(() => admin.from("ArmurerieRdv").select("*", { count: "exact", head: true }).eq("statut", "a_venir").gte("dateRdv", nowIso).lte("dateRdv", iso24)),
   ]);
+  // Le href pointe vers la ZONE exacte à regarder : onglet précis de l'armurerie
+  // (?tab=…) ou ancre de la page communication (#…) → highlight à l'arrivée.
   const items: Alerte[] = [];
-  if (rdvArm) items.push({ key: "rdvArm", label: `${rdvArm} rendez-vous armurerie dans les 24 h`, count: rdvArm, href: "/armurerie", tone: "warn" });
-  if (rdvs) items.push({ key: "rdvs", label: `${rdvs} rendez-vous à traiter`, count: rdvs, href: "/communication", tone: "warn" });
-  if (contrats) items.push({ key: "contrats", label: `${contrats} contrat(s) en attente de signature`, count: contrats, href: "/armurerie", tone: "accent" });
-  if (impots) items.push({ key: "impots", label: `${impots} impôt(s) à régler`, count: impots, href: "/armurerie", tone: "oxblood" });
-  if (paies) items.push({ key: "paies", label: `${paies} paie(s) à verser`, count: paies, href: "/armurerie", tone: "warn" });
-  if (ruptures) items.push({ key: "ruptures", label: `${ruptures} produit(s) en rupture de stock`, count: ruptures, href: "/armurerie", tone: "oxblood" });
+  if (rdvArm) items.push({ key: "rdvArm", label: `${rdvArm} rendez-vous armurerie dans les 24 h`, count: rdvArm, href: "/armurerie?tab=rdv", tone: "warn" });
+  if (rdvs) items.push({ key: "rdvs", label: `${rdvs} rendez-vous à traiter`, count: rdvs, href: "/communication#rdv-clients", tone: "warn" });
+  if (contrats) items.push({ key: "contrats", label: `${contrats} contrat(s) en attente de signature`, count: contrats, href: "/armurerie?tab=contrats", tone: "accent" });
+  if (impots) items.push({ key: "impots", label: `${impots} impôt(s) à régler`, count: impots, href: "/armurerie?tab=impots", tone: "oxblood" });
+  if (paies) items.push({ key: "paies", label: `${paies} paie(s) à verser`, count: paies, href: "/armurerie?tab=paies", tone: "warn" });
+  if (ruptures) items.push({ key: "ruptures", label: `${ruptures} produit(s) en rupture de stock`, count: ruptures, href: "/armurerie?tab=produits", tone: "oxblood" });
   if (candids) items.push({ key: "candids", label: `${candids} candidature(s) récente(s)`, count: candids, href: "/recrutement", tone: "good" });
-  if (telegrammes) items.push({ key: "telegrammes", label: `${telegrammes} télégramme(s) récent(s)`, count: telegrammes, href: "/communication", tone: "accent" });
+  if (telegrammes) items.push({ key: "telegrammes", label: `${telegrammes} télégramme(s) récent(s)`, count: telegrammes, href: "/communication#telegrammes", tone: "accent" });
   const total = items.reduce((s, i) => s + i.count, 0);
   return { total, items };
 }
