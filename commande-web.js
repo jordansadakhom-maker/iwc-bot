@@ -704,6 +704,34 @@ Object.assign(HANDLERS, {
       return { ok: true, message: 'Document envoyé en message privé' };
     } catch (e) { return { ok: false, message: e.message }; }
   },
+
+  // ── Notes vocales du site : la voix captée au micro (transcrite dans le
+  //    navigateur) est postée dans le salon des transcriptions VIA WEBHOOK, au
+  //    format exact du logiciel (🎙️||cible||lieu||info||priorite||agent). Le bot
+  //    la transforme alors en RAPPORT DE TERRAIN immersif par IA (pipeline existant).
+  'note.vocale': async (db, p, ctx) => {
+    const guild = ctx?.guild;
+    if (!guild) return { ok: false, message: 'Serveur indisponible' };
+    const texte = _s(p.texte, 3500);
+    if (!texte || texte.length < 3) return { ok: false, message: 'Note vide — parle un peu plus.' };
+    const CH = '1511491314351472701'; // salon des transcriptions (entrée du Réseau)
+    const ch = guild.channels.cache.get(CH) || await guild.channels.fetch(CH).catch(() => null);
+    if (!ch || typeof ch.fetchWebhooks !== 'function') return { ok: false, message: 'Salon des notes introuvable' };
+    const agent = _s(p.auteurNom, 120) || 'Agent (site)';
+    const cible = _s(p.cible, 120);
+    const lieu = _s(p.lieu, 120);
+    const priorite = ['normale', 'importante', 'urgente'].includes(String(p.priorite)) ? p.priorite : 'normale';
+    try {
+      let hook = null;
+      const hooks = await ch.fetchWebhooks().catch(() => null);
+      if (hooks) hook = [...hooks.values()].find(h => h.token && /note|web|iwc|transcri/i.test(h.name || '')) || [...hooks.values()].find(h => h.token) || null;
+      if (!hook) hook = await ch.createWebhook({ name: 'IWC Notes Web' }).catch(() => null);
+      if (!hook) return { ok: false, message: 'Webhook indisponible — donne au bot la permission « Gérer les webhooks » sur ce salon.' };
+      const contenu = `🎙️||${cible}||${lieu}||${texte}||${priorite}||${agent}`;
+      await hook.send({ content: contenu.slice(0, 1950), username: `🎙️ ${agent}`, allowedMentions: { parse: [] } });
+      return { ok: true, message: 'Note vocale transmise — le réseau la transforme en rapport de terrain.' };
+    } catch (e) { return { ok: false, message: e.message }; }
+  },
 });
 
 // Trouve une opération par id dans db.operations puis db.preparations.
