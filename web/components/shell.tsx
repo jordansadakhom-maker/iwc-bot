@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Search, Bell, Menu, ArrowRight, CheckCircle2 } from "lucide-react";
+import { Search, Bell, BellRing, Menu, ArrowRight, CheckCircle2 } from "lucide-react";
 import clsx from "clsx";
 import { NAV, ME, type Pole } from "@/lib/data";
 import { LogoutButton } from "@/components/logout-button";
 import { CommandPalette } from "@/components/command-palette";
+import { rafraichirAlertes } from "@/app/(app)/notifs-actions";
 import type { AlertesData, Acces } from "@/lib/queries";
 
 type Profil = { nom: string; initiales: string; role: string; avatarUrl: string | null };
@@ -38,6 +39,51 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
   const [bellOpen, setBellOpen] = useState(false);
   const path = usePathname();
   const router = useRouter();
+
+  // ── Notifications « en direct » : la cloche se rafraîchit toute seule et, si
+  //    l'utilisateur l'a autorisé, une notification navigateur s'affiche à chaque
+  //    NOUVEL élément (mêmes alertes que les pings Discord). ────────────────────
+  const [alertesLive, setAlertesLive] = useState<AlertesData>(alertes);
+  const [notifPerm, setNotifPerm] = useState<"default" | "granted" | "denied" | "unsupported">("default");
+  const vusRef = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    if (typeof Notification !== "undefined") setNotifPerm(Notification.permission as "default" | "granted" | "denied");
+    else setNotifPerm("unsupported");
+    // Base de référence : on ne notifie QUE les hausses après le chargement.
+    const base: Record<string, number> = {};
+    for (const it of alertes.items) base[it.key] = it.count;
+    vusRef.current = base;
+  }, [alertes]);
+
+  useEffect(() => {
+    let stop = false;
+    async function tic() {
+      try {
+        const fresh = await rafraichirAlertes();
+        if (stop) return;
+        setAlertesLive(fresh);
+        const peutNotifier = typeof Notification !== "undefined" && Notification.permission === "granted";
+        for (const it of fresh.items) {
+          const avant = vusRef.current[it.key] || 0;
+          if (it.count > avant && peutNotifier && document.visibilityState !== "visible") {
+            try { new Notification("Iron Wolf Company", { body: it.label, tag: it.key }); } catch { /* ignore */ }
+          }
+          vusRef.current[it.key] = it.count;
+        }
+      } catch { /* silencieux */ }
+    }
+    const id = window.setInterval(tic, 25000);
+    return () => { stop = true; window.clearInterval(id); };
+  }, []);
+
+  function activerNotifs() {
+    if (typeof Notification === "undefined") return;
+    Notification.requestPermission().then((p) => {
+      setNotifPerm(p as "default" | "granted" | "denied");
+      if (p === "granted") { try { new Notification("Iron Wolf Company", { body: "Notifications activées — tu recevras les alertes ici." }); } catch { /* ignore */ } }
+    });
+  }
 
   // Palette globale : ⌘K (Mac) / Ctrl+K (Windows) ouvre la recherche partout.
   useEffect(() => {
@@ -168,9 +214,9 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
           <div className="relative">
             <button onClick={() => setBellOpen((v) => !v)} className="relative grid h-10 w-10 place-items-center rounded-xl border border-border bg-surface text-muted hover:text-ink" aria-label="Notifications">
               <Bell className="h-[18px] w-[18px]" />
-              {alertes.total > 0 ? (
+              {alertesLive.total > 0 ? (
                 <span className="absolute -right-1 -top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full px-1 text-[0.6rem] font-extrabold text-black/85" style={{ background: "var(--accent)" }}>
-                  {alertes.total > 99 ? "99+" : alertes.total}
+                  {alertesLive.total > 99 ? "99+" : alertesLive.total}
                 </span>
               ) : null}
             </button>
@@ -180,16 +226,22 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
                 <div className="absolute right-0 z-40 mt-2 w-[330px] overflow-hidden rounded-2xl border border-border-2 bg-surface shadow-2xl">
                   <div className="flex items-center justify-between border-b border-border px-4 py-3">
                     <span className="text-[0.82rem] font-semibold">À traiter</span>
-                    <span className="text-[0.7rem] text-faint">{alertes.total} en attente</span>
+                    <span className="text-[0.7rem] text-faint">{alertesLive.total} en attente · en direct</span>
                   </div>
-                  {alertes.items.length === 0 ? (
+                  {notifPerm === "default" || notifPerm === "denied" ? (
+                    <button onClick={activerNotifs} className="flex w-full items-center gap-2 border-b border-border bg-[color-mix(in_srgb,var(--accent)_8%,transparent)] px-4 py-2.5 text-left text-[0.76rem] text-accent hover:bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]">
+                      <BellRing className="h-4 w-4 shrink-0" />
+                      {notifPerm === "denied" ? "Notifications bloquées — autorise-les dans ton navigateur." : "Activer les notifications navigateur (comme sur Discord)"}
+                    </button>
+                  ) : null}
+                  {alertesLive.items.length === 0 ? (
                     <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
                       <CheckCircle2 className="h-7 w-7" style={{ color: "var(--good)" }} />
                       <span className="text-[0.82rem] text-muted">Tout est à jour. Rien ne t&apos;attend.</span>
                     </div>
                   ) : (
                     <div className="max-h-[60vh] overflow-y-auto py-1">
-                      {alertes.items.map((a) => {
+                      {alertesLive.items.map((a) => {
                         const c = a.tone === "warn" ? "var(--warn)" : a.tone === "oxblood" ? "var(--oxblood)" : a.tone === "good" ? "var(--good)" : "var(--accent)";
                         return (
                           <Link key={a.key} href={a.href} onClick={() => setBellOpen(false)} className="flex items-center gap-3 px-4 py-2.5 hover:bg-[color-mix(in_srgb,var(--ink)_5%,transparent)]">
