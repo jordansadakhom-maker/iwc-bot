@@ -5,15 +5,15 @@ import { useRouter } from "next/navigation";
 import {
   Users, ScrollText, FileSignature, Plus, Minus, Loader2, Trash2, IdCard, Send, Check, X,
   Download, CircleDollarSign, Vault, ArrowDownRight, ArrowUpRight, History, ShoppingCart, Package, Search,
-  Clock, BadgeDollarSign, Landmark, StickyNote, ListTodo, Activity, Wallet, ClipboardList, Pickaxe, Hammer, ChevronDown, AlertTriangle, TrendingUp,
+  Clock, BadgeDollarSign, Landmark, StickyNote, ListTodo, Activity, Wallet, ClipboardList, Pickaxe, Hammer, ChevronDown, AlertTriangle, TrendingUp, CalendarClock,
 } from "lucide-react";
-import type { ArmClient, ArmVente, ArmContrat, ArmMouvement, ArmProduit, ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache, ArmCommande, ArmRessource, ArmRecetteLigne } from "@/lib/queries";
+import type { ArmClient, ArmVente, ArmContrat, ArmMouvement, ArmProduit, ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache, ArmCommande, ArmRessource, ArmRecetteLigne, ArmRdv } from "@/lib/queries";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { cents } from "@/lib/format";
 import { Badge } from "@/components/ui";
 import { PhotoDrop } from "@/components/photo-drop";
 import {
-  EmployesTab, PointageTab, ComptabiliteTab, PaiesTab, ImpotsTab, BlocNotesTab, TachesTab, ActiviteTab, CarnetCommandesTab, RessourcesTab,
+  EmployesTab, PointageTab, ComptabiliteTab, PaiesTab, ImpotsTab, BlocNotesTab, TachesTab, ActiviteTab, CarnetCommandesTab, RessourcesTab, RdvArmurerieTab,
 } from "@/components/armurerie-erp";
 import {
   creerClient, majClient, supprimerClient,
@@ -87,21 +87,23 @@ const ctrTone = (s: string): "good" | "warn" | "accent" | "oxblood" | "muted" =>
   s === "honore" ? "good" : s === "signe" ? "good" : s === "envoye" ? "accent" : s === "refuse" ? "oxblood" : "muted";
 const ctrLabel = (s: string) => s === "honore" ? "Honoré ✓" : s === "signe" ? "Signé" : s === "envoye" ? "Envoyé" : s === "refuse" ? "Refusé" : "Brouillon";
 
-type TabKey = "caisse" | "produits" | "ressources" | "commandes" | "ventes" | "clients" | "contrats" | "employes" | "pointage" | "paies" | "comptabilite" | "impots" | "notes" | "taches" | "activite";
+type TabKey = "caisse" | "produits" | "ressources" | "commandes" | "rdv" | "ventes" | "clients" | "contrats" | "employes" | "pointage" | "paies" | "comptabilite" | "impots" | "notes" | "taches" | "activite";
 
-export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouvementsCoffre, produits, employes, pointages, paies, impots, notes, taches, commandes, ressources }: { clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvementsCoffre: ArmMouvement[]; produits: ArmProduit[]; employes: ArmEmploye[]; pointages: ArmPointage[]; paies: ArmPaie[]; impots: ArmImpot[]; notes: ArmNote[]; taches: ArmTache[]; commandes: ArmCommande[]; ressources: ArmRessource[] }) {
+export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouvementsCoffre, produits, employes, pointages, paies, impots, notes, taches, commandes, ressources, rdvs }: { clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvementsCoffre: ArmMouvement[]; produits: ArmProduit[]; employes: ArmEmploye[]; pointages: ArmPointage[]; paies: ArmPaie[]; impots: ArmImpot[]; notes: ArmNote[]; taches: ArmTache[]; commandes: ArmCommande[]; ressources: ArmRessource[]; rdvs: ArmRdv[] }) {
   const router = useRouter();
   const [tab, setTab] = useState<TabKey>("caisse");
   const signes = contrats.filter((c) => c.statut === "signe").length;
   const paiesDues = paies.filter((p) => p.statut !== "paye").length;
   const impotsDus = impots.filter((i) => i.statut !== "paye").length;
   const tachesAFaire = taches.filter((t) => !t.fait).length;
+  const rdvsAVenir = rdvs.filter((r) => r.statut === "a_venir").length;
 
   const TABS: { key: TabKey; label: string; icon: typeof Users; n: number }[] = [
     { key: "caisse", label: "Caisse", icon: ShoppingCart, n: produits.length },
     { key: "produits", label: "Produits", icon: Package, n: produits.length },
     { key: "ressources", label: "Ressources", icon: Pickaxe, n: ressources.length },
     { key: "commandes", label: "Carnet de commande", icon: ClipboardList, n: commandes.filter((c) => c.statut === "en_attente" || c.statut === "prete").length },
+    { key: "rdv", label: "Rendez-vous", icon: CalendarClock, n: rdvsAVenir },
     { key: "ventes", label: "Registre des ventes", icon: ScrollText, n: ventes.length },
     { key: "clients", label: "Fichier clients", icon: Users, n: clients.length },
     { key: "contrats", label: "Contrats", icon: FileSignature, n: contrats.length },
@@ -145,6 +147,7 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
       {tab === "produits" ? <ProduitsTab produits={produits} ressources={ressources} router={router} /> : null}
       {tab === "ressources" ? <RessourcesTab ressources={ressources} router={router} /> : null}
       {tab === "commandes" ? <CarnetCommandesTab commandes={commandes} produits={produits} clients={clients.map((c) => ({ id: c.id, nom: c.nom }))} router={router} /> : null}
+      {tab === "rdv" ? <RdvArmurerieTab rdvs={rdvs} clients={clients.map((c) => ({ id: c.id, nom: c.nom }))} router={router} /> : null}
       {tab === "clients" ? <ClientsTab clients={clients} ventes={ventes} contrats={contrats} router={router} /> : null}
       {tab === "ventes" ? <VentesTab ventes={ventes} clients={clients} router={router} /> : null}
       {tab === "contrats" ? <ContratsTab contrats={contrats} clients={clients} produits={produits} router={router} /> : null}

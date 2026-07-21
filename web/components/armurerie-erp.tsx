@@ -5,10 +5,10 @@ import { useRouter } from "next/navigation";
 import {
   Users, Plus, Minus, Loader2, Trash2, Check, Download, Clock, Play, Square,
   BadgeDollarSign, Landmark, StickyNote, ListTodo, Activity, Pin, PinOff, Pencil,
-  ArrowDownRight, ArrowUpRight, CircleDollarSign, Wallet, ClipboardList, X, Pickaxe, Search, ScanLine, AlertTriangle,
+  ArrowDownRight, ArrowUpRight, CircleDollarSign, Wallet, ClipboardList, X, Pickaxe, Search, ScanLine, AlertTriangle, CalendarClock, Bell,
 } from "lucide-react";
 import { PhotoDrop } from "@/components/photo-drop";
-import type { ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache, ArmMouvement, ArmVente, ArmProduit, ArmCommande, ArmCommandeLigne, ArmRessource } from "@/lib/queries";
+import type { ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache, ArmMouvement, ArmVente, ArmProduit, ArmCommande, ArmCommandeLigne, ArmRessource, ArmRdv } from "@/lib/queries";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
 import { Badge } from "@/components/ui";
 import { cents, round2 } from "@/lib/format";
@@ -21,6 +21,7 @@ import {
   creerNote, majNote, supprimerNote,
   creerTache, basculerTache, supprimerTache,
   creerCommande, majCommande, marquerCommande, supprimerCommande,
+  creerRdv, majRdv, marquerRdv, supprimerRdv, lireCarteIdentite,
   creerRessource, majRessource, supprimerRessource, importerRessources, acheterRessources, type LigneRessource,
   lireCoffreRessources, appliquerStockRessources, annulerStockRessources,
   lireFinancesReckless,
@@ -1444,6 +1445,188 @@ function CommandeModal({ commande, produits, clients, onClose, router }: { comma
               <button onClick={() => setConfirmDel(false)} className="text-[0.76rem] text-muted hover:text-ink">Annuler</button></div>
           ) : <button onClick={() => setConfirmDel(true)} className="inline-flex items-center gap-1.5 text-[0.76rem] text-faint hover:text-ink"><Trash2 className="h-3.5 w-3.5" /> Supprimer</button>) : <span />}
           <button onClick={enregistrer} disabled={busy === "save"} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{busy === "save" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} {editing ? "Enregistrer" : "Créer la commande"}</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ═══════════════════ RENDEZ-VOUS (agenda du comptoir) ═══════════════════
+const RDV_STATUTS = [
+  { key: "a_venir", label: "À venir", tone: "accent" as const },
+  { key: "honore", label: "Honoré", tone: "good" as const },
+  { key: "annule", label: "Annulé", tone: "muted" as const },
+];
+const rdvStatut = (s: string) => RDV_STATUTS.find((x) => x.key === s) || RDV_STATUTS[0];
+const rdvDateFR = (s: string | null) => { if (!s) return "—"; try { return new Date(s).toLocaleString("fr-FR", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return "—"; } };
+// ISO → valeur d'un <input type="datetime-local"> (heure LOCALE du navigateur).
+function toLocalInput(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso); if (isNaN(d.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+export function RdvArmurerieTab({ rdvs, clients, router }: { rdvs: ArmRdv[]; clients: { id: string; nom: string }[]; router: Router }) {
+  const [sel, setSel] = useState<ArmRdv | null>(null);
+  const [nouveau, setNouveau] = useState(false);
+  const now = Date.now();
+  const t = (r: ArmRdv) => (r.dateRdv ? new Date(r.dateRdv).getTime() : 0);
+  const aVenir = rdvs.filter((r) => r.statut === "a_venir").sort((a, b) => t(a) - t(b));
+  const prochain = aVenir[0] || null;
+  const passes = rdvs.filter((r) => r.statut !== "a_venir").sort((a, b) => t(b) - t(a));
+
+  return (
+    <>
+      <div className="mb-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+        <Stat label="À venir" value={String(aVenir.length)} tone="var(--accent)" icon={CalendarClock} />
+        <Stat label="Prochain" value={prochain ? rdvDateFR(prochain.dateRdv) : "—"} tone="var(--brass)" icon={Clock} />
+        <Stat label="Honorés" value={String(rdvs.filter((r) => r.statut === "honore").length)} tone="var(--good)" icon={Check} />
+      </div>
+      <TopBar>
+        <p className="text-[0.74rem] italic text-faint">Rendez-vous clients — heure + commande. L&apos;équipe est prévenue sur Discord 45 min & 15 min avant.</p>
+        <Btn onClick={() => setNouveau(true)}><Plus className="h-3.5 w-3.5" /> Nouveau rendez-vous</Btn>
+      </TopBar>
+      {aVenir.length === 0 && passes.length === 0 ? (
+        <Vide icon={CalendarClock} texte="Aucun rendez-vous. Crée-en un : nom du client, heure et commande — glisse une pièce d'identité pour remplir le nom tout seul. Un rappel part sur Discord 45 et 15 min avant l'heure." />
+      ) : (
+        <div className="flex flex-col gap-4">
+          {aVenir.length ? (
+            <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
+              {aVenir.map((r) => <RdvCarte key={r.id} r={r} now={now} onClick={() => setSel(r)} />)}
+            </div>
+          ) : null}
+          {passes.length ? (
+            <div>
+              <div className="mb-1.5 text-[0.72rem] uppercase tracking-[0.05em] text-faint">Passés</div>
+              <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
+                {passes.slice(0, 30).map((r) => <RdvCarte key={r.id} r={r} now={now} onClick={() => setSel(r)} />)}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      )}
+      {nouveau ? <RdvModal clients={clients} onClose={() => setNouveau(false)} router={router} /> : null}
+      {sel ? <RdvModal key={sel.id} rdv={sel} clients={clients} onClose={() => setSel(null)} router={router} /> : null}
+    </>
+  );
+}
+
+function RdvCarte({ r, now, onClick }: { r: ArmRdv; now: number; onClick: () => void }) {
+  const st = rdvStatut(r.statut);
+  const nom = [r.clientPrenom, r.clientNom].filter(Boolean).join(" ") || r.clientNom;
+  const t = r.dateRdv ? new Date(r.dateRdv).getTime() : 0;
+  const mins = t ? Math.round((t - now) / 60000) : 0;
+  const bientot = r.statut === "a_venir" && mins > 0 && mins <= 60;
+  const compte = r.statut === "a_venir" && t ? (mins < 0 ? "dépassé" : mins < 60 ? `dans ${mins} min` : mins < 1440 ? `dans ${Math.round(mins / 60)} h` : `dans ${Math.round(mins / 1440)} j`) : null;
+  return (
+    <button onClick={onClick} className="rounded-[12px] border bg-surface-2 px-3.5 py-3 text-left transition hover:-translate-y-0.5 hover:border-border-2" style={{ borderColor: bientot ? "color-mix(in srgb,var(--warn) 55%,var(--border))" : "var(--border)" }}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate text-[0.88rem] font-semibold">{nom}</span>
+        <Badge tone={st.tone}>{st.label}</Badge>
+      </div>
+      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[0.78rem] text-muted"><Clock className="h-3.5 w-3.5 text-faint" /> {rdvDateFR(r.dateRdv)} {compte ? <span className="text-faint">· {compte}</span> : null}</div>
+      {r.commande ? <div className="mt-1 truncate text-[0.74rem] text-faint">🧾 {r.commande}</div> : null}
+    </button>
+  );
+}
+
+function RdvModal({ rdv, clients, onClose, router }: { rdv?: ArmRdv; clients: { id: string; nom: string }[]; onClose: () => void; router: Router }) {
+  const editing = !!rdv;
+  const [clientPrenom, setClientPrenom] = useState(rdv?.clientPrenom || "");
+  const [clientNom, setClientNom] = useState(rdv?.clientNom || "");
+  const [telegramme, setTelegramme] = useState(rdv?.telegramme || "");
+  const [commande, setCommande] = useState(rdv?.commande || "");
+  const [lieu, setLieu] = useState(rdv?.lieu || "");
+  const [dateLocal, setDateLocal] = useState(toLocalInput(rdv?.dateRdv || null));
+  const [notes, setNotes] = useState(rdv?.notes || "");
+  const [statut, setStatut] = useState(rdv?.statut || "a_venir");
+  const [carte, setCarte] = useState(rdv?.carteIdentite || "");
+  const [lisant, setLisant] = useState(false);
+  const [lu, setLu] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [confirmDel, setConfirmDel] = useState(false);
+
+  // Pièce d'identité déposée → l'IA lit le nom/prénom et pré-remplit la fiche.
+  async function onPhoto(url: string) {
+    setCarte(url); setLu(null); setLisant(true);
+    const r = await lireCarteIdentite(url);
+    setLisant(false);
+    if (!r.ok) { setLu(r.error || "Lecture impossible — saisis le nom à la main."); return; }
+    if (r.prenom) setClientPrenom(r.prenom);
+    if (r.nom) setClientNom(r.nom);
+    const extra = [r.dateNaissance ? `né(e) ${r.dateNaissance}` : "", r.residence ? `réside : ${r.residence}` : ""].filter(Boolean).join(" · ");
+    if (extra && !notes) setNotes(extra);
+    const nomComplet = `${r.prenom || ""} ${r.nom || ""}`.trim();
+    setLu(nomComplet ? `📇 Identité lue : ${nomComplet}${extra ? " — " + extra : ""}` : "Carte lue, mais nom non détecté — saisis-le à la main.");
+  }
+
+  async function enregistrer() {
+    setErr(null);
+    if (clientNom.trim().length < 2) { setErr("Indique le nom du client."); return; }
+    if (!dateLocal) { setErr("Choisis la date et l'heure du rendez-vous."); return; }
+    const d = new Date(dateLocal); // navigateur → instant absolu (pas de décalage de fuseau)
+    if (isNaN(d.getTime())) { setErr("Date invalide."); return; }
+    setBusy("save");
+    const data = { clientPrenom, clientNom, telegramme, carteIdentite: carte, commande, lieu, dateRdv: d.toISOString(), notes };
+    const r = editing ? await majRdv(rdv!.id, data) : await creerRdv(data);
+    setBusy(null);
+    if (!r.ok) { setErr(r.error || "Impossible."); return; }
+    router.refresh(); onClose();
+  }
+  async function marquer(st: string) { setBusy("st"); const r = await marquerRdv(rdv!.id, st); setBusy(null); if (r.ok) { setStatut(st); router.refresh(); } }
+  async function supprimer() { setBusy("del"); const r = await supprimerRdv(rdv!.id); setBusy(null); if (!r.ok) { setErr(r.error || "Échec."); return; } router.refresh(); onClose(); }
+
+  const nomComplet = [clientPrenom, clientNom].filter(Boolean).join(" ");
+  return (
+    <Modal titre={editing ? `Rendez-vous — ${nomComplet || rdv!.clientNom}` : "🗓️ Nouveau rendez-vous"} onClose={onClose} max={640}>
+      <div className="flex flex-col gap-3">
+        {/* Pièce d'identité → remplissage automatique */}
+        <div className="rounded-[10px] border border-border bg-surface-2 p-2.5">
+          <PhotoDrop dossier="armurerie-rdv-id" onUploaded={onPhoto} compact label="Glisse la pièce d'identité — le nom se remplit tout seul" />
+          {lisant ? <p className="mt-1.5 flex items-center gap-1.5 text-[0.76rem] text-muted"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Lecture de la pièce d&apos;identité…</p> : null}
+          {lu && !lisant ? <p className="mt-1.5 text-[0.76rem]" style={{ color: /impossible|illisible|non détecté/i.test(lu) ? "var(--warn)" : "var(--good)" }}>{lu}</p> : null}
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Champ label="Prénom du client"><input className={inputCls} value={clientPrenom} onChange={(e) => setClientPrenom(e.target.value)} maxLength={120} /></Champ>
+          <Champ label="Nom du client *"><input className={inputCls} value={clientNom} onChange={(e) => setClientNom(e.target.value)} maxLength={120} list="rdv-clients" /><datalist id="rdv-clients">{clients.map((c) => <option key={c.id} value={c.nom} />)}</datalist></Champ>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Champ label="Date & heure *"><input className={inputCls} type="datetime-local" value={dateLocal} onChange={(e) => setDateLocal(e.target.value)} /></Champ>
+          <Champ label="Contact (télégramme…)"><input className={inputCls} value={telegramme} onChange={(e) => setTelegramme(e.target.value)} maxLength={120} placeholder="N° télégramme, Discord…" /></Champ>
+        </div>
+        <Champ label="Commande / objet du rendez-vous"><textarea className={inputCls + " min-h-[70px] resize-y"} value={commande} onChange={(e) => setCommande(e.target.value)} maxLength={1000} placeholder="Ce que le client vient chercher / commander : armes, munitions, réparation…" /></Champ>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Champ label="Lieu"><input className={inputCls} value={lieu} onChange={(e) => setLieu(e.target.value)} maxLength={200} placeholder="Armurerie de Van Horn…" /></Champ>
+          <Champ label="Notes"><input className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={1000} placeholder="Acompte, détails…" /></Champ>
+        </div>
+
+        {/* Rappel automatique */}
+        <div className="flex items-start gap-2 rounded-[10px] border px-3 py-2 text-[0.76rem]" style={{ borderColor: "color-mix(in srgb,var(--accent) 30%,var(--border))", background: "color-mix(in srgb,var(--accent) 6%,transparent)" }}>
+          <Bell className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: "var(--accent)" }} />
+          <span className="text-muted">L&apos;équipe reçoit un <b className="text-ink">rappel Discord 45 min puis 15 min</b> avant l&apos;heure (salon #agenda).</span>
+        </div>
+
+        {editing ? (
+          <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Statut</span>
+            <div className="flex flex-wrap gap-1.5">
+              {RDV_STATUTS.map((st) => (
+                <button key={st.key} onClick={() => marquer(st.key)} disabled={busy === "st"} className="rounded-lg px-2.5 py-1 text-[0.74rem] font-semibold transition" style={{ color: statut === st.key ? "#000" : "var(--muted)", background: statut === st.key ? "var(--accent)" : "var(--surface)", border: "1px solid var(--border)" }}>{st.label}</button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
+        <div className="mt-1 flex items-center justify-between border-t border-border pt-3">
+          {editing ? (confirmDel ? (
+            <div className="flex items-center gap-2 text-[0.78rem]"><span className="text-muted">Supprimer ?</span>
+              <button onClick={supprimer} disabled={busy === "del"} className="rounded-lg px-2.5 py-1 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--oxblood)" }}>{busy === "del" ? "…" : "Oui"}</button>
+              <button onClick={() => setConfirmDel(false)} className="text-[0.76rem] text-muted hover:text-ink">Annuler</button></div>
+          ) : <button onClick={() => setConfirmDel(true)} className="inline-flex items-center gap-1.5 text-[0.76rem] text-faint hover:text-ink"><Trash2 className="h-3.5 w-3.5" /> Supprimer</button>) : <span />}
+          <button onClick={enregistrer} disabled={busy === "save"} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{busy === "save" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} {editing ? "Enregistrer" : "Créer le rendez-vous"}</button>
         </div>
       </div>
     </Modal>

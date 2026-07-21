@@ -869,14 +869,15 @@ export type ArmTache = { id: string; texte: string; fait: boolean; assigneA: str
 export type ArmCommandeLigne = { objet: string; qte: number; prixUnitaire: number };
 export type ArmCommande = { id: string; categorie: string | null; clientNom: string; clientPrenom: string | null; lignes: ArmCommandeLigne[]; total: number; statut: string; notes: string | null; createdAt: string | null };
 export type ArmRessource = { id: string; nom: string; categorie: string; prix: number; mine: boolean; stock: number };
-export type ArmurerieData = { connecte: boolean; clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvementsCoffre: ArmMouvement[]; produits: ArmProduit[]; employes: ArmEmploye[]; pointages: ArmPointage[]; paies: ArmPaie[]; impots: ArmImpot[]; notes: ArmNote[]; taches: ArmTache[]; commandes: ArmCommande[]; ressources: ArmRessource[] };
+export type ArmRdv = { id: string; clientPrenom: string | null; clientNom: string; telegramme: string | null; carteIdentite: string | null; commande: string | null; lieu: string | null; dateRdv: string | null; notes: string | null; statut: string; createdAt: string | null };
+export type ArmurerieData = { connecte: boolean; clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvementsCoffre: ArmMouvement[]; produits: ArmProduit[]; employes: ArmEmploye[]; pointages: ArmPointage[]; paies: ArmPaie[]; impots: ArmImpot[]; notes: ArmNote[]; taches: ArmTache[]; commandes: ArmCommande[]; ressources: ArmRessource[]; rdvs: ArmRdv[] };
 
 export async function getArmurerie(): Promise<ArmurerieData> {
-  const vide: ArmurerieData = { connecte: false, clients: [], ventes: [], contrats: [], ca: 0, coffre: 0, mouvementsCoffre: [], produits: [], employes: [], pointages: [], paies: [], impots: [], notes: [], taches: [], commandes: [], ressources: [] };
+  const vide: ArmurerieData = { connecte: false, clients: [], ventes: [], contrats: [], ca: 0, coffre: 0, mouvementsCoffre: [], produits: [], employes: [], pointages: [], paies: [], impots: [], notes: [], taches: [], commandes: [], ressources: [], rdvs: [] };
   if (!dataConfigured()) return vide;
   const supabase = createAdminClient();
   if (!supabase) return vide;
-  const [clientR, venteR, contratR, coffreR, mvtR, prodR, empR, ptgR, paieR, impR, noteR, tacheR, cmdR, ressR] = await Promise.all([
+  const [clientR, venteR, contratR, coffreR, mvtR, prodR, empR, ptgR, paieR, impR, noteR, tacheR, cmdR, ressR, rdvR] = await Promise.all([
     supabase.from("ArmurerieClient").select("*").order("nom", { ascending: true }),
     supabase.from("ArmurerieVente").select("*").order("createdAt", { ascending: false }).limit(500),
     supabase.from("ArmurerieContrat").select("*").order("createdAt", { ascending: false }).limit(300),
@@ -891,6 +892,7 @@ export async function getArmurerie(): Promise<ArmurerieData> {
     supabase.from("ArmurerieTache").select("*").order("createdAt", { ascending: false }).limit(200),
     supabase.from("ArmurerieCommande").select("*").order("createdAt", { ascending: false }).limit(200),
     supabase.from("ArmurerieRessource").select("*").order("prix", { ascending: true }),
+    supabase.from("ArmurerieRdv").select("*").order("dateRdv", { ascending: true }).limit(300),
   ]);
   // Tables neuves : si absentes (400/404), on renvoie « connecté » avec des listes vides.
   type Raw = Record<string, unknown>;
@@ -962,8 +964,14 @@ export async function getArmurerie(): Promise<ArmurerieData> {
   const ressources: ArmRessource[] = ressR.error ? [] : ((ressR.data || []) as Raw[]).map((r) => ({
     id: String(r.id), nom: (r.nom as string) || "Ressource", categorie: (r.categorie as string) || "Divers", prix: Number(r.prix) || 0, mine: !!r.mine, stock: Number(r.stock) || 0,
   }));
+  const rdvs: ArmRdv[] = rdvR.error ? [] : ((rdvR.data || []) as Raw[]).map((r) => ({
+    id: String(r.id), clientPrenom: (r.clientPrenom as string) ?? null, clientNom: (r.clientNom as string) || "Client",
+    telegramme: (r.telegramme as string) ?? null, carteIdentite: (r.carteIdentite as string) ?? null,
+    commande: (r.commande as string) ?? null, lieu: (r.lieu as string) ?? null, dateRdv: (r.dateRdv as string) ?? null,
+    notes: (r.notes as string) ?? null, statut: (r.statut as string) || "a_venir", createdAt: (r.createdAt as string) ?? null,
+  }));
   const connecte = !(clientR.error && venteR.error && contratR.error) || dataConfigured();
-  return { connecte, clients, ventes, contrats, ca, coffre, mouvementsCoffre, produits, employes, pointages, paies, impots, notes, taches, commandes, ressources };
+  return { connecte, clients, ventes, contrats, ca, coffre, mouvementsCoffre, produits, employes, pointages, paies, impots, notes, taches, commandes, ressources, rdvs };
 }
 
 // ── Vitrine publique de l'armurerie de Van Horn (tarifs, lecture seule) ──
