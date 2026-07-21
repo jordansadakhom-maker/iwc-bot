@@ -1006,3 +1006,32 @@ export async function getVitrine(): Promise<VitrineData> {
   const [membres, operations, armes] = await Promise.all([compte("Membre"), compte("Operation"), compte("Arme")]);
   return { membres, operations, armes };
 }
+
+// ── Alertes actionnables (cloche du header) ──────────────────────
+// Ce qui demande une action de ta part, agrégé en compteurs. Remplace les
+// pings Discord : tout t'attend sur le site. Compté via la clé service.
+export type Alerte = { key: string; label: string; count: number; href: string; tone: "warn" | "oxblood" | "accent" | "good" };
+export type AlertesData = { total: number; items: Alerte[] };
+export async function getAlertes(): Promise<AlertesData> {
+  const admin = createAdminClient();
+  if (!admin) return { total: 0, items: [] };
+  const safe = async (fn: () => PromiseLike<{ count: number | null; error: unknown }>): Promise<number> => {
+    try { const { count, error } = await fn(); return error ? 0 : (count ?? 0); } catch { return 0; }
+  };
+  const iso7 = new Date(Date.now() - 7 * 86400000).toISOString();
+  const [contrats, impots, paies, ruptures, candids] = await Promise.all([
+    safe(() => admin.from("ArmurerieContrat").select("*", { count: "exact", head: true }).eq("statut", "envoye")),
+    safe(() => admin.from("ArmurerieImpot").select("*", { count: "exact", head: true }).neq("statut", "paye")),
+    safe(() => admin.from("ArmureriePaie").select("*", { count: "exact", head: true }).neq("statut", "paye")),
+    safe(() => admin.from("ArmurerieProduit").select("*", { count: "exact", head: true }).lte("stock", 0).eq("aLaDemande", false)),
+    safe(() => admin.from("Candidature").select("*", { count: "exact", head: true }).gte("createdAt", iso7)),
+  ]);
+  const items: Alerte[] = [];
+  if (contrats) items.push({ key: "contrats", label: `${contrats} contrat(s) en attente de signature`, count: contrats, href: "/armurerie", tone: "accent" });
+  if (impots) items.push({ key: "impots", label: `${impots} impôt(s) à régler`, count: impots, href: "/armurerie", tone: "oxblood" });
+  if (paies) items.push({ key: "paies", label: `${paies} paie(s) à verser`, count: paies, href: "/armurerie", tone: "warn" });
+  if (ruptures) items.push({ key: "ruptures", label: `${ruptures} produit(s) en rupture de stock`, count: ruptures, href: "/armurerie", tone: "oxblood" });
+  if (candids) items.push({ key: "candids", label: `${candids} candidature(s) récente(s)`, count: candids, href: "/recrutement", tone: "good" });
+  const total = items.reduce((s, i) => s + i.count, 0);
+  return { total, items };
+}

@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Search, Bell, Menu } from "lucide-react";
+import { Search, Bell, Menu, ArrowRight, CheckCircle2 } from "lucide-react";
 import clsx from "clsx";
 import { NAV, ME, type Pole } from "@/lib/data";
 import { LogoutButton } from "@/components/logout-button";
+import { CommandPalette } from "@/components/command-palette";
+import type { AlertesData } from "@/lib/queries";
 
 type Profil = { nom: string; initiales: string; role: string; avatarUrl: string | null };
 
@@ -18,12 +20,23 @@ function Crest({ className }: { className?: string }) {
   );
 }
 
-export function Shell({ children, connecte = false, profil = null, initialPole = "iwc" }: { children: React.ReactNode; connecte?: boolean; profil?: Profil | null; initialPole?: Pole }) {
+export function Shell({ children, connecte = false, profil = null, initialPole = "iwc", alertes = { total: 0, items: [] } }: { children: React.ReactNode; connecte?: boolean; profil?: Profil | null; initialPole?: Pole; alertes?: AlertesData }) {
   const [pole, setPole] = useState<Pole>(initialPole);
   const me = profil ?? ME;
   const [open, setOpen] = useState(false);
+  const [cmdOpen, setCmdOpen] = useState(false);
+  const [bellOpen, setBellOpen] = useState(false);
   const path = usePathname();
   const router = useRouter();
+
+  // Palette globale : ⌘K (Mac) / Ctrl+K (Windows) ouvre la recherche partout.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCmdOpen(true); }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Change de pôle : mémorise le choix dans un cookie puis rafraîchit les
   // données côté serveur (les pages relisent le cookie et filtrent par pôle).
@@ -104,15 +117,15 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
             <Menu className="h-[18px] w-[18px]" />
           </button>
 
-          <label className="flex max-w-[420px] flex-1 items-center gap-2.5 rounded-xl border border-border bg-surface px-3.5 py-2.5 text-muted focus-within:border-[color-mix(in_srgb,var(--accent)_55%,var(--border))]">
+          <button
+            onClick={() => setCmdOpen(true)}
+            className="flex max-w-[420px] flex-1 items-center gap-2.5 rounded-xl border border-border bg-surface px-3.5 py-2.5 text-left text-muted transition hover:border-[color-mix(in_srgb,var(--accent)_55%,var(--border))]"
+            aria-label="Recherche globale"
+          >
             <Search className="h-4 w-4" />
-            <input
-              className="w-full border-0 bg-transparent text-[0.86rem] text-ink outline-none placeholder:text-faint"
-              placeholder="Rechercher un membre, un contrat, une opération…"
-              aria-label="Recherche"
-            />
+            <span className="w-full truncate text-[0.86rem] text-faint">Rechercher un membre, un contrat, une opération…</span>
             <kbd className="hidden rounded-md border border-border-2 px-1.5 py-0.5 font-num text-[0.66rem] text-faint sm:inline">⌘K</kbd>
-          </label>
+          </button>
 
           <div className="flex rounded-xl border border-border bg-surface p-[3px]">
             {(["iwc", "confrerie"] as Pole[]).map((p) => (
@@ -135,9 +148,47 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
             ))}
           </div>
 
-          <button className="relative grid h-10 w-10 place-items-center rounded-xl border border-border bg-surface text-muted hover:text-ink" aria-label="Notifications">
-            <Bell className="h-[18px] w-[18px]" />
-          </button>
+          <div className="relative">
+            <button onClick={() => setBellOpen((v) => !v)} className="relative grid h-10 w-10 place-items-center rounded-xl border border-border bg-surface text-muted hover:text-ink" aria-label="Notifications">
+              <Bell className="h-[18px] w-[18px]" />
+              {alertes.total > 0 ? (
+                <span className="absolute -right-1 -top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full px-1 text-[0.6rem] font-extrabold text-black/85" style={{ background: "var(--accent)" }}>
+                  {alertes.total > 99 ? "99+" : alertes.total}
+                </span>
+              ) : null}
+            </button>
+            {bellOpen ? (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setBellOpen(false)} />
+                <div className="absolute right-0 z-40 mt-2 w-[330px] overflow-hidden rounded-2xl border border-border-2 bg-surface shadow-2xl">
+                  <div className="flex items-center justify-between border-b border-border px-4 py-3">
+                    <span className="text-[0.82rem] font-semibold">À traiter</span>
+                    <span className="text-[0.7rem] text-faint">{alertes.total} en attente</span>
+                  </div>
+                  {alertes.items.length === 0 ? (
+                    <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
+                      <CheckCircle2 className="h-7 w-7" style={{ color: "var(--good)" }} />
+                      <span className="text-[0.82rem] text-muted">Tout est à jour. Rien ne t&apos;attend.</span>
+                    </div>
+                  ) : (
+                    <div className="max-h-[60vh] overflow-y-auto py-1">
+                      {alertes.items.map((a) => {
+                        const c = a.tone === "warn" ? "var(--warn)" : a.tone === "oxblood" ? "var(--oxblood)" : a.tone === "good" ? "var(--good)" : "var(--accent)";
+                        return (
+                          <Link key={a.key} href={a.href} onClick={() => setBellOpen(false)} className="flex items-center gap-3 px-4 py-2.5 hover:bg-[color-mix(in_srgb,var(--ink)_5%,transparent)]">
+                            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg font-num text-[0.78rem] font-bold" style={{ color: c, background: `color-mix(in srgb,${c} 15%,transparent)` }}>{a.count}</span>
+                            <span className="min-w-0 flex-1 text-[0.82rem] text-ink">{a.label}</span>
+                            <ArrowRight className="h-4 w-4 shrink-0 text-faint" />
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <Link href="/notifications" onClick={() => setBellOpen(false)} className="block border-t border-border px-4 py-2.5 text-center text-[0.78rem] font-semibold text-accent hover:underline">Voir tout le journal</Link>
+                </div>
+              </>
+            ) : null}
+          </div>
 
           <div className="flex items-center gap-2.5 rounded-xl border border-border bg-surface py-[5px] pl-[5px] pr-1.5">
             {me.avatarUrl ? (
@@ -159,6 +210,8 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
 
         <main className="mx-auto flex w-full max-w-[1360px] flex-col gap-5 px-4 pb-10 pt-6 sm:px-6">{children}</main>
       </div>
+
+      <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
     </div>
   );
 }
