@@ -1,6 +1,8 @@
 "use server";
 
 import { envoyerCommande, type CommandeResult } from "@/lib/commandes";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { iaTexte } from "@/lib/ia";
 
 type AvisInput = {
   cible: string; prime?: string; dangerosite?: string; statut?: string;
@@ -18,4 +20,27 @@ export async function majAvis(id: string, patch: Partial<AvisInput>): Promise<Co
 export async function retirerAvis(id: string): Promise<CommandeResult> {
   if (!id) return { ok: false, error: "Avis introuvable." };
   return envoyerCommande("traque.delete", { id });
+}
+
+// Fiche cible IA : à partir des infos réelles de l'avis de recherche, l'IA rédige
+// un profil, une estimation de dangerosité et des recommandations d'approche.
+// N'invente aucun fait — enrichit seulement l'analyse à partir des indices.
+export async function genererFicheCible(id: string): Promise<{ ok: boolean; texte?: string; error?: string }> {
+  const avisId = String(id || "").trim();
+  if (!avisId) return { ok: false, error: "Avis introuvable." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { data, error } = await admin.from("Traque").select("*").eq("id", avisId).maybeSingle();
+  if (error || !data) return { ok: false, error: "Avis introuvable." };
+  const t = data as Record<string, unknown>;
+  const s = (v: unknown) => String(v ?? "").trim();
+  const faits: Record<string, string> = {
+    "Cible": s(t.cible), "Prime": s(t.prime), "Dangerosité déclarée": s(t.dangerosite),
+    "Mort ou vif": s(t.vivantMort), "Dernière position": s(t.position),
+    "Commanditaire": s(t.commanditaire), "Signalement": s(t.signalement), "Statut": s(t.statut),
+  };
+  const bloc = Object.entries(faits).filter(([, v]) => v).map(([k, v]) => `${k} : ${v}`).join("\n") || "(peu d'indices — reste prudent et sobre)";
+  const system = "Tu es l'officier de renseignement de la Iron Wolf Company (univers western RP). À partir des indices RÉELS d'un avis de recherche, rédige une FICHE DE CIBLE en français, structurée : 1) Profil (synthèse), 2) Niveau de dangerosité estimé + justification à partir des seuls indices, 3) Recommandations d'approche et de prudence pour les chasseurs. N'ajoute AUCUN fait inventé (pas de nom, lieu, arme non mentionnés) : tu raisonnes uniquement à partir des indices fournis. Reste concis et opérationnel.";
+  const r = await iaTexte(system, `INDICES RÉELS :\n${bloc}\n\nRédige la fiche de cible.`, 900);
+  return r.ok ? { ok: true, texte: r.texte } : { ok: false, error: r.error };
 }

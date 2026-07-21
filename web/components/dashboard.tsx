@@ -7,6 +7,7 @@ import type { DashData, FeedItem } from "@/lib/queries";
 import { BarresH, Donut, Repartition } from "@/components/charts";
 import { PoleChip, SectionTitle, Ornement } from "@/components/ui";
 import { LiveFeed } from "@/components/live-feed";
+import { BriefingIA } from "@/components/briefing-ia";
 import { cents } from "@/lib/format";
 
 function Card({ children, className, delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
@@ -195,6 +196,8 @@ export function Dashboard({ data, feed = [] }: { data: DashData; feed?: FeedItem
       </div>
 
       <BandeauAttente connecte={data.connecte} />
+
+      <BriefingIA />
 
       <SectionTitle tone="var(--accent)" icon={Coins}>Synthèse</SectionTitle>
       <Kpis data={data} />

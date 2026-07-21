@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Loader2, Trash2, User } from "lucide-react";
+import { Plus, Loader2, Trash2, User, ScanSearch } from "lucide-react";
 import type { AvisItem } from "@/lib/queries";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
-import { emettreAvis, majAvis, retirerAvis } from "@/app/(app)/wanted/actions";
+import { emettreAvis, majAvis, retirerAvis, genererFicheCible } from "@/app/(app)/wanted/actions";
+import { LireBtn } from "@/components/mic-dictee";
 
 type Router = ReturnType<typeof useRouter>;
 
@@ -124,6 +125,15 @@ function AvisModal({ avis, onClose, router }: { avis?: AvisItem; onClose: () => 
   const [busy, setBusy] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [ok, setOk] = useState(false);
+  const [fiche, setFiche] = useState<string | null>(null);
+
+  async function ficheIA() {
+    if (!avis) return;
+    setBusy("fiche"); setFlash(null);
+    const r = await genererFicheCible(avis.id);
+    setBusy(null);
+    if (r.ok && r.texte) setFiche(r.texte); else setFlash(r.error || "Fiche indisponible.");
+  }
 
   async function valider() {
     if (cible.trim().length < 2) { setFlash("Indique la cible."); return; }
@@ -164,9 +174,23 @@ function AvisModal({ avis, onClose, router }: { avis?: AvisItem; onClose: () => 
           <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Statut</span><Picker options={STATUT} value={statut} onChange={setStatut} /></div>
           <div className="flex justify-end"><button onClick={valider} disabled={busy === "save"} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{busy === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" strokeWidth={2} />} {editing ? "Enregistrer" : "Placarder l'avis"}</button></div>
           {editing ? (
-            <div className="mt-1 flex items-center justify-between border-t border-border pt-3">
-              <ConfirmDel onDelete={supprimer} busy={busy === "del"} />
-              <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3 py-1.5 text-[0.8rem] font-semibold hover:border-border-2">Fermer</button>
+            <div className="mt-1 flex flex-col gap-2.5 border-t border-border pt-3">
+              <div className="flex items-center gap-2">
+                <button onClick={ficheIA} disabled={busy === "fiche"} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-3 py-1.5 text-[0.78rem] font-semibold text-muted transition hover:border-[color-mix(in_srgb,var(--accent)_55%,var(--border))] hover:text-ink disabled:opacity-60">
+                  {busy === "fiche" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ScanSearch className="h-3.5 w-3.5" />} Fiche cible IA
+                </button>
+                {fiche ? <LireBtn texte={fiche} /> : null}
+                <span className="text-[0.7rem] text-faint">Profil, dangerosité & recommandations</span>
+              </div>
+              {fiche ? (
+                <div className="rounded-[10px] border border-border bg-surface-2 p-3">
+                  <p className="whitespace-pre-wrap text-[0.84rem] leading-relaxed text-ink">{fiche}</p>
+                </div>
+              ) : null}
+              <div className="flex items-center justify-between">
+                <ConfirmDel onDelete={supprimer} busy={busy === "del"} />
+                <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3 py-1.5 text-[0.8rem] font-semibold hover:border-border-2">Fermer</button>
+              </div>
             </div>
           ) : null}
         </div>
