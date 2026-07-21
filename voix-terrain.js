@@ -50,10 +50,10 @@ function fichierVersMp3(inputBuffer) {
       const ffmpegPath = require('ffmpeg-static');
       const { spawn } = require('child_process');
       if (!ffmpegPath || !inputBuffer || !inputBuffer.length) return resolve(null);
-      // 32 kbps mono 16 kHz : voix parfaitement transcriptible par Whisper et
-      // fichier léger (~0,25 Mo/min) → on tient de longues scènes sous la limite
-      // Whisper de 25 Mo (≈ 100 min par capture).
-      const ff = spawn(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-ac', '1', '-ar', '16000', '-b:a', '32k', '-f', 'mp3', 'pipe:1']);
+      // 48 kbps mono 16 kHz : voix bien nette pour Whisper tout en restant léger
+      // (~0,36 Mo/min) → on tient encore de longues scènes sous la limite Whisper
+      // de 25 Mo (≈ 65 min par capture).
+      const ff = spawn(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-ac', '1', '-ar', '16000', '-b:a', '48k', '-f', 'mp3', 'pipe:1']);
       const out = [];
       ff.stdout.on('data', d => out.push(d));
       ff.on('error', () => resolve(null));
@@ -64,6 +64,10 @@ function fichierVersMp3(inputBuffer) {
   });
 }
 
+// Contexte donné à Whisper pour mieux orthographier les noms propres du jeu
+// (villes RDR2, télégrammes, dollars…) → transcription plus claire et précise.
+const CONTEXTE_WHISPER = "Scène de jeu de rôle Far West (RedM, Red Dead Redemption 2), en français. Lieux : Valentine, Rhodes, Saint-Denis, Blackwater, Van Horn, Annesburg, Strawberry, Armadillo, Tumbleweed, Lagras, Emerald Ranch. On parle de télégrammes (numéros), de dollars, d'armes, de contrats, de bandes et de shérifs.";
+
 // Transcription OpenAI Whisper (français). Renvoie le texte, ou '' si échec.
 async function _whisper(mp3) {
   const key = process.env.OPENAI_API_KEY;
@@ -73,6 +77,8 @@ async function _whisper(mp3) {
     form.append('file', new Blob([mp3], { type: 'audio/mpeg' }), 'audio.mp3');
     form.append('model', 'whisper-1');
     form.append('language', 'fr');
+    form.append('prompt', CONTEXTE_WHISPER);
+    form.append('temperature', '0');
     form.append('response_format', 'text');
     const r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form,
@@ -94,6 +100,8 @@ async function _whisperDetaille(mp3) {
     form.append('file', new Blob([mp3], { type: 'audio/mpeg' }), 'audio.mp3');
     form.append('model', 'whisper-1');
     form.append('language', 'fr');
+    form.append('prompt', CONTEXTE_WHISPER);
+    form.append('temperature', '0');
     form.append('response_format', 'text');
     const r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form,

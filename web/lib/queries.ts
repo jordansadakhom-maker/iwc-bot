@@ -1144,6 +1144,22 @@ export async function getAlertes(): Promise<AlertesData> {
   return { total, items };
 }
 
+// ── Rapports de terrain (historique des captures « Son du jeu » / « Ma voix ») ──
+export type RapportTerrain = { id: string; agent: string | null; cible: string | null; lieu: string | null; priorite: string; texte: string | null; resume: string | null; source: string; createdAt: string | null };
+export async function getRapportsTerrain(): Promise<RapportTerrain[]> {
+  const admin = createAdminClient();
+  if (!admin) return [];
+  const { data, error } = await admin.from("RapportTerrain").select("*").order("createdAt", { ascending: false }).limit(200);
+  if (error) return []; // table pas encore créée → liste vide (aucun crash)
+  type Raw = Record<string, unknown>;
+  return ((data || []) as Raw[]).map((r) => ({
+    id: String(r.id), agent: (r.agent as string) ?? null, cible: (r.cible as string) ?? null,
+    lieu: (r.lieu as string) ?? null, priorite: (r.priorite as string) || "normale",
+    texte: (r.texte as string) ?? null, resume: (r.resume as string) ?? null,
+    source: (r.source as string) || "jeu", createdAt: (r.createdAt as string) ?? null,
+  }));
+}
+
 // ── Journal de bord : rendez-vous CLÔTURÉS (historique / suivi complet) ──
 export type JournalRdv = {
   id: string; nomRP: string | null; type: string | null; lieu: string | null; creneau: string | null;

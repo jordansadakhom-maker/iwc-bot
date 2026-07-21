@@ -734,4 +734,13 @@ async function marquerRappelRdvArmurerie(id, champ) {
   return await _patch(`ArmurerieRdv?id=eq.${encodeURIComponent(id)}`, body);
 }
 
-module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, majRosterMembre, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise, lireProduitsArmurerie, lireContratArmurerieEnAttente, marquerContratArmurerie, lireRdvArmurerieARappeler, marquerRappelRdvArmurerie };
+// ── Rapports de terrain (captures « Son du jeu » / « Ma voix ») → historique site ──
+// Enregistre une scène transcrite (texte + résumé) pour l'afficher sur le site.
+// Best-effort : no-op si la table n'existe pas encore. Table NEUVE, jamais réconciliée.
+async function enregistrerRapportTerrain(row) {
+  if (!row || !row.id) return false;
+  const r = await _upsert('RapportTerrain', [row]);
+  return !!(r && r.ok);
+}
+
+module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, majRosterMembre, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise, lireProduitsArmurerie, lireContratArmurerieEnAttente, marquerContratArmurerie, lireRdvArmurerieARappeler, marquerRappelRdvArmurerie, enregistrerRapportTerrain };
