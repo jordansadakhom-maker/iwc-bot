@@ -174,6 +174,7 @@ export function Vitrine({ stats }: { stats: VitrineData }) {
         <div className="mt-1 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[0.74rem] text-faint">
           <Link href="/rejoindre" className="hover:text-accent">Recrutement</Link>
           <Link href="/rendez-vous" className="hover:text-accent">Prestations</Link>
+          <Link href="/suivi" className="hover:text-accent">Suivre ma demande</Link>
           <Link href="/armurerie-vh" className="hover:text-accent">Armurerie</Link>
           <Link href="/telegramme" className="hover:text-accent">Nous écrire</Link>
           <Link href="/login" className="hover:text-accent">Espace membre</Link>

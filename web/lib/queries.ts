@@ -1040,14 +1040,16 @@ export async function getAlertes(): Promise<AlertesData> {
     try { const { count, error } = await fn(); return error ? 0 : (count ?? 0); } catch { return 0; }
   };
   const iso7 = new Date(Date.now() - 7 * 86400000).toISOString();
-  const [contrats, impots, paies, ruptures, candids] = await Promise.all([
+  const [contrats, impots, paies, ruptures, candids, rdvs] = await Promise.all([
     safe(() => admin.from("ArmurerieContrat").select("*", { count: "exact", head: true }).eq("statut", "envoye")),
     safe(() => admin.from("ArmurerieImpot").select("*", { count: "exact", head: true }).neq("statut", "paye")),
     safe(() => admin.from("ArmureriePaie").select("*", { count: "exact", head: true }).neq("statut", "paye")),
     safe(() => admin.from("ArmurerieProduit").select("*", { count: "exact", head: true }).lte("stock", 0).eq("aLaDemande", false)),
     safe(() => admin.from("Candidature").select("*", { count: "exact", head: true }).gte("createdAt", iso7)),
+    safe(() => admin.from("Rdv").select("*", { count: "exact", head: true }).eq("statut", "nouveau")),
   ]);
   const items: Alerte[] = [];
+  if (rdvs) items.push({ key: "rdvs", label: `${rdvs} rendez-vous à traiter`, count: rdvs, href: "/communication", tone: "warn" });
   if (contrats) items.push({ key: "contrats", label: `${contrats} contrat(s) en attente de signature`, count: contrats, href: "/armurerie", tone: "accent" });
   if (impots) items.push({ key: "impots", label: `${impots} impôt(s) à régler`, count: impots, href: "/armurerie", tone: "oxblood" });
   if (paies) items.push({ key: "paies", label: `${paies} paie(s) à verser`, count: paies, href: "/armurerie", tone: "warn" });

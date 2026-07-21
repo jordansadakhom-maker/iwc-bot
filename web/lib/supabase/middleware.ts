@@ -41,7 +41,7 @@ export async function updateSession(request: NextRequest) {
   // routes de métadonnées (image d'aperçu Discord, manifeste + icône PWA), sinon
   // le crawler Discord (anonyme) est redirigé vers /login et l'embed n'a pas
   // d'image, et l'appli ne peut pas s'installer.
-  const isPublic = path === "/" || path === "/login" || path.startsWith("/auth") || path === "/rendez-vous" || path === "/telegramme" || path === "/rejoindre" || path === "/armurerie-vh"
+  const isPublic = path === "/" || path === "/login" || path.startsWith("/auth") || path === "/rendez-vous" || path === "/telegramme" || path === "/rejoindre" || path === "/suivi" || path === "/armurerie-vh"
     || path === "/opengraph-image" || path === "/manifest.webmanifest" || path === "/pwa-icon" || path === "/icon" || path === "/apple-icon";
 
   if (requireAuth && !user && !isPublic) {
