@@ -60,13 +60,16 @@ function _embed(d) {
     { name: '📇 Contact', value: (p.contact || '—').slice(0, 300), inline: false },
   ];
   if (p.message) champs.push({ name: '📝 Demande', value: String(p.message).slice(0, 1000), inline: false });
-  return new EmbedBuilder()
+  const e = new EmbedBuilder()
     .setColor(0xc8a45c)
     .setTitle('🌐 Nouvelle demande de rendez-vous — via le site')
     .setDescription(`**Réf.** \`${d.id}\``)
     .addFields(champs)
     .setFooter({ text: 'Iron Wolf Company · Demande via le site web' })
     .setTimestamp();
+  // Capture d'écran du lieu jointe par le client → visible direct sur Discord.
+  if (p.lieuPhoto && /^https?:\/\//.test(String(p.lieuPhoto))) e.setImage(String(p.lieuPhoto));
+  return e;
 }
 
 // Relève les nouvelles demandes web et prévient l'équipe dans #agenda.
