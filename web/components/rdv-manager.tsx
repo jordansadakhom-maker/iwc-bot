@@ -27,6 +27,7 @@ const dateFR = (s: string | null) => { if (!s) return ""; try { return new Date(
 export function RdvManager({ rdvs, membres }: { rdvs: RdvComm[]; membres: MembreLite[] }) {
   const router = useRouter();
   const [sel, setSel] = useState<RdvComm | null>(null);
+  const aTraiterN = rdvs.filter((r) => ["nouveau", "transmis", "attente", "demande"].includes(norm(r.statut))).length;
 
   return (
     <>
@@ -34,6 +35,7 @@ export function RdvManager({ rdvs, membres }: { rdvs: RdvComm[]; membres: Membre
         <div className="flex items-center gap-2.5">
           <h3 className="text-[0.8rem] font-semibold uppercase tracking-[0.06em] text-muted">Rendez-vous clients</h3>
           <span className="font-num text-[0.8rem] text-faint">{rdvs.length}</span>
+          {aTraiterN ? <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.68rem] font-bold" style={{ color: "#fff", background: "var(--warn)" }}>{aTraiterN} à traiter</span> : null}
         </div>
         <a href="/rendez-vous" target="_blank" className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted transition hover:border-border-2 hover:text-ink">
           <Globe className="h-3.5 w-3.5" /> Page de réservation
@@ -51,11 +53,24 @@ export function RdvManager({ rdvs, membres }: { rdvs: RdvComm[]; membres: Membre
         <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
           {rdvs.map((r) => {
             const st = sInfo(r.statut);
+            const nk = norm(r.statut);
+            const aTraiter = ["nouveau", "transmis", "attente", "demande"].includes(nk); // fraîchement arrivé → à traiter
+            const termine = ["honore", "annule", "lapin", "cloture", "clot"].includes(nk); // terminé → estompé
             return (
-              <button key={r.id} onClick={() => setSel(r)} className="rounded-[12px] border border-border bg-surface-2 px-3.5 py-3 text-left transition hover:-translate-y-0.5 hover:border-border-2">
-                <div className="flex items-center justify-between gap-2">
+              <button key={r.id} onClick={() => setSel(r)}
+                className="relative rounded-[12px] border px-3.5 py-3 text-left transition hover:-translate-y-0.5"
+                style={aTraiter
+                  ? { borderColor: "color-mix(in srgb,var(--warn) 58%,var(--border))", background: "color-mix(in srgb,var(--warn) 9%,var(--surface-2))", boxShadow: "0 0 0 1px color-mix(in srgb,var(--warn) 28%,transparent)" }
+                  : { borderColor: "var(--border)", background: "var(--surface-2)", opacity: termine ? 0.72 : 1 }}>
+                {aTraiter ? (
+                  <span className="absolute right-2.5 top-2.5 flex h-2.5 w-2.5" title="Pas encore traité">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60" style={{ background: "var(--warn)" }} />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full" style={{ background: "var(--warn)" }} />
+                  </span>
+                ) : null}
+                <div className="flex items-center justify-between gap-2 pr-4">
                   <div className="min-w-0 truncate text-[0.9rem] font-semibold">{r.nomRP || "Client"}</div>
-                  <Badge tone={badgeTone(st.tone)}>{st.label}</Badge>
+                  <Badge tone={aTraiter ? "warn" : badgeTone(st.tone)}>{aTraiter ? "À traiter" : st.label}</Badge>
                 </div>
                 <div className="mt-2 flex flex-col gap-1 text-[0.74rem] text-muted">
                   {r.type ? <span className="truncate">{r.type}</span> : null}

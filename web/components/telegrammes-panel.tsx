@@ -29,14 +29,34 @@ export function TelegrammesPanel({ telegrammes }: { telegrammes: TelegrammeItem[
     );
   }
 
+  const aTraiterN = telegrammes.filter((t) => !/clotur|classe/i.test(t.statut)).length;
+
   return (
     <>
+      {aTraiterN ? (
+        <div className="mb-2.5 flex items-center gap-1.5 text-[0.74rem]">
+          <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.68rem] font-bold" style={{ color: "#fff", background: "var(--warn)" }}>{aTraiterN} à traiter</span>
+          <span className="text-faint">— les télégrammes encore ouverts ressortent en surbrillance.</span>
+        </div>
+      ) : null}
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
-        {telegrammes.map((t) => (
-          <button key={t.id} onClick={() => setSel(t)} className="rounded-[12px] border border-border bg-surface-2 px-3.5 py-3 text-left transition hover:-translate-y-0.5 hover:border-border-2">
-            <div className="flex items-center justify-between gap-2">
+        {telegrammes.map((t) => {
+          const aTraiter = !/clotur|classe/i.test(t.statut); // encore ouvert → pas traité
+          return (
+          <button key={t.id} onClick={() => setSel(t)}
+            className="relative rounded-[12px] border px-3.5 py-3 text-left transition hover:-translate-y-0.5"
+            style={aTraiter
+              ? { borderColor: "color-mix(in srgb,var(--warn) 60%,var(--border))", background: "color-mix(in srgb,var(--warn) 9%,var(--surface-2))", boxShadow: "0 0 0 1px color-mix(in srgb,var(--warn) 30%,transparent)" }
+              : { borderColor: "var(--border)", background: "var(--surface-2)", opacity: 0.82 }}>
+            {aTraiter ? (
+              <span className="absolute right-2.5 top-2.5 flex h-2.5 w-2.5" title="Pas encore traité">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60" style={{ background: "var(--warn)" }} />
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full" style={{ background: "var(--warn)" }} />
+              </span>
+            ) : null}
+            <div className="flex items-center justify-between gap-2 pr-4">
               <div className="min-w-0 truncate text-[0.9rem] font-semibold">{t.clientNom}</div>
-              <Badge tone={statutTone(t.statut)}>{/ouvert/i.test(t.statut) ? "Ouvert" : /clotur/i.test(t.statut) ? "Clôturé" : t.statut}</Badge>
+              <Badge tone={statutTone(t.statut)}>{/ouvert/i.test(t.statut) ? "À traiter" : /clotur/i.test(t.statut) ? "Clôturé" : t.statut}</Badge>
             </div>
             <p className="mt-1.5 line-clamp-2 text-[0.76rem] text-muted">{apercu(t)}</p>
             <div className="mt-2 flex items-center justify-between gap-2 text-[0.68rem] text-faint">
@@ -44,7 +64,8 @@ export function TelegrammesPanel({ telegrammes }: { telegrammes: TelegrammeItem[
               {t.rdvCree ? <span className="inline-flex items-center gap-1" style={{ color: "var(--good)" }}><Check className="h-3 w-3" /> RDV créé</span> : null}
             </div>
           </button>
-        ))}
+          );
+        })}
       </div>
       {sel ? <TgModal tg={sel} onClose={() => setSel(null)} router={router} /> : null}
     </>
