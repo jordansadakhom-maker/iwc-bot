@@ -224,25 +224,33 @@ export function ComptabiliteTab({ mouvements, ca, router }: { mouvements: ArmMou
     return mouvements.filter((m) => { const t = m.createdAt ? new Date(m.createdAt).getTime() : 0; return t >= seuil; });
   }, [mouvements, periode]);
 
-  const recettes = filtres.filter((m) => m.sens === "entree").reduce((s, m) => s + m.montant, 0);
-  const sorties = filtres.filter((m) => m.sens === "sortie");
+  // « capital » = apports / retraits de trésorerie : hors résultat d'exploitation
+  // (ni recette ni dépense), mais bien pris en compte dans le solde du coffre.
+  const estCapital = (m: ArmMouvement) => m.nature === "capital";
+  const recettes = filtres.filter((m) => m.sens === "entree" && !estCapital(m)).reduce((s, m) => s + m.montant, 0);
+  const sorties = filtres.filter((m) => m.sens === "sortie" && !estCapital(m));
   const depProduit = sorties.filter((m) => m.nature === "produit").reduce((s, m) => s + m.montant, 0);
   const depCharge = sorties.filter((m) => m.nature === "charge").reduce((s, m) => s + m.montant, 0);
   const depAutre = sorties.filter((m) => m.nature !== "produit" && m.nature !== "charge").reduce((s, m) => s + m.montant, 0);
   const depenses = depProduit + depCharge + depAutre;
   const net = recettes - depenses;
+  const capitalIn = filtres.filter((m) => m.sens === "entree" && estCapital(m)).reduce((s, m) => s + m.montant, 0);
+  const capitalOut = filtres.filter((m) => m.sens === "sortie" && estCapital(m)).reduce((s, m) => s + m.montant, 0);
+  const capitalNet = capitalIn - capitalOut;
+  const aCapital = capitalIn > 0 || capitalOut > 0;
 
   function exporter() {
     const l = ["ARMURERIE DE VAN HORN — GRAND LIVRE COMPTABLE", `Période : ${periode === "tout" ? "totale" : periode + " derniers jours"}`, "=".repeat(60), ""];
-    filtres.forEach((m) => l.push(`${dateFR(m.createdAt).padEnd(20)} ${(m.sens === "entree" ? "+" : "−")}${money(m.montant).padEnd(10)} ${m.sens === "sortie" && (m.nature === "produit" || m.nature === "charge") ? `[${m.nature}] ` : ""}${m.motif || ""}${m.auteur ? ` (${m.auteur})` : ""}`));
+    filtres.forEach((m) => l.push(`${dateFR(m.createdAt).padEnd(20)} ${(m.sens === "entree" ? "+" : "−")}${money(m.montant).padEnd(10)} ${m.nature === "capital" ? "[capital] " : m.sens === "sortie" && (m.nature === "produit" || m.nature === "charge") ? `[${m.nature}] ` : ""}${m.motif || ""}${m.auteur ? ` (${m.auteur})` : ""}`));
     l.push("", `Recettes : ${money(recettes)}`, `Dépenses produit : ${money(depProduit)}`, `Dépenses charge : ${money(depCharge + depAutre)}`, `Dépenses totales : ${money(depenses)}`, `Résultat net : ${money(net)}`);
+    if (aCapital) l.push(`Apports de capital : ${money(capitalIn)}`, `Retraits de capital : ${money(capitalOut)}`, `Capital net : ${money(capitalNet)}`);
     const blob = new Blob([l.join("\n")], { type: "text/plain;charset=utf-8" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "comptabilite-van-horn.txt"; a.click(); URL.revokeObjectURL(a.href);
   }
   function exporterCSV() {
     const esc = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
     const lignes = [["Date", "Sens", "Nature", "Libellé", "Par", "Montant"].join(";")];
-    filtres.forEach((m) => lignes.push([esc(dateFR(m.createdAt)), m.sens === "entree" ? "Recette" : "Dépense", m.sens === "sortie" && (m.nature === "produit" || m.nature === "charge") ? m.nature : "", esc(m.motif || ""), esc(m.auteur || ""), (m.sens === "entree" ? "" : "-") + (Number(m.montant) || 0).toFixed(2)].join(";")));
+    filtres.forEach((m) => lignes.push([esc(dateFR(m.createdAt)), m.nature === "capital" ? "Capital" : m.sens === "entree" ? "Recette" : "Dépense", m.nature === "capital" ? "capital" : m.sens === "sortie" && (m.nature === "produit" || m.nature === "charge") ? m.nature : "", esc(m.motif || ""), esc(m.auteur || ""), (m.sens === "entree" ? "" : "-") + (Number(m.montant) || 0).toFixed(2)].join(";")));
     // BOM pour Excel + séparateur ; (locale FR)
     const blob = new Blob(["﻿" + lignes.join("\r\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "comptabilite-van-horn.csv"; a.click(); URL.revokeObjectURL(a.href);
@@ -250,10 +258,11 @@ export function ComptabiliteTab({ mouvements, ca, router }: { mouvements: ArmMou
 
   return (
     <>
-      <div className="mb-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-5">
+      <div className={`mb-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3 ${aCapital ? "xl:grid-cols-6" : "xl:grid-cols-5"}`}>
         <Stat label="Recettes" value={money(recettes)} tone="var(--good)" icon={ArrowDownRight} />
         <Stat label="Dépenses produit" value={money(depProduit)} tone="var(--oxblood)" icon={ClipboardList} />
         <Stat label="Dépenses charge" value={money(depCharge + depAutre)} tone="var(--oxblood)" icon={ArrowUpRight} />
+        {aCapital ? <Stat label="Capital (net)" value={`${capitalNet >= 0 ? "+" : "−"}${money(Math.abs(capitalNet))}`} tone="var(--steel)" icon={Landmark} /> : null}
         <Stat label="Résultat net" value={money(net)} tone={net >= 0 ? "var(--good)" : "var(--oxblood)"} icon={Wallet} />
         <Stat label="CA cumulé" value={money(ca)} tone="var(--accent)" icon={CircleDollarSign} />
       </div>
@@ -284,7 +293,7 @@ export function ComptabiliteTab({ mouvements, ca, router }: { mouvements: ArmMou
                 return (
                   <tr key={m.id} className="hover:bg-[color-mix(in_srgb,var(--ink)_4%,transparent)]">
                     <td className="border-b border-border px-2.5 py-2 text-faint">{dateFR(m.createdAt)}</td>
-                    <td className="border-b border-border px-2.5 py-2"><span className="align-middle">{m.motif || (entree ? "Recette" : "Dépense")}</span>{!entree && (m.nature === "produit" || m.nature === "charge") ? <span className="ml-1.5 inline-block rounded-full px-1.5 py-0.5 align-middle text-[0.6rem] font-semibold uppercase tracking-[0.04em]" style={{ color: m.nature === "produit" ? "var(--accent)" : "var(--oxblood)", background: `color-mix(in srgb,${m.nature === "produit" ? "var(--accent)" : "var(--oxblood)"} 14%,transparent)` }}>{m.nature}</span> : null}</td>
+                    <td className="border-b border-border px-2.5 py-2"><span className="align-middle">{m.motif || (entree ? "Recette" : "Dépense")}</span>{m.nature === "capital" ? <span className="ml-1.5 inline-block rounded-full px-1.5 py-0.5 align-middle text-[0.6rem] font-semibold uppercase tracking-[0.04em]" style={{ color: "var(--steel)", background: "color-mix(in srgb,var(--steel) 14%,transparent)" }}>capital</span> : !entree && (m.nature === "produit" || m.nature === "charge") ? <span className="ml-1.5 inline-block rounded-full px-1.5 py-0.5 align-middle text-[0.6rem] font-semibold uppercase tracking-[0.04em]" style={{ color: m.nature === "produit" ? "var(--accent)" : "var(--oxblood)", background: `color-mix(in srgb,${m.nature === "produit" ? "var(--accent)" : "var(--oxblood)"} 14%,transparent)` }}>{m.nature}</span> : null}</td>
                     <td className="border-b border-border px-2.5 py-2 text-faint">{m.auteur || "—"}</td>
                     <td className="border-b border-border px-2.5 py-2 font-num font-semibold" style={{ color: entree ? "var(--good)" : "var(--oxblood)" }}>{entree ? "+" : "−"}{money(m.montant)}</td>
                   </tr>
@@ -418,7 +427,7 @@ function ImportRecklessModal({ onClose, router }: { onClose: () => void; router:
 }
 function EcritureModal({ onClose, router }: { onClose: () => void; router: Router }) {
   const [sens, setSens] = useState<"entree" | "sortie">("sortie");
-  const [nature, setNature] = useState<"produit" | "charge">("produit");
+  const [nature, setNature] = useState<"produit" | "charge" | "capital">("produit");
   const [montant, setMontant] = useState("");
   const [motif, setMotif] = useState("");
   const [busy, setBusy] = useState(false);
@@ -427,7 +436,7 @@ function EcritureModal({ onClose, router }: { onClose: () => void; router: Route
     setErr(null);
     if (!(Number(montant) > 0)) { setErr("Montant invalide."); return; }
     setBusy(true);
-    const r = await ajouterEcriture(Number(montant), sens, motif, sens === "sortie" ? nature : null);
+    const r = await ajouterEcriture(Number(montant), sens, motif, nature === "capital" ? "capital" : sens === "sortie" ? nature : null);
     setBusy(false);
     if (!r.ok) { setErr(r.error || "Impossible."); return; }
     router.refresh(); onClose();
@@ -445,10 +454,20 @@ function EcritureModal({ onClose, router }: { onClose: () => void; router: Route
             <div className="flex gap-2">
               <button onClick={() => setNature("produit")} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[0.78rem] font-semibold" style={{ color: nature === "produit" ? "#000" : "var(--accent)", background: nature === "produit" ? "var(--accent)" : "transparent", borderColor: "color-mix(in srgb,var(--accent) 45%,var(--border))" }}><ClipboardList className="h-3.5 w-3.5" /> Produit (stock)</button>
               <button onClick={() => setNature("charge")} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[0.78rem] font-semibold" style={{ color: nature === "charge" ? "#fff" : "var(--oxblood)", background: nature === "charge" ? "var(--oxblood)" : "transparent", borderColor: "color-mix(in srgb,var(--oxblood) 45%,var(--border))" }}><Wallet className="h-3.5 w-3.5" /> Charge (frais)</button>
+              <button onClick={() => setNature("capital")} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[0.78rem] font-semibold" style={{ color: nature === "capital" ? "#000" : "var(--steel)", background: nature === "capital" ? "var(--steel)" : "transparent", borderColor: "color-mix(in srgb,var(--steel) 45%,var(--border))" }}><Landmark className="h-3.5 w-3.5" /> Capital (retrait)</button>
             </div>
-            <p className="mt-1 text-[0.68rem] text-faint">Produit = achat qui entre en stock (armes, matières, ressources). Charge = frais (réparation, loyer, salaires…).</p>
+            <p className="mt-1 text-[0.68rem] text-faint">Produit = achat qui entre en stock (armes, matières, ressources). Charge = frais (réparation, loyer, salaires…). Capital = retrait de trésorerie (hors résultat, sort juste du coffre).</p>
           </div>
-        ) : null}
+        ) : (
+          <div>
+            <div className="mb-1 text-[0.68rem] uppercase tracking-[0.06em] text-faint">Type d&apos;entrée</div>
+            <div className="flex gap-2">
+              <button onClick={() => setNature("produit")} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[0.78rem] font-semibold" style={{ color: nature !== "capital" ? "#000" : "var(--good)", background: nature !== "capital" ? "var(--good)" : "transparent", borderColor: "color-mix(in srgb,var(--good) 45%,var(--border))" }}><ArrowDownRight className="h-3.5 w-3.5" /> Recette (vente)</button>
+              <button onClick={() => setNature("capital")} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[0.78rem] font-semibold" style={{ color: nature === "capital" ? "#000" : "var(--steel)", background: nature === "capital" ? "var(--steel)" : "transparent", borderColor: "color-mix(in srgb,var(--steel) 45%,var(--border))" }}><Landmark className="h-3.5 w-3.5" /> Apport de capital</button>
+            </div>
+            <p className="mt-1 text-[0.68rem] text-faint">Recette = vente / prestation (compte dans le chiffre d&apos;affaires). Apport de capital = argent injecté dans le coffre (hors résultat).</p>
+          </div>
+        )}
         <div className="grid gap-3 sm:grid-cols-2">
           <Champ label="Montant ($)"><input className={inputCls} type="number" min={0} step="0.01" value={montant} onChange={(e) => setMontant(e.target.value)} autoFocus /></Champ>
           <Champ label="Libellé"><input className={inputCls} value={motif} onChange={(e) => setMotif(e.target.value)} placeholder="Réassort poudre, réparation…" maxLength={200} /></Champ>
@@ -476,10 +495,14 @@ function ComptaChart({ mouvements }: { mouvements: ArmMouvement[] }) {
     const sorted = mouvements.filter((m) => m.createdAt).slice().sort((a, b) => new Date(a.createdAt!).getTime() - new Date(b.createdAt!).getTime());
     if (!sorted.length) return [];
     const pts: PtC[] = [{ t: new Date(sorted[0].createdAt!).getTime(), rec: 0, dep: 0, net: 0 }];
-    let cr = 0, cd = 0;
+    let cr = 0, cd = 0, solde = 0;
     for (const m of sorted) {
-      if (m.sens === "entree") cr = round2(cr + m.montant); else cd = round2(cd + m.montant);
-      pts.push({ t: new Date(m.createdAt!).getTime(), rec: cr, dep: cd, net: round2(cr - cd) });
+      // Recettes / dépenses = exploitation (hors capital) ; le solde suit TOUS les
+      // mouvements (capital compris) → la courbe « Solde » = trajectoire du coffre.
+      const cap = m.nature === "capital";
+      if (m.sens === "entree") { solde = round2(solde + m.montant); if (!cap) cr = round2(cr + m.montant); }
+      else { solde = round2(solde - m.montant); if (!cap) cd = round2(cd + m.montant); }
+      pts.push({ t: new Date(m.createdAt!).getTime(), rec: cr, dep: cd, net: solde });
     }
     return pts;
   }, [mouvements]);
@@ -510,7 +533,7 @@ function ComptaChart({ mouvements }: { mouvements: ArmMouvement[] }) {
         <div className="flex items-center gap-3 text-[0.68rem] text-faint">
           <span className="inline-flex items-center gap-1"><span className="inline-block h-1.5 w-3 rounded-sm" style={{ background: "var(--good)" }} /> Recettes</span>
           <span className="inline-flex items-center gap-1"><span className="inline-block h-0 w-3 border-t-2 border-dashed" style={{ borderColor: "var(--oxblood)" }} /> Dépenses</span>
-          <span className="inline-flex items-center gap-1"><span className="inline-block h-0 w-3 border-t-2 border-dotted" style={{ borderColor: "var(--accent)" }} /> Solde net</span>
+          <span className="inline-flex items-center gap-1"><span className="inline-block h-0 w-3 border-t-2 border-dotted" style={{ borderColor: "var(--accent)" }} /> Solde coffre</span>
         </div>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full select-none" style={{ height: "auto" }}
@@ -548,7 +571,7 @@ function ComptaChart({ mouvements }: { mouvements: ArmMouvement[] }) {
           <div className="mb-0.5 font-semibold text-muted">{dJour(hp.t)} · {dHeure(hp.t)}</div>
           <div className="flex items-center justify-between gap-3"><span style={{ color: "var(--good)" }}>Recettes</span><span className="font-num">{money(hp.rec)}</span></div>
           <div className="flex items-center justify-between gap-3"><span style={{ color: "var(--oxblood)" }}>Dépenses</span><span className="font-num">{money(hp.dep)}</span></div>
-          <div className="mt-0.5 flex items-center justify-between gap-3 border-t border-border pt-0.5"><span className="font-semibold">Net</span><span className="font-num font-semibold" style={{ color: hp.net >= 0 ? "var(--good)" : "var(--oxblood)" }}>{money(hp.net)}</span></div>
+          <div className="mt-0.5 flex items-center justify-between gap-3 border-t border-border pt-0.5"><span className="font-semibold">Solde coffre</span><span className="font-num font-semibold" style={{ color: hp.net >= 0 ? "var(--good)" : "var(--oxblood)" }}>{money(hp.net)}</span></div>
         </div>
       ) : null}
     </div>

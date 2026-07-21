@@ -28,10 +28,12 @@ async function auteurNom(): Promise<string> {
 // stock : armes, matières, ressources) ou "charge" (frais : paies, impôts…).
 // Nul pour les recettes. Écriture résiliente : si la colonne « nature » n'existe
 // pas encore (migration SQL non appliquée), on réinsère sans — rien ne casse.
-async function _mouvementCoffre(admin: Admin, montant: number, sens: "entree" | "sortie", motif: string, auteur: string, nature?: "produit" | "charge" | null) {
+async function _mouvementCoffre(admin: Admin, montant: number, sens: "entree" | "sortie", motif: string, auteur: string, nature?: "produit" | "charge" | "capital" | null) {
   const m = Math.abs(round2(Number(montant) || 0));
   if (!m) return;
-  const nat = sens === "sortie" && (nature === "produit" || nature === "charge") ? nature : null;
+  // "capital" = apport/retrait de trésorerie (hors résultat, valable en entrée
+  // comme en sortie) ; "produit"/"charge" ne concernent que les dépenses.
+  const nat = nature === "capital" ? "capital" : (sens === "sortie" && (nature === "produit" || nature === "charge") ? nature : null);
   const id = newId("mvt");
   // Voie ATOMIQUE : une fonction SQL met à jour le solde ET journalise en une seule
   // transaction (pas de course entre deux mouvements simultanés).
@@ -126,14 +128,17 @@ export async function creerVente(d: { clientId?: string; acquereur: string; date
   return { ok: true, id };
 }
 
-// Dépôt / retrait manuel sur le coffre de l'armurerie.
+// Dépôt / retrait manuel sur le coffre de l'armurerie. Classé "capital" : un
+// dépôt/retrait est un mouvement de trésorerie (apport/prélèvement), PAS une
+// vente ni une charge → exclu du calcul des recettes/dépenses, mais bien
+// répercuté sur le solde du coffre.
 export async function ajusterCoffreArmurerie(montant: number, mode: "depot" | "retrait", motif: string): Promise<ArmResult> {
   const m = Math.abs(round2(Number(montant) || 0));
   if (m <= 0) return { ok: false, error: "Montant invalide." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
   try {
-    await _mouvementCoffre(admin, m, mode === "retrait" ? "sortie" : "entree", s(motif, 200) || (mode === "retrait" ? "Retrait" : "Dépôt"), await auteurNom());
+    await _mouvementCoffre(admin, m, mode === "retrait" ? "sortie" : "entree", s(motif, 200) || (mode === "retrait" ? "Retrait" : "Dépôt"), await auteurNom(), "capital");
     return { ok: true };
   } catch (e) {
     const msg = (e as Error).message || "";
@@ -833,12 +838,12 @@ export async function supprimerImpot(id: string): Promise<ArmResult> {
 }
 
 // ── Comptabilité : écriture manuelle (recette / dépense) ─────────
-export async function ajouterEcriture(montant: number, sens: "entree" | "sortie", motif: string, nature?: "produit" | "charge" | null): Promise<ArmResult> {
+export async function ajouterEcriture(montant: number, sens: "entree" | "sortie", motif: string, nature?: "produit" | "charge" | "capital" | null): Promise<ArmResult> {
   const m = Math.abs(round2(Number(montant) || 0));
   if (m <= 0) return { ok: false, error: "Montant invalide." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
-  const nat = sens === "sortie" ? (nature === "charge" ? "charge" : "produit") : null;
+  const nat = nature === "capital" ? "capital" : (sens === "sortie" ? (nature === "charge" ? "charge" : "produit") : null);
   try { await _mouvementCoffre(admin, m, sens, s(motif, 200) || (sens === "entree" ? "Recette" : "Dépense"), await auteurNom(), nat); return { ok: true }; }
   catch (e) { return { ok: false, error: erpErr((e as Error).message || "") }; }
 }
