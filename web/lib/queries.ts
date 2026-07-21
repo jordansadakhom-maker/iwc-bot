@@ -552,7 +552,7 @@ export async function getAgenda(): Promise<AgendaData> {
   const supabase = createAdminClient();
   if (!supabase) return { connecte: false, rdvs: [], contacts: [] };
   const [rdvR, contactR] = await Promise.all([
-    supabase.from("Rdv").select("id,nomRP,type,lieu,creneau,statut,paiement").order("createdAt", { ascending: false }).limit(100),
+    supabase.from("Rdv").select("id,nomRP,type,lieu,creneau,statut,paiement").neq("statut", "cloture").order("createdAt", { ascending: false }).limit(100),
     // select("*") : robuste que les colonnes détaillées existent ou non.
     supabase.from("Contact").select("*").order("nom", { ascending: true }).limit(400),
   ]);
@@ -600,7 +600,7 @@ export async function getCommunication(): Promise<CommunicationData> {
   const supabase = createAdminClient();
   if (!supabase) return { connecte: false, rdvs: [], membres: [] };
   const [rdvR, membreR] = await Promise.all([
-    supabase.from("Rdv").select("id,nomRP,type,lieu,creneau,statut,paiement,createdAt").order("createdAt", { ascending: false }).limit(200),
+    supabase.from("Rdv").select("id,nomRP,type,lieu,creneau,statut,paiement,createdAt").neq("statut", "cloture").order("createdAt", { ascending: false }).limit(200),
     supabase.from("Membre").select("id,nomIC").order("nomIC", { ascending: true }),
   ]);
   if (rdvR.error) return { connecte: false, rdvs: [], membres: [] };
@@ -1052,4 +1052,36 @@ export async function getAlertes(): Promise<AlertesData> {
   if (candids) items.push({ key: "candids", label: `${candids} candidature(s) récente(s)`, count: candids, href: "/recrutement", tone: "good" });
   const total = items.reduce((s, i) => s + i.count, 0);
   return { total, items };
+}
+
+// ── Journal de bord : rendez-vous CLÔTURÉS (historique / suivi complet) ──
+export type JournalRdv = {
+  id: string; nomRP: string | null; type: string | null; lieu: string | null; creneau: string | null;
+  source: string | null; assignes: string[]; resultat: string | null; reponses: Reponse[];
+  closedAt: string | null; closedBy: string | null; createdAt: string | null;
+};
+export type JournalData = { connecte: boolean; rdvs: JournalRdv[] };
+export async function getJournal(): Promise<JournalData> {
+  if (!dataConfigured()) return { connecte: false, rdvs: [] };
+  const supabase = createAdminClient();
+  if (!supabase) return { connecte: false, rdvs: [] };
+  const { data, error } = await supabase.from("Rdv").select("id,nomRP,type,lieu,creneau,statut,paiement,createdAt").eq("statut", "cloture").limit(500);
+  if (error) return { connecte: false, rdvs: [] };
+  type Row = Record<string, unknown>;
+  const rdvs: JournalRdv[] = ((data || []) as Row[]).map((r) => {
+    const p = (r.paiement && typeof r.paiement === "object" ? r.paiement : {}) as Record<string, unknown>;
+    return {
+      id: String(r.id), nomRP: (r.nomRP as string) ?? null, type: (r.type as string) ?? null,
+      lieu: (r.lieu as string) ?? null, creneau: (r.creneau as string) ?? null,
+      source: (p.source as string) ?? null,
+      assignes: Array.isArray(p.assignes) ? (p.assignes as string[]) : [],
+      resultat: (p.resultat as string) ?? null,
+      reponses: Array.isArray(p.reponses) ? (p.reponses as Reponse[]) : [],
+      closedAt: (p.closedAt as string) ?? null, closedBy: (p.closedBy as string) ?? null,
+      createdAt: (r.createdAt as string) ?? null,
+    };
+  });
+  // Plus récemment clôturés en tête.
+  rdvs.sort((a, b) => new Date(b.closedAt || b.createdAt || 0).getTime() - new Date(a.closedAt || a.createdAt || 0).getTime());
+  return { connecte: true, rdvs };
 }
