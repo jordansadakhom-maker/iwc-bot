@@ -405,16 +405,34 @@ export async function getOperations(): Promise<OperationsData> {
 }
 
 // ── Membres & RH (page dédiée) ───────────────────────────────────
-export type MembreDetail = { id: string; nomIC: string; grade: string | null; pole: string; statut: string };
+// Fiche RH : champ SITE-NATIVE porté par la table Membre, JAMAIS écrit par le
+// bot (il ne l'envoie pas dans sa synchro → jamais écrasé). Édité depuis le site.
+export type FicheRH = { specialite?: string; statutInterne?: string; salaire?: number; notes?: string };
+export type MembreDetail = { id: string; nomIC: string; grade: string | null; pole: string; statut: string; ficheRH: FicheRH | null };
 export type MembresData = { connecte: boolean; membres: MembreDetail[] };
 
 export async function getMembres(): Promise<MembresData> {
   if (!dataConfigured()) return { connecte: false, membres: [] };
   const supabase = createAdminClient();
   if (!supabase) return { connecte: false, membres: [] };
-  const { data, error } = await supabase.from("Membre").select("id,nomIC,grade,pole,statut").order("nomIC", { ascending: true });
-  if (error) return { connecte: false, membres: [] };
-  return { connecte: true, membres: (data || []) as MembreDetail[] };
+  // Sélection résiliente : si la colonne « ficheRH » n'existe pas encore
+  // (migration SQL non passée), on retombe sur la sélection de base → la page
+  // ne casse jamais.
+  let rows: Record<string, unknown>[] | null = null;
+  const avec = await supabase.from("Membre").select("id,nomIC,grade,pole,statut,ficheRH").order("nomIC", { ascending: true });
+  if (avec.error) {
+    const base = await supabase.from("Membre").select("id,nomIC,grade,pole,statut").order("nomIC", { ascending: true });
+    if (base.error) return { connecte: false, membres: [] };
+    rows = (base.data || []) as Record<string, unknown>[];
+  } else {
+    rows = (avec.data || []) as Record<string, unknown>[];
+  }
+  const membres: MembreDetail[] = rows.map((m) => ({
+    id: String(m.id), nomIC: String(m.nomIC || ""), grade: (m.grade as string) ?? null,
+    pole: String(m.pole || ""), statut: String(m.statut || ""),
+    ficheRH: (m.ficheRH && typeof m.ficheRH === "object") ? (m.ficheRH as FicheRH) : null,
+  }));
+  return { connecte: true, membres };
 }
 
 // ── Renseignement (page dédiée) ──────────────────────────────────

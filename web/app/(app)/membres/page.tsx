@@ -1,7 +1,8 @@
 import { Users } from "lucide-react";
 import { getMembres } from "@/lib/queries";
-import { PageHeader, Card, CardHeader, Empty, Badge } from "@/components/ui";
+import { PageHeader, Card, CardHeader, Empty } from "@/components/ui";
 import { BarresH } from "@/components/charts";
+import { MembreRow } from "@/components/membre-row";
 
 export const dynamic = "force-dynamic";
 
@@ -13,14 +14,6 @@ const ORDRE_GRADES: [string, string][] = [
   ["Opérateur", "Opérateur"],
   ["Recrue — Probatoire", "Recrue"],
 ];
-
-const STATUT_TONE: Record<string, "good" | "warn" | "muted"> = {
-  actif: "good", absent: "warn", inactif: "muted", parti: "muted", visiteur: "muted",
-};
-
-function initiales(nom: string) {
-  return nom.split(/\s+/).filter(Boolean).map((s) => s[0]).slice(0, 2).join("").toUpperCase() || "?";
-}
 
 export default async function MembresPage() {
   const { connecte, membres } = await getMembres();
@@ -35,18 +28,7 @@ export default async function MembresPage() {
           <Empty icon={Users}>Aucun membre synchronisé dans ce pôle pour l&apos;instant.</Empty>
         ) : (
           <div className="flex flex-col divide-y divide-border">
-            {list.map((m) => (
-              <div key={m.id} className="flex items-center gap-3 py-2.5">
-                <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-[0.72rem] font-extrabold text-black/85" style={{ background: tone === "oxblood" ? "linear-gradient(135deg,var(--oxblood),#000)" : "linear-gradient(135deg,var(--accent),color-mix(in srgb,var(--accent) 30%,#000))" }}>
-                  {initiales(m.nomIC)}
-                </div>
-                <div className="min-w-0">
-                  <div className="truncate text-[0.9rem] font-semibold">{m.nomIC}</div>
-                  <div className="truncate text-[0.74rem] text-muted">{m.grade || "—"}</div>
-                </div>
-                <span className="ml-auto"><Badge tone={STATUT_TONE[m.statut?.toLowerCase()] ?? "muted"}>{m.statut}</Badge></span>
-              </div>
-            ))}
+            {list.map((m) => <MembreRow key={m.id} m={m} tone={tone} />)}
           </div>
         )}
       </Card>
