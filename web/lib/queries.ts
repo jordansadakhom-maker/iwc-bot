@@ -1086,3 +1086,72 @@ export async function getJournal(): Promise<JournalData> {
   rdvs.sort((a, b) => new Date(b.closedAt || b.createdAt || 0).getTime() - new Date(a.closedAt || a.createdAt || 0).getTime());
   return { connecte: true, rdvs };
 }
+
+// ── Statistiques : agrégats pour la page analytique (données réelles). ──
+export type StatCat = { label: string; value: number; color: string };
+export type StatistiquesData = {
+  connecte: boolean;
+  kpis: { membres: number; opsTerminees: number; coffreArmurerie: number; aptes: number };
+  parGrade: { label: string; value: number }[];
+  parPole: StatCat[];
+  opsParPhase: StatCat[];
+  medicalParStatut: StatCat[];
+  coffres: StatCat[];
+  coffreEvolution: { t: number; v: number }[];
+};
+export async function getStatistiques(): Promise<StatistiquesData> {
+  const vide: StatistiquesData = { connecte: false, kpis: { membres: 0, opsTerminees: 0, coffreArmurerie: 0, aptes: 0 }, parGrade: [], parPole: [], opsParPhase: [], medicalParStatut: [], coffres: [], coffreEvolution: [] };
+  const admin = createAdminClient();
+  if (!admin) return vide;
+  const [dash, memR, medR, acofR, amvtR] = await Promise.all([
+    getDashboard(),
+    admin.from("Membre").select("pole"),
+    admin.from("DossierMedical").select("statut"),
+    admin.from("ArmurerieCoffre").select("solde").eq("id", "vanhorn").maybeSingle(),
+    admin.from("ArmurerieMouvementCoffre").select("sens,montant,createdAt").order("createdAt", { ascending: true }).limit(2000),
+  ]);
+
+  // Effectifs par pôle.
+  const memRows = (memR.data || []) as { pole: string | null }[];
+  const iwc = memRows.filter((m) => m.pole !== "illegal").length;
+  const conf = memRows.filter((m) => m.pole === "illegal").length;
+  const parPole: StatCat[] = [
+    { label: "Iron Wolf", value: iwc, color: "#c8a45c" },
+    { label: "La Confrérie", value: conf, color: "#b0413a" },
+  ].filter((x) => x.value > 0);
+
+  // Aptitude médicale (statut = état, palette « statut »).
+  const medRows = (medR.data || []) as { statut: string | null }[];
+  const mstat = (s: string) => { s = (s || "").toLowerCase(); if (s === "apte") return "Apte"; if (/observ/.test(s)) return "Observation"; if (s === "inapte") return "Inapte"; return "Non testé"; };
+  const mc = new Map<string, number>();
+  for (const d of medRows) { const k = mstat(d.statut || ""); mc.set(k, (mc.get(k) || 0) + 1); }
+  const MED = [["Apte", "#54b085"], ["Observation", "#d8a53f"], ["Inapte", "#b0413a"], ["Non testé", "#95a1b1"]] as const;
+  const medicalParStatut: StatCat[] = MED.map(([label, color]) => ({ label, value: mc.get(label) || 0, color })).filter((x) => x.value > 0);
+  const aptes = mc.get("Apte") || 0;
+
+  // Coffres de la maison (depuis le tableau de bord — déjà résolus).
+  const c = dash.coffres;
+  const coffres: StatCat[] = [
+    { label: "Commun", value: c.commun ?? 0, color: "#c8a45c" },
+    { label: "Iron Wolf", value: c.legal ?? 0, color: "#6f9fc4" },
+    { label: "Confrérie", value: c.illegal ?? 0, color: "#b0413a" },
+  ].filter((x) => x.value > 0);
+
+  // Coffre armurerie + son évolution (solde cumulé, mouvement par mouvement).
+  const coffreArmurerie = Number((acofR.data as { solde?: number } | null)?.solde ?? 0);
+  const mvts = (amvtR.data || []) as { sens: string; montant: number; createdAt: string }[];
+  let run = 0; const coffreEvolution: { t: number; v: number }[] = [];
+  for (const m of mvts) { run += (m.sens === "sortie" ? -1 : 1) * (Number(m.montant) || 0); const t = new Date(m.createdAt).getTime(); if (t) coffreEvolution.push({ t, v: Math.round(run * 100) / 100 }); }
+
+  const opsTerminees = (dash.opsParPhase.find((p) => /termin|fini|honor/i.test(p.label))?.value) || 0;
+  return {
+    connecte: true,
+    kpis: { membres: dash.membresCount, opsTerminees, coffreArmurerie, aptes },
+    parGrade: dash.membresParGrade,
+    parPole,
+    opsParPhase: dash.opsParPhase,
+    medicalParStatut,
+    coffres,
+    coffreEvolution,
+  };
+}
