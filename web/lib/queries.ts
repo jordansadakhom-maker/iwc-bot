@@ -1109,13 +1109,14 @@ export async function getAlertes(): Promise<AlertesData> {
     try { const { count, error } = await fn(); return error ? 0 : (count ?? 0); } catch { return 0; }
   };
   const iso7 = new Date(Date.now() - 7 * 86400000).toISOString();
-  const [contrats, impots, paies, ruptures, candids, rdvs] = await Promise.all([
+  const [contrats, impots, paies, ruptures, candids, rdvs, telegrammes] = await Promise.all([
     safe(() => admin.from("ArmurerieContrat").select("*", { count: "exact", head: true }).eq("statut", "envoye")),
     safe(() => admin.from("ArmurerieImpot").select("*", { count: "exact", head: true }).neq("statut", "paye")),
     safe(() => admin.from("ArmureriePaie").select("*", { count: "exact", head: true }).neq("statut", "paye")),
     safe(() => admin.from("ArmurerieProduit").select("*", { count: "exact", head: true }).lte("stock", 0).eq("aLaDemande", false)),
     safe(() => admin.from("Candidature").select("*", { count: "exact", head: true }).gte("createdAt", iso7)),
     safe(() => admin.from("Rdv").select("*", { count: "exact", head: true }).eq("statut", "nouveau")),
+    safe(() => admin.from("TelegrammeWeb").select("*", { count: "exact", head: true }).gte("createdAt", iso7)),
   ]);
   const items: Alerte[] = [];
   if (rdvs) items.push({ key: "rdvs", label: `${rdvs} rendez-vous à traiter`, count: rdvs, href: "/communication", tone: "warn" });
@@ -1124,6 +1125,7 @@ export async function getAlertes(): Promise<AlertesData> {
   if (paies) items.push({ key: "paies", label: `${paies} paie(s) à verser`, count: paies, href: "/armurerie", tone: "warn" });
   if (ruptures) items.push({ key: "ruptures", label: `${ruptures} produit(s) en rupture de stock`, count: ruptures, href: "/armurerie", tone: "oxblood" });
   if (candids) items.push({ key: "candids", label: `${candids} candidature(s) récente(s)`, count: candids, href: "/recrutement", tone: "good" });
+  if (telegrammes) items.push({ key: "telegrammes", label: `${telegrammes} télégramme(s) récent(s)`, count: telegrammes, href: "/communication", tone: "accent" });
   const total = items.reduce((s, i) => s + i.count, 0);
   return { total, items };
 }

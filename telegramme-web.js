@@ -15,6 +15,16 @@ const { lireTelegrammesWeb, marquerTelegrammeWebTransmis } = require('./supabase
 
 const SALON_TELEGRAMME = '1512175624176009348'; // salon des télégrammes
 const FONDATEUR_ID = '944208797084311583';       // repli MP
+// Rôles à pinguer pour qu'on soit alerté sur Discord même sans le site ouvert.
+const PING_ROLES = ['Fondateur', 'Conseil', 'Directeur', 'Officier'];
+function _ping(guild) {
+  const ids = new Set();
+  for (const motif of PING_ROLES) {
+    const r = guild.roles.cache.find(x => x.name && x.name.includes(motif));
+    if (r) ids.add(r.id);
+  }
+  return [...ids].map(id => `<@&${id}>`).join(' ');
+}
 
 function _peutEcrire(guild, ch) {
   try {
@@ -50,10 +60,11 @@ async function verifierTelegrammesWeb(guild) {
   try { rows = await lireTelegrammesWeb(); } catch { return; }
   if (!Array.isArray(rows) || !rows.length) return;
   const salon = _salon(guild);
+  const ping = salon ? _ping(guild) : '';
   for (const t of rows) {
     let livre = false;
     if (salon) {
-      try { await salon.send({ content: '📨 **Nouveau télégramme reçu** (site web).', embeds: [_embed(t)] }); livre = true; }
+      try { await salon.send({ content: `${ping ? ping + ' — ' : ''}📨 **Nouveau télégramme reçu** (site web).`, embeds: [_embed(t)], allowedMentions: { parse: ['roles'] } }); livre = true; }
       catch (e) { console.log('⚠️ telegramme-web salon:', e.message); }
     }
     if (!livre) {
