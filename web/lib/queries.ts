@@ -437,6 +437,52 @@ export async function getMembres(): Promise<MembresData> {
   return { connecte: true, membres };
 }
 
+// ── Absences (page dédiée) ───────────────────────────────────────
+// Reflet du panneau Discord #absences. La colonne « absence » (site + bot) porte
+// le détail { jusqu, raison, depuis, programmee }. Sélection résiliente : si la
+// colonne n'existe pas encore, on retombe sur le seul statut « absent ».
+export type AbsenceDetail = {
+  jusqu: string | null; raison: string | null; depuis: string | null;
+  programmee: { debut: string | null; fin: string | null; raison: string | null } | null;
+};
+export type MembreAbsence = { id: string; nom: string; grade: string | null; pole: string; statut: string; absence: AbsenceDetail | null };
+export type AbsencesData = { connecte: boolean; absents: MembreAbsence[]; programmees: MembreAbsence[]; tous: MembreLite[] };
+
+export async function getAbsences(): Promise<AbsencesData> {
+  const vide: AbsencesData = { connecte: false, absents: [], programmees: [], tous: [] };
+  if (!dataConfigured()) return vide;
+  const supabase = createAdminClient();
+  if (!supabase) return vide;
+  let rows: Record<string, unknown>[] | null = null;
+  const avec = await supabase.from("Membre").select("id,nomIC,grade,pole,statut,absence").order("nomIC", { ascending: true });
+  if (avec.error) {
+    const base = await supabase.from("Membre").select("id,nomIC,grade,pole,statut").order("nomIC", { ascending: true });
+    if (base.error) return vide;
+    rows = (base.data || []) as Record<string, unknown>[];
+  } else {
+    rows = (avec.data || []) as Record<string, unknown>[];
+  }
+  const norm = (m: Record<string, unknown>): MembreAbsence => {
+    const a = (m.absence && typeof m.absence === "object") ? (m.absence as Record<string, unknown>) : null;
+    const p = a && a.programmee && typeof a.programmee === "object" ? (a.programmee as Record<string, unknown>) : null;
+    return {
+      id: String(m.id), nom: String(m.nomIC || m.id), grade: (m.grade as string) ?? null,
+      pole: String(m.pole || ""), statut: String(m.statut || ""),
+      absence: a ? {
+        jusqu: (a.jusqu as string) || null, raison: (a.raison as string) || null, depuis: (a.depuis as string) || null,
+        programmee: p ? { debut: (p.debut as string) || null, fin: (p.fin as string) || null, raison: (p.raison as string) || null } : null,
+      } : null,
+    };
+  };
+  const membres = rows.filter((m) => String(m.statut || "") !== "parti").map(norm);
+  const absents = membres.filter((m) => m.statut === "absent")
+    .sort((a, b) => (a.absence?.jusqu || "~").localeCompare(b.absence?.jusqu || "~"));
+  const programmees = membres.filter((m) => m.statut !== "absent" && m.absence?.programmee)
+    .sort((a, b) => (a.absence?.programmee?.debut || "").localeCompare(b.absence?.programmee?.debut || ""));
+  const tous: MembreLite[] = membres.map((m) => ({ id: m.id, nom: m.nom }));
+  return { connecte: true, absents, programmees, tous };
+}
+
 // ── Renseignement (page dédiée) ──────────────────────────────────
 export type RapportItem = { id: string; source: string | null; cible: string | null; info: string; fiabilite: number; statut: string; createdAt: string };
 export type TraqueItem = { id: string; cible: string; prime: string | null; dangerosite: string | null; statut: string };
@@ -1158,4 +1204,30 @@ export async function getStatistiques(): Promise<StatistiquesData> {
     coffres,
     coffreEvolution,
   };
+}
+
+// ── Accès par rôle (permissions du site) ─────────────────────────
+// Déduit du grade du membre connecté (+ flag « médecin » sur sa fiche RH).
+// PRINCIPE ANTI-VERROUILLAGE : au moindre doute (pas de session, grade inconnu,
+// erreur), on OUVRE tout — on ne bloque jamais personne par erreur.
+export type Acces = { direction: boolean; officier: boolean; medecin: boolean; peutRenseignement: boolean; peutMedical: boolean };
+export async function getAcces(): Promise<Acces> {
+  const ouvert: Acces = { direction: true, officier: true, medecin: true, peutRenseignement: true, peutMedical: true };
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return ouvert;
+    const meta = (user.user_metadata || {}) as Record<string, unknown>;
+    const did = String(meta.provider_id || meta.sub || "");
+    const admin = createAdminClient();
+    if (!admin || !did) return ouvert;
+    const { data } = await admin.from("Membre").select("grade,ficheRH").eq("id", did).maybeSingle();
+    const grade = String((data?.grade as string) || "").toLowerCase();
+    if (!grade) return ouvert; // grade inconnu → on n'enferme personne
+    const f = data?.ficheRH as Record<string, unknown> | null;
+    const medecin = !!(f && typeof f === "object" && f.medecin);
+    const direction = /fondateur|conseil|directeur|fl[eé]au|concepteur/.test(grade);
+    const officier = direction || /officier|instructeur/.test(grade);
+    return { direction, officier, medecin, peutRenseignement: officier, peutMedical: direction || medecin };
+  } catch { return ouvert; }
 }

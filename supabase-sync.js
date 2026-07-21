@@ -33,6 +33,14 @@ function setMembresActuels(ids) {
 // null = non fourni → repli sur db.members.
 let _roster = null;
 function setMembresRoster(arr) { _roster = (Array.isArray(arr) && arr.length) ? arr : null; }
+// Met à jour à chaud une entrée du roster en cache (ex : statut/absence après une
+// commande web) pour que la resynchro immédiate reflète le changement sans
+// attendre la prochaine reconstruction complète du roster.
+function majRosterMembre(id, patch) {
+  if (!_roster || !id || !patch || typeof patch !== 'object') return;
+  const e = _roster.find(r => r && String(r.id) === String(id));
+  if (e) Object.assign(e, patch);
+}
 
 // ── Upsert générique d'un lot de lignes dans une table PostgREST ──
 // Prefer: resolution=merge-duplicates → insère ou met à jour sur la clé primaire.
@@ -68,6 +76,23 @@ function _pole(p) { p = String(p || '').toLowerCase(); return _POLES.has(p) ? p 
 
 const _STATUTS = new Set(['actif', 'absent', 'inactif', 'parti', 'visiteur']);
 function _statut(s) { s = String(s || '').toLowerCase(); return _STATUTS.has(s) ? s : 'actif'; }
+
+// Détail d'absence normalisé pour le site : { jusqu, raison, depuis, programmee }
+// ou null s'il n'y a rien de significatif à remonter (ni absence en cours ni
+// absence programmée). Réutilisé pour le roster (objet déjà prêt) et le repli
+// db.members (champs plats absentJusqu / absentRaison / absenceProgrammee).
+function _absence(a, statut) {
+  if (!a || typeof a !== 'object') return null;
+  const prog = a.programmee && typeof a.programmee === 'object'
+    ? { debut: a.programmee.debut || null, fin: a.programmee.fin || null, raison: _str(a.programmee.raison, 200) || null }
+    : null;
+  const jusqu = a.jusqu || null;
+  const raison = _str(a.raison, 200) || null;
+  const depuis = a.depuis || null;
+  const estAbsent = String(statut || '').toLowerCase() === 'absent';
+  if (!estAbsent && !jusqu && !raison && !prog) return null;
+  return { jusqu, raison, depuis, programmee: prog };
+}
 
 // Libellés des rendez-vous (clés db.rdvplus → texte lisible pour le site).
 const RDV_TYPES = { esc: 'Escorte de personne', cnv: 'Escorte de convoi', pro: 'Protection rapprochée', sec: "Sécurisation d'un lieu", enq: 'Enquête / filature', neg: 'Négociation / médiation', rec: 'Récupération de biens', bnt: 'Chasse à la prime', trv: 'Travail discret' };
@@ -129,6 +154,8 @@ function _construire(db) {
       statut: _statut(r.statut),
       ancienneteAt: r.joinedAt || null,
       updatedAt: now,
+      // Détail d'absence (colonne optionnelle — repli automatique si absente).
+      absence: _absence(r.absence),
     }));
   } else {
     membres = Object.values(db.members || {})
@@ -141,6 +168,11 @@ function _construire(db) {
         statut: _statut(m.status || m.statut),
         ancienneteAt: m.joinedAt || m.ancienneteAt || null,
         updatedAt: now,
+        // Détail d'absence (colonne optionnelle — repli automatique si absente).
+        absence: _absence({
+          jusqu: m.absentJusqu || null, raison: m.absentRaison || null, depuis: m.absentDepuis || null,
+          programmee: m.absenceProgrammee || null,
+        }, m.status || m.statut),
       }));
   }
   const memberIds = new Set(membres.map(m => m.id));
@@ -421,7 +453,14 @@ async function syncAll(db) {
       _redo = false;
       const { membres, coffres, contrats, operations, rapports, traques, dossiers, contacts, rdvs, armes, factures, telegrammes, invItems, invMouv, portefeuilles, transactions } = _construire(db);
       const results = [];
-      results.push(await _upsert('Membre', membres));    // 1. aucun FK bloquant (parrainId non fourni)
+      // 1. Membres — aucun FK bloquant ; repli si la colonne optionnelle
+      //    `absence` n'existe pas encore (HTTP 400) pour ne jamais vider le roster.
+      let rM = await _upsert('Membre', membres);
+      if (!rM.ok && rM.status === 400) {
+        const base = membres.map(({ absence, ...b }) => b);
+        rM = await _upsert('Membre', base);
+      }
+      results.push(rM);
       results.push(await _upsert('Coffre', coffres));    // 2. indépendant
       // 3. Contrats — tente le suivi complet ; repli si colonnes optionnelles absentes.
       let rCo = await _upsert('Contrat', contrats);
@@ -640,4 +679,4 @@ async function marquerContratArmurerie(id, statut) {
   return await _patch(`ArmurerieContrat?id=eq.${encodeURIComponent(id)}`, body);
 }
 
-module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise, lireProduitsArmurerie, lireContratArmurerieEnAttente, marquerContratArmurerie };
+module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, majRosterMembre, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise, lireProduitsArmurerie, lireContratArmurerieEnAttente, marquerContratArmurerie };
