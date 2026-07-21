@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { X, Bandage, Pill, Stethoscope, Clock, History, UserPlus, Loader2, Trash2, Plus, HeartPulse, CalendarClock, ClipboardCheck, Search, Activity } from "lucide-react";
+import { X, Bandage, Pill, Stethoscope, Clock, History, UserPlus, Loader2, Trash2, Plus, HeartPulse, CalendarClock, ClipboardCheck, Search, Activity, ScrollText, Printer } from "lucide-react";
 import type { DossierItem } from "@/lib/queries";
 import { creerDossier, majDossier, ajouterBlessure, ajouterOrdonnance, ajouterSuivi, supprimerDossier } from "@/app/(app)/medical/actions";
 
@@ -198,6 +198,8 @@ function DetailModal({ dossier, onClose, router }: { dossier: DossierItem; onClo
   const [prochainRdv, setProchainRdv] = useState(dossier.prochainRdv || "");
   const [testValide, setTestValide] = useState(!!dossier.testValide);
   const [reposMotif, setReposMotif] = useState(dossier.reposMotif || "");
+  const [reposJours, setReposJours] = useState("");
+  const [certifOpen, setCertifOpen] = useState(false);
   const [blessures, setBlessures] = useState(dossier.blessures);
   const [ordos, setOrdos] = useState(dossier.ordonnances);
   const [suivis, setSuivis] = useState(dossier.suivis);
@@ -290,8 +292,9 @@ function DetailModal({ dossier, onClose, router }: { dossier: DossierItem; onClo
           </div>
           <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Convalescence / repos</span>
             <div className="flex gap-1.5">
-              <input className={inputCls} value={reposMotif} onChange={(e) => setReposMotif(e.target.value)} placeholder="Motif (ex : fracture, 4 jours de repos)" maxLength={300} />
-              <button onClick={() => patch({ reposMotif, reposJusquAt: reposMotif ? new Date(Date.now() + 4 * 864e5).toISOString() : null }, "repos", reposMotif ? "Convalescence enregistrée." : "Convalescence levée.")} disabled={busy === "repos"} className="shrink-0 rounded-lg border border-border bg-surface-2 px-2 text-[0.74rem] font-semibold hover:border-border-2">OK</button>
+              <input className={inputCls} value={reposMotif} onChange={(e) => setReposMotif(e.target.value)} placeholder="Motif (ex : fracture)" maxLength={300} />
+              <input className={inputCls + " w-24 shrink-0"} type="number" min={0} value={reposJours} onChange={(e) => setReposJours(e.target.value)} placeholder="jours" title="Durée en jours (4 par défaut)" />
+              <button onClick={() => patch({ reposMotif, reposJusquAt: reposMotif ? new Date(Date.now() + Math.max(1, Number(reposJours) || 4) * 864e5).toISOString() : null }, "repos", reposMotif ? `Convalescence : ${Math.max(1, Number(reposJours) || 4)} j.` : "Convalescence levée.")} disabled={busy === "repos"} className="shrink-0 rounded-lg border border-border bg-surface-2 px-2 text-[0.74rem] font-semibold hover:border-border-2">OK</button>
             </div>
           </div>
           <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Notes du médecin</span>
@@ -388,9 +391,49 @@ function DetailModal({ dossier, onClose, router }: { dossier: DossierItem; onClo
         ) : (
           <button onClick={() => setConfirmDel(true)} className="inline-flex items-center gap-1.5 text-[0.76rem] text-faint hover:text-ink"><Trash2 className="h-3.5 w-3.5" /> Supprimer</button>
         )}
-        <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-[0.8rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}>Fermer</button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setCertifOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-muted hover:border-border-2 hover:text-ink"><ScrollText className="h-3.5 w-3.5" /> Certificat</button>
+          <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-[0.8rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}>Fermer</button>
+        </div>
       </div>
+
+      {certifOpen ? <CertificatOverlay nom={dossier.nom} statut={statut} notes={notes} reposMotif={reposMotif} blessures={blessures} onClose={() => setCertifOpen(false)} /> : null}
     </Modal>
+  );
+}
+
+function CertificatOverlay({ nom, statut, notes, reposMotif, blessures, onClose }: { nom: string; statut: string; notes: string; reposMotif: string; blessures: DossierItem["blessures"]; onClose: () => void }) {
+  const verdict = labelOf(statut);
+  const actives = blessures.slice(-6).reverse();
+  const dateStr = new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center bg-black/70 p-4" onClick={onClose}>
+      <style>{`@media print{body *{visibility:hidden!important}#certif-doc,#certif-doc *{visibility:visible!important}#certif-doc{position:fixed;inset:0;margin:0;padding:44px;background:#fff}.no-print{display:none!important}}`}</style>
+      <div className="w-full max-w-[620px] overflow-y-auto rounded-card border border-border-2 bg-surface p-5 shadow-card" style={{ maxHeight: "88vh" }} onClick={(e) => e.stopPropagation()}>
+        <div className="no-print mb-3 flex items-center justify-between">
+          <span className="font-display text-lg">Certificat médical</span>
+          <div className="flex gap-2">
+            <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[0.78rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Printer className="h-3.5 w-3.5" /> Imprimer / PDF</button>
+            <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3 py-1.5 text-[0.78rem] font-semibold hover:border-border-2">Fermer</button>
+          </div>
+        </div>
+        <div id="certif-doc">
+          <div style={{ fontFamily: "Iowan Old Style, Palatino, Georgia, serif", color: "#1a1206", background: "#fff", padding: "28px 32px", border: "1px solid #ddd", borderRadius: 8 }}>
+            <div style={{ textAlign: "center", letterSpacing: "3px", fontWeight: 700, fontSize: "0.9rem", borderBottom: "2px solid #1a1206", paddingBottom: 8, marginBottom: 18 }}>DISPENSAIRE · IRON WOLF COMPANY</div>
+            <div style={{ textAlign: "center", fontSize: "1.5rem", fontWeight: 700, letterSpacing: "2px", marginBottom: 16 }}>CERTIFICAT MÉDICAL</div>
+            <p style={{ marginBottom: 10 }}>Je soussigné(e), médecin de la compagnie, certifie avoir examiné ce jour :</p>
+            <p style={{ fontSize: "1.25rem", fontWeight: 700, textAlign: "center", margin: "10px 0" }}>{nom}</p>
+            <p style={{ margin: "14px 0 6px" }}>et le déclare, à l&apos;issue de l&apos;examen :</p>
+            <p style={{ textAlign: "center", fontSize: "1.1rem", fontWeight: 700, textTransform: "uppercase", padding: "8px", border: "1.5px solid #1a1206", borderRadius: 6, margin: "6px auto", maxWidth: 360 }}>{verdict}</p>
+            {actives.length ? <div style={{ marginTop: 16 }}><b>Blessures constatées :</b><ul style={{ margin: "6px 0 0 18px" }}>{actives.map((b, i) => <li key={i}>{b.desc || "—"}{b.localisation ? ` (${b.localisation})` : ""}{b.gravite ? ` — ${b.gravite}` : ""}</li>)}</ul></div> : null}
+            {reposMotif ? <p style={{ marginTop: 12 }}><b>Convalescence prescrite :</b> {reposMotif}.</p> : null}
+            {notes ? <p style={{ marginTop: 12 }}><b>Observations :</b> {notes}</p> : null}
+            <p style={{ marginTop: 28 }}>Fait à Saint-Denis, le {dateStr}.</p>
+            <div style={{ marginTop: 30, display: "flex", justifyContent: "flex-end" }}><div style={{ textAlign: "center" }}>Le médecin,<br /><span style={{ fontStyle: "italic", fontSize: "1.1rem" }}>_____________________</span></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
