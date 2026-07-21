@@ -82,6 +82,36 @@ async function _whisper(mp3) {
   } catch (e) { console.log('⚠️ Whisper:', e.message); return ''; }
 }
 
+// Variante DÉTAILLÉE : renvoie { ok, texte } ou { ok:false, code, error } avec un
+// message clair (clé absente / refusée / quota / audio muet). Le site l'affiche
+// tel quel, pour qu'on sache exactement quoi corriger.
+async function _whisperDetaille(mp3) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) return { ok: false, code: 'no_key', error: 'clé OPENAI_API_KEY absente sur le bot (à ajouter dans Fly → Secrets, puis redéployer).' };
+  if (!mp3) return { ok: false, code: 'no_audio', error: 'audio vide.' };
+  try {
+    const form = new FormData();
+    form.append('file', new Blob([mp3], { type: 'audio/mpeg' }), 'audio.mp3');
+    form.append('model', 'whisper-1');
+    form.append('language', 'fr');
+    form.append('response_format', 'text');
+    const r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form,
+    });
+    if (!r.ok) {
+      const t = (await r.text().catch(() => '')).slice(0, 200);
+      console.log('⚠️ Whisper HTTP', r.status, t);
+      let error;
+      if (r.status === 401) error = 'clé OpenAI refusée (401) — la clé OPENAI_API_KEY est invalide ou révoquée.';
+      else if (r.status === 429) error = 'quota OpenAI épuisé (429) — recharge du crédit sur platform.openai.com → Billing.';
+      else if (r.status === 400 && /audio|file|format/i.test(t)) error = 'audio non lisible par OpenAI (400).';
+      else error = `OpenAI a répondu ${r.status}.`;
+      return { ok: false, code: 'http_' + r.status, error };
+    }
+    return { ok: true, texte: (await r.text()).trim() };
+  } catch (e) { console.log('⚠️ Whisper:', e.message); return { ok: false, code: 'exc', error: 'appel OpenAI injoignable (' + e.message + ').' }; }
+}
+
 function _panneauStop() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('voixterrain_stop').setLabel('Arrêter & transcrire').setEmoji('⏹️').setStyle(ButtonStyle.Danger),
@@ -208,4 +238,4 @@ async function routeInteraction(interaction) {
   }
 }
 
-module.exports = { voixCommands, routeInteraction, whisper: _whisper, fichierVersMp3 };
+module.exports = { voixCommands, routeInteraction, whisper: _whisper, whisperDetaille: _whisperDetaille, fichierVersMp3 };
