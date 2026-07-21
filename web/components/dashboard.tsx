@@ -2,9 +2,10 @@
 
 import { FileText, Wallet, Landmark, Target, Plug, Inbox, Users, Activity, Coins, Compass } from "lucide-react";
 import clsx from "clsx";
-import type { DashData } from "@/lib/queries";
+import type { DashData, FeedItem } from "@/lib/queries";
 import { BarresH, Donut, Repartition } from "@/components/charts";
 import { PoleChip, SectionTitle, Ornement } from "@/components/ui";
+import { LiveFeed } from "@/components/live-feed";
 import { cents } from "@/lib/format";
 
 function Card({ children, className, delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
@@ -161,7 +162,7 @@ function OpsBoard({ data }: { data: DashData }) {
 }
 
 
-export function Dashboard({ data }: { data: DashData }) {
+export function Dashboard({ data, feed = [] }: { data: DashData; feed?: FeedItem[] }) {
   return (
     <>
       <div>
@@ -250,6 +251,9 @@ export function Dashboard({ data }: { data: DashData }) {
         <OpsBoard data={data} />
         <Attention data={data} />
       </div>
+
+      <SectionTitle tone="var(--good)" icon={Activity}>En direct</SectionTitle>
+      <LiveFeed items={feed} />
     </>
   );
 }
