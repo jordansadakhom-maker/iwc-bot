@@ -988,3 +988,21 @@ export async function getPortefeuilles(): Promise<PortefeuillesData> {
   const total = portefeuilles.reduce((s, w) => s + w.solde, 0);
   return { connecte: true, portefeuilles, transactions, membres, total };
 }
+
+// ── Vitrine publique (page de couverture) ────────────────────────
+// Quelques chiffres RÉELS pour donner vie à la page d'accueil, sans rien
+// inventer. Lecture via la clé service (aucune session requise). Si la base
+// n'est pas prête, les compteurs valent null → la page masque simplement la stat.
+export type VitrineData = { membres: number | null; operations: number | null; armes: number | null };
+export async function getVitrine(): Promise<VitrineData> {
+  const admin = createAdminClient();
+  if (!admin) return { membres: null, operations: null, armes: null };
+  async function compte(table: string): Promise<number | null> {
+    try {
+      const { count, error } = await admin!.from(table).select("*", { count: "exact", head: true });
+      return error ? null : (typeof count === "number" ? count : null);
+    } catch { return null; }
+  }
+  const [membres, operations, armes] = await Promise.all([compte("Membre"), compte("Operation"), compte("Arme")]);
+  return { membres, operations, armes };
+}
