@@ -1521,7 +1521,9 @@ function ContratModal({ contrat, clients, produits, onClose, router }: { contrat
     const r = await envoyerContrat(contrat!.id);
     setBusy(null);
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
-    setFlash("Contrat envoyé au client en message privé Discord — en attente de signature."); router.refresh();
+    // Retour temps réel : message réel du bot (MP remis) ou « en cours » si la file
+    // n'a pas encore répondu. Le client signe ensuite en répondant « JE SIGNE ».
+    setFlash(r.enAttente ? "Contrat déposé — envoi au client en cours…" : (r.message || "Contrat remis au client en message privé.") + " En attente de sa signature."); router.refresh();
   }
   async function marquer(stt: "signe" | "refuse") {
     setBusy(stt);

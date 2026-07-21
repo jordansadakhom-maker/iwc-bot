@@ -623,4 +623,18 @@ async function lireProduitsArmurerie() {
   return Array.isArray(rows) ? rows : [];
 }
 
-module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise, lireProduitsArmurerie };
+// ── Contrats d'armurerie : signature / refus renvoyés par le client en MP ──
+// Dernier contrat « envoyé » (en attente de signature) pour un client Discord.
+async function lireContratArmurerieEnAttente(discordId) {
+  if (!discordId) return null;
+  const rows = await _get(`ArmurerieContrat?clientDiscordId=eq.${encodeURIComponent(discordId)}&statut=eq.envoye&order=createdAt.desc&limit=1`);
+  return Array.isArray(rows) && rows.length ? rows[0] : null;
+}
+// Passe un contrat en 'signe' (+ signeAt) ou 'refuse'. Écrit direct (table site-native).
+async function marquerContratArmurerie(id, statut) {
+  const body = { statut };
+  if (statut === 'signe') body.signeAt = new Date().toISOString();
+  return await _patch(`ArmurerieContrat?id=eq.${encodeURIComponent(id)}`, body);
+}
+
+module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise, lireProduitsArmurerie, lireContratArmurerieEnAttente, marquerContratArmurerie };

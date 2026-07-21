@@ -607,6 +607,19 @@ Object.assign(HANDLERS, {
       if (!user) return { ok: false, message: 'Commanditaire introuvable sur Discord' };
       const sent = await user.send(lignes.join('\n')).catch(() => null);
       if (!sent) return { ok: false, message: 'MP du commanditaire fermés — envoi impossible' };
+      // Persiste l'état du contrat sur l'opération : permet la signature auto en
+      // MP (« JE SIGNE ») et garde une trace du statut. (saveDB géré par l'appelant.)
+      const op = _findOp(db, p.operationId);
+      if (op) {
+        op.contrat = {
+          statut: 'envoye',
+          commanditaire: _s(p.commanditaire, 120),
+          clientDiscordId: did,
+          sens: p.sens === 'client_propose' ? 'client_propose' : 'client_signe',
+          remuneration: _s(p.remuneration, 120),
+          envoyeAt: new Date().toISOString(),
+        };
+      }
       return { ok: true, message: 'Contrat d\'opération envoyé au commanditaire en message privé' };
     } catch (e) { return { ok: false, message: e.message }; }
   },
@@ -673,4 +686,69 @@ async function appliquerCommandesWeb(guild) {
   if (didChange) { try { await supa.syncAll(loadDB()); } catch {} }
 }
 
-module.exports = { appliquerCommandesWeb, HANDLERS };
+// ── Signature d'un contrat par message privé (« JE SIGNE » / « JE REFUSE ») ──
+// Le client reçoit son contrat en MP (armurerie ou opération) et répond en MP.
+// On repère l'intention, on retrouve SON contrat en attente, on le marque signé
+// (ou refusé) et on lui confirme. Ferme la boucle des contrats sans intervention.
+function _normSig(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+async function traiterSignatureContratMP(message) {
+  try {
+    // MP uniquement, jamais les messages d'un bot.
+    if (!message || message.guild || message.author?.bot) return false;
+    const norm = _normSig(message.content);
+    if (!norm) return false;
+    // Négation ⇒ on ne SIGNE jamais par erreur (« je signe pas », « je ne signe pas »
+    // = refus, pas signature).
+    const negation = /\b(pas|jamais|non|ne)\b/.test(norm);
+    const veutSigner = !negation && (/\bje signe\b/.test(norm) || /\bj accepte\b/.test(norm) || norm === 'signe' || norm === 'signer' || norm === 'accepte' || norm === 'j accepte');
+    const veutRefuser = /\bje refuse\b/.test(norm) || /\bje n accepte pas\b/.test(norm) || norm === 'refuse' || norm === 'refuser' || (negation && /\bsigne\b/.test(norm));
+    if (!veutSigner && !veutRefuser) return false;
+    const did = String(message.author.id);
+
+    // 1) Contrat d'armurerie en attente (table site-native ArmurerieContrat).
+    let contratArmu = null;
+    try { contratArmu = await supa.lireContratArmurerieEnAttente(did); } catch {}
+
+    // 2) Contrat d'opération en attente (stocké sur l'opération dans data.json).
+    const db = loadDB();
+    let opAvecContrat = null;
+    for (const o of [...(db.operations || []), ...(db.preparations || [])]) {
+      if (o && o.contrat && o.contrat.statut === 'envoye' && String(o.contrat.clientDiscordId) === did) {
+        if (!opAvecContrat || new Date(o.contrat.envoyeAt || 0) > new Date(opAvecContrat.contrat.envoyeAt || 0)) opAvecContrat = o;
+      }
+    }
+
+    const tArmu = contratArmu ? new Date(contratArmu.envoyeAt || contratArmu.createdAt || 0).getTime() : -1;
+    const tOp = opAvecContrat ? new Date(opAvecContrat.contrat.envoyeAt || 0).getTime() : -1;
+    if (tArmu < 0 && tOp < 0) return false; // rien en attente pour cette personne → on ne consomme pas
+    const statut = veutSigner ? 'signe' : 'refuse';
+
+    // On agit sur le contrat le plus récemment envoyé.
+    if (tArmu >= tOp) {
+      try { await supa.marquerContratArmurerie(contratArmu.id, statut); } catch (e) { console.log('⚠️ signature armu:', e.message); return false; }
+      const nom = _s(contratArmu.clientNom, 120) || '';
+      const txt = veutSigner
+        ? `✅ Merci${nom ? ' ' + nom : ''}. Votre **contrat de vente** est **signé** — il est désormais inscrit au registre officiel de l'Armurerie de Van Horn.`
+        : `Bien reçu${nom ? ' ' + nom : ''}. Votre **refus** a été enregistré : le contrat est annulé.`;
+      await message.reply({ content: txt, allowedMentions: { parse: [] } }).catch(() => {});
+    } else {
+      opAvecContrat.contrat.statut = statut;
+      opAvecContrat.contrat.signeAt = new Date().toISOString();
+      saveDB(db);
+      const clientPropose = opAvecContrat.contrat.sens === 'client_propose';
+      const qui = _s(opAvecContrat.contrat.commanditaire, 120) || '';
+      const txt = veutSigner
+        ? `✅ Merci${qui ? ' ' + qui : ''}. Le **contrat d'opération** est **signé** — ${clientPropose ? 'la mission est confirmée' : 'la Iron Wolf Company est engagée sur cette mission'}.`
+        : `Bien reçu${qui ? ' ' + qui : ''}. Votre **refus** du contrat d'opération a été enregistré.`;
+      await message.reply({ content: txt, allowedMentions: { parse: [] } }).catch(() => {});
+    }
+    return true;
+  } catch (e) {
+    console.log('⚠️ traiterSignatureContratMP:', e.message);
+    return false;
+  }
+}
+
+module.exports = { appliquerCommandesWeb, HANDLERS, traiterSignatureContratMP };

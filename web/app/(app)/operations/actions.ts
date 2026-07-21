@@ -93,5 +93,6 @@ export async function envoyerContratOperation(data: {
   const did = String(data.clientDiscordId || "").trim();
   if (!did) return { ok: false, error: "Renseigne l'ID Discord du commanditaire pour l'envoi." };
   if (!data.commanditaire || data.commanditaire.trim().length < 2) return { ok: false, error: "Indique le nom du commanditaire." };
-  return envoyerCommande("operation.contrat", { ...data, clientDiscordId: did });
+  // Retour temps réel : on attend le verdict du bot (MP remis / MP fermés).
+  return envoyerCommande("operation.contrat", { ...data, clientDiscordId: did }, { attendre: true });
 }

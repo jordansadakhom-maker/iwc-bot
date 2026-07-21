@@ -365,7 +365,11 @@ function EditModal({ op, membres, onClose, router }: { op: OpDetail; membres: Me
       conditions: ctrConditions, sens: ctrSens,
     });
     setBusy(null);
-    setFlash(r.ok ? "Contrat envoyé au commanditaire en MP — signature dans ~30 s." : (r.error || "Échec."));
+    // Retour temps réel : verdict réel du bot (MP remis / MP fermés). Le
+    // commanditaire signe ensuite en répondant « JE SIGNE » en message privé.
+    setFlash(r.ok
+      ? (r.enAttente ? "Contrat déposé — envoi au commanditaire en cours…" : (r.message || "Contrat remis au commanditaire en message privé.") + " En attente de sa signature.")
+      : (r.error || "Échec."));
   }
 
   return (
