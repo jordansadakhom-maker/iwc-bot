@@ -88,6 +88,10 @@ let candidatureWeb = {};
 try { candidatureWeb = require('./candidature-web'); console.log('✅ Module candidatures web chargé'); }
 catch (e) { console.log('⚠️ candidature-web non chargé:', e.message); }
 
+let voixTerrain = {};
+try { voixTerrain = require('./voix-terrain'); console.log('✅ Module voix terrain chargé'); }
+catch (e) { console.log('⚠️ voix-terrain non chargé:', e.message); }
+
 let rupturesArm = {};
 try { rupturesArm = require('./ruptures-armurerie'); console.log('✅ Module ruptures armurerie chargé'); }
 catch (e) { console.log('⚠️ ruptures-armurerie non chargé:', e.message); }
@@ -1047,7 +1051,7 @@ const SLASH_COMMANDS = [
 ].map(c => c.toJSON());
 
 async function registerSlashCommands(guild) {
-  const cmds = [...SLASH_COMMANDS, ...(creationRapide.creationCommands || []), ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || []), ...(operations.operationsCommands || []), ...(rumeurs.rumeursCommands || []), ...(inventaire.inventaireCommands || []), ...(diagnostic.diagnosticCommands || []), ...(absences.absencesCommands || []), ...(repertoire.repertoireCommands || []), ...(monitoring.monitoringCommands || []), ...(telegramme.telegrammeCommands || []), ...(tableaubord.tableauCommands || []), ...(traque.traqueCommands || []), ...(comptabilite.comptaCommands || []), ...(evenements.evenementsCommands || []), ...(annonces.annoncesCommands || []), ...(journaux.journauxCommands || [])];
+  const cmds = [...SLASH_COMMANDS, ...(creationRapide.creationCommands || []), ...(papiersCommands || []), ...(securite.securiteCommands || []), ...(rdvplus.rdvplusCommands || []), ...(operations.operationsCommands || []), ...(rumeurs.rumeursCommands || []), ...(inventaire.inventaireCommands || []), ...(diagnostic.diagnosticCommands || []), ...(absences.absencesCommands || []), ...(repertoire.repertoireCommands || []), ...(monitoring.monitoringCommands || []), ...(telegramme.telegrammeCommands || []), ...(tableaubord.tableauCommands || []), ...(traque.traqueCommands || []), ...(comptabilite.comptaCommands || []), ...(evenements.evenementsCommands || []), ...(annonces.annoncesCommands || []), ...(journaux.journauxCommands || []), ...(voixTerrain.voixCommands || [])];
   try {
     const noms = cmds.map(c => c?.name || c?.toJSON?.()?.name).filter(Boolean);
     client._cmdNames = noms;
@@ -4665,6 +4669,7 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isButton?.() && (interaction.customId || '').startsWith('cpart_op::')) return _cpartCreerOpBouton(interaction);
   if (interaction.isUserSelectMenu?.() && (interaction.customId || '').startsWith('cpart_opsel::')) return _cpartCreerOpSelect(interaction);
   if (interaction.isUserSelectMenu?.() && (interaction.customId || '').startsWith('info_notify_sel_')) return notionV3.handleInformateurNotifySelect?.(interaction);
+  if (await voixTerrain.routeInteraction?.(interaction)) return;
   if (await contratsConf.routeInteraction?.(interaction)) return;
   if (await opsEtapes.routeInteraction?.(interaction)) return;
   if (await creationRapide.routeInteraction?.(interaction)) return;
