@@ -1,9 +1,9 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Gamepad2, Square, Loader2, CheckCircle2, MonitorPlay } from "lucide-react";
+import { Gamepad2, Square, Loader2, CheckCircle2, MonitorPlay, Volume2, MonitorUp, AlertTriangle } from "lucide-react";
 import { Card, CardHeader } from "@/components/ui";
-import { Champ, Picker, inputCls } from "@/components/edit-ui";
+import { Champ, Picker, inputCls, Modal } from "@/components/edit-ui";
 import { uploadAudio } from "@/app/(app)/actions-upload";
 import { envoyerNoteAudio } from "@/app/(app)/notes-vocales/actions";
 
@@ -18,6 +18,7 @@ const PRIORITES = [
 // (Whisper) et en fait un rapport de terrain immersif. PC uniquement (Chrome/Edge).
 export function CaptureJeu() {
   const [phase, setPhase] = useState<"idle" | "rec" | "traite">("idle");
+  const [rappel, setRappel] = useState(false);
   const [cible, setCible] = useState("");
   const [lieu, setLieu] = useState("");
   const [priorite, setPriorite] = useState("normale");
@@ -101,10 +102,25 @@ export function CaptureJeu() {
   return (
     <Card>
       <CardHeader titre="Capturer le son du jeu (voix des joueurs)" />
-      <div className="-mt-1.5 mb-4 rounded-[10px] border border-border bg-surface-2 p-3 text-[0.82rem] leading-relaxed text-muted">
-        <b className="text-ink">Comment ça marche :</b> clique <b>Capturer</b> → dans la fenêtre du navigateur, choisis <b>« Tout l&apos;écran »</b> et <b>coche « Partager l&apos;audio du système »</b>. Le bot transcrit les voix entendues en jeu et en fait un <b>rapport de terrain immersif</b>.
-        <span className="mt-1 block text-[0.76rem] text-faint">💻 PC uniquement (Chrome/Edge). Rien n&apos;est diffusé : seul le son est enregistré puis transcrit.</span>
-      </div>
+      <ol className="-mt-1.5 mb-4 flex flex-col gap-2 text-[0.83rem] leading-relaxed">
+        <li className="flex items-start gap-2.5 rounded-[10px] border border-border bg-surface-2 px-3 py-2.5">
+          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[0.72rem] font-bold text-black/85" style={{ background: "var(--accent)" }}>1</span>
+          <span className="text-muted">Clique <b className="text-ink">Capturer le son du jeu</b>.</span>
+        </li>
+        <li className="flex items-start gap-2.5 rounded-[10px] border border-border bg-surface-2 px-3 py-2.5">
+          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[0.72rem] font-bold text-black/85" style={{ background: "var(--accent)" }}>2</span>
+          <span className="text-muted">Dans la fenêtre du navigateur, choisis <b className="text-ink"><MonitorUp className="mb-0.5 inline h-3.5 w-3.5" /> « Tout l&apos;écran »</b>.</span>
+        </li>
+        <li className="flex items-start gap-2.5 rounded-[10px] border px-3 py-2.5" style={{ borderColor: "color-mix(in srgb,var(--warn) 55%,var(--border))", background: "color-mix(in srgb,var(--warn) 10%,transparent)" }}>
+          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[0.72rem] font-bold text-black/85" style={{ background: "var(--warn)" }}>3</span>
+          <span><b className="text-ink"><Volume2 className="mb-0.5 inline h-3.5 w-3.5" /> COCHE « Partager l&apos;audio du système »</b> <span className="text-muted">(en bas de la fenêtre). C&apos;est <b>l&apos;étape la plus importante</b> — sans elle, aucune voix n&apos;est captée.</span></span>
+        </li>
+        <li className="flex items-start gap-2.5 rounded-[10px] border border-border bg-surface-2 px-3 py-2.5">
+          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[0.72rem] font-bold text-black/85" style={{ background: "var(--accent)" }}>4</span>
+          <span className="text-muted">Laisse la scène se jouer → <b className="text-ink">⏹️ Arrêter</b>. L&apos;IA en fait un rapport de terrain.</span>
+        </li>
+      </ol>
+      <p className="-mt-2 mb-4 text-[0.76rem] text-faint">💻 PC uniquement (Chrome/Edge). Rien n&apos;est diffusé : seul le son est enregistré puis transcrit. Le jeu peut être dans une autre appli — l&apos;audio système capte tout le son du PC.</p>
 
       <div className="flex flex-col items-center gap-3 rounded-[12px] border border-border bg-surface-2 px-4 py-6">
         {phase === "rec" ? (
@@ -120,7 +136,7 @@ export function CaptureJeu() {
             <Loader2 className="h-[1.15rem] w-[1.15rem] animate-spin" /> Transcription en cours…
           </button>
         ) : (
-          <button onClick={demarrer} className="inline-flex items-center gap-2.5 rounded-full px-6 py-3.5 text-[0.95rem] font-semibold text-black/85" style={{ background: "linear-gradient(180deg,var(--accent-hi),var(--accent))" }}>
+          <button onClick={() => setRappel(true)} className="inline-flex items-center gap-2.5 rounded-full px-6 py-3.5 text-[0.95rem] font-semibold text-black/85" style={{ background: "linear-gradient(180deg,var(--accent-hi),var(--accent))" }}>
             <Gamepad2 className="h-[1.15rem] w-[1.15rem]" /> Capturer le son du jeu
           </button>
         )}
@@ -142,6 +158,29 @@ export function CaptureJeu() {
         <div className="mt-3 flex items-start gap-2 rounded-lg border px-3 py-2.5 text-[0.82rem]" style={flash.t === "ok" ? { color: "var(--good)", borderColor: "color-mix(in srgb,var(--good) 40%,var(--border))", background: "color-mix(in srgb,var(--good) 8%,transparent)" } : { color: "var(--oxblood)", borderColor: "color-mix(in srgb,var(--oxblood) 40%,var(--border))", background: "color-mix(in srgb,var(--oxblood) 8%,transparent)" }}>
           {flash.t === "ok" ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : null}{flash.m}
         </div>
+      ) : null}
+
+      {rappel ? (
+        <Modal titre="Avant de partager" onClose={() => setRappel(false)} max={460}>
+          <div className="flex flex-col gap-3">
+            <p className="text-[0.86rem] text-muted">La fenêtre de partage du navigateur va s&apos;ouvrir. <b className="text-ink">Deux choses à ne pas rater :</b></p>
+            <div className="flex items-start gap-2.5 rounded-[10px] border border-border bg-surface-2 px-3 py-2.5 text-[0.85rem]">
+              <MonitorUp className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
+              <span>Choisis <b>« Tout l&apos;écran »</b> (l&apos;onglet du haut de la fenêtre).</span>
+            </div>
+            <div className="flex items-start gap-2.5 rounded-[10px] border px-3 py-3 text-[0.85rem]" style={{ borderColor: "color-mix(in srgb,var(--warn) 60%,var(--border))", background: "color-mix(in srgb,var(--warn) 12%,transparent)" }}>
+              <Volume2 className="mt-0.5 h-5 w-5 shrink-0" style={{ color: "var(--warn)" }} />
+              <span><b className="text-ink">COCHE ✅ « Partager l&apos;audio du système »</b> — c&apos;est la petite case <b>en bas à gauche</b> de la fenêtre. <span className="text-muted">Sans elle, aucune voix n&apos;est captée.</span></span>
+            </div>
+            <div className="flex items-center gap-1.5 text-[0.76rem] text-faint"><AlertTriangle className="h-3.5 w-3.5" /> Oublié la case audio ? Arrête et relance, ce n&apos;est pas grave.</div>
+            <div className="mt-1 flex justify-end gap-2">
+              <button onClick={() => setRappel(false)} className="rounded-xl border border-border bg-surface-2 px-4 py-2.5 text-[0.85rem] font-semibold text-muted hover:text-ink">Annuler</button>
+              <button onClick={() => { setRappel(false); void demarrer(); }} className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-[0.85rem] font-semibold text-black/85" style={{ background: "linear-gradient(180deg,var(--accent-hi),var(--accent))" }}>
+                <MonitorUp className="h-4 w-4" /> J&apos;ai compris, partager
+              </button>
+            </div>
+          </div>
+        </Modal>
       ) : null}
     </Card>
   );
