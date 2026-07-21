@@ -1,7 +1,47 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Mic } from "lucide-react";
+import { Mic, Volume2, Square } from "lucide-react";
+
+// ── Synthèse vocale (l'IA répond à voix haute) ──────────────────
+export function parler(texte: string) {
+  try {
+    const synth = typeof window !== "undefined" ? window.speechSynthesis : null;
+    if (!synth) return;
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(String(texte || "").slice(0, 700));
+    u.lang = "fr-FR"; u.rate = 1; u.pitch = 1;
+    synth.speak(u);
+  } catch { /* ignore */ }
+}
+export function stopParler() { try { window.speechSynthesis?.cancel(); } catch { /* ignore */ } }
+
+// Bouton « Écouter » : lit un texte à voix haute (bascule lecture / arrêt).
+export function LireBtn({ texte, className }: { texte: string; className?: string }) {
+  const [on, setOn] = useState(false);
+  const [support, setSupport] = useState(false);
+  useEffect(() => { setSupport(typeof window !== "undefined" && !!window.speechSynthesis); }, []);
+  useEffect(() => () => stopParler(), []);
+  if (!support || !texte?.trim()) return null;
+  function toggle() {
+    if (on) { stopParler(); setOn(false); return; }
+    try {
+      const synth = window.speechSynthesis;
+      synth.cancel();
+      const u = new SpeechSynthesisUtterance(texte.slice(0, 700));
+      u.lang = "fr-FR";
+      u.onend = () => setOn(false);
+      u.onerror = () => setOn(false);
+      synth.speak(u); setOn(true);
+    } catch { setOn(false); }
+  }
+  return (
+    <button type="button" onClick={toggle} title={on ? "Arrêter la lecture" : "Écouter"}
+      className={className || "inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted transition hover:border-border-2 hover:text-ink"}>
+      {on ? <Square className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />} {on ? "Stop" : "Écouter"}
+    </button>
+  );
+}
 
 // Dictée vocale via l'API Web Speech (reconnaissance native du navigateur, en
 // français). Aucun serveur, aucune dépendance : on branche le micro et le texte

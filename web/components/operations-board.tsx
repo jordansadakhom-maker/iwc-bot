@@ -6,6 +6,8 @@ import { X, Target, Plus, Loader2, Trash2, MapPin, Users, CalendarClock, Link2, 
 import type { OpDetail, EtapeDetail, MembreLite } from "@/lib/queries";
 import { Badge } from "@/components/ui";
 import { creerOperation, majOperation, supprimerOperation, assignerOperation, terminerOperation, envoyerContratOperation } from "@/app/(app)/operations/actions";
+import { genererRapportMission } from "@/app/(app)/documents/actions";
+import { LireBtn } from "@/components/mic-dictee";
 import { cents } from "@/lib/format";
 
 const dateFR = (s: string | null) => { if (!s) return null; try { return new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" }); } catch { return null; } };
@@ -316,6 +318,8 @@ function EditModal({ op, membres, onClose, router }: { op: OpDetail; membres: Me
   const [ctrRemu, setCtrRemu] = useState(op.prime || "");
   const [ctrConditions, setCtrConditions] = useState("");
   const [ctrSens, setCtrSens] = useState<"client_signe" | "client_propose">("client_signe");
+  // Débrief IA (rapport de mission immersif à partir des vrais faits)
+  const [debriefIA, setDebriefIA] = useState<string | null>(null);
   const dispo = membres.filter((m) => !op.membresIds.includes(m.id));
   const filtres = dispo.filter((m) => m.nom.toLowerCase().includes(q.toLowerCase())).slice(0, 40);
   const nbChoisis = Object.values(choisis).filter(Boolean).length;
@@ -329,6 +333,12 @@ function EditModal({ op, membres, onClose, router }: { op: OpDetail; membres: Me
     setBusy(null);
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
     setChoisis({}); setFlash("Agents assignés & prévenus — mise à jour dans ~30 s."); router.refresh();
+  }
+  async function genererDebriefIA() {
+    setBusy("debriefIA"); setFlash(null);
+    const r = await genererRapportMission(op.id);
+    setBusy(null);
+    if (r.ok && r.texte) setDebriefIA(r.texte); else setFlash(r.error || "Débrief indisponible.");
   }
   async function confirmerTerminer() {
     setBusy("terminer");
@@ -428,6 +438,25 @@ function EditModal({ op, membres, onClose, router }: { op: OpDetail; membres: Me
                   {busy === "terminer" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Landmark className="h-4 w-4" />} Terminer{Number(montantPrime) > 0 ? " & encaisser" : ""}
                 </button>
               </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Débrief IA — rapport de mission immersif pour une opération terminée */}
+      {phase === "terminee" ? (
+        <div className="mb-3 flex flex-col gap-2 border-t border-border pt-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="flex items-center gap-1.5 text-[0.72rem] uppercase tracking-[0.06em] text-faint"><ScrollText className="h-3.5 w-3.5" /> Débriefing IA</span>
+            <button onClick={genererDebriefIA} disabled={busy === "debriefIA"} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.76rem] font-semibold transition hover:border-[color-mix(in_srgb,var(--accent)_55%,var(--border))] disabled:opacity-60">
+              {busy === "debriefIA" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ScrollText className="h-3.5 w-3.5" />} {debriefIA ? "Régénérer" : "Rédiger le rapport"}
+            </button>
+            {debriefIA ? <LireBtn texte={debriefIA} /> : null}
+          </div>
+          <p className="-mt-1 text-[0.72rem] text-faint">L&apos;IA rédige un rapport de mission immersif à partir des faits réels (résultat, butin, pertes, débrief). Aucun fait inventé.</p>
+          {debriefIA ? (
+            <div className="rounded-[10px] border border-border bg-surface-2 p-3">
+              <p className="whitespace-pre-wrap text-[0.84rem] leading-relaxed text-ink">{debriefIA}</p>
             </div>
           ) : null}
         </div>

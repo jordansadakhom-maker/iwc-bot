@@ -1,6 +1,7 @@
 import { Sparkles } from "lucide-react";
 import { PageHeader } from "@/components/ui";
 import { AssistantConsole } from "@/components/assistant-console";
+import { RechercheIA } from "@/components/recherche-ia";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,7 @@ export default function AssistantPage() {
         </div>
       </div>
       <AssistantConsole />
+      <RechercheIA />
     </>
   );
 }

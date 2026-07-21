@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Sparkles, Loader2, Send, Check, HelpCircle, ArrowRight } from "lucide-react";
 import { demander, executer } from "@/app/(app)/assistant/actions";
 import type { Action, Interpretation } from "@/lib/assistant";
-import { MicButton } from "@/components/mic-dictee";
+import { MicButton, LireBtn } from "@/components/mic-dictee";
 
 const EXEMPLES = [
   "Passe l'opération Corbeau en cours",
@@ -119,7 +119,7 @@ export function AssistantConsole() {
       {/* Confirmation des actions proposées */}
       {res ? (
         <div className="rounded-card border border-border bg-surface p-4 shadow-card" style={{ background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,#000))" }}>
-          {res.resume ? <p className="mb-3 text-[0.9rem] text-ink">{res.resume}</p> : null}
+          {res.resume ? <div className="mb-3 flex items-start justify-between gap-2"><p className="text-[0.9rem] text-ink">{res.resume}</p><LireBtn texte={res.resume} /></div> : null}
 
           {res.actions && res.actions.length ? (
             <>
