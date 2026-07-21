@@ -265,6 +265,7 @@ export type OpDetail = {
   objectif: string | null; lieu: string | null; pole: string;
   etapes: EtapeDetail[]; createurNom: string | null; createdAt: string | null; contratLie: string | null;
   resultat: string | null; butin: string | null; debrief: string | null;
+  contrat: { statut: string; commanditaire: string | null; sens: string | null; envoyeAt: string | null; signeAt: string | null } | null;
 };
 export type ContratDetail = {
   id: string; cible: string; commanditaire: string | null; statut: string; pole: string;
@@ -379,6 +380,7 @@ export async function getOperations(): Promise<OperationsData> {
       resultat: (o.resultat as string) ?? null,
       butin: (o.butin as string) ?? null,
       debrief: (o.debrief as string) ?? null,
+      contrat: (o.contrat && typeof o.contrat === "object") ? (o.contrat as OpDetail["contrat"]) : null,
     });
   }
   const contrats: ContratDetail[] = ((contratsR.data || []) as Raw[])

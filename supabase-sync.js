@@ -215,6 +215,8 @@ function _construire(db) {
       resultat: _nn(o.resultat, 120),
       butin: _nn(o.butin, 120),
       debrief: _nn(o.debrief || o.pertes, 800),
+      // Feuille de contrat de l'opération (statut de signature, commanditaire…).
+      contrat: (o.contrat && typeof o.contrat === 'object') ? o.contrat : null,
     });
   }
 
@@ -432,7 +434,7 @@ async function syncAll(db) {
       //    les colonnes optionnelles (objectif, lieu, pole, createurNom) n'existent pas.
       let rO = await _upsert('Operation', operations);
       if (!rO.ok && rO.status === 400) {
-        const base = operations.map(({ objectif, lieu, pole, createurNom, resultat, butin, debrief, ...b }) => b);
+        const base = operations.map(({ objectif, lieu, pole, createurNom, resultat, butin, debrief, contrat, ...b }) => b);
         rO = await _upsert('Operation', base);
       }
       results.push(rO);
