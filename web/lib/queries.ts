@@ -1067,10 +1067,12 @@ export async function getPortefeuilles(): Promise<PortefeuillesData> {
 export type VitrineData = { membres: number | null; operations: number | null; armes: number | null };
 export async function getVitrine(): Promise<VitrineData> {
   const admin = createAdminClient();
-  // Chiffres affichés sur la couverture. On peut FORCER une valeur via une
-  // variable d'environnement (le Fondateur fait autorité sur le chiffre public) ;
-  // sinon on compte la vraie base. Les MEMBRES excluent les visiteurs et les
-  // partis (« la meute » = les vrais membres, pas les gens de passage).
+  // Chiffres affichés sur la couverture. Le MEMBRES est le chiffre déclaré par
+  // le Fondateur (la base compte aussi des visiteurs de passage, non
+  // représentatifs de « la meute ») ; il vaut MEMBRES_MEUTE par défaut et reste
+  // ajustable sans toucher au code via NEXT_PUBLIC_VITRINE_MEMBRES. Les
+  // opérations et armes viennent, elles, directement de la base.
+  const MEMBRES_MEUTE = 7;
   const envNum = (n: string): number | undefined => {
     const v = process.env[n];
     if (v == null || v === "") return undefined;
@@ -1080,23 +1082,16 @@ export async function getVitrine(): Promise<VitrineData> {
   const oMembres = envNum("NEXT_PUBLIC_VITRINE_MEMBRES");
   const oOps = envNum("NEXT_PUBLIC_VITRINE_OPERATIONS");
   const oArmes = envNum("NEXT_PUBLIC_VITRINE_ARMES");
-  if (!admin) return { membres: oMembres ?? null, operations: oOps ?? null, armes: oArmes ?? null };
+  if (!admin) return { membres: oMembres ?? MEMBRES_MEUTE, operations: oOps ?? null, armes: oArmes ?? null };
   async function compte(table: string): Promise<number | null> {
     try {
       const { count, error } = await admin!.from(table).select("*", { count: "exact", head: true });
       return error ? null : (typeof count === "number" ? count : null);
     } catch { return null; }
   }
-  // Membres = la meute réelle : on exclut les visiteurs et les partis.
-  async function compteMembres(): Promise<number | null> {
-    try {
-      const { count, error } = await admin!.from("Membre").select("*", { count: "exact", head: true }).not("statut", "in", "(visiteur,parti)");
-      return error ? null : (typeof count === "number" ? count : null);
-    } catch { return null; }
-  }
-  const [membres, operations, armes] = await Promise.all([compteMembres(), compte("Operation"), compte("Arme")]);
+  const [operations, armes] = await Promise.all([compte("Operation"), compte("Arme")]);
   return {
-    membres: oMembres ?? membres,
+    membres: oMembres ?? MEMBRES_MEUTE,
     operations: oOps ?? operations,
     armes: oArmes ?? armes,
   };
