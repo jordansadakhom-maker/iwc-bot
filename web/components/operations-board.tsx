@@ -240,15 +240,22 @@ function EtapeBloc({ e, i }: { e: EtapeDetail; i: number }) {
   );
 }
 
+// Badge de statut de la feuille de contrat d'opération (envoyé / signé / refusé).
+function ContratStatutBadge({ statut, commanditaire }: { statut: string; commanditaire?: string | null }) {
+  const cfg = statut === "signe" ? { t: "Contrat signé", c: "var(--good)" } : statut === "refuse" ? { t: "Contrat refusé", c: "var(--oxblood)" } : { t: "Contrat envoyé", c: "var(--steel)" };
+  return <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.62rem] font-bold" style={{ color: cfg.c, background: `color-mix(in srgb,${cfg.c} 15%,transparent)` }}>{cfg.t}{commanditaire ? ` · ${commanditaire}` : ""}</span>;
+}
+
 function OpDetailBloc({ op }: { op: OpDetail }) {
   const cree = dateFR(op.createdAt);
   const poleLabel = op.pole === "illegal" ? "🔪 La Confrérie" : op.pole === "legal" ? "⚖️ Iron Wolf" : null;
-  const rien = !op.objectif && !op.lieu && op.membresNoms.length === 0 && op.etapes.length === 0 && !cree && !op.createurNom && !op.contratLie;
+  const rien = !op.objectif && !op.lieu && op.membresNoms.length === 0 && op.etapes.length === 0 && !cree && !op.createurNom && !op.contratLie && !op.contrat;
   return (
     <div className="mb-4 flex flex-col gap-3 rounded-[12px] border border-border bg-surface-2 px-3.5 py-3">
       <div className="flex flex-wrap items-center gap-2">
         <Badge>{op.type}</Badge>
         <Badge tone={op.phase === "en_cours" ? "accent" : op.phase === "terminee" ? "good" : op.phase === "annulee" ? "muted" : "warn"}>{op.etape}</Badge>
+        {op.contrat?.statut ? <ContratStatutBadge statut={op.contrat.statut} commanditaire={op.contrat.commanditaire} /> : null}
         {poleLabel ? <span className="text-[0.74rem] text-faint">{poleLabel}</span> : null}
         {op.prime ? <span className="ml-auto font-num text-[0.86rem] font-semibold" style={{ color: "var(--accent)" }}>{op.prime}</span> : null}
       </div>
@@ -428,7 +435,10 @@ function EditModal({ op, membres, onClose, router }: { op: OpDetail; membres: Me
 
       {/* Feuille de contrat d'opération */}
       <div className="mb-3 flex flex-col gap-2 border-t border-border pt-3">
-        <span className="flex items-center gap-1.5 text-[0.72rem] uppercase tracking-[0.06em] text-faint"><ScrollText className="h-3.5 w-3.5" /> Feuille de contrat</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="flex items-center gap-1.5 text-[0.72rem] uppercase tracking-[0.06em] text-faint"><ScrollText className="h-3.5 w-3.5" /> Feuille de contrat</span>
+          {op.contrat?.statut ? <ContratStatutBadge statut={op.contrat.statut} commanditaire={op.contrat.commanditaire} /> : null}
+        </div>
         <p className="-mt-1 text-[0.72rem] text-faint">Remplie automatiquement depuis la mission (type, lieu, agents, objectif). Ajoute le client et les conditions, puis imprime-la ou envoie-la à signer.</p>
         <div className="grid gap-2 sm:grid-cols-2">
           <Champ label="Commanditaire (client)"><input className={inputCls} value={commanditaire} onChange={(e) => setCommanditaire(e.target.value)} placeholder="Nom du donneur d'ordre" maxLength={120} /></Champ>
