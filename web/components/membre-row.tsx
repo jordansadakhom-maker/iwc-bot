@@ -24,15 +24,16 @@ export function MembreRow({ m, tone }: { m: MembreDetail; tone: "accent" | "oxbl
   const [statutInterne, setStatutInterne] = useState(f.statutInterne || "");
   const [salaire, setSalaire] = useState(f.salaire ? String(f.salaire) : "");
   const [notes, setNotes] = useState(f.notes || "");
+  const [medecin, setMedecin] = useState(!!f.medecin);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const resume = [f.specialite, f.statutInterne, f.salaire ? `${cents(f.salaire)}$` : ""].filter(Boolean).join(" · ");
+  const resume = [f.specialite, f.statutInterne, f.salaire ? `${cents(f.salaire)}$` : "", f.medecin ? "Médecin" : ""].filter(Boolean).join(" · ");
 
   async function enregistrer() {
     setErr(null);
     setBusy(true);
-    const r = await majFicheMembre(m.id, { specialite, statutInterne, salaire: Number(salaire) || 0, notes });
+    const r = await majFicheMembre(m.id, { specialite, statutInterne, salaire: Number(salaire) || 0, notes, medecin });
     setBusy(false);
     if (!r.ok) { setErr(r.error || "Échec."); return; }
     setOpen(false);
@@ -73,6 +74,10 @@ export function MembreRow({ m, tone }: { m: MembreDetail; tone: "accent" | "oxbl
               </div>
               <label className="block"><span className="mb-1 block text-[0.64rem] uppercase tracking-[0.06em] text-faint">Salaire ($)</span><input className={inputCls} type="number" min={0} step="1" value={salaire} onChange={(e) => setSalaire(e.target.value)} placeholder="0" /></label>
               <label className="block"><span className="mb-1 block text-[0.64rem] uppercase tracking-[0.06em] text-faint">Notes RH</span><textarea className={inputCls + " min-h-[90px] resize-y leading-relaxed"} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Remarques, historique, sanctions, points forts…" maxLength={1500} /></label>
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border bg-surface-2 px-3 py-2.5">
+                <input type="checkbox" checked={medecin} onChange={(e) => setMedecin(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[var(--accent)]" />
+                <span className="text-[0.82rem]"><b>Habilitation médecin</b><span className="mt-0.5 block text-[0.72rem] text-faint">Donne accès à l&apos;onglet Médical (dossiers de suivi). La Direction y a accès d&apos;office.</span></span>
+              </label>
               {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
               <div className="flex justify-end gap-2 pt-1">
                 <button onClick={() => setOpen(false)} className="rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2">Annuler</button>

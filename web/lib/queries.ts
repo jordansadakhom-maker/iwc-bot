@@ -409,7 +409,7 @@ export async function getOperations(): Promise<OperationsData> {
 // ── Membres & RH (page dédiée) ───────────────────────────────────
 // Fiche RH : champ SITE-NATIVE porté par la table Membre, JAMAIS écrit par le
 // bot (il ne l'envoie pas dans sa synchro → jamais écrasé). Édité depuis le site.
-export type FicheRH = { specialite?: string; statutInterne?: string; salaire?: number; notes?: string };
+export type FicheRH = { specialite?: string; statutInterne?: string; salaire?: number; notes?: string; medecin?: boolean };
 export type MembreDetail = { id: string; nomIC: string; grade: string | null; pole: string; statut: string; ficheRH: FicheRH | null };
 export type MembresData = { connecte: boolean; membres: MembreDetail[] };
 
