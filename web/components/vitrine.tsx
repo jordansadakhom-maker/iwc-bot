@@ -1,7 +1,7 @@
 import Link from "next/link";
 import {
   Shield, Crosshair, Scale, Users, Target, ArrowRight, Swords, Wallet,
-  MapPin, ClipboardCheck, Handshake, Star, type LucideIcon,
+  MapPin, ClipboardCheck, Handshake, Star, Mail, type LucideIcon,
 } from "lucide-react";
 import type { VitrineData } from "@/lib/queries";
 
@@ -167,9 +167,12 @@ export function Vitrine({ stats, connecte = false }: { stats: VitrineData; conne
               <Swords className="h-[1.15rem] w-[1.15rem] text-accent" /> Visiter l&apos;armurerie
             </Link>
           </div>
-          <p className="mt-5 text-[0.8rem] text-faint">
-            Une question ? <Link href="/telegramme" className="font-semibold text-muted underline decoration-dotted underline-offset-2 hover:text-accent">Envoie-nous un télégramme</Link>.
-          </p>
+          <div className="mt-7 flex flex-col items-center gap-1.5">
+            <span className="text-[0.8rem] text-muted">Une question, un devis, une prestation&nbsp;?</span>
+            <Link href="/telegramme" className="inline-flex items-center gap-2 rounded-xl border border-border-2 bg-surface px-5 py-2.5 text-[0.88rem] font-semibold text-ink transition hover:border-accent hover:text-accent" style={{ boxShadow: "inset 0 0 0 1px color-mix(in srgb,var(--accent) 18%,transparent)" }}>
+              <Mail className="h-[1.05rem] w-[1.05rem] text-accent" /> Envoie-nous un télégramme
+            </Link>
+          </div>
         </div>
       </section>
 

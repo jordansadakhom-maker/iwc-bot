@@ -92,7 +92,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             items.map((it, i) => (
               <button
                 key={`${it.kind}-${it.href}-${it.label}-${i}`}
-                onMouseEnter={() => setActif(i)}
+                onMouseEnter={() => { setActif(i); router.prefetch(it.href); }}
                 onClick={() => choisir(it)}
                 className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors"
                 style={{ background: i === actif ? "color-mix(in srgb,var(--accent) 14%,transparent)" : "transparent" }}
