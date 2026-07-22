@@ -1,9 +1,9 @@
-import { LayoutDashboard, Users, ClipboardList, Boxes, FlaskConical, Archive, BadgeDollarSign, Receipt, ShieldCheck, FileText, BookUser, Stethoscope, ScrollText, FolderOpen, BarChart3, History, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Users, ClipboardList, Boxes, FlaskConical, Archive, BadgeDollarSign, Receipt, ShieldCheck, FileText, BookUser, Stethoscope, ScrollText, FolderOpen, BarChart3, History, ShieldAlert, type LucideIcon } from "lucide-react";
 
 // Onglets de la section Dispensaire de Saint-Denis. `pret` = déjà construit ;
-// `restreint` = réservé aux membres habilités (RH). Les autres s'afficheront
-// « bientôt » tant qu'ils ne sont pas livrés.
-export type DispTab = { href: string; label: string; icon: LucideIcon; pret?: boolean; restreint?: boolean };
+// `restreint` = réservé aux membres habilités (RH/chefs) ; `admin` = permission
+// admin requise. Les autres s'afficheront « bientôt » tant qu'ils ne sont pas livrés.
+export type DispTab = { href: string; label: string; icon: LucideIcon; pret?: boolean; restreint?: boolean; admin?: boolean };
 
 export const DISP_NAV: DispTab[] = [
   { href: "/dispensaire", label: "Accueil", icon: LayoutDashboard, pret: true },
@@ -22,4 +22,5 @@ export const DISP_NAV: DispTab[] = [
   { href: "/dispensaire/historique", label: "Historique", icon: History, pret: true },
   { href: "/repertoire", label: "Répertoire", icon: BookUser, pret: true },
   { href: "/dispensaire/documents", label: "Documents", icon: FolderOpen, pret: true },
+  { href: "/dispensaire/admin", label: "Administration", icon: ShieldAlert, pret: true, admin: true },
 ];
