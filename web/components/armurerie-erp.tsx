@@ -157,8 +157,8 @@ export function PointageTab({ employes, pointages, router }: { employes: ArmEmpl
     return m;
   }, [pointages]);
 
-  async function pointer(e: ArmEmploye) { setBusy(e.id); const r = await pointerService(e.id, e.nom); setBusy(null); if (r.ok) router.refresh(); }
-  async function terminer(p: ArmPointage) { setBusy(p.id); const r = await terminerService(p.id); setBusy(null); if (r.ok) router.refresh(); }
+  async function pointer(e: ArmEmploye) { setBusy(e.id); const r = await pointerService(e.id, e.nom); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Action impossible — réessaie."); }
+  async function terminer(p: ArmPointage) { setBusy(p.id); const r = await terminerService(p.id); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Action impossible — réessaie."); }
 
   const recents = pointages.filter((p) => p.fin).slice(0, 12);
 
@@ -784,7 +784,7 @@ export function BlocNotesTab({ notes, router }: { notes: ArmNote[]; router: Rout
   const [busy, setBusy] = useState<string | null>(null);
   const tri = [...notes].sort((a, b) => (b.epingle ? 1 : 0) - (a.epingle ? 1 : 0));
 
-  async function epingler(n: ArmNote) { setBusy(n.id); const r = await majNote(n.id, { epingle: !n.epingle }); setBusy(null); if (r.ok) router.refresh(); }
+  async function epingler(n: ArmNote) { setBusy(n.id); const r = await majNote(n.id, { epingle: !n.epingle }); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Action impossible — réessaie."); }
 
   return (
     <>
@@ -864,9 +864,9 @@ export function TachesTab({ taches, router }: { taches: ArmTache[]; router: Rout
   const aFaire = taches.filter((t) => !t.fait);
   const faites = taches.filter((t) => t.fait);
 
-  async function ajouter() { if (texte.trim().length < 1) return; setBusy("add"); const r = await creerTache({ texte, assigneA: assigne }); setBusy(null); if (r.ok) { setTexte(""); setAssigne(""); router.refresh(); } }
-  async function basculer(t: ArmTache) { setBusy(t.id); const r = await basculerTache(t.id, !t.fait); setBusy(null); if (r.ok) router.refresh(); }
-  async function suppr(t: ArmTache) { setBusy(t.id); const r = await supprimerTache(t.id); setBusy(null); if (r.ok) router.refresh(); }
+  async function ajouter() { if (texte.trim().length < 1) return; setBusy("add"); const r = await creerTache({ texte, assigneA: assigne }); setBusy(null); if (r.ok) { setTexte(""); setAssigne(""); router.refresh(); } else alert(r.error || "Ajout impossible — réessaie."); }
+  async function basculer(t: ArmTache) { setBusy(t.id); const r = await basculerTache(t.id, !t.fait); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Action impossible — réessaie."); }
+  async function suppr(t: ArmTache) { setBusy(t.id); const r = await supprimerTache(t.id); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Action impossible — réessaie."); }
 
   const Ligne = (t: ArmTache) => (
     <div key={t.id} className="flex items-center gap-2.5 rounded-[8px] border border-border bg-surface-2 px-3 py-2 text-[0.84rem]">
@@ -1373,7 +1373,7 @@ function CommandeModal({ commande, produits, clients, onClose, router }: { comma
     if (!r.ok) { setErr(r.error || "Impossible."); return; }
     router.refresh(); onClose();
   }
-  async function marquer(st: string) { setBusy("st"); const r = await marquerCommande(commande!.id, st); setBusy(null); if (r.ok) { setStatut(st); router.refresh(); } }
+  async function marquer(st: string) { setBusy("st"); const r = await marquerCommande(commande!.id, st); setBusy(null); if (r.ok) { setStatut(st); router.refresh(); } else alert(r.error || "Changement de statut impossible — réessaie."); }
   async function supprimer() { setBusy("del"); const r = await supprimerCommande(commande!.id); setBusy(null); if (!r.ok) { setErr(r.error || "Échec."); return; } router.refresh(); onClose(); }
 
   return (
@@ -1575,7 +1575,7 @@ function RdvModal({ rdv, clients, onClose, router }: { rdv?: ArmRdv; clients: { 
     if (!r.ok) { setErr(r.error || "Impossible."); return; }
     router.refresh(); onClose();
   }
-  async function marquer(st: string) { setBusy("st"); const r = await marquerRdv(rdv!.id, st); setBusy(null); if (r.ok) { setStatut(st); router.refresh(); } }
+  async function marquer(st: string) { setBusy("st"); const r = await marquerRdv(rdv!.id, st); setBusy(null); if (r.ok) { setStatut(st); router.refresh(); } else alert(r.error || "Changement de statut impossible — réessaie."); }
   async function supprimer() { setBusy("del"); const r = await supprimerRdv(rdv!.id); setBusy(null); if (!r.ok) { setErr(r.error || "Échec."); return; } router.refresh(); onClose(); }
 
   const nomComplet = [clientPrenom, clientNom].filter(Boolean).join(" ");

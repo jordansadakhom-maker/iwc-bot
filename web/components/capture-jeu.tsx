@@ -48,6 +48,13 @@ export function CaptureJeu() {
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
 
+  // `support` dépend de `navigator`/`MediaRecorder`, absents au rendu serveur : le
+  // SSR rendrait donc la carte « non pris en charge » et le client l'interface
+  // complète → décalage d'hydratation (React #418). On attend le montage client
+  // pour trancher, de sorte que le 1ᵉʳ rendu client soit identique au HTML serveur.
+  const [monte, setMonte] = useState(false);
+  useEffect(() => { setMonte(true); }, []);
+
   const support = typeof navigator !== "undefined" && !!navigator.mediaDevices?.getDisplayMedia && typeof MediaRecorder !== "undefined";
 
   // Charge la touche mémorisée (par navigateur, via localStorage).
@@ -145,6 +152,19 @@ export function CaptureJeu() {
       setPhase("idle");
       setFlash({ t: "bad", m: (e as Error).message || "Erreur pendant le traitement." });
     }
+  }
+
+  // Avant le montage client, on rend un état neutre (identique côté serveur) pour
+  // éviter le décalage d'hydratation — puis l'effet ci-dessus révèle le vrai contenu.
+  if (!monte) {
+    return (
+      <Card>
+        <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
+          <Loader2 className="h-5 w-5 animate-spin text-faint" />
+          <p className="text-[0.82rem] text-faint">Préparation de la capture…</p>
+        </div>
+      </Card>
+    );
   }
 
   if (!support) {
