@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Send, CheckCircle2, Loader2 } from "lucide-react";
+import { Send, CheckCircle2, Loader2, Bell } from "lucide-react";
 import { envoyerTelegrammeWeb } from "./actions";
 
 const inputCls =
@@ -29,12 +29,19 @@ export function TelegrammeForm() {
   }
 
   if (done) {
+    const suiviHref = `/suivi?nom=${encodeURIComponent(form.nom.trim())}`;
     return (
       <div className="flex flex-col items-center gap-3 py-6 text-center">
         <span className="grid h-14 w-14 place-items-center rounded-2xl" style={{ color: "var(--good)", background: "color-mix(in srgb,var(--good) 16%,transparent)" }}><CheckCircle2 className="h-7 w-7" strokeWidth={1.8} /></span>
         <h2 className="font-display text-xl">Télégramme envoyé&nbsp;!</h2>
         <p className="max-w-sm text-[0.88rem] leading-relaxed text-muted">Merci <b>{form.nom}</b>. Ton télégramme est parti vers la maison. Un membre te répondra{form.contact ? <> via <b>{form.moyen}</b> ({form.contact})</> : ""} dès que possible.</p>
-        <button onClick={() => { setDone(false); setForm({ nom: "", moyen: MOYENS[0], contact: "", message: "", website: "" }); }} className="mt-2 rounded-xl border border-border bg-surface px-4 py-2 text-[0.85rem] text-muted hover:text-ink">Envoyer un autre télégramme</button>
+        {/* Notification côté SITE : le client revient sur « Suivre ma demande »
+            avec son nom et y voit la réponse de l'équipe, sans aucun compte. */}
+        <a href={suiviHref} className="mt-1 inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-[0.86rem] font-semibold text-black/85 transition hover:brightness-105" style={{ background: "linear-gradient(135deg,var(--accent),color-mix(in srgb,var(--accent) 55%,#000))" }}>
+          <Bell className="h-4 w-4" /> Voir la réponse sur le site
+        </a>
+        <p className="max-w-sm text-[0.74rem] leading-relaxed text-faint">Reviens sur <b className="text-muted">Suivre ma demande</b> avec ton nom pour lire notre réponse dès qu&apos;elle arrive — aucune connexion nécessaire.</p>
+        <button onClick={() => { setDone(false); setForm({ nom: "", moyen: MOYENS[0], contact: "", message: "", website: "" }); }} className="mt-1 rounded-xl border border-border bg-surface px-4 py-2 text-[0.85rem] text-muted hover:text-ink">Envoyer un autre télégramme</button>
       </div>
     );
   }
