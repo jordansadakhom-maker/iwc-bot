@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { Cross } from "lucide-react";
 import { LoginButton } from "@/components/login-button";
-import { STANDALONE } from "@/lib/standalone";
+import { isStandalone } from "@/lib/standalone-server";
 
 // Écran de connexion — l'entrée de la plateforme. Le bouton lance la connexion
 // Discord (OAuth Supabase). En mode autonome, l'écran est rebrandé Dispensaire.
-export const metadata = { title: STANDALONE ? "Connexion — Dispensaire de Saint-Denis" : "Connexion — IWC" };
+export async function generateMetadata() {
+  return { title: (await isStandalone()) ? "Connexion — Dispensaire de Saint-Denis" : "Connexion — IWC" };
+}
 
 function Crest() {
   return (
@@ -15,7 +17,8 @@ function Crest() {
   );
 }
 
-export default function LoginPage() {
+export default async function LoginPage() {
+  const STANDALONE = await isStandalone();
   return (
     <main
       className="grid min-h-screen place-items-center px-5 py-10"

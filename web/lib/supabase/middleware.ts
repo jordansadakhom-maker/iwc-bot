@@ -59,9 +59,12 @@ export async function updateSession(request: NextRequest) {
   }
 
   // ── Mode « site autonome du Dispensaire » ──────────────────────────────────
-  // Tout est ramené au Dispensaire : l'accueil et les autres sections d'Iron Wolf
-  // renvoient vers /dispensaire (le reste de la plateforme n'apparaît jamais).
-  if (process.env.NEXT_PUBLIC_DISPENSAIRE_STANDALONE === "true") {
+  // Actif si la variable est à "true" OU si le domaine contient « dispensaire »
+  // (détection automatique — pas besoin de configurer quoi que ce soit). Tout est
+  // ramené au Dispensaire : l'accueil et les autres sections renvoient vers /dispensaire.
+  const host = (request.headers.get("host") || "").toLowerCase();
+  const standalone = process.env.NEXT_PUBLIC_DISPENSAIRE_STANDALONE === "true" || host.includes("dispensaire");
+  if (standalone) {
     const auth = path === "/login" || path.startsWith("/auth");
     const meta = path === "/opengraph-image" || path === "/manifest.webmanifest" || path === "/pwa-icon" || path === "/icon" || path === "/apple-icon";
     const autorise = path.startsWith("/dispensaire") || auth || meta;
