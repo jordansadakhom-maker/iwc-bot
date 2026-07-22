@@ -2,7 +2,20 @@
 
 import { construireContexte, interpreter, TYPES_AUTORISES, type Action, type Interpretation } from "@/lib/assistant";
 import { envoyerCommande } from "@/lib/commandes";
+import { supprimerFiable } from "@/lib/suppression";
 import { iaTexte } from "@/lib/ia";
+
+// Suppressions via l'IA : elles doivent passer par le helper FIABLE (attend le
+// bot + retire la ligne en base), sinon la réconciliation ré-ajoute l'élément —
+// exactement comme les suppressions des autres onglets.
+const DELETE_MAP: Record<string, { table: string; colonne: string; cle: string; msg: string }> = {
+  "operation.delete": { table: "Operation", colonne: "id", cle: "id", msg: "Opération supprimée." },
+  "contrat.delete": { table: "Contrat", colonne: "id", cle: "id", msg: "Contrat supprimé." },
+  "rapport.delete": { table: "RapportInfo", colonne: "id", cle: "id", msg: "Rapport supprimé." },
+  "traque.delete": { table: "Traque", colonne: "id", cle: "id", msg: "Traque supprimée." },
+  "contact.delete": { table: "Contact", colonne: "id", cle: "id", msg: "Contact supprimé." },
+  "medical.delete": { table: "DossierMedical", colonne: "membreId", cle: "membreId", msg: "Dossier supprimé." },
+};
 
 // Recherche / question en langage naturel : l'IA répond à partir des VRAIES
 // données de la compagnie (aucune action, lecture seule). « Quels contrats
@@ -33,6 +46,14 @@ export async function executer(actions: Action[]): Promise<{ ok: boolean; execut
   for (const a of actions) {
     if (!a || !TYPES_AUTORISES.has(a.type)) { echecs++; continue; }
     const payload = (a.payload && typeof a.payload === "object" ? a.payload : {}) as Record<string, unknown>;
+    const del = DELETE_MAP[a.type];
+    if (del) {
+      // Suppression fiable (attend le verdict du bot + retrait direct en base).
+      const valeur = String(payload[del.cle] ?? "");
+      const r = await supprimerFiable({ type: a.type, payload, table: del.table, colonne: del.colonne, valeur, okMsg: del.msg });
+      if (r.ok) executees++; else echecs++;
+      continue;
+    }
     const r = await envoyerCommande(a.type, payload);
     if (r.ok) executees++; else echecs++;
   }
