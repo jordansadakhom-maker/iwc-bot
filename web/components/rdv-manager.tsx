@@ -24,10 +24,16 @@ const badgeTone = (t: string): "good" | "warn" | "muted" | "oxblood" | "accent" 
   t === "var(--good)" ? "good" : t === "var(--warn)" ? "warn" : t === "var(--oxblood)" ? "oxblood" : t === "var(--steel)" ? "accent" : "muted";
 const dateFR = (s: string | null) => { if (!s) return ""; try { return new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
 
+const estATraiterRdv = (r: RdvComm) => ["nouveau", "transmis", "attente", "demande"].includes(norm(r.statut));
+
 export function RdvManager({ rdvs, membres }: { rdvs: RdvComm[]; membres: MembreLite[] }) {
   const router = useRouter();
   const [sel, setSel] = useState<RdvComm | null>(null);
-  const aTraiterN = rdvs.filter((r) => ["nouveau", "transmis", "attente", "demande"].includes(norm(r.statut))).length;
+  const [seulATraiter, setSeulATraiter] = useState(false);
+  const aTraiterN = rdvs.filter(estATraiterRdv).length;
+  // Les « à traiter » remontent toujours en tête ; le filtre n'affiche qu'eux.
+  const rdvsTries = [...rdvs].sort((a, b) => Number(estATraiterRdv(b)) - Number(estATraiterRdv(a)));
+  const rdvsAffiches = seulATraiter ? rdvsTries.filter(estATraiterRdv) : rdvsTries;
 
   return (
     <>
@@ -35,7 +41,17 @@ export function RdvManager({ rdvs, membres }: { rdvs: RdvComm[]; membres: Membre
         <div className="flex items-center gap-2.5">
           <h3 className="text-[0.8rem] font-semibold uppercase tracking-[0.06em] text-muted">Rendez-vous clients</h3>
           <span className="font-num text-[0.8rem] text-faint">{rdvs.length}</span>
-          {aTraiterN ? <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.68rem] font-bold" style={{ color: "#fff", background: "var(--warn)" }}>{aTraiterN} à traiter</span> : null}
+          {aTraiterN ? (
+            <button
+              onClick={() => setSeulATraiter((v) => !v)}
+              aria-pressed={seulATraiter}
+              title={seulATraiter ? "Afficher tous les rendez-vous" : "N'afficher que ceux à traiter"}
+              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.68rem] font-bold transition"
+              style={{ color: "#fff", background: "var(--warn)", boxShadow: seulATraiter ? "0 0 0 2px color-mix(in srgb,var(--warn) 45%,transparent)" : "none" }}
+            >
+              {aTraiterN} à traiter{seulATraiter ? " · tout voir" : ""}
+            </button>
+          ) : null}
         </div>
         <a href="/rendez-vous" target="_blank" className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted transition hover:border-border-2 hover:text-ink">
           <Globe className="h-3.5 w-3.5" /> Page de réservation
@@ -51,7 +67,7 @@ export function RdvManager({ rdvs, membres }: { rdvs: RdvComm[]; membres: Membre
         </div>
       ) : (
         <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
-          {rdvs.map((r) => {
+          {rdvsAffiches.map((r) => {
             const st = sInfo(r.statut);
             const nk = norm(r.statut);
             const aTraiter = ["nouveau", "transmis", "attente", "demande"].includes(nk); // fraîchement arrivé → à traiter
