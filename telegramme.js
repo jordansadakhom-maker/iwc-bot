@@ -575,7 +575,7 @@ async function repondreDepuisWeb(client, db, rdvId, texte, parNom) {
     }
   } catch {}
 
-  return { ok: true, message: livre ? 'Réponse livrée au client' : 'Réponse enregistrée (MP client non livré)', livre };
+  return { ok: true, message: livre ? '✅ Réponse livrée au client en message privé (Discord).' : "⚠️ Réponse enregistrée, mais le message privé n'a PAS pu être livré (le client a peut-être fermé ses MP, ou n'est plus sur le serveur).", livre };
 }
 
 // Marque une conversation comme ayant donné lieu à un RDV (persisté côté bot).
