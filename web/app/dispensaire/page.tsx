@@ -1,41 +1,73 @@
 import Link from "next/link";
-import { AlertTriangle, ArrowRight } from "lucide-react";
-import { getAcces } from "@/lib/queries";
-import { getEnService } from "@/lib/dispensaire-pointage";
-import { getAlertesStock } from "@/lib/dispensaire-stock";
+import { AlertTriangle, ArrowRight, Boxes, FlaskConical, Receipt, FileText, BadgeDollarSign, Package, Bandage, Stethoscope, Clock } from "lucide-react";
+import { getAccueil } from "@/lib/dispensaire-accueil";
 import { DISP_NAV } from "@/lib/dispensaire-nav";
-import { DispEnService } from "@/components/dispensaire-en-service";
+import { AccueilService } from "@/components/dispensaire-accueil-service";
 
 export const dynamic = "force-dynamic";
 
+const money = (n: number) => `$${Math.round(n).toLocaleString("fr-FR")}`;
+const ACT_ICON: Record<string, typeof Package> = { stock: Package, vente: Bandage, service: Clock, frais: FileText, certificat: Stethoscope };
+const heureCourte = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); } catch { return "—"; } };
+
 export default async function DispensaireAccueil() {
-  const acces = await getAcces();
-  const habilite = acces.peutMedical;
-  const enService = await getEnService();
-  const alertes = await getAlertesStock();
-  const modules = DISP_NAV.filter((t) => t.href !== "/dispensaire" && (!t.restreint || habilite));
+  const d = await getAccueil();
+  const modules = DISP_NAV.filter((t) => t.href !== "/dispensaire" && (!t.restreint || d.habilite));
+
+  // Tuiles d'alerte du tableau de bord.
+  const tuiles = [
+    { href: "/dispensaire/stockage", icon: Boxes, label: "Stocks en alerte", val: d.stockAlertes.length, tone: d.stockAlertes.length ? "var(--oxblood)" : "var(--faint)", sous: d.stockAlertes.slice(0, 2).map((s) => `${s.nom} (${s.stock}${s.unite ? " " + s.unite : ""})`).join(" · ") || "Tout au-dessus du seuil" },
+    { href: "/dispensaire/matieres", icon: FlaskConical, label: "Matières en rupture", val: d.matieresRupture.length, tone: d.matieresRupture.length ? "var(--oxblood)" : "var(--faint)", sous: d.matieresRupture.slice(0, 2).map((m) => `${m.nom} (${m.quantite})`).join(" · ") || "Rien à commander" },
+    { href: "/dispensaire/ventes", icon: BadgeDollarSign, label: "Ventes du jour", val: d.ventesJourNb, tone: "var(--good)", sous: `Recette ${money(d.ventesJourCa)}` },
+    { href: "/dispensaire/frais", icon: FileText, label: "Frais en attente", val: d.fraisEnAttente, tone: d.fraisEnAttente ? "var(--warn)" : "var(--faint)", sous: d.fraisEnAttente ? "À valider" : "Rien en attente" },
+  ];
+  if (d.habilite) tuiles.push({ href: "/dispensaire/factures", icon: Receipt, label: "Factures impayées", val: d.facturesImpayees, tone: d.facturesRetard ? "var(--oxblood)" : "var(--warn)", sous: `${d.facturesRetard} en retard · ${money(d.du)} dû` });
 
   return (
     <div className="flex flex-col gap-5">
       <p className="max-w-2xl font-display text-[1rem] italic text-muted">Bienvenue au registre du Dispensaire. Tout ce qui se passe ici — soins, stocks, personnel, factures — se tient à jour d&apos;un même endroit.</p>
 
-      {/* Encarts d'accueil (activés par les prochains modules) */}
-      <div className="grid gap-3 md:grid-cols-2">
-        <Link href="/dispensaire/stockage" className="group flex items-center gap-3 rounded-[14px] border border-border bg-surface-2 p-4 transition hover:border-border-2">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full" style={{ background: alertes.items.length ? "color-mix(in srgb,var(--oxblood) 16%,transparent)" : "color-mix(in srgb,var(--warn) 14%,transparent)" }}><AlertTriangle className="h-5 w-5" style={{ color: alertes.items.length ? "var(--oxblood)" : "var(--warn)" }} /></span>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 text-[0.88rem] font-semibold">Stocks en alerte <span className="font-num" style={{ color: alertes.items.length ? "var(--oxblood)" : "var(--faint)" }}>{alertes.items.length}</span></div>
-            {alertes.items.length ? (
-              <div className="mt-0.5 flex flex-col gap-0.5">
-                {alertes.items.slice(0, 4).map((it) => <div key={it.nom} className="truncate text-[0.74rem] text-faint"><span className="font-semibold text-muted">{it.nom}</span> · {it.stock}{it.unite ? ` ${it.unite}` : ""} / seuil {it.seuil}</div>)}
-                {alertes.items.length > 4 ? <div className="text-[0.72rem] text-faint">+{alertes.items.length - 4} autre(s)…</div> : null}
+      {/* Tuiles d'alerte */}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {tuiles.map((t) => {
+          const Icon = t.icon;
+          return (
+            <Link key={t.href} href={t.href} className="group flex items-center gap-3 rounded-[14px] border border-border bg-surface-2 p-4 transition hover:border-border-2">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full" style={{ background: `color-mix(in srgb,${t.tone} 15%,transparent)` }}><Icon className="h-5 w-5" style={{ color: t.tone }} /></span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 text-[0.88rem] font-semibold">{t.label} <span className="font-num" style={{ color: t.tone }}>{t.val}</span></div>
+                <div className="truncate text-[0.74rem] text-faint">{t.sous}</div>
               </div>
-            ) : <div className="text-[0.76rem] text-faint">{alertes.pret ? "Tous les stocks sont au-dessus de leur seuil." : "Fixe des seuils dans le module Stockage."}</div>}
-          </div>
-          <ArrowRight className="h-4 w-4 shrink-0 text-faint transition group-hover:translate-x-0.5" />
-        </Link>
-        <DispEnService sessions={enService} />
+              <ArrowRight className="h-4 w-4 shrink-0 text-faint transition group-hover:translate-x-0.5" />
+            </Link>
+          );
+        })}
       </div>
+
+      {/* Personnel en service (live) + prise de service */}
+      <AccueilService enService={d.enService} roster={d.roster} />
+
+      {/* Dernières activités */}
+      <section className="rounded-[14px] border border-border bg-surface p-4">
+        <h3 className="mb-2 flex items-center gap-2 text-[0.9rem] font-semibold"><Clock className="h-4 w-4 text-accent" /> Dernières activités</h3>
+        {d.activites.length === 0 ? (
+          <p className="py-4 text-center text-[0.82rem] italic text-faint">Aucune activité récente.</p>
+        ) : (
+          <div className="flex flex-col divide-y divide-border">
+            {d.activites.map((a) => {
+              const Icon = ACT_ICON[a.type] || Package;
+              return (
+                <div key={a.id} className="flex items-center gap-2.5 py-1.5 text-[0.8rem]">
+                  <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md" style={{ background: "color-mix(in srgb,var(--accent) 12%,transparent)" }}><Icon className="h-3.5 w-3.5 text-accent" /></span>
+                  <span className="min-w-0 flex-1 truncate">{a.texte}</span>
+                  {a.par ? <span className="shrink-0 text-faint">{a.par}</span> : null}
+                  <span className="shrink-0 font-num text-faint">{heureCourte(a.at)}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       {/* Accès aux modules */}
       <div>

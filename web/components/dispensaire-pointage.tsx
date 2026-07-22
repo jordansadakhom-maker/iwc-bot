@@ -125,6 +125,26 @@ export function DispensairePointage({ data }: { data: PointData }) {
         )}
       </section>
 
+      {/* Statistiques (jour / semaine / mois / total) */}
+      <section className="rounded-[14px] border border-border bg-surface p-4">
+        <h3 className="mb-3 flex items-center gap-2 text-[0.9rem] font-semibold"><Clock className="h-4 w-4 text-accent" /> Statistiques</h3>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          {[
+            { l: "Aujourd'hui", v: fmtMin(data.stats.jourMin) },
+            { l: "Cette semaine", v: fmtMin(data.stats.semaineMin) },
+            { l: "Ce mois", v: fmtMin(data.stats.moisMin) },
+            { l: "Total", v: fmtMin(data.stats.totalMin) },
+            { l: "Jours travaillés", v: String(data.stats.jours) },
+            { l: "Moyenne / jour", v: fmtMin(data.stats.moyenneMin) },
+          ].map((s) => (
+            <div key={s.l} className="rounded-[10px] border border-border bg-surface-2 p-2.5">
+              <div className="font-num text-[1.05rem] font-bold leading-none">{s.v}</div>
+              <div className="mt-1 text-[0.64rem] uppercase tracking-[0.04em] text-faint">{s.l}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
       {/* Semaine (Lun→Dim) */}
       <section className="rounded-[14px] border border-border bg-surface p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
