@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AlertTriangle, ArrowRight } from "lucide-react";
 import { getAcces } from "@/lib/queries";
 import { getEnService } from "@/lib/dispensaire-pointage";
+import { getAlertesStock } from "@/lib/dispensaire-stock";
 import { DISP_NAV } from "@/lib/dispensaire-nav";
 import { DispEnService } from "@/components/dispensaire-en-service";
 
@@ -11,6 +12,7 @@ export default async function DispensaireAccueil() {
   const acces = await getAcces();
   const habilite = acces.peutMedical;
   const enService = await getEnService();
+  const alertes = await getAlertesStock();
   const modules = DISP_NAV.filter((t) => t.href !== "/dispensaire" && (!t.restreint || habilite));
 
   return (
@@ -19,10 +21,19 @@ export default async function DispensaireAccueil() {
 
       {/* Encarts d'accueil (activés par les prochains modules) */}
       <div className="grid gap-3 md:grid-cols-2">
-        <div className="flex items-center gap-3 rounded-[14px] border border-border bg-surface-2 p-4">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full" style={{ background: "color-mix(in srgb,var(--warn) 16%,transparent)" }}><AlertTriangle className="h-5 w-5" style={{ color: "var(--warn)" }} /></span>
-          <div><div className="text-[0.88rem] font-semibold">Stocks en alerte</div><div className="text-[0.76rem] text-faint">Apparaîtra ici dès le module <b>Stockage</b> (seuils à fixer).</div></div>
-        </div>
+        <Link href="/dispensaire/stockage" className="group flex items-center gap-3 rounded-[14px] border border-border bg-surface-2 p-4 transition hover:border-border-2">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full" style={{ background: alertes.items.length ? "color-mix(in srgb,var(--oxblood) 16%,transparent)" : "color-mix(in srgb,var(--warn) 14%,transparent)" }}><AlertTriangle className="h-5 w-5" style={{ color: alertes.items.length ? "var(--oxblood)" : "var(--warn)" }} /></span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 text-[0.88rem] font-semibold">Stocks en alerte <span className="font-num" style={{ color: alertes.items.length ? "var(--oxblood)" : "var(--faint)" }}>{alertes.items.length}</span></div>
+            {alertes.items.length ? (
+              <div className="mt-0.5 flex flex-col gap-0.5">
+                {alertes.items.slice(0, 4).map((it) => <div key={it.nom} className="truncate text-[0.74rem] text-faint"><span className="font-semibold text-muted">{it.nom}</span> · {it.stock}{it.unite ? ` ${it.unite}` : ""} / seuil {it.seuil}</div>)}
+                {alertes.items.length > 4 ? <div className="text-[0.72rem] text-faint">+{alertes.items.length - 4} autre(s)…</div> : null}
+              </div>
+            ) : <div className="text-[0.76rem] text-faint">{alertes.pret ? "Tous les stocks sont au-dessus de leur seuil." : "Fixe des seuils dans le module Stockage."}</div>}
+          </div>
+          <ArrowRight className="h-4 w-4 shrink-0 text-faint transition group-hover:translate-x-0.5" />
+        </Link>
         <DispEnService sessions={enService} />
       </div>
 

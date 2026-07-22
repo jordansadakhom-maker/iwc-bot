@@ -9,7 +9,7 @@ export const DISP_NAV: DispTab[] = [
   { href: "/dispensaire", label: "Accueil", icon: LayoutDashboard, pret: true },
   { href: "/dispensaire/rh", label: "RH / Salariés", icon: Users, pret: true, restreint: true },
   { href: "/dispensaire/pointage", label: "Pointage", icon: ClipboardList, pret: true },
-  { href: "/dispensaire/stockage", label: "Stockage", icon: Boxes },
+  { href: "/dispensaire/stockage", label: "Stockage", icon: Boxes, pret: true },
   { href: "/dispensaire/ventes", label: "Ventes", icon: BadgeDollarSign },
   { href: "/dispensaire/factures", label: "Factures en retard", icon: Receipt, restreint: true },
   { href: "/dispensaire/fdo", label: "Soins FDO", icon: ShieldCheck },
