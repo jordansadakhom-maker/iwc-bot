@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, ClipboardList, Boxes, BadgeDollarSign, Receipt, ShieldCheck, FileText, BookUser, Stethoscope, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Users, ClipboardList, Boxes, BadgeDollarSign, Receipt, ShieldCheck, FileText, BookUser, Stethoscope, ScrollText, FolderOpen, type LucideIcon } from "lucide-react";
 
 // Onglets de la section Dispensaire de Saint-Denis. `pret` = déjà construit ;
 // `restreint` = réservé aux membres habilités (RH). Les autres s'afficheront
@@ -14,7 +14,8 @@ export const DISP_NAV: DispTab[] = [
   { href: "/dispensaire/factures", label: "Factures en retard", icon: Receipt, pret: true, restreint: true },
   { href: "/dispensaire/fdo", label: "Soins FDO", icon: ShieldCheck, pret: true },
   { href: "/dispensaire/frais", label: "Notes de frais", icon: FileText, pret: true },
-  { href: "/dispensaire/certificats", label: "Certificats", icon: Stethoscope },
+  { href: "/dispensaire/certificats", label: "Certificats", icon: Stethoscope, pret: true },
+  { href: "/dispensaire/rapports", label: "Rapports médicaux", icon: ScrollText, pret: true },
   { href: "/repertoire", label: "Répertoire", icon: BookUser, pret: true },
-  { href: "/dispensaire/documents", label: "Documents", icon: FileText },
+  { href: "/dispensaire/documents", label: "Documents", icon: FolderOpen, pret: true },
 ];
