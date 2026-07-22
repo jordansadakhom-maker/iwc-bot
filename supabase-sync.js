@@ -762,4 +762,23 @@ async function enregistrerScanArmurerie(row) {
   return !!(r && r.ok);
 }
 
-module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, majRosterMembre, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise, lireProduitsArmurerie, lireContratArmurerieEnAttente, marquerContratArmurerie, lireRdvArmurerieARappeler, marquerRappelRdvArmurerie, enregistrerRapportTerrain, lireProduitsArmurerieRecette, lireRessourcesArmurerie, enregistrerScanArmurerie };
+// ── Répertoire du Dispensaire (export du salon Discord → site) ──
+// Noms déjà présents (dédoublonnage). `null` si lecture impossible.
+async function lireNomsContactsDispensaire() {
+  const rows = await _get('DispensaireContact?select=nom&limit=5000');
+  return Array.isArray(rows) ? rows.map((r) => String(r.nom || '')) : null;
+}
+// Insère des fiches (best-effort, no-op si la table n'existe pas encore).
+async function importerContactsDispensaire(rows) {
+  if (!Array.isArray(rows) || !rows.length) return false;
+  const r = await _upsert('DispensaireContact', rows);
+  return !!(r && r.ok);
+}
+// Trace des lignes d'historique (best-effort).
+async function enregistrerHistoriqueDispensaire(rows) {
+  if (!Array.isArray(rows) || !rows.length) return false;
+  const r = await _upsert('DispensaireHistorique', rows);
+  return !!(r && r.ok);
+}
+
+module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, majRosterMembre, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise, lireProduitsArmurerie, lireContratArmurerieEnAttente, marquerContratArmurerie, lireRdvArmurerieARappeler, marquerRappelRdvArmurerie, enregistrerRapportTerrain, lireProduitsArmurerieRecette, lireRessourcesArmurerie, enregistrerScanArmurerie, lireNomsContactsDispensaire, importerContactsDispensaire, enregistrerHistoriqueDispensaire };
