@@ -86,6 +86,52 @@ body > * { position: relative; z-index: 1; }
 ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--accent) 26%, var(--border)); border: 2px solid transparent; background-clip: padding-box; border-radius: 999px; }
 ::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--accent) 45%, var(--border)); border: 2px solid transparent; background-clip: padding-box; }
 
+/* ============================================================
+   « Grand-Livre » — habillage registre d'époque, limité à la section
+   Dispensaire (.disp-registre). On réattribue les jetons de couleur en
+   papier vieilli + encre sépia : tous les composants existants adoptent
+   automatiquement le rendu registre, sans les toucher un à un. Iron Wolf
+   n'est pas concerné (portée locale au sous-arbre du dispensaire).
+   ============================================================ */
+.disp-registre {
+  /* Encre sépia sur papier crème — mêmes rôles de jetons, valeurs d'époque. */
+  --bg:#e4d6b6; --bg-2:#dccca8; --surface:#f6edd7; --surface-2:#efe4c8;
+  --border:#ccb98d; --border-2:#b79e70;
+  --ink:#382a16; --muted:#6a5734; --faint:#9a8760;
+  --brass:#9c7a1a; --brass-hi:#b8901f; --oxblood:#93332a; --steel:#3f6f96;
+  --good:#4c7a3d; --warn:#8f6114; --crit:#9d3327;
+  --accent:var(--brass); --accent-hi:var(--brass-hi);
+  color: var(--ink);
+  /* Le sous-main : papier un peu plus sombre + halo de lampe à pétrole, sur
+     lequel la feuille (plus claire) vient se poser avec son ombre. */
+  background-color: #ddcda8;
+  background-image:
+    radial-gradient(1200px 480px at 50% -8%, rgba(156,122,26,.14), transparent 60%),
+    radial-gradient(760px 520px at 106% 8%, rgba(147,51,42,.07), transparent 55%),
+    linear-gradient(180deg, #e6d8b8, #dccca6);
+  background-attachment: fixed;
+}
+/* La feuille de registre : papier crème, lignes réglées, reliure rouge à
+   gauche, double filet intérieur et ombre portée. */
+.disp-registre__sheet {
+  position: relative;
+  border: 1px solid var(--border-2);
+  border-left: 3px solid color-mix(in srgb, var(--oxblood) 62%, var(--border-2));
+  border-radius: 3px;
+  background-image: repeating-linear-gradient(to bottom, transparent 0 27px, rgba(56,42,22,.055) 27px 28px);
+  background-color: var(--surface);
+  box-shadow: 0 22px 46px rgba(34,22,8,.22), inset 0 1px 0 rgba(255,255,255,.45);
+}
+/* Double filet d'encadrement, à quelques millimètres du bord. */
+.disp-registre__sheet::after {
+  content: ""; position: absolute; inset: 6px; z-index: 0; pointer-events: none;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  border-radius: 2px;
+}
+.disp-registre__sheet > * { position: relative; z-index: 1; }
+/* En-têtes de section en typographie de registre (plume). */
+.disp-registre h2, .disp-registre h3 { font-family: var(--font-display); letter-spacing: .005em; }
+
 /* Notifications : la zone visée par une notification (#ancre) est mise en avant
    d'un flash discret à l'arrivée, et se cale sous l'en-tête collant. */
 :target { scroll-margin-top: 92px; border-radius: 16px; animation: iwc-flash 1.8s ease-out 1; }

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { History, Search } from "lucide-react";
 import type { HistoData, HistoItem } from "@/lib/dispensaire-historique";
 import { Flash, inputCls } from "@/components/edit-ui";
+import { VideRegistre } from "@/components/dispensaire-ui";
 
 const norm = (x: string) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
 const dtFR = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); } catch { return "—"; } };
@@ -27,7 +28,11 @@ export function DispensaireHistorique({ data }: { data: HistoData }) {
         </div>
       </div>
 
-      {liste.length === 0 ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">Aucune entrée.</p> : (
+      {liste.length === 0 ? (
+        data.items.length
+          ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">Aucune entrée ne correspond à ta recherche.</p>
+          : <VideRegistre icon={History} titre="La main courante est vierge" sous="Chaque écriture portée au registre — soin, stock, personnel, facture — viendra s'inscrire ici, la plus récente en tête." />
+      ) : (
         <div className="overflow-x-auto rounded-[14px] border border-border bg-surface">
           <table className="w-full min-w-[640px] text-left text-[0.8rem]">
             <thead><tr className="border-b border-border text-[0.66rem] uppercase tracking-[0.04em] text-faint">

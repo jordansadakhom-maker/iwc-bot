@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FolderOpen, Plus, Check, Trash2, Search, ExternalLink, FileText, Link2, Paperclip } from "lucide-react";
+import { VideRegistre } from "@/components/dispensaire-ui";
 import { DOC_CATEGORIES, normaliserLien, type DocsData, type Doc } from "@/lib/dispensaire-docs-const";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
 import { PhotoDrop } from "@/components/photo-drop";
@@ -48,7 +49,11 @@ export function DispensaireDocuments({ data }: { data: DocsData }) {
         </div>
       </div>
 
-      {liste.length === 0 ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">{docs.length ? "Aucun document ne correspond." : "Aucun document — ajoute le premier (fichier ou lien)."}</p> : (
+      {liste.length === 0 ? (
+        docs.length
+          ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">Aucun document ne correspond à ta recherche.</p>
+          : <VideRegistre icon={FolderOpen} titre="Aucune pièce au dossier" sous="Ajoute un premier document — fichier ou lien — et il sera classé ici, à portée de main." />
+      ) : (
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {liste.map((d) => (
             <div key={d.id} className="group flex flex-col rounded-[12px] border border-border bg-surface-2 p-3">

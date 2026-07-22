@@ -2,9 +2,10 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { BadgeDollarSign, Plus, Loader2, Trash2, AlertTriangle, Bandage } from "lucide-react";
+import { BadgeDollarSign, Plus, Loader2, Trash2, AlertTriangle, Bandage, Users } from "lucide-react";
 import { money, type VentesData, type Vente } from "@/lib/dispensaire-facturation-const";
 import { Flash, inputCls } from "@/components/edit-ui";
+import { Cartouche } from "@/components/dispensaire-ui";
 import { creerVente, supprimerVente } from "@/app/dispensaire/ventes/actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
@@ -20,6 +21,12 @@ export function DispensaireVentes({ data }: { data: VentesData }) {
 
   const semaine = data.semaine;
   const total = useMemo(() => (Math.max(1, Number(v.quantite) || 1)) * (Number(v.prixUnitaire) || 0), [v.quantite, v.prixUnitaire]);
+  // Indicateurs de la semaine (calculés sur les données réelles, sans rien inventer).
+  const bilan = useMemo(() => ({
+    patients: semaine.length,
+    bandages: semaine.reduce((s, p) => s + p.bandages, 0),
+    depasses: semaine.filter((p) => p.depasse).length,
+  }), [semaine]);
 
   async function ajouter() {
     if (!v.patient.trim()) { setFlash({ t: "bad", m: "Indique le patient." }); return; }
@@ -39,6 +46,14 @@ export function DispensaireVentes({ data }: { data: VentesData }) {
     <div className="flex flex-col gap-4">
       {!data.pret ? <Flash tone="bad">Lance <b>web/prisma/sql/dispensaire-facturation.sql</b> dans Supabase, puis recharge.</Flash> : null}
       {flash ? <Flash tone={flash.t === "ok" ? "good" : "bad"}>{flash.m}</Flash> : null}
+
+      {/* Bilan de la semaine */}
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+        <Cartouche label="Recette · semaine" valeur={money(data.caSemaine)} ton="var(--good)" icon={BadgeDollarSign} />
+        <Cartouche label="Patients servis" valeur={bilan.patients} icon={Users} />
+        <Cartouche label="Bandages délivrés" valeur={bilan.bandages} icon={Bandage} />
+        <Cartouche label="Plafonds dépassés" valeur={bilan.depasses} ton={bilan.depasses ? "var(--oxblood)" : undefined} icon={AlertTriangle} />
+      </div>
 
       {/* Enregistrer une vente */}
       <section className="rounded-[14px] border border-border bg-surface p-4">
@@ -61,7 +76,7 @@ export function DispensaireVentes({ data }: { data: VentesData }) {
           <h3 className="flex items-center gap-2 text-[0.9rem] font-semibold"><Bandage className="h-4 w-4 text-accent" /> Cette semaine</h3>
           <span className="text-[0.78rem] text-faint">Recette <b className="font-num text-ink">{money(data.caSemaine)}</b></span>
         </div>
-        {semaine.length === 0 ? <p className="py-4 text-center text-[0.82rem] italic text-faint">Aucune vente cette semaine.</p> : (
+        {semaine.length === 0 ? <p className="py-4 text-center text-[0.82rem] italic text-faint">Aucun soin délivré cette semaine — le cahier est encore vierge.</p> : (
           <div className="flex flex-col divide-y divide-border">
             {semaine.map((p) => (
               <div key={p.patient} className="flex items-center justify-between gap-2 py-1.5 text-[0.82rem]">

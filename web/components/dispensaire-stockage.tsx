@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Boxes, Plus, Search, Check, Pencil, Trash2, AlertTriangle, Archive, ArrowDownRight, ArrowUpRight, History } from "lucide-react";
 import { CATEGORIES, catLabel, enAlerte, type StockData, type StockItem, type StockMouvement } from "@/lib/dispensaire-stock-const";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
+import { VideRegistre } from "@/components/dispensaire-ui";
 import { creerItem, majItem, supprimerItem, ajusterStock } from "@/app/dispensaire/stockage/actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
@@ -102,7 +103,9 @@ export function DispensaireStockage({ data }: { data: StockData }) {
 
       {/* Articles par coffre */}
       {liste.length === 0 ? (
-        <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">{items.length ? "Aucun article ne correspond." : "Aucun article — ajoute le premier."}</p>
+        items.length
+          ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">Aucun article ne correspond à ta recherche.</p>
+          : <VideRegistre icon={Boxes} titre="Les coffres sont encore vides" sous="Ajoute un premier article — remède, matériel ou matière — et l'inventaire se tiendra à jour, coffre par coffre." />
       ) : groupes.map(([coffre, its]) => (
         <section key={coffre}>
           <div className="mb-1.5 flex items-center gap-1.5 text-[0.74rem] font-semibold uppercase tracking-[0.05em] text-faint"><Archive className="h-3.5 w-3.5" /> {coffre} <span className="font-num">({its.length})</span></div>

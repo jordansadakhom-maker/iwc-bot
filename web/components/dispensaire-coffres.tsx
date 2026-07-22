@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Archive, Plus, Check, Pencil, Trash2, MapPin, UserRound } from "lucide-react";
 import type { CoffresData, Coffre } from "@/lib/dispensaire-matieres-const";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
+import { VideRegistre } from "@/components/dispensaire-ui";
 import { creerCoffre, majCoffre, supprimerCoffre } from "@/app/dispensaire/coffres/actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
@@ -41,7 +42,7 @@ export function DispensaireCoffres({ data }: { data: CoffresData }) {
       </div>
       <p className="text-[0.76rem] text-faint">Ces coffres sont proposés automatiquement dans le module <b>Stockage</b> quand tu ranges un article.</p>
 
-      {coffres.length === 0 ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">Aucun coffre — ajoute le premier.</p> : (
+      {coffres.length === 0 ? <VideRegistre icon={Archive} titre="Aucun coffre n'est encore déclaré" sous="Ajoute un premier coffre — nom, emplacement, responsable — et il sera proposé au rangement dans le Stockage." /> : (
         <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
           {coffres.map((c) => (
             <div key={c.id} className="group rounded-[12px] border border-border bg-surface-2 p-3">

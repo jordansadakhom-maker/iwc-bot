@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Receipt, Plus, Check, Pencil, Trash2, AlertTriangle, CalendarClock, Lock } from "lucide-react";
+import { VideRegistre } from "@/components/dispensaire-ui";
 import { FACTURE_STATUTS, factureStatut, factureOuverte, money, type FacturesData, type Facture } from "@/lib/dispensaire-facturation-const";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { creerFacture, majFacture, supprimerFacture } from "@/app/dispensaire/factures/actions";
@@ -75,7 +76,11 @@ export function DispensaireFactures({ data }: { data: FacturesData }) {
         </div>
       </div>
 
-      {liste.length === 0 ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">{factures.length ? "Aucune facture pour ce filtre." : "Aucune facture — crée la première."}</p> : (
+      {liste.length === 0 ? (
+        factures.length
+          ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">Aucune facture pour ce filtre.</p>
+          : <VideRegistre icon={Receipt} titre="Aucune facture au registre" sous="Établis une première facture — elle apparaîtra ici avec son échéance et son état de règlement." />
+      ) : (
         <div className="flex flex-col gap-2">
           {liste.map((f) => {
             const st = factureStatut(f.statut); const late = enRetard(f);

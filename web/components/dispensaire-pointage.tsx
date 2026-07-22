@@ -101,7 +101,7 @@ export function DispensairePointage({ data }: { data: PointData }) {
           <span className="rounded-full px-2 py-0.5 text-[0.68rem] font-bold" style={{ color: enCours.length ? "var(--good)" : "var(--faint)", background: enCours.length ? "color-mix(in srgb,var(--good) 14%,transparent)" : "transparent" }}>{enCours.length}</span>
         </div>
         {enCours.length === 0 ? (
-          <p className="py-6 text-center text-[0.85rem] italic text-faint">Personne en service pour l&apos;instant.</p>
+          <p className="py-6 text-center text-[0.85rem] italic text-faint">Personne au poste pour l&apos;instant — la première prise de service s&apos;affichera ici, en direct.</p>
         ) : (
           <div className="grid gap-2 sm:grid-cols-2">
             {enCours.map((s) => {
