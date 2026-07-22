@@ -47,10 +47,17 @@ export function CaptureFlottante() {
   const streamRef = useRef<MediaStream | null>(null);
   const phaseRef = useRef(phase); phaseRef.current = phase;
 
+  // `support` s'appuie sur `navigator`/`MediaRecorder`, absents côté serveur : le
+  // SSR rend donc « rien » alors que le client rendrait le bouton → décalage
+  // d'hydratation (React #418). On attend le montage client avant de décider quoi
+  // afficher, si bien que le 1ᵉʳ rendu client est identique au HTML serveur (null).
+  const [monte, setMonte] = useState(false);
+  useEffect(() => { setMonte(true); }, []);
+
   const support = typeof navigator !== "undefined" && !!navigator.mediaDevices?.getDisplayMedia && typeof MediaRecorder !== "undefined";
   // La page « Notes vocales » gère déjà sa propre capture → on s'efface pour ne
   // pas dédoubler le raccourci ni les boutons.
-  const actif = support && path !== "/notes-vocales";
+  const actif = monte && support && path !== "/notes-vocales";
 
   useEffect(() => { try { const s = localStorage.getItem(TOUCHE_KEY); if (s) setTouche(s); } catch { /* ignore */ } }, []);
 
