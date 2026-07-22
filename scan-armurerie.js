@@ -16,6 +16,11 @@ const { lireProduitsArmurerieRecette, lireRessourcesArmurerie, enregistrerScanAr
 const SALON_SCAN_ID = '1509244143199715499'; // même salon que le point stock
 const FONDATEUR_ID = '944208797084311583';    // repli MP
 
+// Signature des dernières anomalies URGENTES (négatifs/doublons) alertées sur
+// Discord → on ne pingue qu'au CHANGEMENT, plus de spam horaire. Le rapport
+// COMPLET part toujours vers le site (ArmurerieScanRapport → Journal de bord).
+let _dernierSig = null;
+
 const _STOP = new Set(['de', 'du', 'des', 'd', 'l', 'la', 'le', 'les', 'a', 'au', 'aux', 'en', 'pour']);
 function _norm(x) { return String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, ''); }
 function _tokens(x) { return String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').split(/[^a-z0-9]+/).filter((t) => t && !_STOP.has(t)); }
@@ -95,15 +100,27 @@ async function scannerCoherenceArmurerie(client, options = {}) {
   const negs = anomalies.filter((a) => a.type === 'stock_negatif');
   const doubles = anomalies.filter((a) => a.type === 'doublon');
   const manques = anomalies.filter((a) => a.type === 'ressource_manquante');
+
+  // Discord n'est alerté que pour des INCIDENTS DE STOCK réels (négatifs/doublons)
+  // et une seule fois par changement. Les « ressources de recette manquantes »
+  // (question de catalogue, non urgente) ne spamment plus le salon : elles restent
+  // consultables dans le Journal de bord du site (rapport déjà écrit ci-dessus).
+  const urgents = [...negs, ...doubles];
+  const sig = urgents.map((a) => `${a.type}:${_norm(a.nom)}`).sort().join('|');
+  if (!force && (urgents.length === 0 || sig === _dernierSig)) {
+    return { ok: true, envoye: false, nb, inchange: true };
+  }
+  _dernierSig = sig;
+
   const e = new EmbedBuilder()
-    .setColor(nb ? 0x9b2d30 : 0x2f8f5b)
+    .setColor(urgents.length ? 0x9b2d30 : 0x2f8f5b)
     .setTitle('🧪 Armurerie — scan de cohérence')
     .setTimestamp()
     .setFooter({ text: 'Iron Wolf Company · Scan horaire' });
   if (!nb) e.setDescription('✅ Aucune incohérence détectée.');
   if (negs.length) e.addFields({ name: `🔻 Stocks négatifs (${negs.length})`, value: _liste(negs, (a) => `• **${a.nom}** _(${a.cible})_ — ${a.stock}`) });
   if (doubles.length) e.addFields({ name: `👥 Doublons (${doubles.length})`, value: _liste(doubles, (a) => `• **${a.nom}** _(${a.cible})_ — ${a.n} entrées`) });
-  if (manques.length) e.addFields({ name: `❓ Ressources de recette manquantes (${manques.length})`, value: _liste(manques, (a) => `• ${a.produitNom} → **${a.ingredient}**`) });
+  if (manques.length) e.addFields({ name: '📓 À vérifier', value: `${manques.length} ressource(s) de recette non reconnue(s) — détail dans le **Journal de bord** du site.` });
 
   let livre = false;
   try {
