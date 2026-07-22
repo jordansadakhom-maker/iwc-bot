@@ -6,7 +6,7 @@ import { envoyerTelegrammeWeb } from "./actions";
 
 const inputCls =
   "w-full rounded-xl border border-border bg-surface-2 px-3.5 py-2.5 text-[0.9rem] text-ink outline-none placeholder:text-faint focus:border-[color-mix(in_srgb,var(--accent)_55%,var(--border))]";
-const MOYENS = ["Discord", "Télégramme", "Autre"];
+const MOYENS = ["Discord", "Email", "Télégramme", "Autre"];
 
 export function TelegrammeForm() {
   const [loading, setLoading] = useState(false);
@@ -56,9 +56,11 @@ export function TelegrammeForm() {
         <label className="mb-1.5 block text-[0.76rem] font-semibold uppercase tracking-[0.06em] text-muted">Comment te joindre&nbsp;? (optionnel)</label>
         <div className="grid gap-2 sm:grid-cols-[130px_1fr]">
           <select className={inputCls} value={form.moyen} onChange={(e) => set("moyen", e.target.value)}>{MOYENS.map((m) => <option key={m} value={m}>{m}</option>)}</select>
-          <input className={inputCls} value={form.contact} onChange={(e) => set("contact", e.target.value)} placeholder={form.moyen === "Télégramme" ? "N° ou nom de télégramme" : form.moyen === "Discord" ? "Ton pseudo Discord (ex. jordan)" : "Comment te joindre"} />
+          <input className={inputCls} type={form.moyen === "Email" ? "email" : "text"} value={form.contact} onChange={(e) => set("contact", e.target.value)} placeholder={form.moyen === "Télégramme" ? "N° ou nom de télégramme" : form.moyen === "Discord" ? "Ton pseudo Discord (ex. jordan)" : form.moyen === "Email" ? "ton.email@exemple.com" : "Comment te joindre"} />
         </div>
-        {form.moyen === "Discord" ? <p className="mt-1.5 text-[0.72rem]" style={{ color: "var(--good)" }}>✅ Avec ton pseudo Discord, tu reçois notre réponse <b>directement en message privé</b>.</p> : null}
+        {form.moyen === "Discord" ? <p className="mt-1.5 text-[0.72rem]" style={{ color: "var(--good)" }}>✅ Avec ton pseudo Discord, tu reçois notre réponse <b>directement en message privé</b>.</p>
+         : form.moyen === "Email" ? <p className="mt-1.5 text-[0.72rem]" style={{ color: "var(--good)" }}>✅ Avec ton e-mail, tu reçois notre réponse <b>directement dans ta boîte mail</b>.</p>
+         : null}
       </div>
       <div>
         <label className="mb-1.5 block text-[0.76rem] font-semibold uppercase tracking-[0.06em] text-muted">Ton télégramme *</label>
