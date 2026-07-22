@@ -15,6 +15,9 @@ const dateFR = (s: string | null) => { if (!s) return null; try { return new Dat
 type Board = { preparation: OpDetail[]; encours: OpDetail[]; terminees: OpDetail[] };
 type Router = ReturnType<typeof useRouter>;
 
+// Opération dont le contrat a été envoyé et attend une signature → action requise.
+const enAttenteSignature = (o: OpDetail) => o.contrat?.statut === "envoye";
+
 const PHASES: { key: string; label: string; tone: string }[] = [
   { key: "preparation", label: "Préparation", tone: "var(--warn)" },
   { key: "en_cours", label: "En cours", tone: "var(--steel)" },
@@ -117,27 +120,36 @@ export function OperationsBoard({ operations, membres = [] }: { operations: Boar
         </div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-3">
-          {cols.map(([key, label]) => (
+          {cols.map(([key, label]) => {
+            // Les opérations dont le contrat attend une signature remontent en tête.
+            const liste = [...operations[key]].sort((a, b) => Number(enAttenteSignature(b)) - Number(enAttenteSignature(a)));
+            return (
             <div key={key}>
               <div className="mb-2.5 flex items-center gap-2 text-[0.72rem] uppercase tracking-[0.08em] text-muted">
-                {label} <span className="ml-auto font-num text-faint">{operations[key].length}</span>
+                {label} <span className="ml-auto font-num text-faint">{liste.length}</span>
               </div>
               <div className="flex flex-col gap-2.5">
-                {operations[key].length === 0 ? (
+                {liste.length === 0 ? (
                   <div className="rounded-[11px] border border-dashed border-border px-3 py-4 text-center text-[0.72rem] text-faint">—</div>
-                ) : operations[key].map((o) => (
-                  <button key={o.id} onClick={() => setSel(o)} className="rounded-[11px] border border-border bg-surface-2 px-3 py-2.5 text-left transition hover:-translate-y-0.5 hover:border-border-2">
+                ) : liste.map((o) => {
+                  const aSigner = enAttenteSignature(o);
+                  return (
+                  <button key={o.id} onClick={() => setSel(o)} className="rounded-[11px] border px-3 py-2.5 text-left transition hover:-translate-y-0.5 hover:border-border-2"
+                    style={aSigner ? { borderColor: "color-mix(in srgb,var(--warn) 55%,var(--border))", background: "color-mix(in srgb,var(--warn) 8%,var(--surface-2))" } : { borderColor: "var(--border)", background: "var(--surface-2)" }}>
                     <div className="text-[0.85rem] font-semibold">{o.titre}</div>
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-[0.7rem] text-muted">
                       <Badge>{o.type}</Badge>
+                      {aSigner ? <Badge tone="warn">contrat à signer</Badge> : null}
                       {o.membres > 0 ? <span>{o.membres} agent(s)</span> : null}
                       {o.prime ? <span className="font-num">{o.prime}</span> : null}
                     </div>
                   </button>
-                ))}
+                  );
+                })}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
