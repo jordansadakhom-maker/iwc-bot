@@ -495,11 +495,16 @@ async function _accumulerImpot(admin: Admin, montant: number) {
 
 // ── Caisse (point de vente) — tout est automatisé à l'encaissement ─
 export type LigneCaisse = { produitId?: string; nom: string; categorie?: string; prix: number; cout?: number; qte: number; aLaDemande?: boolean };
-export async function validerCaisse(lignes: LigneCaisse[], client: string, notes: string, clientId?: string, opts?: { serie?: string; photo?: string }): Promise<ArmResult & { total?: number; ticket?: string; ficheCreee?: boolean }> {
+export async function validerCaisse(lignes: LigneCaisse[], client: string, notes: string, clientId?: string, opts?: { serie?: string; photo?: string; forcer?: boolean }): Promise<ArmResult & { total?: number; ticket?: string; ficheCreee?: boolean; manques?: string[] }> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
   const items = (Array.isArray(lignes) ? lignes : []).filter((l) => l && Number(l.qte) > 0);
   if (!items.length) return { ok: false, error: "Le panier est vide." };
+  // Vérif stock AVANT d'encaisser : on bloque si un composant manque (sauf « forcer »).
+  if (!opts?.forcer) {
+    const manques = await _manquesCaisse(admin, items);
+    if (manques.length) return { ok: false, error: `Stock de ressources insuffisant pour fabriquer : ${manques.join(", ")}.`, manques };
+  }
   const vendeur = await auteurNom();
   const dateV = new Date().toLocaleDateString("fr-FR");
   const serie = s(opts?.serie, 60);
@@ -561,12 +566,16 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
       if (l.produitId) {
         const { data } = await admin.from("ArmurerieProduit").select("stock,recette").eq("id", l.produitId).maybeSingle();
         const ps = data ? Number((data as { stock?: number }).stock) || 0 : 0;
-        if (data && !l.aLaDemande) await admin.from("ArmurerieProduit").update({ stock: Math.max(0, ps - q) }).eq("id", l.produitId);
+        if (data && !l.aLaDemande) {
+          const nv = Math.max(0, ps - q);
+          await admin.from("ArmurerieProduit").update({ stock: nv }).eq("id", l.produitId);
+          try { await _journaliserStock(admin, [{ cible: "produit", refId: l.produitId, nom: l.nom, avant: ps, apres: nv, origine: "vente", detail: `Vente ×${q} — ${cli}`, par: vendeur }]); } catch { /* trace best-effort */ }
+        }
         // Fabrication à la demande : la part non couverte par le stock fini consomme
         // les ressources de la recette (le stock déjà fabriqué, lui, ne re-consomme rien).
         const toFab = l.aLaDemande ? q : Math.max(0, q - ps);
         const recette = data && Array.isArray((data as { recette?: unknown }).recette) ? (data as { recette: { ingredient?: string; qte?: number }[] }).recette : [];
-        if (toFab > 0 && recette.length) { try { await _consommerRecetteLignes(admin, recette, toFab); } catch { /* la vente reste enregistrée même si le décompte des ressources échoue */ } }
+        if (toFab > 0 && recette.length) { try { await _consommerRecetteLignes(admin, recette, toFab, { par: vendeur, detail: `Vente : ${s(l.nom, 60)} ×${q} — ${cli}` }); } catch { /* la vente reste enregistrée même si le décompte des ressources échoue */ } }
       }
       // Comptabilité : le crédit du coffre alimente automatiquement le grand livre.
       try { await _mouvementCoffre(admin, montant, "entree", `Vente : ${s(l.nom, 80)} ×${q} — ${cli}`, vendeur); } catch { /* vente enregistrée même si le coffre n'est pas prêt */ }
@@ -1120,22 +1129,93 @@ function _matchRes(ing: string, ressources: ResRow[]): ResRow | null {
   }
   return null;
 }
+// ── Journal des mouvements de stock (traçabilité) ──────────────────
+// Best-effort : enregistre chaque changement de stock (ressource ou produit fini)
+// avec avant → après, origine et auteur. N'échoue jamais la vente/fabrication : si
+// la table n'est pas encore migrée (armurerie-mouvement-stock.sql), on ignore.
+type MvtStock = { cible?: "ressource" | "produit"; refId?: string | null; nom: string; avant: number; apres: number; origine: string; detail?: string | null; par?: string | null };
+async function _journaliserStock(admin: ReturnType<typeof createAdminClient>, entries: MvtStock[]): Promise<void> {
+  if (!admin || !entries.length) return;
+  const rows = entries
+    .filter((e) => Math.round(e.apres) !== Math.round(e.avant)) // ignore les non-mouvements
+    .map((e) => ({
+      id: newId("mvs"), cible: e.cible || "ressource", refId: e.refId ?? null, nom: s(e.nom, 120),
+      delta: Math.round(e.apres) - Math.round(e.avant), avant: Math.round(e.avant), apres: Math.round(e.apres),
+      origine: e.origine || "ajustement", detail: e.detail ? s(e.detail, 300) : null, par: e.par ? s(e.par, 120) : null,
+    }));
+  if (!rows.length) return;
+  try { await admin.from("ArmurerieMouvementStock").insert(rows); } catch { /* table absente → on ignore */ }
+}
+
 // Décompte des ressources d'une recette (× n unités) à la vente. Best-effort :
 // ne descend jamais sous 0, ignore les ingrédients introuvables au catalogue.
-async function _consommerRecetteLignes(admin: ReturnType<typeof createAdminClient>, recette: { ingredient?: string; qte?: number }[], n: number): Promise<void> {
+async function _consommerRecetteLignes(admin: ReturnType<typeof createAdminClient>, recette: { ingredient?: string; qte?: number }[], n: number, ctx?: { par?: string; detail?: string }): Promise<void> {
   if (!admin) return;
   const lignes = (Array.isArray(recette) ? recette : []).filter((l) => l && String(l.ingredient || "").trim() && Number(l.qte) > 0);
   if (!lignes.length || n <= 0) return;
   const { data } = await admin.from("ArmurerieRessource").select("id,nom,stock");
   const rs: ResRow[] = (Array.isArray(data) ? data : []).map((r) => ({ id: String((r as { id: string }).id), nom: String((r as { nom: string }).nom), stock: Number((r as { stock?: number }).stock) || 0 }));
+  const journ: MvtStock[] = [];
   for (const l of lignes) {
     const r = _matchRes(String(l.ingredient), rs);
     if (!r) continue;
     const besoin = Math.max(0, Math.round(Number(l.qte) * n));
-    const nv = Math.max(0, (Number(r.stock) || 0) - besoin);
+    const avant = Number(r.stock) || 0;
+    const nv = Math.max(0, avant - besoin);
     await admin.from("ArmurerieRessource").update({ stock: nv }).eq("id", r.id);
+    journ.push({ cible: "ressource", refId: r.id, nom: r.nom, avant, apres: nv, origine: ctx?.detail ? "vente" : "ajustement", detail: ctx?.detail, par: ctx?.par });
     r.stock = nv; // maj du cache si la même ressource revient dans la recette
   }
+  await _journaliserStock(admin, journ);
+}
+
+// Vérifie AVANT une vente si toutes les ressources des recettes sont disponibles.
+// Agrège les besoins de toutes les lignes (une ressource peut servir plusieurs
+// produits). Retourne la liste des manques (vide = tout est OK). Si le stock des
+// ressources n'est pas suivi, on ne bloque pas.
+async function _manquesCaisse(admin: NonNullable<ReturnType<typeof createAdminClient>>, items: LigneCaisse[]): Promise<string[]> {
+  const withProd = items.filter((l) => l.produitId);
+  if (!withProd.length) return [];
+  const ids = [...new Set(withProd.map((l) => String(l.produitId)))];
+  let pr = await admin.from("ArmurerieProduit").select("id,stock,recette").in("id", ids);
+  if (pr.error) return []; // recette non migrée → pas de blocage
+  const byId = new Map((pr.data as { id: string; stock?: number; recette?: unknown }[]).map((p) => [p.id, p]));
+  const rr = await admin.from("ArmurerieRessource").select("id,nom,stock");
+  if (rr.error && /stock/i.test(rr.error.message)) return []; // stock non suivi → pas de blocage
+  const ressources = (rr.data || []) as ResRow[];
+  const besoins = new Map<string, { nom: string; dispo: number; besoin: number }>();
+  for (const l of withProd) {
+    const p = byId.get(String(l.produitId)); if (!p) continue;
+    const q = Math.max(1, Math.round(Number(l.qte) || 1));
+    const ps = Number(p.stock) || 0;
+    const toFab = l.aLaDemande ? q : Math.max(0, q - ps);
+    if (toFab <= 0) continue;
+    const recette = Array.isArray(p.recette) ? (p.recette as { ingredient?: string; qte?: number }[]) : [];
+    for (const ing of recette) {
+      if (!ing || !String(ing.ingredient || "").trim() || !(Number(ing.qte) > 0)) continue;
+      const r = _matchRes(String(ing.ingredient), ressources);
+      if (!r) continue; // ingrédient hors catalogue → ignoré (comme à la consommation)
+      const prev = besoins.get(r.id) || { nom: r.nom, dispo: Number(r.stock) || 0, besoin: 0 };
+      prev.besoin += Math.round(Number(ing.qte) * toFab);
+      besoins.set(r.id, prev);
+    }
+  }
+  return [...besoins.values()].filter((b) => b.dispo < b.besoin).map((b) => `${b.nom} (besoin ${b.besoin}, en stock ${b.dispo})`);
+}
+
+// Historique des mouvements de stock (lecture, pour l'onglet Journal).
+export type MouvementStock = { id: string; cible: string; nom: string; delta: number; avant: number | null; apres: number | null; origine: string; detail: string | null; par: string | null; createdAt: string | null };
+export async function getMouvementsStock(limite = 200): Promise<MouvementStock[]> {
+  const admin = createAdminClient();
+  if (!admin) return [];
+  const { data, error } = await admin.from("ArmurerieMouvementStock").select("*").order("createdAt", { ascending: false }).limit(limite);
+  if (error) return []; // table pas encore créée → liste vide (aucun crash)
+  type Raw = Record<string, unknown>;
+  return ((data || []) as Raw[]).map((r) => ({
+    id: String(r.id), cible: String(r.cible || "ressource"), nom: String(r.nom || ""),
+    delta: Number(r.delta) || 0, avant: r.avant == null ? null : Number(r.avant), apres: r.apres == null ? null : Number(r.apres),
+    origine: String(r.origine || ""), detail: (r.detail as string) ?? null, par: (r.par as string) ?? null, createdAt: (r.createdAt as string) ?? null,
+  }));
 }
 export async function fabriquerProduit(produitId: string, qte: number): Promise<ArmResult & { q?: number; consommes?: string[]; ignores?: string[]; manques?: string[] }> {
   const q = Math.max(1, Math.round(Number(qte) || 0));
@@ -1169,15 +1249,24 @@ export async function fabriquerProduit(produitId: string, qte: number): Promise<
   const manques = plan.filter((p) => (Number(p.r.stock) || 0) < p.besoin).map((p) => `${p.r.nom} (besoin ${p.besoin}, dispo ${Number(p.r.stock) || 0})`);
   if (manques.length) return { ok: false, error: `Fabrication impossible — stock de ressources insuffisant : ${manques.join(", ")}.`, manques };
   // 3) Appliquer : déduire les ressources, puis ajouter le produit fini.
+  const par = await auteurNom();
+  const journ: MvtStock[] = [];
   const consommes: string[] = [];
   for (const p of plan) {
     const dispo = Number(p.r.stock) || 0;
-    const { error } = await admin.from("ArmurerieRessource").update({ stock: Math.max(0, dispo - p.besoin) }).eq("id", p.r.id);
+    const nv = Math.max(0, dispo - p.besoin);
+    const { error } = await admin.from("ArmurerieRessource").update({ stock: nv }).eq("id", p.r.id);
     if (error) return { ok: false, error: `Erreur lors de la déduction de ${p.r.nom}.`, consommes };
-    p.r.stock = dispo - p.besoin;
+    p.r.stock = nv;
+    journ.push({ cible: "ressource", refId: p.r.id, nom: p.r.nom, avant: dispo, apres: nv, origine: "fabrication", detail: `Fabrication : ${prod.nom} ×${q}`, par });
     consommes.push(`${p.r.nom} −${p.besoin}`);
   }
-  if (!prod.aLaDemande) await admin.from("ArmurerieProduit").update({ stock: Math.max(0, (Number(prod.stock) || 0) + q) }).eq("id", produitId);
+  if (!prod.aLaDemande) {
+    const av = Number(prod.stock) || 0;
+    await admin.from("ArmurerieProduit").update({ stock: Math.max(0, av + q) }).eq("id", produitId);
+    journ.push({ cible: "produit", refId: produitId, nom: prod.nom, avant: av, apres: av + q, origine: "fabrication", detail: `Fabrication ×${q}`, par });
+  }
+  try { await _journaliserStock(admin, journ); } catch { /* trace best-effort */ }
   return { ok: true, q, consommes, ignores, manques: [] };
 }
 
