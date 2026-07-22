@@ -13,7 +13,9 @@ function Crest() {
   );
 }
 
-export default function SuiviPage() {
+export default async function SuiviPage({ searchParams }: { searchParams: Promise<{ nom?: string }> }) {
+  const sp = await searchParams;
+  const initialNom = (sp?.nom || "").slice(0, 80);
   return (
     <main className="grid min-h-screen place-items-center px-5 py-10" style={{ background: "radial-gradient(1000px 520px at 50% -10%, color-mix(in srgb,var(--accent) 12%,transparent), transparent 62%), var(--bg)" }}>
       <div className="flex w-full max-w-[560px] flex-col items-center">
@@ -23,7 +25,7 @@ export default function SuiviPage() {
           </div>
           <h1 className="font-display text-2xl tracking-[0.08em]">SUIVRE MA DEMANDE</h1>
           <p className="mt-2 max-w-[420px] text-[0.86rem] leading-relaxed text-muted">
-            Entre le nom que tu as donné à la compagnie pour voir où en sont tes <b className="text-ink">rendez-vous</b> et tes <b className="text-ink">contrats</b>.
+            Entre le nom que tu as donné à la compagnie pour voir où en sont tes <b className="text-ink">rendez-vous</b>, tes <b className="text-ink">contrats</b> et la <b className="text-ink">réponse à ton télégramme</b>.
           </p>
         </div>
         <SuiviClient />

@@ -94,6 +94,15 @@ export function ContratsTable({ contrats }: { contrats: ContratDetail[] }) {
   const router = useRouter();
   const [sel, setSel] = useState<ContratDetail | null>(null);
   const [nouveau, setNouveau] = useState(false);
+  const [polF, setPolF] = useState(""); // "" = tous | "legal" | "illegal"
+
+  const estIllegal = (c: ContratDetail) => c.pole === "illegal";
+  const nIllegal = contrats.filter(estIllegal).length;
+  const nLegal = contrats.length - nIllegal;
+  const affiches = polF ? contrats.filter((c) => (polF === "illegal" ? estIllegal(c) : !estIllegal(c))) : contrats;
+  const chipStyle = (on: boolean, color: string) =>
+    on ? { borderColor: `color-mix(in srgb,${color} 55%,var(--border))`, background: `color-mix(in srgb,${color} 16%,transparent)`, color: "var(--ink)" }
+       : { borderColor: "var(--border)", color: "var(--muted)" };
 
   return (
     <>
@@ -106,6 +115,14 @@ export function ContratsTable({ contrats }: { contrats: ContratDetail[] }) {
           <Plus className="h-3.5 w-3.5" strokeWidth={2} /> Nouveau contrat
         </button>
       </div>
+
+      {nLegal > 0 && nIllegal > 0 ? (
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          <button onClick={() => setPolF("")} aria-pressed={!polF} className="rounded-full border px-2.5 py-1 text-[0.72rem] font-semibold transition" style={chipStyle(!polF, "var(--accent)")}>Tous <span className="font-num text-faint">{contrats.length}</span></button>
+          <button onClick={() => setPolF(polF === "legal" ? "" : "legal")} aria-pressed={polF === "legal"} className="rounded-full border px-2.5 py-1 text-[0.72rem] font-semibold transition" style={chipStyle(polF === "legal", "var(--brass)")}>⚖️ Iron Wolf <span className="font-num text-faint">{nLegal}</span></button>
+          <button onClick={() => setPolF(polF === "illegal" ? "" : "illegal")} aria-pressed={polF === "illegal"} className="rounded-full border px-2.5 py-1 text-[0.72rem] font-semibold transition" style={chipStyle(polF === "illegal", "var(--oxblood)")}>🔪 Confrérie <span className="font-num text-faint">{nIllegal}</span></button>
+        </div>
+      ) : null}
 
       {contrats.length === 0 ? (
         <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
@@ -125,7 +142,7 @@ export function ContratsTable({ contrats }: { contrats: ContratDetail[] }) {
               </tr>
             </thead>
             <tbody>
-              {contrats.map((c) => (
+              {affiches.map((c) => (
                 <tr key={c.id} onClick={() => setSel(c)} className="cursor-pointer hover:bg-[color-mix(in_srgb,var(--ink)_4%,transparent)]">
                   <td className="border-b border-border px-2.5 py-2.5 font-medium">{c.cible}</td>
                   <td className="border-b border-border px-2.5 py-2.5 text-muted">{c.commanditaire || "—"}</td>

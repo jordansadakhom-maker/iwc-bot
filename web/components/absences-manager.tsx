@@ -35,10 +35,11 @@ function LigneAbsent({ m, onRetour, busy }: { m: MembreAbsence; onRetour: (m: Me
           <span className="text-[0.9rem] font-semibold">{m.nom}</span>
           {m.grade ? <span className="text-[0.72rem] text-faint">· {m.grade}</span> : null}
           {m.pole === "illegal" ? <Badge tone="oxblood">Confrérie</Badge> : null}
+          {jr === "aujourd'hui" || jr === "demain" ? <Badge tone="warn">Retour {jr}</Badge> : null}
         </div>
         <div className="mt-1 text-[0.78rem] text-muted">
           {m.absence?.jusqu ? (
-            <>Retour <b className="text-ink">{dateFR(m.absence.jusqu)}</b>{jr ? <span className="text-faint"> · {jr}</span> : null}</>
+            <>Retour <b className="text-ink">{dateFR(m.absence.jusqu)}</b>{jr ? <span className={jr === "aujourd'hui" || jr === "demain" ? "font-semibold" : "text-faint"} style={jr === "aujourd'hui" || jr === "demain" ? { color: "var(--warn)" } : undefined}> · {jr}</span> : null}</>
           ) : (
             <span className="text-faint">Retour indéterminé</span>
           )}
@@ -58,6 +59,12 @@ function LigneAbsent({ m, onRetour, busy }: { m: MembreAbsence; onRetour: (m: Me
 export function AbsencesManager({ data }: { data: AbsencesData }) {
   const router = useRouter();
   const { absents, programmees, tous } = data;
+  // Les retours les plus proches d'abord (retour indéterminé en dernier).
+  const absentsTri = [...absents].sort((a, b) => {
+    const ta = a.absence?.jusqu ? new Date(a.absence.jusqu).getTime() : Infinity;
+    const tb = b.absence?.jusqu ? new Date(b.absence.jusqu).getTime() : Infinity;
+    return ta - tb;
+  });
   const [open, setOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [flash, setFlash] = useState<{ t: "good" | "bad"; m: string } | null>(null);
@@ -119,7 +126,7 @@ export function AbsencesManager({ data }: { data: AbsencesData }) {
             <Empty icon={Check}>Toute la troupe est sur le pont. 🐺</Empty>
           ) : (
             <div className="flex flex-col divide-y divide-border">
-              {absents.map((m) => <LigneAbsent key={m.id} m={m} onRetour={retour} busy={busyId === m.id} />)}
+              {absentsTri.map((m) => <LigneAbsent key={m.id} m={m} onRetour={retour} busy={busyId === m.id} />)}
             </div>
           )}
         </Card>

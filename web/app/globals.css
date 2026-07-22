@@ -70,6 +70,22 @@ body > * { position: relative; z-index: 1; }
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }
 
+/* Arrivée de page : l'en-tête (et tout bloc marqué .iwc-rise) « monte » en
+   douceur — donne le sentiment que la page se pose. Neutralisé si l'utilisateur
+   préfère moins d'animations (règle ci-dessus). */
+@keyframes iwc-rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+.iwc-rise { animation: iwc-rise .42s cubic-bezier(.22,.61,.36,1) both; }
+
+/* Sélection de texte : encre laiton, comme une plume sur un registre. */
+::selection { background: color-mix(in srgb, var(--accent) 32%, transparent); color: var(--ink); }
+
+/* Barre de défilement discrète, dans l'esprit du poste (cuir sombre + laiton). */
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--accent) 35%, var(--border)) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--accent) 26%, var(--border)); border: 2px solid transparent; background-clip: padding-box; border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--accent) 45%, var(--border)); border: 2px solid transparent; background-clip: padding-box; }
+
 /* Notifications : la zone visée par une notification (#ancre) est mise en avant
    d'un flash discret à l'arrivée, et se cale sous l'en-tête collant. */
 :target { scroll-margin-top: 92px; border-radius: 16px; animation: iwc-flash 1.8s ease-out 1; }

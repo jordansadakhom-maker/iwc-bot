@@ -16,6 +16,12 @@ export function Portefeuilles({ portefeuilles, transactions, membres, total }: {
   const router = useRouter();
   const [payer, setPayer] = useState(false);
   const [ajuster, setAjuster] = useState(false);
+  const [sensF, setSensF] = useState(""); // "" = tout | "entree" | "sortie"
+
+  const estEntree = (t: Transaction) => /entr/i.test(t.sens);
+  const txFiltrees = sensF ? transactions.filter((t) => (sensF === "entree" ? estEntree(t) : !estEntree(t))) : transactions;
+  const visibles = txFiltrees.slice(0, 12);
+  const net = visibles.reduce((s, t) => s + (estEntree(t) ? Math.abs(t.montant) : -Math.abs(t.montant)), 0);
 
   return (
     <>
@@ -60,21 +66,41 @@ export function Portefeuilles({ portefeuilles, transactions, membres, total }: {
 
       {transactions.length ? (
         <div className="mt-4 border-t border-border pt-3">
-          <div className="mb-2 text-[0.72rem] uppercase tracking-[0.06em] text-faint">Journal de trésorerie du coffre</div>
-          <div className="flex flex-col gap-1">
-            {transactions.slice(0, 12).map((t) => {
-              const entree = /entr/i.test(t.sens);
-              return (
-                <div key={t.id} className="flex items-center gap-2.5 rounded-[8px] border border-border bg-surface-2 px-2.5 py-1.5 text-[0.8rem]">
-                  {entree ? <ArrowDownRight className="h-4 w-4 shrink-0" style={{ color: "var(--good)" }} /> : <ArrowUpRight className="h-4 w-4 shrink-0" style={{ color: "var(--oxblood)" }} />}
-                  <span className="min-w-0 flex-1 truncate">{t.motif || t.poste || (entree ? "Entrée" : "Sortie")}</span>
-                  {t.poste ? <span className="hidden shrink-0 text-faint sm:inline">{t.poste}</span> : null}
-                  <span className="shrink-0 font-num font-semibold" style={{ color: entree ? "var(--good)" : "var(--oxblood)" }}>{entree ? "+" : "−"}{money(Math.abs(t.montant))}</span>
-                  <span className="hidden shrink-0 text-[0.68rem] text-faint md:inline">{dateFR(t.createdAt)}</span>
-                </div>
-              );
-            })}
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <span className="text-[0.72rem] uppercase tracking-[0.06em] text-faint">Journal de trésorerie du coffre</span>
+            <div className="flex items-center gap-1">
+              {([["", "Tout"], ["entree", "Entrées"], ["sortie", "Sorties"]] as [string, string][]).map(([k, l]) => {
+                const on = sensF === k;
+                const col = k === "entree" ? "var(--good)" : k === "sortie" ? "var(--oxblood)" : "var(--accent)";
+                return (
+                  <button key={k || "tout"} onClick={() => setSensF(k)} aria-pressed={on}
+                    className="rounded-full border px-2 py-0.5 text-[0.68rem] font-semibold transition"
+                    style={on ? { borderColor: `color-mix(in srgb,${col} 55%,var(--border))`, background: `color-mix(in srgb,${col} 16%,transparent)`, color: "var(--ink)" } : { borderColor: "var(--border)", color: "var(--muted)" }}>
+                    {l}
+                  </button>
+                );
+              })}
+            </div>
+            <span className="ml-auto text-[0.72rem] text-faint">Net affiché : <span className="font-num font-semibold" style={{ color: net < 0 ? "var(--oxblood)" : "var(--good)" }}>{net > 0 ? "+" : net < 0 ? "−" : ""}{money(Math.abs(net))}</span></span>
           </div>
+          {visibles.length === 0 ? (
+            <p className="px-1 py-4 text-center text-[0.78rem] text-faint">Aucun mouvement {sensF === "entree" ? "en entrée" : "en sortie"} sur cette fenêtre.</p>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {visibles.map((t) => {
+                const entree = estEntree(t);
+                return (
+                  <div key={t.id} className="flex items-center gap-2.5 rounded-[8px] border border-border bg-surface-2 px-2.5 py-1.5 text-[0.8rem]">
+                    {entree ? <ArrowDownRight className="h-4 w-4 shrink-0" style={{ color: "var(--good)" }} /> : <ArrowUpRight className="h-4 w-4 shrink-0" style={{ color: "var(--oxblood)" }} />}
+                    <span className="min-w-0 flex-1 truncate">{t.motif || t.poste || (entree ? "Entrée" : "Sortie")}</span>
+                    {t.poste ? <span className="hidden shrink-0 text-faint sm:inline">{t.poste}</span> : null}
+                    <span className="shrink-0 font-num font-semibold" style={{ color: entree ? "var(--good)" : "var(--oxblood)" }}>{entree ? "+" : "−"}{money(Math.abs(t.montant))}</span>
+                    <span className="hidden shrink-0 text-[0.68rem] text-faint md:inline">{dateFR(t.createdAt)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       ) : null}
 

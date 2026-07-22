@@ -12,15 +12,53 @@ const RDV_TONE: Record<string, "good" | "warn" | "muted" | "accent"> = {
   honoré: "good", honore: "good", lapin: "muted", annulé: "muted", annule: "muted", décliné: "muted", decline: "muted",
 };
 
+const CATS = [
+  { key: "atraiter", label: "À traiter", color: "var(--warn)" },
+  { key: "confirme", label: "Confirmés", color: "var(--steel)" },
+  { key: "honore", label: "Honorés", color: "var(--good)" },
+  { key: "clos", label: "Clos", color: "var(--faint)" },
+] as const;
+function catDe(statut: string): "atraiter" | "confirme" | "honore" | "clos" {
+  const s = (statut || "").toLowerCase();
+  if (["planifié", "planifie", "nouveau", "transmis", "demande", "attente"].includes(s)) return "atraiter";
+  if (["confirmé", "confirme"].includes(s)) return "confirme";
+  if (["honoré", "honore"].includes(s)) return "honore";
+  return "clos";
+}
+
 export function AgendaRdvs({ rdvs }: { rdvs: RdvItem[] }) {
   const [sel, setSel] = useState<RdvItem | null>(null);
+  const [cat, setCat] = useState("");
 
   if (rdvs.length === 0) {
     return <Empty icon={CalendarClock}>Aucun rendez-vous pour l&apos;instant. Les demandes (Discord et site public) apparaîtront ici.</Empty>;
   }
 
+  const counts = CATS.map((c) => ({ ...c, n: rdvs.filter((r) => catDe(r.statut) === c.key).length })).filter((c) => c.n);
+  // Filtre par catégorie + les « à traiter » remontent toujours en tête.
+  const affiches = [...rdvs]
+    .filter((r) => !cat || catDe(r.statut) === cat)
+    .sort((a, b) => Number(catDe(b.statut) === "atraiter") - Number(catDe(a.statut) === "atraiter"));
+
   return (
     <>
+      <div className="mb-2.5 flex flex-wrap items-center gap-1.5">
+        <button onClick={() => setCat("")} aria-pressed={!cat}
+          className="rounded-full border px-2.5 py-1 text-[0.72rem] font-semibold transition"
+          style={!cat ? { borderColor: "color-mix(in srgb,var(--accent) 55%,var(--border))", background: "color-mix(in srgb,var(--accent) 16%,transparent)", color: "var(--accent)" } : { borderColor: "var(--border)", color: "var(--muted)" }}>
+          Tous <span className="font-num text-faint">{rdvs.length}</span>
+        </button>
+        {counts.map((c) => {
+          const on = cat === c.key;
+          return (
+            <button key={c.key} onClick={() => setCat(on ? "" : c.key)} aria-pressed={on}
+              className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[0.72rem] font-semibold transition"
+              style={{ borderColor: on ? `color-mix(in srgb,${c.color} 55%,var(--border))` : "var(--border)", background: on ? `color-mix(in srgb,${c.color} 16%,transparent)` : "transparent", color: on ? "var(--ink)" : "var(--muted)" }}>
+              <span className="h-1.5 w-1.5 rounded-full" style={{ background: c.color }} /> {c.label} <span className="font-num text-faint">{c.n}</span>
+            </button>
+          );
+        })}
+      </div>
       <p className="mb-2 text-[0.74rem] text-faint">Clique sur un rendez-vous pour voir tous ses détails.</p>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[680px] border-collapse text-left text-[0.85rem]">
@@ -30,7 +68,7 @@ export function AgendaRdvs({ rdvs }: { rdvs: RdvItem[] }) {
             </tr>
           </thead>
           <tbody>
-            {rdvs.map((r) => (
+            {affiches.map((r) => (
               <tr key={r.id} className="cursor-pointer hover:bg-[color-mix(in_srgb,var(--ink)_4%,transparent)]">
                 <td onClick={() => setSel(r)} className="border-b border-border px-2.5 py-2.5 font-medium">
                   {r.nomRP || "—"}

@@ -69,6 +69,11 @@ function Affiche({ a, onClick }: { a: AvisItem; onClick: () => void }) {
           <span className="rounded-sm px-1.5 py-0.5 font-bold" style={{ color: "#fff", background: dTone(a.dangerosite) }}>{dLabel(a.dangerosite)}</span>
           {a.position ? <span style={{ color: INK }}>vu à {a.position}</span> : null}
         </div>
+        {a.chasseurs > 0 ? (
+          <div className="mt-1.5 text-center text-[0.6rem] font-bold uppercase tracking-[0.1em]" style={{ color: REDINK }}>
+            🐺 {a.chasseurs} chasseur{a.chasseurs > 1 ? "s" : ""} sur la piste
+          </div>
+        ) : null}
         {/* tampon de statut */}
         {clos && st ? (
           <span className="pointer-events-none absolute left-1/2 top-[38%] -translate-x-1/2 -translate-y-1/2 rotate-[-14deg] rounded border-[3px] px-3 py-0.5 font-display text-[1.15rem] font-bold uppercase tracking-[0.12em]" style={{ color: st.tone, borderColor: st.tone, opacity: 0.9, background: "rgba(233,221,194,0.35)" }}>{st.label}</span>
@@ -78,10 +83,19 @@ function Affiche({ a, onClick }: { a: AvisItem; onClick: () => void }) {
   );
 }
 
+const statutKey = (a: AvisItem) => (a.statut || "chasse").toLowerCase();
+
 export function WantedWall({ avis }: { avis: AvisItem[] }) {
   const router = useRouter();
   const [sel, setSel] = useState<AvisItem | null>(null);
   const [nouveau, setNouveau] = useState(false);
+  const [filtre, setFiltre] = useState(""); // "" = tous | clé de STATUT
+
+  const counts = STATUT.map((s) => ({ ...s, n: avis.filter((a) => statutKey(a) === s.key).length })).filter((s) => s.n);
+  // Les cibles « En chasse » (dossiers ouverts) remontent toujours en tête du mur.
+  const affiches = [...avis]
+    .filter((a) => !filtre || statutKey(a) === filtre)
+    .sort((a, b) => Number(statutKey(b) === "chasse") - Number(statutKey(a) === "chasse"));
 
   return (
     <>
@@ -100,9 +114,30 @@ export function WantedWall({ avis }: { avis: AvisItem[] }) {
           <p className="mx-auto max-w-md font-display text-[0.95rem] italic text-muted">Aucun avis de recherche placardé. Émets-en un — il rejoindra le mur et le Discord.</p>
         </div>
       ) : (
-        <div className="grid gap-6 px-1 py-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {avis.map((a) => <Affiche key={a.id} a={a} onClick={() => setSel(a)} />)}
-        </div>
+        <>
+          {counts.length > 1 ? (
+            <div className="mb-3 flex flex-wrap items-center gap-1.5">
+              <button onClick={() => setFiltre("")} aria-pressed={!filtre}
+                className="rounded-full border px-2.5 py-1 text-[0.72rem] font-semibold transition"
+                style={!filtre ? { borderColor: "color-mix(in srgb,var(--accent) 55%,var(--border))", background: "color-mix(in srgb,var(--accent) 16%,transparent)", color: "var(--accent)" } : { borderColor: "var(--border)", color: "var(--muted)" }}>
+                Tous <span className="font-num text-faint">{avis.length}</span>
+              </button>
+              {counts.map((s) => {
+                const on = filtre === s.key;
+                return (
+                  <button key={s.key} onClick={() => setFiltre(on ? "" : s.key)} aria-pressed={on}
+                    className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[0.72rem] font-semibold transition"
+                    style={{ borderColor: on ? `color-mix(in srgb,${s.tone} 60%,var(--border))` : "var(--border)", background: on ? `color-mix(in srgb,${s.tone} 18%,transparent)` : "transparent", color: on ? "var(--ink)" : "var(--muted)" }}>
+                    <span className="h-1.5 w-1.5 rounded-full" style={{ background: s.tone }} /> {s.label} <span className="font-num text-faint">{s.n}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+          <div className="grid gap-6 px-1 py-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {affiches.map((a) => <Affiche key={a.id} a={a} onClick={() => setSel(a)} />)}
+          </div>
+        </>
       )}
 
       {sel ? <AvisModal avis={sel} onClose={() => setSel(null)} router={router} /> : null}

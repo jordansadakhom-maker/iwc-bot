@@ -13,10 +13,12 @@ type Router = ReturnType<typeof useRouter>;
 const dateFR = (n?: number) => { if (!n) return ""; try { return new Date(n).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
 const apercu = (t: TelegrammeItem) => { const m = [...t.messages].reverse().find((x) => x.content); return m?.content?.slice(0, 90) || "—"; };
 const statutTone = (s: string): "good" | "warn" | "muted" => /ouvert/i.test(s) ? "warn" : /clotur|classe/i.test(s) ? "muted" : "good";
+const estATraiterTg = (t: TelegrammeItem) => !/clotur|classe/i.test(t.statut);
 
 export function TelegrammesPanel({ telegrammes }: { telegrammes: TelegrammeItem[] }) {
   const router = useRouter();
   const [sel, setSel] = useState<TelegrammeItem | null>(null);
+  const [seulATraiter, setSeulATraiter] = useState(false);
 
   if (telegrammes.length === 0) {
     return (
@@ -29,18 +31,29 @@ export function TelegrammesPanel({ telegrammes }: { telegrammes: TelegrammeItem[
     );
   }
 
-  const aTraiterN = telegrammes.filter((t) => !/clotur|classe/i.test(t.statut)).length;
+  const aTraiterN = telegrammes.filter(estATraiterTg).length;
+  // Les non traités remontent en tête ; le filtre n'affiche qu'eux.
+  const tries = [...telegrammes].sort((a, b) => Number(estATraiterTg(b)) - Number(estATraiterTg(a)));
+  const affiches = seulATraiter ? tries.filter(estATraiterTg) : tries;
 
   return (
     <>
       {aTraiterN ? (
         <div className="mb-2.5 flex items-center gap-1.5 text-[0.74rem]">
-          <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.68rem] font-bold" style={{ color: "#fff", background: "var(--warn)" }}>{aTraiterN} à traiter</span>
+          <button
+            onClick={() => setSeulATraiter((v) => !v)}
+            aria-pressed={seulATraiter}
+            title={seulATraiter ? "Afficher tous les télégrammes" : "N'afficher que ceux à traiter"}
+            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.68rem] font-bold transition"
+            style={{ color: "#fff", background: "var(--warn)", boxShadow: seulATraiter ? "0 0 0 2px color-mix(in srgb,var(--warn) 45%,transparent)" : "none" }}
+          >
+            {aTraiterN} à traiter{seulATraiter ? " · tout voir" : ""}
+          </button>
           <span className="text-faint">— les télégrammes encore ouverts ressortent en surbrillance.</span>
         </div>
       ) : null}
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
-        {telegrammes.map((t) => {
+        {affiches.map((t) => {
           const aTraiter = !/clotur|classe/i.test(t.statut); // encore ouvert → pas traité
           return (
           <button key={t.id} onClick={() => setSel(t)}

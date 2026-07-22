@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { FileText, Wallet, Landmark, Target, Plug, Inbox, Users, Activity, Coins, Compass } from "lucide-react";
+import { FileText, Wallet, Landmark, Target, Plug, Inbox, Users, Activity, Coins, Compass, ArrowRight, ListChecks, CheckCircle2, Megaphone, CalendarDays, Skull, Mic, Crosshair, Sparkles } from "lucide-react";
 import clsx from "clsx";
-import type { DashData, FeedItem } from "@/lib/queries";
+import type { DashData, FeedItem, AlertesData } from "@/lib/queries";
 import { BarresH, Donut, Repartition } from "@/components/charts";
 import { PoleChip, SectionTitle, Ornement } from "@/components/ui";
 import { LiveFeed } from "@/components/live-feed";
 import { BriefingIA } from "@/components/briefing-ia";
+import { HorlogeCampagne } from "@/components/horloge-campagne";
 import { cents } from "@/lib/format";
 
 function Card({ children, className, delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
@@ -170,7 +171,75 @@ function OpsBoard({ data }: { data: DashData }) {
 }
 
 
-export function Dashboard({ data, feed = [] }: { data: DashData; feed?: FeedItem[] }) {
+// ── « Ce qui t'attend aujourd'hui » : le cœur du QG. Reprend les mêmes alertes
+//    actionnables que la cloche, mais en grand, en tête de page, avec un lien
+//    direct vers la zone à traiter. Aucune donnée inventée (comptes réels). ──
+const TONE_VAR: Record<string, string> = { warn: "var(--warn)", oxblood: "var(--oxblood)", accent: "var(--accent)", good: "var(--good)" };
+function CeQuiTattend({ alertes }: { alertes: AlertesData }) {
+  const items = alertes.items;
+  return (
+    <Card delay={0.06}>
+      <CardHeader titre="Ce qui t'attend aujourd'hui" action={items.length ? "Tout le journal" : undefined} href="/notifications" />
+      {items.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 px-4 py-7 text-center">
+          <CheckCircle2 className="h-7 w-7" style={{ color: "var(--good)" }} strokeWidth={1.7} />
+          <p className="text-[0.85rem] text-muted">Tout est calme au poste, chef. Rien ne réclame ton attention.</p>
+        </div>
+      ) : (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {items.map((a) => {
+            const c = TONE_VAR[a.tone] || "var(--accent)";
+            return (
+              <Link key={a.key} href={a.href}
+                className="group flex items-center gap-3 rounded-[11px] border border-border bg-surface-2 px-3 py-2.5 transition hover:-translate-y-0.5 hover:border-border-2"
+                style={{ boxShadow: `inset 3px 0 0 ${c}` }}>
+                <span className="grid h-9 min-w-9 place-items-center rounded-[9px] font-num text-[0.9rem] font-extrabold" style={{ color: c, background: `color-mix(in srgb,${c} 15%,transparent)` }}>
+                  {a.count > 99 ? "99+" : a.count}
+                </span>
+                <span className="min-w-0 flex-1 text-[0.83rem] leading-snug text-ink">{a.label}</span>
+                <ArrowRight className="h-4 w-4 shrink-0 text-faint transition group-hover:translate-x-0.5 group-hover:text-accent" />
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ── Raccourcis : les gestes les plus fréquents, à un clic. Navigation pure
+//    (aucune écriture) → sûr et intuitif, comme les boutons d'un vrai poste. ──
+const RACCOURCIS: { label: string; href: string; icon: typeof Target; tone: string }[] = [
+  { label: "Répondre aux télégrammes", href: "/communication#telegrammes", icon: Megaphone, tone: "var(--accent)" },
+  { label: "Rendez-vous clients", href: "/communication#rdv-clients", icon: CalendarDays, tone: "var(--warn)" },
+  { label: "Émettre un avis", href: "/wanted", icon: Skull, tone: "var(--oxblood)" },
+  { label: "Nouvelle opération", href: "/operations", icon: Target, tone: "#9085e9" },
+  { label: "Capturer une note", href: "/notes-vocales", icon: Mic, tone: "var(--good)" },
+  { label: "Armurerie", href: "/armurerie", icon: Crosshair, tone: "#3987e5" },
+  { label: "Assistant IA", href: "/assistant", icon: Sparkles, tone: "var(--brass-hi)" },
+  { label: "Voir mes finances", href: "/finances", icon: Coins, tone: "#c98500" },
+];
+function Raccourcis() {
+  return (
+    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4">
+      {RACCOURCIS.map((r) => {
+        const Icon = r.icon;
+        return (
+          <Link key={r.href + r.label} href={r.href}
+            className="group flex items-center gap-2.5 rounded-[12px] border border-border bg-surface px-3 py-3 transition hover:-translate-y-0.5 hover:border-border-2"
+            style={{ background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,#000))" }}>
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px]" style={{ color: r.tone, background: `color-mix(in srgb,${r.tone} 15%,transparent)` }}>
+              <Icon className="h-[18px] w-[18px]" strokeWidth={1.8} />
+            </span>
+            <span className="text-[0.82rem] font-medium leading-snug text-ink">{r.label}</span>
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+export function Dashboard({ data, feed = [], alertes = { total: 0, items: [] } }: { data: DashData; feed?: FeedItem[]; alertes?: AlertesData }) {
   return (
     <>
       <div>
@@ -184,7 +253,8 @@ export function Dashboard({ data, feed = [] }: { data: DashData; feed?: FeedItem
               <div className="mt-1.5 font-display text-[0.9rem] italic text-muted">Poste de commandement de la maison{data.connecte ? ` · ${data.membresCount} âme(s) sous ta bannière` : ""}</div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <HorlogeCampagne />
             <PoleChip pole={data.pole} />
             <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-[0.72rem] text-muted">
               <span className="h-2 w-2 rounded-full" style={{ background: data.connecte ? "var(--good)" : "var(--faint)" }} />
@@ -196,6 +266,10 @@ export function Dashboard({ data, feed = [] }: { data: DashData; feed?: FeedItem
       </div>
 
       <BandeauAttente connecte={data.connecte} />
+
+      <SectionTitle tone="var(--warn)" icon={ListChecks}>Ton poste</SectionTitle>
+      <CeQuiTattend alertes={alertes} />
+      <Raccourcis />
 
       <BriefingIA />
 

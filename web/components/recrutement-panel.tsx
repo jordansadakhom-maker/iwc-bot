@@ -31,12 +31,16 @@ export function RecrutementPanel({ candidatures }: { candidatures: CandidatureIt
     return m;
   }, [candidatures]);
 
-  const filtres = candidatures.filter((c) => {
-    if (filtre !== "tous" && c.statut !== filtre) return false;
-    const t = q.trim().toLowerCase();
-    if (!t) return true;
-    return `${c.nomRP} ${c.motivation || ""} ${c.experience || ""} ${c.contact || ""}`.toLowerCase().includes(t);
-  });
+  const filtres = candidatures
+    .filter((c) => {
+      if (filtre !== "tous" && c.statut !== filtre) return false;
+      const t = q.trim().toLowerCase();
+      if (!t) return true;
+      return `${c.nomRP} ${c.motivation || ""} ${c.experience || ""} ${c.contact || ""}`.toLowerCase().includes(t);
+    })
+    // Les candidatures « Nouveau » (pas encore traitées) remontent en tête ;
+    // le reste garde l'ordre du serveur (plus récentes d'abord).
+    .sort((a, b) => Number(b.statut === "nouveau") - Number(a.statut === "nouveau"));
 
   return (
     <>

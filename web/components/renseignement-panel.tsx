@@ -51,12 +51,29 @@ function BtnAdd({ onClick, children }: { onClick: () => void; children: React.Re
   );
 }
 
+const DANGER_RANK: Record<string, number> = { faible: 1, moyen: 2, eleve: 3, extreme: 4 };
+
 export function RenseignementPanel({ rapports, traques }: { rapports: RapportItem[]; traques: TraqueItem[] }) {
   const router = useRouter();
   const [rapEdit, setRapEdit] = useState<RapportItem | null>(null);
   const [rapNew, setRapNew] = useState(false);
   const [traEdit, setTraEdit] = useState<TraqueItem | null>(null);
   const [traNew, setTraNew] = useState(false);
+
+  // Renseignements FRAIS (non traités) en tête, puis les plus fiables d'abord.
+  const rapportsTri = [...rapports].sort((a, b) => {
+    const an = (a.statut || "").toLowerCase() === "nouveau" ? 1 : 0;
+    const bn = (b.statut || "").toLowerCase() === "nouveau" ? 1 : 0;
+    if (an !== bn) return bn - an;
+    return (b.fiabilite || 0) - (a.fiabilite || 0);
+  });
+  // Cibles « En chasse » d'abord, puis les plus dangereuses en tête.
+  const traquesTri = [...traques].sort((a, b) => {
+    const ac = (a.statut || "").toLowerCase() === "chasse" ? 1 : 0;
+    const bc = (b.statut || "").toLowerCase() === "chasse" ? 1 : 0;
+    if (ac !== bc) return bc - ac;
+    return (DANGER_RANK[(b.dangerosite || "").toLowerCase()] || 0) - (DANGER_RANK[(a.dangerosite || "").toLowerCase()] || 0);
+  });
 
   return (
     <div className="grid items-start gap-4 lg:grid-cols-[3fr_2fr]">
@@ -72,7 +89,7 @@ export function RenseignementPanel({ rapports, traques }: { rapports: RapportIte
           <Empty icon={Eye}>Aucun rapport. Ajoute un renseignement avec « Nouveau rapport ».</Empty>
         ) : (
           <div className="flex flex-col divide-y divide-border">
-            {rapports.map((r) => (
+            {rapportsTri.map((r) => (
               <div key={r.id} className="group py-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -106,7 +123,7 @@ export function RenseignementPanel({ rapports, traques }: { rapports: RapportIte
           <Empty icon={Crosshair}>Aucune traque active. Ajoute une cible avec « Nouvelle traque ».</Empty>
         ) : (
           <div className="flex flex-col gap-2.5">
-            {traques.map((t) => (
+            {traquesTri.map((t) => (
               <button key={t.id} onClick={() => setTraEdit(t)} className="rounded-[11px] border border-border bg-surface-2 px-3 py-2.5 text-left transition hover:border-border-2">
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-[0.88rem] font-semibold">{t.cible}</div>
