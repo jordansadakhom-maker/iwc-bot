@@ -19,16 +19,19 @@ export async function chercherSuivi(nom: string): Promise<SuiviResult> {
   if (q.length < 2) return { ok: false, rdvs: [], contrats: [], telegrammes: [], error: "Entre ton nom (2 lettres minimum)." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, rdvs: [], contrats: [], telegrammes: [], error: "Service momentanément indisponible." };
-  const like = `%${q.replace(/[%_,]/g, " ")}%`;
+  // Correspondance EXACTE (insensible à la casse) — surtout PAS de « %sous-chaîne% » :
+  // sinon un visiteur anonyme pourrait taper « a » et lister les fiches d'autres
+  // clients (RDV, prix de contrats, télégrammes). On enlève les jokers LIKE (%/_).
+  const exact = q.replace(/[%_]/g, " ").trim();
   const safe = async (p: PromiseLike<{ data: Row[] | null; error: unknown }>): Promise<Row[]> => {
     try { const { data, error } = await p; return error ? [] : (data || []); } catch { return []; }
   };
   const [rdvRows, ctrRows, tgRows] = await Promise.all([
-    safe(admin.from("Rdv").select("nomRP,type,lieu,creneau,statut").ilike("nomRP", like).neq("statut", "cloture").limit(25)),
-    safe(admin.from("ArmurerieContrat").select("clientNom,arme,prix,statut").ilike("clientNom", like).limit(25)),
+    safe(admin.from("Rdv").select("nomRP,type,lieu,creneau,statut").ilike("nomRP", exact).neq("statut", "cloture").limit(25)),
+    safe(admin.from("ArmurerieContrat").select("clientNom,arme,prix,statut").ilike("clientNom", exact).limit(25)),
     // Télégrammes envoyés depuis le site : le client y retrouve la RÉPONSE de
     // l'équipe (champ `reponses`) sans compte — sa « notification » côté site.
-    safe(admin.from("TelegrammeWeb").select("nom,message,statut,reponses").ilike("nom", like).limit(25)),
+    safe(admin.from("TelegrammeWeb").select("nom,message,statut,reponses").ilike("nom", exact).limit(25)),
   ]);
   const rdvs: SuiviRdv[] = rdvRows.map((r) => ({ type: s(r.type) || "Rendez-vous", lieu: s(r.lieu), creneau: s(r.creneau), statut: s(r.statut) || "nouveau" }));
   const contrats: SuiviContrat[] = ctrRows.map((c) => ({ arme: s(c.arme) || "Contrat de vente", prix: Number(c.prix) || 0, statut: s(c.statut) || "brouillon" }));

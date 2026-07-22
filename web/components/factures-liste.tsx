@@ -17,16 +17,19 @@ export function FacturesListe({ factures, total }: { factures: FactureItem[]; to
   const [nouveau, setNouveau] = useState(false);
   const [delId, setDelId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [flash, setFlash] = useState<string | null>(null);
 
   async function supprimer(id: string) {
-    setBusy(true);
+    setBusy(true); setFlash(null);
     const r = await supprimerFacture(id);
     setBusy(false);
     if (r.ok) { setDelId(null); router.refresh(); }
+    else { setDelId(null); setFlash(r.error || "Échec de la suppression."); } // ne plus rester muet en cas d'échec
   }
 
   return (
     <>
+      {flash ? <div className="mb-3"><Flash>{flash}</Flash></div> : null}
       <div className="mb-3.5 flex items-center justify-between gap-2.5">
         <div className="flex items-center gap-2.5">
           <h3 className="text-[0.8rem] font-semibold uppercase tracking-[0.06em] text-muted">Factures</h3>

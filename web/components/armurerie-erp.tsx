@@ -587,8 +587,8 @@ export function PaiesTab({ paies, employes, ventes, router }: { paies: ArmPaie[]
   const totalDu = dues.reduce((s, p) => s + p.montant, 0);
   const totalVerse = paies.filter((p) => p.statut === "paye").reduce((s, p) => s + p.montant, 0);
 
-  async function payer(p: ArmPaie) { setBusy(p.id); const r = await payerPaie(p.id); setBusy(null); if (r.ok) router.refresh(); }
-  async function suppr(p: ArmPaie) { setBusy(p.id); const r = await supprimerPaie(p.id); setBusy(null); if (r.ok) router.refresh(); }
+  async function payer(p: ArmPaie) { setBusy(p.id); const r = await payerPaie(p.id); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Versement impossible — réessaie."); }
+  async function suppr(p: ArmPaie) { setBusy(p.id); const r = await supprimerPaie(p.id); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Suppression impossible — réessaie."); }
 
   return (
     <>
@@ -690,8 +690,8 @@ export function ImpotsTab({ impots, ca, router }: { impots: ArmImpot[]; ca: numb
   const du = impots.filter((i) => i.statut !== "paye").reduce((s, i) => s + i.montant, 0);
   const paye = impots.filter((i) => i.statut === "paye").reduce((s, i) => s + i.montant, 0);
 
-  async function payer(i: ArmImpot) { setBusy(i.id); const r = await payerImpot(i.id); setBusy(null); if (r.ok) router.refresh(); }
-  async function suppr(i: ArmImpot) { setBusy(i.id); const r = await supprimerImpot(i.id); setBusy(null); if (r.ok) router.refresh(); }
+  async function payer(i: ArmImpot) { setBusy(i.id); const r = await payerImpot(i.id); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Règlement impossible — réessaie."); }
+  async function suppr(i: ArmImpot) { setBusy(i.id); const r = await supprimerImpot(i.id); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Suppression impossible — réessaie."); }
 
   return (
     <>
