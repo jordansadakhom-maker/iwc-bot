@@ -1,13 +1,16 @@
 import Link from "next/link";
-import { AlertTriangle, Timer, ArrowRight } from "lucide-react";
+import { AlertTriangle, ArrowRight } from "lucide-react";
 import { getAcces } from "@/lib/queries";
+import { getEnService } from "@/lib/dispensaire-pointage";
 import { DISP_NAV } from "@/lib/dispensaire-nav";
+import { DispEnService } from "@/components/dispensaire-en-service";
 
 export const dynamic = "force-dynamic";
 
 export default async function DispensaireAccueil() {
   const acces = await getAcces();
   const habilite = acces.peutMedical;
+  const enService = await getEnService();
   const modules = DISP_NAV.filter((t) => t.href !== "/dispensaire" && (!t.restreint || habilite));
 
   return (
@@ -20,10 +23,7 @@ export default async function DispensaireAccueil() {
           <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full" style={{ background: "color-mix(in srgb,var(--warn) 16%,transparent)" }}><AlertTriangle className="h-5 w-5" style={{ color: "var(--warn)" }} /></span>
           <div><div className="text-[0.88rem] font-semibold">Stocks en alerte</div><div className="text-[0.76rem] text-faint">Apparaîtra ici dès le module <b>Stockage</b> (seuils à fixer).</div></div>
         </div>
-        <div className="flex items-center gap-3 rounded-[14px] border border-border bg-surface-2 p-4">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full" style={{ background: "color-mix(in srgb,var(--good) 16%,transparent)" }}><Timer className="h-5 w-5" style={{ color: "var(--good)" }} /></span>
-          <div><div className="text-[0.88rem] font-semibold">Salariés en service</div><div className="text-[0.76rem] text-faint">Bouton « Prise de service » + chrono à venir avec le module <b>Pointage</b>.</div></div>
-        </div>
+        <DispEnService sessions={enService} />
       </div>
 
       {/* Accès aux modules */}
