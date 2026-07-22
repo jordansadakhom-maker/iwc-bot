@@ -7,7 +7,7 @@
  */
 import {
   LayoutDashboard, LineChart, Target, Eye, Users, HeartPulse, CalendarDays,
-  FileText, Boxes, Megaphone, Bell, Sparkles, Skull, Crosshair, UserPlus, Map, ScrollText, BarChart3, Moon, Mic, Beef, type LucideIcon,
+  FileText, Boxes, Megaphone, Bell, Sparkles, Skull, Crosshair, UserPlus, Map, ScrollText, BarChart3, Moon, Mic, Beef, BookUser, type LucideIcon,
 } from "lucide-react";
 
 export type NavItem = { href: string; label: string; icon: LucideIcon; badge?: number };
@@ -34,6 +34,7 @@ export const NAV: NavGroup[] = [
     items: [
       { href: "/medical", label: "Médical", icon: HeartPulse },
       { href: "/agenda", label: "Agenda & Clients", icon: CalendarDays },
+      { href: "/repertoire", label: "Répertoire contacts", icon: BookUser },
       { href: "/documents", label: "Documents", icon: FileText },
       { href: "/notes-vocales", label: "Notes vocales", icon: Mic },
       { href: "/inventaire", label: "Inventaire", icon: Boxes },
