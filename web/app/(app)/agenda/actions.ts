@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { envoyerCommande, type CommandeResult } from "@/lib/commandes";
+import { supprimerFiable } from "@/lib/suppression";
 
 // Ajoute une fiche de contact DEPUIS LE SITE (espace interne, membre connecté).
 // On enregistre la demande dans Supabase (table DemandeContact) ; le bot Discord
@@ -97,6 +98,5 @@ export async function modifierContact(
 }
 
 export async function supprimerContact(id: string): Promise<CommandeResult> {
-  if (!id) return { ok: false, error: "Contact introuvable." };
-  return envoyerCommande("contact.delete", { id });
+  return supprimerFiable({ type: "contact.delete", payload: { id }, table: "Contact", colonne: "id", valeur: id, okMsg: "Contact supprimé." });
 }

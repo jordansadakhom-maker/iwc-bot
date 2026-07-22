@@ -1,6 +1,7 @@
 "use server";
 
 import { envoyerCommande, type CommandeResult } from "@/lib/commandes";
+import { supprimerFiable } from "@/lib/suppression";
 
 // Actions sur les opérations → file de commandes, appliquées par le bot puis
 // resynchronisées sur le site.
@@ -26,8 +27,7 @@ export async function changerPhase(id: string, phase: string): Promise<CommandeR
 }
 
 export async function supprimerOperation(id: string): Promise<CommandeResult> {
-  if (!id) return { ok: false, error: "Opération introuvable." };
-  return envoyerCommande("operation.delete", { id });
+  return supprimerFiable({ type: "operation.delete", payload: { id }, table: "Operation", colonne: "id", valeur: id, okMsg: "Opération supprimée." });
 }
 
 // Assigner des agents à une opération (les prévient en MP via le bot).
@@ -68,8 +68,7 @@ export async function majContrat(
 }
 
 export async function supprimerContrat(id: string): Promise<CommandeResult> {
-  if (!id) return { ok: false, error: "Contrat introuvable." };
-  return envoyerCommande("contrat.delete", { id });
+  return supprimerFiable({ type: "contrat.delete", payload: { id }, table: "Contrat", colonne: "id", valeur: id, okMsg: "Contrat supprimé." });
 }
 
 // Suivi / pipeline (En attente → En cours → Validé → Honoré → Abandonné).

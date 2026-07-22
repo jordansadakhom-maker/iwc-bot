@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { envoyerCommande } from "@/lib/commandes";
+import { envoyerEmail } from "@/lib/email";
 
 // Télégrammes : répondre (le bot livre le MP au client + garde la trace) et
 // créer automatiquement un RDV à partir d'un télégramme contenant lieu/prénom/heure.
@@ -36,8 +37,10 @@ export async function repondreTelegrammeWeb(idPrefixe: string, texte: string, pa
   reponses.push({ texte: t.slice(0, 2000), par: (parNom || "Équipe").slice(0, 120), at: Date.now() });
   const { error: e2 } = await admin.from("TelegrammeWeb").update({ reponses }).eq("id", id);
   if (e2) return { ok: false, error: "Enregistrement impossible." };
-  // Si l'expéditeur a laissé un contact DISCORD, le bot le retrouve et lui livre
-  // la réponse en MP. Sinon, la réponse reste une trace (contact en jeu, etc.).
+  // On livre la réponse par le canal laissé par l'expéditeur :
+  //   • Discord → le bot retrouve le pseudo et envoie un MP.
+  //   • E-mail  → on envoie un e-mail (si le service est configuré sur Vercel).
+  //   • Sinon   → trace conservée ; le client peut la lire sur « Suivre ma demande ».
   const contact = String(row.contact || "");
   const m = contact.match(/discord\s*[:：]\s*(.+)$/i);
   if (m && m[1].trim()) {
@@ -46,7 +49,15 @@ export async function repondreTelegrammeWeb(idPrefixe: string, texte: string, pa
     if (r.ok) return { ok: true, info: r.message || "✅ Réponse livrée au client en MP Discord." };
     return { ok: true, info: `${r.error || "MP Discord non livré"} — réponse gardée en trace.` };
   }
-  return { ok: true, info: "Réponse conservée (trace). Recontacte l'expéditeur via son moyen de contact (en jeu)." };
+  const em = contact.match(/email\s*[:：]\s*([^\s]+@[^\s]+)/i) || contact.match(/([^\s]+@[^\s]+\.[^\s]+)/);
+  if (em && em[1]) {
+    const corps = `Bonjour,\n\nTu as envoyé un télégramme à la Iron Wolf Company. Voici notre réponse :\n\n${t}\n\n— ${parNom || "Iron Wolf Company"}\n\n(Tu peux aussi suivre ta demande sur notre site, page « Suivre ma demande ».)`;
+    const res = await envoyerEmail(em[1].trim(), "Réponse à ton télégramme — Iron Wolf Company", corps);
+    if (res.ok) return { ok: true, info: "✅ Réponse envoyée par e-mail au client (trace conservée)." };
+    if (res.reason === "non configuré") return { ok: true, info: "Réponse gardée en trace. L'envoi d'e-mail n'est pas encore configuré — le client peut la lire sur « Suivre ma demande »." };
+    return { ok: true, info: `Réponse gardée en trace (e-mail non envoyé : ${res.reason}). Le client peut la lire sur « Suivre ma demande ».` };
+  }
+  return { ok: true, info: "Réponse conservée (trace). Le client peut la lire sur « Suivre ma demande » via son nom." };
 }
 
 // ── Extraction lieu / heure depuis le texte d'un télégramme ──

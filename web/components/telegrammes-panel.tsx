@@ -132,10 +132,15 @@ function TgModal({ tg, onClose, router }: { tg: TelegrammeItem; onClose: () => v
             <span style={{ color: "var(--good)" }}>✅</span>
             <span className="text-muted">Contact <b className="text-ink">Discord</b> fourni : ta réponse est <b>livrée en MP Discord</b> (si le pseudo est trouvé sur le serveur). Contact : <b className="text-ink">{tg.contact}</b></span>
           </div>
+        ) : /email/i.test(tg.contact || "") || /@/.test(tg.contact || "") ? (
+          <div className="mb-3 flex items-start gap-2 rounded-[8px] border px-2.5 py-2 text-[0.78rem]" style={{ borderColor: "color-mix(in srgb,var(--good) 40%,var(--border))", background: "color-mix(in srgb,var(--good) 8%,transparent)" }}>
+            <span style={{ color: "var(--good)" }}>✅</span>
+            <span className="text-muted">Contact <b className="text-ink">e-mail</b> fourni : ta réponse est <b>envoyée par e-mail</b> (si l&apos;envoi est configuré). Contact : <b className="text-ink">{tg.contact}</b></span>
+          </div>
         ) : (
           <div className="mb-3 flex items-start gap-2 rounded-[8px] border px-2.5 py-2 text-[0.78rem]" style={{ borderColor: "color-mix(in srgb,var(--warn) 45%,var(--border))", background: "color-mix(in srgb,var(--warn) 8%,transparent)" }}>
             <span style={{ color: "var(--warn)" }}>⚠️</span>
-            <span className="text-muted">Contact <b className="text-ink">en jeu</b> : pas de MP Discord. Ta réponse est <b>gardée en trace</b> ; recontacte-le via son moyen de contact{tg.contact ? <> : <b className="text-ink">{tg.contact}</b></> : null}.</span>
+            <span className="text-muted">Contact <b className="text-ink">en jeu</b> : pas de livraison automatique. Ta réponse est <b>gardée en trace</b> et le client peut la lire sur <b className="text-ink">« Suivre ma demande »</b>{tg.contact ? <> · {tg.contact}</> : null}.</span>
           </div>
         )
       ) : null}
@@ -170,7 +175,7 @@ function TgModal({ tg, onClose, router }: { tg: TelegrammeItem; onClose: () => v
       {/* Réponse */}
       {/ouvert/i.test(tg.statut) ? (
         <div className="mt-3 flex items-end gap-2">
-          <textarea className={inputCls + " min-h-[46px] resize-y"} value={texte} onChange={(e) => setTexte(e.target.value)} placeholder={tg.source === "web" ? "Réponse gardée en trace — recontacte via le contact ci-dessus (pas de MP Discord)…" : "Réponds au client — il le reçoit en message privé sur Discord (trace conservée)…"} maxLength={2000} />
+          <textarea className={inputCls + " min-h-[46px] resize-y"} value={texte} onChange={(e) => setTexte(e.target.value)} placeholder={tg.source === "web" ? "Réponds — livré au client (Discord / e-mail si fourni), et gardé en trace + « Suivre ma demande »…" : "Réponds au client — il le reçoit en message privé sur Discord (trace conservée)…"} maxLength={2000} />
           <button onClick={repondre} disabled={busy === "rep"} className="inline-flex shrink-0 items-center gap-1 rounded-lg px-3 py-2 text-[0.8rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>
             {busy === "rep" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" strokeWidth={2} />}
           </button>
