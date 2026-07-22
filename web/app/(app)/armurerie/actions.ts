@@ -1217,6 +1217,22 @@ export async function getMouvementsStock(limite = 200): Promise<MouvementStock[]
     origine: String(r.origine || ""), detail: (r.detail as string) ?? null, par: (r.par as string) ?? null, createdAt: (r.createdAt as string) ?? null,
   }));
 }
+
+// Dernier rapport du scan de cohérence horaire (écrit par le bot). Lecture seule.
+export type ScanAnomalie = { type: string; cible?: string; nom?: string; produitNom?: string; ingredient?: string; stock?: number; ids?: string[]; n?: number };
+export type ScanRapport = { id: string; createdAt: string | null; anomalies: ScanAnomalie[]; resume: string | null; nb: number };
+export async function getDernierScanArmurerie(): Promise<ScanRapport | null> {
+  const admin = createAdminClient();
+  if (!admin) return null;
+  const { data, error } = await admin.from("ArmurerieScanRapport").select("*").order("createdAt", { ascending: false }).limit(1).maybeSingle();
+  if (error || !data) return null; // table pas encore créée ou aucun scan → rien (aucune donnée inventée)
+  const r = data as Record<string, unknown>;
+  return {
+    id: String(r.id), createdAt: (r.createdAt as string) ?? null,
+    anomalies: Array.isArray(r.anomalies) ? (r.anomalies as ScanAnomalie[]) : [],
+    resume: (r.resume as string) ?? null, nb: Number(r.nb) || 0,
+  };
+}
 export async function fabriquerProduit(produitId: string, qte: number): Promise<ArmResult & { q?: number; consommes?: string[]; ignores?: string[]; manques?: string[] }> {
   const q = Math.max(1, Math.round(Number(qte) || 0));
   const admin = createAdminClient();

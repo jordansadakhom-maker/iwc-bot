@@ -100,6 +100,10 @@ let rupturesArm = {};
 try { rupturesArm = require('./ruptures-armurerie'); console.log('✅ Module ruptures armurerie chargé'); }
 catch (e) { console.log('⚠️ ruptures-armurerie non chargé:', e.message); }
 
+let scanArm = {};
+try { scanArm = require('./scan-armurerie'); console.log('✅ Module scan armurerie chargé'); }
+catch (e) { console.log('⚠️ scan-armurerie non chargé:', e.message); }
+
 let commandeWeb = {};
 try { commandeWeb = require('./commande-web'); console.log('✅ Module commande web chargé'); }
 catch (e) { console.log('⚠️ commande-web non chargé:', e.message); }
@@ -6964,6 +6968,10 @@ client.once('clientReady', async () => {
 
   // Armurerie de Van Horn : point stock quotidien (ruptures + stock bas) → salon dédié (9h30)
   cron.schedule('30 9 * * *', async () => { try { await rupturesArm.verifierRupturesArmurerie?.(client); } catch (e) { console.log('⚠️ ruptures armurerie:', e.message); } }, { timezone: 'Europe/Paris' });
+
+  // Armurerie : SCAN HORAIRE de cohérence de stock (négatifs, doublons, ressources
+  // manquantes) → écrit un rapport en base et n'alerte le salon QUE si anomalies.
+  cron.schedule('0 * * * *', async () => { try { await scanArm.scannerCoherenceArmurerie?.(client); } catch (e) { console.log('⚠️ scan armurerie:', e.message); } }, { timezone: 'Europe/Paris' });
 
   // [CORRECTION] Résumés hebdo → #journal-de-bord via ajouterJournalIC
   cron.schedule('0 8 * * 1', async () => {

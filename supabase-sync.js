@@ -743,4 +743,23 @@ async function enregistrerRapportTerrain(row) {
   return !!(r && r.ok);
 }
 
-module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, majRosterMembre, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise, lireProduitsArmurerie, lireContratArmurerieEnAttente, marquerContratArmurerie, lireRdvArmurerieARappeler, marquerRappelRdvArmurerie, enregistrerRapportTerrain };
+// ── Scan de cohérence de stock (armurerie) ──────────────────────────────────
+// Lectures dédiées AVEC recette / stock des ressources. IMPORTANT : renvoient
+// `null` en cas d'échec de lecture (et non []), pour que le scan distingue « base
+// vide » d'« erreur de lecture » et n'écrive pas un rapport « RAS » trompeur.
+async function lireProduitsArmurerieRecette() {
+  const rows = await _get('ArmurerieProduit?select=id,nom,categorie,stock,aLaDemande,cout,recette&order=nom.asc&limit=2000');
+  return Array.isArray(rows) ? rows : null;
+}
+async function lireRessourcesArmurerie() {
+  const rows = await _get('ArmurerieRessource?select=id,nom,categorie,stock,prix&order=nom.asc&limit=2000');
+  return Array.isArray(rows) ? rows : null;
+}
+// Écrit un rapport de scan (best-effort, no-op si la table n'existe pas encore).
+async function enregistrerScanArmurerie(row) {
+  if (!row || !row.id) return false;
+  const r = await _upsert('ArmurerieScanRapport', [row]);
+  return !!(r && r.ok);
+}
+
+module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, majRosterMembre, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise, lireProduitsArmurerie, lireContratArmurerieEnAttente, marquerContratArmurerie, lireRdvArmurerieARappeler, marquerRappelRdvArmurerie, enregistrerRapportTerrain, lireProduitsArmurerieRecette, lireRessourcesArmurerie, enregistrerScanArmurerie };
