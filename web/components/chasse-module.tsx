@@ -252,7 +252,7 @@ export function ChasseModule({ data }: { data: ChasseData }) {
       {nouveau ? <NouveauModal zones={zones} defaultZone={vue !== "global" ? vue : zones[0]?.id || "c1"} onClose={() => setNouveau(false)} onCreer={(zoneId, nom, qte, cat) => applique(zoneId, nom, "add", qte, { categorie: cat })} /> : null}
       {transfert ? <TransfertModal zones={zones} items={items} onClose={() => setTransfert(false)} onTransfere={transfere} /> : null}
       {stepItem ? <StepModal item={stepItem} onClose={() => setStepItem(null)} onApply={(mode, qte) => { applique(stepItem.zoneId, stepItem.nom, mode, qte); setStepItem(null); }} onSeuil={(seuil) => { majSeuil(stepItem.zoneId, stepItem.nom, seuil); }} /> : null}
-      {capZone ? <CapaciteModal zone={capZone} used={totauxZone[capZone.id] || 0} onClose={() => setCapZone(null)} onSave={(cap) => { setZones((zs) => zs.map((z) => (z.id === capZone.id ? { ...z, capacite: cap } : z))); definirCapaciteChasse({ zoneId: capZone.id, nom: capZone.nom, capacite: cap }).then((r) => { if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); }); setCapZone(null); }} /> : null}
+      {capZone ? <CapaciteModal zone={capZone} used={totauxZone[capZone.id] || 0} onClose={() => setCapZone(null)} onSave={(nom, cap) => { setZones((zs) => zs.map((z) => (z.id === capZone.id ? { ...z, nom, capacite: cap } : z))); definirCapaciteChasse({ zoneId: capZone.id, nom, capacite: cap }).then((r) => { if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); }); setCapZone(null); }} /> : null}
     </>
   );
 }
@@ -584,16 +584,18 @@ function TransfertModal({ zones, items, onClose, onTransfere }: { zones: ChasseZ
 }
 
 // ── Capacité d'une zone ─────────────────────────────────────────
-function CapaciteModal({ zone, used, onClose, onSave }: { zone: ChasseZone; used: number; onClose: () => void; onSave: (cap: number | null) => void }) {
+function CapaciteModal({ zone, used, onClose, onSave }: { zone: ChasseZone; used: number; onClose: () => void; onSave: (nom: string, cap: number | null) => void }) {
+  const [nom, setNom] = useState(zone.nom);
   const [cap, setCap] = useState(zone.capacite == null ? "" : String(zone.capacite));
   return (
-    <Modal titre={`⚙️ Capacité — ${zone.nom}`} onClose={onClose}>
+    <Modal titre={`⚙️ Réglages — ${zone.nom}`} onClose={onClose}>
       <div className="flex flex-col gap-3">
+        <Champ label="Nom de la charrette"><input className={inputCls} value={nom} onChange={(e) => setNom(e.target.value)} maxLength={60} placeholder="Ex : Charette de chasse" autoFocus /></Champ>
         <p className="text-[0.82rem] text-muted">Stock actuel : <b className="font-num">{used}</b> u. Définis la capacité maximale pour activer la barre de remplissage et l&apos;alerte « presque pleine ».</p>
-        <Champ label="Capacité maximale (u.)"><input className={inputCls} type="number" min={0} value={cap} onChange={(e) => setCap(e.target.value)} placeholder="Laisse vide pour aucune limite" autoFocus /></Champ>
+        <Champ label="Capacité maximale (u.)"><input className={inputCls} type="number" min={0} value={cap} onChange={(e) => setCap(e.target.value)} placeholder="Laisse vide pour aucune limite" /></Champ>
         <div className="mt-1 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2">Annuler</button>
-          <button onClick={() => onSave(cap === "" ? null : Math.max(0, parseInt(cap, 10) || 0))} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Check className="h-3.5 w-3.5" /> Enregistrer</button>
+          <button onClick={() => onSave(nom.trim() || zone.nom, cap === "" ? null : Math.max(0, parseInt(cap, 10) || 0))} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Check className="h-3.5 w-3.5" /> Enregistrer</button>
         </div>
       </div>
     </Modal>

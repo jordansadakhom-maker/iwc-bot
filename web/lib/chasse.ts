@@ -23,8 +23,8 @@ export type ChasseData = {
 // Deux charrettes par défaut si la table "ChasseZone" est encore vide : le module
 // reste utilisable même avant d'avoir renseigné les zones/capacités.
 const ZONES_DEFAUT: ChasseZone[] = [
-  { id: "c1", nom: "Charrette 1", capacite: null, ordre: 1 },
-  { id: "c2", nom: "Charrette 2", capacite: null, ordre: 2 },
+  { id: "c1", nom: "Charette", capacite: null, ordre: 1 },
+  { id: "c2", nom: "Charette de chasse", capacite: null, ordre: 2 },
 ];
 
 type Raw = Record<string, unknown>;

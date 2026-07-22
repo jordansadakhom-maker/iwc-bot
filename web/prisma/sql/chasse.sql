@@ -22,8 +22,8 @@ ALTER TABLE "ChasseZone" ENABLE ROW LEVEL SECURITY;
 
 -- Les deux charrettes de base (ne réécrit rien si elles existent déjà).
 INSERT INTO "ChasseZone" ("id","nom","ordre") VALUES
-  ('c1','Charrette 1',1),
-  ('c2','Charrette 2',2)
+  ('c1','Charette',1),
+  ('c2','Charette de chasse',2)
 ON CONFLICT ("id") DO NOTHING;
 
 -- ── 2) Stock : une ligne = une ressource dans une zone ─────────
