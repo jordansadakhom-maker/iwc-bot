@@ -1055,7 +1055,7 @@ const SLASH_COMMANDS = [
     .addSubcommand(s => s.setName('programmer').setDescription('🕐 Programmer une opération à lancement automatique (Direction)')),
   new SlashCommandBuilder().setName('bilan-export').setDescription('📊 Exporter un Google Sheet (.xlsx) de tout : contrats, argent, opérations… (Direction)'),
   new SlashCommandBuilder().setName('synchro-web').setDescription('🔄 Vérifier / forcer la synchro du site web (Direction)'),
-  new SlashCommandBuilder().setName('exporter-repertoire').setDescription('📇 Exporter les fiches contacts du salon vers le Répertoire du site (Direction)'),
+  new SlashCommandBuilder().setName('exporter-repertoire').setDescription('📇 Exporter les fiches contacts (forum) vers le Répertoire du site (Direction)').addChannelOption(o => o.setName('forum').setDescription('Le forum des fiches (facultatif — sinon le forum par défaut)').setRequired(false)),
   new SlashCommandBuilder().setName('recuperer-donnees').setDescription('🛟 Récupérer opérations/contrats/dossiers perdus depuis les sauvegardes (Direction)'),
 ].map(c => c.toJSON());
 
@@ -1816,8 +1816,11 @@ async function handleSlashCommand(interaction) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     try {
       const { exporterRepertoire } = require('./export-repertoire');
-      const r = await exporterRepertoire(interaction.client);
-      if (!r.ok) return interaction.editReply({ content: r.raison === 'salon' ? "❌ Salon des fiches introuvable — vérifie que le bot a accès au salon `1517505221629050901`." : "❌ Export impossible pour le moment." });
+      const choisi = interaction.options.getChannel('forum');
+      const r = await exporterRepertoire(interaction.client, choisi ? { salonId: choisi.id } : {});
+      if (!r.ok) return interaction.editReply({ content: r.raison === 'salon'
+        ? "❌ **Forum introuvable ou inaccessible.**\n• Le **bot n'a peut-être pas accès** au forum → sur le forum, ajoute le **rôle du bot** avec les permissions **Voir le salon** + **Lire l'historique des messages**.\n• Ou le forum est **dans un autre serveur** où le bot n'est pas présent.\n\n➡️ Astuce : relance la commande en **choisissant le forum** dans l'option `forum:` (il n'apparaîtra dans la liste que si le bot y a accès)."
+        : "❌ Export impossible pour le moment." });
       return interaction.editReply({ content: `📇 **Export du répertoire terminé.**\n• ${r.lus} ${r.forum ? 'post(s) du forum' : 'message(s)'} lus\n• ${r.detectees} fiche(s) détectée(s)\n• **${r.importes} importée(s)** sur le site\n• ${r.doublons} doublon(s) ignoré(s)\n\n➡️ Retrouve-les dans l'onglet **Répertoire contacts** du site.` });
     } catch (e) {
       console.log('❌ /exporter-repertoire:', e.message);
