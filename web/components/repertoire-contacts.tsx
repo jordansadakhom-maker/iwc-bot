@@ -17,10 +17,13 @@ type FlashMsg = { t: "ok" | "bad"; m: string } | null;
 const norm = (x: string) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 const dateFR = (s: string | null) => { if (!s) return ""; try { return new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
 
+// Suggestions de « relation » (le répertoire sert pour les personnes ET les entreprises).
+const RELATIONS = ["Indic", "Allié", "Ami", "Fournisseur", "Collaborateur", "Contact", "Entreprise", "Service public", "Rival", "Autre"];
+
 // Champs affichés dans la fiche (ordre & libellés).
 const CHAMPS_GEN: [keyof DispContact, string][] = [
-  ["responsable", "Responsable"], ["adresse", "Adresse"], ["telegramme", "Télégramme"],
-  ["contactSecondaire", "Contact secondaire"], ["horaires", "Horaires"], ["description", "Description"],
+  ["relation", "Relation / type"], ["responsable", "Responsable / interlocuteur"], ["adresse", "Adresse / où le trouver"], ["telegramme", "Télégramme"],
+  ["contactSecondaire", "Contact secondaire"], ["horaires", "Horaires / dispo"], ["description", "Description"],
 ];
 const CHAMPS_COM: [keyof DispContact, string][] = [
   ["typeService", "Type de service"], ["produits", "Produits disponibles"], ["tarifs", "Tarifs"],
@@ -50,7 +53,7 @@ export function RepertoireContacts({ data }: { data: DispData }) {
     let list = contacts;
     if (catFiltre) list = list.filter((c) => (c.categorieId || "") === catFiltre);
     if (query) list = list.filter((c) => {
-      const blob = norm([c.nom, catNom(c.categorieId), c.responsable, c.telegramme, c.contactSecondaire, c.moyensContact, c.description, c.notes, c.produits, c.typeService, c.adresse].filter(Boolean).join(" "));
+      const blob = norm([c.nom, catNom(c.categorieId), c.relation, c.responsable, c.telegramme, c.contactSecondaire, c.moyensContact, c.description, c.notes, c.produits, c.typeService, c.adresse].filter(Boolean).join(" "));
       return blob.includes(query);
     });
     return list;
@@ -72,7 +75,7 @@ export function RepertoireContacts({ data }: { data: DispData }) {
       const r = await majContact(editing.id, vals);
       if (!r.ok) setFlash({ t: "bad", m: r.error || "Modification impossible." }); else { setFlash({ t: "ok", m: "Fiche mise à jour." }); router.refresh(); }
     } else {
-      const tmp: DispContact = { id: "tmp-" + Math.random().toString(36).slice(2, 8), categorieId: vals.categorieId || null, nom: vals.nom, responsable: vals.responsable || null, description: vals.description || null, adresse: vals.adresse || null, telegramme: vals.telegramme || null, contactSecondaire: vals.contactSecondaire || null, horaires: vals.horaires || null, notes: vals.notes || null, typeService: vals.typeService || null, produits: vals.produits || null, tarifs: vals.tarifs || null, banque: vals.banque || null, moyensContact: vals.moyensContact || null, source: "site", createdAt: null, updatedAt: null, updatedBy: null };
+      const tmp: DispContact = { id: "tmp-" + Math.random().toString(36).slice(2, 8), categorieId: vals.categorieId || null, nom: vals.nom, relation: vals.relation || null, responsable: vals.responsable || null, description: vals.description || null, adresse: vals.adresse || null, telegramme: vals.telegramme || null, contactSecondaire: vals.contactSecondaire || null, horaires: vals.horaires || null, notes: vals.notes || null, typeService: vals.typeService || null, produits: vals.produits || null, tarifs: vals.tarifs || null, banque: vals.banque || null, moyensContact: vals.moyensContact || null, source: "site", createdAt: null, updatedAt: null, updatedBy: null };
       setContacts((prev) => [...prev, tmp]);
       setForm(null);
       const r = await creerContact(vals);
@@ -167,7 +170,7 @@ function FicheCard({ c, onOpen }: { c: DispContact; onOpen: () => void }) {
       <div className="flex items-center gap-2">
         <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg" style={{ background: "color-mix(in srgb,var(--accent) 16%,transparent)" }}><Building2 className="h-4 w-4 text-accent" /></span>
         <div className="min-w-0">
-          <div className="truncate text-[0.86rem] font-semibold">{c.nom}</div>
+          <div className="flex items-center gap-1.5"><span className="truncate text-[0.86rem] font-semibold">{c.nom}</span>{c.relation ? <span className="shrink-0 rounded-full px-1.5 py-0.5 text-[0.6rem] font-bold uppercase tracking-[0.04em]" style={{ color: "var(--accent)", background: "color-mix(in srgb,var(--accent) 14%,transparent)" }}>{c.relation}</span> : null}</div>
           {c.responsable ? <div className="truncate text-[0.72rem] text-faint"><User className="mb-0.5 mr-0.5 inline h-3 w-3" />{c.responsable}</div> : null}
         </div>
       </div>
@@ -226,7 +229,7 @@ function FicheDetail({ c, catNom, canEdit, cats, onClose, onEdit, onDelete, onMo
 // ── Formulaire (création / édition) ─────────────────────────────
 function ContactForm({ initial, cats, onClose, onSave }: { initial: DispContact | null; cats: DispCategorie[]; onClose: () => void; onSave: (vals: Record<string, string>) => void }) {
   const [v, setV] = useState<Record<string, string>>(() => {
-    const base: Record<string, string> = { nom: "", categorieId: "", responsable: "", description: "", adresse: "", telegramme: "", contactSecondaire: "", horaires: "", notes: "", typeService: "", produits: "", tarifs: "", banque: "", moyensContact: "" };
+    const base: Record<string, string> = { nom: "", categorieId: "", relation: "", responsable: "", description: "", adresse: "", telegramme: "", contactSecondaire: "", horaires: "", notes: "", typeService: "", produits: "", tarifs: "", banque: "", moyensContact: "" };
     if (initial) for (const k of Object.keys(base)) base[k] = (initial[k as keyof DispContact] as string) || "";
     return base;
   });
@@ -244,16 +247,22 @@ function ContactForm({ initial, cats, onClose, onSave }: { initial: DispContact 
     <Modal titre={initial ? "✏️ Modifier la fiche" : "➕ Nouveau contact"} onClose={onClose} max={620}>
       <div className="flex flex-col gap-3">
         <div className="grid gap-3 sm:grid-cols-2">
-          <Champ label="Nom (entreprise / personne) *"><input className={inputCls} value={v.nom} onChange={set("nom")} placeholder="Menuiserie de Rhodes…" autoFocus /></Champ>
+          <Champ label="Nom (personne ou entreprise) *"><input className={inputCls} value={v.nom} onChange={set("nom")} placeholder="Earl le forgeron, Menuiserie de Rhodes…" autoFocus /></Champ>
           <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Catégorie</span>
             <select className={inputCls} value={v.categorieId} onChange={(e) => setV((p) => ({ ...p, categorieId: e.target.value }))}><option value="">Sans catégorie</option>{cats.map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}</select>
           </div>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">{ligne("responsable", "Responsable", "Nom du gérant")}{ligne("telegramme", "Télégramme", "@indicatif")}</div>
-        <div className="grid gap-3 sm:grid-cols-2">{ligne("adresse", "Adresse", "Rhodes, Lemoyne…")}{ligne("horaires", "Horaires", "9h – 18h")}</div>
-        {ligne("contactSecondaire", "Contact secondaire", "Autre moyen de joindre")}
-        {ligne("description", "Description", "Ce que fait ce contact…", true)}
-        <div className="border-t border-border pt-1 text-[0.7rem] uppercase tracking-[0.06em] text-faint">Informations commerciales</div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Relation / type</span>
+            <input className={inputCls} value={v.relation} onChange={set("relation")} placeholder="Indic, Allié, Ami, Fournisseur…" list="disp-relations" />
+            <datalist id="disp-relations">{RELATIONS.map((r) => <option key={r} value={r} />)}</datalist>
+          </div>
+          {ligne("responsable", "Responsable / interlocuteur", "Gérant, contact principal…")}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">{ligne("telegramme", "Télégramme", "@indicatif")}{ligne("adresse", "Adresse / où le trouver", "Rhodes, saloon de…")}</div>
+        <div className="grid gap-3 sm:grid-cols-2">{ligne("horaires", "Horaires / dispo", "Le soir, 9h–18h…")}{ligne("contactSecondaire", "Contact secondaire", "Autre moyen de joindre")}</div>
+        {ligne("description", "Description", "Qui c'est / ce qu'il fait…", true)}
+        <div className="border-t border-border pt-1 text-[0.7rem] uppercase tracking-[0.06em] text-faint">Informations commerciales <span className="normal-case text-faint">(optionnel — pour les fournisseurs/entreprises)</span></div>
         <div className="grid gap-3 sm:grid-cols-2">{ligne("typeService", "Type de service", "Fourniture, réparation…")}{ligne("produits", "Produits disponibles", "Bois, munitions…")}</div>
         <div className="grid gap-3 sm:grid-cols-2">{ligne("tarifs", "Tarifs", "Prix connus")}{ligne("moyensContact", "Moyens de contact", "Télégramme, sur place…")}</div>
         {ligne("banque", "Infos bancaires (si présentes)", "Compte, références…")}
@@ -340,6 +349,7 @@ function HistoriqueModal({ historique, onClose }: { historique: DispHisto[]; onC
 
 // ── Import (coller le contenu du salon Discord) ─────────────────
 const CLE_MAP: [RegExp, string][] = [
+  [/^relation|^indic|^alli[eé]|nature du contact/i, "relation"],
   [/responsable|g[eé]rant|patron|proprio|propri[eé]taire/i, "responsable"],
   [/adresse|lieu|localisation|ville/i, "adresse"],
   [/t[eé]l[eé]gramme|telegram/i, "telegramme"],

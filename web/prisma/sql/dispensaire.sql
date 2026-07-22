@@ -24,7 +24,9 @@ INSERT INTO "DispensaireCategorie" ("id","nom","ordre") VALUES
   ('cat-mines','Mines',5),
   ('cat-menuiseries','Menuiseries',6),
   ('cat-armuriers','Armuriers',7),
-  ('cat-autres','Autres partenaires',8)
+  ('cat-indics','Indics',8),
+  ('cat-relations','Relations & alliés',9),
+  ('cat-autres','Autres partenaires',10)
 ON CONFLICT ("id") DO NOTHING;
 
 -- ── Fiches contacts ────────────────────────────────────────────
@@ -32,6 +34,7 @@ CREATE TABLE IF NOT EXISTS "DispensaireContact" (
   "id"               TEXT PRIMARY KEY,
   "categorieId"      TEXT,                    -- → DispensaireCategorie.id
   "nom"              TEXT NOT NULL,           -- entreprise / personne
+  "relation"         TEXT,                    -- indic / allié / fournisseur / ami…
   "responsable"      TEXT,
   "description"      TEXT,
   "adresse"          TEXT,
@@ -51,6 +54,8 @@ CREATE TABLE IF NOT EXISTS "DispensaireContact" (
   "updatedBy"        TEXT
 );
 ALTER TABLE "DispensaireContact" ENABLE ROW LEVEL SECURITY;
+-- Rattrapage si la table préexistait sans la colonne « relation ».
+ALTER TABLE "DispensaireContact" ADD COLUMN IF NOT EXISTS "relation" TEXT;
 CREATE INDEX IF NOT EXISTS "DispensaireContact_cat_idx" ON "DispensaireContact" ("categorieId");
 CREATE INDEX IF NOT EXISTS "DispensaireContact_nom_idx" ON "DispensaireContact" (lower("nom"));
 

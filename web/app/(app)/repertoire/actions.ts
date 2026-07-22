@@ -14,15 +14,15 @@ export type FicheImport = Partial<Record<ChampContact, string>> & { nom: string;
 
 type Admin = NonNullable<ReturnType<typeof createAdminClient>>;
 type ChampContact =
-  | "nom" | "categorieId" | "responsable" | "description" | "adresse" | "telegramme"
+  | "nom" | "categorieId" | "relation" | "responsable" | "description" | "adresse" | "telegramme"
   | "contactSecondaire" | "horaires" | "notes" | "typeService" | "produits" | "tarifs" | "banque" | "moyensContact";
 
 const LABELS: Record<string, string> = {
-  nom: "Nom", categorieId: "Catégorie", responsable: "Responsable", description: "Description", adresse: "Adresse",
+  nom: "Nom", categorieId: "Catégorie", relation: "Relation", responsable: "Responsable", description: "Description", adresse: "Adresse",
   telegramme: "Télégramme", contactSecondaire: "Contact secondaire", horaires: "Horaires", notes: "Notes",
   typeService: "Type de service", produits: "Produits", tarifs: "Tarifs", banque: "Infos bancaires", moyensContact: "Moyens de contact",
 };
-const CHAMPS: ChampContact[] = ["nom", "categorieId", "responsable", "description", "adresse", "telegramme", "contactSecondaire", "horaires", "notes", "typeService", "produits", "tarifs", "banque", "moyensContact"];
+const CHAMPS: ChampContact[] = ["nom", "categorieId", "relation", "responsable", "description", "adresse", "telegramme", "contactSecondaire", "horaires", "notes", "typeService", "produits", "tarifs", "banque", "moyensContact"];
 
 const s = (v: unknown, max = 4000) => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
 const norm = (x: string) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
