@@ -8,6 +8,7 @@
 // Supabase, no-op si les tables/variables ne sont pas là.
 // ═══════════════════════════════════════════════════════════════
 
+const { ChannelType } = require('discord.js');
 const { lireNomsContactsDispensaire, importerContactsDispensaire, enregistrerHistoriqueDispensaire } = require('./supabase-sync');
 
 const SALON_REPERTOIRE_ID = '1517505221629050901'; // salon des fiches contacts
@@ -106,18 +107,71 @@ async function _fetchTous(ch, cap = 3000) {
   return all;
 }
 
+// ── Forum : chaque POST (thread) = une fiche ────────────────────
+async function _threadsForum(ch, cap = 2000) {
+  const threads = [];
+  try { const act = await ch.threads.fetchActive(); if (act && act.threads) threads.push(...act.threads.values()); } catch { /* ignore */ }
+  let before;
+  for (let i = 0; i < 40 && threads.length < cap; i++) {
+    let page;
+    try { page = await ch.threads.fetchArchived({ limit: 100, before }); } catch { break; }
+    if (!page || !page.threads || page.threads.size === 0) break;
+    const arr = [...page.threads.values()];
+    threads.push(...arr);
+    before = arr[arr.length - 1];
+    if (!page.hasMore) break;
+  }
+  return threads;
+}
+
+async function _ficheThread(thread, ch) {
+  let lignes = [];
+  let starter = null;
+  try { starter = await thread.fetchStarterMessage(); } catch { starter = null; }
+  if (starter) {
+    for (const e of (starter.embeds || [])) {
+      if (e.description) lignes.push(...String(e.description).split('\n'));
+      for (const fld of (e.fields || [])) lignes.push(`${fld.name}: ${String(fld.value || '').replace(/\n/g, ' ')}`);
+      if (e.footer && e.footer.text) lignes.push(e.footer.text);
+    }
+    const c = (starter.content || '').trim();
+    if (c) lignes.push(...c.split('\n'));
+  }
+  lignes = lignes.map((l) => l.trim()).filter(Boolean);
+  const f = _fiche(thread.name, lignes);
+  if (!f) return null;
+  // Tags du forum appliqués au post → catégorie
+  try {
+    const avail = ch.availableTags || [];
+    const noms = (thread.appliedTags || []).map((id) => (avail.find((t) => t.id === id) || {}).name).filter(Boolean);
+    if (noms.length && !f.__cat) f.__cat = noms[0];
+  } catch { /* ignore */ }
+  return f;
+}
+
 async function exporterRepertoire(client, options = {}) {
   const salonId = options.salonId || SALON_REPERTOIRE_ID;
   const ch = await client.channels.fetch(salonId).catch(() => null);
-  if (!ch || !ch.isTextBased || !ch.isTextBased()) return { ok: false, raison: 'salon' };
+  if (!ch) return { ok: false, raison: 'salon' };
 
-  const messages = await _fetchTous(ch);
-
+  const estForum = ch.type === ChannelType.GuildForum || ch.type === ChannelType.GuildMedia;
   const fiches = [];
-  for (const m of messages) {
-    for (const e of (m.embeds || [])) { const f = _ficheEmbed(e); if (f && f.nom) fiches.push(f); }
-    const contenu = (m.content || '').trim();
-    if (contenu.length > 1 && !contenu.startsWith('/')) for (const f of _fichesTexte(contenu)) if (f && f.nom) fiches.push(f);
+  let lus = 0;
+  if (estForum) {
+    // Forum : un post (thread) = une fiche. Nom = titre du post, contenu = 1er message.
+    const threads = await _threadsForum(ch);
+    lus = threads.length;
+    for (const th of threads) { const f = await _ficheThread(th, ch); if (f && f.nom) fiches.push(f); }
+  } else if (ch.isTextBased && ch.isTextBased()) {
+    const messages = await _fetchTous(ch);
+    lus = messages.length;
+    for (const m of messages) {
+      for (const e of (m.embeds || [])) { const f = _ficheEmbed(e); if (f && f.nom) fiches.push(f); }
+      const contenu = (m.content || '').trim();
+      if (contenu.length > 1 && !contenu.startsWith('/')) for (const f of _fichesTexte(contenu)) if (f && f.nom) fiches.push(f);
+    }
+  } else {
+    return { ok: false, raison: 'salon' };
   }
 
   const existants = await lireNomsContactsDispensaire();
@@ -153,7 +207,7 @@ async function exporterRepertoire(client, options = {}) {
   }
   try { for (let j = 0; j < histo.length; j += 200) await enregistrerHistoriqueDispensaire(histo.slice(j, j + 200)); } catch { /* best-effort */ }
 
-  return { ok: true, lus: messages.length, detectees: fiches.length, importes, doublons };
+  return { ok: true, lus, detectees: fiches.length, importes, doublons, forum: estForum };
 }
 
 module.exports = { exporterRepertoire, SALON_REPERTOIRE_ID };
