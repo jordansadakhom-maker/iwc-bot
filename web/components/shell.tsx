@@ -8,6 +8,7 @@ import clsx from "clsx";
 import { NAV, ME, type Pole } from "@/lib/data";
 import { LogoutButton } from "@/components/logout-button";
 import { CommandPalette } from "@/components/command-palette";
+import { CaptureFlottante } from "@/components/capture-flottante";
 import { rafraichirAlertes } from "@/app/(app)/notifs-actions";
 import type { AlertesData, Acces } from "@/lib/queries";
 
@@ -365,6 +366,7 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
       </div>
 
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
+      <CaptureFlottante />
     </div>
   );
 }
