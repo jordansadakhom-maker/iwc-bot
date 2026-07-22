@@ -1,6 +1,7 @@
 "use server";
 
 import { envoyerCommande, type CommandeResult } from "@/lib/commandes";
+import { supprimerFiable } from "@/lib/suppression";
 
 // Actions médicales → déposées dans la file de commandes, appliquées par le bot
 // (dossier Discord + base) puis resynchronisées sur le site.
@@ -46,6 +47,6 @@ export async function ajouterOrdonnance(
 }
 
 export async function supprimerDossier(membreId: string): Promise<CommandeResult> {
-  if (!membreId) return { ok: false, error: "Dossier introuvable." };
-  return envoyerCommande("medical.delete", { membreId });
+  // Le dossier médical est référencé par `membreId` (et non `id`).
+  return supprimerFiable({ type: "medical.delete", payload: { membreId }, table: "DossierMedical", colonne: "membreId", valeur: membreId, okMsg: "Dossier supprimé." });
 }

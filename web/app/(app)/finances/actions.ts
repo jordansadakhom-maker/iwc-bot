@@ -2,6 +2,7 @@
 
 import { envoyerCommande, type CommandeResult } from "@/lib/commandes";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { supprimerFiable } from "@/lib/suppression";
 import { round2 } from "@/lib/format";
 
 // Ajuste un coffre (dépôt / retrait / montant exact).
@@ -45,8 +46,7 @@ export async function creerFacture(data: { objet: string; montant: number; clien
   return envoyerCommande("facture.create", { ...data, montant: Math.round(data.montant) });
 }
 export async function supprimerFacture(id: string): Promise<CommandeResult> {
-  if (!id) return { ok: false, error: "Facture introuvable." };
-  return envoyerCommande("facture.delete", { id });
+  return supprimerFiable({ type: "facture.delete", payload: { id }, table: "Facture", colonne: "id", valeur: id, okMsg: "Facture supprimée." });
 }
 
 // ── Portefeuilles perso ──

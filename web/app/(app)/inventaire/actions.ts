@@ -1,6 +1,7 @@
 "use server";
 
 import { envoyerCommande, type CommandeResult } from "@/lib/commandes";
+import { supprimerFiable } from "@/lib/suppression";
 
 export async function creerArme(data: { serie: string; type?: string; categorie?: string; appartenance?: string; membreNom?: string; notes?: string }): Promise<CommandeResult> {
   if (!data.serie || data.serie.trim().length < 1) return { ok: false, error: "Indique un n° de série." };
@@ -11,8 +12,7 @@ export async function majArme(id: string, patch: { serie?: string; type?: string
   return envoyerCommande("arme.update", { id, ...patch });
 }
 export async function supprimerArme(id: string): Promise<CommandeResult> {
-  if (!id) return { ok: false, error: "Arme introuvable." };
-  return envoyerCommande("arme.delete", { id });
+  return supprimerFiable({ type: "arme.delete", payload: { id }, table: "Arme", colonne: "id", valeur: id, okMsg: "Arme supprimée." });
 }
 
 // ── Stock du coffre commun (inventaire, séparé du registre d'armes) ──

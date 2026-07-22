@@ -1,19 +1,7 @@
 "use server";
 
 import { envoyerCommande, type CommandeResult } from "@/lib/commandes";
-import { createAdminClient } from "@/lib/supabase/admin";
-
-// Suppression fiable : on ATTEND le verdict du bot (il retire l'élément de SES
-// données, sinon la réconciliation le ré-ajouterait) ET on retire la ligne
-// directement en base → disparition immédiate du site, même si le bot est
-// momentanément désynchronisé (données éphémères sur Render).
-async function supprimerFiable(type: string, table: string, id: string, okMsg: string): Promise<CommandeResult> {
-  const cid = String(id || "").trim();
-  if (!cid) return { ok: false, error: "Élément introuvable." };
-  const r = await envoyerCommande(type, { id: cid }, { attendre: true, timeoutMs: 12000 });
-  try { const admin = createAdminClient(); if (admin) await admin.from(table).delete().eq("id", cid); } catch { /* best-effort */ }
-  return { ok: true, message: r.ok ? (r.message || okMsg) : okMsg };
-}
+import { supprimerFiable } from "@/lib/suppression";
 
 // ── Rapports d'informateurs ──
 export async function creerRapport(data: { info: string; source?: string; cible?: string; fiabilite?: number; statut?: string }): Promise<CommandeResult> {
@@ -25,7 +13,7 @@ export async function majRapport(id: string, patch: { info?: string; source?: st
   return envoyerCommande("rapport.update", { id, ...patch });
 }
 export async function supprimerRapport(id: string): Promise<CommandeResult> {
-  return supprimerFiable("rapport.delete", "RapportInfo", id, "Rapport supprimé.");
+  return supprimerFiable({ type: "rapport.delete", payload: { id }, table: "RapportInfo", colonne: "id", valeur: id, okMsg: "Rapport supprimé." });
 }
 
 // ── Personnes traquées ──
@@ -38,5 +26,5 @@ export async function majTraque(id: string, patch: { cible?: string; prime?: str
   return envoyerCommande("traque.update", { id, ...patch });
 }
 export async function supprimerTraque(id: string): Promise<CommandeResult> {
-  return supprimerFiable("traque.delete", "Traque", id, "Traque supprimée.");
+  return supprimerFiable({ type: "traque.delete", payload: { id }, table: "Traque", colonne: "id", valeur: id, okMsg: "Traque supprimée." });
 }
