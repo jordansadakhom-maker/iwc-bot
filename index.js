@@ -1055,6 +1055,7 @@ const SLASH_COMMANDS = [
     .addSubcommand(s => s.setName('programmer').setDescription('🕐 Programmer une opération à lancement automatique (Direction)')),
   new SlashCommandBuilder().setName('bilan-export').setDescription('📊 Exporter un Google Sheet (.xlsx) de tout : contrats, argent, opérations… (Direction)'),
   new SlashCommandBuilder().setName('synchro-web').setDescription('🔄 Vérifier / forcer la synchro du site web (Direction)'),
+  new SlashCommandBuilder().setName('exporter-repertoire').setDescription('📇 Exporter les fiches contacts du salon vers le Répertoire du site (Direction)'),
   new SlashCommandBuilder().setName('recuperer-donnees').setDescription('🛟 Récupérer opérations/contrats/dossiers perdus depuis les sauvegardes (Direction)'),
 ].map(c => c.toJSON());
 
@@ -1807,6 +1808,20 @@ async function handleSlashCommand(interaction) {
     } catch (e) {
       console.log('❌ /synchro-web:', e.message);
       return interaction.editReply({ content: `❌ Erreur pendant la synchro : ${e.message}` });
+    }
+  }
+  if (commandName === 'exporter-repertoire') {
+    if (!isDirection(interaction.member)) return interaction.reply({ content: "❌ Réservé à la Direction.", flags: MessageFlags.Ephemeral });
+    if (!supabaseSync.estActif?.()) return interaction.reply({ content: "⚠️ Synchro du site inactive (`SUPABASE_URL` / `SUPABASE_SERVICE_KEY` manquantes sur l'hébergeur).", flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      const { exporterRepertoire } = require('./export-repertoire');
+      const r = await exporterRepertoire(interaction.client);
+      if (!r.ok) return interaction.editReply({ content: r.raison === 'salon' ? "❌ Salon des fiches introuvable — vérifie que le bot a accès au salon `1517505221629050901`." : "❌ Export impossible pour le moment." });
+      return interaction.editReply({ content: `📇 **Export du répertoire terminé.**\n• ${r.lus} message(s) lus\n• ${r.detectees} fiche(s) détectée(s)\n• **${r.importes} importée(s)** sur le site\n• ${r.doublons} doublon(s) ignoré(s)\n\n➡️ Retrouve-les dans l'onglet **Répertoire contacts** du site (les fiches très courtes sont marquées « à compléter »).` });
+    } catch (e) {
+      console.log('❌ /exporter-repertoire:', e.message);
+      return interaction.editReply({ content: `❌ Erreur pendant l'export : ${e.message}` });
     }
   }
   if (commandName === 'recuperer-donnees') {
