@@ -11,10 +11,28 @@ const prioTone = (p: string): "warn" | "oxblood" | "muted" => /urgent/i.test(p) 
 const prioLabel = (p: string) => /urgent/i.test(p) ? "Urgente" : /important/i.test(p) ? "Importante" : "Normale";
 const clean = (s: string) => s.replace(/^#+\s?/gm, "").replace(/\*\*/g, "");
 
+const srcDe = (r: RapportTerrain) => (r.source === "micro" ? "micro" : "jeu");
+
+function Chip({ actif, onClick, children }: { actif: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button onClick={onClick} aria-pressed={actif}
+      className="rounded-full border px-2.5 py-1 text-[0.72rem] font-semibold transition"
+      style={actif
+        ? { borderColor: "color-mix(in srgb,var(--accent) 55%,var(--border))", background: "color-mix(in srgb,var(--accent) 16%,transparent)", color: "var(--accent)" }
+        : { borderColor: "var(--border)", background: "var(--surface)", color: "var(--muted)" }}>
+      {children}
+    </button>
+  );
+}
+
 export function RapportsListe({ rapports }: { rapports: RapportTerrain[] }) {
   const [q, setQ] = useState("");
+  const [prio, setPrio] = useState("");   // "" = toutes | "Urgente" | "Importante" | "Normale"
+  const [src, setSrc] = useState("");     // "" = toutes | "micro" | "jeu"
   const [sel, setSel] = useState<RapportTerrain | null>(null);
   const filtres = rapports.filter((r) => {
+    if (prio && prioLabel(r.priorite) !== prio) return false;
+    if (src && srcDe(r) !== src) return false;
     if (!q.trim()) return true;
     const hay = [r.agent, r.cible, r.lieu, r.resume, r.texte].filter(Boolean).join(" ").toLowerCase();
     return hay.includes(q.trim().toLowerCase());
@@ -36,6 +54,13 @@ export function RapportsListe({ rapports }: { rapports: RapportTerrain[] }) {
             <Search className="h-4 w-4 text-faint" />
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un nom, un lieu, un mot…" className="w-full bg-transparent text-[0.86rem] text-ink outline-none placeholder:text-faint" />
           </div>
+          <div className="mb-3 flex flex-wrap items-center gap-1.5">
+            <span className="mr-0.5 text-[0.68rem] uppercase tracking-[0.06em] text-faint">Priorité</span>
+            {["Urgente", "Importante", "Normale"].map((p) => <Chip key={p} actif={prio === p} onClick={() => setPrio(prio === p ? "" : p)}>{p}</Chip>)}
+            <span className="ml-2 mr-0.5 text-[0.68rem] uppercase tracking-[0.06em] text-faint">Source</span>
+            <Chip actif={src === "micro"} onClick={() => setSrc(src === "micro" ? "" : "micro")}><span className="inline-flex items-center gap-1"><Mic className="h-3 w-3" /> Ma voix</span></Chip>
+            <Chip actif={src === "jeu"} onClick={() => setSrc(src === "jeu" ? "" : "jeu")}><span className="inline-flex items-center gap-1"><Gamepad2 className="h-3 w-3" /> Son du jeu</span></Chip>
+          </div>
           <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
             {filtres.map((r) => (
               <button key={r.id} onClick={() => setSel(r)} className="rounded-[12px] border border-border bg-surface-2 px-3.5 py-3 text-left transition hover:-translate-y-0.5 hover:border-border-2">
@@ -54,7 +79,7 @@ export function RapportsListe({ rapports }: { rapports: RapportTerrain[] }) {
               </button>
             ))}
           </div>
-          {filtres.length === 0 ? <p className="mt-3 text-center text-[0.8rem] text-faint">Aucun rapport ne correspond à « {q} ».</p> : null}
+          {filtres.length === 0 ? <p className="mt-3 text-center text-[0.8rem] text-faint">Aucun rapport ne correspond{q.trim() ? <> à « {q} »</> : ""} avec ces filtres.</p> : null}
         </>
       )}
       {sel ? <RapportModal r={sel} onClose={() => setSel(null)} /> : null}

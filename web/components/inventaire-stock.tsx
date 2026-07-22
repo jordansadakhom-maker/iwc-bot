@@ -28,11 +28,16 @@ export function InventaireStock({ stock, mouvements }: { stock: StockItem[]; mou
   const [pending, setPending] = useState(0);
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [basSeul, setBasSeul] = useState(false); // n'afficher que les objets sous leur seuil
 
   const total = items.reduce((s, i) => s + i.quantite, 0);
   const parCat = CATS.map((c) => ({ cat: c, items: items.filter((s) => s.categorie === c && s.quantite > 0).sort((a, b) => a.nom.localeCompare(b.nom)) })).filter((g) => g.items.length);
   const query = q.trim().toLowerCase();
   const trouves = query ? items.filter((i) => i.quantite > 0 && i.nom.toLowerCase().includes(query)).sort((a, b) => a.nom.localeCompare(b.nom)) : [];
+  // Objets sous leur seuil de réappro (seuil défini ET quantité ≤ seuil) → à recompléter.
+  const basItems = items.filter((i) => i.quantite > 0 && i.seuil != null && i.quantite <= i.seuil).sort((a, b) => a.nom.localeCompare(b.nom));
+  const flatMode = !!query || basSeul;
+  const flatList = query ? trouves : basSeul ? basItems : [];
 
   // Applique un mouvement en optimiste + envoie au bot (best-effort).
   async function applique(categorie: string, nom: string, mode: "add" | "remove" | "set", qte: number) {
@@ -64,6 +69,13 @@ export function InventaireStock({ stock, mouvements }: { stock: StockItem[]; mou
         <div className="flex items-center gap-2.5">
           <h3 className="text-[0.8rem] font-semibold uppercase tracking-[0.06em] text-muted">Coffre commun — stock</h3>
           <span className="font-num text-[0.8rem] text-faint">{total} objet{total > 1 ? "s" : ""}</span>
+          {basItems.length ? (
+            <button onClick={() => setBasSeul((v) => !v)} aria-pressed={basSeul} title={basSeul ? "Afficher tout le stock" : "N'afficher que les objets à recompléter"}
+              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.68rem] font-bold transition"
+              style={{ color: "#fff", background: "var(--warn)", boxShadow: basSeul ? "0 0 0 2px color-mix(in srgb,var(--warn) 45%,transparent)" : "none" }}>
+              <AlertTriangle className="h-3 w-3" /> {basItems.length} sous le seuil{basSeul ? " · tout voir" : ""}
+            </button>
+          ) : null}
           {pending > 0 ? <span className="inline-flex items-center gap-1 text-[0.72rem] text-faint"><Loader2 className="h-3 w-3 animate-spin" /> synchronisation…</span> : null}
         </div>
         <div className="flex items-center gap-2">
@@ -81,7 +93,7 @@ export function InventaireStock({ stock, mouvements }: { stock: StockItem[]; mou
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
             <input className={inputCls + " pl-8"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un objet…" />
           </div>
-          {!query ? (
+          {!flatMode ? (
             <button
               onClick={() => { const allOpen = parCat.every((g) => open[g.cat]); const next: Record<string, boolean> = {}; parCat.forEach((g) => (next[g.cat] = !allOpen)); setOpen(next); }}
               className="shrink-0 rounded-lg border border-border bg-surface-2 px-2.5 py-2 text-[0.74rem] font-semibold text-muted hover:text-ink"
@@ -97,13 +109,13 @@ export function InventaireStock({ stock, mouvements }: { stock: StockItem[]; mou
           <Boxes className="h-6 w-6 text-faint" strokeWidth={1.6} />
           <p className="max-w-md text-[0.82rem] leading-relaxed text-muted">Le coffre est vide (ou pas encore synchronisé). Ajoute un objet, ou glisse une photo du coffre en jeu pour le remplir automatiquement.</p>
         </div>
-      ) : query ? (
-        // Résultats de recherche (à plat, toutes catégories)
-        trouves.length === 0 ? (
-          <p className="px-1 py-6 text-center text-[0.84rem] text-faint">Aucun objet ne correspond à « {q} ».</p>
+      ) : flatMode ? (
+        // Liste à plat (recherche ou « sous le seuil »), toutes catégories confondues
+        flatList.length === 0 ? (
+          <p className="px-1 py-6 text-center text-[0.84rem] text-faint">{query ? <>Aucun objet ne correspond à « {q} ».</> : "Aucun objet sous son seuil — le coffre est bien garni."}</p>
         ) : (
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-            {trouves.map((it) => <ItemCard key={it.id} it={it} applique={applique} onStep={setStepItem} showCat />)}
+            {flatList.map((it) => <ItemCard key={it.id} it={it} applique={applique} onStep={setStepItem} showCat />)}
           </div>
         )
       ) : (

@@ -50,6 +50,8 @@ export function CarteInteractive({ data, imageUrl }: { data: CarteData; imageUrl
   const visRoutes = routesOn ? routes.filter((r) => r.points.length >= 2) : [];
 
   const toggle = (k: string) => setActifs((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const tousActifs = typesPresents.length > 0 && typesPresents.every((ty) => actifs.has(ty.key));
+  const toggleTous = () => setActifs(() => (tousActifs ? new Set<string>() : new Set(typesPresents.map((ty) => ty.key))));
   const reset = () => setT({ x: 0, y: 0, z: 1 });
 
   const onWheel = useCallback((e: RWheelEvent) => {
@@ -86,6 +88,12 @@ export function CarteInteractive({ data, imageUrl }: { data: CarteData; imageUrl
     <div className="flex flex-col gap-3">
       {/* Filtres par type */}
       <div className="flex flex-wrap items-center gap-1.5">
+        {typesPresents.length > 1 ? (
+          <button onClick={toggleTous} title={tousActifs ? "Masquer tous les types" : "Afficher tous les types"}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-[0.74rem] font-semibold text-muted transition hover:border-border-2 hover:text-ink">
+            {tousActifs ? "Tout masquer" : "Tout afficher"}
+          </button>
+        ) : null}
         {typesPresents.map((ty) => {
           const on = actifs.has(ty.key);
           const n = points.filter((p) => p.type === ty.key).length;

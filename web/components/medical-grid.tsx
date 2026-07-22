@@ -71,7 +71,7 @@ export function MedicalGrid({ dossiers, membresLibres }: { dossiers: DossierItem
   const counts = STATUTS.map((s) => ({ ...s, n: dossiers.filter((d) => (d.statut || "").toLowerCase() === s.key).length }));
   const convalescents = dossiers.filter((d) => d.reposJusquAt).length;
   const filtres = dossiers
-    .filter((d) => !filtre || (d.statut || "").toLowerCase() === filtre)
+    .filter((d) => !filtre || (filtre === "__conval" ? !!d.reposJusquAt : (d.statut || "").toLowerCase() === filtre))
     .filter((d) => !q.trim() || d.nom.toLowerCase().includes(q.trim().toLowerCase()));
 
   return (
@@ -85,10 +85,11 @@ export function MedicalGrid({ dossiers, membresLibres }: { dossiers: DossierItem
             <div className="text-[0.68rem] uppercase tracking-[0.04em] text-faint">{c.label}</div>
           </button>
         ))}
-        <div className="rounded-[11px] border border-border bg-surface-2 px-3 py-2">
+        <button onClick={() => setFiltre(filtre === "__conval" ? null : "__conval")} className="rounded-[11px] border px-3 py-2 text-left transition"
+          style={{ borderColor: filtre === "__conval" ? "var(--warn)" : "var(--border)", background: filtre === "__conval" ? "color-mix(in srgb,var(--warn) 12%,transparent)" : "var(--surface-2)" }}>
           <div className="font-num text-[1.2rem] font-bold" style={{ color: "var(--warn)" }}>{convalescents}</div>
           <div className="text-[0.68rem] uppercase tracking-[0.04em] text-faint">Convalescence</div>
-        </div>
+        </button>
       </div>
 
       <div className="mb-3 flex items-center gap-2">
@@ -119,7 +120,7 @@ export function MedicalGrid({ dossiers, membresLibres }: { dossiers: DossierItem
             {d.reposJusquAt ? <div className="mt-1 inline-flex items-center gap-1.5 text-[0.72rem]" style={{ color: "var(--warn)" }}><Clock className="h-3.5 w-3.5" /> Convalescence</div> : null}
           </button>
         ))}
-        {filtres.length === 0 ? <p className="col-span-full px-1 py-6 text-center text-[0.84rem] text-faint">Aucun patient{filtre ? ` « ${labelOf(filtre)} »` : ""}{q ? ` pour « ${q} »` : ""}.</p> : null}
+        {filtres.length === 0 ? <p className="col-span-full px-1 py-6 text-center text-[0.84rem] text-faint">Aucun patient{filtre ? (filtre === "__conval" ? " en convalescence" : ` « ${labelOf(filtre)} »`) : ""}{q ? ` pour « ${q} »` : ""}.</p> : null}
       </div>
 
       {sel ? <DetailModal dossier={sel} onClose={() => setSel(null)} router={router} /> : null}
