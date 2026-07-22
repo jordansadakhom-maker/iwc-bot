@@ -8,6 +8,28 @@ import { uploadPhoto } from "@/app/(app)/actions-upload";
 // avec l'appareil (mobile) → envoi vers Supabase Storage → renvoie l'URL publique
 // via onUploaded. Sûr, best-effort.
 
+// Réduit une image trop grande côté client (canvas) avant l'envoi : évite de
+// dépasser la limite de corps des Server Actions et rend l'envoi rapide. Les GIF
+// et PDF ne sont pas transformés. En cas de souci, renvoie le fichier d'origine.
+async function reduireImage(file: File, maxDim: number): Promise<File> {
+  if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const { width, height } = bitmap;
+    if (Math.max(width, height) <= maxDim) { bitmap.close?.(); return file; }
+    const scale = maxDim / Math.max(width, height);
+    const w = Math.round(width * scale), h = Math.round(height * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) { bitmap.close?.(); return file; }
+    ctx.drawImage(bitmap, 0, 0, w, h); bitmap.close?.();
+    const blob: Blob | null = await new Promise((res) => canvas.toBlob(res, "image/jpeg", 0.85));
+    if (!blob) return file;
+    return new File([blob], file.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" });
+  } catch { return file; }
+}
+
 export function PhotoDrop({
   dossier,
   onUploaded,
@@ -16,6 +38,7 @@ export function PhotoDrop({
   label = "Glisse une photo ici ou clique pour choisir",
   compact = false,
   camera = true,
+  maxDim,
 }: {
   dossier: string;
   onUploaded: (url: string) => void;
@@ -24,6 +47,7 @@ export function PhotoDrop({
   label?: string;
   compact?: boolean;
   camera?: boolean;
+  maxDim?: number; // réduit l'image à cette dimension max (px) avant envoi
 }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -31,31 +55,42 @@ export function PhotoDrop({
   const inputRef = useRef<HTMLInputElement>(null);
   const camRef = useRef<HTMLInputElement>(null);
 
-  const envoyer = useCallback(async (file: File) => {
+  const envoyer = useCallback(async (file0: File) => {
     setErr(null); setBusy(true);
-    const fd = new FormData();
-    fd.set("file", file);
-    fd.set("dossier", dossier);
-    const r = await uploadPhoto(fd);
-    setBusy(false);
-    if (!r.ok || !r.url) { setErr(r.error || "Envoi impossible."); return; }
-    onUploaded(r.url);
-  }, [dossier, onUploaded]);
+    try {
+      const file = maxDim ? await reduireImage(file0, maxDim) : file0;
+      const fd = new FormData();
+      fd.set("file", file);
+      fd.set("dossier", dossier);
+      const r = await uploadPhoto(fd);
+      if (!r.ok || !r.url) { setErr(r.error || "Envoi impossible."); return; }
+      onUploaded(r.url);
+    } catch {
+      // Un fichier trop lourd fait rejeter la Server Action (limite de corps) → on
+      // ne reste jamais bloqué sur le spinner : on affiche une erreur claire.
+      setErr("Fichier trop lourd ou envoi interrompu. Réessaie avec une image plus légère.");
+    } finally {
+      setBusy(false);
+    }
+  }, [dossier, onUploaded, maxDim]);
 
   // Envoi de plusieurs fichiers d'un coup → une seule notification avec toutes les URLs.
   const envoyerPlusieurs = useCallback(async (files: File[]) => {
     if (!files.length) return;
     setErr(null); setBusy(true);
     const urls: string[] = [];
-    for (const file of files) {
-      const fd = new FormData(); fd.set("file", file); fd.set("dossier", dossier);
-      const r = await uploadPhoto(fd);
-      if (r.ok && r.url) urls.push(r.url);
-    }
+    try {
+      for (const file0 of files) {
+        const file = maxDim ? await reduireImage(file0, maxDim) : file0;
+        const fd = new FormData(); fd.set("file", file); fd.set("dossier", dossier);
+        const r = await uploadPhoto(fd);
+        if (r.ok && r.url) urls.push(r.url);
+      }
+    } catch { /* on traite ce qui a réussi ci-dessous */ }
     setBusy(false);
-    if (!urls.length) { setErr("Envoi impossible."); return; }
+    if (!urls.length) { setErr("Envoi impossible (fichier trop lourd ?)."); return; }
     if (onManyUploaded) onManyUploaded(urls); else urls.forEach((u) => onUploaded(u));
-  }, [dossier, onManyUploaded, onUploaded]);
+  }, [dossier, onManyUploaded, onUploaded, maxDim]);
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault(); setDrag(false);

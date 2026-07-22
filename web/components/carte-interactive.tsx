@@ -2,7 +2,7 @@
 
 import { useRef, useState, useCallback, type PointerEvent as RPointerEvent, type WheelEvent as RWheelEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Minus, Maximize2, MapPin, X, Route as RouteIcon, Compass, Pencil, Trash2, Image as ImageIcon, Check, Loader2 } from "lucide-react";
+import { Plus, Minus, Maximize2, MapPin, X, Route as RouteIcon, Compass, Pencil, Trash2, Image as ImageIcon, Check } from "lucide-react";
 import type { CarteData, CartePoint, CarteRoute } from "@/lib/queries";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { PhotoDrop } from "@/components/photo-drop";
@@ -429,17 +429,15 @@ function ItineraireModal({ canConf, onClose, onSave }: { canConf: boolean; onClo
 // ── Modale fond de carte ────────────────────────────────────────
 function FondModal({ current, onClose, onSave }: { current: string | null; onClose: () => void; onSave: (url: string) => void }) {
   const [url, setUrl] = useState("");
-  const [busy, setBusy] = useState(false);
   return (
     <Modal titre="🖼️ Fond de carte" onClose={onClose} max={460}>
       <div className="flex flex-col gap-3">
-        <p className="text-[0.82rem] text-muted">Choisis l&apos;image de la carte RDR2 utilisée sur Discord (les repères se placent par-dessus). Glisse un fichier, ou colle une URL.</p>
-        <PhotoDrop dossier="carte" onUploaded={(u) => { setBusy(true); onSave(u); }} label="Glisse l'image de la carte" />
+        <p className="text-[0.82rem] text-muted">Choisis l&apos;image de la carte RDR2 utilisée sur Discord (les repères se placent par-dessus). Glisse un fichier, ou colle une URL. Les grandes images sont réduites automatiquement.</p>
+        <PhotoDrop dossier="carte" maxDim={3000} camera={false} onUploaded={(u) => onSave(u)} label="Glisse l'image de la carte" />
         <div className="flex items-center gap-2">
           <input className={inputCls} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="…ou colle une URL https://…" />
           <button onClick={() => url && onSave(url)} disabled={!/^https?:\/\//.test(url)} className="shrink-0 rounded-lg px-3 py-2 text-[0.8rem] font-semibold text-black/85 disabled:opacity-40" style={{ background: "var(--accent)" }}>Utiliser</button>
         </div>
-        {busy ? <p className="inline-flex items-center gap-1.5 text-[0.78rem] text-faint"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Envoi…</p> : null}
         {current ? <button onClick={() => onSave("")} className="self-start text-[0.78rem] text-faint hover:text-oxblood">Retirer le fond actuel</button> : null}
       </div>
     </Modal>
