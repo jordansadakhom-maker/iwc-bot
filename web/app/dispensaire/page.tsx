@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowRight, Boxes, FlaskConical, Receipt, FileText, Badg
 import { getAccueil } from "@/lib/dispensaire-accueil";
 import { getRoleDispensaire } from "@/lib/dispensaire-roles";
 import { DISP_NAV } from "@/lib/dispensaire-nav";
+import { STANDALONE } from "@/lib/standalone";
 import { AccueilService } from "@/components/dispensaire-accueil-service";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +15,7 @@ const heureCourte = (iso: string) => { try { return new Intl.DateTimeFormat("fr-
 export default async function DispensaireAccueil() {
   const [d, role] = await Promise.all([getAccueil(), getRoleDispensaire()]);
   const habilite = role.perms.rh || role.perms.factures || role.perms.admin;
-  const modules = DISP_NAV.filter((t) => t.href !== "/dispensaire" && (!t.restreint || habilite) && (!t.admin || role.perms.admin));
+  const modules = DISP_NAV.filter((t) => t.href !== "/dispensaire" && (!t.restreint || habilite) && (!t.admin || role.perms.admin) && !(STANDALONE && t.href === "/repertoire"));
 
   // Tuiles d'alerte du tableau de bord.
   const tuiles = [

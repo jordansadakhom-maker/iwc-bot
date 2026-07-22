@@ -50,5 +50,20 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
+  // ── Mode « site autonome du Dispensaire » ──────────────────────────────────
+  // Tout est ramené au Dispensaire : l'accueil et les autres sections d'Iron Wolf
+  // renvoient vers /dispensaire (le reste de la plateforme n'apparaît jamais).
+  if (process.env.NEXT_PUBLIC_DISPENSAIRE_STANDALONE === "true") {
+    const auth = path === "/login" || path.startsWith("/auth");
+    const meta = path === "/opengraph-image" || path === "/manifest.webmanifest" || path === "/pwa-icon" || path === "/icon" || path === "/apple-icon";
+    const autorise = path.startsWith("/dispensaire") || auth || meta;
+    if (!autorise) {
+      const to = request.nextUrl.clone();
+      to.pathname = "/dispensaire";
+      to.search = "";
+      return NextResponse.redirect(to);
+    }
+  }
+
   return supabaseResponse;
 }
