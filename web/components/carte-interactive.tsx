@@ -189,13 +189,16 @@ export function CarteInteractive({ data, imageUrl }: { data: CarteData; imageUrl
         ref={viewport}
         onWheel={onWheel} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={onUp} onClick={onMapClick}
         className="relative overflow-hidden rounded-[14px] border border-border-2 select-none"
-        style={{ height: "min(72vh, 720px)", cursor: mode !== "none" ? "crosshair" : drag.current ? "grabbing" : "grab", background: "radial-gradient(1200px 700px at 50% -5%, color-mix(in srgb,var(--accent) 7%,transparent), transparent 60%), #16130d", touchAction: "none" }}
+        style={{ height: "min(82vh, 900px)", cursor: mode !== "none" ? "crosshair" : drag.current ? "grabbing" : "grab", background: "radial-gradient(1200px 700px at 50% -5%, color-mix(in srgb,var(--accent) 7%,transparent), transparent 60%), #16130d", touchAction: "none" }}
       >
-        <div className="absolute left-0 top-0 origin-top-left" style={{ transform: `translate(${t.x}px,${t.y}px) scale(${t.z})` }}>
-          <div ref={world} className="relative" style={{ width: "min(72vh,720px)", aspectRatio: "1 / 1" }}>
+        {/* Le « monde » occupe TOUTE la largeur du cadre ; sa hauteur suit le ratio
+            naturel de la carte (aucune bande sombre, aucun recadrage). On fait
+            défiler verticalement / on zoome via translate + scale. */}
+        <div className="absolute left-0 right-0 top-0 origin-top-left" style={{ transform: `translate(${t.x}px,${t.y}px) scale(${t.z})` }}>
+          <div ref={world} className={"relative w-full " + (img ? "" : "aspect-square")}>
             {img ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={img} alt="Carte" className="absolute inset-0 h-full w-full object-cover" draggable={false} />
+              <img src={img} alt="Carte" className="block h-auto w-full" draggable={false} />
             ) : (
               <FondParchemin />
             )}
