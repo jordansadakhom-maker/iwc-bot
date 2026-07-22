@@ -12,9 +12,12 @@ export async function repondreTelegramme(rdvId: string, texte: string): Promise<
   const t = (texte || "").trim();
   if (!rdvId) return { ok: false, error: "Télégramme introuvable." };
   if (t.length < 1) return { ok: false, error: "Écris une réponse." };
-  const r = await envoyerCommande("telegramme.repondre", { rdvId, texte: t.slice(0, 2000) });
+  // On ATTEND le verdict du bot pour CONFIRMER si le MP est réellement arrivé au
+  // client (au lieu d'un « livré » optimiste).
+  const r = await envoyerCommande("telegramme.repondre", { rdvId, texte: t.slice(0, 2000) }, { attendre: true, timeoutMs: 12000 });
   if (!r.ok) return { ok: false, error: r.error };
-  return { ok: true, info: "Réponse transmise — elle est livrée au client en message privé (~30 s)." };
+  if (r.enAttente) return { ok: true, info: "Réponse transmise — livraison au client en cours (~30 s)." };
+  return { ok: true, info: r.message || "Réponse transmise au client." };
 }
 
 // Réponse à un télégramme ENVOYÉ DEPUIS LE SITE (pas de MP Discord possible) :

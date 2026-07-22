@@ -113,8 +113,11 @@ function TgModal({ tg, onClose, router }: { tg: TelegrammeItem; onClose: () => v
         )}
       </div>
 
-      {tg.source === "web" && tg.contact ? (
-        <div className="mb-3 rounded-[8px] border border-border bg-surface-2 px-2.5 py-1.5 text-[0.8rem]"><span className="text-faint">📇 Répondre à : </span>{tg.contact}</div>
+      {tg.source === "web" ? (
+        <div className="mb-3 flex items-start gap-2 rounded-[8px] border px-2.5 py-2 text-[0.78rem]" style={{ borderColor: "color-mix(in srgb,var(--warn) 45%,var(--border))", background: "color-mix(in srgb,var(--warn) 8%,transparent)" }}>
+          <span style={{ color: "var(--warn)" }}>⚠️</span>
+          <span className="text-muted">Télégramme envoyé depuis le site : <b className="text-ink">pas de MP Discord possible</b> (l&apos;expéditeur n&apos;est pas un membre Discord). Ta réponse est <b>gardée en trace</b> ; recontacte-le via son moyen de contact{tg.contact ? <> : <b className="text-ink">{tg.contact}</b></> : null}.</span>
+        </div>
       ) : null}
 
       {/* Fil de conversation */}
@@ -147,7 +150,7 @@ function TgModal({ tg, onClose, router }: { tg: TelegrammeItem; onClose: () => v
       {/* Réponse */}
       {/ouvert/i.test(tg.statut) ? (
         <div className="mt-3 flex items-end gap-2">
-          <textarea className={inputCls + " min-h-[46px] resize-y"} value={texte} onChange={(e) => setTexte(e.target.value)} placeholder="Réponds au client — il reçoit ton message en privé (trace conservée)…" maxLength={2000} />
+          <textarea className={inputCls + " min-h-[46px] resize-y"} value={texte} onChange={(e) => setTexte(e.target.value)} placeholder={tg.source === "web" ? "Réponse gardée en trace — recontacte via le contact ci-dessus (pas de MP Discord)…" : "Réponds au client — il le reçoit en message privé sur Discord (trace conservée)…"} maxLength={2000} />
           <button onClick={repondre} disabled={busy === "rep"} className="inline-flex shrink-0 items-center gap-1 rounded-lg px-3 py-2 text-[0.8rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>
             {busy === "rep" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" strokeWidth={2} />}
           </button>
