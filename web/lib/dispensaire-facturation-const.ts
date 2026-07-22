@@ -9,7 +9,7 @@ export const estBandage = (item: string) => norm(item).includes("bandage");
 
 export type Vente = { id: string; patient: string; item: string; quantite: number; prixUnitaire: number; total: number; note: string | null; par: string | null; createdAt: string };
 export type PatientSemaine = { patient: string; bandages: number; total: number; depasse: boolean };
-export type VentesData = { connecte: boolean; pret: boolean; canEdit: boolean; ventes: Vente[]; semaine: PatientSemaine[]; caSemaine: number; mondayYmd: string };
+export type VentesData = { connecte: boolean; pret: boolean; canEdit: boolean; ventes: Vente[]; semaine: PatientSemaine[]; caSemaine: number; mondayYmd: string; prix: number; plafond: number };
 
 // ── Factures ────────────────────────────────────────────────────────────────
 export const FACTURE_STATUTS = [

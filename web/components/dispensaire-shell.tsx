@@ -7,9 +7,9 @@ import { DISP_NAV } from "@/lib/dispensaire-nav";
 
 // Coquille de la section « Dispensaire de Saint-Denis » : en-tête registre 1904
 // + barre d'onglets horizontale (responsive). Séparée de la coquille Iron Wolf.
-export function DispensaireShell({ children, habilite = false, notifCount = 0 }: { children: React.ReactNode; habilite?: boolean; notifCount?: number }) {
+export function DispensaireShell({ children, habilite = false, estAdmin = false, notifCount = 0 }: { children: React.ReactNode; habilite?: boolean; estAdmin?: boolean; notifCount?: number }) {
   const path = usePathname();
-  const tabs = DISP_NAV.filter((t) => !t.restreint || habilite);
+  const tabs = DISP_NAV.filter((t) => (!t.restreint || habilite) && (!t.admin || estAdmin));
   const estActif = (href: string) => (href === "/dispensaire" ? path === "/dispensaire" : path.startsWith(href));
 
   return (

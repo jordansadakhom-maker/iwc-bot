@@ -2,6 +2,7 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAcces } from "@/lib/queries";
+import { getConfig } from "@/lib/dispensaire-roles";
 import {
   estBandage, factureOuverte,
   type Vente, type PatientSemaine, type VentesData,
@@ -35,7 +36,8 @@ function lundiCourant(): string {
 
 // ── 1) Ventes ───────────────────────────────────────────────────────────────
 export async function getVentes(): Promise<VentesData> {
-  const vide: VentesData = { connecte: false, pret: false, canEdit: false, ventes: [], semaine: [], caSemaine: 0, mondayYmd: "" };
+  const cfg = await getConfig();
+  const vide: VentesData = { connecte: false, pret: false, canEdit: false, ventes: [], semaine: [], caSemaine: 0, mondayYmd: "", prix: cfg.prixBandage, plafond: cfg.plafondBandage };
   const admin = createAdminClient();
   if (!admin) return vide;
   const monday = lundiCourant();
@@ -57,9 +59,9 @@ export async function getVentes(): Promise<VentesData> {
     map.set(v.patient, e);
   }
   const semaine: PatientSemaine[] = [...map.entries()]
-    .map(([patient, e]) => ({ patient, bandages: e.bandages, total: e.total, depasse: e.bandages > 10 }))
+    .map(([patient, e]) => ({ patient, bandages: e.bandages, total: e.total, depasse: e.bandages > cfg.plafondBandage }))
     .sort((a, b) => Number(b.depasse) - Number(a.depasse) || b.bandages - a.bandages);
-  return { connecte: true, pret: true, canEdit: true, ventes, semaine, caSemaine, mondayYmd: monday };
+  return { connecte: true, pret: true, canEdit: true, ventes, semaine, caSemaine, mondayYmd: monday, prix: cfg.prixBandage, plafond: cfg.plafondBandage };
 }
 
 // ── 2) Factures (réservé aux chefs) ─────────────────────────────────────────

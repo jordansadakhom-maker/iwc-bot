@@ -2,6 +2,7 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAcces } from "@/lib/queries";
+import { getConfig } from "@/lib/dispensaire-roles";
 
 // ── Centre de notifications (alertes intelligentes dérivées de l'état courant) ─
 export type Notif = { id: string; severite: "alerte" | "attention" | "info"; type: string; texte: string; href: string };
@@ -24,6 +25,7 @@ export async function getNotifications(): Promise<{ items: Notif[]; count: numbe
   if (!admin) return { items: [], count: 0 };
   let habilite = false;
   try { habilite = (await getAcces()).peutMedical; } catch { habilite = true; }
+  const cfg = await getConfig();
   const monday = lundiCourant();
 
   const [stock, matieres, factures, ventes, frais, salaries] = await Promise.all([
@@ -46,12 +48,12 @@ export async function getNotifications(): Promise<{ items: Notif[]; count: numbe
   // Ventes : patients ayant dépassé 10 bandages cette semaine.
   const bandagesSem = new Map<string, number>();
   for (const v of ventes || []) if (/bandage/i.test(String(v.item || "")) && ymdParis(String(v.createdAt)) >= monday) bandagesSem.set(String(v.patient), (bandagesSem.get(String(v.patient)) || 0) + num(v.quantite));
-  for (const [patient, n] of bandagesSem) if (n > 10) items.push({ id: "vt-" + patient, severite: "attention", type: "Limite de vente", texte: `${patient} a dépassé la limite (${n}/10 bandages cette semaine)`, href: "/dispensaire/ventes" });
+  for (const [patient, n] of bandagesSem) if (n > cfg.plafondBandage) items.push({ id: "vt-" + patient, severite: "attention", type: "Limite de vente", texte: `${patient} a dépassé la limite (${n}/${cfg.plafondBandage} bandages cette semaine)`, href: "/dispensaire/ventes" });
 
   const fraisAttente = (frais || []).filter((f) => String(f.statut) === "en_attente").length;
   if (fraisAttente) items.push({ id: "fr", severite: "attention", type: "Notes de frais", texte: `${fraisAttente} note(s) de frais à valider`, href: "/dispensaire/frais" });
 
-  if (habilite) for (const s of salaries || []) if (String(s.statut || "actif") === "actif" && num(s.absInjustifiees) >= 3) items.push({ id: "rh-" + s.nom, severite: "alerte", type: "RH", texte: `${s.nom} : ${num(s.absInjustifiees)} absences injustifiées — éligible au renvoi`, href: "/dispensaire/rh" });
+  if (habilite) for (const s of salaries || []) if (String(s.statut || "actif") === "actif" && num(s.absInjustifiees) >= cfg.seuilRenvoi) items.push({ id: "rh-" + s.nom, severite: "alerte", type: "RH", texte: `${s.nom} : ${num(s.absInjustifiees)} absences injustifiées — éligible au renvoi`, href: "/dispensaire/rh" });
 
   const ordre = { alerte: 0, attention: 1, info: 2 };
   items.sort((a, b) => ordre[a.severite] - ordre[b.severite]);

@@ -8,7 +8,6 @@ import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { creerSalarie, majSalarie, supprimerSalarie, ajusterAbsence } from "@/app/dispensaire/rh/actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
-const SEUIL = 3; // absences injustifiées → « à renvoyer »
 const GRADES = ["Interne", "Aide-soignant", "Infirmier", "Médecin", "Médecin-chef", "Adjoint", "Chef", "Directeur"];
 const STATUTS = [{ key: "actif", label: "Actif", tone: "var(--good)" }, { key: "suspendu", label: "Suspendu", tone: "var(--warn)" }, { key: "renvoye", label: "Renvoyé", tone: "var(--oxblood)" }];
 const statTone = (s: string) => STATUTS.find((x) => x.key === s)?.tone || "var(--muted)";
@@ -19,6 +18,7 @@ const norm = (x: string) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,
 export function DispensaireRh({ data }: { data: RhData }) {
   const router = useRouter();
   const canEdit = data.canEdit;
+  const SEUIL = data.seuilRenvoi; // seuil configurable (panneau admin)
   const [sal, setSal] = useState<Salarie[]>(data.salaries);
   const [q, setQ] = useState("");
   const [statut, setStatut] = useState("");
