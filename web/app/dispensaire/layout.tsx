@@ -18,5 +18,9 @@ export const metadata = {
 export default async function DispensaireLayout({ children }: { children: React.ReactNode }) {
   const [role, notifCount, standalone] = await Promise.all([getRoleDispensaire(), getNotifCount(), isStandalone()]);
   const habilite = role.perms.rh || role.perms.factures || role.perms.admin;
-  return <DispensaireShell habilite={habilite} estAdmin={role.perms.admin} notifCount={notifCount} standalone={standalone}>{children}</DispensaireShell>;
+  // Dateline d'ambiance : jour réel, mais millésime figé à 1904 (la fiction du
+  // registre). Calculée côté serveur pour éviter tout décalage d'hydratation.
+  const jour = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "numeric", month: "long" }).format(new Date());
+  const dateline = `le ${jour} · 1904`;
+  return <DispensaireShell habilite={habilite} estAdmin={role.perms.admin} notifCount={notifCount} standalone={standalone} dateline={dateline}>{children}</DispensaireShell>;
 }

@@ -28,8 +28,6 @@ export default async function DispensaireAccueil() {
 
   return (
     <div className="flex flex-col gap-5">
-      <p className="max-w-2xl font-display text-[1rem] italic text-muted">Bienvenue au registre du Dispensaire. Tout ce qui se passe ici — soins, stocks, personnel, factures — se tient à jour d&apos;un même endroit.</p>
-
       {/* Tuiles d'alerte */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {tuiles.map((t) => {
@@ -54,7 +52,7 @@ export default async function DispensaireAccueil() {
       <section className="rounded-[14px] border border-border bg-surface p-4">
         <h3 className="mb-2 flex items-center gap-2 text-[0.9rem] font-semibold"><Clock className="h-4 w-4 text-accent" /> Dernières activités</h3>
         {d.activites.length === 0 ? (
-          <p className="py-4 text-center text-[0.82rem] italic text-faint">Aucune activité récente.</p>
+          <p className="py-4 text-center text-[0.82rem] italic text-faint">Le registre est encore silencieux — la première écriture s&apos;inscrira ici.</p>
         ) : (
           <div className="flex flex-col divide-y divide-border">
             {d.activites.map((a) => {

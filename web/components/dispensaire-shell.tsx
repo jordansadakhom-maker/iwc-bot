@@ -3,17 +3,32 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowLeft, Cross, Search, Bell } from "lucide-react";
-import { DISP_NAV } from "@/lib/dispensaire-nav";
+import { DISP_NAV, DISP_EXTRA } from "@/lib/dispensaire-nav";
+import { RegistreHeader } from "@/components/dispensaire-ui";
 import { LogoutButton } from "@/components/logout-button";
 
 // Coquille de la section « Dispensaire de Saint-Denis » : en-tête registre 1904
 // + barre d'onglets horizontale (responsive). Séparée de la coquille Iron Wolf.
-export function DispensaireShell({ children, habilite = false, estAdmin = false, notifCount = 0, standalone = false }: { children: React.ReactNode; habilite?: boolean; estAdmin?: boolean; notifCount?: number; standalone?: boolean }) {
+export function DispensaireShell({ children, habilite = false, estAdmin = false, notifCount = 0, standalone = false, dateline }: { children: React.ReactNode; habilite?: boolean; estAdmin?: boolean; notifCount?: number; standalone?: boolean; dateline?: string }) {
   const path = usePathname();
   // En mode autonome, on masque l'onglet Répertoire (page hébergée par la coquille
   // Iron Wolf) pour ne laisser aucune trace de l'autre plateforme.
   const tabs = DISP_NAV.filter((t) => (!t.restreint || habilite) && (!t.admin || estAdmin) && !(standalone && t.href === "/repertoire"));
   const estActif = (href: string) => (href === "/dispensaire" ? path === "/dispensaire" : path.startsWith(href));
+
+  // En-tête de folio de la page courante : correspondance la plus précise dans la
+  // barre d'onglets (préfixe le plus long), sinon table des routes annexes.
+  const folioFor = (() => {
+    if (path === "/dispensaire") return { titre: DISP_NAV[0].label, sous: DISP_NAV[0].desc, folio: "Fol. 01" };
+    const match = DISP_NAV
+      .map((t, i) => ({ t, i }))
+      .filter(({ t }) => t.href !== "/dispensaire" && path.startsWith(t.href))
+      .sort((a, b) => b.t.href.length - a.t.href.length)[0];
+    if (match) return { titre: match.t.label, sous: match.t.desc, folio: `Fol. ${String(match.i + 1).padStart(2, "0")}` };
+    const extraKey = Object.keys(DISP_EXTRA).find((k) => path.startsWith(k));
+    if (extraKey) return { titre: DISP_EXTRA[extraKey].label, sous: DISP_EXTRA[extraKey].desc, folio: undefined };
+    return null;
+  })();
 
   return (
     <div className="min-h-screen" style={{ background: "radial-gradient(1100px 500px at 50% -10%, color-mix(in srgb,var(--accent) 8%,transparent), transparent 60%)" }}>
@@ -66,7 +81,10 @@ export function DispensaireShell({ children, habilite = false, estAdmin = false,
           })}
         </nav>
 
-        <main className="mt-5 pb-16">{children}</main>
+        <main className="mt-5 pb-16">
+          {folioFor ? <RegistreHeader titre={folioFor.titre} sous={folioFor.sous} folio={folioFor.folio} dateline={dateline} /> : null}
+          {children}
+        </main>
       </div>
     </div>
   );

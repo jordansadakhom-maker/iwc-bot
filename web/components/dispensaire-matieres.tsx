@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { FlaskConical, Plus, Search, Check, Pencil, Trash2, AlertTriangle, Minus, Truck, ShoppingCart } from "lucide-react";
 import { enRupture, suggestionCommande, type MatieresData, type Matiere } from "@/lib/dispensaire-matieres-const";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
+import { VideRegistre } from "@/components/dispensaire-ui";
 import { creerMatiere, majMatiere, ajusterMatiere, supprimerMatiere } from "@/app/dispensaire/matieres/actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
@@ -70,7 +71,11 @@ export function DispensaireMatieres({ data }: { data: MatieresData }) {
 
       <div className="relative"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" /><input className={inputCls + " pl-8"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher une matière, un fournisseur…" /></div>
 
-      {liste.length === 0 ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">{mats.length ? "Aucune matière ne correspond." : "Aucune matière — ajoute la première."}</p> : (
+      {liste.length === 0 ? (
+        mats.length
+          ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">Aucune matière ne correspond à ta recherche.</p>
+          : <VideRegistre icon={FlaskConical} titre="Aucune matière première au registre" sous="Inscris une première matière — quantité, seuil, fournisseur — et l'officine te signalera d'elle-même ce qu'il faut recommander." />
+      ) : (
         <div className="grid gap-2.5 lg:grid-cols-2">
           {liste.map((m) => {
             const rupture = enRupture(m);

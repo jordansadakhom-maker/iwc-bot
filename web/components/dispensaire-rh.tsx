@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Users, Plus, Search, Loader2, X, Check, Pencil, Trash2, AlertTriangle, CalendarDays, Landmark, Send, Minus } from "lucide-react";
 import type { RhData, Salarie } from "@/lib/dispensaire-rh";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
+import { VideRegistre } from "@/components/dispensaire-ui";
 import { creerSalarie, majSalarie, supprimerSalarie, ajusterAbsence } from "@/app/dispensaire/rh/actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
@@ -85,7 +86,9 @@ export function DispensaireRh({ data }: { data: RhData }) {
       </div>
 
       {liste.length === 0 ? (
-        <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">{q || statut ? "Aucun salarié ne correspond." : "Aucun salarié — ajoute le premier."}</p>
+        q || statut
+          ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">Aucun salarié ne correspond à ta recherche.</p>
+          : <VideRegistre icon={Users} titre="Le personnel n'est pas encore inscrit" sous="Enregistre un premier salarié — grade, embauche, télégramme — et sa fiche s'ouvrira ici, avec le suivi des absences." />
       ) : (
         <div className="grid gap-2.5 lg:grid-cols-2">
           {liste.map((s) => {
