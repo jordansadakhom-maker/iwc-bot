@@ -20,7 +20,7 @@ import {
   creerVente, majVente, supprimerVente,
   creerContrat, envoyerContrat, marquerContrat, supprimerContrat, honorerContrat,
   ajusterCoffreArmurerie,
-  creerProduit, majProduit, supprimerProduit, importerCatalogue, importerRecettes, validerCaisse, fabriquerProduit, lireCarteIdentite, lireNumeroSerie, type LigneCaisse,
+  creerProduit, majProduit, supprimerProduit, importerCatalogue, importerRecettes, validerCaisse, fabriquerProduit, lireCarteIdentite, lireNumeroSerie, type LigneCaisse, type MouvementStock,
 } from "@/app/(app)/armurerie/actions";
 
 type Router = ReturnType<typeof useRouter>;
@@ -87,10 +87,10 @@ const ctrTone = (s: string): "good" | "warn" | "accent" | "oxblood" | "muted" =>
   s === "honore" ? "good" : s === "signe" ? "good" : s === "envoye" ? "accent" : s === "refuse" ? "oxblood" : "muted";
 const ctrLabel = (s: string) => s === "honore" ? "Honoré ✓" : s === "signe" ? "Signé" : s === "envoye" ? "Envoyé" : s === "refuse" ? "Refusé" : "Brouillon";
 
-type TabKey = "caisse" | "produits" | "ressources" | "commandes" | "rdv" | "ventes" | "clients" | "contrats" | "employes" | "pointage" | "paies" | "comptabilite" | "impots" | "notes" | "taches" | "activite";
-const TAB_KEYS = new Set<TabKey>(["caisse", "produits", "ressources", "commandes", "rdv", "ventes", "clients", "contrats", "employes", "pointage", "paies", "comptabilite", "impots", "notes", "taches", "activite"]);
+type TabKey = "caisse" | "produits" | "ressources" | "journal" | "commandes" | "rdv" | "ventes" | "clients" | "contrats" | "employes" | "pointage" | "paies" | "comptabilite" | "impots" | "notes" | "taches" | "activite";
+const TAB_KEYS = new Set<TabKey>(["caisse", "produits", "ressources", "journal", "commandes", "rdv", "ventes", "clients", "contrats", "employes", "pointage", "paies", "comptabilite", "impots", "notes", "taches", "activite"]);
 
-export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouvementsCoffre, produits, employes, pointages, paies, impots, notes, taches, commandes, ressources, rdvs }: { clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvementsCoffre: ArmMouvement[]; produits: ArmProduit[]; employes: ArmEmploye[]; pointages: ArmPointage[]; paies: ArmPaie[]; impots: ArmImpot[]; notes: ArmNote[]; taches: ArmTache[]; commandes: ArmCommande[]; ressources: ArmRessource[]; rdvs: ArmRdv[] }) {
+export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouvementsCoffre, produits, employes, pointages, paies, impots, notes, taches, commandes, ressources, rdvs, mouvementsStock = [] }: { clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvementsCoffre: ArmMouvement[]; produits: ArmProduit[]; employes: ArmEmploye[]; pointages: ArmPointage[]; paies: ArmPaie[]; impots: ArmImpot[]; notes: ArmNote[]; taches: ArmTache[]; commandes: ArmCommande[]; ressources: ArmRessource[]; rdvs: ArmRdv[]; mouvementsStock?: MouvementStock[] }) {
   const router = useRouter();
   // Onglet ouvert au démarrage depuis l'URL (?tab=…), ex. une notification qui
   // pointe droit vers « Impôts » ou « Rendez-vous ».
@@ -108,6 +108,7 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
     { key: "caisse", label: "Caisse", icon: ShoppingCart, n: produits.length },
     { key: "produits", label: "Produits", icon: Package, n: produits.length },
     { key: "ressources", label: "Ressources", icon: Pickaxe, n: ressources.length },
+    { key: "journal", label: "Journal stock", icon: ScrollText, n: mouvementsStock.length },
     { key: "commandes", label: "Carnet de commande", icon: ClipboardList, n: commandes.filter((c) => c.statut === "en_attente" || c.statut === "prete").length },
     { key: "rdv", label: "Rendez-vous", icon: CalendarClock, n: rdvsAVenir },
     { key: "ventes", label: "Registre des ventes", icon: ScrollText, n: ventes.length },
@@ -152,6 +153,7 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
       {tab === "caisse" ? <CaisseTab produits={produits} ressources={ressources} clients={clients} router={router} /> : null}
       {tab === "produits" ? <ProduitsTab produits={produits} ressources={ressources} router={router} /> : null}
       {tab === "ressources" ? <RessourcesTab ressources={ressources} router={router} /> : null}
+      {tab === "journal" ? <JournalStockTab mouvements={mouvementsStock} /> : null}
       {tab === "commandes" ? <CarnetCommandesTab commandes={commandes} produits={produits} clients={clients.map((c) => ({ id: c.id, nom: c.nom }))} router={router} /> : null}
       {tab === "rdv" ? <RdvArmurerieTab rdvs={rdvs} clients={clients.map((c) => ({ id: c.id, nom: c.nom }))} router={router} /> : null}
       {tab === "clients" ? <ClientsTab clients={clients} ventes={ventes} contrats={contrats} router={router} /> : null}
@@ -180,6 +182,71 @@ function matchNomClient(clients: ArmClient[], nomLu: string): ArmClient | null {
 }
 
 // ═══════════════════ CAISSE (point de vente) ═══════════════════
+// ═══════════════════ JOURNAL DES MOUVEMENTS DE STOCK ═══════════════════
+const ORIGINES_STOCK = [
+  { key: "vente", label: "Vente", tone: "var(--oxblood)" },
+  { key: "fabrication", label: "Fabrication", tone: "var(--good)" },
+  { key: "ajustement", label: "Ajustement", tone: "var(--warn)" },
+  { key: "ocr", label: "OCR / photo", tone: "var(--steel)" },
+  { key: "correction", label: "Correction", tone: "var(--accent)" },
+];
+function JournalStockTab({ mouvements }: { mouvements: MouvementStock[] }) {
+  const [q, setQ] = useState("");
+  const [orig, setOrig] = useState("");
+  const dateFR = (v: string | null) => { if (!v) return ""; try { return new Date(v).toLocaleString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
+  const t = q.trim().toLowerCase();
+  const filtres = mouvements.filter((m) => {
+    if (orig && m.origine !== orig) return false;
+    if (!t) return true;
+    return `${m.nom} ${m.detail || ""} ${m.par || ""}`.toLowerCase().includes(t);
+  });
+
+  if (!mouvements.length) {
+    return <Vide icon={ScrollText} texte="Aucun mouvement de stock enregistré pour l'instant. Chaque vente, fabrication ou correction s'inscrira ici — avant → après, origine et auteur. (Nécessite d'exécuter armurerie-mouvement-stock.sql dans Supabase.)" />;
+  }
+  return (
+    <div>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[180px] flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
+          <input className={inputCls + " pl-8"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher (ressource, détail, auteur)…" />
+        </div>
+        {ORIGINES_STOCK.filter((o) => mouvements.some((m) => m.origine === o.key)).map((o) => {
+          const on = orig === o.key;
+          return <button key={o.key} onClick={() => setOrig(on ? "" : o.key)} className="rounded-full border px-2.5 py-1 text-[0.72rem] font-semibold transition" style={on ? { borderColor: `color-mix(in srgb,${o.tone} 55%,var(--border))`, background: `color-mix(in srgb,${o.tone} 16%,transparent)`, color: "var(--ink)" } : { borderColor: "var(--border)", color: "var(--muted)" }}>{o.label}</button>;
+        })}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[660px] border-collapse text-left text-[0.82rem]">
+          <thead>
+            <tr className="text-[0.68rem] uppercase tracking-[0.06em] text-faint">
+              {["Quand", "Élément", "Mouvement", "Avant → Après", "Origine", "Par"].map((h) => <th key={h} className="border-b border-border px-2.5 py-2 font-semibold">{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {filtres.map((m) => {
+              const neg = m.delta < 0;
+              const o = ORIGINES_STOCK.find((x) => x.key === m.origine);
+              const tone = o?.tone || "var(--muted)";
+              return (
+                <tr key={m.id} className="hover:bg-[color-mix(in_srgb,var(--ink)_4%,transparent)]">
+                  <td className="border-b border-border px-2.5 py-2 text-faint">{dateFR(m.createdAt)}</td>
+                  <td className="border-b border-border px-2.5 py-2 font-medium">{m.nom}{m.cible === "produit" ? <span className="ml-1 text-[0.64rem] text-faint">(produit)</span> : null}</td>
+                  <td className="border-b border-border px-2.5 py-2 font-num font-bold" style={{ color: neg ? "var(--oxblood)" : "var(--good)" }}>{neg ? "" : "+"}{m.delta}</td>
+                  <td className="border-b border-border px-2.5 py-2 font-num text-muted">{m.avant ?? "—"} → {m.apres ?? "—"}</td>
+                  <td className="border-b border-border px-2.5 py-2"><span className="rounded-md px-1.5 py-0.5 text-[0.64rem] font-bold" style={{ color: tone, background: `color-mix(in srgb,${tone} 15%,transparent)` }}>{o?.label || m.origine}</span>{m.detail ? <span className="ml-1.5 text-[0.7rem] text-faint">{m.detail}</span> : null}</td>
+                  <td className="border-b border-border px-2.5 py-2 text-faint">{m.par || "—"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {filtres.length === 0 ? <p className="px-1 py-6 text-center text-[0.8rem] text-faint">Aucun mouvement pour ce filtre.</p> : null}
+      </div>
+    </div>
+  );
+}
+
 function CaisseTab({ produits, ressources, clients, router }: { produits: ArmProduit[]; ressources: ArmRessource[]; clients: ArmClient[]; router: Router }) {
   const [q, setQ] = useState("");
   const [cart, setCart] = useState<Record<string, number>>({});
@@ -207,6 +274,7 @@ function CaisseTab({ produits, ressources, clients, router }: { produits: ArmPro
   }
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
+  const [manques, setManques] = useState<string[] | null>(null); // composants insuffisants → confirmation
 
   // Photo de carte d'identité déposée → l'IA lit le nom/prénom et pré-remplit.
   async function onPhoto(url: string) {
@@ -240,13 +308,17 @@ function CaisseTab({ produits, ressources, clients, router }: { produits: ArmPro
   const add = (id: string) => setCart((c) => ({ ...c, [id]: (c[id] || 0) + 1 }));
   const sub = (id: string) => setCart((c) => ({ ...c, [id]: Math.max(0, (c[id] || 0) - 1) }));
 
-  async function valider() {
+  async function valider(forcer = false) {
     if (!lignes.length) return;
-    setBusy(true);
+    setBusy(true); setManques(null);
     const payload: LigneCaisse[] = lignes.map((l) => ({ produitId: l.p.id, nom: l.p.nom, categorie: l.p.categorie, prix: pu(l.p), cout: l.p.cout, qte: l.n, aLaDemande: l.p.aLaDemande }));
-    const r = await validerCaisse(payload, clientId ? "" : client, notes, clientId || undefined, { serie: serie.trim() || undefined, photo: photo || undefined });
+    const r = await validerCaisse(payload, clientId ? "" : client, notes, clientId || undefined, { serie: serie.trim() || undefined, photo: photo || undefined, forcer });
     setBusy(false);
-    if (!r.ok) { setFlash(r.error || "Échec."); return; }
+    if (!r.ok) {
+      // Stock de composants insuffisant → on n'encaisse pas, on liste et on propose de forcer.
+      if (r.manques && r.manques.length) { setManques(r.manques); return; }
+      setFlash(r.error || "Échec."); return;
+    }
     // Facture immédiate : instantané du règlement (signé compagnie + client, imprimable / PDF).
     const cliObj = clientId ? clients.find((c) => c.id === clientId) : null;
     const acq = (cliObj?.nom || client || "Client de passage").trim();
@@ -373,7 +445,19 @@ function CaisseTab({ produits, ressources, clients, router }: { produits: ArmPro
               {lu && !lisant ? <div className="mt-1 text-[0.7rem]" style={{ color: lu.startsWith("📇") ? "var(--good)" : "var(--oxblood)" }}>{lu}</div> : null}
             </div>
             <input className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes — optionnel" maxLength={200} />
-            <button onClick={valider} disabled={busy || !lignes.length} className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-[0.86rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--good)" }}>
+            {manques && manques.length ? (
+              <div className="rounded-[10px] border px-3 py-2.5 text-[0.78rem]" style={{ borderColor: "color-mix(in srgb,var(--warn) 50%,var(--border))", background: "color-mix(in srgb,var(--warn) 9%,transparent)" }}>
+                <div className="mb-1 font-semibold" style={{ color: "var(--warn)" }}>⚠️ Composants insuffisants pour fabriquer :</div>
+                <ul className="mb-2 list-disc pl-4 text-muted">{manques.map((m, i) => <li key={i}>{m}</li>)}</ul>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => valider(true)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.78rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--warn)" }}>
+                    {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null} Vendre quand même
+                  </button>
+                  <button onClick={() => setManques(null)} className="text-[0.78rem] text-faint hover:text-ink">Annuler</button>
+                </div>
+              </div>
+            ) : null}
+            <button onClick={() => valider()} disabled={busy || !lignes.length} className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-[0.86rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--good)" }}>
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Encaisser {money(vente)}
             </button>
           </div>
