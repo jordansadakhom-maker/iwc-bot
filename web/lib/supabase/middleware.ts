@@ -10,27 +10,35 @@ import { NextResponse, type NextRequest } from "next/server";
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) return supabaseResponse; // Supabase non configuré → on laisse passer.
+  // Nettoie les variables (espaces / guillemets accidentels de copie).
+  const clean = (v: string | undefined) => (v ?? "").trim().replace(/^["']|["']$/g, "").trim();
+  const url = clean(process.env.NEXT_PUBLIC_SUPABASE_URL);
+  const key = clean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
-  const supabase = createServerClient(url, key, {
-    cookies: {
-      getAll() {
-        return request.cookies.getAll();
-      },
-      setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-        supabaseResponse = NextResponse.next({ request });
-        cookiesToSet.forEach(({ name, value, options }) => supabaseResponse.cookies.set(name, value, options));
-      },
-    },
-  });
-
-  // IMPORTANT : ne rien exécuter entre createServerClient et getUser().
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Session de l'utilisateur — dans un try/catch : si Supabase est absent ou mal
+  // configuré, on NE FAIT JAMAIS planter la requête (pas de 500), on laisse passer.
+  let user: unknown = null;
+  if (url && key && /^https?:\/\//i.test(url)) {
+    try {
+      const supabase = createServerClient(url, key, {
+        cookies: {
+          getAll() {
+            return request.cookies.getAll();
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+            supabaseResponse = NextResponse.next({ request });
+            cookiesToSet.forEach(({ name, value, options }) => supabaseResponse.cookies.set(name, value, options));
+          },
+        },
+      });
+      const res = await supabase.auth.getUser();
+      user = res.data.user;
+    } catch {
+      // Supabase injoignable / clé invalide → on n'enferme personne, on continue.
+      user = null;
+    }
+  }
 
   // Verrouillé PAR DÉFAUT : l'espace interne exige la connexion Discord.
   // Pour déverrouiller exceptionnellement, définir REQUIRE_AUTH="false".
