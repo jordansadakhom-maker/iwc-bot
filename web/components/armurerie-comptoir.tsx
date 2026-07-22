@@ -20,7 +20,7 @@ import {
   creerVente, majVente, supprimerVente,
   creerContrat, envoyerContrat, marquerContrat, supprimerContrat, honorerContrat,
   ajusterCoffreArmurerie,
-  creerProduit, majProduit, supprimerProduit, importerCatalogue, importerRecettes, validerCaisse, fabriquerProduit, lireCarteIdentite, lireNumeroSerie, type LigneCaisse, type MouvementStock,
+  creerProduit, majProduit, supprimerProduit, importerCatalogue, importerRecettes, validerCaisse, fabriquerProduit, lireCarteIdentite, lireNumeroSerie, type LigneCaisse, type MouvementStock, type ScanRapport, type ScanAnomalie,
 } from "@/app/(app)/armurerie/actions";
 
 type Router = ReturnType<typeof useRouter>;
@@ -87,10 +87,10 @@ const ctrTone = (s: string): "good" | "warn" | "accent" | "oxblood" | "muted" =>
   s === "honore" ? "good" : s === "signe" ? "good" : s === "envoye" ? "accent" : s === "refuse" ? "oxblood" : "muted";
 const ctrLabel = (s: string) => s === "honore" ? "Honoré ✓" : s === "signe" ? "Signé" : s === "envoye" ? "Envoyé" : s === "refuse" ? "Refusé" : "Brouillon";
 
-type TabKey = "caisse" | "produits" | "ressources" | "journal" | "commandes" | "rdv" | "ventes" | "clients" | "contrats" | "employes" | "pointage" | "paies" | "comptabilite" | "impots" | "notes" | "taches" | "activite";
-const TAB_KEYS = new Set<TabKey>(["caisse", "produits", "ressources", "journal", "commandes", "rdv", "ventes", "clients", "contrats", "employes", "pointage", "paies", "comptabilite", "impots", "notes", "taches", "activite"]);
+type TabKey = "caisse" | "produits" | "ressources" | "journal" | "scan" | "commandes" | "rdv" | "ventes" | "clients" | "contrats" | "employes" | "pointage" | "paies" | "comptabilite" | "impots" | "notes" | "taches" | "activite";
+const TAB_KEYS = new Set<TabKey>(["caisse", "produits", "ressources", "journal", "scan", "commandes", "rdv", "ventes", "clients", "contrats", "employes", "pointage", "paies", "comptabilite", "impots", "notes", "taches", "activite"]);
 
-export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouvementsCoffre, produits, employes, pointages, paies, impots, notes, taches, commandes, ressources, rdvs, mouvementsStock = [] }: { clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvementsCoffre: ArmMouvement[]; produits: ArmProduit[]; employes: ArmEmploye[]; pointages: ArmPointage[]; paies: ArmPaie[]; impots: ArmImpot[]; notes: ArmNote[]; taches: ArmTache[]; commandes: ArmCommande[]; ressources: ArmRessource[]; rdvs: ArmRdv[]; mouvementsStock?: MouvementStock[] }) {
+export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouvementsCoffre, produits, employes, pointages, paies, impots, notes, taches, commandes, ressources, rdvs, mouvementsStock = [], scan = null }: { clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvementsCoffre: ArmMouvement[]; produits: ArmProduit[]; employes: ArmEmploye[]; pointages: ArmPointage[]; paies: ArmPaie[]; impots: ArmImpot[]; notes: ArmNote[]; taches: ArmTache[]; commandes: ArmCommande[]; ressources: ArmRessource[]; rdvs: ArmRdv[]; mouvementsStock?: MouvementStock[]; scan?: ScanRapport | null }) {
   const router = useRouter();
   // Onglet ouvert au démarrage depuis l'URL (?tab=…), ex. une notification qui
   // pointe droit vers « Impôts » ou « Rendez-vous ».
@@ -109,6 +109,7 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
     { key: "produits", label: "Produits", icon: Package, n: produits.length },
     { key: "ressources", label: "Ressources", icon: Pickaxe, n: ressources.length },
     { key: "journal", label: "Journal stock", icon: ScrollText, n: mouvementsStock.length },
+    { key: "scan", label: "Cohérence", icon: AlertTriangle, n: scan?.nb ?? 0 },
     { key: "commandes", label: "Carnet de commande", icon: ClipboardList, n: commandes.filter((c) => c.statut === "en_attente" || c.statut === "prete").length },
     { key: "rdv", label: "Rendez-vous", icon: CalendarClock, n: rdvsAVenir },
     { key: "ventes", label: "Registre des ventes", icon: ScrollText, n: ventes.length },
@@ -154,6 +155,7 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
       {tab === "produits" ? <ProduitsTab produits={produits} ressources={ressources} router={router} /> : null}
       {tab === "ressources" ? <RessourcesTab ressources={ressources} router={router} /> : null}
       {tab === "journal" ? <JournalStockTab mouvements={mouvementsStock} /> : null}
+      {tab === "scan" ? <ScanTab scan={scan} /> : null}
       {tab === "commandes" ? <CarnetCommandesTab commandes={commandes} produits={produits} clients={clients.map((c) => ({ id: c.id, nom: c.nom }))} router={router} /> : null}
       {tab === "rdv" ? <RdvArmurerieTab rdvs={rdvs} clients={clients.map((c) => ({ id: c.id, nom: c.nom }))} router={router} /> : null}
       {tab === "clients" ? <ClientsTab clients={clients} ventes={ventes} contrats={contrats} router={router} /> : null}
@@ -182,6 +184,45 @@ function matchNomClient(clients: ArmClient[], nomLu: string): ArmClient | null {
 }
 
 // ═══════════════════ CAISSE (point de vente) ═══════════════════
+// ═══════════════════ COHÉRENCE (scan horaire du bot) ═══════════════════
+function ScanTab({ scan }: { scan: ScanRapport | null }) {
+  const dateFR = (v: string | null) => { if (!v) return "—"; try { return new Date(v).toLocaleString("fr-FR", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return "—"; } };
+  if (!scan) {
+    return <Vide icon={AlertTriangle} texte="Aucun scan de cohérence pour l'instant. Le bot vérifie le stock toutes les heures (négatifs, doublons, ressources de recette manquantes) et le résultat s'affiche ici. (Nécessite armurerie-scan.sql + le bot déployé.)" />;
+  }
+  const GROUPES: { key: string; label: string; tone: string; fmt: (a: ScanAnomalie) => string }[] = [
+    { key: "stock_negatif", label: "Stocks négatifs", tone: "var(--oxblood)", fmt: (a) => `${a.nom} (${a.cible}) — ${a.stock}` },
+    { key: "doublon", label: "Doublons (même nom)", tone: "var(--warn)", fmt: (a) => `${a.nom} (${a.cible}) — ${a.n} entrées` },
+    { key: "ressource_manquante", label: "Ressources de recette manquantes", tone: "var(--steel)", fmt: (a) => `${a.produitNom} → ${a.ingredient}` },
+  ];
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-[0.8rem]">
+        <span className="text-faint">Dernier scan : <b className="text-ink">{dateFR(scan.createdAt)}</b> · toutes les heures</span>
+        <span className="rounded-full px-2.5 py-1 text-[0.72rem] font-bold" style={scan.nb ? { color: "#fff", background: "var(--oxblood)" } : { color: "var(--good)", background: "color-mix(in srgb,var(--good) 16%,transparent)" }}>{scan.nb ? `${scan.nb} anomalie${scan.nb > 1 ? "s" : ""}` : "✅ RAS"}</span>
+      </div>
+      {scan.nb === 0 ? (
+        <Vide icon={Check} texte="Aucune incohérence détectée au dernier scan — le stock est cohérent." />
+      ) : (
+        <div className="flex flex-col gap-3">
+          {GROUPES.map((g) => {
+            const items = scan.anomalies.filter((a) => a.type === g.key);
+            if (!items.length) return null;
+            return (
+              <div key={g.key} className="rounded-[12px] border border-border bg-surface-2 p-3">
+                <div className="mb-2 flex items-center gap-2 text-[0.82rem] font-semibold"><span className="h-2 w-2 rounded-full" style={{ background: g.tone }} /> {g.label} <span className="font-num text-faint">{items.length}</span></div>
+                <ul className="flex flex-col gap-1 text-[0.82rem] text-muted">
+                  {items.map((a, i) => <li key={i} className="flex items-start gap-1.5"><span style={{ color: g.tone }}>•</span> <span>{g.fmt(a)}</span></li>)}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ═══════════════════ JOURNAL DES MOUVEMENTS DE STOCK ═══════════════════
 const ORIGINES_STOCK = [
   { key: "vente", label: "Vente", tone: "var(--oxblood)" },
