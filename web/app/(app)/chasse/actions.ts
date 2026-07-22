@@ -135,7 +135,9 @@ export async function definirCapaciteChasse(input: { zoneId: string; nom?: strin
   const capacite = input.capacite == null ? null : clampQ(input.capacite);
   const { data: ex } = await admin.from("ChasseZone").select("id").eq("id", zoneId).maybeSingle();
   if (ex) {
-    const { error } = await admin.from("ChasseZone").update({ capacite }).eq("id", zoneId);
+    const patch: Record<string, unknown> = { capacite };
+    if (input.nom && input.nom.trim()) patch.nom = s(input.nom, 60);
+    const { error } = await admin.from("ChasseZone").update(patch).eq("id", zoneId);
     return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
   }
   const { error } = await admin.from("ChasseZone").insert({ id: zoneId, nom: s(input.nom, 60) || zoneId, capacite, ordre: 99 });

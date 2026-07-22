@@ -1287,38 +1287,52 @@ export async function getAcces(): Promise<Acces> {
   } catch { return ouvert; }
 }
 
-// ── Carte interactive (lieux + itinéraires réels du bot) ─────────
-export type CartePoint = { id: string; type: string; niveau: string; nom: string; region: string | null; lieu: string | null; notes: string | null; x: number | null; y: number | null };
-export type CarteRoute = { id: string; type: string; niveau: string; nom: string; notes: string | null; points: { x: number; y: number }[] };
-export type CarteData = { connecte: boolean; points: CartePoint[]; routes: CarteRoute[]; peutConfidentiel: boolean };
+// ── Carte interactive (lieux + itinéraires du bot ET du site) ────
+// `source` distingue l'origine : « bot » (salon Discord, réconcilié — lecture
+// seule côté site) ou « web » (ajouté depuis le site — éditable/supprimable).
+export type CartePoint = { id: string; type: string; niveau: string; nom: string; region: string | null; lieu: string | null; notes: string | null; x: number | null; y: number | null; source: "bot" | "web" };
+export type CarteRoute = { id: string; type: string; niveau: string; nom: string; notes: string | null; points: { x: number; y: number }[]; source: "bot" | "web" };
+export type CarteData = { connecte: boolean; points: CartePoint[]; routes: CarteRoute[]; peutConfidentiel: boolean; imageUrl: string | null };
 
 export async function getCarte(): Promise<CarteData> {
-  const vide: CarteData = { connecte: false, points: [], routes: [], peutConfidentiel: false };
+  const vide: CarteData = { connecte: false, points: [], routes: [], peutConfidentiel: false, imageUrl: null };
   if (!dataConfigured()) return vide;
   const supabase = createAdminClient();
   if (!supabase) return vide;
   const acces = await getAcces();
   const peutConfidentiel = acces.direction;
-  const [pR, rR] = await Promise.all([
+  const [pR, rR, pwR, rwR, cfgR] = await Promise.all([
     supabase.from("CartePoint").select("*").limit(1000),
     supabase.from("CarteRoute").select("*").limit(400),
+    supabase.from("CartePointWeb").select("*").limit(1000),
+    supabase.from("CarteRouteWeb").select("*").limit(400),
+    supabase.from("CarteConfig").select("cle,valeur").eq("cle", "image").maybeSingle(),
   ]);
-  // Tables pas encore créées → page vide (aucune donnée inventée).
-  if (pR.error && rR.error) return vide;
   const num = (v: unknown): number | null => (v == null || Number.isNaN(Number(v)) ? null : Number(v));
-  let points: CartePoint[] = ((pR.data || []) as Record<string, unknown>[]).map((p) => ({
+  type Raw = Record<string, unknown>;
+  const mapPoint = (src: "bot" | "web") => (p: Raw): CartePoint => ({
     id: String(p.id), type: String(p.type || "autre"), niveau: String(p.niveau || "public"),
     nom: String(p.nom || "Lieu"), region: (p.region as string) ?? null, lieu: (p.lieu as string) ?? null,
-    notes: (p.notes as string) ?? null, x: num(p.x), y: num(p.y),
-  }));
-  let routes: CarteRoute[] = ((rR.data || []) as Record<string, unknown>[]).map((r) => ({
+    notes: (p.notes as string) ?? null, x: num(p.x), y: num(p.y), source: src,
+  });
+  const mapRoute = (src: "bot" | "web") => (r: Raw): CarteRoute => ({
     id: String(r.id), type: String(r.type || "autre"), niveau: String(r.niveau || "public"),
     nom: String(r.nom || "Itinéraire"), notes: (r.notes as string) ?? null,
     points: Array.isArray(r.points) ? (r.points as { x: number; y: number }[]).filter((pt) => pt && Number.isFinite(Number(pt.x)) && Number.isFinite(Number(pt.y))) : [],
-  }));
+    source: src,
+  });
+  let points: CartePoint[] = [
+    ...(pR.error ? [] : ((pR.data || []) as Raw[]).map(mapPoint("bot"))),
+    ...(pwR.error ? [] : ((pwR.data || []) as Raw[]).map(mapPoint("web"))),
+  ];
+  let routes: CarteRoute[] = [
+    ...(rR.error ? [] : ((rR.data || []) as Raw[]).map(mapRoute("bot"))),
+    ...(rwR.error ? [] : ((rwR.data || []) as Raw[]).map(mapRoute("web"))),
+  ];
   if (!peutConfidentiel) {
     points = points.filter((p) => p.niveau !== "confidentiel");
     routes = routes.filter((r) => r.niveau !== "confidentiel");
   }
-  return { connecte: true, points, routes, peutConfidentiel };
+  const imageUrl = (!cfgR.error && cfgR.data ? String((cfgR.data as { valeur?: string }).valeur || "") : "") || process.env.NEXT_PUBLIC_CARTE_IMAGE_URL || null;
+  return { connecte: true, points, routes, peutConfidentiel, imageUrl };
 }
