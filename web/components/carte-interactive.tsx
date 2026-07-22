@@ -1,8 +1,8 @@
 "use client";
 
-import { useRef, useState, useCallback, type PointerEvent as RPointerEvent, type WheelEvent as RWheelEvent } from "react";
+import { useRef, useState, useCallback, useEffect, type PointerEvent as RPointerEvent, type WheelEvent as RWheelEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Minus, Maximize2, MapPin, X, Route as RouteIcon, Compass, Pencil, Trash2, Image as ImageIcon, Check } from "lucide-react";
+import { Plus, Minus, Maximize2, MapPin, X, Route as RouteIcon, Compass, Pencil, Trash2, Image as ImageIcon, Check, Search, Ruler, Expand, Shrink, Sun, Moon, Crosshair } from "lucide-react";
 import type { CarteData, CartePoint, CarteRoute } from "@/lib/queries";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { PhotoDrop } from "@/components/photo-drop";
@@ -36,6 +36,17 @@ const NIVEAU_EMOJI: Record<string, string> = { public: "🟢", membre: "🟡", c
 const NIVEAU_LABEL: Record<string, string> = { public: "Public", membre: "Membre", confidentiel: "Confidentiel" };
 const REGIONS = ["Ambarino", "New Hanover", "Lemoyne", "West Elizabeth", "New Austin", "Guarma", "Autre"];
 
+// Ambiance jour/nuit (calquée sur l'horloge de campagne) — teinte le fond de carte.
+const PHASES: Record<string, { label: string; emoji: string; bg: string }> = {
+  aube: { label: "Aube", emoji: "🌅", bg: "linear-gradient(180deg, rgba(255,170,110,0.18), rgba(120,90,160,0.10))" },
+  jour: { label: "Grand jour", emoji: "☀️", bg: "linear-gradient(180deg, rgba(255,240,200,0.05), rgba(255,240,200,0))" },
+  crepuscule: { label: "Crépuscule", emoji: "🌇", bg: "linear-gradient(180deg, rgba(255,130,70,0.20), rgba(70,50,110,0.22))" },
+  nuit: { label: "Nuit", emoji: "🌙", bg: "linear-gradient(180deg, rgba(20,30,70,0.38), rgba(4,6,18,0.48))" },
+};
+const phaseDe = (h: number) => (h < 6 ? "nuit" : h < 9 ? "aube" : h < 18 ? "jour" : h < 21 ? "crepuscule" : "nuit");
+const longueurRoute = (pts: { x: number; y: number }[]) => { let d = 0; for (let i = 1; i < pts.length; i++) d += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y); return d; };
+const centreRoute = (pts: { x: number; y: number }[]) => pts[Math.floor(pts.length / 2)] || { x: 50, y: 50 };
+
 type XY = { x: number; y: number };
 type EditMode = "none" | "lieu" | "route";
 
@@ -57,26 +68,93 @@ export function CarteInteractive({ data, imageUrl }: { data: CarteData; imageUrl
   // Édition
   const [mode, setMode] = useState<EditMode>("none");
   const [routePts, setRoutePts] = useState<XY[]>([]);
-  const [lieuDraft, setLieuDraft] = useState<XY | null>(null); // création lieu (coords)
-  const [lieuEdit, setLieuEdit] = useState<CartePoint | null>(null); // édition lieu
-  const [routeDraft, setRouteDraft] = useState<XY[] | null>(null); // finalisation itinéraire
+  const [lieuDraft, setLieuDraft] = useState<XY | null>(null);
+  const [lieuEdit, setLieuEdit] = useState<CartePoint | null>(null);
+  const [routeDraft, setRouteDraft] = useState<XY[] | null>(null);
   const [fond, setFond] = useState(false);
 
-  // Transform (pan + zoom).
+  // Immersion : recherche, règle (mesure), ambiance jour/nuit, plein écran, curseur.
+  const [monte, setMonte] = useState(false);
+  const [q, setQ] = useState("");
+  const [regle, setRegle] = useState(false);
+  const [reglePts, setReglePts] = useState<XY[]>([]);
+  const [ambiance, setAmbiance] = useState(true);
+  const [plein, setPlein] = useState(false);
+  const [curseur, setCurseur] = useState<XY | null>(null);
+
+  // Transform (pan + zoom) — borné : la carte remplit toujours le cadre.
   const [t, setT] = useState({ x: 0, y: 0, z: 1 });
+  const tRef = useRef(t); tRef.current = t;
   const drag = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
   const viewport = useRef<HTMLDivElement | null>(null);
   const world = useRef<HTMLDivElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const aspectRef = useRef(1);
+  const animRef = useRef<number | null>(null);
   const moved = useRef(false);
+
+  useEffect(() => { setMonte(true); }, []);
+  useEffect(() => { const h = () => setPlein(!!document.fullscreenElement); document.addEventListener("fullscreenchange", h); return () => document.removeEventListener("fullscreenchange", h); }, []);
 
   const posPoints = points.filter((p) => p.x != null && p.y != null && actifs.has(p.type));
   const sansPos = points.filter((p) => p.x == null || p.y == null);
   const visRoutes = routesOn ? routes.filter((r) => r.points.length >= 2) : [];
+  const heure = monte ? new Date().getHours() : 12;
+  const phase = PHASES[phaseDe(heure)];
+  const recherche = q.trim().toLowerCase();
+  const resultats = recherche ? posPoints.filter((p) => p.nom.toLowerCase().includes(recherche)).slice(0, 8) : [];
 
   const toggle = (k: string) => setActifs((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const tousActifs = typesPresents.length > 0 && typesPresents.every((ty) => actifs.has(ty.key));
   const toggleTous = () => setActifs(() => (tousActifs ? new Set<string>() : new Set(typesPresents.map((ty) => ty.key))));
-  const reset = () => setT({ x: 0, y: 0, z: 1 });
+
+  // Borne le déplacement : le « monde » ne peut jamais laisser de vide dans le cadre.
+  const clampT = useCallback((tx: number, ty: number, z: number) => {
+    const r = viewport.current?.getBoundingClientRect();
+    if (!r || !r.width) return { x: tx, y: ty };
+    const Wv = r.width, Hv = r.height, a = aspectRef.current || 1;
+    const wW = Wv * z, wH = Wv * a * z;
+    const x = wW <= Wv ? (Wv - wW) / 2 : Math.min(0, Math.max(Wv - wW, tx));
+    const y = wH <= Hv ? (Hv - wH) / 2 : Math.min(0, Math.max(Hv - wH, ty));
+    return { x, y };
+  }, []);
+
+  const centrer = useCallback(() => {
+    const r = viewport.current?.getBoundingClientRect();
+    if (!r) return;
+    const wH = r.width * (aspectRef.current || 1);
+    setT({ x: 0, y: Math.min(0, (r.height - wH) / 2), z: 1 });
+  }, []);
+  const reset = () => centrer();
+
+  const onImgLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const im = e.currentTarget;
+    aspectRef.current = im.naturalWidth ? im.naturalHeight / im.naturalWidth : 1;
+    centrer();
+  };
+
+  // Déplacement fluide vers un point (recherche, clic sur un lieu/itinéraire).
+  const flyTo = useCallback((px: number, py: number, z = 2.6) => {
+    const r = viewport.current?.getBoundingClientRect();
+    if (!r) return;
+    const Wv = r.width, Hv = r.height, a = aspectRef.current || 1;
+    const dest = clampT(Wv / 2 - (px / 100) * Wv * z, Hv / 2 - (py / 100) * Wv * a * z, z);
+    const start = { ...tRef.current }, target = { x: dest.x, y: dest.y, z };
+    if (animRef.current) cancelAnimationFrame(animRef.current);
+    const t0 = performance.now(), dur = 560;
+    const step = (now: number) => {
+      const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+      setT({ x: start.x + (target.x - start.x) * e, y: start.y + (target.y - start.y) * e, z: start.z + (target.z - start.z) * e });
+      if (k < 1) animRef.current = requestAnimationFrame(step);
+    };
+    animRef.current = requestAnimationFrame(step);
+  }, [clampT]);
+
+  function togglePlein() {
+    const el = rootRef.current; if (!el) return;
+    if (!document.fullscreenElement) el.requestFullscreen?.().catch(() => {});
+    else document.exitFullscreen?.().catch(() => {});
+  }
 
   // Pixel écran → coordonnées carte (0–100 %), robuste au pan/zoom (rect transformé).
   const toPct = useCallback((clientX: number, clientY: number): XY | null => {
@@ -90,28 +168,34 @@ export function CarteInteractive({ data, imageUrl }: { data: CarteData; imageUrl
     const rect = viewport.current?.getBoundingClientRect();
     if (!rect) return;
     const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
-    setT((p) => { const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15; const z = Math.min(6, Math.max(1, p.z * factor)); const k = z / p.z; return { z, x: cx - (cx - p.x) * k, y: cy - (cy - p.y) * k }; });
-  }, []);
+    setT((p) => { const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15; const z = Math.min(6, Math.max(1, p.z * factor)); const k = z / p.z; const c = clampT(cx - (cx - p.x) * k, cy - (cy - p.y) * k, z); return { z, x: c.x, y: c.y }; });
+  }, [clampT]);
 
   const onDown = (e: RPointerEvent) => { drag.current = { x: e.clientX, y: e.clientY, tx: t.x, ty: t.y }; moved.current = false; (e.target as HTMLElement).setPointerCapture?.(e.pointerId); };
   const onMove = (e: RPointerEvent) => {
-    if (!drag.current) return;
-    const dx = e.clientX - drag.current.x, dy = e.clientY - drag.current.y;
-    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved.current = true;
-    setT((p) => ({ ...p, x: drag.current!.tx + dx, y: drag.current!.ty + dy }));
+    if (drag.current) {
+      const dx = e.clientX - drag.current.x, dy = e.clientY - drag.current.y;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved.current = true;
+      setT((p) => { const c = clampT(drag.current!.tx + dx, drag.current!.ty + dy, p.z); return { ...p, x: c.x, y: c.y }; });
+    } else if (regle) {
+      setCurseur(toPct(e.clientX, e.clientY));
+    }
   };
   const onUp = () => { drag.current = null; };
 
-  // Clic sur la carte en mode édition : place un lieu, ou ajoute un point d'itinéraire.
+  // Clic sur la carte : place un lieu / point d'itinéraire (édition) ou un point de mesure (règle).
   const onMapClick = (e: React.MouseEvent) => {
-    if (mode === "none" || moved.current) return;
+    if (moved.current) return;
     const pct = toPct(e.clientX, e.clientY);
     if (!pct) return;
+    if (regle) { setReglePts((prev) => [...prev, pct]); return; }
     if (mode === "lieu") setLieuDraft(pct);
     else if (mode === "route") setRoutePts((prev) => [...prev, pct]);
   };
 
-  const zoom = (dir: 1 | -1) => setT((p) => { const z = Math.min(6, Math.max(1, p.z * (dir > 0 ? 1.3 : 1 / 1.3))); const rect = viewport.current?.getBoundingClientRect(); const cx = (rect?.width || 0) / 2, cy = (rect?.height || 0) / 2, k = z / p.z; return { z, x: cx - (cx - p.x) * k, y: cy - (cy - p.y) * k }; });
+  const zoom = (dir: 1 | -1) => setT((p) => { const z = Math.min(6, Math.max(1, p.z * (dir > 0 ? 1.3 : 1 / 1.3))); const rect = viewport.current?.getBoundingClientRect(); const cx = (rect?.width || 0) / 2, cy = (rect?.height || 0) / 2, k = z / p.z; const c = clampT(cx - (cx - p.x) * k, cy - (cy - p.y) * k, z); return { z, x: c.x, y: c.y }; });
+
+  const distanceRegle = longueurRoute(reglePts);
 
   // ── Écritures optimistes ──
   async function ajouterLieu(d: { nom: string; type: string; niveau: string; region: string; lieu: string; notes: string; x: number; y: number }) {
@@ -150,12 +234,30 @@ export function CarteInteractive({ data, imageUrl }: { data: CarteData; imageUrl
   function annulerEdition() { setMode("none"); setRoutePts([]); setLieuDraft(null); }
 
   return (
-    <div className="flex flex-col gap-3">
-      {/* Barre d'édition */}
+    <div ref={rootRef} className={"flex flex-col gap-3" + (plein ? " overflow-auto bg-[var(--surface)] p-4" : "")}>
+      {/* Barre d'outils */}
       <div className="flex flex-wrap items-center gap-1.5">
-        <EditBtn active={mode === "lieu"} color="#54b085" onClick={() => { setMode(mode === "lieu" ? "none" : "lieu"); setRoutePts([]); }}><MapPin className="h-3.5 w-3.5" /> Ajouter un lieu</EditBtn>
-        <EditBtn active={mode === "route"} color="#c8a45c" onClick={() => { setMode(mode === "route" ? "none" : "route"); setRoutePts([]); }}><RouteIcon className="h-3.5 w-3.5" /> Tracer un itinéraire</EditBtn>
+        <EditBtn active={mode === "lieu"} color="#54b085" onClick={() => { setRegle(false); setMode(mode === "lieu" ? "none" : "lieu"); setRoutePts([]); }}><MapPin className="h-3.5 w-3.5" /> Ajouter un lieu</EditBtn>
+        <EditBtn active={mode === "route"} color="#c8a45c" onClick={() => { setRegle(false); setMode(mode === "route" ? "none" : "route"); setRoutePts([]); }}><RouteIcon className="h-3.5 w-3.5" /> Tracer un itinéraire</EditBtn>
         <button onClick={() => setFond(true)} className="inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-[0.74rem] font-semibold text-muted transition hover:border-border-2 hover:text-ink"><ImageIcon className="h-3.5 w-3.5" /> Fond de carte</button>
+        <span className="mx-0.5 h-4 w-px bg-border" />
+        {/* Recherche + « voler vers » */}
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Chercher un lieu…" className="w-[160px] rounded-full border border-border bg-surface-2 py-1 pl-7 pr-2 text-[0.74rem] text-ink outline-none placeholder:text-faint focus:border-border-2" />
+          {resultats.length ? (
+            <div className="absolute left-0 top-[112%] z-30 w-[230px] overflow-hidden rounded-lg border border-border-2 bg-surface shadow-card">
+              {resultats.map((p) => (
+                <button key={p.id} onClick={() => { flyTo(p.x!, p.y!); setSel(p); setQ(""); }} className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-[0.76rem] hover:bg-surface-2">
+                  <span>{TYPE(p.type).emoji}</span><span className="truncate text-ink">{p.nom}</span>{p.region ? <span className="ml-auto shrink-0 text-[0.66rem] text-faint">{p.region}</span> : null}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        <EditBtn active={regle} color="#6f9fc4" onClick={() => { setRegle((v) => !v); setMode("none"); setReglePts([]); }}><Ruler className="h-3.5 w-3.5" /> Mesurer</EditBtn>
+        <button onClick={() => setAmbiance((v) => !v)} title="Ambiance jour / nuit" className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[0.74rem] font-semibold transition" style={{ borderColor: ambiance ? "color-mix(in srgb,var(--accent) 50%,var(--border))" : "var(--border)", color: ambiance ? "var(--ink)" : "var(--muted)", background: ambiance ? "color-mix(in srgb,var(--accent) 12%,transparent)" : "transparent" }}>{ambiance ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />} Ambiance</button>
+        <button onClick={togglePlein} title="Plein écran" className="inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-[0.74rem] font-semibold text-muted transition hover:border-border-2 hover:text-ink">{plein ? <Shrink className="h-3.5 w-3.5" /> : <Expand className="h-3.5 w-3.5" />} {plein ? "Réduire" : "Plein écran"}</button>
         {mode !== "none" ? <span className="ml-1 text-[0.74rem] text-faint">{mode === "lieu" ? "Clique sur la carte pour poser le lieu." : `Clique les points du trajet — ${routePts.length} placé(s).`}</span> : null}
       </div>
 
@@ -189,19 +291,22 @@ export function CarteInteractive({ data, imageUrl }: { data: CarteData; imageUrl
         ref={viewport}
         onWheel={onWheel} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={onUp} onClick={onMapClick}
         className="relative overflow-hidden rounded-[14px] border border-border-2 select-none"
-        style={{ height: "min(82vh, 900px)", cursor: mode !== "none" ? "crosshair" : drag.current ? "grabbing" : "grab", background: "radial-gradient(1200px 700px at 50% -5%, color-mix(in srgb,var(--accent) 7%,transparent), transparent 60%), #16130d", touchAction: "none" }}
+        style={{ height: "min(82vh, 900px)", cursor: (mode !== "none" || regle) ? "crosshair" : drag.current ? "grabbing" : "grab", background: "radial-gradient(1200px 700px at 50% -5%, color-mix(in srgb,var(--accent) 7%,transparent), transparent 60%), #16130d", touchAction: "none" }}
       >
         {/* Le « monde » occupe TOUTE la largeur du cadre ; sa hauteur suit le ratio
-            naturel de la carte (aucune bande sombre, aucun recadrage). On fait
-            défiler verticalement / on zoome via translate + scale. */}
+            naturel de la carte. On fait défiler / on zoome via translate + scale ;
+            le déplacement est BORNÉ (la carte remplit toujours le cadre). */}
         <div className="absolute left-0 right-0 top-0 origin-top-left" style={{ transform: `translate(${t.x}px,${t.y}px) scale(${t.z})` }}>
           <div ref={world} className={"relative w-full " + (img ? "" : "aspect-square")}>
             {img ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={img} alt="Carte" className="block h-auto w-full" draggable={false} />
+              <img src={img} alt="Carte" onLoad={onImgLoad} className="block h-auto w-full" draggable={false} />
             ) : (
               <FondParchemin />
             )}
+
+            {/* Ambiance jour/nuit — teinte le fond, sous les repères */}
+            {monte && ambiance ? <div className="pointer-events-none absolute inset-0" style={{ background: phase.bg }} /> : null}
 
             {/* Itinéraires (SVG en % du monde) */}
             <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full">
@@ -217,6 +322,13 @@ export function CarteInteractive({ data, imageUrl }: { data: CarteData; imageUrl
                   {routePts.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={0.9} fill="var(--accent)" />)}
                 </>
               ) : null}
+              {/* Mesure (règle) */}
+              {reglePts.length ? (
+                <>
+                  <path d={reglePts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ")} fill="none" stroke="#6f9fc4" strokeWidth={0.55} strokeDasharray="1.2 1" strokeLinecap="round" />
+                  {reglePts.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={0.85} fill="#6f9fc4" />)}
+                </>
+              ) : null}
             </svg>
 
             {/* Marqueurs */}
@@ -225,9 +337,10 @@ export function CarteInteractive({ data, imageUrl }: { data: CarteData; imageUrl
               const on = sel?.id === p.id;
               return (
                 <button key={p.id} title={p.nom}
-                  onClick={(e) => { e.stopPropagation(); if (!moved.current && mode === "none") setSel(p); }}
+                  onClick={(e) => { e.stopPropagation(); if (!moved.current && mode === "none" && !regle) setSel(p); }}
                   className="absolute grid -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border text-[0.7rem] shadow-md transition"
                   style={{ left: `${p.x}%`, top: `${p.y}%`, width: on ? 26 : 22, height: on ? 26 : 22, transform: `translate(-50%,-50%) scale(${1 / t.z})`, background: `color-mix(in srgb,${ty.color} 80%,#000)`, borderColor: on ? "#fff" : p.source === "web" ? "color-mix(in srgb,var(--accent) 70%,#000)" : "color-mix(in srgb,#000 30%,transparent)", zIndex: on ? 20 : 10 }}>
+                  {on ? <span className="pointer-events-none absolute inset-0 animate-ping rounded-full opacity-50" style={{ background: ty.color }} /> : null}
                   <span style={{ fontSize: 11 }}>{ty.emoji}</span>
                 </button>
               );
@@ -242,13 +355,24 @@ export function CarteInteractive({ data, imageUrl }: { data: CarteData; imageUrl
           <CtrlBtn onClick={reset} label="Réinitialiser"><Maximize2 className="h-4 w-4" /></CtrlBtn>
         </div>
 
-        {/* Boussole */}
-        <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-1.5 rounded-full border border-border-2 bg-black/40 px-2.5 py-1 text-[0.68rem] text-muted backdrop-blur">
-          <Compass className="h-3.5 w-3.5 text-accent" /> {posPoints.length} lieu(x) situé(s)
+        {/* Boussole + ambiance + coordonnées */}
+        <div className="pointer-events-none absolute left-3 top-3 flex flex-col items-start gap-1.5">
+          <div className="flex items-center gap-1.5 rounded-full border border-border-2 bg-black/40 px-2.5 py-1 text-[0.68rem] text-muted backdrop-blur">
+            <Compass className="h-3.5 w-3.5 text-accent" /> {posPoints.length} lieu(x) situé(s)
+          </div>
+          {monte && ambiance ? <div className="flex items-center gap-1.5 rounded-full border border-border-2 bg-black/40 px-2.5 py-1 text-[0.68rem] text-muted backdrop-blur">{phase.emoji} {phase.label}</div> : null}
+          {regle && curseur ? <div className="flex items-center gap-1.5 rounded-full border border-border-2 bg-black/40 px-2.5 py-1 font-num text-[0.68rem] text-muted backdrop-blur"><Crosshair className="h-3 w-3 text-accent" /> X {curseur.x.toFixed(1)} · Y {curseur.y.toFixed(1)}</div> : null}
         </div>
 
-        {/* Panneau « tracé en cours » */}
-        {mode === "route" ? (
+        {/* Panneau de l'outil actif */}
+        {regle ? (
+          <div className="absolute left-1/2 top-3 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border-2 bg-surface/95 px-3 py-1.5 text-[0.78rem] shadow-card backdrop-blur">
+            <Ruler className="h-3.5 w-3.5" style={{ color: "#6f9fc4" }} /> {reglePts.length} point(s){reglePts.length >= 2 ? <> · <b className="font-num">{distanceRegle.toFixed(1)} u.</b></> : null}
+            <button onClick={() => setReglePts((p) => p.slice(0, -1))} disabled={!reglePts.length} className="rounded-md border border-border px-2 py-0.5 text-[0.72rem] text-muted hover:text-ink disabled:opacity-40">Annuler</button>
+            <button onClick={() => setReglePts([])} disabled={!reglePts.length} className="rounded-md border border-border px-2 py-0.5 text-[0.72rem] text-muted hover:text-ink disabled:opacity-40">Effacer</button>
+            <button onClick={() => { setRegle(false); setReglePts([]); }} className="text-faint hover:text-ink"><X className="h-3.5 w-3.5" /></button>
+          </div>
+        ) : mode === "route" ? (
           <div className="absolute left-1/2 top-3 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border-2 bg-surface/95 px-3 py-1.5 text-[0.78rem] shadow-card backdrop-blur">
             <RouteIcon className="h-3.5 w-3.5 text-accent" /> {routePts.length} point(s)
             <button onClick={() => setRoutePts((p) => p.slice(0, -1))} disabled={!routePts.length} className="rounded-md border border-border px-2 py-0.5 text-[0.72rem] text-muted hover:text-ink disabled:opacity-40">Annuler dernier</button>
@@ -297,7 +421,9 @@ export function CarteInteractive({ data, imageUrl }: { data: CarteData; imageUrl
             const rt = RTYPE(r.type);
             return (
               <span key={r.id} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-2.5 py-1 text-[0.74rem]">
-                <span className="h-2 w-2 rounded-full" style={{ background: rt.color }} /> {r.nom} <span className="text-faint">{rt.label}</span>
+                <span className="h-2 w-2 rounded-full" style={{ background: rt.color }} />
+                <button onClick={() => { const c = centreRoute(r.points); flyTo(c.x, c.y, 2.2); }} className="hover:text-accent" title="Voler vers l'itinéraire">{r.nom}</button>
+                <span className="text-faint">{rt.label} · {Math.round(longueurRoute(r.points))} u.</span>
                 {r.source === "web" ? <button onClick={() => retirerItineraire(r.id)} className="text-faint hover:text-oxblood" aria-label="Supprimer l'itinéraire"><X className="h-3.5 w-3.5" /></button> : null}
               </span>
             );
