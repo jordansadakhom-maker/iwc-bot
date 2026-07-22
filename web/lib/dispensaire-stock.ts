@@ -27,7 +27,13 @@ export async function getStock(): Promise<StockData> {
   if (error) return { ...vide, connecte: true, pret: false, canEdit };
   const items = ((data || []) as Record<string, unknown>[]).map(toItem);
 
-  const coffres = [...new Set(items.map((i) => (i.coffre || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  // Coffres proposés : ceux déjà utilisés par un article + les coffres déclarés comme entités.
+  let entites: string[] = [];
+  try {
+    const { data: cf } = await admin.from("DispensaireCoffre").select("nom");
+    entites = ((cf || []) as Record<string, unknown>[]).map((r) => String(r.nom || "").trim()).filter(Boolean);
+  } catch { /* table Coffres pas encore créée */ }
+  const coffres = [...new Set([...items.map((i) => (i.coffre || "").trim()).filter(Boolean), ...entites])].sort((a, b) => a.localeCompare(b));
   const alertes = items.filter(enAlerte).length;
 
   const { data: mvt } = await admin.from("DispensaireStockMouvement").select("*").order("createdAt", { ascending: false }).limit(60);

@@ -10,6 +10,7 @@ export type PointSession = {
 };
 export type PointSalarie = { id: string; nom: string; grade: string | null };
 export type SemaineJour = { dow: number; min: number };            // dow 0=Lun … 6=Dim
+export type PointStats = { jourMin: number; semaineMin: number; moisMin: number; totalMin: number; jours: number; moyenneMin: number };
 export type PointData = {
   connecte: boolean; pret: boolean; canEdit: boolean;
   roster: PointSalarie[];
@@ -17,6 +18,7 @@ export type PointData = {
   semaine: SemaineJour[];                                            // 7 jours (Lun→Dim)
   parSalarie: { nom: string; min: number }[];                       // total semaine par salarié
   mondayYmd: string;
+  stats: PointStats;                                                 // jour / semaine / mois / total / jours / moyenne
   historique: PointSession[];                                        // dernières services clôturés
 };
 
@@ -46,15 +48,20 @@ function toSession(r: Record<string, unknown>): PointSession {
   };
 }
 
+const STATS0: PointStats = { jourMin: 0, semaineMin: 0, moisMin: 0, totalMin: 0, jours: 0, moyenneMin: 0 };
+
 export async function getPointage(): Promise<PointData> {
-  const vide: PointData = { connecte: false, pret: false, canEdit: false, roster: [], enCours: [], semaine: [], parSalarie: [], mondayYmd: "", historique: [] };
+  const vide: PointData = { connecte: false, pret: false, canEdit: false, roster: [], enCours: [], semaine: [], parSalarie: [], mondayYmd: "", stats: STATS0, historique: [] };
   const admin = createAdminClient();
   if (!admin) return vide;
   // Le pointage est un outil de service partagé : ouvert à toute personne connectée.
   let canEdit = true;
   try { await getAcces(); } catch { /* accès permissif par défaut */ }
 
-  const monday = lundiDeLaSemaine(new Date().toISOString());
+  const nowIso = new Date().toISOString();
+  const monday = lundiDeLaSemaine(nowIso);
+  const todayYmd = jourParis(nowIso).ymd;
+  const moisPrefix = todayYmd.slice(0, 7);
 
   // Roster (salariés actifs) pour le sélecteur de prise de service.
   const { data: rost } = await admin.from("DispensaireSalarie").select("id,nom,grade,statut").order("nom", { ascending: true });
@@ -71,19 +78,29 @@ export async function getPointage(): Promise<PointData> {
   const { data: clos } = await admin.from("DispensairePointage").select("*").not("fin", "is", null).order("debut", { ascending: false }).limit(300);
   const closes = ((clos || []) as Record<string, unknown>[]).map(toSession);
 
-  // Agrégat semaine (Lun→Dim) sur les services clôturés de la semaine courante.
+  // Agrégat semaine (Lun→Dim) + statistiques (jour / mois / total / jours travaillés).
   const semaine: SemaineJour[] = Array.from({ length: 7 }, (_, i) => ({ dow: i, min: 0 }));
   const parNom = new Map<string, number>();
+  const joursSet = new Set<string>();
+  const stats: PointStats = { ...STATS0 };
   for (const s of closes) {
     const { ymd, dow } = jourParis(s.debut);
-    if (ymd < monday) continue;                       // hors semaine courante
     const min = s.dureeMin || 0;
-    semaine[dow].min += min;
-    parNom.set(s.nom, (parNom.get(s.nom) || 0) + min);
+    stats.totalMin += min;
+    joursSet.add(ymd);
+    if (ymd === todayYmd) stats.jourMin += min;
+    if (ymd.startsWith(moisPrefix)) stats.moisMin += min;
+    if (ymd >= monday) {                               // semaine courante
+      stats.semaineMin += min;
+      semaine[dow].min += min;
+      parNom.set(s.nom, (parNom.get(s.nom) || 0) + min);
+    }
   }
+  stats.jours = joursSet.size;
+  stats.moyenneMin = stats.jours ? Math.round(stats.totalMin / stats.jours) : 0;
   const parSalarie = [...parNom.entries()].map(([nom, min]) => ({ nom, min })).sort((a, b) => b.min - a.min);
 
-  return { connecte: true, pret: true, canEdit, roster, enCours, semaine, parSalarie, mondayYmd: monday, historique: closes.slice(0, 40) };
+  return { connecte: true, pret: true, canEdit, roster, enCours, semaine, parSalarie, mondayYmd: monday, stats, historique: closes.slice(0, 40) };
 }
 
 // Encart léger de l'accueil : uniquement les salariés en service.

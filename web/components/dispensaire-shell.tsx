@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowLeft, Cross } from "lucide-react";
+import { ArrowLeft, Cross, Search, Bell } from "lucide-react";
 import { DISP_NAV } from "@/lib/dispensaire-nav";
 
 // Coquille de la section « Dispensaire de Saint-Denis » : en-tête registre 1904
 // + barre d'onglets horizontale (responsive). Séparée de la coquille Iron Wolf.
-export function DispensaireShell({ children, habilite = false }: { children: React.ReactNode; habilite?: boolean }) {
+export function DispensaireShell({ children, habilite = false, notifCount = 0 }: { children: React.ReactNode; habilite?: boolean; notifCount?: number }) {
   const path = usePathname();
   const tabs = DISP_NAV.filter((t) => !t.restreint || habilite);
   const estActif = (href: string) => (href === "/dispensaire" ? path === "/dispensaire" : path.startsWith(href));
@@ -26,9 +26,18 @@ export function DispensaireShell({ children, habilite = false }: { children: Rea
               <div className="text-[0.76rem] italic text-faint">Registre administratif · Année 1904</div>
             </div>
           </div>
-          <Link href="/dashboard" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted transition hover:border-border-2 hover:text-ink">
-            <ArrowLeft className="h-3.5 w-3.5" /> Iron Wolf
-          </Link>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Link href="/dispensaire/recherche" title="Recherche globale" className="grid h-8 w-8 place-items-center rounded-lg border border-border bg-surface-2 text-muted transition hover:border-border-2 hover:text-ink">
+              <Search className="h-4 w-4" />
+            </Link>
+            <Link href="/dispensaire/notifications" title="Notifications" className="relative grid h-8 w-8 place-items-center rounded-lg border border-border bg-surface-2 text-muted transition hover:border-border-2 hover:text-ink">
+              <Bell className="h-4 w-4" />
+              {notifCount > 0 ? <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full px-1 text-[0.58rem] font-bold text-white" style={{ background: "var(--oxblood)" }}>{notifCount > 9 ? "9+" : notifCount}</span> : null}
+            </Link>
+            <Link href="/dashboard" className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted transition hover:border-border-2 hover:text-ink">
+              <ArrowLeft className="h-3.5 w-3.5" /> Iron Wolf
+            </Link>
+          </div>
         </header>
 
         {/* Onglets */}
