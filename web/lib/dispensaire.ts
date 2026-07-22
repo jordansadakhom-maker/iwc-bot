@@ -6,7 +6,7 @@ import { getAcces } from "@/lib/queries";
 // ── Types du Répertoire des contacts (Dispensaire de Saint-Denis) ──
 export type DispCategorie = { id: string; nom: string; couleur: string | null; ordre: number };
 export type DispContact = {
-  id: string; categorieId: string | null; nom: string;
+  id: string; categorieId: string | null; nom: string; relation: string | null;
   responsable: string | null; description: string | null; adresse: string | null;
   telegramme: string | null; contactSecondaire: string | null; horaires: string | null; notes: string | null;
   typeService: string | null; produits: string | null; tarifs: string | null; banque: string | null; moyensContact: string | null;
@@ -54,7 +54,7 @@ export async function getDispensaire(): Promise<DispData> {
   const categories = catsRaw.length ? catsRaw.sort((a, b) => a.ordre - b.ordre) : CATS_DEFAUT;
 
   const contacts: DispContact[] = ((ctR.data || []) as Raw[]).map((c) => ({
-    id: String(c.id), categorieId: s(c.categorieId), nom: String(c.nom || "Contact"),
+    id: String(c.id), categorieId: s(c.categorieId), nom: String(c.nom || "Contact"), relation: s(c.relation),
     responsable: s(c.responsable), description: s(c.description), adresse: s(c.adresse),
     telegramme: s(c.telegramme), contactSecondaire: s(c.contactSecondaire), horaires: s(c.horaires), notes: s(c.notes),
     typeService: s(c.typeService), produits: s(c.produits), tarifs: s(c.tarifs), banque: s(c.banque), moyensContact: s(c.moyensContact),
