@@ -3,6 +3,7 @@ import {
   Sparkles, Bell, FileText, Megaphone, ShieldCheck, Skull, type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
+import { HorlogeCampagne } from "@/components/horloge-campagne";
 
 // Primitives d'interface partagées par les pages (serveur-compatibles, sans hooks).
 
@@ -49,7 +50,7 @@ export function PoleChip({ pole }: { pole: "iwc" | "confrerie" }) {
 export function PageHeader({ titre, sous, actif, pole }: { titre: string; sous?: string; actif?: boolean; pole?: "iwc" | "confrerie" }) {
   const Emb = emblemePour(titre);
   return (
-    <div>
+    <div className="iwc-rise">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
           {/* médaillon-sceau en laiton */}
@@ -64,7 +65,8 @@ export function PageHeader({ titre, sous, actif, pole }: { titre: string; sous?:
             {sous ? <div className="mt-1.5 font-display text-[0.9rem] italic text-muted">{sous}</div> : null}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <HorlogeCampagne />
           {pole ? <PoleChip pole={pole} /> : null}
           <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-[0.72rem] text-muted">
             <span className="h-2 w-2 rounded-full" style={{ background: actif ? "var(--good)" : "var(--faint)" }} />
@@ -119,6 +121,7 @@ export function Empty({ icon: Icon = Inbox, children }: { icon?: LucideIcon; chi
         <Icon className="h-5 w-5" style={{ color: "color-mix(in srgb,var(--accent) 70%,var(--faint))" }} strokeWidth={1.6} />
       </span>
       <p className="max-w-md font-display text-[0.9rem] italic leading-relaxed text-muted">{children}</p>
+      <span className="mt-0.5 text-[0.66rem] uppercase tracking-[0.22em] text-faint">— Rien à signaler, chef —</span>
     </div>
   );
 }
