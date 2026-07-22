@@ -6,11 +6,13 @@ import { cookies } from "next/headers";
 // Utilise la clé publiable (anon) + le cookie de session s'il existe → les
 // lectures portent l'identité de l'utilisateur connecté (indispensable une fois
 // la sécurité RLS activée). N'expose JAMAIS la clé service_role côté web.
+const clean = (v: string | undefined) => (v ?? "").trim().replace(/^["']|["']$/g, "").trim();
+
 export async function createClient() {
   const cookieStore = await cookies();
   return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    clean(process.env.NEXT_PUBLIC_SUPABASE_URL),
+    clean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
     {
       cookies: {
         getAll() {
