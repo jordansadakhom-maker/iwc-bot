@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ShieldCheck, Plus, Loader2, Trash2, Building2 } from "lucide-react";
+import { VideRegistre } from "@/components/dispensaire-ui";
 import { FDO_STATUTS, fdoStatut, money, type FDOData, type SoinFDO } from "@/lib/dispensaire-facturation-const";
 import { Flash, inputCls } from "@/components/edit-ui";
 import { creerSoin, majSoin, supprimerSoin } from "@/app/dispensaire/fdo/actions";
@@ -73,7 +74,7 @@ export function DispensaireFDO({ data }: { data: FDOData }) {
       ) : null}
 
       {/* Liste groupée */}
-      {soins.length === 0 ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">Aucun soin FDO enregistré.</p> : bureaux.map((b) => (
+      {soins.length === 0 ? <VideRegistre icon={ShieldCheck} titre="Aucun soin porté aux forces de l'ordre" sous="Enregistre un premier soin FDO — il sera regroupé ici par bureau." /> : bureaux.map((b) => (
         <section key={b.bureau}>
           <div className="mb-1.5 flex items-center gap-1.5 text-[0.74rem] font-semibold uppercase tracking-[0.05em] text-faint"><Building2 className="h-3.5 w-3.5" /> {b.bureau}</div>
           <div className="flex flex-col gap-1.5">

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileText, Plus, Loader2, Trash2, Check, X, Banknote } from "lucide-react";
+import { VideRegistre } from "@/components/dispensaire-ui";
 import { FRAIS_STATUTS, fraisStatut, money, type FraisData, type Frais } from "@/lib/dispensaire-facturation-const";
 import { Flash, inputCls } from "@/components/edit-ui";
 import { creerFrais, statutFrais, supprimerFrais } from "@/app/dispensaire/frais/actions";
@@ -64,7 +65,11 @@ export function DispensaireFrais({ data }: { data: FraisData }) {
         <select className={inputCls + " max-w-[170px]"} value={filtre} onChange={(e) => setFiltre(e.target.value)}><option value="">Tous statuts</option>{FRAIS_STATUTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
       </div>
 
-      {liste.length === 0 ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">{frais.length ? "Aucune note pour ce filtre." : "Aucune note de frais."}</p> : (
+      {liste.length === 0 ? (
+        frais.length
+          ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">Aucune note pour ce filtre.</p>
+          : <VideRegistre icon={Banknote} titre="Aucune note de frais" sous="Déclare une première dépense avancée — elle attendra ici sa validation puis son remboursement." />
+      ) : (
         <div className="flex flex-col gap-2">
           {liste.map((f) => {
             const st = fraisStatut(f.statut);

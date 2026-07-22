@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Stethoscope, Plus, Check, Trash2, Search, Eye, Printer, Copy } from "lucide-react";
+import { VideRegistre } from "@/components/dispensaire-ui";
 import { CERT_TYPES, certType, modeleCertificat, type CertData, type Certificat } from "@/lib/dispensaire-docs-const";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { creerCertificat, supprimerCertificat } from "@/app/dispensaire/certificats/actions";
@@ -77,7 +78,11 @@ export function DispensaireCertificats({ data }: { data: CertData }) {
         </div>
       </div>
 
-      {liste.length === 0 ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">{certs.length ? "Aucun certificat ne correspond." : "Aucun certificat — crée le premier."}</p> : (
+      {liste.length === 0 ? (
+        certs.length
+          ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">Aucun certificat ne correspond à ta recherche.</p>
+          : <VideRegistre icon={Stethoscope} titre="Aucun certificat établi" sous="Rédige un premier certificat médical — il pourra ensuite être scellé et imprimé." />
+      ) : (
         <div className="grid gap-2 lg:grid-cols-2">
           {liste.map((c) => {
             const t = certType(c.type);

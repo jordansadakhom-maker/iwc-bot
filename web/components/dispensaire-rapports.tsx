@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ScrollText, Plus, Check, Pencil, Trash2, Search, ExternalLink } from "lucide-react";
+import { VideRegistre } from "@/components/dispensaire-ui";
 import { RAPPORT_CATEGORIES, estCanva, normaliserLien, type RapportsData, type Rapport } from "@/lib/dispensaire-docs-const";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
 import { creerRapport, majRapport, supprimerRapport } from "@/app/dispensaire/rapports/actions";
@@ -54,7 +55,11 @@ export function DispensaireRapports({ data }: { data: RapportsData }) {
         </div>
       </div>
 
-      {liste.length === 0 ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">{rapports.length ? "Aucun rapport ne correspond." : "Aucun rapport — ajoute le premier (lien Canva)."}</p> : (
+      {liste.length === 0 ? (
+        rapports.length
+          ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">Aucun rapport ne correspond à ta recherche.</p>
+          : <VideRegistre icon={ScrollText} titre="Aucun rapport médical" sous="Ajoute un premier compte rendu (lien Canva) et il sera référencé ici." />
+      ) : (
         <div className="grid gap-2 lg:grid-cols-2">
           {liste.map((r) => (
             <div key={r.id} className="group rounded-[12px] border border-border bg-surface-2 p-3">
