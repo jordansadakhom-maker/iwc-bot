@@ -114,10 +114,17 @@ function TgModal({ tg, onClose, router }: { tg: TelegrammeItem; onClose: () => v
       </div>
 
       {tg.source === "web" ? (
-        <div className="mb-3 flex items-start gap-2 rounded-[8px] border px-2.5 py-2 text-[0.78rem]" style={{ borderColor: "color-mix(in srgb,var(--warn) 45%,var(--border))", background: "color-mix(in srgb,var(--warn) 8%,transparent)" }}>
-          <span style={{ color: "var(--warn)" }}>⚠️</span>
-          <span className="text-muted">Télégramme envoyé depuis le site : <b className="text-ink">pas de MP Discord possible</b> (l&apos;expéditeur n&apos;est pas un membre Discord). Ta réponse est <b>gardée en trace</b> ; recontacte-le via son moyen de contact{tg.contact ? <> : <b className="text-ink">{tg.contact}</b></> : null}.</span>
-        </div>
+        /discord/i.test(tg.contact || "") ? (
+          <div className="mb-3 flex items-start gap-2 rounded-[8px] border px-2.5 py-2 text-[0.78rem]" style={{ borderColor: "color-mix(in srgb,var(--good) 40%,var(--border))", background: "color-mix(in srgb,var(--good) 8%,transparent)" }}>
+            <span style={{ color: "var(--good)" }}>✅</span>
+            <span className="text-muted">Contact <b className="text-ink">Discord</b> fourni : ta réponse est <b>livrée en MP Discord</b> (si le pseudo est trouvé sur le serveur). Contact : <b className="text-ink">{tg.contact}</b></span>
+          </div>
+        ) : (
+          <div className="mb-3 flex items-start gap-2 rounded-[8px] border px-2.5 py-2 text-[0.78rem]" style={{ borderColor: "color-mix(in srgb,var(--warn) 45%,var(--border))", background: "color-mix(in srgb,var(--warn) 8%,transparent)" }}>
+            <span style={{ color: "var(--warn)" }}>⚠️</span>
+            <span className="text-muted">Contact <b className="text-ink">en jeu</b> : pas de MP Discord. Ta réponse est <b>gardée en trace</b> ; recontacte-le via son moyen de contact{tg.contact ? <> : <b className="text-ink">{tg.contact}</b></> : null}.</span>
+          </div>
+        )
       ) : null}
 
       {/* Fil de conversation */}

@@ -626,6 +626,32 @@ Object.assign(HANDLERS, {
     if (!telegramme?.repondreDepuisWeb || !ctx?.guild?.client) return { ok: false, message: 'Télégrammes indisponibles' };
     return await telegramme.repondreDepuisWeb(ctx.guild.client, db, rdvId, texte, p.auteurNom || 'Équipe');
   },
+  // ── Réponse à un télégramme du SITE dont l'expéditeur a laissé un pseudo/ID
+  //    Discord → on le retrouve parmi les membres et on lui livre la réponse en MP.
+  'telegramme.mpDiscord': async (db, p, ctx) => {
+    const guild = ctx?.guild;
+    if (!guild) return { ok: false, message: 'Serveur indisponible' };
+    const pseudo = _s(p.pseudo, 120).replace(/^@/, '');
+    const texte = _s(p.texte, 2000);
+    const de = _s(p.de, 120) || 'Iron Wolf Company';
+    if (!pseudo || !texte) return { ok: false, message: 'Infos manquantes' };
+    let user = null;
+    if (/^\d{16,20}$/.test(pseudo)) user = await guild.client.users.fetch(pseudo).catch(() => null);
+    if (!user) {
+      const q = pseudo.toLowerCase();
+      try {
+        const membres = await guild.members.fetch();
+        const noms = (m) => [m.user.username, m.user.globalName, m.displayName, m.user.tag].filter(Boolean).map(n => String(n).toLowerCase());
+        const m = [...membres.values()].find(m => noms(m).some(n => n === q)) || [...membres.values()].find(m => noms(m).some(n => n.includes(q)));
+        if (m) user = m.user;
+      } catch {}
+    }
+    if (!user) return { ok: false, message: `Client Discord « ${pseudo} » introuvable sur le serveur — recontacte-le autrement.` };
+    let emb = null;
+    try { const { EmbedBuilder: EB } = require('discord.js'); emb = new EB().setColor(0xc8a45c).setTitle('✉️ TÉLÉGRAMME — IRON WOLF COMPANY').setDescription(texte.slice(0, 3500)).setFooter({ text: `Réponse de ${de}` }).setTimestamp(); } catch {}
+    const sent = await user.send(emb ? { embeds: [emb] } : { content: `✉️ **TÉLÉGRAMME — IRON WOLF COMPANY**\n${texte.slice(0, 1800)}` }).catch(() => null);
+    return sent ? { ok: true, message: '✅ Réponse livrée au client en message privé (Discord).' } : { ok: false, message: '⚠️ Client trouvé, mais ses messages privés sont fermés — recontacte-le autrement.' };
+  },
   // Marque un télégramme comme ayant donné un RDV (persisté côté bot).
   'telegramme.marquerRdv': (db, p) => {
     if (!telegramme?.marquerRdvCree) return { ok: false, message: 'Indisponible' };
