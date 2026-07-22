@@ -4,6 +4,7 @@ import { BarresH } from "@/components/charts";
 import { FinancesCoffres } from "@/components/finances-coffres";
 import { FacturesListe } from "@/components/factures-liste";
 import { Portefeuilles } from "@/components/portefeuilles";
+import { cents } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -26,17 +27,23 @@ export default async function FinancesPage() {
       <FinancesCoffres cartes={cartes} connecte={connecte} />
 
       {connecte ? (
-        <Card>
-          <CardHeader titre="Comparatif des coffres (tous pôles)" />
-          <BarresH
-            data={[
-              { label: "Coffre commun", value: coffres.commun ?? 0 },
-              { label: "Coffre Iron Wolf", value: coffres.legal ?? 0 },
-              { label: "Coffre Van Horn", value: coffres.vanhorn ?? 0 },
-            ]}
-            money
-          />
-        </Card>
+        (() => {
+          // Chaque coffre garde SA couleur d'identité (comme sur le tableau de
+          // bord) → on distingue d'un coup d'œil. Palette validée (contraste + CVD).
+          const barres = [
+            { label: "Coffre commun", value: coffres.commun ?? 0, color: "#c98500" },
+            { label: "Coffre Iron Wolf", value: coffres.legal ?? 0, color: "#3987e5" },
+            { label: "Coffre Confrérie", value: coffres.illegal ?? 0, color: "#e66767" },
+            { label: "Coffre Van Horn", value: coffres.vanhorn ?? 0, color: "#9085e9" },
+          ];
+          const totalCoffres = barres.reduce((a, b) => a + b.value, 0);
+          return (
+            <Card>
+              <CardHeader titre="Comparatif des coffres (tous pôles)" compteur={`total : $${cents(totalCoffres)}`} />
+              <BarresH data={barres} money share />
+            </Card>
+          );
+        })()
       ) : null}
 
       <Card>

@@ -15,12 +15,17 @@ function fmt(n: number, money?: boolean) {
 export function BarresH({
   data,
   money,
+  share,
 }: {
   data: { label: string; value: number; color?: string }[];
   money?: boolean;
+  // `share` : affiche en plus la part (%) de chaque barre dans le total. Optionnel
+  // → n'affecte pas les autres usages du graphique (membres, statistiques…).
+  share?: boolean;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const max = Math.max(1, ...data.map((d) => d.value));
+  const sum = data.reduce((a, d) => a + d.value, 0);
   return (
     <div className="flex flex-col gap-3">
       {data.map((d, i) => {
@@ -36,9 +41,13 @@ export function BarresH({
             style={{ opacity: hover === null || on ? 1 : 0.55 }}
           >
             <div className="mb-1 flex items-baseline justify-between gap-2 text-[0.78rem]">
-              <span className="truncate text-muted">{d.label}</span>
-              <span className={"font-num font-semibold " + (on ? "text-ink" : "text-ink")} style={on ? { color: base } : undefined}>
+              <span className="inline-flex min-w-0 items-center gap-1.5 truncate text-muted">
+                {d.color ? <span className="h-2 w-2 shrink-0 rounded-[2px]" style={{ background: d.color }} /> : null}
+                <span className="truncate">{d.label}</span>
+              </span>
+              <span className="shrink-0 font-num font-semibold text-ink" style={on ? { color: base } : undefined}>
                 {fmt(d.value, money)}
+                {share && sum > 0 ? <span className="ml-1.5 font-normal text-faint">· {Math.round((d.value / sum) * 100)}%</span> : null}
               </span>
             </div>
             <div className="h-2.5 w-full overflow-hidden rounded-full" style={{ background: "color-mix(in srgb,var(--ink) 8%,transparent)" }}>
