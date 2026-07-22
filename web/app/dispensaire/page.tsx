@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowRight, Boxes, FlaskConical, Receipt, FileText, Badg
 import { getAccueil } from "@/lib/dispensaire-accueil";
 import { getRoleDispensaire } from "@/lib/dispensaire-roles";
 import { DISP_NAV } from "@/lib/dispensaire-nav";
-import { STANDALONE } from "@/lib/standalone";
+import { isStandalone } from "@/lib/standalone-server";
 import { AccueilService } from "@/components/dispensaire-accueil-service";
 
 export const dynamic = "force-dynamic";
@@ -13,9 +13,9 @@ const ACT_ICON: Record<string, typeof Package> = { stock: Package, vente: Bandag
 const heureCourte = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); } catch { return "—"; } };
 
 export default async function DispensaireAccueil() {
-  const [d, role] = await Promise.all([getAccueil(), getRoleDispensaire()]);
+  const [d, role, standalone] = await Promise.all([getAccueil(), getRoleDispensaire(), isStandalone()]);
   const habilite = role.perms.rh || role.perms.factures || role.perms.admin;
-  const modules = DISP_NAV.filter((t) => t.href !== "/dispensaire" && (!t.restreint || habilite) && (!t.admin || role.perms.admin) && !(STANDALONE && t.href === "/repertoire"));
+  const modules = DISP_NAV.filter((t) => t.href !== "/dispensaire" && (!t.restreint || habilite) && (!t.admin || role.perms.admin) && !(standalone && t.href === "/repertoire"));
 
   // Tuiles d'alerte du tableau de bord.
   const tuiles = [
