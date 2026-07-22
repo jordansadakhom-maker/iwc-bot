@@ -1818,7 +1818,7 @@ async function handleSlashCommand(interaction) {
       const { exporterRepertoire } = require('./export-repertoire');
       const r = await exporterRepertoire(interaction.client);
       if (!r.ok) return interaction.editReply({ content: r.raison === 'salon' ? "❌ Salon des fiches introuvable — vérifie que le bot a accès au salon `1517505221629050901`." : "❌ Export impossible pour le moment." });
-      return interaction.editReply({ content: `📇 **Export du répertoire terminé.**\n• ${r.lus} message(s) lus\n• ${r.detectees} fiche(s) détectée(s)\n• **${r.importes} importée(s)** sur le site\n• ${r.doublons} doublon(s) ignoré(s)\n\n➡️ Retrouve-les dans l'onglet **Répertoire contacts** du site (les fiches très courtes sont marquées « à compléter »).` });
+      return interaction.editReply({ content: `📇 **Export du répertoire terminé.**\n• ${r.lus} ${r.forum ? 'post(s) du forum' : 'message(s)'} lus\n• ${r.detectees} fiche(s) détectée(s)\n• **${r.importes} importée(s)** sur le site\n• ${r.doublons} doublon(s) ignoré(s)\n\n➡️ Retrouve-les dans l'onglet **Répertoire contacts** du site.` });
     } catch (e) {
       console.log('❌ /exporter-repertoire:', e.message);
       return interaction.editReply({ content: `❌ Erreur pendant l'export : ${e.message}` });
