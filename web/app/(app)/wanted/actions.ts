@@ -18,8 +18,17 @@ export async function majAvis(id: string, patch: Partial<AvisInput>): Promise<Co
   return envoyerCommande("traque.update", { id, ...patch });
 }
 export async function retirerAvis(id: string): Promise<CommandeResult> {
-  if (!id) return { ok: false, error: "Avis introuvable." };
-  return envoyerCommande("traque.delete", { id });
+  const avisId = String(id || "").trim();
+  if (!avisId) return { ok: false, error: "Avis introuvable." };
+  // 1) Le bot retire la traque de SES données (source de vérité) + du Discord.
+  //    On ATTEND son verdict pour un retrait réellement effectif.
+  const r = await envoyerCommande("traque.delete", { id: avisId }, { attendre: true, timeoutMs: 12000 });
+  // 2) Filet de sécurité : on retire AUSSI la ligne directement en base, tout de
+  //    suite → l'avis disparaît du site immédiatement. Sans danger : le bot l'a
+  //    déjà retirée de ses données (ou ne l'avait plus après un redéploiement),
+  //    donc il ne la ré-ajoutera pas à la prochaine synchro.
+  try { const admin = createAdminClient(); if (admin) await admin.from("Traque").delete().eq("id", avisId); } catch { /* best-effort */ }
+  return { ok: true, message: r.ok ? (r.message || "Avis retiré.") : "Avis retiré du site." };
 }
 
 // Fiche cible IA : à partir des infos réelles de l'avis de recherche, l'IA rédige
