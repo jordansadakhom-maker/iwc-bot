@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Boxes, Plus, Search, Check, Pencil, Trash2, AlertTriangle, Archive, ArrowDownRight, ArrowUpRight, History } from "lucide-react";
 import { CATEGORIES, catLabel, enAlerte, type StockData, type StockItem, type StockMouvement } from "@/lib/dispensaire-stock-const";
-import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
+import { Modal, Flash, Champ, Picker, PhotoField, inputCls } from "@/components/edit-ui";
 import { VideRegistre } from "@/components/dispensaire-ui";
 import { creerItem, majItem, supprimerItem, ajusterStock } from "@/app/dispensaire/stockage/actions";
 
@@ -50,7 +50,7 @@ export function DispensaireStockage({ data }: { data: StockData }) {
       const r = await majItem(editing.id, clean);
       if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else router.refresh();
     } else {
-      const tmp: StockItem = { id: "tmp-" + Math.random().toString(36).slice(2, 8), nom: vals.nom, categorie: vals.categorie || "materiel", coffre: vals.coffre || null, unite: vals.unite || null, stock: clean.stock, stockFixe: clean.stockFixe, seuil: clean.seuil, note: vals.note || null, updatedAt: null, updatedBy: null };
+      const tmp: StockItem = { id: "tmp-" + Math.random().toString(36).slice(2, 8), nom: vals.nom, categorie: vals.categorie || "materiel", coffre: vals.coffre || null, unite: vals.unite || null, stock: clean.stock, stockFixe: clean.stockFixe, seuil: clean.seuil, note: vals.note || null, photo: vals.photo || null, updatedAt: null, updatedBy: null };
       setItems((p) => [...p, tmp]); setForm(null);
       const r = await creerItem(clean);
       if (!r.ok) { setItems((p) => p.filter((it) => it.id !== tmp.id)); setFlash({ t: "bad", m: r.error || "Impossible." }); }
@@ -146,13 +146,21 @@ function ItemCard({ it, onEdit, onDel, onAdjust }: { it: StockItem; onEdit: () =
   return (
     <div className="rounded-[12px] border p-3" style={{ borderColor: alerte ? "color-mix(in srgb,var(--oxblood) 50%,var(--border))" : "var(--border)", background: "var(--surface-2)" }}>
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
+        <div className="flex min-w-0 items-start gap-2.5">
+          {it.photo ? (
+            <a href={it.photo} target="_blank" rel="noreferrer" className="shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={it.photo} alt={it.nom} className="h-12 w-12 rounded-[8px] border border-border object-cover transition hover:brightness-110" />
+            </a>
+          ) : null}
+          <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[0.9rem] font-semibold">{it.nom}</span>
             <span className="rounded-full px-1.5 py-0.5 text-[0.6rem] font-bold uppercase" style={{ color: catTone[it.categorie] || "var(--muted)", background: `color-mix(in srgb,${catTone[it.categorie] || "var(--muted)"} 14%,transparent)` }}>{catLabel(it.categorie)}</span>
             {alerte ? <span className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[0.6rem] font-bold text-white" style={{ background: "var(--oxblood)" }}><AlertTriangle className="h-2.5 w-2.5" /> alerte</span> : null}
           </div>
           {it.note ? <div className="mt-0.5 text-[0.72rem] text-faint">{it.note}</div> : null}
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <button onClick={onEdit} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Modifier"><Pencil className="h-3.5 w-3.5" /></button>
@@ -179,7 +187,7 @@ function ItemCard({ it, onEdit, onDel, onAdjust }: { it: StockItem; onEdit: () =
 function ItemForm({ initial, coffres, onClose, onSave }: { initial: StockItem | null; coffres: string[]; onClose: () => void; onSave: (v: Record<string, string>) => void }) {
   const [v, setV] = useState<Record<string, string>>(() => ({
     nom: initial?.nom || "", categorie: initial?.categorie || "materiel", coffre: initial?.coffre || "", unite: initial?.unite || "",
-    stock: String(initial?.stock ?? 0), stockFixe: String(initial?.stockFixe ?? 0), seuil: String(initial?.seuil ?? 0), note: initial?.note || "",
+    stock: String(initial?.stock ?? 0), stockFixe: String(initial?.stockFixe ?? 0), seuil: String(initial?.seuil ?? 0), note: initial?.note || "", photo: initial?.photo || "",
   }));
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setV((p) => ({ ...p, [k]: e.target.value }));
@@ -200,6 +208,7 @@ function ItemForm({ initial, coffres, onClose, onSave }: { initial: StockItem | 
           <Champ label="Seuil d'alerte"><input className={inputCls} value={v.seuil} onChange={setNum("seuil")} inputMode="numeric" /></Champ>
         </div>
         <Champ label="Note"><textarea className={inputCls} rows={2} value={v.note} onChange={set("note")} /></Champ>
+        <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Photo (facultatif)</span><PhotoField dossier="dispensaire-stock" value={v.photo} onChange={(url) => setV((p) => ({ ...p, photo: url }))} label="Photo de l'article ou du contenu du coffre" /></div>
         {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
         <div className="mt-1 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2">Annuler</button>

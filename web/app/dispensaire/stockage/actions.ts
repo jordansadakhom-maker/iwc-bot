@@ -6,8 +6,8 @@ import { getSessionProfile } from "@/lib/queries";
 // Stockage — outil de service partagé. Chaque mouvement est tracé.
 export type StockResult = { ok: boolean; error?: string; id?: string; apres?: number };
 
-type Champ = "nom" | "categorie" | "coffre" | "unite" | "note";
-const CHAMPS: Champ[] = ["nom", "categorie", "coffre", "unite", "note"];
+type Champ = "nom" | "categorie" | "coffre" | "unite" | "note" | "photo";
+const CHAMPS: Champ[] = ["nom", "categorie", "coffre", "unite", "note", "photo"];
 const CATS = ["medicament", "materiel", "matiere", "nourriture", "autre"];
 const NUMS = ["stock", "stockFixe", "seuil"] as const;
 
@@ -20,7 +20,7 @@ function nettoyer(data: Record<string, unknown>) {
   const row: Record<string, unknown> = {};
   for (const c of CHAMPS) if (c in data) {
     if (c === "categorie") row[c] = CATS.includes(String(data[c])) ? data[c] : "materiel";
-    else row[c] = s(data[c], c === "note" ? 1000 : 200);
+    else row[c] = s(data[c], c === "note" ? 1000 : c === "photo" ? 600 : 200);
   }
   for (const k of NUMS) if (k in data) row[k] = n(data[k]);
   return row;

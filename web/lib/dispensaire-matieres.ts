@@ -28,7 +28,7 @@ export async function getCoffres(): Promise<CoffresData> {
   const { data, error } = await admin.from("DispensaireCoffre").select("*").order("nom", { ascending: true });
   if (error) return { ...vide, connecte: true, pret: false, canEdit: true };
   const coffres: Coffre[] = ((data || []) as Record<string, unknown>[]).map((r) => ({
-    id: String(r.id), nom: String(r.nom || "Coffre"), emplacement: s(r.emplacement), responsable: s(r.responsable), note: s(r.note), updatedAt: s(r.updatedAt), updatedBy: s(r.updatedBy),
+    id: String(r.id), nom: String(r.nom || "Coffre"), emplacement: s(r.emplacement), responsable: s(r.responsable), note: s(r.note), photo: s(r.photo), updatedAt: s(r.updatedAt), updatedBy: s(r.updatedBy),
   }));
   return { connecte: true, pret: true, canEdit: true, coffres };
 }

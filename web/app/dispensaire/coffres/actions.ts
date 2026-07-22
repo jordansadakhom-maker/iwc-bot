@@ -6,15 +6,15 @@ import { getSessionProfile } from "@/lib/queries";
 // Coffres (entités) — outil de service partagé.
 export type CoffreResult = { ok: boolean; error?: string; id?: string };
 
-type Champ = "nom" | "emplacement" | "responsable" | "note";
-const CHAMPS: Champ[] = ["nom", "emplacement", "responsable", "note"];
+type Champ = "nom" | "emplacement" | "responsable" | "note" | "photo";
+const CHAMPS: Champ[] = ["nom", "emplacement", "responsable", "note", "photo"];
 const s = (v: unknown, max = 200) => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
 function newId() { return `dcf-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
 async function qui() { try { return (await getSessionProfile())?.nom || "Équipe"; } catch { return "Équipe"; } }
 
 function nettoyer(data: Record<string, unknown>) {
   const row: Record<string, unknown> = {};
-  for (const c of CHAMPS) if (c in data) row[c] = s(data[c], c === "note" ? 1000 : 200);
+  for (const c of CHAMPS) if (c in data) row[c] = s(data[c], c === "note" ? 1000 : c === "photo" ? 600 : 200);
   return row;
 }
 

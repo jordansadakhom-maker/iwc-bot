@@ -13,7 +13,7 @@ function toItem(r: Record<string, unknown>): StockItem {
   return {
     id: String(r.id), nom: String(r.nom || "Article"), categorie: String(r.categorie || "materiel"),
     coffre: s(r.coffre), unite: s(r.unite), stock: num(r.stock), stockFixe: num(r.stockFixe), seuil: num(r.seuil),
-    note: s(r.note), updatedAt: s(r.updatedAt), updatedBy: s(r.updatedBy),
+    note: s(r.note), photo: s(r.photo), updatedAt: s(r.updatedAt), updatedBy: s(r.updatedBy),
   };
 }
 

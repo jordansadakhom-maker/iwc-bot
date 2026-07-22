@@ -43,6 +43,16 @@ export async function getRoleDispensaire(): Promise<RoleContext> {
       const def = roleDef(String(membre.role));
       return { connecte: true, identifiant: discordId || null, nom: String(membre.nom || nom), role: def.key, perms: def.perms, source: "membre", membreId: String(membre.id) };
     }
+    // Amorçage : tant qu'AUCUN membre n'est défini (dispensaire tout neuf), le
+    // compte connecté reçoit un accès complet afin de pouvoir se nommer Directeur
+    // depuis le panneau d'administration. Dès qu'un membre existe, l'accès se ferme.
+    try {
+      const { count, error } = await admin.from("DispensaireMembre").select("id", { count: "exact", head: true });
+      if (!error && (count ?? 0) === 0) {
+        const def = roleDef("directeur");
+        return { connecte: true, identifiant: discordId || null, nom, role: def.key, perms: def.perms, source: "fallback", membreId: null };
+      }
+    } catch { /* table pas encore prête → repli normal ci-dessous */ }
   }
 
   // Repli : dérive des accès Iron Wolf (permissif par défaut) — comportement actuel.
