@@ -1166,15 +1166,25 @@ export type JournalRdv = {
   source: string | null; assignes: string[]; resultat: string | null; reponses: Reponse[];
   closedAt: string | null; closedBy: string | null; createdAt: string | null;
 };
-export type JournalData = { connecte: boolean; rdvs: JournalRdv[] };
+export type JournalAnomalie = { type: string; nom?: string; cible?: string; stock?: number; n?: number; produitNom?: string; ingredient?: string };
+export type JournalScan = { id: string; createdAt: string | null; resume: string | null; nb: number; anomalies: JournalAnomalie[] };
+export type JournalData = { connecte: boolean; rdvs: JournalRdv[]; scans: JournalScan[] };
 export async function getJournal(): Promise<JournalData> {
-  if (!dataConfigured()) return { connecte: false, rdvs: [] };
+  if (!dataConfigured()) return { connecte: false, rdvs: [], scans: [] };
   const supabase = createAdminClient();
-  if (!supabase) return { connecte: false, rdvs: [] };
-  const { data, error } = await supabase.from("Rdv").select("id,nomRP,type,lieu,creneau,statut,paiement,createdAt").eq("statut", "cloture").limit(500);
-  if (error) return { connecte: false, rdvs: [] };
+  if (!supabase) return { connecte: false, rdvs: [], scans: [] };
+  const [rdvR, scanR] = await Promise.all([
+    supabase.from("Rdv").select("id,nomRP,type,lieu,creneau,statut,paiement,createdAt").eq("statut", "cloture").limit(500),
+    // Scans horaires de cohérence de l'armurerie (table optionnelle) → journal.
+    supabase.from("ArmurerieScanRapport").select("id,createdAt,resume,nb,anomalies").order("createdAt", { ascending: false }).limit(30),
+  ]);
+  if (rdvR.error) return { connecte: false, rdvs: [], scans: [] };
   type Row = Record<string, unknown>;
-  const rdvs: JournalRdv[] = ((data || []) as Row[]).map((r) => {
+  const scans: JournalScan[] = scanR.error ? [] : ((scanR.data || []) as Row[]).map((s) => ({
+    id: String(s.id), createdAt: (s.createdAt as string) ?? null, resume: (s.resume as string) ?? null,
+    nb: Number(s.nb) || 0, anomalies: Array.isArray(s.anomalies) ? (s.anomalies as JournalAnomalie[]) : [],
+  }));
+  const rdvs: JournalRdv[] = ((rdvR.data || []) as Row[]).map((r) => {
     const p = (r.paiement && typeof r.paiement === "object" ? r.paiement : {}) as Record<string, unknown>;
     return {
       id: String(r.id), nomRP: (r.nomRP as string) ?? null, type: (r.type as string) ?? null,
@@ -1189,7 +1199,7 @@ export async function getJournal(): Promise<JournalData> {
   });
   // Plus récemment clôturés en tête.
   rdvs.sort((a, b) => new Date(b.closedAt || b.createdAt || 0).getTime() - new Date(a.closedAt || a.createdAt || 0).getTime());
-  return { connecte: true, rdvs };
+  return { connecte: true, rdvs, scans };
 }
 
 // ── Statistiques : agrégats pour la page analytique (données réelles). ──

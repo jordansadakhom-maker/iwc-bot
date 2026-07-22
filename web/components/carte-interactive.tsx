@@ -47,6 +47,15 @@ const phaseDe = (h: number) => (h < 6 ? "nuit" : h < 9 ? "aube" : h < 18 ? "jour
 const longueurRoute = (pts: { x: number; y: number }[]) => { let d = 0; for (let i = 1; i < pts.length; i++) d += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y); return d; };
 const centreRoute = (pts: { x: number; y: number }[]) => pts[Math.floor(pts.length / 2)] || { x: 50, y: 50 };
 
+// Distance & temps de trajet INDICATIFS. Échelle approximative de la carte RDR2 :
+// 100 unités (largeur) ≈ 9 km. Vitesse à cheval ≈ 18 km/h (galop, terrain varié).
+const KM_PAR_UNITE = 0.09;
+const VITESSE_KMH = 18;
+const distanceKm = (pts: { x: number; y: number }[]) => longueurRoute(pts) * KM_PAR_UNITE;
+const distTxt = (km: number) => (km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`);
+const tempsTxt = (km: number) => { const m = Math.max(1, Math.round((km / VITESSE_KMH) * 60)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}`; };
+const trajetTxt = (pts: { x: number; y: number }[]) => { const km = distanceKm(pts); return `≈ ${distTxt(km)} · ${tempsTxt(km)} à cheval`; };
+
 type XY = { x: number; y: number };
 type EditMode = "none" | "lieu" | "route";
 
@@ -195,8 +204,6 @@ export function CarteInteractive({ data, imageUrl }: { data: CarteData; imageUrl
 
   const zoom = (dir: 1 | -1) => setT((p) => { const z = Math.min(6, Math.max(1, p.z * (dir > 0 ? 1.3 : 1 / 1.3))); const rect = viewport.current?.getBoundingClientRect(); const cx = (rect?.width || 0) / 2, cy = (rect?.height || 0) / 2, k = z / p.z; const c = clampT(cx - (cx - p.x) * k, cy - (cy - p.y) * k, z); return { z, x: c.x, y: c.y }; });
 
-  const distanceRegle = longueurRoute(reglePts);
-
   // ── Écritures optimistes ──
   async function ajouterLieu(d: { nom: string; type: string; niveau: string; region: string; lieu: string; notes: string; x: number; y: number }) {
     const tmpId = "tmp-" + Math.random().toString(36).slice(2, 8);
@@ -308,26 +315,20 @@ export function CarteInteractive({ data, imageUrl }: { data: CarteData; imageUrl
             {/* Ambiance jour/nuit — teinte le fond, sous les repères */}
             {monte && ambiance ? <div className="pointer-events-none absolute inset-0" style={{ background: phase.bg }} /> : null}
 
-            {/* Itinéraires (SVG en % du monde) */}
+            {/* Itinéraires — traits FINS à largeur constante (non-scaling-stroke),
+                qui suivent bien le tracé quel que soit le zoom. Les sommets sont
+                des points HTML (taille constante) rendus plus bas. */}
             <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full">
               {visRoutes.map((r) => {
                 const rt = RTYPE(r.type);
                 const d = r.points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
-                return <path key={r.id} d={d} fill="none" stroke={rt.color} strokeWidth={0.5} strokeDasharray={rt.dash || undefined} strokeLinecap="round" strokeLinejoin="round" opacity={0.9} />;
+                return <path key={r.id} d={d} fill="none" stroke={rt.color} strokeWidth={2.4} vectorEffect="non-scaling-stroke" strokeDasharray={rt.dash ? "7 5" : undefined} strokeLinecap="round" strokeLinejoin="round" opacity={0.95} />;
               })}
-              {/* Itinéraire en cours de tracé */}
               {routePts.length ? (
-                <>
-                  <path d={routePts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ")} fill="none" stroke="var(--accent)" strokeWidth={0.6} strokeDasharray="1.5 1.2" strokeLinecap="round" opacity={0.95} />
-                  {routePts.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={0.9} fill="var(--accent)" />)}
-                </>
+                <path d={routePts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ")} fill="none" stroke="var(--accent)" strokeWidth={2.6} vectorEffect="non-scaling-stroke" strokeDasharray="7 5" strokeLinecap="round" strokeLinejoin="round" opacity={0.95} />
               ) : null}
-              {/* Mesure (règle) */}
               {reglePts.length ? (
-                <>
-                  <path d={reglePts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ")} fill="none" stroke="#6f9fc4" strokeWidth={0.55} strokeDasharray="1.2 1" strokeLinecap="round" />
-                  {reglePts.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={0.85} fill="#6f9fc4" />)}
-                </>
+                <path d={reglePts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ")} fill="none" stroke="#6f9fc4" strokeWidth={2.4} vectorEffect="non-scaling-stroke" strokeDasharray="6 4" strokeLinecap="round" strokeLinejoin="round" />
               ) : null}
             </svg>
 
@@ -345,6 +346,14 @@ export function CarteInteractive({ data, imageUrl }: { data: CarteData; imageUrl
                 </button>
               );
             })}
+
+            {/* Sommets du tracé / de la mesure — petits points de taille constante */}
+            {routePts.map((p, i) => (
+              <span key={"rp" + i} className="pointer-events-none absolute rounded-full border border-white/70" style={{ left: `${p.x}%`, top: `${p.y}%`, width: 9, height: 9, background: "var(--accent)", transform: `translate(-50%,-50%) scale(${1 / t.z})`, zIndex: 15 }} />
+            ))}
+            {reglePts.map((p, i) => (
+              <span key={"mp" + i} className="pointer-events-none absolute rounded-full border border-white/70" style={{ left: `${p.x}%`, top: `${p.y}%`, width: 9, height: 9, background: "#6f9fc4", transform: `translate(-50%,-50%) scale(${1 / t.z})`, zIndex: 15 }} />
+            ))}
           </div>
         </div>
 
@@ -367,14 +376,14 @@ export function CarteInteractive({ data, imageUrl }: { data: CarteData; imageUrl
         {/* Panneau de l'outil actif */}
         {regle ? (
           <div className="absolute left-1/2 top-3 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border-2 bg-surface/95 px-3 py-1.5 text-[0.78rem] shadow-card backdrop-blur">
-            <Ruler className="h-3.5 w-3.5" style={{ color: "#6f9fc4" }} /> {reglePts.length} point(s){reglePts.length >= 2 ? <> · <b className="font-num">{distanceRegle.toFixed(1)} u.</b></> : null}
+            <Ruler className="h-3.5 w-3.5" style={{ color: "#6f9fc4" }} /> {reglePts.length} point(s){reglePts.length >= 2 ? <> · <b>{trajetTxt(reglePts)}</b></> : null}
             <button onClick={() => setReglePts((p) => p.slice(0, -1))} disabled={!reglePts.length} className="rounded-md border border-border px-2 py-0.5 text-[0.72rem] text-muted hover:text-ink disabled:opacity-40">Annuler</button>
             <button onClick={() => setReglePts([])} disabled={!reglePts.length} className="rounded-md border border-border px-2 py-0.5 text-[0.72rem] text-muted hover:text-ink disabled:opacity-40">Effacer</button>
             <button onClick={() => { setRegle(false); setReglePts([]); }} className="text-faint hover:text-ink"><X className="h-3.5 w-3.5" /></button>
           </div>
         ) : mode === "route" ? (
           <div className="absolute left-1/2 top-3 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border-2 bg-surface/95 px-3 py-1.5 text-[0.78rem] shadow-card backdrop-blur">
-            <RouteIcon className="h-3.5 w-3.5 text-accent" /> {routePts.length} point(s)
+            <RouteIcon className="h-3.5 w-3.5 text-accent" /> {routePts.length} point(s){routePts.length >= 2 ? <> · <b>{trajetTxt(routePts)}</b></> : null}
             <button onClick={() => setRoutePts((p) => p.slice(0, -1))} disabled={!routePts.length} className="rounded-md border border-border px-2 py-0.5 text-[0.72rem] text-muted hover:text-ink disabled:opacity-40">Annuler dernier</button>
             <button onClick={() => setRouteDraft(routePts)} disabled={routePts.length < 2} className="rounded-md px-2 py-0.5 text-[0.72rem] font-semibold text-black/85 disabled:opacity-40" style={{ background: "var(--accent)" }}>Terminer</button>
             <button onClick={annulerEdition} className="text-faint hover:text-ink"><X className="h-3.5 w-3.5" /></button>
@@ -423,7 +432,7 @@ export function CarteInteractive({ data, imageUrl }: { data: CarteData; imageUrl
               <span key={r.id} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-2.5 py-1 text-[0.74rem]">
                 <span className="h-2 w-2 rounded-full" style={{ background: rt.color }} />
                 <button onClick={() => { const c = centreRoute(r.points); flyTo(c.x, c.y, 2.2); }} className="hover:text-accent" title="Voler vers l'itinéraire">{r.nom}</button>
-                <span className="text-faint">{rt.label} · {Math.round(longueurRoute(r.points))} u.</span>
+                <span className="text-faint">{rt.label} · {trajetTxt(r.points)}</span>
                 {r.source === "web" ? <button onClick={() => retirerItineraire(r.id)} className="text-faint hover:text-oxblood" aria-label="Supprimer l'itinéraire"><X className="h-3.5 w-3.5" /></button> : null}
               </span>
             );
