@@ -97,7 +97,7 @@ export function PhotoDrop({
       ) : null}
 
       {/* Choisir un fichier / galerie */}
-      <input ref={inputRef} type="file" multiple={multiple} accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={(e) => { const fs = Array.from(e.target.files || []); if (fs.length) { if (multiple) envoyerPlusieurs(fs); else envoyer(fs[0]); } e.target.value = ""; }} />
+      <input ref={inputRef} type="file" multiple={multiple} accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" className="hidden" onChange={(e) => { const fs = Array.from(e.target.files || []); if (fs.length) { if (multiple) envoyerPlusieurs(fs); else envoyer(fs[0]); } e.target.value = ""; }} />
       {/* Appareil photo (mobile : ouvre directement la caméra arrière) */}
       <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) envoyer(f); e.target.value = ""; }} />
 

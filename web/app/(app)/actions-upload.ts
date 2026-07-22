@@ -10,13 +10,15 @@ export type UploadResult = { ok: boolean; url?: string; error?: string };
 
 const BUCKET = "iwc";
 const MAX = 10 * 1024 * 1024; // 10 Mo
-const MIME_OK = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"]);
+// Images + PDF (scan de commande/coffre lu par l'IA). Le PDF nécessite aussi que
+// « application/pdf » soit autorisé sur le bucket « iwc » côté Supabase Storage.
+const MIME_OK = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif", "application/pdf"]);
 
 export async function uploadPhoto(formData: FormData): Promise<UploadResult> {
   const file = formData.get("file");
-  if (!(file instanceof File)) return { ok: false, error: "Aucune image reçue." };
-  if (file.size > MAX) return { ok: false, error: "Image trop lourde (max 10 Mo)." };
-  if (file.type && !MIME_OK.has(file.type)) return { ok: false, error: "Format non pris en charge (PNG, JPEG, WEBP, GIF)." };
+  if (!(file instanceof File)) return { ok: false, error: "Aucun fichier reçu." };
+  if (file.size > MAX) return { ok: false, error: "Fichier trop lourd (max 10 Mo)." };
+  if (file.type && !MIME_OK.has(file.type)) return { ok: false, error: "Format non pris en charge (PNG, JPEG, WEBP, GIF, PDF)." };
 
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };

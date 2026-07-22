@@ -603,20 +603,26 @@ async function _vision(url: string, system: string, userText: string, maxTokens 
   if (!key) return { ok: false, error: "Lecture automatique indisponible (variable ANTHROPIC_API_KEY absente sur Vercel)." };
   try {
     const img = await fetch(url);
-    if (!img.ok) return { ok: false, error: "Photo inaccessible." };
+    if (!img.ok) return { ok: false, error: "Fichier inaccessible." };
     const ct = img.headers.get("content-type") || "";
+    // PDF détecté par content-type OU extension (Supabase Storage sert parfois octet-stream).
+    const isPdf = /application\/pdf/i.test(ct) || /\.pdf(\?|$)/i.test(url);
     const media = /png/i.test(ct) ? "image/png" : /webp/i.test(ct) ? "image/webp" : /gif/i.test(ct) ? "image/gif" : "image/jpeg";
     const b64 = Buffer.from(await img.arrayBuffer()).toString("base64");
-    if (!b64 || b64.length > 6_000_000) return { ok: false, error: "Photo trop lourde ou illisible." };
+    const cap = isPdf ? 24_000_000 : 6_000_000; // PDF plus permissif (requête API ≤ 32 Mo)
+    if (!b64 || b64.length > cap) return { ok: false, error: "Fichier trop lourd ou illisible." };
+    // Bloc « document » pour le PDF (Claude le lit nativement), sinon bloc « image ».
+    const bloc = isPdf
+      ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
+      : { type: "image", source: { type: "base64", media_type: media, data: b64 } };
+    // Un PDF produit une sortie plus verbeuse → on relève le plafond de tokens sinon le JSON est tronqué.
+    const effMax = isPdf ? Math.max(maxTokens, 2048) : maxTokens;
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
       body: JSON.stringify({
-        model: "claude-sonnet-5", max_tokens: maxTokens, system,
-        messages: [{ role: "user", content: [
-          { type: "image", source: { type: "base64", media_type: media, data: b64 } },
-          { type: "text", text: userText },
-        ] }],
+        model: "claude-sonnet-5", max_tokens: effMax, system,
+        messages: [{ role: "user", content: [bloc, { type: "text", text: userText }] }],
       }),
     });
     if (!res.ok) { const t = await res.text().catch(() => ""); console.error("_vision:", res.status, t.slice(0, 200)); return { ok: false, error: "Lecture impossible pour le moment." }; }
