@@ -3,11 +3,16 @@ import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAcces } from "@/lib/queries";
+import { isStandalone } from "@/lib/standalone-server";
 import { ROLES, roleDef, CONFIG_DEFAUT, type Perms, type Config } from "@/lib/dispensaire-roles-const";
 
 export * from "@/lib/dispensaire-roles-const";
 
-export type RoleContext = { connecte: boolean; identifiant: string | null; nom: string; role: string; perms: Perms; source: "membre" | "fallback"; membreId: string | null };
+// `autorise` = le compte a le droit d'accéder au dispensaire. En mode autonome
+// (site remis à un client), seuls les membres ajoutés sont autorisés (liste
+// blanche stricte) ; les autres sont refusés. En mode intégré Iron Wolf, tout
+// compte connecté reste autorisé (comportement historique).
+export type RoleContext = { connecte: boolean; identifiant: string | null; nom: string; role: string; perms: Perms; source: "membre" | "fallback"; membreId: string | null; autorise: boolean };
 export type Membre = { id: string; identifiant: string | null; nom: string; role: string; actif: boolean; note: string | null; updatedAt: string | null; updatedBy: string | null };
 
 const s = (v: unknown) => (v == null ? null : String(v));
@@ -41,26 +46,32 @@ export async function getRoleDispensaire(): Promise<RoleContext> {
     if (!membre && nom) { const { data } = await admin.from("DispensaireMembre").select("*").ilike("nom", nom).maybeSingle(); membre = data as Record<string, unknown> | null; }
     if (membre && (membre.actif ?? true)) {
       const def = roleDef(String(membre.role));
-      return { connecte: true, identifiant: discordId || null, nom: String(membre.nom || nom), role: def.key, perms: def.perms, source: "membre", membreId: String(membre.id) };
+      return { connecte: true, identifiant: discordId || null, nom: String(membre.nom || nom), role: def.key, perms: def.perms, source: "membre", membreId: String(membre.id), autorise: true };
     }
-    // Amorçage : tant qu'AUCUN membre n'est défini (dispensaire tout neuf), le
-    // compte connecté reçoit un accès complet afin de pouvoir se nommer Directeur
-    // depuis le panneau d'administration. Dès qu'un membre existe, l'accès se ferme.
-    try {
-      const { count, error } = await admin.from("DispensaireMembre").select("id", { count: "exact", head: true });
-      if (!error && (count ?? 0) === 0) {
-        const def = roleDef("directeur");
-        return { connecte: true, identifiant: discordId || null, nom, role: def.key, perms: def.perms, source: "fallback", membreId: null };
-      }
-    } catch { /* table pas encore prête → repli normal ci-dessous */ }
+    // Combien de membres sont définis ? décide l'amorçage puis la liste blanche.
+    let nbMembres: number | null = null;
+    try { const { count, error } = await admin.from("DispensaireMembre").select("id", { count: "exact", head: true }); if (!error) nbMembres = count ?? 0; } catch { /* table pas encore prête */ }
+
+    // Amorçage : aucun membre → le compte connecté peut se nommer Directeur depuis
+    // le panneau d'administration. Dès le 1er membre créé, l'amorçage se ferme.
+    if (nbMembres === 0) {
+      const def = roleDef("directeur");
+      return { connecte: true, identifiant: discordId || null, nom, role: def.key, perms: def.perms, source: "fallback", membreId: null, autorise: true };
+    }
+    // Liste blanche stricte (site autonome) : des membres existent mais ce compte
+    // n'en fait pas partie → accès REFUSÉ (rien n'est affiché ni modifiable).
+    if (nbMembres != null && nbMembres > 0 && (await isStandalone())) {
+      return { connecte: true, identifiant: discordId || null, nom, role: "stagiaire", perms: { admin: false, rh: false, factures: false, stock: false, medical: false, voir: false }, source: "fallback", membreId: null, autorise: false };
+    }
   }
 
-  // Repli : dérive des accès Iron Wolf (permissif par défaut) — comportement actuel.
+  // Repli Iron Wolf (dispensaire INTÉGRÉ à IWC) : dérive des accès Iron Wolf —
+  // comportement historique inchangé. Ne concerne PAS le site autonome.
   let a: Awaited<ReturnType<typeof getAcces>> | null = null;
   try { a = await getAcces(); } catch { a = null; }
   const perms: Perms = { admin: !!a?.direction, rh: !!a?.peutMedical, factures: !!a?.peutMedical, stock: true, medical: true, voir: true };
   const role = a?.direction ? "directeur" : a?.peutMedical ? "medecin" : "stagiaire";
-  return { connecte: true, identifiant: discordId || null, nom, role, perms, source: "fallback", membreId: null };
+  return { connecte: true, identifiant: discordId || null, nom, role, perms, source: "fallback", membreId: null, autorise: true };
 }
 
 export async function getMembres(): Promise<{ pret: boolean; membres: Membre[] }> {
