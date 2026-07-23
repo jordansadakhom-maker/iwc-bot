@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Stethoscope, Plus, Check, Trash2, Search, Eye, Printer, Copy } from "lucide-react";
-import { VideRegistre } from "@/components/dispensaire-ui";
+import { Stethoscope, Plus, Check, Trash2, Search, Eye, Printer, Copy, Cross } from "lucide-react";
+import { VideRegistre, SceauCire } from "@/components/dispensaire-ui";
 import { CERT_TYPES, certType, modeleCertificat, type CertData, type Certificat } from "@/lib/dispensaire-docs-const";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { creerCertificat, supprimerCertificat } from "@/app/dispensaire/certificats/actions";
@@ -13,32 +13,55 @@ const norm = (x: string) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,
 const dateFR = (s: string | null) => { if (!s) return "—"; try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "long", year: "numeric" }).format(new Date(s)); } catch { return "—"; } };
 const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-// Ouvre une fenêtre imprimable (→ « Enregistrer en PDF » du navigateur).
+// Référence de pièce (folio) — stable, à partir de la date d'acte et de l'id.
+function refCertificat(c: Certificat) {
+  const annee = (c.dateActe || c.createdAt || "1904").slice(0, 4);
+  const suffixe = c.id.replace(/[^a-z0-9]/gi, "").slice(-4).toUpperCase().padStart(4, "0");
+  return `DSP-${annee}-${suffixe}`;
+}
+
+// Croix médicale (brass) et sceau de cire, en SVG autonome pour la fenêtre d'impression.
+const CROIX_PATH = "M10 2h4a1 1 0 0 1 1 1v6h6a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-6v6a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-6H3a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1h6V3a1 1 0 0 1 1-1Z";
+const SCEAU_SVG = `<svg width="94" height="94" viewBox="0 0 100 100" aria-hidden="true"><defs><radialGradient id="wax" cx="38%" cy="30%" r="78%"><stop offset="0" stop-color="#b8483c"/><stop offset="68%" stop-color="#8c2f27"/><stop offset="100%" stop-color="#6d231c"/></radialGradient></defs><g transform="rotate(-8 50 50)"><circle cx="50" cy="50" r="46" fill="url(#wax)" stroke="#5c1f18" stroke-width="1"/><circle cx="50" cy="50" r="37" fill="none" stroke="rgba(255,238,222,.34)" stroke-width="1.4" stroke-dasharray="3 3"/><g transform="translate(31 31) scale(1.6)" fill="rgba(255,241,227,.92)"><path d="${CROIX_PATH}"/></g></g></svg>`;
+
+// Ouvre une fenêtre imprimable (→ « Enregistrer en PDF » du navigateur), mise en
+// page comme une pièce officielle scellée : croix en tête, double filet, sceau de cire.
 function imprimer(c: Certificat) {
   const w = window.open("", "_blank", "width=820,height=1000");
   if (!w) return;
   const corps = esc(c.contenu || "").replace(/\n/g, "<br>");
   w.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Certificat — ${esc(c.patient)}</title>
   <style>
-    @page{margin:2.5cm}
-    body{font-family:Georgia,'Times New Roman',serif;color:#1b140c;background:#f4ecd8;margin:0;padding:48px}
-    .cadre{border:2px solid #5c4a2f;padding:36px 40px;max-width:720px;margin:auto;background:#f8f2e2}
-    .tampon{text-align:center;letter-spacing:.12em;text-transform:uppercase;font-size:12px;color:#6b5535}
-    h1{font-size:22px;text-align:center;margin:.4em 0;letter-spacing:.04em}
-    .sub{text-align:center;font-style:italic;color:#6b5535;font-size:13px;margin-bottom:26px}
+    @page{margin:2cm}
+    body{font-family:Georgia,'Times New Roman',serif;color:#1b140c;background:#e9ddc2;margin:0;padding:40px}
+    .cadre{position:relative;border:2px solid #5c4a2f;box-shadow:inset 0 0 0 3px #f8f2e2, inset 0 0 0 4px #b7a074;padding:40px 44px 52px;max-width:720px;margin:auto;background:#f8f2e2;background-image:repeating-linear-gradient(to bottom,transparent 0 28px,rgba(56,42,22,.045) 28px 29px)}
+    .ref{position:absolute;top:16px;right:20px;font-size:11px;letter-spacing:.08em;color:#8a7550}
+    .emblem{display:flex;justify-content:center;color:#9c7a1a;margin-bottom:4px}
+    .tampon{text-align:center;letter-spacing:.14em;text-transform:uppercase;font-size:11px;color:#6b5535}
+    h1{font-size:22px;text-align:center;margin:.35em 0;letter-spacing:.04em}
+    .sub{text-align:center;font-style:italic;color:#6b5535;font-size:13px;margin-bottom:22px}
     .type{text-align:center;font-weight:bold;text-transform:uppercase;letter-spacing:.08em;border-top:1px solid #b7a074;border-bottom:1px solid #b7a074;padding:8px 0;margin:0 0 22px}
     .corps{font-size:15px;line-height:1.9;white-space:normal;min-height:120px}
-    .meta{margin-top:14px;font-size:13px;color:#4a3b26}
-    .sign{margin-top:48px;text-align:right;font-size:14px}
+    .meta{margin-top:16px;font-size:13px;color:#4a3b26}
+    .footer{margin-top:34px;display:flex;align-items:flex-end;justify-content:space-between;gap:20px}
+    .footer .seal{flex:0 0 auto}
+    .footer .cachet{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#8a7550;text-align:center;margin-top:2px}
+    .sign{text-align:right;font-size:14px}
     .sign .l{color:#6b5535;font-size:12px}
+    .sign .n{border-top:1px solid #7a6540;padding-top:4px;min-width:190px;display:inline-block}
   </style></head><body><div class="cadre">
+    <div class="ref">Réf. ${esc(refCertificat(c))}</div>
+    <div class="emblem"><svg width="34" height="34" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${CROIX_PATH}"/></svg></div>
     <div class="tampon">Comté de Lemoyne · Saint-Denis</div>
     <h1>Dispensaire de Saint-Denis</h1>
     <div class="sub">Registre administratif · Année 1904</div>
     <div class="type">${esc(certType(c.type).label)}</div>
     <div class="corps">${corps || "……"}</div>
     <div class="meta">Fait à Saint-Denis, le ${esc(dateFR(c.dateActe || c.createdAt))}.</div>
-    <div class="sign"><div class="l">Le praticien</div><div>${esc(c.medecin || "……………")}</div></div>
+    <div class="footer">
+      <div class="seal">${SCEAU_SVG}<div class="cachet">Sceau du Dispensaire</div></div>
+      <div class="sign"><div class="l">Le praticien</div><div class="n">${esc(c.medecin || "……………")}</div></div>
+    </div>
   </div><script>window.onload=function(){window.print()}</script></body></html>`);
   w.document.close();
 }
@@ -149,13 +172,32 @@ function VoirModal({ c, onClose, onPrint, onCopy }: { c: Certificat; onClose: ()
   return (
     <Modal titre={`Certificat · ${c.patient}`} onClose={onClose} max={640}>
       <div className="flex flex-col gap-3">
-        <div className="rounded-[12px] border p-5" style={{ borderColor: "color-mix(in srgb,var(--accent) 30%,var(--border))", background: "color-mix(in srgb,#e8dcc0 12%,var(--surface-2))" }}>
-          <div className="text-center text-[0.66rem] uppercase tracking-[0.12em] text-faint">Comté de Lemoyne · Saint-Denis</div>
+        <div
+          className="relative overflow-hidden rounded-[12px] border p-5"
+          style={{
+            borderColor: "color-mix(in srgb,var(--accent) 30%,var(--border))",
+            background: "repeating-linear-gradient(to bottom,transparent 0 27px,color-mix(in srgb,var(--ink) 5%,transparent) 27px 28px), color-mix(in srgb,#e8dcc0 14%,var(--surface-2))",
+            boxShadow: "inset 0 0 0 3px color-mix(in srgb,var(--surface) 70%,transparent), inset 0 0 0 4px color-mix(in srgb,var(--accent) 30%,var(--border))",
+          }}
+        >
+          <div className="absolute right-3 top-3 font-num text-[0.56rem] uppercase tracking-[0.1em] text-faint">Réf. {refCertificat(c)}</div>
+          <div className="flex justify-center text-accent"><Cross className="h-7 w-7" strokeWidth={2.2} /></div>
+          <div className="mt-1 text-center text-[0.66rem] uppercase tracking-[0.12em] text-faint">Comté de Lemoyne · Saint-Denis</div>
           <div className="text-center font-display text-[1.2rem]">Dispensaire de Saint-Denis</div>
-          <div className="mb-3 mt-1 border-y border-border py-1.5 text-center text-[0.72rem] font-bold uppercase tracking-[0.08em]" style={{ color: t.tone }}>{t.label}</div>
+          <div className="text-center text-[0.7rem] italic text-faint">Registre administratif · Année 1904</div>
+          <div className="mb-3 mt-2.5 border-y border-border py-1.5 text-center text-[0.72rem] font-bold uppercase tracking-[0.08em]" style={{ color: t.tone }}>{t.label}</div>
           <p className="whitespace-pre-wrap text-[0.86rem] leading-relaxed">{c.contenu || "……"}</p>
           <div className="mt-4 text-[0.76rem] text-faint">Fait à Saint-Denis, le {dateFR(c.dateActe || c.createdAt)}.</div>
-          <div className="mt-3 text-right text-[0.82rem]"><div className="text-[0.68rem] text-faint">Le praticien</div>{c.medecin || "……"}</div>
+          <div className="mt-4 flex items-end justify-between gap-3">
+            <div className="flex flex-col items-center">
+              <SceauCire size={54} />
+              <span className="mt-1 text-[0.54rem] uppercase tracking-[0.1em] text-faint">Sceau du Dispensaire</span>
+            </div>
+            <div className="text-right text-[0.82rem]">
+              <div className="text-[0.68rem] text-faint">Le praticien</div>
+              <div className="mt-3 inline-block min-w-[150px] border-t pt-1" style={{ borderColor: "color-mix(in srgb,var(--ink) 35%,transparent)" }}>{c.medecin || "……"}</div>
+            </div>
+          </div>
         </div>
         <div className="flex justify-end gap-2">
           <button onClick={onCopy} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-3 py-2 text-[0.8rem] font-semibold hover:border-border-2"><Copy className="h-3.5 w-3.5" /> Copier</button>

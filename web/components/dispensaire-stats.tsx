@@ -1,20 +1,43 @@
 import { BarChart3, Clock, Bandage, Package, ShieldCheck, Moon, TrendingUp, Users } from "lucide-react";
 import type { StatsData, Barre } from "@/lib/dispensaire-stats";
 import { Flash } from "@/components/edit-ui";
+import { Cartouche } from "@/components/dispensaire-ui";
 
 const money = (n: number) => `$${Math.round(n).toLocaleString("fr-FR")}`;
 
-// Barres verticales (séries temporelles) — ancrées à la ligne de base, une seule teinte.
-function VBar({ data, hue = "var(--accent)" }: { data: Barre[]; hue?: string }) {
+// Courbe à l'encre (série temporelle) : trait fin ancré à la ligne de base, léger
+// aplat sous la courbe, filets réglés — dans l'esprit d'un tracé à la plume. Rendu
+// serveur pur (SVG), largeur fluide via preserveAspectRatio + trait non mis à l'échelle.
+function Courbe({ data, hue = "var(--accent)", id, fmt }: { data: Barre[]; hue?: string; id: string; fmt?: (n: number) => string }) {
+  const W = 100, H = 40;
   const max = Math.max(1, ...data.map((d) => d.valeur));
+  const n = data.length;
+  if (!n) return <p className="py-6 text-center text-[0.8rem] italic text-faint">Aucune donnée.</p>;
+  const pts = data.map((d, i) => {
+    const x = n > 1 ? (i / (n - 1)) * W : W / 2;
+    const y = H - 2 - (d.valeur / max) * (H - 5);
+    return [x, y] as const;
+  });
+  const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+  const area = `M${pts[0][0].toFixed(1)} ${H} ` + pts.map((p) => "L" + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ") + ` L${pts[n - 1][0].toFixed(1)} ${H} Z`;
   return (
-    <div className="flex items-end gap-1.5" style={{ height: 120 }}>
-      {data.map((d, i) => (
-        <div key={i} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1" title={`${d.label} · ${d.libelle ?? d.valeur}`}>
-          <div className="w-full rounded-t-[3px]" style={{ height: `${Math.max(2, Math.round((d.valeur / max) * 100))}%`, background: d.valeur ? hue : "color-mix(in srgb,var(--ink) 10%,transparent)", minHeight: 2 }} />
-          <span className="w-full truncate text-center text-[0.6rem] text-faint">{d.label}</span>
-        </div>
-      ))}
+    <div className="flex flex-col gap-1.5">
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="112" preserveAspectRatio="none" style={{ display: "block", overflow: "visible" }}>
+        <defs>
+          <linearGradient id={`cg-${id}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor={hue} stopOpacity="0.22" />
+            <stop offset="1" stopColor={hue} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {[10, 20, 30].map((y) => <line key={y} x1="0" y1={y} x2={W} y2={y} stroke="color-mix(in srgb,var(--ink) 8%,transparent)" strokeWidth="1" vectorEffect="non-scaling-stroke" />)}
+        <path d={area} fill={`url(#cg-${id})`} />
+        <path d={line} fill="none" stroke={hue} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+      </svg>
+      <div className="flex justify-between text-[0.6rem] text-faint">
+        <span>{data[0]?.label}</span>
+        <span className="font-num">crête {fmt ? fmt(max) : max}</span>
+        <span>{data[n - 1]?.label}</span>
+      </div>
     </div>
   );
 }
@@ -69,27 +92,18 @@ export function DispensaireStats({ data }: { data: StatsData }) {
 
       <div className="flex items-center gap-2"><BarChart3 className="h-5 w-5 text-accent" /><h2 className="font-display text-[1.15rem]">Statistiques du dispensaire</h2></div>
 
-      {/* KPIs */}
+      {/* Cartouches d'indicateurs */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {kpis.map((t) => {
-          const Icon = t.icon;
-          return (
-            <div key={t.label} className="rounded-[14px] border border-border bg-surface-2 p-3">
-              <div className="flex items-center justify-between"><span className="text-[0.72rem] text-faint">{t.label}</span><Icon className="h-4 w-4" style={{ color: t.tone }} /></div>
-              <div className="mt-1 font-num text-[1.4rem] font-bold leading-none" style={{ color: t.tone }}>{t.val}</div>
-              <div className="mt-1 text-[0.68rem] text-faint">{t.sub}</div>
-            </div>
-          );
-        })}
+        {kpis.map((t) => <Cartouche key={t.label} label={t.label} valeur={t.val} ton={t.tone} icon={t.icon} sous={t.sub} />)}
       </div>
 
-      {/* Séries temporelles */}
+      {/* Séries temporelles — courbes à l'encre */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <Carte titre="Heures travaillées (7 jours)" icon={Clock}><VBar data={data.heuresParJour} /></Carte>
-        <Carte titre="Ventes de bandages (14 jours)" icon={Bandage}><VBar data={data.ventesParJour} hue="var(--good)" /></Carte>
+        <Carte titre="Heures travaillées (7 jours)" icon={Clock}><Courbe id="heures" data={data.heuresParJour} /></Carte>
+        <Carte titre="Ventes de bandages (14 jours)" icon={Bandage}><Courbe id="ventes" data={data.ventesParJour} hue="var(--good)" /></Carte>
       </div>
 
-      <Carte titre="Chiffre d'affaires par jour (14 jours)" icon={TrendingUp}><VBar data={data.caParJour} hue="var(--good)" /></Carte>
+      <Carte titre="Chiffre d'affaires par jour (14 jours)" icon={TrendingUp}><Courbe id="ca" data={data.caParJour} hue="var(--good)" fmt={money} /></Carte>
 
       {/* Classements */}
       <div className="grid gap-4 lg:grid-cols-2">
