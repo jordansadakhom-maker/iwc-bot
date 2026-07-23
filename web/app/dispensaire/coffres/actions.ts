@@ -36,13 +36,24 @@ export async function majCoffre(id: string, patch: Record<string, unknown>): Pro
   const row = nettoyer(patch);
   if ("nom" in row && !row.nom) return { ok: false, error: "Le nom ne peut pas être vide." };
   if (!Object.keys(row).length) return { ok: true };
+  // Les objets référencent le coffre par son nom : si le nom change, on répercute
+  // la nouvelle valeur sur tous les articles rangés dans ce coffre.
+  let ancienNom: string | null = null;
+  if ("nom" in row) { const { data: ex } = await admin.from("DispensaireCoffre").select("nom").eq("id", id).maybeSingle(); ancienNom = ex ? String((ex as Record<string, unknown>).nom || "") : null; }
   const { error } = await admin.from("DispensaireCoffre").update({ ...row, updatedBy: await qui(), updatedAt: new Date().toISOString() }).eq("id", id);
-  return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Enregistrement impossible." };
+  if (ancienNom && ancienNom !== row.nom) await admin.from("DispensaireStock").update({ coffre: row.nom }).eq("coffre", ancienNom);
+  return { ok: true };
 }
 
 export async function supprimerCoffre(id: string): Promise<CoffreResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  // Les objets rangés ne sont pas supprimés : ils repassent en « Non rangé »
+  // (coffre détaché) pour ne pas laisser de coffre fantôme.
+  const { data: ex } = await admin.from("DispensaireCoffre").select("nom").eq("id", id).maybeSingle();
+  const nom = ex ? String((ex as Record<string, unknown>).nom || "").trim() : "";
+  if (nom) await admin.from("DispensaireStock").update({ coffre: null }).eq("coffre", nom);
   const { error } = await admin.from("DispensaireCoffre").delete().eq("id", id);
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }

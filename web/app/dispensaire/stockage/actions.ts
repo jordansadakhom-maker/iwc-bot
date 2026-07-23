@@ -75,3 +75,23 @@ export async function ajusterStock(id: string, delta: number, motif?: string): P
   await admin.from("DispensaireStockMouvement").insert({ id: newId("dsm"), stockId: id, nomItem: String(r.nom || "?"), coffre: (r.coffre as string) ?? null, delta: d, apres, motif: s(motif, 200), par, createdAt: now });
   return { ok: true, apres };
 }
+
+// Déplace un objet d'un coffre vers un autre (référence par nom ; "" = Non rangé).
+// Trace le déplacement (delta 0) pour la traçabilité.
+export async function deplacerItem(id: string, coffreDest: string): Promise<StockResult> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  if (!id) return { ok: false, error: "Article introuvable." };
+  const dest = s(coffreDest, 200); // null si vide → « Non rangé »
+  const { data: ex } = await admin.from("DispensaireStock").select("id,nom,coffre,stock").eq("id", id).maybeSingle();
+  if (!ex) return { ok: false, error: "Article introuvable." };
+  const r = ex as Record<string, unknown>;
+  const from = (r.coffre as string) || null;
+  if ((from || "") === (dest || "")) return { ok: true }; // déjà au bon endroit
+  const now = new Date().toISOString();
+  const par = await qui();
+  const { error } = await admin.from("DispensaireStock").update({ coffre: dest, updatedBy: par, updatedAt: now }).eq("id", id);
+  if (error) return { ok: false, error: "Déplacement impossible." };
+  await admin.from("DispensaireStockMouvement").insert({ id: newId("dsm"), stockId: id, nomItem: String(r.nom || "?"), coffre: dest, delta: 0, apres: Number(r.stock) || 0, motif: `Déplacé : ${from || "Non rangé"} → ${dest || "Non rangé"}`, par, createdAt: now });
+  return { ok: true };
+}
