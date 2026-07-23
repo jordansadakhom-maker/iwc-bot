@@ -312,10 +312,12 @@ const CATALOGUE: { nom: string; cat: string; prix: number; niveau?: number }[] =
   // ── ARMES ──
   { nom: "Couteau de lancé", cat: "Armes", prix: 4, niveau: 0 },
   { nom: "Couteau", cat: "Armes", prix: 5, niveau: 0 },
-  { nom: "Machette", cat: "Armes", prix: 0, niveau: 0 },
   { nom: "Hachette", cat: "Armes", prix: 6, niveau: 0 },
   { nom: "Hachette de chasseur", cat: "Armes", prix: 4, niveau: 0 },
+  { nom: "Machette", cat: "Armes", prix: 12, niveau: 0 },
   { nom: "Arc", cat: "Armes", prix: 10, niveau: 0 },
+  { nom: "Tomahawk", cat: "Armes", prix: 8, niveau: 0 },
+  { nom: "Torche", cat: "Armes", prix: 5, niveau: 0 },
   { nom: "Revolver Cattleman", cat: "Armes", prix: 17, niveau: 0 },
   { nom: "Revolver Cattleman Mexican", cat: "Armes", prix: 20, niveau: 1 },
   { nom: "Revolver Double Action", cat: "Armes", prix: 20, niveau: 0 },
@@ -346,8 +348,8 @@ const CATALOGUE: { nom: string; cat: string; prix: number; niveau?: number }[] =
   { nom: "Menottes", cat: "Accessoires", prix: 3, niveau: 0 },
   { nom: "Jumelles", cat: "Accessoires", prix: 5, niveau: 0 },
   { nom: "Jumelles amélioré", cat: "Accessoires", prix: 10, niveau: 1 },
-  { nom: "Caméra", cat: "Accessoires", prix: 0, niveau: 0 },
-  { nom: "Caméra amélioré", cat: "Accessoires", prix: 0, niveau: 1 },
+  { nom: "Caméra", cat: "Accessoires", prix: 5, niveau: 0 },
+  { nom: "Caméra amélioré", cat: "Accessoires", prix: 15, niveau: 1 },
   { nom: "Lasso", cat: "Accessoires", prix: 5, niveau: 0 },
   { nom: "Lasso amélioré", cat: "Accessoires", prix: 10, niveau: 1 },
   { nom: "Lanterne", cat: "Accessoires", prix: 5, niveau: 0 },
@@ -359,6 +361,8 @@ const CATALOGUE: { nom: string; cat: string; prix: number; niveau?: number }[] =
   { nom: "Boîte de munitions de Revolver", cat: "Munitions", prix: 5, niveau: 0 },
   { nom: "Boîte de munitions de petit gibier", cat: "Munitions", prix: 5, niveau: 0 },
   { nom: "Flèches", cat: "Munitions", prix: 0, niveau: 0 },
+  { nom: "Carquois", cat: "Munitions", prix: 2, niveau: 0 },
+  { nom: "Munitions Tomahawk", cat: "Munitions", prix: 5, niveau: 0 },
   // ── COMPOSANTS ──
   { nom: "Laiton", cat: "Composants", prix: 3.52, niveau: 0 },
   { nom: "Composants d'armes", cat: "Composants", prix: 0, niveau: 0 },
@@ -377,20 +381,28 @@ const CATALOGUE: { nom: string; cat: string; prix: number; niveau?: number }[] =
   { nom: "Verre", cat: "Ressources", prix: 0, niveau: 0 },
   { nom: "Corde", cat: "Ressources", prix: 0.48, niveau: 0 },
   { nom: "Cuir", cat: "Ressources", prix: 0, niveau: 0 },
+  // ── SERVICES ──
+  { nom: "Modification d'armes", cat: "Services", prix: 25, niveau: 0 },
 ];
-// Ajoute les produits ABSENTS (par nom normalisé) ET recatégorise ceux qui
-// existent déjà selon le catalogue canonique (catégorie SEULE — prix/stock/recette
-// intacts). Re-cliquable sans doublon.
+// Applique la grille tarifaire officielle : ajoute les produits ABSENTS (par nom
+// normalisé) ET aligne ceux qui existent déjà sur le catalogue canonique —
+// catégorie, PRIX et niveau (stock/coût/recette laissés intacts). Re-cliquable
+// sans doublon. C'est le bouton qui met les tarifs à jour partout d'un coup.
 export async function importerCatalogue(): Promise<ArmResult & { n?: number; recat?: number }> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
-  const { data: existants } = await admin.from("ArmurerieProduit").select("id,nom,categorie");
-  const parNom = new Map((existants || []).map((p) => [_norm(String((p as { nom: string }).nom)), p as { id: string; nom: string; categorie: string }]));
-  // 1) recatégoriser l'existant
+  const { data: existants } = await admin.from("ArmurerieProduit").select("id,nom,categorie,prix,niveau");
+  const parNom = new Map((existants || []).map((p) => [_norm(String((p as { nom: string }).nom)), p as { id: string; nom: string; categorie: string; prix: number; niveau: number }]));
+  // 1) aligner l'existant sur le catalogue (catégorie + prix + niveau)
   let recat = 0;
   for (const c of CATALOGUE) {
     const ex = parNom.get(_norm(c.nom));
-    if (ex && ex.categorie !== c.cat) { const { error } = await admin.from("ArmurerieProduit").update({ categorie: c.cat }).eq("id", ex.id); if (!error) recat++; }
+    if (!ex) continue;
+    const patch: Record<string, unknown> = {};
+    if (ex.categorie !== c.cat) patch.categorie = c.cat;
+    if (round2(Number(ex.prix)) !== round2(c.prix)) patch.prix = round2(c.prix);
+    if ((Number(ex.niveau) || 0) !== (c.niveau || 0)) patch.niveau = c.niveau || 0;
+    if (Object.keys(patch).length) { const { error } = await admin.from("ArmurerieProduit").update(patch).eq("id", ex.id); if (!error) recat++; }
   }
   // 2) ajouter les manquants
   const manquants = CATALOGUE.filter((p) => !parNom.has(_norm(p.nom)));
