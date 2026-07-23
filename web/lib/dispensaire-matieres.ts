@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { peutModifierStock } from "@/lib/dispensaire-roles";
 import { enRupture, type Matiere, type MatieresData, type Coffre, type CoffresData } from "@/lib/dispensaire-matieres-const";
 
 export * from "@/lib/dispensaire-matieres-const";
@@ -12,13 +13,14 @@ export async function getMatieres(): Promise<MatieresData> {
   const vide: MatieresData = { connecte: false, pret: false, canEdit: false, matieres: [], alertes: 0 };
   const admin = createAdminClient();
   if (!admin) return vide;
+  const canEdit = await peutModifierStock(); // droit « stock » du grade
   const { data, error } = await admin.from("DispensaireMatiere").select("*").order("nom", { ascending: true });
-  if (error) return { ...vide, connecte: true, pret: false, canEdit: true };
+  if (error) return { ...vide, connecte: true, pret: false, canEdit };
   const matieres: Matiere[] = ((data || []) as Record<string, unknown>[]).map((r) => ({
     id: String(r.id), nom: String(r.nom || "Matière"), quantite: num(r.quantite), seuil: num(r.seuil), cible: num(r.cible),
     unite: s(r.unite), fournisseur: s(r.fournisseur), note: s(r.note), updatedAt: s(r.updatedAt), updatedBy: s(r.updatedBy),
   }));
-  return { connecte: true, pret: true, canEdit: true, matieres, alertes: matieres.filter(enRupture).length };
+  return { connecte: true, pret: true, canEdit, matieres, alertes: matieres.filter(enRupture).length };
 }
 
 export async function getCoffres(): Promise<CoffresData> {

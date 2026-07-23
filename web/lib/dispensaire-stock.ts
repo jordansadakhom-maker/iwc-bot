@@ -58,7 +58,7 @@ export async function getCoffresInventaire(): Promise<CoffresInvData> {
   const canEdit = await peutModifierStock(); // droit « stock » du grade
 
   const { data, error } = await admin.from("DispensaireStock").select("*").order("nom", { ascending: true });
-  if (error) return { ...vide, connecte: true, pret: false };
+  if (error) return { ...vide, connecte: true, pret: false, canEdit };
   const items = ((data || []) as Record<string, unknown>[]).map(toItem);
 
   // Coffres déclarés (métadonnées : emplacement, responsable, photo…).
