@@ -5,17 +5,29 @@ export type Perms = { admin: boolean; rh: boolean; factures: boolean; stock: boo
 
 export type RoleDef = { key: string; label: string; tone: string; rang: number; perms: Perms };
 
-const P = (o: Partial<Perms>): Perms => ({ admin: false, rh: false, factures: false, stock: false, medical: false, voir: true, ...o });
+export const P = (o: Partial<Perms>): Perms => ({ admin: false, rh: false, factures: false, stock: false, medical: false, voir: true, ...o });
 
-export const ROLES: RoleDef[] = [
-  { key: "directeur", label: "Directeur", tone: "var(--oxblood)", rang: 6, perms: P({ admin: true, rh: true, factures: true, stock: true, medical: true }) },
-  { key: "adjoint", label: "Directeur adjoint", tone: "var(--warn)", rang: 5, perms: P({ admin: true, rh: true, factures: true, stock: true, medical: true }) },
-  { key: "rh", label: "Responsable RH", tone: "var(--accent)", rang: 4, perms: P({ rh: true, stock: true, medical: true }) },
-  { key: "medecin", label: "Médecin", tone: "var(--good)", rang: 3, perms: P({ stock: true, medical: true }) },
-  { key: "infirmier", label: "Infirmier", tone: "var(--accent)", rang: 2, perms: P({ stock: true, medical: true }) },
-  { key: "stagiaire", label: "Stagiaire", tone: "var(--muted)", rang: 1, perms: P({ medical: true }) },
+// Teintes par rang (du plus haut au plus bas) — réutilisées pour les grades
+// dynamiques créés depuis l'administration.
+export const TONES = ["var(--oxblood)", "var(--warn)", "var(--accent)", "var(--good)", "var(--steel)", "var(--muted)"];
+export const toneForRang = (rang: number, total: number) => TONES[Math.max(0, Math.min(TONES.length - 1, total - rang))] || "var(--muted)";
+
+// Grades PAR DÉFAUT (serveur Reckless) — graine de la table DispensaireGrade et
+// repli si la table n'est pas encore là. Entièrement éditables depuis l'admin.
+export const GRADES_DEFAUT: RoleDef[] = [
+  { key: "directeur", label: "Directeur", tone: "var(--oxblood)", rang: 5, perms: P({ admin: true, rh: true, factures: true, stock: true, medical: true }) },
+  { key: "adjoint", label: "Adjoint", tone: "var(--warn)", rang: 4, perms: P({ admin: true, rh: true, factures: true, stock: true, medical: true }) },
+  { key: "referent", label: "Médecin Référent", tone: "var(--accent)", rang: 3, perms: P({ rh: true, stock: true, medical: true }) },
+  { key: "medecin", label: "Médecin", tone: "var(--good)", rang: 2, perms: P({ stock: true, medical: true }) },
+  { key: "apprenti", label: "Apprenti Médecin", tone: "var(--muted)", rang: 1, perms: P({ medical: true }) },
 ];
-export const roleDef = (k: string) => ROLES.find((r) => r.key === k) || ROLES[ROLES.length - 1];
+// Alias de compatibilité pour les anciens imports.
+export const ROLES = GRADES_DEFAUT;
+
+// Résout un grade dans une liste donnée (repli sur le grade le plus bas).
+export const roleDefIn = (grades: RoleDef[], k: string): RoleDef =>
+  grades.find((r) => r.key === k) || grades[grades.length - 1] || GRADES_DEFAUT[GRADES_DEFAUT.length - 1];
+export const roleDef = (k: string) => roleDefIn(GRADES_DEFAUT, k);
 export const roleLabel = (k: string) => roleDef(k).label;
 
 // ── Configuration / seuils (avec valeurs par défaut) ────────────────────────
