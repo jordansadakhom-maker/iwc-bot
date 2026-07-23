@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Archive, Plus, Check, Pencil, Trash2, MapPin, UserRound, Search, Boxes, AlertTriangle, BadgePlus, ArrowDownAZ, ArrowDownWideNarrow, PackageOpen } from "lucide-react";
 import { CATEGORIES, catLabel, enAlerte, niveauStock, NIVEAU_TON, type StockItem, type CoffresInvData } from "@/lib/dispensaire-stock-const";
+import { Lock } from "lucide-react";
 import { Modal, Flash, Champ, Picker, PhotoField, inputCls } from "@/components/edit-ui";
 import { VideRegistre } from "@/components/dispensaire-ui";
 import { creerCoffre, majCoffre, supprimerCoffre } from "@/app/dispensaire/coffres/actions";
@@ -26,6 +27,7 @@ const catTone: Record<string, string> = { medicament: "var(--accent)", materiel:
 
 export function DispensaireCoffres({ data }: { data: CoffresInvData }) {
   const router = useRouter();
+  const canEdit = data.canEdit;
   const [items, setItems] = useState<StockItem[]>(() => data.coffres.flatMap((c) => c.items));
   const [metas, setMetas] = useState<CoffreMeta[]>(() => data.coffres.filter((c) => c.id).map((c) => ({ id: c.id as string, nom: c.nom, emplacement: c.emplacement, responsable: c.responsable, note: c.note, photo: c.photo })));
   const [q, setQ] = useState("");
@@ -134,6 +136,7 @@ export function DispensaireCoffres({ data }: { data: CoffresInvData }) {
     <div className="flex flex-col gap-4">
       {!data.pret ? <Flash tone="bad">Lance <b>web/prisma/sql/dispensaire-matieres.sql</b> et <b>dispensaire-stock.sql</b> dans Supabase, puis recharge.</Flash> : null}
       {flash ? <Flash tone={flash.t === "ok" ? "good" : "bad"}>{flash.m}</Flash> : null}
+      {data.pret && !canEdit ? <div className="flex items-center gap-2 rounded-[12px] border border-border bg-surface-2 px-3 py-2 text-[0.78rem] text-muted"><Lock className="h-3.5 w-3.5 text-faint" /> Consultation seule — ton grade ne permet pas de modifier les coffres.</div> : null}
 
       {/* Barre d'action */}
       <div className="flex flex-wrap items-center justify-between gap-2.5">
@@ -142,7 +145,7 @@ export function DispensaireCoffres({ data }: { data: CoffresInvData }) {
           <span className="font-num text-[0.8rem] text-faint">{coffres.filter((c) => c.nom).length || metas.length}</span>
           {totalAlertes ? <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.68rem] font-bold text-white" style={{ background: "var(--oxblood)" }}><AlertTriangle className="h-3 w-3" /> {totalAlertes} en alerte</span> : null}
         </div>
-        <button onClick={() => setModale({ type: "newCoffre" })} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Plus className="h-3.5 w-3.5" /> Ajouter un coffre</button>
+        {canEdit ? <button onClick={() => setModale({ type: "newCoffre" })} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Plus className="h-3.5 w-3.5" /> Ajouter un coffre</button> : null}
       </div>
       <p className="text-[0.76rem] text-faint">Chaque coffre est un <b>inventaire réel</b> : ajoute des objets, ajuste les quantités d&apos;un clic, déplace un objet d&apos;un coffre à l&apos;autre. La pastille indique l&apos;état du stock — 🟢 confortable, 🟠 proche du seuil, 🔴 sous le seuil.</p>
 
@@ -165,11 +168,12 @@ export function DispensaireCoffres({ data }: { data: CoffresInvData }) {
             <CoffreBloc
               key={c.id || c.nom || "non-range"}
               coffre={c}
+              canEdit={canEdit}
               nomsCoffres={nomsCoffres}
-              onAddObjet={() => setModale({ type: "newItem", coffre: c.nom })}
-              onEditCoffre={c.id ? () => setModale({ type: "editCoffre", meta: { id: c.id as string, nom: c.nom, emplacement: c.emplacement, responsable: c.responsable, note: c.note, photo: c.photo } }) : undefined}
-              onDelCoffre={c.id ? () => setModale({ type: "delCoffre", meta: { id: c.id as string, nom: c.nom, emplacement: c.emplacement, responsable: c.responsable, note: c.note, photo: c.photo } }) : undefined}
-              onDeclarer={!c.id && c.nom ? () => declarer(c.nom) : undefined}
+              onAddObjet={canEdit ? () => setModale({ type: "newItem", coffre: c.nom }) : undefined}
+              onEditCoffre={canEdit && c.id ? () => setModale({ type: "editCoffre", meta: { id: c.id as string, nom: c.nom, emplacement: c.emplacement, responsable: c.responsable, note: c.note, photo: c.photo } }) : undefined}
+              onDelCoffre={canEdit && c.id ? () => setModale({ type: "delCoffre", meta: { id: c.id as string, nom: c.nom, emplacement: c.emplacement, responsable: c.responsable, note: c.note, photo: c.photo } }) : undefined}
+              onDeclarer={canEdit && !c.id && c.nom ? () => declarer(c.nom) : undefined}
               onEditItem={(it) => setModale({ type: "editItem", item: it })}
               onDelItem={(it) => setModale({ type: "delItem", item: it })}
               onAjuster={ajuster}
@@ -191,9 +195,9 @@ export function DispensaireCoffres({ data }: { data: CoffresInvData }) {
 
 type CoffreVue = { id: string | null; nom: string; emplacement: string | null; responsable: string | null; note: string | null; photo: string | null; items: StockItem[]; nbObjets: number; totalUnites: number; alertes: number };
 
-function CoffreBloc({ coffre: c, nomsCoffres, onAddObjet, onEditCoffre, onDelCoffre, onDeclarer, onEditItem, onDelItem, onAjuster, onDeplacer }: {
-  coffre: CoffreVue; nomsCoffres: string[];
-  onAddObjet: () => void; onEditCoffre?: () => void; onDelCoffre?: () => void; onDeclarer?: () => void;
+function CoffreBloc({ coffre: c, canEdit, nomsCoffres, onAddObjet, onEditCoffre, onDelCoffre, onDeclarer, onEditItem, onDelItem, onAjuster, onDeplacer }: {
+  coffre: CoffreVue; canEdit: boolean; nomsCoffres: string[];
+  onAddObjet?: () => void; onEditCoffre?: () => void; onDelCoffre?: () => void; onDeclarer?: () => void;
   onEditItem: (it: StockItem) => void; onDelItem: (it: StockItem) => void; onAjuster: (it: StockItem, d: number) => void; onDeplacer: (it: StockItem, dest: string) => void;
 }) {
   const nonRange = c.nom === "";
@@ -224,7 +228,7 @@ function CoffreBloc({ coffre: c, nomsCoffres, onAddObjet, onEditCoffre, onDelCof
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          {!nonRange ? <button onClick={onAddObjet} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[0.7rem] font-semibold text-muted hover:text-ink"><Plus className="h-3.5 w-3.5" /> Objet</button> : null}
+          {!nonRange && onAddObjet ? <button onClick={onAddObjet} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[0.7rem] font-semibold text-muted hover:text-ink"><Plus className="h-3.5 w-3.5" /> Objet</button> : null}
           {onDeclarer ? <button onClick={onDeclarer} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[0.7rem] font-semibold text-accent hover:brightness-110" title="Déclarer ce coffre (emplacement, responsable, photo)"><BadgePlus className="h-3.5 w-3.5" /> Déclarer</button> : null}
           {onEditCoffre ? <button onClick={onEditCoffre} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Modifier le coffre"><Pencil className="h-3.5 w-3.5" /></button> : null}
           {onDelCoffre ? <button onClick={onDelCoffre} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-oxblood" aria-label="Supprimer le coffre"><Trash2 className="h-3.5 w-3.5" /></button> : null}
@@ -234,17 +238,17 @@ function CoffreBloc({ coffre: c, nomsCoffres, onAddObjet, onEditCoffre, onDelCof
 
       {/* Objets du coffre */}
       {c.items.length === 0 ? (
-        <p className="mt-2.5 rounded-lg border border-dashed border-border py-4 text-center text-[0.76rem] italic text-faint">Coffre vide — {nonRange ? "déplace un objet ici ou range-le depuis un autre coffre." : "ajoute un premier objet."}</p>
+        <p className="mt-2.5 rounded-lg border border-dashed border-border py-4 text-center text-[0.76rem] italic text-faint">Coffre vide{canEdit ? ` — ${nonRange ? "déplace un objet ici ou range-le depuis un autre coffre." : "ajoute un premier objet."}` : "."}</p>
       ) : (
         <div className="mt-2.5 flex flex-col divide-y divide-border/70">
-          {c.items.map((it) => <ObjetLigne key={it.id} it={it} nomsCoffres={nomsCoffres} onEdit={() => onEditItem(it)} onDel={() => onDelItem(it)} onAjuster={onAjuster} onDeplacer={onDeplacer} />)}
+          {c.items.map((it) => <ObjetLigne key={it.id} it={it} canEdit={canEdit} nomsCoffres={nomsCoffres} onEdit={() => onEditItem(it)} onDel={() => onDelItem(it)} onAjuster={onAjuster} onDeplacer={onDeplacer} />)}
         </div>
       )}
     </section>
   );
 }
 
-function ObjetLigne({ it, nomsCoffres, onEdit, onDel, onAjuster, onDeplacer }: { it: StockItem; nomsCoffres: string[]; onEdit: () => void; onDel: () => void; onAjuster: (it: StockItem, d: number) => void; onDeplacer: (it: StockItem, dest: string) => void }) {
+function ObjetLigne({ it, canEdit, nomsCoffres, onEdit, onDel, onAjuster, onDeplacer }: { it: StockItem; canEdit: boolean; nomsCoffres: string[]; onEdit: () => void; onDel: () => void; onAjuster: (it: StockItem, d: number) => void; onDeplacer: (it: StockItem, dest: string) => void }) {
   const [pas, setPas] = useState("1");
   const niveau = niveauStock(it);
   const p = Math.max(1, Math.round(Number(pas) || 1));
@@ -267,22 +271,29 @@ function ObjetLigne({ it, nomsCoffres, onEdit, onDel, onAjuster, onDeplacer }: {
           <div className="text-[0.68rem] text-faint">Seuil {it.seuil}{it.stockFixe ? ` · fixe ${it.stockFixe}` : ""}{it.note ? ` · ${it.note}` : ""}</div>
         </div>
       </div>
-      {/* Quantité */}
-      <div className="flex items-center gap-1.5">
-        <button onClick={() => onAjuster(it, -p)} className="grid h-7 w-7 place-items-center rounded-md border border-border font-bold text-oxblood hover:bg-surface-2" aria-label="Retirer">−</button>
-        <div className="min-w-[3rem] text-center"><span className="font-num text-[1.15rem] font-bold leading-none" style={{ color: niveau === "rouge" ? "var(--oxblood)" : "var(--ink)" }}>{it.stock}</span><span className="block text-[0.58rem] text-faint">{it.unite || "u"}</span></div>
-        <button onClick={() => onAjuster(it, p)} className="grid h-7 w-7 place-items-center rounded-md border border-border font-bold text-good hover:bg-surface-2" aria-label="Ajouter">+</button>
-        <input className={inputCls + " w-12 text-center !py-1"} value={pas} onChange={(e) => setPas(e.target.value.replace(/[^0-9]/g, ""))} inputMode="numeric" aria-label="Pas" title="Pas d'ajustement" />
-      </div>
-      {/* Déplacer + actions */}
-      <div className="flex items-center gap-1.5">
-        <select value={(it.coffre || "").trim()} onChange={(e) => onDeplacer(it, e.target.value)} className="max-w-[130px] rounded-md border border-border bg-surface px-2 py-1 text-[0.72rem] text-muted" title="Déplacer vers un autre coffre" aria-label="Déplacer">
-          <option value="">Non rangé</option>
-          {nomsCoffres.map((n) => <option key={n} value={n}>{n}</option>)}
-        </select>
-        <button onClick={onEdit} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Modifier l'objet"><Pencil className="h-3.5 w-3.5" /></button>
-        <button onClick={onDel} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-oxblood" aria-label="Supprimer l'objet"><Trash2 className="h-3.5 w-3.5" /></button>
-      </div>
+      {!canEdit ? (
+        /* Lecture seule : quantité seule, sans contrôle. */
+        <div className="min-w-[3rem] text-right"><span className="font-num text-[1.15rem] font-bold leading-none" style={{ color: niveau === "rouge" ? "var(--oxblood)" : "var(--ink)" }}>{it.stock}</span><span className="block text-[0.58rem] text-faint">{it.unite || "u"}</span></div>
+      ) : (
+        <>
+          {/* Quantité */}
+          <div className="flex items-center gap-1.5">
+            <button onClick={() => onAjuster(it, -p)} className="grid h-7 w-7 place-items-center rounded-md border border-border font-bold text-oxblood hover:bg-surface-2" aria-label="Retirer">−</button>
+            <div className="min-w-[3rem] text-center"><span className="font-num text-[1.15rem] font-bold leading-none" style={{ color: niveau === "rouge" ? "var(--oxblood)" : "var(--ink)" }}>{it.stock}</span><span className="block text-[0.58rem] text-faint">{it.unite || "u"}</span></div>
+            <button onClick={() => onAjuster(it, p)} className="grid h-7 w-7 place-items-center rounded-md border border-border font-bold text-good hover:bg-surface-2" aria-label="Ajouter">+</button>
+            <input className={inputCls + " w-12 text-center !py-1"} value={pas} onChange={(e) => setPas(e.target.value.replace(/[^0-9]/g, ""))} inputMode="numeric" aria-label="Pas" title="Pas d'ajustement" />
+          </div>
+          {/* Déplacer + actions */}
+          <div className="flex items-center gap-1.5">
+            <select value={(it.coffre || "").trim()} onChange={(e) => onDeplacer(it, e.target.value)} className="max-w-[130px] rounded-md border border-border bg-surface px-2 py-1 text-[0.72rem] text-muted" title="Déplacer vers un autre coffre" aria-label="Déplacer">
+              <option value="">Non rangé</option>
+              {nomsCoffres.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <button onClick={onEdit} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Modifier l'objet"><Pencil className="h-3.5 w-3.5" /></button>
+            <button onClick={onDel} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-oxblood" aria-label="Supprimer l'objet"><Trash2 className="h-3.5 w-3.5" /></button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

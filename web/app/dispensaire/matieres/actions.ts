@@ -2,9 +2,11 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
+import { peutModifierStock } from "@/lib/dispensaire-roles";
 
-// Matières premières — outil de service partagé.
+// Matières premières — réservé aux grades disposant du droit « stock ».
 export type MatiereResult = { ok: boolean; error?: string; id?: string };
+const REFUS = "Accès refusé : ton grade ne permet pas de modifier les matières.";
 
 type Champ = "nom" | "unite" | "fournisseur" | "note";
 const CHAMPS: Champ[] = ["nom", "unite", "fournisseur", "note"];
@@ -25,6 +27,7 @@ function nettoyer(data: Record<string, unknown>) {
 export async function creerMatiere(data: Record<string, unknown>): Promise<MatiereResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  if (!(await peutModifierStock())) return { ok: false, error: REFUS };
   const row = nettoyer(data);
   if (!row.nom) return { ok: false, error: "Donne le nom de la matière." };
   const id = newId();
@@ -36,6 +39,7 @@ export async function creerMatiere(data: Record<string, unknown>): Promise<Matie
 export async function majMatiere(id: string, patch: Record<string, unknown>): Promise<MatiereResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  if (!(await peutModifierStock())) return { ok: false, error: REFUS };
   if (!id) return { ok: false, error: "Matière introuvable." };
   const row = nettoyer(patch);
   if ("nom" in row && !row.nom) return { ok: false, error: "Le nom ne peut pas être vide." };
@@ -47,6 +51,7 @@ export async function majMatiere(id: string, patch: Record<string, unknown>): Pr
 export async function ajusterMatiere(id: string, delta: number): Promise<MatiereResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  if (!(await peutModifierStock())) return { ok: false, error: REFUS };
   const d = Math.round(Number(delta) || 0);
   if (!d) return { ok: false, error: "Indique une quantité." };
   const { data: ex } = await admin.from("DispensaireMatiere").select("id,quantite").eq("id", id).maybeSingle();
@@ -59,6 +64,7 @@ export async function ajusterMatiere(id: string, delta: number): Promise<Matiere
 export async function supprimerMatiere(id: string): Promise<MatiereResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  if (!(await peutModifierStock())) return { ok: false, error: REFUS };
   const { error } = await admin.from("DispensaireMatiere").delete().eq("id", id);
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { peutModifierStock } from "@/lib/dispensaire-roles";
 import { enAlerte, type StockData, type StockItem, type StockMouvement, type CoffreInv, type CoffresInvData } from "@/lib/dispensaire-stock-const";
 
 // Réexporte les constantes/types purs pour les consommateurs serveur.
@@ -21,7 +22,7 @@ export async function getStock(): Promise<StockData> {
   const vide: StockData = { connecte: false, pret: false, canEdit: false, items: [], coffres: [], mouvements: [], alertes: 0 };
   const admin = createAdminClient();
   if (!admin) return vide;
-  const canEdit = true; // outil de service partagé
+  const canEdit = await peutModifierStock(); // droit « stock » du grade
 
   const { data, error } = await admin.from("DispensaireStock").select("*").order("nom", { ascending: true });
   if (error) return { ...vide, connecte: true, pret: false, canEdit };
@@ -51,9 +52,10 @@ export async function getStock(): Promise<StockData> {
 // coffre utilisés sans être déclarés sont ajoutés en « dérivés » ; les objets
 // sans coffre forment le groupe « Non rangé » en dernier.
 export async function getCoffresInventaire(): Promise<CoffresInvData> {
-  const vide: CoffresInvData = { connecte: false, pret: false, coffres: [], categories: [] };
+  const vide: CoffresInvData = { connecte: false, pret: false, canEdit: false, coffres: [], categories: [] };
   const admin = createAdminClient();
   if (!admin) return vide;
+  const canEdit = await peutModifierStock(); // droit « stock » du grade
 
   const { data, error } = await admin.from("DispensaireStock").select("*").order("nom", { ascending: true });
   if (error) return { ...vide, connecte: true, pret: false };
@@ -89,7 +91,7 @@ export async function getCoffresInventaire(): Promise<CoffresInvData> {
   if (nonRanges.length) coffres.push(build("")); // « Non rangé » en dernier, si non vide
 
   const categories = [...new Set(items.map((i) => i.categorie))];
-  return { connecte: true, pret: true, coffres, categories };
+  return { connecte: true, pret: true, canEdit, coffres, categories };
 }
 
 // Encart léger de l'accueil : articles en alerte (stock ≤ seuil).

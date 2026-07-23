@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Boxes, Plus, Search, Check, Pencil, Trash2, AlertTriangle, Archive, ArrowDownRight, ArrowUpRight, History } from "lucide-react";
+import { Boxes, Plus, Search, Check, Pencil, Trash2, AlertTriangle, Archive, ArrowDownRight, ArrowUpRight, History, Lock } from "lucide-react";
 import { CATEGORIES, catLabel, enAlerte, type StockData, type StockItem, type StockMouvement } from "@/lib/dispensaire-stock-const";
 import { Modal, Flash, Champ, Picker, PhotoField, inputCls } from "@/components/edit-ui";
 import { VideRegistre } from "@/components/dispensaire-ui";
@@ -15,6 +15,7 @@ const catTone: Record<string, string> = { medicament: "var(--accent)", materiel:
 
 export function DispensaireStockage({ data }: { data: StockData }) {
   const router = useRouter();
+  const canEdit = data.canEdit;
   const [items, setItems] = useState<StockItem[]>(data.items);
   const [mvts, setMvts] = useState<StockMouvement[]>(data.mouvements);
   const [q, setQ] = useState("");
@@ -73,6 +74,7 @@ export function DispensaireStockage({ data }: { data: StockData }) {
     <div className="flex flex-col gap-4">
       {!data.pret ? <Flash tone="bad">Lance <b>web/prisma/sql/dispensaire-stock.sql</b> dans Supabase, puis recharge.</Flash> : null}
       {flash ? <Flash tone={flash.t === "ok" ? "good" : "bad"}>{flash.m}</Flash> : null}
+      {data.pret && !canEdit ? <div className="flex items-center gap-2 rounded-[12px] border border-border bg-surface-2 px-3 py-2 text-[0.78rem] text-muted"><Lock className="h-3.5 w-3.5 text-faint" /> Consultation seule — ton grade ne permet pas de modifier le stock.</div> : null}
 
       {/* Barre d'action */}
       <div className="flex flex-wrap items-center justify-between gap-2.5">
@@ -81,7 +83,7 @@ export function DispensaireStockage({ data }: { data: StockData }) {
           <span className="font-num text-[0.8rem] text-faint">{items.length}</span>
           {alertes.length ? <button onClick={() => setSeulAlerte((v) => !v)} className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.68rem] font-bold text-white" style={{ background: "var(--oxblood)", opacity: seulAlerte ? 1 : 0.85 }}><AlertTriangle className="h-3 w-3" /> {alertes.length} en alerte</button> : null}
         </div>
-        <button onClick={() => setForm("new")} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Plus className="h-3.5 w-3.5" strokeWidth={2} /> Ajouter article</button>
+        {canEdit ? <button onClick={() => setForm("new")} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Plus className="h-3.5 w-3.5" strokeWidth={2} /> Ajouter article</button> : null}
       </div>
 
       {/* Alertes */}
@@ -110,7 +112,7 @@ export function DispensaireStockage({ data }: { data: StockData }) {
         <section key={coffre}>
           <div className="mb-1.5 flex items-center gap-1.5 text-[0.74rem] font-semibold uppercase tracking-[0.05em] text-faint"><Archive className="h-3.5 w-3.5" /> {coffre} <span className="font-num">({its.length})</span></div>
           <div className="grid gap-2.5 lg:grid-cols-2">
-            {its.map((it) => <ItemCard key={it.id} it={it} onEdit={() => setForm(it)} onDel={() => setDelId(it.id)} onAdjust={ajuster} />)}
+            {its.map((it) => <ItemCard key={it.id} it={it} canEdit={canEdit} onEdit={() => setForm(it)} onDel={() => setDelId(it.id)} onAdjust={ajuster} />)}
           </div>
         </section>
       ))}
@@ -137,7 +139,7 @@ export function DispensaireStockage({ data }: { data: StockData }) {
   );
 }
 
-function ItemCard({ it, onEdit, onDel, onAdjust }: { it: StockItem; onEdit: () => void; onDel: () => void; onAdjust: (it: StockItem, delta: number, motif: string) => void }) {
+function ItemCard({ it, canEdit, onEdit, onDel, onAdjust }: { it: StockItem; canEdit: boolean; onEdit: () => void; onDel: () => void; onAdjust: (it: StockItem, delta: number, motif: string) => void }) {
   const [qte, setQte] = useState("1");
   const [motif, setMotif] = useState("");
   const alerte = enAlerte(it);
@@ -162,10 +164,12 @@ function ItemCard({ it, onEdit, onDel, onAdjust }: { it: StockItem; onEdit: () =
           {it.note ? <div className="mt-0.5 text-[0.72rem] text-faint">{it.note}</div> : null}
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <button onClick={onEdit} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Modifier"><Pencil className="h-3.5 w-3.5" /></button>
-          <button onClick={onDel} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-oxblood" aria-label="Supprimer"><Trash2 className="h-3.5 w-3.5" /></button>
-        </div>
+        {canEdit ? (
+          <div className="flex shrink-0 items-center gap-1">
+            <button onClick={onEdit} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Modifier"><Pencil className="h-3.5 w-3.5" /></button>
+            <button onClick={onDel} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-oxblood" aria-label="Supprimer"><Trash2 className="h-3.5 w-3.5" /></button>
+          </div>
+        ) : null}
       </div>
       <div className="mt-2 flex items-end gap-3">
         <div><div className="font-num text-[1.5rem] font-bold leading-none" style={{ color: alerte ? "var(--oxblood)" : "var(--ink)" }}>{it.stock}</div><div className="text-[0.62rem] text-faint">{it.unite || "en stock"}</div></div>
@@ -174,12 +178,14 @@ function ItemCard({ it, onEdit, onDel, onAdjust }: { it: StockItem; onEdit: () =
           <span>Seuil : <b className="font-num text-muted">{it.seuil}</b></span>
         </div>
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-border pt-2">
-        <input className={inputCls + " w-16 text-center"} value={qte} onChange={(e) => setQte(e.target.value.replace(/[^0-9]/g, ""))} inputMode="numeric" aria-label="Quantité" />
-        <input className={inputCls + " min-w-[110px] flex-1"} value={motif} onChange={(e) => setMotif(e.target.value)} placeholder="Motif (optionnel)" />
-        <button onClick={() => mouv(1)} className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[0.72rem] font-semibold text-black/85" style={{ background: "var(--good)" }}><ArrowUpRight className="h-3.5 w-3.5" /> Entrée</button>
-        <button onClick={() => mouv(-1)} className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[0.72rem] font-semibold text-white" style={{ background: "var(--oxblood)" }}><ArrowDownRight className="h-3.5 w-3.5" /> Sortie</button>
-      </div>
+      {canEdit ? (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-border pt-2">
+          <input className={inputCls + " w-16 text-center"} value={qte} onChange={(e) => setQte(e.target.value.replace(/[^0-9]/g, ""))} inputMode="numeric" aria-label="Quantité" />
+          <input className={inputCls + " min-w-[110px] flex-1"} value={motif} onChange={(e) => setMotif(e.target.value)} placeholder="Motif (optionnel)" />
+          <button onClick={() => mouv(1)} className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[0.72rem] font-semibold text-black/85" style={{ background: "var(--good)" }}><ArrowUpRight className="h-3.5 w-3.5" /> Entrée</button>
+          <button onClick={() => mouv(-1)} className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[0.72rem] font-semibold text-white" style={{ background: "var(--oxblood)" }}><ArrowDownRight className="h-3.5 w-3.5" /> Sortie</button>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -2,8 +2,10 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
+import { peutModifierStock } from "@/lib/dispensaire-roles";
 
-// Stockage — outil de service partagé. Chaque mouvement est tracé.
+// Stockage — réservé aux grades disposant du droit « stock ». Chaque mouvement est tracé.
+const REFUS = "Accès refusé : ton grade ne permet pas de modifier le stock.";
 export type StockResult = { ok: boolean; error?: string; id?: string; apres?: number };
 
 type Champ = "nom" | "categorie" | "coffre" | "unite" | "note" | "photo";
@@ -29,6 +31,7 @@ function nettoyer(data: Record<string, unknown>) {
 export async function creerItem(data: Record<string, unknown>): Promise<StockResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  if (!(await peutModifierStock())) return { ok: false, error: REFUS };
   const row = nettoyer(data);
   if (!row.nom) return { ok: false, error: "Donne le nom de l'article." };
   const id = newId("dst");
@@ -43,6 +46,7 @@ export async function creerItem(data: Record<string, unknown>): Promise<StockRes
 export async function majItem(id: string, patch: Record<string, unknown>): Promise<StockResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  if (!(await peutModifierStock())) return { ok: false, error: REFUS };
   if (!id) return { ok: false, error: "Article introuvable." };
   const row = nettoyer(patch);
   if ("nom" in row && !row.nom) return { ok: false, error: "Le nom ne peut pas être vide." };
@@ -54,6 +58,7 @@ export async function majItem(id: string, patch: Record<string, unknown>): Promi
 export async function supprimerItem(id: string): Promise<StockResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  if (!(await peutModifierStock())) return { ok: false, error: REFUS };
   const { error } = await admin.from("DispensaireStock").delete().eq("id", id);
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
@@ -62,6 +67,7 @@ export async function supprimerItem(id: string): Promise<StockResult> {
 export async function ajusterStock(id: string, delta: number, motif?: string): Promise<StockResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  if (!(await peutModifierStock())) return { ok: false, error: REFUS };
   const d = Math.round(Number(delta) || 0);
   if (!d) return { ok: false, error: "Indique une quantité." };
   const { data: ex } = await admin.from("DispensaireStock").select("id,nom,stock,coffre").eq("id", id).maybeSingle();
@@ -81,6 +87,7 @@ export async function ajusterStock(id: string, delta: number, motif?: string): P
 export async function deplacerItem(id: string, coffreDest: string): Promise<StockResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  if (!(await peutModifierStock())) return { ok: false, error: REFUS };
   if (!id) return { ok: false, error: "Article introuvable." };
   const dest = s(coffreDest, 200); // null si vide → « Non rangé »
   const { data: ex } = await admin.from("DispensaireStock").select("id,nom,coffre,stock").eq("id", id).maybeSingle();
