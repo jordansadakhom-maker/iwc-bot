@@ -37,6 +37,23 @@ function _setVerrou(val, raison, parId) {
   } catch (e) { console.log('[SÉCURITÉ] _setVerrou:', e?.message); }
 }
 
+// ───────────────────────── PAUSE anti-nuke (démantèlement) ─────────────────────────
+//  Réservé au Maître. Quand la pause est active : les suppressions de salons/rôles
+//  ne sont PLUS restaurées et la détection d'actions de masse ne verrouille plus —
+//  pour pouvoir démanteler des salons librement, par n'importe qui. Reprise
+//  AUTOMATIQUE à l'échéance (l'état survit à un redémarrage via la base). Par
+//  défaut : désactivée → protection pleine, aucun changement de comportement.
+function _pauseUntil() { try { const v = _etatSecu().pauseUntil; return v ? Number(v) : 0; } catch { return 0; } }
+function estEnPause() { return _pauseUntil() > Date.now(); }
+function _setPause(minutes, parId) {
+  try {
+    const db = dbm.loadDB(); db.securite = db.securite || {};
+    if (minutes && minutes > 0) { db.securite.pauseUntil = Date.now() + minutes * 60000; db.securite.pauseParId = parId || null; }
+    else { db.securite.pauseUntil = 0; db.securite.pauseParId = null; }
+    dbm.saveDB(db); dbm.saveDBSync?.();
+  } catch (e) { console.log('[SÉCURITÉ] _setPause:', e?.message); }
+}
+
 // Compteur glissant pour détecter les actions de MASSE (clé = auteur:type d'action)
 const _compteur = new Map();
 function _massif(execId, action, seuil = 4, fenetreMs = 10000) {
@@ -163,6 +180,7 @@ async function _onAuditEntry(entry, guild) {
 
     // 2) ACTIONS DE MASSE (clonage/nuke) → neutralisation + verrouillage
     if (_MASS_ACTIONS[entry.action] && exec && exec !== MAITRE) {
+      if (estEnPause()) return; // anti-nuke en pause (démantèlement) → pas de verrouillage sur action de masse
       if (_massif(exec, entry.action)) {
         await verrouiller(guild,
           `⚠️ Actions de **masse** détectées (${_MASS_ACTIONS[entry.action]}) par <@${exec}> — signe d'un clonage ou d'un nuke.`,
@@ -178,6 +196,7 @@ async function _onChannelDelete(channel) {
     const guild = channel.guild;
     if (!guild) return;
     if (channel.isThread?.()) return; // les fils ne sont pas protégés (non recréables à l'identique)
+    if (estEnPause()) { console.log(`[SÉCURITÉ] ⏸️ Anti-nuke en pause — salon #${channel.name} supprimé, non restauré.`); return; }
     if (salonsAutorisesASupprimer.has(channel.id)) { salonsAutorisesASupprimer.delete(channel.id); return; }
 
     const auteur = await _trouverAuteur(guild, AuditLogEvent.ChannelDelete, channel.id);
@@ -225,6 +244,7 @@ async function _onRoleDelete(role) {
     const guild = role.guild;
     if (!guild) return;
     if (role.managed || role.id === guild.id) return; // rôles d'intégration/bot & @everyone : ignorés
+    if (estEnPause()) { console.log(`[SÉCURITÉ] ⏸️ Anti-nuke en pause — rôle @${role.name} supprimé, non restauré.`); return; }
     if (rolesAutorisesASupprimer.has(role.id)) { rolesAutorisesASupprimer.delete(role.id); return; }
 
     const auteur = await _trouverAuteur(guild, AuditLogEvent.RoleDelete, role.id);
@@ -265,9 +285,12 @@ const securiteCommands = [
   new SlashCommandBuilder().setName('supprimer-role').setDescription('🔒 Supprimer un rôle (réservé + confirmation requise)')
     .addRoleOption(o => o.setName('role').setDescription('Le rôle à supprimer').setRequired(true)),
   new SlashCommandBuilder().setName('securite').setDescription('🛡️ Verrouillage de sécurité (Maître)')
-    .addSubcommand(s => s.setName('etat').setDescription('Voir si le serveur est verrouillé'))
+    .addSubcommand(s => s.setName('etat').setDescription('Voir l’état (verrouillage + pause anti-nuke)'))
     .addSubcommand(s => s.setName('verrouiller').setDescription('🔒 Verrouiller le bot manuellement (Maître)'))
-    .addSubcommand(s => s.setName('deverrouiller').setDescription('🔓 Lever le verrouillage (Maître)')),
+    .addSubcommand(s => s.setName('deverrouiller').setDescription('🔓 Lever le verrouillage (Maître)'))
+    .addSubcommand(s => s.setName('pause').setDescription('⏸️ Mettre l’anti-nuke en pause pour démanteler des salons (Maître)')
+      .addIntegerOption(o => o.setName('minutes').setDescription('Durée en minutes (défaut 120, max 1440)').setMinValue(1).setMaxValue(1440)))
+    .addSubcommand(s => s.setName('reprendre').setDescription('▶️ Réactiver l’anti-nuke tout de suite (Maître)')),
 ];
 
 // ───────────────────────── Routeur d'interactions ─────────────────────────
@@ -277,13 +300,16 @@ async function routeInteraction(interaction) {
     const sub = interaction.options.getSubcommand();
     if (sub === 'etat') {
       const e = _etatSecu();
-      const txt = e.verrou
+      const ligneVerrou = e.verrou
         ? `🔒 **Verrouillé** depuis ${e.depuis ? new Date(e.depuis).toLocaleString('fr-FR') : '?'}\n📋 Raison : ${e.raison || '—'}`
         : '✅ **Non verrouillé** — tout fonctionne normalement.';
-      await interaction.reply({ content: txt, flags: MessageFlags.Ephemeral }).catch(() => {});
+      const lignePause = estEnPause()
+        ? `⏸️ **Anti-nuke EN PAUSE** — reprise automatique le ${new Date(_pauseUntil()).toLocaleString('fr-FR')}.`
+        : '🛡️ **Anti-nuke actif** (restauration des salons/rôles + anti-clonage).';
+      await interaction.reply({ content: `${ligneVerrou}\n${lignePause}`, flags: MessageFlags.Ephemeral }).catch(() => {});
       return true;
     }
-    if (interaction.user.id !== MAITRE) { await interaction.reply({ content: '🔒 Seul le Maître peut (dé)verrouiller le bot.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
+    if (interaction.user.id !== MAITRE) { await interaction.reply({ content: '🔒 Seul le Maître peut (dé)verrouiller ou mettre l’anti-nuke en pause.', flags: MessageFlags.Ephemeral }).catch(() => {}); return true; }
     if (sub === 'verrouiller') {
       await verrouiller(interaction.guild, `🔒 Verrouillage manuel demandé par le Maître.`, {});
       await interaction.reply({ content: '🔒 Bot **verrouillé**. Plus aucune commande ne répond, sauf pour toi. Utilise `/securite deverrouiller` pour rétablir.', flags: MessageFlags.Ephemeral }).catch(() => {});
@@ -292,6 +318,22 @@ async function routeInteraction(interaction) {
     if (sub === 'deverrouiller') {
       await deverrouiller(interaction.user.id, interaction.guild);
       await interaction.reply({ content: '🔓 Bot **déverrouillé** — tout refonctionne.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+    if (sub === 'pause') {
+      const minutes = interaction.options.getInteger('minutes') || 120;
+      _setPause(minutes, interaction.user.id);
+      const jusqua = new Date(_pauseUntil()).toLocaleString('fr-FR');
+      await _alerter(interaction.guild, '⏸️ Anti-nuke mis en pause',
+        `L'anti-nuke a été **mis en pause** par le Maître pour **${minutes} min** (jusqu'au ${jusqua}).\n` +
+        `Les suppressions de salons/rôles **ne sont plus restaurées** et la détection d'actions de masse est suspendue. Pense à \`/securite reprendre\` une fois le démantèlement terminé.`, 0xE67E22);
+      await interaction.reply({ content: `⏸️ **Anti-nuke en pause ${minutes} min.** Tu peux supprimer les salons librement — ils ne seront pas recréés.\nReprise automatique le **${jusqua}**, ou \`/securite reprendre\` pour tout réactiver tout de suite.`, flags: MessageFlags.Ephemeral }).catch(() => {});
+      return true;
+    }
+    if (sub === 'reprendre') {
+      _setPause(0, interaction.user.id);
+      await _alerter(interaction.guild, '▶️ Anti-nuke réactivé', 'L\'anti-nuke a été **réactivé** par le Maître. Protection complète rétablie (restauration + anti-clonage).', 0x2ECC71);
+      await interaction.reply({ content: '▶️ **Anti-nuke réactivé.** La restauration des salons/rôles et l\'anti-clonage sont de nouveau actifs.', flags: MessageFlags.Ephemeral }).catch(() => {});
       return true;
     }
   }
