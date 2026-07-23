@@ -1275,9 +1275,25 @@ export async function getStatistiques(): Promise<StatistiquesData> {
 // Déduit du grade du membre connecté (+ flag « médecin » sur sa fiche RH).
 // PRINCIPE ANTI-VERROUILLAGE : au moindre doute (pas de session, grade inconnu,
 // erreur), on OUVRE tout — on ne bloque jamais personne par erreur.
-export type Acces = { direction: boolean; officier: boolean; medecin: boolean; peutRenseignement: boolean; peutMedical: boolean };
+export type Acces = { direction: boolean; officier: boolean; medecin: boolean; peutRenseignement: boolean; peutMedical: boolean; armurier: boolean };
+
+// Appartenance à l'Armurerie : présent dans le roster ArmurerieEmploye, reconnu
+// par son ID Discord OU son nom (normalisé). C'est l'option « roster » de l'accès.
+const _normArm = (x: unknown) => String(x ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
+async function _dansRosterArmurerie(admin: NonNullable<ReturnType<typeof createAdminClient>>, did: string, nom: string): Promise<boolean> {
+  try {
+    const { data } = await admin.from("ArmurerieEmploye").select("discordId,nom");
+    const nomN = _normArm(nom);
+    for (const e of (data || []) as Record<string, unknown>[]) {
+      if (did && String(e.discordId || "") === did) return true;
+      if (nomN && _normArm(e.nom) === nomN) return true;
+    }
+    return false;
+  } catch { return false; }
+}
+
 export async function getAcces(): Promise<Acces> {
-  const ouvert: Acces = { direction: true, officier: true, medecin: true, peutRenseignement: true, peutMedical: true };
+  const ouvert: Acces = { direction: true, officier: true, medecin: true, peutRenseignement: true, peutMedical: true, armurier: true };
   try {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -1286,14 +1302,25 @@ export async function getAcces(): Promise<Acces> {
     const did = String(meta.provider_id || meta.sub || "");
     const admin = createAdminClient();
     if (!admin || !did) return ouvert;
-    const { data } = await admin.from("Membre").select("grade,ficheRH").eq("id", did).maybeSingle();
+    const { data } = await admin.from("Membre").select("nomIC,grade,ficheRH").eq("id", did).maybeSingle();
     const grade = String((data?.grade as string) || "").toLowerCase();
-    if (!grade) return ouvert; // grade inconnu → on n'enferme personne
+    // Nom IC issu de la fiche Membre — attribué par le staff, NON modifiable par
+    // l'utilisateur. On n'utilise JAMAIS le pseudo Discord (meta.*) pour l'accès :
+    // sinon un compte sans fiche pourrait usurper le nom d'un employé du roster.
+    const nomIC = String((data?.nomIC as string) || "");
     const f = data?.ficheRH as Record<string, unknown> | null;
     const medecin = !!(f && typeof f === "object" && f.medecin);
     const direction = /fondateur|conseil|directeur|fl[eé]au|concepteur/.test(grade);
     const officier = direction || /officier|instructeur/.test(grade);
-    return { direction, officier, medecin, peutRenseignement: officier, peutMedical: direction || medecin };
+    // Armurerie : Direction, OU grade/rôle « armur… » (option 2), OU présent dans le
+    // roster de l'Armurerie — par ID Discord (immuable) ou nom IC de la fiche (option
+    // 1). Sinon accès refusé → Tarifs seulement.
+    let armurier = direction || /armur/.test(grade);
+    if (!armurier) armurier = await _dansRosterArmurerie(admin, did, nomIC);
+    // Grade inconnu : on n'enferme personne pour la nav GÉNÉRALE, mais l'armurerie
+    // reste stricte (uniquement roster/direction, calculé ci-dessus).
+    if (!grade) return { direction: true, officier: true, medecin: true, peutRenseignement: true, peutMedical: true, armurier };
+    return { direction, officier, medecin, peutRenseignement: officier, peutMedical: direction || medecin, armurier };
   } catch { return ouvert; }
 }
 
