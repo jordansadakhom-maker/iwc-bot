@@ -2,6 +2,7 @@ import { getNotifCount } from "@/lib/dispensaire-notifications";
 import { getRoleDispensaire } from "@/lib/dispensaire-roles";
 import { isStandalone } from "@/lib/standalone-server";
 import { DispensaireShell } from "@/components/dispensaire-shell";
+import { DispensaireAccesReserve } from "@/components/dispensaire-acces-reserve";
 
 // Section dédiée « Dispensaire de Saint-Denis » — sa propre coquille (distincte
 // de la partie Iron Wolf). La visibilité des onglets suit le RÔLE du membre au
@@ -16,7 +17,12 @@ export const metadata = {
 };
 
 export default async function DispensaireLayout({ children }: { children: React.ReactNode }) {
-  const [role, notifCount, standalone] = await Promise.all([getRoleDispensaire(), getNotifCount(), isStandalone()]);
+  const role = await getRoleDispensaire();
+  // Liste blanche stricte (site autonome) : un compte non autorisé n'affiche
+  // NI la coquille NI les pages — juste l'écran « Accès réservé ».
+  if (!role.autorise) return <DispensaireAccesReserve nom={role.nom} identifiant={role.identifiant} />;
+
+  const [notifCount, standalone] = await Promise.all([getNotifCount(), isStandalone()]);
   const habilite = role.perms.rh || role.perms.factures || role.perms.admin;
   // Dateline d'ambiance : jour réel, mais millésime figé à 1904 (la fiction du
   // registre). Calculée côté serveur pour éviter tout décalage d'hydratation.
