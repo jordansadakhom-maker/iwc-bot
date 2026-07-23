@@ -26,6 +26,22 @@ const RESSOURCES_SUGGEREES = [
 const CATS = ["Viandes", "Peaux & Cuirs", "Plumes", "Matières", "Carcasses", "Autre"];
 
 const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
+
+// Fusionne les lignes d'une même ressource (même nom normalisé) en une seule,
+// en additionnant les quantités — garantit qu'un objet identique n'apparaît
+// jamais sur plusieurs lignes (le récap fusionne déjà, ceci couvre les vues zone).
+function fusionnerRessources(rows: ChasseStockRow[]): ChasseStockRow[] {
+  const map = new Map<string, ChasseStockRow>();
+  for (const it of rows) {
+    const k = norm(it.nom);
+    const e = map.get(k);
+    if (!e) { map.set(k, { ...it }); continue; }
+    e.quantite += it.quantite;
+    if (it.seuil != null) e.seuil = e.seuil == null ? it.seuil : Math.max(e.seuil, it.seuil);
+    if (!e.categorie && it.categorie) e.categorie = it.categorie;
+  }
+  return [...map.values()];
+}
 function emoji(nom: string) {
   const n = norm(nom);
   if (n.includes("cerf")) return "🦌"; if (n.includes("bison")) return "🐃"; if (n.includes("sanglier")) return "🐗";
@@ -366,7 +382,7 @@ function ZoneVue({ zone, items, totalZone, query, catFiltre, applique, onStep, o
   applique: (zoneId: string, nom: string, mode: Mode, qte: number) => void;
   onStep: (it: ChasseStockRow) => void; onSupprime: (zoneId: string, nom: string) => void; onCap: () => void;
 }) {
-  const list = items
+  const list = fusionnerRessources(items)
     .filter((i) => (!query || i.nom.toLowerCase().includes(query)) && (!catFiltre || (i.categorie || catAuto(i.nom)) === catFiltre))
     .sort((a, b) => b.quantite - a.quantite || a.nom.localeCompare(b.nom));
   const pct = zone.capacite && zone.capacite > 0 ? Math.min(100, Math.round((totalZone / zone.capacite) * 100)) : null;
@@ -546,7 +562,7 @@ function TransfertModal({ zones, items, onClose, onTransfere }: { zones: ChasseZ
   const [nom, setNom] = useState("");
   const [qte, setQte] = useState("");
   const [err, setErr] = useState<string | null>(null);
-  const dispo = items.filter((i) => i.zoneId === de && i.quantite > 0).sort((a, b) => a.nom.localeCompare(b.nom));
+  const dispo = fusionnerRessources(items.filter((i) => i.zoneId === de)).filter((i) => i.quantite > 0).sort((a, b) => a.nom.localeCompare(b.nom));
   const enStock = dispo.find((i) => norm(i.nom) === norm(nom))?.quantite ?? 0;
 
   function go() {
