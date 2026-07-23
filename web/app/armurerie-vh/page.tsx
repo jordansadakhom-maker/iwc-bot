@@ -1,18 +1,21 @@
 import { getArmurerie } from "@/lib/queries";
 import { ArmureriePublic } from "@/components/armurerie-public";
 
-// Page PUBLIQUE : vitrine complète (lecture seule) de l'Armurerie de Van Horn —
-// tarifs, produits/stock, ressources, fichier clients, ventes, contrats.
+// Page PUBLIQUE : GRILLE TARIFAIRE (lecture seule) de l'Armurerie de Van Horn.
 // Sans connexion. Exemptée du verrouillage REQUIRE_AUTH via le middleware.
-// AUCUNE action d'écriture n'est exposée ici (composant read-only).
+// Seuls les tarifs sont exposés — aucune donnée interne (coût, stock, clients,
+// ventes, contrats, finances) n'est envoyée au navigateur.
 export const dynamic = "force-dynamic";
+
+// Catégories internes (matières de craft) exclues de la vitrine publique.
+const CAT_INTERNES = new Set(["Composants", "Ressources"]);
 
 export const metadata = {
   title: "Armurerie de Van Horn — Iron Wolf Company",
-  description: "Armurerie de Van Horn (Iron Wolf Company) : tarifs, stock, ressources, fichier clients, registre des ventes et contrats. État de Louisiane.",
+  description: "Grille tarifaire de l'Armurerie de Van Horn (Iron Wolf Company). Van Horn, État de Louisiane.",
   openGraph: {
     title: "Armurerie de Van Horn — Iron Wolf Company",
-    description: "Tarifs, stock, ressources, clients, ventes et contrats de l'armurerie. Van Horn, État de Louisiane.",
+    description: "Grille tarifaire publique de l'armurerie. Van Horn, État de Louisiane.",
   },
 };
 
@@ -25,7 +28,11 @@ function Crest() {
 }
 
 export default async function ArmurerieVanHornPage() {
-  const { connecte, produits, ressources, clients, ventes, contrats, ca, coffre, mouvementsCoffre, impots } = await getArmurerie();
+  const { connecte, produits } = await getArmurerie();
+  // On ne transmet au client QUE la grille tarifaire minimale (aucune donnée interne).
+  const tarifs = produits
+    .filter((p) => !CAT_INTERNES.has(p.categorie))
+    .map((p) => ({ nom: p.nom, categorie: p.categorie, prix: p.prix, dispo: !p.aLaDemande && p.stock > 0 }));
 
   return (
     <main className="min-h-screen px-5 py-10" style={{ background: "radial-gradient(1100px 560px at 50% -12%, color-mix(in srgb,var(--accent) 12%,transparent), transparent 62%), var(--bg)" }}>
@@ -37,14 +44,14 @@ export default async function ArmurerieVanHornPage() {
           <div className="text-[0.7rem] uppercase tracking-[0.3em] text-faint">Iron Wolf Company · État de Louisiane</div>
           <h1 className="mt-1 font-display text-3xl tracking-[0.06em]">Armurerie de Van Horn</h1>
           <p className="mt-2 max-w-[560px] text-[0.88rem] leading-relaxed text-muted">
-            Vitrine de l&apos;armurerie : tarifs, stock, ressources, fichier clients, registre des ventes et contrats. Consultable librement, sans connexion.
+            Grille tarifaire de l&apos;armurerie — armes, munitions et équipements. Consultable librement, sans connexion.
           </p>
         </header>
 
         {!connecte ? (
           <div className="rounded-2xl border border-border bg-surface p-8 text-center text-[0.9rem] text-muted">Armurerie momentanément indisponible.</div>
         ) : (
-          <ArmureriePublic produits={produits} ressources={ressources} clients={clients} ventes={ventes} contrats={contrats} ca={ca} coffre={coffre} mouvements={mouvementsCoffre} impots={impots} />
+          <ArmureriePublic tarifs={tarifs} />
         )}
 
         <footer className="mt-8 text-center text-[0.72rem] text-faint">

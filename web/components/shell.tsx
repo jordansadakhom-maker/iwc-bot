@@ -16,12 +16,13 @@ type Profil = { nom: string; initiales: string; role: string; avatarUrl: string 
 
 // Accès par défaut : tout ouvert (anti-verrouillage — si le grade n'est pas connu,
 // on n'enferme personne). Le vrai calcul se fait côté serveur (getAcces).
-const ACCES_OUVERT: Acces = { direction: true, officier: true, medecin: true, peutRenseignement: true, peutMedical: true };
+const ACCES_OUVERT: Acces = { direction: true, officier: true, medecin: true, peutRenseignement: true, peutMedical: true, armurier: true };
 // Pages réservées → permission requise pour VOIR l'entrée de menu.
 const NAV_RESTRICT: Record<string, keyof Acces> = {
   "/renseignement": "peutRenseignement",
   "/wanted": "peutRenseignement",
   "/medical": "peutMedical",
+  "/armurerie": "armurier",
 };
 
 function Crest({ className }: { className?: string }) {
