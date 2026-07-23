@@ -8,13 +8,15 @@ import { VideRegistre } from "@/components/dispensaire-ui";
 
 const norm = (x: string) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
 const dtFR = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); } catch { return "—"; } };
-const MOD_TONE: Record<string, string> = { Stockage: "var(--accent)", Ventes: "var(--good)", Pointage: "var(--accent)", Frais: "var(--warn)", Factures: "var(--oxblood)", Certificats: "var(--accent)", Rapports: "var(--accent)", Documents: "var(--muted)", RH: "var(--warn)", "Matières": "var(--warn)", FDO: "var(--accent)" };
+const MOD_TONE: Record<string, string> = { Stockage: "var(--accent)", Coffres: "var(--good)", Ventes: "var(--good)", Pointage: "var(--accent)", Frais: "var(--warn)", Factures: "var(--oxblood)", Certificats: "var(--accent)", Rapports: "var(--accent)", Documents: "var(--muted)", RH: "var(--warn)", "Matières": "var(--warn)", FDO: "var(--accent)" };
+const ACT_TONE: Record<string, string> = { Entrée: "var(--good)", Sortie: "var(--oxblood)", "Déplacement": "var(--warn)", "Nouveau coffre": "var(--good)", "Coffre modifié": "var(--accent)" };
 
 export function DispensaireHistorique({ data }: { data: HistoData }) {
   const [q, setQ] = useState("");
   const [mod, setMod] = useState("");
+  const [act, setAct] = useState("");
   const query = norm(q);
-  const liste = useMemo(() => data.items.filter((i: HistoItem) => (!mod || i.module === mod) && (!query || norm([i.module, i.action, i.cible, i.detail, i.par].filter(Boolean).join(" ")).includes(query))), [data.items, mod, query]);
+  const liste = useMemo(() => data.items.filter((i: HistoItem) => (!mod || i.module === mod) && (!act || i.action === act) && (!query || norm([i.module, i.action, i.cible, i.coffre, i.detail, i.par].filter(Boolean).join(" ")).includes(query))), [data.items, mod, act, query]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -25,6 +27,7 @@ export function DispensaireHistorique({ data }: { data: HistoData }) {
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" /><input className={inputCls + " w-52 pl-8"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher dans l'historique…" /></div>
           <select className={inputCls + " max-w-[160px]"} value={mod} onChange={(e) => setMod(e.target.value)}><option value="">Tous les modules</option>{data.modules.map((m) => <option key={m} value={m}>{m}</option>)}</select>
+          <select className={inputCls + " max-w-[160px]"} value={act} onChange={(e) => setAct(e.target.value)}><option value="">Toutes les actions</option>{data.actions.map((a) => <option key={a} value={a}>{a}</option>)}</select>
         </div>
       </div>
 
@@ -34,16 +37,17 @@ export function DispensaireHistorique({ data }: { data: HistoData }) {
           : <VideRegistre icon={History} titre="La main courante est vierge" sous="Chaque écriture portée au registre — soin, stock, personnel, facture — viendra s'inscrire ici, la plus récente en tête." />
       ) : (
         <div className="overflow-x-auto rounded-[14px] border border-border bg-surface">
-          <table className="w-full min-w-[640px] text-left text-[0.8rem]">
+          <table className="w-full min-w-[760px] text-left text-[0.8rem]">
             <thead><tr className="border-b border-border text-[0.66rem] uppercase tracking-[0.04em] text-faint">
-              <th className="px-3 py-2 font-semibold">Module</th><th className="px-3 py-2 font-semibold">Action</th><th className="px-3 py-2 font-semibold">Cible</th><th className="px-3 py-2 font-semibold">Détail</th><th className="px-3 py-2 font-semibold">Par</th><th className="px-3 py-2 font-semibold">Quand</th>
+              <th className="px-3 py-2 font-semibold">Module</th><th className="px-3 py-2 font-semibold">Action</th><th className="px-3 py-2 font-semibold">Cible</th><th className="px-3 py-2 font-semibold">Coffre</th><th className="px-3 py-2 font-semibold">Détail</th><th className="px-3 py-2 font-semibold">Par</th><th className="px-3 py-2 font-semibold">Quand</th>
             </tr></thead>
             <tbody>
               {liste.map((i) => (
                 <tr key={i.id} className="border-b border-border/50">
                   <td className="px-3 py-1.5"><span className="rounded-full px-1.5 py-0.5 text-[0.64rem] font-bold uppercase" style={{ color: MOD_TONE[i.module] || "var(--muted)", background: `color-mix(in srgb,${MOD_TONE[i.module] || "var(--muted)"} 13%,transparent)` }}>{i.module}</span></td>
-                  <td className="px-3 py-1.5 text-muted">{i.action}</td>
+                  <td className="px-3 py-1.5 font-semibold" style={{ color: ACT_TONE[i.action] || "var(--muted)" }}>{i.action}</td>
                   <td className="px-3 py-1.5 font-semibold">{i.cible}</td>
+                  <td className="px-3 py-1.5 text-faint">{i.coffre || "—"}</td>
                   <td className="px-3 py-1.5 text-faint">{i.detail || "—"}</td>
                   <td className="px-3 py-1.5 text-faint">{i.par || "—"}</td>
                   <td className="px-3 py-1.5 whitespace-nowrap font-num text-faint">{dtFR(i.at)}</td>

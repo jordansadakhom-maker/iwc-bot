@@ -6,10 +6,13 @@ import { getConfig } from "@/lib/dispensaire-roles";
 
 // ── Centre de notifications (alertes intelligentes dérivées de l'état courant) ─
 export type Notif = { id: string; severite: "alerte" | "attention" | "info"; type: string; texte: string; href: string };
+// Fil d'activité récente : mouvements de stock (± / déplacements) et coffres.
+export type Activite = { id: string; genre: "entree" | "sortie" | "deplacement" | "coffre"; texte: string; par: string | null; at: string; href: string };
 
 const PARIS = "Europe/Paris";
 const ymdParis = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: PARIS, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
 const num = (v: unknown) => Number(v) || 0;
+const str = (v: unknown) => (v == null ? null : String(v));
 async function q<T>(p: PromiseLike<{ data: T | null }>): Promise<T | null> { try { return (await p).data; } catch { return null; } }
 
 function lundiCourant(): string {
@@ -63,4 +66,28 @@ export async function getNotifications(): Promise<{ items: Notif[]; count: numbe
 // Compteur léger pour la pastille de l'en-tête.
 export async function getNotifCount(): Promise<number> {
   try { return (await getNotifications()).count; } catch { return 0; }
+}
+
+// Fil d'activité récente autour des coffres & du stock : objet ±, déplacement
+// d'un coffre à l'autre, coffre créé ou modifié. Distinct des alertes (ne compte
+// pas dans la pastille) — c'est une chronologie « ce qui vient de se passer ».
+export async function getActiviteRecente(): Promise<Activite[]> {
+  const admin = createAdminClient();
+  if (!admin) return [];
+  const [mvts, coffres] = await Promise.all([
+    q<Record<string, unknown>[]>(admin.from("DispensaireStockMouvement").select("id,nomItem,coffre,delta,apres,motif,par,createdAt").order("createdAt", { ascending: false }).limit(25)),
+    q<Record<string, unknown>[]>(admin.from("DispensaireCoffre").select("id,nom,createdAt,updatedAt,updatedBy").order("updatedAt", { ascending: false }).limit(10)),
+  ]);
+  const out: Activite[] = [];
+  for (const r of mvts || []) {
+    const delta = num(r.delta), apres = num(r.apres);
+    const deplacement = delta === 0 && /^déplac/i.test(String(r.motif || ""));
+    if (deplacement) out.push({ id: "d" + r.id, genre: "deplacement", texte: `${r.nomItem} — ${r.motif}`, par: str(r.par), at: String(r.createdAt), href: "/dispensaire/coffres" });
+    else out.push({ id: "m" + r.id, genre: delta >= 0 ? "entree" : "sortie", texte: `${r.nomItem} ${delta >= 0 ? "+" : ""}${delta} → ${apres}${r.coffre ? ` (${r.coffre})` : ""}${r.motif ? ` · ${r.motif}` : ""}`, par: str(r.par), at: String(r.createdAt), href: "/dispensaire/coffres" });
+  }
+  for (const r of coffres || []) {
+    const cree = r.createdAt && r.updatedAt && String(r.createdAt) === String(r.updatedAt);
+    out.push({ id: "cf" + r.id, genre: "coffre", texte: cree ? `Nouveau coffre : ${r.nom}` : `Coffre modifié : ${r.nom}`, par: str(r.updatedBy), at: String(r.updatedAt), href: "/dispensaire/coffres" });
+  }
+  return out.filter((a) => a.at && a.at !== "null").sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 20);
 }
