@@ -99,6 +99,14 @@ export async function getRoleDispensaire(): Promise<RoleContext> {
   return { connecte: true, identifiant: discordId || null, nom, role, perms, source: "fallback", membreId: null, autorise: true };
 }
 
+// Garde-fou serveur : le compte connecté peut-il MODIFIER le stock & les coffres ?
+// Vrai si son grade porte le droit `stock` (ou `admin`). Utilisé par toutes les
+// actions de mutation stock/coffres/matières — la lecture reste ouverte à qui a
+// accès au dispensaire (liste blanche gérée au niveau du layout).
+export async function peutModifierStock(): Promise<boolean> {
+  try { const r = await getRoleDispensaire(); return !!(r.perms.stock || r.perms.admin); } catch { return false; }
+}
+
 export async function getMembres(): Promise<{ pret: boolean; membres: Membre[] }> {
   const admin = createAdminClient();
   if (!admin) return { pret: false, membres: [] };

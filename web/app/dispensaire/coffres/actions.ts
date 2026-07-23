@@ -2,9 +2,11 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
+import { peutModifierStock } from "@/lib/dispensaire-roles";
 
-// Coffres (entités) — outil de service partagé.
+// Coffres (entités) — réservé aux grades disposant du droit « stock ».
 export type CoffreResult = { ok: boolean; error?: string; id?: string };
+const REFUS = "Accès refusé : ton grade ne permet pas de modifier les coffres.";
 
 type Champ = "nom" | "emplacement" | "responsable" | "note" | "photo";
 const CHAMPS: Champ[] = ["nom", "emplacement", "responsable", "note", "photo"];
@@ -21,6 +23,7 @@ function nettoyer(data: Record<string, unknown>) {
 export async function creerCoffre(data: Record<string, unknown>): Promise<CoffreResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  if (!(await peutModifierStock())) return { ok: false, error: REFUS };
   const row = nettoyer(data);
   if (!row.nom) return { ok: false, error: "Donne le nom du coffre." };
   const id = newId();
@@ -32,6 +35,7 @@ export async function creerCoffre(data: Record<string, unknown>): Promise<Coffre
 export async function majCoffre(id: string, patch: Record<string, unknown>): Promise<CoffreResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  if (!(await peutModifierStock())) return { ok: false, error: REFUS };
   if (!id) return { ok: false, error: "Coffre introuvable." };
   const row = nettoyer(patch);
   if ("nom" in row && !row.nom) return { ok: false, error: "Le nom ne peut pas être vide." };
@@ -49,6 +53,7 @@ export async function majCoffre(id: string, patch: Record<string, unknown>): Pro
 export async function supprimerCoffre(id: string): Promise<CoffreResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  if (!(await peutModifierStock())) return { ok: false, error: REFUS };
   // Les objets rangés ne sont pas supprimés : ils repassent en « Non rangé »
   // (coffre détaché) pour ne pas laisser de coffre fantôme.
   const { data: ex } = await admin.from("DispensaireCoffre").select("nom").eq("id", id).maybeSingle();

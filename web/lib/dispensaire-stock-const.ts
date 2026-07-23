@@ -55,7 +55,7 @@ export type CoffreInv = {
   alertes: number;                // objets sous le seuil
 };
 export type CoffresInvData = {
-  connecte: boolean; pret: boolean;
+  connecte: boolean; pret: boolean; canEdit: boolean;
   coffres: CoffreInv[];
   categories: string[];
 };

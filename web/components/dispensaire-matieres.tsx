@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FlaskConical, Plus, Search, Check, Pencil, Trash2, AlertTriangle, Minus, Truck, ShoppingCart } from "lucide-react";
+import { FlaskConical, Plus, Search, Check, Pencil, Trash2, AlertTriangle, Minus, Truck, ShoppingCart, Lock } from "lucide-react";
 import { enRupture, suggestionCommande, type MatieresData, type Matiere } from "@/lib/dispensaire-matieres-const";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
 import { VideRegistre } from "@/components/dispensaire-ui";
@@ -13,6 +13,7 @@ const norm = (x: string) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,
 
 export function DispensaireMatieres({ data }: { data: MatieresData }) {
   const router = useRouter();
+  const canEdit = data.canEdit;
   const [mats, setMats] = useState<Matiere[]>(data.matieres);
   const [q, setQ] = useState("");
   const [seulAlerte, setSeulAlerte] = useState(false);
@@ -49,6 +50,7 @@ export function DispensaireMatieres({ data }: { data: MatieresData }) {
     <div className="flex flex-col gap-4">
       {!data.pret ? <Flash tone="bad">Lance <b>web/prisma/sql/dispensaire-matieres.sql</b> dans Supabase, puis recharge.</Flash> : null}
       {flash ? <Flash tone={flash.t === "ok" ? "good" : "bad"}>{flash.m}</Flash> : null}
+      {data.pret && !canEdit ? <div className="flex items-center gap-2 rounded-[12px] border border-border bg-surface-2 px-3 py-2 text-[0.78rem] text-muted"><Lock className="h-3.5 w-3.5 text-faint" /> Consultation seule — ton grade ne permet pas de modifier les matières.</div> : null}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
@@ -56,7 +58,7 @@ export function DispensaireMatieres({ data }: { data: MatieresData }) {
           <span className="font-num text-[0.8rem] text-faint">{mats.length}</span>
           {alertes.length ? <button onClick={() => setSeulAlerte((v) => !v)} className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.68rem] font-bold text-white" style={{ background: "var(--oxblood)", opacity: seulAlerte ? 1 : 0.85 }}><AlertTriangle className="h-3 w-3" /> {alertes.length} en rupture</button> : null}
         </div>
-        <button onClick={() => setForm("new")} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Plus className="h-3.5 w-3.5" /> Ajouter</button>
+        {canEdit ? <button onClick={() => setForm("new")} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Plus className="h-3.5 w-3.5" /> Ajouter</button> : null}
       </div>
 
       {/* Suggestion de commande */}
@@ -87,18 +89,22 @@ export function DispensaireMatieres({ data }: { data: MatieresData }) {
                     <div className="mt-0.5 flex flex-wrap gap-x-3 text-[0.72rem] text-faint">{m.fournisseur ? <span className="inline-flex items-center gap-1"><Truck className="h-3 w-3" /> {m.fournisseur}</span> : null}<span>Seuil {m.seuil}{m.cible ? ` · cible ${m.cible}` : ""}</span></div>
                     {m.note ? <div className="mt-1 text-[0.73rem] text-muted">{m.note}</div> : null}
                   </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <button onClick={() => setForm(m)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Modifier"><Pencil className="h-3.5 w-3.5" /></button>
-                    <button onClick={() => setDelId(m.id)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-oxblood" aria-label="Supprimer"><Trash2 className="h-3.5 w-3.5" /></button>
-                  </div>
+                  {canEdit ? (
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button onClick={() => setForm(m)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Modifier"><Pencil className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => setDelId(m.id)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-oxblood" aria-label="Supprimer"><Trash2 className="h-3.5 w-3.5" /></button>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="mt-2 flex items-center gap-2 border-t border-border pt-2">
                   <div className="font-num text-[1.4rem] font-bold leading-none" style={{ color: rupture ? "var(--oxblood)" : "var(--ink)" }}>{m.quantite}</div>
                   <span className="text-[0.64rem] text-faint">{m.unite || "en stock"}</span>
-                  <div className="ml-auto flex items-center gap-1">
-                    <button onClick={() => ajuster(m, -1)} className="grid h-6 w-6 place-items-center rounded border border-border text-muted hover:text-ink"><Minus className="h-3 w-3" /></button>
-                    <button onClick={() => ajuster(m, 1)} className="grid h-6 w-6 place-items-center rounded border border-border text-muted hover:text-ink"><Plus className="h-3 w-3" /></button>
-                  </div>
+                  {canEdit ? (
+                    <div className="ml-auto flex items-center gap-1">
+                      <button onClick={() => ajuster(m, -1)} className="grid h-6 w-6 place-items-center rounded border border-border text-muted hover:text-ink"><Minus className="h-3 w-3" /></button>
+                      <button onClick={() => ajuster(m, 1)} className="grid h-6 w-6 place-items-center rounded border border-border text-muted hover:text-ink"><Plus className="h-3 w-3" /></button>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             );
