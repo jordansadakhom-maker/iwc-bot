@@ -4,9 +4,33 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAcces } from "@/lib/queries";
 import { isStandalone } from "@/lib/standalone-server";
-import { ROLES, roleDef, CONFIG_DEFAUT, type Perms, type Config } from "@/lib/dispensaire-roles-const";
+import { ROLES, roleDefIn, GRADES_DEFAUT, toneForRang, CONFIG_DEFAUT, type Perms, type Config, type RoleDef } from "@/lib/dispensaire-roles-const";
 
 export * from "@/lib/dispensaire-roles-const";
+
+// Grades EFFECTIFS du dispensaire : lus depuis la table DispensaireGrade (gérée
+// depuis l'administration). Repli sur les grades par défaut (Reckless) si la
+// table n'existe pas encore ou est vide → le site reste utilisable avant le SQL.
+export async function getGrades(): Promise<RoleDef[]> {
+  const admin = createAdminClient();
+  if (!admin) return GRADES_DEFAUT;
+  try {
+    const { data, error } = await admin.from("DispensaireGrade").select("*").order("ordre", { ascending: false });
+    if (error || !data || !data.length) return GRADES_DEFAUT;
+    const rows = data as Record<string, unknown>[];
+    const total = rows.length;
+    return rows.map((r) => {
+      const rang = Number(r.ordre) || 0;
+      return {
+        key: String(r.id),
+        label: String(r.nom || r.id),
+        tone: toneForRang(rang, total),
+        rang,
+        perms: { admin: !!r.admin, rh: !!r.rh, factures: !!r.factures, stock: !!r.stock, medical: !!r.medical, voir: true },
+      };
+    });
+  } catch { return GRADES_DEFAUT; }
+}
 
 // `autorise` = le compte a le droit d'accéder au dispensaire. En mode autonome
 // (site remis à un client), seuls les membres ajoutés sont autorisés (liste
@@ -39,24 +63,25 @@ async function identite(): Promise<{ discordId: string; nom: string }> {
 export async function getRoleDispensaire(): Promise<RoleContext> {
   const admin = createAdminClient();
   const { discordId, nom } = await identite();
+  const grades = await getGrades(); // grades dynamiques (ou repli par défaut)
 
   if (admin) {
     let membre: Record<string, unknown> | null = null;
     if (discordId) { const { data } = await admin.from("DispensaireMembre").select("*").eq("identifiant", discordId).maybeSingle(); membre = data as Record<string, unknown> | null; }
     if (!membre && nom) { const { data } = await admin.from("DispensaireMembre").select("*").ilike("nom", nom).maybeSingle(); membre = data as Record<string, unknown> | null; }
     if (membre && (membre.actif ?? true)) {
-      const def = roleDef(String(membre.role));
+      const def = roleDefIn(grades, String(membre.role));
       return { connecte: true, identifiant: discordId || null, nom: String(membre.nom || nom), role: def.key, perms: def.perms, source: "membre", membreId: String(membre.id), autorise: true };
     }
     // Combien de membres sont définis ? décide l'amorçage puis la liste blanche.
     let nbMembres: number | null = null;
     try { const { count, error } = await admin.from("DispensaireMembre").select("id", { count: "exact", head: true }); if (!error) nbMembres = count ?? 0; } catch { /* table pas encore prête */ }
 
-    // Amorçage : aucun membre → le compte connecté peut se nommer Directeur depuis
-    // le panneau d'administration. Dès le 1er membre créé, l'amorçage se ferme.
+    // Amorçage : aucun membre → le compte connecté reçoit l'accès complet pour se
+    // nommer au grade le plus haut. Dès le 1er membre créé, l'amorçage se ferme.
     if (nbMembres === 0) {
-      const def = roleDef("directeur");
-      return { connecte: true, identifiant: discordId || null, nom, role: def.key, perms: def.perms, source: "fallback", membreId: null, autorise: true };
+      const top = grades[0] || GRADES_DEFAUT[0];
+      return { connecte: true, identifiant: discordId || null, nom, role: top.key, perms: { admin: true, rh: true, factures: true, stock: true, medical: true, voir: true }, source: "fallback", membreId: null, autorise: true };
     }
     // Liste blanche stricte (site autonome) : des membres existent mais ce compte
     // n'en fait pas partie → accès REFUSÉ (rien n'est affiché ni modifiable).
