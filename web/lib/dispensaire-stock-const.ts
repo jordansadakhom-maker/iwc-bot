@@ -3,7 +3,7 @@
 
 export type StockItem = {
   id: string; nom: string; categorie: string; coffre: string | null; unite: string | null;
-  stock: number; stockFixe: number; seuil: number; note: string | null;
+  stock: number; stockFixe: number; seuil: number; note: string | null; photo: string | null;
   updatedAt: string | null; updatedBy: string | null;
 };
 export type StockMouvement = { id: string; stockId: string | null; nomItem: string; coffre: string | null; delta: number; apres: number | null; motif: string | null; par: string | null; createdAt: string };

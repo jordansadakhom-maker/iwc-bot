@@ -10,5 +10,5 @@ export const suggestionCommande = (m: Matiere) => {
   return Math.max(0, cible - m.quantite);
 };
 
-export type Coffre = { id: string; nom: string; emplacement: string | null; responsable: string | null; note: string | null; updatedAt: string | null; updatedBy: string | null };
+export type Coffre = { id: string; nom: string; emplacement: string | null; responsable: string | null; note: string | null; photo: string | null; updatedAt: string | null; updatedBy: string | null };
 export type CoffresData = { connecte: boolean; pret: boolean; canEdit: boolean; coffres: Coffre[] };

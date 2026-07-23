@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Archive, Plus, Check, Pencil, Trash2, MapPin, UserRound } from "lucide-react";
 import type { CoffresData, Coffre } from "@/lib/dispensaire-matieres-const";
-import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
+import { Modal, Flash, Champ, PhotoField, inputCls } from "@/components/edit-ui";
 import { VideRegistre } from "@/components/dispensaire-ui";
 import { creerCoffre, majCoffre, supprimerCoffre } from "@/app/dispensaire/coffres/actions";
 
@@ -22,7 +22,7 @@ export function DispensaireCoffres({ data }: { data: CoffresData }) {
       setCoffres((p) => p.map((c) => (c.id === editing.id ? { ...c, ...vals } as Coffre : c))); setForm(null);
       const r = await majCoffre(editing.id, vals); if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else router.refresh();
     } else {
-      const tmp: Coffre = { id: "tmp-" + Math.random().toString(36).slice(2, 8), nom: vals.nom, emplacement: vals.emplacement || null, responsable: vals.responsable || null, note: vals.note || null, updatedAt: null, updatedBy: null };
+      const tmp: Coffre = { id: "tmp-" + Math.random().toString(36).slice(2, 8), nom: vals.nom, emplacement: vals.emplacement || null, responsable: vals.responsable || null, note: vals.note || null, photo: vals.photo || null, updatedAt: null, updatedBy: null };
       setCoffres((p) => [...p, tmp]); setForm(null);
       const r = await creerCoffre(vals);
       if (!r.ok) { setCoffres((p) => p.filter((c) => c.id !== tmp.id)); setFlash({ t: "bad", m: r.error || "Impossible." }); }
@@ -48,7 +48,17 @@ export function DispensaireCoffres({ data }: { data: CoffresData }) {
             <div key={c.id} className="group rounded-[12px] border border-border bg-surface-2 p-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg" style={{ background: "color-mix(in srgb,var(--accent) 12%,transparent)" }}><Archive className="h-4 w-4 text-accent" /></span><span className="truncate text-[0.9rem] font-semibold">{c.nom}</span></div>
+                  <div className="flex items-center gap-2">
+                    {c.photo ? (
+                      <a href={c.photo} target="_blank" rel="noreferrer" className="shrink-0">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={c.photo} alt={c.nom} className="h-8 w-8 rounded-lg border border-border object-cover transition hover:brightness-110" />
+                      </a>
+                    ) : (
+                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg" style={{ background: "color-mix(in srgb,var(--accent) 12%,transparent)" }}><Archive className="h-4 w-4 text-accent" /></span>
+                    )}
+                    <span className="truncate text-[0.9rem] font-semibold">{c.nom}</span>
+                  </div>
                   <div className="mt-1.5 flex flex-col gap-0.5 text-[0.74rem] text-faint">
                     <span className="inline-flex items-center gap-1.5"><MapPin className="h-3 w-3" /> {c.emplacement || "Emplacement —"}</span>
                     <span className="inline-flex items-center gap-1.5"><UserRound className="h-3 w-3" /> {c.responsable || "Responsable —"}</span>
@@ -72,7 +82,7 @@ export function DispensaireCoffres({ data }: { data: CoffresData }) {
 }
 
 function CoffreForm({ initial, onClose, onSave }: { initial: Coffre | null; onClose: () => void; onSave: (v: Record<string, string>) => void }) {
-  const [v, setV] = useState<Record<string, string>>(() => ({ nom: initial?.nom || "", emplacement: initial?.emplacement || "", responsable: initial?.responsable || "", note: initial?.note || "" }));
+  const [v, setV] = useState<Record<string, string>>(() => ({ nom: initial?.nom || "", emplacement: initial?.emplacement || "", responsable: initial?.responsable || "", note: initial?.note || "", photo: initial?.photo || "" }));
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setV((p) => ({ ...p, [k]: e.target.value }));
   function go() { if (v.nom.trim().length < 1) { setErr("Le nom est obligatoire."); return; } onSave(v); }
@@ -85,6 +95,7 @@ function CoffreForm({ initial, onClose, onSave }: { initial: Coffre | null; onCl
           <Champ label="Responsable"><input className={inputCls} value={v.responsable} onChange={set("responsable")} placeholder="Nom" /></Champ>
         </div>
         <Champ label="Note"><textarea className={inputCls} rows={2} value={v.note} onChange={set("note")} /></Champ>
+        <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Photo du coffre (facultatif)</span><PhotoField dossier="dispensaire-coffres" value={v.photo} onChange={(url) => setV((p) => ({ ...p, photo: url }))} label="Photo du coffre ou de son contenu" /></div>
         {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
         <div className="mt-1 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2">Annuler</button>

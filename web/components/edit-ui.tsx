@@ -1,8 +1,32 @@
 "use client";
 
-import { X } from "lucide-react";
+import { X, Trash2 } from "lucide-react";
+import { PhotoDrop } from "@/components/photo-drop";
 
 // Primitives partagées par les modales d'édition du site.
+
+// Champ « photo » : aperçu de l'image envoyée (dans Supabase Storage) avec un
+// bouton pour la retirer, sinon une zone de dépôt / prise de vue. Réutilisable
+// par n'importe quel formulaire (stock, coffre…).
+export function PhotoField({ dossier, value, onChange, label = "Glisse une photo ou prends-la en photo" }: { dossier: string; value: string; onChange: (url: string) => void; label?: string }) {
+  if (value) {
+    return (
+      <div className="relative overflow-hidden rounded-[12px] border border-border">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={value} alt="Aperçu" className="max-h-56 w-full object-cover" />
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[0.72rem] font-semibold text-white shadow-card"
+          style={{ background: "color-mix(in srgb,var(--oxblood) 88%,#000)" }}
+        >
+          <Trash2 className="h-3.5 w-3.5" /> Retirer
+        </button>
+      </div>
+    );
+  }
+  return <PhotoDrop dossier={dossier} onUploaded={onChange} label={label} maxDim={1400} compact />;
+}
 
 export const inputCls =
   "w-full rounded-[9px] border border-border bg-surface-2 px-2.5 py-1.5 text-[0.84rem] text-ink outline-none placeholder:text-faint focus:border-[color-mix(in_srgb,var(--accent)_55%,var(--border))]";

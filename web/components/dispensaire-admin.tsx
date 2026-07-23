@@ -16,6 +16,18 @@ export function DispensaireAdmin({ membres: init, config: cfg0, moi, pret }: { m
   const [flash, setFlash] = useState<FlashMsg>(null);
   const [form, setForm] = useState<Membre | "new" | null>(null);
   const [delId, setDelId] = useState<string | null>(null);
+  const [autoBusy, setAutoBusy] = useState(false);
+
+  // Première prise en main : le compte connecté se nomme Directeur en un clic
+  // (utilise son identité de session — ID Discord + nom). Ferme l'amorçage.
+  async function meNommerDirecteur() {
+    setAutoBusy(true);
+    const r = await creerMembre({ nom: moi.nom, identifiant: moi.identifiant || "", role: "directeur" });
+    setAutoBusy(false);
+    if (!r.ok) { setFlash({ t: "bad", m: r.error || "Impossible." }); return; }
+    setFlash({ t: "ok", m: "C'est fait — tu es désormais Directeur du dispensaire." });
+    router.refresh();
+  }
 
   async function enregistrer(vals: Record<string, string>, editing: Membre | null) {
     if (editing) {
@@ -46,6 +58,19 @@ export function DispensaireAdmin({ membres: init, config: cfg0, moi, pret }: { m
         <span className="grid h-9 w-9 place-items-center rounded-full" style={{ background: `color-mix(in srgb,${moiDef.tone} 15%,transparent)` }}><BadgeCheck className="h-5 w-5" style={{ color: moiDef.tone }} /></span>
         <div className="text-[0.82rem]">Connecté en tant que <b>{moi.nom}</b> — rôle <b style={{ color: moiDef.tone }}>{moiDef.label}</b>{moi.source === "fallback" ? <span className="text-faint"> (par défaut — non encore affecté)</span> : null}</div>
       </div>
+
+      {/* Première prise en main : personne n'est encore affecté → se nommer Directeur */}
+      {pret && moi.source === "fallback" && membres.length === 0 ? (
+        <div className="rounded-[12px] border p-4" style={{ borderColor: "color-mix(in srgb,var(--accent) 50%,var(--border))", background: "color-mix(in srgb,var(--accent) 7%,transparent)" }}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-[0.9rem] font-semibold"><BadgeCheck className="h-4 w-4 text-accent" /> Première prise en main</div>
+              <p className="mt-1 max-w-xl text-[0.8rem] text-muted">Aucun rôle n&apos;est encore attribué. Nomme-toi <b>Directeur</b> pour prendre la main sur tout le dispensaire — tu pourras ensuite ajouter le reste de l&apos;équipe et régler chaque rôle.</p>
+            </div>
+            <button onClick={meNommerDirecteur} disabled={autoBusy} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{autoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <BadgeCheck className="h-4 w-4" />} Me nommer Directeur</button>
+          </div>
+        </div>
+      ) : null}
 
       {/* Membres & rôles */}
       <section className="rounded-[14px] border border-border bg-surface p-4">
