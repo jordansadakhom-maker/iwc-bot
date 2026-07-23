@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { lireStockDepuisImage, type LigneStock } from "@/lib/vision";
+import { getSessionProfile } from "@/lib/queries";
 
 // ═══════════════════════════════════════════════════════════════
 //  Services du module Chasse (site-native, écriture directe Supabase).
@@ -22,6 +23,15 @@ const s = (v: unknown, max = 120) => String(v ?? "").trim().slice(0, max);
 const clampQ = (q: unknown) => Math.max(0, Math.round(Number(q) || 0));
 const norm = (x: string) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
 function newId(p: string) { return `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
+
+// Identité de l'acteur, résolue CÔTÉ SERVEUR (nom IC de la session) pour que
+// chaque mouvement soit attribué même si le client ne transmet rien. Repli sur
+// la valeur éventuellement fournie.
+async function acteur(fourni?: string | null): Promise<string | null> {
+  try { const p = await getSessionProfile(); if (p?.nom) return String(p.nom).slice(0, 120); } catch { /* session indisponible */ }
+  const f = (fourni || "").trim();
+  return f ? f.slice(0, 120) : null;
+}
 
 // HistoryService — trace un mouvement (best-effort : n'échoue jamais l'action).
 async function ecrireMouvement(admin: Admin, m: {
@@ -78,7 +88,7 @@ export async function ajusterChasse(input: {
   const zoneId = s(input.zoneId, 40);
   if (!zoneId) return { ok: false, error: "Zone manquante." };
   const mode: Mode = input.mode === "remove" ? "remove" : input.mode === "set" ? "set" : "add";
-  const r = await appliquer(admin, { ...input, zoneId, mode });
+  const r = await appliquer(admin, { ...input, zoneId, mode, par: await acteur(input.par) });
   return r.ok ? { ok: true, apres: r.apres } : { ok: false, error: r.error };
 }
 
@@ -96,9 +106,10 @@ export async function deplacerChasse(input: { nom: string; deZone: string; versZ
   const dispo = src ? Number((src as { quantite: number }).quantite) || 0 : 0;
   if (dispo <= 0) return { ok: false, error: `Rien à déplacer — « ${nom} » est absent de la zone de départ.` };
   const moved = Math.min(q, dispo);
+  const par = await acteur(input.par);
 
-  await appliquer(admin, { zoneId: de, nom, mode: "remove", quantite: moved, type: "transfert", cibleZoneId: vers, par: input.par, commentaire: `Transfert vers ${vers}` });
-  const r = await appliquer(admin, { zoneId: vers, nom, mode: "add", quantite: moved, type: "transfert", cibleZoneId: de, par: input.par, commentaire: `Transfert depuis ${de}` });
+  await appliquer(admin, { zoneId: de, nom, mode: "remove", quantite: moved, type: "transfert", cibleZoneId: vers, par, commentaire: `Transfert vers ${vers}` });
+  const r = await appliquer(admin, { zoneId: vers, nom, mode: "add", quantite: moved, type: "transfert", cibleZoneId: de, par, commentaire: `Transfert depuis ${de}` });
   return { ok: true, deplace: moved, apres: r.apres };
 }
 
@@ -122,7 +133,7 @@ export async function supprimerRessourceChasse(input: { zoneId: string; nom: str
   const avant = Number((ex as { quantite: number }).quantite) || 0;
   const { error } = await admin.from("ChasseStock").delete().eq("id", (ex as { id: string }).id);
   if (error) return { ok: false, error: "Suppression impossible." };
-  await ecrireMouvement(admin, { zoneId, nom, type: "suppression", delta: -avant, avant, apres: 0, par: input.par, commentaire: "Ressource retirée de la zone" });
+  await ecrireMouvement(admin, { zoneId, nom, type: "suppression", delta: -avant, avant, apres: 0, par: await acteur(input.par), commentaire: "Ressource retirée de la zone" });
   return { ok: true };
 }
 
@@ -173,12 +184,13 @@ export async function importerStockChasse(input: { zoneId: string; lignes: Ligne
   const mode: Mode = input.mode === "set" ? "set" : "add";
   const lignes = Array.isArray(input.lignes) ? input.lignes.slice(0, 60) : [];
   if (!lignes.length) return { ok: false, error: "Aucune ligne à importer." };
+  const par = await acteur(input.par);
   let count = 0;
   for (const l of lignes) {
     const nom = s(l.nom, 100); const q = clampQ(l.quantite);
     if (!nom) continue;
     if (mode === "add" && q <= 0) continue;
-    const r = await appliquer(admin, { zoneId, nom, mode, quantite: q, type: "ocr", par: input.par, commentaire: "Import photo (OCR)" });
+    const r = await appliquer(admin, { zoneId, nom, mode, quantite: q, type: "ocr", par, commentaire: "Import photo (OCR)" });
     if (r.ok) count++;
   }
   return count ? { ok: true, count } : { ok: false, error: "Aucune ressource importée." };
