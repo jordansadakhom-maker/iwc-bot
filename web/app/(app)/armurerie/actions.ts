@@ -2,10 +2,19 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { getAcces } from "@/lib/queries";
 import { envoyerCommande } from "@/lib/commandes";
 import { round2 } from "@/lib/format";
 
 type Admin = NonNullable<ReturnType<typeof createAdminClient>>;
+
+// Garde d'autorisation : seuls les employés de l'Armurerie (Direction, rôle
+// « armur… » ou roster) peuvent DÉCLENCHER une écriture. Le gate de la page ne
+// protège que l'AFFICHAGE (GET) ; les Server Actions sont des endpoints POST
+// indépendants → chaque action mutante appelle garde() en premier.
+async function garde(): Promise<{ ok: false; error: string } | null> {
+  return (await getAcces()).armurier ? null : { ok: false, error: "Accès refusé — réservé au personnel de l'Armurerie." };
+}
 
 async function auteurNom(): Promise<string> {
   try {
@@ -69,6 +78,7 @@ export async function creerClient(d: { nom: string; telegramme?: string; discord
   if (!d.nom || d.nom.trim().length < 2) return { ok: false, error: "Indique le nom du client." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const id = newId("cli");
   const { error } = await admin.from("ArmurerieClient").insert({
     id, nom: s(d.nom, 120), telegramme: s(d.telegramme, 60), discordId: s(d.discordId, 40),
@@ -81,6 +91,7 @@ export async function majClient(id: string, patch: Record<string, unknown>): Pro
   if (!id) return { ok: false, error: "Client introuvable." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const up: Record<string, unknown> = { updatedAt: new Date().toISOString() };
   for (const k of ["nom", "telegramme", "discordId", "carteIdentite", "statut", "notes"]) if (k in patch) up[k] = s(patch[k], 2000);
   const { error } = await admin.from("ArmurerieClient").update(up).eq("id", id);
@@ -90,6 +101,7 @@ export async function majClient(id: string, patch: Record<string, unknown>): Pro
 export async function supprimerClient(id: string): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { error } = await admin.from("ArmurerieClient").delete().eq("id", id);
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
@@ -99,6 +111,7 @@ export async function creerVente(d: { clientId?: string; acquereur: string; date
   if (!d.acquereur || d.acquereur.trim().length < 2) return { ok: false, error: "Nom de l'acquéreur requis (Décret N°2)." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const id = newId("vte");
   const qte = Math.max(1, Math.round(Number(d.quantite) || 1));
   const pu = d.prixUnitaire != null ? Math.max(0, round2(Number(d.prixUnitaire) || 0)) : null;
@@ -137,6 +150,7 @@ export async function ajusterCoffreArmurerie(montant: number, mode: "depot" | "r
   if (m <= 0) return { ok: false, error: "Montant invalide." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   try {
     await _mouvementCoffre(admin, m, mode === "retrait" ? "sortie" : "entree", s(motif, 200) || (mode === "retrait" ? "Retrait" : "Dépôt"), await auteurNom(), "capital");
     return { ok: true };
@@ -150,6 +164,7 @@ export async function majVente(id: string, patch: Record<string, unknown>): Prom
   if (!id) return { ok: false, error: "Vente introuvable." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const up: Record<string, unknown> = {};
   for (const k of ["acquereur", "dateVente", "marque", "modele", "categorie", "numeroSerie", "vendeur", "telegramme", "notes", "statut", "clientId"]) if (k in patch) up[k] = s(patch[k], 1000);
   if ("quantite" in patch) up.quantite = Math.max(1, Math.round(Number(patch.quantite) || 1));
@@ -172,6 +187,7 @@ export async function majVente(id: string, patch: Record<string, unknown>): Prom
 export async function supprimerVente(id: string): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { error } = await admin.from("ArmurerieVente").delete().eq("id", id);
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
@@ -181,6 +197,7 @@ export async function creerContrat(d: { clientId?: string; clientNom: string; cl
   if (!d.clientNom || d.clientNom.trim().length < 2) return { ok: false, error: "Indique le nom du client." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const id = newId("ctr");
   const { error } = await admin.from("ArmurerieContrat").insert({
     id, clientId: s(d.clientId, 60), clientNom: s(d.clientNom, 120), clientDiscordId: s(d.clientDiscordId, 40),
@@ -195,6 +212,7 @@ export async function creerContrat(d: { clientId?: string; clientNom: string; cl
 export async function envoyerContrat(id: string): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { data, error } = await admin.from("ArmurerieContrat").select("*").eq("id", id).maybeSingle();
   if (error || !data) return { ok: false, error: "Contrat introuvable." };
   if (!data.clientDiscordId) return { ok: false, error: "Renseigne l'ID Discord du client pour l'envoi." };
@@ -211,6 +229,7 @@ export async function envoyerContrat(id: string): Promise<ArmResult> {
 export async function marquerContrat(id: string, statut: "signe" | "refuse" | "brouillon"): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const up: Record<string, unknown> = { statut };
   if (statut === "signe") up.signeAt = new Date().toISOString();
   const { error } = await admin.from("ArmurerieContrat").update(up).eq("id", id);
@@ -219,6 +238,7 @@ export async function marquerContrat(id: string, statut: "signe" | "refuse" | "b
 export async function supprimerContrat(id: string): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { error } = await admin.from("ArmurerieContrat").delete().eq("id", id);
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
@@ -227,6 +247,7 @@ export async function supprimerContrat(id: string): Promise<ArmResult> {
 export async function honorerContrat(id: string): Promise<ArmResult & { total?: number; ticket?: string }> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { data, error } = await admin.from("ArmurerieContrat").select("*").eq("id", id).maybeSingle();
   if (error || !data) return { ok: false, error: "Contrat introuvable." };
   const c = data as Record<string, unknown>;
@@ -269,6 +290,7 @@ export async function creerProduit(d: { nom: string; categorie?: string; prix?: 
   if (!d.nom || d.nom.trim().length < 1) return { ok: false, error: "Nom du produit requis." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const id = newId("prd");
   const row: Record<string, unknown> = {
     id, nom: s(d.nom, 120), categorie: s(d.categorie, 60) || "Divers",
@@ -286,6 +308,7 @@ export async function majProduit(id: string, patch: Record<string, unknown>): Pr
   if (!id) return { ok: false, error: "Produit introuvable." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const up: Record<string, unknown> = {};
   if ("nom" in patch) up.nom = s(patch.nom, 120);
   if ("categorie" in patch) up.categorie = s(patch.categorie, 60);
@@ -302,6 +325,7 @@ export async function majProduit(id: string, patch: Record<string, unknown>): Pr
 export async function supprimerProduit(id: string): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { error } = await admin.from("ArmurerieProduit").delete().eq("id", id);
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
@@ -391,6 +415,7 @@ const CATALOGUE: { nom: string; cat: string; prix: number; niveau?: number }[] =
 export async function importerCatalogue(): Promise<ArmResult & { n?: number; recat?: number }> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { data: existants } = await admin.from("ArmurerieProduit").select("id,nom,categorie,prix,niveau");
   const parNom = new Map((existants || []).map((p) => [_norm(String((p as { nom: string }).nom)), p as { id: string; nom: string; categorie: string; prix: number; niveau: number }]));
   // 1) aligner l'existant sur le catalogue (catégorie + prix + niveau)
@@ -472,6 +497,7 @@ const _norm = (x: string) => String(x).toLowerCase().normalize("NFD").replace(/[
 export async function importerRecettes(): Promise<ArmResult & { n?: number }> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { data: prods, error: e0 } = await admin.from("ArmurerieProduit").select("id,nom");
   if (e0) return { ok: false, error: erpErr(e0.message) };
   const byNorm = new Map((prods || []).map((p) => [_norm((p as { nom: string }).nom), (p as { id: string }).id]));
@@ -510,6 +536,7 @@ export type LigneCaisse = { produitId?: string; nom: string; categorie?: string;
 export async function validerCaisse(lignes: LigneCaisse[], client: string, notes: string, clientId?: string, opts?: { serie?: string; photo?: string; forcer?: boolean }): Promise<ArmResult & { total?: number; ticket?: string; ficheCreee?: boolean; manques?: string[] }> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const items = (Array.isArray(lignes) ? lignes : []).filter((l) => l && Number(l.qte) > 0);
   if (!items.length) return { ok: false, error: "Le panier est vide." };
   // Vérif stock AVANT d'encaisser : on bloque si un composant manque (sauf « forcer »).
@@ -734,6 +761,7 @@ export async function creerEmploye(d: { nom: string; discordId?: string; role?: 
   if (!d.nom || d.nom.trim().length < 2) return { ok: false, error: "Nom de l'employé requis." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const id = newId("emp");
   const { error } = await admin.from("ArmurerieEmploye").insert({
     id, nom: s(d.nom, 120), discordId: s(d.discordId, 40), role: s(d.role, 60) || "Armurier",
@@ -747,6 +775,7 @@ export async function majEmploye(id: string, patch: Record<string, unknown>): Pr
   if (!id) return { ok: false, error: "Employé introuvable." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const up: Record<string, unknown> = { updatedAt: nowISO() };
   if ("nom" in patch) up.nom = s(patch.nom, 120);
   if ("discordId" in patch) up.discordId = s(patch.discordId, 40);
@@ -760,6 +789,7 @@ export async function majEmploye(id: string, patch: Record<string, unknown>): Pr
 export async function supprimerEmploye(id: string): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { error } = await admin.from("ArmurerieEmploye").delete().eq("id", id);
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
@@ -768,6 +798,7 @@ export async function supprimerEmploye(id: string): Promise<ArmResult> {
 export async function pointerService(employeId: string, employeNom: string): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   // Refuse un double pointage ouvert pour le même employé.
   const { data: ouvert } = await admin.from("ArmureriePointage").select("id").eq("employeId", employeId).is("fin", null).limit(1);
   if (Array.isArray(ouvert) && ouvert.length) return { ok: false, error: "Service déjà en cours pour cet employé." };
@@ -780,6 +811,7 @@ export async function terminerService(id: string): Promise<ArmResult> {
   if (!id) return { ok: false, error: "Pointage introuvable." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { data } = await admin.from("ArmureriePointage").select("debut").eq("id", id).maybeSingle();
   const debut = data ? new Date(String((data as { debut: string }).debut)).getTime() : Date.now();
   const minutes = Math.max(0, Math.round((Date.now() - debut) / 60000));
@@ -789,6 +821,7 @@ export async function terminerService(id: string): Promise<ArmResult> {
 export async function supprimerPointage(id: string): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { error } = await admin.from("ArmureriePointage").delete().eq("id", id);
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
@@ -798,6 +831,7 @@ export async function creerPaie(d: { employeId?: string; employeNom: string; per
   if (!d.employeNom || d.employeNom.trim().length < 2) return { ok: false, error: "Indique l'employé." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const commission = Math.max(0, round2(Number(d.commission) || 0));
   const base = Math.max(0, round2(Number(d.base) || 0));
   const prime = Math.max(0, round2(Number(d.prime) || 0));
@@ -814,6 +848,7 @@ export async function creerPaie(d: { employeId?: string; employeNom: string; per
 export async function payerPaie(id: string): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { data, error } = await admin.from("ArmureriePaie").select("*").eq("id", id).maybeSingle();
   if (error || !data) return { ok: false, error: "Fiche de paie introuvable." };
   const p = data as { statut: string; montant: number; employeNom: string };
@@ -827,6 +862,7 @@ export async function payerPaie(id: string): Promise<ArmResult> {
 export async function supprimerPaie(id: string): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { error } = await admin.from("ArmureriePaie").delete().eq("id", id);
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
@@ -835,6 +871,7 @@ export async function supprimerPaie(id: string): Promise<ArmResult> {
 export async function creerImpot(d: { libelle?: string; debut?: string; fin?: string; chiffreAffaires?: number; taux?: number; notes?: string }): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const ca = Math.max(0, round2(Number(d.chiffreAffaires) || 0));
   const taux = Math.max(0, Math.min(100, Math.round(Number(d.taux) || 0)));
   const montant = round2((ca * taux) / 100);
@@ -849,6 +886,7 @@ export async function creerImpot(d: { libelle?: string; debut?: string; fin?: st
 export async function payerImpot(id: string): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { data, error } = await admin.from("ArmurerieImpot").select("*").eq("id", id).maybeSingle();
   if (error || !data) return { ok: false, error: "Déclaration introuvable." };
   const im = data as { statut: string; montant: number; libelle: string };
@@ -862,6 +900,7 @@ export async function payerImpot(id: string): Promise<ArmResult> {
 export async function supprimerImpot(id: string): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { error } = await admin.from("ArmurerieImpot").delete().eq("id", id);
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
@@ -872,6 +911,7 @@ export async function ajouterEcriture(montant: number, sens: "entree" | "sortie"
   if (m <= 0) return { ok: false, error: "Montant invalide." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const nat = nature === "capital" ? "capital" : (sens === "sortie" ? (nature === "charge" ? "charge" : "produit") : null);
   try { await _mouvementCoffre(admin, m, sens, s(motif, 200) || (sens === "entree" ? "Recette" : "Dépense"), await auteurNom(), nat); return { ok: true }; }
   catch (e) { return { ok: false, error: erpErr((e as Error).message || "") }; }
@@ -883,6 +923,7 @@ export async function ajouterEcriture(montant: number, sens: "entree" | "sortie"
 export async function reajusterFinancesReckless(mouvements: { montant: number; sens: "entree" | "sortie"; motif: string; nature: "produit" | "charge" | null }[]): Promise<ArmResult & { remplaces?: number }> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const lignes = (mouvements || []).filter((n) => (Number(n.montant) || 0) > 0.005);
   if (!lignes.length) return { ok: false, error: "Rien à enregistrer." };
   try {
@@ -916,6 +957,7 @@ export async function creerNote(d: { titre?: string; contenu: string }): Promise
   if (!d.contenu || d.contenu.trim().length < 1) return { ok: false, error: "Écris le contenu de la note." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const id = newId("note");
   const { error } = await admin.from("ArmurerieNote").insert({ id, titre: s(d.titre, 120), contenu: s(d.contenu, 4000), epingle: false, auteur: await auteurNom() });
   if (error) return { ok: false, error: erpErr(error.message) };
@@ -925,6 +967,7 @@ export async function majNote(id: string, patch: { titre?: string; contenu?: str
   if (!id) return { ok: false, error: "Note introuvable." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const up: Record<string, unknown> = { updatedAt: nowISO() };
   if ("titre" in patch) up.titre = s(patch.titre, 120);
   if ("contenu" in patch) up.contenu = s(patch.contenu, 4000);
@@ -935,6 +978,7 @@ export async function majNote(id: string, patch: { titre?: string; contenu?: str
 export async function supprimerNote(id: string): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { error } = await admin.from("ArmurerieNote").delete().eq("id", id);
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
@@ -944,6 +988,7 @@ export async function creerTache(d: { texte: string; assigneA?: string }): Promi
   if (!d.texte || d.texte.trim().length < 1) return { ok: false, error: "Décris la tâche." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const id = newId("tsk");
   const { error } = await admin.from("ArmurerieTache").insert({ id, texte: s(d.texte, 300), fait: false, assigneA: s(d.assigneA, 120), auteur: await auteurNom() });
   if (error) return { ok: false, error: erpErr(error.message) };
@@ -952,12 +997,14 @@ export async function creerTache(d: { texte: string; assigneA?: string }): Promi
 export async function basculerTache(id: string, fait: boolean): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { error } = await admin.from("ArmurerieTache").update({ fait: !!fait }).eq("id", id);
   return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
 }
 export async function supprimerTache(id: string): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { error } = await admin.from("ArmurerieTache").delete().eq("id", id);
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
@@ -967,6 +1014,7 @@ export async function creerRessource(d: { nom: string; categorie?: string; prix?
   if (!d.nom || d.nom.trim().length < 1) return { ok: false, error: "Nom de la ressource requis." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const id = newId("res");
   const row: Record<string, unknown> = { id, nom: s(d.nom, 120), categorie: s(d.categorie, 60) || "Divers", prix: Math.max(0, round2(Number(d.prix) || 0)), mine: !!d.mine, stock: Math.max(0, Math.round(Number(d.stock) || 0)) };
   let { error } = await admin.from("ArmurerieRessource").insert(row);
@@ -978,6 +1026,7 @@ export async function majRessource(id: string, patch: { nom?: string; categorie?
   if (!id) return { ok: false, error: "Ressource introuvable." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const up: Record<string, unknown> = { updatedAt: nowISO() };
   if ("nom" in patch) up.nom = s(patch.nom, 120);
   if ("categorie" in patch) up.categorie = s(patch.categorie, 60);
@@ -991,6 +1040,7 @@ export async function majRessource(id: string, patch: { nom?: string; categorie?
 export async function supprimerRessource(id: string): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { error } = await admin.from("ArmurerieRessource").delete().eq("id", id);
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
@@ -1020,6 +1070,7 @@ const RESSOURCES: { nom: string; cat: string; prix: number; mine?: boolean }[] =
 export async function importerRessources(): Promise<ArmResult & { n?: number }> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { data: existants } = await admin.from("ArmurerieRessource").select("id,nom");
   const parNom = new Set((existants || []).map((r) => _norm(String((r as { nom: string }).nom))));
   const manquants = RESSOURCES.filter((r) => !parNom.has(_norm(r.nom)));
@@ -1036,6 +1087,7 @@ export type LigneRessource = { id?: string; nom: string; qte: number; prix: numb
 export async function acheterRessources(lignes: LigneRessource[], remisePct: number): Promise<ArmResult & { net?: number; brut?: number; remise?: number }> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const items = (Array.isArray(lignes) ? lignes : []).filter((l) => l && Number(l.qte) > 0);
   if (!items.length) return { ok: false, error: "Sélectionne au moins une ressource." };
   const pct = Math.max(0, Math.min(100, round2(Number(remisePct) || 0)));
@@ -1075,6 +1127,7 @@ export async function appliquerStockRessources(payload: {
 }): Promise<ArmResult & { maj?: number; crees?: number; applied?: { id: string; avant: number }[]; creesIds?: string[] }> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const mode = payload?.mode === "set" ? "set" : "add";
   const items = (Array.isArray(payload?.items) ? payload!.items : []).filter((i) => i && i.id && Number(i.qte) >= 0);
   const nouvelles = (Array.isArray(payload?.nouvelles) ? payload!.nouvelles : []).filter((n) => n && String(n.nom || "").trim() && Number(n.qte) >= 0);
@@ -1116,6 +1169,7 @@ export async function appliquerStockRessources(payload: {
 export async function annulerStockRessources(payload: { restore?: { id: string; avant: number }[]; supprimer?: string[] }): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const restore = Array.isArray(payload?.restore) ? payload!.restore.filter((r) => r && r.id) : [];
   const supprimer = Array.isArray(payload?.supprimer) ? payload!.supprimer.filter(Boolean) : [];
   try {
@@ -1224,6 +1278,7 @@ async function _manquesCaisse(admin: NonNullable<ReturnType<typeof createAdminCl
 // Historique des mouvements de stock (lecture, pour l'onglet Journal).
 export type MouvementStock = { id: string; cible: string; nom: string; delta: number; avant: number | null; apres: number | null; origine: string; detail: string | null; par: string | null; createdAt: string | null };
 export async function getMouvementsStock(limite = 200): Promise<MouvementStock[]> {
+  if (!(await getAcces()).armurier) return []; // réservé au personnel de l'Armurerie
   const admin = createAdminClient();
   if (!admin) return [];
   const { data, error } = await admin.from("ArmurerieMouvementStock").select("*").order("createdAt", { ascending: false }).limit(limite);
@@ -1240,6 +1295,7 @@ export async function getMouvementsStock(limite = 200): Promise<MouvementStock[]
 export type ScanAnomalie = { type: string; cible?: string; nom?: string; produitNom?: string; ingredient?: string; stock?: number; ids?: string[]; n?: number };
 export type ScanRapport = { id: string; createdAt: string | null; anomalies: ScanAnomalie[]; resume: string | null; nb: number };
 export async function getDernierScanArmurerie(): Promise<ScanRapport | null> {
+  if (!(await getAcces()).armurier) return null; // réservé au personnel de l'Armurerie
   const admin = createAdminClient();
   if (!admin) return null;
   const { data, error } = await admin.from("ArmurerieScanRapport").select("*").order("createdAt", { ascending: false }).limit(1).maybeSingle();
@@ -1255,6 +1311,7 @@ export async function fabriquerProduit(produitId: string, qte: number): Promise<
   const q = Math.max(1, Math.round(Number(qte) || 0));
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   // Produit + recette (résilient si la colonne recette n'est pas migrée).
   let pr = await admin.from("ArmurerieProduit").select("id,nom,stock,aLaDemande,recette").eq("id", produitId).maybeSingle();
   if (pr.error && /recette/i.test(pr.error.message)) pr = await admin.from("ArmurerieProduit").select("id,nom,stock,aLaDemande").eq("id", produitId).maybeSingle();
@@ -1325,6 +1382,7 @@ export async function creerCommande(d: { categorie?: string; clientNom: string; 
   if (!d.clientNom || d.clientNom.trim().length < 2) return { ok: false, error: "Indique le nom du client." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { lignes, total } = _nettoyerLignes(d.lignes);
   if (!lignes.length) return { ok: false, error: "Ajoute au moins un objet à la commande." };
   const id = newId("cmd");
@@ -1339,6 +1397,7 @@ export async function majCommande(id: string, d: { categorie?: string; clientNom
   if (!id) return { ok: false, error: "Commande introuvable." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const up: Record<string, unknown> = { updatedAt: new Date().toISOString() };
   if ("categorie" in d) up.categorie = s(d.categorie, 80);
   if ("clientNom" in d) up.clientNom = s(d.clientNom, 120);
@@ -1352,12 +1411,14 @@ export async function majCommande(id: string, d: { categorie?: string; clientNom
 export async function marquerCommande(id: string, statut: string): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { error } = await admin.from("ArmurerieCommande").update({ statut: s(statut, 40) || "en_attente", updatedAt: new Date().toISOString() }).eq("id", id);
   return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
 }
 export async function supprimerCommande(id: string): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { error } = await admin.from("ArmurerieCommande").delete().eq("id", id);
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
@@ -1372,6 +1433,7 @@ export async function creerRdv(d: { clientPrenom?: string; clientNom: string; te
   if (!quand || isNaN(quand.getTime())) return { ok: false, error: "Choisis la date et l'heure du rendez-vous." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const id = newId("rdv");
   const { error } = await admin.from("ArmurerieRdv").insert({
     id, clientPrenom: s(d.clientPrenom, 120), clientNom: s(d.clientNom, 120), telegramme: s(d.telegramme, 120),
@@ -1385,6 +1447,7 @@ export async function majRdv(id: string, d: { clientPrenom?: string; clientNom?:
   if (!id) return { ok: false, error: "Rendez-vous introuvable." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const up: Record<string, unknown> = { updatedAt: new Date().toISOString() };
   if ("clientPrenom" in d) up.clientPrenom = s(d.clientPrenom, 120);
   if ("clientNom" in d) up.clientNom = s(d.clientNom, 120);
@@ -1402,12 +1465,14 @@ export async function majRdv(id: string, d: { clientPrenom?: string; clientNom?:
 export async function marquerRdv(id: string, statut: string): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { error } = await admin.from("ArmurerieRdv").update({ statut: s(statut, 40) || "a_venir", updatedAt: new Date().toISOString() }).eq("id", id);
   return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
 }
 export async function supprimerRdv(id: string): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
   const { error } = await admin.from("ArmurerieRdv").delete().eq("id", id);
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
