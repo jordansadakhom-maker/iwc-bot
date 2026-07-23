@@ -88,14 +88,15 @@ export function VideRegistre({ titre, sous, icon: Icon = Feather }: { titre: str
 }
 
 // Cartouche : petit encart chiffré (indicateur) au galbe de registre.
-export function Cartouche({ label, valeur, ton, icon: Icon }: { label: string; valeur: React.ReactNode; ton?: string; icon?: LucideIcon }) {
+export function Cartouche({ label, valeur, ton, icon: Icon, sous }: { label: string; valeur: React.ReactNode; ton?: string; icon?: LucideIcon; sous?: string }) {
   return (
     <div className="rounded-[12px] border border-border bg-surface-2 px-3 py-2">
       <div className="flex items-center gap-1.5 text-[0.6rem] font-semibold uppercase tracking-[0.09em] text-faint">
         {Icon ? <Icon className="h-3 w-3" /> : null}
         {label}
       </div>
-      <div className="mt-0.5 font-num text-[1.2rem] font-bold leading-none" style={{ color: ton || "var(--ink)" }}>{valeur}</div>
+      <div className="mt-0.5 font-num text-[1.3rem] font-bold leading-none" style={{ color: ton || "var(--ink)" }}>{valeur}</div>
+      {sous ? <div className="mt-1 text-[0.66rem] text-faint">{sous}</div> : null}
     </div>
   );
 }
