@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, ClipboardList, Boxes, FlaskConical, Archive, BadgeDollarSign, Receipt, ShieldCheck, FileText, BookUser, Stethoscope, ScrollText, BarChart3, History, ShieldAlert, Sparkles, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Users, ClipboardList, Boxes, FlaskConical, Archive, BadgeDollarSign, Receipt, ShieldCheck, FileText, BookUser, Stethoscope, ScrollText, BarChart3, History, ShieldAlert, Sparkles, Scale, type LucideIcon } from "lucide-react";
 
 // Onglets de la section Dispensaire de Saint-Denis. `pret` = déjà construit ;
 // `restreint` = réservé aux membres habilités (RH/chefs) ; `admin` = permission
@@ -22,6 +22,7 @@ export const DISP_NAV: DispTab[] = [
   { href: "/dispensaire/stats", label: "Statistiques", icon: BarChart3, pret: true, desc: "L'activité de l'officine en chiffres et en courbes." },
   { href: "/dispensaire/historique", label: "Historique", icon: History, pret: true, desc: "La main courante — tout ce qui a été porté au registre." },
   { href: "/repertoire", label: "Répertoire", icon: BookUser, pret: true, desc: "Les contacts et correspondants du dispensaire." },
+  { href: "/dispensaire/reglement", label: "Règlement", icon: Scale, pret: true, desc: "Le règlement du cabinet et ses avenants — à connaître de tous." },
   { href: "/dispensaire/admin", label: "Administration", icon: ShieldAlert, pret: true, admin: true, desc: "Rôles, habilitations et réglages du dispensaire." },
 ];
 
