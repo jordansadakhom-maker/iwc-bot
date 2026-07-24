@@ -16,7 +16,7 @@ function initiales(nom: string) {
 }
 const inputCls = "w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-[0.86rem] text-ink outline-none placeholder:text-faint focus:border-[color-mix(in_srgb,var(--accent)_55%,var(--border))]";
 
-export function MembreRow({ m, tone }: { m: MembreDetail; tone: "accent" | "oxblood" }) {
+export function MembreRow({ m, tone, peutEditer = false, peutHabiliterMedecin = false }: { m: MembreDetail; tone: "accent" | "oxblood"; peutEditer?: boolean; peutHabiliterMedecin?: boolean }) {
   const router = useRouter();
   const f = m.ficheRH || {};
   const [open, setOpen] = useState(false);
@@ -52,9 +52,11 @@ export function MembreRow({ m, tone }: { m: MembreDetail; tone: "accent" | "oxbl
         </div>
         <div className="ml-auto flex items-center gap-2">
           <Badge tone={STATUT_TONE[m.statut?.toLowerCase()] ?? "muted"}>{m.statut}</Badge>
-          <button onClick={() => setOpen(true)} className="grid h-8 w-8 place-items-center rounded-lg border border-border text-faint opacity-0 transition hover:border-accent hover:text-ink group-hover:opacity-100" aria-label="Éditer la fiche RH" title="Fiche RH">
-            <Pencil className="h-[15px] w-[15px]" />
-          </button>
+          {peutEditer ? (
+            <button onClick={() => setOpen(true)} className="grid h-8 w-8 place-items-center rounded-lg border border-border text-faint opacity-0 transition hover:border-accent hover:text-ink group-hover:opacity-100" aria-label="Éditer la fiche RH" title="Fiche RH">
+              <Pencil className="h-[15px] w-[15px]" />
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -74,9 +76,9 @@ export function MembreRow({ m, tone }: { m: MembreDetail; tone: "accent" | "oxbl
               </div>
               <label className="block"><span className="mb-1 block text-[0.64rem] uppercase tracking-[0.06em] text-faint">Salaire ($)</span><input className={inputCls} type="number" min={0} step="1" value={salaire} onChange={(e) => setSalaire(e.target.value)} placeholder="0" /></label>
               <label className="block"><span className="mb-1 block text-[0.64rem] uppercase tracking-[0.06em] text-faint">Notes RH</span><textarea className={inputCls + " min-h-[90px] resize-y leading-relaxed"} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Remarques, historique, sanctions, points forts…" maxLength={1500} /></label>
-              <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border bg-surface-2 px-3 py-2.5">
-                <input type="checkbox" checked={medecin} onChange={(e) => setMedecin(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[var(--accent)]" />
-                <span className="text-[0.82rem]"><b>Habilitation médecin</b><span className="mt-0.5 block text-[0.72rem] text-faint">Donne accès à l&apos;onglet Médical (dossiers de suivi). La Direction y a accès d&apos;office.</span></span>
+              <label className={"flex items-start gap-2.5 rounded-lg border border-border bg-surface-2 px-3 py-2.5 " + (peutHabiliterMedecin ? "cursor-pointer" : "cursor-not-allowed opacity-70")}>
+                <input type="checkbox" checked={medecin} disabled={!peutHabiliterMedecin} onChange={(e) => setMedecin(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[var(--accent)] disabled:cursor-not-allowed" />
+                <span className="text-[0.82rem]"><b>Habilitation médecin</b><span className="mt-0.5 block text-[0.72rem] text-faint">Donne accès à l&apos;onglet Médical (dossiers de suivi). La Direction y a accès d&apos;office.{peutHabiliterMedecin ? "" : " Seule la Direction peut modifier cette habilitation."}</span></span>
               </label>
               {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
               <div className="flex justify-end gap-2 pt-1">

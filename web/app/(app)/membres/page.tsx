@@ -1,5 +1,6 @@
 import { Users } from "lucide-react";
 import { getMembres } from "@/lib/queries";
+import { getActeur } from "@/lib/authz";
 import { PageHeader, Card, CardHeader, Empty } from "@/components/ui";
 import { BarresH } from "@/components/charts";
 import { MembresListe } from "@/components/membres-liste";
@@ -22,7 +23,12 @@ const parRang = <T extends { grade: string | null; nomIC: string }>(a: T, b: T) 
 };
 
 export default async function MembresPage() {
-  const { connecte, membres } = await getMembres();
+  const [{ connecte, membres }, acteur] = await Promise.all([getMembres(), getActeur()]);
+  // Édition RH réservée aux officiers / direction ; habilitation médecin à la
+  // direction seule. Même règle (fail-closed) que le serveur majFicheMembre, pour
+  // que l'UI ne propose jamais une action qui serait de toute façon refusée.
+  const peutEditer = !!acteur?.officier;
+  const peutHabiliterMedecin = !!acteur?.direction;
   // Hiérarchie lisible de haut en bas (Fondateur → Recrue), par pôle.
   const iwc = membres.filter((m) => m.pole !== "illegal").sort(parRang);
   const conf = membres.filter((m) => m.pole === "illegal").sort(parRang);
@@ -47,7 +53,7 @@ export default async function MembresPage() {
           </Empty>
         </Card>
       ) : (
-        <MembresListe iwc={iwc} conf={conf} />
+        <MembresListe iwc={iwc} conf={conf} peutEditer={peutEditer} peutHabiliterMedecin={peutHabiliterMedecin} />
       )}
     </>
   );
