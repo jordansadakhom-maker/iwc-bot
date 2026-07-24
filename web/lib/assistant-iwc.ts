@@ -2,9 +2,12 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAlertes } from "@/lib/queries";
-import { type AssistantData, type Constat, type Gravite, trierConstats, compterGravite } from "@/lib/erp-assistant-const";
+import { getEtatsOverlay } from "@/lib/notif-etat";
+import { type AssistantData, type Constat, type Priorite, trierConstats, compterGravite, graviteDe } from "@/lib/erp-assistant-const";
 
 export * from "@/lib/erp-assistant-const";
+
+export const TABLE_ETAT_IWC = "NotifEtatIWC";
 
 // ── Assistant de veille — IRON WOLF COMPANY ─────────────────────────────────
 // Déterministe : lit les vraies données et en tire des constats + une action
@@ -16,8 +19,10 @@ const fmtParis = (d: Date) => { try { return new Intl.DateTimeFormat("fr-FR", { 
 const safeCount = async (fn: () => PromiseLike<{ count: number | null; error: unknown }>): Promise<number> => { try { const { count, error } = await fn(); return error ? 0 : (count ?? 0); } catch { return 0; } };
 const safeRows = async (fn: () => PromiseLike<{ data: unknown }>): Promise<Record<string, unknown>[]> => { try { return ((await fn()).data as Record<string, unknown>[]) || []; } catch { return []; } };
 
-const TONE_GRAVITE: Record<string, Gravite> = { oxblood: "critique", warn: "important", accent: "important", good: "info" };
+const PRIO_ALERTE: Record<string, Priorite> = { rdvArm: "importante", rdvs: "importante", contrats: "importante", impots: "critique", paies: "importante", ruptures: "critique", candids: "information", telegrammes: "normale" };
 const CAT_ALERTE: Record<string, string> = { rdvArm: "Rendez-vous", rdvs: "Rendez-vous", contrats: "Contrats", impots: "Impôts", paies: "Paie", ruptures: "Stock", candids: "Recrutement", telegrammes: "Communication" };
+// Fabrique un constat en dérivant la gravité de la priorité.
+const mk = (o: Omit<Constat, "gravite">): Constat => ({ ...o, gravite: graviteDe(o.priorite) });
 const SUGG_ALERTE: Record<string, string> = {
   rdvArm: "Prépare les rendez-vous armurerie du jour.",
   rdvs: "Traite les demandes de rendez-vous en attente.",
@@ -40,10 +45,10 @@ export async function getAssistantIWC(): Promise<AssistantData> {
   let pret = true;
   try {
     const { items } = await getAlertes();
-    for (const a of items) constats.push({
-      id: "al-" + a.key, gravite: TONE_GRAVITE[a.tone] || "info", categorie: CAT_ALERTE[a.key] || "Alerte",
+    for (const a of items) constats.push(mk({
+      id: "al-" + a.key, priorite: PRIO_ALERTE[a.key] || "normale", categorie: CAT_ALERTE[a.key] || "Alerte",
       titre: a.label, detail: null, suggestion: SUGG_ALERTE[a.key] || "À traiter.", href: a.href,
-    });
+    }));
   } catch { pret = false; }
 
   // 2) Règles propres à l'assistant (points d'insertion repérés).
@@ -55,15 +60,19 @@ export async function getAssistantIWC(): Promise<AssistantData> {
     safeCount(() => admin.from("Contrat").select("*", { count: "exact", head: true }).eq("statut", "en_attente")),
   ]);
 
-  if (pointage) constats.push({ id: "pointage-ouvert", gravite: "important", categorie: "Pointage", titre: `${pointage} pointage(s) armurerie non clôturé(s)`, detail: "Service ouvert depuis plus de 12 h.", suggestion: "Clôture les pointages restés ouverts pour fiabiliser la paie.", href: "/armurerie?tab=pointage" });
+  if (pointage) constats.push(mk({ id: "pointage-ouvert", priorite: "importante", categorie: "Pointage", titre: `${pointage} pointage(s) armurerie non clôturé(s)`, detail: "Service ouvert depuis plus de 12 h.", suggestion: "Clôture les pointages restés ouverts pour fiabiliser la paie.", href: "/armurerie?tab=pointage" }));
 
   const invBas = invRows.filter((r) => num(r.seuil) > 0 && num(r.quantite) <= num(r.seuil));
-  if (invBas.length) constats.push({ id: "inv-bas", gravite: "important", categorie: "Inventaire", titre: `${invBas.length} article(s) d'inventaire sous le seuil`, detail: invBas.slice(0, 3).map((r) => `${r.nom} (${num(r.quantite)})`).join(" · "), suggestion: "Réapprovisionne les articles sous leur seuil d'alerte.", href: "/inventaire" });
+  if (invBas.length) constats.push(mk({ id: "inv-bas", priorite: "normale", categorie: "Inventaire", titre: `${invBas.length} article(s) d'inventaire sous le seuil`, detail: invBas.slice(0, 3).map((r) => `${r.nom} (${num(r.quantite)})`).join(" · "), suggestion: "Réapprovisionne les articles sous leur seuil d'alerte.", href: "/inventaire" }));
 
   const chBas = chasseRows.filter((r) => num(r.seuil) > 0 && num(r.quantite) <= num(r.seuil));
-  if (chBas.length) constats.push({ id: "chasse-bas", gravite: "info", categorie: "Chasse", titre: `${chBas.length} ressource(s) de chasse basse(s)`, detail: chBas.slice(0, 3).map((r) => `${r.nom} (${num(r.quantite)})`).join(" · "), suggestion: "Planifie une sortie de chasse pour recompléter les zones.", href: "/chasse" });
+  if (chBas.length) constats.push(mk({ id: "chasse-bas", priorite: "faible", categorie: "Chasse", titre: `${chBas.length} ressource(s) de chasse basse(s)`, detail: chBas.slice(0, 3).map((r) => `${r.nom} (${num(r.quantite)})`).join(" · "), suggestion: "Planifie une sortie de chasse pour recompléter les zones.", href: "/chasse" }));
 
-  if (contratsAValider) constats.push({ id: "contrats-valider", gravite: "important", categorie: "Contrats", titre: `${contratsAValider} contrat(s) à valider`, detail: null, suggestion: "Valide ou refuse les contrats en attente.", href: "/operations" });
+  if (contratsAValider) constats.push(mk({ id: "contrats-valider", priorite: "importante", categorie: "Contrats", titre: `${contratsAValider} contrat(s) à valider`, detail: null, suggestion: "Valide ou refuse les contrats en attente.", href: "/operations" }));
+
+  // Couche d'état persistée (Non lue / En cours / Résolue / Archivée).
+  const etats = await getEtatsOverlay(TABLE_ETAT_IWC);
+  for (const c of constats) c.etat = etats[c.id] || "nouveau";
 
   return { pret, constats: trierConstats(constats), parGravite: compterGravite(constats), genereLe };
 }
