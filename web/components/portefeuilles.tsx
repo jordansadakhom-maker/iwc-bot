@@ -12,7 +12,7 @@ import { cents } from "@/lib/format";
 const money = (n: number) => `${cents(n)}$`;
 const dateFR = (s: string | null) => { if (!s) return ""; try { return new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
 
-export function Portefeuilles({ portefeuilles, transactions, membres, total }: { portefeuilles: Portefeuille[]; transactions: Transaction[]; membres: MembreLite[]; total: number }) {
+export function Portefeuilles({ portefeuilles, transactions, membres, total, peutDirection = false }: { portefeuilles: Portefeuille[]; transactions: Transaction[]; membres: MembreLite[]; total: number; peutDirection?: boolean }) {
   const router = useRouter();
   const [payer, setPayer] = useState(false);
   const [ajuster, setAjuster] = useState(false);
@@ -32,7 +32,9 @@ export function Portefeuilles({ portefeuilles, transactions, membres, total }: {
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setPayer(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-ink transition hover:border-border-2"><Send className="h-3.5 w-3.5" /> Payer</button>
-          <button onClick={() => setAjuster(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-ink transition hover:border-border-2"><Landmark className="h-3.5 w-3.5" /> Créditer / débiter</button>
+          {peutDirection ? (
+            <button onClick={() => setAjuster(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-ink transition hover:border-border-2"><Landmark className="h-3.5 w-3.5" /> Créditer / débiter</button>
+          ) : null}
         </div>
       </div>
 

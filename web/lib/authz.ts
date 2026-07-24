@@ -51,6 +51,8 @@ export async function getActeur(): Promise<Acteur | null> {
 }
 
 // Raccourcis d'assertion : renvoient l'acteur si autorisé, sinon null.
+// Chacun reflète EXACTEMENT la règle déjà déclarée par la page correspondante
+// (composant AccesReserve), appliquée ici au niveau des ÉCRITURES.
 export async function requireOfficier(): Promise<Acteur | null> {
   const a = await getActeur();
   return a && a.officier ? a : null;
@@ -58,4 +60,14 @@ export async function requireOfficier(): Promise<Acteur | null> {
 export async function requireDirection(): Promise<Acteur | null> {
   const a = await getActeur();
   return a && a.direction ? a : null;
+}
+// Médical : « réservé au médecin de la compagnie et à la Direction ».
+export async function requireMedical(): Promise<Acteur | null> {
+  const a = await getActeur();
+  return a && (a.direction || a.medecin) ? a : null;
+}
+// Renseignement : « réservé à la Direction et aux officiers de terrain » = officier.
+export async function requireRenseignement(): Promise<Acteur | null> {
+  const a = await getActeur();
+  return a && a.officier ? a : null;
 }
