@@ -3,6 +3,7 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAlertes } from "@/lib/queries";
 import { getEtatsOverlay } from "@/lib/notif-etat";
+import { detecterDoublons, detecterNegatifs, apercuReappro, type ReapproItem } from "@/lib/erp-coherence";
 import { type AssistantData, type Constat, type Priorite, trierConstats, compterGravite, graviteDe } from "@/lib/erp-assistant-const";
 
 export * from "@/lib/erp-assistant-const";
@@ -69,6 +70,23 @@ export async function getAssistantIWC(): Promise<AssistantData> {
   if (chBas.length) constats.push(mk({ id: "chasse-bas", priorite: "faible", categorie: "Chasse", titre: `${chBas.length} ressource(s) de chasse basse(s)`, detail: chBas.slice(0, 3).map((r) => `${r.nom} (${num(r.quantite)})`).join(" · "), suggestion: "Planifie une sortie de chasse pour recompléter les zones.", href: "/chasse" }));
 
   if (contratsAValider) constats.push(mk({ id: "contrats-valider", priorite: "importante", categorie: "Contrats", titre: `${contratsAValider} contrat(s) à valider`, detail: null, suggestion: "Valide ou refuse les contrats en attente.", href: "/operations" }));
+
+  // Contrôle de cohérence & réappro sur les produits de l'armurerie.
+  // Seuils armurerie : bas ≤ 3, cible 5 (mêmes valeurs que le comptoir).
+  const SEUIL_BAS = 3, CIBLE = 5;
+  const produits = await safeRows(() => admin.from("ArmurerieProduit").select("nom,stock,aLaDemande"));
+  const enStock = produits.filter((p) => !p.aLaDemande); // « à la demande » = pas de stock à tenir
+  const reappro: ReapproItem[] = enStock
+    .filter((p) => num(p.stock) > 0 && num(p.stock) <= SEUIL_BAS)
+    .map((p) => ({ nom: String(p.nom ?? "?"), q: num(p.stock), manque: Math.max(0, CIBLE - num(p.stock)) }))
+    .sort((a, b) => b.manque - a.manque);
+  if (reappro.length) constats.push(mk({ id: "reappro-produits", priorite: "importante", categorie: "Réappro", titre: `${reappro.length} produit(s) à réassortir`, detail: apercuReappro(reappro), suggestion: `Lance la fabrication pour revenir au stock cible (${CIBLE}).`, href: "/armurerie?tab=produits" }));
+
+  const doublons = detecterDoublons(produits);
+  if (doublons.length) constats.push(mk({ id: "doublons-produits", priorite: "normale", categorie: "Cohérence", titre: `${doublons.length} produit(s) en double`, detail: doublons.slice(0, 3).map((d) => `${d.nom} ×${d.n}`).join(" · "), suggestion: "Fusionne les fiches produit en double.", href: "/armurerie?tab=produits" }));
+
+  const negatifs = detecterNegatifs(produits, "stock");
+  if (negatifs.length) constats.push(mk({ id: "negatif-produits", priorite: "critique", categorie: "Cohérence", titre: `${negatifs.length} produit(s) à stock négatif`, detail: negatifs.slice(0, 3).map((n) => `${n.nom} (${n.q})`).join(" · "), suggestion: "Corrige : un stock négatif signale une perte ou un écart de caisse.", href: "/armurerie?tab=produits" }));
 
   // Couche d'état persistée (Non lue / En cours / Résolue / Archivée).
   const etats = await getEtatsOverlay(TABLE_ETAT_IWC);
