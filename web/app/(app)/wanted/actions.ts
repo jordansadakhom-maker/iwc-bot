@@ -2,7 +2,13 @@
 
 import { envoyerCommande, type CommandeResult } from "@/lib/commandes";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireRenseignement } from "@/lib/authz";
 import { iaTexte } from "@/lib/ia";
+
+// SÉCURITÉ (fail-closed) : les avis de recherche sont réservés à la Direction et
+// aux officiers de terrain (même règle que la page /wanted). Appliquée ici sur les
+// ÉCRITURES pour qu'elle ne dépende pas de l'affichage.
+const REFUS: CommandeResult = { ok: false, error: "Accès refusé — réservé à la Direction et aux officiers." };
 
 type AvisInput = {
   cible: string; prime?: string; dangerosite?: string; statut?: string;
@@ -10,14 +16,17 @@ type AvisInput = {
 };
 
 export async function emettreAvis(data: AvisInput): Promise<CommandeResult> {
+  if (!(await requireRenseignement())) return REFUS;
   if (!data.cible || data.cible.trim().length < 2) return { ok: false, error: "Indique la cible de l'avis." };
   return envoyerCommande("traque.create", { ...data });
 }
 export async function majAvis(id: string, patch: Partial<AvisInput>): Promise<CommandeResult> {
+  if (!(await requireRenseignement())) return REFUS;
   if (!id) return { ok: false, error: "Avis introuvable." };
   return envoyerCommande("traque.update", { id, ...patch });
 }
 export async function retirerAvis(id: string): Promise<CommandeResult> {
+  if (!(await requireRenseignement())) return REFUS;
   const avisId = String(id || "").trim();
   if (!avisId) return { ok: false, error: "Avis introuvable." };
   // 1) Le bot retire la traque de SES données (source de vérité) + du Discord.
@@ -35,6 +44,7 @@ export async function retirerAvis(id: string): Promise<CommandeResult> {
 // un profil, une estimation de dangerosité et des recommandations d'approche.
 // N'invente aucun fait — enrichit seulement l'analyse à partir des indices.
 export async function genererFicheCible(id: string): Promise<{ ok: boolean; texte?: string; error?: string }> {
+  if (!(await requireRenseignement())) return { ok: false, error: "Accès refusé — réservé à la Direction et aux officiers." };
   const avisId = String(id || "").trim();
   if (!avisId) return { ok: false, error: "Avis introuvable." };
   const admin = createAdminClient();

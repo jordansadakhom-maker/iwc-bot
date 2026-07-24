@@ -1294,10 +1294,16 @@ async function _dansRosterArmurerie(admin: NonNullable<ReturnType<typeof createA
 
 export async function getAcces(): Promise<Acces> {
   const ouvert: Acces = { direction: true, officier: true, medecin: true, peutRenseignement: true, peutMedical: true, armurier: true };
+  // Aucune session = aucun accès. C'est le seul cas « fermé » du principe
+  // anti-verrouillage : une requête non authentifiée ne doit jamais obtenir de
+  // droits (les pages de l'app sont derrière l'authentification ; un membre
+  // réellement connecté ne passe jamais par ici). Les autres cas de doute
+  // (grade inconnu, etc.) restent ouverts pour ne bloquer personne par erreur.
+  const ferme: Acces = { direction: false, officier: false, medecin: false, peutRenseignement: false, peutMedical: false, armurier: false };
   try {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return ouvert;
+    if (!user) return ferme;
     const meta = (user.user_metadata || {}) as Record<string, unknown>;
     const did = String(meta.provider_id || meta.sub || "");
     const admin = createAdminClient();
