@@ -1,7 +1,8 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getAcces, getSessionProfile } from "@/lib/queries";
+import { getSessionProfile } from "@/lib/queries";
+import { peutGererRH } from "@/lib/dispensaire-roles";
 
 // RH du Dispensaire — écriture réservée aux membres habilités (direction/médecin).
 export type RhResult = { ok: boolean; error?: string; id?: string };
@@ -12,7 +13,8 @@ const STATUTS = ["actif", "suspendu", "renvoye"];
 
 const s = (v: unknown, max = 500) => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
 function newId() { return `ds-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
-async function autorise() { try { return (await getAcces()).peutMedical; } catch { return true; } }
+// Fail-closed : réservé aux grades porteurs du droit « rh » (ou admin).
+async function autorise() { return peutGererRH(); }
 async function qui() { try { return (await getSessionProfile())?.nom || "Équipe"; } catch { return "Équipe"; } }
 
 function nettoyer(data: Record<string, unknown>) {

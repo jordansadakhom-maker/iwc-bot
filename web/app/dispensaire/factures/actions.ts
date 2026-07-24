@@ -1,7 +1,8 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getAcces, getSessionProfile } from "@/lib/queries";
+import { getSessionProfile } from "@/lib/queries";
+import { peutFacturer } from "@/lib/dispensaire-roles";
 import { FACTURE_DELAI_H, FACTURE_STATUTS } from "@/lib/dispensaire-facturation-const";
 
 // Factures — RÉSERVÉ aux chefs (habilités). Suivi des impayés.
@@ -14,7 +15,8 @@ const CHAMPS: Champ[] = ["objet", "destinataire", "note"];
 const s = (v: unknown, max = 300) => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
 const n = (v: unknown) => Math.max(0, Math.round(Number(v) || 0));
 function newId(p = "df") { return `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
-async function autorise() { try { return (await getAcces()).peutMedical; } catch { return true; } }
+// Fail-closed : réservé aux grades porteurs du droit « factures » (ou admin).
+async function autorise() { return peutFacturer(); }
 async function qui() { try { return (await getSessionProfile())?.nom || "Équipe"; } catch { return "Équipe"; } }
 
 // Journal des actions sur une facture (best-effort : n'échoue jamais l'action).
