@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, ClipboardList, Boxes, FlaskConical, Archive, BadgeDollarSign, Receipt, ShieldCheck, FileText, BookUser, Stethoscope, ScrollText, FolderOpen, BarChart3, History, ShieldAlert, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Users, ClipboardList, Boxes, FlaskConical, Archive, BadgeDollarSign, Receipt, ShieldCheck, FileText, BookUser, Stethoscope, ScrollText, FolderOpen, BarChart3, History, ShieldAlert, Sparkles, type LucideIcon } from "lucide-react";
 
 // Onglets de la section Dispensaire de Saint-Denis. `pret` = déjà construit ;
 // `restreint` = réservé aux membres habilités (RH/chefs) ; `admin` = permission
@@ -7,6 +7,7 @@ export type DispTab = { href: string; label: string; icon: LucideIcon; pret?: bo
 
 export const DISP_NAV: DispTab[] = [
   { href: "/dispensaire", label: "Accueil", icon: LayoutDashboard, pret: true, desc: "Le registre du jour — soins, stocks et personnel réunis d'un même regard." },
+  { href: "/dispensaire/assistant", label: "Assistant", icon: Sparkles, pret: true, desc: "La veille automatique — ce que le dispensaire a détecté et ce qu'il te propose de faire." },
   { href: "/dispensaire/rh", label: "RH / Salariés", icon: Users, pret: true, restreint: true, desc: "Le personnel du dispensaire, ses fonctions et ses états de service." },
   { href: "/dispensaire/pointage", label: "Pointage", icon: ClipboardList, pret: true, desc: "Prises et fins de service, portées à l'heure près." },
   { href: "/dispensaire/stockage", label: "Stockage", icon: Boxes, pret: true, desc: "L'inventaire des coffres — remèdes, matériel et matières." },
