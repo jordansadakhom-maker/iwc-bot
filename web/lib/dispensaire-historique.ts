@@ -17,13 +17,14 @@ export async function getHistorique(): Promise<HistoData> {
   const admin = createAdminClient();
   if (!admin) return { pret: false, items: [], modules: [], actions: [] };
 
-  const [mvts, coffres, ventes, point, frais, factures, certs, rapports, salaries, matieres, fdo] = await Promise.all([
+  const [mvts, coffres, ventes, point, frais, factures, factureLogs, certs, rapports, salaries, matieres, fdo] = await Promise.all([
     q<Record<string, unknown>[]>(admin.from("DispensaireStockMouvement").select("id,nomItem,coffre,delta,apres,motif,par,createdAt").order("createdAt", { ascending: false }).limit(L * 2)),
     q<Record<string, unknown>[]>(admin.from("DispensaireCoffre").select("id,nom,emplacement,responsable,createdAt,updatedAt,updatedBy").order("updatedAt", { ascending: false }).limit(L)),
     q<Record<string, unknown>[]>(admin.from("DispensaireVente").select("id,patient,quantite,item,total,par,createdAt").order("createdAt", { ascending: false }).limit(L)),
     q<Record<string, unknown>[]>(admin.from("DispensairePointage").select("id,nom,dureeMin,fin").not("fin", "is", null).order("fin", { ascending: false }).limit(L)),
     q<Record<string, unknown>[]>(admin.from("DispensaireFrais").select("id,objet,montant,statut,par,updatedAt").order("updatedAt", { ascending: false }).limit(L)),
     q<Record<string, unknown>[]>(admin.from("DispensaireFacture").select("id,objet,montant,statut,par,updatedAt").order("updatedAt", { ascending: false }).limit(L)),
+    q<Record<string, unknown>[]>(admin.from("DispensaireFactureLog").select("id,factureId,action,detail,par,at").order("at", { ascending: false }).limit(L * 2)),
     q<Record<string, unknown>[]>(admin.from("DispensaireCertificat").select("id,patient,type,par,createdAt").order("createdAt", { ascending: false }).limit(L)),
     q<Record<string, unknown>[]>(admin.from("DispensaireRapport").select("id,titre,par,createdAt").order("createdAt", { ascending: false }).limit(L)),
     q<Record<string, unknown>[]>(admin.from("DispensaireSalarie").select("id,nom,statut,updatedBy,updatedAt").order("updatedAt", { ascending: false }).limit(L)),
@@ -50,6 +51,7 @@ export async function getHistorique(): Promise<HistoData> {
   for (const r of point || []) items.push({ id: "p" + r.id, module: "Pointage", action: "Fin de service", cible: String(r.nom), coffre: null, detail: `${Math.floor(num(r.dureeMin) / 60)}h${String(num(r.dureeMin) % 60).padStart(2, "0")}`, par: null, at: String(r.fin) });
   for (const r of frais || []) items.push({ id: "f" + r.id, module: "Frais", action: String(r.statut), cible: String(r.objet), coffre: null, detail: `$${num(r.montant)}`, par: str(r.par), at: String(r.updatedAt) });
   for (const r of factures || []) items.push({ id: "fa" + r.id, module: "Factures", action: String(r.statut), cible: String(r.objet), coffre: null, detail: `$${num(r.montant)}`, par: str(r.par), at: String(r.updatedAt) });
+  for (const r of factureLogs || []) items.push({ id: "fl" + r.id, module: "Factures", action: String(r.action), cible: String(r.detail || r.factureId), coffre: null, detail: null, par: str(r.par), at: String(r.at) });
   for (const r of certs || []) items.push({ id: "c" + r.id, module: "Certificats", action: String(r.type), cible: String(r.patient), coffre: null, detail: null, par: str(r.par), at: String(r.createdAt) });
   for (const r of rapports || []) items.push({ id: "r" + r.id, module: "Rapports", action: "Rapport", cible: String(r.titre), coffre: null, detail: null, par: str(r.par), at: String(r.createdAt) });
   for (const r of salaries || []) items.push({ id: "s" + r.id, module: "RH", action: "Fiche", cible: String(r.nom), coffre: null, detail: String(r.statut), par: str(r.updatedBy), at: String(r.updatedAt) });

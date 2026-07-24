@@ -12,16 +12,39 @@ export type PatientSemaine = { patient: string; bandages: number; total: number;
 export type VentesData = { connecte: boolean; pret: boolean; canEdit: boolean; ventes: Vente[]; semaine: PatientSemaine[]; caSemaine: number; mondayYmd: string; prix: number; plafond: number };
 
 // ── Factures ────────────────────────────────────────────────────────────────
+export const FACTURE_DELAI_H = 72; // délai de paiement automatique (heures)
 export const FACTURE_STATUTS = [
   { key: "non_payee", label: "Non payée", tone: "var(--warn)" },
-  { key: "payee", label: "Payée", tone: "var(--good)" },
+  { key: "relancee", label: "Relancée", tone: "var(--accent)" },
+  { key: "en_attente", label: "En attente", tone: "var(--steel)" },
+  { key: "transmise", label: "Transmise", tone: "var(--accent)" },
   { key: "dossier_police", label: "Dossier police", tone: "var(--oxblood)" },
+  { key: "payee", label: "Payée", tone: "var(--good)" },
   { key: "cloture", label: "Clôturé", tone: "var(--faint)" },
 ];
 export const factureStatut = (k: string) => FACTURE_STATUTS.find((s) => s.key === k) || FACTURE_STATUTS[0];
-export const factureOuverte = (s: string) => s === "non_payee" || s === "dossier_police";
-export type Facture = { id: string; objet: string; destinataire: string | null; montant: number; dateEmission: string | null; dateEcheance: string | null; statut: string; note: string | null; par: string | null; createdAt: string };
+// « Ouverte » = encore due (impayée). Seules Payée / Clôturé sortent des impayés.
+export const factureOuverte = (s: string) => s !== "payee" && s !== "cloture";
+export type Facture = { id: string; objet: string; destinataire: string | null; montant: number; dateEmission: string | null; dateEcheance: string | null; statut: string; note: string | null; par: string | null; createdAt: string; datePaiement: string | null; payePar: string | null };
 export type FacturesData = { connecte: boolean; pret: boolean; canEdit: boolean; factures: Facture[]; enRetard: number; du: number };
+
+// État d'échéance d'une facture ouverte : dépassée / bientôt (< 24 h) / ok.
+export type EcheanceEtat = "depasse" | "bientot" | "ok" | null;
+export function echeanceEtat(f: { statut: string; dateEcheance: string | null }, now = Date.now()): EcheanceEtat {
+  if (!factureOuverte(f.statut) || !f.dateEcheance) return null;
+  const t = new Date(f.dateEcheance).getTime();
+  if (!Number.isFinite(t)) return null;
+  if (t < now) return "depasse";
+  if (t - now < 24 * 3600000) return "bientot";
+  return "ok";
+}
+// Ligne « prête pour la police » : Date / Nom / Prix dû.
+export function copiePolice(f: { dateEmission: string | null; createdAt: string; destinataire: string | null; montant: number }): string {
+  const d = f.dateEmission || f.createdAt;
+  let dfr = "—";
+  try { dfr = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(d)); } catch { /* garde — */ }
+  return `${dfr}\n${f.destinataire || "—"}\n${Math.round(f.montant)} $`;
+}
 
 // ── Soins FDO ───────────────────────────────────────────────────────────────
 // Tarif unique : un soin FDO coûte toujours 2 $ (remboursé ensuite par le

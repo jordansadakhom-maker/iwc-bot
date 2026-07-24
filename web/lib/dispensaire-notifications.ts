@@ -46,7 +46,16 @@ export async function getNotifications(): Promise<{ items: Notif[]; count: numbe
   for (const r of stock || []) if (num(r.seuil) > 0 && num(r.stock) <= num(r.seuil)) items.push({ id: "st-" + r.nom, severite: "alerte", type: "Stock faible", texte: `Stock faible : ${r.nom} (${num(r.stock)}${r.unite ? " " + r.unite : ""} / seuil ${num(r.seuil)})`, href: "/dispensaire/stockage" });
   for (const r of matieres || []) if (num(r.seuil) > 0 && num(r.quantite) <= num(r.seuil)) items.push({ id: "mp-" + r.nom, severite: "alerte", type: "Matière première", texte: `Matière première basse : ${r.nom} (${num(r.quantite)} / seuil ${num(r.seuil)})`, href: "/dispensaire/matieres" });
 
-  if (habilite) for (const f of factures || []) { const ouv = String(f.statut) === "non_payee" || String(f.statut) === "dossier_police"; if (ouv && f.dateEcheance && String(f.dateEcheance).slice(0, 10) < today) items.push({ id: "fa-" + f.objet, severite: "alerte", type: "Facture", texte: `Facture en retard : ${f.objet} (${num(f.montant)}$)`, href: "/dispensaire/factures" }); }
+  // Factures : délai de paiement dépassé (72 h) ou bientôt à échéance (< 24 h).
+  const nowMs = Date.now();
+  if (habilite) for (const f of factures || []) {
+    const st = String(f.statut);
+    if (st === "payee" || st === "cloture" || !f.dateEcheance) continue;
+    const t = new Date(String(f.dateEcheance)).getTime();
+    if (!Number.isFinite(t)) continue;
+    if (t < nowMs) items.push({ id: "fa-" + f.objet, severite: "alerte", type: "Facture", texte: `Délai de paiement dépassé : ${f.objet} (${num(f.montant)}$)`, href: "/dispensaire/factures" });
+    else if (t - nowMs < 24 * 3600000) items.push({ id: "faso-" + f.objet, severite: "attention", type: "Facture", texte: `Facture bientôt à échéance : ${f.objet} (${num(f.montant)}$)`, href: "/dispensaire/factures" });
+  }
 
   // Ventes : patients ayant dépassé 10 bandages cette semaine.
   const bandagesSem = new Map<string, number>();
