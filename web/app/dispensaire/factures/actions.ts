@@ -2,27 +2,37 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAcces, getSessionProfile } from "@/lib/queries";
+import { FACTURE_DELAI_H, FACTURE_STATUTS } from "@/lib/dispensaire-facturation-const";
 
 // Factures — RÉSERVÉ aux chefs (habilités). Suivi des impayés.
 export type FactureResult = { ok: boolean; error?: string; id?: string };
+export type RapportPolice = {
+  genereLe: string;
+  medecin: string;
+  lignes: { date: string | null; nom: string | null; objet: string; montant: number }[];
+  nbDossiers: number;
+  total: number;
+};
 
-const STATUTS = ["non_payee", "payee", "dossier_police", "cloture"];
+const STATUTS = FACTURE_STATUTS.map((x) => x.key);
 type Champ = "objet" | "destinataire" | "note";
 const CHAMPS: Champ[] = ["objet", "destinataire", "note"];
 
 const s = (v: unknown, max = 300) => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
 const n = (v: unknown) => Math.max(0, Math.round(Number(v) || 0));
-const dt = (v: unknown) => { const t = String(v ?? "").trim(); return /^\d{4}-\d{2}-\d{2}/.test(t) ? t.slice(0, 10) : null; };
-function newId() { return `df-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
+function newId(p = "df") { return `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
 async function autorise() { try { return (await getAcces()).peutMedical; } catch { return true; } }
 async function qui() { try { return (await getSessionProfile())?.nom || "Équipe"; } catch { return "Équipe"; } }
+
+// Journal des actions sur une facture (best-effort : n'échoue jamais l'action).
+async function logFacture(admin: NonNullable<ReturnType<typeof createAdminClient>>, factureId: string, action: string, detail: string | null, par: string) {
+  try { await admin.from("DispensaireFactureLog").insert({ id: newId("dfl"), factureId, action, detail, par, at: new Date().toISOString() }); } catch { /* table de log optionnelle */ }
+}
 
 function nettoyer(data: Record<string, unknown>) {
   const row: Record<string, unknown> = {};
   for (const c of CHAMPS) if (c in data) row[c] = s(data[c], c === "note" ? 1000 : 300);
   if ("montant" in data) row.montant = n(data.montant);
-  if ("dateEmission" in data) row.dateEmission = dt(data.dateEmission);
-  if ("dateEcheance" in data) row.dateEcheance = dt(data.dateEcheance);
   if ("statut" in data) row.statut = STATUTS.includes(String(data.statut)) ? data.statut : "non_payee";
   return row;
 }
@@ -34,9 +44,15 @@ export async function creerFacture(data: Record<string, unknown>): Promise<Factu
   const row = nettoyer(data);
   if (!row.objet) return { ok: false, error: "Donne l'objet de la facture." };
   const id = newId();
-  const now = new Date().toISOString();
-  const { error } = await admin.from("DispensaireFacture").insert({ id, statut: "non_payee", montant: 0, ...row, par: await qui(), createdAt: now, updatedAt: now });
-  return error ? { ok: false, error: "Création impossible (la table existe-t-elle ?)." } : { ok: true, id };
+  const now = new Date();
+  const nowIso = now.toISOString();
+  // Délai automatique : émission = maintenant, échéance = +72 h. Aucune saisie.
+  const echeance = new Date(now.getTime() + FACTURE_DELAI_H * 3600000).toISOString();
+  const par = await qui();
+  const { error } = await admin.from("DispensaireFacture").insert({ id, statut: "non_payee", montant: 0, ...row, dateEmission: nowIso, dateEcheance: echeance, par, createdAt: nowIso, updatedAt: nowIso });
+  if (error) return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
+  await logFacture(admin, id, "Création", String(row.objet || ""), par);
+  return { ok: true, id };
 }
 
 export async function majFacture(id: string, patch: Record<string, unknown>): Promise<FactureResult> {
@@ -47,14 +63,57 @@ export async function majFacture(id: string, patch: Record<string, unknown>): Pr
   const row = nettoyer(patch);
   if ("objet" in row && !row.objet) return { ok: false, error: "L'objet ne peut pas être vide." };
   if (!Object.keys(row).length) return { ok: true };
-  const { error } = await admin.from("DispensaireFacture").update({ ...row, updatedAt: new Date().toISOString() }).eq("id", id);
-  return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+  const par = await qui();
+  const now = new Date().toISOString();
+  // Paiement : on horodate le règlement et son auteur (trace conservée).
+  const tracePaiement = row.statut === "payee";
+  if (tracePaiement) { row.datePaiement = now; row.payePar = par; }
+  let { error } = await admin.from("DispensaireFacture").update({ ...row, updatedAt: now }).eq("id", id);
+  // Repli si les colonnes de paiement n'existent pas encore (SQL non lancé) :
+  // on réessaie sans elles pour ne pas bloquer le changement de statut.
+  if (error && tracePaiement) {
+    const { datePaiement: _d, payePar: _p, ...base } = row;
+    void _d; void _p;
+    ({ error } = await admin.from("DispensaireFacture").update({ ...base, updatedAt: now }).eq("id", id));
+  }
+  if (error) return { ok: false, error: "Enregistrement impossible." };
+  if ("statut" in row) { const st = String(row.statut); await logFacture(admin, id, st === "payee" ? "Paiement" : "Changement de statut", st, par); }
+  return { ok: true };
 }
 
 export async function supprimerFacture(id: string): Promise<FactureResult> {
   if (!(await autorise())) return { ok: false, error: "Réservé aux chefs." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  let objet: string | null = null;
+  try { const { data } = await admin.from("DispensaireFacture").select("objet").eq("id", id).maybeSingle(); objet = data ? String((data as Record<string, unknown>).objet || "") : null; } catch { /* ignore */ }
   const { error } = await admin.from("DispensaireFacture").delete().eq("id", id);
-  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Suppression impossible." };
+  await logFacture(admin, id, "Suppression", objet, await qui());
+  return { ok: true };
+}
+
+// Journalise une copie des informations (pour l'historique).
+export async function logCopieFacture(id: string): Promise<{ ok: boolean }> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false };
+  await logFacture(admin, id, "Copie des informations", null, await qui());
+  return { ok: true };
+}
+
+// Génère le rapport de police à partir des factures sélectionnées.
+export async function genererRapportPolice(ids: string[]): Promise<{ ok: boolean; error?: string; rapport?: RapportPolice }> {
+  if (!(await autorise())) return { ok: false, error: "Réservé aux chefs." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  if (!Array.isArray(ids) || !ids.length) return { ok: false, error: "Sélectionne au moins une facture." };
+  const medecin = await qui();
+  const { data, error } = await admin.from("DispensaireFacture").select("id,objet,destinataire,montant,dateEmission,createdAt").in("id", ids.slice(0, 100));
+  if (error) return { ok: false, error: "Lecture impossible." };
+  const rows = (data || []) as Record<string, unknown>[];
+  const lignes = rows.map((r) => ({ date: s(r.dateEmission) || s(r.createdAt), nom: s(r.destinataire), objet: String(r.objet || "Facture"), montant: n(r.montant) }));
+  const total = lignes.reduce((a, l) => a + l.montant, 0);
+  const rapport: RapportPolice = { genereLe: new Date().toISOString(), medecin, lignes, nbDossiers: lignes.length, total };
+  for (const r of rows) await logFacture(admin, String(r.id), "Rapport police", `${lignes.length} dossier(s)`, medecin);
+  return { ok: true, rapport };
 }

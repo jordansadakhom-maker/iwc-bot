@@ -78,7 +78,7 @@ export async function getFactures(): Promise<FacturesData> {
   const factures: Facture[] = ((data || []) as Record<string, unknown>[]).map((r) => ({
     id: String(r.id), objet: String(r.objet || "Facture"), destinataire: s(r.destinataire), montant: num(r.montant),
     dateEmission: s(r.dateEmission), dateEcheance: s(r.dateEcheance), statut: String(r.statut || "non_payee"),
-    note: s(r.note), par: s(r.par), createdAt: String(r.createdAt),
+    note: s(r.note), par: s(r.par), createdAt: String(r.createdAt), datePaiement: s(r.datePaiement), payePar: s(r.payePar),
   }));
   const enRetard = factures.filter((f) => factureOuverte(f.statut) && f.dateEcheance && f.dateEcheance.slice(0, 10) < today).length;
   const du = factures.filter((f) => factureOuverte(f.statut)).reduce((a, f) => a + f.montant, 0);
