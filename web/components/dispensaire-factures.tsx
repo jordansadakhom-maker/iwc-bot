@@ -9,12 +9,13 @@ import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { creerFacture, majFacture, supprimerFacture, logCopieFacture } from "@/app/dispensaire/factures/actions";
 import { RapportImpayesModal } from "@/components/dispensaire-rapport-impayes";
 import type { RapportImpayes, RapportHisto } from "@/lib/dispensaire-rapport-impayes";
+import type { RapportConfig } from "@/lib/dispensaire-rapport-const";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
 const dateFR = (s: string | null) => { if (!s) return "—"; try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", year: "numeric" }).format(new Date(s)); } catch { return "—"; } };
 const dtFR = (s: string | null) => { if (!s) return "—"; try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(s)); } catch { return "—"; } };
 
-export function DispensaireFactures({ data, rapport, historique }: { data: FacturesData; rapport: RapportImpayes; historique: RapportHisto[] }) {
+export function DispensaireFactures({ data, rapport, historique, config }: { data: FacturesData; rapport: RapportImpayes; historique: RapportHisto[]; config: RapportConfig }) {
   const router = useRouter();
   const [factures, setFactures] = useState<Facture[]>(data.factures);
   const [flash, setFlash] = useState<FlashMsg>(null);
@@ -139,7 +140,7 @@ export function DispensaireFactures({ data, rapport, historique }: { data: Factu
 
       {form ? <FactureForm initial={form === "new" ? null : form} onClose={() => setForm(null)} onSave={(v) => enregistrer(v, form === "new" ? null : form)} /> : null}
       {delId ? <ConfirmDelete nom={factures.find((f) => f.id === delId)?.objet || ""} onCancel={() => setDelId(null)} onConfirm={() => supprimer(delId)} /> : null}
-      {rapportOpen ? <RapportImpayesModal initial={rapport} historique={historique} onClose={() => setRapportOpen(false)} /> : null}
+      {rapportOpen ? <RapportImpayesModal initial={rapport} historique={historique} config={config} onClose={() => setRapportOpen(false)} /> : null}
     </div>
   );
 }
