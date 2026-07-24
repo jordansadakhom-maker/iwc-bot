@@ -1,10 +1,17 @@
 import { getAssistantDispensaire } from "@/lib/dispensaire-assistant";
+import { getKpisDispensaire } from "@/lib/kpi-dispensaire";
 import { AssistantPanel } from "@/components/erp-assistant";
+import { KpiBand } from "@/components/erp-kpi";
 import { setEtatNotif } from "./actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function DispensaireAssistantPage() {
-  const veille = await getAssistantDispensaire();
-  return <AssistantPanel data={veille} setEtat={setEtatNotif} />;
+  const [veille, kpis] = await Promise.all([getAssistantDispensaire(), getKpisDispensaire()]);
+  return (
+    <div className="flex flex-col gap-3">
+      <KpiBand items={kpis} />
+      <AssistantPanel data={veille} setEtat={setEtatNotif} />
+    </div>
+  );
 }
