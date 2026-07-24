@@ -2,12 +2,12 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Archive, Plus, Check, Pencil, Trash2, MapPin, UserRound, Search, Boxes, AlertTriangle, BadgePlus, ArrowDownAZ, ArrowDownWideNarrow, PackageOpen } from "lucide-react";
+import { Archive, Plus, Check, Pencil, Trash2, MapPin, UserRound, Search, Boxes, AlertTriangle, BadgePlus, ArrowDownAZ, ArrowDownWideNarrow, PackageOpen, ClipboardList, Loader2 } from "lucide-react";
 import { CATEGORIES, catLabel, enAlerte, niveauStock, NIVEAU_TON, type StockItem, type CoffresInvData } from "@/lib/dispensaire-stock-const";
 import { Lock } from "lucide-react";
 import { Modal, Flash, Champ, Picker, PhotoField, inputCls } from "@/components/edit-ui";
 import { VideRegistre } from "@/components/dispensaire-ui";
-import { creerCoffre, majCoffre, supprimerCoffre } from "@/app/dispensaire/coffres/actions";
+import { creerCoffre, majCoffre, supprimerCoffre, importerPlanRangement } from "@/app/dispensaire/coffres/actions";
 import { creerItem, majItem, supprimerItem, ajusterStock, deplacerItem } from "@/app/dispensaire/stockage/actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
@@ -35,6 +35,16 @@ export function DispensaireCoffres({ data }: { data: CoffresInvData }) {
   const [tri, setTri] = useState<"alpha" | "qte">("alpha");
   const [flash, setFlash] = useState<FlashMsg>(null);
   const [modale, setModale] = useState<Modale>(null);
+  const [importBusy, setImportBusy] = useState(false);
+
+  async function importerPlan() {
+    setImportBusy(true);
+    const r = await importerPlanRangement();
+    setImportBusy(false);
+    if (!r.ok) { setFlash({ t: "bad", m: r.error || "Impossible." }); return; }
+    setFlash({ t: "ok", m: r.coffres || r.objets ? `Plan officiel importé — ${r.coffres} coffre(s) et ${r.objets} objet(s) ajoutés.` : "Plan déjà en place — rien à ajouter." });
+    router.refresh();
+  }
 
   const query = norm(q.trim());
   const filtreActif = !!(cat || query);
@@ -145,7 +155,12 @@ export function DispensaireCoffres({ data }: { data: CoffresInvData }) {
           <span className="font-num text-[0.8rem] text-faint">{coffres.filter((c) => c.nom).length || metas.length}</span>
           {totalAlertes ? <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.68rem] font-bold text-white" style={{ background: "var(--oxblood)" }}><AlertTriangle className="h-3 w-3" /> {totalAlertes} en alerte</span> : null}
         </div>
-        {canEdit ? <button onClick={() => setModale({ type: "newCoffre" })} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Plus className="h-3.5 w-3.5" /> Ajouter un coffre</button> : null}
+        {canEdit ? (
+          <div className="flex items-center gap-1.5">
+            <button onClick={importerPlan} disabled={importBusy} title="Crée les 20 coffres officiels manquants" className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-muted transition hover:text-ink disabled:opacity-60">{importBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ClipboardList className="h-3.5 w-3.5" />} Importer le plan officiel</button>
+            <button onClick={() => setModale({ type: "newCoffre" })} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Plus className="h-3.5 w-3.5" /> Ajouter un coffre</button>
+          </div>
+        ) : null}
       </div>
       <p className="text-[0.76rem] text-faint">Chaque coffre est un <b>inventaire réel</b> : ajoute des objets, ajuste les quantités d&apos;un clic, déplace un objet d&apos;un coffre à l&apos;autre. La pastille indique l&apos;état du stock — 🟢 confortable, 🟠 proche du seuil, 🔴 sous le seuil.</p>
 

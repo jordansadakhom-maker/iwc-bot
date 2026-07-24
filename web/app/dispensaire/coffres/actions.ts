@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { peutModifierStock } from "@/lib/dispensaire-roles";
+import { PLAN_RANGEMENT } from "@/lib/dispensaire-plan-const";
 
 // Coffres (entités) — réservé aux grades disposant du droit « stock ».
 export type CoffreResult = { ok: boolean; error?: string; id?: string };
@@ -48,6 +49,37 @@ export async function majCoffre(id: string, patch: Record<string, unknown>): Pro
   if (error) return { ok: false, error: "Enregistrement impossible." };
   if (ancienNom && ancienNom !== row.nom) await admin.from("DispensaireStock").update({ coffre: row.nom }).eq("coffre", ancienNom);
   return { ok: true };
+}
+
+// Importe le plan de rangement officiel : crée les coffres et leurs objets
+// manquants. Idempotent — n'ajoute que ce qui n'existe pas encore (par nom).
+export async function importerPlanRangement(): Promise<{ ok: boolean; error?: string; coffres: number; objets: number }> {
+  if (!(await peutModifierStock())) return { ok: false, error: REFUS, coffres: 0, objets: 0 };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service momentanément indisponible.", coffres: 0, objets: 0 };
+  const norm = (x: unknown) => String(x ?? "").trim().toLowerCase();
+  const par = await qui();
+  const now = new Date().toISOString();
+
+  // Existants (pour ne rien dupliquer).
+  const { data: cf, error: e1 } = await admin.from("DispensaireCoffre").select("nom");
+  if (e1) return { ok: false, error: "Lance d'abord les SQL du dispensaire (coffres/stock).", coffres: 0, objets: 0 };
+  const coffresExistants = new Set(((cf || []) as Record<string, unknown>[]).map((r) => norm(r.nom)));
+  const { data: st } = await admin.from("DispensaireStock").select("nom,coffre");
+  const objetsExistants = new Set(((st || []) as Record<string, unknown>[]).map((r) => `${norm(r.nom)}@@${norm(r.coffre)}`));
+
+  const coffreRows: Record<string, unknown>[] = [];
+  const stockRows: Record<string, unknown>[] = [];
+  for (const c of PLAN_RANGEMENT) {
+    if (!coffresExistants.has(norm(c.nom))) coffreRows.push({ id: `dcf-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, nom: c.nom, emplacement: c.emplacement, note: c.note, updatedBy: par, updatedAt: now });
+    for (const it of c.items) {
+      if (!objetsExistants.has(`${norm(it)}@@${norm(c.nom)}`)) stockRows.push({ id: `dst-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}${stockRows.length}`, nom: it, categorie: c.categorie, coffre: c.nom, stock: 0, stockFixe: 0, seuil: 0, updatedBy: par, updatedAt: now });
+    }
+  }
+
+  if (coffreRows.length) { const { error } = await admin.from("DispensaireCoffre").insert(coffreRows); if (error) return { ok: false, error: "Création des coffres impossible.", coffres: 0, objets: 0 }; }
+  if (stockRows.length) { const { error } = await admin.from("DispensaireStock").insert(stockRows); if (error) return { ok: false, error: "Coffres créés, mais objets partiels — recharge.", coffres: coffreRows.length, objets: 0 }; }
+  return { ok: true, coffres: coffreRows.length, objets: stockRows.length };
 }
 
 export async function supprimerCoffre(id: string): Promise<CoffreResult> {
