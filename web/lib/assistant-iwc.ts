@@ -100,6 +100,22 @@ export async function getAssistantIWC(): Promise<AssistantData> {
   const relance = contratsRows.filter((c) => c.echeance && String(c.echeance) < nowIso && !CLOS.has(String(c.statut ?? "").toLowerCase()));
   if (relance.length) constats.push(mk({ id: "contrats-relance", priorite: "importante", categorie: "Contrats", titre: `${relance.length} contrat(s) à échéance dépassée`, detail: relance.slice(0, 3).map((c) => String(c.cible ?? "?")).join(" · "), suggestion: "Relance ou clôture les contrats dont l'échéance est passée.", href: "/operations" }));
 
+  // Conflits de rendez-vous (carnet armurerie) : deux RDV « à venir » trop
+  // rapprochés = risque de double-réservation. On cible ArmurerieRdv, seule table
+  // portant une date/heure structurée (dateRdv ISO) ; le créneau des Rdv généraux
+  // est en texte libre, non exploitable pour un chevauchement fiable.
+  const FENETRE_MIN = 20;
+  const rdvArm = (await safeRows(() => admin.from("ArmurerieRdv").select("clientPrenom,clientNom,dateRdv,statut")))
+    .filter((r) => String(r.statut ?? "a_venir") === "a_venir" && r.dateRdv)
+    .map((r) => ({ qui: `${String(r.clientPrenom ?? "")} ${String(r.clientNom ?? "")}`.trim() || "Client", t: Date.parse(String(r.dateRdv)) }))
+    .filter((r) => Number.isFinite(r.t) && r.t >= Date.now() - 3600000)
+    .sort((a, b) => a.t - b.t);
+  const conflits: string[] = [];
+  for (let i = 1; i < rdvArm.length; i++) {
+    if (rdvArm[i].t - rdvArm[i - 1].t <= FENETRE_MIN * 60000) conflits.push(`${rdvArm[i - 1].qui} ↔ ${rdvArm[i].qui}`);
+  }
+  if (conflits.length) constats.push(mk({ id: "rdv-conflit", priorite: "importante", categorie: "Rendez-vous", titre: `${conflits.length} chevauchement(s) de rendez-vous`, detail: conflits.slice(0, 3).join(" · "), suggestion: `Deux rendez-vous sont à moins de ${FENETRE_MIN} min l'un de l'autre : décale un créneau.`, href: "/armurerie?tab=rdv" }));
+
   // Couche d'état persistée (Non lue / En cours / Résolue / Archivée).
   const etats = await getEtatsOverlay(TABLE_ETAT_IWC);
   for (const c of constats) c.etat = etats[c.id] || "nouveau";
