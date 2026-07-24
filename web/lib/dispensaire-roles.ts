@@ -67,8 +67,23 @@ export async function getRoleDispensaire(): Promise<RoleContext> {
 
   if (admin) {
     let membre: Record<string, unknown> | null = null;
+    // 1) Correspondance par ID Discord (immuable) — voie sûre et prioritaire.
     if (discordId) { const { data } = await admin.from("DispensaireMembre").select("*").eq("identifiant", discordId).maybeSingle(); membre = data as Record<string, unknown> | null; }
-    if (!membre && nom) { const { data } = await admin.from("DispensaireMembre").select("*").ilike("nom", nom).maybeSingle(); membre = data as Record<string, unknown> | null; }
+    // 2) Repli par NOM — nécessaire pour l'onboarding (le directeur ajoute une fiche
+    //    par nom, elle se lie au 1er login). Durci contre l'usurpation : on ne matche
+    //    QUE des fiches non encore rattachées à un Discord, et on VERROUILLE la fiche
+    //    sur l'ID dès ce login → impossible ensuite de voler la fiche d'un membre déjà
+    //    rattaché, ni de la revendiquer via un pseudo Discord homonyme.
+    if (!membre && discordId && nom) {
+      const { data } = await admin.from("DispensaireMembre").select("*").ilike("nom", nom).maybeSingle();
+      const row = data as Record<string, unknown> | null;
+      const dejaLie = !!row && row.identifiant != null && String(row.identifiant).trim() !== "";
+      if (row && !dejaLie) {
+        membre = row;
+        // Claim : rattache définitivement la fiche à l'ID Discord (best effort).
+        try { await admin.from("DispensaireMembre").update({ identifiant: discordId }).eq("id", String(row.id)); } catch { /* la lecture reste valable même si l'écriture échoue */ }
+      }
+    }
     if (membre && (membre.actif ?? true)) {
       const def = roleDefIn(grades, String(membre.role));
       return { connecte: true, identifiant: discordId || null, nom: String(membre.nom || nom), role: def.key, perms: def.perms, source: "membre", membreId: String(membre.id), autorise: true };

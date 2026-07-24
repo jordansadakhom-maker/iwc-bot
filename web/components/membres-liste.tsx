@@ -10,7 +10,7 @@ import { inputCls } from "@/components/edit-ui";
 // Liste des membres avec recherche (nom IC / grade / spécialité / statut) sur les
 // données DÉJÀ chargées. Les deux colonnes (Iron Wolf / Confrérie) arrivent déjà
 // triées par grade depuis le serveur.
-export function MembresListe({ iwc, conf }: { iwc: MembreDetail[]; conf: MembreDetail[] }) {
+export function MembresListe({ iwc, conf, peutEditer = false, peutHabiliterMedecin = false }: { iwc: MembreDetail[]; conf: MembreDetail[]; peutEditer?: boolean; peutHabiliterMedecin?: boolean }) {
   const [q, setQ] = useState("");
   const t = q.trim().toLowerCase();
   const filtre = (list: MembreDetail[]) =>
@@ -26,7 +26,7 @@ export function MembresListe({ iwc, conf }: { iwc: MembreDetail[]; conf: MembreD
           <Empty icon={Users}>{t ? "Aucun membre ne correspond à ta recherche." : "Aucun membre synchronisé dans ce pôle pour l'instant."}</Empty>
         ) : (
           <div className="flex flex-col divide-y divide-border">
-            {list.map((m) => <MembreRow key={m.id} m={m} tone={tone} />)}
+            {list.map((m) => <MembreRow key={m.id} m={m} tone={tone} peutEditer={peutEditer} peutHabiliterMedecin={peutHabiliterMedecin} />)}
           </div>
         )}
       </Card>
