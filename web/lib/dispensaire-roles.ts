@@ -122,6 +122,18 @@ export async function peutModifierStock(): Promise<boolean> {
   try { const r = await getRoleDispensaire(); return !!(r.perms.stock || r.perms.admin); } catch { return false; }
 }
 
+// Mêmes gardes fail-closed pour les autres droits du modèle de perms du
+// dispensaire. On s'appuie sur getRoleDispensaire (qui gère l'amorçage, la liste
+// blanche autonome et le repli Iron Wolf) plutôt que sur getAcces().peutMedical —
+// ce dernier est fail-OPEN et lit une table Membre absente en mode autonome, donc
+// « tout le monde devient chef ». En cas de doute : accès refusé.
+export async function peutFacturer(): Promise<boolean> {
+  try { const r = await getRoleDispensaire(); return !!(r.perms.factures || r.perms.admin); } catch { return false; }
+}
+export async function peutGererRH(): Promise<boolean> {
+  try { const r = await getRoleDispensaire(); return !!(r.perms.rh || r.perms.admin); } catch { return false; }
+}
+
 export async function getMembres(): Promise<{ pret: boolean; membres: Membre[] }> {
   const admin = createAdminClient();
   if (!admin) return { pret: false, membres: [] };
