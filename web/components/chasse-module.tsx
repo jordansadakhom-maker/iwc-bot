@@ -27,6 +27,31 @@ const CATS = ["Viandes", "Peaux & Cuirs", "Plumes", "Matières", "Carcasses", "A
 
 const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
 
+// Regroupement des noms TRONQUÉS : « Viande de petit g » et « Viande de petit
+// gibier » désignent la même ressource. On considère A comme une troncature de B
+// si son nom normalisé est un PRÉFIXE de celui de B. On ne fusionne que si c'est
+// SANS AMBIGUÏTÉ — les candidats plus longs doivent former une chaîne (tous
+// préfixes du plus long), sinon on garde A séparé → jamais de regroupement de
+// ressources réellement distinctes (ex. « Viande de gibier » ≠ « …gros gibier »).
+function construireCanon(noms: string[]): { cle: (nom: string) => string; label: (cle: string) => string } {
+  const disp = new Map<string, string>(); // clé normalisée -> meilleur affichage (le plus long)
+  for (const nom of noms) {
+    const k = norm(nom); if (!k) continue;
+    const t = nom.trim(); const p = disp.get(k);
+    if (!p || t.length > p.length) disp.set(k, t);
+  }
+  const keys = [...disp.keys()];
+  const canon = new Map<string, string>();
+  for (const k of keys) {
+    const sup = keys.filter((o) => o !== k && o.startsWith(k)); // k est un préfixe de o
+    if (!sup.length) { canon.set(k, k); continue; }
+    const long = sup.reduce((a, b) => (b.length > a.length ? b : a));
+    canon.set(k, sup.every((s) => long.startsWith(s)) ? long : k); // chaîne → fusion ; branche → séparé
+  }
+  const resolve = (k: string, g = 0): string => { const c = canon.get(k) ?? k; return c === k || g > 8 ? c : resolve(c, g + 1); };
+  return { cle: (nom: string) => resolve(norm(nom)), label: (k: string) => disp.get(k) || k };
+}
+
 // Fusionne les lignes d'une même ressource (même nom normalisé) en une seule,
 // en additionnant les quantités — garantit qu'un objet identique n'apparaît
 // jamais sur plusieurs lignes (le récap fusionne déjà, ceci couvre les vues zone).
@@ -91,11 +116,13 @@ export function ChasseModule({ data }: { data: ChasseData }) {
   const totalGlobal = items.reduce((s, i) => s + i.quantite, 0);
 
   // Récapitulatif : une ligne par ressource, avec le détail par zone + le total.
+  // Les noms tronqués sont regroupés sous leur forme la plus complète (canon).
   const ressources = useMemo(() => {
+    const canon = construireCanon(items.map((i) => i.nom));
     const map = new Map<string, { nom: string; cat: string; total: number; zones: Record<string, number>; seuil: number | null }>();
     for (const it of items) {
-      const k = norm(it.nom);
-      const e = map.get(k) || { nom: it.nom, cat: it.categorie || catAuto(it.nom), total: 0, zones: {}, seuil: null };
+      const k = canon.cle(it.nom);
+      const e = map.get(k) || { nom: canon.label(k), cat: it.categorie || catAuto(it.nom), total: 0, zones: {}, seuil: null };
       e.total += it.quantite;
       e.zones[it.zoneId] = (e.zones[it.zoneId] || 0) + it.quantite;
       if (it.seuil != null) e.seuil = Math.max(e.seuil ?? 0, it.seuil);
