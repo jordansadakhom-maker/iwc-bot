@@ -41,7 +41,11 @@ DECLARE
     ARRAY['ArmurerieMouvementStock','refId',     'idx_armmvtstock_refid'],
     ARRAY['ArmureriePaie',          'employeId', 'idx_armpaie_employeid'],
     ARRAY['ArmureriePointage',      'employeId', 'idx_armpointage_employeid'],
-    ARRAY['ArmurerieImpot',         'statut',    'idx_armimpot_statut']
+    ARRAY['ArmurerieImpot',         'statut',    'idx_armimpot_statut'],
+    -- Répertoire des partenaires (côté Iron Wolf) + son journal de modifications
+    ARRAY['DispensaireHistorique',  'createdAt', 'idx_disphisto_createdat'],
+    ARRAY['DispensaireHistorique',  'contactId', 'idx_disphisto_contactid'],
+    ARRAY['DispensaireContact',     'categorieId','idx_dispcontact_categorie']
   ];
   d text[];
 BEGIN
