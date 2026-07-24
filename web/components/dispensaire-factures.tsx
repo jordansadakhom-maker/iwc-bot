@@ -162,6 +162,14 @@ function FactureForm({ initial, onClose, onSave }: { initial: Facture | null; on
   });
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setV((p) => ({ ...p, [k]: e.target.value }));
+  // Échéance = date d'émission + 72 h (FACTURE_DELAI_H). Affichée, recalculée en
+  // direct quand on change l'émission. Automatique : le serveur la (re)calcule aussi.
+  const echeance = (() => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v.dateEmission || "");
+    if (!m) return "";
+    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])); d.setUTCDate(d.getUTCDate() + Math.round(FACTURE_DELAI_H / 24));
+    return d.toISOString().slice(0, 10);
+  })();
   function go() { if (v.objet.trim().length < 1) { setErr("L'objet est obligatoire."); return; } onSave(v); }
   return (
     <Modal titre={initial ? "✏️ Modifier la facture" : "➕ Nouvelle facture"} onClose={onClose} max={560}>
@@ -174,8 +182,10 @@ function FactureForm({ initial, onClose, onSave }: { initial: Facture | null; on
           <Champ label="Montant ($)"><input className={inputCls} value={v.montant} onChange={(e) => setV((p) => ({ ...p, montant: e.target.value.replace(/[^0-9]/g, "") }))} inputMode="numeric" /></Champ>
           <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Statut</span><Picker options={FACTURE_STATUTS} value={v.statut} onChange={(x) => setV((p) => ({ ...p, statut: x }))} /></div>
         </div>
-        <Champ label="Date d'émission"><input type="date" className={inputCls} value={v.dateEmission} onChange={set("dateEmission")} /></Champ>
-        <p className="flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-3 py-2 text-[0.74rem] text-faint"><CalendarClock className="h-3.5 w-3.5" /> Échéance automatique : <b>{FACTURE_DELAI_H} h</b> après la date d'émission.</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Champ label="Date d'émission"><input type="date" className={inputCls} value={v.dateEmission} onChange={set("dateEmission")} /></Champ>
+          <Champ label={`Échéance · auto +${FACTURE_DELAI_H} h`}><input type="date" className={inputCls + " cursor-not-allowed opacity-70"} value={echeance} readOnly tabIndex={-1} title={`Calculée automatiquement : ${FACTURE_DELAI_H} h après la date d'émission`} /></Champ>
+        </div>
         <Champ label="Note"><textarea className={inputCls} rows={2} value={v.note} onChange={set("note")} /></Champ>
         {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
         <div className="mt-1 flex justify-end gap-2">
