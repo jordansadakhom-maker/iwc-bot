@@ -38,17 +38,21 @@ export function DispensaireFactures({ data, rapport, historique, config }: { dat
   const du = factures.filter((f) => factureOuverte(f.statut)).reduce((a, f) => a + f.montant, 0);
 
   async function enregistrer(vals: Record<string, string>, editing: Facture | null) {
+    // Émission = date SAISIE (repli : maintenant) ; échéance = émission + 72 h.
+    const et = Date.parse(vals.dateEmission || "");
+    const emissionIso = Number.isFinite(et) ? new Date(et).toISOString() : new Date().toISOString();
+    const ech = new Date(new Date(emissionIso).getTime() + FACTURE_DELAI_H * 3600000).toISOString();
     if (editing) {
-      setFactures((p) => p.map((f) => (f.id === editing.id ? { ...f, ...vals, montant: Number(vals.montant) || 0 } as Facture : f))); setForm(null);
+      setFactures((p) => p.map((f) => (f.id === editing.id ? { ...f, ...vals, montant: Number(vals.montant) || 0, dateEmission: emissionIso, dateEcheance: ech } as Facture : f))); setForm(null);
       const r = await majFacture(editing.id, { ...vals, montant: Number(vals.montant) || 0 });
       if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else { setFlash({ t: "ok", m: "Facture mise à jour." }); router.refresh(); }
     } else {
-      const now = new Date(); const ech = new Date(now.getTime() + FACTURE_DELAI_H * 3600000).toISOString();
-      const tmp: Facture = { id: "tmp-" + Math.random().toString(36).slice(2, 8), objet: vals.objet, destinataire: vals.destinataire || null, montant: Number(vals.montant) || 0, dateEmission: now.toISOString(), dateEcheance: ech, statut: vals.statut || "non_payee", note: vals.note || null, par: null, createdAt: now.toISOString(), datePaiement: null, payePar: null };
+      const nowIso = new Date().toISOString();
+      const tmp: Facture = { id: "tmp-" + Math.random().toString(36).slice(2, 8), objet: vals.objet, destinataire: vals.destinataire || null, montant: Number(vals.montant) || 0, dateEmission: emissionIso, dateEcheance: ech, statut: vals.statut || "non_payee", note: vals.note || null, par: null, createdAt: nowIso, datePaiement: null, payePar: null };
       setFactures((p) => [tmp, ...p]); setForm(null);
       const r = await creerFacture({ ...vals, montant: Number(vals.montant) || 0 });
       if (!r.ok) { setFactures((p) => p.filter((f) => f.id !== tmp.id)); setFlash({ t: "bad", m: r.error || "Impossible." }); }
-      else { setFactures((p) => p.map((f) => (f.id === tmp.id ? { ...f, id: r.id || tmp.id } : f))); setFlash({ t: "ok", m: `Facture créée — échéance dans ${FACTURE_DELAI_H} h.` }); router.refresh(); }
+      else { setFactures((p) => p.map((f) => (f.id === tmp.id ? { ...f, id: r.id || tmp.id } : f))); setFlash({ t: "ok", m: `Facture créée — échéance ${FACTURE_DELAI_H} h après l'émission.` }); router.refresh(); }
     }
   }
   async function changerStatut(f: Facture, statut: string) {
@@ -146,10 +150,16 @@ export function DispensaireFactures({ data, rapport, historique, config }: { dat
 }
 
 function FactureForm({ initial, onClose, onSave }: { initial: Facture | null; onClose: () => void; onSave: (v: Record<string, string>) => void }) {
-  const [v, setV] = useState<Record<string, string>>(() => ({
-    objet: initial?.objet || "", destinataire: initial?.destinataire || "", montant: initial ? String(initial.montant) : "2",
-    statut: initial?.statut || "non_payee", note: initial?.note || "",
-  }));
+  const [v, setV] = useState<Record<string, string>>(() => {
+    const d = new Date();
+    const auj = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return {
+      objet: initial?.objet || "", destinataire: initial?.destinataire || "", montant: initial ? String(initial.montant) : "2",
+      statut: initial?.statut || "non_payee", note: initial?.note || "",
+      // Date d'émission SAISIE (on n'émet pas forcément le jour même). Défaut : aujourd'hui.
+      dateEmission: initial?.dateEmission ? String(initial.dateEmission).slice(0, 10) : auj,
+    };
+  });
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setV((p) => ({ ...p, [k]: e.target.value }));
   function go() { if (v.objet.trim().length < 1) { setErr("L'objet est obligatoire."); return; } onSave(v); }
@@ -164,7 +174,8 @@ function FactureForm({ initial, onClose, onSave }: { initial: Facture | null; on
           <Champ label="Montant ($)"><input className={inputCls} value={v.montant} onChange={(e) => setV((p) => ({ ...p, montant: e.target.value.replace(/[^0-9]/g, "") }))} inputMode="numeric" /></Champ>
           <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Statut</span><Picker options={FACTURE_STATUTS} value={v.statut} onChange={(x) => setV((p) => ({ ...p, statut: x }))} /></div>
         </div>
-        {!initial ? <p className="flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-3 py-2 text-[0.74rem] text-faint"><CalendarClock className="h-3.5 w-3.5" /> Échéance posée automatiquement : <b>{FACTURE_DELAI_H} h</b> après la création.</p> : null}
+        <Champ label="Date d'émission"><input type="date" className={inputCls} value={v.dateEmission} onChange={set("dateEmission")} /></Champ>
+        <p className="flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-3 py-2 text-[0.74rem] text-faint"><CalendarClock className="h-3.5 w-3.5" /> Échéance automatique : <b>{FACTURE_DELAI_H} h</b> après la date d'émission.</p>
         <Champ label="Note"><textarea className={inputCls} rows={2} value={v.note} onChange={set("note")} /></Champ>
         {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
         <div className="mt-1 flex justify-end gap-2">
