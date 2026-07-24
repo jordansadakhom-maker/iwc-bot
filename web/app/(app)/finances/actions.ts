@@ -4,6 +4,7 @@ import { envoyerCommande, type CommandeResult } from "@/lib/commandes";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { supprimerFiable } from "@/lib/suppression";
 import { round2 } from "@/lib/format";
+import { requireDirection } from "@/lib/authz";
 
 // Ajuste un coffre (dépôt / retrait / montant exact).
 // Double écriture : 1) reflet INSTANTANÉ dans la table Coffre (le site montre le
@@ -57,8 +58,10 @@ export async function payerMembre(membreId: string, versNom: string, montant: nu
   if (m <= 0) return { ok: false, error: "Montant invalide." };
   return envoyerCommande("wallet.payer", { membreId, versNom, montant: m, raison: (raison || "").slice(0, 120) });
 }
-// Créditer / débiter un portefeuille (Direction).
+// Créditer / débiter un portefeuille (Direction). Créer de la monnaie sur un
+// portefeuille arbitraire est un pouvoir de Direction — garde fail-closed.
 export async function ajusterArgent(membreId: string, montant: number, raison: string): Promise<CommandeResult> {
+  if (!(await requireDirection())) return { ok: false, error: "Accès refusé — réservé à la Direction." };
   if (!membreId) return { ok: false, error: "Choisis un membre." };
   const m = Math.round(Number(montant) || 0);
   if (!m) return { ok: false, error: "Montant nul." };

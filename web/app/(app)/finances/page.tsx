@@ -1,4 +1,5 @@
 import { getFinances, getFactures, getPortefeuilles } from "@/lib/queries";
+import { getActeur } from "@/lib/authz";
 import { PageHeader, Card, CardHeader } from "@/components/ui";
 import { BarresH } from "@/components/charts";
 import { FinancesCoffres } from "@/components/finances-coffres";
@@ -9,7 +10,8 @@ import { cents } from "@/lib/format";
 export const dynamic = "force-dynamic";
 
 export default async function FinancesPage() {
-  const [{ connecte, coffres, pole }, fact, porte] = await Promise.all([getFinances(), getFactures(), getPortefeuilles()]);
+  const [{ connecte, coffres, pole }, fact, porte, acteur] = await Promise.all([getFinances(), getFactures(), getPortefeuilles(), getActeur()]);
+  const peutDirection = !!acteur?.direction;
   const conf = pole === "confrerie";
   // Vue « pôle actif » : coffre commun + le coffre du pôle choisi (le bouton
   // Iron Wolf / Confrérie du header bascule réellement l'affichage).
@@ -47,7 +49,7 @@ export default async function FinancesPage() {
       ) : null}
 
       <Card>
-        <Portefeuilles portefeuilles={porte.portefeuilles} transactions={porte.transactions} membres={porte.membres} total={porte.total} />
+        <Portefeuilles portefeuilles={porte.portefeuilles} transactions={porte.transactions} membres={porte.membres} total={porte.total} peutDirection={peutDirection} />
       </Card>
 
       <Card>
