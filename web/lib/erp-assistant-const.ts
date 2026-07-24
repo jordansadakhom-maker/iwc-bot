@@ -5,14 +5,35 @@
 
 export type Gravite = "critique" | "important" | "info";
 
+// Priorité fine (6 niveaux) — porte le rang réel de chaque constat. La gravité
+// (3 bandes) en est dérivée pour l'affichage groupé.
+export type Priorite = "information" | "faible" | "normale" | "importante" | "urgente" | "critique";
+export const PRIORITE_ORDRE: Record<Priorite, number> = { critique: 0, urgente: 1, importante: 2, normale: 3, faible: 4, information: 5 };
+export const PRIORITE_LABEL: Record<Priorite, string> = { critique: "Critique", urgente: "Urgente", importante: "Importante", normale: "Normale", faible: "Faible", information: "Information" };
+export const PRIORITE_TON: Record<Priorite, string> = { critique: "var(--oxblood)", urgente: "var(--oxblood)", importante: "var(--warn)", normale: "var(--accent)", faible: "var(--steel)", information: "var(--muted)" };
+export function graviteDe(p: Priorite): Gravite { if (p === "critique" || p === "urgente") return "critique"; if (p === "importante" || p === "normale") return "important"; return "info"; }
+
+// État du cycle de vie d'une notification (couche persistée par-dessus le constat).
+export type Etat = "nouveau" | "en_cours" | "resolu" | "archive";
+export const ETATS: Etat[] = ["nouveau", "en_cours", "resolu", "archive"];
+export const ETAT_LABEL: Record<Etat, string> = { nouveau: "Non lue", en_cours: "En cours", resolu: "Résolue", archive: "Archivée" };
+export const ETAT_TON: Record<Etat, string> = { nouveau: "var(--accent)", en_cours: "var(--warn)", resolu: "var(--good)", archive: "var(--muted)" };
+export const ETAT_ACTIFS: Etat[] = ["nouveau", "en_cours"]; // affichés par défaut
+// Escalade : un point critique/urgent encore « Non lu » remonte de lui-même.
+export function estEscalade(c: { priorite: Priorite; etat?: Etat }): boolean {
+  return (c.etat ?? "nouveau") === "nouveau" && (c.priorite === "critique" || c.priorite === "urgente");
+}
+
 export type Constat = {
   id: string;
   gravite: Gravite;
+  priorite: Priorite;
   categorie: string;     // Stock · Coffre · RH · Contrats · Impôts…
   titre: string;         // constat court
   detail: string | null; // précision chiffrée
   suggestion: string;    // action proposée (jamais exécutée sans toi)
   href: string;          // lien direct vers l'élément concerné
+  etat?: Etat;           // couche persistée (défaut « nouveau »)
 };
 
 export type AssistantData = {

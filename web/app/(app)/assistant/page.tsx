@@ -4,6 +4,7 @@ import { AssistantConsole } from "@/components/assistant-console";
 import { RechercheIA } from "@/components/recherche-ia";
 import { AssistantPanel } from "@/components/erp-assistant";
 import { getAssistantIWC } from "@/lib/assistant-iwc";
+import { setEtatNotif } from "./veille-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export default async function AssistantPage() {
     <>
       <PageHeader titre="Assistant" sous="Surveille la compagnie et la pilote en langage naturel" />
       {/* Veille automatique : ce que le système a détecté et propose. */}
-      <AssistantPanel data={veille} />
+      <AssistantPanel data={veille} setEtat={setEtatNotif} />
       <div className="flex items-start gap-3 rounded-card border border-border bg-surface p-3.5" style={{ borderColor: "color-mix(in srgb,var(--accent) 30%,var(--border))" }}>
         <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] text-accent" style={{ background: "color-mix(in srgb,var(--accent) 15%,transparent)" }}>
           <Sparkles className="h-[18px] w-[18px]" strokeWidth={1.8} />
