@@ -2,9 +2,12 @@ import Link from "next/link";
 import { AlertTriangle, ArrowRight, Boxes, FlaskConical, Receipt, FileText, BadgeDollarSign, Package, Bandage, Stethoscope, Clock } from "lucide-react";
 import { getAccueil } from "@/lib/dispensaire-accueil";
 import { getRoleDispensaire } from "@/lib/dispensaire-roles";
+import { getConsigneDuJour } from "@/lib/dispensaire-consignes";
 import { DISP_NAV } from "@/lib/dispensaire-nav";
 import { isStandalone } from "@/lib/standalone-server";
 import { AccueilService } from "@/components/dispensaire-accueil-service";
+import { DispensaireConsignes } from "@/components/dispensaire-consignes";
+import { enregistrerConsigne } from "@/app/dispensaire/consignes-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +16,7 @@ const ACT_ICON: Record<string, typeof Package> = { stock: Package, vente: Bandag
 const heureCourte = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); } catch { return "—"; } };
 
 export default async function DispensaireAccueil() {
-  const [d, role, standalone] = await Promise.all([getAccueil(), getRoleDispensaire(), isStandalone()]);
+  const [d, role, standalone, consigne] = await Promise.all([getAccueil(), getRoleDispensaire(), isStandalone(), getConsigneDuJour()]);
   const habilite = role.perms.rh || role.perms.factures || role.perms.admin;
   const modules = DISP_NAV.filter((t) => t.href !== "/dispensaire" && (!t.restreint || habilite) && (!t.admin || role.perms.admin) && !(standalone && t.href === "/repertoire"));
 
@@ -44,6 +47,9 @@ export default async function DispensaireAccueil() {
           );
         })}
       </div>
+
+      {/* Consignes du jour (objectifs) — éditables par les responsables */}
+      <DispensaireConsignes data={consigne} canEdit={habilite} onSave={enregistrerConsigne} />
 
       {/* Personnel en service (live) + prise de service */}
       <AccueilService enService={d.enService} roster={d.roster} />
