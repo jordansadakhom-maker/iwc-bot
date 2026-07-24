@@ -6,13 +6,6 @@ import { FACTURE_DELAI_H, FACTURE_STATUTS } from "@/lib/dispensaire-facturation-
 
 // Factures — RÉSERVÉ aux chefs (habilités). Suivi des impayés.
 export type FactureResult = { ok: boolean; error?: string; id?: string };
-export type RapportPolice = {
-  genereLe: string;
-  medecin: string;
-  lignes: { date: string | null; nom: string | null; soins: string | null; montant: number }[];
-  nbDossiers: number;
-  total: number;
-};
 
 const STATUTS = FACTURE_STATUTS.map((x) => x.key);
 type Champ = "objet" | "destinataire" | "note";
@@ -101,20 +94,3 @@ export async function logCopieFacture(id: string): Promise<{ ok: boolean }> {
   return { ok: true };
 }
 
-// Génère le rapport de police à partir des factures sélectionnées.
-export async function genererRapportPolice(ids: string[]): Promise<{ ok: boolean; error?: string; rapport?: RapportPolice }> {
-  if (!(await autorise())) return { ok: false, error: "Réservé aux chefs." };
-  const admin = createAdminClient();
-  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
-  if (!Array.isArray(ids) || !ids.length) return { ok: false, error: "Sélectionne au moins une facture." };
-  const medecin = await qui();
-  const { data, error } = await admin.from("DispensaireFacture").select("id,objet,destinataire,montant,dateEmission,createdAt").in("id", ids.slice(0, 100));
-  if (error) return { ok: false, error: "Lecture impossible." };
-  const rows = (data || []) as Record<string, unknown>[];
-  // Le patient est dans `objet` (Prénom / Nom) ; le type de soins dans `destinataire`.
-  const lignes = rows.map((r) => ({ date: s(r.dateEmission) || s(r.createdAt), nom: String(r.objet || "—"), soins: s(r.destinataire), montant: n(r.montant) }));
-  const total = lignes.reduce((a, l) => a + l.montant, 0);
-  const rapport: RapportPolice = { genereLe: new Date().toISOString(), medecin, lignes, nbDossiers: lignes.length, total };
-  for (const r of rows) await logFacture(admin, String(r.id), "Rapport police", `${lignes.length} dossier(s)`, medecin);
-  return { ok: true, rapport };
-}

@@ -34,7 +34,7 @@ export async function getNotifications(): Promise<{ items: Notif[]; count: numbe
   const [stock, matieres, factures, ventes, frais, salaries] = await Promise.all([
     q<Record<string, unknown>[]>(admin.from("DispensaireStock").select("nom,stock,seuil,unite")),
     q<Record<string, unknown>[]>(admin.from("DispensaireMatiere").select("nom,quantite,seuil")),
-    q<Record<string, unknown>[]>(admin.from("DispensaireFacture").select("objet,montant,statut,dateEcheance")),
+    q<Record<string, unknown>[]>(admin.from("DispensaireFacture").select("objet,montant,statut,dateEcheance,dateEmission")),
     q<Record<string, unknown>[]>(admin.from("DispensaireVente").select("patient,quantite,item,createdAt").order("createdAt", { ascending: false }).limit(300)),
     q<Record<string, unknown>[]>(admin.from("DispensaireFrais").select("statut")),
     q<Record<string, unknown>[]>(admin.from("DispensaireSalarie").select("nom,statut,absInjustifiees")),
@@ -53,7 +53,10 @@ export async function getNotifications(): Promise<{ items: Notif[]; count: numbe
     if (st === "payee" || st === "cloture" || !f.dateEcheance) continue;
     const t = new Date(String(f.dateEcheance)).getTime();
     if (!Number.isFinite(t)) continue;
-    if (t < nowMs) items.push({ id: "fa-" + f.objet, severite: "alerte", type: "Facture", texte: `Délai de paiement dépassé : ${f.objet} (${num(f.montant)}$)`, href: "/dispensaire/factures" });
+    // Impayé de plus de 7 jours (depuis l'émission) → escalade forte.
+    const emis = f.dateEmission ? new Date(String(f.dateEmission)).getTime() : NaN;
+    if (Number.isFinite(emis) && nowMs - emis > 7 * 86400000) items.push({ id: "fa7-" + f.objet, severite: "alerte", type: "Facture", texte: `Impayé depuis plus de 7 jours : ${f.objet} (${num(f.montant)}$)`, href: "/dispensaire/factures" });
+    else if (t < nowMs) items.push({ id: "fa-" + f.objet, severite: "alerte", type: "Facture", texte: `Délai de paiement dépassé : ${f.objet} (${num(f.montant)}$)`, href: "/dispensaire/factures" });
     else if (t - nowMs < 24 * 3600000) items.push({ id: "faso-" + f.objet, severite: "attention", type: "Facture", texte: `Facture bientôt à échéance : ${f.objet} (${num(f.montant)}$)`, href: "/dispensaire/factures" });
   }
 
