@@ -67,15 +67,37 @@ export async function getAssistantDispensaire(): Promise<AssistantData> {
 
     // RH proactif : pointages non clôturés + salariés approchant le seuil de renvoi.
     const iso12 = new Date(Date.now() - 12 * 3600000).toISOString();
-    const [pointages, salaries, cfg] = await Promise.all([
+    const [pointages, salaries, membres, cfg] = await Promise.all([
       rows(() => admin.from("DispensairePointage").select("id").is("fin", null).lt("debut", iso12)),
       rows(() => admin.from("DispensaireSalarie").select("nom,statut,absInjustifiees")),
+      rows(() => admin.from("DispensaireMembre").select("nom,actif")),
       getConfig(),
     ]);
     if (pointages.length) constats.push(mk({ id: "disp-pointage", priorite: "importante", categorie: "Pointage", titre: `${pointages.length} pointage(s) non clôturé(s)`, detail: "Service ouvert depuis plus de 12 h.", suggestion: "Clôture les services restés ouverts pour fiabiliser les heures.", href: "/dispensaire/pointage" }));
     const seuil = cfg.seuilRenvoi;
     const surveiller = salaries.filter((s) => String(s.statut ?? "actif") === "actif" && num(s.absInjustifiees) >= seuil - 1 && num(s.absInjustifiees) < seuil);
     if (surveiller.length) constats.push(mk({ id: "disp-rh-surveiller", priorite: "importante", categorie: "RH", titre: `${surveiller.length} salarié(s) à surveiller (absences)`, detail: surveiller.slice(0, 3).map((s) => String(s.nom ?? "?")).join(" · "), suggestion: "Convoque un entretien avant d'atteindre le seuil de renvoi.", href: "/dispensaire/rh" }));
+
+    // Cohérence RH ↔ accès : la fiche RH (DispensaireSalarie) et l'accès au site
+    // (DispensaireMembre) sont deux tables distinctes, rapprochées par le NOM.
+    // On ne lève ces constats QUE si une liste blanche existe réellement
+    // (membres.length > 0) — sinon (mode intégré Iron Wolf) on éviterait des faux
+    // positifs. Objectif : ne jamais laisser un renvoyé garder son accès, ni un
+    // accès sans fiche, ni une fiche sans accès — sans imposer de double saisie.
+    if (membres.length > 0) {
+      const normNom = (v: unknown) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
+      const accesActifs = new Set(membres.filter((m) => m.actif !== false && normNom(m.nom)).map((m) => normNom(m.nom)));
+      const nomsSalaries = new Set(salaries.filter((s) => normNom(s.nom)).map((s) => normNom(s.nom)));
+
+      const renvoyesAvecAcces = salaries.filter((s) => String(s.statut ?? "") === "renvoye" && accesActifs.has(normNom(s.nom)));
+      if (renvoyesAvecAcces.length) constats.push(mk({ id: "rh-renvoye-acces", priorite: "critique", categorie: "Sécurité", titre: `${renvoyesAvecAcces.length} salarié(s) renvoyé(s) gardant l'accès au site`, detail: renvoyesAvecAcces.slice(0, 3).map((s) => String(s.nom ?? "?")).join(" · "), suggestion: "Désactive leur accès dans l'Administration : un renvoi RH ne coupe pas l'accès automatiquement.", href: "/dispensaire/admin" }));
+
+      const accesSansFiche = membres.filter((m) => m.actif !== false && normNom(m.nom) && !nomsSalaries.has(normNom(m.nom)));
+      if (accesSansFiche.length) constats.push(mk({ id: "rh-acces-sans-fiche", priorite: "normale", categorie: "RH", titre: `${accesSansFiche.length} accès sans fiche RH`, detail: accesSansFiche.slice(0, 3).map((m) => String(m.nom ?? "?")).join(" · "), suggestion: "Crée la fiche salarié correspondante (ou retire l'accès s'il n'a plus lieu d'être).", href: "/dispensaire/rh" }));
+
+      const ficheSansAcces = salaries.filter((s) => String(s.statut ?? "actif") === "actif" && normNom(s.nom) && !accesActifs.has(normNom(s.nom)));
+      if (ficheSansAcces.length) constats.push(mk({ id: "rh-fiche-sans-acces", priorite: "faible", categorie: "RH", titre: `${ficheSansAcces.length} salarié(s) actif(s) sans accès`, detail: ficheSansAcces.slice(0, 3).map((s) => String(s.nom ?? "?")).join(" · "), suggestion: "Ajoute leur accès dans l'Administration s'ils doivent utiliser le site.", href: "/dispensaire/admin" }));
+    }
   }
 
   // Couche d'état persistée (Non lue / En cours / Résolue / Archivée).
