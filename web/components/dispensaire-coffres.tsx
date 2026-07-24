@@ -141,7 +141,7 @@ export function DispensaireCoffres({ data }: { data: CoffresInvData }) {
       {/* Barre d'action */}
       <div className="flex flex-wrap items-center justify-between gap-2.5">
         <div className="flex items-center gap-2.5">
-          <h3 className="flex items-center gap-2 text-[0.95rem] font-semibold"><Archive className="h-4 w-4 text-accent" /> Coffres</h3>
+          <h3 className="flex items-center gap-2 text-[0.95rem] font-semibold"><Archive className="h-4 w-4 text-accent" /> Stock Matériel Médical</h3>
           <span className="font-num text-[0.8rem] text-faint">{coffres.filter((c) => c.nom).length || metas.length}</span>
           {totalAlertes ? <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.68rem] font-bold text-white" style={{ background: "var(--oxblood)" }}><AlertTriangle className="h-3 w-3" /> {totalAlertes} en alerte</span> : null}
         </div>

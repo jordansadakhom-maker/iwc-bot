@@ -2,24 +2,26 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
+import { FDO_PRIX } from "@/lib/dispensaire-facturation-const";
 
 // Soins FDO — soins prodigués aux forces de l'ordre (par bureau).
+// Tarif figé à 2 $ (FDO_PRIX) : le montant n'est jamais saisi ni « offert ».
 export type FdoResult = { ok: boolean; error?: string; id?: string };
 
-const STATUTS = ["offert", "facture", "regle"];
+const STATUTS = ["facture", "regle"];
 type Champ = "bureau" | "agent" | "soin" | "note";
 const CHAMPS: Champ[] = ["bureau", "agent", "soin", "note"];
 
 const s = (v: unknown, max = 300) => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
-const n = (v: unknown) => Math.max(0, Math.round(Number(v) || 0));
 function newId() { return `dfo-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
 async function qui() { try { return (await getSessionProfile())?.nom || "Équipe"; } catch { return "Équipe"; } }
 
 function nettoyer(data: Record<string, unknown>) {
   const row: Record<string, unknown> = {};
   for (const c of CHAMPS) if (c in data) row[c] = s(data[c], c === "note" || c === "soin" ? 1000 : 200);
-  if ("montant" in data) row.montant = n(data.montant);
-  if ("statut" in data) row.statut = STATUTS.includes(String(data.statut)) ? data.statut : "offert";
+  // Montant toujours figé à 2 $ — jamais pris de la saisie.
+  if ("montant" in data) row.montant = FDO_PRIX;
+  if ("statut" in data) row.statut = STATUTS.includes(String(data.statut)) ? data.statut : "facture";
   return row;
 }
 
@@ -30,7 +32,7 @@ export async function creerSoin(data: Record<string, unknown>): Promise<FdoResul
   if (!row.bureau) return { ok: false, error: "Indique le bureau du shérif." };
   const id = newId();
   const now = new Date().toISOString();
-  const { error } = await admin.from("DispensaireSoinFDO").insert({ id, statut: "offert", montant: 0, ...row, par: await qui(), createdAt: now, updatedAt: now });
+  const { error } = await admin.from("DispensaireSoinFDO").insert({ id, statut: "facture", ...row, montant: FDO_PRIX, par: await qui(), createdAt: now, updatedAt: now });
   return error ? { ok: false, error: "Création impossible (la table existe-t-elle ?)." } : { ok: true, id };
 }
 

@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ShieldCheck, Plus, Loader2, Trash2, Building2 } from "lucide-react";
 import { VideRegistre } from "@/components/dispensaire-ui";
-import { FDO_STATUTS, fdoStatut, money, type FDOData, type SoinFDO } from "@/lib/dispensaire-facturation-const";
+import { FDO_STATUTS, FDO_PRIX, fdoStatut, money, type FDOData, type SoinFDO } from "@/lib/dispensaire-facturation-const";
 import { Flash, inputCls } from "@/components/edit-ui";
 import { creerSoin, majSoin, supprimerSoin } from "@/app/dispensaire/fdo/actions";
 
@@ -16,7 +16,7 @@ export function DispensaireFDO({ data }: { data: FDOData }) {
   const [soins, setSoins] = useState<SoinFDO[]>(data.soins);
   const [flash, setFlash] = useState<FlashMsg>(null);
   const [busy, setBusy] = useState(false);
-  const [v, setV] = useState({ bureau: "", agent: "", soin: "", montant: "0", statut: "offert" });
+  const [v, setV] = useState({ bureau: "", agent: "", soin: "", statut: "facture" });
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setV((p) => ({ ...p, [k]: e.target.value }));
 
   const bureaux = useMemo(() => {
@@ -29,13 +29,13 @@ export function DispensaireFDO({ data }: { data: FDOData }) {
   async function ajouter() {
     if (!v.bureau.trim()) { setFlash({ t: "bad", m: "Indique le bureau du shérif." }); return; }
     setBusy(true);
-    const r = await creerSoin({ ...v, montant: Number(v.montant) || 0 });
+    const r = await creerSoin({ ...v });
     setBusy(false);
     if (!r.ok) { setFlash({ t: "bad", m: r.error || "Impossible." }); return; }
-    const tmp: SoinFDO = { id: r.id || "tmp", bureau: v.bureau.trim(), agent: v.agent || null, soin: v.soin || null, montant: Number(v.montant) || 0, statut: v.statut, note: null, par: null, createdAt: new Date().toISOString() };
+    const tmp: SoinFDO = { id: r.id || "tmp", bureau: v.bureau.trim(), agent: v.agent || null, soin: v.soin || null, montant: FDO_PRIX, statut: v.statut, note: null, par: null, createdAt: new Date().toISOString() };
     setSoins((p) => [tmp, ...p]);
-    setV({ bureau: v.bureau, agent: "", soin: "", montant: "0", statut: "offert" });
-    setFlash({ t: "ok", m: "Soin enregistré." });
+    setV({ bureau: v.bureau, agent: "", soin: "", statut: "facture" });
+    setFlash({ t: "ok", m: `Soin enregistré — facturé ${money(FDO_PRIX)}.` });
     router.refresh();
   }
   async function changerStatut(s: SoinFDO, statut: string) { setSoins((p) => p.map((x) => (x.id === s.id ? { ...x, statut } : x))); const r = await majSoin(s.id, { statut }); if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else router.refresh(); }
@@ -55,7 +55,7 @@ export function DispensaireFDO({ data }: { data: FDOData }) {
           <label className="flex flex-col gap-1"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Bureau</span><input className={inputCls} value={v.bureau} onChange={set("bureau")} placeholder="Bureau du shérif de…" list="fdo-bureaux" /><datalist id="fdo-bureaux">{connus.map((b) => <option key={b} value={b} />)}</datalist></label>
           <label className="flex flex-col gap-1"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Agent / shérif</span><input className={inputCls} value={v.agent} onChange={set("agent")} placeholder="Nom" /></label>
           <label className="flex flex-col gap-1 lg:col-span-2"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Soin prodigué</span><input className={inputCls} value={v.soin} onChange={set("soin")} placeholder="Description" /></label>
-          <label className="flex flex-col gap-1"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Montant ($)</span><input className={inputCls} value={v.montant} onChange={(e) => setV((p) => ({ ...p, montant: e.target.value.replace(/[^0-9]/g, "") }))} inputMode="numeric" /></label>
+          <div className="flex flex-col gap-1"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Montant</span><div className="flex min-h-[38px] items-center rounded-lg border border-border bg-surface-2 px-3"><span className="font-num text-[0.9rem] font-semibold">{money(FDO_PRIX)}</span><span className="ml-1.5 text-[0.66rem] text-faint">fixe · remboursé par le gouvernement</span></div></div>
           <label className="flex flex-col gap-1"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Statut</span><select className={inputCls} value={v.statut} onChange={set("statut")}>{FDO_STATUTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select></label>
           <div className="flex items-end justify-end lg:col-span-2"><button onClick={ajouter} disabled={busy} className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[0.8rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Enregistrer</button></div>
         </div>

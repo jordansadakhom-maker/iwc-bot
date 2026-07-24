@@ -8,7 +8,7 @@ import { VideRegistre } from "@/components/dispensaire-ui";
 
 const norm = (x: string) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
 const dtFR = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); } catch { return "—"; } };
-const MOD_TONE: Record<string, string> = { Stockage: "var(--accent)", Coffres: "var(--good)", Ventes: "var(--good)", Pointage: "var(--accent)", Frais: "var(--warn)", Factures: "var(--oxblood)", Certificats: "var(--accent)", Rapports: "var(--accent)", Documents: "var(--muted)", RH: "var(--warn)", "Matières": "var(--warn)", FDO: "var(--accent)" };
+const MOD_TONE: Record<string, string> = { Stockage: "var(--accent)", "Stock Matériel Médical": "var(--good)", Ventes: "var(--good)", Pointage: "var(--accent)", Frais: "var(--warn)", Factures: "var(--oxblood)", Certificats: "var(--accent)", Rapports: "var(--accent)", RH: "var(--warn)", "Matières": "var(--warn)", FDO: "var(--accent)" };
 const ACT_TONE: Record<string, string> = { Entrée: "var(--good)", Sortie: "var(--oxblood)", "Déplacement": "var(--warn)", "Nouveau coffre": "var(--good)", "Coffre modifié": "var(--accent)" };
 
 export function DispensaireHistorique({ data }: { data: HistoData }) {
