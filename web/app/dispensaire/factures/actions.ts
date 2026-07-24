@@ -3,7 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { peutFacturer } from "@/lib/dispensaire-roles";
-import { FACTURE_DELAI_H, FACTURE_STATUTS } from "@/lib/dispensaire-facturation-const";
+import { FACTURE_DELAI_H, FACTURE_STATUTS, factureOuverte } from "@/lib/dispensaire-facturation-const";
 
 // Factures — RÉSERVÉ aux chefs (habilités). Suivi des impayés.
 export type FactureResult = { ok: boolean; error?: string; id?: string };
@@ -182,5 +182,39 @@ export async function creerConsultation(input: { patient: string; lignes: Consul
     } catch { /* décrément best-effort */ }
   }
   return { ok: true, id, montant, avertissements: avert.length ? avert : undefined };
+}
+
+// ── DOSSIER PATIENT (dérivé à la lecture, sans nouvelle table) ────────────────
+// Reconstruit tout l'historique d'un patient à partir des tables existantes,
+// rapproché par nom normalisé. Donne une vue 360° : actes + total dû / réglé.
+const _normNom = (v: unknown) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ");
+export type DossierActe = { id: string; type: "Facture" | "Vente" | "Certificat" | "Rapport"; libelle: string; montant: number | null; statut: string | null; date: string };
+export type DossierPatient = { nom: string; totalDu: number; totalRegle: number; nbActes: number; actes: DossierActe[] };
+
+export async function getDossierPatient(nom: string): Promise<DossierPatient> {
+  const vide: DossierPatient = { nom: String(nom ?? "").trim(), totalDu: 0, totalRegle: 0, nbActes: 0, actes: [] };
+  const admin = createAdminClient();
+  const cible = _normNom(nom);
+  if (!admin || !cible) return vide;
+  const rows = async (p: PromiseLike<{ data: unknown }>): Promise<Record<string, unknown>[]> => { try { return ((await p).data as Record<string, unknown>[]) || []; } catch { return []; } };
+  const [factures, ventes, certs, rapports] = await Promise.all([
+    rows(admin.from("DispensaireFacture").select("id,objet,destinataire,montant,statut,dateEmission,createdAt").order("createdAt", { ascending: false }).limit(500)),
+    rows(admin.from("DispensaireVente").select("id,patient,item,quantite,total,createdAt").order("createdAt", { ascending: false }).limit(500)),
+    rows(admin.from("DispensaireCertificat").select("id,patient,type,dateActe,createdAt").order("createdAt", { ascending: false }).limit(500)),
+    rows(admin.from("DispensaireRapport").select("id,patient,titre,createdAt").order("createdAt", { ascending: false }).limit(500)),
+  ]);
+  const actes: DossierActe[] = [];
+  let du = 0, regle = 0;
+  for (const f of factures) {
+    if (_normNom(f.objet) !== cible) continue;
+    const m = Number(f.montant) || 0; const st = String(f.statut || "non_payee");
+    if (factureOuverte(st)) du += m; else regle += m;
+    actes.push({ id: "f" + f.id, type: "Facture", libelle: String(f.destinataire || f.objet || "Facture"), montant: m, statut: st, date: String(f.dateEmission || f.createdAt) });
+  }
+  for (const v of ventes) { if (_normNom(v.patient) !== cible) continue; actes.push({ id: "v" + v.id, type: "Vente", libelle: `${Number(v.quantite) || 0}× ${String(v.item || "article")}`, montant: Number(v.total) || 0, statut: null, date: String(v.createdAt) }); }
+  for (const c of certs) { if (_normNom(c.patient) !== cible) continue; actes.push({ id: "c" + c.id, type: "Certificat", libelle: String(c.type || "Certificat"), montant: null, statut: null, date: String(c.dateActe || c.createdAt) }); }
+  for (const r of rapports) { if (_normNom(r.patient) !== cible) continue; actes.push({ id: "r" + r.id, type: "Rapport", libelle: String(r.titre || "Rapport"), montant: null, statut: null, date: String(r.createdAt) }); }
+  actes.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  return { nom: String(nom).trim(), totalDu: du, totalRegle: regle, nbActes: actes.length, actes };
 }
 

@@ -2,9 +2,10 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Receipt, Plus, Check, Pencil, Trash2, AlertTriangle, CalendarClock, Lock, Copy, FileText, Clock, Stethoscope } from "lucide-react";
+import { Receipt, Plus, Check, Pencil, Trash2, AlertTriangle, CalendarClock, Lock, Copy, FileText, Clock, Stethoscope, User } from "lucide-react";
 import { VideRegistre } from "@/components/dispensaire-ui";
 import { DispensaireConsultation } from "@/components/dispensaire-consultation";
+import { DispensairePatientDossier } from "@/components/dispensaire-patient-dossier";
 import { FACTURE_STATUTS, FACTURE_DELAI_H, factureStatut, factureOuverte, echeanceEtat, copiePolice, money, type FacturesData, type Facture } from "@/lib/dispensaire-facturation-const";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { creerFacture, majFacture, supprimerFacture, logCopieFacture } from "@/app/dispensaire/factures/actions";
@@ -26,6 +27,7 @@ export function DispensaireFactures({ data, rapport, historique, config }: { dat
   const [vue, setVue] = useState<"impayees" | "toutes">("impayees");
   const [rapportOpen, setRapportOpen] = useState(false);
   const [consult, setConsult] = useState(false);
+  const [dossierOpen, setDossierOpen] = useState(false);
 
   if (!data.canEdit) return (
     <div className="rounded-[14px] border border-border bg-surface p-8 text-center">
@@ -94,6 +96,7 @@ export function DispensaireFactures({ data, rapport, historique, config }: { dat
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={() => setDossierOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-muted transition hover:text-ink"><User className="h-3.5 w-3.5" /> Dossier patient</button>
           <button onClick={() => setRapportOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-muted transition hover:text-ink"><FileText className="h-3.5 w-3.5" /> Rapport FDO</button>
           <select className={inputCls + " max-w-[160px]"} value={filtre} onChange={(e) => setFiltre(e.target.value)}><option value="">Tous statuts</option>{FACTURE_STATUTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
           <button onClick={() => setForm("new")} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-muted transition hover:text-ink"><Plus className="h-3.5 w-3.5" /> Facture</button>
@@ -146,6 +149,7 @@ export function DispensaireFactures({ data, rapport, historique, config }: { dat
       )}
 
       {consult ? <DispensaireConsultation onClose={() => setConsult(false)} onDone={(f) => { setFlash(f); router.refresh(); }} /> : null}
+      {dossierOpen ? <DispensairePatientDossier onClose={() => setDossierOpen(false)} /> : null}
       {form ? <FactureForm initial={form === "new" ? null : form} onClose={() => setForm(null)} onSave={(v) => enregistrer(v, form === "new" ? null : form)} /> : null}
       {delId ? <ConfirmDelete nom={factures.find((f) => f.id === delId)?.objet || ""} onCancel={() => setDelId(null)} onConfirm={() => supprimer(delId)} /> : null}
       {rapportOpen ? <RapportImpayesModal initial={rapport} historique={historique} config={config} onClose={() => setRapportOpen(false)} /> : null}
