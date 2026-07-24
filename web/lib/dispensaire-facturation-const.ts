@@ -24,10 +24,12 @@ export type Facture = { id: string; objet: string; destinataire: string | null; 
 export type FacturesData = { connecte: boolean; pret: boolean; canEdit: boolean; factures: Facture[]; enRetard: number; du: number };
 
 // ── Soins FDO ───────────────────────────────────────────────────────────────
+// Tarif unique : un soin FDO coûte toujours 2 $ (remboursé ensuite par le
+// gouvernement). Montant figé, aucune gratuité possible.
+export const FDO_PRIX = 2;
 export const FDO_STATUTS = [
-  { key: "offert", label: "Offert", tone: "var(--good)" },
   { key: "facture", label: "Facturé", tone: "var(--warn)" },
-  { key: "regle", label: "Réglé", tone: "var(--accent)" },
+  { key: "regle", label: "Réglé", tone: "var(--good)" },
 ];
 export const fdoStatut = (k: string) => FDO_STATUTS.find((s) => s.key === k) || FDO_STATUTS[0];
 export type SoinFDO = { id: string; bureau: string; agent: string | null; soin: string | null; montant: number; statut: string; note: string | null; par: string | null; createdAt: string };
