@@ -3,16 +3,20 @@ import { PageHeader } from "@/components/ui";
 import { AssistantConsole } from "@/components/assistant-console";
 import { RechercheIA } from "@/components/recherche-ia";
 import { AssistantPanel } from "@/components/erp-assistant";
+import { KpiBand } from "@/components/erp-kpi";
 import { getAssistantIWC } from "@/lib/assistant-iwc";
+import { getKpisIWC } from "@/lib/kpi-iwc";
 import { setEtatNotif } from "./veille-actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function AssistantPage() {
-  const veille = await getAssistantIWC();
+  const [veille, kpis] = await Promise.all([getAssistantIWC(), getKpisIWC()]);
   return (
     <>
       <PageHeader titre="Assistant" sous="Surveille la compagnie et la pilote en langage naturel" />
+      {/* Indicateurs clés de la compagnie. */}
+      <KpiBand items={kpis} />
       {/* Veille automatique : ce que le système a détecté et propose. */}
       <AssistantPanel data={veille} setEtat={setEtatNotif} />
       <div className="flex items-start gap-3 rounded-card border border-border bg-surface p-3.5" style={{ borderColor: "color-mix(in srgb,var(--accent) 30%,var(--border))" }}>
