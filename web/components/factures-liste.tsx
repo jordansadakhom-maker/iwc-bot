@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Receipt, Plus, Loader2, Trash2 } from "lucide-react";
+import { Receipt, Plus, Loader2, Trash2, User } from "lucide-react";
 import type { FactureItem } from "@/lib/queries";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
 import { creerFacture, supprimerFacture } from "@/app/(app)/finances/actions";
+import { ClientDossier } from "@/components/client-dossier";
 
 type Router = ReturnType<typeof useRouter>;
 import { cents } from "@/lib/format";
@@ -15,6 +16,7 @@ const dateFR = (s: string | null) => { if (!s) return "—"; try { return new Da
 export function FacturesListe({ factures, total }: { factures: FactureItem[]; total: number }) {
   const router = useRouter();
   const [nouveau, setNouveau] = useState(false);
+  const [dossierOpen, setDossierOpen] = useState(false);
   const [delId, setDelId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
@@ -36,9 +38,14 @@ export function FacturesListe({ factures, total }: { factures: FactureItem[]; to
           <span className="font-num text-[0.8rem] text-faint">{factures.length}</span>
           {total > 0 ? <span className="rounded-md px-1.5 py-0.5 font-num text-[0.72rem] font-semibold" style={{ color: "var(--good)", background: "color-mix(in srgb,var(--good) 14%,transparent)" }}>{money(total)} encaissés</span> : null}
         </div>
-        <button onClick={() => setNouveau(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-ink transition hover:border-border-2">
-          <Plus className="h-3.5 w-3.5" strokeWidth={2} /> Nouvelle facture
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setDossierOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-muted transition hover:text-ink">
+            <User className="h-3.5 w-3.5" /> Dossier client
+          </button>
+          <button onClick={() => setNouveau(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-ink transition hover:border-border-2">
+            <Plus className="h-3.5 w-3.5" strokeWidth={2} /> Nouvelle facture
+          </button>
+        </div>
       </div>
 
       {factures.length === 0 ? (
@@ -87,6 +94,7 @@ export function FacturesListe({ factures, total }: { factures: FactureItem[]; to
       )}
 
       {nouveau ? <NouvelleFacture onClose={() => setNouveau(false)} router={router} /> : null}
+      {dossierOpen ? <ClientDossier onClose={() => setDossierOpen(false)} /> : null}
     </>
   );
 }
