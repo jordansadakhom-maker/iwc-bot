@@ -106,3 +106,81 @@ export async function logCopieFacture(id: string): Promise<{ ok: boolean }> {
   return { ok: true };
 }
 
+// ── CONSULTATION UNIFIÉE ─────────────────────────────────────────────────────
+// Un seul geste : patient + soins/articles → facture générée + (option) stock
+// décrémenté + historique alimenté. Remplace la triple saisie soin / facture /
+// stock. Additif : les écrans Ventes & Factures restent inchangés.
+
+// Références pour le formulaire (patients connus + articles en stock).
+export async function getConsultationRefs(): Promise<{ patients: string[]; stock: { id: string; nom: string; stock: number }[] }> {
+  const admin = createAdminClient();
+  if (!admin) return { patients: [], stock: [] };
+  const rows = async (p: PromiseLike<{ data: unknown }>): Promise<Record<string, unknown>[]> => { try { return ((await p).data as Record<string, unknown>[]) || []; } catch { return []; } };
+  const [ventes, factures, certs, stock] = await Promise.all([
+    rows(admin.from("DispensaireVente").select("patient").order("createdAt", { ascending: false }).limit(200)),
+    rows(admin.from("DispensaireFacture").select("objet").order("createdAt", { ascending: false }).limit(200)),
+    rows(admin.from("DispensaireCertificat").select("patient").order("createdAt", { ascending: false }).limit(200)),
+    rows(admin.from("DispensaireStock").select("id,nom,stock").order("nom", { ascending: true }).limit(500)),
+  ]);
+  const set = new Set<string>();
+  const add = (v: unknown) => { const t = String(v ?? "").trim(); if (t) set.add(t); };
+  for (const r of ventes) add(r.patient);
+  for (const r of factures) add(r.objet);
+  for (const r of certs) add(r.patient);
+  const patients = [...set].sort((a, b) => a.localeCompare(b)).slice(0, 400);
+  const stockList = stock.map((r) => ({ id: String(r.id), nom: String(r.nom || "?"), stock: Number(r.stock) || 0 }));
+  return { patients, stock: stockList };
+}
+
+export type ConsultationLigne = { desc: string; quantite: number; prixUnitaire: number; stockId?: string | null };
+export type ConsultationResult = { ok: boolean; error?: string; id?: string; montant?: number; avertissements?: string[] };
+
+export async function creerConsultation(input: { patient: string; lignes: ConsultationLigne[]; regle: boolean; dateEmission?: string; note?: string }): Promise<ConsultationResult> {
+  if (!(await peutFacturer())) return { ok: false, error: "Réservé aux chefs." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  const patient = s(input.patient, 200);
+  if (!patient) return { ok: false, error: "Indique le patient." };
+  const lignes = (Array.isArray(input.lignes) ? input.lignes : [])
+    .map((l) => ({ desc: s(l.desc, 200) || "", quantite: Math.max(1, Math.round(Number(l.quantite) || 1)), prixUnitaire: n(l.prixUnitaire), stockId: l.stockId ? String(l.stockId) : null }))
+    .filter((l) => l.desc || l.prixUnitaire > 0 || l.stockId);
+  if (!lignes.length) return { ok: false, error: "Ajoute au moins un soin ou un article." };
+
+  const par = await qui();
+  const nowIso = new Date().toISOString();
+  const emission = emissionDe(input.dateEmission, nowIso);
+  const echeance = echeanceDe(emission);
+  const montant = lignes.reduce((a, l) => a + l.prixUnitaire * l.quantite, 0);
+  const resume = lignes.map((l) => `${l.quantite}× ${l.desc || "soin"}`).join(", ");
+  const regle = !!input.regle;
+
+  const id = newId();
+  const row: Record<string, unknown> = {
+    id, objet: patient, destinataire: resume.slice(0, 300), montant, statut: regle ? "payee" : "non_payee",
+    dateEmission: emission, dateEcheance: echeance, note: s(input.note, 1000), par, createdAt: nowIso, updatedAt: nowIso,
+  };
+  if (regle) { row.datePaiement = nowIso; row.payePar = par; }
+  let ins = await admin.from("DispensaireFacture").insert(row);
+  // Repli si les colonnes de paiement ne sont pas encore migrées.
+  if (ins.error && regle) { const { datePaiement: _d, payePar: _p, ...base } = row; void _d; void _p; ins = await admin.from("DispensaireFacture").insert(base); }
+  if (ins.error) return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
+  await logFacture(admin, id, "Consultation", resume.slice(0, 200), par);
+
+  // Décrément de stock optionnel & non bloquant : le soin reste facturé quoi qu'il arrive.
+  const avert: string[] = [];
+  for (const l of lignes) {
+    if (!l.stockId) continue;
+    try {
+      const { data: ex } = await admin.from("DispensaireStock").select("id,nom,stock,coffre").eq("id", l.stockId).maybeSingle();
+      if (!ex) continue;
+      const r = ex as Record<string, unknown>;
+      const avant = Number(r.stock) || 0;
+      const apres = Math.max(0, avant - l.quantite);
+      await admin.from("DispensaireStock").update({ stock: apres, updatedBy: par, updatedAt: nowIso }).eq("id", l.stockId);
+      await admin.from("DispensaireStockMouvement").insert({ id: newId("dsm"), stockId: l.stockId, nomItem: String(r.nom || "?"), coffre: (r.coffre as string) ?? null, delta: -l.quantite, apres, motif: `Consultation — ${patient}`, par, createdAt: nowIso });
+      if (avant < l.quantite) avert.push(`${String(r.nom || "?")} : stock insuffisant (${avant} en réserve, ${l.quantite} demandé)`);
+    } catch { /* décrément best-effort */ }
+  }
+  return { ok: true, id, montant, avertissements: avert.length ? avert : undefined };
+}
+
