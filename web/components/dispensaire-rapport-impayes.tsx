@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileText, Printer, Copy, History, Loader2, RefreshCw, Send, Check, ArrowLeft } from "lucide-react";
+import { FileText, Printer, Copy, History, Loader2, RefreshCw, Send, Check, ArrowLeft, CalendarClock } from "lucide-react";
 import { Modal } from "@/components/edit-ui";
 import type { RapportImpayes, RapportHisto } from "@/lib/dispensaire-rapport-impayes";
-import { genererRapportImpayes, chargerSnapshotRapport, rafraichirRapport } from "@/app/dispensaire/factures/rapport-actions";
+import { RAPPORT_MODES, JOURS_SEMAINE, estModeAuto, type RapportConfig, type RapportMode } from "@/lib/dispensaire-rapport-const";
+import { genererRapportImpayes, chargerSnapshotRapport, rafraichirRapport, setRapportConfig } from "@/app/dispensaire/factures/rapport-actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
 const ddMM = (iso: string | null) => { if (!iso) return "—"; try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "2-digit" }).format(new Date(iso)); } catch { return "—"; } };
@@ -108,13 +109,22 @@ export function RapportDoc({ rapport: r }: { rapport: RapportImpayes }) {
   );
 }
 
-export function RapportImpayesModal({ initial, historique, onClose }: { initial: RapportImpayes; historique: RapportHisto[]; onClose: () => void }) {
+export function RapportImpayesModal({ initial, historique, config, onClose }: { initial: RapportImpayes; historique: RapportHisto[]; config: RapportConfig; onClose: () => void }) {
   const router = useRouter();
   const [doc, setDoc] = useState<RapportImpayes>(initial);
   const [histo, setHisto] = useState<RapportHisto[]>(historique);
-  const [vue, setVue] = useState<"apercu" | "histo">("apercu");
+  const [vue, setVue] = useState<"apercu" | "histo" | "plan">("apercu");
   const [busy, setBusy] = useState<string | null>(null);
   const [flash, setFlash] = useState<FlashMsg>(null);
+  const [cfg, setCfg] = useState<RapportConfig>(config);
+
+  async function sauverPlan(patch: Partial<RapportConfig>) {
+    const next = { ...cfg, ...patch };
+    setCfg(next); setBusy("plan");
+    const r = await setRapportConfig({ mode: next.mode, heure: next.heure, jour: next.jour });
+    setBusy(null);
+    if (!r.ok) { setCfg(cfg); setFlash({ t: "bad", m: r.error || "Impossible." }); } else { setFlash({ t: "ok", m: "Planification enregistrée." }); router.refresh(); }
+  }
 
   async function generer() {
     setBusy("gen");
@@ -140,6 +150,7 @@ export function RapportImpayesModal({ initial, historique, onClose }: { initial:
           <div className="flex overflow-hidden rounded-lg border border-border text-[0.74rem] font-semibold">
             <button onClick={() => setVue("apercu")} className="px-2.5 py-1.5" style={vue === "apercu" ? { background: "var(--accent)", color: "#000" } : { color: "var(--muted)" }}>Aperçu</button>
             <button onClick={() => setVue("histo")} className="inline-flex items-center gap-1 px-2.5 py-1.5" style={vue === "histo" ? { background: "var(--accent)", color: "#000" } : { color: "var(--muted)" }}><History className="h-3.5 w-3.5" /> Historique ({histo.length})</button>
+            <button onClick={() => setVue("plan")} className="inline-flex items-center gap-1 px-2.5 py-1.5" style={vue === "plan" ? { background: "var(--accent)", color: "#000" } : { color: "var(--muted)" }}><CalendarClock className="h-3.5 w-3.5" /> Planification</button>
           </div>
           {vue === "apercu" ? (
             <>
@@ -152,7 +163,34 @@ export function RapportImpayesModal({ initial, historique, onClose }: { initial:
           ) : null}
         </div>
 
-        {vue === "apercu" ? (
+        {vue === "plan" ? (
+          <div className="rapport-noprint flex flex-col gap-3">
+            <p className="text-[0.8rem] text-muted">Choisis la fréquence de génération automatique du rapport. La génération planifiée est assurée par le serveur (Cron).</p>
+            <label className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Fréquence</span>
+              <select className="rounded-lg border border-border bg-surface px-3 py-2 text-[0.85rem]" value={cfg.mode} onChange={(e) => sauverPlan({ mode: e.target.value as RapportMode })}>{RAPPORT_MODES.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}</select>
+            </label>
+            {estModeAuto(cfg.mode) ? (
+              <div className="flex flex-wrap gap-3">
+                <label className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Heure</span>
+                  <select className="rounded-lg border border-border bg-surface px-3 py-2 text-[0.85rem]" value={cfg.heure} onChange={(e) => sauverPlan({ heure: Number(e.target.value) })}>{Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, "0")}h00</option>)}</select>
+                </label>
+                {cfg.mode === "hebdo" ? (
+                  <label className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Jour</span>
+                    <select className="rounded-lg border border-border bg-surface px-3 py-2 text-[0.85rem]" value={cfg.jour} onChange={(e) => sauverPlan({ jour: Number(e.target.value) })}>{JOURS_SEMAINE.map((j, i) => <option key={j} value={i + 1}>{j}</option>)}</select>
+                  </label>
+                ) : null}
+                {cfg.mode === "mensuel" ? (
+                  <label className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Jour du mois</span>
+                    <select className="rounded-lg border border-border bg-surface px-3 py-2 text-[0.85rem]" value={cfg.jour} onChange={(e) => sauverPlan({ jour: Number(e.target.value) })}>{Array.from({ length: 28 }, (_, d) => <option key={d} value={d + 1}>{d + 1}</option>)}</select>
+                  </label>
+                ) : null}
+              </div>
+            ) : null}
+            <div className="flex items-center gap-2 text-[0.72rem] text-faint">{busy === "plan" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" style={{ color: "var(--good)" }} />} Enregistré automatiquement.</div>
+            {cfg.lastAutoAt ? <p className="text-[0.72rem] text-faint">Dernière génération automatique : {dtFR(cfg.lastAutoAt)}.</p> : null}
+            <p className="rounded-lg border border-border bg-surface-2 px-3 py-2 text-[0.72rem] text-faint">Pour activer le Cron : définis la variable <b>CRON_SECRET</b> dans Vercel (projet du dispensaire). Le planificateur vérifie chaque heure et génère à l&apos;heure choisie.</p>
+          </div>
+        ) : vue === "apercu" ? (
           <div className="max-h-[70vh] overflow-auto rounded-lg">
             <RapportDoc rapport={doc} />
           </div>

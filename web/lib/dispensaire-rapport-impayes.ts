@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { getFactures } from "@/lib/dispensaire-facturation";
 import { factureOuverte, type Facture } from "@/lib/dispensaire-facturation-const";
+import { RAPPORT_CONFIG_DEFAUT, type RapportConfig, type RapportMode } from "@/lib/dispensaire-rapport-const";
 
 // ── Rapport des impayés (forces de l'ordre) ─────────────────────────────────
 // Construit à la volée depuis les factures (aucune saisie), avec dédoublonnage
@@ -55,20 +56,56 @@ async function dernierRapportAt(admin: NonNullable<ReturnType<typeof createAdmin
   try { const { data } = await admin.from("DispensaireRapportImpayes").select("at").order("at", { ascending: false }).limit(1).maybeSingle(); return data ? String((data as Record<string, unknown>).at) : null; } catch { return null; }
 }
 
-// Données du prochain rapport (impayés courants + paiements depuis le dernier rapport).
-export async function getRapportData(): Promise<{ pret: boolean; rapport: RapportImpayes }> {
-  const medecin = await (async () => { try { return (await getSessionProfile())?.nom || "Le médecin de garde"; } catch { return "Le médecin de garde"; } })();
-  const vide: RapportImpayes = { genereLe: new Date().toISOString(), medecin, depuis: null, impayes: [], payes: [], totalImpaye: 0, totalPaye: 0 };
-  const admin = createAdminClient();
-  if (!admin) return { pret: false, rapport: vide };
+// Construit le rapport (impayés courants + paiements depuis `depuis`).
+async function batirRapport(medecin: string, depuis: string | null): Promise<{ pret: boolean; rapport: RapportImpayes }> {
+  const vide: RapportImpayes = { genereLe: new Date().toISOString(), medecin, depuis, impayes: [], payes: [], totalImpaye: 0, totalPaye: 0 };
   const data = await getFactures();
   if (!data.pret) return { pret: false, rapport: vide };
-  const depuis = await dernierRapportAt(admin);
   const impayesF = data.factures.filter((f) => factureOuverte(f.statut));
   const payesF = data.factures.filter((f) => f.statut === "payee" && f.datePaiement && (!depuis || String(f.datePaiement) > depuis));
   const impayes = agregerImpayes(impayesF);
   const payes = agregerPayes(payesF);
   return { pret: true, rapport: { genereLe: new Date().toISOString(), medecin, depuis, impayes, payes, totalImpaye: impayes.reduce((a, l) => a + l.montant, 0), totalPaye: payes.reduce((a, l) => a + l.montant, 0) } };
+}
+
+// Données du prochain rapport (aperçu — médecin = compte connecté).
+export async function getRapportData(): Promise<{ pret: boolean; rapport: RapportImpayes }> {
+  const medecin = await (async () => { try { return (await getSessionProfile())?.nom || "Le médecin de garde"; } catch { return "Le médecin de garde"; } })();
+  const admin = createAdminClient();
+  const depuis = admin ? await dernierRapportAt(admin) : null;
+  return batirRapport(medecin, depuis);
+}
+
+// Enregistre un rapport (fige un instantané) — utilisé par l'action manuelle
+// ET par la génération planifiée (par = « Génération automatique »).
+export async function enregistrerRapport(par: string): Promise<{ ok: boolean; error?: string; rapport?: RapportImpayes }> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  const depuis = await dernierRapportAt(admin);
+  const { pret, rapport } = await batirRapport(par, depuis);
+  if (!pret) return { ok: false, error: "Données indisponibles (lance les SQL du dispensaire)." };
+  const id = `dri-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const { error } = await admin.from("DispensaireRapportImpayes").insert({ id, at: rapport.genereLe, par, depuis, nbImpayes: rapport.impayes.length, nbPaiements: rapport.payes.length, snapshot: rapport });
+  if (error) return { ok: false, error: "Enregistrement impossible (lance dispensaire-rapport-impayes.sql ?)." };
+  return { ok: true, rapport };
+}
+
+// ── Planification ────────────────────────────────────────────────────────────
+export async function getRapportConfig(): Promise<RapportConfig> {
+  const admin = createAdminClient();
+  if (!admin) return { ...RAPPORT_CONFIG_DEFAUT };
+  try {
+    const { data } = await admin.from("DispensaireRapportConfig").select("*").eq("id", "config").maybeSingle();
+    if (!data) return { ...RAPPORT_CONFIG_DEFAUT };
+    const r = data as Record<string, unknown>;
+    const modes: RapportMode[] = ["manuel", "quotidien", "hebdo", "mensuel"];
+    return {
+      mode: modes.includes(String(r.mode) as RapportMode) ? (String(r.mode) as RapportMode) : "manuel",
+      heure: Math.max(0, Math.min(23, Number(r.heure) || 8)),
+      jour: Math.max(1, Math.min(31, Number(r.jour) || 1)),
+      lastAutoAt: r.lastAutoAt == null ? null : String(r.lastAutoAt),
+    };
+  } catch { return { ...RAPPORT_CONFIG_DEFAUT }; }
 }
 
 // Historique des rapports générés.
