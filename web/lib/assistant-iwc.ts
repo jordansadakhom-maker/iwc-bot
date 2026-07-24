@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getAlertes } from "@/lib/queries";
+import { getAlertes, getAbsences } from "@/lib/queries";
 import { getEtatsOverlay } from "@/lib/notif-etat";
 import { detecterDoublons, detecterNegatifs, apercuReappro, type ReapproItem } from "@/lib/erp-coherence";
 import { type AssistantData, type Constat, type Priorite, trierConstats, compterGravite, graviteDe } from "@/lib/erp-assistant-const";
@@ -87,6 +87,18 @@ export async function getAssistantIWC(): Promise<AssistantData> {
 
   const negatifs = detecterNegatifs(produits, "stock");
   if (negatifs.length) constats.push(mk({ id: "negatif-produits", priorite: "critique", categorie: "Cohérence", titre: `${negatifs.length} produit(s) à stock négatif`, detail: negatifs.slice(0, 3).map((n) => `${n.nom} (${n.q})`).join(" · "), suggestion: "Corrige : un stock négatif signale une perte ou un écart de caisse.", href: "/armurerie?tab=produits" }));
+
+  // RH & contrats proactifs.
+  const CLOS = new Set(["termine", "terminee", "terminée", "annule", "annulee", "annulée", "refuse", "refusé", "clos", "cloture", "clôturé", "signe", "signé"]);
+  const nowIso = new Date().toISOString(), nowY = nowIso.slice(0, 10);
+  const [absencesData, contratsRows] = await Promise.all([
+    getAbsences().catch(() => null),
+    safeRows(() => admin.from("Contrat").select("cible,statut,echeance,suivi")),
+  ]);
+  const termine = absencesData ? absencesData.absents.filter((m) => m.absence?.jusqu && String(m.absence.jusqu).slice(0, 10) < nowY) : [];
+  if (termine.length) constats.push(mk({ id: "abs-terminees", priorite: "normale", categorie: "RH", titre: `${termine.length} absence(s) arrivée(s) à terme`, detail: termine.slice(0, 3).map((m) => m.nom).join(" · "), suggestion: "Réactive les membres dont l'absence est finie.", href: "/absences" }));
+  const relance = contratsRows.filter((c) => c.echeance && String(c.echeance) < nowIso && !CLOS.has(String(c.statut ?? "").toLowerCase()));
+  if (relance.length) constats.push(mk({ id: "contrats-relance", priorite: "importante", categorie: "Contrats", titre: `${relance.length} contrat(s) à échéance dépassée`, detail: relance.slice(0, 3).map((c) => String(c.cible ?? "?")).join(" · "), suggestion: "Relance ou clôture les contrats dont l'échéance est passée.", href: "/operations" }));
 
   // Couche d'état persistée (Non lue / En cours / Résolue / Archivée).
   const etats = await getEtatsOverlay(TABLE_ETAT_IWC);

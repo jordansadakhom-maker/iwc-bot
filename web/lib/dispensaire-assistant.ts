@@ -2,6 +2,7 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getNotifications } from "@/lib/dispensaire-notifications";
+import { getConfig } from "@/lib/dispensaire-roles";
 import { getEtatsOverlay } from "@/lib/notif-etat";
 import { calculerReappro, detecterDoublons, detecterNegatifs, apercuReappro } from "@/lib/erp-coherence";
 import { type AssistantData, type Constat, type Priorite, trierConstats, compterGravite, graviteDe } from "@/lib/erp-assistant-const";
@@ -10,6 +11,7 @@ export * from "@/lib/erp-assistant-const";
 
 export const TABLE_ETAT_DISPENSAIRE = "DispensaireNotifEtat";
 const mk = (o: Omit<Constat, "gravite">): Constat => ({ ...o, gravite: graviteDe(o.priorite) });
+const num = (v: unknown) => Number(v) || 0;
 const rows = async (fn: () => PromiseLike<{ data: unknown }>): Promise<Record<string, unknown>[]> => { try { return ((await fn()).data as Record<string, unknown>[]) || []; } catch { return []; } };
 
 // ── Assistant de veille — DISPENSAIRE DE SAINT-DENIS ────────────────────────
@@ -62,6 +64,18 @@ export async function getAssistantDispensaire(): Promise<AssistantData> {
 
     const negatifs = detecterNegatifs(stock, "stock");
     if (negatifs.length) constats.push(mk({ id: "negatif-stock", priorite: "critique", categorie: "Cohérence", titre: `${negatifs.length} stock(s) négatif(s)`, detail: negatifs.slice(0, 3).map((n) => `${n.nom} (${n.q})`).join(" · "), suggestion: "Corrige : un stock négatif signale une perte ou une erreur de saisie.", href: "/dispensaire/stockage" }));
+
+    // RH proactif : pointages non clôturés + salariés approchant le seuil de renvoi.
+    const iso12 = new Date(Date.now() - 12 * 3600000).toISOString();
+    const [pointages, salaries, cfg] = await Promise.all([
+      rows(() => admin.from("DispensairePointage").select("id").is("fin", null).lt("debut", iso12)),
+      rows(() => admin.from("DispensaireSalarie").select("nom,statut,absInjustifiees")),
+      getConfig(),
+    ]);
+    if (pointages.length) constats.push(mk({ id: "disp-pointage", priorite: "importante", categorie: "Pointage", titre: `${pointages.length} pointage(s) non clôturé(s)`, detail: "Service ouvert depuis plus de 12 h.", suggestion: "Clôture les services restés ouverts pour fiabiliser les heures.", href: "/dispensaire/pointage" }));
+    const seuil = cfg.seuilRenvoi;
+    const surveiller = salaries.filter((s) => String(s.statut ?? "actif") === "actif" && num(s.absInjustifiees) >= seuil - 1 && num(s.absInjustifiees) < seuil);
+    if (surveiller.length) constats.push(mk({ id: "disp-rh-surveiller", priorite: "importante", categorie: "RH", titre: `${surveiller.length} salarié(s) à surveiller (absences)`, detail: surveiller.slice(0, 3).map((s) => String(s.nom ?? "?")).join(" · "), suggestion: "Convoque un entretien avant d'atteindre le seuil de renvoi.", href: "/dispensaire/rh" }));
   }
 
   // Couche d'état persistée (Non lue / En cours / Résolue / Archivée).
