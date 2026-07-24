@@ -15,6 +15,10 @@ const CHAMPS: Champ[] = ["objet", "destinataire", "note"];
 const s = (v: unknown, max = 300) => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
 const n = (v: unknown) => Math.max(0, Math.round(Number(v) || 0));
 function newId(p = "df") { return `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
+// Date d'émission SAISIE (ISO ou « AAAA-MM-JJ ») → ISO. Repli si vide/invalide.
+function emissionDe(v: unknown, fallback: string): string { const t = Date.parse(String(v ?? "").trim()); return Number.isFinite(t) ? new Date(t).toISOString() : fallback; }
+// Échéance automatique = date d'émission + FACTURE_DELAI_H (72 h).
+function echeanceDe(emissionIso: string): string { return new Date(new Date(emissionIso).getTime() + FACTURE_DELAI_H * 3600000).toISOString(); }
 // Fail-closed : réservé aux grades porteurs du droit « factures » (ou admin).
 async function autorise() { return peutFacturer(); }
 async function qui() { try { return (await getSessionProfile())?.nom || "Équipe"; } catch { return "Équipe"; } }
@@ -39,12 +43,13 @@ export async function creerFacture(data: Record<string, unknown>): Promise<Factu
   const row = nettoyer(data);
   if (!row.objet) return { ok: false, error: "Donne l'objet de la facture." };
   const id = newId();
-  const now = new Date();
-  const nowIso = now.toISOString();
-  // Délai automatique : émission = maintenant, échéance = +72 h. Aucune saisie.
-  const echeance = new Date(now.getTime() + FACTURE_DELAI_H * 3600000).toISOString();
+  const nowIso = new Date().toISOString();
+  // Date d'émission : celle SAISIE (on n'émet pas forcément le jour même) ; à
+  // défaut, aujourd'hui. Seule l'ÉCHÉANCE est automatique = émission + 72 h.
+  const emission = emissionDe(data.dateEmission, nowIso);
+  const echeance = echeanceDe(emission);
   const par = await qui();
-  const { error } = await admin.from("DispensaireFacture").insert({ id, statut: "non_payee", montant: 0, ...row, dateEmission: nowIso, dateEcheance: echeance, par, createdAt: nowIso, updatedAt: nowIso });
+  const { error } = await admin.from("DispensaireFacture").insert({ id, statut: "non_payee", montant: 0, ...row, dateEmission: emission, dateEcheance: echeance, par, createdAt: nowIso, updatedAt: nowIso });
   if (error) return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
   await logFacture(admin, id, "Création", String(row.objet || ""), par);
   return { ok: true, id };
@@ -56,6 +61,11 @@ export async function majFacture(id: string, patch: Record<string, unknown>): Pr
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   if (!id) return { ok: false, error: "Facture introuvable." };
   const row = nettoyer(patch);
+  // Date d'émission modifiable → l'échéance (72 h) est recalculée à partir d'elle.
+  if ("dateEmission" in patch) {
+    const t = Date.parse(String(patch.dateEmission ?? "").trim());
+    if (Number.isFinite(t)) { row.dateEmission = new Date(t).toISOString(); row.dateEcheance = echeanceDe(new Date(t).toISOString()); }
+  }
   if ("objet" in row && !row.objet) return { ok: false, error: "L'objet ne peut pas être vide." };
   if (!Object.keys(row).length) return { ok: true };
   const par = await qui();
