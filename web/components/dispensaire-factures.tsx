@@ -168,7 +168,7 @@ export function DispensaireFactures({ data }: { data: FacturesData }) {
 function RapportPoliceModal({ rapport, onClose, onFlash }: { rapport: RapportPolice; onClose: () => void; onFlash: (f: FlashMsg) => void }) {
   const genFR = dtFR(rapport.genereLe);
   function texte() {
-    const l = ["DISPENSAIRE DE SAINT-DENIS", "Signalement d'impayés aux forces de l'ordre", "", `Établi le ${genFR} par ${rapport.medecin}`, "", ...rapport.lignes.map((x) => `• ${dateFR(x.date)} — ${x.nom || "—"} — ${x.objet} — ${money(x.montant)}`), "", `Nombre de dossiers : ${rapport.nbDossiers}`, `Total à recouvrer : ${money(rapport.total)}`];
+    const l = ["DISPENSAIRE DE SAINT-DENIS", "Signalement d'impayés aux forces de l'ordre", "", `Établi le ${genFR} par ${rapport.medecin}`, "", ...rapport.lignes.map((x) => `• ${dateFR(x.date)} — ${x.nom || "—"}${x.soins ? ` — ${x.soins}` : ""} — ${money(x.montant)}`), "", `Nombre de dossiers : ${rapport.nbDossiers}`, `Total à recouvrer : ${money(rapport.total)}`];
     return l.join("\n");
   }
   async function copier() { try { await navigator.clipboard.writeText(texte()); onFlash({ t: "ok", m: "Rapport copié." }); } catch { onFlash({ t: "bad", m: "Copie impossible." }); } }
@@ -187,11 +187,11 @@ function RapportPoliceModal({ rapport, onClose, onFlash }: { rapport: RapportPol
           </div>
           <div className="mt-2 overflow-x-auto">
             <table className="w-full min-w-[440px] text-left text-[0.8rem]">
-              <thead><tr className="border-b border-border text-[0.64rem] uppercase tracking-[0.04em] text-faint"><th className="py-1.5 pr-2">Date des soins</th><th className="px-2">Nom</th><th className="px-2">Objet</th><th className="px-2 text-right">Montant dû</th></tr></thead>
+              <thead><tr className="border-b border-border text-[0.64rem] uppercase tracking-[0.04em] text-faint"><th className="py-1.5 pr-2">Date des soins</th><th className="px-2">Nom</th><th className="px-2">Soins / médicaments</th><th className="px-2 text-right">Montant dû</th></tr></thead>
               <tbody>
                 {rapport.lignes.map((x, i) => (
                   <tr key={i} className="border-b border-border/50">
-                    <td className="py-1.5 pr-2 font-num">{dateFR(x.date)}</td><td className="px-2 font-semibold">{x.nom || "—"}</td><td className="px-2 text-muted">{x.objet}</td><td className="px-2 text-right font-num font-semibold">{money(x.montant)}</td>
+                    <td className="py-1.5 pr-2 font-num">{dateFR(x.date)}</td><td className="px-2 font-semibold">{x.nom || "—"}</td><td className="px-2 text-muted">{x.soins || "—"}</td><td className="px-2 text-right font-num font-semibold">{money(x.montant)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -213,7 +213,7 @@ function RapportPoliceModal({ rapport, onClose, onFlash }: { rapport: RapportPol
 
 function FactureForm({ initial, onClose, onSave }: { initial: Facture | null; onClose: () => void; onSave: (v: Record<string, string>) => void }) {
   const [v, setV] = useState<Record<string, string>>(() => ({
-    objet: initial?.objet || "", destinataire: initial?.destinataire || "", montant: String(initial?.montant ?? 0),
+    objet: initial?.objet || "", destinataire: initial?.destinataire || "", montant: initial ? String(initial.montant) : "2",
     statut: initial?.statut || "non_payee", note: initial?.note || "",
   }));
   const [err, setErr] = useState<string | null>(null);
@@ -223,8 +223,8 @@ function FactureForm({ initial, onClose, onSave }: { initial: Facture | null; on
     <Modal titre={initial ? "✏️ Modifier la facture" : "➕ Nouvelle facture"} onClose={onClose} max={560}>
       <div className="flex flex-col gap-3">
         <div className="grid gap-3 sm:grid-cols-2">
-          <Champ label="Objet *"><input className={inputCls} value={v.objet} onChange={set("objet")} placeholder="Soins, fournitures…" autoFocus /></Champ>
-          <Champ label="Nom du patient / débiteur"><input className={inputCls} value={v.destinataire} onChange={set("destinataire")} placeholder="Nom" /></Champ>
+          <Champ label="Prénom / Nom *"><input className={inputCls} value={v.objet} onChange={set("objet")} placeholder="Prénom Nom du patient" autoFocus /></Champ>
+          <Champ label="Type de soins ou médicaments"><input className={inputCls} value={v.destinataire} onChange={set("destinataire")} placeholder="Ex. bandage, morphine…" /></Champ>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <Champ label="Montant ($)"><input className={inputCls} value={v.montant} onChange={(e) => setV((p) => ({ ...p, montant: e.target.value.replace(/[^0-9]/g, "") }))} inputMode="numeric" /></Champ>

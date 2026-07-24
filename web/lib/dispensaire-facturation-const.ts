@@ -39,11 +39,12 @@ export function echeanceEtat(f: { statut: string; dateEcheance: string | null },
   return "ok";
 }
 // Ligne « prête pour la police » : Date / Nom / Prix dû.
-export function copiePolice(f: { dateEmission: string | null; createdAt: string; destinataire: string | null; montant: number }): string {
+// Le « Nom » est le patient — porté par le champ `objet` (Prénom / Nom).
+export function copiePolice(f: { dateEmission: string | null; createdAt: string; objet: string; montant: number }): string {
   const d = f.dateEmission || f.createdAt;
   let dfr = "—";
   try { dfr = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(d)); } catch { /* garde — */ }
-  return `${dfr}\n${f.destinataire || "—"}\n${Math.round(f.montant)} $`;
+  return `${dfr}\n${f.objet || "—"}\n${Math.round(f.montant)} $`;
 }
 
 // ── Soins FDO ───────────────────────────────────────────────────────────────
