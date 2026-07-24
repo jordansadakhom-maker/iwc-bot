@@ -654,7 +654,9 @@ function PhotoModal({ zones, defaultZone, onClose, onApplied, setFlash }: {
   const [url, setUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [lignes, setLignes] = useState<LigneStock[] | null>(null);
-  const [mode, setMode] = useState<"add" | "set">("add");
+  // Défaut « Remplacer » : une photo reflète l'inventaire RÉEL du moment → on met
+  // le stock à jour, sans cumuler (évite le doublement à chaque scan).
+  const [mode, setMode] = useState<"add" | "set">("set");
   const [err, setErr] = useState<string | null>(null);
 
   async function lire() {
@@ -709,9 +711,9 @@ function PhotoModal({ zones, defaultZone, onClose, onApplied, setFlash }: {
           <>
             <div className="flex items-center justify-between gap-2">
               <span className="text-[0.8rem] font-semibold">Aperçu — {lignes.length} ligne(s) détectée(s)</span>
-              <Picker options={[{ key: "add", label: "➕ Ajouter au stock" }, { key: "set", label: "✏️ Remplacer le stock" }]} value={mode} onChange={(v) => setMode(v as "add" | "set")} />
+              <Picker options={[{ key: "set", label: "✏️ Remplacer le stock" }, { key: "add", label: "➕ Ajouter au stock" }]} value={mode} onChange={(v) => setMode(v as "add" | "set")} />
             </div>
-            <p className="text-[0.76rem] text-faint">Corrige les noms/quantités si besoin avant de valider. « Ajouter » cumule, « Remplacer » écrase la quantité de chaque ressource.</p>
+            <p className="text-[0.76rem] text-faint">Corrige les noms/quantités si besoin avant de valider. <b>« Remplacer »</b> (défaut) met la quantité de chaque ressource à la valeur de la photo — pas de cumul. « Ajouter » additionne à l&apos;existant.</p>
             <div className="flex max-h-[46vh] flex-col gap-1.5 overflow-y-auto pr-1">
               {lignes.map((l, i) => (
                 <div key={i} className="flex items-center gap-2">
