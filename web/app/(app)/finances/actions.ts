@@ -67,3 +67,48 @@ export async function ajusterArgent(membreId: string, montant: number, raison: s
   if (!m) return { ok: false, error: "Montant nul." };
   return envoyerCommande("wallet.ajuster", { membreId, montant: m, raison: (raison || "").slice(0, 120) });
 }
+
+// ── DOSSIER CLIENT (miroir IWC du dossier patient, dérivé à la lecture) ───────
+// Reconstruit toute l'activité d'un client (ventes & contrats & RDV armurerie +
+// factures) à partir des tables existantes, sans nouvelle table.
+const _normCli = (v: unknown) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ");
+const _rowsCli = async (p: PromiseLike<{ data: unknown }>): Promise<Record<string, unknown>[]> => { try { return ((await p).data as Record<string, unknown>[]) || []; } catch { return []; } };
+export type ClientActe = { id: string; type: "Vente" | "Contrat" | "Rendez-vous" | "Facture"; libelle: string; montant: number | null; statut: string | null; date: string };
+export type DossierClient = { nom: string; totalDepense: number; nbActes: number; actes: ClientActe[] };
+
+export async function getClientsListe(): Promise<string[]> {
+  const admin = createAdminClient();
+  if (!admin) return [];
+  const [cli, ventes, contrats] = await Promise.all([
+    _rowsCli(admin.from("ArmurerieClient").select("nom").limit(500)),
+    _rowsCli(admin.from("ArmurerieVente").select("acquereur").order("createdAt", { ascending: false }).limit(300)),
+    _rowsCli(admin.from("ArmurerieContrat").select("clientNom").limit(300)),
+  ]);
+  const set = new Set<string>();
+  const add = (v: unknown) => { const t = String(v ?? "").trim(); if (t) set.add(t); };
+  for (const r of cli) add(r.nom);
+  for (const r of ventes) add(r.acquereur);
+  for (const r of contrats) add(r.clientNom);
+  return [...set].sort((a, b) => a.localeCompare(b)).slice(0, 400);
+}
+
+export async function getDossierClient(nom: string): Promise<DossierClient> {
+  const vide: DossierClient = { nom: String(nom ?? "").trim(), totalDepense: 0, nbActes: 0, actes: [] };
+  const admin = createAdminClient();
+  const cible = _normCli(nom);
+  if (!admin || !cible) return vide;
+  const [ventes, contrats, rdvs, factures] = await Promise.all([
+    _rowsCli(admin.from("ArmurerieVente").select("id,acquereur,marque,modele,prix,quantite,statut,createdAt,dateVente").order("createdAt", { ascending: false }).limit(500)),
+    _rowsCli(admin.from("ArmurerieContrat").select("id,clientNom,arme,prix,statut,createdAt").order("createdAt", { ascending: false }).limit(300)),
+    _rowsCli(admin.from("ArmurerieRdv").select("id,clientNom,commande,lieu,statut,dateRdv").order("dateRdv", { ascending: false }).limit(300)),
+    _rowsCli(admin.from("Facture").select("id,clientNom,objet,montant,createdAt").order("createdAt", { ascending: false }).limit(300)),
+  ]);
+  const actes: ClientActe[] = [];
+  let dep = 0;
+  for (const v of ventes) { if (_normCli(v.acquereur) !== cible) continue; const m = Number(v.prix) || 0; dep += m; const lib = [v.marque, v.modele].filter(Boolean).join(" ") || "Vente"; actes.push({ id: "v" + v.id, type: "Vente", libelle: `${Number(v.quantite) || 1}× ${lib}`, montant: m, statut: v.statut ? String(v.statut) : null, date: String(v.createdAt || v.dateVente || "") }); }
+  for (const c of contrats) { if (_normCli(c.clientNom) !== cible) continue; actes.push({ id: "c" + c.id, type: "Contrat", libelle: String(c.arme || "Contrat"), montant: Number(c.prix) || 0, statut: c.statut ? String(c.statut) : null, date: String(c.createdAt || "") }); }
+  for (const r of rdvs) { if (_normCli(r.clientNom) !== cible) continue; actes.push({ id: "r" + r.id, type: "Rendez-vous", libelle: String(r.commande || r.lieu || "Rendez-vous"), montant: null, statut: r.statut ? String(r.statut) : null, date: String(r.dateRdv || "") }); }
+  for (const f of factures) { if (_normCli(f.clientNom) !== cible) continue; actes.push({ id: "f" + f.id, type: "Facture", libelle: String(f.objet || "Facture"), montant: Number(f.montant) || 0, statut: null, date: String(f.createdAt || "") }); }
+  actes.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  return { nom: String(nom).trim(), totalDepense: dep, nbActes: actes.length, actes };
+}
