@@ -9,7 +9,7 @@ export type FactureResult = { ok: boolean; error?: string; id?: string };
 export type RapportPolice = {
   genereLe: string;
   medecin: string;
-  lignes: { date: string | null; nom: string | null; objet: string; montant: number }[];
+  lignes: { date: string | null; nom: string | null; soins: string | null; montant: number }[];
   nbDossiers: number;
   total: number;
 };
@@ -111,7 +111,8 @@ export async function genererRapportPolice(ids: string[]): Promise<{ ok: boolean
   const { data, error } = await admin.from("DispensaireFacture").select("id,objet,destinataire,montant,dateEmission,createdAt").in("id", ids.slice(0, 100));
   if (error) return { ok: false, error: "Lecture impossible." };
   const rows = (data || []) as Record<string, unknown>[];
-  const lignes = rows.map((r) => ({ date: s(r.dateEmission) || s(r.createdAt), nom: s(r.destinataire), objet: String(r.objet || "Facture"), montant: n(r.montant) }));
+  // Le patient est dans `objet` (Prénom / Nom) ; le type de soins dans `destinataire`.
+  const lignes = rows.map((r) => ({ date: s(r.dateEmission) || s(r.createdAt), nom: String(r.objet || "—"), soins: s(r.destinataire), montant: n(r.montant) }));
   const total = lignes.reduce((a, l) => a + l.montant, 0);
   const rapport: RapportPolice = { genereLe: new Date().toISOString(), medecin, lignes, nbDossiers: lignes.length, total };
   for (const r of rows) await logFacture(admin, String(r.id), "Rapport police", `${lignes.length} dossier(s)`, medecin);
