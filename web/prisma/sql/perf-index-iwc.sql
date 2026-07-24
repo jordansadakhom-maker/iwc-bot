@@ -2,52 +2,55 @@
 --  PERF — Index de l'IRON WOLF COMPANY (site principal)
 --  À exécuter dans le Supabase IRON WOLF (celui alimenté par le bot Discord).
 --
---  100 % additif & idempotent : chaque index est « IF NOT EXISTS », rien n'est
---  supprimé ni modifié. Rejouable sans risque. Toutes les colonnes ci-dessous
---  ont été vérifiées dans les schémas existants (init.sql, phase*.sql, etc.).
+--  100 % additif, idempotent & TOLÉRANT : chaque index n'est créé que si sa
+--  table ET sa colonne existent réellement dans ta base. Une table absente
+--  (module non déployé) est simplement ignorée — le script ne s'arrête jamais
+--  en erreur. Rejouable autant de fois que voulu.
 --
 --  Les clés primaires (id) sont déjà indexées automatiquement : les lookups
 --  Membre.id / Coffre.id à chaque requête sont donc déjà rapides. On ajoute ici
 --  les colonnes de TRI (createdAt), de FILTRE (statut) et les CLÉS ÉTRANGÈRES
---  utilisées dans les listes et journaux qui grossissent avec le temps.
---
---  Note : sur une très grosse table, préférer « CREATE INDEX CONCURRENTLY »
---  (hors transaction) pour éviter tout verrou.
+--  des listes et journaux qui grossissent avec le temps.
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- ── Trésorerie & facturation ────────────────────────────────────────────────
-CREATE INDEX IF NOT EXISTS "idx_transaction_createdat" ON "Transaction" ("createdAt");
-CREATE INDEX IF NOT EXISTS "idx_facture_createdat"     ON "Facture"     ("createdAt");
-CREATE INDEX IF NOT EXISTS "idx_contrat_statut"        ON "Contrat"     ("statut");
-
--- ── Renseignement / traques ─────────────────────────────────────────────────
-CREATE INDEX IF NOT EXISTS "idx_traque_statut"         ON "Traque"      ("statut");
-CREATE INDEX IF NOT EXISTS "idx_rapportterrain_createdat" ON "RapportTerrain" ("createdAt");
-
--- ── Médical / sanctions (lookup par membre) ─────────────────────────────────
-CREATE INDEX IF NOT EXISTS "idx_dossier_membreid"      ON "DossierMedical" ("membreId");
-CREATE INDEX IF NOT EXISTS "idx_sanction_membreid"     ON "Sanction"       ("membreId");
-
--- ── Rendez-vous / télégrammes / recrutement ─────────────────────────────────
-CREATE INDEX IF NOT EXISTS "idx_rdv_statut"            ON "Rdv"         ("statut");
-CREATE INDEX IF NOT EXISTS "idx_rdv_clientid"          ON "Rdv"         ("clientId");
-CREATE INDEX IF NOT EXISTS "idx_telegramme_createdat"  ON "Telegramme"  ("createdAt");
-CREATE INDEX IF NOT EXISTS "idx_telegramme_statut"     ON "Telegramme"  ("statut");
-CREATE INDEX IF NOT EXISTS "idx_candidature_createdat" ON "Candidature" ("createdAt");
-CREATE INDEX IF NOT EXISTS "idx_candidature_statut"    ON "Candidature" ("statut");
-
--- ── Chasse / inventaire (mouvements, append-only) ───────────────────────────
-CREATE INDEX IF NOT EXISTS "idx_chassemvt_createdat"   ON "ChasseMouvement"     ("createdAt");
-CREATE INDEX IF NOT EXISTS "idx_chassemvt_zoneid"      ON "ChasseMouvement"     ("zoneId");
-CREATE INDEX IF NOT EXISTS "idx_invmvt_createdat"      ON "InventaireMouvement" ("createdAt");
-
--- ── Armurerie (ventes, mouvements, paies — les plus volumineux) ─────────────
-CREATE INDEX IF NOT EXISTS "idx_armvente_createdat"    ON "ArmurerieVente"          ("createdAt");
-CREATE INDEX IF NOT EXISTS "idx_armvente_clientid"     ON "ArmurerieVente"          ("clientId");
-CREATE INDEX IF NOT EXISTS "idx_armvente_ticket"       ON "ArmurerieVente"          ("ticket");
-CREATE INDEX IF NOT EXISTS "idx_armmvtcoffre_createdat" ON "ArmurerieMouvementCoffre" ("createdAt");
-CREATE INDEX IF NOT EXISTS "idx_armmvtstock_createdat" ON "ArmurerieMouvementStock" ("createdAt");
-CREATE INDEX IF NOT EXISTS "idx_armmvtstock_refid"     ON "ArmurerieMouvementStock" ("refId");
-CREATE INDEX IF NOT EXISTS "idx_armpaie_employeid"     ON "ArmureriePaie"           ("employeId");
-CREATE INDEX IF NOT EXISTS "idx_armpointage_employeid" ON "ArmureriePointage"       ("employeId");
-CREATE INDEX IF NOT EXISTS "idx_armimpot_statut"       ON "ArmurerieImpot"          ("statut");
+DO $$
+DECLARE
+  defs text[][] := ARRAY[
+    -- [ table , colonne , nom de l'index ]
+    ARRAY['Transaction',            'createdAt', 'idx_transaction_createdat'],
+    ARRAY['Facture',                'createdAt', 'idx_facture_createdat'],
+    ARRAY['Contrat',                'statut',    'idx_contrat_statut'],
+    ARRAY['Traque',                 'statut',    'idx_traque_statut'],
+    ARRAY['RapportTerrain',         'createdAt', 'idx_rapportterrain_createdat'],
+    ARRAY['DossierMedical',         'membreId',  'idx_dossier_membreid'],
+    ARRAY['Sanction',               'membreId',  'idx_sanction_membreid'],
+    ARRAY['Rdv',                    'statut',    'idx_rdv_statut'],
+    ARRAY['Rdv',                    'clientId',  'idx_rdv_clientid'],
+    ARRAY['Telegramme',             'createdAt', 'idx_telegramme_createdat'],
+    ARRAY['Telegramme',             'statut',    'idx_telegramme_statut'],
+    ARRAY['Candidature',            'createdAt', 'idx_candidature_createdat'],
+    ARRAY['Candidature',            'statut',    'idx_candidature_statut'],
+    ARRAY['ChasseMouvement',        'createdAt', 'idx_chassemvt_createdat'],
+    ARRAY['ChasseMouvement',        'zoneId',    'idx_chassemvt_zoneid'],
+    ARRAY['InventaireMouvement',    'createdAt', 'idx_invmvt_createdat'],
+    ARRAY['ArmurerieVente',         'createdAt', 'idx_armvente_createdat'],
+    ARRAY['ArmurerieVente',         'clientId',  'idx_armvente_clientid'],
+    ARRAY['ArmurerieVente',         'ticket',    'idx_armvente_ticket'],
+    ARRAY['ArmurerieMouvementCoffre','createdAt','idx_armmvtcoffre_createdat'],
+    ARRAY['ArmurerieMouvementStock','createdAt', 'idx_armmvtstock_createdat'],
+    ARRAY['ArmurerieMouvementStock','refId',     'idx_armmvtstock_refid'],
+    ARRAY['ArmureriePaie',          'employeId', 'idx_armpaie_employeid'],
+    ARRAY['ArmureriePointage',      'employeId', 'idx_armpointage_employeid'],
+    ARRAY['ArmurerieImpot',         'statut',    'idx_armimpot_statut']
+  ];
+  d text[];
+BEGIN
+  FOREACH d SLICE 1 IN ARRAY defs LOOP
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = d[1] AND column_name = d[2]
+    ) THEN
+      EXECUTE format('CREATE INDEX IF NOT EXISTS %I ON public.%I (%I)', d[3], d[1], d[2]);
+    END IF;
+  END LOOP;
+END $$;
