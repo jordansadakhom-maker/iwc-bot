@@ -4,14 +4,17 @@ import { AssistantConsole } from "@/components/assistant-console";
 import { RechercheIA } from "@/components/recherche-ia";
 import { AssistantPanel } from "@/components/erp-assistant";
 import { KpiBand } from "@/components/erp-kpi";
+import { RapportPanel } from "@/components/erp-rapport";
 import { getAssistantIWC } from "@/lib/assistant-iwc";
 import { getKpisIWC } from "@/lib/kpi-iwc";
+import { construireRapport } from "@/lib/erp-rapport-const";
 import { setEtatNotif } from "./veille-actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function AssistantPage() {
   const [veille, kpis] = await Promise.all([getAssistantIWC(), getKpisIWC()]);
+  const rapport = construireRapport("Bilan Iron Wolf", veille.genereLe, kpis, veille.constats);
   return (
     <>
       <PageHeader titre="Assistant" sous="Surveille la compagnie et la pilote en langage naturel" />
@@ -19,6 +22,8 @@ export default async function AssistantPage() {
       <KpiBand items={kpis} />
       {/* Veille automatique : ce que le système a détecté et propose. */}
       <AssistantPanel data={veille} setEtat={setEtatNotif} />
+      {/* Rapport auto : consultable, copiable, imprimable. */}
+      <RapportPanel rapport={rapport} />
       <div className="flex items-start gap-3 rounded-card border border-border bg-surface p-3.5" style={{ borderColor: "color-mix(in srgb,var(--accent) 30%,var(--border))" }}>
         <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] text-accent" style={{ background: "color-mix(in srgb,var(--accent) 15%,transparent)" }}>
           <Sparkles className="h-[18px] w-[18px]" strokeWidth={1.8} />

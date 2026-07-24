@@ -11,7 +11,7 @@ export async function getKpisIWC(): Promise<Kpi[]> {
     const s = await getStatistiques();
     if (!s.connecte) return [];
     return [
-      { id: "coffre", label: "Coffre armurerie", value: `$${fmt(s.kpis.coffreArmurerie)}`, tone: "var(--good)", spark: echantillonner(s.coffreEvolution.map((p) => p.v)) },
+      { id: "coffre", label: "Coffre armurerie", value: `$${fmt(s.kpis.coffreArmurerie)}`, tone: s.kpis.coffreArmurerie >= 0 ? "var(--good)" : "var(--oxblood)", spark: echantillonner(s.coffreEvolution.map((p) => p.v)) },
       { id: "membres", label: "Membres", value: fmt(s.kpis.membres) },
       { id: "ops", label: "Opérations terminées", value: fmt(s.kpis.opsTerminees) },
       { id: "aptes", label: "Aptes (médical)", value: fmt(s.kpis.aptes) },
