@@ -11,7 +11,8 @@ WITH attendus(objet, tbl, col) AS (VALUES
   ('Table · DispensaireConfig',            'DispensaireConfig',        ''),
   ('Table · DispensaireCategorie',         'DispensaireCategorie',     ''),
   ('Table · DispensaireContact',           'DispensaireContact',       ''),
-  ('Table · DispensaireHistorique',        'DispensaireHistorique',    ''),
+  -- NB : DispensaireHistorique n'est PAS attendue ici — c'est une table du
+  -- répertoire Iron Wolf (voir verif-schema-iwc.sql). Son absence est normale.
   ('Table · DispensaireStock',             'DispensaireStock',         ''),
   ('Table · DispensaireStockMouvement',    'DispensaireStockMouvement',''),
   ('Table · DispensaireMatiere',           'DispensaireMatiere',       ''),

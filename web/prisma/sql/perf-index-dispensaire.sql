@@ -21,7 +21,8 @@ DECLARE
     ARRAY['DispensaireCertificat',   'createdAt',   'idx_dispcert_createdat'],
     ARRAY['DispensaireRapport',      'createdAt',   'idx_disprapport_createdat'],
     ARRAY['DispensaireSoinFDO',      'createdAt',   'idx_dispfdo_createdat'],
-    ARRAY['DispensaireHistorique',   'createdAt',   'idx_disphisto_createdat'],
+    -- (DispensaireHistorique est une table du RÉPERTOIRE Iron Wolf, pas du site
+    --  Dispensaire → voir perf-index-iwc.sql. Rien ici ne l'utilise.)
     ARRAY['DispensaireStockMouvement','createdAt',  'idx_dispstockmvt_createdat'],
     ARRAY['DispensairePointage',     'createdAt',   'idx_disppointage_createdat'],
     ARRAY['DispensaireFacture',      'statut',      'idx_dispfacture_statut'],

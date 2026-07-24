@@ -65,6 +65,10 @@ WITH attendus(objet, tbl, col) AS (VALUES
   ('Table · ArmurerieTache',           'ArmurerieTache',           ''),
   ('Table · ArmurerieRdv',             'ArmurerieRdv',             ''),
   ('Table · ArmurerieScanRapport',     'ArmurerieScanRapport',     ''),
+  -- Répertoire des partenaires (côté Iron Wolf ; masqué sur le site autonome)
+  ('Table · DispensaireCategorie',     'DispensaireCategorie',     ''),
+  ('Table · DispensaireContact',       'DispensaireContact',       ''),
+  ('Table · DispensaireHistorique',    'DispensaireHistorique',    ''),
   -- Colonnes ajoutées par migrations ultérieures (features qui en dépendent)
   ('Colonne · Membre.ficheRH',              'Membre',            'ficheRH'),
   ('Colonne · Membre.absence',              'Membre',            'absence'),
