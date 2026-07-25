@@ -6,6 +6,7 @@ import { getAcces } from "@/lib/queries";
 import { envoyerCommande } from "@/lib/commandes";
 import { round2 } from "@/lib/format";
 import { calculFiscal, snapshotCycle, estMouvementImpot } from "@/lib/armurerie-fiscal";
+import { headers } from "next/headers";
 
 type Admin = NonNullable<ReturnType<typeof createAdminClient>>;
 
@@ -875,7 +876,39 @@ export async function supprimerPaie(id: string): Promise<ArmResult> {
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
 
-// ── Impôts (cycle fiscal : CA × taux) ────────────────────────────
+// ── Journal d'audit fiscal (append-only : qui / quand / avant → après / IP) ───
+// Best-effort : n'échoue jamais l'opération métier ; muet si la table n'existe pas.
+async function _auditFiscal(admin: Admin, action: string, cible: string, avant: unknown, apres: unknown) {
+  try {
+    let ip: string | null = null;
+    try { const h = await headers(); ip = ((h.get("x-forwarded-for") || "").split(",")[0].trim() || h.get("x-real-ip") || "") || null; } catch { ip = null; }
+    await admin.from("ArmurerieAuditFiscal").insert({
+      id: newId("aud"), action: s(action, 40), cible: s(cible, 120),
+      avant: avant == null ? null : s(String(avant), 200), apres: apres == null ? null : s(String(apres), 200),
+      par: await auteurNom(), ip, createdAt: nowISO(),
+    });
+  } catch { /* table absente / indisponible → jamais bloquant */ }
+}
+
+export type AuditFiscal = { id: string; action: string; cible: string | null; avant: string | null; apres: string | null; par: string | null; ip: string | null; createdAt: string | null };
+// Lecture du journal (consultable, jamais modifiable). Réservé aux comptes armurerie.
+export async function getAuditFiscal(): Promise<{ ok: boolean; entries: AuditFiscal[]; pret: boolean }> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, entries: [], pret: false };
+  const _ga = await garde(); if (_ga) return { ok: false, entries: [], pret: true };
+  try {
+    const { data, error } = await admin.from("ArmurerieAuditFiscal").select("*").order("createdAt", { ascending: false }).limit(100);
+    if (error) return { ok: true, entries: [], pret: false }; // table pas encore créée
+    const entries: AuditFiscal[] = ((data || []) as Record<string, unknown>[]).map((r) => ({
+      id: String(r.id), action: String(r.action || ""), cible: (r.cible as string) ?? null,
+      avant: (r.avant as string) ?? null, apres: (r.apres as string) ?? null,
+      par: (r.par as string) ?? null, ip: (r.ip as string) ?? null, createdAt: (r.createdAt as string) ?? null,
+    }));
+    return { ok: true, entries, pret: true };
+  } catch { return { ok: false, entries: [], pret: false }; }
+}
+
+// ── Impôts (cycle fiscal : impôt sur le bénéfice, grille officielle) ──────────
 export async function creerImpot(d: { libelle?: string; debut?: string; fin?: string; chiffreAffaires?: number; taux?: number; notes?: string }): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
@@ -889,6 +922,7 @@ export async function creerImpot(d: { libelle?: string; debut?: string; fin?: st
     chiffreAffaires: ca, taux, montant, statut: "du", notes: s(d.notes, 500),
   });
   if (error) return { ok: false, error: erpErr(error.message) };
+  await _auditFiscal(admin, "declaration", s(d.libelle, 80) || "Cycle fiscal", null, `${montant}$ (${taux}%)`);
   return { ok: true, id };
 }
 export async function payerImpot(id: string): Promise<ArmResult> {
@@ -903,6 +937,7 @@ export async function payerImpot(id: string): Promise<ArmResult> {
   try { if (montant > 0) await _mouvementCoffre(admin, montant, "sortie", `Impôt — ${im.libelle || "cycle"}`, await auteurNom(), "charge"); }
   catch (e) { return { ok: false, error: erpErr((e as Error).message || "") }; }
   await admin.from("ArmurerieImpot").update({ statut: "paye", payeAt: nowISO() }).eq("id", id);
+  await _auditFiscal(admin, "reglement", im.libelle || "cycle", "dû", `réglé ${montant}$`);
   return { ok: true };
 }
 // Clôture du cycle fiscal courant : fige le bénéfice/impôt calculés sur les
@@ -932,6 +967,7 @@ export async function cloturerCycleFiscal(): Promise<ArmResult & { impot?: numbe
   if (cycle.impot > 0) { try { await _mouvementCoffre(admin, cycle.impot, "sortie", `Impôt cycle (${cycle.taux}%)`, await auteurNom(), "charge"); } catch { /* clôture enregistrée même si le coffre n'est pas prêt */ } }
   // Retire la déclaration automatique « du » (remplacée par la clôture réglée).
   try { await admin.from("ArmurerieImpot").delete().eq("statut", "du"); } catch { /* best-effort */ }
+  await _auditFiscal(admin, "cloture", "Cycle fiscal", `bénéfice ${cycle.benefice}$`, `impôt ${cycle.impot}$ (${cycle.taux}%)`);
   return { ok: true, impot: cycle.impot, benefice: cycle.benefice };
 }
 
@@ -941,13 +977,16 @@ export async function supprimerImpot(id: string): Promise<ArmResult> {
   const _ga = await garde(); if (_ga) return _ga;
   // Verrouillage : une déclaration RÉGLÉE (cycle clôturé) est un enregistrement
   // figé → sa suppression est réservée à la Direction.
-  const { data } = await admin.from("ArmurerieImpot").select("statut").eq("id", id).maybeSingle();
-  if (data && String((data as { statut: string }).statut) === "paye") {
+  const { data } = await admin.from("ArmurerieImpot").select("statut,libelle,montant").eq("id", id).maybeSingle();
+  const row = data as { statut: string; libelle: string | null; montant: number } | null;
+  if (row && String(row.statut) === "paye") {
     let dir = false; try { dir = !!(await getAcces()).direction; } catch { dir = false; }
     if (!dir) return { ok: false, error: "Cycle clôturé : suppression réservée à la Direction." };
   }
   const { error } = await admin.from("ArmurerieImpot").delete().eq("id", id);
-  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Suppression impossible." };
+  await _auditFiscal(admin, "suppression", row?.libelle || id, `${row?.statut || "?"} ${row ? Math.round(Number(row.montant) || 0) + "$" : ""}`, null);
+  return { ok: true };
 }
 
 // ── Comptabilité : écriture manuelle (recette / dépense) ─────────
