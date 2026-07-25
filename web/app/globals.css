@@ -70,6 +70,19 @@ body > * { position: relative; z-index: 1; }
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }
 
+/* ============================================================
+   Accessibilité clavier : anneau de focus visible au CLAVIER uniquement
+   (jamais au clic souris/tactile), aux couleurs du poste. Comble l'absence
+   d'indicateur de focus sur les boutons/champs stylés « maison » — un
+   utilisateur au clavier voit enfin où il se trouve.
+   ============================================================ */
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 78%, transparent);
+  outline-offset: 2px;
+}
+/* Pas d'anneau au focus souris/tactile (l'anneau reste au clavier). */
+:focus:not(:focus-visible) { outline: none; }
+
 /* Arrivée de page : l'en-tête (et tout bloc marqué .iwc-rise) « monte » en
    douceur — donne le sentiment que la page se pose. Neutralisé si l'utilisateur
    préfère moins d'animations (règle ci-dessus). */
