@@ -17,6 +17,7 @@ import {
 } from "@/components/armurerie-erp";
 import { SimulateurFiscal } from "@/components/armurerie-fiscal";
 import { snapshotCycle } from "@/lib/armurerie-fiscal";
+import { toastErreur } from "@/lib/toast";
 import {
   creerClient, majClient, supprimerClient,
   creerVente, majVente, supprimerVente, marquerRdv,
@@ -990,8 +991,9 @@ function ClientsTab({ clients, ventes, contrats, router }: { clients: ArmClient[
     if (!nomComplet) { setScanTone("err"); setScanMsg("Carte lue, mais nom non détecté — ajoute le client à la main."); return; }
     const found = matchNomClient(clients, nomComplet);
     if (found) {
-      await majClient(found.id, { carteIdentite: url }); // met à jour sa capture
-      setScanTone("ok"); setScanMsg(`Client retrouvé : ${found.nom} — dossier ouvert et mis à jour.`);
+      const maj = await majClient(found.id, { carteIdentite: url }); // met à jour sa capture
+      if (!maj.ok) toastErreur("La capture n'a pas pu être enregistrée sur le dossier client.");
+      setScanTone("ok"); setScanMsg(`Client retrouvé : ${found.nom} — dossier ouvert${maj.ok ? " et mis à jour" : ""}.`);
       setSel({ ...found, carteIdentite: url });
       router.refresh();
     } else {
