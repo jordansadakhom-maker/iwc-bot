@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getAlertes, getAbsences } from "@/lib/queries";
 import { getEtatsOverlay } from "@/lib/notif-etat";
 import { detecterDoublons, detecterNegatifs, apercuReappro, type ReapproItem } from "@/lib/erp-coherence";
+import { snapshotCycle, euros, pourcent } from "@/lib/armurerie-fiscal";
 import { type AssistantData, type Constat, type Priorite, trierConstats, compterGravite, graviteDe } from "@/lib/erp-assistant-const";
 
 export * from "@/lib/erp-assistant-const";
@@ -115,6 +116,22 @@ export async function getAssistantIWC(): Promise<AssistantData> {
     if (rdvArm[i].t - rdvArm[i - 1].t <= FENETRE_MIN * 60000) conflits.push(`${rdvArm[i - 1].qui} ↔ ${rdvArm[i].qui}`);
   }
   if (conflits.length) constats.push(mk({ id: "rdv-conflit", priorite: "importante", categorie: "Rendez-vous", titre: `${conflits.length} chevauchement(s) de rendez-vous`, detail: conflits.slice(0, 3).join(" · "), suggestion: `Deux rendez-vous sont à moins de ${FENETRE_MIN} min l'un de l'autre : décale un créneau.`, href: "/armurerie?tab=rdv" }));
+
+  // Fiscalité armurerie : impôt à provisionner, approche d'une tranche (avant de
+  // la franchir), et détection d'incohérence entre la déclaration en base et le
+  // calcul sur le bénéfice réel (grille officielle — lib/armurerie-fiscal).
+  const [mvtCoffre, impotsRows] = await Promise.all([
+    safeRows(() => admin.from("ArmurerieMouvementCoffre").select("sens,montant,createdAt")),
+    safeRows(() => admin.from("ArmurerieImpot").select("statut,montant,payeAt,fin")),
+  ]);
+  if (mvtCoffre.length) {
+    const payes = impotsRows.filter((i) => String(i.statut) === "paye").map((i) => ({ payeAt: (i.payeAt as string) ?? null, fin: (i.fin as string) ?? null }));
+    const cycle = snapshotCycle(mvtCoffre.map((m) => ({ sens: String(m.sens), montant: num(m.montant), createdAt: (m.createdAt as string) ?? null })), payes);
+    if (cycle.impot > 0) constats.push(mk({ id: "fisc-impot", priorite: cycle.impot >= 1000 ? "importante" : "normale", categorie: "Impôts", titre: `Impôt à provisionner : ${euros(cycle.impot)}`, detail: `Bénéfice ${euros(cycle.benefice)} · tranche ${pourcent(cycle.taux)} · net ${euros(cycle.net)}`, suggestion: "Provisionne l'impôt du cycle ; règle la déclaration pour clôturer.", href: "/armurerie?tab=impots" }));
+    if (cycle.prochainSeuil != null && cycle.resteAvantProchain != null && cycle.resteAvantProchain <= 200) constats.push(mk({ id: "fisc-proche-tranche", priorite: "information", categorie: "Impôts", titre: `À ${euros(cycle.resteAvantProchain)} de la tranche ${pourcent(cycle.tauxProchain || 0)}`, detail: `Bénéfice ${euros(cycle.benefice)} → prochain palier ${euros(cycle.prochainSeuil)}.`, suggestion: "Une prochaine vente peut faire monter le taux d'imposition.", href: "/armurerie?tab=impots" }));
+    const du = impotsRows.find((i) => String(i.statut) === "du");
+    if (du && Math.abs(num(du.montant) - cycle.impot) > 1) constats.push(mk({ id: "fisc-anomalie", priorite: "critique", categorie: "Cohérence", titre: "Incohérence fiscale détectée", detail: `Déclaration en base ${euros(num(du.montant))} ≠ calcul sur le bénéfice réel ${euros(cycle.impot)}.`, suggestion: "Une vente recalcule et corrige automatiquement ; vérifie la déclaration en cours.", href: "/armurerie?tab=impots" }));
+  }
 
   // Couche d'état persistée (Non lue / En cours / Résolue / Archivée).
   const etats = await getEtatsOverlay(TABLE_ETAT_IWC);
