@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { PhotoDrop } from "@/components/photo-drop";
 import { FiscalDashboard } from "@/components/armurerie-fiscal";
-import { snapshotCycle } from "@/lib/armurerie-fiscal";
+import { snapshotCycle, calculFiscal, pourcent } from "@/lib/armurerie-fiscal";
 import { exporterFiscalExcel, exporterFiscalPDF } from "@/lib/fiscal-export";
 import type { ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache, ArmMouvement, ArmVente, ArmProduit, ArmCommande, ArmCommandeLigne, ArmRessource, ArmRdv } from "@/lib/queries";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
@@ -819,47 +819,49 @@ export function ImpotsTab({ impots, ca, mouvementsCoffre = [], router }: { impot
         ) : null}
       </div>
 
-      {nouveau ? <ImpotModal ca={ca} onClose={() => setNouveau(false)} router={router} /> : null}
+      {nouveau ? <ImpotModal benefice={cycle.benefice} onClose={() => setNouveau(false)} router={router} /> : null}
     </>
   );
 }
-function ImpotModal({ ca, onClose, router }: { ca: number; onClose: () => void; router: Router }) {
+function ImpotModal({ benefice: beneficeInit, onClose, router }: { benefice: number; onClose: () => void; router: Router }) {
   const [libelle, setLibelle] = useState("");
   const [debut, setDebut] = useState("");
   const [fin, setFin] = useState("");
-  const [chiffre, setChiffre] = useState(String(ca || ""));
-  const [taux, setTaux] = useState("10");
+  const [benef, setBenef] = useState(String(Math.round(beneficeInit) || ""));
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const montant = Math.round(((Number(chiffre) || 0) * (Number(taux) || 0)) / 100);
+  // Impôt calculé par la GRILLE sur le bénéfice saisi (même moteur que le reste).
+  const f = calculFiscal(Number(benef) || 0);
 
   async function creer() {
     setErr(null);
     setBusy(true);
-    const r = await creerImpot({ libelle, debut, fin, chiffreAffaires: Number(chiffre) || 0, taux: Number(taux) || 0, notes });
+    const r = await creerImpot({ libelle, debut, fin, benefice: Number(benef) || 0, notes });
     setBusy(false);
     if (!r.ok) { setErr(r.error || "Impossible."); return; }
     router.refresh(); onClose();
   }
   return (
-    <Modal titre="🏛️ Nouvelle déclaration fiscale" onClose={onClose} max={520}>
+    <Modal titre="🏛️ Déclaration manuelle" onClose={onClose} max={520}>
       <div className="flex flex-col gap-3">
+        <p className="text-[0.76rem] text-faint">Enregistre une déclaration ponctuelle : indique le <b>bénéfice</b>, l&apos;impôt suit automatiquement la grille officielle (comme le calcul automatique du cycle).</p>
         <Champ label="Libellé"><input className={inputCls} value={libelle} onChange={(e) => setLibelle(e.target.value)} placeholder="Ex : Cycle du 1er au 15 juillet" maxLength={80} /></Champ>
         <div className="grid gap-3 sm:grid-cols-2">
           <Champ label="Début de cycle"><input className={inputCls} value={debut} onChange={(e) => setDebut(e.target.value)} placeholder="01/07" maxLength={40} /></Champ>
           <Champ label="Fin de cycle"><input className={inputCls} value={fin} onChange={(e) => setFin(e.target.value)} placeholder="15/07" maxLength={40} /></Champ>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Champ label="Chiffre d'affaires ($)"><input className={inputCls} type="number" min={0} step="0.01" value={chiffre} onChange={(e) => setChiffre(e.target.value)} /></Champ>
-          <Champ label="Taux d'imposition (%)"><input className={inputCls} type="number" min={0} max={100} value={taux} onChange={(e) => setTaux(e.target.value)} /></Champ>
+        <Champ label="Bénéfice du cycle ($)"><input className={inputCls} type="number" step="0.01" value={benef} onChange={(e) => setBenef(e.target.value)} /></Champ>
+        {beneficeInit > 0 ? <button onClick={() => setBenef(String(Math.round(beneficeInit)))} className="self-start text-[0.74rem] text-faint underline hover:text-ink">Utiliser le bénéfice du cycle en cours ({money(beneficeInit)})</button> : null}
+        <div className="rounded-[10px] border border-border bg-surface-2 p-3 text-[0.84rem]">
+          <div className="flex justify-between text-faint"><span>Tranche</span><span className="font-num">{f.seuilTranche == null ? "0 %" : pourcent(f.taux)}</span></div>
+          <div className="mt-1 flex justify-between font-semibold"><span>Impôt à régler</span><span className="font-num" style={{ color: "var(--oxblood)" }}>{money(f.impot)}</span></div>
+          <div className="mt-0.5 flex justify-between text-faint"><span>Bénéfice net</span><span className="font-num">{money(f.net)}</span></div>
         </div>
-        <button onClick={() => setChiffre(String(ca || 0))} className="self-start text-[0.74rem] text-faint underline hover:text-ink">Utiliser le CA total ({money(ca)})</button>
-        <div className="rounded-[10px] border border-border bg-surface-2 p-3 text-[0.84rem]"><div className="flex justify-between font-semibold"><span>Impôt à régler</span><span className="font-num" style={{ color: "var(--accent)" }}>{money(montant)}</span></div></div>
         <Champ label="Notes"><input className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} /></Champ>
         {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
         <div className="flex justify-end">
-          <button onClick={creer} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Ouvrir le cycle</button>
+          <button onClick={creer} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Enregistrer la déclaration</button>
         </div>
       </div>
     </Modal>

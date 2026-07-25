@@ -909,20 +909,22 @@ export async function getAuditFiscal(): Promise<{ ok: boolean; entries: AuditFis
 }
 
 // ── Impôts (cycle fiscal : impôt sur le bénéfice, grille officielle) ──────────
-export async function creerImpot(d: { libelle?: string; debut?: string; fin?: string; chiffreAffaires?: number; taux?: number; notes?: string }): Promise<ArmResult> {
+// Déclaration MANUELLE : l'impôt suit la grille officielle sur le bénéfice saisi
+// (même moteur que le calcul automatique). Aucun taux plat manuel — cohérence
+// garantie avec le reste du système.
+export async function creerImpot(d: { libelle?: string; debut?: string; fin?: string; benefice?: number; notes?: string }): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
   const _ga = await garde(); if (_ga) return _ga;
-  const ca = Math.max(0, round2(Number(d.chiffreAffaires) || 0));
-  const taux = Math.max(0, Math.min(100, Math.round(Number(d.taux) || 0)));
-  const montant = round2((ca * taux) / 100);
+  const benefice = round2(Number(d.benefice) || 0);
+  const f = calculFiscal(benefice);
   const id = newId("imp");
   const { error } = await admin.from("ArmurerieImpot").insert({
-    id, libelle: s(d.libelle, 80) || "Cycle fiscal", debut: s(d.debut, 40), fin: s(d.fin, 40),
-    chiffreAffaires: ca, taux, montant, statut: "du", notes: s(d.notes, 500),
+    id, libelle: s(d.libelle, 80) || "Déclaration manuelle", debut: s(d.debut, 40), fin: s(d.fin, 40),
+    chiffreAffaires: benefice, taux: Math.round(f.taux), montant: f.impot, statut: "du", notes: s(d.notes, 500),
   });
   if (error) return { ok: false, error: erpErr(error.message) };
-  await _auditFiscal(admin, "declaration", s(d.libelle, 80) || "Cycle fiscal", null, `${montant}$ (${taux}%)`);
+  await _auditFiscal(admin, "declaration", s(d.libelle, 80) || "Déclaration manuelle", null, `bénéfice ${benefice}$ → impôt ${f.impot}$ (${f.taux}%)`);
   return { ok: true, id };
 }
 export async function payerImpot(id: string): Promise<ArmResult> {

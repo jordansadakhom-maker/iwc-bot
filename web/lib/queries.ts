@@ -1154,7 +1154,7 @@ export async function getAlertes(): Promise<AlertesData> {
   const iso24 = new Date(Date.now() + 24 * 86400000).toISOString(); // fenêtre « dans les 24 h »
   const [contrats, impots, paies, ruptures, candids, rdvs, telegrammes, rdvArm] = await Promise.all([
     safe(() => admin.from("ArmurerieContrat").select("*", { count: "exact", head: true }).eq("statut", "envoye")),
-    safe(() => admin.from("ArmurerieImpot").select("*", { count: "exact", head: true }).neq("statut", "paye")),
+    safe(() => admin.from("ArmurerieImpot").select("*", { count: "exact", head: true }).neq("statut", "paye").gt("montant", 0)),
     safe(() => admin.from("ArmureriePaie").select("*", { count: "exact", head: true }).neq("statut", "paye")),
     safe(() => admin.from("ArmurerieProduit").select("*", { count: "exact", head: true }).lte("stock", 0).eq("aLaDemande", false)),
     safe(() => admin.from("Candidature").select("*", { count: "exact", head: true }).gte("createdAt", iso7)),
