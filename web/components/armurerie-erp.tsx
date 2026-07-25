@@ -18,7 +18,7 @@ import {
   creerEmploye, majEmploye, supprimerEmploye,
   pointerService, terminerService, supprimerPointage,
   creerPaie, payerPaie, supprimerPaie,
-  creerImpot, payerImpot, supprimerImpot,
+  creerImpot, payerImpot, supprimerImpot, cloturerCycleFiscal,
   ajouterEcriture, reajusterFinancesReckless,
   creerNote, majNote, supprimerNote,
   creerTache, basculerTache, supprimerTache,
@@ -694,13 +694,51 @@ export function ImpotsTab({ impots, ca, mouvementsCoffre = [], router }: { impot
   // la dernière déclaration réglée, taux/impôt via la grille officielle.
   const cycle = snapshotCycle(mouvementsCoffre, impots.filter((i) => i.statut === "paye"));
 
+  const [confirmCloture, setConfirmCloture] = useState(false);
   async function payer(i: ArmImpot) { setBusy(i.id); const r = await payerImpot(i.id); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Règlement impossible — réessaie."); }
   async function suppr(i: ArmImpot) { setBusy(i.id); const r = await supprimerImpot(i.id); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Suppression impossible — réessaie."); }
+  async function cloturer() { setBusy("cloture"); const r = await cloturerCycleFiscal(); setBusy(null); setConfirmCloture(false); if (r.ok) router.refresh(); else alert(r.error || "Clôture impossible — réessaie."); }
+  // Export CSV (compatible Excel FR : séparateur « ; » + BOM pour les accents).
+  function exporterCSV() {
+    const lignes: (string | number | null)[][] = [
+      ["Situation fiscale — armurerie", new Date().toLocaleString("fr-FR")], [],
+      ["Cycle en cours"],
+      ["Chiffre d'affaires (entrées)", Math.round(cycle.ca)],
+      ["Achats & dépenses (sorties)", Math.round(cycle.depenses)],
+      ["Bénéfice", Math.round(cycle.benefice)],
+      ["Tranche (seuil)", cycle.seuilTranche ?? "aucune"],
+      ["Taux (%)", cycle.taux],
+      ["Impôt dû", Math.round(cycle.impot)],
+      ["Bénéfice net", Math.round(cycle.net)], [],
+      ["Historique des déclarations"],
+      ["Libellé", "Début", "Fin", "CA", "Taux %", "Montant", "Statut", "Réglé le"],
+      ...impots.map((i) => [i.libelle || "", i.debut || "", i.fin || "", Math.round(i.chiffreAffaires), i.taux, Math.round(i.montant), i.statut, i.payeAt || ""]),
+    ];
+    const csv = lignes.map((r) => r.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(";")).join("\r\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = `fiscal-armurerie-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
 
   return (
     <>
       {/* Tableau de bord fiscal — automatique, temps réel, grille officielle. */}
       <div className="mb-3"><FiscalDashboard cycle={cycle} /></div>
+
+      {/* Clôture du cycle (fige + débite le coffre) & export. */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        {confirmCloture ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-1.5 text-[0.78rem]" style={{ borderColor: "color-mix(in srgb,var(--warn) 50%,var(--border))" }}>
+            <span className="text-muted">Clôturer et figer ce cycle ? L&apos;impôt de <b className="text-ink">{money(cycle.impot)}</b> sort du coffre.</span>
+            <button onClick={cloturer} disabled={busy === "cloture"} className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[0.76rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--good)" }}>{busy === "cloture" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Confirmer</button>
+            <button onClick={() => setConfirmCloture(false)} className="text-[0.76rem] text-muted hover:text-ink">Annuler</button>
+          </div>
+        ) : (
+          <Btn onClick={() => setConfirmCloture(true)}><Landmark className="h-3.5 w-3.5" /> Clôturer le cycle</Btn>
+        )}
+        <button onClick={exporterCSV} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-muted transition hover:border-border-2 hover:text-ink"><Download className="h-3.5 w-3.5" /> Exporter (CSV)</button>
+      </div>
 
       <div className="mb-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
         <Stat label="Impôt dû (cycle)" value={money(cycle.impot)} tone="var(--oxblood)" icon={Clock} />

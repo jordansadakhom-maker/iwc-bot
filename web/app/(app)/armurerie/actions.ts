@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getAcces } from "@/lib/queries";
 import { envoyerCommande } from "@/lib/commandes";
 import { round2 } from "@/lib/format";
-import { calculFiscal } from "@/lib/armurerie-fiscal";
+import { calculFiscal, snapshotCycle, estMouvementImpot } from "@/lib/armurerie-fiscal";
 
 type Admin = NonNullable<ReturnType<typeof createAdminClient>>;
 
@@ -523,11 +523,14 @@ async function _accumulerImpot(admin: Admin) {
   const { data: paye } = await admin.from("ArmurerieImpot").select("payeAt,fin").eq("statut", "paye").order("payeAt", { ascending: false }).limit(1).maybeSingle();
   const start = paye ? ((paye as { payeAt: string | null; fin: string | null }).payeAt || (paye as { fin: string | null }).fin) : null;
   // Flux net du coffre sur le cycle.
-  let qy = admin.from("ArmurerieMouvementCoffre").select("sens,montant");
+  let qy = admin.from("ArmurerieMouvementCoffre").select("sens,montant,motif");
   if (start) qy = qy.gte("createdAt", start);
   const { data: mvts } = await qy;
   let ca = 0, dep = 0;
-  for (const m of ((mvts as { sens: string; montant: number }[]) || [])) { const v = Number(m.montant) || 0; if (String(m.sens) === "sortie") dep += v; else ca += v; }
+  for (const m of ((mvts as { sens: string; montant: number; motif: string | null }[]) || [])) {
+    const v = Number(m.montant) || 0;
+    if (String(m.sens) === "sortie") { if (estMouvementImpot(m.motif)) continue; dep += v; } else ca += v;
+  }
   const f = calculFiscal(round2(ca - dep));
   // taux stocké arrondi (colonne potentiellement entière) ; montant = impôt exact.
   const patch = { chiffreAffaires: round2(ca), taux: Math.round(f.taux), montant: f.impot };
@@ -902,10 +905,47 @@ export async function payerImpot(id: string): Promise<ArmResult> {
   await admin.from("ArmurerieImpot").update({ statut: "paye", payeAt: nowISO() }).eq("id", id);
   return { ok: true };
 }
+// Clôture du cycle fiscal courant : fige le bénéfice/impôt calculés sur les
+// mouvements réels (grille officielle) dans une déclaration RÉGLÉE, débite le
+// coffre de l'impôt, et retire la déclaration « du » automatique → le cycle
+// suivant repart de zéro. Une seule vérité : le tableau de bord et cette clôture
+// utilisent le même calcul (lib/armurerie-fiscal).
+export async function cloturerCycleFiscal(): Promise<ArmResult & { impot?: number; benefice?: number }> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
+  const { data: paye } = await admin.from("ArmurerieImpot").select("payeAt,fin").eq("statut", "paye").order("payeAt", { ascending: false }).limit(1).maybeSingle();
+  const start = paye ? ((paye as { payeAt: string | null; fin: string | null }).payeAt || (paye as { fin: string | null }).fin) : null;
+  let qy = admin.from("ArmurerieMouvementCoffre").select("sens,montant,motif,createdAt");
+  if (start) qy = qy.gte("createdAt", start);
+  const { data: mvts } = await qy;
+  const rows = ((mvts as { sens: string; montant: number; motif: string | null; createdAt: string | null }[]) || []);
+  if (!rows.length) return { ok: false, error: "Aucun mouvement à clôturer sur ce cycle." };
+  const cycle = snapshotCycle(rows.map((m) => ({ sens: String(m.sens), montant: Number(m.montant) || 0, motif: m.motif, createdAt: m.createdAt })), []);
+  const nowIso = nowISO();
+  const { error } = await admin.from("ArmurerieImpot").insert({
+    id: newId("imp"), libelle: "Cycle clôturé", debut: start, fin: nowIso,
+    chiffreAffaires: cycle.ca, taux: Math.round(cycle.taux), montant: cycle.impot, statut: "paye", payeAt: nowIso,
+  });
+  if (error) return { ok: false, error: erpErr(error.message) };
+  // L'impôt sort du coffre (motif « Impôt … » → exclu du bénéfice du cycle suivant).
+  if (cycle.impot > 0) { try { await _mouvementCoffre(admin, cycle.impot, "sortie", `Impôt cycle (${cycle.taux}%)`, await auteurNom(), "charge"); } catch { /* clôture enregistrée même si le coffre n'est pas prêt */ } }
+  // Retire la déclaration automatique « du » (remplacée par la clôture réglée).
+  try { await admin.from("ArmurerieImpot").delete().eq("statut", "du"); } catch { /* best-effort */ }
+  return { ok: true, impot: cycle.impot, benefice: cycle.benefice };
+}
+
 export async function supprimerImpot(id: string): Promise<ArmResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
   const _ga = await garde(); if (_ga) return _ga;
+  // Verrouillage : une déclaration RÉGLÉE (cycle clôturé) est un enregistrement
+  // figé → sa suppression est réservée à la Direction.
+  const { data } = await admin.from("ArmurerieImpot").select("statut").eq("id", id).maybeSingle();
+  if (data && String((data as { statut: string }).statut) === "paye") {
+    let dir = false; try { dir = !!(await getAcces()).direction; } catch { dir = false; }
+    if (!dir) return { ok: false, error: "Cycle clôturé : suppression réservée à la Direction." };
+  }
   const { error } = await admin.from("ArmurerieImpot").delete().eq("id", id);
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
 }
