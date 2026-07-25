@@ -4,7 +4,7 @@ import { AssistantPanel } from "@/components/erp-assistant";
 import { KpiBand } from "@/components/erp-kpi";
 import { RapportPanel } from "@/components/erp-rapport";
 import { construireRapport } from "@/lib/erp-rapport-const";
-import { setEtatNotif } from "./actions";
+import { setEtatNotif, executerConstat } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,7 @@ export default async function DispensaireAssistantPage() {
   return (
     <div className="flex flex-col gap-3">
       <KpiBand items={kpis} />
-      <AssistantPanel data={veille} setEtat={setEtatNotif} />
+      <AssistantPanel data={veille} setEtat={setEtatNotif} onAction={executerConstat} />
       <RapportPanel rapport={rapport} />
     </div>
   );

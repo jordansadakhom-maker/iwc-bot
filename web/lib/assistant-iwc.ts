@@ -61,7 +61,7 @@ export async function getAssistantIWC(): Promise<AssistantData> {
     safeCount(() => admin.from("Contrat").select("*", { count: "exact", head: true }).eq("statut", "en_attente")),
   ]);
 
-  if (pointage) constats.push(mk({ id: "pointage-ouvert", priorite: "importante", categorie: "Pointage", titre: `${pointage} pointage(s) armurerie non clôturé(s)`, detail: "Service ouvert depuis plus de 12 h.", suggestion: "Clôture les pointages restés ouverts pour fiabiliser la paie.", href: "/armurerie?tab=pointage" }));
+  if (pointage) constats.push(mk({ id: "pointage-ouvert", priorite: "importante", categorie: "Pointage", titre: `${pointage} pointage(s) armurerie non clôturé(s)`, detail: "Service ouvert depuis plus de 12 h.", suggestion: "Clôture les pointages restés ouverts pour fiabiliser la paie.", href: "/armurerie?tab=pointage", action: { kind: "clore-pointages", label: "Clôturer maintenant" } }));
 
   const invBas = invRows.filter((r) => num(r.seuil) > 0 && num(r.quantite) <= num(r.seuil));
   if (invBas.length) constats.push(mk({ id: "inv-bas", priorite: "normale", categorie: "Inventaire", titre: `${invBas.length} article(s) d'inventaire sous le seuil`, detail: invBas.slice(0, 3).map((r) => `${r.nom} (${num(r.quantite)})`).join(" · "), suggestion: "Réapprovisionne les articles sous leur seuil d'alerte.", href: "/inventaire" }));
