@@ -3,12 +3,11 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { peutFacturer } from "@/lib/dispensaire-roles";
-import { FACTURE_DELAI_H, FACTURE_STATUTS, factureOuverte } from "@/lib/dispensaire-facturation-const";
+import { FACTURE_DELAI_H, statutsDe, serialiserStatuts, statutRepresentatif, estOuverte } from "@/lib/dispensaire-facturation-const";
 
 // Factures — RÉSERVÉ aux chefs (habilités). Suivi des impayés.
 export type FactureResult = { ok: boolean; error?: string; id?: string };
 
-const STATUTS = FACTURE_STATUTS.map((x) => x.key);
 type Champ = "objet" | "destinataire" | "note";
 const CHAMPS: Champ[] = ["objet", "destinataire", "note"];
 
@@ -17,8 +16,29 @@ const n = (v: unknown) => Math.max(0, Math.round(Number(v) || 0));
 function newId(p = "df") { return `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
 // Date d'émission SAISIE (ISO ou « AAAA-MM-JJ ») → ISO. Repli si vide/invalide.
 function emissionDe(v: unknown, fallback: string): string { const t = Date.parse(String(v ?? "").trim()); return Number.isFinite(t) ? new Date(t).toISOString() : fallback; }
-// Échéance automatique = date d'émission + FACTURE_DELAI_H (72 h).
-function echeanceDe(emissionIso: string): string { return new Date(new Date(emissionIso).getTime() + FACTURE_DELAI_H * 3600000).toISOString(); }
+// Échéance désormais MANUELLE : parse la date saisie → ISO, ou null si vide.
+function echeanceManuelle(v: unknown): string | null { const raw = String(v ?? "").trim(); if (!raw) return null; const t = Date.parse(raw); return Number.isFinite(t) ? new Date(t).toISOString() : null; }
+// Échéance par défaut à la création (suggestion, modifiable) = émission + délai indicatif.
+function echeanceDefaut(emissionIso: string): string { return new Date(new Date(emissionIso).getTime() + FACTURE_DELAI_H * 3600000).toISOString(); }
+
+// Écrit une ligne facture en tolérant l'absence de la colonne `statuts` (SQL non
+// encore lancé) : on réessaie sans elle, la colonne `statut` restant synchronisée.
+type Admin = NonNullable<ReturnType<typeof createAdminClient>>;
+const COLS_OPTIONNELLES = ["statuts", "datePaiement", "payePar"];
+async function ecrireFacture(admin: Admin, mode: "insert" | "update", row: Record<string, unknown>, id?: string) {
+  const run = (r: Record<string, unknown>) => (mode === "insert" ? admin.from("DispensaireFacture").insert(r) : admin.from("DispensaireFacture").update(r).eq("id", id!));
+  const cur: Record<string, unknown> = { ...row };
+  let { error } = await run(cur);
+  // Retire les colonnes optionnelles non encore migrées (mentionnées dans l'erreur) et réessaie.
+  for (let i = 0; i < 3 && error; i++) {
+    const m = error.message || "";
+    const col = COLS_OPTIONNELLES.find((c) => c in cur && new RegExp(c, "i").test(m));
+    if (!col) break;
+    delete cur[col];
+    ({ error } = await run(cur));
+  }
+  return error;
+}
 // Fail-closed : réservé aux grades porteurs du droit « factures » (ou admin).
 async function autorise() { return peutFacturer(); }
 async function qui() { try { return (await getSessionProfile())?.nom || "Équipe"; } catch { return "Équipe"; } }
@@ -32,7 +52,12 @@ function nettoyer(data: Record<string, unknown>) {
   const row: Record<string, unknown> = {};
   for (const c of CHAMPS) if (c in data) row[c] = s(data[c], c === "note" ? 1000 : 300);
   if ("montant" in data) row.montant = n(data.montant);
-  if ("statut" in data) row.statut = STATUTS.includes(String(data.statut)) ? data.statut : "non_payee";
+  // Statuts multiples (nouveau) ou statut unique (compat) → colonnes `statuts` + `statut`.
+  if ("statuts" in data || "statut" in data) {
+    const arr = statutsDe({ statuts: data.statuts, statut: data.statut });
+    row.statuts = serialiserStatuts(arr);
+    row.statut = statutRepresentatif(arr);
+  }
   return row;
 }
 
@@ -44,12 +69,13 @@ export async function creerFacture(data: Record<string, unknown>): Promise<Factu
   if (!row.objet) return { ok: false, error: "Donne l'objet de la facture." };
   const id = newId();
   const nowIso = new Date().toISOString();
-  // Date d'émission : celle SAISIE (on n'émet pas forcément le jour même) ; à
-  // défaut, aujourd'hui. Seule l'ÉCHÉANCE est automatique = émission + 72 h.
+  // Dates désormais MANUELLES : émission saisie (à défaut aujourd'hui), échéance
+  // saisie (à défaut une suggestion +72 h, modifiable — plus rien d'imposé).
   const emission = emissionDe(data.dateEmission, nowIso);
-  const echeance = echeanceDe(emission);
+  const echeance = "dateEcheance" in data ? echeanceManuelle(data.dateEcheance) : echeanceDefaut(emission);
   const par = await qui();
-  const { error } = await admin.from("DispensaireFacture").insert({ id, statut: "non_payee", montant: 0, ...row, dateEmission: emission, dateEcheance: echeance, par, createdAt: nowIso, updatedAt: nowIso });
+  const base: Record<string, unknown> = { id, statut: "non_payee", statuts: "non_payee", montant: 0, ...row, dateEmission: emission, dateEcheance: echeance, par, createdAt: nowIso, updatedAt: nowIso };
+  const error = await ecrireFacture(admin, "insert", base);
   if (error) return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
   await logFacture(admin, id, "Création", String(row.objet || ""), par);
   return { ok: true, id };
@@ -61,28 +87,20 @@ export async function majFacture(id: string, patch: Record<string, unknown>): Pr
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   if (!id) return { ok: false, error: "Facture introuvable." };
   const row = nettoyer(patch);
-  // Date d'émission modifiable → l'échéance (72 h) est recalculée à partir d'elle.
-  if ("dateEmission" in patch) {
-    const t = Date.parse(String(patch.dateEmission ?? "").trim());
-    if (Number.isFinite(t)) { row.dateEmission = new Date(t).toISOString(); row.dateEcheance = echeanceDe(new Date(t).toISOString()); }
-  }
+  // Dates INDÉPENDANTES et MANUELLES : l'émission ne recalcule plus l'échéance.
+  if ("dateEmission" in patch) { const t = Date.parse(String(patch.dateEmission ?? "").trim()); if (Number.isFinite(t)) row.dateEmission = new Date(t).toISOString(); }
+  if ("dateEcheance" in patch) row.dateEcheance = echeanceManuelle(patch.dateEcheance);
   if ("objet" in row && !row.objet) return { ok: false, error: "L'objet ne peut pas être vide." };
   if (!Object.keys(row).length) return { ok: true };
   const par = await qui();
   const now = new Date().toISOString();
-  // Paiement : on horodate le règlement et son auteur (trace conservée).
-  const tracePaiement = row.statut === "payee";
+  // Paiement : dès que « Payé » figure dans les statuts, on horodate le règlement.
+  const nouveauxStatuts = ("statuts" in patch || "statut" in patch) ? statutsDe({ statuts: patch.statuts, statut: patch.statut }) : [];
+  const tracePaiement = nouveauxStatuts.includes("payee");
   if (tracePaiement) { row.datePaiement = now; row.payePar = par; }
-  let { error } = await admin.from("DispensaireFacture").update({ ...row, updatedAt: now }).eq("id", id);
-  // Repli si les colonnes de paiement n'existent pas encore (SQL non lancé) :
-  // on réessaie sans elles pour ne pas bloquer le changement de statut.
-  if (error && tracePaiement) {
-    const { datePaiement: _d, payePar: _p, ...base } = row;
-    void _d; void _p;
-    ({ error } = await admin.from("DispensaireFacture").update({ ...base, updatedAt: now }).eq("id", id));
-  }
+  const error = await ecrireFacture(admin, "update", { ...row, updatedAt: now }, id);
   if (error) return { ok: false, error: "Enregistrement impossible." };
-  if ("statut" in row) { const st = String(row.statut); await logFacture(admin, id, st === "payee" ? "Paiement" : "Changement de statut", st, par); }
+  if ("statuts" in row) { const libelle = nouveauxStatuts.join(", "); await logFacture(admin, id, tracePaiement ? "Paiement" : "Changement de statut", libelle, par); }
   return { ok: true };
 }
 
@@ -149,21 +167,20 @@ export async function creerConsultation(input: { patient: string; lignes: Consul
   const par = await qui();
   const nowIso = new Date().toISOString();
   const emission = emissionDe(input.dateEmission, nowIso);
-  const echeance = echeanceDe(emission);
+  const echeance = echeanceDefaut(emission);
   const montant = lignes.reduce((a, l) => a + l.prixUnitaire * l.quantite, 0);
   const resume = lignes.map((l) => `${l.quantite}× ${l.desc || "soin"}`).join(", ");
   const regle = !!input.regle;
+  const statutUnique = regle ? "payee" : "non_payee";
 
   const id = newId();
   const row: Record<string, unknown> = {
-    id, objet: patient, destinataire: resume.slice(0, 300), montant, statut: regle ? "payee" : "non_payee",
+    id, objet: patient, destinataire: resume.slice(0, 300), montant, statut: statutUnique, statuts: statutUnique,
     dateEmission: emission, dateEcheance: echeance, note: s(input.note, 1000), par, createdAt: nowIso, updatedAt: nowIso,
   };
   if (regle) { row.datePaiement = nowIso; row.payePar = par; }
-  let ins = await admin.from("DispensaireFacture").insert(row);
-  // Repli si les colonnes de paiement ne sont pas encore migrées.
-  if (ins.error && regle) { const { datePaiement: _d, payePar: _p, ...base } = row; void _d; void _p; ins = await admin.from("DispensaireFacture").insert(base); }
-  if (ins.error) return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
+  const insErr = await ecrireFacture(admin, "insert", row);
+  if (insErr) return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
   await logFacture(admin, id, "Consultation", resume.slice(0, 200), par);
 
   // Décrément de stock optionnel & non bloquant : le soin reste facturé quoi qu'il arrive.
@@ -198,7 +215,7 @@ export async function getDossierPatient(nom: string): Promise<DossierPatient> {
   if (!admin || !cible) return vide;
   const rows = async (p: PromiseLike<{ data: unknown }>): Promise<Record<string, unknown>[]> => { try { return ((await p).data as Record<string, unknown>[]) || []; } catch { return []; } };
   const [factures, ventes, certs, rapports] = await Promise.all([
-    rows(admin.from("DispensaireFacture").select("id,objet,destinataire,montant,statut,dateEmission,createdAt").order("createdAt", { ascending: false }).limit(500)),
+    rows(admin.from("DispensaireFacture").select("id,objet,destinataire,montant,statut,statuts,dateEmission,createdAt").order("createdAt", { ascending: false }).limit(500)),
     rows(admin.from("DispensaireVente").select("id,patient,item,quantite,total,createdAt").order("createdAt", { ascending: false }).limit(500)),
     rows(admin.from("DispensaireCertificat").select("id,patient,type,dateActe,createdAt").order("createdAt", { ascending: false }).limit(500)),
     rows(admin.from("DispensaireRapport").select("id,patient,titre,createdAt").order("createdAt", { ascending: false }).limit(500)),
@@ -207,8 +224,8 @@ export async function getDossierPatient(nom: string): Promise<DossierPatient> {
   let du = 0, regle = 0;
   for (const f of factures) {
     if (_normNom(f.objet) !== cible) continue;
-    const m = Number(f.montant) || 0; const st = String(f.statut || "non_payee");
-    if (factureOuverte(st)) du += m; else regle += m;
+    const m = Number(f.montant) || 0; const arr = statutsDe(f); const st = statutRepresentatif(arr);
+    if (estOuverte(arr)) du += m; else regle += m;
     actes.push({ id: "f" + f.id, type: "Facture", libelle: String(f.destinataire || f.objet || "Facture"), montant: m, statut: st, date: String(f.dateEmission || f.createdAt) });
   }
   for (const v of ventes) { if (_normNom(v.patient) !== cible) continue; actes.push({ id: "v" + v.id, type: "Vente", libelle: `${Number(v.quantite) || 0}× ${String(v.item || "article")}`, montant: Number(v.total) || 0, statut: null, date: String(v.createdAt) }); }

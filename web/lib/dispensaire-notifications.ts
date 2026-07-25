@@ -3,6 +3,7 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAcces } from "@/lib/queries";
 import { getConfig } from "@/lib/dispensaire-roles";
+import { statutsDe, estClose } from "@/lib/dispensaire-facturation-const";
 
 // ── Centre de notifications (alertes intelligentes dérivées de l'état courant) ─
 export type Notif = { id: string; severite: "alerte" | "attention" | "info"; type: string; texte: string; href: string; ref?: string; escalade?: "relance" | "police" };
@@ -34,7 +35,7 @@ export async function getNotifications(): Promise<{ items: Notif[]; count: numbe
   const [stock, matieres, factures, ventes, frais, salaries] = await Promise.all([
     q<Record<string, unknown>[]>(admin.from("DispensaireStock").select("nom,stock,seuil,unite")),
     q<Record<string, unknown>[]>(admin.from("DispensaireMatiere").select("nom,quantite,seuil")),
-    q<Record<string, unknown>[]>(admin.from("DispensaireFacture").select("objet,montant,statut,dateEcheance,dateEmission")),
+    q<Record<string, unknown>[]>(admin.from("DispensaireFacture").select("objet,montant,statut,statuts,dateEcheance,dateEmission")),
     q<Record<string, unknown>[]>(admin.from("DispensaireVente").select("patient,quantite,item,createdAt").order("createdAt", { ascending: false }).limit(300)),
     q<Record<string, unknown>[]>(admin.from("DispensaireFrais").select("statut")),
     q<Record<string, unknown>[]>(admin.from("DispensaireSalarie").select("nom,statut,absInjustifiees")),
@@ -49,13 +50,13 @@ export async function getNotifications(): Promise<{ items: Notif[]; count: numbe
   // Factures : délai de paiement dépassé (72 h) ou bientôt à échéance (< 24 h).
   const nowMs = Date.now();
   if (habilite) for (const f of factures || []) {
-    const st = String(f.statut);
-    if (st === "payee" || st === "cloture" || !f.dateEcheance) continue;
+    const statuts = statutsDe(f);
+    if (estClose(statuts) || !f.dateEcheance) continue;
     const t = new Date(String(f.dateEcheance)).getTime();
     if (!Number.isFinite(t)) continue;
     // Échelle de recouvrement : une facture déjà « relancée » et toujours en retard
     // passe au rang suivant → dossier police proposé (sinon : relance proposée).
-    const dejaRelancee = st === "relancee";
+    const dejaRelancee = statuts.includes("relancee");
     const escalade: "relance" | "police" = dejaRelancee ? "police" : "relance";
     const relanceTxt = dejaRelancee ? " — déjà relancé" : "";
     // Impayé de plus de 7 jours (depuis l'émission) → escalade forte.

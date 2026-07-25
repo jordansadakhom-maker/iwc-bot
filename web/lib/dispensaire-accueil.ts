@@ -2,6 +2,7 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAcces } from "@/lib/queries";
+import { estOuverte, statutsDe } from "@/lib/dispensaire-facturation-const";
 
 // ── Données consolidées du tableau de bord du Dispensaire ────────────────────
 export type ServiceEnCours = { id: string; nom: string; grade: string | null; debut: string };
@@ -43,7 +44,7 @@ export async function getAccueil(): Promise<AccueilData> {
     q<Record<string, unknown>[]>(admin.from("DispensairePointage").select("id,nom,salarieId,debut").is("fin", null).order("debut", { ascending: true })),
     q<Record<string, unknown>[]>(admin.from("DispensaireStock").select("nom,stock,seuil,unite")),
     q<Record<string, unknown>[]>(admin.from("DispensaireMatiere").select("nom,quantite,seuil,unite")),
-    q<Record<string, unknown>[]>(admin.from("DispensaireFacture").select("montant,statut,dateEcheance")),
+    q<Record<string, unknown>[]>(admin.from("DispensaireFacture").select("montant,statut,statuts,dateEcheance")),
     q<Record<string, unknown>[]>(admin.from("DispensaireFrais").select("statut")),
     q<Record<string, unknown>[]>(admin.from("DispensaireVente").select("total,createdAt").order("createdAt", { ascending: false }).limit(200)),
     q<Record<string, unknown>[]>(admin.from("DispensaireStockMouvement").select("id,nomItem,delta,par,createdAt").order("createdAt", { ascending: false }).limit(6)),
@@ -63,10 +64,12 @@ export async function getAccueil(): Promise<AccueilData> {
   const stockAlertes: AlerteStock[] = (stock || []).map((r) => ({ nom: String(r.nom || "Article"), stock: num(r.stock), seuil: num(r.seuil), unite: str(r.unite) })).filter((i) => i.seuil > 0 && i.stock <= i.seuil).sort((a, b) => a.stock - b.stock);
   const matieresRupture = (matieres || []).map((r) => ({ nom: String(r.nom || "Matière"), quantite: num(r.quantite), seuil: num(r.seuil), unite: str(r.unite) })).filter((i) => i.seuil > 0 && i.quantite <= i.seuil).sort((a, b) => a.quantite - b.quantite);
 
-  const ouverte = (s: string) => s === "non_payee" || s === "dossier_police";
-  const facturesImpayees = (factures || []).filter((f) => ouverte(String(f.statut))).length;
-  const facturesRetard = (factures || []).filter((f) => ouverte(String(f.statut)) && f.dateEcheance && String(f.dateEcheance).slice(0, 10) < today).length;
-  const du = (factures || []).filter((f) => ouverte(String(f.statut))).reduce((a, f) => a + num(f.montant), 0);
+  // Ouverte (encore due) = tout SAUF « Payée » ou « Clôturé », statuts multiples
+  // pris en compte. Cohérent avec la page Factures et les statistiques.
+  const estDue = (f: Record<string, unknown>) => estOuverte(statutsDe(f));
+  const facturesImpayees = (factures || []).filter(estDue).length;
+  const facturesRetard = (factures || []).filter((f) => estDue(f) && f.dateEcheance && String(f.dateEcheance).slice(0, 10) < today).length;
+  const du = (factures || []).filter(estDue).reduce((a, f) => a + num(f.montant), 0);
   const fraisEnAttente = (frais || []).filter((f) => String(f.statut) === "en_attente").length;
 
   const ventesJour = (ventes || []).filter((v) => ymdParis(String(v.createdAt)) === today);

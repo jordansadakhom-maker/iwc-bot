@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { estOuverte, statutsDe } from "@/lib/dispensaire-facturation-const";
 
 // ── Statistiques du Dispensaire (agrégats pour la page graphiques) ───────────
 export type Barre = { label: string; valeur: number; libelle?: string };
@@ -49,7 +50,7 @@ export async function getStats(): Promise<StatsData> {
     q<Record<string, unknown>[]>(admin.from("DispensaireVente").select("total,quantite,item,createdAt").order("createdAt", { ascending: false }).limit(500)),
     q<Record<string, unknown>[]>(admin.from("DispensaireStockMouvement").select("nomItem,delta").order("createdAt", { ascending: false }).limit(500)),
     q<Record<string, unknown>[]>(admin.from("DispensaireSoinFDO").select("bureau,montant")),
-    q<Record<string, unknown>[]>(admin.from("DispensaireFacture").select("montant,statut")),
+    q<Record<string, unknown>[]>(admin.from("DispensaireFacture").select("montant,statut,statuts")),
     q<Record<string, unknown>[]>(admin.from("DispensaireFrais").select("montant,statut,createdAt")),
     q<Record<string, unknown>[]>(admin.from("DispensaireStock").select("stock,seuil")),
     q<Record<string, unknown>[]>(admin.from("DispensaireMatiere").select("quantite,seuil")),
@@ -63,9 +64,12 @@ export async function getStats(): Promise<StatsData> {
   const articles = (stock || []).length;
   const articlesAlerte = (stock || []).filter((r) => num(r.seuil) > 0 && num(r.stock) <= num(r.seuil)).length;
   const matieresRupture = (matieres || []).filter((r) => num(r.seuil) > 0 && num(r.quantite) <= num(r.seuil)).length;
-  const ouverte = (s: string) => s === "non_payee" || s === "dossier_police";
-  const facturesImpayees = (factures || []).filter((f) => ouverte(String(f.statut))).length;
-  const du = (factures || []).filter((f) => ouverte(String(f.statut))).reduce((a, f) => a + num(f.montant), 0);
+  // Ouverte (encore due) = tout SAUF « Payée » ou « Clôturé » — statuts multiples
+  // pris en compte (une facture relancée / transmise reste due). Cohérent avec la
+  // page Factures (getFactures).
+  const estDue = (f: Record<string, unknown>) => estOuverte(statutsDe(f));
+  const facturesImpayees = (factures || []).filter(estDue).length;
+  const du = (factures || []).filter(estDue).reduce((a, f) => a + num(f.montant), 0);
   const caMois = (ventes || []).filter((v) => ymdParis(String(v.createdAt)).startsWith(moisPrefix)).reduce((a, v) => a + num(v.total), 0);
   const depensesMois = (frais || []).filter((f) => String(f.statut) === "vire" && ymdParis(String(f.createdAt)).startsWith(moisPrefix)).reduce((a, f) => a + num(f.montant), 0);
   const soinsFDO = (fdo || []).length;
