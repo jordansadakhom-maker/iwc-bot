@@ -11,10 +11,20 @@ import { uploadPhoto } from "@/app/(app)/actions-upload";
 // Réduit une image trop grande côté client (canvas) avant l'envoi : évite de
 // dépasser la limite de corps des Server Actions et rend l'envoi rapide. Les GIF
 // et PDF ne sont pas transformés. En cas de souci, renvoie le fichier d'origine.
+// Garde-fou : ne jamais laisser un envoi tourner à l'infini. Si la Server Action
+// ne répond pas dans le délai (réseau lent, stockage qui bloque), on rend la main
+// avec une erreur claire au lieu de figer le spinner « Envoi en cours… ».
+function avecDelai<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
+}
+const UPLOAD_TIMEOUT_MS = 45000;
+
 async function reduireImage(file: File, maxDim: number): Promise<File> {
   if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) return file;
   try {
-    const bitmap = await createImageBitmap(file);
+    // « from-image » : applique l'orientation EXIF (photo mobile) pendant la
+    // conversion → l'image réduite n'est jamais tournée de travers (lecture IA fiable).
+    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" }).catch(() => createImageBitmap(file));
     const { width, height } = bitmap;
     if (Math.max(width, height) <= maxDim) { bitmap.close?.(); return file; }
     const scale = maxDim / Math.max(width, height);
@@ -38,7 +48,7 @@ export function PhotoDrop({
   label = "Glisse une photo ici ou clique pour choisir",
   compact = false,
   camera = true,
-  maxDim,
+  maxDim = 2400, // par défaut on réduit les grandes photos (appareil mobile) avant l'envoi
 }: {
   dossier: string;
   onUploaded: (url: string) => void;
@@ -62,13 +72,13 @@ export function PhotoDrop({
       const fd = new FormData();
       fd.set("file", file);
       fd.set("dossier", dossier);
-      const r = await uploadPhoto(fd);
+      const r = await avecDelai(uploadPhoto(fd), UPLOAD_TIMEOUT_MS);
       if (!r.ok || !r.url) { setErr(r.error || "Envoi impossible."); return; }
       onUploaded(r.url);
     } catch {
-      // Un fichier trop lourd fait rejeter la Server Action (limite de corps) → on
-      // ne reste jamais bloqué sur le spinner : on affiche une erreur claire.
-      setErr("Fichier trop lourd ou envoi interrompu. Réessaie avec une image plus légère.");
+      // Fichier trop lourd (limite de corps) OU envoi qui n'aboutit pas (réseau /
+      // stockage) → on ne reste jamais bloqué sur le spinner : erreur claire.
+      setErr("Envoi interrompu (réseau ou fichier trop lourd). Réessaie — ou avec une image plus légère.");
     } finally {
       setBusy(false);
     }
@@ -83,7 +93,7 @@ export function PhotoDrop({
       for (const file0 of files) {
         const file = maxDim ? await reduireImage(file0, maxDim) : file0;
         const fd = new FormData(); fd.set("file", file); fd.set("dossier", dossier);
-        const r = await uploadPhoto(fd);
+        const r = await avecDelai(uploadPhoto(fd), UPLOAD_TIMEOUT_MS);
         if (r.ok && r.url) urls.push(r.url);
       }
     } catch { /* on traite ce qui a réussi ci-dessous */ }
