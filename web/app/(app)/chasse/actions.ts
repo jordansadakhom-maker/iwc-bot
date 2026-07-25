@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { lireStockDepuisImage, type LigneStock } from "@/lib/vision";
 import { getSessionProfile } from "@/lib/queries";
 import { construireCanon } from "@/lib/chasse-canon";
+import { cleNom } from "@/lib/noms";
 
 // ═══════════════════════════════════════════════════════════════
 //  Services du module Chasse (site-native, écriture directe Supabase).
@@ -22,7 +23,6 @@ type Admin = NonNullable<ReturnType<typeof createAdminClient>>;
 
 const s = (v: unknown, max = 120) => String(v ?? "").trim().slice(0, max);
 const clampQ = (q: unknown) => Math.max(0, Math.round(Number(q) || 0));
-const norm = (x: string) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
 function newId(p: string) { return `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
 
 // Identité de l'acteur, résolue CÔTÉ SERVEUR (nom IC de la session) pour que
@@ -162,7 +162,7 @@ export async function ajouterZoneChasse(input: { nom: string; capacite?: number 
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const nom = s(input.nom, 60);
   if (!nom) return { ok: false, error: "Donne un nom à la zone." };
-  const id = "z-" + (norm(nom).slice(0, 18) || "zone") + "-" + Math.random().toString(36).slice(2, 5);
+  const id = "z-" + (cleNom(nom).slice(0, 18) || "zone") + "-" + Math.random().toString(36).slice(2, 5);
   const { data: zs } = await admin.from("ChasseZone").select("ordre");
   const ordre = ((zs || []) as { ordre: number }[]).reduce((m, z) => Math.max(m, Number(z.ordre) || 0), 0) + 1;
   const { error } = await admin.from("ChasseZone").insert({ id, nom, capacite: input.capacite == null ? null : clampQ(input.capacite), ordre });

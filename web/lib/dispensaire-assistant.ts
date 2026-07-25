@@ -5,6 +5,7 @@ import { getNotifications } from "@/lib/dispensaire-notifications";
 import { getConfig } from "@/lib/dispensaire-roles";
 import { getEtatsOverlay } from "@/lib/notif-etat";
 import { calculerReappro, detecterDoublons, detecterNegatifs, apercuReappro } from "@/lib/erp-coherence";
+import { cleNom } from "@/lib/noms";
 import { type AssistantData, type Constat, type Priorite, trierConstats, compterGravite, graviteDe } from "@/lib/erp-assistant-const";
 
 export * from "@/lib/erp-assistant-const";
@@ -92,17 +93,16 @@ export async function getAssistantDispensaire(): Promise<AssistantData> {
     // positifs. Objectif : ne jamais laisser un renvoyé garder son accès, ni un
     // accès sans fiche, ni une fiche sans accès — sans imposer de double saisie.
     if (membres.length > 0) {
-      const normNom = (v: unknown) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
-      const accesActifs = new Set(membres.filter((m) => m.actif !== false && normNom(m.nom)).map((m) => normNom(m.nom)));
-      const nomsSalaries = new Set(salaries.filter((s) => normNom(s.nom)).map((s) => normNom(s.nom)));
+      const accesActifs = new Set(membres.filter((m) => m.actif !== false && cleNom(m.nom)).map((m) => cleNom(m.nom)));
+      const nomsSalaries = new Set(salaries.filter((s) => cleNom(s.nom)).map((s) => cleNom(s.nom)));
 
-      const renvoyesAvecAcces = salaries.filter((s) => String(s.statut ?? "") === "renvoye" && accesActifs.has(normNom(s.nom)));
+      const renvoyesAvecAcces = salaries.filter((s) => String(s.statut ?? "") === "renvoye" && accesActifs.has(cleNom(s.nom)));
       if (renvoyesAvecAcces.length) constats.push(mk({ id: "rh-renvoye-acces", priorite: "critique", categorie: "Sécurité", titre: `${renvoyesAvecAcces.length} salarié(s) renvoyé(s) gardant l'accès au site`, detail: renvoyesAvecAcces.slice(0, 3).map((s) => String(s.nom ?? "?")).join(" · "), suggestion: "Désactive leur accès dans l'Administration : un renvoi RH ne coupe pas l'accès automatiquement.", href: "/dispensaire/admin", action: { kind: "couper-acces", label: "Couper l'accès" } }));
 
-      const accesSansFiche = membres.filter((m) => m.actif !== false && normNom(m.nom) && !nomsSalaries.has(normNom(m.nom)));
+      const accesSansFiche = membres.filter((m) => m.actif !== false && cleNom(m.nom) && !nomsSalaries.has(cleNom(m.nom)));
       if (accesSansFiche.length) constats.push(mk({ id: "rh-acces-sans-fiche", priorite: "normale", categorie: "RH", titre: `${accesSansFiche.length} accès sans fiche RH`, detail: accesSansFiche.slice(0, 3).map((m) => String(m.nom ?? "?")).join(" · "), suggestion: "Crée la fiche salarié correspondante (ou retire l'accès s'il n'a plus lieu d'être).", href: "/dispensaire/rh" }));
 
-      const ficheSansAcces = salaries.filter((s) => String(s.statut ?? "actif") === "actif" && normNom(s.nom) && !accesActifs.has(normNom(s.nom)));
+      const ficheSansAcces = salaries.filter((s) => String(s.statut ?? "actif") === "actif" && cleNom(s.nom) && !accesActifs.has(cleNom(s.nom)));
       if (ficheSansAcces.length) constats.push(mk({ id: "rh-fiche-sans-acces", priorite: "faible", categorie: "RH", titre: `${ficheSansAcces.length} salarié(s) actif(s) sans accès`, detail: ficheSansAcces.slice(0, 3).map((s) => String(s.nom ?? "?")).join(" · "), suggestion: "Ajoute leur accès dans l'Administration s'ils doivent utiliser le site.", href: "/dispensaire/admin" }));
     }
   }

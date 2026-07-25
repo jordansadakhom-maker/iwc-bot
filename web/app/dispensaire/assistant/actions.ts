@@ -6,10 +6,8 @@ import { getRoleDispensaire, peutFacturer } from "@/lib/dispensaire-roles";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { terminerService } from "@/app/dispensaire/pointage/actions";
 import { factureOuverte } from "@/lib/dispensaire-facturation-const";
+import { cleNom } from "@/lib/noms";
 import type { ActionConstatResult } from "@/lib/erp-assistant-const";
-
-// Rapprochement RH ↔ accès par nom normalisé (même règle que l'assistant).
-const normNom = (v: unknown) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
 
 // Change l'état d'une notification du DISPENSAIRE (couche persistée).
 // Gardé par la liste blanche : un compte non autorisé ne peut pas écrire
@@ -74,8 +72,8 @@ export async function executerConstat(kind: string, ref?: string): Promise<Actio
     ]);
     const salaries = (salRes.data as { nom: string; statut: string }[]) || [];
     const membres = (memRes.data as { id: string; nom: string; actif: boolean | null }[]) || [];
-    const renvoyes = new Set(salaries.filter((s) => String(s.statut ?? "") === "renvoye" && normNom(s.nom)).map((s) => normNom(s.nom)));
-    const aCouper = membres.filter((m) => m.actif !== false && normNom(m.nom) && renvoyes.has(normNom(m.nom)));
+    const renvoyes = new Set(salaries.filter((s) => String(s.statut ?? "") === "renvoye" && cleNom(s.nom)).map((s) => cleNom(s.nom)));
+    const aCouper = membres.filter((m) => m.actif !== false && cleNom(m.nom) && renvoyes.has(cleNom(m.nom)));
     if (!aCouper.length) return { ok: false, error: "Aucun accès à couper." };
     let n = 0; let lastErr: string | undefined;
     for (const m of aCouper) { const { error } = await admin.from("DispensaireMembre").update({ actif: false }).eq("id", m.id); if (error) lastErr = error.message; else n++; }

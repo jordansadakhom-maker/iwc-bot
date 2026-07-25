@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { peutGererRH } from "@/lib/dispensaire-roles";
+import { cleNom } from "@/lib/noms";
 
 // RH du Dispensaire — écriture réservée aux membres habilités (direction/médecin).
 export type RhResult = { ok: boolean; error?: string; id?: string };
@@ -12,7 +13,6 @@ const CHAMPS: Champ[] = ["nom", "grade", "qualifications", "dateEmbauche", "comp
 const STATUTS = ["actif", "suspendu", "renvoye"];
 
 const s = (v: unknown, max = 500) => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
-const normNom = (v: unknown) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
 function newId() { return `ds-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
 
 // Sécurité automatique (refonte « fiche Personnel ») : un salarié passé « renvoyé »
@@ -21,11 +21,11 @@ function newId() { return `ds-${Date.now().toString(36)}${Math.random().toString
 // la coupure échoue (elle peut être faite à la main depuis l'Administration).
 async function couperAccesDe(admin: NonNullable<ReturnType<typeof createAdminClient>>, nom: string | null | undefined): Promise<void> {
   try {
-    const cle = normNom(nom);
+    const cle = cleNom(nom);
     if (!cle) return;
     const { data } = await admin.from("DispensaireMembre").select("id,nom,actif");
     for (const m of ((data as { id: string; nom: string; actif: boolean | null }[]) || [])) {
-      if (m.actif !== false && normNom(m.nom) === cle) await admin.from("DispensaireMembre").update({ actif: false }).eq("id", m.id);
+      if (m.actif !== false && cleNom(m.nom) === cle) await admin.from("DispensaireMembre").update({ actif: false }).eq("id", m.id);
     }
   } catch { /* la coupure reste faisable à la main */ }
 }
