@@ -18,7 +18,7 @@ import {
   creerEmploye, majEmploye, supprimerEmploye,
   pointerService, terminerService, supprimerPointage,
   creerPaie, payerPaie, supprimerPaie,
-  creerImpot, payerImpot, supprimerImpot, cloturerCycleFiscal,
+  creerImpot, payerImpot, supprimerImpot, cloturerCycleFiscal, getAuditFiscal, type AuditFiscal,
   ajouterEcriture, reajusterFinancesReckless,
   creerNote, majNote, supprimerNote,
   creerTache, basculerTache, supprimerTache,
@@ -695,6 +695,13 @@ export function ImpotsTab({ impots, ca, mouvementsCoffre = [], router }: { impot
   const cycle = snapshotCycle(mouvementsCoffre, impots.filter((i) => i.statut === "paye"));
 
   const [confirmCloture, setConfirmCloture] = useState(false);
+  const [audit, setAudit] = useState<AuditFiscal[] | null>(null);
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [auditPret, setAuditPret] = useState(true);
+  async function ouvrirAudit() {
+    const next = !auditOpen; setAuditOpen(next);
+    if (next && audit === null) { const r = await getAuditFiscal(); setAudit(r.entries); setAuditPret(r.pret); }
+  }
   async function payer(i: ArmImpot) { setBusy(i.id); const r = await payerImpot(i.id); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Règlement impossible — réessaie."); }
   async function suppr(i: ArmImpot) { setBusy(i.id); const r = await supprimerImpot(i.id); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Suppression impossible — réessaie."); }
   async function cloturer() { setBusy("cloture"); const r = await cloturerCycleFiscal(); setBusy(null); setConfirmCloture(false); if (r.ok) router.refresh(); else alert(r.error || "Clôture impossible — réessaie."); }
@@ -775,6 +782,35 @@ export function ImpotsTab({ impots, ca, mouvementsCoffre = [], router }: { impot
           ))}
         </div>
       )}
+      {/* Journal d'audit — registre consultable, en écriture seule. */}
+      <div className="mt-3 rounded-[12px] border border-border bg-surface-2">
+        <button onClick={ouvrirAudit} className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-[0.82rem] font-semibold">
+          <ClipboardList className="h-4 w-4 text-faint" /> Journal d&apos;audit fiscal
+          <span className="ml-auto text-[0.72rem] text-faint">{auditOpen ? "masquer" : "afficher"}</span>
+        </button>
+        {auditOpen ? (
+          <div className="border-t border-border px-3.5 py-2.5">
+            {!auditPret ? (
+              <p className="text-[0.76rem] text-faint">Lance <b>web/prisma/sql/armurerie-audit-fiscal.sql</b> dans Supabase pour activer le registre.</p>
+            ) : !audit || audit.length === 0 ? (
+              <p className="text-[0.76rem] text-faint">Aucune opération fiscale enregistrée pour l&apos;instant.</p>
+            ) : (
+              <div className="flex flex-col divide-y divide-border">
+                {audit.map((a) => (
+                  <div key={a.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 py-1.5 text-[0.74rem]">
+                    <span className="rounded px-1.5 py-0.5 text-[0.62rem] font-bold uppercase" style={{ color: "var(--accent)", background: "color-mix(in srgb,var(--accent) 12%,transparent)" }}>{a.action}</span>
+                    <span className="font-medium">{a.cible}</span>
+                    {a.avant || a.apres ? <span className="text-faint">{a.avant || "—"} → <b className="text-muted">{a.apres || "—"}</b></span> : null}
+                    <span className="ml-auto text-faint">{a.par || "?"}{a.ip ? ` · ${a.ip}` : ""} · {dateFR(a.createdAt)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="mt-2 flex items-center gap-1 text-[0.68rem] text-faint"><Landmark className="h-3 w-3" /> Registre en écriture seule : consultable, jamais modifiable.</p>
+          </div>
+        ) : null}
+      </div>
+
       {nouveau ? <ImpotModal ca={ca} onClose={() => setNouveau(false)} router={router} /> : null}
     </>
   );
