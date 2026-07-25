@@ -10,6 +10,7 @@ import {
 import { PhotoDrop } from "@/components/photo-drop";
 import { FiscalDashboard } from "@/components/armurerie-fiscal";
 import { snapshotCycle } from "@/lib/armurerie-fiscal";
+import { exporterFiscalExcel, exporterFiscalPDF } from "@/lib/fiscal-export";
 import type { ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache, ArmMouvement, ArmVente, ArmProduit, ArmCommande, ArmCommandeLigne, ArmRessource, ArmRdv } from "@/lib/queries";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
 import { Badge } from "@/components/ui";
@@ -727,6 +728,10 @@ export function ImpotsTab({ impots, ca, mouvementsCoffre = [], router }: { impot
     const a = document.createElement("a"); a.href = url; a.download = `fiscal-armurerie-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
     URL.revokeObjectURL(url);
   }
+  // Exports natifs (librairies chargées à la demande).
+  const [exp, setExp] = useState<string | null>(null);
+  async function exporterExcel() { setExp("xlsx"); try { await exporterFiscalExcel(cycle, impots); } catch { alert("Export Excel impossible — réessaie."); } setExp(null); }
+  async function exporterPDF() { setExp("pdf"); try { await exporterFiscalPDF(cycle, impots); } catch { alert("Export PDF impossible — réessaie."); } setExp(null); }
 
   return (
     <>
@@ -744,7 +749,10 @@ export function ImpotsTab({ impots, ca, mouvementsCoffre = [], router }: { impot
         ) : (
           <Btn onClick={() => setConfirmCloture(true)}><Landmark className="h-3.5 w-3.5" /> Clôturer le cycle</Btn>
         )}
-        <button onClick={exporterCSV} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-muted transition hover:border-border-2 hover:text-ink"><Download className="h-3.5 w-3.5" /> Exporter (CSV)</button>
+        <span className="ml-1 text-[0.72rem] text-faint">Exporter :</span>
+        <button onClick={exporterPDF} disabled={exp === "pdf"} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-muted transition hover:border-border-2 hover:text-ink disabled:opacity-60">{exp === "pdf" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} PDF</button>
+        <button onClick={exporterExcel} disabled={exp === "xlsx"} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-muted transition hover:border-border-2 hover:text-ink disabled:opacity-60">{exp === "xlsx" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Excel</button>
+        <button onClick={exporterCSV} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-muted transition hover:border-border-2 hover:text-ink"><Download className="h-3.5 w-3.5" /> CSV</button>
       </div>
 
       <div className="mb-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
