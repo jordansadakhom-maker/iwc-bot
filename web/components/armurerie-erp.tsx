@@ -1506,8 +1506,8 @@ export function RdvArmurerieTab({ rdvs, clients, router }: { rdvs: ArmRdv[]; cli
           ) : null}
         </div>
       )}
-      {nouveau ? <RdvModal clients={clients} onClose={() => setNouveau(false)} router={router} /> : null}
-      {sel ? <RdvModal key={sel.id} rdv={sel} clients={clients} onClose={() => setSel(null)} router={router} /> : null}
+      {nouveau ? <RdvModal rdvs={rdvs} clients={clients} onClose={() => setNouveau(false)} router={router} /> : null}
+      {sel ? <RdvModal key={sel.id} rdv={sel} rdvs={rdvs} clients={clients} onClose={() => setSel(null)} router={router} /> : null}
     </>
   );
 }
@@ -1531,7 +1531,7 @@ function RdvCarte({ r, now, onClick }: { r: ArmRdv; now: number; onClick: () => 
   );
 }
 
-function RdvModal({ rdv, clients, onClose, router }: { rdv?: ArmRdv; clients: { id: string; nom: string }[]; onClose: () => void; router: Router }) {
+function RdvModal({ rdv, rdvs, clients, onClose, router }: { rdv?: ArmRdv; rdvs: ArmRdv[]; clients: { id: string; nom: string }[]; onClose: () => void; router: Router }) {
   const editing = !!rdv;
   const [clientPrenom, setClientPrenom] = useState(rdv?.clientPrenom || "");
   const [clientNom, setClientNom] = useState(rdv?.clientNom || "");
@@ -1547,6 +1547,33 @@ function RdvModal({ rdv, clients, onClose, router }: { rdv?: ArmRdv; clients: { 
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
+
+  // Détection de chevauchement À LA SAISIE : on compare la date choisie aux
+  // autres RDV « à venir » (fenêtre ±20 min) pour signaler la double-réservation
+  // AVANT qu'elle n'existe, et proposer les créneaux libres proches du même jour.
+  // Purement indicatif — n'empêche jamais d'enregistrer (double-booking assumé possible).
+  const CONFLIT_MS = 20 * 60000;
+  const occupes = useMemo(() =>
+    rdvs.filter((r) => r.id !== rdv?.id && r.statut === "a_venir" && r.dateRdv)
+      .map((r) => ({ t: new Date(r.dateRdv as string).getTime(), nom: [r.clientPrenom, r.clientNom].filter(Boolean).join(" ") || r.clientNom || "client" }))
+      .filter((b) => Number.isFinite(b.t))
+      .sort((a, b) => a.t - b.t)
+  , [rdvs, rdv?.id]);
+  const choisiT = dateLocal ? new Date(dateLocal).getTime() : NaN;
+  const memeJour = (a: number, b: number) => { const x = new Date(a), y = new Date(b); return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate(); };
+  const libre = (t: number) => occupes.every((b) => Math.abs(b.t - t) >= CONFLIT_MS);
+  const conflits = Number.isFinite(choisiT) ? occupes.filter((b) => Math.abs(b.t - choisiT) < CONFLIT_MS) : [];
+  const suggestions: number[] = [];
+  if (conflits.length && Number.isFinite(choisiT)) {
+    const step = 15 * 60000;
+    for (let k = 1; k <= 24 && suggestions.length < 3; k++) {
+      for (const dir of [1, -1]) {
+        const t = choisiT + dir * k * step;
+        if (t > Date.now() && memeJour(t, choisiT) && libre(t) && !suggestions.includes(t)) { suggestions.push(t); if (suggestions.length >= 3) break; }
+      }
+    }
+  }
+  const heureFR = (t: number) => { try { return new Date(t).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); } catch { return "—"; } };
 
   // Pièce d'identité déposée → l'IA lit le nom/prénom et pré-remplit la fiche.
   async function onPhoto(url: string) {
@@ -1597,6 +1624,28 @@ function RdvModal({ rdv, clients, onClose, router }: { rdv?: ArmRdv; clients: { 
           <Champ label="Date & heure *"><input className={inputCls} type="datetime-local" value={dateLocal} onChange={(e) => setDateLocal(e.target.value)} /></Champ>
           <Champ label="Contact (télégramme…)"><input className={inputCls} value={telegramme} onChange={(e) => setTelegramme(e.target.value)} maxLength={120} placeholder="N° télégramme, Discord…" /></Champ>
         </div>
+
+        {/* Chevauchement de créneau détecté à la saisie (indicatif, n'empêche pas d'enregistrer). */}
+        {conflits.length ? (
+          <div className="flex flex-col gap-2 rounded-[10px] border px-3 py-2.5 text-[0.8rem]" style={{ borderColor: "color-mix(in srgb,var(--warn) 55%,var(--border))", background: "color-mix(in srgb,var(--warn) 8%,transparent)" }}>
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: "var(--warn)" }} />
+              <span className="text-muted">
+                Ce créneau <b className="text-ink">chevauche</b> {conflits.length > 1 ? `${conflits.length} rendez-vous déjà prévus` : "un rendez-vous déjà prévu"} :{" "}
+                {conflits.map((c, i) => <span key={i}>{i ? ", " : ""}<b className="text-ink">{c.nom}</b> à {heureFR(c.t)}</span>)}.
+              </span>
+            </div>
+            {suggestions.length ? (
+              <div className="flex flex-wrap items-center gap-1.5 pl-6">
+                <span className="text-[0.74rem] text-faint">Créneaux libres proches :</span>
+                {suggestions.map((t) => (
+                  <button key={t} type="button" onClick={() => setDateLocal(toLocalInput(new Date(t).toISOString()))} className="rounded-md border px-2 py-0.5 text-[0.74rem] font-semibold transition hover:brightness-110" style={{ borderColor: "color-mix(in srgb,var(--good) 45%,var(--border))", color: "var(--good)" }}>{heureFR(t)}</button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         <Champ label="Commande / objet du rendez-vous"><textarea className={inputCls + " min-h-[70px] resize-y"} value={commande} onChange={(e) => setCommande(e.target.value)} maxLength={1000} placeholder="Ce que le client vient chercher / commander : armes, munitions, réparation…" /></Champ>
         <div className="grid gap-3 sm:grid-cols-2">
           <Champ label="Lieu"><input className={inputCls} value={lieu} onChange={(e) => setLieu(e.target.value)} maxLength={200} placeholder="Armurerie de Van Horn…" /></Champ>
