@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { lireStockDepuisImage, type LigneStock } from "@/lib/vision";
 import { getSessionProfile } from "@/lib/queries";
+import { construireCanon } from "@/lib/chasse-canon";
 
 // ═══════════════════════════════════════════════════════════════
 //  Services du module Chasse (site-native, écriture directe Supabase).
@@ -185,11 +186,25 @@ export async function importerStockChasse(input: { zoneId: string; lignes: Ligne
   const lignes = Array.isArray(input.lignes) ? input.lignes.slice(0, 60) : [];
   if (!lignes.length) return { ok: false, error: "Aucune ligne à importer." };
   const par = await acteur(input.par);
+
+  // n°8 — « le scan qui reconnaît » : chaque nom lu est rapproché du RÉFÉRENTIEL
+  // des ressources déjà connues (toutes zones) AVANT enregistrement, avec la même
+  // logique que le regroupement d'affichage. Un « Viande de petit g » scané tombe
+  // ainsi sur « Viande de petit gibier » existant → jamais de troncature stockée.
+  const scannes = lignes.map((l) => String(l.nom || "")).filter(Boolean);
+  let canon: ReturnType<typeof construireCanon> | null = null;
+  try {
+    const { data: exist } = await admin.from("ChasseStock").select("nom");
+    const refNames = ((exist as { nom: string }[]) || []).map((r) => r.nom).filter(Boolean);
+    canon = construireCanon([...refNames, ...scannes]);
+  } catch { canon = null; } // référentiel indisponible → on stocke le nom lu tel quel
+
   let count = 0;
   for (const l of lignes) {
-    const nom = s(l.nom, 100); const q = clampQ(l.quantite);
-    if (!nom) continue;
+    const brut = s(l.nom, 100); const q = clampQ(l.quantite);
+    if (!brut) continue;
     if (mode === "add" && q <= 0) continue;
+    const nom = canon ? (s(canon.label(canon.cle(brut)), 100) || brut) : brut;
     const r = await appliquer(admin, { zoneId, nom, mode, quantite: q, type: "ocr", par, commentaire: "Import photo (OCR)" });
     if (r.ok) count++;
   }
