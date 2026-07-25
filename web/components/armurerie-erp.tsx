@@ -1467,7 +1467,7 @@ function toLocalInput(iso: string | null): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-export function RdvArmurerieTab({ rdvs, clients, router }: { rdvs: ArmRdv[]; clients: { id: string; nom: string }[]; router: Router }) {
+export function RdvArmurerieTab({ rdvs, clients, router, onDemarrer }: { rdvs: ArmRdv[]; clients: { id: string; nom: string }[]; router: Router; onDemarrer?: (p: { clientNom: string; note: string; rdvId: string; rdvLabel: string }) => void }) {
   const [sel, setSel] = useState<ArmRdv | null>(null);
   const [nouveau, setNouveau] = useState(false);
   const now = Date.now();
@@ -1507,7 +1507,7 @@ export function RdvArmurerieTab({ rdvs, clients, router }: { rdvs: ArmRdv[]; cli
         </div>
       )}
       {nouveau ? <RdvModal rdvs={rdvs} clients={clients} onClose={() => setNouveau(false)} router={router} /> : null}
-      {sel ? <RdvModal key={sel.id} rdv={sel} rdvs={rdvs} clients={clients} onClose={() => setSel(null)} router={router} /> : null}
+      {sel ? <RdvModal key={sel.id} rdv={sel} rdvs={rdvs} clients={clients} onClose={() => setSel(null)} router={router} onDemarrer={onDemarrer} /> : null}
     </>
   );
 }
@@ -1531,7 +1531,7 @@ function RdvCarte({ r, now, onClick }: { r: ArmRdv; now: number; onClick: () => 
   );
 }
 
-function RdvModal({ rdv, rdvs, clients, onClose, router }: { rdv?: ArmRdv; rdvs: ArmRdv[]; clients: { id: string; nom: string }[]; onClose: () => void; router: Router }) {
+function RdvModal({ rdv, rdvs, clients, onClose, router, onDemarrer }: { rdv?: ArmRdv; rdvs: ArmRdv[]; clients: { id: string; nom: string }[]; onClose: () => void; router: Router; onDemarrer?: (p: { clientNom: string; note: string; rdvId: string; rdvLabel: string }) => void }) {
   const editing = !!rdv;
   const [clientPrenom, setClientPrenom] = useState(rdv?.clientPrenom || "");
   const [clientNom, setClientNom] = useState(rdv?.clientNom || "");
@@ -1657,6 +1657,18 @@ function RdvModal({ rdv, rdvs, clients, onClose, router }: { rdv?: ArmRdv; rdvs:
           <Bell className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: "var(--accent)" }} />
           <span className="text-muted">L&apos;équipe reçoit un <b className="text-ink">rappel Discord 45 min puis 15 min</b> avant l&apos;heure (salon #agenda).</span>
         </div>
+
+        {/* Continuité RDV → acte : démarre la vente au comptoir, pré-remplie du
+            client + de l'objet ; le RDV passe « honoré » une fois encaissé. */}
+        {editing && onDemarrer && statut === "a_venir" ? (
+          <button
+            onClick={() => { const label = nomComplet || rdv!.clientNom; onDemarrer({ clientNom: label, note: commande.trim(), rdvId: rdv!.id, rdvLabel: label }); onClose(); }}
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2.5 text-[0.84rem] font-semibold text-black/85 transition hover:brightness-105"
+            style={{ background: "var(--good)" }}
+          >
+            <Play className="h-4 w-4" strokeWidth={2} /> Démarrer la vente au comptoir
+          </button>
+        ) : null}
 
         {editing ? (
           <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Statut</span>
