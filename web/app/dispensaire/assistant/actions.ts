@@ -45,5 +45,19 @@ export async function executerConstat(kind: string, ref?: string): Promise<Actio
     if (n === 0) return { ok: false, error: lastErr || "Relance impossible." };
     return { ok: true, message: `${n} facture(s) marquée(s) « relancée ».` };
   }
+  if (kind === "dossier-police") {
+    // Dernier rang de recouvrement : bascule les factures ouvertes de la cible en
+    // « dossier police » (elles restent dues, mais partent au rapport des FDO).
+    if (!(await peutFacturer())) return { ok: false, error: "Droit de facturation requis." };
+    const cible = (ref || "").trim();
+    if (!cible) return { ok: false, error: "Facture cible manquante." };
+    const { data } = await admin.from("DispensaireFacture").select("id,statut").eq("objet", cible);
+    const cibles = ((data as { id: string; statut: string }[]) || []).filter((f) => factureOuverte(f.statut) && f.statut !== "dossier_police");
+    if (!cibles.length) return { ok: false, error: "Aucune facture ouverte à transmettre pour cette cible." };
+    let n = 0; let lastErr: string | undefined;
+    for (const f of cibles) { const { error } = await admin.from("DispensaireFacture").update({ statut: "dossier_police" }).eq("id", f.id); if (error) lastErr = error.message; else n++; }
+    if (n === 0) return { ok: false, error: lastErr || "Transmission impossible." };
+    return { ok: true, message: `${n} facture(s) passée(s) en « dossier police ».` };
+  }
   return { ok: false, error: "Action inconnue." };
 }
