@@ -5,9 +5,20 @@ import { TABLE_ETAT_DISPENSAIRE } from "@/lib/dispensaire-assistant";
 import { getRoleDispensaire, peutFacturer } from "@/lib/dispensaire-roles";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { terminerService } from "@/app/dispensaire/pointage/actions";
-import { factureOuverte } from "@/lib/dispensaire-facturation-const";
+import { estOuverte, statutsDe, serialiserStatuts, statutRepresentatif } from "@/lib/dispensaire-facturation-const";
 import { cleNom } from "@/lib/noms";
 import type { ActionConstatResult } from "@/lib/erp-assistant-const";
+
+// Ajoute un statut à une facture SANS retirer les autres (cases à cocher).
+// Écrit `statuts` (CSV) + `statut` (représentatif), en tolérant l'absence de la
+// colonne `statuts`. Renvoie un message d'erreur ou undefined.
+async function ajouterStatutFacture(admin: NonNullable<ReturnType<typeof createAdminClient>>, id: string, statutsActuels: string[], nouveau: string): Promise<string | undefined> {
+  const arr = [...new Set([...statutsActuels, nouveau])];
+  const patch: Record<string, unknown> = { statuts: serialiserStatuts(arr), statut: statutRepresentatif(arr) };
+  let { error } = await admin.from("DispensaireFacture").update(patch).eq("id", id);
+  if (error && /statuts/i.test(error.message)) { const { statuts: _s, ...noS } = patch; void _s; ({ error } = await admin.from("DispensaireFacture").update(noS).eq("id", id)); }
+  return error?.message;
+}
 
 // Change l'état d'une notification du DISPENSAIRE (couche persistée).
 // Gardé par la liste blanche : un compte non autorisé ne peut pas écrire
@@ -37,26 +48,26 @@ export async function executerConstat(kind: string, ref?: string): Promise<Actio
     if (!(await peutFacturer())) return { ok: false, error: "Droit de facturation requis." };
     const cible = (ref || "").trim();
     if (!cible) return { ok: false, error: "Facture cible manquante." };
-    // Ne relance QUE les factures encore ouvertes et pas déjà « relancée ».
-    const { data } = await admin.from("DispensaireFacture").select("id,statut").eq("objet", cible);
-    const cibles = ((data as { id: string; statut: string }[]) || []).filter((f) => factureOuverte(f.statut) && f.statut !== "relancee");
+    // Ajoute « relancée » aux factures encore ouvertes qui ne l'ont pas déjà.
+    const { data } = await admin.from("DispensaireFacture").select("id,statut,statuts").eq("objet", cible);
+    const cibles = ((data as Record<string, unknown>[]) || []).map((f) => ({ id: String(f.id), arr: statutsDe(f) })).filter((f) => estOuverte(f.arr) && !f.arr.includes("relancee"));
     if (!cibles.length) return { ok: false, error: "Aucune facture ouverte à relancer pour cette cible." };
     let n = 0; let lastErr: string | undefined;
-    for (const f of cibles) { const { error } = await admin.from("DispensaireFacture").update({ statut: "relancee" }).eq("id", f.id); if (error) lastErr = error.message; else n++; }
+    for (const f of cibles) { const err = await ajouterStatutFacture(admin, f.id, f.arr, "relancee"); if (err) lastErr = err; else n++; }
     if (n === 0) return { ok: false, error: lastErr || "Relance impossible." };
     return { ok: true, message: `${n} facture(s) marquée(s) « relancée ».` };
   }
   if (kind === "dossier-police") {
-    // Dernier rang de recouvrement : bascule les factures ouvertes de la cible en
-    // « dossier police » (elles restent dues, mais partent au rapport des FDO).
+    // Dernier rang de recouvrement : ajoute « dossier police » aux factures
+    // ouvertes de la cible (elles restent dues, mais partent au rapport des FDO).
     if (!(await peutFacturer())) return { ok: false, error: "Droit de facturation requis." };
     const cible = (ref || "").trim();
     if (!cible) return { ok: false, error: "Facture cible manquante." };
-    const { data } = await admin.from("DispensaireFacture").select("id,statut").eq("objet", cible);
-    const cibles = ((data as { id: string; statut: string }[]) || []).filter((f) => factureOuverte(f.statut) && f.statut !== "dossier_police");
+    const { data } = await admin.from("DispensaireFacture").select("id,statut,statuts").eq("objet", cible);
+    const cibles = ((data as Record<string, unknown>[]) || []).map((f) => ({ id: String(f.id), arr: statutsDe(f) })).filter((f) => estOuverte(f.arr) && !f.arr.includes("dossier_police"));
     if (!cibles.length) return { ok: false, error: "Aucune facture ouverte à transmettre pour cette cible." };
     let n = 0; let lastErr: string | undefined;
-    for (const f of cibles) { const { error } = await admin.from("DispensaireFacture").update({ statut: "dossier_police" }).eq("id", f.id); if (error) lastErr = error.message; else n++; }
+    for (const f of cibles) { const err = await ajouterStatutFacture(admin, f.id, f.arr, "dossier_police"); if (err) lastErr = err; else n++; }
     if (n === 0) return { ok: false, error: lastErr || "Transmission impossible." };
     return { ok: true, message: `${n} facture(s) passée(s) en « dossier police ».` };
   }

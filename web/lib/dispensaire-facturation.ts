@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getAcces } from "@/lib/queries";
 import { getConfig } from "@/lib/dispensaire-roles";
 import {
-  estBandage, factureOuverte,
+  estBandage, estOuverte, statutsDe, statutRepresentatif,
   type Vente, type PatientSemaine, type VentesData,
   type Facture, type FacturesData,
   type SoinFDO, type BureauFDO, type FDOData,
@@ -75,13 +75,16 @@ export async function getFactures(): Promise<FacturesData> {
   const { data, error } = await admin.from("DispensaireFacture").select("*").order("dateEcheance", { ascending: true, nullsFirst: false }).limit(300);
   if (error) return { ...vide, connecte: true, pret: false, canEdit: true };
   const today = ymdParis(new Date().toISOString());
-  const factures: Facture[] = ((data || []) as Record<string, unknown>[]).map((r) => ({
-    id: String(r.id), objet: String(r.objet || "Facture"), destinataire: s(r.destinataire), montant: num(r.montant),
-    dateEmission: s(r.dateEmission), dateEcheance: s(r.dateEcheance), statut: String(r.statut || "non_payee"),
-    note: s(r.note), par: s(r.par), createdAt: String(r.createdAt), datePaiement: s(r.datePaiement), payePar: s(r.payePar),
-  }));
-  const enRetard = factures.filter((f) => factureOuverte(f.statut) && f.dateEcheance && f.dateEcheance.slice(0, 10) < today).length;
-  const du = factures.filter((f) => factureOuverte(f.statut)).reduce((a, f) => a + f.montant, 0);
+  const factures: Facture[] = ((data || []) as Record<string, unknown>[]).map((r) => {
+    const statuts = statutsDe(r);
+    return {
+      id: String(r.id), objet: String(r.objet || "Facture"), destinataire: s(r.destinataire), montant: num(r.montant),
+      dateEmission: s(r.dateEmission), dateEcheance: s(r.dateEcheance), statut: statutRepresentatif(statuts), statuts,
+      note: s(r.note), par: s(r.par), createdAt: String(r.createdAt), datePaiement: s(r.datePaiement), payePar: s(r.payePar),
+    };
+  });
+  const enRetard = factures.filter((f) => estOuverte(f.statuts) && f.dateEcheance && f.dateEcheance.slice(0, 10) < today).length;
+  const du = factures.filter((f) => estOuverte(f.statuts)).reduce((a, f) => a + f.montant, 0);
   return { connecte: true, pret: true, canEdit: true, factures, enRetard, du };
 }
 

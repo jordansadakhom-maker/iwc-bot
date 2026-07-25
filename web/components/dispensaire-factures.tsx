@@ -6,14 +6,17 @@ import { Receipt, Plus, Check, Pencil, Trash2, AlertTriangle, CalendarClock, Loc
 import { VideRegistre } from "@/components/dispensaire-ui";
 import { DispensaireConsultation } from "@/components/dispensaire-consultation";
 import { DispensairePatientDossier } from "@/components/dispensaire-patient-dossier";
-import { FACTURE_STATUTS, FACTURE_DELAI_H, factureStatut, factureOuverte, echeanceEtat, copiePolice, money, type FacturesData, type Facture } from "@/lib/dispensaire-facturation-const";
-import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
+import { FACTURE_STATUTS, FACTURE_DELAI_H, factureStatut, estOuverte, statutRepresentatif, incoherencesStatuts, echeanceEtat, copiePolice, money, type FacturesData, type Facture } from "@/lib/dispensaire-facturation-const";
+import { toast } from "@/lib/toast";
+import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
 import { creerFacture, majFacture, supprimerFacture, logCopieFacture } from "@/app/dispensaire/factures/actions";
 import { RapportImpayesModal } from "@/components/dispensaire-rapport-impayes";
 import type { RapportImpayes, RapportHisto } from "@/lib/dispensaire-rapport-impayes";
 import type { RapportConfig } from "@/lib/dispensaire-rapport-const";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
+// Valeurs remontées par le formulaire : dates SAISIES + statuts MULTIPLES.
+type FactureVals = { objet: string; destinataire: string; montant: string; note: string; dateEmission: string; dateEcheance: string; statuts: string[] };
 const dateFR = (s: string | null) => { if (!s) return "—"; try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", year: "numeric" }).format(new Date(s)); } catch { return "—"; } };
 const dtFR = (s: string | null) => { if (!s) return "—"; try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(s)); } catch { return "—"; } };
 
@@ -36,38 +39,55 @@ export function DispensaireFactures({ data, rapport, historique, config }: { dat
     </div>
   );
 
-  const base = useMemo(() => (vue === "impayees" ? factures.filter((f) => factureOuverte(f.statut)) : factures), [factures, vue]);
-  const liste = base.filter((f) => !filtre || f.statut === filtre);
+  const base = useMemo(() => (vue === "impayees" ? factures.filter((f) => estOuverte(f.statuts)) : factures), [factures, vue]);
+  // Filtre par statut : une facture correspond si elle PORTE ce statut (multi).
+  const liste = base.filter((f) => !filtre || f.statuts.includes(filtre));
   const retard = factures.filter((f) => echeanceEtat(f) === "depasse").length;
-  const du = factures.filter((f) => factureOuverte(f.statut)).reduce((a, f) => a + f.montant, 0);
+  const du = factures.filter((f) => estOuverte(f.statuts)).reduce((a, f) => a + f.montant, 0);
   // Défaut intelligent : autocomplétion du patient à partir des factures existantes
   // (mêmes noms → un seul dossier patient, moins de fautes de frappe). Aucune requête.
   const patientsConnus = useMemo(() => [...new Set(factures.map((f) => f.objet).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [factures]);
 
-  async function enregistrer(vals: Record<string, string>, editing: Facture | null) {
-    // Émission = date SAISIE (repli : maintenant) ; échéance = émission + 72 h.
+  async function enregistrer(vals: FactureVals, editing: Facture | null) {
+    // Dates MANUELLES et indépendantes : émission saisie (repli : aujourd'hui),
+    // échéance saisie (peut rester vide → aucune échéance imposée).
     const et = Date.parse(vals.dateEmission || "");
     const emissionIso = Number.isFinite(et) ? new Date(et).toISOString() : new Date().toISOString();
-    const ech = new Date(new Date(emissionIso).getTime() + FACTURE_DELAI_H * 3600000).toISOString();
+    const ee = Date.parse(vals.dateEcheance || "");
+    const echeanceIso = Number.isFinite(ee) ? new Date(ee).toISOString() : null;
+    const statuts = vals.statuts.length ? vals.statuts : ["non_payee"];
+    const repr = statutRepresentatif(statuts);
+    const montant = Number(vals.montant) || 0;
+    const inc = incoherencesStatuts(statuts);
+    // Charge utile serveur : dates + statuts multiples (le serveur synchronise `statut`).
+    const payload = { objet: vals.objet, destinataire: vals.destinataire, montant, note: vals.note, dateEmission: vals.dateEmission, dateEcheance: vals.dateEcheance, statuts };
     if (editing) {
-      setFactures((p) => p.map((f) => (f.id === editing.id ? { ...f, ...vals, montant: Number(vals.montant) || 0, dateEmission: emissionIso, dateEcheance: ech } as Facture : f))); setForm(null);
-      const r = await majFacture(editing.id, { ...vals, montant: Number(vals.montant) || 0 });
-      if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else { setFlash({ t: "ok", m: "Facture mise à jour." }); router.refresh(); }
+      setFactures((p) => p.map((f) => (f.id === editing.id ? { ...f, objet: vals.objet, destinataire: vals.destinataire || null, montant, note: vals.note || null, dateEmission: emissionIso, dateEcheance: echeanceIso, statuts, statut: repr } as Facture : f))); setForm(null);
+      const r = await majFacture(editing.id, payload);
+      if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else { setFlash({ t: "ok", m: "Facture mise à jour." }); if (inc.length) toast(inc[0], "info"); router.refresh(); }
     } else {
       const nowIso = new Date().toISOString();
-      const tmp: Facture = { id: "tmp-" + Math.random().toString(36).slice(2, 8), objet: vals.objet, destinataire: vals.destinataire || null, montant: Number(vals.montant) || 0, dateEmission: emissionIso, dateEcheance: ech, statut: vals.statut || "non_payee", note: vals.note || null, par: null, createdAt: nowIso, datePaiement: null, payePar: null };
+      const tmp: Facture = { id: "tmp-" + Math.random().toString(36).slice(2, 8), objet: vals.objet, destinataire: vals.destinataire || null, montant, dateEmission: emissionIso, dateEcheance: echeanceIso, statut: repr, statuts, note: vals.note || null, par: null, createdAt: nowIso, datePaiement: statuts.includes("payee") ? nowIso : null, payePar: null };
       setFactures((p) => [tmp, ...p]); setForm(null);
-      const r = await creerFacture({ ...vals, montant: Number(vals.montant) || 0 });
+      const r = await creerFacture(payload);
       if (!r.ok) { setFactures((p) => p.filter((f) => f.id !== tmp.id)); setFlash({ t: "bad", m: r.error || "Impossible." }); }
-      else { setFactures((p) => p.map((f) => (f.id === tmp.id ? { ...f, id: r.id || tmp.id } : f))); setFlash({ t: "ok", m: `Facture créée — échéance ${FACTURE_DELAI_H} h après l'émission.` }); router.refresh(); }
+      else { setFactures((p) => p.map((f) => (f.id === tmp.id ? { ...f, id: r.id || tmp.id } : f))); setFlash({ t: "ok", m: "Facture créée." }); if (inc.length) toast(inc[0], "info"); router.refresh(); }
     }
   }
+  // Coche / décoche un statut (indépendant, plusieurs simultanés). Garde ≥ 1 statut.
   async function changerStatut(f: Facture, statut: string) {
-    const etait = f.statut;
-    setFactures((p) => p.map((x) => (x.id === f.id ? { ...x, statut, datePaiement: statut === "payee" ? new Date().toISOString() : x.datePaiement } : x)));
-    const r = await majFacture(f.id, { statut });
-    if (!r.ok) { setFactures((p) => p.map((x) => (x.id === f.id ? { ...x, statut: etait } : x))); setFlash({ t: "bad", m: r.error || "Impossible." }); }
-    else { setFlash({ t: "ok", m: statut === "payee" ? "Facture réglée — retirée des impayés." : `Statut : ${factureStatut(statut).label}.` }); router.refresh(); }
+    const avant = f.statuts;
+    const bascule = avant.includes(statut) ? avant.filter((x) => x !== statut) : [...avant, statut];
+    const finalArr = bascule.length ? bascule : ["non_payee"];
+    const repr = statutRepresentatif(finalArr);
+    const vientDePayer = finalArr.includes("payee") && !avant.includes("payee");
+    setFactures((p) => p.map((x) => (x.id === f.id ? { ...x, statuts: finalArr, statut: repr, datePaiement: vientDePayer ? new Date().toISOString() : x.datePaiement } : x)));
+    const r = await majFacture(f.id, { statuts: finalArr });
+    if (!r.ok) { setFactures((p) => p.map((x) => (x.id === f.id ? { ...x, statuts: avant, statut: statutRepresentatif(avant) } : x))); setFlash({ t: "bad", m: r.error || "Impossible." }); return; }
+    const inc = incoherencesStatuts(finalArr);
+    if (inc.length) toast(inc[0], "info");
+    setFlash({ t: "ok", m: vientDePayer ? "Facture réglée — retirée des impayés." : `Statuts : ${finalArr.map((k) => factureStatut(k).label).join(", ")}.` });
+    router.refresh();
   }
   async function supprimer(id: string) { setFactures((p) => p.filter((f) => f.id !== id)); setDelId(null); const r = await supprimerFacture(id); if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else { setFlash({ t: "ok", m: "Facture supprimée." }); router.refresh(); } }
   async function copier(f: Facture) {
@@ -77,7 +97,7 @@ export function DispensaireFactures({ data, rapport, historique, config }: { dat
 
   return (
     <div className="flex flex-col gap-4">
-      {!data.pret ? <Flash tone="bad">Lance <b>dispensaire-facturation.sql</b> puis <b>dispensaire-factures-plus.sql</b> dans Supabase, puis recharge.</Flash> : null}
+      {!data.pret ? <Flash tone="bad">Lance <b>dispensaire-facturation.sql</b>, <b>dispensaire-factures-plus.sql</b> puis <b>dispensaire-factures-statuts.sql</b> dans Supabase, puis recharge.</Flash> : null}
       {flash ? <Flash tone={flash.t === "ok" ? "good" : "bad"}>{flash.m}</Flash> : null}
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -110,7 +130,7 @@ export function DispensaireFactures({ data, rapport, historique, config }: { dat
       {liste.length === 0 ? (
         factures.length
           ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">{vue === "impayees" ? "Aucune facture impayée — tout est réglé." : "Aucune facture pour ce filtre."}</p>
-          : <VideRegistre icon={Receipt} titre="Aucune facture au registre" sous="Établis une première facture — l'échéance à 72 h est posée automatiquement." />
+          : <VideRegistre icon={Receipt} titre="Aucune facture au registre" sous="Établis une première facture — dates d'émission et d'échéance saisies à la main, statuts à cocher." />
       ) : (
         <div className="flex flex-col gap-2">
           {liste.map((f) => {
@@ -128,7 +148,7 @@ export function DispensaireFactures({ data, rapport, historique, config }: { dat
                     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[0.72rem] text-faint">
                       <span className="font-num text-[0.9rem] font-bold text-ink">{money(f.montant)}</span>
                       {f.dateEcheance ? <span className="inline-flex items-center gap-1"><CalendarClock className="h-3 w-3" /> échéance {dtFR(f.dateEcheance)}</span> : null}
-                      {f.statut === "payee" && f.datePaiement ? <span className="inline-flex items-center gap-1" style={{ color: "var(--good)" }}><Check className="h-3 w-3" /> réglée {dateFR(f.datePaiement)}{f.payePar ? ` · ${f.payePar}` : ""}</span> : null}
+                      {f.statuts.includes("payee") && f.datePaiement ? <span className="inline-flex items-center gap-1" style={{ color: "var(--good)" }}><Check className="h-3 w-3" /> réglée {dateFR(f.datePaiement)}{f.payePar ? ` · ${f.payePar}` : ""}</span> : null}
                     </div>
                     {f.note ? <div className="mt-1 text-[0.74rem] text-muted">{f.note}</div> : null}
                   </div>
@@ -138,12 +158,15 @@ export function DispensaireFactures({ data, rapport, historique, config }: { dat
                     <button onClick={() => setDelId(f.id)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-oxblood" aria-label="Supprimer"><Trash2 className="h-3.5 w-3.5" /></button>
                   </div>
                 </div>
-                {/* Statuts — tous toujours disponibles */}
+                {/* Statuts — cases à cocher INDÉPENDANTES (plusieurs simultanés). */}
                 <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-border pt-2">
-                  {FACTURE_STATUTS.map((s) => (
-                    <button key={s.key} onClick={() => changerStatut(f, s.key)} className="rounded-md border px-2 py-1 text-[0.68rem] font-semibold transition hover:brightness-110" style={f.statut === s.key ? { color: "#000", background: s.tone, borderColor: s.tone } : { color: s.tone, borderColor: "color-mix(in srgb," + s.tone + " 40%,var(--border))" }}>{s.label}</button>
-                  ))}
-                  <span className="ml-auto text-[0.66rem] uppercase" style={{ color: st.tone }}>{st.label}</span>
+                  {FACTURE_STATUTS.map((s) => {
+                    const on = f.statuts.includes(s.key);
+                    return (
+                      <button key={s.key} onClick={() => changerStatut(f, s.key)} aria-pressed={on} className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[0.68rem] font-semibold transition hover:brightness-110" style={on ? { color: "#000", background: s.tone, borderColor: s.tone } : { color: s.tone, borderColor: "color-mix(in srgb," + s.tone + " 40%,var(--border))" }}>{on ? <Check className="h-2.5 w-2.5" /> : null}{s.label}</button>
+                    );
+                  })}
+                  <span className="ml-auto text-[0.66rem] uppercase" style={{ color: st.tone }} title="Statut principal (utilisé par les rapports & filtres)">{st.label}</span>
                 </div>
               </div>
             );
@@ -160,28 +183,30 @@ export function DispensaireFactures({ data, rapport, historique, config }: { dat
   );
 }
 
-function FactureForm({ initial, patients, onClose, onSave }: { initial: Facture | null; patients: string[]; onClose: () => void; onSave: (v: Record<string, string>) => void }) {
-  const [v, setV] = useState<Record<string, string>>(() => {
-    const d = new Date();
-    const auj = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    return {
-      objet: initial?.objet || "", destinataire: initial?.destinataire || "", montant: initial ? String(initial.montant) : "2",
-      statut: initial?.statut || "non_payee", note: initial?.note || "",
-      // Date d'émission SAISIE (on n'émet pas forcément le jour même). Défaut : aujourd'hui.
-      dateEmission: initial?.dateEmission ? String(initial.dateEmission).slice(0, 10) : auj,
-    };
-  });
+// Ajoute N jours à une date « AAAA-MM-JJ » (UTC) → « AAAA-MM-JJ » (ou "" si invalide).
+function ajouterJours(ymd: string, jours: number): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(ymd || "");
+  if (!m) return "";
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])); d.setUTCDate(d.getUTCDate() + jours);
+  return d.toISOString().slice(0, 10);
+}
+
+function FactureForm({ initial, patients, onClose, onSave }: { initial: Facture | null; patients: string[]; onClose: () => void; onSave: (v: FactureVals) => void }) {
+  const auj = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })();
+  const [v, setV] = useState<Record<string, string>>(() => ({
+    objet: initial?.objet || "", destinataire: initial?.destinataire || "", montant: initial ? String(initial.montant) : "2", note: initial?.note || "",
+    // Dates SAISIES à la main. Défaut création : émission = aujourd'hui, échéance = +72 h
+    // (simple suggestion, entièrement modifiable — plus rien n'est imposé).
+    dateEmission: initial?.dateEmission ? String(initial.dateEmission).slice(0, 10) : auj,
+    dateEcheance: initial ? (initial.dateEcheance ? String(initial.dateEcheance).slice(0, 10) : "") : ajouterJours(auj, Math.round(FACTURE_DELAI_H / 24)),
+  }));
+  // Statuts MULTIPLES (cases à cocher indépendantes). Toujours ≥ 1.
+  const [statuts, setStatuts] = useState<string[]>(() => (initial ? (initial.statuts.length ? initial.statuts : [initial.statut]) : ["non_payee"]));
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setV((p) => ({ ...p, [k]: e.target.value }));
-  // Échéance = date d'émission + 72 h (FACTURE_DELAI_H). Affichée, recalculée en
-  // direct quand on change l'émission. Automatique : le serveur la (re)calcule aussi.
-  const echeance = (() => {
-    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v.dateEmission || "");
-    if (!m) return "";
-    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])); d.setUTCDate(d.getUTCDate() + Math.round(FACTURE_DELAI_H / 24));
-    return d.toISOString().slice(0, 10);
-  })();
-  function go() { if (v.objet.trim().length < 1) { setErr("L'objet est obligatoire."); return; } onSave(v); }
+  const toggle = (k: string) => setStatuts((p) => (p.includes(k) ? (p.length > 1 ? p.filter((x) => x !== k) : p) : [...p, k]));
+  const inc = incoherencesStatuts(statuts);
+  function go() { if (v.objet.trim().length < 1) { setErr("L'objet est obligatoire."); return; } onSave({ objet: v.objet, destinataire: v.destinataire, montant: v.montant, note: v.note, dateEmission: v.dateEmission, dateEcheance: v.dateEcheance, statuts }); }
   return (
     <Modal titre={initial ? "✏️ Modifier la facture" : "➕ Nouvelle facture"} onClose={onClose} max={560}>
       <div className="flex flex-col gap-3">
@@ -190,12 +215,31 @@ function FactureForm({ initial, patients, onClose, onSave }: { initial: Facture 
           <Champ label="Type de soins ou médicaments"><input className={inputCls} value={v.destinataire} onChange={set("destinataire")} placeholder="Ex. bandage, morphine…" /></Champ>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Champ label="Montant ($)"><input className={inputCls} value={v.montant} onChange={(e) => setV((p) => ({ ...p, montant: e.target.value.replace(/[^0-9]/g, "") }))} inputMode="numeric" /></Champ>
-          <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Statut</span><Picker options={FACTURE_STATUTS} value={v.statut} onChange={(x) => setV((p) => ({ ...p, statut: x }))} /></div>
+          <Champ label="Date d'émission (début)"><input type="date" className={inputCls} value={v.dateEmission} onChange={set("dateEmission")} /></Champ>
+          <Champ label="Date d'échéance">
+            <div className="flex items-center gap-1.5">
+              <input type="date" className={inputCls} value={v.dateEcheance} onChange={set("dateEcheance")} />
+              <button type="button" onClick={() => setV((p) => ({ ...p, dateEcheance: ajouterJours(p.dateEmission || auj, Math.round(FACTURE_DELAI_H / 24)) }))} className="shrink-0 rounded-lg border border-border bg-surface-2 px-2 py-1.5 text-[0.7rem] font-semibold text-muted transition hover:text-ink" title={`Proposer l'émission + ${FACTURE_DELAI_H} h`}>+{FACTURE_DELAI_H} h</button>
+            </div>
+          </Champ>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Champ label="Date d'émission"><input type="date" className={inputCls} value={v.dateEmission} onChange={set("dateEmission")} /></Champ>
-          <Champ label={`Échéance · auto +${FACTURE_DELAI_H} h`}><input type="date" className={inputCls + " cursor-not-allowed opacity-70"} value={echeance} readOnly tabIndex={-1} title={`Calculée automatiquement : ${FACTURE_DELAI_H} h après la date d'émission`} /></Champ>
+        <Champ label="Montant ($)"><input className={inputCls} value={v.montant} onChange={(e) => setV((p) => ({ ...p, montant: e.target.value.replace(/[^0-9]/g, "") }))} inputMode="numeric" /></Champ>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Statuts · cochez-en plusieurs</span>
+          <div className="flex flex-wrap gap-1.5">
+            {FACTURE_STATUTS.map((o) => {
+              const on = statuts.includes(o.key);
+              return (
+                <button key={o.key} type="button" onClick={() => toggle(o.key)} aria-pressed={on} className="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[0.78rem] font-semibold transition" style={{ color: on ? "#000" : o.tone, background: on ? o.tone : "transparent", borderColor: "color-mix(in srgb," + o.tone + " 45%,var(--border))" }}>{on ? <Check className="h-3 w-3" /> : null}{o.label}</button>
+              );
+            })}
+          </div>
+          {inc.length ? (
+            <div className="mt-0.5 flex flex-col gap-0.5 rounded-lg border px-2.5 py-1.5 text-[0.72rem]" style={{ color: "var(--warn)", borderColor: "color-mix(in srgb,var(--warn) 40%,var(--border))", background: "color-mix(in srgb,var(--warn) 8%,transparent)" }}>
+              {inc.map((m, i) => <div key={i} className="flex items-start gap-1.5"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" /> {m}</div>)}
+              <div className="text-faint">Avertissement seulement — l'enregistrement reste possible.</div>
+            </div>
+          ) : null}
         </div>
         <Champ label="Note"><textarea className={inputCls} rows={2} value={v.note} onChange={set("note")} /></Champ>
         {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}

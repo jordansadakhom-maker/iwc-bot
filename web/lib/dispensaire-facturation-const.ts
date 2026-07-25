@@ -23,15 +23,62 @@ export const FACTURE_STATUTS = [
   { key: "cloture", label: "Clôturé", tone: "var(--faint)" },
 ];
 export const factureStatut = (k: string) => FACTURE_STATUTS.find((s) => s.key === k) || FACTURE_STATUTS[0];
-// « Ouverte » = encore due (impayée). Seules Payée / Clôturé sortent des impayés.
-export const factureOuverte = (s: string) => s !== "payee" && s !== "cloture";
-export type Facture = { id: string; objet: string; destinataire: string | null; montant: number; dateEmission: string | null; dateEcheance: string | null; statut: string; note: string | null; par: string | null; createdAt: string; datePaiement: string | null; payePar: string | null };
+export const FACTURE_STATUT_KEYS = FACTURE_STATUTS.map((s) => s.key);
+
+// ── Statuts MULTIPLES (cases à cocher indépendantes) ─────────────────────────
+// Une facture porte un ENSEMBLE de statuts (« Non payée » + « Relancée » +
+// « Transmise »…). Stockés dans la colonne `statuts` (CSV) ; repli sur l'ancien
+// `statut` unique pour les lignes non migrées (compat ascendante totale).
+
+// « Fermée » = réglée (Payée) OU clôturée → sort des impayés. Sinon encore due.
+export const estClose = (statuts: string[]) => statuts.some((s) => s === "payee" || s === "cloture");
+export const estOuverte = (statuts: string[]) => !estClose(statuts);
+// Compat : accepte un statut unique (ancien) OU un tableau (nouveau).
+export const factureOuverte = (s: string | string[]) => (Array.isArray(s) ? estOuverte(s) : s !== "payee" && s !== "cloture");
+
+// Lit l'ensemble des statuts d'une facture : `statuts` (CSV/tableau) si présent,
+// sinon le `statut` unique. Toujours ≥ 1 statut, dédupliqué, filtré sur la grille.
+export function statutsDe(raw: { statuts?: unknown; statut?: unknown }): string[] {
+  const src = raw?.statuts;
+  let arr: string[] = [];
+  if (Array.isArray(src)) arr = src.map(String);
+  else if (typeof src === "string" && src.trim()) arr = src.split(",");
+  arr = arr.map((x) => x.trim()).filter((x) => FACTURE_STATUT_KEYS.includes(x));
+  if (!arr.length) { const uni = String(raw?.statut ?? "").trim(); arr = FACTURE_STATUT_KEYS.includes(uni) ? [uni] : ["non_payee"]; }
+  return [...new Set(arr)];
+}
+export const serialiserStatuts = (arr: string[]) =>
+  ([...new Set(arr.map((x) => String(x).trim()).filter((x) => FACTURE_STATUT_KEYS.includes(x)))].join(",") || "non_payee");
+
+// Statut « représentatif » unique — pour la compat de la colonne `statut` et un
+// libellé court. Priorité : payé > clôturé > dossier police > transmis > relancé
+// > en attente > non payé.
+const REPR_PRIORITE = ["payee", "cloture", "dossier_police", "transmise", "relancee", "en_attente", "non_payee"];
+export function statutRepresentatif(statuts: string[]): string {
+  for (const k of REPR_PRIORITE) if (statuts.includes(k)) return k;
+  return statuts[0] || "non_payee";
+}
+
+// Contrôle de cohérence NON BLOQUANT : renvoie des avertissements pour les
+// combinaisons contradictoires/inhabituelles (l'utilisateur reste libre de coder
+// comme il veut, mais il est prévenu).
+export function incoherencesStatuts(statuts: string[]): string[] {
+  const a = (k: string) => statuts.includes(k);
+  const out: string[] = [];
+  if (a("payee") && a("non_payee")) out.push("« Payé » et « Non payé » sont contradictoires.");
+  if (a("payee") && a("dossier_police")) out.push("« Payé » + « Dossier police » : inhabituel (une facture réglée n'est plus au dossier police).");
+  if (a("cloture") && a("non_payee") && !a("payee")) out.push("« Clôturé » sans « Payé » : facture close mais marquée non réglée (créance abandonnée ?).");
+  return out;
+}
+
+export type Facture = { id: string; objet: string; destinataire: string | null; montant: number; dateEmission: string | null; dateEcheance: string | null; statut: string; statuts: string[]; note: string | null; par: string | null; createdAt: string; datePaiement: string | null; payePar: string | null };
 export type FacturesData = { connecte: boolean; pret: boolean; canEdit: boolean; factures: Facture[]; enRetard: number; du: number };
 
 // État d'échéance d'une facture ouverte : dépassée / bientôt (< 24 h) / ok.
 export type EcheanceEtat = "depasse" | "bientot" | "ok" | null;
-export function echeanceEtat(f: { statut: string; dateEcheance: string | null }, now = Date.now()): EcheanceEtat {
-  if (!factureOuverte(f.statut) || !f.dateEcheance) return null;
+export function echeanceEtat(f: { statut?: string; statuts?: string[]; dateEcheance: string | null }, now = Date.now()): EcheanceEtat {
+  const arr = f.statuts?.length ? f.statuts : (f.statut ? [f.statut] : ["non_payee"]);
+  if (!estOuverte(arr) || !f.dateEcheance) return null;
   const t = new Date(f.dateEcheance).getTime();
   if (!Number.isFinite(t)) return null;
   if (t < now) return "depasse";
