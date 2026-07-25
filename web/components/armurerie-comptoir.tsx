@@ -17,6 +17,7 @@ import {
 } from "@/components/armurerie-erp";
 import { SimulateurFiscal } from "@/components/armurerie-fiscal";
 import { snapshotCycle } from "@/lib/armurerie-fiscal";
+import { ToastHost } from "@/components/toast-host";
 import {
   creerClient, majClient, supprimerClient,
   creerVente, majVente, supprimerVente, marquerRdv,
@@ -182,6 +183,7 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
       {tab === "notes" ? <BlocNotesTab notes={notes} router={router} /> : null}
       {tab === "taches" ? <TachesTab taches={taches} router={router} /> : null}
       {tab === "activite" ? <ActiviteTab mouvements={mouvementsCoffre} ventes={ventes} pointages={pointages} paies={paies} /> : null}
+      <ToastHost />
     </>
   );
 }

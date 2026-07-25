@@ -11,6 +11,7 @@ import { PhotoDrop } from "@/components/photo-drop";
 import { FiscalDashboard } from "@/components/armurerie-fiscal";
 import { snapshotCycle, calculFiscal, pourcent } from "@/lib/armurerie-fiscal";
 import { exporterFiscalExcel, exporterFiscalPDF } from "@/lib/fiscal-export";
+import { toastErreur } from "@/lib/toast";
 import type { ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache, ArmMouvement, ArmVente, ArmProduit, ArmCommande, ArmCommandeLigne, ArmRessource, ArmRdv } from "@/lib/queries";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
 import { Badge } from "@/components/ui";
@@ -160,8 +161,8 @@ export function PointageTab({ employes, pointages, router }: { employes: ArmEmpl
     return m;
   }, [pointages]);
 
-  async function pointer(e: ArmEmploye) { setBusy(e.id); const r = await pointerService(e.id, e.nom); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Action impossible — réessaie."); }
-  async function terminer(p: ArmPointage) { setBusy(p.id); const r = await terminerService(p.id); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Action impossible — réessaie."); }
+  async function pointer(e: ArmEmploye) { setBusy(e.id); const r = await pointerService(e.id, e.nom); setBusy(null); if (r.ok) router.refresh(); else toastErreur(r.error || "Action impossible — réessaie."); }
+  async function terminer(p: ArmPointage) { setBusy(p.id); const r = await terminerService(p.id); setBusy(null); if (r.ok) router.refresh(); else toastErreur(r.error || "Action impossible — réessaie."); }
 
   const recents = pointages.filter((p) => p.fin).slice(0, 12);
 
@@ -590,8 +591,8 @@ export function PaiesTab({ paies, employes, ventes, router }: { paies: ArmPaie[]
   const totalDu = dues.reduce((s, p) => s + p.montant, 0);
   const totalVerse = paies.filter((p) => p.statut === "paye").reduce((s, p) => s + p.montant, 0);
 
-  async function payer(p: ArmPaie) { setBusy(p.id); const r = await payerPaie(p.id); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Versement impossible — réessaie."); }
-  async function suppr(p: ArmPaie) { setBusy(p.id); const r = await supprimerPaie(p.id); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Suppression impossible — réessaie."); }
+  async function payer(p: ArmPaie) { setBusy(p.id); const r = await payerPaie(p.id); setBusy(null); if (r.ok) router.refresh(); else toastErreur(r.error || "Versement impossible — réessaie."); }
+  async function suppr(p: ArmPaie) { setBusy(p.id); const r = await supprimerPaie(p.id); setBusy(null); if (r.ok) router.refresh(); else toastErreur(r.error || "Suppression impossible — réessaie."); }
 
   return (
     <>
@@ -703,9 +704,9 @@ export function ImpotsTab({ impots, ca, mouvementsCoffre = [], router }: { impot
     const next = !auditOpen; setAuditOpen(next);
     if (next && audit === null) { const r = await getAuditFiscal(); setAudit(r.entries); setAuditPret(r.pret); }
   }
-  async function payer(i: ArmImpot) { setBusy(i.id); const r = await payerImpot(i.id); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Règlement impossible — réessaie."); }
-  async function suppr(i: ArmImpot) { setBusy(i.id); const r = await supprimerImpot(i.id); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Suppression impossible — réessaie."); }
-  async function cloturer() { setBusy("cloture"); const r = await cloturerCycleFiscal(); setBusy(null); setConfirmCloture(false); if (r.ok) router.refresh(); else alert(r.error || "Clôture impossible — réessaie."); }
+  async function payer(i: ArmImpot) { setBusy(i.id); const r = await payerImpot(i.id); setBusy(null); if (r.ok) router.refresh(); else toastErreur(r.error || "Règlement impossible — réessaie."); }
+  async function suppr(i: ArmImpot) { setBusy(i.id); const r = await supprimerImpot(i.id); setBusy(null); if (r.ok) router.refresh(); else toastErreur(r.error || "Suppression impossible — réessaie."); }
+  async function cloturer() { setBusy("cloture"); const r = await cloturerCycleFiscal(); setBusy(null); setConfirmCloture(false); if (r.ok) router.refresh(); else toastErreur(r.error || "Clôture impossible — réessaie."); }
   // Export CSV (compatible Excel FR : séparateur « ; » + BOM pour les accents).
   function exporterCSV() {
     const lignes: (string | number | null)[][] = [
@@ -730,8 +731,8 @@ export function ImpotsTab({ impots, ca, mouvementsCoffre = [], router }: { impot
   }
   // Exports natifs (librairies chargées à la demande).
   const [exp, setExp] = useState<string | null>(null);
-  async function exporterExcel() { setExp("xlsx"); try { await exporterFiscalExcel(cycle, impots); } catch { alert("Export Excel impossible — réessaie."); } setExp(null); }
-  async function exporterPDF() { setExp("pdf"); try { await exporterFiscalPDF(cycle, impots); } catch { alert("Export PDF impossible — réessaie."); } setExp(null); }
+  async function exporterExcel() { setExp("xlsx"); try { await exporterFiscalExcel(cycle, impots); } catch { toastErreur("Export Excel impossible — réessaie."); } setExp(null); }
+  async function exporterPDF() { setExp("pdf"); try { await exporterFiscalPDF(cycle, impots); } catch { toastErreur("Export PDF impossible — réessaie."); } setExp(null); }
 
   return (
     <>
@@ -875,7 +876,7 @@ export function BlocNotesTab({ notes, router }: { notes: ArmNote[]; router: Rout
   const [busy, setBusy] = useState<string | null>(null);
   const tri = [...notes].sort((a, b) => (b.epingle ? 1 : 0) - (a.epingle ? 1 : 0));
 
-  async function epingler(n: ArmNote) { setBusy(n.id); const r = await majNote(n.id, { epingle: !n.epingle }); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Action impossible — réessaie."); }
+  async function epingler(n: ArmNote) { setBusy(n.id); const r = await majNote(n.id, { epingle: !n.epingle }); setBusy(null); if (r.ok) router.refresh(); else toastErreur(r.error || "Action impossible — réessaie."); }
 
   return (
     <>
@@ -955,9 +956,9 @@ export function TachesTab({ taches, router }: { taches: ArmTache[]; router: Rout
   const aFaire = taches.filter((t) => !t.fait);
   const faites = taches.filter((t) => t.fait);
 
-  async function ajouter() { if (texte.trim().length < 1) return; setBusy("add"); const r = await creerTache({ texte, assigneA: assigne }); setBusy(null); if (r.ok) { setTexte(""); setAssigne(""); router.refresh(); } else alert(r.error || "Ajout impossible — réessaie."); }
-  async function basculer(t: ArmTache) { setBusy(t.id); const r = await basculerTache(t.id, !t.fait); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Action impossible — réessaie."); }
-  async function suppr(t: ArmTache) { setBusy(t.id); const r = await supprimerTache(t.id); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Action impossible — réessaie."); }
+  async function ajouter() { if (texte.trim().length < 1) return; setBusy("add"); const r = await creerTache({ texte, assigneA: assigne }); setBusy(null); if (r.ok) { setTexte(""); setAssigne(""); router.refresh(); } else toastErreur(r.error || "Ajout impossible — réessaie."); }
+  async function basculer(t: ArmTache) { setBusy(t.id); const r = await basculerTache(t.id, !t.fait); setBusy(null); if (r.ok) router.refresh(); else toastErreur(r.error || "Action impossible — réessaie."); }
+  async function suppr(t: ArmTache) { setBusy(t.id); const r = await supprimerTache(t.id); setBusy(null); if (r.ok) router.refresh(); else toastErreur(r.error || "Action impossible — réessaie."); }
 
   const Ligne = (t: ArmTache) => (
     <div key={t.id} className="flex items-center gap-2.5 rounded-[8px] border border-border bg-surface-2 px-3 py-2 text-[0.84rem]">
@@ -1464,7 +1465,7 @@ function CommandeModal({ commande, produits, clients, onClose, router }: { comma
     if (!r.ok) { setErr(r.error || "Impossible."); return; }
     router.refresh(); onClose();
   }
-  async function marquer(st: string) { setBusy("st"); const r = await marquerCommande(commande!.id, st); setBusy(null); if (r.ok) { setStatut(st); router.refresh(); } else alert(r.error || "Changement de statut impossible — réessaie."); }
+  async function marquer(st: string) { setBusy("st"); const r = await marquerCommande(commande!.id, st); setBusy(null); if (r.ok) { setStatut(st); router.refresh(); } else toastErreur(r.error || "Changement de statut impossible — réessaie."); }
   async function supprimer() { setBusy("del"); const r = await supprimerCommande(commande!.id); setBusy(null); if (!r.ok) { setErr(r.error || "Échec."); return; } router.refresh(); onClose(); }
 
   return (
@@ -1693,7 +1694,7 @@ function RdvModal({ rdv, rdvs, clients, onClose, router, onDemarrer }: { rdv?: A
     if (!r.ok) { setErr(r.error || "Impossible."); return; }
     router.refresh(); onClose();
   }
-  async function marquer(st: string) { setBusy("st"); const r = await marquerRdv(rdv!.id, st); setBusy(null); if (r.ok) { setStatut(st); router.refresh(); } else alert(r.error || "Changement de statut impossible — réessaie."); }
+  async function marquer(st: string) { setBusy("st"); const r = await marquerRdv(rdv!.id, st); setBusy(null); if (r.ok) { setStatut(st); router.refresh(); } else toastErreur(r.error || "Changement de statut impossible — réessaie."); }
   async function supprimer() { setBusy("del"); const r = await supprimerRdv(rdv!.id); setBusy(null); if (!r.ok) { setErr(r.error || "Échec."); return; } router.refresh(); onClose(); }
 
   const nomComplet = [clientPrenom, clientNom].filter(Boolean).join(" ");
