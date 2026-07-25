@@ -97,7 +97,7 @@ export async function getAssistantDispensaire(): Promise<AssistantData> {
       const nomsSalaries = new Set(salaries.filter((s) => normNom(s.nom)).map((s) => normNom(s.nom)));
 
       const renvoyesAvecAcces = salaries.filter((s) => String(s.statut ?? "") === "renvoye" && accesActifs.has(normNom(s.nom)));
-      if (renvoyesAvecAcces.length) constats.push(mk({ id: "rh-renvoye-acces", priorite: "critique", categorie: "Sécurité", titre: `${renvoyesAvecAcces.length} salarié(s) renvoyé(s) gardant l'accès au site`, detail: renvoyesAvecAcces.slice(0, 3).map((s) => String(s.nom ?? "?")).join(" · "), suggestion: "Désactive leur accès dans l'Administration : un renvoi RH ne coupe pas l'accès automatiquement.", href: "/dispensaire/admin" }));
+      if (renvoyesAvecAcces.length) constats.push(mk({ id: "rh-renvoye-acces", priorite: "critique", categorie: "Sécurité", titre: `${renvoyesAvecAcces.length} salarié(s) renvoyé(s) gardant l'accès au site`, detail: renvoyesAvecAcces.slice(0, 3).map((s) => String(s.nom ?? "?")).join(" · "), suggestion: "Désactive leur accès dans l'Administration : un renvoi RH ne coupe pas l'accès automatiquement.", href: "/dispensaire/admin", action: { kind: "couper-acces", label: "Couper l'accès" } }));
 
       const accesSansFiche = membres.filter((m) => m.actif !== false && normNom(m.nom) && !nomsSalaries.has(normNom(m.nom)));
       if (accesSansFiche.length) constats.push(mk({ id: "rh-acces-sans-fiche", priorite: "normale", categorie: "RH", titre: `${accesSansFiche.length} accès sans fiche RH`, detail: accesSansFiche.slice(0, 3).map((m) => String(m.nom ?? "?")).join(" · "), suggestion: "Crée la fiche salarié correspondante (ou retire l'accès s'il n'a plus lieu d'être).", href: "/dispensaire/rh" }));
