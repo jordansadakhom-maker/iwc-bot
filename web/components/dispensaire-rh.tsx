@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Users, Plus, Search, Loader2, X, Check, Pencil, Trash2, AlertTriangle, CalendarDays, Landmark, Send, Minus } from "lucide-react";
+import { Users, Plus, Search, Loader2, X, Check, Pencil, Trash2, AlertTriangle, CalendarDays, Landmark, Send, Minus, Link2 } from "lucide-react";
 import type { RhData, Salarie } from "@/lib/dispensaire-rh";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { VideRegistre } from "@/components/dispensaire-ui";
@@ -54,9 +54,10 @@ export function DispensaireRh({ data }: { data: RhData }) {
     if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." });
   }
   async function renvoyer(s: Salarie) {
-    setSal((p) => p.map((x) => (x.id === s.id ? { ...x, statut: "renvoye" } : x)));
+    // Le renvoi coupe l'accès dans la foulée (côté serveur) → on l'anticipe à l'écran.
+    setSal((p) => p.map((x) => (x.id === s.id ? { ...x, statut: "renvoye", acces: x.acces ? { ...x.acces, actif: false } : x.acces } : x)));
     const r = await majSalarie(s.id, { statut: "renvoye" });
-    if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else router.refresh();
+    if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else { setFlash({ t: "ok", m: `${s.nom} renvoyé — accès au site coupé.` }); router.refresh(); }
   }
 
   if (!canEdit) return (
@@ -101,6 +102,7 @@ export function DispensaireRh({ data }: { data: RhData }) {
                       <span className="text-[0.9rem] font-semibold">{s.nom}</span>
                       {s.grade ? <span className="rounded-full border border-border px-1.5 py-0.5 text-[0.64rem] font-semibold text-muted">{s.grade}</span> : null}
                       <span className="rounded-full px-1.5 py-0.5 text-[0.62rem] font-bold uppercase" style={{ color: statTone(s.statut), background: `color-mix(in srgb,${statTone(s.statut)} 14%,transparent)` }}>{statLabel(s.statut)}</span>
+                      {s.acces ? <AccesPastille acces={s.acces} renvoye={s.statut === "renvoye"} /> : null}
                     </div>
                     <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[0.72rem] text-faint">
                       <span className="inline-flex items-center gap-1"><CalendarDays className="h-3 w-3" /> Embauché {dateFR(s.dateEmbauche)}</span>
@@ -129,6 +131,16 @@ export function DispensaireRh({ data }: { data: RhData }) {
       {delId ? <ConfirmDelete nom={sal.find((s) => s.id === delId)?.nom || ""} onCancel={() => setDelId(null)} onConfirm={() => supprimer(delId)} /> : null}
     </div>
   );
+}
+
+// Pastille d'accès au site rapproché depuis la liste blanche (une seule fiche).
+function AccesPastille({ acces, renvoye }: { acces: NonNullable<Salarie["acces"]>; renvoye: boolean }) {
+  const base = "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[0.62rem] font-semibold";
+  if (!acces.present) return <span className={base} style={{ color: "var(--muted)", background: "color-mix(in srgb,var(--muted) 12%,transparent)" }} title="Aucune fiche d'accès au site pour ce salarié">Sans accès</span>;
+  // Désynchronisation critique : renvoyé mais l'accès est resté ouvert.
+  if (renvoye && acces.actif) return <span className="rounded-full px-1.5 py-0.5 text-[0.62rem] font-bold text-white" style={{ background: "var(--oxblood)" }} title="Renvoyé mais l'accès au site est encore actif — le bouton « Renvoyer » le coupe">⚠ Accès actif</span>;
+  if (acces.actif) return <span className={base} style={{ color: "var(--good)", background: "color-mix(in srgb,var(--good) 14%,transparent)" }} title={`Accès au site actif${acces.role ? " · grade d'accès : " + acces.role : ""}${acces.lieDiscord ? " · Discord lié" : ""}`}>{acces.lieDiscord ? <Link2 className="h-2.5 w-2.5" /> : null} Accès</span>;
+  return <span className={base} style={{ color: "var(--faint)", background: "color-mix(in srgb,var(--faint) 12%,transparent)" }} title="Accès au site coupé">Accès coupé</span>;
 }
 
 function AbsCtrl({ label, val, tone, onMinus, onPlus }: { label: string; val: number; tone: string; onMinus: () => void; onPlus: () => void }) {
