@@ -3,14 +3,15 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Sparkles, Lightbulb, ArrowRight, Info, ShieldCheck, Search, Play, Check, Archive, RotateCcw, Loader2, Flame } from "lucide-react";
+import { Sparkles, Lightbulb, ArrowRight, Info, ShieldCheck, Search, Play, Check, Archive, RotateCcw, Loader2, Flame, Zap } from "lucide-react";
 import { resumeAuto, compterGravite, GRAVITE_TON, GRAVITE_LABEL, PRIORITE_LABEL, PRIORITE_TON, PRIORITE_ORDRE, ETAT_LABEL, ETAT_TON, ETATS, ETAT_ACTIFS, estEscalade, type AssistantData, type Constat, type Etat } from "@/lib/erp-assistant-const";
 
 type SetEtat = (id: string, etat: Etat) => Promise<{ ok: boolean; error?: string }>;
+type OnAction = (kind: string) => Promise<{ ok: boolean; error?: string; message?: string }>;
 const norm = (x: string) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 const ORDRE_G = ["critique", "important", "info"] as const;
 
-export function AssistantPanel({ data, setEtat }: { data: AssistantData; setEtat?: SetEtat }) {
+export function AssistantPanel({ data, setEtat, onAction }: { data: AssistantData; setEtat?: SetEtat; onAction?: OnAction }) {
   const router = useRouter();
   const editable = !!setEtat;
   const [override, setOverride] = useState<Record<string, Etat>>({});
@@ -20,6 +21,16 @@ export function AssistantPanel({ data, setEtat }: { data: AssistantData; setEtat
   const [fCat, setFCat] = useState("");
   const [flash, setFlash] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [actBusy, setActBusy] = useState<string | null>(null);
+
+  async function agir(c: Constat) {
+    if (!onAction || !c.action) return;
+    setActBusy(c.id);
+    const r = await onAction(c.action.kind);
+    setActBusy(null);
+    if (!r.ok) setFlash(r.error || "Action impossible.");
+    else { setFlash(r.message || "C'est fait."); router.refresh(); }
+  }
 
   const etatDe = (c: Constat): Etat => override[c.id] ?? c.etat ?? "nouveau";
   const all = data.constats.map((c) => ({ ...c, etat: etatDe(c) }));
@@ -100,10 +111,15 @@ export function AssistantPanel({ data, setEtat }: { data: AssistantData; setEtat
                   <div className="mt-1 text-[0.88rem] font-semibold">{c.titre}</div>
                   {c.detail ? <div className="mt-0.5 text-[0.74rem] text-faint">{c.detail}</div> : null}
                   <div className="mt-1 flex items-start gap-1.5 text-[0.78rem] text-muted"><Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: "var(--warn)" }} /> {c.suggestion}</div>
-                  {/* Actions d'état */}
-                  {editable ? (
+                  {/* Action directe (« régler en 1 clic ») + actions d'état */}
+                  {(editable || (onAction && c.action)) ? (
                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                      {!clos ? (
+                      {onAction && c.action && !clos ? (
+                        <button onClick={() => agir(c)} disabled={actBusy === c.id} className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[0.72rem] font-bold text-black/85 transition hover:brightness-110 disabled:opacity-50" style={{ background: "var(--accent)" }}>
+                          {actBusy === c.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />} {c.action.label}
+                        </button>
+                      ) : null}
+                      {editable ? (!clos ? (
                         <>
                           {c.etat !== "en_cours" ? <EtatBtn on={() => mark(c, "en_cours")} busy={busy === c.id + "en_cours"} icon={Play} tone="var(--warn)">En cours</EtatBtn> : null}
                           <EtatBtn on={() => mark(c, "resolu")} busy={busy === c.id + "resolu"} icon={Check} tone="var(--good)">Résolu</EtatBtn>
@@ -111,7 +127,7 @@ export function AssistantPanel({ data, setEtat }: { data: AssistantData; setEtat
                         </>
                       ) : (
                         <EtatBtn on={() => mark(c, "nouveau")} busy={busy === c.id + "nouveau"} icon={RotateCcw} tone="var(--accent)">Rouvrir</EtatBtn>
-                      )}
+                      )) : null}
                     </div>
                   ) : null}
                 </div>

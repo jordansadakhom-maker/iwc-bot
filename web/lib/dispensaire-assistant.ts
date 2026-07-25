@@ -73,7 +73,7 @@ export async function getAssistantDispensaire(): Promise<AssistantData> {
       rows(() => admin.from("DispensaireMembre").select("nom,actif")),
       getConfig(),
     ]);
-    if (pointages.length) constats.push(mk({ id: "disp-pointage", priorite: "importante", categorie: "Pointage", titre: `${pointages.length} pointage(s) non clôturé(s)`, detail: "Service ouvert depuis plus de 12 h.", suggestion: "Clôture les services restés ouverts pour fiabiliser les heures.", href: "/dispensaire/pointage" }));
+    if (pointages.length) constats.push(mk({ id: "disp-pointage", priorite: "importante", categorie: "Pointage", titre: `${pointages.length} pointage(s) non clôturé(s)`, detail: "Service ouvert depuis plus de 12 h.", suggestion: "Clôture les services restés ouverts pour fiabiliser les heures.", href: "/dispensaire/pointage", action: { kind: "clore-pointages", label: "Clôturer maintenant" } }));
     const seuil = cfg.seuilRenvoi;
     const surveiller = salaries.filter((s) => String(s.statut ?? "actif") === "actif" && num(s.absInjustifiees) >= seuil - 1 && num(s.absInjustifiees) < seuil);
     if (surveiller.length) constats.push(mk({ id: "disp-rh-surveiller", priorite: "importante", categorie: "RH", titre: `${surveiller.length} salarié(s) à surveiller (absences)`, detail: surveiller.slice(0, 3).map((s) => String(s.nom ?? "?")).join(" · "), suggestion: "Convoque un entretien avant d'atteindre le seuil de renvoi.", href: "/dispensaire/rh" }));

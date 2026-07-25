@@ -8,7 +8,7 @@ import { RapportPanel } from "@/components/erp-rapport";
 import { getAssistantIWC } from "@/lib/assistant-iwc";
 import { getKpisIWC } from "@/lib/kpi-iwc";
 import { construireRapport } from "@/lib/erp-rapport-const";
-import { setEtatNotif } from "./veille-actions";
+import { setEtatNotif, executerConstat } from "./veille-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +21,7 @@ export default async function AssistantPage() {
       {/* Indicateurs clés de la compagnie. */}
       <KpiBand items={kpis} />
       {/* Veille automatique : ce que le système a détecté et propose. */}
-      <AssistantPanel data={veille} setEtat={setEtatNotif} />
+      <AssistantPanel data={veille} setEtat={setEtatNotif} onAction={executerConstat} />
       {/* Rapport auto : consultable, copiable, imprimable. */}
       <RapportPanel rapport={rapport} />
       <div className="flex items-start gap-3 rounded-card border border-border bg-surface p-3.5" style={{ borderColor: "color-mix(in srgb,var(--accent) 30%,var(--border))" }}>
