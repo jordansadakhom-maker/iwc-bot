@@ -21,6 +21,19 @@ export function DispensaireVentes({ data }: { data: VentesData }) {
 
   const semaine = data.semaine;
   const total = useMemo(() => (Math.max(1, Number(v.quantite) || 1)) * (Number(v.prixUnitaire) || 0), [v.quantite, v.prixUnitaire]);
+  // Défauts intelligents : autocomplétion du patient et de l'article à partir
+  // des ventes déjà enregistrées (aucune requête, aucune donnée inventée).
+  const patientsConnus = useMemo(() => {
+    const s = new Set<string>();
+    for (const p of semaine) if (p.patient) s.add(p.patient);
+    for (const x of ventes) if (x.patient) s.add(x.patient);
+    return [...s].sort((a, b) => a.localeCompare(b));
+  }, [semaine, ventes]);
+  const articlesConnus = useMemo(() => {
+    const s = new Set<string>(["Bandage"]);
+    for (const x of ventes) if (x.item) s.add(x.item);
+    return [...s].sort((a, b) => a.localeCompare(b));
+  }, [ventes]);
   // Indicateurs de la semaine (calculés sur les données réelles, sans rien inventer).
   const bilan = useMemo(() => ({
     patients: semaine.length,
@@ -59,9 +72,11 @@ export function DispensaireVentes({ data }: { data: VentesData }) {
       <section className="rounded-[14px] border border-border bg-surface p-4">
         <h3 className="mb-1 flex items-center gap-2 text-[0.9rem] font-semibold"><BadgeDollarSign className="h-4 w-4 text-accent" /> Enregistrer une vente</h3>
         <p className="mb-3 text-[0.72rem] text-faint">Règle : <b>{data.plafond} bandages</b> maximum par patient et par semaine, à <b>{money(data.prix)}</b> l&apos;unité.</p>
+        <datalist id="vente-patients">{patientsConnus.map((p) => <option key={p} value={p} />)}</datalist>
+        <datalist id="vente-articles">{articlesConnus.map((a) => <option key={a} value={a} />)}</datalist>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          <label className="flex flex-col gap-1 lg:col-span-2"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Patient</span><input className={inputCls} value={v.patient} onChange={set("patient")} placeholder="Prénom Nom" /></label>
-          <label className="flex flex-col gap-1"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Article</span><input className={inputCls} value={v.item} onChange={set("item")} placeholder="Bandage" /></label>
+          <label className="flex flex-col gap-1 lg:col-span-2"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Patient</span><input className={inputCls} list="vente-patients" value={v.patient} onChange={set("patient")} placeholder="Prénom Nom" /></label>
+          <label className="flex flex-col gap-1"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Article</span><input className={inputCls} list="vente-articles" value={v.item} onChange={set("item")} placeholder="Bandage" /></label>
           <label className="flex flex-col gap-1"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Quantité</span><input className={inputCls} value={v.quantite} onChange={(e) => setV((p) => ({ ...p, quantite: e.target.value.replace(/[^0-9]/g, "") }))} inputMode="numeric" /></label>
           <label className="flex flex-col gap-1"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Prix unité ($)</span><input className={inputCls} value={v.prixUnitaire} onChange={(e) => setV((p) => ({ ...p, prixUnitaire: e.target.value.replace(/[^0-9]/g, "") }))} inputMode="numeric" /></label>
           <label className="flex flex-col gap-1 lg:col-span-2"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Note</span><input className={inputCls} value={v.note} onChange={set("note")} placeholder="Optionnel" /></label>

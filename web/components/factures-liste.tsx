@@ -15,6 +15,9 @@ const dateFR = (s: string | null) => { if (!s) return "—"; try { return new Da
 
 export function FacturesListe({ factures, total }: { factures: FactureItem[]; total: number }) {
   const router = useRouter();
+  // Défaut intelligent : autocomplétion du client à partir des factures existantes
+  // (mêmes noms → un seul dossier client, moins de fautes de frappe). Aucune requête.
+  const clientsConnus = [...new Set(factures.map((f) => f.clientNom).filter((n): n is string => !!n))].sort((a, b) => a.localeCompare(b));
   const [nouveau, setNouveau] = useState(false);
   const [dossierOpen, setDossierOpen] = useState(false);
   const [delId, setDelId] = useState<string | null>(null);
@@ -93,13 +96,13 @@ export function FacturesListe({ factures, total }: { factures: FactureItem[]; to
         </div>
       )}
 
-      {nouveau ? <NouvelleFacture onClose={() => setNouveau(false)} router={router} /> : null}
+      {nouveau ? <NouvelleFacture clients={clientsConnus} onClose={() => setNouveau(false)} router={router} /> : null}
       {dossierOpen ? <ClientDossier onClose={() => setDossierOpen(false)} /> : null}
     </>
   );
 }
 
-function NouvelleFacture({ onClose, router }: { onClose: () => void; router: Router }) {
+function NouvelleFacture({ clients, onClose, router }: { clients: string[]; onClose: () => void; router: Router }) {
   const [objet, setObjet] = useState("");
   const [montant, setMontant] = useState("");
   const [clientNom, setClientNom] = useState("");
@@ -130,7 +133,7 @@ function NouvelleFacture({ onClose, router }: { onClose: () => void; router: Rou
           <Champ label="Objet / prestation *"><input className={inputCls} value={objet} onChange={(e) => setObjet(e.target.value)} placeholder="Escorte d'une diligence…" maxLength={200} autoFocus /></Champ>
           <div className="grid gap-3 sm:grid-cols-2">
             <Champ label="Montant réglé ($) *"><input className={inputCls} value={montant} onChange={(e) => setMontant(e.target.value.replace(/[^0-9]/g, ""))} placeholder="250" inputMode="numeric" /></Champ>
-            <Champ label="Client"><input className={inputCls} value={clientNom} onChange={(e) => setClientNom(e.target.value)} placeholder="Earl le forgeron" maxLength={100} /></Champ>
+            <Champ label="Client"><input className={inputCls} list="facture-clients" value={clientNom} onChange={(e) => setClientNom(e.target.value)} placeholder="Earl le forgeron" maxLength={100} /><datalist id="facture-clients">{clients.map((c) => <option key={c} value={c} />)}</datalist></Champ>
           </div>
           <Champ label="Type (optionnel)"><input className={inputCls} value={type} onChange={(e) => setType(e.target.value)} placeholder="Contrat, Soin médical…" maxLength={80} /></Champ>
           <div className="flex justify-end gap-2">
