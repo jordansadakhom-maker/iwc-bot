@@ -14,6 +14,7 @@ import {
   ajusterChasse, deplacerChasse, definirSeuilChasse, supprimerRessourceChasse,
   definirCapaciteChasse, lireStockChasse, importerStockChasse,
 } from "@/app/(app)/chasse/actions";
+import { construireCanon } from "@/lib/chasse-canon";
 
 type Mode = "add" | "remove" | "set";
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
@@ -27,30 +28,8 @@ const CATS = ["Viandes", "Peaux & Cuirs", "Plumes", "Matières", "Carcasses", "A
 
 const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
 
-// Regroupement des noms TRONQUÉS : « Viande de petit g » et « Viande de petit
-// gibier » désignent la même ressource. On considère A comme une troncature de B
-// si son nom normalisé est un PRÉFIXE de celui de B. On ne fusionne que si c'est
-// SANS AMBIGUÏTÉ — les candidats plus longs doivent former une chaîne (tous
-// préfixes du plus long), sinon on garde A séparé → jamais de regroupement de
-// ressources réellement distinctes (ex. « Viande de gibier » ≠ « …gros gibier »).
-function construireCanon(noms: string[]): { cle: (nom: string) => string; label: (cle: string) => string } {
-  const disp = new Map<string, string>(); // clé normalisée -> meilleur affichage (le plus long)
-  for (const nom of noms) {
-    const k = norm(nom); if (!k) continue;
-    const t = nom.trim(); const p = disp.get(k);
-    if (!p || t.length > p.length) disp.set(k, t);
-  }
-  const keys = [...disp.keys()];
-  const canon = new Map<string, string>();
-  for (const k of keys) {
-    const sup = keys.filter((o) => o !== k && o.startsWith(k)); // k est un préfixe de o
-    if (!sup.length) { canon.set(k, k); continue; }
-    const long = sup.reduce((a, b) => (b.length > a.length ? b : a));
-    canon.set(k, sup.every((s) => long.startsWith(s)) ? long : k); // chaîne → fusion ; branche → séparé
-  }
-  const resolve = (k: string, g = 0): string => { const c = canon.get(k) ?? k; return c === k || g > 8 ? c : resolve(c, g + 1); };
-  return { cle: (nom: string) => resolve(norm(nom)), label: (k: string) => disp.get(k) || k };
-}
+// Regroupement des noms TRONQUÉS (« Viande de petit g » ≡ « Viande de petit
+// gibier ») — logique partagée avec le scan/import (lib/chasse-canon).
 
 // Fusionne les lignes d'une même ressource (même nom normalisé) en une seule,
 // en additionnant les quantités — garantit qu'un objet identique n'apparaît
@@ -291,7 +270,7 @@ export function ChasseModule({ data }: { data: ChasseData }) {
       <HistoryPanel data={data} zones={zones} open={journal} onToggle={() => setJournal((v) => !v)} monte={monte} />
 
       {/* Modales */}
-      {photo ? <PhotoModal zones={zones} defaultZone={vue !== "global" ? vue : zones[0]?.id || "c1"} onClose={() => setPhoto(false)} onApplied={(zoneId, lignes, mode) => { mergeImport(zoneId, lignes, mode); router.refresh(); }} setFlash={setFlash} /> : null}
+      {photo ? <PhotoModal zones={zones} defaultZone={vue !== "global" ? vue : zones[0]?.id || "c1"} nomsConnus={[...new Set(items.map((i) => i.nom))]} onClose={() => setPhoto(false)} onApplied={(zoneId, lignes, mode) => { mergeImport(zoneId, lignes, mode); router.refresh(); }} setFlash={setFlash} /> : null}
       {nouveau ? <NouveauModal zones={zones} defaultZone={vue !== "global" ? vue : zones[0]?.id || "c1"} onClose={() => setNouveau(false)} onCreer={(zoneId, nom, qte, cat) => applique(zoneId, nom, "add", qte, { categorie: cat })} /> : null}
       {transfert ? <TransfertModal zones={zones} items={items} onClose={() => setTransfert(false)} onTransfere={transfere} /> : null}
       {stepItem ? <StepModal item={stepItem} onClose={() => setStepItem(null)} onApply={(mode, qte) => { applique(stepItem.zoneId, stepItem.nom, mode, qte); setStepItem(null); }} onSeuil={(seuil) => { majSeuil(stepItem.zoneId, stepItem.nom, seuil); }} /> : null}
@@ -646,8 +625,8 @@ function CapaciteModal({ zone, used, onClose, onSave }: { zone: ChasseZone; used
 }
 
 // ── Import par photo (OCR) : lecture → aperçu corrigeable → appliquer ──
-function PhotoModal({ zones, defaultZone, onClose, onApplied, setFlash }: {
-  zones: ChasseZone[]; defaultZone: string; onClose: () => void;
+function PhotoModal({ zones, defaultZone, nomsConnus, onClose, onApplied, setFlash }: {
+  zones: ChasseZone[]; defaultZone: string; nomsConnus: string[]; onClose: () => void;
   onApplied: (zoneId: string, lignes: LigneStock[], mode: "add" | "set") => void; setFlash: (f: FlashMsg) => void;
 }) {
   const [zoneId, setZoneId] = useState(defaultZone);
@@ -666,7 +645,10 @@ function PhotoModal({ zones, defaultZone, onClose, onApplied, setFlash }: {
     const r = await lireStockChasse(url);
     setBusy(false);
     if (!r.ok || !r.lignes) { setErr(r.error || "Lecture impossible."); return; }
-    setLignes(r.lignes);
+    // n°8 : rapproche chaque nom lu du référentiel connu → la troncature est corrigée
+    // dans l'aperçu (proposé), l'utilisateur valide/ajuste avant d'enregistrer.
+    const canon = construireCanon([...nomsConnus, ...r.lignes.map((l) => l.nom)]);
+    setLignes(r.lignes.map((l) => ({ ...l, nom: canon.label(canon.cle(l.nom)) || l.nom })));
   }
   function setLigne(i: number, patch: Partial<LigneStock>) { setLignes((prev) => (prev ? prev.map((l, k) => (k === i ? { ...l, ...patch } : l)) : prev)); }
   function retirer(i: number) { setLignes((prev) => (prev ? prev.filter((_, k) => k !== i) : prev)); }
