@@ -42,7 +42,9 @@ export async function getAssistantDispensaire(): Promise<AssistantData> {
     const { items } = await getNotifications();
     for (const n of items) {
       const priorite = SEVERITE_PRIORITE[n.severite] || "information";
-      constats.push({ id: "no-" + n.id, gravite: graviteDe(priorite), priorite, categorie: n.type, titre: n.texte, detail: null, suggestion: suggestionPour(n.type), href: n.href });
+      // Facture impayée / en retard → relance possible en 1 clic (ref = objet ciblé).
+      const action = n.ref && n.type === "Facture" ? { kind: "relancer-facture", label: "Relancer", ref: n.ref } : undefined;
+      constats.push({ id: "no-" + n.id, gravite: graviteDe(priorite), priorite, categorie: n.type, titre: n.texte, detail: null, suggestion: suggestionPour(n.type), href: n.href, action });
     }
   } catch { pret = false; }
 

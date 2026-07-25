@@ -7,7 +7,7 @@ import { Sparkles, Lightbulb, ArrowRight, Info, ShieldCheck, Search, Play, Check
 import { resumeAuto, compterGravite, GRAVITE_TON, GRAVITE_LABEL, PRIORITE_LABEL, PRIORITE_TON, PRIORITE_ORDRE, ETAT_LABEL, ETAT_TON, ETATS, ETAT_ACTIFS, estEscalade, type AssistantData, type Constat, type Etat } from "@/lib/erp-assistant-const";
 
 type SetEtat = (id: string, etat: Etat) => Promise<{ ok: boolean; error?: string }>;
-type OnAction = (kind: string) => Promise<{ ok: boolean; error?: string; message?: string }>;
+type OnAction = (kind: string, ref?: string) => Promise<{ ok: boolean; error?: string; message?: string }>;
 const norm = (x: string) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 const ORDRE_G = ["critique", "important", "info"] as const;
 
@@ -26,7 +26,7 @@ export function AssistantPanel({ data, setEtat, onAction }: { data: AssistantDat
   async function agir(c: Constat) {
     if (!onAction || !c.action) return;
     setActBusy(c.id);
-    const r = await onAction(c.action.kind);
+    const r = await onAction(c.action.kind, c.action.ref);
     setActBusy(null);
     if (!r.ok) setFlash(r.error || "Action impossible.");
     else { setFlash(r.message || "C'est fait."); router.refresh(); }

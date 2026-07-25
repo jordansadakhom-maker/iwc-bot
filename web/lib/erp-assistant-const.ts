@@ -34,7 +34,7 @@ export type Constat = {
   suggestion: string;    // action proposée (jamais exécutée sans toi)
   href: string;          // lien direct vers l'élément concerné
   etat?: Etat;           // couche persistée (défaut « nouveau »)
-  action?: { kind: string; label: string }; // action INLINE exécutable en 1 clic (facultative)
+  action?: { kind: string; label: string; ref?: string }; // action INLINE exécutable en 1 clic (facultative ; ref = cible)
 };
 
 // Résultat d'une action de constat exécutée en 1 clic depuis l'assistant.
