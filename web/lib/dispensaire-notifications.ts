@@ -5,7 +5,7 @@ import { getAcces } from "@/lib/queries";
 import { getConfig } from "@/lib/dispensaire-roles";
 
 // ── Centre de notifications (alertes intelligentes dérivées de l'état courant) ─
-export type Notif = { id: string; severite: "alerte" | "attention" | "info"; type: string; texte: string; href: string };
+export type Notif = { id: string; severite: "alerte" | "attention" | "info"; type: string; texte: string; href: string; ref?: string };
 // Fil d'activité récente : mouvements de stock (± / déplacements) et coffres.
 export type Activite = { id: string; genre: "entree" | "sortie" | "deplacement" | "coffre"; texte: string; par: string | null; at: string; href: string };
 
@@ -55,8 +55,8 @@ export async function getNotifications(): Promise<{ items: Notif[]; count: numbe
     if (!Number.isFinite(t)) continue;
     // Impayé de plus de 7 jours (depuis l'émission) → escalade forte.
     const emis = f.dateEmission ? new Date(String(f.dateEmission)).getTime() : NaN;
-    if (Number.isFinite(emis) && nowMs - emis > 7 * 86400000) items.push({ id: "fa7-" + f.objet, severite: "alerte", type: "Facture", texte: `Impayé depuis plus de 7 jours : ${f.objet} (${num(f.montant)}$)`, href: "/dispensaire/factures" });
-    else if (t < nowMs) items.push({ id: "fa-" + f.objet, severite: "alerte", type: "Facture", texte: `Délai de paiement dépassé : ${f.objet} (${num(f.montant)}$)`, href: "/dispensaire/factures" });
+    if (Number.isFinite(emis) && nowMs - emis > 7 * 86400000) items.push({ id: "fa7-" + f.objet, severite: "alerte", type: "Facture", texte: `Impayé depuis plus de 7 jours : ${f.objet} (${num(f.montant)}$)`, href: "/dispensaire/factures", ref: String(f.objet) });
+    else if (t < nowMs) items.push({ id: "fa-" + f.objet, severite: "alerte", type: "Facture", texte: `Délai de paiement dépassé : ${f.objet} (${num(f.montant)}$)`, href: "/dispensaire/factures", ref: String(f.objet) });
     else if (t - nowMs < 24 * 3600000) items.push({ id: "faso-" + f.objet, severite: "attention", type: "Facture", texte: `Facture bientôt à échéance : ${f.objet} (${num(f.montant)}$)`, href: "/dispensaire/factures" });
   }
 

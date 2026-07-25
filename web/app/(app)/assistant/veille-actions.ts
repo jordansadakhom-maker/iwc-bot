@@ -13,7 +13,7 @@ export async function setEtatNotif(id: string, etat: string): Promise<{ ok: bool
 
 // Exécute l'action inline d'un constat (« régler en 1 clic »). Chaque action
 // réutilise les Server Actions existantes (donc leurs gardes) — additif, sûr.
-export async function executerConstat(kind: string): Promise<ActionConstatResult> {
+export async function executerConstat(kind: string, _ref?: string): Promise<ActionConstatResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
   if (kind === "clore-pointages") {
