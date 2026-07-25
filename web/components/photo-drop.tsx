@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback } from "react";
 import { ImagePlus, Loader2, X, Camera } from "lucide-react";
 import { uploadPhoto } from "@/app/(app)/actions-upload";
+import { avecDelai } from "@/lib/with-timeout";
 
 // Zone de dépôt réutilisable : glisser / choisir une image OU la prendre en photo
 // avec l'appareil (mobile) → envoi vers Supabase Storage → renvoie l'URL publique
@@ -11,12 +12,8 @@ import { uploadPhoto } from "@/app/(app)/actions-upload";
 // Réduit une image trop grande côté client (canvas) avant l'envoi : évite de
 // dépasser la limite de corps des Server Actions et rend l'envoi rapide. Les GIF
 // et PDF ne sont pas transformés. En cas de souci, renvoie le fichier d'origine.
-// Garde-fou : ne jamais laisser un envoi tourner à l'infini. Si la Server Action
-// ne répond pas dans le délai (réseau lent, stockage qui bloque), on rend la main
-// avec une erreur claire au lieu de figer le spinner « Envoi en cours… ».
-function avecDelai<T>(p: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
-}
+// Délai max d'un envoi de photo avant d'abandonner l'attente (spinner) et
+// d'afficher une erreur. Voir lib/with-timeout (garde-fou partagé).
 const UPLOAD_TIMEOUT_MS = 45000;
 
 async function reduireImage(file: File, maxDim: number): Promise<File> {

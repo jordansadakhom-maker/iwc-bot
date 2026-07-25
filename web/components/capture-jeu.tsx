@@ -6,6 +6,7 @@ import { Card, CardHeader } from "@/components/ui";
 import { Champ, Picker, inputCls, Modal } from "@/components/edit-ui";
 import { uploadAudio } from "@/app/(app)/actions-upload";
 import { envoyerNoteAudio } from "@/app/(app)/notes-vocales/actions";
+import { avecDelai } from "@/lib/with-timeout";
 
 const PRIORITES = [
   { key: "normale", label: "Normale" },
@@ -142,15 +143,20 @@ export function CaptureJeu() {
       const ext = type.includes("ogg") ? "ogg" : "webm";
       const fd = new FormData();
       fd.set("file", new File([blob], `jeu.${ext}`, { type }));
-      const up = await uploadAudio(fd);
+      // Garde-fous anti-blocage : ni l'envoi ni la transcription ne peuvent figer
+      // l'écran indéfiniment (60 s pour l'envoi, 120 s pour la transcription).
+      const up = await avecDelai(uploadAudio(fd), 60000);
       if (!up.ok || !up.url) { setPhase("idle"); setFlash({ t: "bad", m: up.error || "Envoi de l'audio impossible." }); return; }
-      const r = await envoyerNoteAudio({ url: up.url, cible, lieu, priorite });
+      const r = await avecDelai(envoyerNoteAudio({ url: up.url, cible, lieu, priorite }), 120000);
       setPhase("idle");
       if (r.ok) { setFlash({ t: "ok", m: r.message || "Son du jeu transcrit — le réseau en fait un rapport de terrain." }); setCible(""); setLieu(""); setPriorite("normale"); }
       else setFlash({ t: "bad", m: r.error || "Transcription impossible." });
     } catch (e) {
       setPhase("idle");
-      setFlash({ t: "bad", m: (e as Error).message || "Erreur pendant le traitement." });
+      const msg = (e as Error)?.message === "timeout"
+        ? "Envoi ou transcription trop long — réessaie (enregistre une scène plus courte)."
+        : ((e as Error).message || "Erreur pendant le traitement.");
+      setFlash({ t: "bad", m: msg });
     }
   }
 
