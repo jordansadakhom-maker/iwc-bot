@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Gamepad2, Square, Loader2, X, Keyboard, Volume2, MonitorUp, CheckCircle2 } from "lucide-react";
 import { uploadAudio } from "@/app/(app)/actions-upload";
 import { envoyerNoteAudio } from "@/app/(app)/notes-vocales/actions";
+import { avecDelai } from "@/lib/with-timeout";
 
 // Bouton FLOTTANT de capture « Son du jeu », présent sur TOUTES les pages du site
 // (sauf « Notes vocales » qui a déjà sa propre interface complète). Permet de
@@ -103,15 +104,20 @@ export function CaptureFlottante() {
       const ext = type.includes("ogg") ? "ogg" : "webm";
       const fd = new FormData();
       fd.set("file", new File([blob], `jeu.${ext}`, { type }));
-      const up = await uploadAudio(fd);
+      // Garde-fous anti-blocage : ni l'envoi ni la transcription ne peuvent figer
+      // l'écran indéfiniment (60 s pour l'envoi, 120 s pour la transcription).
+      const up = await avecDelai(uploadAudio(fd), 60000);
       if (!up.ok || !up.url) { setPhase("idle"); setFlash({ t: "bad", m: up.error || "Envoi impossible." }); return; }
-      const r = await envoyerNoteAudio({ url: up.url, cible, lieu, priorite });
+      const r = await avecDelai(envoyerNoteAudio({ url: up.url, cible, lieu, priorite }), 120000);
       setPhase("idle");
       if (r.ok) { setFlash({ t: "ok", m: r.message || "Son du jeu transcrit — rapport généré." }); setCible(""); setLieu(""); setPriorite("normale"); }
       else setFlash({ t: "bad", m: r.error || "Transcription impossible." });
     } catch (e) {
       setPhase("idle");
-      setFlash({ t: "bad", m: (e as Error).message || "Erreur pendant le traitement." });
+      const msg = (e as Error)?.message === "timeout"
+        ? "Envoi ou transcription trop long — réessaie (enregistre une scène plus courte)."
+        : ((e as Error).message || "Erreur pendant le traitement.");
+      setFlash({ t: "bad", m: msg });
     }
   }
 
