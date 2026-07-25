@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { ToastHost } from "@/components/toast-host";
 
 export const metadata: Metadata = {
   // Base des URL absolues (images de partage social) → supprime l'avertissement
@@ -19,7 +20,11 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="fr" data-theme="dark">
-      <body>{children}</body>
+      <body>
+        {children}
+        {/* Notifications éphémères — disponibles sur tout le site. */}
+        <ToastHost />
+      </body>
     </html>
   );
 }
