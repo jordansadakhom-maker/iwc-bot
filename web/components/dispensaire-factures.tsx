@@ -40,6 +40,9 @@ export function DispensaireFactures({ data, rapport, historique, config }: { dat
   const liste = base.filter((f) => !filtre || f.statut === filtre);
   const retard = factures.filter((f) => echeanceEtat(f) === "depasse").length;
   const du = factures.filter((f) => factureOuverte(f.statut)).reduce((a, f) => a + f.montant, 0);
+  // Défaut intelligent : autocomplétion du patient à partir des factures existantes
+  // (mêmes noms → un seul dossier patient, moins de fautes de frappe). Aucune requête.
+  const patientsConnus = useMemo(() => [...new Set(factures.map((f) => f.objet).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [factures]);
 
   async function enregistrer(vals: Record<string, string>, editing: Facture | null) {
     // Émission = date SAISIE (repli : maintenant) ; échéance = émission + 72 h.
@@ -150,14 +153,14 @@ export function DispensaireFactures({ data, rapport, historique, config }: { dat
 
       {consult ? <DispensaireConsultation onClose={() => setConsult(false)} onDone={(f) => { setFlash(f); router.refresh(); }} /> : null}
       {dossierOpen ? <DispensairePatientDossier onClose={() => setDossierOpen(false)} /> : null}
-      {form ? <FactureForm initial={form === "new" ? null : form} onClose={() => setForm(null)} onSave={(v) => enregistrer(v, form === "new" ? null : form)} /> : null}
+      {form ? <FactureForm initial={form === "new" ? null : form} patients={patientsConnus} onClose={() => setForm(null)} onSave={(v) => enregistrer(v, form === "new" ? null : form)} /> : null}
       {delId ? <ConfirmDelete nom={factures.find((f) => f.id === delId)?.objet || ""} onCancel={() => setDelId(null)} onConfirm={() => supprimer(delId)} /> : null}
       {rapportOpen ? <RapportImpayesModal initial={rapport} historique={historique} config={config} onClose={() => setRapportOpen(false)} /> : null}
     </div>
   );
 }
 
-function FactureForm({ initial, onClose, onSave }: { initial: Facture | null; onClose: () => void; onSave: (v: Record<string, string>) => void }) {
+function FactureForm({ initial, patients, onClose, onSave }: { initial: Facture | null; patients: string[]; onClose: () => void; onSave: (v: Record<string, string>) => void }) {
   const [v, setV] = useState<Record<string, string>>(() => {
     const d = new Date();
     const auj = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -183,7 +186,7 @@ function FactureForm({ initial, onClose, onSave }: { initial: Facture | null; on
     <Modal titre={initial ? "✏️ Modifier la facture" : "➕ Nouvelle facture"} onClose={onClose} max={560}>
       <div className="flex flex-col gap-3">
         <div className="grid gap-3 sm:grid-cols-2">
-          <Champ label="Prénom / Nom *"><input className={inputCls} value={v.objet} onChange={set("objet")} placeholder="Prénom Nom du patient" autoFocus /></Champ>
+          <Champ label="Prénom / Nom *"><input className={inputCls} list="facture-patients" value={v.objet} onChange={set("objet")} placeholder="Prénom Nom du patient" autoFocus /><datalist id="facture-patients">{patients.map((p) => <option key={p} value={p} />)}</datalist></Champ>
           <Champ label="Type de soins ou médicaments"><input className={inputCls} value={v.destinataire} onChange={set("destinataire")} placeholder="Ex. bandage, morphine…" /></Champ>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
