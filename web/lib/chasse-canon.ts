@@ -7,7 +7,9 @@
 // « …gros gibier »). Utilisé à l'affichage (regroupement) ET au scan/import
 // (rapprochement du référentiel avant enregistrement → jamais de troncature stockée).
 
-export const normChasse = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
+import { cleNom } from "@/lib/noms";
+// Normalisation des noms de ressources = la clé d'appariement commune (source unique).
+export const normChasse = cleNom;
 
 export function construireCanon(noms: string[]): { cle: (nom: string) => string; label: (cle: string) => string } {
   const disp = new Map<string, string>(); // clé normalisée -> meilleur affichage (le plus long)

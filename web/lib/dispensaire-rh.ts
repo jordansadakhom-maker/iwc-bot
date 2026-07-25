@@ -3,6 +3,7 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAcces } from "@/lib/queries";
 import { getConfig } from "@/lib/dispensaire-roles";
+import { cleNom } from "@/lib/noms";
 
 // Accès au site rapproché depuis DispensaireMembre (par nom) → la fiche RH « sait »
 // si la personne peut se connecter, sous quel grade, et si son Discord est lié.
@@ -15,8 +16,6 @@ export type Salarie = {
   updatedAt: string | null; updatedBy: string | null; acces?: SalarieAcces | null;
 };
 export type RhData = { connecte: boolean; pret: boolean; canEdit: boolean; salaries: Salarie[]; seuilRenvoi: number };
-
-const normNom = (v: unknown) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
 
 // Nombre d'absences INJUSTIFIÉES à partir duquel le salarié est signalé « à renvoyer ».
 export const SEUIL_RENVOI = 3;
@@ -43,7 +42,7 @@ export async function getRh(): Promise<RhData> {
     if (membres.length) {
       accesParNom = new Map<string, SalarieAcces>();
       for (const m of membres) {
-        const k = normNom(m.nom); if (!k) continue;
+        const k = cleNom(m.nom); if (!k) continue;
         const item: SalarieAcces = { present: true, actif: m.actif !== false, role: s(m.role), lieDiscord: !!(m.identifiant && String(m.identifiant).trim()) };
         const cur = accesParNom.get(k);
         // Une fiche active l'emporte sur une inactive (cas d'homonymes/doublons).
@@ -57,7 +56,7 @@ export async function getRh(): Promise<RhData> {
     dateEmbauche: s(r.dateEmbauche), compteBancaire: s(r.compteBancaire), telegramme: s(r.telegramme),
     statut: String(r.statut || "actif"), absJustifiees: num(r.absJustifiees), absInjustifiees: num(r.absInjustifiees),
     notes: s(r.notes), updatedAt: s(r.updatedAt), updatedBy: s(r.updatedBy),
-    acces: accesParNom ? (accesParNom.get(normNom(r.nom)) ?? { present: false, actif: false, role: null, lieDiscord: false }) : null,
+    acces: accesParNom ? (accesParNom.get(cleNom(r.nom)) ?? { present: false, actif: false, role: null, lieDiscord: false }) : null,
   }));
   return { connecte: true, pret: true, canEdit, salaries, seuilRenvoi };
 }

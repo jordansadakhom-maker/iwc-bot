@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAcces, getSessionProfile } from "@/lib/queries";
+import { cleNom } from "@/lib/noms";
 
 // ═══════════════════════════════════════════════════════════════
 //  Répertoire des contacts (Dispensaire de Saint-Denis) — écriture
@@ -25,7 +26,6 @@ const LABELS: Record<string, string> = {
 const CHAMPS: ChampContact[] = ["nom", "categorieId", "relation", "responsable", "description", "adresse", "telegramme", "contactSecondaire", "horaires", "notes", "typeService", "produits", "tarifs", "banque", "moyensContact"];
 
 const s = (v: unknown, max = 4000) => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
-const norm = (x: string) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
 function newId(p: string) { return `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
 
 async function qui() { try { const p = await getSessionProfile(); return p?.nom || "Équipe"; } catch { return "Équipe"; } }
@@ -99,7 +99,7 @@ export async function creerCategorie(nom: string): Promise<DispResult> {
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const n = s(nom, 80);
   if (!n) return { ok: false, error: "Donne un nom à la catégorie." };
-  const id = "cat-" + (norm(n).slice(0, 24) || "x") + "-" + Math.random().toString(36).slice(2, 5);
+  const id = "cat-" + (cleNom(n).slice(0, 24) || "x") + "-" + Math.random().toString(36).slice(2, 5);
   const { data: cs } = await admin.from("DispensaireCategorie").select("ordre");
   const ordre = ((cs || []) as { ordre: number }[]).reduce((m, c) => Math.max(m, Number(c.ordre) || 0), 0) + 1;
   const { error } = await admin.from("DispensaireCategorie").insert({ id, nom: n, ordre });
@@ -137,9 +137,9 @@ export async function importerContacts(fiches: FicheImport[]): Promise<ImportRap
   if (!list.length) return { ok: false, importes: 0, doublons: 0, erreurs: 0, aVerifier: [], error: "Aucune fiche à importer." };
 
   const { data: exData } = await admin.from("DispensaireContact").select("nom");
-  const vus = new Set(((exData || []) as { nom: string }[]).map((c) => norm(c.nom)));
+  const vus = new Set(((exData || []) as { nom: string }[]).map((c) => cleNom(c.nom)));
   const { data: catData } = await admin.from("DispensaireCategorie").select("id,nom");
-  const catParNom = new Map(((catData || []) as { id: string; nom: string }[]).map((c) => [norm(c.nom), c.id]));
+  const catParNom = new Map(((catData || []) as { id: string; nom: string }[]).map((c) => [cleNom(c.nom), c.id]));
 
   const par = await qui();
   let importes = 0, doublons = 0, erreurs = 0;
@@ -150,11 +150,11 @@ export async function importerContacts(fiches: FicheImport[]): Promise<ImportRap
   for (const f of list) {
     const nom = s(f.nom, 200);
     if (!nom) { erreurs++; continue; }
-    const k = norm(nom);
+    const k = cleNom(nom);
     if (vus.has(k)) { doublons++; continue; }
     vus.add(k);
     const row = nettoyer(f as Record<string, unknown>);
-    if (f.categorie) { const cid = catParNom.get(norm(f.categorie)); if (cid) row.categorieId = cid; }
+    if (f.categorie) { const cid = catParNom.get(cleNom(f.categorie)); if (cid) row.categorieId = cid; }
     const id = newId("dc");
     rows.push({ id, ...row, nom, source: "discord", updatedBy: par, updatedAt: new Date().toISOString() });
     traces.push({ contactId: id, contactNom: nom, action: "import", par });
