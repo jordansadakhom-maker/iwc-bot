@@ -207,7 +207,7 @@ export function PointageTab({ employes, pointages, router }: { employes: ArmEmpl
                 <span className="min-w-0 flex-1 truncate font-medium">{p.employeNom}</span>
                 <span className="shrink-0 text-faint">{heureFR(p.debut)} → {heureFR(p.fin)}</span>
                 <span className="shrink-0 font-num font-semibold" style={{ color: "var(--accent)" }}>{hm(p.minutes)}</span>
-                <button onClick={async () => { setBusy(p.id); await supprimerPointage(p.id); setBusy(null); router.refresh(); }} className="shrink-0 text-faint hover:text-ink"><Trash2 className="h-3.5 w-3.5" /></button>
+                <button onClick={async () => { setBusy(p.id); const r = await supprimerPointage(p.id); setBusy(null); if (r.ok) router.refresh(); else toastErreur(r.error || "Suppression impossible — réessaie."); }} className="shrink-0 text-faint hover:text-ink"><Trash2 className="h-3.5 w-3.5" /></button>
               </div>
             ))}
           </div>
