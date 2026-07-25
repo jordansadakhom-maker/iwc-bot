@@ -1,0 +1,54 @@
+name: Redéploiement Vercel (site)
+
+# Déclenche un redéploiement du SITE (Vercel) à chaque push sur main qui touche
+# le dossier web/. Utile si l'intégration Git de Vercel ne redéploie pas la prod
+# de façon fiable (ex. mauvaise « Production Branch »). Sinon, Vercel déploie déjà
+# tout seul — ce workflow est alors un filet de sécurité que TU contrôles.
+#
+# ── Mise en place (une seule fois) ──
+# 1. Dans Vercel : ouvre ton projet → Settings → Git → « Deploy Hooks ».
+#       - Crée un hook, branche : main (nom au choix, ex. « redeploy-main »).
+#       - Copie l'URL du hook.
+# 2. Dans GitHub : repo → Settings → Secrets and variables → Actions → New repository secret.
+#       Name  : VERCEL_DEPLOY_HOOK
+#       Value : (colle l'URL du Deploy Hook Vercel)
+# 3. C'est tout. Chaque fusion sur main touchant web/ redéploiera le site.
+#
+# Tant que le secret n'est pas configuré, ce workflow ne fait rien (il s'ignore).
+# Tu peux aussi le lancer à la main : onglet Actions → ce workflow → « Run workflow ».
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'           # ne redéploie le site QUE si le site a changé
+  workflow_dispatch: {}    # permet aussi un déclenchement manuel
+
+# Une seule exécution à la fois ; on annule les précédentes pour ne garder que le
+# dernier état de main.
+concurrency:
+  group: vercel-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Déclencher le redéploiement Vercel
+        env:
+          HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "ℹ️ VERCEL_DEPLOY_HOOK non configuré — rien à faire."
+            echo "   (Ajoute le secret pour activer le redéploiement automatique du site.)"
+            exit 0
+          fi
+          echo "🚀 Déclenchement du redéploiement Vercel…"
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$HOOK")
+          echo "Réponse Vercel : HTTP $code"
+          if [ "$code" -ge 200 ] && [ "$code" -lt 400 ]; then
+            echo "✅ Redéploiement déclenché. Suis-le dans l'onglet Deployments de Vercel."
+          else
+            echo "❌ Échec (HTTP $code) — vérifie l'URL du Deploy Hook Vercel."
+            exit 1
+          fi
