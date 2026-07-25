@@ -17,7 +17,7 @@ import {
 } from "@/components/armurerie-erp";
 import {
   creerClient, majClient, supprimerClient,
-  creerVente, majVente, supprimerVente,
+  creerVente, majVente, supprimerVente, marquerRdv,
   creerContrat, envoyerContrat, marquerContrat, supprimerContrat, honorerContrat,
   ajusterCoffreArmurerie,
   creerProduit, majProduit, supprimerProduit, importerCatalogue, importerRecettes, validerCaisse, fabriquerProduit, lireCarteIdentite, lireNumeroSerie, type LigneCaisse, type MouvementStock, type ScanRapport, type ScanAnomalie,
@@ -90,6 +90,11 @@ const ctrLabel = (s: string) => s === "honore" ? "Honoré ✓" : s === "signe" ?
 type TabKey = "caisse" | "produits" | "ressources" | "journal" | "scan" | "commandes" | "rdv" | "ventes" | "clients" | "contrats" | "employes" | "pointage" | "paies" | "comptabilite" | "impots" | "notes" | "taches" | "activite";
 const TAB_KEYS = new Set<TabKey>(["caisse", "produits", "ressources", "journal", "scan", "commandes", "rdv", "ventes", "clients", "contrats", "employes", "pointage", "paies", "comptabilite", "impots", "notes", "taches", "activite"]);
 
+// « Démarrer » un rendez-vous → pré-remplit la caisse avec le client + l'objet,
+// et retient le RDV pour le passer « honoré » une fois la vente encaissée.
+// N'altère JAMAIS la cascade de vente : ne fait qu'amorcer les champs.
+export type CaissePrefill = { clientNom: string; note: string; rdvId: string; rdvLabel: string };
+
 export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouvementsCoffre, produits, employes, pointages, paies, impots, notes, taches, commandes, ressources, rdvs, mouvementsStock = [], scan = null }: { clients: ArmClient[]; ventes: ArmVente[]; contrats: ArmContrat[]; ca: number; coffre: number; mouvementsCoffre: ArmMouvement[]; produits: ArmProduit[]; employes: ArmEmploye[]; pointages: ArmPointage[]; paies: ArmPaie[]; impots: ArmImpot[]; notes: ArmNote[]; taches: ArmTache[]; commandes: ArmCommande[]; ressources: ArmRessource[]; rdvs: ArmRdv[]; mouvementsStock?: MouvementStock[]; scan?: ScanRapport | null }) {
   const router = useRouter();
   // Onglet ouvert au démarrage depuis l'URL (?tab=…), ex. une notification qui
@@ -98,6 +103,9 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
   const tabParam = searchParams.get("tab");
   const [tab, setTab] = useState<TabKey>(() => (tabParam && TAB_KEYS.has(tabParam as TabKey)) ? (tabParam as TabKey) : "caisse");
   useEffect(() => { if (tabParam && TAB_KEYS.has(tabParam as TabKey)) setTab(tabParam as TabKey); }, [tabParam]);
+  // Continuité RDV → acte : le RDV « Démarrer » dépose ici de quoi amorcer la caisse.
+  const [prefill, setPrefill] = useState<CaissePrefill | null>(null);
+  const demarrerDepuisRdv = (p: CaissePrefill) => { setPrefill(p); setTab("caisse"); };
   const signes = contrats.filter((c) => c.statut === "signe").length;
   const paiesDues = paies.filter((p) => p.statut !== "paye").length;
   const impotsDus = impots.filter((i) => i.statut !== "paye").length;
@@ -151,13 +159,13 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
         })}
       </div>
 
-      {tab === "caisse" ? <CaisseTab produits={produits} ressources={ressources} clients={clients} router={router} /> : null}
+      {tab === "caisse" ? <CaisseTab produits={produits} ressources={ressources} clients={clients} router={router} prefill={prefill} onPrefillDone={() => setPrefill(null)} /> : null}
       {tab === "produits" ? <ProduitsTab produits={produits} ressources={ressources} router={router} /> : null}
       {tab === "ressources" ? <RessourcesTab ressources={ressources} router={router} /> : null}
       {tab === "journal" ? <JournalStockTab mouvements={mouvementsStock} /> : null}
       {tab === "scan" ? <ScanTab scan={scan} /> : null}
       {tab === "commandes" ? <CarnetCommandesTab commandes={commandes} produits={produits} clients={clients.map((c) => ({ id: c.id, nom: c.nom }))} router={router} /> : null}
-      {tab === "rdv" ? <RdvArmurerieTab rdvs={rdvs} clients={clients.map((c) => ({ id: c.id, nom: c.nom }))} router={router} /> : null}
+      {tab === "rdv" ? <RdvArmurerieTab rdvs={rdvs} clients={clients.map((c) => ({ id: c.id, nom: c.nom }))} router={router} onDemarrer={demarrerDepuisRdv} /> : null}
       {tab === "clients" ? <ClientsTab clients={clients} ventes={ventes} contrats={contrats} router={router} /> : null}
       {tab === "ventes" ? <VentesTab ventes={ventes} clients={clients} router={router} /> : null}
       {tab === "contrats" ? <ContratsTab contrats={contrats} clients={clients} produits={produits} router={router} /> : null}
@@ -288,9 +296,11 @@ function JournalStockTab({ mouvements }: { mouvements: MouvementStock[] }) {
   );
 }
 
-function CaisseTab({ produits, ressources, clients, router }: { produits: ArmProduit[]; ressources: ArmRessource[]; clients: ArmClient[]; router: Router }) {
+function CaisseTab({ produits, ressources, clients, router, prefill = null, onPrefillDone }: { produits: ArmProduit[]; ressources: ArmRessource[]; clients: ArmClient[]; router: Router; prefill?: CaissePrefill | null; onPrefillDone?: () => void }) {
   const [q, setQ] = useState("");
   const [cart, setCart] = useState<Record<string, number>>({});
+  // RDV en cours de concrétisation : retenu pour le passer « honoré » à l'encaissement.
+  const [rdvLie, setRdvLie] = useState<{ id: string; label: string } | null>(null);
   const [pxEdit, setPxEdit] = useState<Record<string, string>>({}); // prix unitaire ajusté à la vente
   const [client, setClient] = useState("");
   const [clientId, setClientId] = useState("");
@@ -316,6 +326,19 @@ function CaisseTab({ produits, ressources, clients, router }: { produits: ArmPro
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
   const [manques, setManques] = useState<string[] | null>(null); // composants insuffisants → confirmation
+
+  // Amorçage depuis un RDV « Démarrer » : pré-remplit le client + les notes et
+  // retient le RDV. On rattache au dossier client s'il existe déjà (même logique
+  // que la lecture de carte d'identité). Consommé une seule fois.
+  useEffect(() => {
+    if (!prefill) return;
+    const m = matchNomClient(clients, prefill.clientNom);
+    if (m) { setClientId(m.id); setClient(""); } else { setClientId(""); setClient(prefill.clientNom); }
+    if (prefill.note) setNotes(prefill.note);
+    setRdvLie({ id: prefill.rdvId, label: prefill.rdvLabel });
+    onPrefillDone?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill]);
 
   // Photo de carte d'identité déposée → l'IA lit le nom/prénom et pré-remplit.
   async function onPhoto(url: string) {
@@ -374,6 +397,9 @@ function CaisseTab({ produits, ressources, clients, router }: { produits: ArmPro
     setFactureSnap(snap); setFactureOpen(false);
     setCart({}); setPxEdit({}); setClient(""); setClientId(""); setNotes(""); setSerie(""); setPhoto(""); setLu(null); setSerieLu(null);
     setFlash(`Vente encaissée : ${money(r.total || vente)} → coffre + registre + facture + compta + impôts${r.ficheCreee ? " + fiche client créée" : ""}.`);
+    // Continuité RDV → acte : la vente concrétise le rendez-vous → il passe « honoré ».
+    // La vente est déjà encaissée ; si le marquage échoue, on n'annule rien.
+    if (rdvLie) { const rl = rdvLie; setRdvLie(null); try { const mr = await marquerRdv(rl.id, "honore"); if (mr.ok) setFlash((f) => `${f ?? ""} Rendez-vous de ${rl.label} marqué « honoré ».`.trim()); } catch { /* le RDV pourra être marqué à la main */ } }
     router.refresh();
   }
 
@@ -414,6 +440,13 @@ function CaisseTab({ produits, ressources, clients, router }: { produits: ArmPro
       <div className="lg:sticky lg:top-4 lg:self-start">
         <div className="rounded-[14px] border border-border bg-surface-2 p-3.5">
           <div className="mb-2 flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[0.05em] text-muted"><ShoppingCart className="h-4 w-4" /> Panier</div>
+          {rdvLie ? (
+            <div className="mb-2 flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[0.74rem]" style={{ borderColor: "color-mix(in srgb,var(--accent) 45%,var(--border))", background: "color-mix(in srgb,var(--accent) 8%,transparent)" }}>
+              <CalendarClock className="h-3.5 w-3.5 shrink-0" style={{ color: "var(--accent)" }} />
+              <span className="min-w-0 flex-1">Vente issue du <b>RDV de {rdvLie.label}</b> — il passera « honoré » à l&apos;encaissement.</span>
+              <button onClick={() => setRdvLie(null)} className="shrink-0 text-faint hover:text-ink" title="Détacher le rendez-vous"><X className="h-3.5 w-3.5" /></button>
+            </div>
+          ) : null}
           {flash ? <div className="mb-2"><Flash>{flash}</Flash></div> : null}
           {factureSnap ? (
             <button onClick={() => setFactureOpen(true)} className="mb-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-[0.8rem] font-semibold" style={{ borderColor: "color-mix(in srgb,var(--brass) 45%,var(--border))", color: "var(--brass)" }}>
