@@ -111,7 +111,12 @@ export function verifierCoherence(c: CalculFiscal): string[] {
 // réglée : entrées (ventes) − sorties (achats, dépenses, paies). C'est exactement
 // « CA − COGS − dépenses − achats » : chaque euro entré/sorti du coffre y figure.
 // Tout est recalculé à partir des mouvements réels → aucune saisie, aucun bouton.
-export type MvtCoffre = { sens: string; montant: number; createdAt: string | null };
+export type MvtCoffre = { sens: string; montant: number; createdAt: string | null; motif?: string | null };
+
+// Un règlement d'impôt (sortie du coffre) ne doit PAS réduire le bénéfice
+// imposable du cycle suivant (sinon l'impôt se taxe lui-même). On l'exclut par
+// son motif (« Impôt — … », « Impôt cycle … »).
+export const estMouvementImpot = (motif: unknown) => /^\s*imp[oô]t/i.test(String(motif ?? ""));
 export type DeclarationReglee = { payeAt: string | null; fin: string | null };
 export type CycleFiscal = CalculFiscal & {
   ca: number;         // total des entrées du cycle
@@ -136,7 +141,10 @@ export function snapshotCycle(mouvements: MvtCoffre[], impotsPayes: DeclarationR
   for (const m of mouvements || []) {
     if (depuis && m.createdAt && m.createdAt < depuis) continue; // hors du cycle courant
     const v = Number(m.montant) || 0;
-    if (String(m.sens) === "sortie") depenses += v; else ca += v;
+    if (String(m.sens) === "sortie") {
+      if (estMouvementImpot(m.motif)) continue; // un paiement d'impôt ne réduit pas le bénéfice
+      depenses += v;
+    } else ca += v;
   }
   ca = round2(ca); depenses = round2(depenses);
   const benefice = round2(ca - depenses);
