@@ -8,6 +8,8 @@ import {
   ArrowDownRight, ArrowUpRight, CircleDollarSign, Wallet, ClipboardList, X, Pickaxe, Search, ScanLine, AlertTriangle, CalendarClock, Bell,
 } from "lucide-react";
 import { PhotoDrop } from "@/components/photo-drop";
+import { FiscalDashboard } from "@/components/armurerie-fiscal";
+import { snapshotCycle } from "@/lib/armurerie-fiscal";
 import type { ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache, ArmMouvement, ArmVente, ArmProduit, ArmCommande, ArmCommandeLigne, ArmRessource, ArmRdv } from "@/lib/queries";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
 import { Badge } from "@/components/ui";
@@ -684,25 +686,30 @@ function PaieModal({ employes, ventes, onClose, router }: { employes: ArmEmploye
 }
 
 // ═══════════════════ IMPÔTS ═══════════════════
-export function ImpotsTab({ impots, ca, router }: { impots: ArmImpot[]; ca: number; router: Router }) {
+export function ImpotsTab({ impots, ca, mouvementsCoffre = [], router }: { impots: ArmImpot[]; ca: number; mouvementsCoffre?: ArmMouvement[]; router: Router }) {
   const [nouveau, setNouveau] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const du = impots.filter((i) => i.statut !== "paye").reduce((s, i) => s + i.montant, 0);
   const paye = impots.filter((i) => i.statut === "paye").reduce((s, i) => s + i.montant, 0);
+  // Situation fiscale dérivée à la lecture : bénéfice = flux net du coffre depuis
+  // la dernière déclaration réglée, taux/impôt via la grille officielle.
+  const cycle = snapshotCycle(mouvementsCoffre, impots.filter((i) => i.statut === "paye"));
 
   async function payer(i: ArmImpot) { setBusy(i.id); const r = await payerImpot(i.id); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Règlement impossible — réessaie."); }
   async function suppr(i: ArmImpot) { setBusy(i.id); const r = await supprimerImpot(i.id); setBusy(null); if (r.ok) router.refresh(); else alert(r.error || "Suppression impossible — réessaie."); }
 
   return (
     <>
+      {/* Tableau de bord fiscal — automatique, temps réel, grille officielle. */}
+      <div className="mb-3"><FiscalDashboard cycle={cycle} /></div>
+
       <div className="mb-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-        <Stat label="Impôts dus" value={money(du)} tone="var(--warn)" icon={Clock} />
+        <Stat label="Impôt dû (cycle)" value={money(cycle.impot)} tone="var(--oxblood)" icon={Clock} />
         <Stat label="Déjà réglés" value={money(paye)} tone="var(--good)" icon={Check} />
         <Stat label="Déclarations" value={String(impots.length)} tone="var(--steel)" icon={Landmark} />
       </div>
       <TopBar>
-        <p className="text-[0.74rem] italic text-faint">Cycle fiscal de 15 jours : chiffre d&apos;affaires × taux. Le règlement débite le coffre.</p>
-        <Btn onClick={() => setNouveau(true)}><Plus className="h-3.5 w-3.5" /> Nouvelle déclaration</Btn>
+        <p className="text-[0.74rem] italic text-faint">Impôt calculé automatiquement sur le <b>bénéfice</b> du cycle (grille officielle). Historique des déclarations réglées ci-dessous.</p>
+        <Btn onClick={() => setNouveau(true)}><Plus className="h-3.5 w-3.5" /> Déclaration manuelle</Btn>
       </TopBar>
       {impots.length === 0 ? (
         <Vide icon={Landmark} texte="Aucune déclaration. Ouvre un cycle fiscal : indique la période et le taux, le montant se calcule sur ton chiffre d'affaires." />
@@ -713,7 +720,7 @@ export function ImpotsTab({ impots, ca, router }: { impots: ArmImpot[]; ca: numb
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <div className="truncate text-[0.88rem] font-semibold">{i.libelle || "Cycle fiscal"}{i.debut || i.fin ? <span className="text-[0.74rem] font-normal text-faint"> · {[i.debut, i.fin].filter(Boolean).join(" → ")}</span> : null}</div>
-                  <div className="mt-0.5 text-[0.72rem] text-faint">CA {money(i.chiffreAffaires)} × {i.taux}%</div>
+                  <div className="mt-0.5 text-[0.72rem] text-faint">Taux {i.taux}% · CA {money(i.chiffreAffaires)}</div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <span className="font-num text-[1.05rem] font-bold" style={{ color: "var(--accent)" }}>{money(i.montant)}</span>

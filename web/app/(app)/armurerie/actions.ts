@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getAcces } from "@/lib/queries";
 import { envoyerCommande } from "@/lib/commandes";
 import { round2 } from "@/lib/format";
+import { calculFiscal } from "@/lib/armurerie-fiscal";
 
 type Admin = NonNullable<ReturnType<typeof createAdminClient>>;
 
@@ -513,22 +514,26 @@ export async function importerRecettes(): Promise<ArmResult & { n?: number }> {
 }
 
 // ── Impôts : accumulation automatique du cycle fiscal en cours ───
-// À chaque vente, on ajoute le CA au cycle « dû » en cours (ou on en ouvre un
-// nouveau, en héritant du dernier taux, 10 % par défaut) et on recalcule l'impôt.
-async function _accumulerImpot(admin: Admin, montant: number) {
-  const m = round2(montant);
-  if (m <= 0) return;
-  const { data: enCours } = await admin.from("ArmurerieImpot").select("*").eq("statut", "du").order("createdAt", { ascending: false }).limit(1).maybeSingle();
-  if (enCours) {
-    const e = enCours as { id: string; chiffreAffaires: number; taux: number };
-    const ca = round2((Number(e.chiffreAffaires) || 0) + m);
-    const taux = Number(e.taux) || 0;
-    await admin.from("ArmurerieImpot").update({ chiffreAffaires: ca, montant: round2((ca * taux) / 100) }).eq("id", e.id);
-  } else {
-    const { data: dernier } = await admin.from("ArmurerieImpot").select("taux").order("createdAt", { ascending: false }).limit(1).maybeSingle();
-    const taux = dernier ? (Number((dernier as { taux: number }).taux) || 0) : 10;
-    await admin.from("ArmurerieImpot").insert({ id: newId("imp"), libelle: "Ventes (cycle en cours)", chiffreAffaires: m, taux, montant: round2((m * taux) / 100), statut: "du" });
-  }
+// Impôt du cycle en cours, recalculé automatiquement sur le BÉNÉFICE (grille
+// officielle — cf. lib/armurerie-fiscal, source unique de vérité). Le bénéfice =
+// flux NET du coffre depuis la dernière déclaration réglée (entrées − sorties =
+// CA − achats − dépenses). Best-effort : n'échoue jamais la vente.
+async function _accumulerImpot(admin: Admin) {
+  // Début du cycle = dernière déclaration réglée (sinon depuis toujours).
+  const { data: paye } = await admin.from("ArmurerieImpot").select("payeAt,fin").eq("statut", "paye").order("payeAt", { ascending: false }).limit(1).maybeSingle();
+  const start = paye ? ((paye as { payeAt: string | null; fin: string | null }).payeAt || (paye as { fin: string | null }).fin) : null;
+  // Flux net du coffre sur le cycle.
+  let qy = admin.from("ArmurerieMouvementCoffre").select("sens,montant");
+  if (start) qy = qy.gte("createdAt", start);
+  const { data: mvts } = await qy;
+  let ca = 0, dep = 0;
+  for (const m of ((mvts as { sens: string; montant: number }[]) || [])) { const v = Number(m.montant) || 0; if (String(m.sens) === "sortie") dep += v; else ca += v; }
+  const f = calculFiscal(round2(ca - dep));
+  // taux stocké arrondi (colonne potentiellement entière) ; montant = impôt exact.
+  const patch = { chiffreAffaires: round2(ca), taux: Math.round(f.taux), montant: f.impot };
+  const { data: enCours } = await admin.from("ArmurerieImpot").select("id").eq("statut", "du").order("createdAt", { ascending: false }).limit(1).maybeSingle();
+  if (enCours) await admin.from("ArmurerieImpot").update(patch).eq("id", (enCours as { id: string }).id);
+  else await admin.from("ArmurerieImpot").insert({ id: newId("imp"), libelle: "Cycle en cours (bénéfice)", statut: "du", ...patch });
 }
 
 // ── Caisse (point de vente) — tout est automatisé à l'encaissement ─
@@ -625,8 +630,8 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
       const resume = items.map((l) => `${s(l.nom, 40)} ×${Math.max(1, Math.round(Number(l.qte) || 1))}`).join(", ");
       await envoyerCommande("facture.create", { objet: `Vente armurerie — ${resume}`.slice(0, 300), montant: total, clientNom: cli, type: "Armurerie" });
     } catch { /* best-effort */ }
-    // Impôts : accumulation automatique du cycle fiscal en cours.
-    try { await _accumulerImpot(admin, total); } catch { /* best-effort */ }
+    // Impôts : recalcul automatique du cycle sur le bénéfice (grille officielle).
+    try { await _accumulerImpot(admin); } catch { /* best-effort */ }
     return { ok: true, total, ticket, ficheCreee };
   } catch (e) {
     const msg = (e as Error).message || "";
