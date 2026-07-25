@@ -142,9 +142,15 @@ describe("Cycle — bénéfice = flux net du coffre (des centaines de mouvements
 });
 
 describe("Helpers", () => {
-  it("estMouvementImpot reconnaît les libellés d'impôt", () => {
+  it("estMouvementImpot ne reconnaît QUE nos écritures d'impôt", () => {
+    // Nos motifs (règlement + clôture) → exclus du bénéfice.
     expect(estMouvementImpot("Impôt — cycle")).toBe(true);
-    expect(estMouvementImpot("Impot cycle")).toBe(true);
+    expect(estMouvementImpot("Impôt — Déclaration manuelle")).toBe(true);
+    expect(estMouvementImpot("Impôt cycle (35%)")).toBe(true);
+    expect(estMouvementImpot("Impot cycle (30%)")).toBe(true);
+    // Dépenses libellées par l'utilisateur → PAS exclues (ne pas gonfler le bénéfice).
+    expect(estMouvementImpot("Impôt foncier 2026")).toBe(false);
+    expect(estMouvementImpot("Impôts divers")).toBe(false);
     expect(estMouvementImpot("Achat de bois")).toBe(false);
   });
   it("debutCycle retient la clôture la plus récente", () => {

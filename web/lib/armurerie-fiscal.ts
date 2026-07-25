@@ -114,9 +114,11 @@ export function verifierCoherence(c: CalculFiscal): string[] {
 export type MvtCoffre = { sens: string; montant: number; createdAt: string | null; motif?: string | null };
 
 // Un règlement d'impôt (sortie du coffre) ne doit PAS réduire le bénéfice
-// imposable du cycle suivant (sinon l'impôt se taxe lui-même). On l'exclut par
-// son motif (« Impôt — … », « Impôt cycle … »).
-export const estMouvementImpot = (motif: unknown) => /^\s*imp[oô]t/i.test(String(motif ?? ""));
+// imposable du cycle suivant (sinon l'impôt se taxe lui-même). On ne reconnaît
+// QUE nos propres écritures d'impôt — « Impôt — … » (règlement) et « Impôt cycle
+// … » (clôture) — pour ne jamais exclure par erreur une dépense que l'utilisateur
+// aurait libellée « Impôt foncier », « Impôts divers », etc.
+export const estMouvementImpot = (motif: unknown) => /^\s*imp[oô]t\s*(—|-|cycle\b)/i.test(String(motif ?? ""));
 export type DeclarationReglee = { payeAt: string | null; fin: string | null };
 export type CycleFiscal = CalculFiscal & {
   ca: number;         // total des entrées du cycle
