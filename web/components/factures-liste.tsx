@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Receipt, Plus, Loader2, Trash2, User } from "lucide-react";
+import { Receipt, Plus, Loader2, Trash2, User, Link2 } from "lucide-react";
 import type { FactureItem } from "@/lib/queries";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
 import { creerFacture, supprimerFacture } from "@/app/(app)/finances/actions";
@@ -76,7 +76,14 @@ export function FacturesListe({ factures, total }: { factures: FactureItem[]; to
                 <tr key={f.id} className="hover:bg-[color-mix(in_srgb,var(--ink)_4%,transparent)]">
                   <td className="border-b border-border px-2.5 py-2.5 font-num font-medium">{f.numero}</td>
                   <td className="border-b border-border px-2.5 py-2.5">{f.clientNom || "—"}</td>
-                  <td className="border-b border-border px-2.5 py-2.5 text-muted">{f.objet}</td>
+                  <td className="border-b border-border px-2.5 py-2.5 text-muted">
+                    {f.objet}
+                    {f.contratObjet ? (
+                      <span className="mt-0.5 flex items-center gap-1 text-[0.68rem]" style={{ color: "var(--accent)" }} title="Cette facture règle ce contrat">
+                        <Link2 className="h-3 w-3 shrink-0" /> règle le contrat : {f.contratObjet}{f.contratSuivi ? ` · ${f.contratSuivi}` : ""}
+                      </span>
+                    ) : null}
+                  </td>
                   <td className="border-b border-border px-2.5 py-2.5 font-num text-faint">{dateFR(f.createdAt)}</td>
                   <td className="border-b border-border px-2.5 py-2.5 text-right font-num font-semibold" style={{ color: "var(--good)" }}>{money(f.montant)}</td>
                   <td className="border-b border-border px-2.5 py-2.5 text-right">

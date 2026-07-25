@@ -830,25 +830,58 @@ export async function getNotificationsFeed(): Promise<FeedData> {
 }
 
 // ── Factures ─────────────────────────────────────────────────────
-export type FactureItem = { id: string; numero: string; objet: string; montant: number; clientNom: string | null; type: string | null; createdAt: string | null };
+export type FactureItem = { id: string; numero: string; objet: string; montant: number; clientNom: string | null; type: string | null; createdAt: string | null; contratId?: string | null; contratObjet?: string | null; contratSuivi?: string | null };
 export type FacturesData = { connecte: boolean; factures: FactureItem[]; total: number };
 
 export async function getFactures(): Promise<FacturesData> {
   if (!dataConfigured()) return { connecte: false, factures: [], total: 0 };
   const supabase = createAdminClient();
   if (!supabase) return { connecte: false, factures: [], total: 0 };
-  const { data, error } = await supabase.from("Facture").select("*").order("createdAt", { ascending: false }).limit(300);
-  if (error) return { connecte: false, factures: [], total: 0 };
   type Raw = Record<string, unknown>;
-  const factures: FactureItem[] = ((data || []) as Raw[]).map((f) => ({
-    id: String(f.id),
-    numero: (f.numero as string) || "—",
-    objet: (f.objet as string) || "Prestation",
-    montant: Number(f.montant) || 0,
-    clientNom: (f.clientNom as string) ?? null,
-    type: (f.type as string) ?? null,
-    createdAt: (f.createdAt as string) ?? null,
-  }));
+  // Factures + contrats : on relie chaque facture « de contrat » au contrat qu'elle
+  // règle (boucle Contrat → Facture → Paiement). Le lien est dérivé À LA LECTURE
+  // (aucune écriture, aucune colonne requise) : soit un contratId explicite s'il
+  // existe déjà sur la facture, soit un rapprochement exact objet + montant.
+  const [factR, contratsR] = await Promise.all([
+    supabase.from("Facture").select("*").order("createdAt", { ascending: false }).limit(300),
+    supabase.from("Contrat").select("*").limit(1000),
+  ]);
+  if (factR.error) return { connecte: false, factures: [], total: 0 };
+  const contrats = ((contratsR.data || []) as Raw[]);
+  const normTxt = (v: unknown) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ");
+  const cObjet = (c: Raw) => normTxt(c.objet ?? c.cible);
+  const cClient = (c: Raw) => normTxt(c.commanditaire ?? c.clientNom);
+  const cMontant = (c: Raw) => Number(c.remuVerseAuCoffre ?? 0) || 0;
+  const contratById = new Map(contrats.map((c) => [String(c.id), c]));
+
+  const factures: FactureItem[] = ((factR.data || []) as Raw[]).map((f) => {
+    const type = (f.type as string) ?? null;
+    const estContrat = !!type && /contrat/i.test(type);
+    let lie: Raw | null = null;
+    if (estContrat) {
+      // 1) Lien explicite si la colonne contratId est déjà présente et valide.
+      if (f.contratId && contratById.has(String(f.contratId))) lie = contratById.get(String(f.contratId)) || null;
+      // 2) Sinon rapprochement EXACT (objet + montant, client en départage) —
+      //    on ne lie que si un SEUL contrat correspond (jamais d'attribution douteuse).
+      if (!lie) {
+        const fo = normTxt(f.objet), fc = normTxt(f.clientNom), fm = Number(f.montant) || 0;
+        const cands = contrats.filter((c) => cObjet(c) && cObjet(c) === fo && cMontant(c) === fm && (!fc || !cClient(c) || cClient(c) === fc));
+        if (cands.length === 1) lie = cands[0];
+      }
+    }
+    return {
+      id: String(f.id),
+      numero: (f.numero as string) || "—",
+      objet: (f.objet as string) || "Prestation",
+      montant: Number(f.montant) || 0,
+      clientNom: (f.clientNom as string) ?? null,
+      type,
+      createdAt: (f.createdAt as string) ?? null,
+      contratId: lie ? String(lie.id) : null,
+      contratObjet: lie ? (String(lie.objet ?? lie.cible ?? "") || null) : null,
+      contratSuivi: lie ? (String(lie.suivi ?? lie.statut ?? "") || null) : null,
+    };
+  });
   const total = factures.reduce((s, f) => s + f.montant, 0);
   return { connecte: true, factures, total };
 }
