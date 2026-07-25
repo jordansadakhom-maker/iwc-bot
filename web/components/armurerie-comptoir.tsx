@@ -15,6 +15,8 @@ import { PhotoDrop } from "@/components/photo-drop";
 import {
   EmployesTab, PointageTab, ComptabiliteTab, PaiesTab, ImpotsTab, BlocNotesTab, TachesTab, ActiviteTab, CarnetCommandesTab, RessourcesTab, RdvArmurerieTab,
 } from "@/components/armurerie-erp";
+import { SimulateurFiscal } from "@/components/armurerie-fiscal";
+import { snapshotCycle } from "@/lib/armurerie-fiscal";
 import {
   creerClient, majClient, supprimerClient,
   creerVente, majVente, supprimerVente, marquerRdv,
@@ -106,6 +108,9 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
   // Continuité RDV → acte : le RDV « Démarrer » dépose ici de quoi amorcer la caisse.
   const [prefill, setPrefill] = useState<CaissePrefill | null>(null);
   const demarrerDepuisRdv = (p: CaissePrefill) => { setPrefill(p); setTab("caisse"); };
+  // Bénéfice du cycle fiscal courant (dérivé du coffre) — alimente le simulateur
+  // en caisse : impact d'une vente sur la tranche/l'impôt avant de valider.
+  const beneficeCycle = snapshotCycle(mouvementsCoffre, impots.filter((i) => i.statut === "paye")).benefice;
   const signes = contrats.filter((c) => c.statut === "signe").length;
   const paiesDues = paies.filter((p) => p.statut !== "paye").length;
   const impotsDus = impots.filter((i) => i.statut !== "paye").length;
@@ -159,7 +164,7 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
         })}
       </div>
 
-      {tab === "caisse" ? <CaisseTab produits={produits} ressources={ressources} clients={clients} router={router} prefill={prefill} onPrefillDone={() => setPrefill(null)} /> : null}
+      {tab === "caisse" ? <CaisseTab produits={produits} ressources={ressources} clients={clients} router={router} prefill={prefill} onPrefillDone={() => setPrefill(null)} beneficeCycle={beneficeCycle} /> : null}
       {tab === "produits" ? <ProduitsTab produits={produits} ressources={ressources} router={router} /> : null}
       {tab === "ressources" ? <RessourcesTab ressources={ressources} router={router} /> : null}
       {tab === "journal" ? <JournalStockTab mouvements={mouvementsStock} /> : null}
@@ -173,7 +178,7 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
       {tab === "pointage" ? <PointageTab employes={employes} pointages={pointages} router={router} /> : null}
       {tab === "paies" ? <PaiesTab paies={paies} employes={employes} ventes={ventes} router={router} /> : null}
       {tab === "comptabilite" ? <ComptabiliteTab mouvements={mouvementsCoffre} ca={ca} router={router} /> : null}
-      {tab === "impots" ? <ImpotsTab impots={impots} ca={ca} router={router} /> : null}
+      {tab === "impots" ? <ImpotsTab impots={impots} ca={ca} mouvementsCoffre={mouvementsCoffre} router={router} /> : null}
       {tab === "notes" ? <BlocNotesTab notes={notes} router={router} /> : null}
       {tab === "taches" ? <TachesTab taches={taches} router={router} /> : null}
       {tab === "activite" ? <ActiviteTab mouvements={mouvementsCoffre} ventes={ventes} pointages={pointages} paies={paies} /> : null}
@@ -296,7 +301,7 @@ function JournalStockTab({ mouvements }: { mouvements: MouvementStock[] }) {
   );
 }
 
-function CaisseTab({ produits, ressources, clients, router, prefill = null, onPrefillDone }: { produits: ArmProduit[]; ressources: ArmRessource[]; clients: ArmClient[]; router: Router; prefill?: CaissePrefill | null; onPrefillDone?: () => void }) {
+function CaisseTab({ produits, ressources, clients, router, prefill = null, onPrefillDone, beneficeCycle = 0 }: { produits: ArmProduit[]; ressources: ArmRessource[]; clients: ArmClient[]; router: Router; prefill?: CaissePrefill | null; onPrefillDone?: () => void; beneficeCycle?: number }) {
   const [q, setQ] = useState("");
   const [cart, setCart] = useState<Record<string, number>>({});
   // RDV en cours de concrétisation : retenu pour le passer « honoré » à l'encaissement.
@@ -487,6 +492,8 @@ function CaisseTab({ produits, ressources, clients, router, prefill = null, onPr
             <div className="flex justify-between"><span className="text-faint">Vente</span><span className="font-num font-semibold">{money(vente)}</span></div>
             <div className="flex justify-between"><span className="font-semibold">Bénéfice</span><span className="font-num font-bold" style={{ color: "var(--good)" }}>{money(benefice)}</span></div>
           </div>
+          {/* Simulateur fiscal : impact de cette vente sur la tranche/l'impôt du cycle. */}
+          {benefice > 0 ? <div className="mt-2"><SimulateurFiscal beneficeCycle={beneficeCycle} beneficeVente={benefice} /></div> : null}
           <div className="mt-2.5 flex flex-col gap-2">
             {clients.length ? (
               <select className={inputCls} value={clientId} onChange={(e) => setClientId(e.target.value)}>
