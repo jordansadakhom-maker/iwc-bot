@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { MessageSquare, Loader2, Send, Globe, CalendarPlus, Check, StickyNote } from "lucide-react";
+import { MessageSquare, Loader2, Send, Globe, CalendarPlus, Check, StickyNote, Archive, ArchiveRestore } from "lucide-react";
 import type { TelegrammeItem } from "@/lib/queries";
 import { Modal, Flash, inputCls } from "@/components/edit-ui";
 import { Badge } from "@/components/ui";
-import { repondreTelegramme, repondreTelegrammeWeb, creerRdvDepuisTelegramme } from "@/app/(app)/communication/telegramme-actions";
+import { repondreTelegramme, repondreTelegrammeWeb, creerRdvDepuisTelegramme, changerStatutTelegrammeWeb } from "@/app/(app)/communication/telegramme-actions";
 
 type Router = ReturnType<typeof useRouter>;
 
@@ -92,8 +92,18 @@ function TgModal({ tg, onClose, router }: { tg: TelegrammeItem; onClose: () => v
   const [flash, setFlash] = useState<string | null>(null);
   const [envoyes, setEnvoyes] = useState<string[]>([]);
   const [rdvFait, setRdvFait] = useState(tg.rdvCree);
+  const [estClos, setEstClos] = useState(/clotur/i.test(tg.statut));
 
   const texteClient = tg.messages.filter((m) => m.from === "client").map((m) => m.content || "").join(" ");
+
+  // Clôturer / rouvrir un télégramme du site — entièrement côté site.
+  async function basculerStatut() {
+    setBusy("statut");
+    const r = await changerStatutTelegrammeWeb(tg.id, !estClos);
+    setBusy(null);
+    if (!r.ok) { setFlash(r.error || "Échec."); return; }
+    setEstClos((v) => !v); setFlash(r.info || "Statut mis à jour."); router.refresh();
+  }
 
   async function repondre() {
     if (texte.trim().length < 1) return;
@@ -118,13 +128,20 @@ function TgModal({ tg, onClose, router }: { tg: TelegrammeItem; onClose: () => v
 
       <div className="mb-3 flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1.5 text-[0.74rem] text-faint"><Globe className="h-3.5 w-3.5" /> {tg.source === "web" ? "Envoyé depuis le site" : "Reçu sur Discord · relayé ici"}</span>
-        {rdvFait ? (
-          <Badge tone="good">RDV créé</Badge>
-        ) : (
-          <button onClick={creerRdv} disabled={busy === "rdv"} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">
-            {busy === "rdv" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CalendarPlus className="h-3.5 w-3.5" />} Créer le RDV
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {rdvFait ? (
+            <Badge tone="good">RDV créé</Badge>
+          ) : (
+            <button onClick={creerRdv} disabled={busy === "rdv"} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">
+              {busy === "rdv" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CalendarPlus className="h-3.5 w-3.5" />} Créer le RDV
+            </button>
+          )}
+          {tg.source === "web" ? (
+            <button onClick={basculerStatut} disabled={busy === "statut"} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">
+              {busy === "statut" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : estClos ? <ArchiveRestore className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />} {estClos ? "Rouvrir" : "Clôturer"}
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {tg.source === "web" ? (
@@ -174,7 +191,7 @@ function TgModal({ tg, onClose, router }: { tg: TelegrammeItem; onClose: () => v
       </div>
 
       {/* Réponse */}
-      {/ouvert/i.test(tg.statut) ? (
+      {!estClos ? (
         <div className="mt-3 flex items-end gap-2">
           <textarea className={inputCls + " min-h-[46px] resize-y"} value={texte} onChange={(e) => setTexte(e.target.value)} placeholder={tg.source === "web" ? "Réponds — livré au client (Discord / e-mail si fourni), et gardé en trace + « Suivre ma demande »…" : "Réponds au client — il le reçoit en message privé sur Discord (trace conservée)…"} maxLength={2000} />
           <button onClick={repondre} disabled={busy === "rep"} className="inline-flex shrink-0 items-center gap-1 rounded-lg px-3 py-2 text-[0.8rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>

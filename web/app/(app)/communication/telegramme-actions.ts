@@ -60,6 +60,20 @@ export async function repondreTelegrammeWeb(idPrefixe: string, texte: string, pa
   return { ok: true, info: "Réponse conservée (trace). Le client peut la lire sur « Suivre ma demande » via son nom." };
 }
 
+// Clôture / réouverture d'un télégramme ENVOYÉ DEPUIS LE SITE, entièrement
+// géré côté site (aucune dépendance au bot). La réouverture repasse en
+// « transmis » (et non « nouveau ») pour que le bot ne le re-notifie JAMAIS sur
+// Discord — évite tout doublon. Le trigger SQL crée la notif « clôturé » au besoin.
+export async function changerStatutTelegrammeWeb(idPrefixe: string, clos: boolean): Promise<TgResult> {
+  const id = (idPrefixe || "").replace(/^web-/, "");
+  if (!id) return { ok: false, error: "Télégramme introuvable." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { error } = await admin.from("TelegrammeWeb").update({ statut: clos ? "clos" : "transmis" }).eq("id", id);
+  if (error) return { ok: false, error: "Enregistrement impossible." };
+  return { ok: true, info: clos ? "Télégramme clôturé — trace conservée." : "Télégramme rouvert." };
+}
+
 // ── Extraction lieu / heure depuis le texte d'un télégramme ──
 const LIEUX = [
   "Valentine", "Strawberry", "Rhodes", "Saint-Denis", "Saint Denis", "Blackwater", "Annesburg",
