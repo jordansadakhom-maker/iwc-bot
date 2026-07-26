@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { envoyerCommande, type CommandeResult } from "@/lib/commandes";
+import { emettreEvenement } from "@/lib/evenements";
 
 // Suppression FIABLE d'un élément géré par le bot (tables réconciliées côté
 // bot → une suppression « fire-and-forget » revient toute seule).
@@ -22,5 +23,7 @@ export async function supprimerFiable(opts: {
     const admin = createAdminClient();
     if (admin) await admin.from(opts.table).delete().eq(opts.colonne, v);
   } catch { /* best-effort : le bot a déjà retiré l'élément de ses données */ }
+  // Journal d'audit (best-effort) : trace de la suppression (qui / quoi).
+  await emettreEvenement({ aggregate: opts.table.toLowerCase(), type: "suppression", cibleId: v, cibleLibelle: opts.table, payload: { commande: opts.type } });
   return { ok: true, message: r.ok ? (r.message || opts.okMsg) : opts.okMsg };
 }
