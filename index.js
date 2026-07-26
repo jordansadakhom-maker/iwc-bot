@@ -4691,6 +4691,30 @@ client.on('interactionCreate', async interaction => {
       saveDB(db);
     }
   } catch {}
+  // ── Communication : Discord en NOTIFY-ONLY ────────────────────────────────
+  // Les télégrammes & rendez-vous se gèrent désormais UNIQUEMENT sur le site.
+  // On intercepte ici toutes leurs interactions (boutons/menus/modales/commandes
+  // rdvp_ · tg_ · rdvclient_) et on redirige vers le site, sans exécuter les
+  // anciens handlers. 100 % réversible : il suffit de retirer ce bloc.
+  try {
+    const cid = interaction.customId || '';
+    const cmd = interaction.isChatInputCommand?.() ? (interaction.commandName || '') : '';
+    const estComm = /^(rdvp_|tg_|rdvclient_)/.test(cid)
+      || ['panel-rdv-plus', 'agenda-plus', 'dossier-client', 'recap-rdv', 'registre-telegrammes-installer'].includes(cmd);
+    if (estComm && interaction.isRepliable?.() && !interaction.replied && !interaction.deferred) {
+      const base = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || process.env.SITE_URL || 'https://iwc-bot-psi.vercel.app').replace(/\/+$/, '');
+      let url = base + '/communication';
+      let txt = '➡️ **La gestion se fait désormais sur le site.** Réponses, rendez-vous et statuts se traitent depuis le site — Discord ne sert plus qu\'à prévenir.';
+      if (cid === 'rdvclient_demande') { url = base + '/telegramme'; txt = '➡️ **Envoie ton télégramme sur le site** — tu pourras aussi suivre ta demande.'; }
+      else if (cid === 'rdvp_book') { url = base + '/rendez-vous'; txt = '➡️ **Prends ton rendez-vous sur le site.**'; }
+      else if (cid === 'rdvp_mesdemandes' || cid === 'rdvclient_suivi') { url = base + '/suivi'; txt = '➡️ **Suis ta demande sur le site.**'; }
+      try {
+        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Ouvrir sur le site').setEmoji('➡️').setURL(url));
+        await interaction.reply({ content: txt, components: [row], flags: MessageFlags.Ephemeral });
+      } catch {}
+      return;
+    }
+  } catch {}
   if (interaction.isButton?.() && (interaction.customId || '').startsWith('ndval_')) return _gererValidationNote(interaction);
   if (interaction.isButton?.() && (interaction.customId || '').startsWith('cpart_op::')) return _cpartCreerOpBouton(interaction);
   if (interaction.isUserSelectMenu?.() && (interaction.customId || '').startsWith('cpart_opsel::')) return _cpartCreerOpSelect(interaction);

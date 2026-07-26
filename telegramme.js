@@ -345,6 +345,16 @@ async function onMessage(message) {
     if (!content && message.attachments.size === 0) return false;
     if (/^\s*(\/\/|\(\()/.test(content)) { _logMsg(conv, 'note', message.member?.displayName || message.author.username, content.replace(/^\s*(\/\/|\(\()\s*/, '')); persist(db); await message.react('📝').catch(() => {}); return true; } // note interne
 
+    // ── NOTIFY-ONLY : on ne livre plus les réponses au client depuis Discord ──
+    // La réponse se fait UNIQUEMENT sur le site (Communication → Télégrammes).
+    // On garde la visibilité des messages du client (relayés plus haut) mais on
+    // ne transmet plus ce que l'équipe écrit ici. Réversible : retirer ce bloc.
+    _logMsg(conv, 'note', message.member?.displayName || message.author.username, `[non transmis — répondre sur le site] ${content}`);
+    persist(db);
+    await message.react('➡️').catch(() => {});
+    await message.channel.send({ content: '➡️ **Les réponses se font désormais sur le site.** Ce message n\'a **pas** été envoyé au client — réponds-lui depuis **Communication → Télégrammes** sur le site.' }).catch(() => {});
+    return true;
+
     const user = await message.client.users.fetch(conv.demandeurId).catch(() => null);
     if (!user) {
       await message.react('⚠️').catch(() => {});
