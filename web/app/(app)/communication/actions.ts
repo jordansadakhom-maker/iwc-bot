@@ -105,7 +105,7 @@ async function livrerReponseClient(contact: string, texte: string, parNom: strin
 // Replanifie un RDV depuis le site : met à jour le créneau et/ou le lieu, et
 // garde une trace horodatée dans le fil (paiement.reponses). Entièrement côté
 // site (le bot n'écrase pas les RDV web/télégramme).
-export async function replanifierRdv(id: string, creneau: string, lieu: string): Promise<CommResult> {
+export async function replanifierRdv(id: string, creneau: string, lieu: string): Promise<CommResult & { info?: string }> {
   if (!id) return { ok: false, error: "RDV introuvable." };
   const c = (creneau || "").trim();
   const l = (lieu || "").trim();
@@ -117,13 +117,16 @@ export async function replanifierRdv(id: string, creneau: string, lieu: string):
   const paiement = (data?.paiement && typeof data.paiement === "object" ? data.paiement : {}) as Record<string, unknown>;
   const reponses = Array.isArray(paiement.reponses) ? (paiement.reponses as unknown[]) : [];
   const parts = [c ? `créneau → ${c}` : null, l ? `lieu → ${l}` : null].filter(Boolean).join(" · ");
-  reponses.push({ texte: `📅 Replanifié (${parts})`, par: await auteurNom(), at: new Date().toISOString() });
+  const par = await auteurNom();
+  reponses.push({ texte: `📅 Replanifié (${parts})`, par, at: new Date().toISOString() });
   const patch: Record<string, unknown> = { paiement: { ...paiement, reponses } };
   if (c) patch.creneau = c.slice(0, 200);
   if (l) patch.lieu = l.slice(0, 200);
   const { error: e2 } = await admin.from("Rdv").update(patch).eq("id", id);
   if (e2) { console.error("replanifierRdv:", e2.message); return { ok: false, error: "Enregistrement impossible." }; }
-  return { ok: true };
+  // Prévient le client du changement (MP Discord / e-mail selon son contact).
+  const info = await livrerReponseClient(String(paiement.contact || ""), `📅 Ton rendez-vous a été replanifié : ${parts}.`, par);
+  return { ok: true, info };
 }
 
 // Lit le paiement JSON d'un RDV, applique un patch, réécrit. Renvoie le nouvel objet.
@@ -194,6 +197,26 @@ export async function encaisserRdv(id: string, montant: number, note: string): P
   // 3) Génère une facture (via le bot, exactement comme l'encaissement Discord).
   try { await creerFacture({ objet: `RDV — ${nomRP}`, montant: m, clientNom: nomRP, type: `RDV — ${typeRdv}`, remuneration: `$${m}` }); } catch { /* best-effort */ }
   return { ok: true, solde };
+}
+
+// Demande l'avis du client après un RDV honoré (satisfaction) — depuis le site.
+// Envoie un message d'invitation au client via son contact (MP Discord / e-mail)
+// et garde la trace. Calque la « satisfaction request » de Discord.
+export async function demanderAvisRdv(id: string): Promise<CommResult & { info?: string }> {
+  if (!id) return { ok: false, error: "RDV introuvable." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { data, error: e1 } = await admin.from("Rdv").select("paiement").eq("id", id).maybeSingle();
+  if (e1 || !data) return { ok: false, error: "RDV introuvable." };
+  const paiement = ((data as { paiement?: unknown }).paiement && typeof (data as { paiement?: unknown }).paiement === "object" ? (data as { paiement?: unknown }).paiement : {}) as Record<string, unknown>;
+  const par = await auteurNom();
+  const reponses = Array.isArray(paiement.reponses) ? (paiement.reponses as unknown[]) : [];
+  reponses.push({ texte: "⭐ Demande d'avis envoyée au client.", par, at: new Date().toISOString() });
+  const { error: e2 } = await admin.from("Rdv").update({ paiement: { ...paiement, reponses, avisDemande: new Date().toISOString() } }).eq("id", id);
+  if (e2) { console.error("demanderAvisRdv:", e2.message); return { ok: false, error: "Enregistrement impossible." }; }
+  const msg = "Merci d'avoir fait appel à la Iron Wolf Company ! Es-tu satisfait(e) de la prestation ? Réponds simplement à ce message — ton retour nous aide à nous améliorer.";
+  const info = await livrerReponseClient(String(paiement.contact || ""), msg, par);
+  return { ok: true, info };
 }
 
 // Enregistre l'URL d'une photo du lieu du RDV (Supabase Storage).
