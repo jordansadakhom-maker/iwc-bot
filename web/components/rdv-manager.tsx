@@ -7,7 +7,7 @@ import type { RdvComm, MembreLite } from "@/lib/queries";
 import { Modal, Flash, Picker, inputCls } from "@/components/edit-ui";
 import { Badge } from "@/components/ui";
 import { PhotoDrop } from "@/components/photo-drop";
-import { majStatutRdv, repondreRdv, assignerRdv, definirLieuPhotoRdv, cloturerRdv } from "@/app/(app)/communication/actions";
+import { majStatutRdv, repondreRdv, assignerRdv, definirLieuPhotoRdv, cloturerRdv, replanifierRdv } from "@/app/(app)/communication/actions";
 
 type Router = ReturnType<typeof useRouter>;
 
@@ -129,6 +129,11 @@ function RdvModal({ rdv, membres, onClose, router }: { rdv: RdvComm; membres: Me
   const [groupe, setGroupe] = useState<string>("");
   // Clôture
   const [resultat, setResultat] = useState("");
+  // Replanification (créneau / lieu) — valeurs « live » pour l'affichage + champs éditables.
+  const [creneauLive, setCreneauLive] = useState(rdv.creneau || "");
+  const [lieuLive, setLieuLive] = useState(rdv.lieu || "");
+  const [creneauEdit, setCreneauEdit] = useState(rdv.creneau || "");
+  const [lieuEdit, setLieuEdit] = useState(rdv.lieu || "");
 
   const filtres = membres.filter((m) => m.nom.toLowerCase().includes(q.toLowerCase())).slice(0, 40);
   const nbChoisis = Object.values(choisis).filter(Boolean).length;
@@ -176,6 +181,20 @@ function RdvModal({ rdv, membres, onClose, router }: { rdv: RdvComm; membres: Me
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
     router.refresh(); onClose();
   }
+  async function replanifier() {
+    const c = creneauEdit.trim(), l = lieuEdit.trim();
+    if (c === (creneauLive || "") && l === (lieuLive || "")) { setFlash("Rien à changer."); return; }
+    if (!c && !l) { setFlash("Indique un créneau ou un lieu."); return; }
+    setBusy("replan");
+    const r = await replanifierRdv(rdv.id, c, l);
+    setBusy(null);
+    if (!r.ok) { setFlash(r.error || "Échec."); return; }
+    if (c) setCreneauLive(c);
+    if (l) setLieuLive(l);
+    const parts = [c ? `créneau → ${c}` : null, l ? `lieu → ${l}` : null].filter(Boolean).join(" · ");
+    setReponses((p) => [...p, { texte: `📅 Replanifié (${parts})`, par: "moi", at: new Date().toISOString() }]);
+    setFlash("Rendez-vous replanifié — trace conservée."); router.refresh();
+  }
 
   return (
     <Modal titre={rdv.nomRP || "Rendez-vous"} onClose={onClose} max={540}>
@@ -183,8 +202,8 @@ function RdvModal({ rdv, membres, onClose, router }: { rdv: RdvComm; membres: Me
       <div className="flex flex-col gap-1.5 rounded-[10px] border border-border bg-surface-2 px-3 py-2.5 text-[0.84rem]">
         {rdv.type ? <div><span className="text-faint">Prestation :</span> {rdv.type}</div> : null}
         {rdv.duree ? <div className="flex items-center gap-1.5"><Hourglass className="h-3.5 w-3.5 text-faint" /> Durée : {rdv.duree}</div> : null}
-        {rdv.creneau ? <div className="flex items-center gap-1.5"><CalendarClock className="h-3.5 w-3.5 text-faint" /> {rdv.creneau}</div> : null}
-        {rdv.lieu ? <div className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-faint" /> {rdv.lieu}</div> : null}
+        {creneauLive ? <div className="flex items-center gap-1.5"><CalendarClock className="h-3.5 w-3.5 text-faint" /> {creneauLive}</div> : null}
+        {lieuLive ? <div className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-faint" /> {lieuLive}</div> : null}
         {rdv.contact ? <div className="flex items-center gap-1.5"><User className="h-3.5 w-3.5 text-faint" /> {rdv.contact}</div> : null}
         {rdv.message ? <div className="mt-1 border-t border-border pt-2 text-muted"><span className="text-faint">Message : </span>{rdv.message}</div> : null}
         {assignes.length ? (
@@ -198,6 +217,20 @@ function RdvModal({ rdv, membres, onClose, router }: { rdv: RdvComm; membres: Me
       <div className="mt-3 flex flex-col gap-1">
         <span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Statut {busy === "statut" ? "· …" : ""}</span>
         <Picker options={STATUTS} value={statut} onChange={changer} />
+      </div>
+
+      {/* Replanifier : nouveau créneau / lieu (géré depuis le site) */}
+      <div className="mt-3 border-t border-border pt-3">
+        <div className="mb-1.5 flex items-center gap-1.5 text-[0.72rem] uppercase tracking-[0.05em] text-faint"><CalendarClock className="h-3.5 w-3.5" /> Replanifier</div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <input className={inputCls} value={creneauEdit} onChange={(e) => setCreneauEdit(e.target.value)} placeholder="Nouveau créneau (ex. demain 14h)" maxLength={200} />
+          <input className={inputCls} value={lieuEdit} onChange={(e) => setLieuEdit(e.target.value)} placeholder="Nouveau lieu" maxLength={200} />
+        </div>
+        <div className="mt-2 flex justify-end">
+          <button onClick={replanifier} disabled={busy === "replan"} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-3 py-1.5 text-[0.8rem] font-semibold hover:border-border-2 disabled:opacity-60">
+            {busy === "replan" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />} Replanifier
+          </button>
+        </div>
       </div>
 
       {/* Lieu du RDV (photo) */}
