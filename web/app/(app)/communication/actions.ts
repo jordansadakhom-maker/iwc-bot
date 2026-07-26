@@ -214,7 +214,8 @@ export async function demanderAvisRdv(id: string): Promise<CommResult & { info?:
   reponses.push({ texte: "⭐ Demande d'avis envoyée au client.", par, at: new Date().toISOString() });
   const { error: e2 } = await admin.from("Rdv").update({ paiement: { ...paiement, reponses, avisDemande: new Date().toISOString() } }).eq("id", id);
   if (e2) { console.error("demanderAvisRdv:", e2.message); return { ok: false, error: "Enregistrement impossible." }; }
-  const msg = "Merci d'avoir fait appel à la Iron Wolf Company ! Es-tu satisfait(e) de la prestation ? Réponds simplement à ce message — ton retour nous aide à nous améliorer.";
+  const site = (process.env.NEXT_PUBLIC_APP_URL || "https://iwc-bot-psi.vercel.app").replace(/\/+$/, "");
+  const msg = `Merci d'avoir fait appel à la Iron Wolf Company ! Donne-nous ton avis en un clic : ${site}/avis/${id}`;
   const info = await livrerReponseClient(String(paiement.contact || ""), msg, par);
   return { ok: true, info };
 }
