@@ -26,9 +26,10 @@ const dateFR = (s: string | null) => { if (!s) return ""; try { return new Date(
 
 const estATraiterRdv = (r: RdvComm) => ["nouveau", "transmis", "attente", "demande"].includes(norm(r.statut));
 
-export function RdvManager({ rdvs, membres }: { rdvs: RdvComm[]; membres: MembreLite[] }) {
+export function RdvManager({ rdvs, membres, focusId }: { rdvs: RdvComm[]; membres: MembreLite[]; focusId?: string }) {
   const router = useRouter();
-  const [sel, setSel] = useState<RdvComm | null>(null);
+  // Deep-link : ouvre directement le rendez-vous ciblé (route /rendez-vous/[id]).
+  const [sel, setSel] = useState<RdvComm | null>(() => (focusId ? rdvs.find((r) => r.id === focusId) ?? null : null));
   const [seulATraiter, setSeulATraiter] = useState(false);
   const aTraiterN = rdvs.filter(estATraiterRdv).length;
   // Les « à traiter » remontent toujours en tête ; le filtre n'affiche qu'eux.

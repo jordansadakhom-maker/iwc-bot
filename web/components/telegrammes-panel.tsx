@@ -15,9 +15,10 @@ const apercu = (t: TelegrammeItem) => { const m = [...t.messages].reverse().find
 const statutTone = (s: string): "good" | "warn" | "muted" => /ouvert/i.test(s) ? "warn" : /clotur|classe/i.test(s) ? "muted" : "good";
 const estATraiterTg = (t: TelegrammeItem) => !/clotur|classe/i.test(t.statut);
 
-export function TelegrammesPanel({ telegrammes }: { telegrammes: TelegrammeItem[] }) {
+export function TelegrammesPanel({ telegrammes, focusId }: { telegrammes: TelegrammeItem[]; focusId?: string }) {
   const router = useRouter();
-  const [sel, setSel] = useState<TelegrammeItem | null>(null);
+  // Deep-link : ouvre directement la conversation ciblée (?focusId / route /[id]).
+  const [sel, setSel] = useState<TelegrammeItem | null>(() => (focusId ? telegrammes.find((t) => t.id === focusId) ?? null : null));
   const [seulATraiter, setSeulATraiter] = useState(false);
 
   if (telegrammes.length === 0) {
