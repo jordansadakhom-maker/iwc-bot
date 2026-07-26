@@ -1,0 +1,110 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Bell, Check, CheckCheck, Archive, ArchiveRestore, Trash2, ArrowUpRight } from "lucide-react";
+import { toast } from "@/lib/toast";
+import { NOTIF_FILTRES, correspondFiltre, compteNonLus, notifMeta, type CentreNotif } from "@/lib/notifications-centre";
+import { marquerNotifLue, marquerToutesLues, archiverNotif, supprimerNotif } from "@/app/(app)/notifications/actions";
+
+const TONE_TXT: Record<string, string> = { accent: "var(--accent)", good: "var(--good)", warn: "var(--warn)", oxblood: "var(--oxblood)", muted: "var(--faint)" };
+const dtFR = (s: string) => { if (!s) return ""; try { return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(s)); } catch { return ""; } };
+
+export function NotificationCenter({ initial }: { initial: CentreNotif[] }) {
+  const router = useRouter();
+  const [list, setList] = useState<CentreNotif[]>(initial);
+  const [filtre, setFiltre] = useState<string>("tous");
+
+  const nonLus = compteNonLus(list);
+  const affiches = useMemo(() => list.filter((n) => correspondFiltre(n, filtre)), [list, filtre]);
+  const compteFiltre = (key: string) => list.filter((n) => correspondFiltre(n, key)).length;
+
+  async function lu(n: CentreNotif, valeur = true) {
+    setList((p) => p.map((x) => (x.id === n.id ? { ...x, lu: valeur, luAt: valeur ? new Date().toISOString() : null } : x)));
+    const r = await marquerNotifLue(n.id, valeur); if (!r.ok) toast("Action impossible.", "bad");
+  }
+  async function toutLu() {
+    setList((p) => p.map((x) => (x.archive ? x : { ...x, lu: true, luAt: x.luAt || new Date().toISOString() })));
+    const r = await marquerToutesLues(); if (r.ok) toast("Tout est marqué comme lu.", "ok"); else toast("Action impossible.", "bad");
+  }
+  async function archiver(n: CentreNotif, valeur = true) {
+    setList((p) => p.map((x) => (x.id === n.id ? { ...x, archive: valeur, lu: valeur ? true : x.lu } : x)));
+    const r = await archiverNotif(n.id, valeur); if (!r.ok) toast("Action impossible.", "bad");
+  }
+  async function supprimer(n: CentreNotif) {
+    setList((p) => p.filter((x) => x.id !== n.id));
+    const r = await supprimerNotif(n.id); if (!r.ok) { toast("Suppression impossible.", "bad"); router.refresh(); }
+  }
+  function ouvrir(n: CentreNotif) {
+    if (!n.lu) void lu(n, true);         // ouvrir = lire
+    if (n.lien) router.push(n.lien);      // deep-link → la bonne page
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* En-tête : filtres + compteur + tout marquer lu */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {NOTIF_FILTRES.map((f) => {
+            const actif = filtre === f.key;
+            const c = compteFiltre(f.key);
+            return (
+              <button key={f.key} onClick={() => setFiltre(f.key)} aria-pressed={actif}
+                className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[0.74rem] font-semibold transition"
+                style={actif ? { background: "var(--accent)", color: "#000", borderColor: "transparent" } : { color: "var(--muted)", borderColor: "var(--border)" }}>
+                {f.label}
+                {c ? <span className="rounded-full px-1.5 text-[0.64rem] font-bold" style={actif ? { background: "rgba(0,0,0,.18)" } : { background: "var(--surface-2)", color: "var(--faint)" }}>{c}</span> : null}
+              </button>
+            );
+          })}
+        </div>
+        <button onClick={toutLu} disabled={!nonLus}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted transition hover:text-ink disabled:opacity-40">
+          <CheckCheck className="h-3.5 w-3.5" /> Tout marquer lu{nonLus ? ` (${nonLus})` : ""}
+        </button>
+      </div>
+
+      {affiches.length === 0 ? (
+        <div className="flex flex-col items-center gap-3 px-4 py-12 text-center">
+          <span className="grid h-11 w-11 place-items-center rounded-full border" style={{ borderColor: "color-mix(in srgb,var(--accent) 30%,var(--border))", background: "color-mix(in srgb,var(--accent) 8%,transparent)" }}>
+            <Bell className="h-5 w-5" style={{ color: "color-mix(in srgb,var(--accent) 70%,var(--faint))" }} strokeWidth={1.6} />
+          </span>
+          <p className="max-w-md font-display text-[0.9rem] italic text-muted">
+            {filtre === "archive" ? "Aucune notification archivée." : "Aucune notification ici. Les télégrammes, demandes de rendez-vous, réponses des clients et changements de statut s'afficheront ici au fil de l'eau."}
+          </p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {affiches.map((n) => {
+            const meta = notifMeta(n.type);
+            const tone = TONE_TXT[meta.tone] || "var(--faint)";
+            return (
+              <div key={n.id} className="notif-in group flex items-start gap-3 rounded-[12px] border px-3 py-2.5 transition"
+                style={{ borderColor: n.lu ? "var(--border)" : "color-mix(in srgb," + tone + " 40%,var(--border))", background: n.lu ? "var(--surface-2)" : "color-mix(in srgb," + tone + " 7%,var(--surface-2))" }}>
+                <span className="mt-0.5 text-[1.05rem]" aria-hidden>{meta.icon}</span>
+                <button onClick={() => ouvrir(n)} className="min-w-0 flex-1 text-left" title={n.lien ? "Ouvrir la page concernée" : undefined}>
+                  <div className="flex items-center gap-2">
+                    {!n.lu ? <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: tone }} aria-label="Non lu" /> : null}
+                    <span className="truncate text-[0.86rem] font-semibold">{n.titre}</span>
+                  </div>
+                  {n.corps ? <div className="mt-0.5 truncate text-[0.8rem] text-muted">{n.corps}</div> : null}
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[0.68rem] text-faint">
+                    <span style={{ color: tone }}>{meta.label}</span>
+                    <span>· {dtFR(n.createdAt)}</span>
+                    {n.luAt ? <span>· lu {dtFR(n.luAt)}</span> : null}
+                  </div>
+                </button>
+                <div className="flex shrink-0 items-center gap-1 opacity-70 transition group-hover:opacity-100">
+                  {n.lien ? <button onClick={() => ouvrir(n)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Ouvrir"><ArrowUpRight className="h-3.5 w-3.5" /></button> : null}
+                  {!n.archive ? <button onClick={() => lu(n, !n.lu)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label={n.lu ? "Marquer comme non lu" : "Marquer comme lu"} title={n.lu ? "Marquer comme non lu" : "Marquer comme lu"}><Check className="h-3.5 w-3.5" /></button> : null}
+                  <button onClick={() => archiver(n, !n.archive)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label={n.archive ? "Désarchiver" : "Archiver"} title={n.archive ? "Désarchiver" : "Archiver"}>{n.archive ? <ArchiveRestore className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}</button>
+                  <button onClick={() => supprimer(n)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-oxblood" aria-label="Supprimer" title="Supprimer"><Trash2 className="h-3.5 w-3.5" /></button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
