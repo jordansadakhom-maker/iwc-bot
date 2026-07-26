@@ -1,6 +1,7 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import { getSessionProfile } from "@/lib/queries";
 import { versCentreNotif, type CentreNotif } from "@/lib/notifications-centre";
 
@@ -12,15 +13,28 @@ async function membreConnecte(): Promise<string | null> {
   try { return (await getSessionProfile())?.nom || null; } catch { return null; }
 }
 
-const COLS = "id,type,titre,corps,lien,clientNom,cibleId,lu,luAt,archive,createdAt";
+// Id Discord du membre connecté (pour le ciblage). null si non résolu.
+async function monId(): Promise<string | null> {
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    const meta = (user?.user_metadata || {}) as Record<string, unknown>;
+    const id = String(meta.provider_id || meta.sub || "");
+    return /^\d{5,}$/.test(id) ? id : null;
+  } catch { return null; }
+}
 
 export async function listerNotifications(): Promise<{ connecte: boolean; notifs: CentreNotif[] }> {
   if (!(await membreConnecte())) return { connecte: false, notifs: [] };
   const admin = createAdminClient();
   if (!admin) return { connecte: false, notifs: [] };
-  const { data, error } = await admin.from("Notification").select(COLS).order("createdAt", { ascending: false }).limit(200);
+  const { data, error } = await admin.from("Notification").select("id,type,titre,corps,lien,clientNom,cibleId,lu,luAt,archive,createdAt,membreId").order("createdAt", { ascending: false }).limit(200);
   if (error) return { connecte: false, notifs: [] };
-  return { connecte: true, notifs: ((data || []) as Record<string, unknown>[]).map(versCentreNotif) };
+  const id = await monId();
+  // Ciblage : une notification adressée à un membre précis (membreId) n'est
+  // visible que par lui. Les notifications d'équipe (membreId null) → tout le monde.
+  const rows = ((data || []) as Record<string, unknown>[]).filter((r) => !r.membreId || String(r.membreId) === id);
+  return { connecte: true, notifs: rows.map(versCentreNotif) };
 }
 
 // Compteur léger des non-lues actives (pastille rouge) — jamais d'erreur bloquante.
@@ -28,7 +42,10 @@ export async function compterNotifsNonLues(): Promise<number> {
   try {
     const admin = createAdminClient();
     if (!admin) return 0;
-    const { count } = await admin.from("Notification").select("id", { count: "exact", head: true }).eq("lu", false).eq("archive", false);
+    const id = await monId();
+    let qb = admin.from("Notification").select("id", { count: "exact", head: true }).eq("lu", false).eq("archive", false);
+    qb = id ? qb.or(`membreId.is.null,membreId.eq.${id}`) : qb.is("membreId", null);
+    const { count } = await qb;
     return count || 0;
   } catch { return 0; }
 }

@@ -1155,7 +1155,7 @@ export async function getAlertes(): Promise<AlertesData> {
   const iso7 = new Date(Date.now() - 7 * 86400000).toISOString();
   const nowIso = new Date().toISOString();
   const iso24 = new Date(Date.now() + 24 * 86400000).toISOString(); // fenêtre « dans les 24 h »
-  const [contrats, impots, paies, ruptures, candids, rdvs, telegrammes, rdvArm] = await Promise.all([
+  const [contrats, impots, paies, ruptures, candids, rdvs, telegrammes, rdvArm, notifsNL] = await Promise.all([
     safe(() => admin.from("ArmurerieContrat").select("*", { count: "exact", head: true }).eq("statut", "envoye")),
     safe(() => admin.from("ArmurerieImpot").select("*", { count: "exact", head: true }).neq("statut", "paye").gt("montant", 0)),
     safe(() => admin.from("ArmureriePaie").select("*", { count: "exact", head: true }).neq("statut", "paye")),
@@ -1164,10 +1164,13 @@ export async function getAlertes(): Promise<AlertesData> {
     safe(() => admin.from("Rdv").select("*", { count: "exact", head: true }).eq("statut", "nouveau")),
     safe(() => admin.from("TelegrammeWeb").select("*", { count: "exact", head: true }).gte("createdAt", iso7)),
     safe(() => admin.from("ArmurerieRdv").select("*", { count: "exact", head: true }).eq("statut", "a_venir").gte("dateRdv", nowIso).lte("dateRdv", iso24)),
+    // Centre de notifications : non lues & non archivées (persistant, temps réel).
+    safe(() => admin.from("Notification").select("*", { count: "exact", head: true }).eq("lu", false).eq("archive", false)),
   ]);
   // Le href pointe vers la ZONE exacte à regarder : onglet précis de l'armurerie
   // (?tab=…) ou ancre de la page communication (#…) → highlight à l'arrivée.
   const items: Alerte[] = [];
+  if (notifsNL) items.push({ key: "notifs", label: `${notifsNL} notification(s) non lue(s)`, count: notifsNL, href: "/notifications", tone: "accent" });
   if (rdvArm) items.push({ key: "rdvArm", label: `${rdvArm} rendez-vous armurerie dans les 24 h`, count: rdvArm, href: "/armurerie?tab=rdv", tone: "warn" });
   if (rdvs) items.push({ key: "rdvs", label: `${rdvs} rendez-vous à traiter`, count: rdvs, href: "/communication#rdv-clients", tone: "warn" });
   if (contrats) items.push({ key: "contrats", label: `${contrats} contrat(s) en attente de signature`, count: contrats, href: "/armurerie?tab=contrats", tone: "accent" });
