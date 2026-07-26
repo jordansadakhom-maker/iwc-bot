@@ -28,11 +28,12 @@ async function attendreResultat(
 }
 
 // Identité du membre connecté (pour tracer « par qui » la modif a été faite).
-async function auteur(): Promise<{ nom: string; id: string | null }> {
+// `authed` = une session valide existe (barrière d'écriture site→bot).
+async function auteur(): Promise<{ nom: string; id: string | null; authed: boolean }> {
   try {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { nom: "Site web", id: null };
+    if (!user) return { nom: "Site web", id: null, authed: false };
     const meta = (user.user_metadata || {}) as Record<string, unknown>;
     let nom = (meta.full_name || meta.name || meta.user_name || "Membre") as string;
     const discordId = (meta.provider_id || meta.sub || "") as string;
@@ -41,9 +42,9 @@ async function auteur(): Promise<{ nom: string; id: string | null }> {
       const { data: m } = await admin.from("Membre").select("nomIC").eq("id", String(discordId)).maybeSingle();
       if (m?.nomIC) nom = m.nomIC as string;
     }
-    return { nom: String(nom).slice(0, 120), id: discordId ? String(discordId) : null };
+    return { nom: String(nom).slice(0, 120), id: discordId ? String(discordId) : null, authed: true };
   } catch {
-    return { nom: "Site web", id: null };
+    return { nom: "Site web", id: null, authed: false };
   }
 }
 
@@ -56,6 +57,9 @@ export async function envoyerCommande(
   if (!admin) return { ok: false, error: "Service momentanément indisponible. Réessaie dans un instant." };
 
   const a = await auteur();
+  // Fail-closed : toute écriture site→bot exige une session (barrière unique
+  // pour tous les modules — contrats, opérations, suppressions, RDV, télégrammes…).
+  if (!a.authed) return { ok: false, error: "Action réservée aux membres connectés." };
   const id = crypto.randomUUID();
   const { error } = await admin.from("CommandeWeb").insert({
     id,

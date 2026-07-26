@@ -623,7 +623,16 @@ async function _del(pathAndQuery) {
 
 // Supprime de Supabase les lignes d'une table dont l'ID n'est plus présent
 // localement → la base reflète EXACTEMENT l'état actuel (plus de fantômes).
+// Tables NÉES DU SITE (ou dérivées) : le bot n'en est PAS la source de vérité,
+// il ne doit donc JAMAIS y supprimer des lignes absentes de son data.json —
+// sinon un événement/une notification créé côté site disparaît à la sync.
+// Garde-fou permanent : même si on ajoute par erreur un _reconcilier dessus.
+const _JAMAIS_RECONCILIER = new Set(['Event', 'Notification', 'ActivityLog', 'TelegrammeWeb', 'DemandeContact']);
 async function _reconcilier(table, idsGardes) {
+  if (_JAMAIS_RECONCILIER.has(table)) {
+    console.log(`⛔ _reconcilier ignoré pour ${table} (donnée site-native — jamais supprimée par la sync).`);
+    return 0;
+  }
   // Sécurité : ne jamais tout supprimer si la liste à garder est vide
   // (état transitoire suspect) — évite un vidage accidentel de la table.
   if (!Array.isArray(idsGardes) || idsGardes.length === 0) return 0;
