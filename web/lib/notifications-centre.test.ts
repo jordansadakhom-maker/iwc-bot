@@ -16,6 +16,11 @@ describe("notifMeta — métadonnées par type", () => {
     expect(notifMeta("message").label).toBe("Nouvelle réponse");
     expect(notifMeta("rdv").icon).toBe("📅");
     expect(notifMeta("rdv-statut").tone).toBe("good");
+    expect(notifMeta("contrat").icon).toBe("📜");
+    expect(notifMeta("operation").icon).toBe("🎯");
+    expect(notifMeta("operation-statut").tone).toBe("good");
+    expect(notifMeta("candidature").icon).toBe("🐺");
+    expect(notifMeta("candidature-statut").label).toBe("Décision de candidature");
   });
   it("retombe sur un défaut sûr pour un type inconnu", () => {
     expect(notifMeta("_bidon_")).toEqual({ icon: "🔔", label: "Notification", tone: "muted" });
@@ -42,6 +47,19 @@ describe("correspondFiltre — filtres du centre", () => {
     expect(correspondFiltre(n({ type: "rdv" }), "rdv")).toBe(true);
     expect(correspondFiltre(n({ type: "rdv-statut" }), "rdv")).toBe(true);
     expect(correspondFiltre(n({ type: "telegramme" }), "rdv")).toBe(false);
+  });
+  it("« operations » couvre opérations + contrats, hors archive", () => {
+    expect(correspondFiltre(n({ type: "operation" }), "operations")).toBe(true);
+    expect(correspondFiltre(n({ type: "operation-statut" }), "operations")).toBe(true);
+    expect(correspondFiltre(n({ type: "contrat" }), "operations")).toBe(true);
+    expect(correspondFiltre(n({ type: "contrat-statut" }), "operations")).toBe(true);
+    expect(correspondFiltre(n({ type: "operation", archive: true }), "operations")).toBe(false);
+    expect(correspondFiltre(n({ type: "rdv" }), "operations")).toBe(false);
+  });
+  it("« recrutement » couvre les candidatures", () => {
+    expect(correspondFiltre(n({ type: "candidature" }), "recrutement")).toBe(true);
+    expect(correspondFiltre(n({ type: "candidature-statut" }), "recrutement")).toBe(true);
+    expect(correspondFiltre(n({ type: "contrat" }), "recrutement")).toBe(false);
   });
   it("« archive » ne montre QUE les archivées", () => {
     expect(correspondFiltre(n({ archive: true }), "archive")).toBe(true);

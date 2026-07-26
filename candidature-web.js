@@ -10,8 +10,16 @@
 // les variables Supabase.
 // ═══════════════════════════════════════════════════════════════
 
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { lireCandidaturesWeb, marquerCandidatureTransmise } = require('./supabase-sync');
+
+// Base du site + bouton « Ouvrir sur le site » : Discord prévient, le site gère.
+const SITE = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || process.env.SITE_URL || 'https://iwc-bot-psi.vercel.app').replace(/\/+$/, '');
+function _lien() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Ouvrir sur le site').setEmoji('➡️').setURL(SITE + '/recrutement'),
+  );
+}
 
 const FONDATEUR_ID = '944208797084311583'; // repli MP
 // Rôles à pinguer pour qu'on soit alerté sur Discord même sans le site ouvert.
@@ -65,11 +73,11 @@ async function verifierCandidaturesWeb(guild) {
   for (const c of rows) {
     let livre = false;
     if (salon) {
-      try { await salon.send({ content: `${ping ? ping + ' — ' : ''}🐺 **Nouvelle candidature reçue** (site web).`, embeds: [_embed(c)], allowedMentions: { parse: ['roles'] } }); livre = true; }
+      try { await salon.send({ content: `${ping ? ping + ' — ' : ''}🐺 **Nouvelle candidature reçue** (site web).`, embeds: [_embed(c)], components: [_lien()], allowedMentions: { parse: ['roles'] } }); livre = true; }
       catch (e) { console.log('⚠️ candidature-web salon:', e.message); }
     }
     if (!livre) {
-      try { const u = await guild.client.users.fetch(FONDATEUR_ID).catch(() => null); if (u) { await u.send({ content: '🐺 **Nouvelle candidature** (site web) — *aucun salon trouvé.*', embeds: [_embed(c)] }); livre = true; } }
+      try { const u = await guild.client.users.fetch(FONDATEUR_ID).catch(() => null); if (u) { await u.send({ content: '🐺 **Nouvelle candidature** (site web) — *aucun salon trouvé.*', embeds: [_embed(c)], components: [_lien()] }); livre = true; } }
       catch (e) { console.log('⚠️ candidature-web MP:', e.message); }
     }
     if (livre) { try { await marquerCandidatureTransmise(c.id); } catch {} }

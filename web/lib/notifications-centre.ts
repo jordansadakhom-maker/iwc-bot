@@ -28,6 +28,12 @@ const META: Record<string, NotifMeta> = {
   message: { icon: "💬", label: "Nouvelle réponse", tone: "accent" },
   rdv: { icon: "📅", label: "Rendez-vous", tone: "accent" },
   "rdv-statut": { icon: "🗓️", label: "Statut de RDV", tone: "good" },
+  contrat: { icon: "📜", label: "Contrat", tone: "accent" },
+  "contrat-statut": { icon: "⚖️", label: "Statut de contrat", tone: "good" },
+  operation: { icon: "🎯", label: "Opération", tone: "oxblood" },
+  "operation-statut": { icon: "🔄", label: "Phase d'opération", tone: "good" },
+  candidature: { icon: "🐺", label: "Candidature", tone: "accent" },
+  "candidature-statut": { icon: "✅", label: "Décision de candidature", tone: "good" },
 };
 const META_DEFAUT: NotifMeta = { icon: "🔔", label: "Notification", tone: "muted" };
 
@@ -41,6 +47,8 @@ export const NOTIF_FILTRES = [
   { key: "non_lus", label: "Non lus" },
   { key: "telegrammes", label: "Télégrammes" },
   { key: "rdv", label: "Rendez-vous" },
+  { key: "operations", label: "Opérations" },
+  { key: "recrutement", label: "Recrutement" },
   { key: "archive", label: "Archivés" },
 ] as const;
 export type NotifFiltre = (typeof NOTIF_FILTRES)[number]["key"];
@@ -52,6 +60,8 @@ export function correspondFiltre(n: CentreNotif, filtre: string): boolean {
     case "non_lus": return !n.lu && !n.archive;
     case "telegrammes": return !n.archive && (n.type.startsWith("telegramme") || n.type === "message");
     case "rdv": return !n.archive && n.type.startsWith("rdv");
+    case "operations": return !n.archive && (n.type.startsWith("operation") || n.type.startsWith("contrat"));
+    case "recrutement": return !n.archive && n.type.startsWith("candidature");
     case "archive": return n.archive;
     default: return !n.archive; // « tous » = tout sauf archivé
   }

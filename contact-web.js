@@ -12,11 +12,19 @@
 // les variables Supabase. La table DemandeContact est neuve et jamais réconciliée.
 // ═══════════════════════════════════════════════════════════════
 
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const supa = require('./supabase-sync');
 let repertoire = null; try { repertoire = require('./repertoire'); } catch {}
 
 const SALON_PANEL_CONTACT = '1518385544860667945'; // salon du panneau « Nouvelle fiche »
+
+// Base du site + bouton « Ouvrir sur le site » → carnet/répertoire (gestion sur le site).
+const SITE = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || process.env.SITE_URL || 'https://iwc-bot-psi.vercel.app').replace(/\/+$/, '');
+function _lien() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Ouvrir sur le site').setEmoji('➡️').setURL(SITE + '/repertoire'),
+  );
+}
 
 // Relève les demandes de contact du site et crée les fiches correspondantes.
 async function verifierDemandesContactWeb(guild) {
@@ -64,7 +72,7 @@ async function _notifier(guild, contact, d) {
     .setDescription(`**${contact.nom}** a été ajouté au carnet depuis le site${d.creeParNom ? ` par **${d.creeParNom}**` : ''}.`)
     .setFooter({ text: 'Iron Wolf Company · Le Carnet' })
     .setTimestamp();
-  await ch.send({ embeds: [e] }).catch(() => {});
+  await ch.send({ embeds: [e], components: [_lien()] }).catch(() => {});
 }
 
 module.exports = { verifierDemandesContactWeb };

@@ -3268,6 +3268,29 @@ client.on('messageReactionAdd', async (reaction, user) => {
   try { if (reaction.partial) await reaction.fetch(); } catch { return; }
   const db = loadDB(); const guild = reaction.message.guild; if (!guild) return;
 
+  // ── NOTIFY-ONLY : décisions par réaction désactivées (→ site) ──────────────
+  // Vote de candidature (✅/❌ sur un DOSSIER), contrat express (✅/❌) et notes
+  // 📜→contrat / 🎯→opération se traitent désormais sur le SITE. On neutralise
+  // ces réactions AVANT toute mutation. Le ✅ du règlement et les réactions de
+  // jeu ne sont pas concernés. Réversible : retirer ce bloc.
+  try {
+    const emo = reaction.emoji?.name || '';
+    const titre = reaction.message?.embeds?.[0]?.title || '';
+    const voteCandidature = (emo === '✅' || emo === '❌') && titre.includes('DOSSIER');
+    const voteContratExpress = (emo === '✅' || emo === '❌') && !!(db.contratsVote && db.contratsVote[reaction.message.id]);
+    const noteContrat = emo === '📜';
+    const noteOperation = emo === '🎯';
+    if (voteCandidature || voteContratExpress || noteContrat || noteOperation) {
+      const base = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || process.env.SITE_URL || 'https://iwc-bot-psi.vercel.app').replace(/\/+$/, '');
+      try { await reaction.users.remove(user.id); } catch {}
+      if (voteCandidature || voteContratExpress) {
+        const page = voteCandidature ? '/recrutement' : '/operations';
+        try { await user.send(`➡️ **La décision se prend désormais sur le site.** Ouvre ${base}${page} — Discord ne sert plus qu'à prévenir.`); } catch {}
+      }
+      return;
+    }
+  } catch {}
+
   // ── 🗳️ Vote d'un contrat express (5 voix ✅ pour valider) ──
   if (db.contratsVote && db.contratsVote[reaction.message.id]) {
     const isAccept = reaction.emoji.name === '✅'; const isRefuse = reaction.emoji.name === '❌';
@@ -4691,23 +4714,41 @@ client.on('interactionCreate', async interaction => {
       saveDB(db);
     }
   } catch {}
-  // ── Communication : Discord en NOTIFY-ONLY ────────────────────────────────
-  // Les télégrammes & rendez-vous se gèrent désormais UNIQUEMENT sur le site.
-  // On intercepte ici toutes leurs interactions (boutons/menus/modales/commandes
-  // rdvp_ · tg_ · rdvclient_) et on redirige vers le site, sans exécuter les
-  // anciens handlers. 100 % réversible : il suffit de retirer ce bloc.
+  // ── Gestion : Discord en NOTIFY-ONLY ──────────────────────────────────────
+  // Télégrammes, rendez-vous, contrats, opérations et candidatures se gèrent
+  // désormais UNIQUEMENT sur le site. On intercepte ici toutes leurs
+  // interactions (boutons/menus/modales/commandes) et on redirige vers la BONNE
+  // page, sans exécuter les anciens handlers. 100 % réversible : retirer ce bloc.
   try {
     const cid = interaction.customId || '';
     const cmd = interaction.isChatInputCommand?.() ? (interaction.commandName || '') : '';
-    const estComm = /^(rdvp_|tg_|rdvclient_)/.test(cid)
-      || ['panel-rdv-plus', 'agenda-plus', 'dossier-client', 'recap-rdv', 'registre-telegrammes-installer'].includes(cmd);
-    if (estComm && interaction.isRepliable?.() && !interaction.replied && !interaction.deferred) {
+    // Catégorise l'interaction (null = non concernée → on laisse passer les jeux,
+    // la Direction, l'inventaire, etc.).
+    let cat = null;
+    if (/^(rdvp_|tg_|rdvclient_)/.test(cid)
+        || ['panel-rdv-plus', 'agenda-plus', 'dossier-client', 'recap-rdv', 'registre-telegrammes-installer'].includes(cmd)) cat = 'comm';
+    else if (/^(cc_|contrat_|open_contrat_|signer_offre|refuser_offre|contre_offre_|co_(accept|refuse|rdv)_)/.test(cid)
+        || ['contrat-panel'].includes(cmd)) cat = 'contrat';
+    else if (/^(op_|opnew|opx_|modal_op_)/.test(cid)
+        || ['panel-operations', 'operation'].includes(cmd)) cat = 'operation';
+    else if (/^(open_candidature_|candidature_modal_|rec_role_)/.test(cid)) cat = 'candidature';
+
+    if (cat && interaction.isRepliable?.() && !interaction.replied && !interaction.deferred) {
       const base = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || process.env.SITE_URL || 'https://iwc-bot-psi.vercel.app').replace(/\/+$/, '');
       let url = base + '/communication';
-      let txt = '➡️ **La gestion se fait désormais sur le site.** Réponses, rendez-vous et statuts se traitent depuis le site — Discord ne sert plus qu\'à prévenir.';
+      let txt = '➡️ **La gestion se fait désormais sur le site.** Réponses, rendez-vous, contrats, opérations et candidatures se traitent depuis le site — Discord ne sert plus qu\'à prévenir.';
+      // Télégrammes / rendez-vous
       if (cid === 'rdvclient_demande') { url = base + '/telegramme'; txt = '➡️ **Envoie ton télégramme sur le site** — tu pourras aussi suivre ta demande.'; }
       else if (cid === 'rdvp_book') { url = base + '/rendez-vous'; txt = '➡️ **Prends ton rendez-vous sur le site.**'; }
       else if (cid === 'rdvp_mesdemandes' || cid === 'rdvclient_suivi') { url = base + '/suivi'; txt = '➡️ **Suis ta demande sur le site.**'; }
+      // Contrats : signature / refus / contre-offre CÔTÉ CLIENT → espace de suivi
+      else if (/^(signer_offre|refuser_offre|contre_offre_|co_(accept|refuse|rdv)_)/.test(cid)) { url = base + '/suivi'; txt = '➡️ **Le contrat se signe désormais sur le site.** Ouvre ton espace de suivi.'; }
+      else if (cat === 'contrat') { url = base + '/operations'; txt = '➡️ **Les contrats se gèrent sur le site.**'; }
+      // Opérations (création, phases, assignations, clôture…)
+      else if (cat === 'operation') { url = base + '/operations'; txt = '➡️ **Les opérations se gèrent sur le site.**'; }
+      // Candidatures : dépôt côté candidat → page publique ; décision interne → recrutement
+      else if (/^(open_candidature_|candidature_modal_)/.test(cid)) { url = base + '/rejoindre'; txt = '➡️ **Dépose ta candidature sur le site.**'; }
+      else if (cat === 'candidature') { url = base + '/recrutement'; txt = '➡️ **Les candidatures se traitent sur le site.**'; }
       try {
         const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Ouvrir sur le site').setEmoji('➡️').setURL(url));
         await interaction.reply({ content: txt, components: [row], flags: MessageFlags.Ephemeral });

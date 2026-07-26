@@ -997,27 +997,11 @@ async function traiterSignatureContratMP(message) {
     const tArmu = contratArmu ? new Date(contratArmu.envoyeAt || contratArmu.createdAt || 0).getTime() : -1;
     const tOp = opAvecContrat ? new Date(opAvecContrat.contrat.envoyeAt || 0).getTime() : -1;
     if (tArmu < 0 && tOp < 0) return false; // rien en attente pour cette personne → on ne consomme pas
-    const statut = veutSigner ? 'signe' : 'refuse';
-
-    // On agit sur le contrat le plus récemment envoyé.
-    if (tArmu >= tOp) {
-      try { await supa.marquerContratArmurerie(contratArmu.id, statut); } catch (e) { console.log('⚠️ signature armu:', e.message); return false; }
-      const nom = _s(contratArmu.clientNom, 120) || '';
-      const txt = veutSigner
-        ? `✅ Merci${nom ? ' ' + nom : ''}. Votre **contrat de vente** est **signé** — il est désormais inscrit au registre officiel de l'Armurerie de Van Horn.`
-        : `Bien reçu${nom ? ' ' + nom : ''}. Votre **refus** a été enregistré : le contrat est annulé.`;
-      await message.reply({ content: txt, allowedMentions: { parse: [] } }).catch(() => {});
-    } else {
-      opAvecContrat.contrat.statut = statut;
-      opAvecContrat.contrat.signeAt = new Date().toISOString();
-      saveDB(db);
-      const clientPropose = opAvecContrat.contrat.sens === 'client_propose';
-      const qui = _s(opAvecContrat.contrat.commanditaire, 120) || '';
-      const txt = veutSigner
-        ? `✅ Merci${qui ? ' ' + qui : ''}. Le **contrat d'opération** est **signé** — ${clientPropose ? 'la mission est confirmée' : 'la Iron Wolf Company est engagée sur cette mission'}.`
-        : `Bien reçu${qui ? ' ' + qui : ''}. Votre **refus** du contrat d'opération a été enregistré.`;
-      await message.reply({ content: txt, allowedMentions: { parse: [] } }).catch(() => {});
-    }
+    // NOTIFY-ONLY : la signature/refus se fait désormais sur le SITE. On ne
+    // modifie plus aucun contrat depuis Discord — on confirme la réception et on
+    // renvoie vers l'espace de suivi. (Réversible : restaurer le bloc d'origine.)
+    const base = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || process.env.SITE_URL || 'https://iwc-bot-psi.vercel.app').replace(/\/+$/, '');
+    await message.reply({ content: `➡️ **La signature se fait désormais sur le site.** Ouvre ton espace de suivi pour signer ou refuser : ${base}/suivi`, allowedMentions: { parse: [] } }).catch(() => {});
     return true;
   } catch (e) {
     console.log('⚠️ traiterSignatureContratMP:', e.message);
