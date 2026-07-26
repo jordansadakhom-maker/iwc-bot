@@ -157,7 +157,7 @@ function RdvModal({ rdv, membres, onClose, router }: { rdv: RdvComm; membres: Me
     setBusy(null);
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
     setReponses((p) => [...p, { texte, par: "moi", at: new Date().toISOString() }]);
-    setTexte(""); setFlash("Réponse enregistrée (trace conservée)."); router.refresh();
+    setTexte(""); setFlash(r.info || "Réponse enregistrée (trace conservée)."); router.refresh();
   }
   async function assigner() {
     const ids = membres.filter((m) => choisis[m.id]).map((m) => m.id);
@@ -303,7 +303,7 @@ function RdvModal({ rdv, membres, onClose, router }: { rdv: RdvComm; membres: Me
           </div>
         )}
         <div className="mt-2 flex items-end gap-2">
-          <textarea className={inputCls + " min-h-[44px] resize-y"} value={texte} onChange={(e) => setTexte(e.target.value)} placeholder="Écris une réponse / une note (gardée en trace)…" maxLength={2000} />
+          <textarea className={inputCls + " min-h-[44px] resize-y"} value={texte} onChange={(e) => setTexte(e.target.value)} placeholder="Réponds au client — livré en MP Discord / e-mail si un contact a été laissé, et gardé en trace…" maxLength={2000} />
           <button onClick={repondre} disabled={busy === "rep"} className="inline-flex shrink-0 items-center gap-1 rounded-lg px-3 py-2 text-[0.8rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>
             {busy === "rep" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" strokeWidth={2} />}
           </button>
