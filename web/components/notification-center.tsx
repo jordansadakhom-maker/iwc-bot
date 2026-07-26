@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, Check, CheckCheck, Archive, ArchiveRestore, Trash2, ArrowUpRight } from "lucide-react";
 import { toast } from "@/lib/toast";
-import { NOTIF_FILTRES, correspondFiltre, compteNonLus, notifMeta, type CentreNotif } from "@/lib/notifications-centre";
+import { NOTIF_FILTRES, correspondFiltre, compteNonLus, notifMeta, versCentreNotif, type CentreNotif } from "@/lib/notifications-centre";
+import { useNotificationsRealtime } from "@/lib/use-notifications-realtime";
 import { marquerNotifLue, marquerToutesLues, archiverNotif, supprimerNotif } from "@/app/(app)/notifications/actions";
 
 const TONE_TXT: Record<string, string> = { accent: "var(--accent)", good: "var(--good)", warn: "var(--warn)", oxblood: "var(--oxblood)", muted: "var(--faint)" };
@@ -18,6 +19,15 @@ export function NotificationCenter({ initial }: { initial: CentreNotif[] }) {
   const nonLus = compteNonLus(list);
   const affiches = useMemo(() => list.filter((n) => correspondFiltre(n, filtre)), [list, filtre]);
   const compteFiltre = (key: string) => list.filter((n) => correspondFiltre(n, key)).length;
+
+  // Temps réel : une nouvelle notification s'ajoute en tête instantanément
+  // (sans recharger la page) + toast discret. Dédup par id.
+  useNotificationsRealtime((raw) => {
+    const nn = versCentreNotif(raw as Record<string, unknown>);
+    if (!nn.id) return;
+    setList((p) => (p.some((x) => x.id === nn.id) ? p : [nn, ...p]));
+    toast(`${notifMeta(nn.type).icon} ${nn.titre}`, "info");
+  });
 
   async function lu(n: CentreNotif, valeur = true) {
     setList((p) => p.map((x) => (x.id === n.id ? { ...x, lu: valeur, luAt: valeur ? new Date().toISOString() : null } : x)));
