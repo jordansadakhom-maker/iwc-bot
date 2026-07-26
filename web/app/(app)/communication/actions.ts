@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { envoyerCommande } from "@/lib/commandes";
+import { ajusterCoffre, creerFacture } from "@/app/(app)/finances/actions";
 
 // Gestion des rendez-vous clients (pris sur le site) — trace conservée.
 // Les demandes web vivent dans Supabase (table Rdv) ; on les met à jour
@@ -131,6 +132,41 @@ export async function assignerRdv(
     rdvNom: meta.nom || null, rdvLieu: meta.lieu || null, rdvCreneau: meta.creneau || null, rdvDuree: meta.duree || null,
   });
   return { ok: true };
+}
+
+// Encaisse le paiement d'un RDV (client ayant réglé sa prestation), depuis le
+// site — calque l'encaissement Discord (rdvp_encaisser) : marque le paiement sur
+// le RDV → crédite le coffre commun → génère une facture. Réutilise les chemins
+// financiers EXISTANTS (ajusterCoffre / creerFacture) : reflet instantané + le
+// bot reste la source de vérité (coffre & facture), donc AUCUNE divergence.
+// Anti-doublon : un RDV déjà encaissé ne peut pas l'être une seconde fois.
+export async function encaisserRdv(id: string, montant: number, note: string): Promise<CommResult & { solde?: number }> {
+  if (!id) return { ok: false, error: "RDV introuvable." };
+  const m = Math.round(Number(montant) || 0);
+  if (m <= 0) return { ok: false, error: "Montant invalide." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { data, error: e1 } = await admin.from("Rdv").select("paiement,nomRP,type").eq("id", id).maybeSingle();
+  if (e1 || !data) return { ok: false, error: "RDV introuvable." };
+  const row = data as { paiement?: unknown; nomRP?: string | null; type?: string | null };
+  const paiement = (row.paiement && typeof row.paiement === "object" ? row.paiement : {}) as Record<string, unknown>;
+  if (Number(paiement.montant) > 0) return { ok: false, error: `Déjà encaissé : $${Number(paiement.montant).toLocaleString("fr-FR")}.` };
+  const par = await auteurNom();
+  const nomRP = String(row.nomRP || "Client");
+  const typeRdv = String(row.type || "RDV");
+  const n = (note || "").trim().slice(0, 500);
+  // 1) Marque le paiement + trace dans le fil.
+  const reponses = Array.isArray(paiement.reponses) ? (paiement.reponses as unknown[]) : [];
+  reponses.push({ texte: `💰 Encaissé : $${m.toLocaleString("fr-FR")}${n ? ` — ${n}` : ""}`, par, at: new Date().toISOString() });
+  const nouveau = { ...paiement, montant: m, par, at: new Date().toISOString(), note: n || null, facture: null, reponses };
+  const { error: e2 } = await admin.from("Rdv").update({ paiement: nouveau }).eq("id", id);
+  if (e2) { console.error("encaisserRdv:", e2.message); return { ok: false, error: "Enregistrement impossible." }; }
+  // 2) Crédite le coffre commun (reflet instantané + commande bot = source de vérité).
+  let solde: number | undefined;
+  try { const rc = await ajusterCoffre("commun", m, "depot"); if (rc.ok) solde = rc.solde; } catch { /* best-effort */ }
+  // 3) Génère une facture (via le bot, exactement comme l'encaissement Discord).
+  try { await creerFacture({ objet: `RDV — ${nomRP}`, montant: m, clientNom: nomRP, type: `RDV — ${typeRdv}`, remuneration: `$${m}` }); } catch { /* best-effort */ }
+  return { ok: true, solde };
 }
 
 // Enregistre l'URL d'une photo du lieu du RDV (Supabase Storage).

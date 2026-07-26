@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarClock, MapPin, User, MessageSquare, Loader2, Send, Globe, Users, ImageIcon, Check, Hourglass, Archive } from "lucide-react";
+import { CalendarClock, MapPin, User, MessageSquare, Loader2, Send, Globe, Users, ImageIcon, Check, Hourglass, Archive, Banknote } from "lucide-react";
 import type { RdvComm, MembreLite } from "@/lib/queries";
 import { Modal, Flash, Picker, inputCls } from "@/components/edit-ui";
 import { Badge } from "@/components/ui";
 import { PhotoDrop } from "@/components/photo-drop";
-import { majStatutRdv, repondreRdv, assignerRdv, definirLieuPhotoRdv, cloturerRdv, replanifierRdv } from "@/app/(app)/communication/actions";
+import { majStatutRdv, repondreRdv, assignerRdv, definirLieuPhotoRdv, cloturerRdv, replanifierRdv, encaisserRdv } from "@/app/(app)/communication/actions";
 
 type Router = ReturnType<typeof useRouter>;
 
@@ -134,6 +134,10 @@ function RdvModal({ rdv, membres, onClose, router }: { rdv: RdvComm; membres: Me
   const [lieuLive, setLieuLive] = useState(rdv.lieu || "");
   const [creneauEdit, setCreneauEdit] = useState(rdv.creneau || "");
   const [lieuEdit, setLieuEdit] = useState(rdv.lieu || "");
+  // Encaissement
+  const [encaisse, setEncaisse] = useState<number | null>(rdv.paiementMontant);
+  const [montantEnc, setMontantEnc] = useState("");
+  const [noteEnc, setNoteEnc] = useState("");
 
   const filtres = membres.filter((m) => m.nom.toLowerCase().includes(q.toLowerCase())).slice(0, 40);
   const nbChoisis = Object.values(choisis).filter(Boolean).length;
@@ -194,6 +198,18 @@ function RdvModal({ rdv, membres, onClose, router }: { rdv: RdvComm; membres: Me
     const parts = [c ? `créneau → ${c}` : null, l ? `lieu → ${l}` : null].filter(Boolean).join(" · ");
     setReponses((p) => [...p, { texte: `📅 Replanifié (${parts})`, par: "moi", at: new Date().toISOString() }]);
     setFlash("Rendez-vous replanifié — trace conservée."); router.refresh();
+  }
+  async function encaisser() {
+    const m = Math.round(Number(montantEnc.replace(/[^0-9]/g, "")) || 0);
+    if (m <= 0) { setFlash("Montant invalide."); return; }
+    setBusy("enc");
+    const r = await encaisserRdv(rdv.id, m, noteEnc);
+    setBusy(null);
+    if (!r.ok) { setFlash(r.error || "Échec."); return; }
+    setEncaisse(m);
+    setReponses((p) => [...p, { texte: `💰 Encaissé : $${m.toLocaleString("fr-FR")}${noteEnc.trim() ? ` — ${noteEnc.trim()}` : ""}`, par: "moi", at: new Date().toISOString() }]);
+    setFlash(`Encaissé — coffre commun crédité${r.solde != null ? ` (solde $${r.solde.toLocaleString("fr-FR")})` : ""}, facture en cours (~30 s).`);
+    router.refresh();
   }
 
   return (
@@ -292,6 +308,29 @@ function RdvModal({ rdv, membres, onClose, router }: { rdv: RdvComm; membres: Me
             {busy === "rep" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" strokeWidth={2} />}
           </button>
         </div>
+      </div>
+
+      {/* Encaisser le paiement → coffre commun + facture */}
+      <div className="mt-3 rounded-[10px] border border-border bg-surface-2 p-3">
+        <div className="mb-1.5 flex items-center gap-1.5 text-[0.72rem] uppercase tracking-[0.05em] text-faint"><Banknote className="h-3.5 w-3.5" /> Encaisser le paiement</div>
+        {encaisse != null && encaisse > 0 ? (
+          <div className="flex items-center gap-2 text-[0.84rem]" style={{ color: "var(--good)" }}>
+            <Check className="h-4 w-4" /> Encaissé : <b>${encaisse.toLocaleString("fr-FR")}</b>{rdv.facture ? <span className="text-faint">· facture {rdv.facture}</span> : null}
+          </div>
+        ) : (
+          <>
+            <p className="mb-2 text-[0.74rem] text-faint">Le client a réglé → crédite le <b className="text-muted">coffre commun</b> et génère une <b className="text-muted">facture</b> (le bot confirme sous ~30 s).</p>
+            <div className="grid gap-2 sm:grid-cols-[1fr_2fr]">
+              <input className={inputCls} value={montantEnc} onChange={(e) => setMontantEnc(e.target.value.replace(/[^0-9]/g, ""))} inputMode="numeric" placeholder="Montant reçu ($)" />
+              <input className={inputCls} value={noteEnc} onChange={(e) => setNoteEnc(e.target.value)} placeholder="Note (facultatif)" maxLength={500} />
+            </div>
+            <div className="mt-2 flex justify-end">
+              <button onClick={encaisser} disabled={busy === "enc"} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[0.8rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>
+                {busy === "enc" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Banknote className="h-4 w-4" />} Encaisser
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Clôturer → part au journal de bord */}
