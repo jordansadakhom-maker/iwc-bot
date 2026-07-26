@@ -11,12 +11,20 @@
 // les variables Supabase.
 // ═══════════════════════════════════════════════════════════════
 
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { lireDemandesRdvWeb, marquerRdvTransmis } = require('./supabase-sync');
 
 const SALON_AGENDA = '1509638226132996178'; // #agenda (même salon que les RDV Discord)
 const PING_ROLES = ['Panseur', 'Officier de Terrain', 'Officier', 'Fondateur'];
 const FONDATEUR_ID = '944208797084311583'; // Jonas — reçoit la notif en dernier recours
+// Lien profond vers le rendez-vous sur le site (Discord = notifier + rediriger).
+const SITE_URL = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || process.env.SITE_URL || 'https://iwc-bot-psi.vercel.app').replace(/\/+$/, '');
+const _deep = (d) => `${SITE_URL}/communication/rendez-vous/${d.id}`;
+// Bouton « Ouvrir sur le site » — la gestion se fait sur le site, pas sur Discord.
+function _boutonSite(url) {
+  try { return [new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Ouvrir sur le site').setEmoji('➡️').setURL(url))]; }
+  catch { return []; }
+}
 
 // Le bot peut-il écrire dans ce salon ?
 function _peutEcrire(guild, ch) {
@@ -63,6 +71,7 @@ function _embed(d) {
   const e = new EmbedBuilder()
     .setColor(0xc8a45c)
     .setTitle('🌐 Nouvelle demande de rendez-vous — via le site')
+    .setURL(_deep(d))
     .setDescription(`**Réf.** \`${d.id}\``)
     .addFields(champs)
     .setFooter({ text: 'Iron Wolf Company · Demande via le site web' })
@@ -85,8 +94,9 @@ async function verifierDemandesRdvWeb(guild) {
     if (salon) {
       try {
         await salon.send({
-          content: `${ping ? ping + ' — ' : ''}📨 **Nouvelle demande de rendez-vous** (site web).`,
+          content: `${ping ? ping + ' — ' : ''}📨 **Nouvelle demande de rendez-vous** (site web). À traiter sur le site.`,
           embeds: [_embed(d)],
+          components: _boutonSite(_deep(d)),
         });
         livre = true;
       } catch (e) { console.log('⚠️ rdv-web notif salon:', e.message); }
@@ -97,7 +107,7 @@ async function verifierDemandesRdvWeb(guild) {
     if (!livre) {
       try {
         const u = await guild.client.users.fetch(FONDATEUR_ID).catch(() => null);
-        if (u) { await u.send({ content: '📨 **Nouvelle demande de rendez-vous** (site web) — *aucun salon d\'agenda trouvé sur le serveur.*', embeds: [_embed(d)] }); livre = true; }
+        if (u) { await u.send({ content: '📨 **Nouvelle demande de rendez-vous** (site web) — *aucun salon d\'agenda trouvé sur le serveur.* À traiter sur le site.', embeds: [_embed(d)], components: _boutonSite(_deep(d)) }); livre = true; }
       } catch (e) { console.log('⚠️ rdv-web notif MP fondateur:', e.message); }
     }
     if (livre) { try { await marquerRdvTransmis(d.id); } catch {} }
