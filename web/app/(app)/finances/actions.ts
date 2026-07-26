@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { supprimerFiable } from "@/lib/suppression";
 import { round2 } from "@/lib/format";
 import { requireDirection } from "@/lib/authz";
+import { emettreEvenement } from "@/lib/evenements";
 
 // Ajuste un coffre (dépôt / retrait / montant exact).
 // Double écriture : 1) reflet INSTANTANÉ dans la table Coffre (le site montre le
@@ -37,6 +38,7 @@ export async function ajusterCoffre(
   // 2) Commande filée au bot (source de vérité).
   const r = await envoyerCommande("coffre.ajuster", { cible, montant: m, mode });
   if (!r.ok) return r;
+  await emettreEvenement({ aggregate: "coffre", type: "coffre.ajuste", cibleLibelle: `Coffre ${cible}`, apres: solde != null ? { solde } : null, payload: { mode, montant: m } });
   return { ok: true, solde };
 }
 
@@ -65,7 +67,9 @@ export async function ajusterArgent(membreId: string, montant: number, raison: s
   if (!membreId) return { ok: false, error: "Choisis un membre." };
   const m = Math.round(Number(montant) || 0);
   if (!m) return { ok: false, error: "Montant nul." };
-  return envoyerCommande("wallet.ajuster", { membreId, montant: m, raison: (raison || "").slice(0, 120) });
+  const r = await envoyerCommande("wallet.ajuster", { membreId, montant: m, raison: (raison || "").slice(0, 120) });
+  if (r.ok) await emettreEvenement({ aggregate: "wallet", type: "wallet.ajuste", cibleId: membreId, cibleLibelle: "Portefeuille", payload: { montant: m, raison: (raison || "").slice(0, 120) } });
+  return r;
 }
 
 // ── DOSSIER CLIENT (miroir IWC du dossier patient, dérivé à la lecture) ───────
