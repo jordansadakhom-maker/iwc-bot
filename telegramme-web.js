@@ -10,11 +10,19 @@
 // les variables Supabase.
 // ═══════════════════════════════════════════════════════════════
 
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { lireTelegrammesWeb, marquerTelegrammeWebTransmis } = require('./supabase-sync');
 
 const SALON_TELEGRAMME = '1512175624176009348'; // salon des télégrammes
 const FONDATEUR_ID = '944208797084311583';       // repli MP
+// Lien profond vers la conversation sur le site (Discord = notifier + rediriger).
+const SITE_URL = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || process.env.SITE_URL || 'https://iwc-bot-psi.vercel.app').replace(/\/+$/, '');
+const _deep = (t) => `${SITE_URL}/communication/telegramme/web-${t.id}`;
+// Bouton « Ouvrir sur le site » — la réponse se fait sur le site, pas sur Discord.
+function _boutonSite(url) {
+  try { return [new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Ouvrir sur le site').setEmoji('➡️').setURL(url))]; }
+  catch { return []; }
+}
 // Rôles à pinguer pour qu'on soit alerté sur Discord même sans le site ouvert.
 const PING_ROLES = ['Fondateur', 'Conseil', 'Directeur', 'Officier'];
 function _ping(guild) {
@@ -46,6 +54,7 @@ function _embed(t) {
   return new EmbedBuilder()
     .setColor(0xc8a45c)
     .setTitle('📨 Nouveau télégramme — via le site')
+    .setURL(_deep(t))
     .setDescription(String(t.message || '').slice(0, 1800) || '—')
     .addFields(
       { name: '👤 De', value: String(t.nom || '—').slice(0, 120), inline: true },
@@ -64,11 +73,11 @@ async function verifierTelegrammesWeb(guild) {
   for (const t of rows) {
     let livre = false;
     if (salon) {
-      try { await salon.send({ content: `${ping ? ping + ' — ' : ''}📨 **Nouveau télégramme reçu** (site web).`, embeds: [_embed(t)], allowedMentions: { parse: ['roles'] } }); livre = true; }
+      try { await salon.send({ content: `${ping ? ping + ' — ' : ''}📨 **Nouveau télégramme reçu** (site web). Répondez sur le site.`, embeds: [_embed(t)], components: _boutonSite(_deep(t)), allowedMentions: { parse: ['roles'] } }); livre = true; }
       catch (e) { console.log('⚠️ telegramme-web salon:', e.message); }
     }
     if (!livre) {
-      try { const u = await guild.client.users.fetch(FONDATEUR_ID).catch(() => null); if (u) { await u.send({ content: '📨 **Nouveau télégramme** (site web) — *aucun salon trouvé.*', embeds: [_embed(t)] }); livre = true; } }
+      try { const u = await guild.client.users.fetch(FONDATEUR_ID).catch(() => null); if (u) { await u.send({ content: '📨 **Nouveau télégramme** (site web) — *aucun salon trouvé.* Répondez sur le site.', embeds: [_embed(t)], components: _boutonSite(_deep(t)) }); livre = true; } }
       catch (e) { console.log('⚠️ telegramme-web MP:', e.message); }
     }
     if (livre) { try { await marquerTelegrammeWebTransmis(t.id); } catch {} }
