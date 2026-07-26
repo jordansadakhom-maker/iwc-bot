@@ -64,13 +64,22 @@ export async function repondreTelegrammeWeb(idPrefixe: string, texte: string, pa
 // géré côté site (aucune dépendance au bot). La réouverture repasse en
 // « transmis » (et non « nouveau ») pour que le bot ne le re-notifie JAMAIS sur
 // Discord — évite tout doublon. Le trigger SQL crée la notif « clôturé » au besoin.
-export async function changerStatutTelegrammeWeb(idPrefixe: string, clos: boolean): Promise<TgResult> {
-  const id = (idPrefixe || "").replace(/^web-/, "");
+export async function changerStatutTelegramme(id: string, clos: boolean): Promise<TgResult> {
   if (!id) return { ok: false, error: "Télégramme introuvable." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
-  const { error } = await admin.from("TelegrammeWeb").update({ statut: clos ? "clos" : "transmis" }).eq("id", id);
-  if (error) return { ok: false, error: "Enregistrement impossible." };
+  if (id.startsWith("web-")) {
+    // Télégramme du SITE : réouverture en « transmis » (jamais « nouveau ») → le
+    // bot ne le re-notifie JAMAIS sur Discord (zéro doublon).
+    const { error } = await admin.from("TelegrammeWeb").update({ statut: clos ? "clos" : "transmis" }).eq("id", id.replace(/^web-/, ""));
+    if (error) return { ok: false, error: "Enregistrement impossible." };
+  } else {
+    // Télégramme DISCORD : on écrit le statut directement. Si le client réécrit,
+    // le bot rouvrira la conversation (comportement voulu). Le fil du salon Discord
+    // n'est pas archivé automatiquement tant que Discord reste actif — sans impact.
+    const { error } = await admin.from("Telegramme").update({ statut: clos ? "cloture" : "ouvert", updatedAt: new Date().toISOString() }).eq("id", id);
+    if (error) return { ok: false, error: "Enregistrement impossible." };
+  }
   return { ok: true, info: clos ? "Télégramme clôturé — trace conservée." : "Télégramme rouvert." };
 }
 

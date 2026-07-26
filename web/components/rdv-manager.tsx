@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarClock, MapPin, User, MessageSquare, Loader2, Send, Globe, Users, ImageIcon, Check, Hourglass, Archive, Banknote } from "lucide-react";
+import { CalendarClock, MapPin, User, MessageSquare, Loader2, Send, Globe, Users, ImageIcon, Check, Hourglass, Archive, Banknote, Star } from "lucide-react";
 import type { RdvComm, MembreLite } from "@/lib/queries";
 import { Modal, Flash, Picker, inputCls } from "@/components/edit-ui";
 import { Badge } from "@/components/ui";
 import { PhotoDrop } from "@/components/photo-drop";
-import { majStatutRdv, repondreRdv, assignerRdv, definirLieuPhotoRdv, cloturerRdv, replanifierRdv, encaisserRdv } from "@/app/(app)/communication/actions";
+import { majStatutRdv, repondreRdv, assignerRdv, definirLieuPhotoRdv, cloturerRdv, replanifierRdv, encaisserRdv, demanderAvisRdv } from "@/app/(app)/communication/actions";
 
 type Router = ReturnType<typeof useRouter>;
 
@@ -197,7 +197,15 @@ function RdvModal({ rdv, membres, onClose, router }: { rdv: RdvComm; membres: Me
     if (l) setLieuLive(l);
     const parts = [c ? `créneau → ${c}` : null, l ? `lieu → ${l}` : null].filter(Boolean).join(" · ");
     setReponses((p) => [...p, { texte: `📅 Replanifié (${parts})`, par: "moi", at: new Date().toISOString() }]);
-    setFlash("Rendez-vous replanifié — trace conservée."); router.refresh();
+    setFlash(r.info || "Rendez-vous replanifié — trace conservée."); router.refresh();
+  }
+  async function demanderAvis() {
+    setBusy("avis");
+    const r = await demanderAvisRdv(rdv.id);
+    setBusy(null);
+    if (!r.ok) { setFlash(r.error || "Échec."); return; }
+    setReponses((p) => [...p, { texte: "⭐ Demande d'avis envoyée au client.", par: "moi", at: new Date().toISOString() }]);
+    setFlash(r.info || "Demande d'avis envoyée au client."); router.refresh();
   }
   async function encaisser() {
     const m = Math.round(Number(montantEnc.replace(/[^0-9]/g, "")) || 0);
@@ -233,6 +241,13 @@ function RdvModal({ rdv, membres, onClose, router }: { rdv: RdvComm; membres: Me
       <div className="mt-3 flex flex-col gap-1">
         <span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Statut {busy === "statut" ? "· …" : ""}</span>
         <Picker options={STATUTS} value={statut} onChange={changer} />
+        {statut === "honore" ? (
+          <div className="mt-1.5 flex justify-end">
+            <button onClick={demanderAvis} disabled={busy === "avis"} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-3 py-1.5 text-[0.78rem] font-semibold hover:border-border-2 disabled:opacity-60">
+              {busy === "avis" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Star className="h-4 w-4" />} Demander l&apos;avis du client
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {/* Replanifier : nouveau créneau / lieu (géré depuis le site) */}

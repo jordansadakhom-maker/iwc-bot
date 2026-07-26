@@ -6,7 +6,7 @@ import { MessageSquare, Loader2, Send, Globe, CalendarPlus, Check, StickyNote, A
 import type { TelegrammeItem } from "@/lib/queries";
 import { Modal, Flash, inputCls } from "@/components/edit-ui";
 import { Badge } from "@/components/ui";
-import { repondreTelegramme, repondreTelegrammeWeb, creerRdvDepuisTelegramme, changerStatutTelegrammeWeb } from "@/app/(app)/communication/telegramme-actions";
+import { repondreTelegramme, repondreTelegrammeWeb, creerRdvDepuisTelegramme, changerStatutTelegramme } from "@/app/(app)/communication/telegramme-actions";
 
 type Router = ReturnType<typeof useRouter>;
 
@@ -99,7 +99,7 @@ function TgModal({ tg, onClose, router }: { tg: TelegrammeItem; onClose: () => v
   // Clôturer / rouvrir un télégramme du site — entièrement côté site.
   async function basculerStatut() {
     setBusy("statut");
-    const r = await changerStatutTelegrammeWeb(tg.id, !estClos);
+    const r = await changerStatutTelegramme(tg.id, !estClos);
     setBusy(null);
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
     setEstClos((v) => !v); setFlash(r.info || "Statut mis à jour."); router.refresh();
@@ -136,11 +136,9 @@ function TgModal({ tg, onClose, router }: { tg: TelegrammeItem; onClose: () => v
               {busy === "rdv" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CalendarPlus className="h-3.5 w-3.5" />} Créer le RDV
             </button>
           )}
-          {tg.source === "web" ? (
-            <button onClick={basculerStatut} disabled={busy === "statut"} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">
-              {busy === "statut" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : estClos ? <ArchiveRestore className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />} {estClos ? "Rouvrir" : "Clôturer"}
-            </button>
-          ) : null}
+          <button onClick={basculerStatut} disabled={busy === "statut"} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">
+            {busy === "statut" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : estClos ? <ArchiveRestore className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />} {estClos ? "Rouvrir" : "Clôturer"}
+          </button>
         </div>
       </div>
 
