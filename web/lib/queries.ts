@@ -645,6 +645,7 @@ export type RdvComm = {
   id: string; nomRP: string | null; type: string | null; lieu: string | null; creneau: string | null;
   statut: string; source: string | null; contact: string | null; message: string | null; reponses: Reponse[]; createdAt: string | null;
   assignes: string[]; lieuPhoto: string | null; duree: string | null;
+  paiementMontant: number | null; facture: string | null;
 };
 export type CommunicationData = { connecte: boolean; rdvs: RdvComm[]; membres: MembreLite[] };
 
@@ -669,6 +670,8 @@ export async function getCommunication(): Promise<CommunicationData> {
       assignes: Array.isArray(p.assignes) ? (p.assignes as string[]) : [],
       lieuPhoto: (p.lieuPhoto as string) ?? null,
       duree: (p.duree as string) ?? null,
+      paiementMontant: p.montant != null ? Number(p.montant) : null,
+      facture: (p.facture as string) ?? null,
     };
   });
   const membres: MembreLite[] = ((membreR.data || []) as { id: string; nomIC: string }[]).map((m) => ({ id: String(m.id), nom: m.nomIC || String(m.id) }));
