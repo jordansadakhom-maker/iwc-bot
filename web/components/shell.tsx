@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Search, Bell, BellRing, Menu, ArrowRight, CheckCircle2, Volume2, VolumeX } from "lucide-react";
@@ -10,6 +10,9 @@ import { LogoutButton } from "@/components/logout-button";
 import { CommandPalette } from "@/components/command-palette";
 import { CaptureFlottante } from "@/components/capture-flottante";
 import { rafraichirAlertes } from "@/app/(app)/notifs-actions";
+import { toast } from "@/lib/toast";
+import { notifMeta, versCentreNotif } from "@/lib/notifications-centre";
+import { useNotificationsRealtime } from "@/lib/use-notifications-realtime";
 import type { AlertesData, Acces } from "@/lib/queries";
 
 type Profil = { nom: string; initiales: string; role: string; avatarUrl: string | null };
@@ -57,7 +60,7 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
 
   // Petit « ding » synthétisé (aucun fichier externe → compatible CSP). Ne joue
   // que si l'utilisateur a déjà interagi avec la page (règle d'autoplay).
-  function jouerDing() {
+  const jouerDing = useCallback(() => {
     const ctx = audioRef.current;
     if (!ctx || ctx.state !== "running") return;
     const t0 = ctx.currentTime;
@@ -70,7 +73,7 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
       o.connect(g); g.connect(ctx.destination);
       o.start(t0 + dt); o.stop(t0 + dt + 0.3);
     });
-  }
+  }, []);
 
   // Charge l'état « lu » + préférence son, et prépare l'audio au 1er clic/touche.
   useEffect(() => {
@@ -93,31 +96,43 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
 
   useEffect(() => { try { localStorage.setItem("iwc.alertes.vus", JSON.stringify(vus)); } catch { /* ignore */ } }, [vus]);
 
-  useEffect(() => {
-    let stop = false;
-    async function tic() {
-      try {
-        const fresh = await rafraichirAlertes();
-        if (stop) return;
-        setAlertesLive(fresh);
-        const peutNotifier = typeof Notification !== "undefined" && Notification.permission === "granted";
-        let duNouveau = false;
-        for (const it of fresh.items) {
-          const dejaAlerte = notifiesRef.current[it.key] || 0;
-          if (it.count > dejaAlerte) {
-            duNouveau = true;
-            if (peutNotifier && document.visibilityState !== "visible") {
-              try { new Notification("Iron Wolf Company", { body: it.label, tag: it.key }); } catch { /* ignore */ }
-            }
-            notifiesRef.current[it.key] = it.count;
+  // Rafraîchit les pastilles de la cloche : notification navigateur + son sur
+  // toute hausse. Appelé par le polling (filet) ET par le temps réel (instantané).
+  const rafraichir = useCallback(async () => {
+    try {
+      const fresh = await rafraichirAlertes();
+      setAlertesLive(fresh);
+      const peutNotifier = typeof Notification !== "undefined" && Notification.permission === "granted";
+      let duNouveau = false;
+      for (const it of fresh.items) {
+        const dejaAlerte = notifiesRef.current[it.key] || 0;
+        if (it.count > dejaAlerte) {
+          duNouveau = true;
+          if (peutNotifier && document.visibilityState !== "visible") {
+            try { new Notification("Iron Wolf Company", { body: it.label, tag: it.key }); } catch { /* ignore */ }
           }
+          notifiesRef.current[it.key] = it.count;
         }
-        if (duNouveau && sonActifRef.current) jouerDing();
-      } catch { /* silencieux */ }
-    }
-    const id = window.setInterval(tic, 25000);
-    return () => { stop = true; window.clearInterval(id); };
-  }, []);
+      }
+      if (duNouveau && sonActifRef.current) jouerDing();
+    } catch { /* silencieux */ }
+  }, [jouerDing]);
+
+  // Filet : polling 25 s (au cas où le temps réel serait indisponible).
+  useEffect(() => {
+    const id = window.setInterval(rafraichir, 25000);
+    return () => window.clearInterval(id);
+  }, [rafraichir]);
+
+  // Temps réel : dès qu'une notification est insérée, rafraîchissement immédiat
+  // + toast discret sur n'importe quelle page. Tolérant : no-op si indisponible.
+  useNotificationsRealtime((raw) => {
+    void rafraichir();
+    try {
+      const nn = versCentreNotif(raw as Record<string, unknown>);
+      if (nn.id && nn.titre) toast(`${notifMeta(nn.type).icon} ${nn.titre}`, "info");
+    } catch { /* ignore */ }
+  });
 
   // « Lu » = on marque les alertes d'une page dès qu'on y arrive.
   const basePath = (h: string) => h.split(/[?#]/)[0];
