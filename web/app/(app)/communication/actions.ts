@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { envoyerCommande } from "@/lib/commandes";
+import { envoyerEmail } from "@/lib/email";
 import { ajusterCoffre, creerFacture } from "@/app/(app)/finances/actions";
 
 // Gestion des rendez-vous clients (pris sur le site) — trace conservée.
@@ -58,7 +59,7 @@ export async function cloturerRdv(id: string, resultat: string): Promise<CommRes
   return { ok: true };
 }
 
-export async function repondreRdv(id: string, texte: string): Promise<CommResult> {
+export async function repondreRdv(id: string, texte: string): Promise<CommResult & { info?: string }> {
   const t = (texte || "").trim();
   if (!id) return { ok: false, error: "RDV introuvable." };
   if (t.length < 1) return { ok: false, error: "Écris une réponse." };
@@ -69,10 +70,36 @@ export async function repondreRdv(id: string, texte: string): Promise<CommResult
   if (e1) return { ok: false, error: "RDV introuvable." };
   const paiement = (data?.paiement && typeof data.paiement === "object" ? data.paiement : {}) as Record<string, unknown>;
   const reponses = Array.isArray(paiement.reponses) ? (paiement.reponses as unknown[]) : [];
-  reponses.push({ texte: t.slice(0, 2000), par: await auteurNom(), at: new Date().toISOString() });
+  const par = await auteurNom();
+  reponses.push({ texte: t.slice(0, 2000), par, at: new Date().toISOString() });
   const { error: e2 } = await admin.from("Rdv").update({ paiement: { ...paiement, reponses } }).eq("id", id);
   if (e2) { console.error("repondreRdv:", e2.message); return { ok: false, error: "Enregistrement impossible." }; }
-  return { ok: true };
+  // Livraison au client via le contact laissé (comme pour les télégrammes) :
+  //   • Discord → le bot envoie un MP.  • E-mail → envoi direct.  • Sinon → trace
+  //     seule, lisible par le client sur « Suivre ma demande ».
+  return { ok: true, info: await livrerReponseClient(String(paiement.contact || ""), t, par) };
+}
+
+// Livre une réponse au client via le canal de contact d'un RDV. Best-effort :
+// renvoie un message d'info pour l'UI, ne jette jamais.
+async function livrerReponseClient(contact: string, texte: string, parNom: string): Promise<string> {
+  const t = texte.slice(0, 2000);
+  const md = contact.match(/discord\s*[:：]\s*(.+)$/i);
+  if (md && md[1].trim()) {
+    const r = await envoyerCommande("telegramme.mpDiscord", { pseudo: md[1].trim(), texte: t, de: parNom || "Iron Wolf Company" }, { attendre: true, timeoutMs: 12000 });
+    if (r.enAttente) return "Réponse conservée — livraison Discord en cours…";
+    if (r.ok) return r.message || "✅ Réponse livrée au client en MP Discord.";
+    return `${r.error || "MP Discord non livré"} — réponse gardée en trace.`;
+  }
+  const em = contact.match(/email\s*[:：]\s*([^\s]+@[^\s]+)/i) || contact.match(/([^\s]+@[^\s]+\.[^\s]+)/);
+  if (em && em[1]) {
+    const corps = `Bonjour,\n\nAu sujet de ta demande de rendez-vous auprès de la Iron Wolf Company :\n\n${t}\n\n— ${parNom || "Iron Wolf Company"}\n\n(Tu peux aussi suivre ta demande sur notre site, page « Suivre ma demande ».)`;
+    const res = await envoyerEmail(em[1].trim(), "Réponse à ta demande de rendez-vous — Iron Wolf Company", corps);
+    if (res.ok) return "✅ Réponse envoyée par e-mail au client (trace conservée).";
+    if (res.reason === "non configuré") return "Réponse gardée en trace. L'e-mail n'est pas configuré — le client peut la lire sur « Suivre ma demande ».";
+    return `Réponse gardée en trace (e-mail non envoyé : ${res.reason}). Le client peut la lire sur « Suivre ma demande ».`;
+  }
+  return "Réponse conservée (trace). Le client peut la lire sur « Suivre ma demande ».";
 }
 
 // Replanifie un RDV depuis le site : met à jour le créneau et/ou le lieu, et
