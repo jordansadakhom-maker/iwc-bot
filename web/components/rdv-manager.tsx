@@ -236,6 +236,14 @@ function RdvModal({ rdv, membres, onClose, router }: { rdv: RdvComm; membres: Me
             {assignes.map((a, i) => <span key={i} className="rounded-full border border-border bg-surface px-2 py-0.5 text-[0.74rem]">{a}</span>)}
           </div>
         ) : null}
+        {rdv.satisfaction ? (
+          <div className="mt-1 flex flex-wrap items-center gap-1.5 border-t border-border pt-2">
+            <Star className="h-3.5 w-3.5" style={{ color: "var(--accent)" }} />
+            <span className="text-faint">Avis client :</span>
+            <span style={{ color: "var(--accent)" }}>{"★".repeat(rdv.satisfaction.note)}{"☆".repeat(Math.max(0, 5 - rdv.satisfaction.note))}</span>
+            {rdv.satisfaction.commentaire ? <span className="text-muted">— {rdv.satisfaction.commentaire}</span> : null}
+          </div>
+        ) : null}
       </div>
 
       <div className="mt-3 flex flex-col gap-1">

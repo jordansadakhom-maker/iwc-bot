@@ -646,6 +646,7 @@ export type RdvComm = {
   statut: string; source: string | null; contact: string | null; message: string | null; reponses: Reponse[]; createdAt: string | null;
   assignes: string[]; lieuPhoto: string | null; duree: string | null;
   paiementMontant: number | null; facture: string | null;
+  satisfaction: { note: number; commentaire: string | null } | null;
 };
 export type CommunicationData = { connecte: boolean; rdvs: RdvComm[]; membres: MembreLite[] };
 
@@ -654,14 +655,16 @@ export async function getCommunication(): Promise<CommunicationData> {
   const supabase = createAdminClient();
   if (!supabase) return { connecte: false, rdvs: [], membres: [] };
   const [rdvR, membreR] = await Promise.all([
-    supabase.from("Rdv").select("id,nomRP,type,lieu,creneau,statut,paiement,createdAt").neq("statut", "cloture").order("createdAt", { ascending: false }).limit(200),
+    supabase.from("Rdv").select("id,nomRP,type,lieu,creneau,statut,paiement,satisfaction,createdAt").neq("statut", "cloture").order("createdAt", { ascending: false }).limit(200),
     supabase.from("Membre").select("id,nomIC").order("nomIC", { ascending: true }),
   ]);
   if (rdvR.error) return { connecte: false, rdvs: [], membres: [] };
-  type Row = { id: string; nomRP: string | null; type: string | null; lieu: string | null; creneau: string | null; statut: string; paiement: Record<string, unknown> | null; createdAt: string | null };
+  type Row = { id: string; nomRP: string | null; type: string | null; lieu: string | null; creneau: string | null; statut: string; paiement: Record<string, unknown> | null; satisfaction: string | null; createdAt: string | null };
   const rdvs: RdvComm[] = ((rdvR.data || []) as Row[]).map((r) => {
     const p = (r.paiement || {}) as Record<string, unknown>;
     const reps = Array.isArray(p.reponses) ? (p.reponses as Reponse[]) : [];
+    let satisfaction: { note: number; commentaire: string | null } | null = null;
+    try { if (r.satisfaction) { const sat = JSON.parse(r.satisfaction) as { note?: number; commentaire?: string | null }; if (sat && typeof sat.note === "number") satisfaction = { note: sat.note, commentaire: sat.commentaire ?? null }; } } catch { /* champ libre / ancien format → ignore */ }
     return {
       id: String(r.id), nomRP: r.nomRP, type: r.type, lieu: r.lieu, creneau: r.creneau,
       statut: r.statut || "nouveau", source: (p.source as string) ?? null,
@@ -672,6 +675,7 @@ export async function getCommunication(): Promise<CommunicationData> {
       duree: (p.duree as string) ?? null,
       paiementMontant: p.montant != null ? Number(p.montant) : null,
       facture: (p.facture as string) ?? null,
+      satisfaction,
     };
   });
   const membres: MembreLite[] = ((membreR.data || []) as { id: string; nomIC: string }[]).map((m) => ({ id: String(m.id), nom: m.nomIC || String(m.id) }));
