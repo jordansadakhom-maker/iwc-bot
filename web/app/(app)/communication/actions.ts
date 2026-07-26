@@ -74,6 +74,30 @@ export async function repondreRdv(id: string, texte: string): Promise<CommResult
   return { ok: true };
 }
 
+// Replanifie un RDV depuis le site : met à jour le créneau et/ou le lieu, et
+// garde une trace horodatée dans le fil (paiement.reponses). Entièrement côté
+// site (le bot n'écrase pas les RDV web/télégramme).
+export async function replanifierRdv(id: string, creneau: string, lieu: string): Promise<CommResult> {
+  if (!id) return { ok: false, error: "RDV introuvable." };
+  const c = (creneau || "").trim();
+  const l = (lieu || "").trim();
+  if (!c && !l) return { ok: false, error: "Indique un nouveau créneau ou un nouveau lieu." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const { data, error: e1 } = await admin.from("Rdv").select("paiement").eq("id", id).maybeSingle();
+  if (e1) return { ok: false, error: "RDV introuvable." };
+  const paiement = (data?.paiement && typeof data.paiement === "object" ? data.paiement : {}) as Record<string, unknown>;
+  const reponses = Array.isArray(paiement.reponses) ? (paiement.reponses as unknown[]) : [];
+  const parts = [c ? `créneau → ${c}` : null, l ? `lieu → ${l}` : null].filter(Boolean).join(" · ");
+  reponses.push({ texte: `📅 Replanifié (${parts})`, par: await auteurNom(), at: new Date().toISOString() });
+  const patch: Record<string, unknown> = { paiement: { ...paiement, reponses } };
+  if (c) patch.creneau = c.slice(0, 200);
+  if (l) patch.lieu = l.slice(0, 200);
+  const { error: e2 } = await admin.from("Rdv").update(patch).eq("id", id);
+  if (e2) { console.error("replanifierRdv:", e2.message); return { ok: false, error: "Enregistrement impossible." }; }
+  return { ok: true };
+}
+
 // Lit le paiement JSON d'un RDV, applique un patch, réécrit. Renvoie le nouvel objet.
 async function _patchPaiement(id: string, patch: Record<string, unknown>): Promise<CommResult> {
   const admin = createAdminClient();
