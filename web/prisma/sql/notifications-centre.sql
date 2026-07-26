@@ -88,8 +88,11 @@ BEGIN
         n_new := COALESCE(jsonb_array_length(NEW."messages"), 0);
         IF n_new > n_old THEN
           dernier := NEW."messages" -> (n_new - 1);
-          -- On ne notifie que les messages venant du CLIENT (pas nos propres réponses).
-          IF COALESCE(dernier ->> 'from', '') <> 'equipe' THEN
+          -- On ne notifie QUE les messages venant du CLIENT. On teste « = client »
+          -- (et non « <> equipe ») : sinon les notes internes (from='note', dont
+          -- celles posées par la bascule notify-only) déclenchent de fausses
+          -- « Réponse du client ».
+          IF COALESCE(dernier ->> 'from', '') = 'client' THEN
             INSERT INTO "Notification"("id","type","titre","corps","lien","clientNom","cibleId","ref","createdAt")
             VALUES (gen_random_uuid()::text, 'message',
                     'Réponse du client — ' || COALESCE(NEW."clientNom", 'Client'),

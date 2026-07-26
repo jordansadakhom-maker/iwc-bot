@@ -4,16 +4,19 @@ import { setEtatOverlay } from "@/lib/notif-etat";
 import { TABLE_ETAT_IWC } from "@/lib/assistant-iwc";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { terminerService } from "@/app/(app)/armurerie/actions";
+import { getActeur } from "@/lib/authz";
 import type { ActionConstatResult } from "@/lib/erp-assistant-const";
 
 // Change l'état d'une notification de veille IRON WOLF (couche persistée).
 export async function setEtatNotif(id: string, etat: string): Promise<{ ok: boolean; error?: string }> {
+  if (!(await getActeur())) return { ok: false, error: "Accès refusé — réservé aux membres connectés." };
   return setEtatOverlay(TABLE_ETAT_IWC, id, etat);
 }
 
 // Exécute l'action inline d'un constat (« régler en 1 clic »). Chaque action
 // réutilise les Server Actions existantes (donc leurs gardes) — additif, sûr.
 export async function executerConstat(kind: string, _ref?: string): Promise<ActionConstatResult> {
+  if (!(await getActeur())) return { ok: false, error: "Accès refusé — réservé aux membres connectés." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
   if (kind === "clore-pointages") {
