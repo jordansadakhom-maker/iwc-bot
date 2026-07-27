@@ -26,6 +26,7 @@ const NAV_RESTRICT: Record<string, keyof Acces> = {
   "/wanted": "peutRenseignement",
   "/medical": "peutMedical",
   "/armurerie": "armurier",
+  "/audit": "direction",
 };
 
 function Crest({ className }: { className?: string }) {
