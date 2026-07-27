@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getAcces } from "@/lib/queries";
+import { getLicenceConfig, verifierAchatArme, logRefusAchat } from "@/lib/licences";
 import { envoyerCommande } from "@/lib/commandes";
 import { round2 } from "@/lib/format";
 import { calculFiscal, snapshotCycle, estMouvementImpot } from "@/lib/armurerie-fiscal";
@@ -114,6 +115,21 @@ export async function creerVente(d: { clientId?: string; acquereur: string; date
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
   const _ga = await garde(); if (_ga) return _ga;
+  // Intégration Licences (Lot E) — blocage OPTIONNEL des ventes non conformes.
+  // Désactivé par défaut : tant que l'interrupteur est OFF, la vente suit son
+  // cours habituel. La vérification ne doit JAMAIS faire échouer une vente par
+  // erreur technique (try/catch tolérant).
+  try {
+    const cfg = await getLicenceConfig();
+    if (cfg.bloquerVentes) {
+      const cat = [d.categorie, d.marque, d.modele].filter(Boolean).join(" ");
+      const v = await verifierAchatArme(d.acquereur, cat);
+      if (!v.ok) {
+        await logRefusAchat({ acquereur: d.acquereur, motif: v.motif, licenceId: v.licence?.id ?? null, numero: v.licence?.numero ?? null, par: await auteurNom(), categorie: cat });
+        return { ok: false, error: `Vente refusée — ${v.motif} (contrôle des licences actif).` };
+      }
+    }
+  } catch { /* la vérification ne bloque jamais sur erreur technique */ }
   const id = newId("vte");
   const qte = Math.max(1, Math.round(Number(d.quantite) || 1));
   const pu = d.prixUnitaire != null ? Math.max(0, round2(Number(d.prixUnitaire) || 0)) : null;

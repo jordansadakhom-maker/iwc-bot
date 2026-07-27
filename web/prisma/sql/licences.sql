@@ -119,6 +119,18 @@ INSERT INTO "LicenceType" ("code", "nom", "prefixe", "ordre") VALUES
   ('exceptionnelle',   'Autorisation exceptionnelle',      'EXC',  10)
 ON CONFLICT ("code") DO NOTHING;
 
+-- ── 6. Réglages du registre (Lot E — intégration Armurerie) ─────────────────
+--  Interrupteur du blocage des ventes. Défaut = OFF ('0') : l'Armurerie n'est
+--  pas modifiée tant qu'on n'active pas le contrôle depuis l'onglet Licences.
+CREATE TABLE IF NOT EXISTS "LicenceConfig" (
+  "cle"       TEXT PRIMARY KEY,
+  "valeur"    TEXT,
+  "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+  "updatedBy" TEXT
+);
+ALTER TABLE "LicenceConfig" ENABLE ROW LEVEL SECURITY;
+INSERT INTO "LicenceConfig" ("cle", "valeur") VALUES ('bloquer_ventes_armurerie', '0') ON CONFLICT ("cle") DO NOTHING;
+
 -- ═══════════════════════════════════════════════════════════════════════════
 --  FIN — rejouable à volonté. Prochaine étape (côté site) : onglet « Licences ».
 -- ═══════════════════════════════════════════════════════════════════════════
