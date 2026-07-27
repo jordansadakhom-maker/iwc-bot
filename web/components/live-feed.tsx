@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Radio, Pause, Play } from "lucide-react";
+import { useNotificationsRealtime } from "@/lib/use-notifications-realtime";
 import type { FeedItem } from "@/lib/queries";
 
 const TONE: Record<string, string> = {
@@ -41,6 +42,15 @@ export function LiveFeed({ items }: { items: FeedItem[] }) {
     }, 25000);
     return () => clearInterval(t);
   }, [live, router]);
+
+  // Temps réel : rafraîchissement IMMÉDIAT dès qu'un événement arrive (le poll
+  // 25 s ci-dessus n'est plus qu'un filet). Respecte la pause et l'onglet caché.
+  useNotificationsRealtime(() => {
+    if (!live) return;
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    router.refresh();
+    setTick((n) => n + 1);
+  });
 
   return (
     <section className="rounded-card border border-border bg-surface p-4 shadow-card sm:p-5">

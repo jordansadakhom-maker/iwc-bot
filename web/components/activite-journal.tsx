@@ -1,17 +1,23 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
 import { activiteMeta, modulesDe, filtrerActivite, type ActiviteItem } from "@/lib/activite";
+import { useNotificationsRealtime } from "@/lib/use-notifications-realtime";
 import { inputCls } from "@/components/edit-ui";
 
 const dtFR = (s: string) => { if (!s) return ""; try { return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(s)); } catch { return ""; } };
 
 export function ActiviteJournal({ initial }: { initial: ActiviteItem[] }) {
+  const router = useRouter();
   const [module, setModule] = useState("tous");
   const [q, setQ] = useState("");
   const modules = useMemo(() => modulesDe(initial), [initial]);
   const affiches = useMemo(() => filtrerActivite(initial, module, q), [initial, module, q]);
+
+  // Temps réel : un nouvel événement rafraîchit le journal (sans recharger).
+  useNotificationsRealtime(() => router.refresh());
 
   return (
     <div className="flex flex-col gap-3">
