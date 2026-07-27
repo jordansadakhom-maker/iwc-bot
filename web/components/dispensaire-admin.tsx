@@ -48,7 +48,7 @@ export function DispensaireAdmin({ membres: init, config: cfg0, grades: grades0,
       setMembres((p) => p.map((m) => (m.id === editing.id ? { ...m, ...vals } as Membre : m))); setForm(null);
       const r = await majMembre(editing.id, vals); if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else router.refresh();
     } else {
-      const tmp: Membre = { id: "tmp-" + Math.random().toString(36).slice(2, 8), identifiant: vals.identifiant || null, nom: vals.nom, role: vals.role || topGrade, actif: true, note: vals.note || null, updatedAt: null, updatedBy: null };
+      const tmp: Membre = { id: "tmp-" + Math.random().toString(36).slice(2, 8), identifiant: vals.identifiant || null, nom: vals.nom, role: vals.role || topGrade, actif: true, note: vals.note || null, nomRp: vals.nomRp || null, prenomRp: vals.prenomRp || null, serveur: vals.serveur || null, updatedAt: null, updatedBy: null };
       setMembres((p) => [...p, tmp]); setForm(null);
       const r = await creerMembre(vals);
       if (!r.ok) { setMembres((p) => p.filter((m) => m.id !== tmp.id)); setFlash({ t: "bad", m: r.error || "Impossible." }); }
@@ -102,7 +102,7 @@ export function DispensaireAdmin({ membres: init, config: cfg0, grades: grades0,
                 <div key={m.id} className="flex flex-wrap items-center gap-2 rounded-[10px] border border-border bg-surface-2 px-3 py-2" style={{ opacity: m.actif ? 1 : 0.55 }}>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5"><span className="text-[0.86rem] font-semibold">{m.nom}</span>{!m.actif ? <span className="rounded-full border border-border px-1.5 text-[0.6rem] uppercase text-faint">inactif</span> : null}</div>
-                    <div className="text-[0.7rem] text-faint">{m.identifiant ? `ID ${m.identifiant}` : "identifié par le nom"}{m.note ? ` · ${m.note}` : ""}</div>
+                    <div className="text-[0.7rem] text-faint">{[[m.prenomRp, m.nomRp].filter(Boolean).join(" ") || null, m.serveur ? `serveur ${m.serveur}` : null, m.identifiant ? `ID ${m.identifiant}` : "identifié par le nom", m.note || null].filter(Boolean).join(" · ")}</div>
                   </div>
                   <select value={grades.some((g) => g.key === m.role) ? m.role : def.key} onChange={(e) => changerRole(m, e.target.value)} className="rounded-md border border-border bg-surface px-2 py-1 text-[0.74rem] font-semibold" style={{ color: def.tone }}>{grades.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select>
                   <button onClick={() => toggleActif(m)} className="rounded-md border border-border px-2 py-1 text-[0.7rem] font-semibold text-muted hover:text-ink">{m.actif ? "Désactiver" : "Activer"}</button>
@@ -314,7 +314,7 @@ function ParamForm({ config, onFlash, onSaved }: { config: Config; onFlash: (f: 
 }
 
 function MembreForm({ initial, grades, defaultRole, onClose, onSave }: { initial: Membre | null; grades: RoleDef[]; defaultRole: string; onClose: () => void; onSave: (v: Record<string, string>) => void }) {
-  const [v, setV] = useState<Record<string, string>>(() => ({ nom: initial?.nom || "", identifiant: initial?.identifiant || "", role: initial?.role || defaultRole, note: initial?.note || "" }));
+  const [v, setV] = useState<Record<string, string>>(() => ({ nom: initial?.nom || "", identifiant: initial?.identifiant || "", role: initial?.role || defaultRole, note: initial?.note || "", prenomRp: initial?.prenomRp || "", nomRp: initial?.nomRp || "", serveur: initial?.serveur || "" }));
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setV((p) => ({ ...p, [k]: e.target.value }));
   function go() { if (v.nom.trim().length < 1) { setErr("Le nom est obligatoire."); return; } onSave(v); }
@@ -326,6 +326,11 @@ function MembreForm({ initial, grades, defaultRole, onClose, onSave }: { initial
         <label className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Grade</span>
           <select className={inputCls} value={grades.some((g) => g.key === v.role) ? v.role : defaultRole} onChange={set("role")}>{grades.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select>
         </label>
+        <div className="grid grid-cols-2 gap-3">
+          <Champ label="Prénom RP"><input className={inputCls} value={v.prenomRp} onChange={set("prenomRp")} placeholder="Prénom en jeu" /></Champ>
+          <Champ label="Nom RP"><input className={inputCls} value={v.nomRp} onChange={set("nomRp")} placeholder="Nom en jeu" /></Champ>
+        </div>
+        <Champ label="Serveur"><input className={inputCls} value={v.serveur} onChange={set("serveur")} placeholder="Serveur sur lequel il joue" /></Champ>
         <Champ label="Note"><textarea className={inputCls} rows={2} value={v.note} onChange={set("note")} /></Champ>
         {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
         <div className="mt-1 flex justify-end gap-2">
