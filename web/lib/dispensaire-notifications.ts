@@ -3,9 +3,16 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getConfig, peutFacturer } from "@/lib/dispensaire-roles";
 import { statutsDe, estClose } from "@/lib/dispensaire-facturation-const";
+import { getEtatsOverlay } from "@/lib/notif-etat";
+import { ETAT_ACTIFS, type Etat } from "@/lib/erp-assistant-const";
+
+// Table d'état des notifications du Dispensaire (partagée avec l'Assistant).
+// Littéral repris ici volontairement pour éviter un import circulaire
+// (dispensaire-assistant importe déjà getNotifications).
+const TABLE_ETAT = "DispensaireNotifEtat";
 
 // ── Centre de notifications (alertes intelligentes dérivées de l'état courant) ─
-export type Notif = { id: string; severite: "alerte" | "attention" | "info"; type: string; texte: string; href: string; ref?: string; escalade?: "relance" | "police" };
+export type Notif = { id: string; severite: "alerte" | "attention" | "info"; type: string; texte: string; href: string; ref?: string; escalade?: "relance" | "police"; etat?: Etat };
 // Fil d'activité récente : mouvements de stock (± / déplacements) et coffres.
 export type Activite = { id: string; genre: "entree" | "sortie" | "deplacement" | "coffre"; texte: string; par: string | null; at: string; href: string };
 
@@ -74,9 +81,16 @@ export async function getNotifications(): Promise<{ items: Notif[]; count: numbe
 
   if (habilite) for (const s of salaries || []) if (String(s.statut || "actif") === "actif" && num(s.absInjustifiees) >= cfg.seuilRenvoi) items.push({ id: "rh-" + s.nom, severite: "alerte", type: "RH", texte: `${s.nom} : ${num(s.absInjustifiees)} absences injustifiées — éligible au renvoi`, href: "/dispensaire/rh" });
 
+  // Couche d'état persistée : une notif marquée « résolue / archivée » sort du
+  // décompte de la pastille (qui, avant, ne se vidait jamais). L'état est attaché
+  // à chaque item pour que la page puisse l'afficher et proposer les actions.
+  const etats = await getEtatsOverlay(TABLE_ETAT);
+  for (const it of items) it.etat = etats[it.id] || "nouveau";
+
   const ordre = { alerte: 0, attention: 1, info: 2 };
   items.sort((a, b) => ordre[a.severite] - ordre[b.severite]);
-  return { items, count: items.length };
+  const count = items.filter((it) => ETAT_ACTIFS.includes(it.etat || "nouveau")).length;
+  return { items, count };
 }
 
 // Compteur léger pour la pastille de l'en-tête.

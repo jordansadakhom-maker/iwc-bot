@@ -53,7 +53,7 @@ export function DispensairePointage({ data }: { data: PointData }) {
     const r = await prendreService({ salarieId: tmp.salarieId, nom });
     setBusy(false);
     if (!r.ok) { setEnCours((p) => p.filter((s) => s.id !== tmp.id)); setFlash({ t: "bad", m: r.error || "Impossible." }); }
-    else { setEnCours((p) => p.map((s) => (s.id === tmp.id ? { ...s, id: r.id || tmp.id } : s))); setFlash({ t: "ok", m: `${nom} a pris son service.` }); }
+    else { setEnCours((p) => p.map((s) => (s.id === tmp.id ? { ...s, id: r.id || tmp.id } : s))); setFlash({ t: "ok", m: `${nom} a pris son service.` }); router.refresh(); }
   }
 
   async function terminer(sess: PointSession) {
