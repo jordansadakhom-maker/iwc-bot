@@ -147,6 +147,12 @@ CREATE TABLE IF NOT EXISTS "LicenceMembre" (
 ALTER TABLE "LicenceMembre" ENABLE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS "LicenceMembre_ident_idx" ON "LicenceMembre" (lower(coalesce("identifiant", '')));
 
+-- ── 8. Notifications Discord (bot) — marqueur d'annonce sur le journal ───────
+--  Le bot relève les évènements non encore annoncés (annonceAt IS NULL) et les
+--  poste dans le salon Discord des licences, puis les marque annoncés.
+ALTER TABLE "LicenceEvent" ADD COLUMN IF NOT EXISTS "annonceAt" TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS "LicenceEvent_annonce_idx" ON "LicenceEvent" ("annonceAt") WHERE "annonceAt" IS NULL;
+
 -- ═══════════════════════════════════════════════════════════════════════════
 --  FIN — rejouable à volonté. Prochaine étape (côté site) : onglet « Licences ».
 -- ═══════════════════════════════════════════════════════════════════════════
