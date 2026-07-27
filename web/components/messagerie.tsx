@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { MessagesSquare, Loader2, Plus, Send, ArrowLeft, Archive, ArchiveRestore, Circle } from "lucide-react";
 import { Card, CardHeader, Empty, Badge } from "@/components/ui";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
-import { useNotificationsRealtime } from "@/lib/use-notifications-realtime";
+import { useNotificationsRealtime, useMessagesRealtime, useConversationsRealtime } from "@/lib/use-notifications-realtime";
 import { trierConversations, estArchivee, type ConversationListe, type Conversation, type Message } from "@/lib/conversations";
 import { ouvrirConversation, creerConversation, envoyerMessage, archiverConversation } from "@/app/(app)/messages/actions";
 
@@ -58,6 +58,13 @@ export function Messagerie({ moiId, conversations }: { moiId: string | null; con
 
   // Temps réel : une nouvelle conversation (notification) rafraîchit la liste.
   useNotificationsRealtime(() => router.refresh());
+  // Temps réel messagerie : nouveaux messages du fil ouvert (rechargé) et
+  // évolutions de la liste des conversations (nouveaux fils / derniers messages).
+  useMessagesRealtime(selected, () => {
+    if (!selected) return;
+    ouvrirConversation(selected).then((r) => { if (r.ok && r.conversation) setThread({ conversation: r.conversation, messages: r.messages }); router.refresh(); });
+  });
+  useConversationsRealtime(() => router.refresh());
 
   return (
     <>
