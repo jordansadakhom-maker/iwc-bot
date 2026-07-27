@@ -1,3 +1,4 @@
+// Redéploiement — test de déclenchement Vercel (post-reconnexion Git).
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 
