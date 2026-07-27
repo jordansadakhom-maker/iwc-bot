@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { HeartPulse, Loader2, Play, Check, X, UserPlus, Stethoscope, Clock, Plus, BadgeDollarSign } from "lucide-react";
+import { HeartPulse, Loader2, Play, Check, X, UserPlus, Stethoscope, Clock, Plus, BadgeDollarSign, BedDouble } from "lucide-react";
 import { Flash, inputCls } from "@/components/edit-ui";
 import { ETAT_PEC_LABEL, type PrisesEnChargeData, type PriseEnCharge } from "@/lib/dispensaire-prises-en-charge-const";
-import { admettre, attribuerMedecin, demarrerSoin, annulerPriseEnCharge } from "@/app/dispensaire/prises-en-charge/actions";
+import { admettre, attribuerMedecin, demarrerSoin, annulerPriseEnCharge, assignerChambrePEC } from "@/app/dispensaire/prises-en-charge/actions";
 import { encaisserPriseEnCharge } from "@/app/dispensaire/factures/actions";
 import { money } from "@/lib/dispensaire-facturation-const";
 import { DispensairePecCloture } from "@/components/dispensaire-pec-cloture";
@@ -143,6 +143,13 @@ export function DispensairePrisesEnCharge({ data }: { data: PrisesEnChargeData }
             <input className={inputCls + " h-8 w-[150px] py-1 text-[0.78rem]"} list="pec-medecins" placeholder="Médecin…" value={med[p.id] ?? (p.medecin || "")} onChange={(e) => setMed((m) => ({ ...m, [p.id]: e.target.value }))} />
             <button onClick={() => faire(p.id, () => attribuerMedecin(p.id, med[p.id] ?? (p.medecin || "")), "Médecin attribué.")} disabled={busyRow} className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[0.72rem] font-semibold text-muted transition hover:text-ink disabled:opacity-50">Assigner</button>
           </div>
+
+          {/* Lit / chambre : affiché s'il est occupé, sinon sélecteur d'assignation */}
+          {p.chambre ? (
+            <span className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[0.72rem] font-semibold" style={{ color: "var(--good)", background: "color-mix(in srgb,var(--good) 12%,transparent)" }}><BedDouble className="h-3.5 w-3.5" /> {p.chambre.nom}</span>
+          ) : data.chambresLibres.length ? (
+            <div className="flex items-center gap-1"><BedDouble className="h-3.5 w-3.5 text-faint" /><select className={inputCls + " h-8 w-auto py-1 text-[0.74rem]"} value="" onChange={(e) => { if (e.target.value) faire(p.id, () => assignerChambrePEC(p.id, e.target.value), "Lit assigné."); }} aria-label="Assigner un lit"><option value="">Assigner un lit…</option>{data.chambresLibres.map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}</select></div>
+          ) : null}
 
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
             {p.etat === "admis" && data.canSoigner ? (

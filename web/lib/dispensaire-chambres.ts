@@ -2,11 +2,29 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { estAutorise } from "@/lib/dispensaire-roles";
+import { emettreEvenementDispensaire } from "@/lib/dispensaire-evenements";
+import { cleNom } from "@/lib/noms";
 import { toChambre, ETATS_CHAMBRE, type ChambresData, type EtatChambre } from "@/lib/dispensaire-chambres-const";
 
 export * from "@/lib/dispensaire-chambres-const";
 
 async function q<T>(p: PromiseLike<{ data: T | null }>): Promise<T | null> { try { return (await p).data; } catch { return null; } }
+
+// Libère (→ nettoyage) tout lit occupé par un patient donné. Best-effort — appelé
+// à la clôture / annulation d'une prise en charge pour ne pas laisser un lit
+// « occupé » par un patient qui n'est plus soigné. No-op si le module n'existe pas.
+export async function libererChambresDuPatient(nomPatient: string, par: string): Promise<void> {
+  const admin = createAdminClient();
+  const cle = cleNom(nomPatient);
+  if (!admin || !cle) return;
+  try {
+    const { data } = await admin.from("DispensaireChambre").select("id,nom").eq("patientNormalise", cle).eq("etat", "occupee");
+    for (const c of ((data as { id: string; nom: string }[]) || [])) {
+      await admin.from("DispensaireChambre").update({ etat: "nettoyage", patient: null, patientNormalise: null, medecin: null, depuis: null, updatedBy: par, updatedAt: new Date().toISOString() }).eq("id", c.id);
+      await emettreEvenementDispensaire({ aggregate: "chambre", type: "chambre.liberee", cibleId: c.id, cibleLibelle: c.nom, apres: { etat: "nettoyage", motif: "Sortie du patient" } });
+    }
+  } catch { /* best-effort */ }
+}
 
 export async function getChambres(): Promise<ChambresData> {
   const stats0 = { libre: 0, occupee: 0, reservee: 0, nettoyage: 0 } as Record<EtatChambre, number>;
