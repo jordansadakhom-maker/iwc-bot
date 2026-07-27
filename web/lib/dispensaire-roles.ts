@@ -143,6 +143,11 @@ export async function peutFacturer(): Promise<boolean> {
 export async function peutGererRH(): Promise<boolean> {
   try { const r = await getRoleDispensaire(); return !!(r.perms.rh || r.perms.admin); } catch { return false; }
 }
+// Droit de SOIN : éditer le dossier médical d'un patient (grades porteurs du
+// droit `medical`, ou admin). fail-closed.
+export async function peutSoigner(): Promise<boolean> {
+  try { const r = await getRoleDispensaire(); return !!(r.perms.medical || r.perms.admin); } catch { return false; }
+}
 
 export async function getMembres(): Promise<{ pret: boolean; membres: Membre[] }> {
   const admin = createAdminClient();
