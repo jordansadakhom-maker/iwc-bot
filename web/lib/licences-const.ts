@@ -85,6 +85,26 @@ export function autoriseLicence(l: Licence, perm: string): boolean {
   return statutEffectif(l) === "active" && !!l.permissions[perm];
 }
 
+// ── Rôles fins & capacités (Lot G) ──────────────────────────────────────────
+// Chaque rôle ne peut effectuer QUE les actions listées dans ses capacités.
+export type CapLicence = "voir" | "creer" | "cycle" | "revoquer" | "supprimer" | "gererTypes" | "gererIntegration" | "gererRoles";
+
+export const ROLES_LICENCE: { key: string; label: string; tone: string; caps: CapLicence[] }[] = [
+  { key: "admin", label: "Administrateur", tone: "var(--oxblood)", caps: ["voir", "creer", "cycle", "revoquer", "supprimer", "gererTypes", "gererIntegration", "gererRoles"] },
+  { key: "direction", label: "Direction IWC", tone: "var(--warn)", caps: ["voir", "creer", "cycle", "revoquer", "supprimer", "gererTypes", "gererIntegration", "gererRoles"] },
+  { key: "responsable", label: "Responsable Armurerie", tone: "var(--accent)", caps: ["voir", "creer", "cycle", "revoquer", "gererTypes", "gererIntegration"] },
+  { key: "armurier", label: "Armurier", tone: "var(--good)", caps: ["voir", "creer", "cycle"] },
+  { key: "agent", label: "Agent autorisé", tone: "var(--steel)", caps: ["voir", "creer"] },
+  { key: "consultation", label: "Consultation seule", tone: "var(--muted)", caps: ["voir"] },
+];
+export const roleLicenceDef = (k: string) => ROLES_LICENCE.find((r) => r.key === k) || ROLES_LICENCE[ROLES_LICENCE.length - 1];
+
+export type CapsLicence = Record<CapLicence, boolean>;
+export function capsDe(roleKey: string): CapsLicence {
+  const set = new Set(roleLicenceDef(roleKey).caps);
+  return { voir: set.has("voir"), creer: set.has("creer"), cycle: set.has("cycle"), revoquer: set.has("revoquer"), supprimer: set.has("supprimer"), gererTypes: set.has("gererTypes"), gererIntegration: set.has("gererIntegration"), gererRoles: set.has("gererRoles") };
+}
+
 // Numéro de repli (si la fonction SQL next_licence_numero n'est pas disponible) :
 // même format & même clé de contrôle que la fonction Postgres.
 export function genererNumeroLocal(prefixe: string | null, seq: number, annee: number): string {

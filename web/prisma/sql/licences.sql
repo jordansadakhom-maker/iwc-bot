@@ -131,6 +131,22 @@ CREATE TABLE IF NOT EXISTS "LicenceConfig" (
 ALTER TABLE "LicenceConfig" ENABLE ROW LEVEL SECURITY;
 INSERT INTO "LicenceConfig" ("cle", "valeur") VALUES ('bloquer_ventes_armurerie', '0') ON CONFLICT ("cle") DO NOTHING;
 
+-- ── 7. Rôles & accès (Lot G) — attribution de rôles précis par personne ─────
+--  Chaque personne (ID Discord) reçoit un rôle qui décide de ses actions. En
+--  l'absence de fiche, un repli se base sur les accès IWC (Direction = complet).
+CREATE TABLE IF NOT EXISTS "LicenceMembre" (
+  "id"          TEXT PRIMARY KEY,
+  "identifiant" TEXT,                                  -- ID Discord
+  "nom"         TEXT NOT NULL,
+  "role"        TEXT NOT NULL DEFAULT 'consultation',  -- admin|direction|responsable|armurier|agent|consultation
+  "actif"       BOOLEAN NOT NULL DEFAULT true,
+  "createdAt"   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  "updatedAt"   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  "updatedBy"   TEXT
+);
+ALTER TABLE "LicenceMembre" ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS "LicenceMembre_ident_idx" ON "LicenceMembre" (lower(coalesce("identifiant", '')));
+
 -- ═══════════════════════════════════════════════════════════════════════════
 --  FIN — rejouable à volonté. Prochaine étape (côté site) : onglet « Licences ».
 -- ═══════════════════════════════════════════════════════════════════════════

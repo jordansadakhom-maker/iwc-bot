@@ -2,9 +2,45 @@ import "server-only";
 
 import { cache } from "react";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { statutEffectif, statutDef, type Licence, type LicenceType, type StatutLicence } from "@/lib/licences-const";
+import { getAcces, getSessionDiscordId, getSessionProfile } from "@/lib/queries";
+import { statutEffectif, statutDef, capsDe, type Licence, type LicenceType, type StatutLicence, type CapsLicence } from "@/lib/licences-const";
 
 export * from "@/lib/licences-const";
+
+// ── Rôle & capacités du compte connecté (Lot G) ─────────────────────────────
+// Priorité à la fiche LicenceMembre (par ID Discord) ; sinon repli sur les accès
+// IWC (Direction = complet ; Armurier = armurier ; sinon consultation) — sans
+// jamais enfermer quelqu'un. Pour restreindre précisément une personne, lui
+// attribuer un rôle dans « Rôles & accès ».
+export type RoleLicenceContext = { role: string; caps: CapsLicence; nom: string; identifiant: string | null };
+
+export const getRoleLicence = cache(async (): Promise<RoleLicenceContext> => {
+  const admin = createAdminClient();
+  const [did, prof] = await Promise.all([getSessionDiscordId(), getSessionProfile()]);
+  const nom = prof?.nom || "Agent";
+  let roleKey: string | null = null;
+  if (admin && did) {
+    try { const { data } = await admin.from("LicenceMembre").select("role,actif").eq("identifiant", did).maybeSingle(); if (data && ((data as Record<string, unknown>).actif ?? true)) roleKey = String((data as Record<string, unknown>).role); } catch { /* table absente */ }
+  }
+  if (!roleKey) {
+    const acces = await getAcces().catch(() => null);
+    roleKey = acces?.direction ? "direction" : acces?.armurier ? "armurier" : "consultation";
+  }
+  return { role: roleKey, caps: capsDe(roleKey), nom, identifiant: did };
+});
+
+export type LicenceMembre = { id: string; identifiant: string | null; nom: string; role: string; actif: boolean };
+
+export async function getLicenceMembres(): Promise<{ pret: boolean; membres: LicenceMembre[] }> {
+  const admin = createAdminClient();
+  if (!admin) return { pret: false, membres: [] };
+  try {
+    const { data, error } = await admin.from("LicenceMembre").select("*").order("nom", { ascending: true });
+    if (error) return { pret: false, membres: [] };
+    const membres = ((data || []) as Record<string, unknown>[]).map((r) => ({ id: String(r.id), identifiant: s(r.identifiant), nom: String(r.nom || "Membre"), role: String(r.role || "consultation"), actif: r.actif == null ? true : Boolean(r.actif) }));
+    return { pret: true, membres };
+  } catch { return { pret: false, membres: [] }; }
+}
 
 const s = (v: unknown): string | null => (v == null ? null : String(v));
 const asPerms = (v: unknown): Record<string, boolean> => {
