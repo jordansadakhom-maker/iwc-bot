@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ShieldCheck, Search, Plus, X, Loader2, CheckCircle2, XCircle, BadgeCheck, Ban, RotateCcw, RefreshCw, Trash2, Pencil, Clock, FileText } from "lucide-react";
+import { ShieldCheck, Search, Plus, X, Loader2, CheckCircle2, XCircle, BadgeCheck, Ban, RotateCcw, RefreshCw, Trash2, Pencil, Clock, FileText, BarChart3 } from "lucide-react";
 import {
   STATUTS, statutDef, PERMISSIONS, RESTRICTIONS, permLabel, restrLabel,
   statutEffectif, joursAvantExpiration, type Licence, type LicenceType,
@@ -63,6 +63,32 @@ export function LicencesRegistre({ data }: { data: { pret: boolean; licences: Li
     return licences.filter((l) => l.nom.toLowerCase().includes(t) || (l.prenom || "").toLowerCase().includes(t) || l.numero.toLowerCase().includes(t)).slice(0, 12);
   }, [q, licences]);
 
+  // Lot D — alertes d'expiration (paliers 30/15/7/3/1 j · 24 h · expirée).
+  const alertes = useMemo(() => {
+    const palier = (j: number) => (j <= 0 ? "24 h" : j <= 1 ? "24 h" : j <= 3 ? "3 jours" : j <= 7 ? "7 jours" : j <= 15 ? "15 jours" : "30 jours");
+    const out: { l: Licence; jours: number | null; label: string; tone: string }[] = [];
+    for (const l of licences) {
+      const eff = statutEffectif(l);
+      if (eff === "expiree") { out.push({ l, jours: joursAvantExpiration(l.dateExpiration), label: "Expirée", tone: "var(--oxblood)" }); continue; }
+      if (eff !== "active") continue;
+      const j = joursAvantExpiration(l.dateExpiration);
+      if (j == null || j > 30) continue;
+      out.push({ l, jours: j, label: `${palier(j)}`, tone: j <= 7 ? "var(--oxblood)" : "var(--warn)" });
+    }
+    return out.sort((a, b) => (a.jours ?? -9999) - (b.jours ?? -9999));
+  }, [licences]);
+
+  // Lot F — activité mensuelle (licences délivrées sur les 6 derniers mois).
+  const parMois = useMemo(() => {
+    const now = new Date();
+    const mois: { key: string; label: string; n: number }[] = [];
+    for (let i = 5; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); mois.push({ key: `${d.getFullYear()}-${d.getMonth()}`, label: d.toLocaleDateString("fr-FR", { month: "short" }), n: 0 }); }
+    const idx = new Map(mois.map((m, i) => [m.key, i]));
+    for (const l of licences) { const d = new Date(l.createdAt); const i = idx.get(`${d.getFullYear()}-${d.getMonth()}`); if (i != null) mois[i].n++; }
+    const max = Math.max(1, ...mois.map((m) => m.n));
+    return { mois, max };
+  }, [licences]);
+
   function apres(r: { ok: boolean; error?: string }, okMsg: string) {
     if (!r.ok) { setFlash({ t: "bad", m: r.error || "Impossible." }); return false; }
     setFlash({ t: "ok", m: okMsg }); setForm(null); setFiche(null); start(() => router.refresh()); return true;
@@ -116,6 +142,38 @@ export function LicencesRegistre({ data }: { data: { pret: boolean; licences: Li
             })}
           </div>
         ) : null}
+      </div>
+
+      {/* Lots D + F — Alertes d'expiration & activité */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-[14px] border border-border bg-surface p-4">
+          <div className="mb-3 flex items-center gap-2"><Clock className="h-4 w-4 text-accent" /><h3 className="text-[0.9rem] font-semibold">Expirations & renouvellements <span className="font-num text-[0.8rem] text-faint">{alertes.length}</span></h3></div>
+          {alertes.length === 0 ? <p className="py-4 text-center text-[0.82rem] italic text-faint">Aucune licence à renouveler prochainement.</p> : (
+            <div className="flex max-h-[260px] flex-col gap-1.5 overflow-y-auto">
+              {alertes.map((a) => (
+                <button key={a.l.id} onClick={() => setFiche(a.l)} className="flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-left text-[0.78rem] transition hover:border-accent">
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: a.tone }} />
+                  <span className="min-w-0 flex-1 truncate font-semibold">{a.l.nom}{a.l.prenom ? ` ${a.l.prenom}` : ""}</span>
+                  <span className="shrink-0 font-num text-faint">{a.l.numero}</span>
+                  <span className="shrink-0 rounded-full px-2 py-0.5 text-[0.66rem] font-semibold" style={{ background: `color-mix(in srgb,${a.tone} 16%,transparent)`, color: a.tone }}>{a.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-[14px] border border-border bg-surface p-4">
+          <div className="mb-3 flex items-center gap-2"><BarChart3 className="h-4 w-4 text-accent" /><h3 className="text-[0.9rem] font-semibold">Licences délivrées · 6 mois</h3></div>
+          <div className="flex h-[220px] items-end justify-between gap-2 px-1">
+            {parMois.mois.map((m) => (
+              <div key={m.key} className="flex flex-1 flex-col items-center gap-1.5">
+                <span className="font-num text-[0.72rem] font-semibold text-faint">{m.n}</span>
+                <div className="w-full rounded-t-md" style={{ height: `${Math.round((m.n / parMois.max) * 160) + 4}px`, background: "color-mix(in srgb,var(--accent) 70%,transparent)" }} />
+                <span className="text-[0.68rem] capitalize text-faint">{m.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Registre complet */}
