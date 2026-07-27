@@ -160,6 +160,17 @@ export async function renouvelerLicence(id: string, nouvelleExpiration: string):
   return { ok: true, id };
 }
 
+// Interrupteur d'intégration Armurerie : activer/couper le blocage des ventes.
+export async function setBlocageVentesArmurerie(actif: boolean): Promise<LicenceResult> {
+  const refus = await garde(); if (refus) return refus;
+  const admin = createAdminClient(); if (!admin) return { ok: false, error: "Service indisponible." };
+  const par = await auteur();
+  const { error } = await admin.from("LicenceConfig").upsert({ cle: "bloquer_ventes_armurerie", valeur: actif ? "1" : "0", updatedAt: new Date().toISOString(), updatedBy: par }, { onConflict: "cle" });
+  if (error) return { ok: false, error: "Enregistrement impossible (le SQL LicenceConfig a-t-il été lancé ?)." };
+  await journal(admin, { type: actif ? "config_blocage_on" : "config_blocage_off", par });
+  return { ok: true };
+}
+
 export async function supprimerLicence(id: string): Promise<LicenceResult> {
   const refus = await garde(); if (refus) return refus;
   const admin = createAdminClient(); if (!admin) return { ok: false, error: "Service indisponible." };

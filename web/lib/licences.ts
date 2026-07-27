@@ -2,7 +2,7 @@ import "server-only";
 
 import { cache } from "react";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { statutEffectif, type Licence, type LicenceType, type StatutLicence } from "@/lib/licences-const";
+import { statutEffectif, statutDef, type Licence, type LicenceType, type StatutLicence } from "@/lib/licences-const";
 
 export * from "@/lib/licences-const";
 
@@ -107,6 +107,67 @@ export async function rechercheLicences(q: string): Promise<Licence[]> {
     const noms = await nomsDesTypes(admin);
     return (data as Record<string, unknown>[]).map((r) => mapLicence(r, noms[String(r.typeCode)] || null));
   } catch { return []; }
+}
+
+// ── Intégration Armurerie (Lot E) ───────────────────────────────────────────
+export type LicenceConfig = { bloquerVentes: boolean };
+
+// Réglages du registre (interrupteur de blocage des ventes). Mémoïsé par requête.
+export const getLicenceConfig = cache(async (): Promise<LicenceConfig> => {
+  const def: LicenceConfig = { bloquerVentes: false };
+  const admin = createAdminClient(); if (!admin) return def;
+  try {
+    const { data } = await admin.from("LicenceConfig").select("cle,valeur");
+    const m: Record<string, string> = {};
+    for (const r of (data || []) as Record<string, unknown>[]) m[String(r.cle)] = String(r.valeur);
+    return { bloquerVentes: m["bloquer_ventes_armurerie"] === "1" };
+  } catch { return def; }
+});
+
+export type VerifAchat = { ok: boolean; motif: string; licence: Licence | null };
+
+// Vérifie qu'un acquéreur a le droit d'acheter une arme (licence valide, achat
+// autorisé, restrictions respectées). Best-effort de correspondance par nom.
+export async function verifierAchatArme(acquereur: string, categorie?: string | null): Promise<VerifAchat> {
+  const admin = createAdminClient();
+  const nom = (acquereur || "").trim();
+  if (!admin || nom.length < 2) return { ok: false, motif: "Acquéreur non identifié.", licence: null };
+  try {
+    const tokens = nom.toLowerCase().split(/\s+/).map((t) => t.replace(/[%_,]/g, "")).filter((t) => t.length > 1);
+    if (!tokens.length) return { ok: false, motif: "Acquéreur non identifié.", licence: null };
+    const ors = tokens.map((t) => `nom.ilike.%${t}%,prenom.ilike.%${t}%`).join(",");
+    const { data } = await admin.from("Licence").select("*").or(ors).limit(50);
+    const norm = nom.toLowerCase();
+    const scored = ((data || []) as Record<string, unknown>[]).map((r) => mapLicence(r, null)).map((l) => {
+      let sc = 0;
+      if (l.nom && norm.includes(l.nom.toLowerCase())) sc += 2;
+      if (l.prenom && norm.includes(l.prenom.toLowerCase())) sc += 1;
+      if (statutEffectif(l) === "active") sc += 0.5;
+      return { l, sc };
+    }).filter((x) => x.sc > 0).sort((a, b) => b.sc - a.sc);
+    if (!scored.length) return { ok: false, motif: "Aucune licence enregistrée pour cet acquéreur.", licence: null };
+    const licence = scored[0].l;
+    const eff = statutEffectif(licence);
+    if (eff !== "active") return { ok: false, motif: `Licence ${statutDef(eff).label.toLowerCase()}.`, licence };
+    if (!licence.permissions["acheter_arme"]) return { ok: false, motif: "La licence n'autorise pas l'achat d'arme.", licence };
+    if (licence.restrictions.includes("no_achat")) return { ok: false, motif: "Restriction : interdiction d'achat.", licence };
+    const cat = (categorie || "").toLowerCase();
+    if (licence.restrictions.includes("no_arme_longue") && /longue|fusil|carabine|rifle|shotgun|sniper/.test(cat)) return { ok: false, motif: "Restriction : armes longues interdites.", licence };
+    if (licence.restrictions.includes("no_auto") && /auto|mitrail/.test(cat)) return { ok: false, motif: "Restriction : armes automatiques interdites.", licence };
+    return { ok: true, motif: "Licence valide.", licence };
+  } catch { return { ok: false, motif: "Vérification indisponible.", licence: null }; }
+}
+
+// Trace une tentative d'achat refusée dans le journal (best-effort).
+export async function logRefusAchat(e: { acquereur: string; motif: string; licenceId: string | null; numero: string | null; par: string; categorie?: string | null }): Promise<void> {
+  const admin = createAdminClient(); if (!admin) return;
+  try {
+    await admin.from("LicenceEvent").insert({
+      id: `lev-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+      licenceId: e.licenceId, numero: e.numero, type: "refus", par: e.par,
+      details: { acquereur: e.acquereur, motif: e.motif, categorie: e.categorie ?? null },
+    });
+  } catch { /* ignore */ }
 }
 
 export type LicencesStats = { total: number; active: number; suspendue: number; revoquee: number; expiree: number; renouvellements: number };

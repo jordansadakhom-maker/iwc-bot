@@ -2,12 +2,12 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ShieldCheck, Search, Plus, X, Loader2, CheckCircle2, XCircle, BadgeCheck, Ban, RotateCcw, RefreshCw, Trash2, Pencil, Clock, FileText, BarChart3 } from "lucide-react";
+import { ShieldCheck, Search, Plus, X, Loader2, CheckCircle2, XCircle, BadgeCheck, Ban, RotateCcw, RefreshCw, Trash2, Pencil, Clock, FileText, BarChart3, Crosshair } from "lucide-react";
 import {
   STATUTS, statutDef, PERMISSIONS, RESTRICTIONS, permLabel, restrLabel,
   statutEffectif, joursAvantExpiration, type Licence, type LicenceType,
 } from "@/lib/licences-const";
-import { creerLicence, majLicence, suspendreLicence, reactiverLicence, revoquerLicence, renouvelerLicence, supprimerLicence } from "@/app/(app)/licences/actions";
+import { creerLicence, majLicence, suspendreLicence, reactiverLicence, revoquerLicence, renouvelerLicence, supprimerLicence, setBlocageVentesArmurerie } from "@/app/(app)/licences/actions";
 
 type Flash = { t: "ok" | "bad"; m: string } | null;
 const dateFR = (iso: string | null) => { if (!iso) return "—"; try { return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(iso)); } catch { return "—"; } };
@@ -42,9 +42,10 @@ function raisonNonAutorise(l: Licence): string {
   return "Non autorisé";
 }
 
-export function LicencesRegistre({ data }: { data: { pret: boolean; licences: Licence[]; types: LicenceType[] } }) {
+export function LicencesRegistre({ data, config }: { data: { pret: boolean; licences: Licence[]; types: LicenceType[] }; config?: { bloquerVentes: boolean } }) {
   const router = useRouter();
   const [licences] = useState<Licence[]>(data.licences);
+  const [bloque, setBloque] = useState(!!config?.bloquerVentes);
   const [q, setQ] = useState("");
   const [flash, setFlash] = useState<Flash>(null);
   const [form, setForm] = useState<Licence | "new" | null>(null);
@@ -92,6 +93,13 @@ export function LicencesRegistre({ data }: { data: { pret: boolean; licences: Li
   function apres(r: { ok: boolean; error?: string }, okMsg: string) {
     if (!r.ok) { setFlash({ t: "bad", m: r.error || "Impossible." }); return false; }
     setFlash({ t: "ok", m: okMsg }); setForm(null); setFiche(null); start(() => router.refresh()); return true;
+  }
+
+  async function toggleBlocage() {
+    const next = !bloque; setBloque(next);
+    const r = await setBlocageVentesArmurerie(next);
+    if (!r.ok) { setBloque(!next); setFlash({ t: "bad", m: r.error || "Impossible." }); }
+    else { setFlash({ t: "ok", m: next ? "Contrôle des ventes Armurerie activé." : "Contrôle des ventes Armurerie désactivé." }); start(() => router.refresh()); }
   }
 
   return (
@@ -197,6 +205,21 @@ export function LicencesRegistre({ data }: { data: { pret: boolean; licences: Li
             </table>
           </div>
         )}
+      </div>
+
+      {/* Lot E — Intégration Armurerie (interrupteur de blocage des ventes) */}
+      <div className="rounded-[14px] border border-border bg-surface p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <Crosshair className="h-4 w-4 shrink-0 text-accent" />
+          <div className="min-w-0 flex-1">
+            <h3 className="text-[0.9rem] font-semibold">Intégration Armurerie — contrôle des ventes</h3>
+            <p className="text-[0.76rem] text-faint">Activé, chaque vente à l&apos;Armurerie vérifie la licence de l&apos;acquéreur (validité, autorisation d&apos;achat, restrictions) et <b>bloque</b> avec un motif précis si non conforme. Désactivé, les ventes suivent leur cours habituel.</p>
+          </div>
+          <button onClick={toggleBlocage} className="relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors" style={{ background: bloque ? "var(--good)" : "var(--border-2)" }} aria-pressed={bloque} aria-label="Basculer le contrôle des ventes">
+            <span className="inline-block h-5 w-5 rounded-full bg-white transition-transform" style={{ transform: bloque ? "translateX(22px)" : "translateX(3px)" }} />
+          </button>
+          <span className="shrink-0 text-[0.78rem] font-semibold" style={{ color: bloque ? "var(--good)" : "var(--faint)" }}>{bloque ? "Activé" : "Désactivé"}</span>
+        </div>
       </div>
 
       {form ? <LicenceForm initial={form === "new" ? null : form} types={data.types} onClose={() => setForm(null)} onDone={apres} busy={pending} /> : null}
