@@ -2,8 +2,9 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { getSessionProfile } from "@/lib/queries";
+import { getSessionProfile, getAcces } from "@/lib/queries";
 import { versCentreNotif, type CentreNotif } from "@/lib/notifications-centre";
+import { rolesDeActeur, notifVisiblePour, orCibleNotif, type CibleActeur } from "@/lib/notif-ciblage";
 
 // Centre de notifications — lecture & actions (lu / archivé / supprimé).
 // Réservé aux membres connectés (le layout (app) protège déjà l'affichage ;
@@ -24,16 +25,22 @@ async function monId(): Promise<string | null> {
   } catch { return null; }
 }
 
+// Acteur de ciblage : id + rôles (membre / rôle / équipe).
+async function monCiblage(): Promise<CibleActeur> {
+  const [did, acces] = await Promise.all([monId(), getAcces().catch(() => ({}))]);
+  return { did, roles: rolesDeActeur(acces) };
+}
+
 export async function listerNotifications(): Promise<{ connecte: boolean; notifs: CentreNotif[] }> {
   if (!(await membreConnecte())) return { connecte: false, notifs: [] };
   const admin = createAdminClient();
   if (!admin) return { connecte: false, notifs: [] };
-  const { data, error } = await admin.from("Notification").select("id,type,titre,corps,lien,clientNom,cibleId,lu,luAt,archive,createdAt,membreId").order("createdAt", { ascending: false }).limit(200);
+  const { data, error } = await admin.from("Notification").select("id,type,titre,corps,lien,clientNom,cibleId,lu,luAt,archive,createdAt,membreId,roleCible").order("createdAt", { ascending: false }).limit(200);
   if (error) return { connecte: false, notifs: [] };
-  const id = await monId();
-  // Ciblage : une notification adressée à un membre précis (membreId) n'est
-  // visible que par lui. Les notifications d'équipe (membreId null) → tout le monde.
-  const rows = ((data || []) as Record<string, unknown>[]).filter((r) => !r.membreId || String(r.membreId) === id);
+  const cible = await monCiblage();
+  // Ciblage : équipe (membreId & roleCible null) → tous ; ciblée membre → lui ;
+  // ciblée rôle → les porteurs du rôle.
+  const rows = ((data || []) as Record<string, unknown>[]).filter((r) => notifVisiblePour(r as { membreId?: string | null; roleCible?: string | null }, cible));
   return { connecte: true, notifs: rows.map(versCentreNotif) };
 }
 
@@ -42,10 +49,8 @@ export async function compterNotifsNonLues(): Promise<number> {
   try {
     const admin = createAdminClient();
     if (!admin) return 0;
-    const id = await monId();
-    let qb = admin.from("Notification").select("id", { count: "exact", head: true }).eq("lu", false).eq("archive", false);
-    qb = id ? qb.or(`membreId.is.null,membreId.eq.${id}`) : qb.is("membreId", null);
-    const { count } = await qb;
+    const cible = await monCiblage();
+    const { count } = await admin.from("Notification").select("id", { count: "exact", head: true }).eq("lu", false).eq("archive", false).or(orCibleNotif(cible));
     return count || 0;
   } catch { return 0; }
 }

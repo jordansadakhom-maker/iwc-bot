@@ -11,6 +11,7 @@ import "server-only";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { rolesDeActeur, orCibleNotif } from "@/lib/notif-ciblage";
 
 // ── Pôle actif (Iron Wolf légal / La Confrérie illégal) ──────────
 // Choisi par le bouton du header, mémorisé dans un cookie côté client.
@@ -1159,10 +1160,9 @@ export async function getAlertes(): Promise<AlertesData> {
   const iso7 = new Date(Date.now() - 7 * 86400000).toISOString();
   const nowIso = new Date().toISOString();
   const iso24 = new Date(Date.now() + 24 * 86400000).toISOString(); // fenêtre « dans les 24 h »
-  // Ciblage : ne compter que les notifications d'équipe (membreId null) + celles
-  // adressées au membre connecté. Id validé (chiffres) avant injection dans .or().
-  const didBrut = await getSessionDiscordId();
-  const did = didBrut && /^\d{5,}$/.test(didBrut) ? didBrut : null;
+  // Ciblage : équipe (membreId & roleCible null) + adressées au membre + à ses rôles.
+  const [didBrut, acces] = await Promise.all([getSessionDiscordId(), getAcces()]);
+  const cible = { did: didBrut, roles: rolesDeActeur(acces) };
   const [contrats, impots, paies, ruptures, candids, rdvs, telegrammes, rdvArm, notifsNL] = await Promise.all([
     safe(() => admin.from("ArmurerieContrat").select("*", { count: "exact", head: true }).eq("statut", "envoye")),
     safe(() => admin.from("ArmurerieImpot").select("*", { count: "exact", head: true }).neq("statut", "paye").gt("montant", 0)),
@@ -1173,11 +1173,8 @@ export async function getAlertes(): Promise<AlertesData> {
     safe(() => admin.from("TelegrammeWeb").select("*", { count: "exact", head: true }).gte("createdAt", iso7)),
     safe(() => admin.from("ArmurerieRdv").select("*", { count: "exact", head: true }).eq("statut", "a_venir").gte("dateRdv", nowIso).lte("dateRdv", iso24)),
     // Centre de notifications : non lues & non archivées (persistant, temps réel).
-    // Filtré par ciblage membre (équipe + les miennes).
-    safe(() => {
-      const qb = admin.from("Notification").select("*", { count: "exact", head: true }).eq("lu", false).eq("archive", false);
-      return did ? qb.or(`membreId.is.null,membreId.eq.${did}`) : qb.is("membreId", null);
-    }),
+    // Filtré par ciblage (équipe + les miennes + celles de mes rôles).
+    safe(() => admin.from("Notification").select("*", { count: "exact", head: true }).eq("lu", false).eq("archive", false).or(orCibleNotif(cible))),
   ]);
   // Le href pointe vers la ZONE exacte à regarder : onglet précis de l'armurerie
   // (?tab=…) ou ancre de la page communication (#…) → highlight à l'arrivée.
