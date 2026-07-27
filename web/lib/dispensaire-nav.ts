@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, ClipboardList, Boxes, FlaskConical, Archive, BadgeDollarSign, Receipt, ShieldCheck, FileText, BookUser, Stethoscope, ScrollText, BarChart3, History, ShieldAlert, Sparkles, Scale, HeartPulse, Factory, CalendarClock, Scissors, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Users, ClipboardList, Boxes, FlaskConical, Archive, BadgeDollarSign, Receipt, ShieldCheck, FileText, BookUser, Stethoscope, ScrollText, BarChart3, History, ShieldAlert, Sparkles, Scale, HeartPulse, Factory, CalendarClock, Scissors, Landmark, type LucideIcon } from "lucide-react";
 
 // Onglets de la section Dispensaire de Saint-Denis. `pret` = déjà construit ;
 // `restreint` = réservé aux membres habilités (RH/chefs) ; `admin` = permission
@@ -19,6 +19,7 @@ export const DISP_NAV: DispTab[] = [
   { href: "/dispensaire/fabrication", label: "Fabrication", icon: Factory, pret: true, restreint: true, desc: "Transformer les matières premières en consommables — recettes et production." },
   { href: "/dispensaire/ventes", label: "Ventes", icon: BadgeDollarSign, pret: true, desc: "Le cahier des soins délivrés, patient par patient." },
   { href: "/dispensaire/factures", label: "Factures en retard", icon: Receipt, pret: true, restreint: true, desc: "Les créances impayées et l'état de leur relance." },
+  { href: "/dispensaire/comptabilite", label: "Comptabilité", icon: Landmark, pret: true, restreint: true, desc: "Trésorerie, recettes, dépenses et grand-livre — reconstruits automatiquement." },
   { href: "/dispensaire/fdo", label: "Soins FDO", icon: ShieldCheck, pret: true, desc: "Soins portés aux forces de l'ordre du comté." },
   { href: "/dispensaire/frais", label: "Notes de frais", icon: FileText, pret: true, desc: "Dépenses avancées, en attente de remboursement." },
   { href: "/dispensaire/certificats", label: "Certificats", icon: Stethoscope, pret: true, desc: "Certificats médicaux, prêts à sceller et à imprimer." },
