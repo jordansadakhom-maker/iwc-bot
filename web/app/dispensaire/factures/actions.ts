@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { peutFacturer } from "@/lib/dispensaire-roles";
+import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenements";
 import { FACTURE_DELAI_H, statutsDe, serialiserStatuts, statutRepresentatif, estOuverte } from "@/lib/dispensaire-facturation-const";
 
 // Factures — RÉSERVÉ aux chefs (habilités). Suivi des impayés.
@@ -78,6 +79,7 @@ export async function creerFacture(data: Record<string, unknown>): Promise<Factu
   const error = await ecrireFacture(admin, "insert", base);
   if (error) return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
   await logFacture(admin, id, "Création", String(row.objet || ""), par);
+  await emettreEvenementDispensaire({ aggregate: "facture", type: "facture.cree", cibleId: id, cibleLibelle: String(row.objet || ""), apres: { objet: row.objet, montant: base.montant, statut: base.statut } });
   return { ok: true, id };
 }
 
@@ -98,9 +100,11 @@ export async function majFacture(id: string, patch: Record<string, unknown>): Pr
   const nouveauxStatuts = ("statuts" in patch || "statut" in patch) ? statutsDe({ statuts: patch.statuts, statut: patch.statut }) : [];
   const tracePaiement = nouveauxStatuts.includes("payee");
   if (tracePaiement) { row.datePaiement = now; row.payePar = par; }
+  const avant = await lireAvant("DispensaireFacture", id);
   const error = await ecrireFacture(admin, "update", { ...row, updatedAt: now }, id);
   if (error) return { ok: false, error: "Enregistrement impossible." };
   if ("statuts" in row) { const libelle = nouveauxStatuts.join(", "); await logFacture(admin, id, tracePaiement ? "Paiement" : "Changement de statut", libelle, par); }
+  await emettreEvenementDispensaire({ aggregate: "facture", type: tracePaiement ? "facture.paiement" : "facture.maj", cibleId: id, cibleLibelle: String((avant?.objet ?? row.objet) ?? ""), avant, apres: row });
   return { ok: true };
 }
 
@@ -108,11 +112,12 @@ export async function supprimerFacture(id: string): Promise<FactureResult> {
   if (!(await autorise())) return { ok: false, error: "Réservé aux chefs." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
-  let objet: string | null = null;
-  try { const { data } = await admin.from("DispensaireFacture").select("objet").eq("id", id).maybeSingle(); objet = data ? String((data as Record<string, unknown>).objet || "") : null; } catch { /* ignore */ }
+  const avant = await lireAvant("DispensaireFacture", id);
+  const objet = avant ? String(avant.objet || "") : null;
   const { error } = await admin.from("DispensaireFacture").delete().eq("id", id);
   if (error) return { ok: false, error: "Suppression impossible." };
   await logFacture(admin, id, "Suppression", objet, await qui());
+  await emettreEvenementDispensaire({ aggregate: "facture", type: "facture.supprime", cibleId: id, cibleLibelle: objet ?? "", avant });
   return { ok: true };
 }
 
@@ -182,6 +187,7 @@ export async function creerConsultation(input: { patient: string; lignes: Consul
   const insErr = await ecrireFacture(admin, "insert", row);
   if (insErr) return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
   await logFacture(admin, id, "Consultation", resume.slice(0, 200), par);
+  await emettreEvenementDispensaire({ aggregate: "facture", type: "facture.consultation", cibleId: id, cibleLibelle: patient, apres: { patient, montant, resume: resume.slice(0, 300), regle } });
 
   // Décrément de stock optionnel & non bloquant : le soin reste facturé quoi qu'il arrive.
   const avert: string[] = [];

@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { estAutorise } from "@/lib/dispensaire-roles";
+import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenements";
 
 // Pointage — outil de service partagé (ouvert à tout le personnel du dispensaire).
 export type PointResult = { ok: boolean; error?: string; id?: string };
@@ -31,7 +32,9 @@ export async function prendreService(data: { salarieId?: string | null; nom: str
   const id = newId();
   const now = new Date().toISOString();
   const { error } = await admin.from("DispensairePointage").insert({ id, salarieId, nom, debut: now, updatedBy: await qui(), updatedAt: now });
-  return error ? { ok: false, error: "Prise de service impossible (la table existe-t-elle ?)." } : { ok: true, id };
+  if (error) return { ok: false, error: "Prise de service impossible (la table existe-t-elle ?)." };
+  await emettreEvenementDispensaire({ aggregate: "pointage", type: "pointage.debut", cibleId: id, cibleLibelle: nom, apres: { nom, debut: now } });
+  return { ok: true, id };
 }
 
 // Terminer le service : renseigne la fin et calcule la durée (minutes).
@@ -40,14 +43,17 @@ export async function terminerService(id: string): Promise<PointResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   if (!id) return { ok: false, error: "Service introuvable." };
-  const { data: ex } = await admin.from("DispensairePointage").select("id,debut,fin").eq("id", id).maybeSingle();
+  const { data: ex } = await admin.from("DispensairePointage").select("id,nom,debut,fin").eq("id", id).maybeSingle();
   if (!ex) return { ok: false, error: "Service introuvable." };
-  if ((ex as Record<string, unknown>).fin) return { ok: true };            // déjà clôturé
+  const r = ex as Record<string, unknown>;
+  if (r.fin) return { ok: true };            // déjà clôturé
   const fin = new Date();
-  const debut = new Date(String((ex as Record<string, unknown>).debut));
+  const debut = new Date(String(r.debut));
   const dureeMin = Math.max(0, Math.round((fin.getTime() - debut.getTime()) / 60000));
   const { error } = await admin.from("DispensairePointage").update({ fin: fin.toISOString(), dureeMin, updatedBy: await qui(), updatedAt: fin.toISOString() }).eq("id", id);
-  return error ? { ok: false, error: "Clôture impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Clôture impossible." };
+  await emettreEvenementDispensaire({ aggregate: "pointage", type: "pointage.fin", cibleId: id, cibleLibelle: String(r.nom ?? ""), apres: { dureeMin } });
+  return { ok: true };
 }
 
 // Correction : supprimer une ligne de pointage.
@@ -55,6 +61,9 @@ export async function supprimerPointage(id: string): Promise<PointResult> {
   if (!(await estAutorise())) return { ok: false, error: REFUS };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  const avant = await lireAvant("DispensairePointage", id);
   const { error } = await admin.from("DispensairePointage").delete().eq("id", id);
-  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Suppression impossible." };
+  await emettreEvenementDispensaire({ aggregate: "pointage", type: "pointage.supprime", cibleId: id, cibleLibelle: String(avant?.nom ?? ""), avant });
+  return { ok: true };
 }

@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { estAutorise, getConfig } from "@/lib/dispensaire-roles";
+import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenements";
 
 // Ventes — comptoir du dispensaire (ouvert à tout le personnel du dispensaire).
 export type VenteResult = { ok: boolean; error?: string; id?: string };
@@ -27,13 +28,18 @@ export async function creerVente(data: Record<string, unknown>): Promise<VenteRe
   const total = quantite * prixUnitaire;
   const id = newId();
   const { error } = await admin.from("DispensaireVente").insert({ id, patient, item, quantite, prixUnitaire, total, note: s(data.note, 500), par: await qui(), createdAt: new Date().toISOString() });
-  return error ? { ok: false, error: "Enregistrement impossible (la table existe-t-elle ?)." } : { ok: true, id };
+  if (error) return { ok: false, error: "Enregistrement impossible (la table existe-t-elle ?)." };
+  await emettreEvenementDispensaire({ aggregate: "vente", type: "vente.cree", cibleId: id, cibleLibelle: patient, apres: { patient, item, quantite, prixUnitaire, total } });
+  return { ok: true, id };
 }
 
 export async function supprimerVente(id: string): Promise<VenteResult> {
   if (!(await estAutorise())) return { ok: false, error: REFUS };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  const avant = await lireAvant("DispensaireVente", id);
   const { error } = await admin.from("DispensaireVente").delete().eq("id", id);
-  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Suppression impossible." };
+  await emettreEvenementDispensaire({ aggregate: "vente", type: "vente.supprime", cibleId: id, cibleLibelle: String(avant?.patient ?? ""), avant });
+  return { ok: true };
 }

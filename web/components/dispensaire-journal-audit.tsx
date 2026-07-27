@@ -10,9 +10,16 @@ const LABEL: Record<string, string> = {
   "stock.item_cree": "Article créé", "stock.item_maj": "Article modifié", "stock.item_supprime": "Article supprimé", "stock.ajuste": "Stock ajusté", "stock.deplace": "Article déplacé",
   "coffre.cree": "Coffre créé", "coffre.maj": "Coffre modifié", "coffre.supprime": "Coffre supprimé", "coffre.import_plan": "Plan de rangement importé",
   "matiere.cree": "Matière créée", "matiere.maj": "Matière modifiée", "matiere.supprime": "Matière supprimée", "matiere.ajuste": "Matière ajustée",
+  "vente.cree": "Vente enregistrée", "vente.supprime": "Vente supprimée",
+  "facture.cree": "Facture créée", "facture.maj": "Facture modifiée", "facture.paiement": "Facture payée", "facture.supprime": "Facture supprimée", "facture.consultation": "Consultation",
+  "fdo.cree": "Soin FDO créé", "fdo.maj": "Soin FDO modifié", "fdo.supprime": "Soin FDO supprimé",
+  "frais.cree": "Note de frais déposée", "frais.statut": "Frais — statut changé", "frais.supprime": "Note de frais supprimée",
+  "certificat.cree": "Certificat émis", "certificat.supprime": "Certificat supprimé",
+  "rapport.cree": "Rapport créé", "rapport.maj": "Rapport modifié", "rapport.supprime": "Rapport supprimé",
+  "pointage.debut": "Prise de service", "pointage.fin": "Fin de service", "pointage.supprime": "Pointage supprimé",
 };
-const MODULE_LABEL: Record<string, string> = { membre: "Accès", grade: "Grades", config: "Config", salarie: "RH", stock: "Stock", coffre: "Coffres", matiere: "Matières" };
-const TON: Record<string, string> = { membre: "var(--accent)", grade: "var(--warn)", config: "var(--steel)", salarie: "var(--good)", stock: "var(--accent)", coffre: "var(--steel)", matiere: "var(--warn)" };
+const MODULE_LABEL: Record<string, string> = { membre: "Accès", grade: "Grades", config: "Config", salarie: "RH", stock: "Stock", coffre: "Coffres", matiere: "Matières", vente: "Ventes", facture: "Factures", fdo: "FDO", frais: "Frais", certificat: "Certificats", rapport: "Rapports", pointage: "Pointage" };
+const TON: Record<string, string> = { membre: "var(--accent)", grade: "var(--warn)", config: "var(--steel)", salarie: "var(--good)", stock: "var(--accent)", coffre: "var(--steel)", matiere: "var(--warn)", vente: "var(--good)", facture: "var(--accent)", fdo: "var(--steel)", frais: "var(--warn)", certificat: "var(--good)", rapport: "var(--steel)", pointage: "var(--accent)" };
 
 const dtFR = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); } catch { return "—"; } };
 

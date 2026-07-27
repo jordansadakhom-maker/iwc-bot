@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { estAutorise } from "@/lib/dispensaire-roles";
+import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenements";
 
 // Certificats médicaux — ouvert au personnel soignant du dispensaire.
 export type CertResult = { ok: boolean; error?: string; id?: string };
@@ -27,13 +28,18 @@ export async function creerCertificat(data: Record<string, unknown>): Promise<Ce
     id, patient, type, medecin: s(data.medecin, 200), dateActe: dt(data.dateActe), dureeRepos: n(data.dureeRepos),
     contenu: s(data.contenu, 4000), note: s(data.note, 1000), par: await qui(), createdAt: new Date().toISOString(),
   });
-  return error ? { ok: false, error: "Enregistrement impossible (la table existe-t-elle ?)." } : { ok: true, id };
+  if (error) return { ok: false, error: "Enregistrement impossible (la table existe-t-elle ?)." };
+  await emettreEvenementDispensaire({ aggregate: "certificat", type: "certificat.cree", cibleId: id, cibleLibelle: patient, apres: { patient, type, medecin: s(data.medecin, 200) } });
+  return { ok: true, id };
 }
 
 export async function supprimerCertificat(id: string): Promise<CertResult> {
   if (!(await estAutorise())) return { ok: false, error: REFUS };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  const avant = await lireAvant("DispensaireCertificat", id);
   const { error } = await admin.from("DispensaireCertificat").delete().eq("id", id);
-  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Suppression impossible." };
+  await emettreEvenementDispensaire({ aggregate: "certificat", type: "certificat.supprime", cibleId: id, cibleLibelle: String(avant?.patient ?? ""), avant });
+  return { ok: true };
 }

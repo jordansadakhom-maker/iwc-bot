@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { estAutorise } from "@/lib/dispensaire-roles";
+import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenements";
 import { FDO_PRIX } from "@/lib/dispensaire-facturation-const";
 
 // Soins FDO — soins prodigués aux forces de l'ordre (par bureau).
@@ -36,7 +37,9 @@ export async function creerSoin(data: Record<string, unknown>): Promise<FdoResul
   const id = newId();
   const now = new Date().toISOString();
   const { error } = await admin.from("DispensaireSoinFDO").insert({ id, statut: "facture", ...row, montant: FDO_PRIX, par: await qui(), createdAt: now, updatedAt: now });
-  return error ? { ok: false, error: "Création impossible (la table existe-t-elle ?)." } : { ok: true, id };
+  if (error) return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
+  await emettreEvenementDispensaire({ aggregate: "fdo", type: "fdo.cree", cibleId: id, cibleLibelle: String(row.bureau ?? ""), apres: { ...row, montant: FDO_PRIX } });
+  return { ok: true, id };
 }
 
 export async function majSoin(id: string, patch: Record<string, unknown>): Promise<FdoResult> {
@@ -47,14 +50,20 @@ export async function majSoin(id: string, patch: Record<string, unknown>): Promi
   const row = nettoyer(patch);
   if ("bureau" in row && !row.bureau) return { ok: false, error: "Le bureau ne peut pas être vide." };
   if (!Object.keys(row).length) return { ok: true };
+  const avant = await lireAvant("DispensaireSoinFDO", id);
   const { error } = await admin.from("DispensaireSoinFDO").update({ ...row, updatedAt: new Date().toISOString() }).eq("id", id);
-  return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Enregistrement impossible." };
+  await emettreEvenementDispensaire({ aggregate: "fdo", type: "fdo.maj", cibleId: id, cibleLibelle: String((avant?.bureau ?? row.bureau) ?? ""), avant, apres: row });
+  return { ok: true };
 }
 
 export async function supprimerSoin(id: string): Promise<FdoResult> {
   if (!(await estAutorise())) return { ok: false, error: REFUS };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  const avant = await lireAvant("DispensaireSoinFDO", id);
   const { error } = await admin.from("DispensaireSoinFDO").delete().eq("id", id);
-  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Suppression impossible." };
+  await emettreEvenementDispensaire({ aggregate: "fdo", type: "fdo.supprime", cibleId: id, cibleLibelle: String(avant?.bureau ?? ""), avant });
+  return { ok: true };
 }
