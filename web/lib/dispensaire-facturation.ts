@@ -1,8 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getAcces } from "@/lib/queries";
-import { getConfig } from "@/lib/dispensaire-roles";
+import { getConfig, peutFacturer } from "@/lib/dispensaire-roles";
 import {
   estBandage, estOuverte, statutsDe, statutRepresentatif,
   type Vente, type PatientSemaine, type VentesData,
@@ -69,8 +68,7 @@ export async function getFactures(): Promise<FacturesData> {
   const vide: FacturesData = { connecte: false, pret: false, canEdit: false, factures: [], enRetard: 0, du: 0 };
   const admin = createAdminClient();
   if (!admin) return vide;
-  let canEdit = false;
-  try { canEdit = (await getAcces()).peutMedical; } catch { canEdit = true; }
+  const canEdit = await peutFacturer();
   if (!canEdit) return { connecte: true, pret: true, canEdit: false, factures: [], enRetard: 0, du: 0 };
   const { data, error } = await admin.from("DispensaireFacture").select("*").order("dateEcheance", { ascending: true, nullsFirst: false }).limit(300);
   if (error) return { ...vide, connecte: true, pret: false, canEdit: true };
@@ -110,8 +108,7 @@ export async function getFrais(): Promise<FraisData> {
   const vide: FraisData = { connecte: false, pret: false, canValidate: false, frais: [], enAttente: 0 };
   const admin = createAdminClient();
   if (!admin) return vide;
-  let canValidate = false;
-  try { canValidate = (await getAcces()).peutMedical; } catch { canValidate = true; }
+  const canValidate = await peutFacturer();
   const { data, error } = await admin.from("DispensaireFrais").select("*").order("createdAt", { ascending: false }).limit(300);
   if (error) return { ...vide, connecte: true, pret: false, canValidate };
   const frais: Frais[] = ((data || []) as Record<string, unknown>[]).map((r) => ({

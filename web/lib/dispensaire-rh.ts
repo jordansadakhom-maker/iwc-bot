@@ -1,8 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getAcces } from "@/lib/queries";
-import { getConfig } from "@/lib/dispensaire-roles";
+import { getConfig, peutGererRH } from "@/lib/dispensaire-roles";
 import { cleNom } from "@/lib/noms";
 
 // Accès au site rapproché depuis DispensaireMembre (par nom) → la fiche RH « sait »
@@ -27,8 +26,7 @@ export async function getRh(): Promise<RhData> {
   const vide: RhData = { connecte: false, pret: false, canEdit: false, salaries: [], seuilRenvoi: SEUIL_RENVOI };
   const admin = createAdminClient();
   if (!admin) return vide;
-  const acces = await getAcces();
-  const canEdit = acces.peutMedical;
+  const canEdit = await peutGererRH();
   const seuilRenvoi = (await getConfig()).seuilRenvoi;
   const { data, error } = await admin.from("DispensaireSalarie").select("*").order("nom", { ascending: true });
   if (error) return { connecte: true, pret: false, canEdit, salaries: [], seuilRenvoi };

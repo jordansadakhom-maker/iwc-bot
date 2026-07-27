@@ -2,10 +2,12 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
+import { estAutorise } from "@/lib/dispensaire-roles";
 
-// Certificats médicaux — ouvert au personnel soignant connecté.
+// Certificats médicaux — ouvert au personnel soignant du dispensaire.
 export type CertResult = { ok: boolean; error?: string; id?: string };
 
+const REFUS = "Accès refusé.";
 const TYPES = ["medical", "arret", "aptitude", "inaptitude", "deces", "autre"];
 const s = (v: unknown, max = 400) => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
 const n = (v: unknown) => Math.max(0, Math.round(Number(v) || 0));
@@ -14,6 +16,7 @@ function newId() { return `dc-${Date.now().toString(36)}${Math.random().toString
 async function qui() { try { return (await getSessionProfile())?.nom || "Équipe"; } catch { return "Équipe"; } }
 
 export async function creerCertificat(data: Record<string, unknown>): Promise<CertResult> {
+  if (!(await estAutorise())) return { ok: false, error: REFUS };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const patient = s(data.patient, 200);
@@ -28,6 +31,7 @@ export async function creerCertificat(data: Record<string, unknown>): Promise<Ce
 }
 
 export async function supprimerCertificat(id: string): Promise<CertResult> {
+  if (!(await estAutorise())) return { ok: false, error: REFUS };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const { error } = await admin.from("DispensaireCertificat").delete().eq("id", id);

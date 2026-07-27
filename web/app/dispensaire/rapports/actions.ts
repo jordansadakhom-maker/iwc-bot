@@ -2,10 +2,12 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
+import { estAutorise } from "@/lib/dispensaire-roles";
 
-// Rapports médicaux (liens Canva) — ouvert au personnel soignant connecté.
+// Rapports médicaux (liens Canva) — ouvert au personnel soignant du dispensaire.
 export type RapportResult = { ok: boolean; error?: string; id?: string };
 
+const REFUS = "Accès refusé.";
 type Champ = "titre" | "categorie" | "patient" | "lien" | "auteur" | "note";
 const CHAMPS: Champ[] = ["titre", "categorie", "patient", "lien", "auteur", "note"];
 const s = (v: unknown, max = 400) => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
@@ -19,6 +21,7 @@ function nettoyer(data: Record<string, unknown>) {
 }
 
 export async function creerRapport(data: Record<string, unknown>): Promise<RapportResult> {
+  if (!(await estAutorise())) return { ok: false, error: REFUS };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const row = nettoyer(data);
@@ -29,6 +32,7 @@ export async function creerRapport(data: Record<string, unknown>): Promise<Rappo
 }
 
 export async function majRapport(id: string, patch: Record<string, unknown>): Promise<RapportResult> {
+  if (!(await estAutorise())) return { ok: false, error: REFUS };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   if (!id) return { ok: false, error: "Rapport introuvable." };
@@ -40,6 +44,7 @@ export async function majRapport(id: string, patch: Record<string, unknown>): Pr
 }
 
 export async function supprimerRapport(id: string): Promise<RapportResult> {
+  if (!(await estAutorise())) return { ok: false, error: REFUS };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const { error } = await admin.from("DispensaireRapport").delete().eq("id", id);

@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getAcces } from "@/lib/queries";
+import { peutFacturer } from "@/lib/dispensaire-roles";
 import { estOuverte, statutsDe } from "@/lib/dispensaire-facturation-const";
 
 // ── Données consolidées du tableau de bord du Dispensaire ────────────────────
@@ -35,8 +35,7 @@ export async function getAccueil(): Promise<AccueilData> {
   const admin = createAdminClient();
   if (!admin) return vide;
 
-  let habilite = false;
-  try { habilite = (await getAcces()).peutMedical; } catch { habilite = true; }
+  const habilite = await peutFacturer();
   const today = ymdParis(new Date().toISOString());
 
   const [rost, ouv, stock, matieres, factures, frais, ventes, mvts, ventesRec, pointRec, fraisRec, certsRec] = await Promise.all([

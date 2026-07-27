@@ -1,10 +1,12 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getAcces, getSessionProfile } from "@/lib/queries";
+import { getSessionProfile } from "@/lib/queries";
+import { peutFacturer } from "@/lib/dispensaire-roles";
 import { getRapportData, getRapportSnapshot, getRapportConfig, enregistrerRapport, type RapportImpayes } from "@/lib/dispensaire-rapport-impayes";
 
-async function habilite() { try { return (await getAcces()).peutMedical; } catch { return true; } }
+// Rapport des impayés = donnée financière → réservé au droit « factures » (fail-closed).
+async function habilite() { return peutFacturer(); }
 
 // Génère (et enregistre) le rapport des impayés. Fait avancer la fenêtre
 // « paiements récents » → remise à zéro automatique.
