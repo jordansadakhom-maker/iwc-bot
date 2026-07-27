@@ -1,6 +1,8 @@
 import { ShieldAlert } from "lucide-react";
 import { getRoleDispensaire, getMembres, getConfig, getGrades } from "@/lib/dispensaire-roles";
+import { getJournalAudit } from "@/lib/dispensaire-evenements";
 import { DispensaireAdmin } from "@/components/dispensaire-admin";
+import { DispensaireJournalAudit } from "@/components/dispensaire-journal-audit";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +16,11 @@ export default async function DispensaireAdminPage() {
       </div>
     );
   }
-  const [{ pret, membres }, config, grades] = await Promise.all([getMembres(), getConfig(), getGrades()]);
-  return <DispensaireAdmin membres={membres} config={config} grades={grades} moi={moi} pret={pret} />;
+  const [{ pret, membres }, config, grades, journal] = await Promise.all([getMembres(), getConfig(), getGrades(), getJournalAudit({ limit: 100 })]);
+  return (
+    <div className="flex flex-col gap-4">
+      <DispensaireAdmin membres={membres} config={config} grades={grades} moi={moi} pret={pret} />
+      <DispensaireJournalAudit data={journal} />
+    </div>
+  );
 }

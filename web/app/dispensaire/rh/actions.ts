@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { peutGererRH } from "@/lib/dispensaire-roles";
+import { emettreEvenementDispensaire } from "@/lib/dispensaire-evenements";
 import { cleNom } from "@/lib/noms";
 
 // RH du Dispensaire — écriture réservée aux membres habilités (direction/médecin).
@@ -32,6 +33,10 @@ async function couperAccesDe(admin: NonNullable<ReturnType<typeof createAdminCli
 // Fail-closed : réservé aux grades porteurs du droit « rh » (ou admin).
 async function autorise() { return peutGererRH(); }
 async function qui() { try { return (await getSessionProfile())?.nom || "Équipe"; } catch { return "Équipe"; } }
+// Lit une fiche salarié (best-effort) pour capturer l'« avant » du journal d'audit.
+async function lire(admin: NonNullable<ReturnType<typeof createAdminClient>>, id: string): Promise<Record<string, unknown> | null> {
+  try { const { data } = await admin.from("DispensaireSalarie").select("*").eq("id", id).maybeSingle(); return (data as Record<string, unknown>) ?? null; } catch { return null; }
+}
 
 function nettoyer(data: Record<string, unknown>) {
   const row: Record<string, unknown> = {};
@@ -51,7 +56,9 @@ export async function creerSalarie(data: Record<string, unknown>): Promise<RhRes
   if (!row.nom) return { ok: false, error: "Donne le nom du salarié." };
   const id = newId();
   const { error } = await admin.from("DispensaireSalarie").insert({ id, ...row, updatedBy: await qui(), updatedAt: new Date().toISOString() });
-  return error ? { ok: false, error: "Création impossible (la table existe-t-elle ?)." } : { ok: true, id };
+  if (error) return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
+  await emettreEvenementDispensaire({ aggregate: "salarie", type: "salarie.cree", cibleId: id, cibleLibelle: String(row.nom ?? ""), apres: row });
+  return { ok: true, id };
 }
 
 export async function majSalarie(id: string, patch: Record<string, unknown>): Promise<RhResult> {
@@ -62,12 +69,13 @@ export async function majSalarie(id: string, patch: Record<string, unknown>): Pr
   const row = nettoyer(patch);
   if ("nom" in row && !row.nom) return { ok: false, error: "Le nom ne peut pas être vide." };
   if (!Object.keys(row).length) return { ok: true };
+  const avant = await lire(admin, id);
   const { error } = await admin.from("DispensaireSalarie").update({ ...row, updatedBy: await qui(), updatedAt: new Date().toISOString() }).eq("id", id);
   if (error) return { ok: false, error: "Enregistrement impossible." };
+  await emettreEvenementDispensaire({ aggregate: "salarie", type: "salarie.maj", cibleId: id, cibleLibelle: String((avant?.nom ?? row.nom) ?? ""), avant, apres: row });
   // Le passage en « renvoyé » coupe l'accès au site dans la foulée.
   if (String(patch.statut ?? "") === "renvoye") {
-    let nom = row.nom as string | null | undefined;
-    if (!nom) { try { const { data } = await admin.from("DispensaireSalarie").select("nom").eq("id", id).maybeSingle(); nom = (data as { nom?: string } | null)?.nom; } catch { /* nom indisponible */ } }
+    const nom = (row.nom as string | null | undefined) ?? (avant?.nom as string | null | undefined);
     await couperAccesDe(admin, nom);
   }
   return { ok: true };
@@ -77,8 +85,11 @@ export async function supprimerSalarie(id: string): Promise<RhResult> {
   if (!(await autorise())) return { ok: false, error: "Réservé aux membres habilités." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  const avant = await lire(admin, id);
   const { error } = await admin.from("DispensaireSalarie").delete().eq("id", id);
-  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Suppression impossible." };
+  await emettreEvenementDispensaire({ aggregate: "salarie", type: "salarie.supprime", cibleId: id, cibleLibelle: String(avant?.nom ?? ""), avant });
+  return { ok: true };
 }
 
 // Ajuste un compteur d'absences (type 'j' = justifiée, 'i' = injustifiée).
@@ -92,5 +103,7 @@ export async function ajusterAbsence(id: string, type: "j" | "i", delta: number)
   const cur = Number((ex as Record<string, unknown>)[col]) || 0;
   const val = Math.max(0, cur + Math.round(delta));
   const { error } = await admin.from("DispensaireSalarie").update({ [col]: val, updatedAt: new Date().toISOString() }).eq("id", id);
-  return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Enregistrement impossible." };
+  await emettreEvenementDispensaire({ aggregate: "salarie", type: "salarie.absence", cibleId: id, avant: { [col]: cur }, apres: { [col]: val } });
+  return { ok: true };
 }
