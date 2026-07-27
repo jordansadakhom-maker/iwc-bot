@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { estAutorise } from "@/lib/dispensaire-roles";
+import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenements";
 
 // Rapports médicaux (liens Canva) — ouvert au personnel soignant du dispensaire.
 export type RapportResult = { ok: boolean; error?: string; id?: string };
@@ -28,7 +29,9 @@ export async function creerRapport(data: Record<string, unknown>): Promise<Rappo
   if (!row.titre) return { ok: false, error: "Donne un nom au rapport." };
   const id = newId();
   const { error } = await admin.from("DispensaireRapport").insert({ id, auteur: row.auteur ?? (await qui()), ...row, par: await qui(), createdAt: new Date().toISOString() });
-  return error ? { ok: false, error: "Enregistrement impossible (la table existe-t-elle ?)." } : { ok: true, id };
+  if (error) return { ok: false, error: "Enregistrement impossible (la table existe-t-elle ?)." };
+  await emettreEvenementDispensaire({ aggregate: "rapport", type: "rapport.cree", cibleId: id, cibleLibelle: String(row.titre ?? ""), apres: row });
+  return { ok: true, id };
 }
 
 export async function majRapport(id: string, patch: Record<string, unknown>): Promise<RapportResult> {
@@ -39,14 +42,20 @@ export async function majRapport(id: string, patch: Record<string, unknown>): Pr
   const row = nettoyer(patch);
   if ("titre" in row && !row.titre) return { ok: false, error: "Le nom ne peut pas être vide." };
   if (!Object.keys(row).length) return { ok: true };
+  const avant = await lireAvant("DispensaireRapport", id);
   const { error } = await admin.from("DispensaireRapport").update(row).eq("id", id);
-  return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Enregistrement impossible." };
+  await emettreEvenementDispensaire({ aggregate: "rapport", type: "rapport.maj", cibleId: id, cibleLibelle: String((avant?.titre ?? row.titre) ?? ""), avant, apres: row });
+  return { ok: true };
 }
 
 export async function supprimerRapport(id: string): Promise<RapportResult> {
   if (!(await estAutorise())) return { ok: false, error: REFUS };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  const avant = await lireAvant("DispensaireRapport", id);
   const { error } = await admin.from("DispensaireRapport").delete().eq("id", id);
-  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Suppression impossible." };
+  await emettreEvenementDispensaire({ aggregate: "rapport", type: "rapport.supprime", cibleId: id, cibleLibelle: String(avant?.titre ?? ""), avant });
+  return { ok: true };
 }

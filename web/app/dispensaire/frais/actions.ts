@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { estAutorise, peutFacturer } from "@/lib/dispensaire-roles";
+import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenements";
 
 // Notes de frais — dépôt ouvert au personnel ; validation/virement réservés aux
 // chefs (droit « factures »). Gardes fail-closed : au moindre doute, refusé.
@@ -25,7 +26,9 @@ export async function creerFrais(data: Record<string, unknown>): Promise<FraisRe
   const now = new Date().toISOString();
   const par = await qui();
   const { error } = await admin.from("DispensaireFrais").insert({ id, objet, montant: n(data.montant), demandeur: s(data.demandeur) || par, statut: "en_attente", note: s(data.note, 1000), par, createdAt: now, updatedAt: now });
-  return error ? { ok: false, error: "Création impossible (la table existe-t-elle ?)." } : { ok: true, id };
+  if (error) return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
+  await emettreEvenementDispensaire({ aggregate: "frais", type: "frais.cree", cibleId: id, cibleLibelle: objet, apres: { objet, montant: n(data.montant), demandeur: s(data.demandeur) || par } });
+  return { ok: true, id };
 }
 
 // Change le statut (valider / refuser / marquer virée). Réservé aux chefs.
@@ -34,16 +37,22 @@ export async function statutFrais(id: string, statut: string): Promise<FraisResu
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   if (!STATUTS.includes(statut)) return { ok: false, error: "Statut inconnu." };
+  const avant = await lireAvant("DispensaireFrais", id);
   const patch: Record<string, unknown> = { statut, updatedAt: new Date().toISOString() };
   if (statut === "valide" || statut === "vire") patch.validePar = await qui();
   const { error } = await admin.from("DispensaireFrais").update(patch).eq("id", id);
-  return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Enregistrement impossible." };
+  await emettreEvenementDispensaire({ aggregate: "frais", type: "frais.statut", cibleId: id, cibleLibelle: String(avant?.objet ?? ""), avant: { statut: avant?.statut ?? null }, apres: { statut } });
+  return { ok: true };
 }
 
 export async function supprimerFrais(id: string): Promise<FraisResult> {
   if (!(await peutValider())) return { ok: false, error: "Suppression réservée aux chefs." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  const avant = await lireAvant("DispensaireFrais", id);
   const { error } = await admin.from("DispensaireFrais").delete().eq("id", id);
-  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Suppression impossible." };
+  await emettreEvenementDispensaire({ aggregate: "frais", type: "frais.supprime", cibleId: id, cibleLibelle: String(avant?.objet ?? ""), avant });
+  return { ok: true };
 }
