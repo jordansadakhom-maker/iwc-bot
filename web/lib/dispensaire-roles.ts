@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAcces } from "@/lib/queries";
@@ -11,7 +12,7 @@ export * from "@/lib/dispensaire-roles-const";
 // Grades EFFECTIFS du dispensaire : lus depuis la table DispensaireGrade (gérée
 // depuis l'administration). Repli sur les grades par défaut (Reckless) si la
 // table n'existe pas encore ou est vide → le site reste utilisable avant le SQL.
-export async function getGrades(): Promise<RoleDef[]> {
+export const getGrades = cache(async (): Promise<RoleDef[]> => {
   const admin = createAdminClient();
   if (!admin) return GRADES_DEFAUT;
   try {
@@ -30,7 +31,7 @@ export async function getGrades(): Promise<RoleDef[]> {
       };
     });
   } catch { return GRADES_DEFAUT; }
-}
+});
 
 // `autorise` = le compte a le droit d'accéder au dispensaire. En mode autonome
 // (site remis à un client), seuls les membres ajoutés sont autorisés (liste
@@ -42,7 +43,7 @@ export type Membre = { id: string; identifiant: string | null; nom: string; role
 const s = (v: unknown) => (v == null ? null : String(v));
 
 // Identité du compte connecté (ID Discord + nom d'affichage).
-async function identite(): Promise<{ discordId: string; nom: string }> {
+const identite = cache(async (): Promise<{ discordId: string; nom: string }> => {
   try {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -54,16 +55,17 @@ async function identite(): Promise<{ discordId: string; nom: string }> {
     if (discordId && admin) { const { data } = await admin.from("Membre").select("nomIC").eq("id", discordId).maybeSingle(); if (data?.nomIC) nom = String(data.nomIC); }
     return { discordId, nom };
   } catch { return { discordId: "", nom: "Membre" }; }
-}
+});
 
 // Rôle EFFECTIF du compte au sein du dispensaire.
 // Règle : une fiche DispensaireMembre gagne toujours ; sinon on retombe sur le
 // comportement Iron Wolf actuel (permissif) — donc rien n'est « déréglé » et le
 // premier directeur peut s'auto-attribuer son rôle depuis le panneau admin.
-export async function getRoleDispensaire(): Promise<RoleContext> {
+export const getRoleDispensaire = cache(async (): Promise<RoleContext> => {
   const admin = createAdminClient();
-  const { discordId, nom } = await identite();
-  const grades = await getGrades(); // grades dynamiques (ou repli par défaut)
+  // Les deux lectures sont indépendantes → menées en parallèle (identité du
+  // compte + grades dynamiques). Toutes deux sont par ailleurs mémoïsées.
+  const [{ discordId, nom }, grades] = await Promise.all([identite(), getGrades()]);
 
   if (admin) {
     let membre: Record<string, unknown> | null = null;
@@ -112,7 +114,7 @@ export async function getRoleDispensaire(): Promise<RoleContext> {
   const perms: Perms = { admin: !!a?.direction, rh: !!a?.peutMedical, factures: !!a?.peutMedical, stock: true, medical: true, voir: true };
   const role = a?.direction ? "directeur" : a?.peutMedical ? "medecin" : "stagiaire";
   return { connecte: true, identifiant: discordId || null, nom, role, perms, source: "fallback", membreId: null, autorise: true };
-}
+});
 
 // Garde-fou minimal PARTAGÉ : le compte connecté a-t-il le droit d'accéder au
 // dispensaire ? (liste blanche stricte en mode autonome ; tout membre IWC en mode
@@ -162,7 +164,7 @@ export async function getMembres(): Promise<{ pret: boolean; membres: Membre[] }
 }
 
 // ── Configuration / seuils ──────────────────────────────────────────────────
-export async function getConfig(): Promise<Config> {
+export const getConfig = cache(async (): Promise<Config> => {
   const admin = createAdminClient();
   if (!admin) return { ...CONFIG_DEFAUT };
   try {
@@ -175,6 +177,6 @@ export async function getConfig(): Promise<Config> {
     }
     return cfg;
   } catch { return { ...CONFIG_DEFAUT }; }
-}
+});
 
 export const ROLES_LISTE = ROLES;
