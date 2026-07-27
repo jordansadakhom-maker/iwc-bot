@@ -2,7 +2,7 @@ import Link from "next/link";
 import { LayoutDashboard, Wallet, HeartPulse, CalendarClock, Scissors, Users, Boxes, TrendingDown, ScrollText, ArrowRight, Lock, RefreshCw, BedDouble } from "lucide-react";
 import { money } from "@/lib/dispensaire-facturation-const";
 import { Cartouche } from "@/components/dispensaire-ui";
-import { AutoRefresh } from "@/components/auto-refresh";
+import { RealtimeRefresh } from "@/components/realtime-refresh";
 import type { CockpitData } from "@/lib/dispensaire-cockpit";
 
 const heureFR = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); } catch { return "—"; } };
@@ -30,11 +30,11 @@ export function DispensaireCockpit({ data }: { data: CockpitData }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <AutoRefresh seconds={30} />
+      <RealtimeRefresh fallbackSeconds={60} />
 
       <div className="flex items-center gap-2">
         <h2 className="flex items-center gap-2 font-display text-[1.15rem]"><LayoutDashboard className="h-5 w-5 text-accent" /> Cockpit de direction</h2>
-        <span className="ml-auto inline-flex items-center gap-1 text-[0.7rem] text-faint"><RefreshCw className="h-3 w-3" /> auto · {heureFR(data.genereLe)}</span>
+        <span className="ml-auto inline-flex items-center gap-1 text-[0.7rem] text-faint"><RefreshCw className="h-3 w-3" /> temps réel · {heureFR(data.genereLe)}</span>
       </div>
 
       {/* KPI */}

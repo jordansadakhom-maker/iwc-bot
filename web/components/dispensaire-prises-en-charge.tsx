@@ -9,6 +9,7 @@ import { admettre, attribuerMedecin, demarrerSoin, annulerPriseEnCharge, assigne
 import { encaisserPriseEnCharge } from "@/app/dispensaire/factures/actions";
 import { money } from "@/lib/dispensaire-facturation-const";
 import { DispensairePecCloture } from "@/components/dispensaire-pec-cloture";
+import { RealtimeRefresh } from "@/components/realtime-refresh";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
 const heureFR = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); } catch { return "—"; } };
@@ -68,6 +69,7 @@ export function DispensairePrisesEnCharge({ data }: { data: PrisesEnChargeData }
 
   return (
     <div className="flex flex-col gap-4">
+      <RealtimeRefresh fallbackSeconds={90} />
       <datalist id="pec-patients">{data.patients.map((p) => <option key={p} value={p} />)}</datalist>
       <datalist id="pec-medecins">{data.medecins.map((m) => <option key={m} value={m} />)}</datalist>
 
