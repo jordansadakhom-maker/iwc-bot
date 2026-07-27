@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "react";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getConfig, peutFacturer } from "@/lib/dispensaire-roles";
 import { statutsDe, estClose } from "@/lib/dispensaire-facturation-const";
@@ -22,7 +23,7 @@ const num = (v: unknown) => Number(v) || 0;
 const str = (v: unknown) => (v == null ? null : String(v));
 async function q<T>(p: PromiseLike<{ data: T | null }>): Promise<T | null> { try { return (await p).data; } catch { return null; } }
 
-export async function getNotifications(): Promise<{ items: Notif[]; count: number }> {
+export const getNotifications = cache(async (): Promise<{ items: Notif[]; count: number }> => {
   const admin = createAdminClient();
   if (!admin) return { items: [], count: 0 };
   const habilite = await peutFacturer();
@@ -105,7 +106,7 @@ export async function getNotifications(): Promise<{ items: Notif[]; count: numbe
   items.sort((a, b) => ordre[a.severite] - ordre[b.severite]);
   const count = items.filter((it) => ETAT_ACTIFS.includes(it.etat || "nouveau")).length;
   return { items, count };
-}
+});
 
 // Compteur léger pour la pastille de l'en-tête.
 export async function getNotifCount(): Promise<number> {
