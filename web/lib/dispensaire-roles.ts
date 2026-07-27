@@ -38,7 +38,7 @@ export const getGrades = cache(async (): Promise<RoleDef[]> => {
 // blanche stricte) ; les autres sont refusés. En mode intégré Iron Wolf, tout
 // compte connecté reste autorisé (comportement historique).
 export type RoleContext = { connecte: boolean; identifiant: string | null; nom: string; role: string; perms: Perms; source: "membre" | "fallback"; membreId: string | null; autorise: boolean };
-export type Membre = { id: string; identifiant: string | null; nom: string; role: string; actif: boolean; note: string | null; updatedAt: string | null; updatedBy: string | null };
+export type Membre = { id: string; identifiant: string | null; nom: string; role: string; actif: boolean; note: string | null; nomRp: string | null; prenomRp: string | null; serveur: string | null; updatedAt: string | null; updatedBy: string | null };
 
 const s = (v: unknown) => (v == null ? null : String(v));
 
@@ -158,7 +158,9 @@ export async function getMembres(): Promise<{ pret: boolean; membres: Membre[] }
   if (error) return { pret: false, membres: [] };
   const membres: Membre[] = ((data || []) as Record<string, unknown>[]).map((r) => ({
     id: String(r.id), identifiant: s(r.identifiant), nom: String(r.nom || "Membre"), role: String(r.role || "stagiaire"),
-    actif: r.actif == null ? true : Boolean(r.actif), note: s(r.note), updatedAt: s(r.updatedAt), updatedBy: s(r.updatedBy),
+    actif: r.actif == null ? true : Boolean(r.actif), note: s(r.note),
+    nomRp: s(r.nomRp), prenomRp: s(r.prenomRp), serveur: s(r.serveur),
+    updatedAt: s(r.updatedAt), updatedBy: s(r.updatedBy),
   }));
   return { pret: true, membres };
 }

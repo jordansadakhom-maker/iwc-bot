@@ -36,8 +36,14 @@ export async function creerMembre(data: Record<string, unknown>): Promise<AdminR
   const id = newId();
   const now = new Date().toISOString();
   const actif = data.actif === false ? false : true;
-  const { error } = await admin.from("DispensaireMembre").insert({ id, nom, identifiant: s(data.identifiant), role, actif, note: s(data.note, 500), updatedBy: await qui(), updatedAt: now });
-  if (error) return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
+  const par = await qui();
+  const base: Record<string, unknown> = { id, nom, identifiant: s(data.identifiant), role, actif, note: s(data.note, 500), updatedBy: par, updatedAt: now };
+  const rp: Record<string, unknown> = { nomRp: s(data.nomRp), prenomRp: s(data.prenomRp), serveur: s(data.serveur, 80) };
+  let ins = await admin.from("DispensaireMembre").insert({ ...base, ...rp });
+  // Tolérant : si les colonnes RP ne sont pas encore là (SQL non lancé), on
+  // réinsère sans elles plutôt que d'échouer.
+  if (ins.error && /nomrp|prenomrp|serveur|column/i.test(ins.error.message)) ins = await admin.from("DispensaireMembre").insert(base);
+  if (ins.error) return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
   await emettreEvenementDispensaire({ aggregate: "membre", type: "membre.cree", cibleId: id, cibleLibelle: nom, apres: { nom, role, actif, identifiant: s(data.identifiant) } });
   return { ok: true, id };
 }
@@ -53,11 +59,18 @@ export async function majMembre(id: string, patch: Record<string, unknown>): Pro
   if ("role" in patch) row.role = await validRole(patch.role);
   if ("actif" in patch) row.actif = Boolean(patch.actif);
   if ("note" in patch) row.note = s(patch.note, 500);
-  if (!Object.keys(row).length) return { ok: true };
+  const rp: Record<string, unknown> = {};
+  if ("nomRp" in patch) rp.nomRp = s(patch.nomRp);
+  if ("prenomRp" in patch) rp.prenomRp = s(patch.prenomRp);
+  if ("serveur" in patch) rp.serveur = s(patch.serveur, 80);
+  if (!Object.keys(row).length && !Object.keys(rp).length) return { ok: true };
   const avant = await lire(admin, "DispensaireMembre", id);
-  const { error } = await admin.from("DispensaireMembre").update({ ...row, updatedBy: await qui(), updatedAt: new Date().toISOString() }).eq("id", id);
-  if (error) return { ok: false, error: "Enregistrement impossible." };
-  await emettreEvenementDispensaire({ aggregate: "membre", type: "membre.maj", cibleId: id, cibleLibelle: String((avant?.nom ?? row.nom) ?? ""), avant, apres: row });
+  const meta = { updatedBy: await qui(), updatedAt: new Date().toISOString() };
+  let upd = await admin.from("DispensaireMembre").update({ ...row, ...rp, ...meta }).eq("id", id);
+  // Tolérant : colonnes RP absentes (SQL non lancé) → réessaie sans elles.
+  if (upd.error && /nomrp|prenomrp|serveur|column/i.test(upd.error.message)) upd = await admin.from("DispensaireMembre").update({ ...row, ...meta }).eq("id", id);
+  if (upd.error) return { ok: false, error: "Enregistrement impossible." };
+  await emettreEvenementDispensaire({ aggregate: "membre", type: "membre.maj", cibleId: id, cibleLibelle: String((avant?.nom ?? row.nom) ?? ""), avant, apres: { ...row, ...rp } });
   return { ok: true };
 }
 
