@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BadgeDollarSign, Plus, Loader2, Trash2, AlertTriangle, Bandage, Users } from "lucide-react";
 import { money, type VentesData, type Vente } from "@/lib/dispensaire-facturation-const";
@@ -18,6 +18,10 @@ export function DispensaireVentes({ data }: { data: VentesData }) {
   const [busy, setBusy] = useState(false);
   const [v, setV] = useState({ patient: "", item: "Bandage", quantite: "1", prixUnitaire: String(data.prix), note: "" });
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setV((p) => ({ ...p, [k]: e.target.value }));
+  // Jeton anti-doublon : stable tant que la vente n'est pas enregistrée (un
+  // double-clic renvoie la même vente), régénéré après chaque succès.
+  const cleRef = useRef("");
+  const jeton = () => (cleRef.current ||= (globalThis.crypto?.randomUUID?.() ?? String(Date.now()) + Math.random()));
 
   const semaine = data.semaine;
   const total = useMemo(() => (Math.max(1, Number(v.quantite) || 1)) * (Number(v.prixUnitaire) || 0), [v.quantite, v.prixUnitaire]);
@@ -44,9 +48,10 @@ export function DispensaireVentes({ data }: { data: VentesData }) {
   async function ajouter() {
     if (!v.patient.trim()) { setFlash({ t: "bad", m: "Indique le patient." }); return; }
     setBusy(true);
-    const r = await creerVente({ ...v, quantite: Number(v.quantite) || 1, prixUnitaire: Number(v.prixUnitaire) || 0 });
+    const r = await creerVente({ ...v, quantite: Number(v.quantite) || 1, prixUnitaire: Number(v.prixUnitaire) || 0, cle: jeton() });
     setBusy(false);
     if (!r.ok) { setFlash({ t: "bad", m: r.error || "Impossible." }); return; }
+    cleRef.current = "";                     // succès → jeton neuf pour la prochaine vente
     const tmp: Vente = { id: r.id || "tmp", patient: v.patient.trim(), item: v.item || "Bandage", quantite: Math.max(1, Number(v.quantite) || 1), prixUnitaire: Number(v.prixUnitaire) || 0, total, note: v.note || null, par: null, createdAt: new Date().toISOString() };
     setVentes((p) => [tmp, ...p]);
     setV({ patient: "", item: "Bandage", quantite: "1", prixUnitaire: String(data.prix), note: "" });

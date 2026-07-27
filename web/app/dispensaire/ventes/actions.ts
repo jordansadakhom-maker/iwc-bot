@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { estAutorise, getConfig } from "@/lib/dispensaire-roles";
 import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenements";
+import { idAvecJeton, estDoublon } from "@/lib/dispensaire-idempotence";
 
 // Ventes — comptoir du dispensaire (ouvert à tout le personnel du dispensaire).
 export type VenteResult = { ok: boolean; error?: string; id?: string };
@@ -26,9 +27,14 @@ export async function creerVente(data: Record<string, unknown>): Promise<VenteRe
   // le client n'envoie pas de prix, on applique la valeur courante de la config.
   const prixUnitaire = data.prixUnitaire != null ? n(data.prixUnitaire) : (await getConfig()).prixBandage;
   const total = quantite * prixUnitaire;
-  const id = newId();
+  // Idempotence : id dérivé du jeton client → un second envoi (double-clic) est
+  // rejeté par la clé primaire et renvoie la vente déjà créée.
+  const id = idAvecJeton("dv", data.cle, newId);
   const { error } = await admin.from("DispensaireVente").insert({ id, patient, item, quantite, prixUnitaire, total, note: s(data.note, 500), par: await qui(), createdAt: new Date().toISOString() });
-  if (error) return { ok: false, error: "Enregistrement impossible (la table existe-t-elle ?)." };
+  if (error) {
+    if (estDoublon(error)) return { ok: true, id };
+    return { ok: false, error: "Enregistrement impossible (la table existe-t-elle ?)." };
+  }
   await emettreEvenementDispensaire({ aggregate: "vente", type: "vente.cree", cibleId: id, cibleLibelle: patient, apres: { patient, item, quantite, prixUnitaire, total } });
   return { ok: true, id };
 }

@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { estAutorise } from "@/lib/dispensaire-roles";
 import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenements";
+import { idAvecJeton, estDoublon } from "@/lib/dispensaire-idempotence";
 import { FDO_PRIX } from "@/lib/dispensaire-facturation-const";
 
 // Soins FDO — soins prodigués aux forces de l'ordre (par bureau).
@@ -34,10 +35,13 @@ export async function creerSoin(data: Record<string, unknown>): Promise<FdoResul
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const row = nettoyer(data);
   if (!row.bureau) return { ok: false, error: "Indique le bureau du shérif." };
-  const id = newId();
+  const id = idAvecJeton("dfo", data.cle, newId);
   const now = new Date().toISOString();
   const { error } = await admin.from("DispensaireSoinFDO").insert({ id, statut: "facture", ...row, montant: FDO_PRIX, par: await qui(), createdAt: now, updatedAt: now });
-  if (error) return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
+  if (error) {
+    if (estDoublon(error)) return { ok: true, id };
+    return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
+  }
   await emettreEvenementDispensaire({ aggregate: "fdo", type: "fdo.cree", cibleId: id, cibleLibelle: String(row.bureau ?? ""), apres: { ...row, montant: FDO_PRIX } });
   return { ok: true, id };
 }

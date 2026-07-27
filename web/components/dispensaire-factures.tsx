@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Receipt, Plus, Check, Pencil, Trash2, AlertTriangle, CalendarClock, Lock, Copy, FileText, Clock, Stethoscope, User } from "lucide-react";
 import { VideRegistre } from "@/components/dispensaire-ui";
@@ -31,6 +31,9 @@ export function DispensaireFactures({ data, rapport, historique, config }: { dat
   const [rapportOpen, setRapportOpen] = useState(false);
   const [consult, setConsult] = useState(false);
   const [dossierOpen, setDossierOpen] = useState(false);
+  // Jeton anti-doublon des créations de facture (stable jusqu'au succès).
+  const cleRef = useRef("");
+  const jeton = () => (cleRef.current ||= (globalThis.crypto?.randomUUID?.() ?? String(Date.now()) + Math.random()));
 
   if (!data.canEdit) return (
     <div className="rounded-[14px] border border-border bg-surface p-8 text-center">
@@ -69,9 +72,9 @@ export function DispensaireFactures({ data, rapport, historique, config }: { dat
       const nowIso = new Date().toISOString();
       const tmp: Facture = { id: "tmp-" + Math.random().toString(36).slice(2, 8), objet: vals.objet, destinataire: vals.destinataire || null, montant, dateEmission: emissionIso, dateEcheance: echeanceIso, statut: repr, statuts, note: vals.note || null, par: null, createdAt: nowIso, datePaiement: statuts.includes("payee") ? nowIso : null, payePar: null };
       setFactures((p) => [tmp, ...p]); setForm(null);
-      const r = await creerFacture(payload);
+      const r = await creerFacture({ ...payload, cle: jeton() });
       if (!r.ok) { setFactures((p) => p.filter((f) => f.id !== tmp.id)); setFlash({ t: "bad", m: r.error || "Impossible." }); }
-      else { setFactures((p) => p.map((f) => (f.id === tmp.id ? { ...f, id: r.id || tmp.id } : f))); setFlash({ t: "ok", m: "Facture créée." }); if (inc.length) toast(inc[0], "info"); router.refresh(); }
+      else { cleRef.current = ""; setFactures((p) => p.map((f) => (f.id === tmp.id ? { ...f, id: r.id || tmp.id } : f))); setFlash({ t: "ok", m: "Facture créée." }); if (inc.length) toast(inc[0], "info"); router.refresh(); }
     }
   }
   // Coche / décoche un statut (indépendant, plusieurs simultanés). Garde ≥ 1 statut.
