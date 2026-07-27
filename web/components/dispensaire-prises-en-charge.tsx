@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { HeartPulse, Loader2, Play, Check, X, UserPlus, Stethoscope, Clock, Plus } from "lucide-react";
 import { Flash, inputCls } from "@/components/edit-ui";
 import { ETAT_PEC_LABEL, type PrisesEnChargeData, type PriseEnCharge } from "@/lib/dispensaire-prises-en-charge-const";
-import { admettre, attribuerMedecin, demarrerSoin, terminerPriseEnCharge, annulerPriseEnCharge } from "@/app/dispensaire/prises-en-charge/actions";
+import { admettre, attribuerMedecin, demarrerSoin, annulerPriseEnCharge } from "@/app/dispensaire/prises-en-charge/actions";
+import { DispensairePecCloture } from "@/components/dispensaire-pec-cloture";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
 const heureFR = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); } catch { return "—"; } };
@@ -19,6 +20,7 @@ export function DispensairePrisesEnCharge({ data }: { data: PrisesEnChargeData }
   const [actif, setActif] = useState<string | null>(null);          // id en cours d'action
   const [flash, setFlash] = useState<FlashMsg>(null);
   const [med, setMed] = useState<Record<string, string>>({});        // saisie médecin par ligne
+  const [clot, setClot] = useState<PriseEnCharge | null>(null);       // épisode en cours de clôture
   const [now, setNow] = useState<number | null>(null);
   const cleRef = useRef("");
   const jeton = () => (cleRef.current ||= (globalThis.crypto?.randomUUID?.() ?? String(Date.now()) + Math.random()));
@@ -111,6 +113,8 @@ export function DispensairePrisesEnCharge({ data }: { data: PrisesEnChargeData }
           </div>
         </section>
       ) : null}
+
+      {clot ? <DispensairePecCloture pec={clot} onClose={() => setClot(null)} onDone={(f) => { setFlash(f); router.refresh(); }} /> : null}
     </div>
   );
 
@@ -139,7 +143,7 @@ export function DispensairePrisesEnCharge({ data }: { data: PrisesEnChargeData }
               <button onClick={() => faire(p.id, () => demarrerSoin(p.id), "Soin démarré.")} disabled={busyRow} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[0.74rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{busyRow ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />} Démarrer le soin</button>
             ) : null}
             {data.canSoigner ? (
-              <button onClick={() => faire(p.id, () => terminerPriseEnCharge(p.id), "Prise en charge terminée.")} disabled={busyRow} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[0.74rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--good)" }}><Check className="h-3.5 w-3.5" /> Terminer</button>
+              <button onClick={() => setClot(p)} disabled={busyRow} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[0.74rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--good)" }}><Check className="h-3.5 w-3.5" /> Terminer</button>
             ) : null}
             <button onClick={() => faire(p.id, () => annulerPriseEnCharge(p.id), "Prise en charge annulée.")} disabled={busyRow} className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-[0.74rem] font-semibold text-muted transition hover:text-oxblood disabled:opacity-50"><X className="h-3.5 w-3.5" /> Annuler</button>
           </div>

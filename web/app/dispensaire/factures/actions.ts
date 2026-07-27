@@ -167,6 +167,13 @@ export async function creerConsultation(input: { patient: string; lignes: Consul
   if (!(await peutFacturer())) return { ok: false, error: "Réservé aux chefs." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  return creerFactureDeSoins(admin, input, await qui());
+}
+
+// Cœur PARTAGÉ : crée la facture d'une consultation + décrémente le stock lié.
+// Réutilisé par la consultation manuelle (droit factures) ET par la clôture d'une
+// prise en charge (droit soignant) — la garde est faite par l'appelant.
+async function creerFactureDeSoins(admin: Admin, input: { patient: string; lignes: ConsultationLigne[]; regle: boolean; dateEmission?: string; note?: string; cle?: string }, par: string): Promise<ConsultationResult> {
   const patient = s(input.patient, 200);
   if (!patient) return { ok: false, error: "Indique le patient." };
   const lignes = (Array.isArray(input.lignes) ? input.lignes : [])
@@ -174,7 +181,6 @@ export async function creerConsultation(input: { patient: string; lignes: Consul
     .filter((l) => l.desc || l.prixUnitaire > 0 || l.stockId);
   if (!lignes.length) return { ok: false, error: "Ajoute au moins un soin ou un article." };
 
-  const par = await qui();
   const nowIso = new Date().toISOString();
   const emission = emissionDe(input.dateEmission, nowIso);
   const echeance = echeanceDefaut(emission);
@@ -215,6 +221,35 @@ export async function creerConsultation(input: { patient: string; lignes: Consul
     } catch { /* décrément best-effort */ }
   }
   return { ok: true, id, montant, avertissements: avert.length ? avert : undefined };
+}
+
+// ── CLÔTURE D'UNE PRISE EN CHARGE (Lot 3.2) ──────────────────────────────────
+// Terminer un épisode de soin en un geste : génère la facture, décrémente le
+// stock, relie la facture à la prise en charge (factureId) et passe l'état à
+// « terminé ». Réservé au personnel SOIGNANT (le soignant facture son propre
+// soin, sans dépendre du droit « factures »).
+export async function terminerAvecFacture(pecId: string, input: { lignes: ConsultationLigne[]; regle: boolean; note?: string; cle?: string }): Promise<ConsultationResult> {
+  if (!(await peutSoigner())) return { ok: false, error: "Réservé au personnel soignant." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  if (!pecId) return { ok: false, error: "Prise en charge introuvable." };
+  const pec = await lireAvant("DispensairePriseEnCharge", pecId);
+  if (!pec) return { ok: false, error: "Prise en charge introuvable." };
+  const etat = String(pec.etat);
+  // Idempotence : une prise en charge déjà terminée renvoie sa facture liée.
+  if (etat === "termine") return { ok: true, id: pec.factureId ? String(pec.factureId) : undefined };
+  if (etat === "annule") return { ok: false, error: "Cette prise en charge a été annulée." };
+
+  const par = await qui();
+  const patient = String(pec.patient || "");
+  // 1) Facture + décrément de stock (cœur partagé).
+  const res = await creerFactureDeSoins(admin, { patient, lignes: input.lignes, regle: input.regle, note: input.note, cle: input.cle }, par);
+  if (!res.ok) return res;
+  // 2) Clôture de l'épisode + lien vers la facture.
+  const now = new Date().toISOString();
+  await admin.from("DispensairePriseEnCharge").update({ etat: "termine", finAt: now, factureId: res.id, updatedBy: par, updatedAt: now }).eq("id", pecId);
+  await emettreEvenementDispensaire({ aggregate: "prise_en_charge", type: "prise_en_charge.termine", cibleId: pecId, cibleLibelle: patient, avant: pec, apres: { etat: "termine", factureId: res.id, montant: res.montant } });
+  return res;
 }
 
 // ── DOSSIER PATIENT (dérivé à la lecture, sans nouvelle table) ────────────────
