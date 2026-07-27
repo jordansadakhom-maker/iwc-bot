@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { X, Target, Plus, Loader2, Trash2, MapPin, Users, CalendarClock, Link2, CheckCircle2, Clock3, Lock, Send, Flag, Landmark, Check, ScrollText, Download } from "lucide-react";
+import { X, Target, Plus, Loader2, Trash2, MapPin, Users, CalendarClock, Link2, CheckCircle2, Clock3, Lock, Send, Flag, Landmark, Check, ScrollText, Download, Sparkles } from "lucide-react";
 import type { OpDetail, EtapeDetail, MembreLite } from "@/lib/queries";
+import type { Suggestion } from "@/lib/attribution";
 import { Badge } from "@/components/ui";
-import { creerOperation, majOperation, supprimerOperation, assignerOperation, terminerOperation, envoyerContratOperation } from "@/app/(app)/operations/actions";
+import { creerOperation, majOperation, supprimerOperation, assignerOperation, suggererAgents, terminerOperation, envoyerContratOperation } from "@/app/(app)/operations/actions";
 import { genererRapportMission } from "@/app/(app)/documents/actions";
 import { LireBtn } from "@/components/mic-dictee";
 import { cents } from "@/lib/format";
@@ -317,6 +318,8 @@ function EditModal({ op, membres, onClose, router }: { op: OpDetail; membres: Me
   // Assignation
   const [q, setQ] = useState("");
   const [choisis, setChoisis] = useState<Record<string, boolean>>({});
+  const [suggBusy, setSuggBusy] = useState(false);
+  const [suggNote, setSuggNote] = useState<string | null>(null);
   // Terminaison
   const [terminer, setTerminer] = useState(false);
   const [resultat, setResultat] = useState("Réussite complète");
@@ -344,7 +347,17 @@ function EditModal({ op, membres, onClose, router }: { op: OpDetail; membres: Me
     const r = await assignerOperation(op.id, ids, noms);
     setBusy(null);
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
-    setChoisis({}); setFlash("Agents assignés & prévenus — mise à jour dans ~30 s."); router.refresh();
+    setChoisis({}); setSuggNote(null); setFlash("Agents assignés & prévenus — mise à jour dans ~30 s."); router.refresh();
+  }
+  // Attribution assistée : pré-coche les agents recommandés (dispo, faible charge, pôle).
+  async function suggerer() {
+    setSuggBusy(true); setFlash(null); setSuggNote(null);
+    const r = await suggererAgents(op.pole, op.membresIds);
+    setSuggBusy(false);
+    const top = (r.suggestions || []).slice(0, 3);
+    if (!r.ok || top.length === 0) { setSuggNote("Aucun agent disponible à suggérer."); return; }
+    setChoisis((c) => { const n = { ...c }; for (const s of top) n[s.id] = true; return n; });
+    setSuggNote("Suggéré : " + top.map((s) => `${s.nom} (${s.raisons[0] || ""})`).join(" · "));
   }
   async function genererDebriefIA() {
     setBusy("debriefIA"); setFlash(null);
@@ -410,7 +423,13 @@ function EditModal({ op, membres, onClose, router }: { op: OpDetail; membres: Me
       {/* Assigner des agents */}
       {phase !== "terminee" && phase !== "annulee" ? (
         <div className="mb-3 flex flex-col gap-2 border-t border-border pt-3">
-          <span className="text-[0.72rem] uppercase tracking-[0.06em] text-faint">Assigner des agents</span>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[0.72rem] uppercase tracking-[0.06em] text-faint">Assigner des agents</span>
+            <button onClick={suggerer} disabled={suggBusy} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[0.74rem] font-semibold transition disabled:opacity-50" style={{ color: "var(--accent)", borderColor: "color-mix(in srgb,var(--accent) 45%,var(--border))" }}>
+              {suggBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} Suggérer
+            </button>
+          </div>
+          {suggNote ? <p className="rounded-[9px] border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] text-muted">{suggNote}</p> : null}
           <input className={inputCls} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un membre…" />
           <div className="max-h-36 overflow-y-auto rounded-[10px] border border-border bg-surface-2">
             {filtres.length === 0 ? <p className="px-3 py-2 text-[0.78rem] text-faint">Aucun membre disponible.</p> : filtres.map((m) => (
