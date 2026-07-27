@@ -2,6 +2,7 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getConfig, peutFacturer } from "@/lib/dispensaire-roles";
+import { ymdParis, lundiCourant } from "@/lib/dispensaire-dates";
 import {
   estBandage, estOuverte, statutsDe, statutRepresentatif,
   type Vente, type PatientSemaine, type VentesData,
@@ -14,24 +15,6 @@ export * from "@/lib/dispensaire-facturation-const";
 
 const s = (v: unknown) => (v == null ? null : String(v));
 const num = (v: unknown) => Number(v) || 0;
-
-// ── Semaine civile (Paris) — pour l'agrégat des ventes ──────────────────────
-const PARIS = "Europe/Paris";
-function ymdParis(iso: string): string {
-  const p = new Intl.DateTimeFormat("en-GB", { timeZone: PARIS, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(iso));
-  const g = (t: string) => p.find((x) => x.type === t)?.value || "";
-  return `${g("year")}-${g("month")}-${g("day")}`;
-}
-function dowParis(iso: string): number {
-  const d = new Intl.DateTimeFormat("en-GB", { timeZone: PARIS, weekday: "short" }).format(new Date(iso));
-  return ({ Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 } as Record<string, number>)[d] ?? 0;
-}
-function lundiCourant(): string {
-  const now = new Date().toISOString();
-  const base = new Date(ymdParis(now) + "T12:00:00Z");
-  base.setUTCDate(base.getUTCDate() - dowParis(now));
-  return base.toISOString().slice(0, 10);
-}
 
 // ── 1) Ventes ───────────────────────────────────────────────────────────────
 export async function getVentes(): Promise<VentesData> {

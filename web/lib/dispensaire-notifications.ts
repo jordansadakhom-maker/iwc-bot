@@ -3,6 +3,7 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getConfig, peutFacturer } from "@/lib/dispensaire-roles";
 import { statutsDe, estClose } from "@/lib/dispensaire-facturation-const";
+import { ymdParis, lundiCourant } from "@/lib/dispensaire-dates";
 import { getEtatsOverlay } from "@/lib/notif-etat";
 import { ETAT_ACTIFS, type Etat } from "@/lib/erp-assistant-const";
 
@@ -16,19 +17,9 @@ export type Notif = { id: string; severite: "alerte" | "attention" | "info"; typ
 // Fil d'activité récente : mouvements de stock (± / déplacements) et coffres.
 export type Activite = { id: string; genre: "entree" | "sortie" | "deplacement" | "coffre"; texte: string; par: string | null; at: string; href: string };
 
-const PARIS = "Europe/Paris";
-const ymdParis = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: PARIS, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
 const num = (v: unknown) => Number(v) || 0;
 const str = (v: unknown) => (v == null ? null : String(v));
 async function q<T>(p: PromiseLike<{ data: T | null }>): Promise<T | null> { try { return (await p).data; } catch { return null; } }
-
-function lundiCourant(): string {
-  const today = ymdParis(new Date().toISOString());
-  const base = new Date(today + "T12:00:00Z");
-  const dow = (base.getUTCDay() + 6) % 7;          // 0 = lundi
-  base.setUTCDate(base.getUTCDate() - dow);
-  return base.toISOString().slice(0, 10);
-}
 
 export async function getNotifications(): Promise<{ items: Notif[]; count: number }> {
   const admin = createAdminClient();
