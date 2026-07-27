@@ -1,15 +1,15 @@
-import { getLicences, getLicenceConfig } from "@/lib/licences";
+import { getLicences, getLicenceConfig, getRoleLicence, getLicenceMembres } from "@/lib/licences";
 import { PageHeader, Card } from "@/components/ui";
 import { LicencesRegistre } from "@/components/licences";
 
 export const dynamic = "force-dynamic";
 
 export default async function LicencesPage() {
-  const [data, config] = await Promise.all([getLicences(), getLicenceConfig()]);
+  const [data, config, role, membres] = await Promise.all([getLicences(), getLicenceConfig(), getRoleLicence(), getLicenceMembres()]);
   return (
     <>
       <PageHeader titre="Licences & autorisations" sous="Registre officiel — délivrance, validité, restrictions et vérification rapide" actif={data.pret} />
-      <Card><LicencesRegistre data={data} config={config} /></Card>
+      <Card><LicencesRegistre data={data} config={config} caps={role.caps} roleLabel={role.role} membres={membres.membres} /></Card>
     </>
   );
 }

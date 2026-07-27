@@ -5,9 +5,12 @@ import { useRouter } from "next/navigation";
 import { ShieldCheck, Search, Plus, X, Loader2, CheckCircle2, XCircle, BadgeCheck, Ban, RotateCcw, RefreshCw, Trash2, Pencil, Clock, FileText, BarChart3, Crosshair } from "lucide-react";
 import {
   STATUTS, statutDef, PERMISSIONS, RESTRICTIONS, permLabel, restrLabel,
-  statutEffectif, joursAvantExpiration, type Licence, type LicenceType,
+  statutEffectif, joursAvantExpiration, ROLES_LICENCE, roleLicenceDef, type Licence, type LicenceType, type CapsLicence,
 } from "@/lib/licences-const";
-import { creerLicence, majLicence, suspendreLicence, reactiverLicence, revoquerLicence, renouvelerLicence, supprimerLicence, setBlocageVentesArmurerie } from "@/app/(app)/licences/actions";
+import { creerLicence, majLicence, suspendreLicence, reactiverLicence, revoquerLicence, renouvelerLicence, supprimerLicence, setBlocageVentesArmurerie, creerRoleMembre, majRoleMembre, supprimerRoleMembre } from "@/app/(app)/licences/actions";
+
+type MembreRole = { id: string; identifiant: string | null; nom: string; role: string; actif: boolean };
+const CAPS_TOUT: CapsLicence = { voir: true, creer: true, cycle: true, revoquer: true, supprimer: true, gererTypes: true, gererIntegration: true, gererRoles: true };
 
 type Flash = { t: "ok" | "bad"; m: string } | null;
 const dateFR = (iso: string | null) => { if (!iso) return "—"; try { return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(iso)); } catch { return "—"; } };
@@ -43,7 +46,7 @@ function raisonNonAutorise(l: Licence): string {
   return "Non autorisé";
 }
 
-export function LicencesRegistre({ data, config }: { data: { pret: boolean; licences: Licence[]; types: LicenceType[] }; config?: { bloquerVentes: boolean } }) {
+export function LicencesRegistre({ data, config, caps = CAPS_TOUT, roleLabel, membres = [] }: { data: { pret: boolean; licences: Licence[]; types: LicenceType[] }; config?: { bloquerVentes: boolean }; caps?: CapsLicence; roleLabel?: string; membres?: MembreRole[] }) {
   const router = useRouter();
   const [licences] = useState<Licence[]>(data.licences);
   const [bloque, setBloque] = useState(!!config?.bloquerVentes);
@@ -131,7 +134,7 @@ export function LicencesRegistre({ data, config }: { data: { pret: boolean; lice
           <Search className="h-4 w-4 text-accent" />
           <h3 className="text-[0.9rem] font-semibold">Vérification rapide</h3>
           <span className="text-[0.72rem] text-faint">nom · prénom · numéro</span>
-          <button onClick={() => setForm("new")} className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Plus className="h-3.5 w-3.5" /> Nouvelle licence</button>
+          {caps.creer ? <button onClick={() => setForm("new")} className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Plus className="h-3.5 w-3.5" /> Nouvelle licence</button> : <span className="ml-auto text-[0.72rem] text-faint">{roleLabel ? roleLicenceDef(roleLabel).label : "Consultation"}</span>}
         </div>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher une personne ou un numéro de licence…" className={inputCls} autoFocus />
         {q.trim().length >= 2 ? (
@@ -209,22 +212,27 @@ export function LicencesRegistre({ data, config }: { data: { pret: boolean; lice
       </div>
 
       {/* Lot E — Intégration Armurerie (interrupteur de blocage des ventes) */}
-      <div className="rounded-[14px] border border-border bg-surface p-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <Crosshair className="h-4 w-4 shrink-0 text-accent" />
-          <div className="min-w-0 flex-1">
-            <h3 className="text-[0.9rem] font-semibold">Intégration Armurerie — contrôle des ventes</h3>
-            <p className="text-[0.76rem] text-faint">Activé, chaque vente à l&apos;Armurerie vérifie la licence de l&apos;acquéreur (validité, autorisation d&apos;achat, restrictions) et <b>bloque</b> avec un motif précis si non conforme. Désactivé, les ventes suivent leur cours habituel.</p>
+      {caps.gererIntegration ? (
+        <div className="rounded-[14px] border border-border bg-surface p-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <Crosshair className="h-4 w-4 shrink-0 text-accent" />
+            <div className="min-w-0 flex-1">
+              <h3 className="text-[0.9rem] font-semibold">Intégration Armurerie — contrôle des ventes</h3>
+              <p className="text-[0.76rem] text-faint">Activé, chaque vente à l&apos;Armurerie vérifie la licence de l&apos;acquéreur (validité, autorisation d&apos;achat, restrictions) et <b>bloque</b> avec un motif précis si non conforme. Désactivé, les ventes suivent leur cours habituel.</p>
+            </div>
+            <button onClick={toggleBlocage} className="relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors" style={{ background: bloque ? "var(--good)" : "var(--border-2)" }} aria-pressed={bloque} aria-label="Basculer le contrôle des ventes">
+              <span className="inline-block h-5 w-5 rounded-full bg-white transition-transform" style={{ transform: bloque ? "translateX(22px)" : "translateX(3px)" }} />
+            </button>
+            <span className="shrink-0 text-[0.78rem] font-semibold" style={{ color: bloque ? "var(--good)" : "var(--faint)" }}>{bloque ? "Activé" : "Désactivé"}</span>
           </div>
-          <button onClick={toggleBlocage} className="relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors" style={{ background: bloque ? "var(--good)" : "var(--border-2)" }} aria-pressed={bloque} aria-label="Basculer le contrôle des ventes">
-            <span className="inline-block h-5 w-5 rounded-full bg-white transition-transform" style={{ transform: bloque ? "translateX(22px)" : "translateX(3px)" }} />
-          </button>
-          <span className="shrink-0 text-[0.78rem] font-semibold" style={{ color: bloque ? "var(--good)" : "var(--faint)" }}>{bloque ? "Activé" : "Désactivé"}</span>
         </div>
-      </div>
+      ) : null}
+
+      {/* Lot G — Rôles & accès */}
+      {caps.gererRoles ? <RolesPanel membres={membres} onFlash={setFlash} onRefresh={() => start(() => router.refresh())} /> : null}
 
       {form ? <LicenceForm initial={form === "new" ? null : form} types={data.types} onClose={() => setForm(null)} onDone={apres} busy={pending} /> : null}
-      {fiche ? <LicenceFiche l={fiche} onClose={() => setFiche(null)} onEdit={() => { setForm(fiche); setFiche(null); }} onDone={apres} busy={pending} /> : null}
+      {fiche ? <LicenceFiche l={fiche} caps={caps} onClose={() => setFiche(null)} onEdit={() => { setForm(fiche); setFiche(null); }} onDone={apres} busy={pending} /> : null}
     </div>
   );
 }
@@ -302,7 +310,7 @@ function LicenceForm({ initial, types, onClose, onDone, busy }: { initial: Licen
 }
 
 // ── Fiche + cycle de vie ─────────────────────────────────────────────────────
-function LicenceFiche({ l, onClose, onEdit, onDone, busy }: { l: Licence; onClose: () => void; onEdit: () => void; onDone: (r: { ok: boolean; error?: string }, m: string) => boolean; busy: boolean }) {
+function LicenceFiche({ l, caps, onClose, onEdit, onDone, busy }: { l: Licence; caps: CapsLicence; onClose: () => void; onEdit: () => void; onDone: (r: { ok: boolean; error?: string }, m: string) => boolean; busy: boolean }) {
   const [action, setAction] = useState<"suspendre" | "revoquer" | "renouveler" | null>(null);
   const [motif, setMotif] = useState("");
   const [date, setDate] = useState("");
@@ -409,16 +417,82 @@ ul{margin:6px 0;padding-left:18px;font-size:12.5px;line-height:1.5}.muted{color:
         ) : (
           <div className="flex flex-wrap gap-2 border-t border-border pt-3">
             <button onClick={certificat} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-[0.78rem] font-semibold hover:border-accent"><FileText className="h-3.5 w-3.5" /> Certificat</button>
-            <button onClick={onEdit} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-[0.78rem] font-semibold hover:border-accent"><Pencil className="h-3.5 w-3.5" /> Modifier</button>
-            <button onClick={() => { setDate(l.dateExpiration ? l.dateExpiration.slice(0, 10) : ""); setAction("renouveler"); }} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-[0.78rem] font-semibold hover:border-good"><RefreshCw className="h-3.5 w-3.5" /> Renouveler</button>
-            {eff === "suspendue" ? (
+            {caps.creer ? <button onClick={onEdit} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-[0.78rem] font-semibold hover:border-accent"><Pencil className="h-3.5 w-3.5" /> Modifier</button> : null}
+            {caps.cycle ? <button onClick={() => { setDate(l.dateExpiration ? l.dateExpiration.slice(0, 10) : ""); setAction("renouveler"); }} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-[0.78rem] font-semibold hover:border-good"><RefreshCw className="h-3.5 w-3.5" /> Renouveler</button> : null}
+            {caps.cycle ? (eff === "suspendue" ? (
               <button disabled={local || busy} onClick={() => faire(() => reactiverLicence(l.id), "Licence réactivée.")} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-[0.78rem] font-semibold hover:border-good"><RotateCcw className="h-3.5 w-3.5" /> Réactiver</button>
             ) : (
               <button onClick={() => { setMotif(""); setAction("suspendre"); }} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-[0.78rem] font-semibold hover:border-warn"><Clock className="h-3.5 w-3.5" /> Suspendre</button>
-            )}
-            {eff !== "revoquee" ? <button onClick={() => { setMotif(""); setAction("revoquer"); }} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-[0.78rem] font-semibold hover:border-oxblood"><Ban className="h-3.5 w-3.5" /> Révoquer</button> : null}
+            )) : null}
+            {caps.revoquer && eff !== "revoquee" ? <button onClick={() => { setMotif(""); setAction("revoquer"); }} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-[0.78rem] font-semibold hover:border-oxblood"><Ban className="h-3.5 w-3.5" /> Révoquer</button> : null}
           </div>
         )}
+      </div>
+    </Modal>
+  );
+}
+
+// ── Lot G — Panneau « Rôles & accès » ────────────────────────────────────────
+function RolesPanel({ membres, onFlash, onRefresh }: { membres: MembreRole[]; onFlash: (f: Flash) => void; onRefresh: () => void }) {
+  const [list, setList] = useState<MembreRole[]>(membres);
+  const [form, setForm] = useState(false);
+
+  async function changerRole(m: MembreRole, role: string) {
+    setList((p) => p.map((x) => (x.id === m.id ? { ...x, role } : x)));
+    const r = await majRoleMembre(m.id, { role }); if (!r.ok) onFlash({ t: "bad", m: r.error || "Impossible." }); else onRefresh();
+  }
+  async function toggleActif(m: MembreRole) {
+    const actif = !m.actif; setList((p) => p.map((x) => (x.id === m.id ? { ...x, actif } : x)));
+    const r = await majRoleMembre(m.id, { actif }); if (!r.ok) onFlash({ t: "bad", m: r.error || "Impossible." }); else onRefresh();
+  }
+  async function supprimer(m: MembreRole) {
+    setList((p) => p.filter((x) => x.id !== m.id));
+    const r = await supprimerRoleMembre(m.id); if (!r.ok) onFlash({ t: "bad", m: r.error || "Impossible." }); else onRefresh();
+  }
+  async function enregistrer(vals: { nom: string; identifiant: string; role: string }) {
+    setForm(false);
+    const r = await creerRoleMembre(vals);
+    if (!r.ok) { onFlash({ t: "bad", m: r.error || "Impossible." }); return; }
+    onFlash({ t: "ok", m: "Rôle attribué." }); onRefresh();
+  }
+
+  return (
+    <div className="rounded-[14px] border border-border bg-surface p-4">
+      <div className="mb-2 flex items-center gap-2">
+        <ShieldCheck className="h-4 w-4 text-accent" />
+        <h3 className="text-[0.9rem] font-semibold">Rôles &amp; accès <span className="font-num text-[0.8rem] text-faint">{list.length}</span></h3>
+        <button onClick={() => setForm(true)} className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.74rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Plus className="h-3.5 w-3.5" /> Attribuer un rôle</button>
+      </div>
+      <p className="mb-3 text-[0.72rem] text-faint">Attribue un rôle précis par personne (via son ID Discord). Sans fiche, l&apos;accès se déduit des droits IWC (Direction = complet).</p>
+      {list.length === 0 ? <p className="py-3 text-center text-[0.8rem] italic text-faint">Aucun rôle attribué — accès dérivé des droits IWC.</p> : (
+        <div className="flex flex-col gap-2">
+          {list.map((m) => {
+            const d = roleLicenceDef(m.role);
+            return (
+              <div key={m.id} className="flex flex-wrap items-center gap-2 rounded-[10px] border border-border bg-surface-2 px-3 py-2" style={{ opacity: m.actif ? 1 : 0.55 }}>
+                <div className="min-w-0 flex-1"><div className="text-[0.84rem] font-semibold">{m.nom}</div><div className="text-[0.7rem] text-faint">{m.identifiant ? `ID ${m.identifiant}` : "identifié par le nom"}</div></div>
+                <select value={m.role} onChange={(e) => changerRole(m, e.target.value)} className="rounded-md border border-border bg-surface px-2 py-1 text-[0.74rem] font-semibold" style={{ color: d.tone }}>{ROLES_LICENCE.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select>
+                <button onClick={() => toggleActif(m)} className="rounded-md border border-border px-2 py-1 text-[0.7rem] font-semibold text-muted hover:text-ink">{m.actif ? "Désactiver" : "Activer"}</button>
+                <button onClick={() => supprimer(m)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-oxblood" aria-label="Supprimer"><Trash2 className="h-3.5 w-3.5" /></button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {form ? <RoleForm onClose={() => setForm(false)} onSave={enregistrer} /> : null}
+    </div>
+  );
+}
+
+function RoleForm({ onClose, onSave }: { onClose: () => void; onSave: (v: { nom: string; identifiant: string; role: string }) => void }) {
+  const [v, setV] = useState({ nom: "", identifiant: "", role: "consultation" });
+  return (
+    <Modal titre="Attribuer un rôle" onClose={onClose} max={460}>
+      <div className="flex flex-col gap-3">
+        <label className="text-[0.78rem] font-semibold">Nom<input value={v.nom} onChange={(e) => setV({ ...v, nom: e.target.value })} className={`mt-1 ${inputCls}`} autoFocus /></label>
+        <label className="text-[0.78rem] font-semibold">ID Discord<input value={v.identifiant} onChange={(e) => setV({ ...v, identifiant: e.target.value })} className={`mt-1 ${inputCls}`} placeholder="pour lier au compte" /></label>
+        <label className="text-[0.78rem] font-semibold">Rôle<select value={v.role} onChange={(e) => setV({ ...v, role: e.target.value })} className={`mt-1 ${inputCls}`}>{ROLES_LICENCE.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></label>
+        <div className="flex justify-end gap-2"><button onClick={onClose} className="rounded-lg border border-border px-3 py-2 text-[0.8rem] font-semibold text-muted hover:text-ink">Annuler</button><button onClick={() => v.nom.trim() && onSave(v)} className="rounded-lg px-3.5 py-2 text-[0.8rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}>Attribuer</button></div>
       </div>
     </Modal>
   );

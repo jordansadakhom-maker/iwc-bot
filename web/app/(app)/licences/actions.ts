@@ -2,9 +2,8 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { getAcces } from "@/lib/queries";
-import { getTypesLicence } from "@/lib/licences";
-import { genererNumeroLocal, PERMISSIONS, RESTRICTIONS } from "@/lib/licences-const";
+import { getTypesLicence, getRoleLicence } from "@/lib/licences";
+import { genererNumeroLocal, PERMISSIONS, RESTRICTIONS, ROLES_LICENCE, type CapLicence } from "@/lib/licences-const";
 
 type Admin = NonNullable<ReturnType<typeof createAdminClient>>;
 export type LicenceResult = { ok: boolean; error?: string; id?: string; numero?: string };
@@ -14,11 +13,11 @@ const RESTR_KEYS = new Set(RESTRICTIONS.map((r) => r.key));
 const s = (v: unknown, max = 300): string | null => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
 const newId = (p: string) => `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
-// Garde d'écriture : personnel habilité (Armurerie / Direction). L'affichage est
-// ouvert en lecture ; toute MUTATION passe par ici (les Server Actions sont des
-// endpoints POST indépendants du gate de la page).
-async function garde(): Promise<LicenceResult | null> {
-  try { const a = await getAcces(); return a.armurier || a.direction ? null : { ok: false, error: "Accès refusé — réservé au personnel habilité." }; }
+// Garde d'écriture par CAPACITÉ (Lot G) : chaque action exige la capacité
+// correspondant au rôle du compte. L'affichage reste ouvert en lecture ; toute
+// MUTATION passe par ici (les Server Actions sont des endpoints POST indépendants).
+async function garde(cap: CapLicence): Promise<LicenceResult | null> {
+  try { const r = await getRoleLicence(); return r.caps[cap] ? null : { ok: false, error: "Action non autorisée pour votre rôle." }; }
   catch { return { ok: false, error: "Accès refusé." }; }
 }
 
@@ -57,7 +56,7 @@ const filtreRestr = (v: unknown): string[] => (Array.isArray(v) ? v.map(String).
 const dateOrNull = (v: unknown): string | null => { const t = s(v); if (!t) return null; const d = new Date(t); return Number.isNaN(d.getTime()) ? null : d.toISOString(); };
 
 export async function creerLicence(data: Record<string, unknown>): Promise<LicenceResult> {
-  const refus = await garde(); if (refus) return refus;
+  const refus = await garde("creer"); if (refus) return refus;
   const admin = createAdminClient(); if (!admin) return { ok: false, error: "Service indisponible." };
   const nom = s(data.nom); if (!nom) return { ok: false, error: "Le nom est obligatoire." };
   const typeCode = s(data.typeCode); if (!typeCode) return { ok: false, error: "Choisis un type de licence." };
@@ -90,7 +89,7 @@ export async function creerLicence(data: Record<string, unknown>): Promise<Licen
 }
 
 export async function majLicence(id: string, patch: Record<string, unknown>): Promise<LicenceResult> {
-  const refus = await garde(); if (refus) return refus;
+  const refus = await garde("creer"); if (refus) return refus;
   const admin = createAdminClient(); if (!admin) return { ok: false, error: "Service indisponible." };
   if (!id) return { ok: false, error: "Licence introuvable." };
   const par = await auteur();
@@ -111,7 +110,7 @@ export async function majLicence(id: string, patch: Record<string, unknown>): Pr
 }
 
 export async function suspendreLicence(id: string, motif: string, fin?: string): Promise<LicenceResult> {
-  const refus = await garde(); if (refus) return refus;
+  const refus = await garde("cycle"); if (refus) return refus;
   const admin = createAdminClient(); if (!admin) return { ok: false, error: "Service indisponible." };
   const par = await auteur();
   const { error } = await admin.from("Licence").update({
@@ -123,7 +122,7 @@ export async function suspendreLicence(id: string, motif: string, fin?: string):
 }
 
 export async function reactiverLicence(id: string): Promise<LicenceResult> {
-  const refus = await garde(); if (refus) return refus;
+  const refus = await garde("cycle"); if (refus) return refus;
   const admin = createAdminClient(); if (!admin) return { ok: false, error: "Service indisponible." };
   const par = await auteur();
   const { error } = await admin.from("Licence").update({
@@ -135,7 +134,7 @@ export async function reactiverLicence(id: string): Promise<LicenceResult> {
 }
 
 export async function revoquerLicence(id: string, motif: string): Promise<LicenceResult> {
-  const refus = await garde(); if (refus) return refus;
+  const refus = await garde("revoquer"); if (refus) return refus;
   const admin = createAdminClient(); if (!admin) return { ok: false, error: "Service indisponible." };
   const par = await auteur();
   const { error } = await admin.from("Licence").update({
@@ -147,7 +146,7 @@ export async function revoquerLicence(id: string, motif: string): Promise<Licenc
 }
 
 export async function renouvelerLicence(id: string, nouvelleExpiration: string): Promise<LicenceResult> {
-  const refus = await garde(); if (refus) return refus;
+  const refus = await garde("cycle"); if (refus) return refus;
   const admin = createAdminClient(); if (!admin) return { ok: false, error: "Service indisponible." };
   const exp = dateOrNull(nouvelleExpiration);
   if (!exp) return { ok: false, error: "Donne la nouvelle date d'expiration." };
@@ -162,7 +161,7 @@ export async function renouvelerLicence(id: string, nouvelleExpiration: string):
 
 // Interrupteur d'intégration Armurerie : activer/couper le blocage des ventes.
 export async function setBlocageVentesArmurerie(actif: boolean): Promise<LicenceResult> {
-  const refus = await garde(); if (refus) return refus;
+  const refus = await garde("gererIntegration"); if (refus) return refus;
   const admin = createAdminClient(); if (!admin) return { ok: false, error: "Service indisponible." };
   const par = await auteur();
   const { error } = await admin.from("LicenceConfig").upsert({ cle: "bloquer_ventes_armurerie", valeur: actif ? "1" : "0", updatedAt: new Date().toISOString(), updatedBy: par }, { onConflict: "cle" });
@@ -172,7 +171,7 @@ export async function setBlocageVentesArmurerie(actif: boolean): Promise<Licence
 }
 
 export async function supprimerLicence(id: string): Promise<LicenceResult> {
-  const refus = await garde(); if (refus) return refus;
+  const refus = await garde("supprimer"); if (refus) return refus;
   const admin = createAdminClient(); if (!admin) return { ok: false, error: "Service indisponible." };
   const par = await auteur();
   // Trace AVANT suppression (le journal survit à la fiche).
@@ -182,4 +181,44 @@ export async function supprimerLicence(id: string): Promise<LicenceResult> {
   if (error) return { ok: false, error: "Suppression impossible." };
   await journal(admin, { licenceId: id, numero, type: "suppression", par });
   return { ok: true, id };
+}
+
+// ── Rôles & accès (Lot G) — attribution de rôles précis (cap « gererRoles ») ──
+const roleValide = (r: unknown) => (ROLES_LICENCE.some((x) => x.key === r) ? String(r) : "consultation");
+
+export async function creerRoleMembre(data: { nom?: string; identifiant?: string; role?: string }): Promise<LicenceResult> {
+  const refus = await garde("gererRoles"); if (refus) return refus;
+  const admin = createAdminClient(); if (!admin) return { ok: false, error: "Service indisponible." };
+  const nom = s(data.nom); if (!nom) return { ok: false, error: "Donne le nom du membre." };
+  const id = newId("lmb"); const par = await auteur();
+  const { error } = await admin.from("LicenceMembre").insert({ id, nom, identifiant: s(data.identifiant, 60), role: roleValide(data.role), actif: true, updatedBy: par, updatedAt: new Date().toISOString() });
+  if (error) return { ok: false, error: "Création impossible (le SQL LicenceMembre a-t-il été lancé ?)." };
+  await journal(admin, { type: "role_cree", par, details: { nom, role: roleValide(data.role) } });
+  return { ok: true, id };
+}
+
+export async function majRoleMembre(id: string, patch: { nom?: string; identifiant?: string; role?: string; actif?: boolean }): Promise<LicenceResult> {
+  const refus = await garde("gererRoles"); if (refus) return refus;
+  const admin = createAdminClient(); if (!admin) return { ok: false, error: "Service indisponible." };
+  if (!id) return { ok: false, error: "Membre introuvable." };
+  const row: Record<string, unknown> = {};
+  if ("nom" in patch) { const n = s(patch.nom); if (!n) return { ok: false, error: "Le nom ne peut pas être vide." }; row.nom = n; }
+  if ("identifiant" in patch) row.identifiant = s(patch.identifiant, 60);
+  if ("role" in patch) row.role = roleValide(patch.role);
+  if ("actif" in patch) row.actif = Boolean(patch.actif);
+  if (!Object.keys(row).length) return { ok: true };
+  const par = await auteur();
+  const { error } = await admin.from("LicenceMembre").update({ ...row, updatedBy: par, updatedAt: new Date().toISOString() }).eq("id", id);
+  if (error) return { ok: false, error: "Enregistrement impossible." };
+  await journal(admin, { type: "role_maj", par, details: row });
+  return { ok: true };
+}
+
+export async function supprimerRoleMembre(id: string): Promise<LicenceResult> {
+  const refus = await garde("gererRoles"); if (refus) return refus;
+  const admin = createAdminClient(); if (!admin) return { ok: false, error: "Service indisponible." };
+  const { error } = await admin.from("LicenceMembre").delete().eq("id", id);
+  if (error) return { ok: false, error: "Suppression impossible." };
+  await journal(admin, { type: "role_supprime", par: await auteur() });
+  return { ok: true };
 }
