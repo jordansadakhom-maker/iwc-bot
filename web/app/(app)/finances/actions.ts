@@ -77,8 +77,11 @@ export async function ajusterArgent(membreId: string, montant: number, raison: s
 // factures) à partir des tables existantes, sans nouvelle table.
 const _normCli = (v: unknown) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ");
 const _rowsCli = async (p: PromiseLike<{ data: unknown }>): Promise<Record<string, unknown>[]> => { try { return ((await p).data as Record<string, unknown>[]) || []; } catch { return []; } };
-export type ClientActe = { id: string; type: "Vente" | "Contrat" | "Rendez-vous" | "Facture"; libelle: string; montant: number | null; statut: string | null; date: string };
+export type ClientActe = { id: string; type: "Vente" | "Contrat" | "Rendez-vous" | "Facture" | "Télégramme"; libelle: string; montant: number | null; statut: string | null; date: string };
 export type DossierClient = { nom: string; totalDepense: number; nbActes: number; actes: ClientActe[] };
+// Fiche 360° : le dossier + la fiche client (statut/blacklist/notes) + RDV
+// généraux & télégrammes. Vue unique, dérivée à la lecture (aucune table neuve).
+export type FicheClient = { nom: string; statut: string | null; notes: string | null; contact: string | null; totalDepense: number; nbActes: number; actes: ClientActe[] };
 
 export async function getClientsListe(): Promise<string[]> {
   const admin = createAdminClient();
@@ -115,4 +118,32 @@ export async function getDossierClient(nom: string): Promise<DossierClient> {
   for (const f of factures) { if (_normCli(f.clientNom) !== cible) continue; actes.push({ id: "f" + f.id, type: "Facture", libelle: String(f.objet || "Facture"), montant: Number(f.montant) || 0, statut: null, date: String(f.createdAt || "") }); }
   actes.sort((a, b) => String(b.date).localeCompare(String(a.date)));
   return { nom: String(nom).trim(), totalDepense: dep, nbActes: actes.length, actes };
+}
+
+// Fiche client 360° : le dossier (getDossierClient) ENRICHI de la fiche
+// ArmurerieClient (statut/blacklist/notes/contact), des RDV généraux (table Rdv)
+// et des télégrammes. Vue unique, deep-linkable via /repertoire/client/[nom].
+export async function getFicheClient(nom: string): Promise<FicheClient> {
+  const base = await getDossierClient(nom);
+  const vide: FicheClient = { nom: base.nom, statut: null, notes: null, contact: null, totalDepense: base.totalDepense, nbActes: base.nbActes, actes: base.actes };
+  const admin = createAdminClient();
+  const cible = _normCli(nom);
+  if (!admin || !cible) return vide;
+  const [clients, rdvsGen, tgWeb] = await Promise.all([
+    _rowsCli(admin.from("ArmurerieClient").select("nom,statut,notes,telegramme").limit(500)),
+    _rowsCli(admin.from("Rdv").select("id,nomRP,type,creneau,statut,createdAt").order("createdAt", { ascending: false }).limit(300)),
+    _rowsCli(admin.from("TelegrammeWeb").select("id,nom,message,statut,createdAt").order("createdAt", { ascending: false }).limit(300)),
+  ]);
+  const meta = clients.find((c) => _normCli(c.nom) === cible);
+  const actes: ClientActe[] = [...base.actes];
+  for (const r of rdvsGen) { if (_normCli(r.nomRP) !== cible) continue; actes.push({ id: "gr" + r.id, type: "Rendez-vous", libelle: String(r.type || "Rendez-vous"), montant: null, statut: r.statut ? String(r.statut) : null, date: String(r.creneau || r.createdAt || "") }); }
+  for (const t of tgWeb) { if (_normCli(t.nom) !== cible) continue; actes.push({ id: "tg" + t.id, type: "Télégramme", libelle: String(t.message || "Télégramme").slice(0, 90), montant: null, statut: t.statut ? String(t.statut) : null, date: String(t.createdAt || "") }); }
+  actes.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  return {
+    nom: base.nom,
+    statut: meta ? String(meta.statut || "actif") : null,
+    notes: meta && meta.notes ? String(meta.notes) : null,
+    contact: meta && meta.telegramme ? String(meta.telegramme) : null,
+    totalDepense: base.totalDepense, nbActes: actes.length, actes,
+  };
 }

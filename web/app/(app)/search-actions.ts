@@ -27,8 +27,8 @@ export async function rechercheGlobale(q: string): Promise<ResultatRecherche[]> 
   const out: ResultatRecherche[] = [];
   membres.forEach((m) => out.push({ type: "Membre", label: s(m.nomIC) || "—", sous: s(m.grade), href: "/membres" }));
   ops.forEach((o) => out.push({ type: "Opération", label: s(o.cible) || "—", sous: s(o.phase), href: "/operations" }));
-  clients.forEach((c) => out.push({ type: "Client", label: s(c.nom) || "—", sous: s(c.telegramme), href: "/armurerie" }));
-  contrats.forEach((c) => out.push({ type: "Contrat", label: s(c.clientNom) || "—", sous: [s(c.arme), s(c.statut)].filter(Boolean).join(" · "), href: "/armurerie" }));
+  clients.forEach((c) => { const n = s(c.nom); out.push({ type: "Client", label: n || "—", sous: s(c.telegramme), href: n ? `/repertoire/client/${encodeURIComponent(n)}` : "/armurerie" }); });
+  contrats.forEach((c) => { const n = s(c.clientNom); out.push({ type: "Contrat", label: n || "—", sous: [s(c.arme), s(c.statut)].filter(Boolean).join(" · "), href: n ? `/repertoire/client/${encodeURIComponent(n)}` : "/armurerie" }); });
   armes.forEach((a) => out.push({ type: "Arme", label: s(a.serie) || "—", sous: s(a.type), href: "/inventaire" }));
   return out;
 }
