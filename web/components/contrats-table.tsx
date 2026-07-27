@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileText, Plus, Loader2, Trash2, Users, CalendarClock, Landmark, Check } from "lucide-react";
+import { FileText, Plus, Loader2, Trash2, Users, CalendarClock, Landmark, Check, Sparkles } from "lucide-react";
 import type { ContratDetail } from "@/lib/queries";
+import type { Suggestion } from "@/lib/attribution";
 import { Badge } from "@/components/ui";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
-import { creerContrat, majContrat, supprimerContrat, majSuiviContrat, honorerContrat } from "@/app/(app)/operations/actions";
+import { creerContrat, majContrat, supprimerContrat, majSuiviContrat, honorerContrat, suggererAgents } from "@/app/(app)/operations/actions";
 import { cents } from "@/lib/format";
 
 const dateFR = (s: string | null) => { if (!s) return null; try { return new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" }); } catch { return null; } };
@@ -261,6 +262,16 @@ function EditModal({ contrat, onClose, router }: { contrat: ContratDetail; onClo
   const [honorer, setHonorer] = useState(false);
   const [montant, setMontant] = useState(String((contrat.remuneration || "").replace(/[^\d]/g, "") || ""));
   const dejaHonore = !!contrat.remuVerseAuCoffre;
+  // Attribution assistée (indicative) : agents recommandés pour staffer le contrat.
+  const [suggBusy, setSuggBusy] = useState(false);
+  const [suggList, setSuggList] = useState<Suggestion[] | null>(null);
+
+  async function suggerer() {
+    setSuggBusy(true);
+    const r = await suggererAgents(pole === "illegal" ? "illegal" : "legal", []);
+    setSuggBusy(false);
+    setSuggList(r.ok ? r.suggestions.slice(0, 4) : []);
+  }
 
   async function push(patch: Record<string, string>, key: string) {
     setBusy(key);
@@ -327,6 +338,36 @@ function EditModal({ contrat, onClose, router }: { contrat: ContratDetail; onClo
           </div>
         ) : null}
         {dejaHonore ? <p className="flex items-center gap-1.5 text-[0.78rem]" style={{ color: "var(--good)" }}><Check className="h-3.5 w-3.5" /> Contrat honoré — {cents(contrat.remuVerseAuCoffre || 0)}$ au coffre.</p> : null}
+      </div>
+
+      {/* Attribution assistée (indicative) */}
+      <div className="mb-3 flex flex-col gap-2 border-t border-border pt-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[0.72rem] uppercase tracking-[0.06em] text-faint">Agents recommandés</span>
+          <button onClick={suggerer} disabled={suggBusy} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[0.74rem] font-semibold transition disabled:opacity-50" style={{ color: "var(--accent)", borderColor: "color-mix(in srgb,var(--accent) 45%,var(--border))" }}>
+            {suggBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} Suggérer
+          </button>
+        </div>
+        {suggList ? (
+          suggList.length === 0 ? (
+            <p className="text-[0.76rem] italic text-faint">Aucun agent disponible à recommander.</p>
+          ) : (
+            <>
+              <div className="flex flex-col gap-1.5">
+                {suggList.map((s, i) => (
+                  <div key={s.id} className="flex items-center gap-2.5 rounded-[9px] border border-border bg-surface-2 px-2.5 py-1.5">
+                    {i === 0 ? <Badge tone="accent">Top</Badge> : <span className="w-1" />}
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[0.84rem] font-semibold">{s.nom}{s.grade ? <span className="text-[0.7rem] text-faint"> · {s.grade}</span> : null}</div>
+                      <div className="truncate text-[0.7rem] text-muted">{s.raisons.join(" · ")}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[0.7rem] italic text-faint">Recommandation indicative (disponibilité · charge · pôle) — assigne-les via l&apos;opération liée à ce contrat.</p>
+            </>
+          )
+        ) : null}
       </div>
 
       <div className="mb-2 border-t border-border pt-3 text-[0.72rem] uppercase tracking-[0.06em] text-faint">Modifier</div>
