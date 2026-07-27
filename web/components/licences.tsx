@@ -11,6 +11,7 @@ import { creerLicence, majLicence, suspendreLicence, reactiverLicence, revoquerL
 
 type Flash = { t: "ok" | "bad"; m: string } | null;
 const dateFR = (iso: string | null) => { if (!iso) return "—"; try { return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(iso)); } catch { return "—"; } };
+const escapeHtml = (v: string) => v.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] || c));
 const inputCls = "w-full rounded-lg border border-border bg-surface px-3 py-2 text-[0.85rem] outline-none focus:border-accent";
 
 function StatutBadge({ l }: { l: Licence }) {
@@ -315,6 +316,44 @@ function LicenceFiche({ l, onClose, onEdit, onDone, busy }: { l: Licence; onClos
     setLocal(true); const r = await fn(); setLocal(false); if (onDone(r, msg)) setAction(null);
   }
 
+  // Lot H — certificat officiel imprimable / PDF (avec QR code de vérification).
+  async function certificat() {
+    try {
+      const QRCode = (await import("qrcode")).default;
+      const qr = await QRCode.toDataURL(`IWC-LICENCE:${l.numero}`, { margin: 1, width: 220 });
+      const li = (arr: string[]) => (arr.length ? arr.map((x) => `<li>${x}</li>`).join("") : `<li class="muted">Aucune</li>`);
+      const perms = PERMISSIONS.filter((p) => l.permissions[p.key]).map((p) => escapeHtml(p.label));
+      const restr = l.restrictions.map((k) => escapeHtml(restrLabel(k)));
+      const dd = statutDef(statutEffectif(l));
+      const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Certificat ${escapeHtml(l.numero)}</title><style>
+*{box-sizing:border-box}body{font-family:Georgia,'Times New Roman',serif;margin:0;color:#2a2118;background:#e9e0cd}
+.page{width:210mm;min-height:296mm;margin:0 auto;padding:16mm;background:#f7f1e3}
+.frame{border:3px double #7a5a2a;padding:12mm;position:relative;min-height:262mm}
+.head{text-align:center;border-bottom:2px solid #7a5a2a;padding-bottom:10px;margin-bottom:16px}
+.org{letter-spacing:3px;font-size:11px;text-transform:uppercase;color:#7a5a2a}
+h1{font-size:23px;margin:8px 0 4px}.num{font-family:'Courier New',monospace;font-size:15px;letter-spacing:1px;background:#efe3c8;border:1px solid #b89a5a;display:inline-block;padding:4px 12px;border-radius:4px}
+.statut{display:inline-block;margin-left:8px;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:bold;border:1px solid ${dd.tone};color:${dd.tone}}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:5px 18px;margin:16px 0;font-size:13px}.grid b{color:#6a5230}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:8px}
+h3{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#7a5a2a;border-bottom:1px solid #cbb27a;padding-bottom:3px}
+ul{margin:6px 0;padding-left:18px;font-size:12.5px;line-height:1.5}.muted{color:#998;font-style:italic;list-style:none;margin-left:-18px}
+.foot{display:flex;align-items:flex-end;justify-content:space-between;margin-top:34px}
+.sign{font-size:12px}.line{border-top:1px solid #7a5a2a;width:190px;margin-top:30px;padding-top:4px}
+.cachet{width:104px;height:104px;border:2px solid #a4322b;border-radius:50%;color:#a4322b;display:flex;align-items:center;justify-content:center;text-align:center;font-size:9px;letter-spacing:1px;transform:rotate(-11deg);opacity:.82;text-transform:uppercase;line-height:1.4}
+.qr{text-align:center;font-size:9px;color:#7a5a2a}.qr img{width:104px;height:104px}
+@media print{body{background:#fff}.page{margin:0;padding:0}}
+</style></head><body><div class="page"><div class="frame">
+<div class="head"><div class="org">Iron Wolf Company — Registre officiel des licences</div><h1>${escapeHtml(l.typeNom || l.typeCode)}</h1><span class="num">${escapeHtml(l.numero)}</span><span class="statut">${dd.label}</span></div>
+<div class="grid"><div><b>Nom :</b> ${escapeHtml(l.nom)}</div><div><b>Prénom :</b> ${escapeHtml(l.prenom || "—")}</div><div><b>Métier :</b> ${escapeHtml(l.metier || "—")}</div><div><b>Grade :</b> ${escapeHtml(l.grade || "—")}</div><div><b>Organisation :</b> ${escapeHtml(l.organisation || "—")}</div><div><b>Délivrée par :</b> ${escapeHtml(l.delivrePar || "—")}</div><div><b>Délivrance :</b> ${dateFR(l.dateDelivrance)}</div><div><b>Expiration :</b> ${dateFR(l.dateExpiration)}</div></div>
+<div class="cols"><div><h3>Autorisations</h3><ul>${li(perms)}</ul></div><div><h3>Restrictions</h3><ul>${li(restr)}</ul></div></div>
+<div class="foot"><div class="sign"><div>Signature de l'autorité</div><div class="line">${escapeHtml(l.delivrePar || "—")}</div></div><div class="cachet">Iron Wolf<br/>Company<br/>Officiel</div><div class="qr"><img src="${qr}" alt="QR"/><div>Vérification<br/>${escapeHtml(l.numero)}</div></div></div>
+</div></div><script>window.onload=function(){setTimeout(function(){window.print()},300)}</script></body></html>`;
+      const w = window.open("", "_blank", "width=920,height=1180");
+      if (!w) return;
+      w.document.open(); w.document.write(html); w.document.close();
+    } catch { /* génération impossible — ignore */ }
+  }
+
   return (
     <Modal titre={`Licence ${l.numero}`} onClose={onClose} max={720}>
       <div className="flex flex-col gap-4">
@@ -369,6 +408,7 @@ function LicenceFiche({ l, onClose, onEdit, onDone, busy }: { l: Licence; onClos
           </div>
         ) : (
           <div className="flex flex-wrap gap-2 border-t border-border pt-3">
+            <button onClick={certificat} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-[0.78rem] font-semibold hover:border-accent"><FileText className="h-3.5 w-3.5" /> Certificat</button>
             <button onClick={onEdit} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-[0.78rem] font-semibold hover:border-accent"><Pencil className="h-3.5 w-3.5" /> Modifier</button>
             <button onClick={() => { setDate(l.dateExpiration ? l.dateExpiration.slice(0, 10) : ""); setAction("renouveler"); }} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-[0.78rem] font-semibold hover:border-good"><RefreshCw className="h-3.5 w-3.5" /> Renouveler</button>
             {eff === "suspendue" ? (
