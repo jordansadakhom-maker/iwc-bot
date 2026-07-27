@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { ymdParis } from "@/lib/dispensaire-dates";
 import { estOuverte, statutsDe } from "@/lib/dispensaire-facturation-const";
 
 // ── Statistiques du Dispensaire (agrégats pour la page graphiques) ───────────
@@ -16,8 +17,6 @@ export type StatsData = {
   absences: { justifiees: number; injustifiees: number };
 };
 
-const PARIS = "Europe/Paris";
-const ymdParis = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: PARIS, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
 const num = (v: unknown) => Number(v) || 0;
 async function q<T>(p: PromiseLike<{ data: T | null }>): Promise<T | null> { try { return (await p).data; } catch { return null; } }
 

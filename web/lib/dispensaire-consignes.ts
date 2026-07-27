@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { ymdParis } from "@/lib/dispensaire-dates";
 
 // ── Consignes du jour ────────────────────────────────────────────────────────
 // Une consigne par journée (clé = date Paris). Chaque enregistrement est journalisé
@@ -19,7 +20,8 @@ export type ConsigneData = {
 };
 
 const s = (v: unknown) => (v == null ? null : String(v));
-export const jourParis = (d = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+// Conservé pour compatibilité (importé par consignes-actions) → délègue au service unique.
+export const jourParis = (d: string | Date = new Date()) => ymdParis(d);
 
 export async function getConsigneDuJour(): Promise<ConsigneData> {
   const jour = jourParis();

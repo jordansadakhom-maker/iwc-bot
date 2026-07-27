@@ -2,6 +2,7 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAcces } from "@/lib/queries";
+import { ymdParis, dowParis, lundiCourant } from "@/lib/dispensaire-dates";
 
 // ── Pointage du Dispensaire (prise de service) ──────────────────────────────
 export type PointSession = {
@@ -22,24 +23,6 @@ export type PointData = {
   historique: PointSession[];                                        // dernières services clôturés
 };
 
-const PARIS = "Europe/Paris";
-const DOW: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
-
-// Date « civile » à Paris (YYYY-MM-DD) + jour de semaine (0=Lun) pour un instant donné.
-function jourParis(iso: string): { ymd: string; dow: number } {
-  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: PARIS, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(new Date(iso));
-  const g = (t: string) => parts.find((p) => p.type === t)?.value || "";
-  return { ymd: `${g("year")}-${g("month")}-${g("day")}`, dow: DOW[g("weekday")] ?? 0 };
-}
-
-// Lundi (YYYY-MM-DD, date civile Paris) de la semaine contenant `nowIso`.
-function lundiDeLaSemaine(nowIso: string): string {
-  const { ymd, dow } = jourParis(nowIso);
-  const base = new Date(ymd + "T12:00:00Z");         // midi UTC : à l'abri des bascules d'heure
-  base.setUTCDate(base.getUTCDate() - dow);
-  return base.toISOString().slice(0, 10);
-}
-
 function toSession(r: Record<string, unknown>): PointSession {
   return {
     id: String(r.id), salarieId: r.salarieId == null ? null : String(r.salarieId), nom: String(r.nom || "Salarié"),
@@ -59,8 +42,8 @@ export async function getPointage(): Promise<PointData> {
   try { await getAcces(); } catch { /* accès permissif par défaut */ }
 
   const nowIso = new Date().toISOString();
-  const monday = lundiDeLaSemaine(nowIso);
-  const todayYmd = jourParis(nowIso).ymd;
+  const monday = lundiCourant(nowIso);
+  const todayYmd = ymdParis(nowIso);
   const moisPrefix = todayYmd.slice(0, 7);
 
   // Roster (salariés actifs) pour le sélecteur de prise de service.
@@ -84,7 +67,7 @@ export async function getPointage(): Promise<PointData> {
   const joursSet = new Set<string>();
   const stats: PointStats = { ...STATS0 };
   for (const s of closes) {
-    const { ymd, dow } = jourParis(s.debut);
+    const ymd = ymdParis(s.debut), dow = dowParis(s.debut);
     const min = s.dureeMin || 0;
     stats.totalMin += min;
     joursSet.add(ymd);

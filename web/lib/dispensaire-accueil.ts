@@ -2,6 +2,7 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { peutFacturer } from "@/lib/dispensaire-roles";
+import { ymdParis } from "@/lib/dispensaire-dates";
 import { estOuverte, statutsDe } from "@/lib/dispensaire-facturation-const";
 
 // ── Données consolidées du tableau de bord du Dispensaire ────────────────────
@@ -24,8 +25,6 @@ export type AccueilData = {
   activites: Activite[];
 };
 
-const PARIS = "Europe/Paris";
-const ymdParis = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: PARIS, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
 const num = (v: unknown) => Number(v) || 0;
 const str = (v: unknown) => (v == null ? null : String(v));
 async function q<T>(p: PromiseLike<{ data: T | null }>): Promise<T | null> { try { return (await p).data; } catch { return null; } }
