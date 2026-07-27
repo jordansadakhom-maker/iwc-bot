@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "react";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ymdParis } from "@/lib/dispensaire-dates";
 
@@ -28,7 +29,7 @@ function urgenceDe(stock: number, jours: number | null): Urgence {
   return "surveiller";
 }
 
-export async function getPrevisions(): Promise<PrevisionData> {
+export const getPrevisions = cache(async (): Promise<PrevisionData> => {
   const vide: PrevisionData = { pret: false, fenetreJours: FENETRE, items: [] };
   const admin = createAdminClient();
   if (!admin) return vide;
@@ -75,4 +76,4 @@ export async function getPrevisions(): Promise<PrevisionData> {
   const ordre: Record<Urgence, number> = { rupture: 0, critique: 1, bientot: 2, surveiller: 3 };
   items.sort((a, b) => ordre[a.urgence] - ordre[b.urgence] || (a.joursRestants ?? -1) - (b.joursRestants ?? -1));
   return { pret: true, fenetreJours: FENETRE, items: items.slice(0, 25) };
-}
+});

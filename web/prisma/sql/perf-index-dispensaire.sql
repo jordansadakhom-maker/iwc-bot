@@ -59,3 +59,33 @@ BEGIN
     EXECUTE 'CREATE INDEX IF NOT EXISTS idx_disppointage_ouvert ON public."DispensairePointage" (fin) WHERE fin IS NULL';
   END IF;
 END $$;
+
+-- ── Index COMPOSITES (filtre + tri en une passe) ────────────────────────────
+--  Chaque index n'est créé que si TOUTES ses colonnes existent (même tolérance).
+--  Ils servent les combinaisons réellement demandées par les grosses listes :
+--  factures impayées triées par échéance, frais/mouvements listés par date.
+DO $$
+DECLARE
+  comps text[][] := ARRAY[
+    -- [ table , liste de colonnes SQL , nom de l'index , colonnes à vérifier (séparées par des virgules) ]
+    ARRAY['DispensaireFacture',        '"statut", "dateEcheance"',   'idx_dispfacture_statut_echeance', 'statut,dateEcheance'],
+    ARRAY['DispensaireFrais',          '"createdAt" DESC',           'idx_dispfrais_createdat',         'createdAt'],
+    ARRAY['DispensaireStockMouvement', '"stockId", "createdAt" DESC','idx_dispstockmvt_item_date',      'stockId,createdAt']
+  ];
+  c text[];
+  ok boolean;
+  col text;
+BEGIN
+  FOREACH c SLICE 1 IN ARRAY comps LOOP
+    ok := true;
+    FOREACH col IN ARRAY string_to_array(c[4], ',') LOOP
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = c[1] AND column_name = col
+      ) THEN ok := false; END IF;
+    END LOOP;
+    IF ok THEN
+      EXECUTE format('CREATE INDEX IF NOT EXISTS %I ON public.%I (%s)', c[3], c[1], c[2]);
+    END IF;
+  END LOOP;
+END $$;
