@@ -8,6 +8,7 @@
  * portent l'identité du membre connecté (compatible sécurité RLS).
  */
 import "server-only";
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -115,7 +116,7 @@ export async function isBaseConnected(): Promise<boolean> {
 }
 
 // ID Discord du membre connecté (pour les ponts avec le bot, ex. la carte).
-export async function getSessionDiscordId(): Promise<string | null> {
+export const getSessionDiscordId = cache(async (): Promise<string | null> => {
   if (!authConfigured()) return null;
   try {
     const supabase = await createClient();
@@ -125,10 +126,10 @@ export async function getSessionDiscordId(): Promise<string | null> {
     const discordId = (meta.provider_id || meta.sub || "") as string;
     return discordId ? String(discordId) : null;
   } catch { return null; }
-}
+});
 
 // Profil du membre connecté (compte Discord + fiche Membre si elle existe).
-export async function getSessionProfile(): Promise<Profil | null> {
+export const getSessionProfile = cache(async (): Promise<Profil | null> => {
   if (!authConfigured()) return null;
   try {
     const supabase = await createClient();
@@ -152,7 +153,7 @@ export async function getSessionProfile(): Promise<Profil | null> {
   } catch {
     return null;
   }
-}
+});
 
 export async function getDashboard(): Promise<DashData> {
   if (!dataConfigured()) return EMPTY;
@@ -1340,7 +1341,7 @@ async function _dansRosterArmurerie(admin: NonNullable<ReturnType<typeof createA
   } catch { return false; }
 }
 
-export async function getAcces(): Promise<Acces> {
+export const getAcces = cache(async (): Promise<Acces> => {
   const ouvert: Acces = { direction: true, officier: true, medecin: true, peutRenseignement: true, peutMedical: true, armurier: true };
   // Aucune session = aucun accès. C'est le seul cas « fermé » du principe
   // anti-verrouillage : une requête non authentifiée ne doit jamais obtenir de
@@ -1376,7 +1377,7 @@ export async function getAcces(): Promise<Acces> {
     if (!grade) return { direction: true, officier: true, medecin: true, peutRenseignement: true, peutMedical: true, armurier };
     return { direction, officier, medecin, peutRenseignement: officier, peutMedical: direction || medecin, armurier };
   } catch { return ouvert; }
-}
+});
 
 // ── Carte interactive (lieux + itinéraires du bot ET du site) ────
 // `source` distingue l'origine : « bot » (salon Discord, réconcilié — lecture
