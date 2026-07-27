@@ -252,6 +252,30 @@ export async function terminerAvecFacture(pecId: string, input: { lignes: Consul
   return res;
 }
 
+// Encaissement depuis le tableau des prises en charge : marque la facture liée
+// comme réglée (boucle le parcours sans quitter la vue). Droit facturation.
+export async function encaisserPriseEnCharge(pecId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!(await peutFacturer())) return { ok: false, error: "Réservé aux chefs (facturation)." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  const pec = await lireAvant("DispensairePriseEnCharge", pecId);
+  if (!pec) return { ok: false, error: "Prise en charge introuvable." };
+  const factureId = pec.factureId ? String(pec.factureId) : "";
+  if (!factureId) return { ok: false, error: "Aucune facture liée à cette prise en charge." };
+  const fac = await lireAvant("DispensaireFacture", factureId);
+  if (!fac) return { ok: false, error: "Facture introuvable." };
+  const statuts = statutsDe(fac);
+  if (statuts.includes("payee")) return { ok: true };   // déjà réglée (idempotent)
+  const arr = [...new Set([...statuts.filter((x) => x !== "non_payee"), "payee"])];
+  const now = new Date().toISOString();
+  const par = await qui();
+  const err = await ecrireFacture(admin, "update", { statuts: serialiserStatuts(arr), statut: statutRepresentatif(arr), datePaiement: now, payePar: par, updatedAt: now }, factureId);
+  if (err) return { ok: false, error: "Encaissement impossible." };
+  await logFacture(admin, factureId, "Paiement", "Encaissé depuis la prise en charge", par);
+  await emettreEvenementDispensaire({ aggregate: "prise_en_charge", type: "prise_en_charge.encaisse", cibleId: pecId, cibleLibelle: String(pec.patient ?? ""), avant: { statut: statutRepresentatif(statuts) }, apres: { statut: "payee", factureId } });
+  return { ok: true };
+}
+
 // ── DOSSIER PATIENT (dérivé à la lecture, sans nouvelle table) ────────────────
 // Reconstruit tout l'historique d'un patient à partir des tables existantes,
 // rapproché par nom normalisé. Donne une vue 360° : actes + total dû / réglé.

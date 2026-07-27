@@ -2,10 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { HeartPulse, Loader2, Play, Check, X, UserPlus, Stethoscope, Clock, Plus } from "lucide-react";
+import { HeartPulse, Loader2, Play, Check, X, UserPlus, Stethoscope, Clock, Plus, BadgeDollarSign } from "lucide-react";
 import { Flash, inputCls } from "@/components/edit-ui";
 import { ETAT_PEC_LABEL, type PrisesEnChargeData, type PriseEnCharge } from "@/lib/dispensaire-prises-en-charge-const";
 import { admettre, attribuerMedecin, demarrerSoin, annulerPriseEnCharge } from "@/app/dispensaire/prises-en-charge/actions";
+import { encaisserPriseEnCharge } from "@/app/dispensaire/factures/actions";
+import { money } from "@/lib/dispensaire-facturation-const";
 import { DispensairePecCloture } from "@/components/dispensaire-pec-cloture";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
@@ -104,8 +106,12 @@ export function DispensairePrisesEnCharge({ data }: { data: PrisesEnChargeData }
           <h3 className="mb-2 flex items-center gap-2 text-[0.9rem] font-semibold"><Clock className="h-4 w-4 text-faint" /> Terminées récemment</h3>
           <div className="flex flex-col divide-y divide-border/70">
             {data.recentes.map((p) => (
-              <div key={p.id} className="flex items-center gap-2 py-1.5 text-[0.82rem]">
+              <div key={p.id} className="flex flex-wrap items-center gap-2 py-1.5 text-[0.82rem]">
                 <span className="min-w-0 flex-1 truncate"><b className="font-semibold">{p.patient}</b>{p.motif ? <span className="text-faint"> · {p.motif}</span> : ""}{p.medecin ? <span className="text-faint"> · {p.medecin}</span> : ""}</span>
+                {p.facture ? <span className="shrink-0 font-num text-[0.74rem]" style={{ color: p.facture.payee ? "var(--good)" : "var(--oxblood)" }}>{money(p.facture.montant)} · {p.facture.payee ? "réglé" : "impayé"}</span> : null}
+                {p.facture && !p.facture.payee && data.canFacturer ? (
+                  <button onClick={() => faire(p.id, () => encaisserPriseEnCharge(p.id), "Facture encaissée.")} disabled={actif === p.id} className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border px-2 py-1 text-[0.7rem] font-semibold text-muted transition hover:text-ink disabled:opacity-50" style={{ borderColor: "color-mix(in srgb,var(--good) 40%,var(--border))" }}><BadgeDollarSign className="h-3 w-3" /> Encaisser</button>
+                ) : null}
                 <span className="shrink-0 rounded-full px-2 py-0.5 text-[0.66rem] font-bold" style={{ color: ETAT_TON[p.etat], background: `color-mix(in srgb,${ETAT_TON[p.etat]} 14%,transparent)` }}>{ETAT_PEC_LABEL[p.etat]}</span>
                 <span className="shrink-0 font-num text-[0.72rem] text-faint">{heureFR(p.finAt || p.admisAt)}</span>
               </div>
