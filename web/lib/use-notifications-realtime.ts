@@ -38,3 +38,57 @@ export function useNotificationsRealtime(onInsert: (n: NotifRealtime) => void): 
   ref.current = onInsert;
   useEffect(() => souscrireNotifications((n) => ref.current(n)), []);
 }
+
+// ── Messagerie temps réel ────────────────────────────────────────────────────
+// Mêmes garanties de tolérance. Requiert conversations-realtime.sql (publication
+// + RLS lecture) ; sinon no-op silencieux (le rechargement à l'ouverture reste).
+
+// Nouveaux messages d'UN fil (filtre côté serveur sur conversationId).
+export function souscrireMessages(conversationId: string, onEvent: () => void): () => void {
+  if (!conversationId) return () => {};
+  try {
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`fil-${conversationId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "Message", filter: `conversationId=eq.${conversationId}` },
+        () => { try { onEvent(); } catch { /* ignore */ } },
+      )
+      .subscribe();
+    return () => { try { supabase.removeChannel(channel); } catch { /* ignore */ } };
+  } catch {
+    return () => {};
+  }
+}
+
+// Toute évolution de la liste des conversations (création, nouveau dernier message).
+export function souscrireConversations(onEvent: () => void): () => void {
+  try {
+    const supabase = createClient();
+    const channel = supabase
+      .channel("liste-conversations")
+      .on("postgres_changes", { event: "*", schema: "public", table: "Conversation" }, () => { try { onEvent(); } catch { /* ignore */ } })
+      .subscribe();
+    return () => { try { supabase.removeChannel(channel); } catch { /* ignore */ } };
+  } catch {
+    return () => {};
+  }
+}
+
+// Hook fil ouvert : (re)souscrit quand la conversation sélectionnée change.
+export function useMessagesRealtime(conversationId: string | null, onEvent: () => void): void {
+  const ref = useRef(onEvent);
+  ref.current = onEvent;
+  useEffect(() => {
+    if (!conversationId) return;
+    return souscrireMessages(conversationId, () => ref.current());
+  }, [conversationId]);
+}
+
+// Hook liste des conversations : souscrit une fois.
+export function useConversationsRealtime(onEvent: () => void): void {
+  const ref = useRef(onEvent);
+  ref.current = onEvent;
+  useEffect(() => souscrireConversations(() => ref.current()), []);
+}
