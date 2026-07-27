@@ -1,7 +1,7 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getAcces } from "@/lib/queries";
+import { estAutorise, peutFacturer } from "@/lib/dispensaire-roles";
 
 // Recherche globale instantanée dans tous les registres du dispensaire.
 export type ResultItem = { type: string; label: string; sub: string | null; href: string };
@@ -12,11 +12,13 @@ const clean = (v: unknown) => { const t = String(v ?? "").replace(/[,()*%]/g, " 
 export async function rechercher(terme: string): Promise<ResultItem[]> {
   const s = clean(terme);
   if (s.length < 2) return [];
+  // Recherche réservée au personnel du dispensaire (liste blanche en autonome).
+  if (!(await estAutorise())) return [];
   const admin = createAdminClient();
   if (!admin) return [];
   const like = `*${s}*`;
-  let habilite = false;
-  try { habilite = (await getAcces()).peutMedical; } catch { habilite = true; }
+  // L'inclusion des factures (donnée financière) exige le droit « factures ».
+  const habilite = await peutFacturer();
 
   const [sal, stock, matieres, coffres, rapports, ventes, certs, contacts, factures] = await Promise.all([
     q<Record<string, unknown>[]>(admin.from("DispensaireSalarie").select("nom,grade").or(`nom.ilike.${like},grade.ilike.${like}`).limit(6)),

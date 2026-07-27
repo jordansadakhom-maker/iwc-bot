@@ -2,10 +2,12 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
+import { estAutorise } from "@/lib/dispensaire-roles";
 
-// Pointage — outil de service partagé (ouvert à toute personne connectée).
+// Pointage — outil de service partagé (ouvert à tout le personnel du dispensaire).
 export type PointResult = { ok: boolean; error?: string; id?: string };
 
+const REFUS = "Accès refusé.";
 const s = (v: unknown, max = 200) => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
 function newId() { return `dp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
 async function qui() { try { return (await getSessionProfile())?.nom || "Équipe"; } catch { return "Équipe"; } }
@@ -13,6 +15,7 @@ async function qui() { try { return (await getSessionProfile())?.nom || "Équipe
 // Prendre le service : ouvre une ligne (début = maintenant). Bloque si le salarié
 // a déjà un service ouvert.
 export async function prendreService(data: { salarieId?: string | null; nom: string }): Promise<PointResult> {
+  if (!(await estAutorise())) return { ok: false, error: REFUS };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const nom = s(data.nom);
@@ -33,6 +36,7 @@ export async function prendreService(data: { salarieId?: string | null; nom: str
 
 // Terminer le service : renseigne la fin et calcule la durée (minutes).
 export async function terminerService(id: string): Promise<PointResult> {
+  if (!(await estAutorise())) return { ok: false, error: REFUS };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   if (!id) return { ok: false, error: "Service introuvable." };
@@ -48,6 +52,7 @@ export async function terminerService(id: string): Promise<PointResult> {
 
 // Correction : supprimer une ligne de pointage.
 export async function supprimerPointage(id: string): Promise<PointResult> {
+  if (!(await estAutorise())) return { ok: false, error: REFUS };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const { error } = await admin.from("DispensairePointage").delete().eq("id", id);

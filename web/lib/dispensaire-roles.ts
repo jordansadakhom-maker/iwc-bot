@@ -114,6 +114,16 @@ export async function getRoleDispensaire(): Promise<RoleContext> {
   return { connecte: true, identifiant: discordId || null, nom, role, perms, source: "fallback", membreId: null, autorise: true };
 }
 
+// Garde-fou minimal PARTAGÉ : le compte connecté a-t-il le droit d'accéder au
+// dispensaire ? (liste blanche stricte en mode autonome ; tout membre IWC en mode
+// intégré — comportement historique). fail-closed : au moindre doute, refusé.
+// Utilisé par les actions « ouvertes à tout le personnel » (ventes, certificats,
+// pointage, rapports, soins FDO, dépôt de frais, recherche) pour fermer le trou
+// où n'importe quel compte connecté hors liste blanche pouvait les appeler.
+export async function estAutorise(): Promise<boolean> {
+  try { return !!(await getRoleDispensaire()).autorise; } catch { return false; }
+}
+
 // Garde-fou serveur : le compte connecté peut-il MODIFIER le stock & les coffres ?
 // Vrai si son grade porte le droit `stock` (ou `admin`). Utilisé par toutes les
 // actions de mutation stock/coffres/matières — la lecture reste ouverte à qui a

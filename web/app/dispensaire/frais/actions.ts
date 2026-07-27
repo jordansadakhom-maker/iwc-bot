@@ -1,19 +1,22 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getAcces, getSessionProfile } from "@/lib/queries";
+import { getSessionProfile } from "@/lib/queries";
+import { estAutorise, peutFacturer } from "@/lib/dispensaire-roles";
 
-// Notes de frais — dépôt ouvert à tous ; validation/virement réservés aux chefs.
+// Notes de frais — dépôt ouvert au personnel ; validation/virement réservés aux
+// chefs (droit « factures »). Gardes fail-closed : au moindre doute, refusé.
 export type FraisResult = { ok: boolean; error?: string; id?: string };
 
 const STATUTS = ["en_attente", "valide", "refuse", "vire"];
 const s = (v: unknown, max = 300) => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
 const n = (v: unknown) => Math.max(0, Math.round(Number(v) || 0));
 function newId() { return `dfr-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
-async function peutValider() { try { return (await getAcces()).peutMedical; } catch { return true; } }
+async function peutValider() { return peutFacturer(); }
 async function qui() { try { return (await getSessionProfile())?.nom || "Équipe"; } catch { return "Équipe"; } }
 
 export async function creerFrais(data: Record<string, unknown>): Promise<FraisResult> {
+  if (!(await estAutorise())) return { ok: false, error: "Accès refusé." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const objet = s(data.objet);

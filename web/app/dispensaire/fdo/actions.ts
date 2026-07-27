@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
+import { estAutorise } from "@/lib/dispensaire-roles";
 import { FDO_PRIX } from "@/lib/dispensaire-facturation-const";
 
 // Soins FDO — soins prodigués aux forces de l'ordre (par bureau).
@@ -12,6 +13,7 @@ const STATUTS = ["facture", "regle"];
 type Champ = "bureau" | "agent" | "soin" | "note";
 const CHAMPS: Champ[] = ["bureau", "agent", "soin", "note"];
 
+const REFUS = "Accès refusé.";
 const s = (v: unknown, max = 300) => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
 function newId() { return `dfo-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
 async function qui() { try { return (await getSessionProfile())?.nom || "Équipe"; } catch { return "Équipe"; } }
@@ -26,6 +28,7 @@ function nettoyer(data: Record<string, unknown>) {
 }
 
 export async function creerSoin(data: Record<string, unknown>): Promise<FdoResult> {
+  if (!(await estAutorise())) return { ok: false, error: REFUS };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const row = nettoyer(data);
@@ -37,6 +40,7 @@ export async function creerSoin(data: Record<string, unknown>): Promise<FdoResul
 }
 
 export async function majSoin(id: string, patch: Record<string, unknown>): Promise<FdoResult> {
+  if (!(await estAutorise())) return { ok: false, error: REFUS };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   if (!id) return { ok: false, error: "Soin introuvable." };
@@ -48,6 +52,7 @@ export async function majSoin(id: string, patch: Record<string, unknown>): Promi
 }
 
 export async function supprimerSoin(id: string): Promise<FdoResult> {
+  if (!(await estAutorise())) return { ok: false, error: REFUS };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const { error } = await admin.from("DispensaireSoinFDO").delete().eq("id", id);

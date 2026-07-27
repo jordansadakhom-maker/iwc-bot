@@ -1,8 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getAcces } from "@/lib/queries";
-import { getConfig } from "@/lib/dispensaire-roles";
+import { getConfig, peutFacturer } from "@/lib/dispensaire-roles";
 import { statutsDe, estClose } from "@/lib/dispensaire-facturation-const";
 
 // ── Centre de notifications (alertes intelligentes dérivées de l'état courant) ─
@@ -27,8 +26,7 @@ function lundiCourant(): string {
 export async function getNotifications(): Promise<{ items: Notif[]; count: number }> {
   const admin = createAdminClient();
   if (!admin) return { items: [], count: 0 };
-  let habilite = false;
-  try { habilite = (await getAcces()).peutMedical; } catch { habilite = true; }
+  const habilite = await peutFacturer();
   const cfg = await getConfig();
   const monday = lundiCourant();
 
