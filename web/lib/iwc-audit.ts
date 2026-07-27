@@ -46,7 +46,7 @@ export async function getAuditIwc(): Promise<RapportAudit> {
     catch { return []; }
   };
 
-  const [licences, types, membresL, operations, contrats, produits, coffres, mvtCoffre, paies, impots] = await Promise.all([
+  const [licences, types, membresL, operations, contrats, produits, coffres, mvtCoffre, paies, impots, armContrats, armPointages, commandes] = await Promise.all([
     q("Licence", "id,numero,typeCode,statut,dateDelivrance,dateExpiration,suspensionMotif,revocationMotif,suspensionDebut,suspensionFin,nom"),
     q("LicenceType", "code"),
     q("LicenceMembre", "id,identifiant,nom,role"),
@@ -57,6 +57,9 @@ export async function getAuditIwc(): Promise<RapportAudit> {
     q("ArmurerieMouvementCoffre", "id,montant,sens"),
     q("ArmureriePaie", "id,base,prime,montant"),
     q("ArmurerieImpot", "id,chiffreAffaires,taux,montant"),
+    q("ArmurerieContrat", "id,arme,prix,statut"),
+    q("ArmureriePointage", "id,employeNom,debut,fin"),
+    q("ArmurerieCommande", "id,lignes,statut"),
   ]);
 
   const A: Anomalie[] = [];
@@ -143,6 +146,24 @@ export async function getAuditIwc(): Promise<RapportAudit> {
     if (Number(i.montant) < 0) A.push({ categorie: "Armurerie", gravite: "majeur", titre: "Impôt à montant négatif", detail: `impôt ${String(i.id).slice(0, 12)} = ${i.montant} $`, suggestion: "Corriger l'impôt.", ref: String(i.id) });
     if (Number(i.taux) < 0 || Number(i.taux) > 100) A.push({ categorie: "Armurerie", gravite: "majeur", titre: "Taux d'imposition hors bornes", detail: `impôt ${String(i.id).slice(0, 12)} : ${i.taux} %`, suggestion: "Le taux doit être entre 0 et 100 %.", ref: String(i.id) });
     if (Number(i.chiffreAffaires) < 0) A.push({ categorie: "Armurerie", gravite: "mineur", titre: "Base d'imposition négative", detail: `impôt ${String(i.id).slice(0, 12)}`, suggestion: "Vérifier la base imposable.", ref: String(i.id) });
+  }
+
+  // ── Élargissement Armurerie : contrats, pointage, commandes ───────────────
+  ctrl();
+  for (const c of armContrats) if (Number(c.prix) < 0)
+    A.push({ categorie: "Armurerie", gravite: "majeur", titre: "Contrat d'arme à prix négatif", detail: `${c.arme || "contrat"} = ${c.prix} $`, suggestion: "Corriger le prix du contrat.", ref: String(c.id) });
+  ctrl();
+  for (const p of armPointages) {
+    const deb = p.debut ? Date.parse(String(p.debut)) : NaN;
+    const fin = p.fin ? Date.parse(String(p.fin)) : NaN;
+    if (Number.isFinite(deb) && Number.isFinite(fin) && fin < deb)
+      A.push({ categorie: "Dates", gravite: "mineur", titre: "Pointage armurerie : fin avant début", detail: `${p.employeNom || ""}`, suggestion: "Corriger l'horodatage du pointage.", ref: String(p.id) });
+  }
+  ctrl();
+  for (const cmd of commandes) {
+    const lignes = Array.isArray(cmd.lignes) ? (cmd.lignes as Record<string, unknown>[]) : [];
+    if (lignes.some((l) => Number(l.qte) < 0 || Number(l.prixUnitaire) < 0))
+      A.push({ categorie: "Armurerie", gravite: "mineur", titre: "Ligne de commande à valeur négative", detail: `commande ${String(cmd.id).slice(0, 12)}`, suggestion: "Corriger quantité/prix des lignes.", ref: String(cmd.id) });
   }
 
   const { categories, scoreGlobal } = scorer(CATEGORIES, A);

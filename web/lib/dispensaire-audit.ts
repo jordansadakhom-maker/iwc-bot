@@ -43,7 +43,7 @@ export async function getAuditDispensaire(): Promise<RapportAudit> {
     catch { return []; }
   };
 
-  const [pec, chambres, factures, stock, mouvements, membres, grades] = await Promise.all([
+  const [pec, chambres, factures, stock, mouvements, membres, grades, rdv, pointages, matieres, ambulances] = await Promise.all([
     q("DispensairePriseEnCharge", "id,patient,patientNormalise,etat,factureId,admisAt,soinAt,finAt"),
     q("DispensaireChambre", "id,nom,etat,patient,patientNormalise"),
     q("DispensaireFacture", "id,montant,statut"),
@@ -51,6 +51,10 @@ export async function getAuditDispensaire(): Promise<RapportAudit> {
     q("DispensaireStockMouvement", "stockId"),
     q("DispensaireMembre", "id,identifiant,nom,role,actif"),
     getGrades().catch(() => []),
+    q("DispensaireRendezVous", "id,patient,etat,debut"),
+    q("DispensairePointage", "id,nom,debut,fin"),
+    q("DispensaireMatiere", "id,nom,quantite"),
+    q("DispensaireAmbulance", "id,nom,etat,essence"),
   ]);
 
   const A: Anomalie[] = [];
@@ -117,6 +121,36 @@ export async function getAuditDispensaire(): Promise<RapportAudit> {
   const admActifs = membres.filter((m) => (m.actif ?? true) && gradeAdmin.has(String(m.role))).length;
   if (membres.length > 0 && admActifs === 0)
     A.push({ categorie: "Permissions", gravite: "majeur", titre: "Aucun administrateur actif", detail: "des membres existent mais aucun n'a le droit admin", suggestion: "Attribuer un grade « admin » à au moins un membre.", ref: "perms" });
+
+  // ── Élargissement : matières, rendez-vous, pointage, ambulances ───────────
+  const now = Date.now();
+  ctrl();
+  for (const m of matieres) if (Number(m.quantite) < 0)
+    A.push({ categorie: "Cohérence", gravite: "majeur", titre: "Matière première négative", detail: `${m.nom} = ${m.quantite}`, suggestion: "Corriger le stock de matière.", ref: String(m.id) });
+  ctrl();
+  for (const r of rdv) if (r.etat === "prevu") {
+    const d = r.debut ? Date.parse(String(r.debut)) : NaN;
+    if (Number.isFinite(d) && d < now - 3600000)
+      A.push({ categorie: "Cohérence", gravite: "mineur", titre: "Rendez-vous passé non traité", detail: `${r.patient} — prévu mais dépassé`, suggestion: "Marquer honoré / absent / annulé.", ref: String(r.id) });
+  }
+  ctrl();
+  for (const p of pointages) {
+    const deb = p.debut ? Date.parse(String(p.debut)) : NaN;
+    const fin = p.fin ? Date.parse(String(p.fin)) : NaN;
+    if (!p.fin && Number.isFinite(deb) && now - deb > 86400000)
+      A.push({ categorie: "Cohérence", gravite: "info", titre: "Service non clôturé depuis plus de 24 h", detail: `${p.nom} — pointage resté ouvert`, suggestion: "Clôturer le pointage oublié.", ref: String(p.id) });
+    if (Number.isFinite(deb) && Number.isFinite(fin) && fin < deb)
+      A.push({ categorie: "Dates", gravite: "mineur", titre: "Fin de service avant le début", detail: `${p.nom}`, suggestion: "Corriger l'horodatage du pointage.", ref: String(p.id) });
+  }
+  ctrl();
+  const etatsAmb = new Set(["disponible", "en_intervention", "entretien", "hs"]);
+  for (const amb of ambulances) {
+    if (amb.etat && !etatsAmb.has(String(amb.etat)))
+      A.push({ categorie: "Cohérence", gravite: "mineur", titre: "État d'ambulance inconnu", detail: `${amb.nom} → « ${amb.etat} »`, suggestion: "Ramener à disponible/en_intervention/entretien/hs.", ref: String(amb.id) });
+    const e = Number(amb.essence);
+    if (amb.essence != null && (e < 0 || e > 100))
+      A.push({ categorie: "Cohérence", gravite: "mineur", titre: "Niveau d'essence hors bornes", detail: `${amb.nom} = ${amb.essence} %`, suggestion: "L'essence doit être entre 0 et 100 %.", ref: String(amb.id) });
+  }
 
   const { categories, scoreGlobal } = scorer(CATEGORIES, A);
   return { genereLe: new Date().toISOString(), pret: true, canVoir: true, scoreGlobal, totalControles: controles, categories, anomalies: trierAnomalies(A), checklist: CHECKLIST };
