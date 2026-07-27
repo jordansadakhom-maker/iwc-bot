@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { peutModifierStock } from "@/lib/dispensaire-roles";
+import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenements";
 import { PLAN_RANGEMENT } from "@/lib/dispensaire-plan-const";
 
 // Coffres (entités) — réservé aux grades disposant du droit « stock ».
@@ -30,7 +31,9 @@ export async function creerCoffre(data: Record<string, unknown>): Promise<Coffre
   const id = newId();
   const now = new Date().toISOString();
   const { error } = await admin.from("DispensaireCoffre").insert({ id, ...row, updatedBy: await qui(), updatedAt: now });
-  return error ? { ok: false, error: "Création impossible (la table existe-t-elle ?)." } : { ok: true, id };
+  if (error) return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
+  await emettreEvenementDispensaire({ aggregate: "coffre", type: "coffre.cree", cibleId: id, cibleLibelle: String(row.nom), apres: row });
+  return { ok: true, id };
 }
 
 export async function majCoffre(id: string, patch: Record<string, unknown>): Promise<CoffreResult> {
@@ -43,11 +46,12 @@ export async function majCoffre(id: string, patch: Record<string, unknown>): Pro
   if (!Object.keys(row).length) return { ok: true };
   // Les objets référencent le coffre par son nom : si le nom change, on répercute
   // la nouvelle valeur sur tous les articles rangés dans ce coffre.
-  let ancienNom: string | null = null;
-  if ("nom" in row) { const { data: ex } = await admin.from("DispensaireCoffre").select("nom").eq("id", id).maybeSingle(); ancienNom = ex ? String((ex as Record<string, unknown>).nom || "") : null; }
+  const avant = await lireAvant("DispensaireCoffre", id);
+  const ancienNom = "nom" in row ? String(avant?.nom ?? "") : null;
   const { error } = await admin.from("DispensaireCoffre").update({ ...row, updatedBy: await qui(), updatedAt: new Date().toISOString() }).eq("id", id);
   if (error) return { ok: false, error: "Enregistrement impossible." };
   if (ancienNom && ancienNom !== row.nom) await admin.from("DispensaireStock").update({ coffre: row.nom }).eq("coffre", ancienNom);
+  await emettreEvenementDispensaire({ aggregate: "coffre", type: "coffre.maj", cibleId: id, cibleLibelle: String((avant?.nom ?? row.nom) ?? ""), avant, apres: row });
   return { ok: true };
 }
 
@@ -79,6 +83,7 @@ export async function importerPlanRangement(): Promise<{ ok: boolean; error?: st
 
   if (coffreRows.length) { const { error } = await admin.from("DispensaireCoffre").insert(coffreRows); if (error) return { ok: false, error: "Création des coffres impossible.", coffres: 0, objets: 0 }; }
   if (stockRows.length) { const { error } = await admin.from("DispensaireStock").insert(stockRows); if (error) return { ok: false, error: "Coffres créés, mais objets partiels — recharge.", coffres: coffreRows.length, objets: 0 }; }
+  if (coffreRows.length || stockRows.length) await emettreEvenementDispensaire({ aggregate: "coffre", type: "coffre.import_plan", cibleLibelle: "Plan de rangement", apres: { coffres: coffreRows.length, objets: stockRows.length } });
   return { ok: true, coffres: coffreRows.length, objets: stockRows.length };
 }
 
@@ -92,5 +97,7 @@ export async function supprimerCoffre(id: string): Promise<CoffreResult> {
   const nom = ex ? String((ex as Record<string, unknown>).nom || "").trim() : "";
   if (nom) await admin.from("DispensaireStock").update({ coffre: null }).eq("coffre", nom);
   const { error } = await admin.from("DispensaireCoffre").delete().eq("id", id);
-  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Suppression impossible." };
+  await emettreEvenementDispensaire({ aggregate: "coffre", type: "coffre.supprime", cibleId: id, cibleLibelle: nom });
+  return { ok: true };
 }

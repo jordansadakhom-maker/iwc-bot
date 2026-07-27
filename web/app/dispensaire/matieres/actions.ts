@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { peutModifierStock } from "@/lib/dispensaire-roles";
+import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenements";
 
 // Matières premières — réservé aux grades disposant du droit « stock ».
 export type MatiereResult = { ok: boolean; error?: string; id?: string };
@@ -33,7 +34,9 @@ export async function creerMatiere(data: Record<string, unknown>): Promise<Matie
   const id = newId();
   const now = new Date().toISOString();
   const { error } = await admin.from("DispensaireMatiere").insert({ id, quantite: 0, seuil: 0, cible: 0, ...row, updatedBy: await qui(), updatedAt: now });
-  return error ? { ok: false, error: "Création impossible (la table existe-t-elle ?)." } : { ok: true, id };
+  if (error) return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
+  await emettreEvenementDispensaire({ aggregate: "matiere", type: "matiere.cree", cibleId: id, cibleLibelle: String(row.nom), apres: row });
+  return { ok: true, id };
 }
 
 export async function majMatiere(id: string, patch: Record<string, unknown>): Promise<MatiereResult> {
@@ -44,8 +47,11 @@ export async function majMatiere(id: string, patch: Record<string, unknown>): Pr
   const row = nettoyer(patch);
   if ("nom" in row && !row.nom) return { ok: false, error: "Le nom ne peut pas être vide." };
   if (!Object.keys(row).length) return { ok: true };
+  const avant = await lireAvant("DispensaireMatiere", id);
   const { error } = await admin.from("DispensaireMatiere").update({ ...row, updatedBy: await qui(), updatedAt: new Date().toISOString() }).eq("id", id);
-  return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Enregistrement impossible." };
+  await emettreEvenementDispensaire({ aggregate: "matiere", type: "matiere.maj", cibleId: id, cibleLibelle: String((avant?.nom ?? row.nom) ?? ""), avant, apres: row });
+  return { ok: true };
 }
 
 export async function ajusterMatiere(id: string, delta: number): Promise<MatiereResult> {
@@ -54,17 +60,24 @@ export async function ajusterMatiere(id: string, delta: number): Promise<Matiere
   if (!(await peutModifierStock())) return { ok: false, error: REFUS };
   const d = Math.round(Number(delta) || 0);
   if (!d) return { ok: false, error: "Indique une quantité." };
-  const { data: ex } = await admin.from("DispensaireMatiere").select("id,quantite").eq("id", id).maybeSingle();
+  const { data: ex } = await admin.from("DispensaireMatiere").select("id,nom,quantite").eq("id", id).maybeSingle();
   if (!ex) return { ok: false, error: "Matière introuvable." };
-  const apres = Math.max(0, (Number((ex as Record<string, unknown>).quantite) || 0) + d);
+  const r = ex as Record<string, unknown>;
+  const cur = Number(r.quantite) || 0;
+  const apres = Math.max(0, cur + d);
   const { error } = await admin.from("DispensaireMatiere").update({ quantite: apres, updatedBy: await qui(), updatedAt: new Date().toISOString() }).eq("id", id);
-  return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Enregistrement impossible." };
+  await emettreEvenementDispensaire({ aggregate: "matiere", type: "matiere.ajuste", cibleId: id, cibleLibelle: String(r.nom || "?"), avant: { quantite: cur }, apres: { quantite: apres }, payload: { delta: d } });
+  return { ok: true };
 }
 
 export async function supprimerMatiere(id: string): Promise<MatiereResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   if (!(await peutModifierStock())) return { ok: false, error: REFUS };
+  const avant = await lireAvant("DispensaireMatiere", id);
   const { error } = await admin.from("DispensaireMatiere").delete().eq("id", id);
-  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Suppression impossible." };
+  await emettreEvenementDispensaire({ aggregate: "matiere", type: "matiere.supprime", cibleId: id, cibleLibelle: String(avant?.nom ?? ""), avant });
+  return { ok: true };
 }

@@ -44,6 +44,14 @@ async function acteur(): Promise<{ id: string | null; nom: string }> {
   }
 }
 
+// Lit une ligne par id (best-effort) pour capturer l'état « avant » d'un
+// événement. Renvoie null si indisponible — le journal ne bloque jamais l'action.
+export async function lireAvant(table: string, id: string): Promise<Record<string, unknown> | null> {
+  const admin = createAdminClient();
+  if (!admin || !id) return null;
+  try { const { data } = await admin.from(table).select("*").eq("id", id).maybeSingle(); return (data as Record<string, unknown>) ?? null; } catch { return null; }
+}
+
 export async function emettreEvenementDispensaire(e: EvenementDispensaireInput): Promise<void> {
   try {
     const admin = createAdminClient();

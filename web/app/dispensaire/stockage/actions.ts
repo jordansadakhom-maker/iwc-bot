@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { peutModifierStock } from "@/lib/dispensaire-roles";
+import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenements";
 
 // Stockage — réservé aux grades disposant du droit « stock ». Chaque mouvement est tracé.
 const REFUS = "Accès refusé : ton grade ne permet pas de modifier le stock.";
@@ -40,6 +41,7 @@ export async function creerItem(data: Record<string, unknown>): Promise<StockRes
   if (error) return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
   // Trace le stock initial s'il est non nul.
   if (Number(row.stock) > 0) await admin.from("DispensaireStockMouvement").insert({ id: newId("dsm"), stockId: id, nomItem: String(row.nom), coffre: row.coffre ?? null, delta: Number(row.stock), apres: Number(row.stock), motif: "Stock initial", par: await qui(), createdAt: now });
+  await emettreEvenementDispensaire({ aggregate: "stock", type: "stock.item_cree", cibleId: id, cibleLibelle: String(row.nom), apres: row });
   return { ok: true, id };
 }
 
@@ -51,16 +53,22 @@ export async function majItem(id: string, patch: Record<string, unknown>): Promi
   const row = nettoyer(patch);
   if ("nom" in row && !row.nom) return { ok: false, error: "Le nom ne peut pas être vide." };
   if (!Object.keys(row).length) return { ok: true };
+  const avant = await lireAvant("DispensaireStock", id);
   const { error } = await admin.from("DispensaireStock").update({ ...row, updatedBy: await qui(), updatedAt: new Date().toISOString() }).eq("id", id);
-  return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Enregistrement impossible." };
+  await emettreEvenementDispensaire({ aggregate: "stock", type: "stock.item_maj", cibleId: id, cibleLibelle: String((avant?.nom ?? row.nom) ?? ""), avant, apres: row });
+  return { ok: true };
 }
 
 export async function supprimerItem(id: string): Promise<StockResult> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   if (!(await peutModifierStock())) return { ok: false, error: REFUS };
+  const avant = await lireAvant("DispensaireStock", id);
   const { error } = await admin.from("DispensaireStock").delete().eq("id", id);
-  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Suppression impossible." };
+  await emettreEvenementDispensaire({ aggregate: "stock", type: "stock.item_supprime", cibleId: id, cibleLibelle: String(avant?.nom ?? ""), avant });
+  return { ok: true };
 }
 
 // Applique un mouvement ± sur le stock glissant et le trace.
@@ -79,6 +87,7 @@ export async function ajusterStock(id: string, delta: number, motif?: string): P
   const { error } = await admin.from("DispensaireStock").update({ stock: apres, updatedBy: par, updatedAt: now }).eq("id", id);
   if (error) return { ok: false, error: "Enregistrement impossible." };
   await admin.from("DispensaireStockMouvement").insert({ id: newId("dsm"), stockId: id, nomItem: String(r.nom || "?"), coffre: (r.coffre as string) ?? null, delta: d, apres, motif: s(motif, 200), par, createdAt: now });
+  await emettreEvenementDispensaire({ aggregate: "stock", type: "stock.ajuste", cibleId: id, cibleLibelle: String(r.nom || "?"), avant: { stock: Number(r.stock) || 0 }, apres: { stock: apres }, payload: { delta: d, motif: s(motif, 200) } });
   return { ok: true, apres };
 }
 
@@ -100,5 +109,6 @@ export async function deplacerItem(id: string, coffreDest: string): Promise<Stoc
   const { error } = await admin.from("DispensaireStock").update({ coffre: dest, updatedBy: par, updatedAt: now }).eq("id", id);
   if (error) return { ok: false, error: "Déplacement impossible." };
   await admin.from("DispensaireStockMouvement").insert({ id: newId("dsm"), stockId: id, nomItem: String(r.nom || "?"), coffre: dest, delta: 0, apres: Number(r.stock) || 0, motif: `Déplacé : ${from || "Non rangé"} → ${dest || "Non rangé"}`, par, createdAt: now });
+  await emettreEvenementDispensaire({ aggregate: "stock", type: "stock.deplace", cibleId: id, cibleLibelle: String(r.nom || "?"), avant: { coffre: from }, apres: { coffre: dest } });
   return { ok: true };
 }
