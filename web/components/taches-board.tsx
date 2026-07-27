@@ -2,11 +2,12 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ListChecks, Loader2, Plus, Check, Clock, Trash2, UserCheck, CircleDot, Circle, AlarmClock } from "lucide-react";
+import { ListChecks, Loader2, Plus, Check, Clock, Trash2, UserCheck, CircleDot, Circle, AlarmClock, Sparkles } from "lucide-react";
 import { Card, CardHeader, Empty, Badge } from "@/components/ui";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
-import { PRIORITES, STATUTS_TACHE, prioriteMeta, estFaite, estEnRetard, trierTaches, type Tache } from "@/lib/taches";
-import { creerTache, majStatutTache, assignerTacheAMoi, supprimerTache } from "@/app/(app)/taches/actions";
+import { PRIORITES, prioriteMeta, estFaite, estEnRetard, trierTaches, type Tache } from "@/lib/taches";
+import type { Suggestion } from "@/lib/attribution";
+import { creerTache, majStatutTache, assignerTacheAMoi, assignerTacheA, suggererMembres, supprimerTache } from "@/app/(app)/taches/actions";
 
 const dateFR = (s: string | null) => {
   if (!s) return "—";
@@ -27,9 +28,9 @@ type Filtre = "actives" | "moi" | "faites" | "toutes";
 const badgeTone = (tone: string): "accent" | "good" | "warn" | "muted" | "oxblood" =>
   (["accent", "good", "warn", "muted", "oxblood"].includes(tone) ? tone : "accent") as "accent" | "good" | "warn" | "muted" | "oxblood";
 
-function LigneTache({ t, moiId, onStatut, onMoi, onSuppr, busy, now }: {
+function LigneTache({ t, moiId, onStatut, onMoi, onSuggerer, onSuppr, busy, now, suggOuvert }: {
   t: Tache; moiId: string | null; now: number;
-  onStatut: (id: string, statut: string) => void; onMoi: (id: string) => void; onSuppr: (t: Tache) => void; busy: boolean;
+  onStatut: (id: string, statut: string) => void; onMoi: (id: string) => void; onSuggerer: (t: Tache) => void; onSuppr: (t: Tache) => void; busy: boolean; suggOuvert: boolean;
 }) {
   const p = prioriteMeta(t.priorite);
   const faite = estFaite(t);
@@ -69,6 +70,9 @@ function LigneTache({ t, moiId, onStatut, onMoi, onSuppr, busy, now }: {
         {!faite && t.statut !== "en_cours" ? (
           <button onClick={() => onStatut(t.id, "en_cours")} disabled={busy} className="rounded-lg border border-border bg-surface-2 px-2 py-1 text-[0.7rem] font-semibold text-muted transition hover:text-ink disabled:opacity-50">En cours</button>
         ) : null}
+        {!faite && !t.assigneId ? (
+          <button onClick={() => onSuggerer(t)} disabled={busy} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[0.7rem] font-semibold transition disabled:opacity-50" style={{ color: suggOuvert ? "#000" : "var(--accent)", background: suggOuvert ? "var(--accent)" : "transparent", borderColor: "color-mix(in srgb,var(--accent) 45%,var(--border))" }}><Sparkles className="h-3 w-3" /> Suggérer</button>
+        ) : null}
         {!faite && t.assigneId !== moiId ? (
           <button onClick={() => onMoi(t.id)} disabled={busy} className="rounded-lg border border-border bg-surface-2 px-2 py-1 text-[0.7rem] font-semibold text-muted transition hover:text-ink disabled:opacity-50">Pour moi</button>
         ) : null}
@@ -85,6 +89,10 @@ export function TachesBoard({ connecte, moiId, taches }: { connecte: boolean; mo
   const [busyId, setBusyId] = useState<string | null>(null);
   const [flash, setFlash] = useState<{ t: "good" | "bad"; m: string } | null>(null);
   const [open, setOpen] = useState(false);
+  // Attribution assistée : id de la tâche dont on affiche les suggestions.
+  const [suggFor, setSuggFor] = useState<string | null>(null);
+  const [suggData, setSuggData] = useState<Suggestion[]>([]);
+  const [suggBusy, setSuggBusy] = useState(false);
 
   // Formulaire de création
   const [titre, setTitre] = useState("");
@@ -134,6 +142,19 @@ export function TachesBoard({ connecte, moiId, taches }: { connecte: boolean; mo
     agir(() => supprimerTache(t.id), t.id, "Tâche supprimée.");
   }
 
+  async function ouvrirSuggestions(t: Tache) {
+    if (suggFor === t.id) { setSuggFor(null); return; }
+    setSuggFor(t.id); setSuggData([]); setSuggBusy(true); setFlash(null);
+    const r = await suggererMembres(t.pole || undefined);
+    setSuggBusy(false);
+    setSuggData(r.ok ? r.suggestions : []);
+  }
+
+  async function assignerA(t: Tache, sugg: Suggestion) {
+    setSuggFor(null);
+    await agir(() => assignerTacheA(t.id, sugg.id, sugg.nom), t.id, `Assignée à ${sugg.nom}.`);
+  }
+
   if (!connecte) {
     return <Card><Empty icon={ListChecks}>Connecte-toi avec Discord pour voir et gérer les tâches de la compagnie.</Empty></Card>;
   }
@@ -178,10 +199,36 @@ export function TachesBoard({ connecte, moiId, taches }: { connecte: boolean; mo
         ) : (
           <div className="flex flex-col divide-y divide-border">
             {liste.map((t) => (
-              <LigneTache key={t.id} t={t} moiId={moiId} now={now} busy={busyId === t.id}
-                onStatut={(id, statut) => agir(() => majStatutTache(id, statut), id)}
-                onMoi={(id) => agir(() => assignerTacheAMoi(id), id, "Tâche assignée.")}
-                onSuppr={suppr} />
+              <div key={t.id}>
+                <LigneTache t={t} moiId={moiId} now={now} busy={busyId === t.id} suggOuvert={suggFor === t.id}
+                  onStatut={(id, statut) => agir(() => majStatutTache(id, statut), id)}
+                  onMoi={(id) => agir(() => assignerTacheAMoi(id), id, "Tâche assignée.")}
+                  onSuggerer={ouvrirSuggestions}
+                  onSuppr={suppr} />
+                {suggFor === t.id ? (
+                  <div className="mb-2 rounded-[11px] border border-border bg-surface-2 p-2.5">
+                    <div className="mb-1.5 flex items-center gap-1.5 px-0.5 text-[0.72rem] font-semibold uppercase tracking-[0.05em] text-faint"><Sparkles className="h-3 w-3" style={{ color: "var(--accent)" }} /> Membres suggérés</div>
+                    {suggBusy ? (
+                      <div className="flex items-center justify-center py-3 text-muted"><Loader2 className="h-4 w-4 animate-spin" /></div>
+                    ) : suggData.length === 0 ? (
+                      <div className="px-1 py-2 text-[0.78rem] italic text-faint">Aucun membre disponible à suggérer.</div>
+                    ) : (
+                      <div className="flex flex-col gap-1.5">
+                        {suggData.map((sg, i) => (
+                          <div key={sg.id} className="flex items-center gap-2.5 rounded-[9px] border border-border bg-surface px-2.5 py-1.5">
+                            {i === 0 ? <Badge tone="accent">Top</Badge> : <span className="w-1" />}
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5"><span className="truncate text-[0.84rem] font-semibold">{sg.nom}</span>{sg.grade ? <span className="text-[0.7rem] text-faint">· {sg.grade}</span> : null}</div>
+                              <div className="truncate text-[0.7rem] text-muted">{sg.raisons.join(" · ")}</div>
+                            </div>
+                            <button onClick={() => assignerA(t, sg)} disabled={busyId === t.id} className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1 text-[0.72rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--accent)" }}><UserCheck className="h-3 w-3" /> Assigner</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </div>
             ))}
           </div>
         )}
