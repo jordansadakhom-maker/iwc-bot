@@ -13,6 +13,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 const supa = require('./supabase-sync');
+const { lienSignature } = require('./sign-token');
 let EmbedBuilder = null; try { ({ EmbedBuilder } = require('discord.js')); } catch {}
 let dbMod = {}; try { dbMod = require('./db'); } catch {}
 const loadDB = dbMod.loadDB || (() => ({}));
@@ -756,6 +757,9 @@ Object.assign(HANDLERS, {
     const did = _s(p.clientDiscordId, 40);
     if (!guild || !did) return { ok: false, message: 'Commanditaire Discord introuvable' };
     const clientPropose = p.sens === 'client_propose'; // le client propose, la Compagnie s'engage
+    // Lien de signature sur le SITE (jeton non devinable). La signature ne se
+    // fait plus par MP « JE SIGNE » (désactivé) → on envoie le lien.
+    const lienSig = lienSignature(p.operationId);
     const lignes = [
       '```', '   IRON WOLF COMPANY   ', '```',
       '📜 **CONTRAT D\'OPÉRATION**',
@@ -773,7 +777,9 @@ Object.assign(HANDLERS, {
         ? 'La Iron Wolf Company s\'engage à mener à bien la mission ci-dessus aux conditions convenues.'
         : 'En acceptant ce contrat, vous confiez la mission ci-dessus à la Iron Wolf Company aux conditions convenues.',
       '',
-      '✍️ *Pour **signer**, répondez « JE SIGNE » à ce message. Pour refuser, répondez « JE REFUSE ».*',
+      lienSig
+        ? `✍️ **Pour signer ou refuser, ouvrez ce lien sécurisé :**\n${lienSig}`
+        : '✍️ *La signature se fait sur le site — ouvrez votre espace de suivi.*',
     ].filter(x => x != null);
     try {
       const user = await guild.client.users.fetch(did).catch(() => null);
@@ -790,11 +796,37 @@ Object.assign(HANDLERS, {
           clientDiscordId: did,
           sens: p.sens === 'client_propose' ? 'client_propose' : 'client_signe',
           remuneration: _s(p.remuneration, 120),
+          // Détails persistés pour l'affichage de la page de signature du site.
+          categorie: _s(p.categorie, 120),
+          objectif: _s(p.objectif, 800),
+          lieu: _s(p.lieu, 200),
+          conditions: _s(p.conditions, 1500),
+          pole: _s(p.pole, 40),
           envoyeAt: new Date().toISOString(),
         };
       }
       return { ok: true, message: 'Contrat d\'opération envoyé au commanditaire en message privé' };
     } catch (e) { return { ok: false, message: e.message }; }
+  },
+
+  // ── Signature / refus du contrat d'opération DEPUIS LE SITE (lien à jeton) ──
+  // Le client signe/refuse via /suivi/contrat/<token> ; le site dépose la
+  // commande, le bot (source de vérité) applique le statut sur l'opération.
+  'operation.contratSignerWeb': (db, p) => {
+    const op = _findOp(db, p.operationId);
+    if (!op || !op.contrat) return { ok: false, message: 'Contrat d\'opération introuvable' };
+    if (op.contrat.statut !== 'envoye') return { ok: false, message: 'Contrat déjà traité' };
+    op.contrat.statut = 'signe';
+    op.contrat.signeAt = new Date().toISOString();
+    return { ok: true, message: 'Contrat signé par le client (via le site)' };
+  },
+  'operation.contratRefuserWeb': (db, p) => {
+    const op = _findOp(db, p.operationId);
+    if (!op || !op.contrat) return { ok: false, message: 'Contrat d\'opération introuvable' };
+    if (op.contrat.statut !== 'envoye') return { ok: false, message: 'Contrat déjà traité' };
+    op.contrat.statut = 'refuse';
+    op.contrat.refuseAt = new Date().toISOString();
+    return { ok: true, message: 'Contrat refusé par le client (via le site)' };
   },
 
   // ── Documents : envoyer un document rédigé sur le site à quelqu'un (MP) ──
