@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ShieldCheck, Plus, Loader2, Trash2, Building2 } from "lucide-react";
 import { VideRegistre } from "@/components/dispensaire-ui";
@@ -26,12 +26,17 @@ export function DispensaireFDO({ data }: { data: FDOData }) {
   }, [soins]);
   const connus = useMemo(() => [...new Set(soins.map((s) => s.bureau))], [soins]);
 
+  // Jeton anti-doublon : stable jusqu'au succès (un double-clic renvoie le même soin).
+  const cleRef = useRef("");
+  const jeton = () => (cleRef.current ||= (globalThis.crypto?.randomUUID?.() ?? String(Date.now()) + Math.random()));
+
   async function ajouter() {
     if (!v.bureau.trim()) { setFlash({ t: "bad", m: "Indique le bureau du shérif." }); return; }
     setBusy(true);
-    const r = await creerSoin({ ...v });
+    const r = await creerSoin({ ...v, cle: jeton() });
     setBusy(false);
     if (!r.ok) { setFlash({ t: "bad", m: r.error || "Impossible." }); return; }
+    cleRef.current = "";
     const tmp: SoinFDO = { id: r.id || "tmp", bureau: v.bureau.trim(), agent: v.agent || null, soin: v.soin || null, montant: FDO_PRIX, statut: v.statut, note: null, par: null, createdAt: new Date().toISOString() };
     setSoins((p) => [tmp, ...p]);
     setV({ bureau: v.bureau, agent: "", soin: "", statut: "facture" });

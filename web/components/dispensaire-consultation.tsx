@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Stethoscope, Plus, Trash2, Check, Loader2, PackageMinus } from "lucide-react";
 import { Modal, Champ, inputCls } from "@/components/edit-ui";
 import { FACTURE_DELAI_H, money } from "@/lib/dispensaire-facturation-const";
@@ -28,6 +28,10 @@ export function DispensaireConsultation({ onClose, onDone }: { onClose: () => vo
   const [refs, setRefs] = useState<Refs>({ patients: [], stock: [] });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Jeton anti-doublon : une seule consultation par ouverture de la modale,
+  // même en cas de double-clic ou de retry réseau.
+  const cleRef = useRef("");
+  const jeton = () => (cleRef.current ||= (globalThis.crypto?.randomUUID?.() ?? String(Date.now()) + Math.random()));
 
   useEffect(() => { let ok = true; getConsultationRefs().then((r) => { if (ok) setRefs(r); }).catch(() => {}); return () => { ok = false; }; }, []);
 
@@ -50,7 +54,7 @@ export function DispensaireConsultation({ onClose, onDone }: { onClose: () => vo
       .filter((l) => l.desc || l.prixUnitaire > 0 || l.stockId);
     if (!payload.length) { setErr("Ajoute au moins un soin ou un article."); return; }
     setBusy(true);
-    const r = await creerConsultation({ patient, lignes: payload, regle, dateEmission: emission, note });
+    const r = await creerConsultation({ patient, lignes: payload, regle, dateEmission: emission, note, cle: jeton() });
     setBusy(false);
     if (!r.ok) { setErr(r.error || "Enregistrement impossible."); return; }
     const base = `Consultation enregistrée — ${money(r.montant || total)} · ${regle ? "réglée" : "à créditer (impayé)"}.`;

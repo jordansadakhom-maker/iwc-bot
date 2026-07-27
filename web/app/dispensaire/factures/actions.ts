@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { peutFacturer } from "@/lib/dispensaire-roles";
 import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenements";
+import { idAvecJeton, estDoublon } from "@/lib/dispensaire-idempotence";
 import { FACTURE_DELAI_H, statutsDe, serialiserStatuts, statutRepresentatif, estOuverte } from "@/lib/dispensaire-facturation-const";
 
 // Factures — RÉSERVÉ aux chefs (habilités). Suivi des impayés.
@@ -68,7 +69,7 @@ export async function creerFacture(data: Record<string, unknown>): Promise<Factu
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const row = nettoyer(data);
   if (!row.objet) return { ok: false, error: "Donne l'objet de la facture." };
-  const id = newId();
+  const id = idAvecJeton("df", data.cle, newId);
   const nowIso = new Date().toISOString();
   // Dates désormais MANUELLES : émission saisie (à défaut aujourd'hui), échéance
   // saisie (à défaut une suggestion +72 h, modifiable — plus rien d'imposé).
@@ -77,7 +78,10 @@ export async function creerFacture(data: Record<string, unknown>): Promise<Factu
   const par = await qui();
   const base: Record<string, unknown> = { id, statut: "non_payee", statuts: "non_payee", montant: 0, ...row, dateEmission: emission, dateEcheance: echeance, par, createdAt: nowIso, updatedAt: nowIso };
   const error = await ecrireFacture(admin, "insert", base);
-  if (error) return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
+  if (error) {
+    if (estDoublon(error)) return { ok: true, id };
+    return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
+  }
   await logFacture(admin, id, "Création", String(row.objet || ""), par);
   await emettreEvenementDispensaire({ aggregate: "facture", type: "facture.cree", cibleId: id, cibleLibelle: String(row.objet || ""), apres: { objet: row.objet, montant: base.montant, statut: base.statut } });
   return { ok: true, id };
@@ -158,7 +162,7 @@ export async function getConsultationRefs(): Promise<{ patients: string[]; stock
 export type ConsultationLigne = { desc: string; quantite: number; prixUnitaire: number; stockId?: string | null };
 export type ConsultationResult = { ok: boolean; error?: string; id?: string; montant?: number; avertissements?: string[] };
 
-export async function creerConsultation(input: { patient: string; lignes: ConsultationLigne[]; regle: boolean; dateEmission?: string; note?: string }): Promise<ConsultationResult> {
+export async function creerConsultation(input: { patient: string; lignes: ConsultationLigne[]; regle: boolean; dateEmission?: string; note?: string; cle?: string }): Promise<ConsultationResult> {
   if (!(await peutFacturer())) return { ok: false, error: "Réservé aux chefs." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
@@ -178,14 +182,19 @@ export async function creerConsultation(input: { patient: string; lignes: Consul
   const regle = !!input.regle;
   const statutUnique = regle ? "payee" : "non_payee";
 
-  const id = newId();
+  const id = idAvecJeton("df", input.cle, newId);
   const row: Record<string, unknown> = {
     id, objet: patient, destinataire: resume.slice(0, 300), montant, statut: statutUnique, statuts: statutUnique,
     dateEmission: emission, dateEcheance: echeance, note: s(input.note, 1000), par, createdAt: nowIso, updatedAt: nowIso,
   };
   if (regle) { row.datePaiement = nowIso; row.payePar = par; }
   const insErr = await ecrireFacture(admin, "insert", row);
-  if (insErr) return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
+  if (insErr) {
+    // Doublon (double-clic / retry) : la consultation existe déjà → on renvoie
+    // le succès SANS re-décrémenter le stock ni re-journaliser.
+    if (estDoublon(insErr)) return { ok: true, id, montant };
+    return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
+  }
   await logFacture(admin, id, "Consultation", resume.slice(0, 200), par);
   await emettreEvenementDispensaire({ aggregate: "facture", type: "facture.consultation", cibleId: id, cibleLibelle: patient, apres: { patient, montant, resume: resume.slice(0, 300), regle } });
 
