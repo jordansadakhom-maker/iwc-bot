@@ -303,7 +303,29 @@ CREATE INDEX IF NOT EXISTS "DispAmbulance_etat_idx" ON "DispensaireAmbulance"("e
 ALTER TABLE "DispensaireAmbulance" ENABLE ROW LEVEL SECURITY;
 
 
+-- ═══════════════════════════════════════════════════════════════════════════
+--  10) TEMPS RÉEL (signal Realtime) — mises à jour instantanées du cockpit et des
+--      prises en charge. Table SIGNAL en lecture publique (horodatage seul) +
+--      publication temps réel. Les données métier restent fermées.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS "DispensaireRealtimeSignal" (
+  "id" TEXT PRIMARY KEY,
+  "at" TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO "DispensaireRealtimeSignal" ("id", "at") VALUES ('global', now())
+  ON CONFLICT ("id") DO NOTHING;
+ALTER TABLE "DispensaireRealtimeSignal" ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "dispensaire_signal_read" ON "DispensaireRealtimeSignal";
+CREATE POLICY "dispensaire_signal_read" ON "DispensaireRealtimeSignal" FOR SELECT USING (true);
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE "DispensaireRealtimeSignal";
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+
 -- ── Fin du tout-en-un. Recharge le site : Journal d'audit, dossier médical,
 --    Prises en charge, Fabrication, Rendez-vous, Interventions, Chambres,
---    Ambulances, Comptabilité et Cockpit Direction sont désormais actifs.
---    (Comptabilité & Cockpit sont dérivés → aucune table dédiée.) ───────────────
+--    Ambulances, Comptabilité, Cockpit Direction et TEMPS RÉEL sont désormais
+--    actifs. (Comptabilité & Cockpit sont dérivés → aucune table dédiée.) ────────

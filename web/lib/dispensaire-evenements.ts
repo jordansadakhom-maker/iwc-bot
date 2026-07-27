@@ -71,6 +71,9 @@ export async function emettreEvenementDispensaire(e: EvenementDispensaireInput):
       ref: e.ref ?? null,
       priorite: e.priorite ?? 0,
     });
+    // Signal temps réel : « pousse » l'horodatage pour que les vues abonnées se
+    // rafraîchissent instantanément (best-effort, no-op si le signal n'existe pas).
+    try { await admin.from("DispensaireRealtimeSignal").update({ at: new Date().toISOString() }).eq("id", "global"); } catch { /* signal optionnel */ }
   } catch {
     /* best-effort : le journal ne bloque jamais l'action métier */
   }
