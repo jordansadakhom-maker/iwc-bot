@@ -58,6 +58,34 @@ export function compterGravite(cs: Constat[]): AssistantData["parGravite"] {
   return { critique: cs.filter((c) => c.gravite === "critique").length, important: cs.filter((c) => c.gravite === "important").length, info: cs.filter((c) => c.gravite === "info").length };
 }
 
+// Constats dérivés du socle ERP récent (tâches, conversations — modules Phase 4).
+// PUR & testable : la lecture réelle est faite par l'appelant (assistant-iwc).
+export function constatsSocle(
+  input: {
+    taches?: { statut: string; echeance: string | null; assigneId: string | null }[];
+    conversations?: { statut: string; lastMessageAt: string }[];
+  },
+  now: number = Date.now(),
+): Constat[] {
+  const g = (c: Omit<Constat, "gravite">): Constat => ({ ...c, gravite: graviteDe(c.priorite) });
+  const out: Constat[] = [];
+  const taches = input.taches ?? [];
+  const conversations = input.conversations ?? [];
+  const parse = (v: string | null) => { const t = Date.parse(String(v ?? "")); return Number.isFinite(t) ? t : null; };
+
+  const enRetard = taches.filter((t) => { const e = parse(t.echeance); return t.statut !== "faite" && e != null && e < now; }).length;
+  if (enRetard) out.push(g({ id: "taches-retard", priorite: "importante", categorie: "Tâches", titre: `${enRetard} tâche(s) en retard`, detail: null, suggestion: "Traite ou replanifie les tâches dont l'échéance est passée.", href: "/taches" }));
+
+  const nonAssignees = taches.filter((t) => t.statut !== "faite" && !t.assigneId).length;
+  if (nonAssignees) out.push(g({ id: "taches-non-assignees", priorite: "normale", categorie: "Tâches", titre: `${nonAssignees} tâche(s) non assignée(s)`, detail: null, suggestion: "Assigne-les via l'attribution assistée.", href: "/taches" }));
+
+  const SEUIL = 7 * 86400000;
+  const inactives = conversations.filter((c) => { const t = parse(c.lastMessageAt); return c.statut !== "archivee" && t != null && now - t > SEUIL; }).length;
+  if (inactives) out.push(g({ id: "conv-inactives", priorite: "information", categorie: "Messagerie", titre: `${inactives} conversation(s) sans activité depuis 7 j`, detail: null, suggestion: "Relance le fil ou archive-le pour garder la messagerie claire.", href: "/messages" }));
+
+  return out;
+}
+
 // Rapport auto d'une phrase — le « résumé du jour ».
 export function resumeAuto(cs: Constat[]): string {
   if (!cs.length) return "Rien à signaler — tout est à jour.";

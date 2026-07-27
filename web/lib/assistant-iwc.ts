@@ -5,7 +5,7 @@ import { getAlertes, getAbsences } from "@/lib/queries";
 import { getEtatsOverlay } from "@/lib/notif-etat";
 import { detecterDoublons, detecterNegatifs, apercuReappro, type ReapproItem } from "@/lib/erp-coherence";
 import { snapshotCycle, euros, pourcent } from "@/lib/armurerie-fiscal";
-import { type AssistantData, type Constat, type Priorite, trierConstats, compterGravite, graviteDe } from "@/lib/erp-assistant-const";
+import { type AssistantData, type Constat, type Priorite, trierConstats, compterGravite, graviteDe, constatsSocle } from "@/lib/erp-assistant-const";
 
 export * from "@/lib/erp-assistant-const";
 
@@ -132,6 +132,17 @@ export async function getAssistantIWC(): Promise<AssistantData> {
     const du = impotsRows.find((i) => String(i.statut) === "du");
     if (du && Math.abs(num(du.montant) - cycle.impot) > 1) constats.push(mk({ id: "fisc-anomalie", priorite: "critique", categorie: "Cohérence", titre: "Incohérence fiscale détectée", detail: `Déclaration en base ${euros(num(du.montant))} ≠ calcul sur le bénéfice réel ${euros(cycle.impot)}.`, suggestion: "Une vente recalcule et corrige automatiquement ; vérifie la déclaration en cours.", href: "/armurerie?tab=impots" }));
   }
+
+  // Socle ERP récent (tâches, conversations — modules Phase 4). Tables optionnelles :
+  // safeRows renvoie [] si elles n'existent pas encore → aucun constat, aucun crash.
+  const [tachesRows, convRows] = await Promise.all([
+    safeRows(() => admin.from("Tache").select("statut,echeance,assigneId").neq("statut", "faite")),
+    safeRows(() => admin.from("Conversation").select("statut,lastMessageAt")),
+  ]);
+  for (const c of constatsSocle({
+    taches: tachesRows.map((t) => ({ statut: String(t.statut || ""), echeance: (t.echeance as string) ?? null, assigneId: (t.assigneId as string) ?? null })),
+    conversations: convRows.map((c) => ({ statut: String(c.statut || ""), lastMessageAt: String(c.lastMessageAt || "") })),
+  }, Date.now())) constats.push(c);
 
   // Couche d'état persistée (Non lue / En cours / Résolue / Archivée).
   const etats = await getEtatsOverlay(TABLE_ETAT_IWC);
