@@ -31,7 +31,12 @@ DECLARE
     ARRAY['DispensaireSoinFDO',      'statut',      'idx_dispfdo_statut'],
     ARRAY['DispensaireFrais',        'statut',      'idx_dispfrais_statut'],
     ARRAY['DispensaireStockMouvement','stockId',    'idx_dispstockmvt_stockid'],
-    ARRAY['DispensairePointage',     'salarieId',   'idx_disppointage_salarie']
+    ARRAY['DispensairePointage',     'salarieId',   'idx_disppointage_salarie'],
+    -- Colonnes réellement filtrées (audit P3) : identité patient & objet facture.
+    ARRAY['DispensaireFacture',      'objet',       'idx_dispfacture_objet'],
+    ARRAY['DispensaireVente',        'patient',     'idx_dispvente_patient'],
+    ARRAY['DispensaireCertificat',   'patient',     'idx_dispcert_patient'],
+    ARRAY['DispensaireRapport',      'patient',     'idx_disprapport_patient']
   ];
   d text[];
 BEGIN
@@ -43,4 +48,14 @@ BEGIN
       EXECUTE format('CREATE INDEX IF NOT EXISTS %I ON public.%I (%I)', d[3], d[1], d[2]);
     END IF;
   END LOOP;
+
+  -- Services EN COURS : l'accueil recharge « fin IS NULL » à chaque page. Un index
+  -- PARTIEL (uniquement les lignes ouvertes) est minuscule et évite le balayage
+  -- complet de l'historique de pointage qui, lui, grossit sans fin.
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'DispensairePointage' AND column_name = 'fin'
+  ) THEN
+    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_disppointage_ouvert ON public."DispensairePointage" (fin) WHERE fin IS NULL';
+  END IF;
 END $$;
