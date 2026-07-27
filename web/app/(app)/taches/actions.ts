@@ -11,6 +11,19 @@ const STATUTS = new Set<string>(STATUTS_TACHE.map((s) => s.key));
 const s = (v: unknown, max = 300) => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
 const iso = (v: unknown): string | null => { const raw = String(v ?? "").trim(); if (!raw) return null; const t = Date.parse(raw); return Number.isFinite(t) ? new Date(t).toISOString() : null; };
 
+// Notification CIBLÉE (membreId) : reçue par ce seul membre (ciblage + RLS).
+// Best-effort : ne bloque jamais l'action. ref stable → pas de doublon.
+async function notifierMembre(admin: ReturnType<typeof createAdminClient>, membreId: string, n: { titre: string; corps?: string; lien: string; cibleId: string; ref: string }) {
+  if (!admin || !membreId) return;
+  try {
+    await admin.from("Notification").insert({
+      id: crypto.randomUUID(), membreId, type: "tache",
+      titre: n.titre.slice(0, 200), corps: (n.corps || "").slice(0, 200),
+      lien: n.lien, cibleId: n.cibleId, ref: n.ref, createdAt: new Date().toISOString(),
+    });
+  } catch { /* ref déjà existante ou table indisponible → no-op */ }
+}
+
 export async function listerTaches(): Promise<{ connecte: boolean; moiId: string | null; taches: Tache[] }> {
   const a = await getActeur();
   if (!a) return { connecte: false, moiId: null, taches: [] };
@@ -90,9 +103,14 @@ export async function assignerTacheA(id: string, membreId: string, membreNom: st
   if (!a) return { ok: false, error: "Accès refusé." };
   const admin = createAdminClient();
   if (!admin || !id || !membreId) return { ok: false, error: "Tâche introuvable." };
-  const { error } = await admin.from("Tache").update({ assigneId: membreId, assigneNom: s(membreNom, 120), updatedAt: new Date().toISOString(), updatedBy: a.nomIC }).eq("id", id);
+  const { data, error } = await admin.from("Tache").update({ assigneId: membreId, assigneNom: s(membreNom, 120), updatedAt: new Date().toISOString(), updatedBy: a.nomIC }).eq("id", id).select("titre").maybeSingle();
   if (error) return { ok: false, error: "Enregistrement impossible." };
   await emettreEvenement({ aggregate: "tache", type: "tache.assignee", cibleId: id, payload: { assigneId: membreId } });
+  // Prévient le destinataire (sauf s'il s'assigne lui-même) via une notif ciblée.
+  if (membreId !== a.did) {
+    const titre = String((data as { titre?: string } | null)?.titre || "une tâche");
+    await notifierMembre(admin, membreId, { titre: `Tâche assignée — ${titre}`, corps: `${a.nomIC} t'a confié cette tâche.`, lien: "/taches", cibleId: id, ref: `tache-assign-${id}-${membreId}` });
+  }
   return { ok: true };
 }
 
