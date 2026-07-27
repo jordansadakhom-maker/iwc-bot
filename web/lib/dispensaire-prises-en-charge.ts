@@ -3,7 +3,8 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { estAutorise, peutSoigner, peutFacturer } from "@/lib/dispensaire-roles";
 import { statutsDe, estOuverte } from "@/lib/dispensaire-facturation-const";
-import { ETATS_EN_COURS, toPEC, type PrisesEnChargeData } from "@/lib/dispensaire-prises-en-charge-const";
+import { cleNom } from "@/lib/noms";
+import { ETATS_EN_COURS, toPEC, type PrisesEnChargeData, type ChambreLibre } from "@/lib/dispensaire-prises-en-charge-const";
 
 export * from "@/lib/dispensaire-prises-en-charge-const";
 
@@ -14,7 +15,7 @@ export * from "@/lib/dispensaire-prises-en-charge-const";
 async function q<T>(p: PromiseLike<{ data: T | null }>): Promise<T | null> { try { return (await p).data; } catch { return null; } }
 
 export async function getPrisesEnCharge(): Promise<PrisesEnChargeData> {
-  const vide: PrisesEnChargeData = { pret: false, canEdit: false, canSoigner: false, canFacturer: false, enCours: [], recentes: [], patients: [], medecins: [] };
+  const vide: PrisesEnChargeData = { pret: false, canEdit: false, canSoigner: false, canFacturer: false, enCours: [], recentes: [], patients: [], medecins: [], chambresLibres: [] };
   const admin = createAdminClient();
   if (!admin) return vide;
   const [canEdit, canSoigner, canFacturer] = await Promise.all([estAutorise(), peutSoigner(), peutFacturer()]);
@@ -52,5 +53,21 @@ export async function getPrisesEnCharge(): Promise<PrisesEnChargeData> {
     .filter((s) => String(s.statut || "actif") !== "renvoye")
     .map((s) => String(s.nom || "").trim()).filter(Boolean);
 
-  return { pret: true, canEdit, canSoigner, canFacturer, enCours, recentes, patients, medecins };
+  // Lien avec les chambres (best-effort) : rattache à chaque épisode EN COURS le
+  // lit qu'occupe son patient, et fournit la liste des lits libres à assigner.
+  let chambresLibres: ChambreLibre[] = [];
+  try {
+    const ch = await q<Record<string, unknown>[]>(admin.from("DispensaireChambre").select("id,nom,etat,patientNormalise"));
+    if (ch) {
+      const occupees = new Map<string, { id: string; nom: string }>();
+      for (const c of ch) {
+        if (String(c.etat) === "libre") chambresLibres.push({ id: String(c.id), nom: String(c.nom || "?") });
+        else if (String(c.etat) === "occupee" && c.patientNormalise) occupees.set(String(c.patientNormalise), { id: String(c.id), nom: String(c.nom || "?") });
+      }
+      for (const p of enCours) { const c = occupees.get(cleNom(p.patient)); if (c) p.chambre = c; }
+      chambresLibres = chambresLibres.sort((a, b) => a.nom.localeCompare(b.nom));
+    }
+  } catch { /* module chambres non déployé → pas de lien */ }
+
+  return { pret: true, canEdit, canSoigner, canFacturer, enCours, recentes, patients, medecins, chambresLibres };
 }

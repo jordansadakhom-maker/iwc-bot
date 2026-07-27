@@ -6,6 +6,7 @@ import { peutFacturer, estAutorise, peutSoigner } from "@/lib/dispensaire-roles"
 import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenements";
 import { idAvecJeton, estDoublon } from "@/lib/dispensaire-idempotence";
 import { lireDossierMedical, ecrireDossierMedical, type DossierMedical } from "@/lib/dispensaire-patients";
+import { libererChambresDuPatient } from "@/lib/dispensaire-chambres";
 import { FACTURE_DELAI_H, statutsDe, serialiserStatuts, statutRepresentatif, estOuverte } from "@/lib/dispensaire-facturation-const";
 
 // Factures — RÉSERVÉ aux chefs (habilités). Suivi des impayés.
@@ -249,6 +250,7 @@ export async function terminerAvecFacture(pecId: string, input: { lignes: Consul
   const now = new Date().toISOString();
   await admin.from("DispensairePriseEnCharge").update({ etat: "termine", finAt: now, factureId: res.id, updatedBy: par, updatedAt: now }).eq("id", pecId);
   await emettreEvenementDispensaire({ aggregate: "prise_en_charge", type: "prise_en_charge.termine", cibleId: pecId, cibleLibelle: patient, avant: pec, apres: { etat: "termine", factureId: res.id, montant: res.montant } });
+  await libererChambresDuPatient(patient, par);   // sortie du patient → lit à nettoyer
   return res;
 }
 

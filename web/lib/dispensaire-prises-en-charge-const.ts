@@ -14,12 +14,17 @@ export type PriseEnCharge = {
   // Facture liée (rattachée à la lecture pour les épisodes terminés) : permet
   // d'encaisser depuis le tableau. `null` si aucune facture ou non résolue.
   facture?: { montant: number; payee: boolean } | null;
+  // Chambre/lit occupé(e) par le patient (rapproché par nom), si l'hospitalisation
+  // est en cours. `null` si le patient n'occupe aucun lit.
+  chambre?: { id: string; nom: string } | null;
 };
+
+export type ChambreLibre = { id: string; nom: string };
 
 export type PrisesEnChargeData = {
   pret: boolean; canEdit: boolean; canSoigner: boolean; canFacturer: boolean;
   enCours: PriseEnCharge[]; recentes: PriseEnCharge[];
-  patients: string[]; medecins: string[];
+  patients: string[]; medecins: string[]; chambresLibres: ChambreLibre[];
 };
 
 const str = (v: unknown) => (v == null ? null : String(v));
