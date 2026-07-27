@@ -7,7 +7,7 @@
  */
 import {
   LayoutDashboard, LineChart, Target, Eye, Users, HeartPulse, CalendarDays,
-  FileText, Boxes, Megaphone, Bell, Sparkles, Skull, Crosshair, UserPlus, Map, ScrollText, BarChart3, Moon, Mic, Beef, BookUser, Cross, History, ListChecks, type LucideIcon,
+  FileText, Boxes, Megaphone, Bell, Sparkles, Skull, Crosshair, UserPlus, Map, ScrollText, BarChart3, Moon, Mic, Beef, BookUser, Cross, History, ListChecks, MessagesSquare, type LucideIcon,
 } from "lucide-react";
 
 export type NavItem = { href: string; label: string; icon: LucideIcon; badge?: number };
@@ -33,6 +33,7 @@ export const NAV: NavGroup[] = [
   {
     title: "Terrain",
     items: [
+      { href: "/messages", label: "Messagerie", icon: MessagesSquare },
       { href: "/medical", label: "Médical", icon: HeartPulse },
       { href: "/agenda", label: "Agenda & Clients", icon: CalendarDays },
       { href: "/repertoire", label: "Répertoire contacts", icon: BookUser },
