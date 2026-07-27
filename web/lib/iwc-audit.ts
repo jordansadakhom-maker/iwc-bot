@@ -46,7 +46,7 @@ export async function getAuditIwc(): Promise<RapportAudit> {
     catch { return []; }
   };
 
-  const [licences, types, membresL, operations, contrats, produits, coffres, mvtCoffre, paies, impots, armContrats, armPointages, commandes, carteRoutes, contacts] = await Promise.all([
+  const [licences, types, membresL, operations, contrats, produits, coffres, mvtCoffre, paies, impots, armContrats, armPointages, commandes, carteRoutes, contacts, armVentes, ressources] = await Promise.all([
     q("Licence", "id,numero,typeCode,statut,dateDelivrance,dateExpiration,suspensionMotif,revocationMotif,suspensionDebut,suspensionFin,nom"),
     q("LicenceType", "code"),
     q("LicenceMembre", "id,identifiant,nom,role"),
@@ -62,6 +62,8 @@ export async function getAuditIwc(): Promise<RapportAudit> {
     q("ArmurerieCommande", "id,lignes,statut"),
     q("CarteRoute", "id,nom,points"),
     q("Contact", "id,nom,fiabilite"),
+    q("ArmurerieVente", "id,marque,modele,prix,quantite"),
+    q("ArmurerieRessource", "id,nom,prix,stock"),
   ]);
 
   const A: Anomalie[] = [];
@@ -175,6 +177,18 @@ export async function getAuditIwc(): Promise<RapportAudit> {
   ctrl();
   for (const c of contacts) if (Number(c.fiabilite) < 0)
     A.push({ categorie: "Cohérence", gravite: "mineur", titre: "Fiabilité de contact négative", detail: `${c.nom} = ${c.fiabilite}`, suggestion: "Corriger la fiabilité.", ref: String(c.id) });
+
+  // ── Ventes & ressources armurerie ─────────────────────────────────────────
+  ctrl();
+  for (const v of armVentes) {
+    if (Number(v.prix) < 0) A.push({ categorie: "Armurerie", gravite: "majeur", titre: "Vente à prix négatif", detail: `${[v.marque, v.modele].filter(Boolean).join(" ") || String(v.id).slice(0, 12)} = ${v.prix} $`, suggestion: "Corriger le prix de vente.", ref: String(v.id) });
+    if (v.quantite != null && Number(v.quantite) <= 0) A.push({ categorie: "Armurerie", gravite: "mineur", titre: "Vente à quantité nulle ou négative", detail: `${[v.marque, v.modele].filter(Boolean).join(" ") || String(v.id).slice(0, 12)} : ${v.quantite}`, suggestion: "La quantité doit être ≥ 1.", ref: String(v.id) });
+  }
+  ctrl();
+  for (const r of ressources) {
+    if (Number(r.stock) < 0) A.push({ categorie: "Armurerie", gravite: "majeur", titre: "Stock de ressource négatif", detail: `${r.nom} = ${r.stock}`, suggestion: "Corriger le stock.", ref: String(r.id) });
+    if (Number(r.prix) < 0) A.push({ categorie: "Armurerie", gravite: "mineur", titre: "Prix de ressource négatif", detail: `${r.nom} = ${r.prix} $`, suggestion: "Corriger le prix.", ref: String(r.id) });
+  }
 
   const { categories, scoreGlobal } = scorer(CATEGORIES, A);
   return { genereLe: new Date().toISOString(), pret: true, canVoir: true, scoreGlobal, totalControles: controles, categories, anomalies: trierAnomalies(A), checklist: CHECKLIST };
