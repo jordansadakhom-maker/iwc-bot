@@ -2,7 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
-import { estAutorise } from "@/lib/dispensaire-roles";
+import { estAutorise, getConfig } from "@/lib/dispensaire-roles";
 
 // Ventes — comptoir du dispensaire (ouvert à tout le personnel du dispensaire).
 export type VenteResult = { ok: boolean; error?: string; id?: string };
@@ -21,7 +21,9 @@ export async function creerVente(data: Record<string, unknown>): Promise<VenteRe
   if (!patient) return { ok: false, error: "Indique le patient." };
   const item = s(data.item) || "Bandage";
   const quantite = Math.max(1, n(data.quantite) || 1);
-  const prixUnitaire = n(data.prixUnitaire ?? 4);
+  // Prix de repli = prix configuré en admin (et non plus « 4 » codé en dur) : si
+  // le client n'envoie pas de prix, on applique la valeur courante de la config.
+  const prixUnitaire = data.prixUnitaire != null ? n(data.prixUnitaire) : (await getConfig()).prixBandage;
   const total = quantite * prixUnitaire;
   const id = newId();
   const { error } = await admin.from("DispensaireVente").insert({ id, patient, item, quantite, prixUnitaire, total, note: s(data.note, 500), par: await qui(), createdAt: new Date().toISOString() });
