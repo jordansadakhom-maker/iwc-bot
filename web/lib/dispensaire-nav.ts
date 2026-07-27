@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, ClipboardList, Boxes, FlaskConical, Archive, BadgeDollarSign, Receipt, ShieldCheck, FileText, BookUser, Stethoscope, ScrollText, BarChart3, History, ShieldAlert, Sparkles, Scale, HeartPulse, Factory, CalendarClock, Scissors, Landmark, BedDouble, Truck, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Users, ClipboardList, Boxes, FlaskConical, Archive, BadgeDollarSign, Receipt, ShieldCheck, FileText, BookUser, Stethoscope, ScrollText, BarChart3, History, ShieldAlert, Sparkles, Scale, HeartPulse, Factory, CalendarClock, Scissors, Landmark, BedDouble, Truck, Gauge, type LucideIcon } from "lucide-react";
 
 // Onglets de la section Dispensaire de Saint-Denis. `pret` = déjà construit ;
 // `restreint` = réservé aux membres habilités (RH/chefs) ; `admin` = permission
@@ -32,6 +32,7 @@ export const DISP_NAV: DispTab[] = [
   { href: "/repertoire", label: "Répertoire", icon: BookUser, pret: true, desc: "Les contacts et correspondants du dispensaire." },
   { href: "/dispensaire/reglement", label: "Règlement", icon: Scale, pret: true, desc: "Le règlement du cabinet et ses avenants — à connaître de tous." },
   { href: "/dispensaire/admin", label: "Administration", icon: ShieldAlert, pret: true, admin: true, desc: "Rôles, habilitations et réglages du dispensaire." },
+  { href: "/dispensaire/audit", label: "Mode Audit", icon: Gauge, pret: true, admin: true, desc: "Le contrôle qualité — anomalies, cohérence des données et checklist de tests." },
 ];
 
 // Routes hors barre d'onglets qui méritent tout de même un en-tête de folio.
