@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, ShoppingBag, FileSignature, CalendarClock, Receipt, User, ArrowRight } from "lucide-react";
+import { Loader2, ShoppingBag, FileSignature, CalendarClock, Receipt, User, ArrowRight, Mail } from "lucide-react";
 import { Modal, inputCls } from "@/components/edit-ui";
 import { cents } from "@/lib/format";
 import { getClientsListe, getDossierClient, type DossierClient, type ClientActe } from "@/app/(app)/finances/actions";
@@ -12,7 +12,7 @@ import { getClientsListe, getDossierClient, type DossierClient, type ClientActe 
 
 const money = (n: number) => `${cents(n)}$`;
 const dateFR = (s: string | null) => { if (!s) return "—"; try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", year: "numeric" }).format(new Date(s)); } catch { return "—"; } };
-const ICONE: Record<ClientActe["type"], typeof ShoppingBag> = { Vente: ShoppingBag, Contrat: FileSignature, "Rendez-vous": CalendarClock, Facture: Receipt };
+const ICONE: Record<ClientActe["type"], typeof ShoppingBag> = { Vente: ShoppingBag, Contrat: FileSignature, "Rendez-vous": CalendarClock, Facture: Receipt, "Télégramme": Mail };
 
 export function ClientDossier({ onClose, initialNom }: { onClose: () => void; initialNom?: string }) {
   const [clients, setClients] = useState<string[]>([]);
