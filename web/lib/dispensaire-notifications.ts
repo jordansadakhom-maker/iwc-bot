@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getConfig, peutFacturer } from "@/lib/dispensaire-roles";
 import { statutsDe, estClose } from "@/lib/dispensaire-facturation-const";
 import { ymdParis, lundiCourant } from "@/lib/dispensaire-dates";
+import { getPrevisions } from "@/lib/dispensaire-prevision";
 import { getEtatsOverlay } from "@/lib/notif-etat";
 import { ETAT_ACTIFS, type Etat } from "@/lib/erp-assistant-const";
 
@@ -40,8 +41,20 @@ export async function getNotifications(): Promise<{ items: Notif[]; count: numbe
   const items: Notif[] = [];
   const today = ymdParis(new Date().toISOString());
 
-  for (const r of stock || []) if (num(r.seuil) > 0 && num(r.stock) <= num(r.seuil)) items.push({ id: "st-" + r.nom, severite: "alerte", type: "Stock faible", texte: `Stock faible : ${r.nom} (${num(r.stock)}${r.unite ? " " + r.unite : ""} / seuil ${num(r.seuil)})`, href: "/dispensaire/stockage" });
+  const stockFaibleNoms = new Set<string>();
+  for (const r of stock || []) if (num(r.seuil) > 0 && num(r.stock) <= num(r.seuil)) { stockFaibleNoms.add(String(r.nom)); items.push({ id: "st-" + r.nom, severite: "alerte", type: "Stock faible", texte: `Stock faible : ${r.nom} (${num(r.stock)}${r.unite ? " " + r.unite : ""} / seuil ${num(r.seuil)})`, href: "/dispensaire/stockage" }); }
   for (const r of matieres || []) if (num(r.seuil) > 0 && num(r.quantite) <= num(r.seuil)) items.push({ id: "mp-" + r.nom, severite: "alerte", type: "Matière première", texte: `Matière première basse : ${r.nom} (${num(r.quantite)} / seuil ${num(r.seuil)})`, href: "/dispensaire/matieres" });
+
+  // Rupture PRÉVUE (prospectif) : au rythme de consommation actuel, l'article
+  // tombera à zéro sous peu — et il n'est pas encore signalé « sous seuil ».
+  try {
+    const prev = await getPrevisions();
+    for (const p of prev.items) {
+      if (p.urgence !== "critique" && p.urgence !== "bientot") continue;
+      if (stockFaibleNoms.has(p.nom)) continue;
+      items.push({ id: "prev-" + p.id, severite: "attention", type: "Rupture prévue", texte: `${p.nom} : rupture prévue ${p.joursRestants == null ? "imminente" : `dans ${p.joursRestants} j`} (≈ ${p.consoJour}/j)`, href: "/dispensaire/stockage" });
+    }
+  } catch { /* module prévision indisponible */ }
 
   // Factures : délai de paiement dépassé (72 h) ou bientôt à échéance (< 24 h).
   const nowMs = Date.now();
