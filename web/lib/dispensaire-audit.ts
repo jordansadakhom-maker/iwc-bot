@@ -43,7 +43,7 @@ export async function getAuditDispensaire(): Promise<RapportAudit> {
     catch { return []; }
   };
 
-  const [pec, chambres, factures, stock, mouvements, membres, grades, rdv, pointages, matieres, ambulances] = await Promise.all([
+  const [pec, chambres, factures, stock, mouvements, membres, grades, rdv, pointages, matieres, ambulances, frais, interventions] = await Promise.all([
     q("DispensairePriseEnCharge", "id,patient,patientNormalise,etat,factureId,admisAt,soinAt,finAt"),
     q("DispensaireChambre", "id,nom,etat,patient,patientNormalise"),
     q("DispensaireFacture", "id,montant,statut"),
@@ -55,6 +55,8 @@ export async function getAuditDispensaire(): Promise<RapportAudit> {
     q("DispensairePointage", "id,nom,debut,fin"),
     q("DispensaireMatiere", "id,nom,quantite"),
     q("DispensaireAmbulance", "id,nom,etat,essence"),
+    q("DispensaireFrais", "id,objet,montant,statut"),
+    q("DispensaireIntervention", "id,patient,statut"),
   ]);
 
   const A: Anomalie[] = [];
@@ -151,6 +153,18 @@ export async function getAuditDispensaire(): Promise<RapportAudit> {
     if (amb.essence != null && (e < 0 || e > 100))
       A.push({ categorie: "Cohérence", gravite: "mineur", titre: "Niveau d'essence hors bornes", detail: `${amb.nom} = ${amb.essence} %`, suggestion: "L'essence doit être entre 0 et 100 %.", ref: String(amb.id) });
   }
+
+  // ── Notes de frais & interventions ───────────────────────────────────────
+  ctrl();
+  const statutsFrais = new Set(["en_attente", "valide", "refuse", "vire"]);
+  for (const f of frais) {
+    if (Number(f.montant) < 0) A.push({ categorie: "Cohérence", gravite: "majeur", titre: "Note de frais à montant négatif", detail: `${f.objet} = ${f.montant} $`, suggestion: "Corriger le montant.", ref: String(f.id) });
+    if (f.statut && !statutsFrais.has(String(f.statut))) A.push({ categorie: "Cohérence", gravite: "mineur", titre: "Statut de note de frais inconnu", detail: `${f.objet} → « ${f.statut} »`, suggestion: "Ramener à en_attente/valide/refuse/vire.", ref: String(f.id) });
+  }
+  ctrl();
+  const statutsInterv = new Set(["planifiee", "en_cours", "terminee", "annulee"]);
+  for (const it of interventions) if (it.statut && !statutsInterv.has(String(it.statut)))
+    A.push({ categorie: "Cohérence", gravite: "mineur", titre: "Statut d'intervention inconnu", detail: `${it.patient} → « ${it.statut} »`, suggestion: "Ramener à planifiée/en cours/terminée/annulée.", ref: String(it.id) });
 
   const { categories, scoreGlobal } = scorer(CATEGORIES, A);
   return { genereLe: new Date().toISOString(), pret: true, canVoir: true, scoreGlobal, totalControles: controles, categories, anomalies: trierAnomalies(A), checklist: CHECKLIST };
