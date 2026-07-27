@@ -17,9 +17,10 @@ const LABEL: Record<string, string> = {
   "certificat.cree": "Certificat émis", "certificat.supprime": "Certificat supprimé",
   "rapport.cree": "Rapport créé", "rapport.maj": "Rapport modifié", "rapport.supprime": "Rapport supprimé",
   "pointage.debut": "Prise de service", "pointage.fin": "Fin de service", "pointage.supprime": "Pointage supprimé",
+  "patient.dossier_maj": "Dossier médical modifié",
 };
-const MODULE_LABEL: Record<string, string> = { membre: "Accès", grade: "Grades", config: "Config", salarie: "RH", stock: "Stock", coffre: "Coffres", matiere: "Matières", vente: "Ventes", facture: "Factures", fdo: "FDO", frais: "Frais", certificat: "Certificats", rapport: "Rapports", pointage: "Pointage" };
-const TON: Record<string, string> = { membre: "var(--accent)", grade: "var(--warn)", config: "var(--steel)", salarie: "var(--good)", stock: "var(--accent)", coffre: "var(--steel)", matiere: "var(--warn)", vente: "var(--good)", facture: "var(--accent)", fdo: "var(--steel)", frais: "var(--warn)", certificat: "var(--good)", rapport: "var(--steel)", pointage: "var(--accent)" };
+const MODULE_LABEL: Record<string, string> = { membre: "Accès", grade: "Grades", config: "Config", salarie: "RH", stock: "Stock", coffre: "Coffres", matiere: "Matières", vente: "Ventes", facture: "Factures", fdo: "FDO", frais: "Frais", certificat: "Certificats", rapport: "Rapports", pointage: "Pointage", patient: "Patients" };
+const TON: Record<string, string> = { membre: "var(--accent)", grade: "var(--warn)", config: "var(--steel)", salarie: "var(--good)", stock: "var(--accent)", coffre: "var(--steel)", matiere: "var(--warn)", vente: "var(--good)", facture: "var(--accent)", fdo: "var(--steel)", frais: "var(--warn)", certificat: "var(--good)", rapport: "var(--steel)", pointage: "var(--accent)", patient: "var(--good)" };
 
 const dtFR = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); } catch { return "—"; } };
 

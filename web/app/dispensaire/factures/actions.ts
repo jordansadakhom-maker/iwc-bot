@@ -2,9 +2,10 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
-import { peutFacturer } from "@/lib/dispensaire-roles";
+import { peutFacturer, estAutorise, peutSoigner } from "@/lib/dispensaire-roles";
 import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenements";
 import { idAvecJeton, estDoublon } from "@/lib/dispensaire-idempotence";
+import { lireDossierMedical, ecrireDossierMedical, type DossierMedical } from "@/lib/dispensaire-patients";
 import { FACTURE_DELAI_H, statutsDe, serialiserStatuts, statutRepresentatif, estOuverte } from "@/lib/dispensaire-facturation-const";
 
 // Factures — RÉSERVÉ aux chefs (habilités). Suivi des impayés.
@@ -248,5 +249,26 @@ export async function getDossierPatient(nom: string): Promise<DossierPatient> {
   for (const r of rapports) { if (_normNom(r.patient) !== cible) continue; actes.push({ id: "r" + r.id, type: "Rapport", libelle: String(r.titre || "Rapport"), montant: null, statut: null, date: String(r.createdAt) }); }
   actes.sort((a, b) => String(b.date).localeCompare(String(a.date)));
   return { nom: String(nom).trim(), totalDu: du, totalRegle: regle, nbActes: actes.length, actes };
+}
+
+// ── DOSSIER MÉDICAL (Lot 2) ──────────────────────────────────────────────────
+// Fiche patient structurée (groupe sanguin, allergies, antécédents…). Lecture
+// ouverte à tout le personnel autorisé ; édition réservée aux soignants.
+export type DossierMedicalResult = { pret: boolean; existe: boolean; dossier: DossierMedical | null; canEdit: boolean };
+
+export async function getDossierMedical(nom: string): Promise<DossierMedicalResult> {
+  if (!(await estAutorise())) return { pret: false, existe: false, dossier: null, canEdit: false };
+  const [{ pret, existe, dossier }, canEdit] = await Promise.all([lireDossierMedical(nom), peutSoigner()]);
+  return { pret, existe, dossier, canEdit };
+}
+
+export async function majDossierMedical(nom: string, patch: Record<string, unknown>): Promise<{ ok: boolean; error?: string; id?: string }> {
+  if (!(await peutSoigner())) return { ok: false, error: "Édition réservée au personnel soignant." };
+  const par = await qui();
+  const avant = (await lireDossierMedical(nom)).dossier;
+  const res = await ecrireDossierMedical(nom, patch, par);
+  if (!res.ok) return res;
+  await emettreEvenementDispensaire({ aggregate: "patient", type: "patient.dossier_maj", cibleId: res.id, cibleLibelle: String(nom).trim(), avant, apres: { nom: String(nom).trim(), ...patch } });
+  return res;
 }
 
