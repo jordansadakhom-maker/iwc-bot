@@ -44,15 +44,25 @@ export async function updateSession(request: NextRequest) {
   // Pour déverrouiller exceptionnellement, définir REQUIRE_AUTH="false".
   const requireAuth = process.env.REQUIRE_AUTH !== "false";
   const path = request.nextUrl.pathname;
-  // Pages accessibles SANS connexion, même quand le site est verrouillé :
-  // la connexion, le retour OAuth, la prise de rendez-vous publique — ET les
-  // routes de métadonnées (image d'aperçu Discord, manifeste + icône PWA), sinon
-  // le crawler Discord (anonyme) est redirigé vers /login et l'embed n'a pas
-  // d'image, et l'appli ne peut pas s'installer.
-  const isPublic = path === "/" || path === "/login" || path.startsWith("/auth") || path === "/rendez-vous" || path === "/telegramme" || path === "/rejoindre" || path.startsWith("/suivi") || path.startsWith("/avis") || path === "/armurerie-vh"
-    || path === "/opengraph-image" || path === "/manifest.webmanifest" || path === "/pwa-icon" || path === "/icon" || path === "/apple-icon";
 
-  if (requireAuth && !user && !isPublic) {
+  // Modèle « liste des zones PROTÉGÉES » (dossier app/(app) + espace Dispensaire).
+  // Tout le reste passe librement : accueil, /login, /auth, formulaires publics
+  // (/rendez-vous, /telegramme, /rejoindre), /suivi (signature client), /avis,
+  // boutique publique /armurerie-vh, routes API (auto-authentifiées, ex. cron),
+  // métadonnées (opengraph/manifest/icônes), robots.txt & sitemap.xml — et les
+  // URL inconnues, qui rendent ainsi une VRAIE page 404 au lieu d'être renvoyées
+  // vers /login. Chaque page interne se protège en plus via getActeur (fail-closed).
+  const PROTECTED = [
+    "/absences", "/activite", "/agenda", "/armurerie", "/assistant", "/carte", "/carte-metier",
+    "/chasse", "/communication", "/dashboard", "/direction", "/documents", "/finances", "/inventaire",
+    "/journal", "/medical", "/membres", "/messages", "/mouvements", "/notes-vocales", "/notifications",
+    "/operations", "/recrutement", "/renseignement", "/repertoire", "/statistiques", "/taches", "/wanted",
+    "/dispensaire",
+  ];
+  // Frontière stricte : "/armurerie" protégé n'attrape PAS le public "/armurerie-vh".
+  const estProtege = PROTECTED.some((p) => path === p || path.startsWith(p + "/"));
+
+  if (requireAuth && !user && estProtege) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/login";
     return NextResponse.redirect(redirectUrl);
