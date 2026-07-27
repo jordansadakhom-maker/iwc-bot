@@ -56,6 +56,16 @@ export async function getNotifications(): Promise<{ items: Notif[]; count: numbe
     }
   } catch { /* module prévision indisponible */ }
 
+  // Rappels : rendez-vous encore « prévus » et programmés aujourd'hui.
+  try {
+    const rdvs = await q<Record<string, unknown>[]>(admin.from("DispensaireRendezVous").select("id,patient,type,debut,etat").eq("etat", "prevu").order("debut", { ascending: true }).limit(100));
+    for (const r of rdvs || []) {
+      if (ymdParis(String(r.debut)) !== today) continue;
+      const h = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit" }).format(new Date(String(r.debut)));
+      items.push({ id: "rdv-" + r.id, severite: "attention", type: "Rendez-vous", texte: `RDV aujourd'hui à ${h} — ${String(r.patient || "?")}${r.type ? ` (${r.type})` : ""}`, href: "/dispensaire/rendez-vous" });
+    }
+  } catch { /* module rendez-vous indisponible */ }
+
   // Factures : délai de paiement dépassé (72 h) ou bientôt à échéance (< 24 h).
   const nowMs = Date.now();
   if (habilite) for (const f of factures || []) {

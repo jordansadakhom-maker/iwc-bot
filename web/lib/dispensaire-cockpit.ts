@@ -5,6 +5,7 @@ import { getAccueil } from "@/lib/dispensaire-accueil";
 import { getPrisesEnCharge } from "@/lib/dispensaire-prises-en-charge";
 import { getRendezVous } from "@/lib/dispensaire-rendez-vous";
 import { getInterventions } from "@/lib/dispensaire-interventions";
+import { getChambres } from "@/lib/dispensaire-chambres";
 import { getPrevisions } from "@/lib/dispensaire-prevision";
 import { getComptabilite } from "@/lib/dispensaire-comptabilite";
 import { getJournalAudit, type AuditEntree } from "@/lib/dispensaire-evenements";
@@ -26,6 +27,7 @@ export type CockpitData = {
   pecEnCours: number; pecAdmis: number; pecEnSoin: number;
   rdvAujourdhui: number; prochainsRdv: CockpitRdv[];
   intervEnCours: number;
+  chambresOccupees: number; chambresTotal: number;
   stockAlertes: number; matieresRupture: number; ruptureBientot: number; topRupture: CockpitRupture[];
   journal: AuditEntree[];
 };
@@ -35,17 +37,19 @@ export async function getCockpit(): Promise<CockpitData> {
     pret: false, canVoir: false, genereLe: new Date().toISOString(),
     tresorerie: 0, moisSolde: 0, facturesImpayees: 0, du: 0, ventesJourNb: 0, ventesJourCa: 0,
     enService: [], pecEnCours: 0, pecAdmis: 0, pecEnSoin: 0, rdvAujourdhui: 0, prochainsRdv: [], intervEnCours: 0,
+    chambresOccupees: 0, chambresTotal: 0,
     stockAlertes: 0, matieresRupture: 0, ruptureBientot: 0, topRupture: [], journal: [],
   };
   let moi;
   try { moi = await getRoleDispensaire(); } catch { return vide; }
   if (!moi.perms.admin) return { ...vide, pret: true };
 
-  const [accueil, pec, rdv, interv, prev, compta, journalRes] = await Promise.all([
+  const [accueil, pec, rdv, interv, chambres, prev, compta, journalRes] = await Promise.all([
     getAccueil().catch(() => null),
     getPrisesEnCharge().catch(() => null),
     getRendezVous().catch(() => null),
     getInterventions().catch(() => null),
+    getChambres().catch(() => null),
     getPrevisions().catch(() => null),
     getComptabilite().catch(() => null),
     getJournalAudit({ limit: 8 }).catch(() => ({ pret: false, entrees: [] })),
@@ -69,6 +73,8 @@ export async function getCockpit(): Promise<CockpitData> {
     pecEnSoin: (pec?.enCours || []).filter((p) => p.etat === "en_soin").length,
     rdvAujourdhui, prochainsRdv,
     intervEnCours: (interv?.enCours || []).length,
+    chambresOccupees: chambres?.stats?.occupee ?? 0,
+    chambresTotal: chambres ? Object.values(chambres.stats).reduce((a, b) => a + b, 0) : 0,
     stockAlertes: (accueil?.stockAlertes || []).length, matieresRupture: (accueil?.matieresRupture || []).length,
     ruptureBientot: ruptureUrg.length, topRupture,
     journal: journalRes?.entrees || [],

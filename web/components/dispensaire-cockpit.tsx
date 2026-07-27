@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LayoutDashboard, Wallet, HeartPulse, CalendarClock, Scissors, Users, Boxes, TrendingDown, ScrollText, ArrowRight, Lock, RefreshCw } from "lucide-react";
+import { LayoutDashboard, Wallet, HeartPulse, CalendarClock, Scissors, Users, Boxes, TrendingDown, ScrollText, ArrowRight, Lock, RefreshCw, BedDouble } from "lucide-react";
 import { money } from "@/lib/dispensaire-facturation-const";
 import { Cartouche } from "@/components/dispensaire-ui";
 import { AutoRefresh } from "@/components/auto-refresh";
@@ -38,10 +38,11 @@ export function DispensaireCockpit({ data }: { data: CockpitData }) {
       </div>
 
       {/* KPI */}
-      <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4 xl:grid-cols-7">
         <Cartouche label="Trésorerie" valeur={money(data.tresorerie)} ton={data.tresorerie >= 0 ? "var(--good)" : "var(--oxblood)"} icon={Wallet} />
         <Cartouche label="Solde du mois" valeur={money(data.moisSolde)} ton={data.moisSolde >= 0 ? "var(--good)" : "var(--oxblood)"} icon={Wallet} />
         <Cartouche label="En charge" valeur={data.pecEnCours} ton="var(--accent)" icon={HeartPulse} />
+        <Cartouche label="Lits occupés" valeur={`${data.chambresOccupees}/${data.chambresTotal}`} ton={data.chambresOccupees ? "var(--oxblood)" : undefined} icon={BedDouble} />
         <Cartouche label="RDV aujourd'hui" valeur={data.rdvAujourdhui} icon={CalendarClock} />
         <Cartouche label="Interventions" valeur={data.intervEnCours} ton={data.intervEnCours ? "var(--oxblood)" : undefined} icon={Scissors} />
         <Cartouche label="En service" valeur={data.enService.length} ton={data.enService.length ? "var(--good)" : undefined} icon={Users} />
