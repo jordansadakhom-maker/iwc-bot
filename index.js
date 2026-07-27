@@ -108,6 +108,10 @@ let commandeWeb = {};
 try { commandeWeb = require('./commande-web'); console.log('✅ Module commande web chargé'); }
 catch (e) { console.log('⚠️ commande-web non chargé:', e.message); }
 
+let licencesWeb = {};
+try { licencesWeb = require('./licences-web'); console.log('✅ Module licences web chargé'); }
+catch (e) { console.log('⚠️ licences-web non chargé:', e.message); }
+
 let resumePhoto = {};
 try { resumePhoto = require('./resume-photo'); console.log('✅ Module résumé-photo chargé'); }
 catch (e) { console.log('⚠️ resume-photo non chargé:', e.message); }
@@ -6921,6 +6925,14 @@ client.once('clientReady', async () => {
   cron.schedule('*/2 * * * *', async () => {
     for (const g of client.guilds.cache.values()) await contactWeb.verifierDemandesContactWeb?.(g).catch(() => {});
   });
+  // 🪪 Évènements du registre des licences (création, suspension, révocation, refus…) → salon Discord des licences (toutes les 2 min).
+  cron.schedule('*/2 * * * *', async () => {
+    for (const g of client.guilds.cache.values()) await licencesWeb.verifierNotificationsLicences?.(g).catch(() => {});
+  });
+  // 📅 Digest quotidien des licences à renouveler (expirations ≤ 30 j) — 9h30 Paris.
+  cron.schedule('30 9 * * *', async () => {
+    for (const g of client.guilds.cache.values()) await licencesWeb.verifierExpirationsLicences?.(g).catch(() => {});
+  }, { timezone: 'Europe/Paris' });
   // ⚡ Commandes CRUD venues du site (créer/modifier/supprimer) → appliquées toutes
   //    les 3 s. Le site peut ainsi attendre le vrai verdict (« temps réel ») pour
   //    les envois de contrats, tout en gardant l'affichage optimiste ailleurs.
