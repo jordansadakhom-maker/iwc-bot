@@ -47,7 +47,7 @@ export async function getAuditDispensaire(): Promise<RapportAudit> {
     q("DispensairePriseEnCharge", "id,patient,patientNormalise,etat,factureId,admisAt,soinAt,finAt"),
     q("DispensaireChambre", "id,nom,etat,patient,patientNormalise"),
     q("DispensaireFacture", "id,montant,statut"),
-    q("DispensaireStock", "id,nom,stock"),
+    q("DispensaireStock", "id,nom,stock,seuil,stockFixe"),
     q("DispensaireStockMouvement", "stockId"),
     q("DispensaireMembre", "id,identifiant,nom,role,actif"),
     getGrades().catch(() => []),
@@ -81,8 +81,11 @@ export async function getAuditDispensaire(): Promise<RapportAudit> {
 
   // ── Cohérence (logique métier) ──────────────────────────────────────────
   ctrl();
-  for (const s of stock) if (Number(s.stock) < 0)
-    A.push({ categorie: "Cohérence", gravite: "critique", titre: "Stock négatif", detail: `${s.nom} = ${s.stock}`, suggestion: "Corriger le stock / rejouer les mouvements.", ref: String(s.id) });
+  for (const s of stock) {
+    if (Number(s.stock) < 0) A.push({ categorie: "Cohérence", gravite: "critique", titre: "Stock négatif", detail: `${s.nom} = ${s.stock}`, suggestion: "Corriger le stock / rejouer les mouvements.", ref: String(s.id) });
+    if (Number(s.seuil) < 0) A.push({ categorie: "Cohérence", gravite: "mineur", titre: "Seuil d'alerte négatif", detail: `${s.nom} : seuil ${s.seuil}`, suggestion: "Le seuil doit être ≥ 0.", ref: String(s.id) });
+    if (Number(s.stockFixe) < 0) A.push({ categorie: "Cohérence", gravite: "mineur", titre: "Stock de référence négatif", detail: `${s.nom} : ${s.stockFixe}`, suggestion: "Corriger le stock fixe.", ref: String(s.id) });
+  }
   const pecActifNorm = new Set(pec.filter((p) => p.etat === "admis" || p.etat === "en_soin").map((p) => norm(p.patientNormalise || p.patient)));
   ctrl();
   for (const c of chambres) {
