@@ -11,10 +11,13 @@ export type PriseEnCharge = {
   etat: EtatPEC; note: string | null; factureId: string | null;
   admisAt: string; soinAt: string | null; finAt: string | null;
   updatedAt: string | null; updatedBy: string | null;
+  // Facture liée (rattachée à la lecture pour les épisodes terminés) : permet
+  // d'encaisser depuis le tableau. `null` si aucune facture ou non résolue.
+  facture?: { montant: number; payee: boolean } | null;
 };
 
 export type PrisesEnChargeData = {
-  pret: boolean; canEdit: boolean; canSoigner: boolean;
+  pret: boolean; canEdit: boolean; canSoigner: boolean; canFacturer: boolean;
   enCours: PriseEnCharge[]; recentes: PriseEnCharge[];
   patients: string[]; medecins: string[];
 };
