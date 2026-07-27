@@ -46,7 +46,7 @@ export async function getAuditIwc(): Promise<RapportAudit> {
     catch { return []; }
   };
 
-  const [licences, types, membresL, operations, contrats, produits, coffres, mvtCoffre, paies, impots, armContrats, armPointages, commandes] = await Promise.all([
+  const [licences, types, membresL, operations, contrats, produits, coffres, mvtCoffre, paies, impots, armContrats, armPointages, commandes, carteRoutes, contacts] = await Promise.all([
     q("Licence", "id,numero,typeCode,statut,dateDelivrance,dateExpiration,suspensionMotif,revocationMotif,suspensionDebut,suspensionFin,nom"),
     q("LicenceType", "code"),
     q("LicenceMembre", "id,identifiant,nom,role"),
@@ -60,6 +60,8 @@ export async function getAuditIwc(): Promise<RapportAudit> {
     q("ArmurerieContrat", "id,arme,prix,statut"),
     q("ArmureriePointage", "id,employeNom,debut,fin"),
     q("ArmurerieCommande", "id,lignes,statut"),
+    q("CarteRoute", "id,nom,points"),
+    q("Contact", "id,nom,fiabilite"),
   ]);
 
   const A: Anomalie[] = [];
@@ -165,6 +167,14 @@ export async function getAuditIwc(): Promise<RapportAudit> {
     if (lignes.some((l) => Number(l.qte) < 0 || Number(l.prixUnitaire) < 0))
       A.push({ categorie: "Armurerie", gravite: "mineur", titre: "Ligne de commande à valeur négative", detail: `commande ${String(cmd.id).slice(0, 12)}`, suggestion: "Corriger quantité/prix des lignes.", ref: String(cmd.id) });
   }
+
+  // ── Carte & répertoire ────────────────────────────────────────────────────
+  ctrl();
+  for (const r of carteRoutes) { const pts = Array.isArray(r.points) ? (r.points as unknown[]) : []; if (pts.length < 2)
+    A.push({ categorie: "Intégrité", gravite: "mineur", titre: "Itinéraire à moins de 2 points", detail: `${r.nom || String(r.id).slice(0, 12)}`, suggestion: "Compléter ou supprimer l'itinéraire.", ref: String(r.id) }); }
+  ctrl();
+  for (const c of contacts) if (Number(c.fiabilite) < 0)
+    A.push({ categorie: "Cohérence", gravite: "mineur", titre: "Fiabilité de contact négative", detail: `${c.nom} = ${c.fiabilite}`, suggestion: "Corriger la fiabilité.", ref: String(c.id) });
 
   const { categories, scoreGlobal } = scorer(CATEGORIES, A);
   return { genereLe: new Date().toISOString(), pret: true, canVoir: true, scoreGlobal, totalControles: controles, categories, anomalies: trierAnomalies(A), checklist: CHECKLIST };
