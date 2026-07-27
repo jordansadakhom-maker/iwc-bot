@@ -2,6 +2,9 @@
 
 import { envoyerCommande, type CommandeResult } from "@/lib/commandes";
 import { supprimerFiable } from "@/lib/suppression";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { getActeur } from "@/lib/authz";
+import { suggererAssignation, type CandidatMembre, type Suggestion } from "@/lib/attribution";
 
 // Actions sur les opérations → file de commandes, appliquées par le bot puis
 // resynchronisées sur le site.
@@ -28,6 +31,35 @@ export async function changerPhase(id: string, phase: string): Promise<CommandeR
 
 export async function supprimerOperation(id: string): Promise<CommandeResult> {
   return supprimerFiable({ type: "operation.delete", payload: { id }, table: "Operation", colonne: "id", valeur: id, okMsg: "Opération supprimée." });
+}
+
+// Attribution assistée : agents recommandés pour une opération. Lecture seule.
+// La charge combine les tâches ouvertes ET les opérations actives déjà assignées.
+export async function suggererAgents(pole?: string, exclureIds?: string[]): Promise<{ ok: boolean; suggestions: Suggestion[] }> {
+  const a = await getActeur();
+  if (!a) return { ok: false, suggestions: [] };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, suggestions: [] };
+  const exclu = new Set((exclureIds || []).map(String));
+  const [{ data: mem }, { data: tk }, { data: ops }] = await Promise.all([
+    admin.from("Membre").select("id,nomIC,grade,pole,statut"),
+    admin.from("Tache").select("assigneId").neq("statut", "faite"),
+    admin.from("Operation").select("agentsAssignes,phase"),
+  ]);
+  const charge = new Map<string, number>();
+  for (const t of (tk || []) as { assigneId: string | null }[]) { if (t.assigneId) charge.set(t.assigneId, (charge.get(t.assigneId) || 0) + 1); }
+  for (const o of (ops || []) as { agentsAssignes: unknown; phase: string | null }[]) {
+    if (/termin|annul|clotur/.test(String(o.phase || "").toLowerCase())) continue; // opérations actives seulement
+    const ag = Array.isArray(o.agentsAssignes) ? o.agentsAssignes : [];
+    for (const id of ag) { const s = String(id || ""); if (s) charge.set(s, (charge.get(s) || 0) + 1); }
+  }
+  const candidats: CandidatMembre[] = ((mem || []) as Record<string, unknown>[])
+    .filter((m) => String(m.statut || "") !== "parti" && !exclu.has(String(m.id)))
+    .map((m) => ({
+      id: String(m.id), nom: String(m.nomIC || m.id), grade: (m.grade as string) ?? null,
+      pole: String(m.pole || ""), absent: String(m.statut || "") === "absent", charge: charge.get(String(m.id)) || 0,
+    }));
+  return { ok: true, suggestions: suggererAssignation(candidats, { pole: pole ?? null }, 5) };
 }
 
 // Assigner des agents à une opération (les prévient en MP via le bot).
