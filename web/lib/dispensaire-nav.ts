@@ -8,6 +8,7 @@ export type DispTab = { href: string; label: string; icon: LucideIcon; pret?: bo
 export const DISP_NAV: DispTab[] = [
   { href: "/dispensaire", label: "Accueil", icon: LayoutDashboard, pret: true, desc: "Le registre du jour — soins, stocks et personnel réunis d'un même regard." },
   { href: "/dispensaire/assistant", label: "Assistant", icon: Sparkles, pret: true, desc: "La veille automatique — ce que le dispensaire a détecté et ce qu'il te propose de faire." },
+  { href: "/dispensaire/cockpit", label: "Cockpit Direction", icon: LayoutDashboard, pret: true, admin: true, desc: "La vue d'ensemble en temps réel — soins, planning, stock et finances d'un même regard." },
   { href: "/dispensaire/prises-en-charge", label: "Prises en charge", icon: HeartPulse, pret: true, desc: "Le parcours de soin — admission, attribution d'un médecin, soin, sortie." },
   { href: "/dispensaire/rendez-vous", label: "Rendez-vous", icon: CalendarClock, pret: true, desc: "Le planning des consultations — patients attendus, médecins et salles." },
   { href: "/dispensaire/interventions", label: "Interventions", icon: Scissors, pret: true, restreint: true, desc: "Les opérations et leurs comptes-rendus opératoires (CRO)." },
