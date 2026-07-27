@@ -627,7 +627,7 @@ async function _del(pathAndQuery) {
 // il ne doit donc JAMAIS y supprimer des lignes absentes de son data.json —
 // sinon un événement/une notification créé côté site disparaît à la sync.
 // Garde-fou permanent : même si on ajoute par erreur un _reconcilier dessus.
-const _JAMAIS_RECONCILIER = new Set(['Event', 'Notification', 'ActivityLog', 'TelegrammeWeb', 'DemandeContact', 'Tache']);
+const _JAMAIS_RECONCILIER = new Set(['Event', 'Notification', 'ActivityLog', 'TelegrammeWeb', 'DemandeContact', 'Tache', 'Conversation', 'Message', 'ConversationVue']);
 async function _reconcilier(table, idsGardes) {
   if (_JAMAIS_RECONCILIER.has(table)) {
     console.log(`⛔ _reconcilier ignoré pour ${table} (donnée site-native — jamais supprimée par la sync).`);
