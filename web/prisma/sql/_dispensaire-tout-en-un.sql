@@ -260,7 +260,50 @@ CREATE INDEX IF NOT EXISTS "DispInterv_patient_idx" ON "DispensaireIntervention"
 ALTER TABLE "DispensaireIntervention" ENABLE ROW LEVEL SECURITY;
 
 
+-- ═══════════════════════════════════════════════════════════════════════════
+--  8) CHAMBRES / LITS (Lot 5) — active l'onglet « Chambres ».
+-- ═══════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS "DispensaireChambre" (
+  "id"               TEXT PRIMARY KEY,
+  "nom"              TEXT NOT NULL,
+  "type"             TEXT,
+  "etat"             TEXT NOT NULL DEFAULT 'libre',   -- libre | occupee | reservee | nettoyage
+  "patient"          TEXT,
+  "patientNormalise" TEXT,
+  "medecin"          TEXT,
+  "depuis"           TIMESTAMPTZ,
+  "note"             TEXT,
+  "createdAt"        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  "updatedAt"        TIMESTAMPTZ,
+  "updatedBy"        TEXT
+);
+CREATE INDEX IF NOT EXISTS "DispChambre_etat_idx" ON "DispensaireChambre"("etat");
+ALTER TABLE "DispensaireChambre" ENABLE ROW LEVEL SECURITY;
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  9) AMBULANCES (Lot 5) — active l'onglet « Ambulances ».
+-- ═══════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS "DispensaireAmbulance" (
+  "id"               TEXT PRIMARY KEY,
+  "nom"              TEXT NOT NULL,
+  "etat"             TEXT NOT NULL DEFAULT 'disponible',  -- disponible | en_intervention | entretien | hs
+  "essence"          INT,
+  "kilometrage"      INT,
+  "materiel"         TEXT,
+  "dernierEntretien" TEXT,
+  "note"             TEXT,
+  "createdAt"        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  "updatedAt"        TIMESTAMPTZ,
+  "updatedBy"        TEXT
+);
+CREATE INDEX IF NOT EXISTS "DispAmbulance_etat_idx" ON "DispensaireAmbulance"("etat");
+ALTER TABLE "DispensaireAmbulance" ENABLE ROW LEVEL SECURITY;
+
+
 -- ── Fin du tout-en-un. Recharge le site : Journal d'audit, dossier médical,
---    Prises en charge, Fabrication, Rendez-vous, Interventions, Comptabilité et
---    Cockpit Direction sont désormais actifs. (Comptabilité & Cockpit sont
---    dérivés → aucune table dédiée.) ───────────────────────────────────────────
+--    Prises en charge, Fabrication, Rendez-vous, Interventions, Chambres,
+--    Ambulances, Comptabilité et Cockpit Direction sont désormais actifs.
+--    (Comptabilité & Cockpit sont dérivés → aucune table dédiée.) ───────────────
