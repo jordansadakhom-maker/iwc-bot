@@ -184,5 +184,83 @@ BEGIN
   END IF;
 END $$;
 
--- ── Fin du tout-en-un. Recharge le site : Journal d'audit, dossier médical et
---    onglet « Prises en charge » sont désormais actifs. ────────────────────────
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  5) FABRICATION (Lot 4) — recettes matières → consommables
+--     Active l'onglet « Fabrication ».
+-- ═══════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS "DispensaireRecette" (
+  "id"             TEXT PRIMARY KEY,
+  "nom"            TEXT NOT NULL,
+  "produitNom"     TEXT NOT NULL,
+  "produitStockId" TEXT,
+  "rendement"      INT NOT NULL DEFAULT 1,
+  "ingredients"    JSONB NOT NULL DEFAULT '[]',
+  "note"           TEXT,
+  "createdAt"      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  "updatedAt"      TIMESTAMPTZ,
+  "updatedBy"      TEXT
+);
+ALTER TABLE "DispensaireRecette" ENABLE ROW LEVEL SECURITY;
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  6) RENDEZ-VOUS / PLANNING (Lot 5) — active l'onglet « Rendez-vous ».
+-- ═══════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS "DispensaireRendezVous" (
+  "id"               TEXT PRIMARY KEY,
+  "patient"          TEXT NOT NULL,
+  "patientNormalise" TEXT NOT NULL,
+  "type"             TEXT,
+  "medecin"          TEXT,
+  "salle"            TEXT,
+  "priorite"         TEXT NOT NULL DEFAULT 'normale',
+  "debut"            TIMESTAMPTZ NOT NULL,
+  "dureeMin"         INT,
+  "etat"             TEXT NOT NULL DEFAULT 'prevu',
+  "motif"            TEXT,
+  "note"             TEXT,
+  "createdAt"        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  "updatedAt"        TIMESTAMPTZ,
+  "updatedBy"        TEXT
+);
+CREATE INDEX IF NOT EXISTS "DispRDV_debut_idx"   ON "DispensaireRendezVous"("debut");
+CREATE INDEX IF NOT EXISTS "DispRDV_etat_idx"    ON "DispensaireRendezVous"("etat", "debut");
+CREATE INDEX IF NOT EXISTS "DispRDV_patient_idx" ON "DispensaireRendezVous"("patientNormalise");
+ALTER TABLE "DispensaireRendezVous" ENABLE ROW LEVEL SECURITY;
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  7) INTERVENTIONS / CRO (Lot 5) — active l'onglet « Interventions ».
+-- ═══════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS "DispensaireIntervention" (
+  "id"               TEXT PRIMARY KEY,
+  "patient"          TEXT NOT NULL,
+  "patientNormalise" TEXT NOT NULL,
+  "type"             TEXT,
+  "chirurgien"       TEXT,
+  "assistants"       TEXT,
+  "salle"            TEXT,
+  "statut"           TEXT NOT NULL DEFAULT 'planifiee',
+  "debut"            TIMESTAMPTZ,
+  "fin"              TIMESTAMPTZ,
+  "soinsRealises"    TEXT,
+  "complications"    TEXT,
+  "compteRendu"      TEXT,
+  "note"             TEXT,
+  "createdAt"        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  "updatedAt"        TIMESTAMPTZ,
+  "updatedBy"        TEXT
+);
+CREATE INDEX IF NOT EXISTS "DispInterv_statut_idx"  ON "DispensaireIntervention"("statut", "createdAt" DESC);
+CREATE INDEX IF NOT EXISTS "DispInterv_patient_idx" ON "DispensaireIntervention"("patientNormalise");
+ALTER TABLE "DispensaireIntervention" ENABLE ROW LEVEL SECURITY;
+
+
+-- ── Fin du tout-en-un. Recharge le site : Journal d'audit, dossier médical,
+--    Prises en charge, Fabrication, Rendez-vous, Interventions, Comptabilité et
+--    Cockpit Direction sont désormais actifs. (Comptabilité & Cockpit sont
+--    dérivés → aucune table dédiée.) ───────────────────────────────────────────
