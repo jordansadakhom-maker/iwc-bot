@@ -7,9 +7,10 @@ import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenem
 import { idAvecJeton, estDoublon } from "@/lib/dispensaire-idempotence";
 import { cleNom } from "@/lib/noms";
 import { ETATS_RDV, PRIORITES, type EtatRDV, type Priorite } from "@/lib/dispensaire-rendez-vous-const";
+import { conflitsRdv, type RdvExistant } from "@/lib/rdv-conflits";
 
 // Rendez-vous — ouvert au personnel autorisé (accueil/planning).
-export type RDVResult = { ok: boolean; error?: string; id?: string };
+export type RDVResult = { ok: boolean; error?: string; id?: string; conflit?: boolean };
 const REFUS = "Accès refusé.";
 const s = (v: unknown, max = 300) => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
 const n = (v: unknown) => Math.max(0, Math.round(Number(v) || 0));
@@ -33,6 +34,24 @@ export async function creerRDV(data: Record<string, unknown>): Promise<RDVResult
     priorite, debut: new Date(t).toISOString(), dureeMin: data.dureeMin != null ? n(data.dureeMin) : null,
     etat: "prevu" as EtatRDV, motif: s(data.motif, 500), note: s(data.note, 1000), updatedBy: await qui(), updatedAt: now, createdAt: now,
   };
+  // Anti double-réservation : refuse si le médecin OU la salle est déjà occupé sur
+  // un créneau qui chevauche (sauf « forcer »). Ne bloque jamais sur erreur technique.
+  if (!data.forcer && (row.medecin || row.salle)) {
+    try {
+      const { data: exist } = await admin.from("DispensaireRendezVous")
+        .select("id,debut,dureeMin,medecin,salle,etat")
+        .gte("debut", new Date(t - 12 * 3600000).toISOString())
+        .lte("debut", new Date(t + 12 * 3600000).toISOString());
+      const conflits = conflitsRdv({ debut: row.debut, dureeMin: row.dureeMin, medecin: row.medecin, salle: row.salle }, (exist || []) as unknown as RdvExistant[]);
+      if (conflits.length) {
+        const c = conflits[0];
+        const parMed = !!row.medecin && String(c.medecin ?? "").trim().toLowerCase() === String(row.medecin).trim().toLowerCase();
+        const quoi = parMed ? `Le médecin « ${row.medecin} »` : `La salle « ${row.salle} »`;
+        return { ok: false, conflit: true, error: `${quoi} a déjà un rendez-vous sur ce créneau. Change l'horaire, le médecin ou la salle.` };
+      }
+    } catch { /* la détection ne bloque jamais la création */ }
+  }
+
   const { error } = await admin.from("DispensaireRendezVous").insert(row);
   if (error) {
     if (estDoublon(error)) return { ok: true, id };
