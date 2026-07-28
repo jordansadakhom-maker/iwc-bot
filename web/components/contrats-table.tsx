@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FileText, Plus, Loader2, Trash2, Users, CalendarClock, Landmark, Check, Sparkles } from "lucide-react";
 import type { ContratDetail } from "@/lib/queries";
 import type { Suggestion } from "@/lib/attribution";
@@ -96,6 +96,15 @@ export function ContratsTable({ contrats }: { contrats: ContratDetail[] }) {
   const [sel, setSel] = useState<ContratDetail | null>(null);
   const [nouveau, setNouveau] = useState(false);
   const [polF, setPolF] = useState(""); // "" = tous | "legal" | "illegal"
+  const params = useSearchParams();
+
+  // Deep-link : ?ct=<id> (depuis une notification) ouvre directement le contrat.
+  useEffect(() => {
+    const id = params.get("ct");
+    if (!id) return;
+    const found = contrats.find((c) => c.id === id);
+    if (found) setSel(found);
+  }, [params, contrats]);
 
   const estIllegal = (c: ContratDetail) => c.pole === "illegal";
   const nIllegal = contrats.filter(estIllegal).length;

@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, Check, CheckCheck, Archive, ArchiveRestore, Trash2, ArrowUpRight } from "lucide-react";
 import { toast } from "@/lib/toast";
-import { NOTIF_FILTRES, correspondFiltre, compteNonLus, notifMeta, versCentreNotif, type CentreNotif } from "@/lib/notifications-centre";
+import { NOTIF_FILTRES, correspondFiltre, compteNonLus, notifMeta, versCentreNotif, lienNotif, type CentreNotif } from "@/lib/notifications-centre";
 import { useNotificationsRealtime } from "@/lib/use-notifications-realtime";
 import { notifVisiblePour, type CibleActeur } from "@/lib/notif-ciblage";
 import { marquerNotifLue, marquerToutesLues, archiverNotif, supprimerNotif } from "@/app/(app)/notifications/actions";
@@ -51,8 +51,9 @@ export function NotificationCenter({ initial, cible }: { initial: CentreNotif[];
     const r = await supprimerNotif(n.id); if (!r.ok) { toast("Suppression impossible.", "bad"); router.refresh(); }
   }
   function ouvrir(n: CentreNotif) {
-    if (!n.lu) void lu(n, true);         // ouvrir = lire
-    if (n.lien) router.push(n.lien);      // deep-link → la bonne page
+    if (!n.lu) void lu(n, true);          // ouvrir = lire
+    const cible = lienNotif(n);           // deep-link → la bonne page ET le bon élément
+    if (cible) router.push(cible);
   }
 
   return (

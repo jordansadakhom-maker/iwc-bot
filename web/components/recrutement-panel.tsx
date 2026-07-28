@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { UserPlus, Search, Loader2, Trash2, Check, X, Calendar, Clock, Award, IdCard, Target } from "lucide-react";
 import type { CandidatureItem } from "@/lib/queries";
 import { Modal, Flash, inputCls } from "@/components/edit-ui";
@@ -24,6 +24,15 @@ export function RecrutementPanel({ candidatures }: { candidatures: CandidatureIt
   const [sel, setSel] = useState<CandidatureItem | null>(null);
   const [filtre, setFiltre] = useState<string>("tous");
   const [q, setQ] = useState("");
+  const params = useSearchParams();
+
+  // Deep-link : ?focus=<id> (depuis une notification) ouvre directement la fiche.
+  useEffect(() => {
+    const id = params.get("focus");
+    if (!id) return;
+    const found = candidatures.find((c) => c.id === id);
+    if (found) setSel(found);
+  }, [params, candidatures]);
 
   const counts = useMemo(() => {
     const m: Record<string, number> = { tous: candidatures.length };
