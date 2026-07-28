@@ -2,8 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Send, Loader2, UserCheck, UserPlus, LogOut, History, MessageSquare, Sparkles, FileText } from "lucide-react";
+import { Send, Loader2, UserCheck, UserPlus, LogOut, History, MessageSquare, Sparkles, FileText, X } from "lucide-react";
 import { toast } from "@/lib/toast";
+import { PhotoDrop } from "@/components/photo-drop";
 import { STATUTS_DEMANDE, statutDemandeDef, prioriteDemandeDef, typeDemandeDef, depuis, type DemandeDetail } from "@/lib/demandes-const";
 import { repondreDemande, prendreEnCharge, libererDemande, changerStatutDemande, resumerDemande, brouillonReponseDemande } from "@/app/(app)/demandes/actions";
 
@@ -13,6 +14,7 @@ const LIB_EVT: Record<string, string> = { creation: "a ouvert la demande", statu
 export function DemandeDetailVue({ demande, monId }: { demande: DemandeDetail; monId: string | null }) {
   const router = useRouter();
   const [msg, setMsg] = useState("");
+  const [pj, setPj] = useState<{ nom: string; url: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [resume, setResume] = useState<string | null>(null);
   const [iaBusy, setIaBusy] = useState<string | null>(null);
@@ -42,12 +44,12 @@ export function DemandeDetailVue({ demande, monId }: { demande: DemandeDetail; m
 
   async function envoyer() {
     const t = msg.trim();
-    if (!t) return;
+    if (!t && !pj.length) return;
     setBusy(true);
-    const r = await repondreDemande(demande.id, t);
+    const r = await repondreDemande(demande.id, t, pj);
     setBusy(false);
     if (!r.ok) { toast(r.error || "Envoi impossible.", "bad"); return; }
-    setMsg("");
+    setMsg(""); setPj([]);
     rafraichir();
   }
   async function agir(fn: () => Promise<{ ok: boolean; error?: string }>, ok: string) {
@@ -82,8 +84,20 @@ export function DemandeDetailVue({ demande, monId }: { demande: DemandeDetail; m
           {/* Zone de réponse */}
           <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
             <textarea value={msg} onChange={(e) => setMsg(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) envoyer(); }} rows={3} placeholder="Répondre sur le site… (Ctrl/⌘+Entrée pour envoyer)" className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-[0.85rem] outline-none focus:border-accent" />
-            <div className="flex justify-end">
-              <button onClick={envoyer} disabled={busy || !msg.trim()} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.8rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--accent)" }}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Envoyer</button>
+            {pj.length ? (
+              <div className="flex flex-wrap gap-2">
+                {pj.map((p, i) => (
+                  <div key={i} className="relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={p.url} alt="pièce jointe" className="h-14 w-14 rounded-md border border-border object-cover" />
+                    <button onClick={() => setPj((a) => a.filter((_, j) => j !== i))} className="absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full text-white" style={{ background: "var(--oxblood)" }} aria-label="Retirer"><X className="h-2.5 w-2.5" /></button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <div className="flex items-center justify-between gap-2">
+              <div className="max-w-[180px]"><PhotoDrop dossier="demandes" onUploaded={(url) => setPj((a) => [...a, { nom: "image", url }])} label="Joindre une image" maxDim={1400} compact /></div>
+              <button onClick={envoyer} disabled={busy || (!msg.trim() && !pj.length)} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.8rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--accent)" }}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Envoyer</button>
             </div>
           </div>
         </div>
