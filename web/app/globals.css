@@ -158,3 +158,52 @@ body > * { position: relative; z-index: 1; }
 @keyframes notif-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 .notif-in { animation: notif-in .28s cubic-bezier(.22,.61,.36,1) both; }
 @media (prefers-reduced-motion: reduce) { .notif-in { animation: none; } }
+
+/* ============================================================
+   FINITION PREMIUM — profondeur, matière, vie.
+   Tout passe par les jetons/utilitaires partagés → chaque carte, chaque
+   bouton du site en hérite automatiquement (aucun composant touché un à un).
+   Additif, respectueux de prefers-reduced-motion (neutralisé plus haut).
+   ============================================================ */
+
+/* Cartes : ombre feuilletée + liseré de lumière en haut (matière), et un survol
+   « vivant » — le bord s'éclaire d'un souffle laiton, la carte gagne en relief.
+   Redéfinit shadow-card (déclarée après la couche utilities → prioritaire). */
+.shadow-card {
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, #fff 5%, transparent),
+    0 1px 2px -1px rgba(0,0,0,.4),
+    0 10px 24px -14px rgba(0,0,0,.55),
+    0 30px 56px -30px rgba(0,0,0,.6);
+  transition: box-shadow .32s cubic-bezier(.22,.61,.36,1), border-color .32s ease, transform .32s cubic-bezier(.22,.61,.36,1);
+}
+.shadow-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, #fff 7%, transparent),
+    0 2px 4px -1px rgba(0,0,0,.4),
+    0 16px 34px -16px rgba(0,0,0,.55),
+    0 40px 72px -34px rgba(0,0,0,.7),
+    0 0 26px -8px color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+/* Boutons & liens-boutons : pression tactile universelle (feedback net au clic)
+   et léger éclat au survol — sans jamais casser la mise en page. */
+button:not(:disabled), a[role="button"]:not([aria-disabled="true"]), [type="submit"]:not(:disabled) {
+  transition: transform .1s cubic-bezier(.22,.61,.36,1), filter .18s ease, box-shadow .18s ease, background-color .18s ease, border-color .18s ease, color .18s ease;
+}
+button:not(:disabled):hover, a[role="button"]:not([aria-disabled="true"]):hover { filter: brightness(1.05); }
+button:not(:disabled):active, a[role="button"]:not([aria-disabled="true"]):active, [type="submit"]:not(:disabled):active { transform: translateY(1px) scale(.985); filter: brightness(.97); }
+
+/* Champs de saisie : transition douce de la bordure/halo au focus (premium). */
+input, textarea, select { transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease; }
+input:focus, textarea:focus, select:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+
+/* Halo « respirant » — première impression (écran de connexion, héros). */
+@keyframes iwc-breathe { 0%,100% { opacity:.5; transform: scale(1); } 50% { opacity:.85; transform: scale(1.08); } }
+.iwc-breathe { animation: iwc-breathe 8s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .iwc-breathe { animation: none; } }
+
+/* Entrée héros : fondu + montée un peu plus ample (pour les grands moments). */
+@keyframes iwc-hero { from { opacity: 0; transform: translateY(14px) scale(.985); } to { opacity: 1; transform: none; } }
+.iwc-hero { animation: iwc-hero .7s cubic-bezier(.22,.61,.36,1) both; }

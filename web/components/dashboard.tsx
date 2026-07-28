@@ -244,10 +244,10 @@ function Raccourcis() {
 export function Dashboard({ data, feed = [], alertes = { total: 0, items: [] }, demandes, monId }: { data: DashData; feed?: FeedItem[]; alertes?: AlertesData; demandes?: DemandesData; monId?: string | null }) {
   return (
     <>
-      <div>
+      <div className="iwc-hero">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
-            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full border" style={{ borderColor: "color-mix(in srgb,var(--accent) 55%,var(--border))", background: "radial-gradient(circle at 30% 25%, color-mix(in srgb,var(--accent) 24%,transparent), color-mix(in srgb,var(--surface) 92%,#000) 72%)", boxShadow: "inset 0 0 0 1px color-mix(in srgb,var(--accent) 20%,transparent)" }}>
+            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full border" style={{ borderColor: "color-mix(in srgb,var(--accent) 55%,var(--border))", background: "radial-gradient(circle at 30% 25%, color-mix(in srgb,var(--accent) 24%,transparent), color-mix(in srgb,var(--surface) 92%,#000) 72%)", boxShadow: "inset 0 0 0 1px color-mix(in srgb,var(--accent) 20%,transparent), 0 0 26px -8px color-mix(in srgb,var(--accent) 50%,transparent)" }}>
               <Compass className="h-[22px] w-[22px]" style={{ color: "var(--accent)" }} strokeWidth={1.7} />
             </span>
             <div>
