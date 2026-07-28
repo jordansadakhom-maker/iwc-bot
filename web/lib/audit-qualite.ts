@@ -33,7 +33,7 @@ const rapportVide = (opts: Partial<RapportAudit> = {}): RapportAudit => ({
 const norm = (v: unknown) => String(v ?? "").trim().toLowerCase();
 
 // Audit du site principal (IWC / Armurerie / Licences) — 100 % lecture seule.
-export async function getAuditIwc(): Promise<RapportAudit> {
+export async function getAuditQualite(): Promise<RapportAudit> {
   let voir = false;
   try { voir = !!(await getAcces()).direction; } catch { voir = false; }
   if (!voir) return rapportVide({ canVoir: false });
