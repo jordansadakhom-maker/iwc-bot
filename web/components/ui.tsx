@@ -2,6 +2,7 @@ import {
   Inbox, Star, Coins, Target, Eye, Users, HeartPulse, CalendarDays, Crosshair,
   Sparkles, Bell, FileText, Megaphone, ShieldCheck, Skull, type LucideIcon,
 } from "lucide-react";
+import Link from "next/link";
 import clsx from "clsx";
 import { HorlogeCampagne } from "@/components/horloge-campagne";
 
@@ -91,22 +92,34 @@ export function SectionTitle({ children, tone = "var(--accent)", icon: Icon }: {
   );
 }
 
-export function Card({ children, className }: { children: React.ReactNode; className?: string }) {
+// Carte de contenu partagée. `delay` (optionnel) déclenche l'entrée « rise »
+// échelonnée (utilisée par le dashboard) ; sans lui, la carte est statique.
+export function Card({ children, className, delay }: { children: React.ReactNode; className?: string; delay?: number }) {
   return (
     <section
-      className={clsx("rounded-card border border-border bg-surface p-[18px] shadow-card", className)}
-      style={{ background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,#000))" }}
+      className={clsx("rounded-card border border-border bg-surface p-[18px] shadow-card", delay !== undefined && "animate-rise", className)}
+      style={{ background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,#000))", ...(delay !== undefined ? { animationDelay: `${delay}s` } : {}) }}
     >
       {children}
     </section>
   );
 }
 
-export function CardHeader({ titre, compteur }: { titre: string; compteur?: number | string }) {
+// En-tête de carte. Affiche soit un compteur (à droite), soit une action (lien
+// « … → » si `href`, sinon simple libellé accentué).
+export function CardHeader({ titre, compteur, action, href }: { titre: string; compteur?: number | string; action?: string; href?: string }) {
   return (
     <div className="mb-3.5 flex items-center justify-between gap-2.5">
       <h3 className="text-[0.8rem] font-semibold uppercase tracking-[0.06em] text-muted">{titre}</h3>
-      {compteur !== undefined ? <span className="font-num text-[0.8rem] text-faint">{compteur}</span> : null}
+      {action ? (
+        href ? (
+          <Link href={href} className="cursor-pointer text-[0.74rem] text-accent transition hover:text-brass-hi hover:underline">{action} →</Link>
+        ) : (
+          <span className="text-[0.74rem] text-accent">{action}</span>
+        )
+      ) : compteur !== undefined ? (
+        <span className="font-num text-[0.8rem] text-faint">{compteur}</span>
+      ) : null}
     </div>
   );
 }
