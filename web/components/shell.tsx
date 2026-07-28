@@ -224,7 +224,7 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
         )}
       >
         <div className="mb-2.5 flex items-center gap-3 border-b border-border px-2 pb-4 pt-1.5">
-          <div className="grid h-[42px] w-[42px] place-items-center rounded-xl border border-border-2 bg-surface">
+          <div className="grid h-[42px] w-[42px] place-items-center rounded-xl border border-border-2 bg-surface" style={{ boxShadow: "0 0 22px -8px color-mix(in srgb,var(--accent) 55%,transparent)" }}>
             <Crest className="h-6 w-6 text-accent" />
           </div>
           <div>
@@ -259,7 +259,7 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
                       : "text-muted hover:bg-[color-mix(in_srgb,var(--ink)_6%,transparent)] hover:text-ink"
                   )}
                 >
-                  <Icon className="h-[18px] w-[18px] shrink-0 opacity-90" strokeWidth={1.8} />
+                  <Icon className={clsx("h-[18px] w-[18px] shrink-0", active ? "text-accent opacity-100" : "opacity-90")} strokeWidth={1.8} />
                   <span>{it.label}</span>
                   {badge ? (
                     <span

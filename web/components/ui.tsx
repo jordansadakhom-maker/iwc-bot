@@ -56,7 +56,7 @@ export function PageHeader({ titre, sous, actif, pole }: { titre: string; sous?:
           {/* médaillon-sceau en laiton */}
           <span
             className="grid h-12 w-12 shrink-0 place-items-center rounded-full border"
-            style={{ borderColor: "color-mix(in srgb,var(--accent) 55%,var(--border))", background: "radial-gradient(circle at 30% 25%, color-mix(in srgb,var(--accent) 24%,transparent), color-mix(in srgb,var(--surface) 92%,#000) 72%)", boxShadow: "inset 0 0 0 1px color-mix(in srgb,var(--accent) 20%,transparent)" }}
+            style={{ borderColor: "color-mix(in srgb,var(--accent) 55%,var(--border))", background: "radial-gradient(circle at 30% 25%, color-mix(in srgb,var(--accent) 24%,transparent), color-mix(in srgb,var(--surface) 92%,#000) 72%)", boxShadow: "inset 0 0 0 1px color-mix(in srgb,var(--accent) 20%,transparent), 0 0 26px -8px color-mix(in srgb,var(--accent) 50%,transparent)" }}
           >
             <Emb className="h-[22px] w-[22px]" style={{ color: "var(--accent)" }} strokeWidth={1.7} />
           </span>
