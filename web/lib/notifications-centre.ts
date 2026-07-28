@@ -38,6 +38,8 @@ const META: Record<string, NotifMeta> = {
   demande: { icon: "📨", label: "Nouvelle demande", tone: "accent" },
   "demande-statut": { icon: "🔁", label: "Statut de demande", tone: "good" },
   "demande-transfert": { icon: "📨", label: "Demande transférée", tone: "warn" },
+  tache: { icon: "📋", label: "Tâche", tone: "accent" },
+  membre: { icon: "👤", label: "Ressources humaines", tone: "warn" },
 };
 const META_DEFAUT: NotifMeta = { icon: "🔔", label: "Notification", tone: "muted" };
 
@@ -57,6 +59,8 @@ export const PRIORITE_META: Record<PrioriteNotif, { label: string; tone: string;
 };
 const PRIORITE_TYPE: Record<string, PrioriteNotif> = {
   operation: "elevee", contrat: "elevee",
+  membre: "elevee",                 // habilitation/accès sensible (RH)
+  "demande-transfert": "elevee",    // un dossier attend une prise en charge
   "telegramme-clos": "faible", "rdv-statut": "faible",
 };
 export function prioriteDe(type: string): PrioriteNotif {
@@ -71,6 +75,9 @@ export function moduleDe(type: string): string {
   if (type.startsWith("telegramme")) return "telegrammes";
   if (type === "message") return "messages";
   if (type.startsWith("candidature")) return "recrutement";
+  if (type.startsWith("demande")) return "demandes";
+  if (type === "tache") return "taches";
+  if (type === "membre") return "rh";
   return "autre";
 }
 
@@ -84,6 +91,8 @@ export const NOTIF_FILTRES = [
   { key: "rdv", label: "Rendez-vous" },
   { key: "telegrammes", label: "Télégrammes" },
   { key: "messages", label: "Messages" },
+  { key: "demandes", label: "Demandes" },
+  { key: "taches", label: "Tâches" },
   { key: "recrutement", label: "Recrutement" },
   { key: "archive", label: "Archivés" },
   { key: "corbeille", label: "🗑 Corbeille" },
@@ -103,7 +112,9 @@ export function correspondFiltre(n: CentreNotif, filtre: string): boolean {
     case "rdv": return !n.archive && n.type.startsWith("rdv");
     case "telegrammes": return !n.archive && n.type.startsWith("telegramme");
     case "messages": return !n.archive && n.type === "message";
-    case "recrutement": return !n.archive && n.type.startsWith("candidature");
+    case "demandes": return !n.archive && n.type.startsWith("demande");
+    case "taches": return !n.archive && n.type === "tache";
+    case "recrutement": return !n.archive && (n.type.startsWith("candidature") || n.type === "membre");
     case "archive": return n.archive;
     case "favoris": return !n.archive; // le tri favori est appliqué dans le composant
     default: return !n.archive; // « tous » = tout sauf archivé
