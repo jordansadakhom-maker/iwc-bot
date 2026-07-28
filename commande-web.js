@@ -275,6 +275,12 @@ const HANDLERS = {
     const guild = ctx?.guild;
     if (guild) for (const id of ids) { try { const m = await guild.members.fetch(id).catch(() => null); if (m) { await m.send(`🎯 **Tu es assigné(e) à une opération** — **${op.cible || op.name || 'Opération'}**${op.lieu ? ` · ${op.lieu}` : ''}\n_Assigné par ${p.auteurNom || 'la Direction'} depuis le site._`).catch(() => {}); dm++; } } catch {} }
     op.majPar = p.auteurNom || 'Site web'; op.majAt = Date.now();
+    // Reflet SITE : une notification au centre pour CHAQUE agent (pas seulement un MP
+    // Discord) — l'agent qui ne regarde pas ses MP la voit quand même. Best-effort.
+    try {
+      const nom = _s(op.cible || op.name, 120) || 'Opération';
+      for (const id of ids) supa.creerNotification && supa.creerNotification({ type: 'operation', titre: `Assigné(e) à une opération — ${nom}`, corps: op.lieu ? `Lieu : ${op.lieu}` : null, lien: '/operations', cibleId: String(op.id), membreId: String(id), ref: `op-assign-${op.id}-${id}` });
+    } catch {}
     return { ok: true, message: `${ids.length} agent(s) assigné(s) (${dm} MP)` };
   },
   // Terminer une opération : résultat/butin/débrief + versement éventuel de la prime au coffre.
@@ -290,6 +296,13 @@ const HANDLERS = {
     const montant = Math.round(Number(p.montantPrime) || 0);
     if (montant > 0 && !op.primeVerseeCoffre) { db.coffre = (Math.round(Number(db.coffre) || 0)) + montant; op.primeVerseeCoffre = montant; credit = montant; }
     op.majPar = p.auteurNom || 'Site web'; op.majAt = Date.now();
+    // Reflet SITE : journal + notification aux agents assignés (leur op est close).
+    try {
+      const nom = _s(op.cible || op.name, 120) || 'Opération';
+      const agents = Array.isArray(op.participantsIds) && op.participantsIds.length ? op.participantsIds : (Array.isArray(op.agents) ? op.agents : []);
+      supa.journaliserEvenement && supa.journaliserEvenement({ aggregate: 'operation', type: 'operation.terminee', cibleId: String(op.id), cibleLibelle: nom, actorNom: p.auteurNom || 'Site web', payload: { resultat: op.resultat || null, prime: credit || 0 } });
+      for (const id of agents) supa.creerNotification && supa.creerNotification({ type: 'operation-statut', titre: `Opération terminée — ${nom}`, corps: op.resultat ? `Résultat : ${op.resultat}` : null, lien: '/operations', cibleId: String(op.id), membreId: String(id), ref: `op-terminee-${op.id}-${id}` });
+    } catch {}
     return { ok: true, message: `Opération terminée${credit ? ` · +${credit}$ au coffre` : ''}` };
   },
 
@@ -364,6 +377,13 @@ const HANDLERS = {
       remuneration: _s(c.remuneration, 120), createdAt: Date.now(), source: 'web', contratId: String(c.id),
     });
     c.majPar = p.auteurNom || 'Site web'; c.majAt = Date.now();
+    // Reflet SITE : journal + notification à l'encadrement (« honoré » change le
+    // suivi, pas forcément le statut → le trigger de statut ne suffit pas). Best-effort.
+    try {
+      const nom = _s(c.objet || c.cible, 120) || 'Contrat';
+      supa.journaliserEvenement && supa.journaliserEvenement({ aggregate: 'contrat', type: 'contrat.honore', cibleId: String(c.id), cibleLibelle: nom, actorNom: p.auteurNom || 'Site web', payload: { montant, facture: numero } });
+      supa.creerNotification && supa.creerNotification({ type: 'contrat-statut', titre: `Contrat honoré — ${nom}`, corps: `+${montant}$ au coffre · ${numero}`, lien: '/operations', cibleId: String(c.id), roleCible: 'officier', ref: `contrat-honore-${c.id}` });
+    } catch {}
     return { ok: true, message: `Contrat honoré : +${montant}$ au coffre · ${numero}` };
   },
 

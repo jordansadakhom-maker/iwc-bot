@@ -70,6 +70,48 @@ async function _upsert(table, rows) {
   }
 }
 
+// ── Journal & notifications (best-effort, JAMAIS bloquant) ──────────────────
+// Permettent au BOT de refléter ses actions sur le SITE : un évènement dans
+// "Event" (projeté en ActivityLog par un trigger) et/ou une notification dans
+// "Notification" (centre du site + temps réel) — comme le font déjà les Demandes.
+// No-op silencieux si Supabase n'est pas configuré ou en cas d'erreur.
+function _uid(p) { return `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`; }
+
+async function journaliserEvenement(e) {
+  if (!estActif() || !e || !e.aggregate || !e.type) return;
+  try {
+    await _upsert('Event', [{
+      id: _uid('evt'), aggregate: String(e.aggregate), type: String(e.type),
+      actorId: e.actorId != null ? String(e.actorId) : null,
+      actorNom: e.actorNom != null ? String(e.actorNom).slice(0, 120) : 'Site web',
+      cibleId: e.cibleId != null ? String(e.cibleId) : null,
+      cibleLibelle: e.cibleLibelle != null ? String(e.cibleLibelle).slice(0, 200) : null,
+      pole: e.pole != null ? String(e.pole) : null,
+      roleCible: e.roleCible != null ? String(e.roleCible) : null,
+      membreId: e.membreId != null ? String(e.membreId) : null,
+      avant: e.avant != null ? e.avant : null, apres: e.apres != null ? e.apres : null,
+      payload: e.payload != null ? e.payload : null,
+      ref: e.ref != null ? String(e.ref) : null,
+      priorite: Number.isFinite(e.priorite) ? e.priorite : 0,
+    }]);
+  } catch { /* best-effort */ }
+}
+
+async function creerNotification(n) {
+  if (!estActif() || !n || !n.type || !n.titre) return;
+  try {
+    await _upsert('Notification', [{
+      id: _uid('ntf'), type: String(n.type), titre: String(n.titre).slice(0, 300),
+      corps: n.corps != null ? String(n.corps).slice(0, 1000) : null,
+      lien: n.lien != null ? String(n.lien) : null,
+      cibleId: n.cibleId != null ? String(n.cibleId) : null,
+      roleCible: n.roleCible != null ? String(n.roleCible) : null,
+      membreId: n.membreId != null ? String(n.membreId) : null,
+      ref: n.ref != null ? String(n.ref) : null, lu: false,
+    }]);
+  } catch { /* best-effort */ }
+}
+
 // ── Normalisations vers les enums Postgres ──
 const _POLES = new Set(['legal', 'illegal', 'both']);
 function _pole(p) { p = String(p || '').toLowerCase(); return _POLES.has(p) ? p : 'legal'; }
@@ -822,4 +864,4 @@ async function enregistrerHistoriqueDispensaire(rows) {
   return !!(r && r.ok);
 }
 
-module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, majRosterMembre, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise, lireProduitsArmurerie, lireContratArmurerieEnAttente, marquerContratArmurerie, lireRdvArmurerieARappeler, marquerRappelRdvArmurerie, enregistrerRapportTerrain, lireProduitsArmurerieRecette, lireRessourcesArmurerie, enregistrerScanArmurerie, lireNomsContactsDispensaire, importerContactsDispensaire, enregistrerHistoriqueDispensaire, lireEvenementsLicenceANotifier, marquerEvenementLicenceAnnonce, lireLicencesExpirant, lireDemandesANotifier, marquerDemandeAnnoncee, lireDemandesEnAttente };
+module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, majRosterMembre, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise, lireProduitsArmurerie, lireContratArmurerieEnAttente, marquerContratArmurerie, lireRdvArmurerieARappeler, marquerRappelRdvArmurerie, enregistrerRapportTerrain, lireProduitsArmurerieRecette, lireRessourcesArmurerie, enregistrerScanArmurerie, lireNomsContactsDispensaire, importerContactsDispensaire, enregistrerHistoriqueDispensaire, lireEvenementsLicenceANotifier, marquerEvenementLicenceAnnonce, lireLicencesExpirant, lireDemandesANotifier, marquerDemandeAnnoncee, lireDemandesEnAttente, journaliserEvenement, creerNotification };
