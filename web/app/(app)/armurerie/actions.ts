@@ -574,6 +574,27 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
   const serie = s(opts?.serie, 60);
   const photo = opts?.photo ? s(opts.photo, 600) : null;
 
+  // Contrôle des licences (Lot E) sur la CAISSE (voie principale) — OPTIONNEL,
+  // gouverné par l'interrupteur bloquer_ventes_armurerie (OFF par défaut). Chaque
+  // ligne est vérifiée AVANT toute écriture ; une ligne refusée annule tout
+  // l'encaissement (rien n'est écrit hormis la trace du refus). N'est PAS
+  // contournable par « forcer » (garde-fou légal, pas un simple manque de stock).
+  // Jamais bloquant sur erreur technique.
+  try {
+    const cfg = await getLicenceConfig();
+    const acquereur = s(client, 120);
+    if (cfg.bloquerVentes && acquereur && !/^client de passage$/i.test(acquereur)) {
+      for (const l of items) {
+        const cat = [l.categorie, l.nom].filter(Boolean).join(" ");
+        const v = await verifierAchatArme(acquereur, cat);
+        if (!v.ok) {
+          try { await logRefusAchat({ acquereur, motif: v.motif, licenceId: v.licence?.id ?? null, numero: v.licence?.numero ?? null, par: vendeur, categorie: cat }); } catch { /* trace best-effort */ }
+          return { ok: false, error: `Vente refusée — ${v.motif} (contrôle des licences actif).` };
+        }
+      }
+    }
+  } catch { /* la vérification ne bloque jamais sur erreur technique */ }
+
   // Client fiché → on rattache la vente (photo + télégramme au registre) ; sinon passage.
   let cid: string | null = clientId ? s(clientId, 60) : null;
   let cli = s(client, 120) || "Client de passage";
