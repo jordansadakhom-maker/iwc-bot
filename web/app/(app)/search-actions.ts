@@ -16,12 +16,13 @@ export async function rechercheGlobale(q: string): Promise<ResultatRecherche[]> 
   const safe = async (p: PromiseLike<{ data: Row[] | null; error: unknown }>): Promise<Row[]> => {
     try { const { data, error } = await p; return error ? [] : (data || []); } catch { return []; }
   };
-  const [membres, ops, clients, contrats, armes] = await Promise.all([
+  const [membres, ops, clients, contrats, armes, demandes] = await Promise.all([
     safe(admin.from("Membre").select("id,nomIC,grade").ilike("nomIC", like).limit(6)),
     safe(admin.from("Operation").select("id,cible,phase").ilike("cible", like).limit(6)),
     safe(admin.from("ArmurerieClient").select("id,nom,telegramme").ilike("nom", like).limit(6)),
     safe(admin.from("ArmurerieContrat").select("id,clientNom,arme,statut").ilike("clientNom", like).limit(6)),
     safe(admin.from("Arme").select("id,serie,type").ilike("serie", like).limit(6)),
+    safe(admin.from("Demande").select("id,ref,titre,statut").or(`titre.ilike.${like},ref.ilike.${like}`).limit(6)),
   ]);
   const s = (v: unknown) => (v == null ? "" : String(v));
   const out: ResultatRecherche[] = [];
@@ -30,5 +31,6 @@ export async function rechercheGlobale(q: string): Promise<ResultatRecherche[]> 
   clients.forEach((c) => { const n = s(c.nom); out.push({ type: "Client", label: n || "—", sous: s(c.telegramme), href: n ? `/repertoire/client/${encodeURIComponent(n)}` : "/armurerie" }); });
   contrats.forEach((c) => { const n = s(c.clientNom); out.push({ type: "Contrat", label: n || "—", sous: [s(c.arme), s(c.statut)].filter(Boolean).join(" · "), href: n ? `/repertoire/client/${encodeURIComponent(n)}` : "/armurerie" }); });
   armes.forEach((a) => out.push({ type: "Arme", label: s(a.serie) || "—", sous: s(a.type), href: "/inventaire" }));
+  demandes.forEach((d) => out.push({ type: "Demande", label: s(d.titre) || "—", sous: [s(d.ref), s(d.statut)].filter(Boolean).join(" · "), href: `/demandes/${s(d.id)}` }));
   return out;
 }
