@@ -6947,6 +6947,10 @@ client.once('clientReady', async () => {
   cron.schedule('*/2 * * * *', sansChevauchement('demandesWeb', async () => {
     for (const g of client.guilds.cache.values()) await demandesWeb.verifierDemandesWeb?.(g).catch(() => {});
   }));
+  // 📋 Relance auto : demandes non assignées / en souffrance — 8h30 et 17h30 Paris.
+  cron.schedule('30 8,17 * * *', sansChevauchement('demandesRelance', async () => {
+    for (const g of client.guilds.cache.values()) await demandesWeb.verifierRelancesDemandes?.(g).catch(() => {});
+  }), { timezone: 'Europe/Paris' });
   // 📅 Digest quotidien des licences à renouveler (expirations ≤ 30 j) — 9h30 Paris.
   cron.schedule('30 9 * * *', sansChevauchement('licencesExp', async () => {
     for (const g of client.guilds.cache.values()) await licencesWeb.verifierExpirationsLicences?.(g).catch(() => {});

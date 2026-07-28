@@ -705,6 +705,11 @@ async function lireDemandesANotifier() {
 async function marquerDemandeAnnoncee(id) {
   return await _patch(`Demande?id=eq.${encodeURIComponent(id)}`, { annonceAt: new Date().toISOString() });
 }
+// Demandes encore ouvertes (pour la relance automatique : non assignées / en souffrance).
+async function lireDemandesEnAttente() {
+  const rows = await _get('Demande?statut=in.(nouvelle,en_attente,en_cours,infos,attente_tiers)&order=createdAt.asc&limit=100');
+  return Array.isArray(rows) ? rows : [];
+}
 
 // ── File de commandes venues du site (table CommandeWeb) ──
 // Le site dépose des commandes (créer/modifier/supprimer) ; le bot les applique
@@ -817,4 +822,4 @@ async function enregistrerHistoriqueDispensaire(rows) {
   return !!(r && r.ok);
 }
 
-module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, majRosterMembre, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise, lireProduitsArmurerie, lireContratArmurerieEnAttente, marquerContratArmurerie, lireRdvArmurerieARappeler, marquerRappelRdvArmurerie, enregistrerRapportTerrain, lireProduitsArmurerieRecette, lireRessourcesArmurerie, enregistrerScanArmurerie, lireNomsContactsDispensaire, importerContactsDispensaire, enregistrerHistoriqueDispensaire, lireEvenementsLicenceANotifier, marquerEvenementLicenceAnnonce, lireLicencesExpirant, lireDemandesANotifier, marquerDemandeAnnoncee };
+module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, majRosterMembre, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise, lireProduitsArmurerie, lireContratArmurerieEnAttente, marquerContratArmurerie, lireRdvArmurerieARappeler, marquerRappelRdvArmurerie, enregistrerRapportTerrain, lireProduitsArmurerieRecette, lireRessourcesArmurerie, enregistrerScanArmurerie, lireNomsContactsDispensaire, importerContactsDispensaire, enregistrerHistoriqueDispensaire, lireEvenementsLicenceANotifier, marquerEvenementLicenceAnnonce, lireLicencesExpirant, lireDemandesANotifier, marquerDemandeAnnoncee, lireDemandesEnAttente };

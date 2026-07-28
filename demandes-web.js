@@ -88,4 +88,31 @@ async function verifierDemandesWeb(guild) {
   }
 }
 
-module.exports = { verifierDemandesWeb };
+// Relance automatique : digest des demandes non assignées / sans activité depuis
+// 24 h. Rappelle à l'équipe ce qui attend — le traitement se fait sur le site.
+async function verifierRelancesDemandes(guild) {
+  if (!guild || !supa.lireDemandesEnAttente) return;
+  let rows;
+  try { rows = await supa.lireDemandesEnAttente(); } catch { return; }
+  if (!Array.isArray(rows) || !rows.length) return;
+  const now = Date.now();
+  const nonAssignees = rows.filter((d) => !d.assigneId);
+  const enSouffrance = rows.filter((d) => d.assigneId && d.updatedAt && (now - Date.parse(d.updatedAt)) > 86400000);
+  if (!nonAssignees.length && !enSouffrance.length) return;
+  const ch = await _salon(guild);
+  if (!ch?.send) return;
+
+  const ligne = (d) => `• \`${d.ref || String(d.id).slice(0, 6)}\` ${String(d.titre || '').slice(0, 60)} — ${SITE}/demandes/${d.id}`;
+  const parts = [];
+  if (nonAssignees.length) parts.push(`**🕓 Non assignées (${nonAssignees.length})**\n${nonAssignees.slice(0, 12).map(ligne).join('\n')}`);
+  if (enSouffrance.length) parts.push(`**⏳ Sans activité depuis 24 h (${enSouffrance.length})**\n${enSouffrance.slice(0, 12).map(ligne).join('\n')}`);
+  const e = new EmbedBuilder()
+    .setColor(0xd8a53f)
+    .setTitle('📋 Demandes à traiter')
+    .setDescription(parts.join('\n\n').slice(0, 3900))
+    .setFooter({ text: 'Iron Wolf Company · Guichet des demandes' })
+    .setTimestamp();
+  await ch.send({ embeds: [e] }).catch(() => {});
+}
+
+module.exports = { verifierDemandesWeb, verifierRelancesDemandes };
