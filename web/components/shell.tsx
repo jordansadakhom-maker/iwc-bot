@@ -364,7 +364,7 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
             {bellOpen ? (
               <>
                 <div className="fixed inset-0 z-30" onClick={() => setBellOpen(false)} />
-                <div className="absolute right-0 z-40 mt-2 w-[330px] overflow-hidden rounded-2xl border border-border-2 bg-surface shadow-2xl">
+                <div className="absolute right-0 z-40 mt-2 w-[330px] overflow-hidden rounded-2xl border border-border-2 bg-[color-mix(in_srgb,var(--surface)_85%,transparent)] shadow-2xl backdrop-blur-xl">
                   <div className="flex items-center justify-between border-b border-border px-4 py-3">
                     <span className="text-[0.82rem] font-semibold">À traiter</span>
                     <div className="flex items-center gap-2">
@@ -430,7 +430,7 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
 
       {aideOpen ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4" onClick={() => setAideOpen(false)}>
-          <div className="w-full max-w-sm rounded-card border border-border bg-surface p-5 shadow-card" onClick={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-sm rounded-card border border-border bg-[color-mix(in_srgb,var(--surface)_85%,transparent)] p-5 shadow-card backdrop-blur-xl" onClick={(e) => e.stopPropagation()}>
             <h2 className="mb-3 font-display text-lg tracking-[0.02em]">Raccourcis clavier</h2>
             <ul className="flex flex-col gap-1.5 text-[0.85rem]">
               {([
