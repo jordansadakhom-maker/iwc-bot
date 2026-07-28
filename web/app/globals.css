@@ -208,4 +208,15 @@ input:focus, textarea:focus, select:focus { box-shadow: 0 0 0 3px color-mix(in s
 @keyframes iwc-hero { from { opacity: 0; transform: translateY(14px) scale(.985); } to { opacity: 1; transform: none; } }
 .iwc-hero { animation: iwc-hero .7s cubic-bezier(.22,.61,.36,1) both; }
 
+/* Skeleton « shimmer » : balayage lumineux lent — plus premium que le pulse.
+   À poser sur un bloc de surface (position relative, contenu masqué). */
+@keyframes iwc-shimmer { 100% { transform: translateX(100%); } }
+.iwc-skeleton { position: relative; overflow: hidden; }
+.iwc-skeleton::after {
+  content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--ink) 9%, transparent), transparent);
+  animation: iwc-shimmer 1.6s cubic-bezier(.4,0,.2,1) infinite;
+}
+@media (prefers-reduced-motion: reduce) { .iwc-skeleton::after { animation: none; } }
+
 /* Déploiement Production — Refonte « Effet Wouah » (mise en ligne). */
