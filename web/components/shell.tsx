@@ -13,6 +13,7 @@ import { rafraichirAlertes } from "@/app/(app)/notifs-actions";
 import { toast } from "@/lib/toast";
 import { notifMeta, versCentreNotif } from "@/lib/notifications-centre";
 import { rolesDeActeur, notifVisiblePour } from "@/lib/notif-ciblage";
+import { Breadcrumb } from "@/components/breadcrumb";
 import { useNotificationsRealtime } from "@/lib/use-notifications-realtime";
 import type { AlertesData, Acces } from "@/lib/queries";
 
@@ -397,7 +398,7 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
           {profil ? <LogoutButton /> : null}
         </header>
 
-        <main className="mx-auto flex w-full max-w-[1360px] flex-col gap-5 px-4 pb-10 pt-6 sm:px-6">{children}</main>
+        <main className="mx-auto flex w-full max-w-[1360px] flex-col gap-5 px-4 pb-10 pt-6 sm:px-6"><Breadcrumb />{children}</main>
       </div>
 
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
