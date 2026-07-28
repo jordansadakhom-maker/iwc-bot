@@ -5,7 +5,7 @@ import { FileText, Wallet, Landmark, Target, Plug, Inbox, Users, Activity, Coins
 import clsx from "clsx";
 import type { DashData, FeedItem, AlertesData } from "@/lib/queries";
 import { BarresH, Donut, Repartition } from "@/components/charts";
-import { PoleChip, SectionTitle, Ornement } from "@/components/ui";
+import { PoleChip, SectionTitle, Ornement, Card, CardHeader } from "@/components/ui";
 import { LiveFeed } from "@/components/live-feed";
 import { DemandesResume } from "@/components/demandes-resume";
 import type { DemandesData } from "@/lib/demandes-const";
@@ -13,32 +13,6 @@ import type { LicenceExpirant } from "@/lib/licences";
 import { BriefingIA } from "@/components/briefing-ia";
 import { HorlogeCampagne } from "@/components/horloge-campagne";
 import { cents } from "@/lib/format";
-
-function Card({ children, className, delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
-  return (
-    <section
-      className={clsx("rounded-card border border-border bg-surface p-[18px] shadow-card animate-rise", className)}
-      style={{ animationDelay: `${delay}s`, background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,#000))" }}
-    >
-      {children}
-    </section>
-  );
-}
-
-function CardHeader({ titre, action, href }: { titre: string; action?: string; href?: string }) {
-  return (
-    <div className="mb-3.5 flex items-center justify-between gap-2.5">
-      <h3 className="text-[0.8rem] font-semibold uppercase tracking-[0.06em] text-muted">{titre}</h3>
-      {action ? (
-        href ? (
-          <Link href={href} className="cursor-pointer text-[0.74rem] text-accent transition hover:text-brass-hi hover:underline">{action} →</Link>
-        ) : (
-          <span className="text-[0.74rem] text-accent">{action}</span>
-        )
-      ) : null}
-    </div>
-  );
-}
 
 function Empty({ children }: { children: React.ReactNode }) {
   return (
