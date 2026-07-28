@@ -15,6 +15,7 @@ donnée existante touchée). Copier-coller dans le **SQL Editor** de la bonne ba
 | [`notifications-corbeille.sql`](./notifications-corbeille.sql) | Colonne `supprime` du centre de notifications → **corbeille** (suppression réversible + restauration) | ⭕ recommandé (sinon suppression définitive) |
 | [`activite-avant-apres.sql`](./activite-avant-apres.sql) | Colonne `ActivityLog.payload` + trigger → le journal affiche **motif/contexte** (avant→après déjà supporté) | ⭕ recommandé (journal détaillé) |
 | [`perf-index-search.sql`](./perf-index-search.sql) | Index **trigram** (`pg_trgm`) accélérant la recherche universelle ⌘K | ⭕ optionnel (perf) |
+| [`armurerie-stock-atomique.sql`](./armurerie-stock-atomique.sql) | Fonction `armurerie_stock_mouvement` → décrément de stock **atomique** (anti « lost update » sur ventes simultanées) | ⭕ recommandé (fiabilité caisse) |
 
 ## ② Supabase du DISPENSAIRE (projet séparé)
 
