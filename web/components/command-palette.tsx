@@ -71,7 +71,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   return (
     <div className="fixed inset-0 z-[60] flex items-start justify-center px-4 pt-[12vh]" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/55 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-[560px] overflow-hidden rounded-2xl border border-border-2 bg-[color-mix(in_srgb,var(--surface)_88%,transparent)] shadow-2xl backdrop-blur-xl" style={{ boxShadow: "0 24px 60px -12px rgba(0,0,0,0.6)" }}>
+      <div className="iwc-pop relative w-full max-w-[560px] overflow-hidden rounded-2xl border border-border-2 bg-[color-mix(in_srgb,var(--surface)_88%,transparent)] shadow-2xl backdrop-blur-xl" style={{ boxShadow: "0 24px 60px -12px rgba(0,0,0,0.6)" }}>
         <div className="flex items-center gap-3 border-b border-border px-4 py-3">
           <Search className="h-[18px] w-[18px] text-faint" />
           <input

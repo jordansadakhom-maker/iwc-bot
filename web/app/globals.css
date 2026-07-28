@@ -219,4 +219,9 @@ input:focus, textarea:focus, select:focus { box-shadow: 0 0 0 3px color-mix(in s
 }
 @media (prefers-reduced-motion: reduce) { .iwc-skeleton::after { animation: none; } }
 
+/* Ouverture fluide des fenêtres/menus : fondu + léger zoom (rapide, 200 ms). */
+@keyframes iwc-pop { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: none; } }
+.iwc-pop { animation: iwc-pop .2s cubic-bezier(.22,.61,.36,1) both; }
+@media (prefers-reduced-motion: reduce) { .iwc-pop { animation: none; } }
+
 /* Déploiement Production — Refonte « Effet Wouah » (mise en ligne). */
