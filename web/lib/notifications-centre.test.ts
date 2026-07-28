@@ -6,7 +6,7 @@ import {
 
 const n = (over: Partial<CentreNotif> = {}): CentreNotif => ({
   id: "1", type: "telegramme", titre: "T", corps: null, lien: null, clientNom: null,
-  cibleId: null, lu: false, luAt: null, archive: false, createdAt: "2026-07-26T10:00:00Z", ...over,
+  cibleId: null, lu: false, luAt: null, archive: false, supprime: false, createdAt: "2026-07-26T10:00:00Z", ...over,
 });
 
 describe("notifMeta — métadonnées par type", () => {

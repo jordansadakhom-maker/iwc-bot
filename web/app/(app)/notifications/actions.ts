@@ -46,7 +46,9 @@ export async function listerNotifications(): Promise<{ connecte: boolean; notifs
   if (!(await membreConnecte())) return { connecte: false, notifs: [] };
   const admin = createAdminClient();
   if (!admin) return { connecte: false, notifs: [] };
-  const { data, error } = await admin.from("Notification").select("id,type,titre,corps,lien,clientNom,cibleId,lu,luAt,archive,createdAt,membreId,roleCible").order("createdAt", { ascending: false }).limit(200);
+  // select('*') = tolérant : renvoie « supprime » si la colonne existe (corbeille),
+  // sans jamais casser si le SQL n'a pas encore été lancé (colonne absente = ignorée).
+  const { data, error } = await admin.from("Notification").select("*").order("createdAt", { ascending: false }).limit(200);
   if (error) return { connecte: false, notifs: [] };
   const cible = await monCiblage();
   // Ciblage : équipe (membreId & roleCible null) → tous ; ciblée membre → lui ;
@@ -103,6 +105,32 @@ export async function supprimerNotif(id: string): Promise<{ ok: boolean }> {
   const admin = createAdminClient();
   if (!admin || !id) return { ok: false };
   if (!(await peutAgirSurNotif(admin, id))) return { ok: false };
+  // Corbeille : mise en corbeille (soft-delete) si la colonne existe ; sinon
+  // suppression définitive (repli tolérant si le SQL n'est pas encore lancé).
+  const soft = await admin.from("Notification").update({ supprime: true }).eq("id", id);
+  if (!soft.error) return { ok: true };
   const { error } = await admin.from("Notification").delete().eq("id", id);
   return { ok: !error };
+}
+
+export async function restaurerNotif(id: string): Promise<{ ok: boolean }> {
+  if (!(await membreConnecte())) return { ok: false };
+  const admin = createAdminClient();
+  if (!admin || !id) return { ok: false };
+  if (!(await peutAgirSurNotif(admin, id))) return { ok: false };
+  const { error } = await admin.from("Notification").update({ supprime: false }).eq("id", id);
+  return { ok: !error };
+}
+
+// Vide la corbeille du membre (suppression DÉFINITIVE des notifications déjà mises
+// en corbeille et visibles par lui).
+export async function viderCorbeille(): Promise<{ ok: boolean }> {
+  if (!(await membreConnecte())) return { ok: false };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false };
+  try {
+    const cible = await monCiblage();
+    const { error } = await admin.from("Notification").delete().eq("supprime", true).or(orCibleNotif(cible));
+    return { ok: !error };
+  } catch { return { ok: false }; }
 }
