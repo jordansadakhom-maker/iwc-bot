@@ -34,6 +34,9 @@ const META: Record<string, NotifMeta> = {
   "operation-statut": { icon: "🔄", label: "Phase d'opération", tone: "good" },
   candidature: { icon: "🐺", label: "Candidature", tone: "accent" },
   "candidature-statut": { icon: "✅", label: "Décision de candidature", tone: "good" },
+  demande: { icon: "📨", label: "Nouvelle demande", tone: "accent" },
+  "demande-statut": { icon: "🔁", label: "Statut de demande", tone: "good" },
+  "demande-transfert": { icon: "📨", label: "Demande transférée", tone: "warn" },
 };
 const META_DEFAUT: NotifMeta = { icon: "🔔", label: "Notification", tone: "muted" };
 

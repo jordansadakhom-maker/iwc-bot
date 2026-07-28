@@ -627,7 +627,7 @@ async function _del(pathAndQuery) {
 // il ne doit donc JAMAIS y supprimer des lignes absentes de son data.json —
 // sinon un événement/une notification créé côté site disparaît à la sync.
 // Garde-fou permanent : même si on ajoute par erreur un _reconcilier dessus.
-const _JAMAIS_RECONCILIER = new Set(['Event', 'Notification', 'ActivityLog', 'TelegrammeWeb', 'DemandeContact', 'Tache', 'Conversation', 'Message', 'ConversationVue', 'Licence', 'LicenceType', 'LicenceEvent', 'LicenceMembre', 'LicenceConfig']);
+const _JAMAIS_RECONCILIER = new Set(['Event', 'Notification', 'ActivityLog', 'TelegrammeWeb', 'DemandeContact', 'Tache', 'Conversation', 'Message', 'ConversationVue', 'Licence', 'LicenceType', 'LicenceEvent', 'LicenceMembre', 'LicenceConfig', 'Demande', 'DemandeMessage', 'DemandeEvent']);
 async function _reconcilier(table, idsGardes) {
   if (_JAMAIS_RECONCILIER.has(table)) {
     console.log(`⛔ _reconcilier ignoré pour ${table} (donnée site-native — jamais supprimée par la sync).`);
@@ -693,6 +693,17 @@ async function marquerEvenementLicenceAnnonce(id) {
 async function lireLicencesExpirant() {
   const rows = await _get('Licence?statut=in.(active,suspendue)&dateExpiration=not.is.null&order=dateExpiration.asc&limit=300');
   return Array.isArray(rows) ? rows : [];
+}
+
+// ── Demandes (tickets) du site → notification Discord ──
+// Le bot relève les demandes non encore annoncées et les poste (lien profond),
+// puis les marque annoncées. Table NEUVE, jamais réconciliée.
+async function lireDemandesANotifier() {
+  const rows = await _get('Demande?annonceAt=is.null&order=createdAt.asc&limit=25');
+  return Array.isArray(rows) ? rows : [];
+}
+async function marquerDemandeAnnoncee(id) {
+  return await _patch(`Demande?id=eq.${encodeURIComponent(id)}`, { annonceAt: new Date().toISOString() });
 }
 
 // ── File de commandes venues du site (table CommandeWeb) ──
@@ -806,4 +817,4 @@ async function enregistrerHistoriqueDispensaire(rows) {
   return !!(r && r.ok);
 }
 
-module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, majRosterMembre, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise, lireProduitsArmurerie, lireContratArmurerieEnAttente, marquerContratArmurerie, lireRdvArmurerieARappeler, marquerRappelRdvArmurerie, enregistrerRapportTerrain, lireProduitsArmurerieRecette, lireRessourcesArmurerie, enregistrerScanArmurerie, lireNomsContactsDispensaire, importerContactsDispensaire, enregistrerHistoriqueDispensaire, lireEvenementsLicenceANotifier, marquerEvenementLicenceAnnonce, lireLicencesExpirant };
+module.exports = { estActif, syncAll, scheduleSync, setMembresActuels, setMembresRoster, majRosterMembre, lireDemandesRdvWeb, marquerRdvTransmis, lireDemandesContactWeb, marquerDemandeContactTraitee, marquerDemandeContactEchec, lireCommandesWeb, marquerCommandeWeb, lireTelegrammesWeb, marquerTelegrammeWebTransmis, lireCandidaturesWeb, marquerCandidatureTransmise, lireProduitsArmurerie, lireContratArmurerieEnAttente, marquerContratArmurerie, lireRdvArmurerieARappeler, marquerRappelRdvArmurerie, enregistrerRapportTerrain, lireProduitsArmurerieRecette, lireRessourcesArmurerie, enregistrerScanArmurerie, lireNomsContactsDispensaire, importerContactsDispensaire, enregistrerHistoriqueDispensaire, lireEvenementsLicenceANotifier, marquerEvenementLicenceAnnonce, lireLicencesExpirant, lireDemandesANotifier, marquerDemandeAnnoncee };

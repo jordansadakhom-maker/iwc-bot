@@ -112,6 +112,10 @@ let licencesWeb = {};
 try { licencesWeb = require('./licences-web'); console.log('✅ Module licences web chargé'); }
 catch (e) { console.log('⚠️ licences-web non chargé:', e.message); }
 
+let demandesWeb = {};
+try { demandesWeb = require('./demandes-web'); console.log('✅ Module demandes web chargé'); }
+catch (e) { console.log('⚠️ demandes-web non chargé:', e.message); }
+
 let resumePhoto = {};
 try { resumePhoto = require('./resume-photo'); console.log('✅ Module résumé-photo chargé'); }
 catch (e) { console.log('⚠️ resume-photo non chargé:', e.message); }
@@ -6938,6 +6942,10 @@ client.once('clientReady', async () => {
   // 🪪 Évènements du registre des licences (création, suspension, révocation, refus…) → salon Discord des licences (toutes les 2 min).
   cron.schedule('*/2 * * * *', sansChevauchement('licencesNotif', async () => {
     for (const g of client.guilds.cache.values()) await licencesWeb.verifierNotificationsLicences?.(g).catch(() => {});
+  }));
+  // 📨 Nouvelles demandes du site (guichet unique) → notification Discord + lien profond (toutes les 2 min).
+  cron.schedule('*/2 * * * *', sansChevauchement('demandesWeb', async () => {
+    for (const g of client.guilds.cache.values()) await demandesWeb.verifierDemandesWeb?.(g).catch(() => {});
   }));
   // 📅 Digest quotidien des licences à renouveler (expirations ≤ 30 j) — 9h30 Paris.
   cron.schedule('30 9 * * *', sansChevauchement('licencesExp', async () => {
