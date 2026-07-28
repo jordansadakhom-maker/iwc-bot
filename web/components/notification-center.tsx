@@ -7,7 +7,7 @@ import { toast } from "@/lib/toast";
 import { NOTIF_FILTRES, correspondFiltre, compteNonLus, notifMeta, versCentreNotif, lienNotif, prioriteDe, PRIORITE_META, type CentreNotif } from "@/lib/notifications-centre";
 import { useNotificationsRealtime } from "@/lib/use-notifications-realtime";
 import { notifVisiblePour, type CibleActeur } from "@/lib/notif-ciblage";
-import { marquerNotifLue, marquerToutesLues, archiverNotif, supprimerNotif } from "@/app/(app)/notifications/actions";
+import { marquerNotifLue, marquerToutesLues, archiverNotif, supprimerNotif, restaurerNotif, viderCorbeille } from "@/app/(app)/notifications/actions";
 
 const TONE_TXT: Record<string, string> = { accent: "var(--accent)", good: "var(--good)", warn: "var(--warn)", oxblood: "var(--oxblood)", muted: "var(--faint)" };
 const dtFR = (s: string) => { if (!s) return ""; try { return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(s)); } catch { return ""; } };
@@ -61,8 +61,16 @@ export function NotificationCenter({ initial, cible }: { initial: CentreNotif[];
     const r = await archiverNotif(n.id, valeur); if (!r.ok) toast("Action impossible.", "bad");
   }
   async function supprimer(n: CentreNotif) {
-    setList((p) => p.filter((x) => x.id !== n.id));
+    setList((p) => p.map((x) => (x.id === n.id ? { ...x, supprime: true } : x)));   // → corbeille
     const r = await supprimerNotif(n.id); if (!r.ok) { toast("Suppression impossible.", "bad"); router.refresh(); }
+  }
+  async function restaurer(n: CentreNotif) {
+    setList((p) => p.map((x) => (x.id === n.id ? { ...x, supprime: false } : x)));
+    const r = await restaurerNotif(n.id); if (!r.ok) { toast("Restauration impossible.", "bad"); router.refresh(); }
+  }
+  async function viderTout() {
+    setList((p) => p.filter((x) => !x.supprime));
+    const r = await viderCorbeille(); if (r.ok) toast("Corbeille vidée.", "ok"); else { toast("Action impossible.", "bad"); router.refresh(); }
   }
   function ouvrir(n: CentreNotif) {
     if (!n.lu) void lu(n, true);          // ouvrir = lire
@@ -98,10 +106,16 @@ export function NotificationCenter({ initial, cible }: { initial: CentreNotif[];
             style={triPrio ? { background: "var(--accent)", color: "#000", borderColor: "transparent" } : { color: "var(--muted)", borderColor: "var(--border)" }}>
             <ArrowDownWideNarrow className="h-3.5 w-3.5" /> Priorité
           </button>
-          <button onClick={toutLu} disabled={!nonLus}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted transition hover:text-ink disabled:opacity-40">
-            <CheckCheck className="h-3.5 w-3.5" /> Tout lu{nonLus ? ` (${nonLus})` : ""}
-          </button>
+          {filtre === "corbeille" ? (
+            <button onClick={viderTout} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[0.74rem] font-semibold transition" style={{ color: "var(--oxblood)", borderColor: "color-mix(in srgb,var(--oxblood) 40%,var(--border))" }}>
+              <Trash2 className="h-3.5 w-3.5" /> Vider la corbeille
+            </button>
+          ) : (
+            <button onClick={toutLu} disabled={!nonLus}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted transition hover:text-ink disabled:opacity-40">
+              <CheckCheck className="h-3.5 w-3.5" /> Tout lu{nonLus ? ` (${nonLus})` : ""}
+            </button>
+          )}
         </div>
       </div>
 
@@ -139,10 +153,16 @@ export function NotificationCenter({ initial, cible }: { initial: CentreNotif[];
                 </button>
                 <div className="flex shrink-0 items-center gap-1 opacity-70 transition group-hover:opacity-100">
                   <button onClick={() => toggleFavori(n.id)} className="grid h-7 w-7 place-items-center rounded-md border border-border" style={{ color: favoris[n.id] ? "var(--warn)" : "var(--faint)" }} aria-label="Favori" title="Favori"><Star className="h-3.5 w-3.5" fill={favoris[n.id] ? "var(--warn)" : "none"} /></button>
-                  {n.lien ? <button onClick={() => ouvrir(n)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Ouvrir"><ArrowUpRight className="h-3.5 w-3.5" /></button> : null}
-                  {!n.archive ? <button onClick={() => lu(n, !n.lu)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label={n.lu ? "Marquer comme non lu" : "Marquer comme lu"} title={n.lu ? "Marquer comme non lu" : "Marquer comme lu"}><Check className="h-3.5 w-3.5" /></button> : null}
-                  <button onClick={() => archiver(n, !n.archive)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label={n.archive ? "Désarchiver" : "Archiver"} title={n.archive ? "Désarchiver" : "Archiver"}>{n.archive ? <ArchiveRestore className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}</button>
-                  <button onClick={() => supprimer(n)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-oxblood" aria-label="Supprimer" title="Supprimer"><Trash2 className="h-3.5 w-3.5" /></button>
+                  {n.supprime ? (
+                    <button onClick={() => restaurer(n)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-good" aria-label="Restaurer" title="Restaurer"><ArchiveRestore className="h-3.5 w-3.5" /></button>
+                  ) : (
+                    <>
+                      {n.lien ? <button onClick={() => ouvrir(n)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Ouvrir"><ArrowUpRight className="h-3.5 w-3.5" /></button> : null}
+                      {!n.archive ? <button onClick={() => lu(n, !n.lu)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label={n.lu ? "Marquer comme non lu" : "Marquer comme lu"} title={n.lu ? "Marquer comme non lu" : "Marquer comme lu"}><Check className="h-3.5 w-3.5" /></button> : null}
+                      <button onClick={() => archiver(n, !n.archive)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label={n.archive ? "Désarchiver" : "Archiver"} title={n.archive ? "Désarchiver" : "Archiver"}>{n.archive ? <ArchiveRestore className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}</button>
+                      <button onClick={() => supprimer(n)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-oxblood" aria-label="Supprimer" title="Mettre à la corbeille"><Trash2 className="h-3.5 w-3.5" /></button>
+                    </>
+                  )}
                 </div>
               </div>
             );

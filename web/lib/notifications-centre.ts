@@ -16,6 +16,7 @@ export type CentreNotif = {
   lu: boolean;
   luAt: string | null;
   archive: boolean;
+  supprime: boolean;
   createdAt: string;
 };
 
@@ -85,6 +86,7 @@ export const NOTIF_FILTRES = [
   { key: "messages", label: "Messages" },
   { key: "recrutement", label: "Recrutement" },
   { key: "archive", label: "Archivés" },
+  { key: "corbeille", label: "🗑 Corbeille" },
 ] as const;
 export type NotifFiltre = (typeof NOTIF_FILTRES)[number]["key"];
 
@@ -92,6 +94,8 @@ export type NotifFiltre = (typeof NOTIF_FILTRES)[number]["key"];
 // ressortent QUE dans l'onglet « Archivés ». `favoris` est fourni séparément
 // (état par appareil) et géré dans le composant.
 export function correspondFiltre(n: CentreNotif, filtre: string): boolean {
+  if (filtre === "corbeille") return n.supprime;          // la corbeille montre UNIQUEMENT les supprimées
+  if (n.supprime) return false;                            // partout ailleurs, on masque les supprimées
   switch (filtre) {
     case "non_lus": return !n.lu && !n.archive;
     case "operations": return !n.archive && n.type.startsWith("operation");
@@ -107,7 +111,7 @@ export function correspondFiltre(n: CentreNotif, filtre: string): boolean {
 }
 
 // Compteur des non-lues actives (hors archives) — pour la pastille rouge.
-export const compteNonLus = (list: CentreNotif[]): number => list.filter((n) => !n.lu && !n.archive).length;
+export const compteNonLus = (list: CentreNotif[]): number => list.filter((n) => !n.lu && !n.archive && !n.supprime).length;
 
 // Normalise une ligne brute de la table "Notification" en CentreNotif.
 export function versCentreNotif(r: Record<string, unknown>): CentreNotif {
@@ -123,6 +127,7 @@ export function versCentreNotif(r: Record<string, unknown>): CentreNotif {
     lu: !!r.lu,
     luAt: s(r.luAt),
     archive: !!r.archive,
+    supprime: !!r.supprime,
     createdAt: String(r.createdAt || ""),
   };
 }
