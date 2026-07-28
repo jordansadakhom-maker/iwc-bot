@@ -665,10 +665,16 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
       }
       if (l.produitId) {
         const { data } = await admin.from("ArmurerieProduit").select("stock,recette").eq("id", l.produitId).maybeSingle();
-        const ps = data ? Number((data as { stock?: number }).stock) || 0 : 0;
+        let ps = data ? Number((data as { stock?: number }).stock) || 0 : 0;
         if (data && !l.aLaDemande) {
-          const nv = Math.max(0, ps - q);
-          await admin.from("ArmurerieProduit").update({ stock: nv }).eq("id", l.produitId);
+          // Décrément ATOMIQUE (verrou de ligne SELECT … FOR UPDATE) : deux ventes
+          // simultanées du même produit ne s'écrasent plus (fini le lost update).
+          // Repli non-atomique si la fonction n'est pas installée (SQL non lancé).
+          const rpc = await admin.rpc("armurerie_stock_mouvement", { p_id: l.produitId, p_delta: -q });
+          const ligne = !rpc.error && Array.isArray(rpc.data) ? (rpc.data[0] as { avant?: number; apres?: number } | undefined) : undefined;
+          let nv: number;
+          if (ligne && ligne.apres != null) { ps = Number(ligne.avant) || ps; nv = Number(ligne.apres); }
+          else { nv = Math.max(0, ps - q); await admin.from("ArmurerieProduit").update({ stock: nv }).eq("id", l.produitId); }
           try { await _journaliserStock(admin, [{ cible: "produit", refId: l.produitId, nom: l.nom, avant: ps, apres: nv, origine: "vente", detail: `Vente ×${q} — ${cli}`, par: vendeur }]); } catch { /* trace best-effort */ }
         }
         // Fabrication à la demande : la part non couverte par le stock fini consomme
