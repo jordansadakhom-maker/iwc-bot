@@ -115,6 +115,25 @@ export const getLicences = cache(async (): Promise<LicencesData> => {
   } catch { return { pret: false, licences: [], types: [] }; }
 });
 
+// Licences ACTIVES arrivant à expiration (fenêtre en jours). Dérivé du cache
+// getLicences → aucun coût réseau supplémentaire sur une page qui l'utilise déjà.
+export type LicenceExpirant = { id: string; numero: string; nom: string; typeNom: string | null; jours: number };
+export async function getLicencesExpirant(joursMax = 30): Promise<{ pret: boolean; items: LicenceExpirant[] }> {
+  const { pret, licences } = await getLicences();
+  if (!pret) return { pret: false, items: [] };
+  const now = Date.now();
+  const items: LicenceExpirant[] = [];
+  for (const l of licences) {
+    if (l.statut !== "active" || !l.dateExpiration) continue;
+    const jours = Math.ceil((Date.parse(l.dateExpiration) - now) / 86400000);
+    if (jours >= 0 && jours <= joursMax) {
+      items.push({ id: l.id, numero: l.numero, nom: [l.prenom, l.nom].filter(Boolean).join(" ") || l.nom, typeNom: l.typeNom, jours });
+    }
+  }
+  items.sort((a, b) => a.jours - b.jours);
+  return { pret: true, items };
+}
+
 export async function getLicence(id: string): Promise<Licence | null> {
   const admin = createAdminClient();
   if (!admin || !id) return null;
