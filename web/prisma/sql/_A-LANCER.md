@@ -11,6 +11,8 @@ donnée existante touchée). Copier-coller dans le **SQL Editor** de la bonne ba
 | Fichier | Rôle | Obligatoire |
 |---|---|---|
 | [`licences.sql`](./licences.sql) | Système de Licences complet : types, licences, journal, numérotation officielle, config Armurerie, rôles, marqueur de notifications Discord | ✅ pour l'onglet **Licences** |
+| [`demandes.sql`](./demandes.sql) | Plateforme centrale **Demandes** (tickets) : dossiers, messages, historique, numérotation `DEM-AAAA-NNNNN`, marqueur d'annonce Discord | ✅ pour l'onglet **Demandes** |
+| [`notifications-corbeille.sql`](./notifications-corbeille.sql) | Colonne `supprime` du centre de notifications → **corbeille** (suppression réversible + restauration) | ⭕ recommandé (sinon suppression définitive) |
 
 ## ② Supabase du DISPENSAIRE (projet séparé)
 
@@ -26,16 +28,28 @@ donnée existante touchée). Copier-coller dans le **SQL Editor** de la bonne ba
 **Aucun SQL** — les pages `/audit` (IWC) et `/dispensaire/audit` (Dispensaire)
 ne font que **lire** l'état courant. Rien à installer.
 
-## Notifications Discord des licences (hors SQL)
+## Notifications Discord (hors SQL) — variables du bot
 
-Sur l'hébergement du **bot** (Fly/Render), définir la variable d'environnement
-**`SALON_LICENCES`** = l'ID du salon Discord où poster, puis **redéployer le bot**.
-Sans elle, les notifications restent silencieuses (rien d'autre n'est affecté).
+Sur l'hébergement du **bot** (Fly/Render), définir puis **redéployer le bot** :
+
+- **`SALON_LICENCES`** = ID du salon Discord où poster les notifications de **licences**.
+- **`SALON_DEMANDES`** = ID du salon où poster les notifications de **demandes**.
+
+Sans elles, les notifications concernées restent silencieuses (rien d'autre n'est affecté).
+
+## Assistant IA (hors SQL) — variable Vercel
+
+Pour activer les fonctions IA (résumé/brouillon de demande, briefing…), définir
+sur **Vercel** la variable **`ANTHROPIC_API_KEY`**. Absente, l'IA reste inactive
+avec un message clair (aucune autre fonction affectée).
 
 ---
 
 ### Ordre conseillé
 1. `licences.sql` → base principale.
-2. `dispensaire-membre-rp.sql` → base du Dispensaire.
-3. (option) `perf-index-dispensaire.sql` → base du Dispensaire.
-4. Variable `SALON_LICENCES` + redéploiement du bot.
+2. `demandes.sql` → base principale.
+3. `notifications-corbeille.sql` → base principale.
+4. `dispensaire-membre-rp.sql` → base du Dispensaire.
+5. (option) `perf-index-dispensaire.sql` → base du Dispensaire.
+6. Variables bot `SALON_LICENCES` + `SALON_DEMANDES` (+ redéploiement du bot).
+7. (option) Variable Vercel `ANTHROPIC_API_KEY` pour l'IA.
