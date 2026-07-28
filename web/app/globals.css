@@ -46,9 +46,9 @@ body {
   /* Atmosphère « frontière » : halos laiton/sang/acier fixes, comme une lampe
      à pétrole sur du cuir sombre — donne de la profondeur à toutes les pages. */
   background:
-    radial-gradient(1100px 520px at 50% -8%, color-mix(in srgb, var(--brass) 7%, transparent), transparent 60%),
-    radial-gradient(820px 620px at 108% 6%, color-mix(in srgb, var(--oxblood) 6%, transparent), transparent 55%),
-    radial-gradient(900px 720px at -10% 102%, color-mix(in srgb, var(--steel) 5%, transparent), transparent 55%),
+    radial-gradient(1200px 620px at 50% -10%, color-mix(in srgb, var(--brass) 16%, transparent), transparent 62%),
+    radial-gradient(900px 700px at 112% 4%, color-mix(in srgb, var(--oxblood) 13%, transparent), transparent 56%),
+    radial-gradient(1000px 780px at -12% 104%, color-mix(in srgb, var(--steel) 12%, transparent), transparent 56%),
     var(--bg);
   background-attachment: fixed;
   color: var(--ink);
