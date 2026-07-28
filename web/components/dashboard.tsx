@@ -7,6 +7,8 @@ import type { DashData, FeedItem, AlertesData } from "@/lib/queries";
 import { BarresH, Donut, Repartition } from "@/components/charts";
 import { PoleChip, SectionTitle, Ornement } from "@/components/ui";
 import { LiveFeed } from "@/components/live-feed";
+import { DemandesResume } from "@/components/demandes-resume";
+import type { DemandesData } from "@/lib/demandes-const";
 import { BriefingIA } from "@/components/briefing-ia";
 import { HorlogeCampagne } from "@/components/horloge-campagne";
 import { cents } from "@/lib/format";
@@ -239,7 +241,7 @@ function Raccourcis() {
   );
 }
 
-export function Dashboard({ data, feed = [], alertes = { total: 0, items: [] } }: { data: DashData; feed?: FeedItem[]; alertes?: AlertesData }) {
+export function Dashboard({ data, feed = [], alertes = { total: 0, items: [] }, demandes, monId }: { data: DashData; feed?: FeedItem[]; alertes?: AlertesData; demandes?: DemandesData; monId?: string | null }) {
   return (
     <>
       <div>
@@ -269,6 +271,8 @@ export function Dashboard({ data, feed = [], alertes = { total: 0, items: [] } }
 
       <SectionTitle tone="var(--warn)" icon={ListChecks}>Ton poste</SectionTitle>
       <CeQuiTattend alertes={alertes} />
+
+      {demandes ? <DemandesResume data={demandes} monId={monId} /> : null}
       <Raccourcis />
 
       <BriefingIA />
