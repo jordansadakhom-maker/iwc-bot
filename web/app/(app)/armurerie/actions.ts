@@ -183,6 +183,10 @@ export async function majVente(id: string, patch: Record<string, unknown>): Prom
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
   const _ga = await garde(); if (_ga) return _ga;
+  // Prix AVANT modification → pour ajuster le coffre de la DIFFÉRENCE (corriger une
+  // vente ne doit pas laisser le coffre incohérent, comme pour la suppression).
+  const { data: avantV } = await admin.from("ArmurerieVente").select("prix,marque,modele").eq("id", id).maybeSingle();
+  const ancienPrix = avantV ? Math.max(0, round2(Number((avantV as { prix?: number }).prix) || 0)) : 0;
   const up: Record<string, unknown> = {};
   for (const k of ["acquereur", "dateVente", "marque", "modele", "categorie", "numeroSerie", "vendeur", "telegramme", "notes", "statut", "clientId"]) if (k in patch) up[k] = s(patch[k], 1000);
   if ("quantite" in patch) up.quantite = Math.max(1, Math.round(Number(patch.quantite) || 1));
@@ -200,7 +204,19 @@ export async function majVente(id: string, patch: Record<string, unknown>): Prom
     if (/photo/i.test(m)) delete up.photo; else if (/quantite/i.test(m)) delete up.quantite; else if (/prixUnitaire/i.test(m)) delete up.prixUnitaire;
     res = await admin.from("ArmurerieVente").update(up).eq("id", id);
   }
-  return res.error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
+  if (res.error) return { ok: false, error: "Enregistrement impossible." };
+  // Le total a-t-il changé ? Ajuste le coffre de la différence (entrée si le prix
+  // monte, sortie s'il baisse). Mouvement tracé, best-effort.
+  if ("prix" in up) {
+    const nouveauPrix = Math.max(0, round2(Number(up.prix) || 0));
+    const delta = round2(nouveauPrix - ancienPrix);
+    if (delta !== 0) {
+      const r = avantV as Record<string, unknown> | null;
+      const arme = [s(r?.marque, 80), s(r?.modele, 80)].filter(Boolean).join(" ") || "arme";
+      try { await _mouvementCoffre(admin, Math.abs(delta), delta > 0 ? "entree" : "sortie", `Correction de vente — ${arme}`, await auteurNom()); } catch { /* best-effort : la vente est déjà mise à jour */ }
+    }
+  }
+  return { ok: true };
 }
 export async function supprimerVente(id: string): Promise<ArmResult> {
   if (!id) return { ok: false, error: "Vente introuvable." };
@@ -1073,10 +1089,10 @@ export async function reajusterFinancesReckless(mouvements: { montant: number; s
   try {
     const auteur = await auteurNom();
     // 1. Ancien import Reckless (à remplacer) + son effet net sur le solde.
-    const { data: anc } = await admin.from("ArmurerieMouvementCoffre").select("id,sens,montant").ilike("motif", "%Reckless%");
+    const { data: anc } = await admin.from("ArmurerieMouvementCoffre").select("id,sens,montant").ilike("motif", "Reckless — %");
     const anciens = (anc || []) as { id: string; sens: string; montant: number }[];
     const prevNet = anciens.reduce((sm, m) => sm + (m.sens === "entree" ? Number(m.montant) || 0 : -(Number(m.montant) || 0)), 0);
-    if (anciens.length) await admin.from("ArmurerieMouvementCoffre").delete().ilike("motif", "%Reckless%");
+    if (anciens.length) await admin.from("ArmurerieMouvementCoffre").delete().ilike("motif", "Reckless — %");
     // 2. Recale le solde : retire l'ancien net, ajoute le nouveau.
     const newNet = lignes.reduce((sm, n) => sm + (n.sens === "entree" ? n.montant : -n.montant), 0);
     const { data: cof } = await admin.from("ArmurerieCoffre").select("solde").eq("id", "vanhorn").maybeSingle();
@@ -1086,7 +1102,10 @@ export async function reajusterFinancesReckless(mouvements: { montant: number; s
     const now = nowISO();
     for (const n of lignes) {
       const nat = n.sens === "sortie" && (n.nature === "produit" || n.nature === "charge") ? n.nature : null;
-      const base: Record<string, unknown> = { id: newId("mvt"), sens: n.sens, montant: round2(n.montant), motif: s(n.motif, 200), auteur, createdAt: now };
+      // Préfixe réservé « Reckless — » : marque l'écriture comme issue de l'import
+      // (c'est LUI, et lui seul, que le prochain ré-import remplace). Une écriture
+      // manuelle mentionnant « Reckless » ailleurs qu'en tête n'est jamais touchée.
+      const base: Record<string, unknown> = { id: newId("mvt"), sens: n.sens, montant: round2(n.montant), motif: s("Reckless — " + String(n.motif ?? ""), 200), auteur, createdAt: now };
       const row = nat ? { ...base, nature: nat } : base;
       let ins = await admin.from("ArmurerieMouvementCoffre").insert(row);
       if (ins.error && nat && /nature/i.test(ins.error.message)) ins = await admin.from("ArmurerieMouvementCoffre").insert(base);
