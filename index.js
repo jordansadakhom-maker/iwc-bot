@@ -6909,37 +6909,47 @@ client.once('clientReady', async () => {
   // 🔄 Synchronisation Supabase (plateforme web) toutes les 5 min — reflète les
   //    coffres/contrats/opérations à jour. No-op sans variables d'env.
   cron.schedule('*/5 * * * *', async () => { try { await _majMembresActuels(client.guilds.cache.values()); await supabaseSync.syncAll?.(loadDB()); } catch {} });
+  // 🔒 Verrou anti-chevauchement : un même job de relève ne tourne jamais deux
+  //    fois en parallèle. Si un cycle est plus lent que l'intervalle, le suivant
+  //    est ignoré au lieu de traiter les mêmes lignes en double (→ moins de
+  //    doublons de notifications). Erreurs avalées comme avant (best-effort).
+  const _verrousWeb = {};
+  const sansChevauchement = (cle, fn) => async () => {
+    if (_verrousWeb[cle]) return;
+    _verrousWeb[cle] = true;
+    try { await fn(); } catch { /* silencieux */ } finally { _verrousWeb[cle] = false; }
+  };
   // 📨 Demandes de RDV venues du site web → notifier l'équipe dans #agenda (toutes les 2 min).
-  cron.schedule('*/2 * * * *', async () => {
+  cron.schedule('*/2 * * * *', sansChevauchement('rdvWeb', async () => {
     for (const g of client.guilds.cache.values()) await rdvWeb.verifierDemandesRdvWeb?.(g).catch(() => {});
-  });
+  }));
   // ✉️ Télégrammes envoyés depuis le site → notifier l'équipe dans le salon télégrammes (toutes les 2 min).
-  cron.schedule('*/2 * * * *', async () => {
+  cron.schedule('*/2 * * * *', sansChevauchement('telegrammeWeb', async () => {
     for (const g of client.guilds.cache.values()) await telegrammeWeb.verifierTelegrammesWeb?.(g).catch(() => {});
-  });
+  }));
   // 🐺 Candidatures de recrutement déposées sur le site → notifier l'équipe (toutes les 2 min).
-  cron.schedule('*/2 * * * *', async () => {
+  cron.schedule('*/2 * * * *', sansChevauchement('candidatureWeb', async () => {
     for (const g of client.guilds.cache.values()) await candidatureWeb.verifierCandidaturesWeb?.(g).catch(() => {});
-  });
+  }));
   // 🎴 Nouvelles fiches de contact demandées depuis le site → créer la fiche (carnet + forum) (toutes les 2 min).
-  cron.schedule('*/2 * * * *', async () => {
+  cron.schedule('*/2 * * * *', sansChevauchement('contactWeb', async () => {
     for (const g of client.guilds.cache.values()) await contactWeb.verifierDemandesContactWeb?.(g).catch(() => {});
-  });
+  }));
   // 🪪 Évènements du registre des licences (création, suspension, révocation, refus…) → salon Discord des licences (toutes les 2 min).
-  cron.schedule('*/2 * * * *', async () => {
+  cron.schedule('*/2 * * * *', sansChevauchement('licencesNotif', async () => {
     for (const g of client.guilds.cache.values()) await licencesWeb.verifierNotificationsLicences?.(g).catch(() => {});
-  });
+  }));
   // 📅 Digest quotidien des licences à renouveler (expirations ≤ 30 j) — 9h30 Paris.
-  cron.schedule('30 9 * * *', async () => {
+  cron.schedule('30 9 * * *', sansChevauchement('licencesExp', async () => {
     for (const g of client.guilds.cache.values()) await licencesWeb.verifierExpirationsLicences?.(g).catch(() => {});
-  }, { timezone: 'Europe/Paris' });
+  }), { timezone: 'Europe/Paris' });
   // ⚡ Commandes CRUD venues du site (créer/modifier/supprimer) → appliquées toutes
   //    les 3 s. Le site peut ainsi attendre le vrai verdict (« temps réel ») pour
   //    les envois de contrats, tout en gardant l'affichage optimiste ailleurs.
   if (commandeWeb.appliquerCommandesWeb) {
-    setInterval(async () => {
-      try { const g = client.guilds.cache.first(); if (g) await commandeWeb.appliquerCommandesWeb(g); } catch {}
-    }, 3000);
+    setInterval(sansChevauchement('commandeWeb', async () => {
+      const g = client.guilds.cache.first(); if (g) await commandeWeb.appliquerCommandesWeb(g);
+    }), 3000);
   }
   cron.schedule('0 18 * * *', async () => {
     try { const u = await client.users.fetch('944208797084311583').catch(() => null); if (u) await u.send({ embeds: [_genererRecapEmbed(loadDB())] }).catch(() => {}); } catch {}
