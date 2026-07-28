@@ -10,9 +10,11 @@ export async function listerActivite(): Promise<{ connecte: boolean; items: Acti
   if (!(await getActeur())) return { connecte: false, items: [] };
   const admin = createAdminClient();
   if (!admin) return { connecte: false, items: [] };
+  // select('*') = tolérant : renvoie avant/apres/payload/parId s'ils existent
+  // (activite-avant-apres.sql lancé), sans jamais casser sinon.
   const { data, error } = await admin
     .from("ActivityLog")
-    .select("id,module,action,cible,cibleId,par,at")
+    .select("*")
     .order("at", { ascending: false })
     .limit(300);
   if (error) return { connecte: true, items: [] };
