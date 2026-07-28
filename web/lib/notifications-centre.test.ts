@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   notifMeta, correspondFiltre, compteNonLus, versCentreNotif, NOTIF_FILTRES,
+  prioriteDe, moduleDe,
   type CentreNotif,
 } from "./notifications-centre";
 
@@ -9,9 +10,26 @@ const n = (over: Partial<CentreNotif> = {}): CentreNotif => ({
   cibleId: null, lu: false, luAt: null, archive: false, supprime: false, createdAt: "2026-07-26T10:00:00Z", ...over,
 });
 
+describe("priorité & module dérivés du type", () => {
+  it("dérive la priorité de gravité", () => {
+    expect(prioriteDe("membre")).toBe("elevee");           // accès sensible RH
+    expect(prioriteDe("demande-transfert")).toBe("elevee");
+    expect(prioriteDe("rdv-statut")).toBe("faible");
+    expect(prioriteDe("telegramme")).toBe("normale");
+  });
+  it("range chaque type dans son module", () => {
+    expect(moduleDe("demande-statut")).toBe("demandes");
+    expect(moduleDe("tache")).toBe("taches");
+    expect(moduleDe("membre")).toBe("rh");
+    expect(moduleDe("operation-statut")).toBe("operations");
+  });
+});
+
 describe("notifMeta — métadonnées par type", () => {
   it("connaît les types métier", () => {
     expect(notifMeta("telegramme").icon).toBe("✉️");
+    expect(notifMeta("tache").icon).toBe("📋");
+    expect(notifMeta("membre").label).toBe("Ressources humaines");
     expect(notifMeta("telegramme-clos").tone).toBe("muted");
     expect(notifMeta("message").label).toBe("Nouvelle réponse");
     expect(notifMeta("rdv").icon).toBe("📅");
@@ -58,10 +76,17 @@ describe("correspondFiltre — filtres du centre", () => {
     expect(correspondFiltre(n({ type: "operation", archive: true }), "operations")).toBe(false);
     expect(correspondFiltre(n({ type: "rdv" }), "operations")).toBe(false);
   });
-  it("« recrutement » couvre les candidatures", () => {
+  it("« recrutement » couvre candidatures + RH (membre)", () => {
     expect(correspondFiltre(n({ type: "candidature" }), "recrutement")).toBe(true);
     expect(correspondFiltre(n({ type: "candidature-statut" }), "recrutement")).toBe(true);
+    expect(correspondFiltre(n({ type: "membre" }), "recrutement")).toBe(true);
     expect(correspondFiltre(n({ type: "contrat" }), "recrutement")).toBe(false);
+  });
+  it("« demandes » et « taches » sont des filtres distincts", () => {
+    expect(correspondFiltre(n({ type: "demande" }), "demandes")).toBe(true);
+    expect(correspondFiltre(n({ type: "demande-statut" }), "demandes")).toBe(true);
+    expect(correspondFiltre(n({ type: "tache" }), "taches")).toBe(true);
+    expect(correspondFiltre(n({ type: "tache" }), "demandes")).toBe(false);
   });
   it("« archive » ne montre QUE les archivées", () => {
     expect(correspondFiltre(n({ archive: true }), "archive")).toBe(true);
