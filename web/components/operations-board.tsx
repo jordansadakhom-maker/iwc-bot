@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { X, Target, Plus, Loader2, Trash2, MapPin, Users, CalendarClock, Link2, CheckCircle2, Clock3, Lock, Send, Flag, Landmark, Check, ScrollText, Download, Sparkles } from "lucide-react";
 import type { OpDetail, EtapeDetail, MembreLite } from "@/lib/queries";
 import type { Suggestion } from "@/lib/attribution";
@@ -93,9 +93,18 @@ function Champ({ label, children }: { label: string; children: React.ReactNode }
 
 export function OperationsBoard({ operations, membres = [] }: { operations: Board; membres?: MembreLite[] }) {
   const router = useRouter();
+  const params = useSearchParams();
   const [sel, setSel] = useState<OpDetail | null>(null);
   const [nouveau, setNouveau] = useState(false);
   const total = operations.preparation.length + operations.encours.length + operations.terminees.length;
+
+  // Deep-link : ?op=<id> (depuis une notification) ouvre directement l'opération.
+  useEffect(() => {
+    const opId = params.get("op");
+    if (!opId) return;
+    const found = [...operations.preparation, ...operations.encours, ...operations.terminees].find((o) => o.id === opId);
+    if (found) setSel(found);
+  }, [params, operations]);
 
   const cols: [keyof Board, string][] = [["preparation", "Préparation"], ["encours", "En cours"], ["terminees", "Terminées"]];
 

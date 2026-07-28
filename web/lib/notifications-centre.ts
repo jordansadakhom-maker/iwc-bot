@@ -87,3 +87,16 @@ export function versCentreNotif(r: Record<string, unknown>): CentreNotif {
     createdAt: String(r.createdAt || ""),
   };
 }
+
+// Deep-link vers l'ÉLÉMENT précis à partir du type + cibleId : la notification
+// ouvre directement le bon élément (modal), pas seulement la page. Repli sur le
+// lien de page si aucun cibleId. Télégrammes/RDV/messages ont déjà leur route.
+export function lienNotif(n: { type: string; lien: string | null; cibleId?: string | null }): string {
+  const base = n.lien || "";
+  const id = n.cibleId;
+  if (!id) return base;
+  if (n.type.startsWith("operation")) return `/operations?op=${encodeURIComponent(id)}`;
+  if (n.type.startsWith("contrat")) return `/operations?ct=${encodeURIComponent(id)}`;
+  if (n.type.startsWith("candidature")) return `/recrutement?focus=${encodeURIComponent(id)}`;
+  return base;
+}
