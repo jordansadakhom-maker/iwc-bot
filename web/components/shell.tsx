@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Search, Bell, BellRing, Menu, ArrowRight, CheckCircle2, Volume2, VolumeX } from "lucide-react";
@@ -12,6 +12,7 @@ import { CaptureFlottante } from "@/components/capture-flottante";
 import { rafraichirAlertes } from "@/app/(app)/notifs-actions";
 import { toast } from "@/lib/toast";
 import { notifMeta, versCentreNotif } from "@/lib/notifications-centre";
+import { rolesDeActeur, notifVisiblePour } from "@/lib/notif-ciblage";
 import { useNotificationsRealtime } from "@/lib/use-notifications-realtime";
 import type { AlertesData, Acces } from "@/lib/queries";
 
@@ -37,9 +38,12 @@ function Crest({ className }: { className?: string }) {
   );
 }
 
-export function Shell({ children, connecte = false, profil = null, initialPole = "iwc", alertes = { total: 0, items: [] }, acces = ACCES_OUVERT }: { children: React.ReactNode; connecte?: boolean; profil?: Profil | null; initialPole?: Pole; alertes?: AlertesData; acces?: Acces }) {
+export function Shell({ children, connecte = false, profil = null, initialPole = "iwc", alertes = { total: 0, items: [] }, acces = ACCES_OUVERT, monId = null }: { children: React.ReactNode; connecte?: boolean; profil?: Profil | null; initialPole?: Pole; alertes?: AlertesData; acces?: Acces; monId?: string | null }) {
   const [pole, setPole] = useState<Pole>(initialPole);
   const me = profil ?? ME;
+  // Ciblage du membre connecté (id Discord + rôles) — pour ne montrer en temps
+  // réel QUE les notifications qui lui sont destinées (équipe ou ciblées lui).
+  const cibleActeur = useMemo(() => ({ did: monId, roles: rolesDeActeur(acces) }), [monId, acces]);
   const [open, setOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
@@ -110,14 +114,24 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
         if (it.count > dejaAlerte) {
           duNouveau = true;
           if (peutNotifier && document.visibilityState !== "visible") {
-            try { new Notification("Iron Wolf Company", { body: it.label, tag: it.key }); } catch { /* ignore */ }
+            // Un CLIC sur la notification système ramène l'onglet au premier plan
+            // ET ouvre directement la bonne page (fini le cul-de-sac).
+            try {
+              const notif = new Notification("Iron Wolf Company", { body: it.label, tag: it.key });
+              const cible = it.href;
+              notif.onclick = () => {
+                try { window.focus(); } catch { /* ignore */ }
+                if (cible) { try { router.push(cible); } catch { /* ignore */ } }
+                try { notif.close(); } catch { /* ignore */ }
+              };
+            } catch { /* ignore */ }
           }
           notifiesRef.current[it.key] = it.count;
         }
       }
       if (duNouveau && sonActifRef.current) jouerDing();
     } catch { /* silencieux */ }
-  }, [jouerDing]);
+  }, [jouerDing, router]);
 
   // Filet : polling 25 s (au cas où le temps réel serait indisponible).
   useEffect(() => {
@@ -130,7 +144,11 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
   useNotificationsRealtime((raw) => {
     void rafraichir();
     try {
-      const nn = versCentreNotif(raw as Record<string, unknown>);
+      const r = raw as Record<string, unknown>;
+      // Ciblage : on n'affiche le toast QUE si la notification est destinée à ce
+      // membre (équipe, ou ciblée lui/son rôle) — plus de fuite entre membres.
+      if (!notifVisiblePour({ membreId: r.membreId as string | null, roleCible: r.roleCible as string | null }, cibleActeur)) return;
+      const nn = versCentreNotif(r);
       if (nn.id && nn.titre) toast(`${notifMeta(nn.type).icon} ${nn.titre}`, "info");
     } catch { /* ignore */ }
   });

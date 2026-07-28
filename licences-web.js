@@ -49,6 +49,7 @@ async function verifierNotificationsLicences(guild) {
   if (!ch?.send) return;
 
   for (const ev of rows) {
+    let envoye = false;
     try {
       const m = META[ev.type] || { color: 0x6b4f2a, emoji: 'ℹ️', titre: String(ev.type || 'Évènement') };
       const d = (ev.details && typeof ev.details === 'object') ? ev.details : {};
@@ -65,11 +66,14 @@ async function verifierNotificationsLicences(guild) {
         .setDescription(lignes.join('\n') || '—')
         .setFooter({ text: 'Iron Wolf Company · Registre des licences' })
         .setTimestamp(new Date(ev.at || Date.now()));
-      await ch.send({ embeds: [e], components: [_lien()] }).catch(() => {});
+      await ch.send({ embeds: [e], components: [_lien()] });
+      envoye = true;
     } catch (err) {
-      console.log('⚠️ licences-web:', err.message);
+      console.log('⚠️ licences-web (envoi):', err.message);
     }
-    try { await supa.marquerEvenementLicenceAnnonce(ev.id); } catch {}
+    // Marque « annoncé » UNIQUEMENT après un envoi réussi : un échec Discord est
+    // réessayé au cycle suivant (2 min) au lieu d'être perdu définitivement.
+    if (envoye) { try { await supa.marquerEvenementLicenceAnnonce(ev.id); } catch {} }
   }
 }
 
