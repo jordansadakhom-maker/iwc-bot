@@ -274,14 +274,15 @@ function EcheancesPresence({ licences = [], presence }: { licences?: LicenceExpi
 export function Dashboard({ data, feed = [], alertes = { total: 0, items: [] }, demandes, monId, licencesExpirant = [], presence }: { data: DashData; feed?: FeedItem[]; alertes?: AlertesData; demandes?: DemandesData; monId?: string | null; licencesExpirant?: LicenceExpirant[]; presence?: { presents: number; absents: number } }) {
   return (
     <>
-      <div className="iwc-hero">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="iwc-hero relative">
+        <div aria-hidden className="pointer-events-none absolute -left-8 -top-10 h-44 w-[min(620px,88%)] rounded-full blur-3xl" style={{ background: "radial-gradient(circle at 22% 50%, color-mix(in srgb,var(--accent) 16%,transparent), transparent 72%)" }} />
+        <div className="relative flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
             <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full border" style={{ borderColor: "color-mix(in srgb,var(--accent) 55%,var(--border))", background: "radial-gradient(circle at 30% 25%, color-mix(in srgb,var(--accent) 24%,transparent), color-mix(in srgb,var(--surface) 92%,#000) 72%)", boxShadow: "inset 0 0 0 1px color-mix(in srgb,var(--accent) 20%,transparent), 0 0 26px -8px color-mix(in srgb,var(--accent) 50%,transparent)" }}>
               <Compass className="h-[22px] w-[22px]" style={{ color: "var(--accent)" }} strokeWidth={1.7} />
             </span>
             <div>
-              <h1 className="font-display text-[1.9rem] leading-none tracking-[0.01em]" style={{ textWrap: "balance" } as React.CSSProperties}>Tableau de bord</h1>
+              <h1 className="font-display text-[2.2rem] leading-none tracking-[0.01em] sm:text-[2.5rem]" style={{ textWrap: "balance" } as React.CSSProperties}>Tableau de bord</h1>
               <div className="mt-1.5 font-display text-[0.9rem] italic text-muted">Poste de commandement de la maison{data.connecte ? ` · ${data.membresCount} âme(s) sous ta bannière` : ""}</div>
             </div>
           </div>

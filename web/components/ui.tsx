@@ -51,8 +51,10 @@ export function PoleChip({ pole }: { pole: "iwc" | "confrerie" }) {
 export function PageHeader({ titre, sous, actif, pole }: { titre: string; sous?: string; actif?: boolean; pole?: "iwc" | "confrerie" }) {
   const Emb = emblemePour(titre);
   return (
-    <div className="iwc-rise">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className="iwc-rise relative">
+      {/* Halo lumineux derrière l'en-tête — donne du relief au titre de chaque page. */}
+      <div aria-hidden className="pointer-events-none absolute -left-8 -top-10 h-44 w-[min(620px,88%)] rounded-full blur-3xl" style={{ background: "radial-gradient(circle at 22% 50%, color-mix(in srgb,var(--accent) 15%,transparent), transparent 72%)" }} />
+      <div className="relative flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
           {/* médaillon-sceau en laiton */}
           <span
@@ -62,7 +64,7 @@ export function PageHeader({ titre, sous, actif, pole }: { titre: string; sous?:
             <Emb className="h-[22px] w-[22px]" style={{ color: "var(--accent)" }} strokeWidth={1.7} />
           </span>
           <div>
-            <h1 className="font-display text-[1.9rem] leading-none tracking-[0.01em]">{titre}</h1>
+            <h1 className="font-display text-[2.2rem] leading-none tracking-[0.01em] sm:text-[2.5rem]">{titre}</h1>
             {sous ? <div className="mt-1.5 font-display text-[0.9rem] italic text-muted">{sous}</div> : null}
           </div>
         </div>
