@@ -2,10 +2,10 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Send, Loader2, UserCheck, UserPlus, LogOut, History, MessageSquare } from "lucide-react";
+import { Send, Loader2, UserCheck, UserPlus, LogOut, History, MessageSquare, Sparkles, FileText } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { STATUTS_DEMANDE, statutDemandeDef, prioriteDemandeDef, typeDemandeDef, depuis, type DemandeDetail } from "@/lib/demandes-const";
-import { repondreDemande, prendreEnCharge, libererDemande, changerStatutDemande } from "@/app/(app)/demandes/actions";
+import { repondreDemande, prendreEnCharge, libererDemande, changerStatutDemande, resumerDemande, brouillonReponseDemande } from "@/app/(app)/demandes/actions";
 
 const dtFR = (s: string) => { if (!s) return ""; try { return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(s)); } catch { return ""; } };
 const LIB_EVT: Record<string, string> = { creation: "a ouvert la demande", statut: "a changé le statut", prise_en_charge: "a pris en charge", transfert: "a réassigné", message: "a répondu", cloture: "a clôturé", reouverture: "a rouvert" };
@@ -14,8 +14,26 @@ export function DemandeDetailVue({ demande, monId }: { demande: DemandeDetail; m
   const router = useRouter();
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  const [resume, setResume] = useState<string | null>(null);
+  const [iaBusy, setIaBusy] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const rafraichir = () => start(() => router.refresh());
+
+  async function resumer() {
+    setIaBusy("resume");
+    const r = await resumerDemande(demande.id);
+    setIaBusy(null);
+    if (!r.ok || !r.texte) { toast(r.error || "IA indisponible.", "bad"); return; }
+    setResume(r.texte);
+  }
+  async function brouillon() {
+    setIaBusy("brouillon");
+    const r = await brouillonReponseDemande(demande.id);
+    setIaBusy(null);
+    if (!r.ok || !r.texte) { toast(r.error || "IA indisponible.", "bad"); return; }
+    setMsg(r.texte);
+    toast("Brouillon inséré — relis avant d'envoyer.", "ok");
+  }
 
   const st = statutDemandeDef(demande.statut);
   const pr = prioriteDemandeDef(demande.priorite);
@@ -103,6 +121,16 @@ export function DemandeDetailVue({ demande, monId }: { demande: DemandeDetail; m
 
           {demande.resume ? <><label className="mt-3 block text-[0.72rem] font-semibold uppercase tracking-wide text-faint">Détails</label><p className="mt-1 whitespace-pre-wrap text-[0.82rem] text-muted">{demande.resume}</p></> : null}
           {demande.lien ? <a href={demande.lien} className="mt-3 inline-block text-[0.78rem] text-accent hover:underline">↗ Élément lié</a> : null}
+        </div>
+
+        {/* Assistant IA */}
+        <div className="rounded-[14px] border border-border bg-surface p-4">
+          <div className="mb-2 flex items-center gap-2"><Sparkles className="h-4 w-4 text-accent" /><h3 className="text-[0.88rem] font-semibold">Assistant</h3></div>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={resumer} disabled={!!iaBusy} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-[0.76rem] font-semibold transition hover:border-accent disabled:opacity-60">{iaBusy === "resume" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />} Résumer</button>
+            <button onClick={brouillon} disabled={!!iaBusy} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-[0.76rem] font-semibold transition hover:border-accent disabled:opacity-60">{iaBusy === "brouillon" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} Brouillon de réponse</button>
+          </div>
+          {resume ? <div className="mt-2 whitespace-pre-wrap rounded-lg border border-border bg-surface-2 p-2.5 text-[0.8rem] leading-relaxed">{resume}</div> : <p className="mt-2 text-[0.72rem] text-faint">L&apos;IA propose, tu décides : le résumé reprend le dossier ; le brouillon remplit la zone de réponse (à relire avant d&apos;envoyer).</p>}
         </div>
 
         {/* Historique */}
