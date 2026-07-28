@@ -13,6 +13,8 @@ donnée existante touchée). Copier-coller dans le **SQL Editor** de la bonne ba
 | [`licences.sql`](./licences.sql) | Système de Licences complet : types, licences, journal, numérotation officielle, config Armurerie, rôles, marqueur de notifications Discord | ✅ pour l'onglet **Licences** |
 | [`demandes.sql`](./demandes.sql) | Plateforme centrale **Demandes** (tickets) : dossiers, messages, historique, numérotation `DEM-AAAA-NNNNN`, marqueur d'annonce Discord | ✅ pour l'onglet **Demandes** |
 | [`notifications-corbeille.sql`](./notifications-corbeille.sql) | Colonne `supprime` du centre de notifications → **corbeille** (suppression réversible + restauration) | ⭕ recommandé (sinon suppression définitive) |
+| [`activite-avant-apres.sql`](./activite-avant-apres.sql) | Colonne `ActivityLog.payload` + trigger → le journal affiche **motif/contexte** (avant→après déjà supporté) | ⭕ recommandé (journal détaillé) |
+| [`perf-index-search.sql`](./perf-index-search.sql) | Index **trigram** (`pg_trgm`) accélérant la recherche universelle ⌘K | ⭕ optionnel (perf) |
 
 ## ② Supabase du DISPENSAIRE (projet séparé)
 
