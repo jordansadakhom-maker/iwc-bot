@@ -41,28 +41,64 @@ export function notifMeta(type: string): NotifMeta {
   return META[type] || META_DEFAUT;
 }
 
+// ── Priorités (dérivées du type) ─────────────────────────────────────────────
+// Chaque notification porte un niveau de priorité, avec un affichage propre et
+// un ordre de tri. Dérivé du type (aucune colonne SQL requise).
+export type PrioriteNotif = "critique" | "elevee" | "normale" | "faible";
+export const PRIORITE_META: Record<PrioriteNotif, { label: string; tone: string; ordre: number }> = {
+  critique: { label: "Critique", tone: "var(--oxblood)", ordre: 0 },
+  elevee: { label: "Élevée", tone: "var(--warn)", ordre: 1 },
+  normale: { label: "Normale", tone: "var(--accent)", ordre: 2 },
+  faible: { label: "Faible", tone: "var(--faint)", ordre: 3 },
+};
+const PRIORITE_TYPE: Record<string, PrioriteNotif> = {
+  operation: "elevee", contrat: "elevee",
+  "telegramme-clos": "faible", "rdv-statut": "faible",
+};
+export function prioriteDe(type: string): PrioriteNotif {
+  return PRIORITE_TYPE[type] || "normale";
+}
+
+// ── Modules (dérivés du type) — pour le filtrage par domaine ─────────────────
+export function moduleDe(type: string): string {
+  if (type.startsWith("operation")) return "operations";
+  if (type.startsWith("contrat")) return "contrats";
+  if (type.startsWith("rdv")) return "rdv";
+  if (type.startsWith("telegramme")) return "telegrammes";
+  if (type === "message") return "messages";
+  if (type.startsWith("candidature")) return "recrutement";
+  return "autre";
+}
+
 // ── Filtres du centre ────────────────────────────────────────────────────────
 export const NOTIF_FILTRES = [
   { key: "tous", label: "Tous" },
   { key: "non_lus", label: "Non lus" },
-  { key: "telegrammes", label: "Télégrammes" },
-  { key: "rdv", label: "Rendez-vous" },
+  { key: "favoris", label: "★ Favoris" },
   { key: "operations", label: "Opérations" },
+  { key: "contrats", label: "Contrats" },
+  { key: "rdv", label: "Rendez-vous" },
+  { key: "telegrammes", label: "Télégrammes" },
+  { key: "messages", label: "Messages" },
   { key: "recrutement", label: "Recrutement" },
   { key: "archive", label: "Archivés" },
 ] as const;
 export type NotifFiltre = (typeof NOTIF_FILTRES)[number]["key"];
 
 // Une notification correspond-elle au filtre choisi ? Les archivées ne
-// ressortent QUE dans l'onglet « Archivés ».
+// ressortent QUE dans l'onglet « Archivés ». `favoris` est fourni séparément
+// (état par appareil) et géré dans le composant.
 export function correspondFiltre(n: CentreNotif, filtre: string): boolean {
   switch (filtre) {
     case "non_lus": return !n.lu && !n.archive;
-    case "telegrammes": return !n.archive && (n.type.startsWith("telegramme") || n.type === "message");
+    case "operations": return !n.archive && n.type.startsWith("operation");
+    case "contrats": return !n.archive && n.type.startsWith("contrat");
     case "rdv": return !n.archive && n.type.startsWith("rdv");
-    case "operations": return !n.archive && (n.type.startsWith("operation") || n.type.startsWith("contrat"));
+    case "telegrammes": return !n.archive && n.type.startsWith("telegramme");
+    case "messages": return !n.archive && n.type === "message";
     case "recrutement": return !n.archive && n.type.startsWith("candidature");
     case "archive": return n.archive;
+    case "favoris": return !n.archive; // le tri favori est appliqué dans le composant
     default: return !n.archive; // « tous » = tout sauf archivé
   }
 }

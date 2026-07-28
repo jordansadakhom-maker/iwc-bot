@@ -37,10 +37,11 @@ describe("correspondFiltre — filtres du centre", () => {
     expect(correspondFiltre(n({ lu: true }), "non_lus")).toBe(false);
     expect(correspondFiltre(n({ lu: false, archive: true }), "non_lus")).toBe(false);
   });
-  it("« telegrammes » couvre télégramme + message + clôture", () => {
+  it("« telegrammes » couvre télégramme + clôture (les messages ont leur filtre)", () => {
     expect(correspondFiltre(n({ type: "telegramme" }), "telegrammes")).toBe(true);
     expect(correspondFiltre(n({ type: "telegramme-clos" }), "telegrammes")).toBe(true);
-    expect(correspondFiltre(n({ type: "message" }), "telegrammes")).toBe(true);
+    expect(correspondFiltre(n({ type: "message" }), "telegrammes")).toBe(false);
+    expect(correspondFiltre(n({ type: "message" }), "messages")).toBe(true);
     expect(correspondFiltre(n({ type: "rdv" }), "telegrammes")).toBe(false);
   });
   it("« rdv » couvre rdv + rdv-statut", () => {
@@ -48,11 +49,12 @@ describe("correspondFiltre — filtres du centre", () => {
     expect(correspondFiltre(n({ type: "rdv-statut" }), "rdv")).toBe(true);
     expect(correspondFiltre(n({ type: "telegramme" }), "rdv")).toBe(false);
   });
-  it("« operations » couvre opérations + contrats, hors archive", () => {
+  it("« operations » et « contrats » sont des filtres distincts, hors archive", () => {
     expect(correspondFiltre(n({ type: "operation" }), "operations")).toBe(true);
     expect(correspondFiltre(n({ type: "operation-statut" }), "operations")).toBe(true);
-    expect(correspondFiltre(n({ type: "contrat" }), "operations")).toBe(true);
-    expect(correspondFiltre(n({ type: "contrat-statut" }), "operations")).toBe(true);
+    expect(correspondFiltre(n({ type: "contrat" }), "operations")).toBe(false);
+    expect(correspondFiltre(n({ type: "contrat" }), "contrats")).toBe(true);
+    expect(correspondFiltre(n({ type: "contrat-statut" }), "contrats")).toBe(true);
     expect(correspondFiltre(n({ type: "operation", archive: true }), "operations")).toBe(false);
     expect(correspondFiltre(n({ type: "rdv" }), "operations")).toBe(false);
   });
