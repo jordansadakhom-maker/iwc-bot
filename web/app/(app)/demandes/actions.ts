@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionProfile } from "@/lib/queries";
+import { iaTexte } from "@/lib/ia";
 import { STATUTS_DEMANDE, PRIORITES_DEMANDE, TYPES_DEMANDE, typeDemandeDef, statutDemandeDef, genererRefDemandeLocale } from "@/lib/demandes-const";
 
 type Admin = NonNullable<ReturnType<typeof createAdminClient>>;
@@ -153,4 +154,35 @@ export async function changerStatutDemande(demandeId: string, statut: string): P
   const auteurId = avant?.auteurId ? String(avant.auteurId) : null;
   if (auteurId) await notifier(admin, { type: "demande-statut", titre: `🔁 ${statutDemandeDef(st).label}`, corps: `${avant?.titre || "Votre demande"}`, demandeId, membreId: auteurId, ref: `demande-statut-${demandeId}-${st}` });
   return { ok: true };
+}
+
+// ── Assistant IA (lecture seule ; l'IA propose, l'humain décide) ─────────────
+async function transcript(admin: Admin, demandeId: string): Promise<string> {
+  const [{ data: dem }, { data: msgs }] = await Promise.all([
+    admin.from("Demande").select("titre,type,resume,statut,priorite,auteurNom").eq("id", demandeId).maybeSingle(),
+    admin.from("DemandeMessage").select("auteurNom,corps,createdAt").eq("demandeId", demandeId).order("createdAt", { ascending: true }).limit(200),
+  ]);
+  const d = (dem || {}) as Record<string, unknown>;
+  const lignes = ((msgs || []) as Record<string, unknown>[]).map((m) => `${m.auteurNom}: ${m.corps}`).join("\n");
+  return `Titre: ${d.titre || ""}\nType: ${d.type || ""}\nStatut: ${d.statut || ""}\nPriorité: ${d.priorite || ""}\nAuteur: ${d.auteurNom || ""}\n\nDétails: ${d.resume || "—"}\n\n--- Conversation ---\n${lignes || "(aucun message)"}`;
+}
+
+export async function resumerDemande(demandeId: string): Promise<{ ok: boolean; texte?: string; error?: string }> {
+  if (!(await connecte())) return { ok: false, error: "Connexion requise." };
+  const admin = createAdminClient();
+  if (!admin || !demandeId) return { ok: false, error: "Demande introuvable." };
+  const r = await iaTexte(
+    "Tu es l'assistant interne de l'Iron Wolf Company (univers RDR2, 1899). Résume ce dossier de façon concise et factuelle pour un membre qui le reprend : le besoin, où on en est, ce qui reste à faire. 4 à 6 puces courtes en français. Ne prends aucune décision, ne t'engage sur rien.",
+    await transcript(admin, demandeId), 700);
+  return r.ok ? { ok: true, texte: r.texte } : { ok: false, error: r.error };
+}
+
+export async function brouillonReponseDemande(demandeId: string): Promise<{ ok: boolean; texte?: string; error?: string }> {
+  if (!(await connecte())) return { ok: false, error: "Connexion requise." };
+  const admin = createAdminClient();
+  if (!admin || !demandeId) return { ok: false, error: "Demande introuvable." };
+  const r = await iaTexte(
+    "Tu es l'assistant interne de l'Iron Wolf Company (univers RDR2, 1899). Rédige un BROUILLON de réponse professionnelle, courtoise et sobre au dernier message, du point de vue de l'IWC. Français, ton pro et immersif. C'est un brouillon à relire et modifier — ne t'engage sur rien d'irréversible, ne promets aucune date ferme.",
+    await transcript(admin, demandeId), 500);
+  return r.ok ? { ok: true, texte: r.texte } : { ok: false, error: r.error };
 }
