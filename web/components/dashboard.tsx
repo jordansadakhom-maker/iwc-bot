@@ -61,8 +61,8 @@ function Kpis({ data }: { data: DashData }) {
           <Card key={k.label} delay={0.02 + i * 0.06}>
             <div className="flex items-center justify-between">
               <span className="text-[0.72rem] font-semibold uppercase tracking-[0.09em] text-muted">{k.label}</span>
-              <span className="grid h-[32px] w-[32px] place-items-center rounded-[9px]" style={{ color: k.tone, background: `color-mix(in srgb,${k.tone} 15%,transparent)` }}>
-                <Icon className="h-4 w-4" strokeWidth={1.9} />
+              <span className="grid h-[34px] w-[34px] place-items-center rounded-[10px]" style={{ color: k.tone, background: `color-mix(in srgb,${k.tone} 18%,transparent)`, boxShadow: `0 0 18px -4px color-mix(in srgb,${k.tone} 60%,transparent), inset 0 0 0 1px color-mix(in srgb,${k.tone} 30%,transparent)` }}>
+                <Icon className="h-4 w-4" strokeWidth={2} />
               </span>
             </div>
             <div className={clsx("tabular mb-1 mt-3 font-num text-[1.95rem] font-semibold", K ? "text-ink" : "text-faint")}>{k.value}</div>
