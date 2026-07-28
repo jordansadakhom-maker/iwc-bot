@@ -6,12 +6,13 @@ import { Bell, Check, CheckCheck, Archive, ArchiveRestore, Trash2, ArrowUpRight 
 import { toast } from "@/lib/toast";
 import { NOTIF_FILTRES, correspondFiltre, compteNonLus, notifMeta, versCentreNotif, type CentreNotif } from "@/lib/notifications-centre";
 import { useNotificationsRealtime } from "@/lib/use-notifications-realtime";
+import { notifVisiblePour, type CibleActeur } from "@/lib/notif-ciblage";
 import { marquerNotifLue, marquerToutesLues, archiverNotif, supprimerNotif } from "@/app/(app)/notifications/actions";
 
 const TONE_TXT: Record<string, string> = { accent: "var(--accent)", good: "var(--good)", warn: "var(--warn)", oxblood: "var(--oxblood)", muted: "var(--faint)" };
 const dtFR = (s: string) => { if (!s) return ""; try { return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(s)); } catch { return ""; } };
 
-export function NotificationCenter({ initial }: { initial: CentreNotif[] }) {
+export function NotificationCenter({ initial, cible }: { initial: CentreNotif[]; cible?: CibleActeur }) {
   const router = useRouter();
   const [list, setList] = useState<CentreNotif[]>(initial);
   const [filtre, setFiltre] = useState<string>("tous");
@@ -23,7 +24,11 @@ export function NotificationCenter({ initial }: { initial: CentreNotif[] }) {
   // Temps réel : une nouvelle notification s'ajoute en tête instantanément
   // (sans recharger la page) + toast discret. Dédup par id.
   useNotificationsRealtime((raw) => {
-    const nn = versCentreNotif(raw as Record<string, unknown>);
+    const r = raw as Record<string, unknown>;
+    // Ciblage : n'ajoute que les notifications destinées à ce membre (équipe ou
+    // ciblées lui/son rôle) — la liste live ne fuite plus celles des autres.
+    if (cible && !notifVisiblePour({ membreId: r.membreId as string | null, roleCible: r.roleCible as string | null }, cible)) return;
+    const nn = versCentreNotif(r);
     if (!nn.id) return;
     setList((p) => (p.some((x) => x.id === nn.id) ? p : [nn, ...p]));
     toast(`${notifMeta(nn.type).icon} ${nn.titre}`, "info");

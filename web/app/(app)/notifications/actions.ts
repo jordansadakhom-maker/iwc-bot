@@ -31,6 +31,17 @@ async function monCiblage(): Promise<CibleActeur> {
   return { did, roles: rolesDeActeur(acces) };
 }
 
+// Garde de PROPRIÉTÉ : le membre connecté a-t-il le droit d'agir sur CETTE
+// notification ? (équipe, ou ciblée sur lui). Empêche d'altérer ou de supprimer
+// la notification d'un autre membre en devinant son id.
+async function peutAgirSurNotif(admin: NonNullable<ReturnType<typeof createAdminClient>>, id: string): Promise<boolean> {
+  try {
+    const { data } = await admin.from("Notification").select("membreId,roleCible").eq("id", id).maybeSingle();
+    if (!data) return false;
+    return notifVisiblePour(data as { membreId?: string | null; roleCible?: string | null }, await monCiblage());
+  } catch { return false; }
+}
+
 export async function listerNotifications(): Promise<{ connecte: boolean; notifs: CentreNotif[] }> {
   if (!(await membreConnecte())) return { connecte: false, notifs: [] };
   const admin = createAdminClient();
@@ -59,6 +70,7 @@ export async function marquerNotifLue(id: string, lu = true): Promise<{ ok: bool
   if (!(await membreConnecte())) return { ok: false };
   const admin = createAdminClient();
   if (!admin || !id) return { ok: false };
+  if (!(await peutAgirSurNotif(admin, id))) return { ok: false };
   const patch: Record<string, unknown> = { lu, luAt: lu ? new Date().toISOString() : null };
   const { error } = await admin.from("Notification").update(patch).eq("id", id);
   return { ok: !error };
@@ -68,7 +80,10 @@ export async function marquerToutesLues(): Promise<{ ok: boolean }> {
   if (!(await membreConnecte())) return { ok: false };
   const admin = createAdminClient();
   if (!admin) return { ok: false };
-  const { error } = await admin.from("Notification").update({ lu: true, luAt: new Date().toISOString() }).eq("lu", false).eq("archive", false);
+  // Ciblage : ne marque lues QUE les notifications visibles par ce membre (équipe
+  // + les siennes) — plus de « tout le monde marqué lu » pour un clic d'un seul.
+  const cible = await monCiblage();
+  const { error } = await admin.from("Notification").update({ lu: true, luAt: new Date().toISOString() }).eq("lu", false).eq("archive", false).or(orCibleNotif(cible));
   return { ok: !error };
 }
 
@@ -76,6 +91,7 @@ export async function archiverNotif(id: string, archive = true): Promise<{ ok: b
   if (!(await membreConnecte())) return { ok: false };
   const admin = createAdminClient();
   if (!admin || !id) return { ok: false };
+  if (!(await peutAgirSurNotif(admin, id))) return { ok: false };
   // Archiver marque aussi comme lu (elle sort du compteur des non-lues).
   const patch: Record<string, unknown> = archive ? { archive: true, lu: true } : { archive: false };
   const { error } = await admin.from("Notification").update(patch).eq("id", id);
@@ -86,6 +102,7 @@ export async function supprimerNotif(id: string): Promise<{ ok: boolean }> {
   if (!(await membreConnecte())) return { ok: false };
   const admin = createAdminClient();
   if (!admin || !id) return { ok: false };
+  if (!(await peutAgirSurNotif(admin, id))) return { ok: false };
   const { error } = await admin.from("Notification").delete().eq("id", id);
   return { ok: !error };
 }

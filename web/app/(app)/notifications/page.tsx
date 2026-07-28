@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { Bell } from "lucide-react";
-import { getNotificationsFeed } from "@/lib/queries";
+import { getNotificationsFeed, getSessionDiscordId, getAcces } from "@/lib/queries";
 import { listerNotifications } from "./actions";
 import { NotificationCenter } from "@/components/notification-center";
 import { compteNonLus } from "@/lib/notifications-centre";
+import { rolesDeActeur } from "@/lib/notif-ciblage";
 import { PageHeader, Card, CardHeader, Empty } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -15,8 +16,9 @@ const dateFR = (s: string | null) => {
 const TONE_TXT: Record<string, string> = { accent: "var(--accent)", good: "var(--good)", warn: "var(--warn)", oxblood: "var(--oxblood)", muted: "var(--faint)" };
 
 export default async function NotificationsPage() {
-  const [{ connecte, notifs }, feed] = await Promise.all([listerNotifications(), getNotificationsFeed()]);
+  const [{ connecte, notifs }, feed, monId, acces] = await Promise.all([listerNotifications(), getNotificationsFeed(), getSessionDiscordId(), getAcces()]);
   const nonLus = compteNonLus(notifs);
+  const cible = { did: monId, roles: rolesDeActeur(acces) };
 
   return (
     <>
@@ -25,7 +27,7 @@ export default async function NotificationsPage() {
       {/* Centre de notifications — persistant, lu/non-lu, archivage, filtres, historique. */}
       <Card>
         <CardHeader titre="Centre de notifications" compteur={nonLus} />
-        <NotificationCenter initial={notifs} />
+        <NotificationCenter initial={notifs} cible={cible} />
       </Card>
 
       {/* Activité récente (vue dérivée, conservée pour continuité). */}
