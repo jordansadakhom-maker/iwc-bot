@@ -1,6 +1,10 @@
 // Carte métier — cartographie des fonctions de la compagnie.
 // Dérivation PURE (testable) : à partir du grade + fiche RH, on déduit les
 // « métiers » qu'occupe chaque membre, puis on mesure la couverture de chacun.
+// La règle de dérivation vit désormais dans lib/roles.ts (source unique partagée
+// avec les accès) ; ce module se concentre sur la CARTOGRAPHIE (couverture d'équipe).
+
+import { metiersDe as metiersDeRole } from "@/lib/roles";
 
 export type MetierDef = { key: string; label: string; description: string };
 
@@ -14,26 +18,17 @@ export const METIERS: MetierDef[] = [
   { key: "terrain", label: "Terrain", description: "Opérations & missions" },
 ];
 
-export type MembreCarte = { nom: string; grade: string | null; statut: string; medecin: boolean; specialite: string | null };
+export type MembreCarte = { nom: string; grade: string | null; statut: string; medecin: boolean; specialite: string | null; armurierRoster?: boolean };
 export type MembrePuce = { nom: string; grade: string | null; absent: boolean };
 export type Couverture = "ok" | "fragile" | "vide"; // fragile = présent(s) 0 mais des membres existent
 export type MetierStat = MetierDef & { total: number; presents: number; absents: number; membres: MembrePuce[]; couverture: Couverture };
 export type Cartographie = { metiers: MetierStat[]; nonClasses: MembrePuce[]; total: number };
 
-// Métiers d'un membre (peut en cumuler plusieurs). Même vocabulaire que getAcces.
+// Métiers d'un membre (peut en cumuler plusieurs). Délègue à la source unique
+// lib/roles.ts (même vocabulaire que getAcces), en propageant l'appartenance au
+// roster de l'Armurerie quand elle est connue.
 export function metiersDe(m: MembreCarte): string[] {
-  const g = String(m.grade ?? "").toLowerCase();
-  const spec = String(m.specialite ?? "").toLowerCase();
-  const out = new Set<string>();
-  const direction = /fondateur|conseil|directeur|fl[eé]au|concepteur/.test(g);
-  const officier = direction || /officier|instructeur/.test(g);
-  if (direction) out.add("direction");
-  if (officier) out.add("officier");
-  if (/instructeur/.test(g) || /instruct/.test(spec)) out.add("instruction");
-  if (m.medecin || /m[eé]dec|infirm|docteur|toubib|chirurg/.test(spec)) out.add("medecine");
-  if (/armur/.test(g) || /armur/.test(spec)) out.add("armurerie");
-  if (/officier|agent|op[eé]rateur|recrue|terrain/.test(g)) out.add("terrain");
-  return [...out];
+  return metiersDeRole(m);
 }
 
 export function cartographier(membres: MembreCarte[]): Cartographie {
