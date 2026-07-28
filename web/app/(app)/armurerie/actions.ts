@@ -203,11 +203,26 @@ export async function majVente(id: string, patch: Record<string, unknown>): Prom
   return res.error ? { ok: false, error: "Enregistrement impossible." } : { ok: true };
 }
 export async function supprimerVente(id: string): Promise<ArmResult> {
+  if (!id) return { ok: false, error: "Vente introuvable." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
   const _ga = await garde(); if (_ga) return _ga;
+  // Instantané AVANT suppression → pour rembourser le coffre (réversibilité).
+  const { data: v } = await admin.from("ArmurerieVente").select("prix,marque,modele,acquereur").eq("id", id).maybeSingle();
   const { error } = await admin.from("ArmurerieVente").delete().eq("id", id);
-  return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+  if (error) return { ok: false, error: "Suppression impossible." };
+  // Rembourse le coffre du montant annulé : une vente supprimée ne doit plus le
+  // créditer (avant, le coffre restait surévalué). Best-effort, mouvement tracé.
+  // Le STOCK n'est pas restauré : la ligne de vente ne référence pas le produit
+  // décrémenté (pas de lien fiable) — une restauration devinée corromprait le stock.
+  const montant = v ? Math.max(0, round2(Number((v as { prix?: number }).prix) || 0)) : 0;
+  if (montant > 0) {
+    const r = v as Record<string, unknown>;
+    const arme = [s(r.marque, 80), s(r.modele, 80)].filter(Boolean).join(" ") || "arme";
+    const acq = s(r.acquereur, 120) || "client";
+    try { await _mouvementCoffre(admin, montant, "sortie", `Annulation de vente — ${arme} à ${acq}`, await auteurNom()); } catch { /* best-effort : suppression déjà effectuée */ }
+  }
+  return { ok: true };
 }
 
 // ── Contrats de vente ────────────────────────────────────────────
