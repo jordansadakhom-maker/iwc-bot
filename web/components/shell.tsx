@@ -47,6 +47,8 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
   const cibleActeur = useMemo(() => ({ did: monId, roles: rolesDeActeur(acces) }), [monId, acces]);
   const [open, setOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
+  const [aideOpen, setAideOpen] = useState(false);       // aide des raccourcis clavier
+  const gPendingRef = useRef(0);                          // chord « g puis lettre » (horodatage)
   const [bellOpen, setBellOpen] = useState(false);
   const path = usePathname();
   const router = useRouter();
@@ -184,14 +186,37 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
     });
   }
 
-  // Palette globale : ⌘K (Mac) / Ctrl+K (Windows) ouvre la recherche partout.
+  // Raccourcis clavier « à la Linear/GitHub » : palette (⌘K / Ctrl+K / « / »),
+  // aide (« ? »), et navigation par chord (« g » puis une lettre). Tous ignorés
+  // pendant la saisie dans un champ, pour ne jamais gêner l'écriture.
   useEffect(() => {
+    const GMAP: Record<string, string> = {
+      d: "/dashboard", n: "/notifications", m: "/membres", o: "/operations",
+      t: "/taches", r: "/recrutement", l: "/licences", f: "/finances", c: "/carte",
+    };
+    const enSaisie = (el: EventTarget | null): boolean => {
+      const t = el as HTMLElement | null;
+      if (!t || !t.tagName) return false;
+      return t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || !!t.isContentEditable;
+    };
     function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCmdOpen(true); }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCmdOpen(true); return; }
+      if (e.key === "Escape") { setAideOpen(false); return; }
+      if (enSaisie(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+      // Chord : « g » (mémorisé ~900 ms) puis une lettre → navigation directe.
+      const now = Date.now();
+      if (gPendingRef.current && now - gPendingRef.current < 900) {
+        const dest = GMAP[e.key.toLowerCase()];
+        gPendingRef.current = 0;
+        if (dest) { e.preventDefault(); router.push(dest); return; }
+      }
+      if (e.key === "g") { gPendingRef.current = now; return; }
+      if (e.key === "/") { e.preventDefault(); setCmdOpen(true); return; }
+      if (e.key === "?") { e.preventDefault(); setAideOpen(true); return; }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [router]);
 
   // Change de pôle : mémorise le choix dans un cookie puis rafraîchit les
   // données côté serveur (les pages relisent le cookie et filtrent par pôle).
@@ -402,6 +427,33 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
       </div>
 
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
+
+      {aideOpen ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4" onClick={() => setAideOpen(false)}>
+          <div className="w-full max-w-sm rounded-card border border-border bg-surface p-5 shadow-card" onClick={(e) => e.stopPropagation()}>
+            <h2 className="mb-3 font-display text-lg tracking-[0.02em]">Raccourcis clavier</h2>
+            <ul className="flex flex-col gap-1.5 text-[0.85rem]">
+              {([
+                ["Recherche globale", "⌘K / /"],
+                ["Tableau de bord", "g d"],
+                ["Notifications", "g n"],
+                ["Membres", "g m"],
+                ["Opérations", "g o"],
+                ["Tâches", "g t"],
+                ["Licences", "g l"],
+                ["Finances", "g f"],
+                ["Cette aide", "?"],
+              ] as [string, string][]).map(([v, k]) => (
+                <li key={k} className="flex items-center justify-between gap-3">
+                  <span className="text-muted">{v}</span>
+                  <kbd className="rounded-md border border-border bg-bg-2 px-2 py-0.5 text-[0.72rem] font-semibold text-ink">{k}</kbd>
+                </li>
+              ))}
+            </ul>
+            <button onClick={() => setAideOpen(false)} className="mt-4 w-full rounded-[10px] border border-border py-2 text-[0.82rem] font-semibold transition hover:border-accent">Fermer</button>
+          </div>
+        </div>
+      ) : null}
       <CaptureFlottante />
     </div>
   );
