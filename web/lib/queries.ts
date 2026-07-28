@@ -863,6 +863,16 @@ export async function getFactures(): Promise<FacturesData> {
   const cClient = (c: Raw) => normTxt(c.commanditaire ?? c.clientNom);
   const cMontant = (c: Raw) => Number(c.remuVerseAuCoffre ?? 0) || 0;
   const contratById = new Map(contrats.map((c) => [String(c.id), c]));
+  // Index des contrats par clé « objet|montant » → rapprochement O(1) par facture
+  // au lieu d'un filter O(n) (évite le O(n×m) sur gros volumes). Résultat identique.
+  const contratsParCle = new Map<string, Raw[]>();
+  for (const c of contrats) {
+    const o = cObjet(c);
+    if (!o) continue; // le rapprochement exige un objet non vide (comme avant)
+    const cle = `${o}|${cMontant(c)}`;
+    const arr = contratsParCle.get(cle);
+    if (arr) arr.push(c); else contratsParCle.set(cle, [c]);
+  }
 
   const factures: FactureItem[] = ((factR.data || []) as Raw[]).map((f) => {
     const type = (f.type as string) ?? null;
@@ -875,7 +885,7 @@ export async function getFactures(): Promise<FacturesData> {
       //    on ne lie que si un SEUL contrat correspond (jamais d'attribution douteuse).
       if (!lie) {
         const fo = normTxt(f.objet), fc = normTxt(f.clientNom), fm = Number(f.montant) || 0;
-        const cands = contrats.filter((c) => cObjet(c) && cObjet(c) === fo && cMontant(c) === fm && (!fc || !cClient(c) || cClient(c) === fc));
+        const cands = (contratsParCle.get(`${fo}|${fm}`) || []).filter((c) => !fc || !cClient(c) || cClient(c) === fc);
         if (cands.length === 1) lie = cands[0];
       }
     }

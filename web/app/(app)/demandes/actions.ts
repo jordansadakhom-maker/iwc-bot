@@ -144,15 +144,21 @@ export async function changerStatutDemande(demandeId: string, statut: string): P
   if (!st) return { ok: false, error: "Statut invalide." };
   const { nom: par } = await acteur();
   const now = new Date().toISOString();
-  const clos = st === "terminee" || st === "refusee" || st === "archivee";
+  const estClos = (s: unknown) => s === "terminee" || s === "refusee" || s === "archivee";
+  const clos = estClos(st);
   const patch: Record<string, unknown> = { statut: st, updatedAt: now, updatedBy: par, closedAt: clos ? now : null };
-  const { data: avant } = await admin.from("Demande").select("auteurId,titre").eq("id", demandeId).maybeSingle();
+  const { data: avant } = await admin.from("Demande").select("auteurId,titre,statut").eq("id", demandeId).maybeSingle();
   const { error } = await admin.from("Demande").update(patch).eq("id", demandeId);
   if (error) return { ok: false, error: "Changement impossible." };
-  await journal(admin, demandeId, clos ? "cloture" : "statut", par, { statut: st });
-  // Notifie l'auteur du changement de statut (sur le site + Discord via le bot).
+  // Réouverture = on repart d'un statut CLOS vers un statut ouvert → évènement dédié
+  // (le type « reouverture » existait en SQL + libellé UI mais n'était jamais émis).
+  const reouvre = estClos(avant?.statut) && !clos;
+  await journal(admin, demandeId, reouvre ? "reouverture" : clos ? "cloture" : "statut", par, { statut: st });
+  // Notifie l'auteur. ref horodatée : une même transition rejouée (ex. re-clôture
+  // après réouverture) re-notifie bien l'auteur au lieu d'être avalée par la
+  // contrainte d'unicité (correctif du « re-notification perdue »).
   const auteurId = avant?.auteurId ? String(avant.auteurId) : null;
-  if (auteurId) await notifier(admin, { type: "demande-statut", titre: `🔁 ${statutDemandeDef(st).label}`, corps: `${avant?.titre || "Votre demande"}`, demandeId, membreId: auteurId, ref: `demande-statut-${demandeId}-${st}` });
+  if (auteurId) await notifier(admin, { type: "demande-statut", titre: `🔁 ${statutDemandeDef(st).label}`, corps: `${avant?.titre || "Votre demande"}`, demandeId, membreId: auteurId, ref: `demande-statut-${demandeId}-${st}-${Date.now().toString(36)}` });
   return { ok: true };
 }
 
