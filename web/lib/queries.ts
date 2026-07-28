@@ -1168,11 +1168,14 @@ export const getAlertes = cache(async (): Promise<AlertesData> => {
   // Ciblage : équipe (membreId & roleCible null) + adressées au membre + à ses rôles.
   const [didBrut, acces] = await Promise.all([getSessionDiscordId(), getAcces()]);
   const cible = { did: didBrut, roles: rolesDeActeur(acces) };
-  const [contrats, impots, paies, ruptures, candids, rdvs, telegrammes, rdvArm, notifsNL] = await Promise.all([
+  const [contrats, impots, paies, ruptures, stockBas, candids, rdvs, telegrammes, rdvArm, notifsNL] = await Promise.all([
     safe(() => admin.from("ArmurerieContrat").select("*", { count: "exact", head: true }).eq("statut", "envoye")),
     safe(() => admin.from("ArmurerieImpot").select("*", { count: "exact", head: true }).neq("statut", "paye").gt("montant", 0)),
     safe(() => admin.from("ArmureriePaie").select("*", { count: "exact", head: true }).neq("statut", "paye")),
     safe(() => admin.from("ArmurerieProduit").select("*", { count: "exact", head: true }).lte("stock", 0).eq("aLaDemande", false)),
+    // Stock FAIBLE (bientôt en rupture) : 0 < stock ≤ 3, hors « à la demande ».
+    // Prévention (pas seulement la rupture) — aligne l'armurerie sur Chasse/Dispensaire.
+    safe(() => admin.from("ArmurerieProduit").select("*", { count: "exact", head: true }).gt("stock", 0).lte("stock", 3).eq("aLaDemande", false)),
     safe(() => admin.from("Candidature").select("*", { count: "exact", head: true }).gte("createdAt", iso7)),
     safe(() => admin.from("Rdv").select("*", { count: "exact", head: true }).eq("statut", "nouveau")),
     safe(() => admin.from("TelegrammeWeb").select("*", { count: "exact", head: true }).gte("createdAt", iso7)),
@@ -1191,6 +1194,7 @@ export const getAlertes = cache(async (): Promise<AlertesData> => {
   if (impots) items.push({ key: "impots", label: `${impots} impôt(s) à régler`, count: impots, href: "/armurerie?tab=impots", tone: "oxblood" });
   if (paies) items.push({ key: "paies", label: `${paies} paie(s) à verser`, count: paies, href: "/armurerie?tab=paies", tone: "warn" });
   if (ruptures) items.push({ key: "ruptures", label: `${ruptures} produit(s) en rupture de stock`, count: ruptures, href: "/armurerie?tab=produits", tone: "oxblood" });
+  if (stockBas) items.push({ key: "stockBas", label: `${stockBas} produit(s) en stock faible`, count: stockBas, href: "/armurerie?tab=produits", tone: "warn" });
   if (candids) items.push({ key: "candids", label: `${candids} candidature(s) récente(s)`, count: candids, href: "/recrutement", tone: "good" });
   if (telegrammes) items.push({ key: "telegrammes", label: `${telegrammes} télégramme(s) récent(s)`, count: telegrammes, href: "/communication#telegrammes", tone: "accent" });
   const total = items.reduce((s, i) => s + i.count, 0);
