@@ -13,6 +13,7 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { rolesDeActeur, orCibleNotif } from "@/lib/notif-ciblage";
+import { estDirection, estOfficier, estArmurierGrade } from "@/lib/roles";
 
 // ── Pôle actif (Iron Wolf légal / La Confrérie illégal) ──────────
 // Choisi par le bouton du header, mémorisé dans un cookie côté client.
@@ -1152,7 +1153,10 @@ export async function getVitrine(): Promise<VitrineData> {
 // pings Discord : tout t'attend sur le site. Compté via la clé service.
 export type Alerte = { key: string; label: string; count: number; href: string; tone: "warn" | "oxblood" | "accent" | "good" };
 export type AlertesData = { total: number; items: Alerte[] };
-export async function getAlertes(): Promise<AlertesData> {
+// Mémoïsée par requête (cache React) : le layout (app) l'appelle sur CHAQUE page,
+// et le dashboard une seconde fois → sans cache, 2× 9 requêtes count par rendu du
+// dashboard. cache() déduplique dans le même rendu serveur, sur toute l'appli.
+export const getAlertes = cache(async (): Promise<AlertesData> => {
   const admin = createAdminClient();
   if (!admin) return { total: 0, items: [] };
   const safe = async (fn: () => PromiseLike<{ count: number | null; error: unknown }>): Promise<number> => {
@@ -1191,7 +1195,7 @@ export async function getAlertes(): Promise<AlertesData> {
   if (telegrammes) items.push({ key: "telegrammes", label: `${telegrammes} télégramme(s) récent(s)`, count: telegrammes, href: "/communication#telegrammes", tone: "accent" });
   const total = items.reduce((s, i) => s + i.count, 0);
   return { total, items };
-}
+});
 
 // ── Rapports de terrain (historique des captures « Son du jeu » / « Ma voix ») ──
 export type RapportTerrain = { id: string; agent: string | null; cible: string | null; lieu: string | null; priorite: string; texte: string | null; resume: string | null; source: string; createdAt: string | null };
@@ -1365,12 +1369,12 @@ export const getAcces = cache(async (): Promise<Acces> => {
     const nomIC = String((data?.nomIC as string) || "");
     const f = data?.ficheRH as Record<string, unknown> | null;
     const medecin = !!(f && typeof f === "object" && f.medecin);
-    const direction = /fondateur|conseil|directeur|fl[eé]au|concepteur/.test(grade);
-    const officier = direction || /officier|instructeur/.test(grade);
+    const direction = estDirection(grade);
+    const officier = estOfficier(grade);
     // Armurerie : Direction, OU grade/rôle « armur… » (option 2), OU présent dans le
     // roster de l'Armurerie — par ID Discord (immuable) ou nom IC de la fiche (option
     // 1). Sinon accès refusé → Tarifs seulement.
-    let armurier = direction || /armur/.test(grade);
+    let armurier = estArmurierGrade(grade);
     if (!armurier) armurier = await _dansRosterArmurerie(admin, did, nomIC);
     // Grade inconnu : on n'enferme personne pour la nav GÉNÉRALE, mais l'armurerie
     // reste stricte (uniquement roster/direction, calculé ci-dessus).

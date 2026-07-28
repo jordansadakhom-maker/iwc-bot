@@ -15,6 +15,7 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { estDirection, estOfficier } from "@/lib/roles";
 
 export type Acteur = {
   did: string;
@@ -42,8 +43,8 @@ export async function getActeur(): Promise<Acteur | null> {
     const nomIC = String((data.nomIC as string) || "");
     const f = data.ficheRH as Record<string, unknown> | null;
     const medecin = !!(f && typeof f === "object" && f.medecin);
-    const direction = /fondateur|conseil|directeur|fl[eé]au|concepteur/.test(grade);
-    const officier = direction || /officier|instructeur/.test(grade);
+    const direction = estDirection(grade);
+    const officier = estOfficier(grade);
     return { did, grade, nomIC, direction, officier, medecin };
   } catch {
     return null;
