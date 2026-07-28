@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { envoyerCommande } from "@/lib/commandes";
 import { envoyerEmail } from "@/lib/email";
 import { ajusterCoffre, creerFacture } from "@/app/(app)/finances/actions";
+import { getActeur } from "@/lib/authz";
 
 // Gestion des rendez-vous clients (pris sur le site) — trace conservée.
 // Les demandes web vivent dans Supabase (table Rdv) ; on les met à jour
@@ -32,7 +33,15 @@ async function auteurNom(): Promise<string> {
   } catch { return "Équipe"; }
 }
 
+// Garde de session (fail-closed) : les mutations RDV sont réservées aux membres
+// connectés. Le layout (app) protège déjà l'affichage ; on double la barrière au
+// niveau des ÉCRITURES (avant, ces actions ne dépendaient que du service_role).
+async function garde(): Promise<CommResult | null> {
+  return (await getActeur()) ? null : { ok: false, error: "Action réservée aux membres connectés." };
+}
+
 export async function majStatutRdv(id: string, statut: string): Promise<CommResult> {
+  const _g = await garde(); if (_g) return _g;
   if (!id) return { ok: false, error: "RDV introuvable." };
   if (!STATUTS.includes(statut)) return { ok: false, error: "Statut invalide." };
   const admin = createAdminClient();
@@ -46,6 +55,7 @@ export async function majStatutRdv(id: string, statut: string): Promise<CommResu
 // DE BORD (avec son résultat, la date de clôture et l'auteur). Garde une trace
 // totale sans encombrer l'agenda ni le salon Discord.
 export async function cloturerRdv(id: string, resultat: string): Promise<CommResult> {
+  const _g = await garde(); if (_g) return _g;
   if (!id) return { ok: false, error: "RDV introuvable." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
@@ -60,6 +70,7 @@ export async function cloturerRdv(id: string, resultat: string): Promise<CommRes
 }
 
 export async function repondreRdv(id: string, texte: string): Promise<CommResult & { info?: string }> {
+  const _g = await garde(); if (_g) return _g;
   const t = (texte || "").trim();
   if (!id) return { ok: false, error: "RDV introuvable." };
   if (t.length < 1) return { ok: false, error: "Écris une réponse." };
@@ -106,6 +117,7 @@ async function livrerReponseClient(contact: string, texte: string, parNom: strin
 // garde une trace horodatée dans le fil (paiement.reponses). Entièrement côté
 // site (le bot n'écrase pas les RDV web/télégramme).
 export async function replanifierRdv(id: string, creneau: string, lieu: string): Promise<CommResult & { info?: string }> {
+  const _g = await garde(); if (_g) return _g;
   if (!id) return { ok: false, error: "RDV introuvable." };
   const c = (creneau || "").trim();
   const l = (lieu || "").trim();
@@ -150,6 +162,7 @@ export async function assignerRdv(
   groupe: string | null,
   meta: { nom?: string | null; lieu?: string | null; creneau?: string | null; duree?: string | null },
 ): Promise<CommResult> {
+  const _g = await garde(); if (_g) return _g;
   if (!id) return { ok: false, error: "RDV introuvable." };
   const ids = (Array.isArray(membreIds) ? membreIds : []).map(String).filter(Boolean).slice(0, 15);
   const g = groupe === "legal" || groupe === "illegal" ? groupe : null;
@@ -171,6 +184,7 @@ export async function assignerRdv(
 // bot reste la source de vérité (coffre & facture), donc AUCUNE divergence.
 // Anti-doublon : un RDV déjà encaissé ne peut pas l'être une seconde fois.
 export async function encaisserRdv(id: string, montant: number, note: string): Promise<CommResult & { solde?: number }> {
+  const _g = await garde(); if (_g) return _g;
   if (!id) return { ok: false, error: "RDV introuvable." };
   const m = Math.round(Number(montant) || 0);
   if (m <= 0) return { ok: false, error: "Montant invalide." };
@@ -203,6 +217,7 @@ export async function encaisserRdv(id: string, montant: number, note: string): P
 // Envoie un message d'invitation au client via son contact (MP Discord / e-mail)
 // et garde la trace. Calque la « satisfaction request » de Discord.
 export async function demanderAvisRdv(id: string): Promise<CommResult & { info?: string }> {
+  const _g = await garde(); if (_g) return _g;
   if (!id) return { ok: false, error: "RDV introuvable." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
@@ -222,6 +237,7 @@ export async function demanderAvisRdv(id: string): Promise<CommResult & { info?:
 
 // Enregistre l'URL d'une photo du lieu du RDV (Supabase Storage).
 export async function definirLieuPhotoRdv(id: string, url: string): Promise<CommResult> {
+  const _g = await garde(); if (_g) return _g;
   if (!id) return { ok: false, error: "RDV introuvable." };
   if (!/^https?:\/\//.test(url || "")) return { ok: false, error: "Photo invalide." };
   return _patchPaiement(id, { lieuPhoto: url });
