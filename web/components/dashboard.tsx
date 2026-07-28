@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FileText, Wallet, Landmark, Target, Plug, Inbox, Users, Activity, Coins, Compass, ArrowRight, ListChecks, CheckCircle2, Megaphone, CalendarDays, Skull, Mic, Crosshair, Sparkles } from "lucide-react";
+import { FileText, Wallet, Landmark, Target, Plug, Inbox, Users, Activity, Coins, Compass, ArrowRight, ListChecks, CheckCircle2, Megaphone, CalendarDays, Skull, Mic, Crosshair, Sparkles, Clock, UserCheck, ScrollText } from "lucide-react";
 import clsx from "clsx";
 import type { DashData, FeedItem, AlertesData } from "@/lib/queries";
 import { BarresH, Donut, Repartition } from "@/components/charts";
@@ -9,6 +9,7 @@ import { PoleChip, SectionTitle, Ornement } from "@/components/ui";
 import { LiveFeed } from "@/components/live-feed";
 import { DemandesResume } from "@/components/demandes-resume";
 import type { DemandesData } from "@/lib/demandes-const";
+import type { LicenceExpirant } from "@/lib/licences";
 import { BriefingIA } from "@/components/briefing-ia";
 import { HorlogeCampagne } from "@/components/horloge-campagne";
 import { cents } from "@/lib/format";
@@ -241,7 +242,62 @@ function Raccourcis() {
   );
 }
 
-export function Dashboard({ data, feed = [], alertes = { total: 0, items: [] }, demandes, monId }: { data: DashData; feed?: FeedItem[]; alertes?: AlertesData; demandes?: DemandesData; monId?: string | null }) {
+// Échéances (licences) + présence du jour — le QG surveille ce qui arrive à terme.
+function EcheancesPresence({ licences = [], presence }: { licences?: LicenceExpirant[]; presence?: { presents: number; absents: number } }) {
+  const urgentes = licences.length;
+  return (
+    <div className="grid items-start gap-4 lg:grid-cols-2">
+      <Card delay={0.04}>
+        <CardHeader titre="Licences arrivant à expiration" action={urgentes ? "Gérer" : undefined} href="/licences" />
+        {urgentes ? (
+          <ul className="flex flex-col gap-1.5">
+            {licences.slice(0, 6).map((l) => {
+              const tone = l.jours <= 3 ? "var(--oxblood)" : l.jours <= 7 ? "var(--warn)" : "var(--accent)";
+              return (
+                <li key={l.id} className="flex items-center gap-2.5 rounded-[10px] border border-border px-3 py-2" style={{ background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,#000))" }}>
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[9px]" style={{ color: tone, background: `color-mix(in srgb,${tone} 15%,transparent)` }}>
+                    <ScrollText className="h-4 w-4" strokeWidth={1.8} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[0.84rem] font-medium text-ink">{l.nom}</span>
+                    <span className="block truncate text-[0.72rem] text-faint">{l.typeNom || l.numero}</span>
+                  </span>
+                  <span className="shrink-0 text-[0.74rem] font-semibold tabular-nums" style={{ color: tone }}>
+                    {l.jours === 0 ? "aujourd'hui" : `J-${l.jours}`}
+                  </span>
+                </li>
+              );
+            })}
+            {urgentes > 6 ? <li className="px-1 pt-0.5 text-[0.74rem] text-faint">+ {urgentes - 6} autre(s)…</li> : null}
+          </ul>
+        ) : (
+          <Empty>Aucune licence n&apos;expire dans les 30 jours.</Empty>
+        )}
+      </Card>
+      <Card delay={0.08}>
+        <CardHeader titre="Présence du jour" action="Absences" href="/absences" />
+        {presence ? (
+          <div className="flex items-stretch gap-3">
+            <Link href="/membres" className="flex flex-1 flex-col items-center gap-1 rounded-[12px] border border-border px-3 py-4 transition hover:-translate-y-0.5 hover:border-border-2" style={{ background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,#000))" }}>
+              <span className="grid h-9 w-9 place-items-center rounded-[10px]" style={{ color: "var(--good)", background: "color-mix(in srgb,var(--good) 15%,transparent)" }}><UserCheck className="h-[18px] w-[18px]" strokeWidth={1.9} /></span>
+              <span className="font-num text-[1.5rem] font-bold leading-none tabular-nums text-ink">{presence.presents}</span>
+              <span className="text-[0.68rem] uppercase tracking-[0.08em] text-faint">Présents</span>
+            </Link>
+            <Link href="/absences" className="flex flex-1 flex-col items-center gap-1 rounded-[12px] border border-border px-3 py-4 transition hover:-translate-y-0.5 hover:border-border-2" style={{ background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,#000))" }}>
+              <span className="grid h-9 w-9 place-items-center rounded-[10px]" style={{ color: "var(--warn)", background: "color-mix(in srgb,var(--warn) 15%,transparent)" }}><Clock className="h-[18px] w-[18px]" strokeWidth={1.9} /></span>
+              <span className="font-num text-[1.5rem] font-bold leading-none tabular-nums text-ink">{presence.absents}</span>
+              <span className="text-[0.68rem] uppercase tracking-[0.08em] text-faint">Absents</span>
+            </Link>
+          </div>
+        ) : (
+          <Empty>La présence s&apos;affichera dès la synchronisation des membres.</Empty>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+export function Dashboard({ data, feed = [], alertes = { total: 0, items: [] }, demandes, monId, licencesExpirant = [], presence }: { data: DashData; feed?: FeedItem[]; alertes?: AlertesData; demandes?: DemandesData; monId?: string | null; licencesExpirant?: LicenceExpirant[]; presence?: { presents: number; absents: number } }) {
   return (
     <>
       <div className="iwc-hero">
@@ -273,6 +329,10 @@ export function Dashboard({ data, feed = [], alertes = { total: 0, items: [] }, 
       <CeQuiTattend alertes={alertes} />
 
       {demandes ? <DemandesResume data={demandes} monId={monId} /> : null}
+
+      <SectionTitle tone="var(--warn)" icon={Clock}>Échéances &amp; présence</SectionTitle>
+      <EcheancesPresence licences={licencesExpirant} presence={presence} />
+
       <Raccourcis />
 
       <BriefingIA />
