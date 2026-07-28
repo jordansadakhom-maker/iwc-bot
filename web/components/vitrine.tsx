@@ -68,32 +68,36 @@ export function Vitrine({ stats, connecte = false }: { stats: VitrineData; conne
       </header>
 
       {/* HÉRO */}
-      <section className="relative mx-auto max-w-6xl px-5 pb-8 pt-8 text-center sm:pt-16">
-        <div className="mx-auto mb-6 grid h-20 w-20 place-items-center rounded-3xl border border-border-2 text-accent" style={{ background: "radial-gradient(circle at 30% 22%, color-mix(in srgb,var(--accent) 32%,transparent), transparent 68%), var(--surface)" }}>
-          <Crest className="h-11 w-11" />
-        </div>
-        <p className="text-[0.68rem] uppercase tracking-[0.34em] text-faint">Compagnie de sécurité · État de Louisiane</p>
-        <h1 className="mx-auto mt-3 max-w-3xl font-display text-[2.6rem] font-semibold leading-[1.05] tracking-[0.02em] sm:text-[3.9rem]">
-          Iron Wolf Company
-        </h1>
-        <p className="mx-auto mt-4 max-w-xl text-[1.05rem] leading-relaxed text-muted">
-          Sécurité, escorte, armement et chasse de prime. Une meute soudée, un registre tenu à la lettre, une parole qui vaut de l&apos;or. <span className="text-ink">Ta place t&apos;attend.</span>
-        </p>
-
-        <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-          <Link href="/rejoindre" className={CTA_PRIMAIRE} style={{ background: "linear-gradient(180deg,var(--accent-hi),var(--accent))" }}>
-            <Users className="h-[1.15rem] w-[1.15rem]" /> Rejoindre la meute <ArrowRight className="h-[1.05rem] w-[1.05rem]" />
-          </Link>
-          <Link href="/rendez-vous" className={CTA_SECONDAIRE}>
-            <Handshake className="h-[1.15rem] w-[1.15rem] text-accent" /> Demander une prestation
-          </Link>
-        </div>
-
-        {chiffres.length ? (
-          <div className="mx-auto mt-11 flex max-w-lg items-center justify-center divide-x divide-border rounded-2xl border border-border bg-surface/60 py-5" style={{ backdropFilter: "blur(2px)" }}>
-            {chiffres.map((c) => <Stat key={c.label} valeur={c.valeur} label={c.label} />)}
+      <section className="relative mx-auto max-w-6xl overflow-hidden px-5 pb-8 pt-8 text-center sm:pt-16">
+        {/* Atmosphère ambiante — un halo laiton qui respire derrière l'emblème. */}
+        <div aria-hidden className="iwc-breathe pointer-events-none absolute left-1/2 top-[9rem] -z-0 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl" style={{ background: "radial-gradient(circle, color-mix(in srgb,var(--accent) 18%,transparent), transparent 70%)" }} />
+        <div className="relative z-10">
+          <div className="iwc-hero mx-auto mb-6 grid h-20 w-20 place-items-center rounded-3xl border border-border-2 text-accent" style={{ background: "radial-gradient(circle at 30% 22%, color-mix(in srgb,var(--accent) 32%,transparent), transparent 68%), var(--surface)", boxShadow: "0 0 40px -12px color-mix(in srgb,var(--accent) 45%,transparent)" }}>
+            <Crest className="h-11 w-11" />
           </div>
-        ) : null}
+          <p className="iwc-hero text-[0.68rem] uppercase tracking-[0.34em] text-faint" style={{ animationDelay: ".08s" }}>Compagnie de sécurité · État de Louisiane</p>
+          <h1 className="iwc-hero mx-auto mt-3 max-w-3xl font-display text-[2.6rem] font-semibold leading-[1.05] tracking-[0.02em] sm:text-[3.9rem]" style={{ animationDelay: ".14s" }}>
+            Iron Wolf Company
+          </h1>
+          <p className="iwc-hero mx-auto mt-4 max-w-xl text-[1.05rem] leading-relaxed text-muted" style={{ animationDelay: ".2s" }}>
+            Sécurité, escorte, armement et chasse de prime. Une meute soudée, un registre tenu à la lettre, une parole qui vaut de l&apos;or. <span className="text-ink">Ta place t&apos;attend.</span>
+          </p>
+
+          <div className="iwc-hero mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row" style={{ animationDelay: ".26s" }}>
+            <Link href="/rejoindre" className={CTA_PRIMAIRE} style={{ background: "linear-gradient(180deg,var(--accent-hi),var(--accent))" }}>
+              <Users className="h-[1.15rem] w-[1.15rem]" /> Rejoindre la meute <ArrowRight className="h-[1.05rem] w-[1.05rem]" />
+            </Link>
+            <Link href="/rendez-vous" className={CTA_SECONDAIRE}>
+              <Handshake className="h-[1.15rem] w-[1.15rem] text-accent" /> Demander une prestation
+            </Link>
+          </div>
+
+          {chiffres.length ? (
+            <div className="iwc-hero mx-auto mt-11 flex max-w-lg items-center justify-center divide-x divide-border rounded-2xl border border-border bg-surface/60 py-5" style={{ backdropFilter: "blur(2px)", animationDelay: ".32s" }}>
+              {chiffres.map((c) => <Stat key={c.label} valeur={c.valeur} label={c.label} />)}
+            </div>
+          ) : null}
+        </div>
       </section>
 
       {/* CE QUE NOUS SOMMES */}

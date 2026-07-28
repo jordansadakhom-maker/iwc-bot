@@ -21,13 +21,15 @@ export default async function LoginPage() {
   const STANDALONE = await isStandalone();
   return (
     <main
-      className="grid min-h-screen place-items-center px-5 py-10"
+      className="relative grid min-h-screen place-items-center overflow-hidden px-5 py-10"
       style={{
         background:
-          "radial-gradient(1000px 520px at 50% -10%, color-mix(in srgb,var(--accent) 12%,transparent), transparent 62%), var(--bg)",
+          "radial-gradient(1100px 560px at 50% -12%, color-mix(in srgb,var(--accent) 14%,transparent), transparent 60%), radial-gradient(760px 620px at 108% 8%, color-mix(in srgb,var(--oxblood) 9%,transparent), transparent 55%), radial-gradient(820px 700px at -8% 104%, color-mix(in srgb,var(--steel) 7%,transparent), transparent 55%), var(--bg)",
       }}
     >
-      <div className="w-full max-w-[420px]">
+      {/* Halo respirant derrière la carte — donne vie à l'écran d'entrée. */}
+      <div aria-hidden className="iwc-breathe pointer-events-none absolute left-1/2 top-[38%] -z-0 h-[460px] w-[460px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl" style={{ background: "radial-gradient(circle, color-mix(in srgb,var(--accent) 22%,transparent), transparent 70%)" }} />
+      <div className="iwc-hero relative z-10 w-full max-w-[420px]">
         <Link href={STANDALONE ? "/dispensaire" : "/"} className="mb-7 flex flex-col items-center text-center transition hover:opacity-90">
           <div
             className="mb-4 grid h-16 w-16 place-items-center rounded-2xl border border-border-2 text-accent"
