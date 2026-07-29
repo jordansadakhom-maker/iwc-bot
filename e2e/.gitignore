@@ -1,0 +1,10 @@
+# ── Ne JAMAIS committer la session (cookies/tokens Discord/Supabase) ──
+auth.json
+*.storage.json
+
+# ── Sorties de tests ──
+node_modules/
+test-results/
+playwright-report/
+playwright/.cache/
+blob-report/
