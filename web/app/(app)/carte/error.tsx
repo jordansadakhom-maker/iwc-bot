@@ -1,16 +1,39 @@
 "use client";
 
-import { useEffect } from "react";
-import { Map as MapIcon, RotateCw, RefreshCw } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Map as MapIcon, RotateCw, RefreshCw, ChevronDown } from "lucide-react";
 
 // Boundary de la route Carte : au lieu de l'écran brut « This page couldn't
-// load », un message soigné avec deux issues — « Réessayer » (re-rend le
-// segment, utile si l'erreur était passagère) et « Recharger la page »
-// (rechargement complet, utile après une mise à jour du site / chunk périmé).
+// load », un message soigné. Deux issues — « Réessayer » (re-rend le segment)
+// et « Recharger la page » (rechargement complet). En plus :
+//  • auto-guérison des erreurs de CHUNK (JS non chargé, fréquent juste après un
+//    déploiement) → un rechargement complet automatique, une seule fois ;
+//  • affichage du DÉTAIL technique à l'écran (message + digest) pour diagnostic
+//    sans avoir à ouvrir la console.
+const estErreurChunk = (e?: { name?: string; message?: string }) =>
+  /ChunkLoadError|Loading chunk|dynamically imported module|Importing a module script failed|Failed to fetch/i.test(
+    String(e?.name || "") + " " + String(e?.message || ""),
+  );
+
 export default function CarteError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  const [details, setDetails] = useState(false);
+  const [autoRechargement, setAutoRechargement] = useState(false);
+
   useEffect(() => {
-    // Trace côté client (visible dans la console) — aide au diagnostic.
     console.error("Carte — erreur de rendu :", error);
+    // Auto-guérison chunk : un rechargement complet, au plus une fois / 15 s
+    // (évite toute boucle). Résout le cas « chunk périmé après déploiement ».
+    if (estErreurChunk(error) && typeof window !== "undefined") {
+      try {
+        const KEY = "iwc-carte-chunk-reload";
+        const last = Number(sessionStorage.getItem(KEY) || 0);
+        if (Date.now() - last > 15000) {
+          sessionStorage.setItem(KEY, String(Date.now()));
+          setAutoRechargement(true);
+          window.location.reload();
+        }
+      } catch { /* sessionStorage indisponible : on laisse les boutons manuels */ }
+    }
   }, [error]);
 
   return (
@@ -23,23 +46,35 @@ export default function CarteError({ error, reset }: { error: Error & { digest?:
       </span>
       <div>
         <h2 className="font-display text-[1.4rem]">La carte n&apos;a pas pu se charger</h2>
-        <p className="mt-1 max-w-md text-[0.9rem] text-muted">Un contretemps passager. Réessaie — et si ça persiste, recharge la page (une mise à jour du site vient peut-être d&apos;être déployée).</p>
+        <p className="mt-1 max-w-md text-[0.9rem] text-muted">
+          {autoRechargement ? "Rechargement automatique en cours…" : "Un contretemps passager. Réessaie — et si ça persiste, recharge la page (une mise à jour du site vient peut-être d’être déployée)."}
+        </p>
       </div>
       <div className="flex flex-wrap items-center justify-center gap-2.5">
-        <button
-          onClick={() => reset()}
-          className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.85rem] font-semibold text-black/85"
-          style={{ background: "var(--accent)" }}
-        >
+        <button onClick={() => reset()} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.85rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}>
           <RotateCw className="h-4 w-4" /> Réessayer
         </button>
-        <button
-          onClick={() => window.location.reload()}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.85rem] font-semibold hover:border-border-2"
-        >
+        <button onClick={() => window.location.reload()} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.85rem] font-semibold hover:border-border-2">
           <RefreshCw className="h-4 w-4" /> Recharger la page
         </button>
       </div>
+
+      {/* Détail technique — affiché à l'écran pour faciliter le diagnostic. */}
+      {(error?.message || error?.digest) ? (
+        <div className="mt-1 w-full max-w-md">
+          <button onClick={() => setDetails((v) => !v)} className="inline-flex items-center gap-1 text-[0.72rem] text-faint hover:text-muted">
+            <ChevronDown className={"h-3.5 w-3.5 transition-transform " + (details ? "rotate-180" : "")} /> Détails techniques
+          </button>
+          {details ? (
+            <pre className="mt-1.5 max-h-40 overflow-auto rounded-lg border border-border bg-surface-2 px-3 py-2 text-left text-[0.72rem] leading-relaxed text-muted">
+              {estErreurChunk(error) ? "Type : erreur de chargement (chunk) — souvent après un déploiement.\n" : ""}
+              {error?.name ? `Nom : ${error.name}\n` : ""}
+              {error?.message ? `Message : ${error.message}\n` : ""}
+              {error?.digest ? `Digest : ${error.digest}` : ""}
+            </pre>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
