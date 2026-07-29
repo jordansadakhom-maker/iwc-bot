@@ -84,6 +84,8 @@ export function ChasseModule({ data }: { data: ChasseData }) {
   const [flash, setFlash] = useState<FlashMsg>(null);
   const [pending, setPending] = useState(0);
   const [journal, setJournal] = useState(false);
+  // Prix unitaires par ressource (valorisation du stock) — clé = nom normalisé.
+  const [prix, setPrix] = useState<Record<string, number>>({});
 
   // Modales
   const [photo, setPhoto] = useState(false);
@@ -109,6 +111,17 @@ export function ChasseModule({ data }: { data: ChasseData }) {
     }
     return [...map.values()].sort((a, b) => b.total - a.total || a.nom.localeCompare(b.nom));
   }, [items]);
+
+  // Prix unitaires : chargés depuis CET appareil (localStorage), modifiables à la
+  // volée. La valorisation (Σ quantité × prix) donne « ce qu'on touche à la fin ».
+  useEffect(() => { try { const raw = localStorage.getItem("iwc-chasse-prix"); if (raw) setPrix(JSON.parse(raw)); } catch { /* ignore */ } }, []);
+  const majPrix = (cle: string, v: number) => setPrix((p) => {
+    const n = { ...p };
+    if (!v || v <= 0 || !Number.isFinite(v)) delete n[cle]; else n[cle] = v;
+    try { localStorage.setItem("iwc-chasse-prix", JSON.stringify(n)); } catch { /* ignore */ }
+    return n;
+  });
+  const valeurTotale = ressources.reduce((s, r) => s + r.total * (prix[norm(r.nom)] || 0), 0);
 
   const totauxZone = useMemo(() => {
     const m: Record<string, number> = {};
@@ -204,7 +217,7 @@ export function ChasseModule({ data }: { data: ChasseData }) {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2.5">
         <div className="flex items-center gap-2.5">
           <h3 className="text-[0.8rem] font-semibold uppercase tracking-[0.06em] text-muted">Chasse — charrettes &amp; ressources</h3>
-          <span className="font-num text-[0.8rem] text-faint">{totalGlobal} u. · {nbRessources} ressource{nbRessources > 1 ? "s" : ""}</span>
+          <span className="font-num text-[0.8rem] text-faint">{totalGlobal} u. · {nbRessources} ressource{nbRessources > 1 ? "s" : ""}{valeurTotale > 0 ? <> · <b style={{ color: "var(--brass-hi)" }}>≈ ${valeurTotale.toFixed(2)}</b> à la vente</> : null}</span>
           {pending > 0 ? <span className="inline-flex items-center gap-1 text-[0.72rem] text-faint"><Loader2 className="h-3 w-3 animate-spin" /> synchronisation…</span> : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -251,7 +264,7 @@ export function ChasseModule({ data }: { data: ChasseData }) {
       </div>
 
       {vue === "global" ? (
-        <RecapTable ressources={ressources} zones={zones} query={query} catFiltre={catFiltre} />
+        <RecapTable ressources={ressources} zones={zones} query={query} catFiltre={catFiltre} prix={prix} onPrix={majPrix} />
       ) : (
         <ZoneVue
           zone={zones.find((z) => z.id === vue)!}
@@ -343,38 +356,62 @@ function AlertesRow({ alertes, zones, totauxZone, onVoir }: {
 }
 
 // ── Vue globale : tableau récapitulatif (somme automatique) ──────
-function RecapTable({ ressources, zones, query, catFiltre }: {
+// Colonnes « Prix / u. » (éditable) et « Gain » (= Total × prix) → le pied de
+// tableau donne « ce qu'on touche à la fin » (valorisation totale du stock).
+function RecapTable({ ressources, zones, query, catFiltre, prix, onPrix }: {
   ressources: { nom: string; cat: string; total: number; zones: Record<string, number>; seuil: number | null }[];
   zones: ChasseZone[]; query: string; catFiltre: string;
+  prix: Record<string, number>; onPrix: (cle: string, v: number) => void;
 }) {
   const list = ressources.filter((r) => (!query || r.nom.toLowerCase().includes(query)) && (!catFiltre || r.cat === catFiltre));
   if (!list.length) return <p className="px-1 py-8 text-center text-[0.84rem] text-faint">{query || catFiltre ? "Aucune ressource ne correspond." : "Aucune ressource — ajoute-en une, ou importe une photo du stock."}</p>;
   const totaux = zones.map((z) => list.reduce((s, r) => s + (r.zones[z.id] || 0), 0));
   const grand = totaux.reduce((s, n) => s + n, 0);
+  const gainDe = (r: (typeof list)[number]) => r.total * (prix[norm(r.nom)] || 0);
+  const gainTotal = list.reduce((s, r) => s + gainDe(r), 0);
   return (
     <div className="overflow-x-auto rounded-[12px] border border-border">
-      <table className="w-full min-w-[520px] border-collapse text-left text-[0.85rem]">
+      <table className="w-full min-w-[640px] border-collapse text-left text-[0.85rem]">
         <thead>
           <tr className="text-[0.68rem] uppercase tracking-[0.05em] text-faint">
             <th className="border-b border-border px-3 py-2 font-semibold">Ressource</th>
             {zones.map((z) => <th key={z.id} className="border-b border-border px-3 py-2 text-right font-semibold">{z.nom}</th>)}
             <th className="border-b border-border px-3 py-2 text-right font-semibold" style={{ color: "var(--accent)" }}>Total</th>
+            <th className="border-b border-border px-3 py-2 text-right font-semibold">Prix / u.</th>
+            <th className="border-b border-border px-3 py-2 text-right font-semibold" style={{ color: "var(--brass-hi)" }}>Gain</th>
           </tr>
         </thead>
         <tbody>
-          {list.map((r) => (
-            <tr key={r.nom} className="hover:bg-[color-mix(in_srgb,var(--ink)_4%,transparent)]">
-              <td className="border-b border-border px-3 py-2"><span className="mr-1.5">{emoji(r.nom)}</span>{r.nom}{r.seuil != null && r.total <= r.seuil ? <span className="ml-1.5 align-middle text-[0.68rem]" style={{ color: "var(--warn)" }}>▼ seuil {r.seuil}</span> : null}</td>
-              {zones.map((z) => <td key={z.id} className="border-b border-border px-3 py-2 text-right font-num text-muted">{r.zones[z.id] || <span className="text-faint">—</span>}</td>)}
-              <td className="border-b border-border px-3 py-2 text-right font-num font-semibold" style={{ color: "var(--accent)" }}>{r.total}</td>
-            </tr>
-          ))}
+          {list.map((r) => {
+            const cle = norm(r.nom);
+            const g = gainDe(r);
+            return (
+              <tr key={r.nom} className="hover:bg-[color-mix(in_srgb,var(--ink)_4%,transparent)]">
+                <td className="border-b border-border px-3 py-2"><span className="mr-1.5">{emoji(r.nom)}</span>{r.nom}{r.seuil != null && r.total <= r.seuil ? <span className="ml-1.5 align-middle text-[0.68rem]" style={{ color: "var(--warn)" }}>▼ seuil {r.seuil}</span> : null}</td>
+                {zones.map((z) => <td key={z.id} className="border-b border-border px-3 py-2 text-right font-num text-muted">{r.zones[z.id] || <span className="text-faint">—</span>}</td>)}
+                <td className="border-b border-border px-3 py-2 text-right font-num font-semibold" style={{ color: "var(--accent)" }}>{r.total}</td>
+                <td className="border-b border-border px-2 py-1.5 text-right">
+                  <input
+                    type="number" min={0} step="0.01" inputMode="decimal"
+                    value={prix[cle] ?? ""}
+                    onChange={(e) => onPrix(cle, parseFloat(e.target.value))}
+                    placeholder="0.00"
+                    aria-label={`Prix unitaire — ${r.nom}`}
+                    className="w-[78px] rounded-md border border-border bg-surface px-2 py-1 text-right font-num text-[0.82rem] outline-none focus:border-border-2"
+                  />
+                </td>
+                <td className="border-b border-border px-3 py-2 text-right font-num font-semibold" style={{ color: g > 0 ? "var(--brass-hi)" : "var(--faint)" }}>{g > 0 ? `$${g.toFixed(2)}` : "—"}</td>
+              </tr>
+            );
+          })}
         </tbody>
         <tfoot>
           <tr className="text-[0.8rem] font-semibold">
             <td className="px-3 py-2">Total</td>
             {totaux.map((t, i) => <td key={i} className="px-3 py-2 text-right font-num text-muted">{t}</td>)}
             <td className="px-3 py-2 text-right font-num" style={{ color: "var(--accent)" }}>{grand}</td>
+            <td className="px-3 py-2 text-right text-[0.72rem] text-faint">à la vente →</td>
+            <td className="px-3 py-2 text-right font-num" style={{ color: "var(--brass-hi)" }}>${gainTotal.toFixed(2)}</td>
           </tr>
         </tfoot>
       </table>
