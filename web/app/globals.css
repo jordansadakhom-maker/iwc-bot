@@ -248,4 +248,16 @@ tbody tr:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); 
 .iwc-pop { animation: iwc-pop .2s cubic-bezier(.22,.61,.36,1) both; }
 @media (prefers-reduced-motion: reduce) { .iwc-pop { animation: none; } }
 
+/* Reflet métallique qui glisse sur les lingots (graphique « Comparatif des
+   coffres ») — donne l'impression de lumière courant sur du métal/de l'or.
+   Le reflet est décalé par barre (animation-delay) pour un scintillement vivant. */
+.iwc-glint::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 45%; pointer-events: none;
+  background: linear-gradient(105deg, transparent, color-mix(in srgb,#fff 42%,transparent), transparent);
+  transform: translateX(-160%);
+  animation: iwc-glint 3.4s ease-in-out infinite;
+}
+@keyframes iwc-glint { 0% { transform: translateX(-160%); } 55%, 100% { transform: translateX(360%); } }
+@media (prefers-reduced-motion: reduce) { .iwc-glint::after { animation: none; opacity: 0; } }
+
 /* Déploiement Production — Refonte « Effet Wouah » (mise en ligne). */

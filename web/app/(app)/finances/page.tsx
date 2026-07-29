@@ -1,7 +1,7 @@
 import { getFinances, getFactures, getPortefeuilles } from "@/lib/queries";
 import { getActeur } from "@/lib/authz";
 import { PageHeader, Card, CardHeader } from "@/components/ui";
-import { BarresH } from "@/components/charts";
+import { ComparatifCoffres } from "@/components/charts";
 import { FinancesCoffres } from "@/components/finances-coffres";
 import { FacturesListe } from "@/components/factures-liste";
 import { Portefeuilles } from "@/components/portefeuilles";
@@ -42,7 +42,7 @@ export default async function FinancesPage() {
           return (
             <Card>
               <CardHeader titre="Comparatif des coffres (tous pôles)" compteur={`total : $${cents(totalCoffres)}`} />
-              <BarresH data={barres} money share />
+              <ComparatifCoffres data={barres} />
             </Card>
           );
         })()
