@@ -67,66 +67,101 @@ export function BarresH({
   );
 }
 
-// ── Comparatif des coffres — version « immersive » quasi-3D. Chaque coffre est
-//    un lingot métallique : rigole encaissée (groove), dégradé cylindrique
-//    (lumière en haut, ombre en bas), arête de lumière, ombre portée + halo
-//    coloré, et un reflet qui glisse lentement (comme la lumière sur du métal).
-//    L'argent se lit en or. Dédié à la page Finances — BarresH reste inchangé
-//    pour les autres graphes (membres, statistiques…). ──
-export function ComparatifCoffres({ data }: { data: { label: string; value: number; color: string }[] }) {
+// ── Évolution de la trésorerie — courbe multi-lignes dans le temps, dans le
+//    style de la « finance de l'armurerie » : aire sous le total, lignes par
+//    coffre, grille + axes en $, infobulle datée au survol. Nourrie par les
+//    événements « coffre.ajuste » (voir getTresorerieEvolution). ──
+type TP = { t: number; commun: number; legal: number; illegal: number; total: number };
+
+function niceMax(v: number): number {
+  if (v <= 0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  const n = v / p;
+  const nice = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
+  return nice * p;
+}
+const dJour = (t: number) => new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short" }).format(new Date(t));
+const dHeure = (t: number) => new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" }).format(new Date(t));
+
+export function TresorerieChart({ points }: { points: TP[] }) {
   const [hover, setHover] = useState<number | null>(null);
-  const max = Math.max(1, ...data.map((d) => d.value));
-  const sum = data.reduce((a, d) => a + d.value, 0);
+  if (!points || points.length < 2) {
+    return (
+      <div className="flex flex-col items-center gap-2 px-4 py-12 text-center">
+        <p className="max-w-md font-display text-[0.92rem] italic leading-relaxed text-muted">La courbe se construit à mesure des dépôts et retraits sur les coffres. Fais un ajustement pour l&apos;alimenter.</p>
+        <span className="text-[0.66rem] uppercase tracking-[0.22em] text-faint">— Trésorerie en sommeil —</span>
+      </div>
+    );
+  }
+
+  const W = 760, H = 250, PL = 56, PR = 60, PT = 16, PB = 26;
+  const pw = W - PL - PR, ph = H - PT - PB;
+  const n = points.length;
+  const series = [
+    { key: "commun" as const, label: "Commun", color: "#c98500", width: 1.6, dash: "" },
+    { key: "legal" as const, label: "Iron Wolf", color: "#3987e5", width: 1.6, dash: "5 3" },
+    { key: "illegal" as const, label: "Confrérie", color: "#e66767", width: 1.6, dash: "1.5 3.5" },
+  ];
+  const rawMax = Math.max(...points.flatMap((p) => [p.total, p.commun, p.legal, p.illegal]), 1);
+  const ymax = niceMax(rawMax);
+  const span = ymax || 1;
+  const x = (i: number) => PL + (n === 1 ? pw / 2 : (i / (n - 1)) * pw);
+  const y = (v: number) => PT + (1 - v / span) * ph;
+  const path = (get: (p: TP) => number) => points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(get(p)).toFixed(1)}`).join(" ");
+  const totalPath = path((p) => p.total);
+  const areaPath = `${totalPath} L${x(n - 1).toFixed(1)},${y(0).toFixed(1)} L${x(0).toFixed(1)},${y(0).toFixed(1)} Z`;
+  const last = points[n - 1];
+  const hp = hover != null ? points[hover] : null;
+
   return (
-    <div className="flex flex-col gap-4 pt-1">
-      {data.map((d, i) => {
-        const pct = d.value > 0 ? Math.max((d.value / max) * 100, 3) : 0;
-        const share = sum > 0 ? Math.round((d.value / sum) * 100) : 0;
-        const on = hover === i;
-        const c = d.color;
-        return (
-          <div
-            key={d.label}
-            onMouseEnter={() => setHover(i)}
-            onMouseLeave={() => setHover(null)}
-            className="cursor-default transition-opacity"
-            style={{ opacity: hover === null || on ? 1 : 0.55 }}
-          >
-            <div className="mb-1.5 flex items-baseline justify-between gap-2 text-[0.8rem]">
-              <span className="inline-flex min-w-0 items-center gap-2 truncate text-muted">
-                <span className="h-2.5 w-2.5 shrink-0 rotate-45 rounded-[2px]" style={{ background: c, boxShadow: `0 0 8px -1px ${c}` }} />
-                <span className="truncate">{d.label}</span>
-              </span>
-              <span className="shrink-0 font-num text-[0.95rem] font-bold tabular-nums" style={{ color: "var(--brass-hi)", textShadow: "0 0 16px color-mix(in srgb, var(--brass-hi) 34%, transparent)" }}>
-                ${cents(d.value)}
-                {sum > 0 ? <span className="ml-1.5 text-[0.76rem] font-normal text-faint">· {share}%</span> : null}
-              </span>
-            </div>
-            {/* Rigole encaissée : le lingot vient s'y loger, en relief. */}
-            <div
-              className="relative h-9 w-full rounded-full"
-              style={{
-                background: "linear-gradient(180deg, color-mix(in srgb,#000 34%,var(--surface-2)), color-mix(in srgb,#000 10%,var(--surface-2)))",
-                boxShadow: "inset 0 2px 5px rgba(0,0,0,.55), inset 0 -1px 0 color-mix(in srgb,#fff 6%,transparent)",
-              }}
-            >
-              {pct > 0 ? (
-                <div
-                  className="iwc-glint absolute inset-y-[3px] left-[3px] overflow-hidden rounded-full"
-                  style={{
-                    width: `calc(${pct}% - 6px)`,
-                    minWidth: "22px",
-                    animationDelay: `${i * 0.45}s`,
-                    background: `linear-gradient(180deg, color-mix(in srgb,#fff 42%,transparent), transparent 46%, color-mix(in srgb,#000 30%,transparent)), linear-gradient(90deg, color-mix(in srgb,${c} 50%,#000), ${c})`,
-                    boxShadow: `inset 0 1px 0 color-mix(in srgb,#fff 55%,transparent), inset 0 -2px 5px color-mix(in srgb,#000 42%,transparent), 0 3px 8px -2px rgba(0,0,0,.55), 0 0 ${on ? 26 : 15}px -6px ${c}`,
-                    transition: "box-shadow .25s ease, width .55s cubic-bezier(.22,.61,.36,1)",
-                  }}
-                />
-              ) : null}
-            </div>
-          </div>
-        );
-      })}
+    <div className="relative">
+      <div className="mb-2 flex flex-wrap items-center justify-end gap-3 text-[0.68rem] text-faint">
+        <span className="mr-auto text-[0.72rem] font-semibold uppercase tracking-[0.06em] text-muted">Évolution de la trésorerie</span>
+        <span className="inline-flex items-center gap-1"><span className="inline-block h-1.5 w-3 rounded-sm" style={{ background: "var(--brass-hi)" }} /> Total</span>
+        {series.map((s) => (
+          <span key={s.key} className="inline-flex items-center gap-1"><span className="inline-block h-0 w-3 border-t-2" style={{ borderColor: s.color, borderStyle: s.dash ? "dashed" : "solid" }} /> {s.label}</span>
+        ))}
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full select-none" style={{ height: "auto" }}
+        onMouseMove={(e) => { const rect = e.currentTarget.getBoundingClientRect(); const vbX = ((e.clientX - rect.left) / rect.width) * W; const i = Math.round(((vbX - PL) / pw) * (n - 1)); setHover(Math.max(0, Math.min(n - 1, i))); }}
+        onMouseLeave={() => setHover(null)}>
+        <defs>
+          <linearGradient id="treso-aire" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--brass-hi)" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="var(--brass-hi)" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {[0, 0.25, 0.5, 0.75, 1].map((g) => { const yy = PT + g * ph; return (
+          <g key={g}>
+            <line x1={PL} y1={yy} x2={W - PR} y2={yy} stroke="var(--border)" strokeWidth={1} />
+            <text x={PL - 6} y={yy + 3} textAnchor="end" fontSize={9} fill="var(--faint)">{cents(ymax - g * span)}$</text>
+          </g>
+        ); })}
+        <path d={areaPath} fill="url(#treso-aire)" />
+        {series.map((s) => (
+          <path key={s.key} d={path((p) => p[s.key])} fill="none" stroke={s.color} strokeWidth={s.width} strokeDasharray={s.dash || undefined} strokeLinejoin="round" strokeLinecap="round" opacity={0.9} />
+        ))}
+        <path d={totalPath} fill="none" stroke="var(--brass-hi)" strokeWidth={2.6} strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx={x(n - 1)} cy={y(last.total)} r={3} fill="var(--brass-hi)" />
+        <text x={W - PR + 4} y={y(last.total) + 3} fontSize={9.5} fill="var(--brass-hi)" className="font-semibold">{cents(last.total)}$</text>
+        <text x={PL} y={H - 7} textAnchor="start" fontSize={9} fill="var(--faint)">{dJour(points[0].t)}</text>
+        <text x={W - PR} y={H - 7} textAnchor="end" fontSize={9} fill="var(--faint)">{dJour(last.t)}</text>
+        {hp ? (
+          <g>
+            <line x1={x(hover!)} y1={PT} x2={x(hover!)} y2={PT + ph} stroke="var(--muted)" strokeWidth={1} opacity={0.5} />
+            <circle cx={x(hover!)} cy={y(hp.total)} r={3.5} fill="var(--brass-hi)" stroke="var(--surface)" strokeWidth={1.5} />
+          </g>
+        ) : null}
+      </svg>
+      {hp ? (
+        <div className="pointer-events-none absolute z-10 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[0.68rem] shadow-lg" style={{ left: `${(x(hover!) / W) * 100}%`, top: 28, transform: `translateX(${hover! > n / 2 ? "-105%" : "5%"})` }}>
+          <div className="mb-1 font-semibold text-muted">{dJour(hp.t)} · {dHeure(hp.t)}</div>
+          <div className="flex items-center justify-between gap-3"><span style={{ color: "#c98500" }}>Commun</span><span className="font-num">${cents(hp.commun)}</span></div>
+          <div className="flex items-center justify-between gap-3"><span style={{ color: "#3987e5" }}>Iron Wolf</span><span className="font-num">${cents(hp.legal)}</span></div>
+          <div className="flex items-center justify-between gap-3"><span style={{ color: "#e66767" }}>Confrérie</span><span className="font-num">${cents(hp.illegal)}</span></div>
+          <div className="mt-1 flex items-center justify-between gap-3 border-t border-border pt-1"><span className="font-semibold">Total</span><span className="font-num font-semibold" style={{ color: "var(--brass-hi)" }}>${cents(hp.total)}</span></div>
+        </div>
+      ) : null}
     </div>
   );
 }
