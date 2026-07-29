@@ -105,7 +105,7 @@ export function MarchesChasse({ data }: { data: MarchesData }) {
 
       {actives.length === 0 ? (
         <p className="rounded-[12px] border border-dashed border-border px-4 py-8 text-center text-[0.85rem] italic text-faint">
-          Aucune ville active. {peut ? "Ajoute une ville via « Gérer les villes »." : "La Direction doit ajouter des villes."}
+          Aucune ville active. {peut ? "Ajoute une ville via « Gérer les villes »." : "Un officier ou la Direction doit ajouter des villes."}
         </p>
       ) : sections.map((cat) => {
         const liste = ressourcesFiltrees.filter((r) => r.categorie === cat);

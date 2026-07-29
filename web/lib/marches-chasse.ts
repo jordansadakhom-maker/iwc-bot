@@ -38,7 +38,7 @@ export async function getMarchesChasse(): Promise<MarchesData> {
   const admin = createAdminClient();
   if (!admin) return vide;
   let peut = false;
-  try { peut = !!(await getActeur())?.direction; } catch { peut = false; }
+  try { peut = !!(await getActeur())?.officier; } catch { peut = false; }
 
   const [vR, rR, pR, hR] = await Promise.all([
     admin.from("ChasseVille").select("*").order("ordre", { ascending: true }),
