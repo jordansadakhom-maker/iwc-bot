@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FlaskConical, Plus, Search, Check, Pencil, Trash2, AlertTriangle, Minus, Truck, ShoppingCart, Lock } from "lucide-react";
+import { FlaskConical, Plus, Search, Check, Pencil, Trash2, AlertTriangle, ArrowUpRight, ArrowDownRight, Truck, ShoppingCart, Lock } from "lucide-react";
 import { enRupture, suggestionCommande, type MatieresData, type Matiere } from "@/lib/dispensaire-matieres-const";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
 import { VideRegistre } from "@/components/dispensaire-ui";
@@ -20,6 +20,10 @@ export function DispensaireMatieres({ data }: { data: MatieresData }) {
   const [flash, setFlash] = useState<FlashMsg>(null);
   const [form, setForm] = useState<Matiere | "new" | null>(null);
   const [delId, setDelId] = useState<string | null>(null);
+
+  // Re-synchronise avec la base après chaque router.refresh() : la quantité
+  // affichée = la quantité réellement enregistrée (même fiabilité que le stock).
+  useEffect(() => { setMats(data.matieres); }, [data]);
 
   const query = norm(q);
   const liste = useMemo(() => mats.filter((m) => (!seulAlerte || enRupture(m)) && (!query || norm([m.nom, m.fournisseur, m.note].filter(Boolean).join(" ")).includes(query))), [mats, seulAlerte, query]);
@@ -79,41 +83,56 @@ export function DispensaireMatieres({ data }: { data: MatieresData }) {
           : <VideRegistre icon={FlaskConical} titre="Aucune matière première au registre" sous="Inscris une première matière — quantité, seuil, fournisseur — et l'officine te signalera d'elle-même ce qu'il faut recommander." />
       ) : (
         <div className="grid gap-2.5 lg:grid-cols-2">
-          {liste.map((m) => {
-            const rupture = enRupture(m);
-            return (
-              <div key={m.id} className="rounded-[12px] border p-3" style={{ borderColor: rupture ? "color-mix(in srgb,var(--oxblood) 50%,var(--border))" : "var(--border)", background: "var(--surface-2)" }}>
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-1.5"><span className="text-[0.9rem] font-semibold" style={rupture ? { color: "var(--oxblood)" } : undefined}>{m.nom}</span>{rupture ? <span className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[0.6rem] font-bold text-white" style={{ background: "var(--oxblood)" }}><AlertTriangle className="h-2.5 w-2.5" /> rupture</span> : null}</div>
-                    <div className="mt-0.5 flex flex-wrap gap-x-3 text-[0.72rem] text-faint">{m.fournisseur ? <span className="inline-flex items-center gap-1"><Truck className="h-3 w-3" /> {m.fournisseur}</span> : null}<span>Seuil {m.seuil}{m.cible ? ` · cible ${m.cible}` : ""}</span></div>
-                    {m.note ? <div className="mt-1 text-[0.73rem] text-muted">{m.note}</div> : null}
-                  </div>
-                  {canEdit ? (
-                    <div className="flex shrink-0 items-center gap-1">
-                      <button onClick={() => setForm(m)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Modifier"><Pencil className="h-3.5 w-3.5" /></button>
-                      <button onClick={() => setDelId(m.id)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-oxblood" aria-label="Supprimer"><Trash2 className="h-3.5 w-3.5" /></button>
-                    </div>
-                  ) : null}
-                </div>
-                <div className="mt-2 flex items-center gap-2 border-t border-border pt-2">
-                  <div className="font-num text-[1.4rem] font-bold leading-none" style={{ color: rupture ? "var(--oxblood)" : "var(--ink)" }}>{m.quantite}</div>
-                  <span className="text-[0.64rem] text-faint">{m.unite || "en stock"}</span>
-                  {canEdit ? (
-                    <div className="ml-auto flex items-center gap-1">
-                      <button onClick={() => ajuster(m, -1)} className="grid h-6 w-6 place-items-center rounded border border-border text-muted hover:text-ink"><Minus className="h-3 w-3" /></button>
-                      <button onClick={() => ajuster(m, 1)} className="grid h-6 w-6 place-items-center rounded border border-border text-muted hover:text-ink"><Plus className="h-3 w-3" /></button>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            );
-          })}
+          {liste.map((m) => <MatiereCard key={m.id} m={m} canEdit={canEdit} onEdit={() => setForm(m)} onDel={() => setDelId(m.id)} onAdjust={ajuster} />)}
         </div>
       )}
 
       {form ? <MatiereForm initial={form === "new" ? null : form} onClose={() => setForm(null)} onSave={(v) => enregistrer(v, form === "new" ? null : form)} /> : null}
       {delId ? <ConfirmDelete nom={mats.find((m) => m.id === delId)?.nom || ""} onCancel={() => setDelId(null)} onConfirm={() => supprimer(delId)} /> : null}
+    </div>
+  );
+}
+
+// Carte alignée sur celle du Stock matériel médical : bloc quantité (grand
+// chiffre + Seuil/cible) puis contrôle Entrée/Sortie avec saisie de quantité —
+// mêmes gestes, même logique, pour une cohérence totale entre les deux modules.
+function MatiereCard({ m, canEdit, onEdit, onDel, onAdjust }: { m: Matiere; canEdit: boolean; onEdit: () => void; onDel: () => void; onAdjust: (m: Matiere, delta: number) => void }) {
+  const [qte, setQte] = useState("1");
+  const rupture = enRupture(m);
+  const q = Math.max(1, Math.round(Number(qte) || 1));
+  function mouv(sens: 1 | -1) { onAdjust(m, sens * q); setQte("1"); }
+  return (
+    <div className="rounded-[12px] border p-3" style={{ borderColor: rupture ? "color-mix(in srgb,var(--oxblood) 50%,var(--border))" : "var(--border)", background: "var(--surface-2)" }}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[0.9rem] font-semibold" style={rupture ? { color: "var(--oxblood)" } : undefined}>{m.nom}</span>
+            {rupture ? <span className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[0.6rem] font-bold text-white" style={{ background: "var(--oxblood)" }}><AlertTriangle className="h-2.5 w-2.5" /> rupture</span> : null}
+          </div>
+          <div className="mt-0.5 flex flex-wrap gap-x-3 text-[0.72rem] text-faint">{m.fournisseur ? <span className="inline-flex items-center gap-1"><Truck className="h-3 w-3" /> {m.fournisseur}</span> : null}</div>
+          {m.note ? <div className="mt-0.5 text-[0.72rem] text-faint">{m.note}</div> : null}
+        </div>
+        {canEdit ? (
+          <div className="flex shrink-0 items-center gap-1">
+            <button onClick={onEdit} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Modifier"><Pencil className="h-3.5 w-3.5" /></button>
+            <button onClick={onDel} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-oxblood" aria-label="Supprimer"><Trash2 className="h-3.5 w-3.5" /></button>
+          </div>
+        ) : null}
+      </div>
+      <div className="mt-2 flex items-end gap-3">
+        <div><div className="font-num text-[1.5rem] font-bold leading-none" style={{ color: rupture ? "var(--oxblood)" : "var(--ink)" }}>{m.quantite}</div><div className="text-[0.62rem] text-faint">{m.unite || "en stock"}</div></div>
+        <div className="mb-0.5 flex flex-col gap-0.5 text-[0.66rem] text-faint">
+          <span>Seuil : <b className="font-num text-muted">{m.seuil}</b></span>
+          {m.cible ? <span>Cible : <b className="font-num text-muted">{m.cible}</b></span> : null}
+        </div>
+      </div>
+      {canEdit ? (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-border pt-2">
+          <input className={inputCls + " w-16 text-center"} value={qte} onChange={(e) => setQte(e.target.value.replace(/[^0-9]/g, ""))} inputMode="numeric" aria-label="Quantité" />
+          <button onClick={() => mouv(1)} className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[0.72rem] font-semibold text-black/85" style={{ background: "var(--good)" }}><ArrowUpRight className="h-3.5 w-3.5" /> Entrée</button>
+          <button onClick={() => mouv(-1)} className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[0.72rem] font-semibold text-white" style={{ background: "var(--oxblood)" }}><ArrowDownRight className="h-3.5 w-3.5" /> Sortie</button>
+        </div>
+      ) : null}
     </div>
   );
 }
