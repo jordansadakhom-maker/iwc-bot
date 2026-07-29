@@ -39,7 +39,10 @@ export function FinancesCoffres({
                   <Icon className="h-4 w-4" strokeWidth={1.8} />
                 </span>
               </div>
-              <div className={"tabular mb-1 mt-3 font-num text-[1.9rem] font-semibold " + (connecte ? "text-ink" : "text-faint")}>{connecte ? money(c.val) : "—"}</div>
+              <div
+                className={"tabular mb-1 mt-3 font-num text-[1.9rem] font-semibold " + (connecte ? "" : "text-faint")}
+                style={connecte ? { color: "var(--brass-hi)", textShadow: "0 0 24px color-mix(in srgb, var(--brass-hi) 32%, transparent)" } : undefined}
+              >{connecte ? money(c.val) : "—"}</div>
               <div className="flex items-center justify-between">
                 <span className="text-[0.72rem] text-faint">{connecte ? "À jour" : "En attente de la base"}</span>
                 {connecte ? (

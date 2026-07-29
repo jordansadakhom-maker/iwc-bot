@@ -67,6 +67,70 @@ export function BarresH({
   );
 }
 
+// ── Comparatif des coffres — version « immersive » quasi-3D. Chaque coffre est
+//    un lingot métallique : rigole encaissée (groove), dégradé cylindrique
+//    (lumière en haut, ombre en bas), arête de lumière, ombre portée + halo
+//    coloré, et un reflet qui glisse lentement (comme la lumière sur du métal).
+//    L'argent se lit en or. Dédié à la page Finances — BarresH reste inchangé
+//    pour les autres graphes (membres, statistiques…). ──
+export function ComparatifCoffres({ data }: { data: { label: string; value: number; color: string }[] }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const max = Math.max(1, ...data.map((d) => d.value));
+  const sum = data.reduce((a, d) => a + d.value, 0);
+  return (
+    <div className="flex flex-col gap-4 pt-1">
+      {data.map((d, i) => {
+        const pct = d.value > 0 ? Math.max((d.value / max) * 100, 3) : 0;
+        const share = sum > 0 ? Math.round((d.value / sum) * 100) : 0;
+        const on = hover === i;
+        const c = d.color;
+        return (
+          <div
+            key={d.label}
+            onMouseEnter={() => setHover(i)}
+            onMouseLeave={() => setHover(null)}
+            className="cursor-default transition-opacity"
+            style={{ opacity: hover === null || on ? 1 : 0.55 }}
+          >
+            <div className="mb-1.5 flex items-baseline justify-between gap-2 text-[0.8rem]">
+              <span className="inline-flex min-w-0 items-center gap-2 truncate text-muted">
+                <span className="h-2.5 w-2.5 shrink-0 rotate-45 rounded-[2px]" style={{ background: c, boxShadow: `0 0 8px -1px ${c}` }} />
+                <span className="truncate">{d.label}</span>
+              </span>
+              <span className="shrink-0 font-num text-[0.95rem] font-bold tabular-nums" style={{ color: "var(--brass-hi)", textShadow: "0 0 16px color-mix(in srgb, var(--brass-hi) 34%, transparent)" }}>
+                ${cents(d.value)}
+                {sum > 0 ? <span className="ml-1.5 text-[0.76rem] font-normal text-faint">· {share}%</span> : null}
+              </span>
+            </div>
+            {/* Rigole encaissée : le lingot vient s'y loger, en relief. */}
+            <div
+              className="relative h-9 w-full rounded-full"
+              style={{
+                background: "linear-gradient(180deg, color-mix(in srgb,#000 34%,var(--surface-2)), color-mix(in srgb,#000 10%,var(--surface-2)))",
+                boxShadow: "inset 0 2px 5px rgba(0,0,0,.55), inset 0 -1px 0 color-mix(in srgb,#fff 6%,transparent)",
+              }}
+            >
+              {pct > 0 ? (
+                <div
+                  className="iwc-glint absolute inset-y-[3px] left-[3px] overflow-hidden rounded-full"
+                  style={{
+                    width: `calc(${pct}% - 6px)`,
+                    minWidth: "22px",
+                    animationDelay: `${i * 0.45}s`,
+                    background: `linear-gradient(180deg, color-mix(in srgb,#fff 42%,transparent), transparent 46%, color-mix(in srgb,#000 30%,transparent)), linear-gradient(90deg, color-mix(in srgb,${c} 50%,#000), ${c})`,
+                    boxShadow: `inset 0 1px 0 color-mix(in srgb,#fff 55%,transparent), inset 0 -2px 5px color-mix(in srgb,#000 42%,transparent), 0 3px 8px -2px rgba(0,0,0,.55), 0 0 ${on ? 26 : 15}px -6px ${c}`,
+                    transition: "box-shadow .25s ease, width .55s cubic-bezier(.22,.61,.36,1)",
+                  }}
+                />
+              ) : null}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Donut (répartition), légende à libellés directs + survol (segment mis en
 //    avant, centre affiche le libellé/valeur/part survolés). ──
 export function Donut({ data }: { data: { label: string; value: number; color: string }[] }) {
