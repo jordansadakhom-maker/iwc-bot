@@ -1093,7 +1093,7 @@ export async function getFinances(): Promise<FinancesData> {
 // l'état ACTUEL comme dernier point. Chaque coffre est reporté (forward-fill)
 // tant qu'un nouvel événement ne le modifie pas. La courbe se remplit au fil des
 // dépôts/retraits — vide tant qu'aucun mouvement n'a été enregistré.
-export type TresoPoint = { t: number; commun: number; legal: number; illegal: number; total: number };
+export type TresoPoint = { t: number; commun: number; legal: number; illegal: number; vanhorn: number; total: number };
 export type TresorerieEvolution = { points: TresoPoint[] };
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -1101,35 +1101,62 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 export async function getTresorerieEvolution(): Promise<TresorerieEvolution> {
   const admin = createAdminClient();
   if (!admin) return { points: [] };
-  const [evR, coffreR] = await Promise.all([
+  const [evR, vhMvtR, coffreR, vhR] = await Promise.all([
     admin.from("Event").select("cibleLibelle,apres,createdAt").eq("aggregate", "coffre").order("createdAt", { ascending: true }).limit(1000),
+    // Journal RICHE de Van Horn (ventes/dépenses de l'armurerie) → la courbe
+    // démarre pleine grâce à cet historique déjà existant.
+    admin.from("ArmurerieMouvementCoffre").select("sens,montant,createdAt").order("createdAt", { ascending: true }).limit(2000),
     admin.from("Coffre").select("id,solde"),
+    admin.from("ArmurerieCoffre").select("solde").eq("id", "vanhorn").maybeSingle(),
   ]);
   const cur = (id: string) => Number((coffreR.data || []).find((c: { id: string; solde: number }) => c.id === id)?.solde) || 0;
-  const now = { commun: cur("coffre_commun"), legal: cur("coffre_legal"), illegal: cur("coffre_illegal") };
+  const nowVh = vhR.error || !vhR.data ? 0 : Number((vhR.data as { solde: number }).solde) || 0;
+  const now = { commun: cur("coffre_commun"), legal: cur("coffre_legal"), illegal: cur("coffre_illegal"), vanhorn: nowVh };
 
-  const quelCoffre = (lib?: string | null): "commun" | "legal" | "illegal" | null => {
+  type Coffre = "commun" | "legal" | "illegal" | "vanhorn";
+  type Upd = { t: number; coffre: Coffre; solde: number };
+  const updates: Upd[] = [];
+
+  // 1) Coffres principaux : événements « coffre.ajuste » (chacun porte le solde APRÈS).
+  const quelCoffre = (lib?: string | null): Coffre | null => {
     const s = String(lib || "").toLowerCase();
     if (s.includes("commun")) return "commun";
     if (s.includes("illegal") || s.includes("confr")) return "illegal";
     if (s.includes("legal") || s.includes("iron")) return "legal";
     return null;
   };
-
-  const pts: TresoPoint[] = [];
-  let commun = 0, legal = 0, illegal = 0, started = false;
   for (const e of (evR.error ? [] : (evR.data || [])) as { cibleLibelle?: string | null; apres?: unknown; createdAt?: string | null }[]) {
     const w = quelCoffre(e.cibleLibelle);
     const solde = e.apres && typeof e.apres === "object" ? Number((e.apres as { solde?: unknown }).solde) : NaN;
     if (!w || !Number.isFinite(solde) || !e.createdAt) continue;
-    if (w === "commun") commun = solde; else if (w === "legal") legal = solde; else illegal = solde;
-    started = true;
-    pts.push({ t: new Date(e.createdAt).getTime(), commun, legal, illegal, total: r2(commun + legal + illegal) });
+    updates.push({ t: new Date(e.createdAt).getTime(), coffre: w, solde });
   }
-  // Point « maintenant » : les soldes réels de la base (ancrage exact du présent).
-  pts.push({ t: Date.now(), commun: now.commun, legal: now.legal, illegal: now.illegal, total: r2(now.commun + now.legal + now.illegal) });
-  // Sans historique exploitable, un seul point ne fait pas une courbe.
-  return { points: started ? pts : [] };
+
+  // 2) Van Horn : cumul du journal de mouvements (entrée +, sortie −).
+  let vh = 0;
+  for (const m of (vhMvtR.error ? [] : (vhMvtR.data || [])) as { sens?: string; montant?: unknown; createdAt?: string | null }[]) {
+    if (!m.createdAt) continue;
+    const mt = Number(m.montant) || 0;
+    vh = r2(vh + (m.sens === "entree" ? mt : -mt));
+    updates.push({ t: new Date(m.createdAt).getTime(), coffre: "vanhorn", solde: vh });
+  }
+
+  if (!updates.length) return { points: [] };
+
+  // Fusion chronologique + report (forward-fill) de chaque coffre entre deux points.
+  updates.sort((a, b) => a.t - b.t);
+  let commun = 0, legal = 0, illegal = 0, vanhorn = 0;
+  const pts: TresoPoint[] = [];
+  for (const u of updates) {
+    if (u.coffre === "commun") commun = u.solde;
+    else if (u.coffre === "legal") legal = u.solde;
+    else if (u.coffre === "illegal") illegal = u.solde;
+    else vanhorn = u.solde;
+    pts.push({ t: u.t, commun, legal, illegal, vanhorn, total: r2(commun + legal + illegal + vanhorn) });
+  }
+  // Point « maintenant » : soldes réels de la base (ancrage exact du présent).
+  pts.push({ t: Date.now(), commun: now.commun, legal: now.legal, illegal: now.illegal, vanhorn: now.vanhorn, total: r2(now.commun + now.legal + now.illegal + now.vanhorn) });
+  return { points: pts };
 }
 
 // ── Portefeuilles perso + journal de trésorerie ──────────────────

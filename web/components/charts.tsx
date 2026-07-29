@@ -71,7 +71,7 @@ export function BarresH({
 //    style de la « finance de l'armurerie » : aire sous le total, lignes par
 //    coffre, grille + axes en $, infobulle datée au survol. Nourrie par les
 //    événements « coffre.ajuste » (voir getTresorerieEvolution). ──
-type TP = { t: number; commun: number; legal: number; illegal: number; total: number };
+type TP = { t: number; commun: number; legal: number; illegal: number; vanhorn: number; total: number };
 
 function niceMax(v: number): number {
   if (v <= 0) return 1;
@@ -101,8 +101,9 @@ export function TresorerieChart({ points }: { points: TP[] }) {
     { key: "commun" as const, label: "Commun", color: "#c98500", width: 1.6, dash: "" },
     { key: "legal" as const, label: "Iron Wolf", color: "#3987e5", width: 1.6, dash: "5 3" },
     { key: "illegal" as const, label: "Confrérie", color: "#e66767", width: 1.6, dash: "1.5 3.5" },
+    { key: "vanhorn" as const, label: "Van Horn", color: "#9085e9", width: 1.6, dash: "3 3" },
   ];
-  const rawMax = Math.max(...points.flatMap((p) => [p.total, p.commun, p.legal, p.illegal]), 1);
+  const rawMax = Math.max(...points.flatMap((p) => [p.total, p.commun, p.legal, p.illegal, p.vanhorn]), 1);
   const ymax = niceMax(rawMax);
   const span = ymax || 1;
   const x = (i: number) => PL + (n === 1 ? pw / 2 : (i / (n - 1)) * pw);
@@ -159,6 +160,7 @@ export function TresorerieChart({ points }: { points: TP[] }) {
           <div className="flex items-center justify-between gap-3"><span style={{ color: "#c98500" }}>Commun</span><span className="font-num">${cents(hp.commun)}</span></div>
           <div className="flex items-center justify-between gap-3"><span style={{ color: "#3987e5" }}>Iron Wolf</span><span className="font-num">${cents(hp.legal)}</span></div>
           <div className="flex items-center justify-between gap-3"><span style={{ color: "#e66767" }}>Confrérie</span><span className="font-num">${cents(hp.illegal)}</span></div>
+          <div className="flex items-center justify-between gap-3"><span style={{ color: "#9085e9" }}>Van Horn</span><span className="font-num">${cents(hp.vanhorn)}</span></div>
           <div className="mt-1 flex items-center justify-between gap-3 border-t border-border pt-1"><span className="font-semibold">Total</span><span className="font-num font-semibold" style={{ color: "var(--brass-hi)" }}>${cents(hp.total)}</span></div>
         </div>
       ) : null}
