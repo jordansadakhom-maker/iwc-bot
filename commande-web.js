@@ -369,9 +369,12 @@ const HANDLERS = {
     if (c.remuVerseAuCoffre) return { ok: false, message: 'Contrat déjà honoré' };
     const montant = Math.round(Number(p.montant) || 0);
     if (!Number.isFinite(montant) || montant <= 0) return { ok: false, message: 'Montant invalide' };
-    db.coffre = (Math.round(Number(db.coffre) || 0)) + montant;
     c.suivi = 'Honoré'; c.remuVerseAuCoffre = montant; c.honoreAt = Date.now(); c.status = c.status || 'signe';
     const pole = (c.cc || c.type === 'confrerie' || String(c.id).startsWith('CF-')) ? 'illegal' : 'legal';
+    // Crédite le coffre DU PÔLE du contrat (legal = Iron Wolf, illegal = Confrérie),
+    // et non le coffre commun — cohérent avec la vue Finances et coffre.ajuster.
+    if (!db.coffres || typeof db.coffres !== 'object') db.coffres = {};
+    db.coffres[pole] = (Math.round(Number(db.coffres[pole]) || 0)) + montant;
     if (!Array.isArray(db.factures)) db.factures = [];
     const n = db.factures.filter(f => f && f.numero && f.numero !== 'FAC-000').length + 1;
     const numero = `FAC-${String(n).padStart(3, '0')}`;
@@ -388,7 +391,7 @@ const HANDLERS = {
     try {
       const nom = _s(c.objet || c.cible, 120) || 'Contrat';
       supa.journaliserEvenement && supa.journaliserEvenement({ aggregate: 'contrat', type: 'contrat.honore', cibleId: String(c.id), cibleLibelle: nom, actorNom: p.auteurNom || 'Site web', payload: { montant, facture: numero } });
-      supa.creerNotification && supa.creerNotification({ type: 'contrat-statut', titre: `Contrat honoré — ${nom}`, corps: `+${montant}$ au coffre · ${numero}`, lien: '/operations', cibleId: String(c.id), roleCible: 'officier', ref: `contrat-honore-${c.id}` });
+      supa.creerNotification && supa.creerNotification({ type: 'contrat-statut', titre: `Contrat honoré — ${nom}`, corps: `+${montant}$ au coffre ${pole === 'illegal' ? 'Confrérie' : 'Iron Wolf'} · ${numero}`, lien: '/operations', cibleId: String(c.id), roleCible: 'officier', ref: `contrat-honore-${c.id}` });
     } catch {}
     return { ok: true, message: `Contrat honoré : +${montant}$ au coffre · ${numero}` };
   },

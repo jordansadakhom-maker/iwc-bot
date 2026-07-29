@@ -3,7 +3,7 @@
 import { envoyerCommande, type CommandeResult } from "@/lib/commandes";
 import { supprimerFiable } from "@/lib/suppression";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getActeur } from "@/lib/authz";
+import { getActeur, requireOfficier } from "@/lib/authz";
 import { suggererAssignation, type CandidatMembre, type Suggestion } from "@/lib/attribution";
 
 // Actions sur les opérations → file de commandes, appliquées par le bot puis
@@ -76,7 +76,10 @@ export async function terminerOperation(
   data: { resultat?: string; butin?: string; pertes?: string; debrief?: string; montantPrime?: number }
 ): Promise<CommandeResult> {
   if (!id) return { ok: false, error: "Opération introuvable." };
-  return envoyerCommande("operation.terminer", { id, ...data, montantPrime: Math.max(0, Math.round(Number(data.montantPrime) || 0)) });
+  // Verse une prime au coffre → réservé à l'encadrement (officier/Direction).
+  if (!(await requireOfficier())) return { ok: false, error: "Action réservée aux officiers et à la Direction." };
+  // On ATTEND le verdict réel du bot (le versement au coffre a-t-il pris ?).
+  return envoyerCommande("operation.terminer", { id, ...data, montantPrime: Math.max(0, Math.round(Number(data.montantPrime) || 0)) }, { attendre: true });
 }
 
 // ── Contrats ── (mêmes champs que le formulaire Discord)
@@ -112,9 +115,12 @@ export async function majSuiviContrat(id: string, suivi: string): Promise<Comman
 // Honorer : crédite le coffre + crée une facture (via le bot).
 export async function honorerContrat(id: string, montant: number): Promise<CommandeResult> {
   if (!id) return { ok: false, error: "Contrat introuvable." };
+  // Crédite le coffre + crée une facture → réservé à l'encadrement.
+  if (!(await requireOfficier())) return { ok: false, error: "Action réservée aux officiers et à la Direction." };
   const m = Math.round(Number(montant) || 0);
   if (m <= 0) return { ok: false, error: "Indique un montant à verser au coffre." };
-  return envoyerCommande("contrat.honorer", { id, montant: m });
+  // On ATTEND le verdict réel du bot (évite le « faux succès »).
+  return envoyerCommande("contrat.honorer", { id, montant: m }, { attendre: true });
 }
 
 // Envoyer une FEUILLE DE CONTRAT d'opération au commanditaire en MP Discord

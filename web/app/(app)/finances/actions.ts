@@ -4,7 +4,7 @@ import { envoyerCommande, type CommandeResult } from "@/lib/commandes";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { supprimerFiable } from "@/lib/suppression";
 import { round2 } from "@/lib/format";
-import { requireDirection } from "@/lib/authz";
+import { requireDirection, requireOfficier } from "@/lib/authz";
 import { emettreEvenement } from "@/lib/evenements";
 
 // Ajuste un coffre (dépôt / retrait / montant exact).
@@ -19,6 +19,9 @@ export async function ajusterCoffre(
 ): Promise<CommandeResult & { solde?: number }> {
   if (!["commun", "legal", "illegal"].includes(cible)) return { ok: false, error: "Coffre inconnu." };
   if (!Number.isFinite(montant) || montant < 0) return { ok: false, error: "Montant invalide." };
+  // Bouger les fonds de la compagnie → réservé à l'encadrement (officier/Direction),
+  // fail-closed. (Auparavant : tout membre connecté pouvait ajuster les coffres.)
+  if (!(await requireOfficier())) return { ok: false, error: "Action réservée aux officiers et à la Direction." };
   const m = round2(montant);
 
   // 1) Reflet instantané dans la table Coffre (service role → contourne RLS).
