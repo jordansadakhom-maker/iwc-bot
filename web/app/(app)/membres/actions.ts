@@ -3,6 +3,8 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getActeur } from "@/lib/authz";
 import { emettreEvenement } from "@/lib/evenements";
+import { envoyerCommande, type CommandeResult } from "@/lib/commandes";
+import { TOUS_GRADES } from "@/lib/grades";
 import type { FicheRH } from "@/lib/queries";
 
 function newId(p: string) { return `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
@@ -120,4 +122,26 @@ export async function assignerMetierCarte(membreId: string, metier: "medecine" |
     payload: { metier, actif, par: acteur.nomIC },
   });
   return { ok: true };
+}
+
+// Change le GRADE Discord d'un membre depuis le site. Le bot fait autorité :
+// on lui envoie la commande « membre.grade » et on ATTEND son verdict réel
+// (succès seulement si le rôle a bien été posé côté Discord). Réservé à la
+// Direction — modifier des rôles Discord est une action sensible.
+export async function changerGradeMembre(membreId: string, grade: string): Promise<CommandeResult> {
+  const id = String(membreId || "").trim();
+  const g = String(grade || "").trim();
+  if (!id) return { ok: false, error: "Membre introuvable." };
+  const acteur = await getActeur();
+  if (!acteur || !acteur.direction) return { ok: false, error: "Changer un grade est réservé à la Direction." };
+  if (!TOUS_GRADES.some((x) => x.nom === g)) return { ok: false, error: "Grade inconnu." };
+
+  const r = await envoyerCommande("membre.grade", { membreId: id, grade: g }, { attendre: true });
+  if (r.ok && !r.enAttente) {
+    await emettreEvenement({
+      aggregate: "membre", type: "membre.grade", cibleId: id, cibleLibelle: id,
+      apres: { grade: g }, payload: { par: acteur.nomIC },
+    });
+  }
+  return r;
 }

@@ -23,6 +23,12 @@ let repertoire = null; try { repertoire = require('./repertoire'); } catch {}
 let telegramme = null; try { telegramme = require('./telegramme'); } catch {}
 let inventaire = null; try { inventaire = require('./inventaire'); } catch {}
 let absences = null; try { absences = require('./absences'); } catch {}
+// Grades ↔ rôles Discord (changement de grade depuis le site). Chargé en
+// best-effort : sans ce module, le handler membre.grade renvoie une erreur claire.
+let _notionV3 = {}; try { _notionV3 = require('./notion-modules-v3'); } catch {}
+const GRADE_ROLES = _notionV3.ROLES || {};
+const GRADES_LEGAL = _notionV3.GRADES_LEGAL || [];
+const GRADES_ILLEGAL = _notionV3.GRADES_ILLEGAL || [];
 function _normInv(x) { return String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, ''); }
 
 // ── Utilitaires ──
@@ -455,6 +461,50 @@ function _statutTraque(s) { s = String(s || '').toLowerCase(); return _STATUTS_T
 
 // ── Renseignement + Contacts : handlers additionnels ──
 Object.assign(HANDLERS, {
+  // Change le GRADE Discord d'un membre depuis le site (Direction). Retire tous
+  // les rôles de grade puis pose le nouveau, VÉRIFIE que ça a pris (hiérarchie /
+  // permission), et met à jour la db locale (rang/pole/historique) → la synchro
+  // reflète le changement. Renvoie un verdict lisible au site (attente active).
+  'membre.grade': async (db, p, ctx) => {
+    const guild = ctx && ctx.guild;
+    if (!guild) return { ok: false, message: 'Serveur Discord indisponible.' };
+    const userId = _s(p.membreId, 40);
+    const nouveauGrade = _s(p.grade, 60);
+    if (!userId || !nouveauGrade) return { ok: false, message: 'Membre ou grade manquant.' };
+    const gradeInfo = [...GRADES_LEGAL, ...GRADES_ILLEGAL].find((g) => g.nom === nouveauGrade);
+    if (!gradeInfo || !GRADE_ROLES[gradeInfo.roleKey]) return { ok: false, message: `Grade inconnu : ${nouveauGrade}.` };
+    const newRoleId = GRADE_ROLES[gradeInfo.roleKey];
+    const gm = await guild.members.fetch(userId).catch(() => null);
+    if (!gm) return { ok: false, message: 'Membre introuvable sur le serveur Discord.' };
+    const newRole = guild.roles.cache.get(newRoleId);
+    if (!newRole) return { ok: false, message: 'Rôle de grade introuvable côté Discord.' };
+    // Hiérarchie : le bot doit être AU-DESSUS du rôle cible pour pouvoir l'attribuer.
+    const me = guild.members.me || (await guild.members.fetchMe().catch(() => null));
+    if (me && newRole.position >= me.roles.highest.position) {
+      return { ok: false, message: `Le bot ne peut pas attribuer « ${nouveauGrade} » : ce rôle est au-dessus du sien. Remonte le rôle du bot dans les réglages Discord.` };
+    }
+    // Retire les autres rôles de grade, ajoute le nouveau.
+    const allGradeRoleIds = [...GRADES_LEGAL, ...GRADES_ILLEGAL].map((g) => GRADE_ROLES[g.roleKey]).filter(Boolean);
+    for (const rid of allGradeRoleIds) {
+      if (rid === newRoleId) continue;
+      const role = guild.roles.cache.get(rid);
+      if (role && gm.roles.cache.has(rid)) { try { await gm.roles.remove(role); } catch {} }
+    }
+    try { await gm.roles.add(newRole); } catch (e) { return { ok: false, message: `Échec de l'attribution : ${(e && e.message) || 'permission ?'}` }; }
+    // Vérifie que le rôle est RÉELLEMENT posé (sinon hiérarchie/permission).
+    const fresh = await guild.members.fetch(userId).catch(() => gm);
+    if (!fresh.roles.cache.has(newRoleId)) return { ok: false, message: "Le rôle n'a pas pu être appliqué (permission « Gérer les rôles » ou hiérarchie)." };
+    // Reflet dans la db locale → la resynchro post-lot met le site à jour.
+    const m = db.members && db.members[userId];
+    if (m) {
+      if (!Array.isArray(m.historiqueGrades)) m.historiqueGrades = [];
+      if ((m.rang || '—') !== nouveauGrade) m.historiqueGrades.push({ de: m.rang || '—', vers: nouveauGrade, par: _s(p.auteurNom, 80) || 'Site', at: new Date().toISOString() });
+      m.rang = nouveauGrade;
+      m.pole = GRADES_ILLEGAL.some((g) => g.nom === nouveauGrade) ? 'illegal' : 'legal';
+      m.gradeDepuis = new Date().toISOString();
+    }
+    return { ok: true, message: `${(fresh.user && fresh.user.username) || userId} est désormais ${nouveauGrade}.` };
+  },
   // Rapports d'informateurs (db.informateurs)
   'rapport.create': (db, p) => {
     const info = _s(p.info, 4000);
