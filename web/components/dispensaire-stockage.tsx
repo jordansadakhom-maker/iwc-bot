@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Boxes, Plus, Search, Check, Pencil, Trash2, AlertTriangle, Archive, ArrowDownRight, ArrowUpRight, History, Lock } from "lucide-react";
+import { Boxes, Plus, Search, Check, Pencil, Trash2, AlertTriangle, Archive, ArrowDownRight, ArrowUpRight, History, Lock, Layers } from "lucide-react";
 import { CATEGORIES, catLabel, enAlerte, type StockData, type StockItem, type StockMouvement } from "@/lib/dispensaire-stock-const";
 import { Modal, Flash, Champ, Picker, PhotoField, inputCls } from "@/components/edit-ui";
 import { VideRegistre } from "@/components/dispensaire-ui";
@@ -22,9 +22,17 @@ export function DispensaireStockage({ data }: { data: StockData }) {
   const [cat, setCat] = useState("");
   const [coffreF, setCoffreF] = useState("");
   const [seulAlerte, setSeulAlerte] = useState(false);
+  const [vue, setVue] = useState<"coffre" | "global">("coffre");
   const [flash, setFlash] = useState<FlashMsg>(null);
   const [form, setForm] = useState<StockItem | "new" | null>(null);
   const [delId, setDelId] = useState<string | null>(null);
+
+  // Re-synchronise l'état avec la base après chaque router.refresh() : ce que
+  // l'écran montre = ce qui est RÉELLEMENT enregistré (plus de valeur « fantôme »
+  // qui resterait affichée si une écriture avait échoué). `data` ne change
+  // d'identité qu'au rendu serveur (montage + refresh), jamais sur un simple
+  // re-render client — donc pas de scintillement pendant la saisie.
+  useEffect(() => { setItems(data.items); setMvts(data.mouvements); }, [data]);
 
   const query = norm(q.trim());
   const liste = useMemo(() => items.filter((it) =>
@@ -43,6 +51,26 @@ export function DispensaireStockage({ data }: { data: StockData }) {
     for (const it of liste) { const k = (it.coffre || "").trim() || "Sans coffre"; (m.get(k) || m.set(k, []).get(k))!.push(it); }
     return [...m.entries()].sort((a, b) => (a[0] === "Sans coffre" ? 1 : b[0] === "Sans coffre" ? -1 : a[0].localeCompare(b[0])));
   }, [liste]);
+
+  // Vue globale : matériel total disponible par article, tous coffres confondus
+  // (ex : Bandages → Coffre A 25 + B 40 + C 18 = 83). Respecte la recherche et la
+  // catégorie, mais ignore le filtre par coffre (sans objet ici). Regroupe par nom
+  // normalisé : le même article rangé dans plusieurs coffres est additionné.
+  const globaux = useMemo(() => {
+    const m = new Map<string, { nom: string; unite: string | null; total: number; seuil: number; parCoffre: { coffre: string; stock: number }[] }>();
+    for (const it of items) {
+      if (cat && it.categorie !== cat) continue;
+      if (query && !norm([it.nom, it.coffre, it.note, catLabel(it.categorie)].filter(Boolean).join(" ")).includes(query)) continue;
+      const k = norm(it.nom.trim());
+      const e = m.get(k) || { nom: it.nom, unite: it.unite, total: 0, seuil: 0, parCoffre: [] };
+      e.total += it.stock;
+      e.seuil += it.seuil;
+      e.parCoffre.push({ coffre: (it.coffre || "").trim() || "Non rangé", stock: it.stock });
+      if (!e.unite && it.unite) e.unite = it.unite;
+      m.set(k, e);
+    }
+    return [...m.values()].map((e) => ({ ...e, parCoffre: e.parCoffre.sort((a, b) => b.stock - a.stock) })).sort((a, b) => a.nom.localeCompare(b.nom));
+  }, [items, cat, query]);
 
   async function enregistrer(vals: Record<string, string>, editing: StockItem | null) {
     const clean = { ...vals, stock: Number(vals.stock) || 0, stockFixe: Number(vals.stockFixe) || 0, seuil: Number(vals.seuil) || 0 };
@@ -100,22 +128,60 @@ export function DispensaireStockage({ data }: { data: StockData }) {
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[180px] flex-1"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" /><input className={inputCls + " pl-8"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un article, un coffre…" /></div>
         <select className={inputCls + " max-w-[170px]"} value={cat} onChange={(e) => setCat(e.target.value)}><option value="">Toutes catégories</option>{CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select>
-        {coffres.length ? <select className={inputCls + " max-w-[170px]"} value={coffreF} onChange={(e) => setCoffreF(e.target.value)}><option value="">Tous les coffres</option>{coffres.map((c) => <option key={c} value={c}>{c}</option>)}</select> : null}
+        {vue === "coffre" && coffres.length ? <select className={inputCls + " max-w-[170px]"} value={coffreF} onChange={(e) => setCoffreF(e.target.value)}><option value="">Tous les coffres</option>{coffres.map((c) => <option key={c} value={c}>{c}</option>)}</select> : null}
+        <div className="inline-flex rounded-lg border border-border bg-surface-2 p-0.5">
+          {([["coffre", "Par coffre", Archive], ["global", "Vue globale", Layers]] as const).map(([k, lbl, Ic]) => (
+            <button key={k} onClick={() => setVue(k)} className="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[0.74rem] font-semibold transition" style={vue === k ? { background: "var(--accent)", color: "#000" } : { color: "var(--muted)" }}><Ic className="h-3.5 w-3.5" /> {lbl}</button>
+          ))}
+        </div>
       </div>
 
-      {/* Articles par coffre */}
-      {liste.length === 0 ? (
-        items.length
-          ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">Aucun article ne correspond à ta recherche.</p>
-          : <VideRegistre icon={Boxes} titre="Les coffres sont encore vides" sous="Ajoute un premier article — remède, matériel ou matière — et l'inventaire se tiendra à jour, coffre par coffre." />
-      ) : groupes.map(([coffre, its]) => (
-        <section key={coffre}>
-          <div className="mb-1.5 flex items-center gap-1.5 text-[0.74rem] font-semibold uppercase tracking-[0.05em] text-faint"><Archive className="h-3.5 w-3.5" /> {coffre} <span className="font-num">({its.length})</span></div>
-          <div className="grid gap-2.5 lg:grid-cols-2">
-            {its.map((it) => <ItemCard key={it.id} it={it} canEdit={canEdit} onEdit={() => setForm(it)} onDel={() => setDelId(it.id)} onAdjust={ajuster} />)}
-          </div>
-        </section>
-      ))}
+      {vue === "global" ? (
+        /* Vue globale — matériel total disponible (somme tous coffres). */
+        globaux.length === 0 ? (
+          items.length
+            ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">Aucun article ne correspond à ta recherche.</p>
+            : <VideRegistre icon={Layers} titre="Aucun article en stock" sous="Ajoute des articles — leur total, tous coffres confondus, s'affichera ici." />
+        ) : (
+          <section className="rounded-[14px] border border-border bg-surface p-3.5">
+            <div className="mb-1 flex items-center gap-2 text-[0.9rem] font-semibold"><Layers className="h-4 w-4 text-accent" /> Matériel total disponible <span className="font-num text-[0.8rem] text-faint">({globaux.length})</span></div>
+            <p className="mb-3 text-[0.72rem] text-faint">Somme des quantités de chaque article, <b>tous coffres confondus</b> — pour savoir d&apos;un coup d&apos;œil s&apos;il faut produire ou réapprovisionner.</p>
+            <div className="grid gap-2.5 lg:grid-cols-2">
+              {globaux.map((g) => {
+                const alerte = g.seuil > 0 && g.total < g.seuil;
+                return (
+                  <div key={g.nom} className="rounded-[12px] border p-3" style={{ borderColor: alerte ? "color-mix(in srgb,var(--oxblood) 50%,var(--border))" : "var(--border)", background: "var(--surface-2)" }}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5"><span className="text-[0.9rem] font-semibold">{g.nom}</span>{alerte ? <span className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[0.6rem] font-bold text-white" style={{ background: "var(--oxblood)" }}><AlertTriangle className="h-2.5 w-2.5" /> alerte</span> : null}</div>
+                      <span className="font-num text-[1.4rem] font-bold leading-none" style={{ color: alerte ? "var(--oxblood)" : "var(--ink)" }}>{g.total}<span className="ml-1 text-[0.62rem] font-normal text-faint">{g.unite || "u"}</span></span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {g.parCoffre.map((pc, i) => (
+                        <span key={i} className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-2 py-0.5 text-[0.7rem]"><span className="text-faint">{pc.coffre}</span> <b className="font-num">{pc.stock}</b></span>
+                      ))}
+                    </div>
+                    {g.seuil > 0 ? <div className="mt-1.5 text-[0.66rem] text-faint">Seuil cumulé : <b className="font-num">{g.seuil}</b></div> : null}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )
+      ) : (
+        /* Vue par coffre. */
+        liste.length === 0 ? (
+          items.length
+            ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">Aucun article ne correspond à ta recherche.</p>
+            : <VideRegistre icon={Boxes} titre="Les coffres sont encore vides" sous="Ajoute un premier article — remède, matériel ou matière — et l'inventaire se tiendra à jour, coffre par coffre." />
+        ) : groupes.map(([coffre, its]) => (
+          <section key={coffre}>
+            <div className="mb-1.5 flex items-center gap-1.5 text-[0.74rem] font-semibold uppercase tracking-[0.05em] text-faint"><Archive className="h-3.5 w-3.5" /> {coffre} <span className="font-num">({its.length})</span></div>
+            <div className="grid gap-2.5 lg:grid-cols-2">
+              {its.map((it) => <ItemCard key={it.id} it={it} canEdit={canEdit} onEdit={() => setForm(it)} onDel={() => setDelId(it.id)} onAdjust={ajuster} />)}
+            </div>
+          </section>
+        ))
+      )}
 
       {/* Traçabilité */}
       {mvts.length ? (
