@@ -19,9 +19,11 @@ function money(n: number | null) {
 export function FinancesCoffres({
   cartes,
   connecte,
+  peut = true,
 }: {
   cartes: { cible: Cible; label: string; val: number | null; tone: string }[];
   connecte: boolean;
+  peut?: boolean; // droit d'ajuster (officier/Direction) — sinon lecture seule
 }) {
   const router = useRouter();
   const [edit, setEdit] = useState<{ cible: Cible; label: string; val: number | null } | null>(null);
@@ -45,7 +47,7 @@ export function FinancesCoffres({
               >{connecte ? money(c.val) : "—"}</div>
               <div className="flex items-center justify-between">
                 <span className="text-[0.72rem] text-faint">{connecte ? "À jour" : "En attente de la base"}</span>
-                {connecte ? (
+                {connecte && peut ? (
                   <button onClick={() => setEdit({ cible: c.cible, label: c.label, val: c.val })} className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2 py-1 text-[0.72rem] font-semibold hover:border-border-2">
                     <Pencil className="h-3 w-3" /> Ajuster
                   </button>

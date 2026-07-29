@@ -269,7 +269,9 @@ function EditModal({ contrat, onClose, router }: { contrat: ContratDetail; onClo
   const [confirmDel, setConfirmDel] = useState(false);
   const [suivi, setSuivi] = useState(contrat.suivi || suiviDeStatut(contrat.statut));
   const [honorer, setHonorer] = useState(false);
-  const [montant, setMontant] = useState(String((contrat.remuneration || "").replace(/[^\d]/g, "") || ""));
+  // Pré-remplissage : on prend le PREMIER nombre de la rémunération (et pas la
+  // concaténation de tous les chiffres — « 2000$ + 500 » donnait 2000500).
+  const [montant, setMontant] = useState((String(contrat.remuneration || "").match(/\d+/) || [""])[0]);
   const dejaHonore = !!contrat.remuVerseAuCoffre;
   // Attribution assistée (indicative) : agents recommandés pour staffer le contrat.
   const [suggBusy, setSuggBusy] = useState(false);

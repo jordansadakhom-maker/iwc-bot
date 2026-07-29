@@ -12,6 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function FinancesPage() {
   const [{ connecte, coffres, pole }, fact, porte, acteur, evolution] = await Promise.all([getFinances(), getFactures(), getPortefeuilles(), getActeur(), getTresorerieEvolution()]);
   const peutDirection = !!acteur?.direction;
+  const peutAjusterCoffre = !!acteur?.officier; // officier ou Direction
   const conf = pole === "confrerie";
   // Vue « pôle actif » : coffre commun + le coffre du pôle choisi (le bouton
   // Iron Wolf / Confrérie du header bascule réellement l'affichage).
@@ -26,7 +27,7 @@ export default async function FinancesPage() {
     <>
       <PageHeader titre="Finances" sous="Coffres modifiables — dépôt / retrait" actif={connecte} pole={pole} />
 
-      <FinancesCoffres cartes={cartes} connecte={connecte} />
+      <FinancesCoffres cartes={cartes} connecte={connecte} peut={peutAjusterCoffre} />
 
       {connecte ? (
         (() => {
