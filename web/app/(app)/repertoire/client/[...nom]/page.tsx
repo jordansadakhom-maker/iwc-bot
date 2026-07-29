@@ -9,9 +9,12 @@ const ICONE: Record<string, string> = { Vente: "🔫", Contrat: "📜", "Rendez-
 const money = (n: number) => `$${Math.round(n).toLocaleString("fr-FR")}`;
 const dateFR = (s: string) => { if (!s) return ""; try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", year: "numeric" }).format(new Date(s)); } catch { return ""; } };
 
-export default async function FicheClientPage({ params }: { params: Promise<{ nom: string }> }) {
+export default async function FicheClientPage({ params }: { params: Promise<{ nom: string[] }> }) {
   const { nom } = await params;
-  const cible = decodeURIComponent(nom);
+  // Segment attrape-tout : un nom contenant « / » (ex. « Doc / Compagnie ») est
+  // découpé en plusieurs segments par le routeur → on les rejoint. Les segments
+  // sont déjà décodés par Next (pas de decodeURIComponent à refaire).
+  const cible = (Array.isArray(nom) ? nom : [nom]).join("/");
   const f = await getFicheClient(cible);
 
   const interdit = f.statut === "interdit";
