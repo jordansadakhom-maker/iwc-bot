@@ -80,3 +80,44 @@ export async function majFicheMembre(id: string, fiche: FicheRH): Promise<FicheR
   }
   return { ok: true };
 }
+
+// Attribution d'une FONCTION éditable depuis la Carte métier, sans écraser le
+// reste de la fiche RH. « medecine » = habilitation médecin (Direction) ;
+// « instruction » = spécialité « Instructeur » (officier+). Les autres fonctions
+// (Direction/Officiers/Terrain) dépendent du grade Discord et ne sont pas ici.
+export async function assignerMetierCarte(membreId: string, metier: "medecine" | "instruction", actif: boolean): Promise<FicheResult> {
+  const id = String(membreId || "").trim();
+  if (!id) return { ok: false, error: "Membre introuvable." };
+  const acteur = await getActeur();
+  if (!acteur || !acteur.officier) return { ok: false, error: "Action réservée aux officiers et à la direction." };
+  if (metier === "medecine" && !acteur.direction) return { ok: false, error: "L'habilitation médecin est réservée à la Direction." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+
+  const { data: existant } = await admin.from("Membre").select("nomIC,ficheRH").eq("id", id).maybeSingle();
+  const nomMembre = String(existant?.nomIC || id);
+  const ancienne = (existant?.ficheRH as Record<string, unknown> | null) || {};
+  const clean = (v: unknown, max: number) => String(v ?? "").trim().slice(0, max);
+  const specAncienne = clean(ancienne.specialite, 80);
+  const propre: FicheRH = {
+    specialite: metier === "instruction"
+      ? (actif ? "Instructeur" : (/instruct/i.test(specAncienne) ? "" : specAncienne))
+      : specAncienne,
+    statutInterne: clean(ancienne.statutInterne, 60),
+    salaire: Math.max(0, Math.round(Number(ancienne.salaire) || 0)),
+    notes: clean(ancienne.notes, 1500),
+    medecin: metier === "medecine" ? actif : !!ancienne.medecin,
+  };
+
+  const { error } = await admin.from("Membre").update({ ficheRH: propre }).eq("id", id);
+  if (error) {
+    if (/ficheRH|column|does not exist|schema cache/i.test(error.message)) return { ok: false, error: "La fiche RH n'est pas encore prête côté base — exécute membre-fiche-rh.sql dans Supabase." };
+    return { ok: false, error: "Enregistrement impossible pour le moment." };
+  }
+  await emettreEvenement({
+    aggregate: "membre", type: "membre.metier", cibleId: id, cibleLibelle: nomMembre,
+    avant: ancienne, apres: propre as unknown as Record<string, unknown>,
+    payload: { metier, actif, par: acteur.nomIC },
+  });
+  return { ok: true };
+}
