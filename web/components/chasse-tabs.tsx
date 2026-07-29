@@ -48,7 +48,7 @@ export function ChasseTabs({ stock, marches }: { stock: ChasseData; marches: Mar
           );
         })}
       </div>
-      {tab === "stock" ? <ChasseModule data={stock} /> : <MarchesChasse data={marches} stockRes={stockRes} />}
+      {tab === "stock" ? <ChasseModule data={stock} marches={marches} /> : <MarchesChasse data={marches} stockRes={stockRes} />}
     </div>
   );
 }
