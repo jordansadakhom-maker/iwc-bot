@@ -44,11 +44,7 @@ export function MarchesChasse({ data, stockRes = [] }: { data: MarchesData; stoc
   const [saving, setSaving] = useState<string | null>(null);
 
   const actives = villes.filter((v) => v.actif);
-  // Villes « tarifées » = au moins un prix fixé. On n'affiche QUE celles-là en
-  // colonnes (vue lisible) ; l'admin choisit une ville dans le filtre pour lui
-  // saisir ses premiers prix (elle apparaît alors automatiquement).
-  const villesPricees = actives.filter((v) => Object.values(prix[v.id] || {}).some((p) => p > 0));
-  const colonnes = fVille === "all" ? villesPricees : actives.filter((v) => v.id === fVille);
+  const colonnes = fVille === "all" ? actives : actives.filter((v) => v.id === fVille);
   const query = q.trim().toLowerCase();
 
   const setPrixLocal = (villeId: string, res: string, val: number) =>
@@ -125,18 +121,14 @@ export function MarchesChasse({ data, stockRes = [] }: { data: MarchesData; stoc
 
       {flash ? <Flash tone={flash.t === "ok" ? "good" : "bad"}>{flash.m}</Flash> : null}
 
-      {peut && actives.length && villesPricees.length < actives.length ? (
-        <p className="text-[0.74rem] text-faint">💡 Seules les villes <b>tarifées</b> apparaissent en colonnes. Pour tarifer une ville, choisis-la dans le filtre <b>« Toutes les villes »</b> ci-dessus, puis saisis ses prix.</p>
-      ) : null}
-
-      {/* Total du stock par ville (comparateur global) — villes tarifées seulement */}
-      {aDuStock && totauxVille.some((t) => t.total > 0) ? (
+      {/* Total du stock par ville (comparateur global) */}
+      {aDuStock && actives.length ? (
         <div className="rounded-[14px] border border-border p-3" style={{ background: "linear-gradient(180deg, color-mix(in srgb,var(--brass-hi) 6%,var(--surface)), var(--surface))" }}>
           <div className="mb-2 flex items-center gap-2 text-[0.78rem] font-bold uppercase tracking-[0.06em]" style={{ color: "var(--brass-hi)" }}>
             <Trophy className="h-4 w-4" /> Valeur de ton stock par ville
           </div>
           <div className="flex flex-wrap gap-2">
-            {totauxVille.filter((t) => t.total > 0).map(({ ville, total }, i) => {
+            {totauxVille.map(({ ville, total }, i) => {
               const best = i === 0 && total > 0;
               return (
                 <div key={ville.id} className="rounded-[10px] border px-3 py-2" style={best ? { borderColor: "color-mix(in srgb,var(--brass-hi) 55%,var(--border))", background: "color-mix(in srgb,var(--brass-hi) 12%,transparent)" } : { borderColor: "var(--border)" }}>

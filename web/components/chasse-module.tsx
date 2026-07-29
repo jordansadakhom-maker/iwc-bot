@@ -7,7 +7,6 @@ import {
   ArrowLeftRight, Trash2, SlidersHorizontal, Package, TrendingDown, Clock, Settings2, ScanLine, ChevronDown,
 } from "lucide-react";
 import type { ChasseData, ChasseZone, ChasseStockRow } from "@/lib/chasse";
-import type { MarchesData, VilleMarche } from "@/lib/marches-chasse";
 import type { LigneStock } from "@/lib/vision";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { PhotoDrop } from "@/components/photo-drop";
@@ -70,7 +69,7 @@ const dateFR = (s: string | null) => { if (!s) return ""; try { return new Date(
 const isToday = (s: string | null) => { if (!s) return false; try { const d = new Date(s), n = new Date(); return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate(); } catch { return false; } };
 const zoneNom = (zones: ChasseZone[], id: string) => zones.find((z) => z.id === id)?.nom || id;
 
-export function ChasseModule({ data, marches }: { data: ChasseData; marches?: MarchesData }) {
+export function ChasseModule({ data }: { data: ChasseData }) {
   const router = useRouter();
   // Rendu neutre côté serveur pour les valeurs qui dépendent de l'heure (évite
   // tout décalage d'hydratation) — révélées après montage client.
@@ -265,7 +264,7 @@ export function ChasseModule({ data, marches }: { data: ChasseData; marches?: Ma
       </div>
 
       {vue === "global" ? (
-        <RecapTable ressources={ressources} zones={zones} query={query} catFiltre={catFiltre} prix={prix} onPrix={majPrix} villesMarche={marches?.villes || []} prixMarche={marches?.prix || {}} />
+        <RecapTable ressources={ressources} zones={zones} query={query} catFiltre={catFiltre} prix={prix} onPrix={majPrix} />
       ) : (
         <ZoneVue
           zone={zones.find((z) => z.id === vue)!}
@@ -359,11 +358,10 @@ function AlertesRow({ alertes, zones, totauxZone, onVoir }: {
 // ── Vue globale : tableau récapitulatif (somme automatique) ──────
 // Colonnes « Prix / u. » (éditable) et « Gain » (= Total × prix) → le pied de
 // tableau donne « ce qu'on touche à la fin » (valorisation totale du stock).
-function RecapTable({ ressources, zones, query, catFiltre, prix, onPrix, villesMarche, prixMarche }: {
+function RecapTable({ ressources, zones, query, catFiltre, prix, onPrix }: {
   ressources: { nom: string; cat: string; total: number; zones: Record<string, number>; seuil: number | null }[];
   zones: ChasseZone[]; query: string; catFiltre: string;
   prix: Record<string, number>; onPrix: (cle: string, v: number) => void;
-  villesMarche: VilleMarche[]; prixMarche: Record<string, Record<string, number>>;
 }) {
   const list = ressources.filter((r) => (!query || r.nom.toLowerCase().includes(query)) && (!catFiltre || r.cat === catFiltre));
   if (!list.length) return <p className="px-1 py-8 text-center text-[0.84rem] text-faint">{query || catFiltre ? "Aucune ressource ne correspond." : "Aucune ressource — ajoute-en une, ou importe une photo du stock."}</p>;
@@ -371,12 +369,6 @@ function RecapTable({ ressources, zones, query, catFiltre, prix, onPrix, villesM
   const grand = totaux.reduce((s, n) => s + n, 0);
   const gainDe = (r: (typeof list)[number]) => r.total * (prix[norm(r.nom)] || 0);
   const gainTotal = list.reduce((s, r) => s + gainDe(r), 0);
-  // Prix de rachat par ville — on n'affiche QUE les villes tarifées (≥1 prix),
-  // colonnes lues depuis « Villes & Marchés ». La meilleure ville par ligne est
-  // mise en avant, et le pied donne le total du stock à la vente par ville.
-  const villesPricees = villesMarche.filter((v) => v.actif && Object.values(prixMarche[v.id] || {}).some((p) => p > 0));
-  const prixDe = (villeId: string, nom: string) => prixMarche[villeId]?.[nom] || 0;
-  const totalVilleDe = (villeId: string) => list.reduce((s, r) => s + r.total * prixDe(villeId, r.nom), 0);
   return (
     <div className="overflow-x-auto rounded-[12px] border border-border">
       <table className="w-full min-w-[640px] border-collapse text-left text-[0.85rem]">
@@ -385,7 +377,6 @@ function RecapTable({ ressources, zones, query, catFiltre, prix, onPrix, villesM
             <th className="border-b border-border px-3 py-2 font-semibold">Ressource</th>
             {zones.map((z) => <th key={z.id} className="border-b border-border px-3 py-2 text-right font-semibold">{z.nom}</th>)}
             <th className="border-b border-border px-3 py-2 text-right font-semibold" style={{ color: "var(--accent)" }}>Total</th>
-            {villesPricees.map((v) => <th key={v.id} className="border-b border-border px-3 py-2 text-right font-semibold" style={{ color: "var(--steel)" }} title="Prix de rachat (Villes & Marchés)">{v.nom}</th>)}
             <th className="border-b border-border px-3 py-2 text-right font-semibold">Prix / u.</th>
             <th className="border-b border-border px-3 py-2 text-right font-semibold" style={{ color: "var(--brass-hi)" }}>Gain</th>
           </tr>
@@ -399,7 +390,6 @@ function RecapTable({ ressources, zones, query, catFiltre, prix, onPrix, villesM
                 <td className="border-b border-border px-3 py-2"><span className="mr-1.5">{emoji(r.nom)}</span>{r.nom}{r.seuil != null && r.total <= r.seuil ? <span className="ml-1.5 align-middle text-[0.68rem]" style={{ color: "var(--warn)" }}>▼ seuil {r.seuil}</span> : null}</td>
                 {zones.map((z) => <td key={z.id} className="border-b border-border px-3 py-2 text-right font-num text-muted">{r.zones[z.id] || <span className="text-faint">—</span>}</td>)}
                 <td className="border-b border-border px-3 py-2 text-right font-num font-semibold" style={{ color: "var(--accent)" }}>{r.total}</td>
-                {villesPricees.map((v) => { const p = prixDe(v.id, r.nom); return <td key={v.id} className="border-b border-border px-3 py-2 text-right font-num" style={{ color: p ? "var(--steel)" : "var(--faint)" }}>{p ? `$${p.toFixed(2)}` : "—"}</td>; })}
                 <td className="border-b border-border px-2 py-1.5 text-right">
                   <input
                     type="number" min={0} step="0.01" inputMode="decimal"
@@ -420,7 +410,6 @@ function RecapTable({ ressources, zones, query, catFiltre, prix, onPrix, villesM
             <td className="px-3 py-2">Total</td>
             {totaux.map((t, i) => <td key={i} className="px-3 py-2 text-right font-num text-muted">{t}</td>)}
             <td className="px-3 py-2 text-right font-num" style={{ color: "var(--accent)" }}>{grand}</td>
-            {villesPricees.map((v) => { const tot = totalVilleDe(v.id); return <td key={v.id} className="px-3 py-2 text-right font-num" style={{ color: "var(--steel)" }} title="Total du stock à la vente dans cette ville">{tot ? `$${tot.toFixed(2)}` : "—"}</td>; })}
             <td className="px-3 py-2 text-right text-[0.72rem] text-faint">à la vente →</td>
             <td className="px-3 py-2 text-right font-num" style={{ color: "var(--brass-hi)" }}>${gainTotal.toFixed(2)}</td>
           </tr>
