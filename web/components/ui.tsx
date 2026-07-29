@@ -100,7 +100,7 @@ export function Card({ children, className, delay }: { children: React.ReactNode
   return (
     <section
       className={clsx("rounded-card border border-border bg-surface p-[18px] shadow-card", delay !== undefined && "animate-rise", className)}
-      style={{ background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,#000))", ...(delay !== undefined ? { animationDelay: `${delay}s` } : {}) }}
+      style={{ background: "linear-gradient(180deg,color-mix(in srgb,var(--surface) 94%,var(--brass)),color-mix(in srgb,var(--surface) 88%,#000))", ...(delay !== undefined ? { animationDelay: `${delay}s` } : {}) }}
     >
       {children}
     </section>
