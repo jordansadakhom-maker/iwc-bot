@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Gauge, Shield, GraduationCap, Cross, Crosshair, Target, Users, UserPlus, Loader2, Check, X, type LucideIcon } from "lucide-react";
+import { Gauge, Shield, GraduationCap, Cross, Crosshair, Target, Users, UserPlus, Loader2, Check, X, ShieldCheck, type LucideIcon } from "lucide-react";
 import { Card, CardHeader, Badge } from "@/components/ui";
 import { Modal, Flash } from "@/components/edit-ui";
 import type { Cartographie, MetierStat, MembrePuce, Couverture } from "@/lib/carte-metier";
 import type { MembreAssign } from "@/lib/carte-metier-data";
-import { assignerMetierCarte } from "@/app/(app)/membres/actions";
+import { assignerMetierCarte, changerGradeMembre } from "@/app/(app)/membres/actions";
+import { GRADES_LEGAL, GRADES_ILLEGAL } from "@/lib/grades";
 
 type MetierAssignable = "medecine" | "instruction";
 const ICONE: Record<string, LucideIcon> = {
@@ -68,11 +69,19 @@ function CarteMetier({ s, peutAssigner, onAssigner }: { s: MetierStat; peutAssig
 
 export function CarteMetierVue({ carto, membres, peut }: { carto: Cartographie; membres: MembreAssign[]; peut: { direction: boolean; officier: boolean } }) {
   const [assign, setAssign] = useState<MetierAssignable | null>(null);
+  const [gradeOpen, setGradeOpen] = useState(false);
   const lacunes = carto.metiers.filter((m) => m.couverture !== "ok");
   const peutFor = (metier: MetierAssignable) => (metier === "medecine" ? peut.direction : peut.officier);
 
   return (
     <div className="flex flex-col gap-4">
+      {peut.direction ? (
+        <div className="flex justify-end">
+          <button onClick={() => setGradeOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[0.8rem] font-semibold transition hover:brightness-110" style={{ color: "var(--accent)", borderColor: "color-mix(in srgb,var(--accent) 45%,var(--border))", background: "color-mix(in srgb,var(--accent) 10%,transparent)" }}>
+            <ShieldCheck className="h-4 w-4" /> Gérer les grades
+          </button>
+        </div>
+      ) : null}
       {lacunes.length > 0 ? (
         <div className="rounded-card border border-border bg-surface p-3.5 text-[0.85rem] shadow-card" style={{ borderColor: "color-mix(in srgb,var(--warn) 35%,var(--border))" }}>
           <b>À surveiller :</b>{" "}
@@ -106,7 +115,73 @@ export function CarteMetierVue({ carto, membres, peut }: { carto: Cartographie; 
       </p>
 
       {assign ? <AssignModal metier={assign} membres={membres} onClose={() => setAssign(null)} /> : null}
+      {gradeOpen ? <GradeModal membres={membres} onClose={() => setGradeOpen(false)} /> : null}
     </div>
+  );
+}
+
+function GradeModal({ membres, onClose }: { membres: MembreAssign[]; onClose: () => void }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [flash, setFlash] = useState<{ t: "ok" | "bad"; m: string } | null>(null);
+  const [q, setQ] = useState("");
+  const [grades, setGrades] = useState<Record<string, string>>({}); // id → grade choisi (optimiste)
+  const query = q.trim().toLowerCase();
+  const liste = membres.filter((m) => !query || m.nom.toLowerCase().includes(query) || (m.grade || "").toLowerCase().includes(query));
+
+  async function appliquer(m: MembreAssign, grade: string) {
+    if (!grade || grade === (grades[m.id] ?? m.grade)) return;
+    setBusy(m.id);
+    setGrades((g) => ({ ...g, [m.id]: grade }));
+    const r = await changerGradeMembre(m.id, grade);
+    setBusy(null);
+    if (!r.ok) {
+      setGrades((g) => ({ ...g, [m.id]: m.grade || "" }));
+      setFlash({ t: "bad", m: r.error || "Changement impossible." });
+    } else if (r.enAttente) {
+      setFlash({ t: "ok", m: "Envoyé au bot — le grade sera appliqué dans un instant." });
+    } else {
+      setFlash({ t: "ok", m: r.message || `${m.nom} → ${grade}.` });
+      router.refresh();
+    }
+  }
+
+  return (
+    <Modal titre="🛡️ Gérer les grades" onClose={onClose} max={560}>
+      <div className="flex flex-col gap-3">
+        <p className="text-[0.8rem] text-muted">Change le grade Discord d&apos;un membre. Le bot applique le rôle et confirme. <b>Réservé à la Direction.</b> Le bot doit avoir « Gérer les rôles » et son rôle au-dessus des grades visés.</p>
+        {flash ? <Flash tone={flash.t === "ok" ? "good" : "bad"}>{flash.m}</Flash> : null}
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un membre…" className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-[0.85rem] outline-none focus:border-border-2" />
+        <div className="flex max-h-[48vh] flex-col gap-1 overflow-y-auto pr-1">
+          {liste.length === 0 ? <p className="px-1 py-6 text-center text-[0.82rem] text-faint">Aucun membre.</p> : liste.map((m) => {
+            const gradeActuel = grades[m.id] ?? m.grade ?? "";
+            return (
+              <div key={m.id} className="flex items-center gap-2 rounded-[10px] border border-border bg-surface-2 px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[0.85rem] font-medium">{m.nom}</div>
+                  <div className="truncate text-[0.7rem] text-faint">{m.grade || "— sans grade —"}</div>
+                </div>
+                {busy === m.id ? <Loader2 className="h-4 w-4 animate-spin text-faint" /> : null}
+                <select
+                  value={gradeActuel} disabled={busy === m.id}
+                  onChange={(e) => appliquer(m, e.target.value)}
+                  className="max-w-[210px] rounded-lg border border-border bg-surface px-2 py-1.5 text-[0.8rem] outline-none focus:border-border-2 disabled:opacity-50"
+                >
+                  <option value="">— choisir un grade —</option>
+                  <optgroup label="Iron Wolf">
+                    {GRADES_LEGAL.map((g) => <option key={g.nom} value={g.nom}>{g.emoji} {g.nom}</option>)}
+                  </optgroup>
+                  <optgroup label="La Confrérie">
+                    {GRADES_ILLEGAL.map((g) => <option key={g.nom} value={g.nom}>{g.emoji} {g.nom}</option>)}
+                  </optgroup>
+                </select>
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex justify-end"><button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2">Fermer</button></div>
+      </div>
+    </Modal>
   );
 }
 
