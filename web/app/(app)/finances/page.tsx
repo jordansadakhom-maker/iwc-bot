@@ -1,7 +1,7 @@
-import { getFinances, getFactures, getPortefeuilles } from "@/lib/queries";
+import { getFinances, getFactures, getPortefeuilles, getTresorerieEvolution } from "@/lib/queries";
 import { getActeur } from "@/lib/authz";
 import { PageHeader, Card, CardHeader } from "@/components/ui";
-import { ComparatifCoffres } from "@/components/charts";
+import { TresorerieChart } from "@/components/charts";
 import { FinancesCoffres } from "@/components/finances-coffres";
 import { FacturesListe } from "@/components/factures-liste";
 import { Portefeuilles } from "@/components/portefeuilles";
@@ -10,7 +10,7 @@ import { cents } from "@/lib/format";
 export const dynamic = "force-dynamic";
 
 export default async function FinancesPage() {
-  const [{ connecte, coffres, pole }, fact, porte, acteur] = await Promise.all([getFinances(), getFactures(), getPortefeuilles(), getActeur()]);
+  const [{ connecte, coffres, pole }, fact, porte, acteur, evolution] = await Promise.all([getFinances(), getFactures(), getPortefeuilles(), getActeur(), getTresorerieEvolution()]);
   const peutDirection = !!acteur?.direction;
   const conf = pole === "confrerie";
   // Vue « pôle actif » : coffre commun + le coffre du pôle choisi (le bouton
@@ -41,8 +41,8 @@ export default async function FinancesPage() {
           const totalCoffres = barres.reduce((a, b) => a + b.value, 0);
           return (
             <Card>
-              <CardHeader titre="Comparatif des coffres (tous pôles)" compteur={`total : $${cents(totalCoffres)}`} />
-              <ComparatifCoffres data={barres} />
+              <CardHeader titre="Trésorerie (tous pôles)" compteur={`total : $${cents(totalCoffres)}`} />
+              <TresorerieChart points={evolution.points} />
             </Card>
           );
         })()

@@ -1087,6 +1087,51 @@ export async function getFinances(): Promise<FinancesData> {
   return { connecte: true, pole, coffres: { commun: find("coffre_commun"), legal: find("coffre_legal"), illegal: find("coffre_illegal"), vanhorn } };
 }
 
+// ── Évolution de la trésorerie (courbe dans le temps) ────────────
+// Reconstruit la trajectoire des soldes des 3 coffres principaux à partir des
+// événements « coffre.ajuste » (chacun porte le NOUVEAU solde daté), puis ajoute
+// l'état ACTUEL comme dernier point. Chaque coffre est reporté (forward-fill)
+// tant qu'un nouvel événement ne le modifie pas. La courbe se remplit au fil des
+// dépôts/retraits — vide tant qu'aucun mouvement n'a été enregistré.
+export type TresoPoint = { t: number; commun: number; legal: number; illegal: number; total: number };
+export type TresorerieEvolution = { points: TresoPoint[] };
+
+const r2 = (n: number) => Math.round(n * 100) / 100;
+
+export async function getTresorerieEvolution(): Promise<TresorerieEvolution> {
+  const admin = createAdminClient();
+  if (!admin) return { points: [] };
+  const [evR, coffreR] = await Promise.all([
+    admin.from("Event").select("cibleLibelle,apres,createdAt").eq("aggregate", "coffre").order("createdAt", { ascending: true }).limit(1000),
+    admin.from("Coffre").select("id,solde"),
+  ]);
+  const cur = (id: string) => Number((coffreR.data || []).find((c: { id: string; solde: number }) => c.id === id)?.solde) || 0;
+  const now = { commun: cur("coffre_commun"), legal: cur("coffre_legal"), illegal: cur("coffre_illegal") };
+
+  const quelCoffre = (lib?: string | null): "commun" | "legal" | "illegal" | null => {
+    const s = String(lib || "").toLowerCase();
+    if (s.includes("commun")) return "commun";
+    if (s.includes("illegal") || s.includes("confr")) return "illegal";
+    if (s.includes("legal") || s.includes("iron")) return "legal";
+    return null;
+  };
+
+  const pts: TresoPoint[] = [];
+  let commun = 0, legal = 0, illegal = 0, started = false;
+  for (const e of (evR.error ? [] : (evR.data || [])) as { cibleLibelle?: string | null; apres?: unknown; createdAt?: string | null }[]) {
+    const w = quelCoffre(e.cibleLibelle);
+    const solde = e.apres && typeof e.apres === "object" ? Number((e.apres as { solde?: unknown }).solde) : NaN;
+    if (!w || !Number.isFinite(solde) || !e.createdAt) continue;
+    if (w === "commun") commun = solde; else if (w === "legal") legal = solde; else illegal = solde;
+    started = true;
+    pts.push({ t: new Date(e.createdAt).getTime(), commun, legal, illegal, total: r2(commun + legal + illegal) });
+  }
+  // Point « maintenant » : les soldes réels de la base (ancrage exact du présent).
+  pts.push({ t: Date.now(), commun: now.commun, legal: now.legal, illegal: now.illegal, total: r2(now.commun + now.legal + now.illegal) });
+  // Sans historique exploitable, un seul point ne fait pas une courbe.
+  return { points: started ? pts : [] };
+}
+
 // ── Portefeuilles perso + journal de trésorerie ──────────────────
 export type MvtPerso = { date?: string; montant?: number; raison?: string };
 export type Portefeuille = { id: string; nom: string; solde: number; historique: MvtPerso[] };
