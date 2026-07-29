@@ -2,7 +2,7 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAcces } from "@/lib/queries";
-import { ymdParis, dowParis, lundiCourant } from "@/lib/dispensaire-dates";
+import { ymdParis, dowParis, lundiCourant, lundiDecale, dimancheDe } from "@/lib/dispensaire-dates";
 
 // ── Pointage du Dispensaire (prise de service) ──────────────────────────────
 export type PointSession = {
@@ -84,6 +84,88 @@ export async function getPointage(): Promise<PointData> {
   const parSalarie = [...parNom.entries()].map(([nom, min]) => ({ nom, min })).sort((a, b) => b.min - a.min);
 
   return { connecte: true, pret: true, canEdit, roster, enCours, semaine, parSalarie, mondayYmd: monday, stats, historique: closes.slice(0, 40) };
+}
+
+// ── Assiduité sur 3 semaines (précédente / actuelle / suivante) ─────────────
+// Pour chaque salarié et chaque semaine : jours travaillés, heures, absences
+// justifiées et injustifiées. Sert directement au calcul des salaires.
+export type SemaineAssiduite = { jours: number; heuresMin: number; absJust: number; absInj: number };
+export type LigneAssiduite = { nom: string; grade: string | null; semaines: SemaineAssiduite[] };
+export type AssiduiteData = { pret: boolean; lundis: string[]; lignes: LigneAssiduite[] };
+
+const normNom = (v: unknown) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ");
+const semaineVide = (): SemaineAssiduite => ({ jours: 0, heuresMin: 0, absJust: 0, absInj: 0 });
+
+export async function getAssiduite(): Promise<AssiduiteData> {
+  const admin = createAdminClient();
+  if (!admin) return { pret: false, lundis: [], lignes: [] };
+
+  const monday = lundiCourant(new Date().toISOString());
+  const lundis = [lundiDecale(monday, -1), monday, lundiDecale(monday, 1)];
+  const dimanches = lundis.map(dimancheDe);
+  const debutFenetre = lundis[0];
+  const finFenetre = dimanches[2];
+  // Bornes UTC élargies d'un jour de chaque côté (le regroupement se fait ensuite
+  // sur la date civile Paris → aucun jour de bord perdu par le décalage horaire).
+  const bMin = new Date(debutFenetre + "T00:00:00Z"); bMin.setUTCDate(bMin.getUTCDate() - 1);
+  const bMax = new Date(finFenetre + "T00:00:00Z"); bMax.setUTCDate(bMax.getUTCDate() + 2);
+  const semaineDe = (ymd: string) => lundis.findIndex((_, i) => ymd >= lundis[i] && ymd <= dimanches[i]);
+
+  // Roster (salariés actifs) → toutes les personnes apparaissent, même à 0.
+  const { data: rost } = await admin.from("DispensaireSalarie").select("id,nom,grade,statut").order("nom", { ascending: true });
+  const roster = ((rost || []) as Record<string, unknown>[]).filter((r) => String(r.statut || "actif") !== "renvoye");
+
+  // Une ligne par personne (clé = nom normalisé), semences depuis le roster.
+  const map = new Map<string, LigneAssiduite>();
+  const joursSet = new Set<string>(); // `${cle}|${sem}|${ymd}` → jours travaillés distincts
+  const ligne = (nom: string, grade: string | null) => {
+    const cle = normNom(nom);
+    let l = map.get(cle);
+    if (!l) { l = { nom, grade, semaines: [semaineVide(), semaineVide(), semaineVide()] }; map.set(cle, l); }
+    return l;
+  };
+  for (const r of roster) ligne(String(r.nom || "Salarié"), r.grade == null ? null : String(r.grade));
+
+  // Services clôturés de la fenêtre → jours + heures par semaine.
+  try {
+    const { data: clos } = await admin.from("DispensairePointage").select("nom,debut,dureeMin,fin").not("fin", "is", null).gte("debut", bMin.toISOString()).lte("debut", bMax.toISOString()).limit(2000);
+    for (const r of (clos || []) as Record<string, unknown>[]) {
+      const ymd = ymdParis(String(r.debut));
+      const sem = semaineDe(ymd);
+      if (sem < 0) continue;
+      const nom = String(r.nom || "Salarié");
+      const l = ligne(nom, null);
+      l.semaines[sem].heuresMin += Number(r.dureeMin) || 0;
+      const k = `${normNom(nom)}|${sem}|${ymd}`;
+      if (!joursSet.has(k)) { joursSet.add(k); l.semaines[sem].jours += 1; }
+    }
+  } catch { /* table absente → 0 partout */ }
+
+  // Absences datées de la fenêtre → justifiées / injustifiées par semaine.
+  try {
+    const { data: abs } = await admin.from("DispensaireAbsence").select("nom,date,justifiee").gte("date", debutFenetre).lte("date", finFenetre).limit(2000);
+    for (const r of (abs || []) as Record<string, unknown>[]) {
+      const ymd = String(r.date).slice(0, 10);
+      const sem = semaineDe(ymd);
+      if (sem < 0) continue;
+      const l = ligne(String(r.nom || "Salarié"), null);
+      if (r.justifiee) l.semaines[sem].absJust += 1; else l.semaines[sem].absInj += 1;
+    }
+  } catch { /* table Absence pas encore créée → aucune absence */ }
+
+  const lignes = [...map.values()].sort((a, b) => a.nom.localeCompare(b.nom));
+  return { pret: true, lundis, lignes };
+}
+
+export type AbsenceRow = { id: string; salarieId: string | null; nom: string; date: string; justifiee: boolean; motif: string | null };
+export async function getAbsencesRecentes(): Promise<{ pret: boolean; absences: AbsenceRow[] }> {
+  const admin = createAdminClient();
+  if (!admin) return { pret: false, absences: [] };
+  try {
+    const { data, error } = await admin.from("DispensaireAbsence").select("*").order("date", { ascending: false }).limit(60);
+    if (error) return { pret: false, absences: [] };
+    return { pret: true, absences: ((data || []) as Record<string, unknown>[]).map((r) => ({ id: String(r.id), salarieId: r.salarieId == null ? null : String(r.salarieId), nom: String(r.nom || "Salarié"), date: String(r.date).slice(0, 10), justifiee: !!r.justifiee, motif: r.motif == null ? null : String(r.motif) })) };
+  } catch { return { pret: false, absences: [] }; }
 }
 
 // Encart léger de l'accueil : uniquement les salariés en service.

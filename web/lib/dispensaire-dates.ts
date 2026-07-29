@@ -25,3 +25,19 @@ export function lundiCourant(now: string | Date = new Date()): string {
   base.setUTCDate(base.getUTCDate() - dowParis(now));
   return base.toISOString().slice(0, 10);
 }
+
+// Décale un lundi (YYYY-MM-DD) de `semaines` semaines (négatif = passé). Ancré
+// midi UTC → insensible aux bascules d'heure d'été/hiver. Sert à la vue glissante
+// « semaine précédente / actuelle / suivante » du pointage.
+export function lundiDecale(lundi: string, semaines: number): string {
+  const base = new Date(lundi + "T12:00:00Z");
+  base.setUTCDate(base.getUTCDate() + semaines * 7);
+  return base.toISOString().slice(0, 10);
+}
+
+// Dimanche (YYYY-MM-DD) clôturant la semaine d'un lundi donné.
+export function dimancheDe(lundi: string): string {
+  const base = new Date(lundi + "T12:00:00Z");
+  base.setUTCDate(base.getUTCDate() + 6);
+  return base.toISOString().slice(0, 10);
+}

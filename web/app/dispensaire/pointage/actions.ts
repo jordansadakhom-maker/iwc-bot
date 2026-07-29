@@ -2,7 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
-import { estAutorise } from "@/lib/dispensaire-roles";
+import { estAutorise, peutGererRH } from "@/lib/dispensaire-roles";
 import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenements";
 
 // Pointage — outil de service partagé (ouvert à tout le personnel du dispensaire).
@@ -53,6 +53,37 @@ export async function terminerService(id: string): Promise<PointResult> {
   const { error } = await admin.from("DispensairePointage").update({ fin: fin.toISOString(), dureeMin, updatedBy: await qui(), updatedAt: fin.toISOString() }).eq("id", id);
   if (error) return { ok: false, error: "Clôture impossible." };
   await emettreEvenementDispensaire({ aggregate: "pointage", type: "pointage.fin", cibleId: id, cibleLibelle: String(r.nom ?? ""), apres: { dureeMin } });
+  return { ok: true };
+}
+
+// ── Absences (justifiées / injustifiées) — suivi d'assiduité ────────────────
+// Réservé à l'encadrement RH/Direction (peutGererRH), fail-closed : c'est un
+// jugement sur l'assiduité, pas un simple pointage.
+export async function ajouterAbsence(data: { salarieId?: string | null; nom: string; date: string; justifiee: boolean; motif?: string }): Promise<PointResult> {
+  if (!(await peutGererRH())) return { ok: false, error: "Réservé à l'encadrement (RH/Direction)." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  const nom = s(data.nom);
+  if (!nom) return { ok: false, error: "Choisis un salarié." };
+  const date = s(data.date, 10);
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, error: "Date invalide." };
+  const id = `da-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const now = new Date().toISOString();
+  const row = { id, salarieId: s(data.salarieId ?? undefined), nom, date, justifiee: !!data.justifiee, motif: s(data.motif, 300), par: await qui(), createdAt: now };
+  const { error } = await admin.from("DispensaireAbsence").insert(row);
+  if (error) return { ok: false, error: "Enregistrement impossible (lance dispensaire-absences.sql ?)." };
+  await emettreEvenementDispensaire({ aggregate: "absence", type: "absence.cree", cibleId: id, cibleLibelle: nom, apres: { date, justifiee: !!data.justifiee } });
+  return { ok: true, id };
+}
+
+export async function supprimerAbsence(id: string): Promise<PointResult> {
+  if (!(await peutGererRH())) return { ok: false, error: "Réservé à l'encadrement (RH/Direction)." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  const avant = await lireAvant("DispensaireAbsence", id);
+  const { error } = await admin.from("DispensaireAbsence").delete().eq("id", id);
+  if (error) return { ok: false, error: "Suppression impossible." };
+  await emettreEvenementDispensaire({ aggregate: "absence", type: "absence.supprime", cibleId: id, cibleLibelle: String(avant?.nom ?? ""), avant });
   return { ok: true };
 }
 

@@ -2,13 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ClipboardList, Play, Square, Loader2, Trash2, CalendarDays, Clock, Users } from "lucide-react";
-import type { PointData, PointSession } from "@/lib/dispensaire-pointage";
+import { ClipboardList, Play, Square, Loader2, Trash2, CalendarDays, Clock, Users, CalendarRange, UserX, Plus, Check } from "lucide-react";
+import type { PointData, PointSession, AssiduiteData, AbsenceRow } from "@/lib/dispensaire-pointage";
 import { Flash, inputCls } from "@/components/edit-ui";
-import { prendreService, terminerService, supprimerPointage } from "@/app/dispensaire/pointage/actions";
+import { prendreService, terminerService, supprimerPointage, ajouterAbsence, supprimerAbsence } from "@/app/dispensaire/pointage/actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
 const JOURS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
+const jjmm = (ymd: string) => { const p = ymd.split("-"); return p.length === 3 ? `${p[2]}/${p[1]}` : ymd; };
+const labelSemaine = (i: number) => (i === 0 ? "Précédente" : i === 1 ? "Cette semaine" : "Suivante");
 
 const heureFR = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); } catch { return "—"; } };
 const dateFR = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", weekday: "short", day: "2-digit", month: "short" }).format(new Date(iso)); } catch { return "—"; } };
@@ -27,7 +29,7 @@ function useNow(actif: boolean) {
   return now;
 }
 
-export function DispensairePointage({ data }: { data: PointData }) {
+export function DispensairePointage({ data, assiduite, absences = [], peutGerer = false }: { data: PointData; assiduite?: AssiduiteData; absences?: AbsenceRow[]; peutGerer?: boolean }) {
   const router = useRouter();
   const [enCours, setEnCours] = useState<PointSession[]>(data.enCours);
   const [flash, setFlash] = useState<FlashMsg>(null);
@@ -36,7 +38,14 @@ export function DispensairePointage({ data }: { data: PointData }) {
   const [busy, setBusy] = useState(false);
   const now = useNow(enCours.length > 0);
 
+  // Absences (encadrement) — état local + formulaire.
+  const [absList, setAbsList] = useState<AbsenceRow[]>(absences);
+  const today = useMemo(() => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()), []);
+  const [abs, setAbs] = useState({ choix: "", manuel: "", date: today, justifiee: true, motif: "" });
+  const [absBusy, setAbsBusy] = useState(false);
+
   useEffect(() => { setEnCours(data.enCours); }, [data.enCours]);
+  useEffect(() => { setAbsList(absences); }, [absences]);
 
   const semaineTotal = useMemo(() => data.semaine.reduce((a, j) => a + j.min, 0), [data.semaine]);
   const maxJour = useMemo(() => Math.max(1, ...data.semaine.map((j) => j.min)), [data.semaine]);
@@ -65,6 +74,26 @@ export function DispensairePointage({ data }: { data: PointData }) {
 
   async function supprimer(id: string) {
     const r = await supprimerPointage(id);
+    if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else router.refresh();
+  }
+
+  async function ajoutAbsence() {
+    const sal = data.roster.find((r) => r.id === abs.choix);
+    const nom = abs.manuel.trim() || sal?.nom || "";
+    if (!nom) { setFlash({ t: "bad", m: "Choisis un salarié ou saisis un nom." }); return; }
+    if (!abs.date) { setFlash({ t: "bad", m: "Choisis une date." }); return; }
+    setAbsBusy(true);
+    const r = await ajouterAbsence({ salarieId: abs.manuel.trim() ? null : sal?.id ?? null, nom, date: abs.date, justifiee: abs.justifiee, motif: abs.motif.trim() });
+    setAbsBusy(false);
+    if (!r.ok) { setFlash({ t: "bad", m: r.error || "Impossible." }); return; }
+    setAbsList((p) => [{ id: r.id || "tmp", salarieId: null, nom, date: abs.date, justifiee: abs.justifiee, motif: abs.motif.trim() || null }, ...p]);
+    setAbs((p) => ({ ...p, choix: "", manuel: "", motif: "" }));
+    setFlash({ t: "ok", m: `Absence enregistrée — ${nom}.` });
+    router.refresh();
+  }
+  async function suppAbsence(id: string) {
+    setAbsList((p) => p.filter((a) => a.id !== id));
+    const r = await supprimerAbsence(id);
     if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else router.refresh();
   }
 
@@ -170,6 +199,92 @@ export function DispensairePointage({ data }: { data: PointData }) {
           </div>
         ) : null}
       </section>
+
+      {/* Assiduité sur 3 semaines (précédente / actuelle / suivante) */}
+      <section className="rounded-[14px] border border-border bg-surface p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="flex items-center gap-2 text-[0.9rem] font-semibold"><CalendarRange className="h-4 w-4 text-accent" /> Assiduité · 3 semaines</h3>
+          <span className="text-[0.72rem] text-faint">Jours travaillés, heures et absences — base du calcul des salaires.</span>
+        </div>
+        {!assiduite || !assiduite.pret ? (
+          <p className="py-4 text-center text-[0.82rem] italic text-faint">Assiduité indisponible — lance <b>dispensaire-pointage.sql</b> (et <b>dispensaire-absences.sql</b> pour les absences).</p>
+        ) : assiduite.lignes.length === 0 ? (
+          <p className="py-4 text-center text-[0.82rem] italic text-faint">Aucun salarié — ajoute des salariés dans RH.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[620px] border-collapse text-left text-[0.8rem]">
+              <thead>
+                <tr className="text-[0.64rem] uppercase tracking-[0.05em] text-faint">
+                  <th className="border-b border-border px-2 py-2 font-semibold">Salarié</th>
+                  {assiduite.lundis.map((l, i) => <th key={i} className="border-b border-border px-2 py-2 text-center font-semibold">{labelSemaine(i)}<div className="font-num text-[0.6rem] normal-case text-faint">dès {jjmm(l)}</div></th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {assiduite.lignes.map((ln) => (
+                  <tr key={ln.nom} className="hover:bg-[color-mix(in_srgb,var(--ink)_4%,transparent)]">
+                    <td className="border-b border-border px-2 py-2"><div className="font-semibold">{ln.nom}</div>{ln.grade ? <div className="text-[0.66rem] text-faint">{ln.grade}</div> : null}</td>
+                    {ln.semaines.map((s, i) => (
+                      <td key={i} className="border-b border-border px-2 py-2 text-center align-top" style={i === 1 ? { background: "color-mix(in srgb,var(--accent) 6%,transparent)" } : undefined}>
+                        <div className="font-num"><b>{s.jours}</b> j · {fmtMin(s.heuresMin)}</div>
+                        <div className="mt-0.5 flex items-center justify-center gap-1.5 text-[0.66rem]">
+                          {s.absJust ? <span style={{ color: "var(--good)" }}>{s.absJust} just.</span> : null}
+                          {s.absInj ? <span style={{ color: "var(--oxblood)" }}>{s.absInj} inj.</span> : null}
+                          {!s.absJust && !s.absInj ? <span className="text-faint">—</span> : null}
+                        </div>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* Absences (encadrement RH / Direction) */}
+      {peutGerer ? (
+        <section className="rounded-[14px] border border-border bg-surface p-4">
+          <h3 className="mb-3 flex items-center gap-2 text-[0.9rem] font-semibold"><UserX className="h-4 w-4 text-accent" /> Absences</h3>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex min-w-[150px] flex-1 flex-col gap-1">
+              <span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Salarié</span>
+              <select className={inputCls} value={abs.choix} onChange={(e) => setAbs((p) => ({ ...p, choix: e.target.value, manuel: "" }))} disabled={absBusy}>
+                <option value="">{data.roster.length ? "— Choisir —" : "Aucun salarié (voir RH)"}</option>
+                {data.roster.map((r) => <option key={r.id} value={r.id}>{r.nom}{r.grade ? ` · ${r.grade}` : ""}</option>)}
+              </select>
+            </label>
+            <label className="flex min-w-[120px] flex-col gap-1">
+              <span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Date</span>
+              <input type="date" className={inputCls} value={abs.date} onChange={(e) => setAbs((p) => ({ ...p, date: e.target.value }))} disabled={absBusy} />
+            </label>
+            <div className="flex flex-col gap-1">
+              <span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Type</span>
+              <div className="inline-flex rounded-lg border border-border bg-surface-2 p-0.5">
+                {([[true, "Justifiée", "var(--good)"], [false, "Injustifiée", "var(--oxblood)"]] as const).map(([val, lbl, tone]) => (
+                  <button key={String(val)} type="button" onClick={() => setAbs((p) => ({ ...p, justifiee: val }))} className="rounded-md px-2.5 py-1.5 text-[0.74rem] font-semibold transition" style={abs.justifiee === val ? { background: tone, color: "#000" } : { color: "var(--muted)" }}>{lbl}</button>
+                ))}
+              </div>
+            </div>
+            <label className="flex min-w-[140px] flex-1 flex-col gap-1">
+              <span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Motif (facultatif)</span>
+              <input className={inputCls} value={abs.motif} onChange={(e) => setAbs((p) => ({ ...p, motif: e.target.value }))} placeholder="Maladie, congé…" disabled={absBusy} />
+            </label>
+            <button onClick={ajoutAbsence} disabled={absBusy} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[0.8rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{absBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Enregistrer</button>
+          </div>
+          {absList.length ? (
+            <div className="mt-3 flex flex-col divide-y divide-border border-t border-border pt-1">
+              {absList.map((a) => (
+                <div key={a.id} className="group flex items-center gap-2 py-1.5 text-[0.8rem]">
+                  <span className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[0.62rem] font-bold" style={a.justifiee ? { color: "var(--good)", background: "color-mix(in srgb,var(--good) 14%,transparent)" } : { color: "#fff", background: "var(--oxblood)" }}>{a.justifiee ? <Check className="h-2.5 w-2.5" /> : null}{a.justifiee ? "Justifiée" : "Injustifiée"}</span>
+                  <span className="min-w-0 flex-1 truncate"><b className="font-semibold">{a.nom}</b>{a.motif ? <span className="text-faint"> — {a.motif}</span> : null}</span>
+                  <span className="shrink-0 font-num text-faint">{jjmm(a.date)}</span>
+                  <button onClick={() => suppAbsence(a.id)} className="shrink-0 text-faint opacity-0 transition hover:text-oxblood group-hover:opacity-100" aria-label="Supprimer"><Trash2 className="h-3.5 w-3.5" /></button>
+                </div>
+              ))}
+            </div>
+          ) : <p className="mt-3 border-t border-border pt-3 text-center text-[0.78rem] italic text-faint">Aucune absence enregistrée.</p>}
+        </section>
+      ) : null}
 
       {/* Historique */}
       {data.historique.length ? (

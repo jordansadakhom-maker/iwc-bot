@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, ClipboardList, Boxes, FlaskConical, Archive, BadgeDollarSign, Receipt, ShieldCheck, FileText, BookUser, Stethoscope, ScrollText, BarChart3, History, ShieldAlert, Sparkles, Scale, HeartPulse, Factory, CalendarClock, Scissors, Landmark, BedDouble, Truck, Gauge, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Users, ClipboardList, Boxes, FlaskConical, Archive, BadgeDollarSign, Receipt, ShieldCheck, FileText, BookUser, Stethoscope, ScrollText, BarChart3, History, ShieldAlert, Sparkles, Scale, HeartPulse, Factory, CalendarClock, Scissors, Landmark, BedDouble, Truck, Gauge, Coins, type LucideIcon } from "lucide-react";
 
 // Onglets de la section Dispensaire de Saint-Denis. `pret` = déjà construit ;
 // `restreint` = réservé aux membres habilités (RH/chefs) ; `admin` = permission
@@ -15,7 +15,8 @@ export const DISP_NAV: DispTab[] = [
   { href: "/dispensaire/chambres", label: "Chambres", icon: BedDouble, pret: true, desc: "Les lits et chambres — occupation, réservation, nettoyage." },
   { href: "/dispensaire/ambulances", label: "Ambulances", icon: Truck, pret: true, desc: "La flotte d'intervention — état, carburant, entretien et matériel." },
   { href: "/dispensaire/rh", label: "RH / Salariés", icon: Users, pret: true, restreint: true, desc: "Le personnel du dispensaire, ses fonctions et ses états de service." },
-  { href: "/dispensaire/pointage", label: "Pointage", icon: ClipboardList, pret: true, desc: "Prises et fins de service, portées à l'heure près." },
+  { href: "/dispensaire/pointage", label: "Pointage", icon: ClipboardList, pret: true, desc: "Prises et fins de service, absences et assiduité sur trois semaines." },
+  { href: "/dispensaire/salaires", label: "Salaires", icon: Coins, pret: true, admin: true, desc: "Calcul automatique des salaires — barème par fonction × jours travaillés." },
   { href: "/dispensaire/stockage", label: "Stockage", icon: Boxes, pret: true, desc: "L'inventaire des coffres — remèdes, matériel et matières." },
   { href: "/dispensaire/coffres", label: "Stock Matériel Médical", icon: Archive, pret: true, desc: "Le matériel médical rangé, coffre par coffre — et ce qu'il faut réapprovisionner." },
   { href: "/dispensaire/matieres", label: "Matières premières", icon: FlaskConical, pret: true, desc: "Ce qu'il faut réapprovisionner pour tenir l'officine." },

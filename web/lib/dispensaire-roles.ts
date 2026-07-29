@@ -145,6 +145,12 @@ export async function peutFacturer(): Promise<boolean> {
 export async function peutGererRH(): Promise<boolean> {
   try { const r = await getRoleDispensaire(); return !!(r.perms.rh || r.perms.admin); } catch { return false; }
 }
+// Droit de DIRECTION du dispensaire = permission `admin` (grades directeur /
+// adjoint). Utilisé par les fonctions réservées à la direction (salaires…).
+// fail-closed.
+export async function peutAdministrer(): Promise<boolean> {
+  try { const r = await getRoleDispensaire(); return !!r.perms.admin; } catch { return false; }
+}
 // Droit de SOIN : éditer le dossier médical d'un patient (grades porteurs du
 // droit `medical`, ou admin). fail-closed.
 export async function peutSoigner(): Promise<boolean> {
