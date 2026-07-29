@@ -9,11 +9,12 @@ import { getRapportData, getRapportSnapshot, getRapportConfig, enregistrerRappor
 async function habilite() { return peutFacturer(); }
 
 // Génère (et enregistre) le rapport des impayés. Fait avancer la fenêtre
-// « paiements récents » → remise à zéro automatique.
-export async function genererRapportImpayes(): Promise<{ ok: boolean; error?: string; rapport?: RapportImpayes }> {
+// « paiements récents » → remise à zéro automatique. Le médecin signataire (et
+// son titre/grade) est choisi dans les effectifs ; à défaut, le compte connecté.
+export async function genererRapportImpayes(medecin?: string, titre?: string): Promise<{ ok: boolean; error?: string; rapport?: RapportImpayes }> {
   if (!(await habilite())) return { ok: false, error: "Réservé aux chefs." };
-  const medecin = await (async () => { try { return (await getSessionProfile())?.nom || "Le médecin de garde"; } catch { return "Le médecin de garde"; } })();
-  return enregistrerRapport(medecin);
+  const nom = (medecin || "").trim() || await (async () => { try { return (await getSessionProfile())?.nom || "Le médecin de garde"; } catch { return "Le médecin de garde"; } })();
+  return enregistrerRapport(nom, titre);
 }
 
 // Recharge les données du rapport courant (aperçu à la volée).

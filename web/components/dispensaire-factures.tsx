@@ -2,10 +2,8 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Receipt, Plus, Check, Pencil, Trash2, AlertTriangle, CalendarClock, Lock, Copy, FileText, Clock, Stethoscope, User } from "lucide-react";
+import { Receipt, Plus, Check, Pencil, Trash2, AlertTriangle, CalendarClock, Lock, Copy, FileText, Clock, Search, ArrowUpNarrowWide, ArrowDownWideNarrow } from "lucide-react";
 import { VideRegistre } from "@/components/dispensaire-ui";
-import { DispensaireConsultation } from "@/components/dispensaire-consultation";
-import { DispensairePatientDossier } from "@/components/dispensaire-patient-dossier";
 import { FACTURE_STATUTS, FACTURE_DELAI_H, factureStatut, estOuverte, statutRepresentatif, incoherencesStatuts, echeanceEtat, copiePolice, money, type FacturesData, type Facture } from "@/lib/dispensaire-facturation-const";
 import { toast } from "@/lib/toast";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
@@ -20,17 +18,18 @@ type FactureVals = { objet: string; destinataire: string; montant: string; note:
 const dateFR = (s: string | null) => { if (!s) return "—"; try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", year: "numeric" }).format(new Date(s)); } catch { return "—"; } };
 const dtFR = (s: string | null) => { if (!s) return "—"; try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(s)); } catch { return "—"; } };
 
-export function DispensaireFactures({ data, rapport, historique, config }: { data: FacturesData; rapport: RapportImpayes; historique: RapportHisto[]; config: RapportConfig }) {
+export function DispensaireFactures({ data, rapport, historique, config, medecins = [] }: { data: FacturesData; rapport: RapportImpayes; historique: RapportHisto[]; config: RapportConfig; medecins?: { nom: string; grade: string | null }[] }) {
   const router = useRouter();
   const [factures, setFactures] = useState<Facture[]>(data.factures);
   const [flash, setFlash] = useState<FlashMsg>(null);
   const [form, setForm] = useState<Facture | "new" | null>(null);
   const [delId, setDelId] = useState<string | null>(null);
   const [filtre, setFiltre] = useState("");
+  const [recherche, setRecherche] = useState("");
+  // Tri sur la date d'ÉMISSION : "recent" = récent→ancien, "ancien" = ancien→récent.
+  const [tri, setTri] = useState<"recent" | "ancien">("recent");
   const [vue, setVue] = useState<"impayees" | "toutes">("impayees");
   const [rapportOpen, setRapportOpen] = useState(false);
-  const [consult, setConsult] = useState(false);
-  const [dossierOpen, setDossierOpen] = useState(false);
   // Jeton anti-doublon des créations de facture (stable jusqu'au succès).
   const cleRef = useRef("");
   const jeton = () => (cleRef.current ||= (globalThis.crypto?.randomUUID?.() ?? String(Date.now()) + Math.random()));
@@ -43,8 +42,16 @@ export function DispensaireFactures({ data, rapport, historique, config }: { dat
   );
 
   const base = useMemo(() => (vue === "impayees" ? factures.filter((f) => estOuverte(f.statuts)) : factures), [factures, vue]);
-  // Filtre par statut : une facture correspond si elle PORTE ce statut (multi).
-  const liste = base.filter((f) => !filtre || f.statuts.includes(filtre));
+  // Filtre par statut + recherche patient + tri par date d'émission (instantané).
+  const rq = recherche.trim().toLowerCase();
+  const liste = useMemo(() => {
+    const arr = base.filter((f) =>
+      (!filtre || f.statuts.includes(filtre)) &&
+      (!rq || (f.objet || "").toLowerCase().includes(rq) || (f.destinataire || "").toLowerCase().includes(rq))
+    );
+    const em = (f: Facture) => String(f.dateEmission || f.createdAt || "");
+    return [...arr].sort((a, b) => (tri === "recent" ? em(b).localeCompare(em(a)) : em(a).localeCompare(em(b))));
+  }, [base, filtre, rq, tri]);
   const retard = factures.filter((f) => echeanceEtat(f) === "depasse").length;
   const du = factures.filter((f) => estOuverte(f.statuts)).reduce((a, f) => a + f.montant, 0);
   // Défaut intelligent : autocomplétion du patient à partir des factures existantes
@@ -121,13 +128,19 @@ export function DispensaireFactures({ data, rapport, historique, config }: { dat
             {(["impayees", "toutes"] as const).map((k) => <button key={k} onClick={() => setVue(k)} className="px-2.5 py-1 transition" style={vue === k ? { background: "var(--accent)", color: "#000" } : { color: "var(--muted)" }}>{k === "impayees" ? "Impayées" : "Toutes"}</button>)}
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setDossierOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-muted transition hover:text-ink"><User className="h-3.5 w-3.5" /> Dossier patient</button>
+        <div className="flex flex-wrap items-center gap-2">
           <button onClick={() => setRapportOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-muted transition hover:text-ink"><FileText className="h-3.5 w-3.5" /> Rapport des impayés</button>
           <select className={inputCls + " max-w-[160px]"} value={filtre} onChange={(e) => setFiltre(e.target.value)}><option value="">Tous statuts</option>{FACTURE_STATUTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
-          <button onClick={() => setForm("new")} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-muted transition hover:text-ink"><Plus className="h-3.5 w-3.5" /> Facture</button>
-          <button onClick={() => setConsult(true)} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Stethoscope className="h-3.5 w-3.5" /> Consultation</button>
+          <button onClick={() => setForm("new")} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Plus className="h-3.5 w-3.5" /> Facture</button>
         </div>
+      </div>
+
+      {/* Recherche patient + tri par date d'émission (instantanés) */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[200px] flex-1"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" /><input className={inputCls + " pl-8"} value={recherche} onChange={(e) => setRecherche(e.target.value)} placeholder="Rechercher un patient…" /></div>
+        <button onClick={() => setTri((t) => (t === "recent" ? "ancien" : "recent"))} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-2 text-[0.74rem] font-semibold text-muted transition hover:text-ink" title="Trier par date d'émission">
+          {tri === "recent" ? <><ArrowDownWideNarrow className="h-3.5 w-3.5" /> Émission : récent → ancien</> : <><ArrowUpNarrowWide className="h-3.5 w-3.5" /> Émission : ancien → récent</>}
+        </button>
       </div>
 
       {liste.length === 0 ? (
@@ -150,7 +163,8 @@ export function DispensaireFactures({ data, rapport, historique, config }: { dat
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[0.72rem] text-faint">
                       <span className="font-num text-[0.9rem] font-bold text-ink">{money(f.montant)}</span>
-                      {f.dateEcheance ? <span className="inline-flex items-center gap-1"><CalendarClock className="h-3 w-3" /> échéance {dtFR(f.dateEcheance)}</span> : null}
+                      <span className="inline-flex items-center gap-1" title="Date d'émission"><CalendarClock className="h-3 w-3" /> émise {dateFR(f.dateEmission || f.createdAt)}</span>
+                      {f.dateEcheance ? <span className="inline-flex items-center gap-1">· échéance {dtFR(f.dateEcheance)}</span> : null}
                       {f.statuts.includes("payee") && f.datePaiement ? <span className="inline-flex items-center gap-1" style={{ color: "var(--good)" }}><Check className="h-3 w-3" /> réglée {dateFR(f.datePaiement)}{f.payePar ? ` · ${f.payePar}` : ""}</span> : null}
                     </div>
                     {f.note ? <div className="mt-1 text-[0.74rem] text-muted">{f.note}</div> : null}
@@ -177,11 +191,9 @@ export function DispensaireFactures({ data, rapport, historique, config }: { dat
         </div>
       )}
 
-      {consult ? <DispensaireConsultation onClose={() => setConsult(false)} onDone={(f) => { setFlash(f); router.refresh(); }} /> : null}
-      {dossierOpen ? <DispensairePatientDossier onClose={() => setDossierOpen(false)} /> : null}
       {form ? <FactureForm initial={form === "new" ? null : form} patients={patientsConnus} onClose={() => setForm(null)} onSave={(v) => enregistrer(v, form === "new" ? null : form)} /> : null}
       {delId ? <ConfirmDelete nom={factures.find((f) => f.id === delId)?.objet || ""} onCancel={() => setDelId(null)} onConfirm={() => supprimer(delId)} /> : null}
-      {rapportOpen ? <RapportImpayesModal initial={rapport} historique={historique} config={config} onClose={() => setRapportOpen(false)} /> : null}
+      {rapportOpen ? <RapportImpayesModal initial={rapport} historique={historique} config={config} medecins={medecins} onClose={() => setRapportOpen(false)} /> : null}
     </div>
   );
 }
