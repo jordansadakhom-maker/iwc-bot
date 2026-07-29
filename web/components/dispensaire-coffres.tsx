@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Archive, Plus, Check, Pencil, Trash2, MapPin, UserRound, Search, Boxes, AlertTriangle, BadgePlus, ArrowDownAZ, ArrowDownWideNarrow, PackageOpen, ClipboardList, Loader2 } from "lucide-react";
 import { CATEGORIES, catLabel, enAlerte, niveauStock, NIVEAU_TON, type StockItem, type CoffresInvData } from "@/lib/dispensaire-stock-const";
@@ -36,6 +36,17 @@ export function DispensaireCoffres({ data }: { data: CoffresInvData }) {
   const [flash, setFlash] = useState<FlashMsg>(null);
   const [modale, setModale] = useState<Modale>(null);
   const [importBusy, setImportBusy] = useState(false);
+
+  // Re-synchronise l'état avec la base après chaque router.refresh() : la quantité
+  // affichée = la quantité RÉELLEMENT enregistrée. Sans ça, la valeur optimiste
+  // restait figée à l'écran même si l'écriture avait échoué (impression de « ça
+  // change mais ce n'est pas sauvegardé »). `data` ne change d'identité qu'au
+  // rendu serveur (montage + refresh), pas sur un re-render client → pas de
+  // scintillement.
+  useEffect(() => {
+    setItems(data.coffres.flatMap((c) => c.items));
+    setMetas(data.coffres.filter((c) => c.id).map((c) => ({ id: c.id as string, nom: c.nom, emplacement: c.emplacement, responsable: c.responsable, note: c.note, photo: c.photo })));
+  }, [data]);
 
   async function importerPlan() {
     setImportBusy(true);
