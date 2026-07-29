@@ -13,6 +13,11 @@ const ddMM = (iso: string | null) => { if (!iso) return "—"; try { return new 
 const jourLong = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "numeric", month: "long" }).format(new Date(iso)); } catch { return "—"; } };
 const dtFR = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); } catch { return "—"; } };
 
+// Médecin signataire = tiré des effectifs. Titre affiché = son grade, sinon défaut.
+type Medecin = { nom: string; grade: string | null };
+const TITRE_DEFAUT = "Médecin du Dispensaire de Saint-Denis";
+const titreDe = (grade: string | null | undefined) => (grade || "").trim() || TITRE_DEFAUT;
+
 const INTRO = [
   "Conformément aux dispositions en vigueur, vous trouverez ci-joint la liste des personnes pour lesquelles une facture a été établie, à la suite de soins hospitaliers ou d'interventions en campagne.",
   "Les noms des intéressés ont été inscrits sur chaque facture, accompagnés du montant dû. Aucun contrôle d'identité n'a été effectué de manière contrainte.",
@@ -20,11 +25,95 @@ const INTRO = [
 ];
 
 function rapportTexte(r: RapportImpayes): string {
-  const L: string[] = ["CABINET MÉDICAL DE SAINT-DENIS", "Rapport des impayés des soins, du Dispensaire et de l'Hôpital", "", ...INTRO, "Fait pour servir et valoir ce que de droit.", "", "DATE ET NOM — $", ...r.impayes.map((i) => `${ddMM(i.date)} ${i.nom} — ${Math.round(i.montant)}`)];
-  L.push("", "Personnes ayant payé depuis l'envoi du dernier document :");
-  if (r.payes.length) L.push(...r.payes.map((p) => `• ${ddMM(p.date)} ${p.nom} — ${Math.round(p.montant)}`)); else L.push("(aucun paiement depuis le dernier rapport)");
-  L.push("", "Ci-dessus figure la liste des contrevenants.", "Veuillez agréer l'expression de nos salutations distinguées.", "", `Fait à Saint-Denis, le ${jourLong(r.genereLe)} de l'An de Grâce 1904`, "Dr. Ed Remington — Chef du Cabinet Médical de Saint-Denis");
+  const L: string[] = ["CABINET MÉDICAL DE SAINT-DENIS", "Rapport des impayés des soins, du Dispensaire et de l'Hôpital", "", ...INTRO, "Fait pour servir et valoir ce que de droit.", "", "ÉMISSION · NOM — $", ...r.impayes.map((i) => `${ddMM(i.date)} ${i.nom} — ${Math.round(i.montant)}`)];
+  L.push("", "Personnes ayant payé depuis l'envoi du dernier document (émission · paiement) :");
+  if (r.payes.length) L.push(...r.payes.map((p) => `• ${p.nom} — ${Math.round(p.montant)} (émis ${ddMM(p.emission)} · payé ${ddMM(p.date)})`)); else L.push("(aucun paiement depuis le dernier rapport)");
+  L.push("", "Ci-dessus figure la liste des contrevenants.", "Veuillez agréer l'expression de nos salutations distinguées.", "", `Fait à Saint-Denis, le ${jourLong(r.genereLe)} de l'An de Grâce 1904`, `Dr. ${r.medecin} — ${r.medecinTitre}`);
   return L.join("\n");
+}
+
+// Impression PDF fiable : on ouvre une fenêtre dédiée avec un document AUTONOME
+// (marges @page, aucune superposition, chaque ligne insécable). Remplace le
+// window.print() « en place » qui, à cause du conteneur modal en overflow, faisait
+// chevaucher les blocs sur la 2ᵉ page (correctif bug n°2).
+function imprimerRapport(r: RapportImpayes) {
+  const w = window.open("", "_blank", "width=900,height=1120");
+  if (!w) return;
+  const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
+  const impRows = r.impayes.length
+    ? r.impayes.map((i) => `<tr><td>${esc(ddMM(i.date))} &nbsp; ${esc(i.nom)}</td><td class="r">${Math.round(i.montant)}</td></tr>`).join("")
+    : `<tr><td colspan="2" class="vide">Aucun impayé à ce jour.</td></tr>`;
+  const payRows = r.payes.length
+    ? r.payes.map((p) => `<div class="pay">• ${esc(p.nom)} — <b>${Math.round(p.montant)}</b> <span class="muted">(émis ${esc(ddMM(p.emission))} · payé ${esc(ddMM(p.date))})</span></div>`).join("")
+    : `<div class="muted i">Aucun paiement depuis le dernier rapport.</div>`;
+  w.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Rapport des impayés — ${esc(jourLong(r.genereLe))}</title>
+  <style>
+    @page{margin:1.6cm}
+    *{box-sizing:border-box}
+    body{font-family:Georgia,'Times New Roman',serif;color:#2a2115;margin:0;padding:0;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .doc{background:linear-gradient(180deg,#efe6cf,#e7dcc0);border:2px solid #b8a67e;box-shadow:inset 0 0 0 5px #efe6cf,inset 0 0 0 6px #cdb98d;padding:30px 34px}
+    .center{text-align:center}
+    h1{font-size:22px;font-weight:bold;text-transform:uppercase;letter-spacing:.06em;margin:6px 0 2px}
+    .k{font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:.1em}
+    .kk{font-size:11px;text-transform:uppercase;letter-spacing:.14em}
+    .lat{font-size:11px;font-style:italic;color:#6a5c3f}
+    .sep{margin:14px 0;text-align:center;color:#7a6a4a}
+    .sep:before,.sep:after{content:"";display:inline-block;width:64px;height:1px;background:#b8a67e;vertical-align:middle;margin:0 8px}
+    h2{font-size:17px;font-weight:bold;text-align:center;margin:6px 0}
+    .intro p{font-size:13px;line-height:1.7;text-align:justify;margin:0 0 6px}
+    table{width:100%;border-collapse:collapse;font-family:'Courier New',monospace;margin-top:4px}
+    th{border-bottom:2px solid #8a7850;text-align:left;font-size:16px;padding:2px 0}
+    th.r,td.r{text-align:right}
+    td{border-bottom:1px solid #c7b68e66;font-size:14px;padding:3px 0;break-inside:avoid}
+    td.vide{font-style:italic;color:#6a5c3f;border:0;padding-top:8px}
+    .payes{margin-top:20px}
+    .payes .u{font-size:13px;text-decoration:underline}
+    .pay{font-family:'Courier New',monospace;font-size:14px;padding:2px 0;break-inside:avoid}
+    .muted{color:#6a5c3f;font-size:12px}
+    .i{font-style:italic}
+    .concl p{font-size:13px;line-height:1.7;text-align:justify;margin:6px 0 0}
+    .sign{margin-top:34px;text-align:right;break-inside:avoid}
+    .sign .l{font-size:12px;color:#4a3b26}
+    .sign .h{height:1px;background:#b8a67e;margin:6px 0;width:220px;margin-left:auto}
+    .sign .nom{font-family:'Segoe Script','Brush Script MT',cursive;font-size:22px}
+    .sign .dr{font-size:13px;font-weight:bold}
+    .sign .ti{font-size:12px;font-style:italic}
+    .foot{margin-top:22px;border-top:1px solid #b8a67e;padding-top:8px;text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#6a5c3f}
+  </style></head><body><div class="doc">
+    <div class="center">
+      <div style="font-size:20px">⚕</div>
+      <h1>Cabinet Médical de Saint-Denis</h1>
+      <div class="k">Hôpital et Dispensaire de l'État de Louisiane</div>
+      <div class="kk">Soigner — Soulager — Préserver</div>
+      <div class="lat">« Sancte Lucas, ora pro nobis »</div>
+    </div>
+    <div class="sep"></div>
+    <h2>Rapport des impayés des soins, du Dispensaire et de l'Hôpital</h2>
+    <div class="sep"></div>
+    <div class="intro">${INTRO.map((p) => `<p>${esc(p)}</p>`).join("")}<p>Fait pour servir et valoir ce que de droit.</p></div>
+    <div class="sep"></div>
+    <table><thead><tr><th>Date d'émission et Nom</th><th class="r">$</th></tr></thead><tbody>${impRows}</tbody></table>
+    <div class="payes">
+      <div class="u">Personnes ayant payé depuis l'envoi du dernier document :</div>
+      <div class="muted">Nom — montant (date d'émission · date de paiement)</div>
+      <div style="margin-top:4px">${payRows}</div>
+    </div>
+    <div class="concl">
+      <p>Ci-dessus figure la liste des contrevenants.</p>
+      <p>Pour toute information complémentaire, nous demeurons à votre entière disposition.</p>
+      <p>Veuillez agréer l'expression de nos salutations distinguées.</p>
+    </div>
+    <div class="sign">
+      <div class="l">Fait à Saint-Denis, le ${esc(jourLong(r.genereLe))} de l'An de Grâce 1904</div>
+      <div class="l">Pour le Cabinet Médical de Saint-Denis,</div>
+      <div class="h"></div>
+      <div class="nom">${esc(r.medecin)}</div>
+      <div class="dr">Dr. ${esc(r.medecin)}</div>
+      <div class="ti">${esc(r.medecinTitre || TITRE_DEFAUT)}</div>
+    </div>
+    <div class="foot">Ars Medicina · Humanitas · Scientia — Primum non nocere</div>
+  </div><script>window.onload=function(){window.print()}</script></body></html>`);
+  w.document.close();
 }
 
 const Sep = () => <div className="my-3 flex items-center justify-center gap-2 text-[#7a6a4a]"><span className="h-px w-16 bg-[#b8a67e]" /><span className="text-[0.7rem]">❖</span><span className="h-px w-16 bg-[#b8a67e]" /></div>;
@@ -76,9 +165,9 @@ export function RapportDoc({ rapport: r }: { rapport: RapportImpayes }) {
       {/* Paiements depuis le dernier rapport */}
       <div className="mt-5">
         <p className="text-[0.82rem] underline">Voici la liste des personnes qui ont payé depuis l&apos;envoi du dernier document :</p>
-        <p className="text-[0.78rem]">Date de facturation — nom — $</p>
+        <p className="text-[0.78rem]">Nom — montant (date d&apos;émission · date de paiement)</p>
         <div className="mt-1" style={{ fontFamily: "'Courier New', monospace" }}>
-          {r.payes.length ? r.payes.map((p, k) => <div key={k} className="text-[0.86rem]">• {ddMM(p.date)} {p.nom} — {Math.round(p.montant)}</div>) : <p className="text-[0.82rem] italic text-[#6a5c3f]">Aucun paiement depuis le dernier rapport.</p>}
+          {r.payes.length ? r.payes.map((p, k) => <div key={k} className="text-[0.86rem]">• {p.nom} — {Math.round(p.montant)} <span className="text-[0.72rem] text-[#6a5c3f]">(émis {ddMM(p.emission)} · payé {ddMM(p.date)})</span></div>) : <p className="text-[0.82rem] italic text-[#6a5c3f]">Aucun paiement depuis le dernier rapport.</p>}
         </div>
       </div>
 
@@ -96,9 +185,9 @@ export function RapportDoc({ rapport: r }: { rapport: RapportImpayes }) {
           <div>le {jourLong(r.genereLe)} de l&apos;An de Grâce 1904</div>
           <div className="my-1 h-px bg-[#b8a67e]" />
           <div className="text-[0.76rem]">Pour le Cabinet Médical de Saint-Denis,</div>
-          <div className="mt-1 text-[1.3rem]" style={{ fontFamily: "'Segoe Script','Brush Script MT',cursive" }}>Ed Remington</div>
-          <div className="text-[0.78rem] font-semibold">Dr. Ed Remington</div>
-          <div className="text-[0.72rem] italic">Chef du Cabinet Médical de Saint-Denis</div>
+          <div className="mt-1 text-[1.3rem]" style={{ fontFamily: "'Segoe Script','Brush Script MT',cursive" }}>{r.medecin || "……"}</div>
+          <div className="text-[0.78rem] font-semibold">Dr. {r.medecin || "……"}</div>
+          <div className="text-[0.72rem] italic">{r.medecinTitre || TITRE_DEFAUT}</div>
         </div>
         <Stamp tone="#3a3222" l1="State Medical Board" l2="1904" />
       </div>
@@ -109,9 +198,16 @@ export function RapportDoc({ rapport: r }: { rapport: RapportImpayes }) {
   );
 }
 
-export function RapportImpayesModal({ initial, historique, config, onClose }: { initial: RapportImpayes; historique: RapportHisto[]; config: RapportConfig; onClose: () => void }) {
+export function RapportImpayesModal({ initial, historique, config, medecins = [], onClose }: { initial: RapportImpayes; historique: RapportHisto[]; config: RapportConfig; medecins?: Medecin[]; onClose: () => void }) {
   const router = useRouter();
   const [doc, setDoc] = useState<RapportImpayes>(initial);
+
+  // Change le médecin signataire (nom + titre/grade) → l'aperçu, l'impression et
+  // le texte copié s'adaptent aussitôt. Aucune requête : simple mise à jour locale.
+  function choisirMedecin(nom: string) {
+    const m = medecins.find((x) => x.nom === nom);
+    setDoc((d) => ({ ...d, medecin: nom || d.medecin, medecinTitre: titreDe(m?.grade) }));
+  }
   const [histo, setHisto] = useState<RapportHisto[]>(historique);
   const [vue, setVue] = useState<"apercu" | "histo" | "plan">("apercu");
   const [busy, setBusy] = useState<string | null>(null);
@@ -128,14 +224,15 @@ export function RapportImpayesModal({ initial, historique, config, onClose }: { 
 
   async function generer() {
     setBusy("gen");
-    const r = await genererRapportImpayes();
+    const r = await genererRapportImpayes(doc.medecin, doc.medecinTitre);
     setBusy(null);
     if (!r.ok || !r.rapport) { setFlash({ t: "bad", m: r.error || "Impossible." }); return; }
     setDoc(r.rapport); setFlash({ t: "ok", m: `Rapport généré — ${r.rapport.impayes.length} impayé(s), ${r.rapport.payes.length} paiement(s).` });
     setHisto((p) => [{ id: "tmp", at: r.rapport!.genereLe, par: r.rapport!.medecin, nbImpayes: r.rapport!.impayes.length, nbPaiements: r.rapport!.payes.length }, ...p]);
     router.refresh();
   }
-  async function actualiser() { setBusy("ref"); const rp = await rafraichirRapport(); setBusy(null); if (rp) { setDoc(rp); setFlash({ t: "ok", m: "Aperçu actualisé." }); } }
+  // Actualise les données mais CONSERVE le médecin signataire choisi.
+  async function actualiser() { setBusy("ref"); const rp = await rafraichirRapport(); setBusy(null); if (rp) { setDoc((d) => ({ ...rp, medecin: d.medecin, medecinTitre: d.medecinTitre })); setFlash({ t: "ok", m: "Aperçu actualisé." }); } }
   async function copier(pourFDO = false) { try { await navigator.clipboard.writeText(rapportTexte(doc)); setFlash({ t: "ok", m: pourFDO ? "Copié — colle-le dans le salon des forces de l'ordre." : "Rapport copié." }); } catch { setFlash({ t: "bad", m: "Copie impossible." }); } }
   async function voirSnapshot(id: string) { setBusy("snap" + id); const snap = await chargerSnapshotRapport(id); setBusy(null); if (snap) { setDoc(snap); setVue("apercu"); } else setFlash({ t: "bad", m: "Aperçu indisponible." }); }
 
@@ -156,12 +253,24 @@ export function RapportImpayesModal({ initial, historique, config, onClose }: { 
             <>
               <button onClick={actualiser} disabled={!!busy} className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted hover:text-ink disabled:opacity-50">{busy === "ref" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />} Actualiser</button>
               <button onClick={generer} disabled={!!busy} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[0.74rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--warn)" }}>{busy === "gen" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />} Générer le rapport</button>
-              <button onClick={() => window.print()} className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted hover:text-ink"><Printer className="h-3.5 w-3.5" /> Imprimer / PDF</button>
+              <button onClick={() => imprimerRapport(doc)} className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted hover:text-ink"><Printer className="h-3.5 w-3.5" /> Imprimer / PDF</button>
               <button onClick={() => copier(false)} className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted hover:text-ink"><Copy className="h-3.5 w-3.5" /> Copier</button>
               <button onClick={() => copier(true)} className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted hover:text-ink"><Send className="h-3.5 w-3.5" /> Envoyer aux FDO</button>
             </>
           ) : null}
         </div>
+
+        {vue === "apercu" ? (
+          <div className="rapport-noprint flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2">
+            <span className="text-[0.72rem] font-semibold uppercase tracking-[0.05em] text-faint">Médecin signataire</span>
+            <select value={doc.medecin} onChange={(e) => choisirMedecin(e.target.value)} className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[0.8rem]" title="Choisir le médecin qui édite le document">
+              {!medecins.some((m) => m.nom === doc.medecin) ? <option value={doc.medecin}>{doc.medecin} (compte connecté)</option> : null}
+              {medecins.map((m) => <option key={m.nom} value={m.nom}>{m.nom}{m.grade ? ` — ${m.grade}` : ""}</option>)}
+            </select>
+            <span className="text-[0.72rem] text-faint">Signé : <b>Dr. {doc.medecin}</b> · {doc.medecinTitre || TITRE_DEFAUT}</span>
+            {medecins.length === 0 ? <span className="text-[0.68rem] italic text-faint">Ajoute des médecins dans les Effectifs (RH) pour les retrouver ici.</span> : null}
+          </div>
+        ) : null}
 
         {vue === "plan" ? (
           <div className="rapport-noprint flex flex-col gap-3">

@@ -12,16 +12,22 @@ import { RAPPORT_CONFIG_DEFAUT, type RapportConfig, type RapportMode } from "@/l
 // du dernier rapport enregistré → elle se remet d'elle-même à zéro.
 
 export type LigneImpaye = { date: string | null; nom: string; montant: number; soins: string | null; medecin: string | null; refs: string[] };
-export type LignePaye = { date: string | null; nom: string; montant: number };
+// `emission` = date d'ÉMISSION de la facture ; `date` = date de PAIEMENT. Les deux
+// sont INDÉPENDANTES : le paiement n'écrase jamais l'émission (correctif bug n°3).
+export type LignePaye = { date: string | null; emission: string | null; nom: string; montant: number };
 export type RapportImpayes = {
   genereLe: string;
   medecin: string;
+  medecinTitre: string;
   depuis: string | null;
   impayes: LigneImpaye[];
   payes: LignePaye[];
   totalImpaye: number;
   totalPaye: number;
 };
+
+// Titre par défaut sous la signature quand aucun grade n'est connu.
+export const TITRE_MEDECIN_DEFAUT = "Médecin du Dispensaire de Saint-Denis";
 export type RapportHisto = { id: string; at: string; par: string | null; nbImpayes: number; nbPaiements: number };
 
 const norm = (x: unknown) => String(x ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ");
@@ -44,10 +50,14 @@ function agregerPayes(fs: Facture[]): LignePaye[] {
   const m = new Map<string, LignePaye>();
   for (const f of fs) {
     const k = norm(f.objet) || f.id;
-    const d = f.datePaiement || f.dateEmission || f.createdAt;
+    const d = f.datePaiement || null;                 // date de PAIEMENT (indépendante)
+    const em = f.dateEmission || f.createdAt || null;  // date d'ÉMISSION (indépendante)
     const e = m.get(k);
-    if (e) { e.montant += f.montant; if (d && (!e.date || d < e.date)) e.date = d; }
-    else m.set(k, { date: d, nom: f.objet || "—", montant: f.montant });
+    if (e) {
+      e.montant += f.montant;
+      if (d && (!e.date || d < e.date)) e.date = d;
+      if (em && (!e.emission || em < e.emission)) e.emission = em;
+    } else m.set(k, { date: d, emission: em, nom: f.objet || "—", montant: f.montant });
   }
   return [...m.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)));
 }
@@ -76,9 +86,10 @@ async function fdoLignes(depuis: string | null): Promise<{ impayes: LigneImpaye[
       else impM.set(k, { date: d, nom: `FDO — ${bureau}`, montant: val(r.montant), soins: agent, medecin: r.par ? String(r.par) : null, refs: [] });
     } else if (r.updatedAt && (!depuis || String(r.updatedAt) > depuis)) {
       const d = String(r.updatedAt);
+      const em = r.createdAt ? String(r.createdAt) : null;
       const e = payM.get(k);
-      if (e) { e.montant += val(r.montant); if (d && (!e.date || d < e.date)) e.date = d; }
-      else payM.set(k, { date: d, nom: `FDO — ${bureau}`, montant: val(r.montant) });
+      if (e) { e.montant += val(r.montant); if (d && (!e.date || d < e.date)) e.date = d; if (em && (!e.emission || em < e.emission)) e.emission = em; }
+      else payM.set(k, { date: d, emission: em, nom: `FDO — ${bureau}`, montant: val(r.montant) });
     }
   }
   return { impayes: [...impM.values()], payes: [...payM.values()] };
@@ -89,8 +100,9 @@ async function dernierRapportAt(admin: NonNullable<ReturnType<typeof createAdmin
 }
 
 // Construit le rapport (impayés courants + paiements depuis `depuis`).
-async function batirRapport(medecin: string, depuis: string | null): Promise<{ pret: boolean; rapport: RapportImpayes }> {
-  const vide: RapportImpayes = { genereLe: new Date().toISOString(), medecin, depuis, impayes: [], payes: [], totalImpaye: 0, totalPaye: 0 };
+async function batirRapport(medecin: string, depuis: string | null, titre?: string | null): Promise<{ pret: boolean; rapport: RapportImpayes }> {
+  const medecinTitre = (titre || "").trim() || TITRE_MEDECIN_DEFAUT;
+  const vide: RapportImpayes = { genereLe: new Date().toISOString(), medecin, medecinTitre, depuis, impayes: [], payes: [], totalImpaye: 0, totalPaye: 0 };
   const data = await getFactures();
   if (!data.pret) return { pret: false, rapport: vide };
   const impayesF = data.factures.filter((f) => factureOuverte(f.statut));
@@ -101,10 +113,10 @@ async function batirRapport(medecin: string, depuis: string | null): Promise<{ p
   const fdo = await fdoLignes(depuis);
   if (fdo.impayes.length) { impayes.push(...fdo.impayes); impayes.sort((a, b) => String(a.date).localeCompare(String(b.date))); }
   if (fdo.payes.length) { payes.push(...fdo.payes); payes.sort((a, b) => String(a.date).localeCompare(String(b.date))); }
-  return { pret: true, rapport: { genereLe: new Date().toISOString(), medecin, depuis, impayes, payes, totalImpaye: impayes.reduce((a, l) => a + l.montant, 0), totalPaye: payes.reduce((a, l) => a + l.montant, 0) } };
+  return { pret: true, rapport: { genereLe: new Date().toISOString(), medecin, medecinTitre, depuis, impayes, payes, totalImpaye: impayes.reduce((a, l) => a + l.montant, 0), totalPaye: payes.reduce((a, l) => a + l.montant, 0) } };
 }
 
-// Données du prochain rapport (aperçu — médecin = compte connecté).
+// Données du prochain rapport (aperçu — médecin = compte connecté par défaut).
 export async function getRapportData(): Promise<{ pret: boolean; rapport: RapportImpayes }> {
   const medecin = await (async () => { try { return (await getSessionProfile())?.nom || "Le médecin de garde"; } catch { return "Le médecin de garde"; } })();
   const admin = createAdminClient();
@@ -113,12 +125,13 @@ export async function getRapportData(): Promise<{ pret: boolean; rapport: Rappor
 }
 
 // Enregistre un rapport (fige un instantané) — utilisé par l'action manuelle
-// ET par la génération planifiée (par = « Génération automatique »).
-export async function enregistrerRapport(par: string): Promise<{ ok: boolean; error?: string; rapport?: RapportImpayes }> {
+// ET par la génération planifiée (par = « Génération automatique »). `titre` =
+// grade/fonction du médecin signataire (affiché sous la signature).
+export async function enregistrerRapport(par: string, titre?: string | null): Promise<{ ok: boolean; error?: string; rapport?: RapportImpayes }> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const depuis = await dernierRapportAt(admin);
-  const { pret, rapport } = await batirRapport(par, depuis);
+  const { pret, rapport } = await batirRapport(par, depuis, titre);
   if (!pret) return { ok: false, error: "Données indisponibles (lance les SQL du dispensaire)." };
   const id = `dri-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const { error } = await admin.from("DispensaireRapportImpayes").insert({ id, at: rapport.genereLe, par, depuis, nbImpayes: rapport.impayes.length, nbPaiements: rapport.payes.length, snapshot: rapport });
