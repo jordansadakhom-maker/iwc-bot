@@ -1,0 +1,20 @@
+{
+  "name": "iwc-e2e",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Tests end-to-end (Playwright) du site IWC — isolés de web/, joués manuellement avec ta session.",
+  "type": "module",
+  "scripts": {
+    "auth": "playwright open --save-storage=auth.json https://iwc-bot-psi.vercel.app/login",
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:ui": "playwright test --ui",
+    "smoke": "playwright test app-smoke",
+    "public": "playwright test public",
+    "roundtrip": "playwright test chasse-roundtrip",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}
