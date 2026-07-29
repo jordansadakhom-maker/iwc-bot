@@ -1478,11 +1478,14 @@ export type CarteData = { connecte: boolean; points: CartePoint[]; routes: Carte
 
 export async function getCarte(): Promise<CarteData> {
   const vide: CarteData = { connecte: false, points: [], routes: [], peutConfidentiel: false, imageUrl: null };
+  try {
   if (!dataConfigured()) return vide;
   const supabase = createAdminClient();
   if (!supabase) return vide;
-  const acces = await getAcces();
-  const peutConfidentiel = acces.direction;
+  // getAcces peut échouer (session en cours de rafraîchissement) : on ne laisse
+  // JAMAIS ça faire planter le rendu de la page (→ « This page couldn't load »).
+  let peutConfidentiel = false;
+  try { peutConfidentiel = (await getAcces()).direction; } catch { peutConfidentiel = false; }
   const [pR, rR, pwR, rwR, cfgR] = await Promise.all([
     supabase.from("CartePoint").select("*").limit(1000),
     supabase.from("CarteRoute").select("*").limit(400),
@@ -1517,4 +1520,5 @@ export async function getCarte(): Promise<CarteData> {
   }
   const imageUrl = (!cfgR.error && cfgR.data ? String((cfgR.data as { valeur?: string }).valeur || "") : "") || process.env.NEXT_PUBLIC_CARTE_IMAGE_URL || null;
   return { connecte: true, points, routes, peutConfidentiel, imageUrl };
+  } catch { return vide; }
 }
