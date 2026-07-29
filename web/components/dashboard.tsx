@@ -47,9 +47,12 @@ function BandeauAttente({ connecte }: { connecte: boolean }) {
 function Kpis({ data }: { data: DashData }) {
   const K = data.connecte;
   const conf = data.pole === "confrerie";
+  // L'argent se lit en OR (laiton clair), quel que soit le pôle — les coffres
+  // brillent comme des pièces ; les compteurs restent en encre claire (hiérarchie).
+  const OR = "var(--brass-hi)";
   const kpis = [
-    { label: "Coffre commun", value: K ? money(data.coffres.commun) : "—", icon: Wallet, tone: "#c98500" },
-    { label: conf ? "Coffre Confrérie" : "Coffre Iron Wolf", value: K ? money(conf ? data.coffres.illegal : data.coffres.legal) : "—", icon: Landmark, tone: conf ? "var(--oxblood)" : "#3987e5" },
+    { label: "Coffre commun", value: K ? money(data.coffres.commun) : "—", icon: Wallet, tone: "#c98500", argent: true },
+    { label: conf ? "Coffre Confrérie" : "Coffre Iron Wolf", value: K ? money(conf ? data.coffres.illegal : data.coffres.legal) : "—", icon: Landmark, tone: conf ? "var(--oxblood)" : "#3987e5", argent: true },
     { label: "Contrats en cours", value: K ? String(data.contratsEnCours) : "—", icon: FileText, tone: "#199e70" },
     { label: "Opérations actives", value: K ? String(data.opsActives) : "—", icon: Target, tone: "#9085e9" },
   ];
@@ -65,7 +68,10 @@ function Kpis({ data }: { data: DashData }) {
                 <Icon className="h-4 w-4" strokeWidth={2} />
               </span>
             </div>
-            <div className={clsx("tabular mb-1 mt-3 font-num text-[1.95rem] font-semibold", K ? "text-ink" : "text-faint")}>{k.value}</div>
+            <div
+              className={clsx("tabular mb-1 mt-3 font-num text-[1.95rem] font-semibold", K ? (k.argent ? "" : "text-ink") : "text-faint")}
+              style={K && k.argent ? { color: OR, textShadow: `0 0 24px color-mix(in srgb, ${OR} 32%, transparent)` } : undefined}
+            >{k.value}</div>
             <div className="flex items-center gap-1.5 text-[0.72rem] text-faint">
               <span className="h-1.5 w-1.5 rounded-full" style={{ background: K ? "var(--good)" : "var(--faint)" }} />
               {K ? "À jour" : "En attente de la base"}
