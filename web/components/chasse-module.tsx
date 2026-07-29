@@ -376,7 +376,6 @@ function RecapTable({ ressources, zones, query, catFiltre, prix, onPrix, villesM
   // mise en avant, et le pied donne le total du stock à la vente par ville.
   const villesPricees = villesMarche.filter((v) => v.actif && Object.values(prixMarche[v.id] || {}).some((p) => p > 0));
   const prixDe = (villeId: string, nom: string) => prixMarche[villeId]?.[nom] || 0;
-  const meilleureVilleDe = (nom: string) => { let id = "", max = 0; for (const v of villesPricees) { const p = prixDe(v.id, nom); if (p > max) { max = p; id = v.id; } } return id; };
   const totalVilleDe = (villeId: string) => list.reduce((s, r) => s + r.total * prixDe(villeId, r.nom), 0);
   return (
     <div className="overflow-x-auto rounded-[12px] border border-border">
@@ -400,7 +399,7 @@ function RecapTable({ ressources, zones, query, catFiltre, prix, onPrix, villesM
                 <td className="border-b border-border px-3 py-2"><span className="mr-1.5">{emoji(r.nom)}</span>{r.nom}{r.seuil != null && r.total <= r.seuil ? <span className="ml-1.5 align-middle text-[0.68rem]" style={{ color: "var(--warn)" }}>▼ seuil {r.seuil}</span> : null}</td>
                 {zones.map((z) => <td key={z.id} className="border-b border-border px-3 py-2 text-right font-num text-muted">{r.zones[z.id] || <span className="text-faint">—</span>}</td>)}
                 <td className="border-b border-border px-3 py-2 text-right font-num font-semibold" style={{ color: "var(--accent)" }}>{r.total}</td>
-                {villesPricees.map((v) => { const p = prixDe(v.id, r.nom); const best = meilleureVilleDe(r.nom) === v.id && p > 0; return <td key={v.id} className="border-b border-border px-3 py-2 text-right font-num" style={best ? { color: "var(--brass-hi)", fontWeight: 700, background: "color-mix(in srgb,var(--brass-hi) 10%,transparent)" } : { color: p ? "var(--muted)" : "var(--faint)" }}>{p ? `$${p.toFixed(2)}` : "—"}</td>; })}
+                {villesPricees.map((v) => { const p = prixDe(v.id, r.nom); return <td key={v.id} className="border-b border-border px-3 py-2 text-right font-num" style={{ color: p ? "var(--steel)" : "var(--faint)" }}>{p ? `$${p.toFixed(2)}` : "—"}</td>; })}
                 <td className="border-b border-border px-2 py-1.5 text-right">
                   <input
                     type="number" min={0} step="0.01" inputMode="decimal"
@@ -421,7 +420,7 @@ function RecapTable({ ressources, zones, query, catFiltre, prix, onPrix, villesM
             <td className="px-3 py-2">Total</td>
             {totaux.map((t, i) => <td key={i} className="px-3 py-2 text-right font-num text-muted">{t}</td>)}
             <td className="px-3 py-2 text-right font-num" style={{ color: "var(--accent)" }}>{grand}</td>
-            {villesPricees.map((v) => { const tot = totalVilleDe(v.id); const best = villesPricees.every((o) => totalVilleDe(o.id) <= tot) && tot > 0; return <td key={v.id} className="px-3 py-2 text-right font-num" style={best ? { color: "var(--brass-hi)", fontWeight: 700 } : { color: "var(--steel)" }} title="Total du stock à la vente dans cette ville">{tot ? `$${tot.toFixed(2)}` : "—"}</td>; })}
+            {villesPricees.map((v) => { const tot = totalVilleDe(v.id); return <td key={v.id} className="px-3 py-2 text-right font-num" style={{ color: "var(--steel)" }} title="Total du stock à la vente dans cette ville">{tot ? `$${tot.toFixed(2)}` : "—"}</td>; })}
             <td className="px-3 py-2 text-right text-[0.72rem] text-faint">à la vente →</td>
             <td className="px-3 py-2 text-right font-num" style={{ color: "var(--brass-hi)" }}>${gainTotal.toFixed(2)}</td>
           </tr>
