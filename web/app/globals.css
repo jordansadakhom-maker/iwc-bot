@@ -182,25 +182,28 @@ body > * { position: relative; z-index: 1; }
    Additif, respectueux de prefers-reduced-motion (neutralisé plus haut).
    ============================================================ */
 
-/* Cartes : ombre feuilletée + liseré de lumière en haut (matière), et un survol
-   « vivant » — le bord s'éclaire d'un souffle laiton, la carte gagne en relief.
+/* Cartes redessinées : arête de laiton éclairé en haut (rail de lumière, comme
+   le bord poli d'un panneau serti), ombre feuilletée, et un survol « vivant » —
+   le bord s'éclaire d'un souffle laiton, la carte gagne en relief.
+   Le liseré supérieur est désormais teinté laiton (au lieu d'un blanc neutre) :
+   chaque panneau du site porte la même signature chaleureuse, sans le toucher.
    Redéfinit shadow-card (déclarée après la couche utilities → prioritaire). */
 .shadow-card {
   box-shadow:
-    inset 0 1px 0 0 color-mix(in srgb, #fff 5%, transparent),
+    inset 0 1px 0 0 color-mix(in srgb, var(--accent-hi) 26%, transparent),
     0 1px 2px -1px rgba(0,0,0,.4),
     0 10px 24px -14px rgba(0,0,0,.55),
     0 30px 56px -30px rgba(0,0,0,.6);
   transition: box-shadow .32s cubic-bezier(.22,.61,.36,1), border-color .32s ease, transform .32s cubic-bezier(.22,.61,.36,1);
 }
 .shadow-card:hover {
-  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
   box-shadow:
-    inset 0 1px 0 0 color-mix(in srgb, #fff 7%, transparent),
+    inset 0 1px 0 0 color-mix(in srgb, var(--accent-hi) 46%, transparent),
     0 2px 4px -1px rgba(0,0,0,.4),
     0 16px 34px -16px rgba(0,0,0,.55),
     0 40px 72px -34px rgba(0,0,0,.7),
-    0 0 26px -8px color-mix(in srgb, var(--accent) 26%, transparent);
+    0 0 30px -8px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 /* Boutons & liens-boutons : pression tactile universelle (feedback net au clic)
