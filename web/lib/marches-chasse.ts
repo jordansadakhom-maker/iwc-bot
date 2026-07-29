@@ -50,9 +50,22 @@ export async function getMarchesChasse(): Promise<MarchesData> {
   if (vR.error && rR.error) return { ...vide, peut };
 
   type Row = Record<string, unknown>;
-  const villes: VilleMarche[] = ((vR.data || []) as Row[]).map((v) => ({
+  let villes: VilleMarche[] = ((vR.data || []) as Row[]).map((v) => ({
     id: String(v.id), nom: String(v.nom || ""), actif: v.actif !== false, ordre: Number(v.ordre) || 0,
   }));
+
+  // Auto-installation des villes RDR2 par défaut au tout premier chargement
+  // (table présente mais vide) → l'utilisateur n'a rien à saisir. Idempotent
+  // (upsert par id fixe) : aucune duplication même sous chargements concurrents.
+  if (!vR.error && villes.length === 0) {
+    const slug = (s: string) => "vil-" + s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
+    const noms = ["Valentine", "Blackwater", "Saint Denis", "Rhodes", "Strawberry", "Tumbleweed", "Van Horn", "Annesburg", "Armadillo"];
+    const rows = noms.map((nom, i) => ({ id: slug(nom), nom, actif: true, ordre: i + 1 }));
+    try {
+      await admin.from("ChasseVille").upsert(rows, { onConflict: "id" });
+      villes = rows.map((r) => ({ id: r.id, nom: r.nom, actif: true, ordre: r.ordre }));
+    } catch { /* seed best-effort */ }
+  }
   const ressources: RessourceMarche[] = ((rR.data || []) as Row[]).map((r) => ({
     id: String(r.id), nom: String(r.nom || ""), categorie: r.categorie === "illegal" ? "illegal" : "legal", ordre: Number(r.ordre) || 0,
   }));
