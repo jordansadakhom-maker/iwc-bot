@@ -48,7 +48,9 @@ function imprimer(c: Certificat) {
     .footer .cachet{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#8a7550;text-align:center;margin-top:2px}
     .sign{text-align:right;font-size:14px}
     .sign .l{color:#6b5535;font-size:12px}
-    .sign .n{border-top:1px solid #7a6540;padding-top:4px;min-width:190px;display:inline-block}
+    .sign .n{border-top:1px solid #7a6540;padding-top:4px;min-width:190px;display:inline-block;font-weight:bold}
+    .sign .st{font-size:11px;font-style:italic;color:#6b5535;margin-top:3px}
+    .motto{margin-top:26px;border-top:1px solid #b7a074;padding-top:8px;text-align:center;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#8a7550}
   </style></head><body><div class="cadre">
     <div class="ref">Réf. ${esc(refCertificat(c))}</div>
     <div class="emblem"><svg width="34" height="34" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${CROIX_PATH}"/></svg></div>
@@ -60,13 +62,14 @@ function imprimer(c: Certificat) {
     <div class="meta">Fait à Saint-Denis, le ${esc(dateFR(c.dateActe || c.createdAt))}.</div>
     <div class="footer">
       <div class="seal">${SCEAU_SVG}<div class="cachet">Sceau du Dispensaire</div></div>
-      <div class="sign"><div class="l">Le praticien</div><div class="n">${esc(c.medecin || "……………")}</div></div>
+      <div class="sign"><div class="l">Le praticien</div><div class="n">${esc(c.medecin || "……………")}</div><div class="st">Dispensaire de Saint-Denis</div></div>
     </div>
+    <div class="motto">Ars Medicina · Humanitas · Scientia — Primum non nocere</div>
   </div><script>window.onload=function(){window.print()}</script></body></html>`);
   w.document.close();
 }
 
-export function DispensaireCertificats({ data }: { data: CertData }) {
+export function DispensaireCertificats({ data, medecins = [] }: { data: CertData; medecins?: { nom: string; grade: string | null }[] }) {
   const router = useRouter();
   const [certs, setCerts] = useState<Certificat[]>(data.certificats);
   const [flash, setFlash] = useState<FlashMsg>(null);
@@ -127,14 +130,14 @@ export function DispensaireCertificats({ data }: { data: CertData }) {
         </div>
       )}
 
-      {form ? <CertForm onClose={() => setForm(false)} onSave={enregistrer} /> : null}
+      {form ? <CertForm medecins={medecins} onClose={() => setForm(false)} onSave={enregistrer} /> : null}
       {voir ? <VoirModal c={voir} onClose={() => setVoir(null)} onPrint={() => imprimer(voir)} onCopy={() => copier(voir)} /> : null}
       {delId ? <ConfirmDelete nom={certs.find((c) => c.id === delId)?.patient || ""} onCancel={() => setDelId(null)} onConfirm={() => supprimer(delId)} /> : null}
     </div>
   );
 }
 
-function CertForm({ onClose, onSave }: { onClose: () => void; onSave: (v: Record<string, string>) => void }) {
+function CertForm({ medecins, onClose, onSave }: { medecins: { nom: string; grade: string | null }[]; onClose: () => void; onSave: (v: Record<string, string>) => void }) {
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   const [v, setV] = useState<Record<string, string>>({ patient: "", medecin: "", type: "medical", dateActe: today, dureeRepos: "0", contenu: "" });
   const [err, setErr] = useState<string | null>(null);
@@ -146,7 +149,14 @@ function CertForm({ onClose, onSave }: { onClose: () => void; onSave: (v: Record
       <div className="flex flex-col gap-3">
         <div className="grid gap-3 sm:grid-cols-2">
           <Champ label="Patient *"><input className={inputCls} value={v.patient} onChange={set("patient")} placeholder="Prénom Nom" autoFocus /></Champ>
-          <Champ label="Praticien"><input className={inputCls} value={v.medecin} onChange={set("medecin")} placeholder="Dr. …" /></Champ>
+          <Champ label="Praticien">
+            <select className={inputCls} value={v.medecin} onChange={(e) => setV((p) => ({ ...p, medecin: e.target.value }))}>
+              <option value="">— Choisir un médecin —</option>
+              {medecins.map((m) => <option key={m.nom} value={m.nom}>{m.nom}{m.grade ? ` — ${m.grade}` : ""}</option>)}
+              {v.medecin && !medecins.some((m) => m.nom === v.medecin) ? <option value={v.medecin}>{v.medecin}</option> : null}
+            </select>
+            {medecins.length === 0 ? <span className="mt-1 text-[0.68rem] italic text-faint">Aucun médecin dans les effectifs — ajoute-les dans RH pour les retrouver ici.</span> : null}
+          </Champ>
         </div>
         <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Type de certificat</span><Picker options={CERT_TYPES} value={v.type} onChange={(x) => genererModele(x)} /></div>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -195,7 +205,8 @@ function VoirModal({ c, onClose, onPrint, onCopy }: { c: Certificat; onClose: ()
             </div>
             <div className="text-right text-[0.82rem]">
               <div className="text-[0.68rem] text-faint">Le praticien</div>
-              <div className="mt-3 inline-block min-w-[150px] border-t pt-1" style={{ borderColor: "color-mix(in srgb,var(--ink) 35%,transparent)" }}>{c.medecin || "……"}</div>
+              <div className="mt-3 inline-block min-w-[150px] border-t pt-1 font-semibold" style={{ borderColor: "color-mix(in srgb,var(--ink) 35%,transparent)" }}>{c.medecin || "……"}</div>
+              <div className="text-[0.62rem] italic text-faint">Dispensaire de Saint-Denis</div>
             </div>
           </div>
         </div>

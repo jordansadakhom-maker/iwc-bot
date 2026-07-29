@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ScrollText, Plus, Check, Pencil, Trash2, Search, ExternalLink } from "lucide-react";
+import { ScrollText, Plus, Check, Pencil, Trash2, Search, ExternalLink, Printer } from "lucide-react";
 import { VideRegistre } from "@/components/dispensaire-ui";
 import { RAPPORT_CATEGORIES, estCanva, normaliserLien, type RapportsData, type Rapport } from "@/lib/dispensaire-docs-const";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
@@ -10,9 +10,60 @@ import { creerRapport, majRapport, supprimerRapport } from "@/app/dispensaire/ra
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
 const norm = (x: string) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
-const dateFR = (s: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", year: "numeric" }).format(new Date(s)); } catch { return "—"; } };
+const dateFR = (s: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "long", year: "numeric" }).format(new Date(s)); } catch { return "—"; } };
+const escH = (t: unknown) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-export function DispensaireRapports({ data }: { data: RapportsData }) {
+const CROIX_PATH_R = "M10 2h4a1 1 0 0 1 1 1v6h6a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-6v6a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-6H3a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1h6V3a1 1 0 0 1 1-1Z";
+
+// Génère le rapport médical DIRECTEMENT sur le site (fini la dépendance Canva) :
+// une fenêtre imprimable → « Enregistrer en PDF » / capture pour Discord. Mise en
+// page « pièce officielle » : croix en tête, double filet, signature du praticien.
+function imprimerRapport(r: Rapport) {
+  const w = window.open("", "_blank", "width=840,height=1040");
+  if (!w) return;
+  const corps = escH(r.note || "").replace(/\n/g, "<br>");
+  w.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Rapport médical — ${escH(r.titre)}</title>
+  <style>
+    @page{margin:2cm}
+    *{box-sizing:border-box}
+    body{font-family:Georgia,'Times New Roman',serif;color:#1b140c;background:#e9ddc2;margin:0;padding:40px}
+    .cadre{position:relative;border:2px solid #5c4a2f;box-shadow:inset 0 0 0 3px #f8f2e2,inset 0 0 0 4px #b7a074;padding:40px 44px 52px;max-width:720px;margin:auto;background:#f8f2e2;background-image:repeating-linear-gradient(to bottom,transparent 0 28px,rgba(56,42,22,.045) 28px 29px)}
+    .ref{position:absolute;top:16px;right:20px;font-size:11px;letter-spacing:.08em;color:#8a7550}
+    .emblem{display:flex;justify-content:center;color:#9c7a1a;margin-bottom:4px}
+    .tampon{text-align:center;letter-spacing:.14em;text-transform:uppercase;font-size:11px;color:#6b5535}
+    h1{font-size:22px;text-align:center;margin:.35em 0;letter-spacing:.04em}
+    .sub{text-align:center;font-style:italic;color:#6b5535;font-size:13px;margin-bottom:18px}
+    .cat{text-align:center;font-weight:bold;text-transform:uppercase;letter-spacing:.08em;font-size:13px;color:#6b5535}
+    .titre{text-align:center;font-size:17px;font-weight:bold;border-top:1px solid #b7a074;border-bottom:1px solid #b7a074;padding:8px 0;margin:8px 0 18px}
+    .meta{font-size:13px;color:#4a3b26;margin-bottom:14px}
+    .meta b{color:#1b140c}
+    .corps{font-size:15px;line-height:1.9;white-space:normal;min-height:160px;text-align:justify}
+    .footer{margin-top:34px;display:flex;align-items:flex-end;justify-content:space-between;gap:20px}
+    .sign{text-align:right;font-size:14px}
+    .sign .l{color:#6b5535;font-size:12px}
+    .sign .n{border-top:1px solid #7a6540;padding-top:4px;min-width:190px;display:inline-block;font-weight:bold}
+    .sign .st{font-size:11px;font-style:italic;color:#6b5535;margin-top:3px}
+    .motto{margin-top:26px;border-top:1px solid #b7a074;padding-top:8px;text-align:center;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#8a7550}
+  </style></head><body><div class="cadre">
+    <div class="ref">Réf. RAP-${escH((r.createdAt || "1904").slice(0, 4))}-${escH(r.id.replace(/[^a-z0-9]/gi, "").slice(-4).toUpperCase().padStart(4, "0"))}</div>
+    <div class="emblem"><svg width="34" height="34" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${CROIX_PATH_R}"/></svg></div>
+    <div class="tampon">Comté de Lemoyne · Saint-Denis</div>
+    <h1>Dispensaire de Saint-Denis</h1>
+    <div class="sub">Registre médical · Année 1904</div>
+    ${r.categorie ? `<div class="cat">${escH(r.categorie)}</div>` : ""}
+    <div class="titre">${escH(r.titre)}</div>
+    <div class="meta">${r.patient ? `Patient : <b>${escH(r.patient)}</b><br>` : ""}Fait à Saint-Denis, le <b>${escH(dateFR(r.createdAt))}</b>.</div>
+    <div class="corps">${corps || "……"}</div>
+    <div class="footer">
+      <div></div>
+      <div class="sign"><div class="l">Le praticien</div><div class="n">${escH(r.auteur || "……………")}</div><div class="st">Dispensaire de Saint-Denis</div></div>
+    </div>
+    <div class="motto">Ars Medicina · Humanitas · Scientia — Primum non nocere</div>
+  </div><script>window.onload=function(){window.print()}</script></body></html>`);
+  w.document.close();
+}
+
+export function DispensaireRapports({ data, medecins = [] }: { data: RapportsData; medecins?: { nom: string; grade: string | null }[] }) {
   const router = useRouter();
   const [rapports, setRapports] = useState<Rapport[]>(data.rapports);
   const [flash, setFlash] = useState<FlashMsg>(null);
@@ -58,7 +109,7 @@ export function DispensaireRapports({ data }: { data: RapportsData }) {
       {liste.length === 0 ? (
         rapports.length
           ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">Aucun rapport ne correspond à ta recherche.</p>
-          : <VideRegistre icon={ScrollText} titre="Aucun rapport médical" sous="Ajoute un premier compte rendu (lien Canva) et il sera référencé ici." />
+          : <VideRegistre icon={ScrollText} titre="Aucun rapport médical" sous="Rédige un premier compte rendu — il est généré et imprimable directement ici (PDF, partageable sur Discord). Un lien externe reste possible, mais facultatif." />
       ) : (
         <div className="grid gap-2 lg:grid-cols-2">
           {liste.map((r) => (
@@ -70,6 +121,7 @@ export function DispensaireRapports({ data }: { data: RapportsData }) {
                   {r.note ? <div className="mt-1 line-clamp-2 text-[0.74rem] text-muted">{r.note}</div> : null}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
+                  <button onClick={() => imprimerRapport(r)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Générer / Imprimer le rapport" title="Générer / Imprimer (PDF)"><Printer className="h-3.5 w-3.5" /></button>
                   <button onClick={() => setForm(r)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Modifier"><Pencil className="h-3.5 w-3.5" /></button>
                   <button onClick={() => setDelId(r.id)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint opacity-0 transition hover:text-oxblood group-hover:opacity-100" aria-label="Supprimer"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
@@ -80,13 +132,13 @@ export function DispensaireRapports({ data }: { data: RapportsData }) {
         </div>
       )}
 
-      {form ? <RapportForm initial={form === "new" ? null : form} cats={cats} onClose={() => setForm(null)} onSave={(v) => enregistrer(v, form === "new" ? null : form)} /> : null}
+      {form ? <RapportForm initial={form === "new" ? null : form} cats={cats} medecins={medecins} onClose={() => setForm(null)} onSave={(v) => enregistrer(v, form === "new" ? null : form)} /> : null}
       {delId ? <ConfirmDelete nom={rapports.find((r) => r.id === delId)?.titre || ""} onCancel={() => setDelId(null)} onConfirm={() => supprimer(delId)} /> : null}
     </div>
   );
 }
 
-function RapportForm({ initial, cats, onClose, onSave }: { initial: Rapport | null; cats: string[]; onClose: () => void; onSave: (v: Record<string, string>) => void }) {
+function RapportForm({ initial, cats, medecins, onClose, onSave }: { initial: Rapport | null; cats: string[]; medecins: { nom: string; grade: string | null }[]; onClose: () => void; onSave: (v: Record<string, string>) => void }) {
   const [v, setV] = useState<Record<string, string>>(() => ({ titre: initial?.titre || "", categorie: initial?.categorie || "", patient: initial?.patient || "", lien: initial?.lien || "", auteur: initial?.auteur || "", note: initial?.note || "" }));
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setV((p) => ({ ...p, [k]: e.target.value }));
@@ -100,11 +152,16 @@ function RapportForm({ initial, cats, onClose, onSave }: { initial: Rapport | nu
           <Champ label="Catégorie"><input className={inputCls} value={v.categorie} onChange={set("categorie")} placeholder="Consultation, Chirurgie…" list="rap-cats" /><datalist id="rap-cats">{options.map((c) => <option key={c} value={c} />)}</datalist></Champ>
           <Champ label="Patient"><input className={inputCls} value={v.patient} onChange={set("patient")} placeholder="Optionnel" /></Champ>
         </div>
-        <Champ label="Lien Canva"><input className={inputCls} value={v.lien} onChange={set("lien")} placeholder="https://www.canva.com/design/…" /></Champ>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Champ label="Auteur"><input className={inputCls} value={v.auteur} onChange={set("auteur")} placeholder="Toi par défaut" /></Champ>
-        </div>
-        <Champ label="Description"><textarea className={inputCls} rows={2} value={v.note} onChange={set("note")} /></Champ>
+        <Champ label="Médecin (praticien)">
+          <select className={inputCls} value={v.auteur} onChange={(e) => setV((p) => ({ ...p, auteur: e.target.value }))}>
+            <option value="">— Choisir un médecin —</option>
+            {medecins.map((m) => <option key={m.nom} value={m.nom}>{m.nom}{m.grade ? ` — ${m.grade}` : ""}</option>)}
+            {v.auteur && !medecins.some((m) => m.nom === v.auteur) ? <option value={v.auteur}>{v.auteur}</option> : null}
+          </select>
+          {medecins.length === 0 ? <span className="mt-1 text-[0.68rem] italic text-faint">Aucun médecin dans les effectifs — ajoute-les dans RH.</span> : null}
+        </Champ>
+        <Champ label="Contenu du rapport"><textarea className={inputCls} rows={7} value={v.note} onChange={set("note")} placeholder="Rédige le compte rendu — il sera mis en page et imprimable directement (PDF)." /></Champ>
+        <Champ label="Lien externe (facultatif)"><input className={inputCls} value={v.lien} onChange={set("lien")} placeholder="https://… (Canva ou autre — optionnel)" /></Champ>
         {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
         <div className="mt-1 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2">Annuler</button>
