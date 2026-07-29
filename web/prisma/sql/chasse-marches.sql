@@ -59,3 +59,17 @@ insert into "ChasseRessourceMarche" (id, nom, categorie, ordre) values
   ('rmk-crocsloup',        'Crocs de loup',          'illegal', 51),
   ('rmk-carapacetortue',   'Carapace de tortue',     'illegal', 52)
 on conflict (nom) do nothing;
+
+-- Villes RDR2 par défaut (modifiables/désactivables ensuite). Le site les
+-- (ré)installe aussi automatiquement si la table est vide.
+insert into "ChasseVille" (id, nom, ordre) values
+  ('vil-valentine',  'Valentine',   1),
+  ('vil-blackwater', 'Blackwater',  2),
+  ('vil-saintdenis', 'Saint Denis', 3),
+  ('vil-rhodes',     'Rhodes',      4),
+  ('vil-strawberry', 'Strawberry',  5),
+  ('vil-tumbleweed', 'Tumbleweed',  6),
+  ('vil-vanhorn',    'Van Horn',    7),
+  ('vil-annesburg',  'Annesburg',   8),
+  ('vil-armadillo',  'Armadillo',   9)
+on conflict (id) do nothing;

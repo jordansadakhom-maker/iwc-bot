@@ -14,6 +14,7 @@ import {
 } from "@/app/(app)/chasse/marches-actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
+const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
 const money = (n: number) => "$" + n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const dateFR = (s: string | null) => { if (!s) return ""; try { return new Date(s).toLocaleString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
 const CAT: Record<CategorieMarche, { label: string; c: string; icon: typeof Leaf }> = {
@@ -28,7 +29,7 @@ function meilleure(prixParVille: Record<string, number>, villes: VilleMarche[]) 
   return { villeId: e[0].id, nom: e[0].nom, prix: e[0].prix, ecart: Math.round((e[0].prix - (e[1]?.prix ?? 0)) * 100) / 100 };
 }
 
-export function MarchesChasse({ data }: { data: MarchesData }) {
+export function MarchesChasse({ data, stockRes = [] }: { data: MarchesData; stockRes?: { nom: string; quantite: number }[] }) {
   const router = useRouter();
   const peut = data.peut;
   const [villes, setVilles] = useState<VilleMarche[]>(data.villes);
@@ -59,9 +60,26 @@ export function MarchesChasse({ data }: { data: MarchesData }) {
     if (!r.ok) { setFlash({ t: "bad", m: r.error || "Échec." }); } else { router.refresh(); }
   }
 
-  const ressourcesFiltrees = useMemo(() => ressources
+  // Stock (quantités par ressource) → fusionné dans le catalogue. Les ressources
+  // du stock absentes du catalogue apparaissent AUTOMATIQUEMENT en « Légal ».
+  const stockMap = useMemo(() => { const m = new Map<string, number>(); for (const s of stockRes) m.set(norm(s.nom), (m.get(norm(s.nom)) || 0) + s.quantite); return m; }, [stockRes]);
+  const ressourcesAvecStock = useMemo(() => {
+    const parNom = new Map<string, RessourceMarche & { quantite: number }>();
+    for (const r of ressources) parNom.set(norm(r.nom), { ...r, quantite: stockMap.get(norm(r.nom)) || 0 });
+    for (const s of stockRes) { const k = norm(s.nom); if (!parNom.has(k)) parNom.set(k, { id: "stk-" + k, nom: s.nom, categorie: "legal", ordre: 900, quantite: s.quantite }); }
+    return [...parNom.values()];
+  }, [ressources, stockRes, stockMap]);
+
+  const ressourcesFiltrees = useMemo(() => ressourcesAvecStock
     .filter((r) => (fCat === "all" || r.categorie === fCat) && (!query || r.nom.toLowerCase().includes(query)))
-    .sort((a, b) => a.ordre - b.ordre || a.nom.localeCompare(b.nom)), [ressources, fCat, query]);
+    .sort((a, b) => a.ordre - b.ordre || a.nom.localeCompare(b.nom)), [ressourcesAvecStock, fCat, query]);
+
+  // Total de rachat du STOCK par ville : Σ (quantité × prix de la ville). Le
+  // meilleur en tête → « où vendre rapporte le plus ».
+  const totauxVille = useMemo(() => actives
+    .map((v) => ({ ville: v, total: ressourcesAvecStock.reduce((s, r) => s + r.quantite * (prix[v.id]?.[r.nom] || 0), 0) }))
+    .sort((a, b) => b.total - a.total), [actives, ressourcesAvecStock, prix]);
+  const aDuStock = stockRes.some((s) => s.quantite > 0);
 
   if (!data.pret) {
     return (
@@ -103,6 +121,27 @@ export function MarchesChasse({ data }: { data: MarchesData }) {
 
       {flash ? <Flash tone={flash.t === "ok" ? "good" : "bad"}>{flash.m}</Flash> : null}
 
+      {/* Total du stock par ville (comparateur global) */}
+      {aDuStock && actives.length ? (
+        <div className="rounded-[14px] border border-border p-3" style={{ background: "linear-gradient(180deg, color-mix(in srgb,var(--brass-hi) 6%,var(--surface)), var(--surface))" }}>
+          <div className="mb-2 flex items-center gap-2 text-[0.78rem] font-bold uppercase tracking-[0.06em]" style={{ color: "var(--brass-hi)" }}>
+            <Trophy className="h-4 w-4" /> Valeur de ton stock par ville
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {totauxVille.map(({ ville, total }, i) => {
+              const best = i === 0 && total > 0;
+              return (
+                <div key={ville.id} className="rounded-[10px] border px-3 py-2" style={best ? { borderColor: "color-mix(in srgb,var(--brass-hi) 55%,var(--border))", background: "color-mix(in srgb,var(--brass-hi) 12%,transparent)" } : { borderColor: "var(--border)" }}>
+                  <div className="text-[0.72rem] text-muted">{best ? "🏆 " : ""}{ville.nom}</div>
+                  <div className="font-num text-[1.05rem] font-bold" style={{ color: total > 0 ? "var(--brass-hi)" : "var(--faint)" }}>{money(total)}</div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-[0.72rem] text-faint">Somme de (quantité en stock × prix de rachat) par ville. Renseigne les prix ci-dessous pour comparer — la ville 🏆 rachète ton stock le plus cher.</p>
+        </div>
+      ) : null}
+
       {actives.length === 0 ? (
         <p className="rounded-[12px] border border-dashed border-border px-4 py-8 text-center text-[0.85rem] italic text-faint">
           Aucune ville active. {peut ? "Ajoute une ville via « Gérer les villes »." : "Un officier ou la Direction doit ajouter des villes."}
@@ -135,7 +174,7 @@ export function MarchesChasse({ data }: { data: MarchesData }) {
                     const best = meilleure(parVille, actives);
                     return (
                       <tr key={r.id} className="hover:bg-[color-mix(in_srgb,var(--ink)_4%,transparent)]">
-                        <td className="border-b border-border px-3 py-2 font-medium">{r.nom}</td>
+                        <td className="border-b border-border px-3 py-2 font-medium">{r.nom}{r.quantite > 0 ? <span className="ml-1.5 rounded px-1 font-num text-[0.7rem] text-faint" style={{ background: "color-mix(in srgb,var(--ink) 6%,transparent)" }} title="En stock">×{r.quantite}</span> : null}</td>
                         {colonnes.map((v) => {
                           const val = prix[v.id]?.[r.nom] || 0;
                           const estBest = best && best.villeId === v.id && val > 0;
@@ -167,7 +206,11 @@ export function MarchesChasse({ data }: { data: MarchesData }) {
                         </td>
                         {peut ? (
                           <td className="border-b border-border px-2 py-1.5 text-right">
-                            <button onClick={async () => { if (saving) return; setSaving(r.id); const res = await supprimerRessourceMarche(r.id, r.nom); setSaving(null); if (res.ok) { setRessources((rs) => rs.filter((x) => x.id !== r.id)); router.refresh(); } else setFlash({ t: "bad", m: res.error || "Échec." }); }} className="text-faint hover:text-oxblood" title="Supprimer la ressource"><Trash2 className="h-3.5 w-3.5" /></button>
+                            {r.id.startsWith("stk-") ? (
+                              <span className="text-[0.62rem] text-faint" title="Ressource issue de ton stock — automatique">auto</span>
+                            ) : (
+                              <button onClick={async () => { if (saving) return; setSaving(r.id); const res = await supprimerRessourceMarche(r.id, r.nom); setSaving(null); if (res.ok) { setRessources((rs) => rs.filter((x) => x.id !== r.id)); router.refresh(); } else setFlash({ t: "bad", m: res.error || "Échec." }); }} className="text-faint hover:text-oxblood" title="Supprimer la ressource"><Trash2 className="h-3.5 w-3.5" /></button>
+                            )}
                           </td>
                         ) : null}
                       </tr>
