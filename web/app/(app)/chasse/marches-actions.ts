@@ -14,7 +14,7 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 type Admin = NonNullable<ReturnType<typeof createAdminClient>>;
 async function garde(): Promise<{ admin: Admin; nom: string } | MarcheResult> {
   const acteur = await getActeur();
-  if (!acteur || !acteur.direction) return { ok: false, error: "Réservé à la Direction." };
+  if (!acteur || !acteur.officier) return { ok: false, error: "Réservé aux officiers et à la Direction." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
   return { admin, nom: acteur.nomIC || "Direction" };
