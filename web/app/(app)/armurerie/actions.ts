@@ -7,6 +7,7 @@ import { getLicenceConfig, verifierAchatArme, logRefusAchat } from "@/lib/licenc
 import { envoyerCommande } from "@/lib/commandes";
 import { round2 } from "@/lib/format";
 import { calculFiscal, snapshotCycle, estMouvementImpot } from "@/lib/armurerie-fiscal";
+import { reapprovisionner } from "@/lib/armurerie-reappro";
 import { headers } from "next/headers";
 
 type Admin = NonNullable<ReturnType<typeof createAdminClient>>;
@@ -377,6 +378,17 @@ export async function supprimerProduit(id: string): Promise<ArmResult> {
   const _ga = await garde(); if (_ga) return _ga;
   const { error } = await admin.from("ArmurerieProduit").delete().eq("id", id);
   return error ? { ok: false, error: "Suppression impossible." } : { ok: true };
+}
+
+// Réapprovisionnement manuel (« Réapprovisionner maintenant » depuis le comptoir)
+// — même logique que le cron quotidien : chaque produit vendable sous sa cible
+// est remonté à la cible (jamais réduit). Réservé au personnel de l'armurerie.
+export async function reapprovisionnerMaintenant(): Promise<{ ok: boolean; error?: string; maj?: number }> {
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service indisponible." };
+  const _ga = await garde(); if (_ga) return _ga;
+  const { maj } = await reapprovisionner(admin);
+  return { ok: true, maj };
 }
 
 // Stock officiel de l'armurerie, catégorisé (Armes / Accessoires / Munitions /

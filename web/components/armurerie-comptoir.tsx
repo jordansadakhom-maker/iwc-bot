@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   Users, ScrollText, FileSignature, Plus, Minus, Loader2, Trash2, IdCard, Send, Check, X,
   Download, CircleDollarSign, Vault, ArrowDownRight, ArrowUpRight, History, ShoppingCart, Package, Search,
-  Clock, BadgeDollarSign, Landmark, StickyNote, ListTodo, Activity, Wallet, ClipboardList, Pickaxe, Hammer, ChevronDown, AlertTriangle, TrendingUp, CalendarClock,
+  Clock, BadgeDollarSign, Landmark, StickyNote, ListTodo, Activity, Wallet, ClipboardList, Pickaxe, Hammer, ChevronDown, AlertTriangle, TrendingUp, CalendarClock, PackagePlus,
 } from "lucide-react";
 import type { ArmClient, ArmVente, ArmContrat, ArmMouvement, ArmProduit, ArmEmploye, ArmPointage, ArmPaie, ArmImpot, ArmNote, ArmTache, ArmCommande, ArmRessource, ArmRecetteLigne, ArmRdv } from "@/lib/queries";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
@@ -23,7 +23,7 @@ import {
   creerVente, majVente, supprimerVente, marquerRdv,
   creerContrat, envoyerContrat, marquerContrat, supprimerContrat, honorerContrat,
   ajusterCoffreArmurerie,
-  creerProduit, majProduit, supprimerProduit, importerCatalogue, importerRecettes, validerCaisse, fabriquerProduit, lireCarteIdentite, lireNumeroSerie, type LigneCaisse, type MouvementStock, type ScanRapport, type ScanAnomalie,
+  creerProduit, majProduit, supprimerProduit, importerCatalogue, importerRecettes, reapprovisionnerMaintenant, validerCaisse, fabriquerProduit, lireCarteIdentite, lireNumeroSerie, type LigneCaisse, type MouvementStock, type ScanRapport, type ScanAnomalie,
 } from "@/app/(app)/armurerie/actions";
 
 type Router = ReturnType<typeof useRouter>;
@@ -603,6 +603,9 @@ function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[];
 
   async function importer() { setBusy("cat"); const r = await importerCatalogue(); setBusy(null); if (r.ok) { const parts: string[] = []; if (r.n) parts.push(`${r.n} produit(s) ajouté(s)`); if (r.recat) parts.push(`${r.recat} tarif(s) mis à jour`); setFlash(parts.length ? parts.join(" · ") + "." : "Tarifs déjà à jour."); router.refresh(); } else setFlash(r.error || "Échec."); }
   async function importerRec() { setBusy("rec"); const r = await importerRecettes(); setBusy(null); if (r.ok) { setFlash(`${r.n ?? 0} recettes appliquées aux produits.`); router.refresh(); } else setFlash(r.error || "Échec."); }
+  // Réapprovisionne tout de suite (top-up jusqu'aux cibles) — même effet que le
+  // réappro automatique quotidien, déclenché à la main.
+  async function reappro() { setBusy("reappro"); const r = await reapprovisionnerMaintenant(); setBusy(null); if (r.ok) { setFlash(r.maj ? `Réapprovisionnement effectué — ${r.maj} produit(s) remis à niveau.` : "Tout est déjà au niveau cible."); router.refresh(); } else setFlash(r.error || "Échec."); }
   // Ajustement rapide de la quantité en stock (optimiste ; +/− ou ±10).
   async function ajusterStock(p: ArmProduit, delta: number) {
     const courant = override[p.id] ?? p.stock;
@@ -685,6 +688,7 @@ function ProduitsTab({ produits, ressources, router }: { produits: ArmProduit[];
         {flash ? <div className="mr-auto"><Flash>{flash}</Flash></div> : null}
         <button onClick={importer} disabled={!!busy} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">{busy === "cat" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} {produits.length === 0 ? "Importer le catalogue type" : "Appliquer la grille tarifaire"}</button>
         {produits.length > 0 ? <button onClick={importerRec} disabled={!!busy} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">{busy === "rec" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Hammer className="h-3.5 w-3.5" />} Importer les recettes</button> : null}
+        {produits.length > 0 ? <button onClick={reappro} disabled={!!busy} title="Remonte chaque produit à son niveau cible (comme le réappro quotidien)" className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">{busy === "reappro" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PackagePlus className="h-3.5 w-3.5" />} Réapprovisionner</button> : null}
         <button onClick={() => setNouveau(true)} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Plus className="h-3.5 w-3.5" /> Nouveau produit</button>
       </div>
       {produits.length === 0 ? (
