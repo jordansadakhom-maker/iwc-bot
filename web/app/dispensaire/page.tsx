@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Boxes, FlaskConical, Receipt, FileText, BadgeDollarSign, Package, Bandage, Stethoscope, Clock, Users, CalendarClock, Activity } from "lucide-react";
+import { ArrowRight, Boxes, FlaskConical, Receipt, FileText, BadgeDollarSign, Users, CalendarClock, Activity } from "lucide-react";
 import { getAccueil } from "@/lib/dispensaire-accueil";
 import { getRoleDispensaire, getConfig } from "@/lib/dispensaire-roles";
 import { getConsigneDuJour } from "@/lib/dispensaire-consignes";
@@ -9,14 +9,13 @@ import { DISP_NAV } from "@/lib/dispensaire-nav";
 import { isStandalone } from "@/lib/standalone-server";
 import { AccueilService } from "@/components/dispensaire-accueil-service";
 import { DispensaireConsignes } from "@/components/dispensaire-consignes";
-import { StatWidget, PremiumCard, SectionHeader, EmptyState } from "@/components/dispensaire-premium";
+import { StatWidget } from "@/components/dispensaire-premium";
+import { DispensaireTimeline } from "@/components/dispensaire-timeline";
 import { enregistrerConsigne } from "@/app/dispensaire/consignes-actions";
 
 export const dynamic = "force-dynamic";
 
 const money = (n: number) => `$${Math.round(n).toLocaleString("fr-FR")}`;
-const ACT_ICON: Record<string, typeof Package> = { stock: Package, vente: Bandage, service: Clock, frais: FileText, certificat: Stethoscope };
-const heureCourte = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); } catch { return "—"; } };
 
 export default async function DispensaireAccueil() {
   const [d, role, standalone, consigne, cfg, rdv] = await Promise.all([getAccueil(), getRoleDispensaire(), isStandalone(), getConsigneDuJour(), getConfig(), getRendezVous()]);
@@ -48,27 +47,8 @@ export default async function DispensaireAccueil() {
       {/* Personnel en service (live) + prise de service */}
       <AccueilService enService={d.enService} roster={d.roster} inactiviteMin={cfg.pointageInactiviteMin} />
 
-      {/* Dernières activités */}
-      <PremiumCard lift={false} className="p-4">
-        <SectionHeader eyebrow="Temps réel" titre="Dernières activités" icon={Clock} />
-        {d.activites.length === 0 ? (
-          <EmptyState icon={Activity} titre="Le registre est encore silencieux" sous="La première écriture s'inscrira ici — soins, stocks, personnel." />
-        ) : (
-          <div className="flex flex-col divide-y divide-border">
-            {d.activites.map((a) => {
-              const Icon = ACT_ICON[a.type] || Package;
-              return (
-                <div key={a.id} className="flex items-center gap-2.5 py-1.5 text-[0.8rem]">
-                  <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md" style={{ background: "color-mix(in srgb,var(--accent) 12%,transparent)" }}><Icon className="h-3.5 w-3.5 text-accent" /></span>
-                  <span className="min-w-0 flex-1 truncate">{a.texte}</span>
-                  {a.par ? <span className="shrink-0 text-faint">{a.par}</span> : null}
-                  <span className="shrink-0 font-num text-faint">{heureCourte(a.at)}</span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </PremiumCard>
+      {/* Dernières activités — timeline temps réel (horodatage relatif vivant) */}
+      <DispensaireTimeline items={d.activites} />
 
       {/* Accès aux modules */}
       <div>
