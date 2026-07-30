@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowLeft, Cross, Search, Bell, ChevronDown, LayoutGrid } from "lucide-react";
+import { ArrowLeft, Cross, Search, Bell, ChevronDown, LayoutGrid, Siren } from "lucide-react";
 import { DISP_NAV, DISP_EXTRA, DISP_CATEGORIES, DISP_DIRECT, DISP_DIRECTION, tabsDeCategorie, aPermDirection, aAccesDirection, type PermsLike, type DispTab } from "@/lib/dispensaire-nav";
 import { RegistreHeader } from "@/components/dispensaire-ui";
 import { LogoutButton } from "@/components/logout-button";
@@ -19,6 +19,12 @@ export function DispensaireShell({ children, perms = {}, notifCount = 0, standal
   const [openCat, setOpenCat] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const habilite = !!(perms.rh || perms.factures || perms.admin);
+
+  // Mode Urgence : bascule d'ambiance (rouge dominant) mémorisée localement,
+  // partagée par toute la section via l'attribut data-mode sur la coquille.
+  const [urgence, setUrgence] = useState(false);
+  useEffect(() => { try { setUrgence(localStorage.getItem("disp-urgence") === "1"); } catch { /* stockage indisponible */ } }, []);
+  const basculerUrgence = () => setUrgence((v) => { const n = !v; try { localStorage.setItem("disp-urgence", n ? "1" : "0"); } catch { /* ignore */ } return n; });
 
   // Ferme le menu ouvert au clic extérieur ou au changement de page.
   useEffect(() => { setOpenCat(null); }, [path]);
@@ -71,7 +77,7 @@ export function DispensaireShell({ children, perms = {}, notifCount = 0, standal
   };
 
   return (
-    <div className="disp-premium min-h-screen px-3 py-6">
+    <div className="disp-premium min-h-screen px-3 py-6" data-mode={urgence ? "urgence" : undefined}>
       <div className="disp-premium__canvas mx-auto max-w-[1180px] px-4 py-5 sm:px-6">
         {/* Cartouche de couverture du registre */}
         <header className="flex items-start justify-between gap-3 border-b-2 pb-3" style={{ borderColor: "color-mix(in srgb,var(--accent) 45%,var(--border))" }}>
@@ -86,6 +92,11 @@ export function DispensaireShell({ children, perms = {}, notifCount = 0, standal
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
+            <button type="button" onClick={basculerUrgence} aria-pressed={urgence} title={urgence ? "Désactiver le mode urgence" : "Activer le mode urgence"}
+              className={`grid h-8 w-8 place-items-center rounded-lg border transition ${urgence ? "disp-urgent text-white" : "border-border bg-surface-2 text-muted hover:border-border-2 hover:text-ink"}`}
+              style={urgence ? { background: "var(--crit)", borderColor: "var(--crit)" } : undefined}>
+              <Siren className="h-4 w-4" />
+            </button>
             <DispensaireCommandCenter perms={perms} standalone={standalone} />
             <Link href="/dispensaire/recherche" title="Recherche globale" className="grid h-8 w-8 place-items-center rounded-lg border border-border bg-surface-2 text-muted transition hover:border-border-2 hover:text-ink sm:hidden">
               <Search className="h-4 w-4" />
