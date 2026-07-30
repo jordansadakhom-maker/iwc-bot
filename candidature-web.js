@@ -61,6 +61,7 @@ function _embed(c) {
     .setTimestamp();
   if (c.experience) e.addFields({ name: '🎯 Expérience', value: String(c.experience).slice(0, 1000) });
   if (c.disponibilites) e.addFields({ name: '🕒 Disponibilités', value: String(c.disponibilites).slice(0, 300) });
+  if (c.source) e.addFields({ name: '📣 Nous a connus via', value: String(c.source).slice(0, 120), inline: true });
   return e;
 }
 
