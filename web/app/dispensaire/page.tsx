@@ -44,6 +44,7 @@ export default async function DispensaireAccueil() {
       <DiagBoundary where="Tableau de bord (rendu)">
       <div className="flex flex-col gap-5">
         {/* Cockpit — widgets clés (compteurs animés, cliquables). */}
+        <DiagBoundary where="A · KPIs (StatWidget)">
         <div className="disp-rise grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
           <StatWidget label="Médecins en service" value={d.enService.length} icon={Users} tone="good" live href="/dispensaire/pointage" sous={d.enService.length ? d.enService.slice(0, 2).map((s) => s.nom).join(" · ") : "Personne en service"} />
           <StatWidget label="RDV aujourd'hui" value={rdvAujourdhui} icon={CalendarClock} href="/dispensaire/rendez-vous" sous={rdvAujourdhui ? "Consultations prévues" : "Aucun rendez-vous"} />
@@ -54,17 +55,25 @@ export default async function DispensaireAccueil() {
           {d.habilite ? <StatWidget label="Factures impayées" value={d.facturesImpayees} icon={Receipt} tone={d.facturesRetard ? "crit" : "warn"} href="/dispensaire/factures" sous={`${d.facturesRetard} en retard · ${money(d.du)} dû`} /> : null}
           <StatWidget label="Recette du jour" value={d.ventesJourCa} format={money} icon={BadgeDollarSign} tone="good" href="/dispensaire/ventes" sous="Ventes encaissées aujourd'hui" />
         </div>
+        </DiagBoundary>
 
         {/* Consignes du jour (objectifs) — éditables par les responsables */}
+        <DiagBoundary where="B · Consignes du jour">
         <DispensaireConsignes data={consigne} canEdit={habilite} onSave={enregistrerConsigne} />
+        </DiagBoundary>
 
         {/* Personnel en service (live) + prise de service */}
+        <DiagBoundary where="C · Personnel en service">
         <AccueilService enService={d.enService} roster={d.roster} inactiviteMin={cfg.pointageInactiviteMin} />
+        </DiagBoundary>
 
         {/* Dernières activités — timeline temps réel (horodatage relatif vivant) */}
+        <DiagBoundary where="D · Timeline activités">
         <DispensaireTimeline items={d.activites} />
+        </DiagBoundary>
 
         {/* Accès aux modules */}
+        <DiagBoundary where="E · Modules">
         <div>
           <div className="mb-2 text-[0.72rem] font-semibold uppercase tracking-[0.06em] text-faint">Modules du dispensaire</div>
           <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
@@ -80,6 +89,7 @@ export default async function DispensaireAccueil() {
             })}
           </div>
         </div>
+        </DiagBoundary>
       </div>
       </DiagBoundary>
     );
