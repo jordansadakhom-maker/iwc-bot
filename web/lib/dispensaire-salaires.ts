@@ -73,9 +73,10 @@ export async function getSalaires(): Promise<SalairesData> {
   const jm = new Map<string, { jours: number; heuresMin: number }>();
   try {
     const bMin = new Date(monday + "T00:00:00Z"); bMin.setUTCDate(bMin.getUTCDate() - 1);
-    const { data: clos } = await admin.from("DispensairePointage").select("nom,debut,dureeMin,fin").not("fin", "is", null).gte("debut", bMin.toISOString()).limit(2000);
+    const { data: clos } = await admin.from("DispensairePointage").select("nom,debut,dureeMin,fin,valide").not("fin", "is", null).gte("debut", bMin.toISOString()).limit(2000);
     const joursSet = new Set<string>();
     for (const r of (clos || []) as Record<string, unknown>[]) {
+      if (r.valide === false) continue;           // service invalidé → ne compte pas pour la paie
       const ymd = ymdParis(String(r.debut));
       if (ymd < monday) continue;                 // seulement la semaine courante
       const k = normNom(r.nom);

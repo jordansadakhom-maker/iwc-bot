@@ -8,6 +8,7 @@ import { ymdParis, dowParis, lundiCourant, lundiDecale, dimancheDe } from "@/lib
 export type PointSession = {
   id: string; salarieId: string | null; nom: string;
   debut: string; fin: string | null; dureeMin: number | null; note: string | null;
+  lastSeen: string | null; finSource: string | null; valide: boolean | null; etat: string | null; commentaire: string | null; corrigePar: string | null;
 };
 export type PointSalarie = { id: string; nom: string; grade: string | null };
 export type SemaineJour = { dow: number; min: number };            // dow 0=Lun … 6=Dim
@@ -28,6 +29,9 @@ function toSession(r: Record<string, unknown>): PointSession {
     id: String(r.id), salarieId: r.salarieId == null ? null : String(r.salarieId), nom: String(r.nom || "Salarié"),
     debut: String(r.debut), fin: r.fin == null ? null : String(r.fin),
     dureeMin: r.dureeMin == null ? null : Number(r.dureeMin) || 0, note: r.note == null ? null : String(r.note),
+    lastSeen: r.lastSeen == null ? null : String(r.lastSeen), finSource: r.finSource == null ? null : String(r.finSource),
+    valide: r.valide == null ? null : Boolean(r.valide), etat: r.etat == null ? null : String(r.etat),
+    commentaire: r.commentaire == null ? null : String(r.commentaire), corrigePar: r.corrigePar == null ? null : String(r.corrigePar),
   };
 }
 
@@ -126,10 +130,12 @@ export async function getAssiduite(): Promise<AssiduiteData> {
   };
   for (const r of roster) ligne(String(r.nom || "Salarié"), r.grade == null ? null : String(r.grade));
 
-  // Services clôturés de la fenêtre → jours + heures par semaine.
+  // Services VALIDÉS de la fenêtre → jours + heures par semaine (le temps « ouvert »
+  // ou non validé n'est jamais compté).
   try {
-    const { data: clos } = await admin.from("DispensairePointage").select("nom,debut,dureeMin,fin").not("fin", "is", null).gte("debut", bMin.toISOString()).lte("debut", bMax.toISOString()).limit(2000);
+    const { data: clos } = await admin.from("DispensairePointage").select("nom,debut,dureeMin,fin,valide").not("fin", "is", null).gte("debut", bMin.toISOString()).lte("debut", bMax.toISOString()).limit(2000);
     for (const r of (clos || []) as Record<string, unknown>[]) {
+      if (r.valide === false) continue;            // clôturé mais invalidé → exclu
       const ymd = ymdParis(String(r.debut));
       const sem = semaineDe(ymd);
       if (sem < 0) continue;

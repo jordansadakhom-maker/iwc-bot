@@ -57,7 +57,7 @@ export function DispensairePointage({ data, assiduite, absences = [], peutGerer 
     if (!nom) { setFlash({ t: "bad", m: "Choisis un salarié ou saisis un nom." }); return; }
     if (enCours.some((s) => s.nom.toLowerCase() === nom.toLowerCase())) { setFlash({ t: "bad", m: `${nom} est déjà en service.` }); return; }
     setBusy(true);
-    const tmp: PointSession = { id: "tmp-" + Math.random().toString(36).slice(2, 8), salarieId: nomManuel ? null : salarie?.id ?? null, nom, debut: new Date().toISOString(), fin: null, dureeMin: null, note: null };
+    const tmp: PointSession = { id: "tmp-" + Math.random().toString(36).slice(2, 8), salarieId: nomManuel ? null : salarie?.id ?? null, nom, debut: new Date().toISOString(), fin: null, dureeMin: null, note: null, lastSeen: new Date().toISOString(), finSource: null, valide: null, etat: "en_service", commentaire: null, corrigePar: null };
     setEnCours((p) => [...p, tmp]); setChoix(""); setManuel("");
     const r = await prendreService({ salarieId: tmp.salarieId, nom });
     setBusy(false);
