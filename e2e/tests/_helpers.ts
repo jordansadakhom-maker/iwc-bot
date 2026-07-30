@@ -43,6 +43,41 @@ export const APP_ROUTES = [
   "/direction",
 ];
 
+// Dispensaire de Saint-Denis — toutes les pages de la section (espace distinct,
+// avec son propre contrôle d'accès : une session non habilitée voit un écran
+// « Accès réservé », ce qui n'est PAS un crash → le smoke passe quand même).
+export const DISPENSAIRE_ROUTES = [
+  "/dispensaire",
+  "/dispensaire/assistant",
+  "/dispensaire/cockpit",
+  "/dispensaire/prises-en-charge",
+  "/dispensaire/rendez-vous",
+  "/dispensaire/interventions",
+  "/dispensaire/chambres",
+  "/dispensaire/ambulances",
+  "/dispensaire/rh",
+  "/dispensaire/pointage",
+  "/dispensaire/salaires",
+  "/dispensaire/stockage",
+  "/dispensaire/coffres",
+  "/dispensaire/matieres",
+  "/dispensaire/fabrication",
+  "/dispensaire/ventes",
+  "/dispensaire/factures",
+  "/dispensaire/comptabilite",
+  "/dispensaire/fdo",
+  "/dispensaire/frais",
+  "/dispensaire/certificats",
+  "/dispensaire/rapports",
+  "/dispensaire/stats",
+  "/dispensaire/historique",
+  "/dispensaire/reglement",
+  "/dispensaire/admin",
+  "/dispensaire/audit",
+  "/dispensaire/recherche",
+  "/dispensaire/notifications",
+];
+
 // Bruit console tiers à ignorer (favicon, télémétrie, extensions…). On ne fait
 // JAMAIS échouer un test sur ces motifs — seuls les vrais crashs comptent.
 const IGNORER = [

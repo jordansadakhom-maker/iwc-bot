@@ -46,7 +46,7 @@ export default defineConfig({
     // Espace INTERNE — rejoue ta session (auth.json). Si absente → skip.
     {
       name: "app",
-      testMatch: /(app-smoke|chasse-roundtrip)\.spec\.ts/,
+      testMatch: /(app-smoke|dispensaire-smoke|chasse-roundtrip)\.spec\.ts/,
       use: {
         ...devices["Desktop Chrome"],
         storageState: HAS_AUTH ? AUTH_FILE : undefined,
