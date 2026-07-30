@@ -22,11 +22,18 @@ export function AccueilService({ enService, roster, inactiviteMin = 10 }: { enSe
   const [now, setNow] = useState<number | null>(null);
 
   useEffect(() => { setListe(enService); }, [enService]);
+  // Chrono live : rafraîchit chaque seconde, mais SE MET EN PAUSE quand l'onglet
+  // est masqué (optimisation : aucun re-render inutile en arrière-plan).
   useEffect(() => {
     if (!liste.length) return;
-    setNow(Date.now());
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    let id: ReturnType<typeof setInterval> | null = null;
+    const tick = () => setNow(Date.now());
+    const demarrer = () => { if (id == null) { tick(); id = setInterval(tick, 1000); } };
+    const arreter = () => { if (id != null) { clearInterval(id); id = null; } };
+    const onVis = () => (typeof document !== "undefined" && document.hidden ? arreter() : demarrer());
+    demarrer();
+    document.addEventListener("visibilitychange", onVis);
+    return () => { arreter(); document.removeEventListener("visibilitychange", onVis); };
   }, [liste.length]);
 
   async function commencer() {

@@ -25,11 +25,18 @@ const metaDe = (type: string) => META[type] || { icon: Activity, tone: "var(--ac
 
 export function DispensaireTimeline({ items, titre = "Dernières activités", eyebrow = "Temps réel", actions }: { items: TimelineItem[]; titre?: string; eyebrow?: string; actions?: ReactNode }) {
   // Rafraîchit le temps relatif chaque minute (sans re-fetch) — effet « vivant ».
+  // Se met en pause quand l'onglet est masqué (optimisation), et se resynchronise
+  // au retour au premier plan.
   const [nowMs, setNowMs] = useState<number>(() => 0);
   useEffect(() => {
-    setNowMs(Date.now());
-    const t = setInterval(() => setNowMs(Date.now()), 60_000);
-    return () => clearInterval(t);
+    let id: ReturnType<typeof setInterval> | null = null;
+    const tick = () => setNowMs(Date.now());
+    const demarrer = () => { if (id == null) { tick(); id = setInterval(tick, 60_000); } };
+    const arreter = () => { if (id != null) { clearInterval(id); id = null; } };
+    const onVis = () => (typeof document !== "undefined" && document.hidden ? arreter() : demarrer());
+    demarrer();
+    document.addEventListener("visibilitychange", onVis);
+    return () => { arreter(); document.removeEventListener("visibilitychange", onVis); };
   }, []);
 
   return (
