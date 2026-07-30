@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LayoutDashboard, Wallet, HeartPulse, CalendarClock, Scissors, Users, Boxes, TrendingDown, ScrollText, ArrowRight, Lock, RefreshCw, BedDouble } from "lucide-react";
+import { LayoutDashboard, Wallet, HeartPulse, CalendarClock, Scissors, Users, Boxes, TrendingDown, ScrollText, ArrowRight, Lock, RefreshCw, BedDouble, AlertTriangle, Coins, UserX, Receipt } from "lucide-react";
 import { money } from "@/lib/dispensaire-facturation-const";
 import { Cartouche } from "@/components/dispensaire-ui";
 import { RealtimeRefresh } from "@/components/realtime-refresh";
@@ -111,6 +111,14 @@ export function DispensaireCockpit({ data }: { data: CockpitData }) {
         <Cartouche label="Recette du jour" valeur={money(data.ventesJourCa)} ton="var(--good)" icon={Wallet} />
         <Cartouche label="Factures impayées" valeur={data.facturesImpayees} ton={data.facturesImpayees ? "var(--oxblood)" : undefined} icon={Wallet} />
         <Cartouche label="Créances dues" valeur={money(data.du)} ton={data.du ? "var(--oxblood)" : undefined} icon={Wallet} />
+      </div>
+
+      {/* Pilotage Direction : retards réels, masse salariale, absences, ruptures */}
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+        <Cartouche label={`En retard (> ${data.seuilRetard} j)`} valeur={data.facturesEnRetard} ton={data.facturesEnRetard ? "var(--oxblood)" : "var(--good)"} icon={AlertTriangle} />
+        <Cartouche label="Dû en retard" valeur={money(data.duRetard)} ton={data.duRetard ? "var(--oxblood)" : undefined} icon={Receipt} />
+        <Cartouche label="Masse salariale (sem.)" valeur={money(data.masseSalariale)} ton="var(--brass-hi)" icon={Coins} />
+        <Cartouche label="Absences injustifiées" valeur={data.absencesInjustifiees} ton={data.absencesInjustifiees ? "var(--oxblood)" : "var(--good)"} icon={UserX} />
       </div>
 
       {/* Dernières actions */}
