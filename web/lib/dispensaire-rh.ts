@@ -3,6 +3,7 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getConfig, peutGererRH } from "@/lib/dispensaire-roles";
 import { cleNom } from "@/lib/noms";
+import type { Sanction } from "@/lib/dispensaire-sanctions-const";
 
 // Accès au site rapproché depuis DispensaireMembre (par nom) → la fiche RH « sait »
 // si la personne peut se connecter, sous quel grade, et si son Discord est lié.
@@ -14,7 +15,7 @@ export type Salarie = {
   statut: string; absJustifiees: number; absInjustifiees: number; notes: string | null;
   updatedAt: string | null; updatedBy: string | null; acces?: SalarieAcces | null;
 };
-export type RhData = { connecte: boolean; pret: boolean; canEdit: boolean; salaries: Salarie[]; seuilRenvoi: number };
+export type RhData = { connecte: boolean; pret: boolean; canEdit: boolean; salaries: Salarie[]; seuilRenvoi: number; sanctionsParSalarie: Record<string, Sanction[]> };
 
 // Nombre d'absences INJUSTIFIÉES à partir duquel le salarié est signalé « à renvoyer ».
 export const SEUIL_RENVOI = 3;
@@ -23,13 +24,28 @@ const s = (v: unknown) => (v == null ? null : String(v));
 const num = (v: unknown) => Number(v) || 0;
 
 export async function getRh(): Promise<RhData> {
-  const vide: RhData = { connecte: false, pret: false, canEdit: false, salaries: [], seuilRenvoi: SEUIL_RENVOI };
+  const vide: RhData = { connecte: false, pret: false, canEdit: false, salaries: [], seuilRenvoi: SEUIL_RENVOI, sanctionsParSalarie: {} };
   const admin = createAdminClient();
   if (!admin) return vide;
   const canEdit = await peutGererRH();
   const seuilRenvoi = (await getConfig()).seuilRenvoi;
   const { data, error } = await admin.from("DispensaireSalarie").select("*").order("nom", { ascending: true });
-  if (error) return { connecte: true, pret: false, canEdit, salaries: [], seuilRenvoi };
+  if (error) return { connecte: true, pret: false, canEdit, salaries: [], seuilRenvoi, sanctionsParSalarie: {} };
+
+  // Sanctions disciplinaires groupées par salarié (dégradation propre si la table
+  // n'existe pas encore — aucune sanction, aucun crash).
+  const sanctionsParSalarie: Record<string, Sanction[]> = {};
+  try {
+    const { data: sanc } = await admin.from("DispensaireSanction").select("*").order("date", { ascending: false }).order("createdAt", { ascending: false }).limit(1000);
+    for (const r of ((sanc as Record<string, unknown>[]) || [])) {
+      const sid = s(r.salarieId); if (!sid) continue;
+      (sanctionsParSalarie[sid] ||= []).push({
+        id: String(r.id), salarieId: sid, nom: String(r.nom || "Salarié"), type: String(r.type || "autre"),
+        motif: s(r.motif), date: r.date == null ? null : String(r.date).slice(0, 10), duree: s(r.duree),
+        commentaire: s(r.commentaire), par: s(r.par), createdAt: s(r.createdAt),
+      });
+    }
+  } catch { /* table absente → aucune sanction */ }
 
   // Rapprochement RH ↔ accès : on lit la liste blanche (DispensaireMembre) et on
   // l'associe à chaque salarié par nom normalisé. Une seule fiche à consulter.
@@ -56,5 +72,5 @@ export async function getRh(): Promise<RhData> {
     notes: s(r.notes), updatedAt: s(r.updatedAt), updatedBy: s(r.updatedBy),
     acces: accesParNom ? (accesParNom.get(cleNom(r.nom)) ?? { present: false, actif: false, role: null, lieDiscord: false }) : null,
   }));
-  return { connecte: true, pret: true, canEdit, salaries, seuilRenvoi };
+  return { connecte: true, pret: true, canEdit, salaries, seuilRenvoi, sanctionsParSalarie };
 }

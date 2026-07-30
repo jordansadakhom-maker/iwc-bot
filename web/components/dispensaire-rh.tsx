@@ -2,11 +2,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Users, Plus, Search, Loader2, X, Check, Pencil, Trash2, AlertTriangle, CalendarDays, Landmark, Send, Minus, Link2 } from "lucide-react";
+import { Users, Plus, Search, Loader2, X, Check, Pencil, Trash2, AlertTriangle, CalendarDays, Landmark, Send, Minus, Link2, Gavel } from "lucide-react";
 import type { RhData, Salarie } from "@/lib/dispensaire-rh";
+import { type Sanction, SANCTION_TYPES, sanctionLabel, sanctionTone } from "@/lib/dispensaire-sanctions-const";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { VideRegistre } from "@/components/dispensaire-ui";
 import { creerSalarie, majSalarie, supprimerSalarie, ajusterAbsence } from "@/app/dispensaire/rh/actions";
+import { ajouterSanction, supprimerSanction } from "@/app/dispensaire/rh/sanctions-actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
 const GRADES = ["Interne", "Aide-soignant", "Infirmier", "Médecin", "Médecin-chef", "Adjoint", "Chef", "Directeur"];
@@ -26,6 +28,21 @@ export function DispensaireRh({ data }: { data: RhData }) {
   const [flash, setFlash] = useState<FlashMsg>(null);
   const [form, setForm] = useState<Salarie | "new" | null>(null);
   const [delId, setDelId] = useState<string | null>(null);
+  const [sancFor, setSancFor] = useState<Salarie | null>(null);
+  const [sancMap, setSancMap] = useState<Record<string, Sanction[]>>(data.sanctionsParSalarie);
+
+  async function addSanction(salarie: Salarie, v: { type: string; motif: string; date: string; duree: string; commentaire: string }) {
+    const tmp: Sanction = { id: "tmp-" + Math.random().toString(36).slice(2, 8), salarieId: salarie.id, nom: salarie.nom, type: v.type, motif: v.motif, date: v.date || new Date().toISOString().slice(0, 10), duree: v.duree || null, commentaire: v.commentaire || null, par: null, createdAt: new Date().toISOString() };
+    setSancMap((m) => ({ ...m, [salarie.id]: [tmp, ...(m[salarie.id] || [])] }));
+    const r = await ajouterSanction({ salarieId: salarie.id, nom: salarie.nom, type: v.type, motif: v.motif, date: v.date, duree: v.duree, commentaire: v.commentaire });
+    if (!r.ok) { setSancMap((m) => ({ ...m, [salarie.id]: (m[salarie.id] || []).filter((x) => x.id !== tmp.id) })); setFlash({ t: "bad", m: r.error || "Impossible." }); }
+    else { setSancMap((m) => ({ ...m, [salarie.id]: (m[salarie.id] || []).map((x) => (x.id === tmp.id ? { ...x, id: r.id || tmp.id } : x)) })); setFlash({ t: "ok", m: "Sanction enregistrée." }); router.refresh(); }
+  }
+  async function delSanction(salarieId: string, id: string) {
+    setSancMap((m) => ({ ...m, [salarieId]: (m[salarieId] || []).filter((x) => x.id !== id) }));
+    const r = await supprimerSanction(id);
+    if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else router.refresh();
+  }
 
   const query = norm(q.trim());
   const liste = sal
@@ -112,6 +129,10 @@ export function DispensaireRh({ data }: { data: RhData }) {
                     {s.qualifications ? <div className="mt-1 text-[0.74rem] text-muted">{s.qualifications}</div> : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
+                    <button onClick={() => setSancFor(s)} className="relative grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Sanctions" title="Sanctions disciplinaires">
+                      <Gavel className="h-3.5 w-3.5" />
+                      {(sancMap[s.id]?.length || 0) > 0 ? <span className="absolute -right-1 -top-1 grid h-3.5 min-w-[0.9rem] place-items-center rounded-full px-0.5 text-[0.54rem] font-bold text-white" style={{ background: "var(--oxblood)" }}>{sancMap[s.id].length}</span> : null}
+                    </button>
                     <button onClick={() => setForm(s)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Modifier"><Pencil className="h-3.5 w-3.5" /></button>
                     <button onClick={() => setDelId(s.id)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-oxblood" aria-label="Supprimer"><Trash2 className="h-3.5 w-3.5" /></button>
                   </div>
@@ -129,7 +150,68 @@ export function DispensaireRh({ data }: { data: RhData }) {
 
       {form ? <SalarieForm initial={form === "new" ? null : form} onClose={() => setForm(null)} onSave={(v) => enregistrer(v, form === "new" ? null : form)} /> : null}
       {delId ? <ConfirmDelete nom={sal.find((s) => s.id === delId)?.nom || ""} onCancel={() => setDelId(null)} onConfirm={() => supprimer(delId)} /> : null}
+      {sancFor ? <SanctionsModal salarie={sancFor} sanctions={sancMap[sancFor.id] || []} onClose={() => setSancFor(null)} onAdd={(v) => addSanction(sancFor, v)} onDel={(id) => delSanction(sancFor.id, id)} /> : null}
     </div>
+  );
+}
+
+const dateFRcourt = (s: string | null) => { if (!s) return "—"; try { return new Date(s.length <= 10 ? s + "T00:00:00" : s).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }); } catch { return "—"; } };
+
+// Dossier disciplinaire d'un salarié : historique complet + ajout d'une sanction.
+function SanctionsModal({ salarie, sanctions, onClose, onAdd, onDel }: { salarie: Salarie; sanctions: Sanction[]; onClose: () => void; onAdd: (v: { type: string; motif: string; date: string; duree: string; commentaire: string }) => void; onDel: (id: string) => void }) {
+  const [v, setV] = useState({ type: "avertissement", motif: "", date: new Date().toISOString().slice(0, 10), duree: "", commentaire: "" });
+  const [err, setErr] = useState<string | null>(null);
+  const set = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setV((p) => ({ ...p, [k]: e.target.value }));
+  function go() {
+    if (!v.motif.trim()) { setErr("Indique le motif."); return; }
+    setErr(null);
+    onAdd({ ...v, motif: v.motif.trim() });
+    setV((p) => ({ ...p, motif: "", duree: "", commentaire: "" }));
+  }
+  return (
+    <Modal titre={`Sanctions — ${salarie.nom}`} onClose={onClose} max={560}>
+      <div className="flex flex-col gap-3">
+        {/* Ajout */}
+        <div className="rounded-[10px] border border-border bg-surface-2 p-3">
+          <div className="mb-2 flex items-center gap-1.5 text-[0.78rem] font-semibold"><Gavel className="h-3.5 w-3.5 text-accent" /> Nouvelle sanction</div>
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1"><span className="text-[0.68rem] uppercase tracking-[0.05em] text-faint">Type</span><Picker options={SANCTION_TYPES.map((t) => ({ key: t.key, label: t.label, tone: t.tone }))} value={v.type} onChange={(x) => setV((p) => ({ ...p, type: x }))} /></div>
+            <Champ label="Motif *"><input className={inputCls} value={v.motif} onChange={set("motif")} placeholder="Raison de la sanction" autoFocus /></Champ>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Champ label="Date"><input type="date" className={inputCls} value={v.date} onChange={set("date")} /></Champ>
+              <Champ label="Durée (si applicable)"><input className={inputCls} value={v.duree} onChange={set("duree")} placeholder="ex. 7 jours" /></Champ>
+            </div>
+            <Champ label="Commentaire"><textarea className={inputCls} rows={2} value={v.commentaire} onChange={set("commentaire")} placeholder="Précisions, contexte…" /></Champ>
+            {err ? <p className="text-[0.78rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
+            <button onClick={go} className="self-end inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Check className="h-3.5 w-3.5" /> Enregistrer la sanction</button>
+          </div>
+        </div>
+
+        {/* Historique */}
+        <div>
+          <div className="mb-1.5 text-[0.72rem] uppercase tracking-[0.05em] text-faint">Historique ({sanctions.length})</div>
+          {sanctions.length === 0 ? (
+            <p className="py-4 text-center text-[0.82rem] italic text-faint">Aucune sanction au dossier.</p>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              {sanctions.map((sx) => (
+                <div key={sx.id} className="group rounded-[10px] border border-border bg-surface p-2.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full px-1.5 py-0.5 text-[0.62rem] font-bold" style={{ color: sanctionTone(sx.type), background: `color-mix(in srgb,${sanctionTone(sx.type)} 14%,transparent)` }}>{sanctionLabel(sx.type)}</span>
+                    <span className="text-[0.82rem] font-semibold">{sx.motif}</span>
+                    {sx.duree ? <span className="text-[0.72rem] text-muted">· {sx.duree}</span> : null}
+                    <span className="ml-auto font-num text-[0.72rem] text-faint">{dateFRcourt(sx.date)}</span>
+                    <button onClick={() => onDel(sx.id)} className="text-faint opacity-0 transition hover:text-oxblood group-hover:opacity-100" aria-label="Supprimer la sanction"><Trash2 className="h-3.5 w-3.5" /></button>
+                  </div>
+                  {sx.commentaire ? <div className="mt-1 text-[0.76rem] text-muted">{sx.commentaire}</div> : null}
+                  {sx.par ? <div className="mt-0.5 text-[0.68rem] text-faint">Par {sx.par}</div> : null}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </Modal>
   );
 }
 
