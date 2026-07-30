@@ -11,6 +11,7 @@ import { AccueilService } from "@/components/dispensaire-accueil-service";
 import { DispensaireConsignes } from "@/components/dispensaire-consignes";
 import { StatWidget } from "@/components/dispensaire-premium";
 import { DispensaireTimeline } from "@/components/dispensaire-timeline";
+import { DiagBoundary } from "@/components/diag-boundary";
 import { enregistrerConsigne } from "@/app/dispensaire/consignes-actions";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +41,7 @@ export default async function DispensaireAccueil() {
     const matRupture = d.matieresRupture.length;
 
     return (
+      <DiagBoundary where="Tableau de bord (rendu)">
       <div className="flex flex-col gap-5">
         {/* Cockpit — widgets clés (compteurs animés, cliquables). */}
         <div className="disp-rise grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
@@ -79,6 +81,7 @@ export default async function DispensaireAccueil() {
           </div>
         </div>
       </div>
+      </DiagBoundary>
     );
   } catch (e) {
     return <DiagBox where="Tableau de bord (page)" e={e} />;

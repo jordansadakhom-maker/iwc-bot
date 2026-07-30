@@ -7,6 +7,7 @@ import { DispensaireAccesReserve } from "@/components/dispensaire-acces-reserve"
 import { DispensaireKeepalive } from "@/components/dispensaire-keepalive";
 import { RepriseService } from "@/components/dispensaire-reprise-service";
 import { DispensaireAccesTracker } from "@/components/dispensaire-acces-tracker";
+import { DiagBoundary } from "@/components/diag-boundary";
 
 // Section dédiée « Dispensaire de Saint-Denis » — sa propre coquille (distincte
 // de la partie Iron Wolf). La visibilité des onglets suit le RÔLE du membre au
@@ -50,7 +51,7 @@ export default async function DispensaireLayout({ children }: { children: React.
         {monService ? <RepriseService id={monService.id} debut={monService.debut} lastSeen={monService.lastSeen} inactiviteMin={cfg.pointageInactiviteMin} /> : null}
         {/* Journalise les accès aux modules sensibles (espace Direction). */}
         <DispensaireAccesTracker />
-        <DispensaireShell perms={role.perms} notifCount={notifCount} standalone={standalone} dateline={dateline}>{children}</DispensaireShell>
+        <DispensaireShell perms={role.perms} notifCount={notifCount} standalone={standalone} dateline={dateline}><DiagBoundary where="Contenu de page Dispensaire">{children}</DiagBoundary></DispensaireShell>
       </>
     );
   } catch (e) {
