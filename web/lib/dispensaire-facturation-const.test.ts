@@ -4,6 +4,7 @@ import {
   FACTURE_DELAI_H, FACTURE_STATUTS,
   statutsDe, serialiserStatuts, statutRepresentatif, incoherencesStatuts,
   estOuverte, estClose,
+  ageFactureJours, joursDeRetard, estDeclarableFDO, RETARD_DEFAUT_JOURS,
 } from "./dispensaire-facturation-const";
 
 describe("factureOuverte — une facture encore due", () => {
@@ -132,5 +133,33 @@ describe("Constantes & helpers de facturation", () => {
   });
   it("norm déburre et met en minuscules (en gardant les mots)", () => {
     expect(norm("  Médicament ")).toBe("medicament");
+  });
+});
+
+describe("Retard des factures (déclarations FDO)", () => {
+  const NOW = Date.parse("2026-07-30T12:00:00Z");
+  const DAY = 86400000;
+  const facture = (jours: number, statuts: string[] = ["non_payee"]) => ({
+    dateEmission: new Date(NOW - jours * DAY).toISOString(), createdAt: new Date(NOW - jours * DAY).toISOString(),
+    statut: statuts[0], statuts,
+  });
+
+  it("ageFactureJours compte les jours pleins depuis l'émission", () => {
+    expect(ageFactureJours(facture(0), NOW)).toBe(0);
+    expect(ageFactureJours(facture(5), NOW)).toBe(5);
+  });
+  it("joursDeRetard = âge − délai autorisé, jamais négatif", () => {
+    expect(joursDeRetard(facture(2), 3, NOW)).toBe(0);   // encore dans les délais
+    expect(joursDeRetard(facture(3), 3, NOW)).toBe(0);   // pile à échéance
+    expect(joursDeRetard(facture(7), 3, NOW)).toBe(4);   // 4 jours de retard
+  });
+  it("estDeclarableFDO : non payée ET délai atteint", () => {
+    expect(estDeclarableFDO(facture(1), 3, NOW)).toBe(false);              // trop récente
+    expect(estDeclarableFDO(facture(5), 3, NOW)).toBe(true);               // en retard
+    expect(estDeclarableFDO(facture(10, ["payee"]), 3, NOW)).toBe(false);  // payée → jamais déclarée
+    expect(estDeclarableFDO(facture(10, ["cloture"]), 3, NOW)).toBe(false);
+  });
+  it("le délai par défaut est de 3 jours", () => {
+    expect(RETARD_DEFAUT_JOURS).toBe(3);
   });
 });

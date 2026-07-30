@@ -3,7 +3,7 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { getFactures } from "@/lib/dispensaire-facturation";
-import { factureOuverte, type Facture } from "@/lib/dispensaire-facturation-const";
+import { estOuverte, estDeclarableFDO, type Facture } from "@/lib/dispensaire-facturation-const";
 import { RAPPORT_CONFIG_DEFAUT, type RapportConfig, type RapportMode } from "@/lib/dispensaire-rapport-const";
 
 // ── Rapport des impayés (forces de l'ordre) ─────────────────────────────────
@@ -100,12 +100,24 @@ async function dernierRapportAt(admin: NonNullable<ReturnType<typeof createAdmin
 }
 
 // Construit le rapport (impayés courants + paiements depuis `depuis`).
-async function batirRapport(medecin: string, depuis: string | null, titre?: string | null): Promise<{ pret: boolean; rapport: RapportImpayes }> {
+// `opts.factureIds` : sélection EXPLICITE de factures patient à déclarer (le rapport
+// ne contient qu'elles). Absent → filtre par défaut : uniquement les factures
+// RÉELLEMENT EN RETARD (âge ≥ délai de retard configuré). Fini le rapport qui
+// embarquait toutes les factures non payées, même récentes.
+async function batirRapport(medecin: string, depuis: string | null, titre?: string | null, opts?: { factureIds?: string[]; seuil?: number }): Promise<{ pret: boolean; rapport: RapportImpayes }> {
   const medecinTitre = (titre || "").trim() || TITRE_MEDECIN_DEFAUT;
   const vide: RapportImpayes = { genereLe: new Date().toISOString(), medecin, medecinTitre, depuis, impayes: [], payes: [], totalImpaye: 0, totalPaye: 0 };
   const data = await getFactures();
   if (!data.pret) return { pret: false, rapport: vide };
-  const impayesF = data.factures.filter((f) => factureOuverte(f.statut));
+  const now = Date.now();
+  const seuil = Math.max(0, opts?.seuil ?? (await getRapportConfig()).joursRetard);
+  let impayesF: Facture[];
+  if (opts?.factureIds) {
+    const set = new Set(opts.factureIds);
+    impayesF = data.factures.filter((f) => set.has(f.id) && estOuverte(f.statuts));  // sélection manuelle (paiées exclues par sécurité)
+  } else {
+    impayesF = data.factures.filter((f) => estDeclarableFDO(f, seuil, now));           // défaut : seulement les vraies retardataires
+  }
   const payesF = data.factures.filter((f) => f.statut === "payee" && f.datePaiement && (!depuis || String(f.datePaiement) > depuis));
   const impayes = agregerImpayes(impayesF);
   const payes = agregerPayes(payesF);
@@ -127,11 +139,11 @@ export async function getRapportData(): Promise<{ pret: boolean; rapport: Rappor
 // Enregistre un rapport (fige un instantané) — utilisé par l'action manuelle
 // ET par la génération planifiée (par = « Génération automatique »). `titre` =
 // grade/fonction du médecin signataire (affiché sous la signature).
-export async function enregistrerRapport(par: string, titre?: string | null): Promise<{ ok: boolean; error?: string; rapport?: RapportImpayes }> {
+export async function enregistrerRapport(par: string, titre?: string | null, opts?: { factureIds?: string[]; seuil?: number }): Promise<{ ok: boolean; error?: string; rapport?: RapportImpayes }> {
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const depuis = await dernierRapportAt(admin);
-  const { pret, rapport } = await batirRapport(par, depuis, titre);
+  const { pret, rapport } = await batirRapport(par, depuis, titre, opts);
   if (!pret) return { ok: false, error: "Données indisponibles (lance les SQL du dispensaire)." };
   const id = `dri-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const { error } = await admin.from("DispensaireRapportImpayes").insert({ id, at: rapport.genereLe, par, depuis, nbImpayes: rapport.impayes.length, nbPaiements: rapport.payes.length, snapshot: rapport });
@@ -152,6 +164,7 @@ export async function getRapportConfig(): Promise<RapportConfig> {
       mode: modes.includes(String(r.mode) as RapportMode) ? (String(r.mode) as RapportMode) : "manuel",
       heure: Math.max(0, Math.min(23, Number(r.heure) || 8)),
       jour: Math.max(1, Math.min(31, Number(r.jour) || 1)),
+      joursRetard: r.joursRetard == null ? RAPPORT_CONFIG_DEFAUT.joursRetard : Math.max(0, Math.min(365, Number(r.joursRetard) || 0)),
       lastAutoAt: r.lastAutoAt == null ? null : String(r.lastAutoAt),
     };
   } catch { return { ...RAPPORT_CONFIG_DEFAUT }; }

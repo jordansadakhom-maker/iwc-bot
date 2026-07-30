@@ -193,7 +193,7 @@ export function DispensaireFactures({ data, rapport, historique, config, medecin
 
       {form ? <FactureForm initial={form === "new" ? null : form} patients={patientsConnus} onClose={() => setForm(null)} onSave={(v) => enregistrer(v, form === "new" ? null : form)} /> : null}
       {delId ? <ConfirmDelete nom={factures.find((f) => f.id === delId)?.objet || ""} onCancel={() => setDelId(null)} onConfirm={() => supprimer(delId)} /> : null}
-      {rapportOpen ? <RapportImpayesModal initial={rapport} historique={historique} config={config} medecins={medecins} onClose={() => setRapportOpen(false)} /> : null}
+      {rapportOpen ? <RapportImpayesModal initial={rapport} historique={historique} config={config} medecins={medecins} factures={factures} onClose={() => setRapportOpen(false)} /> : null}
     </div>
   );
 }

@@ -85,6 +85,38 @@ export function echeanceEtat(f: { statut?: string; statuts?: string[]; dateEchea
   if (t - now < 24 * 3600000) return "bientot";
   return "ok";
 }
+// ── Retard d'une facture (pour les déclarations aux forces de l'ordre) ───────
+// Délai de paiement autorisé PAR DÉFAUT, en jours, avant qu'une facture soit
+// considérée « en retard » (modifiable par la Direction, stocké en base).
+export const RETARD_DEFAUT_JOURS = 3;
+
+// Âge d'une facture en jours pleins depuis son ÉMISSION (repli : createdAt).
+export function ageFactureJours(f: { dateEmission: string | null; createdAt: string }, now = Date.now()): number {
+  const base = f.dateEmission || f.createdAt;
+  const t = new Date(base).getTime();
+  if (!Number.isFinite(t)) return 0;
+  return Math.max(0, Math.floor((now - t) / 86400000));
+}
+// Jours de RETARD = âge − délai autorisé (0 si encore dans les délais / à échéance).
+export function joursDeRetard(f: { dateEmission: string | null; createdAt: string }, seuil: number, now = Date.now()): number {
+  return Math.max(0, ageFactureJours(f, now) - Math.max(0, seuil));
+}
+// Une facture est DÉCLARABLE aux FDO si elle est ouverte (non payée / non clôturée)
+// ET que son âge a atteint le délai de retard.
+export function estDeclarableFDO(f: { statut?: string; statuts?: string[]; dateEmission: string | null; createdAt: string }, seuil: number, now = Date.now()): boolean {
+  const arr = f.statuts?.length ? f.statuts : (f.statut ? [f.statut] : ["non_payee"]);
+  return estOuverte(arr) && ageFactureJours(f, now) >= Math.max(0, seuil);
+}
+
+// Filtres possibles à la génération d'une déclaration FDO.
+export type FiltreFDO = "retard" | "jours" | "nonpayees" | "toutes";
+export const FILTRES_FDO: { key: FiltreFDO; label: string }[] = [
+  { key: "retard", label: "En retard (délai dépassé)" },
+  { key: "jours", label: "Dépassant N jours" },
+  { key: "nonpayees", label: "Non payées (toutes)" },
+  { key: "toutes", label: "Toutes les factures" },
+];
+
 // Ligne « prête pour la police » : Date / Nom / Prix dû.
 // Le « Nom » est le patient — porté par le champ `objet` (Prénom / Nom).
 export function copiePolice(f: { dateEmission: string | null; createdAt: string; objet: string; montant: number }): string {
