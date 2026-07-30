@@ -1,3 +1,5 @@
+"use client";
+
 import { BarChart3, Clock, Bandage, Package, ShieldCheck, Moon, TrendingUp, TrendingDown, Users, Receipt } from "lucide-react";
 import type { StatsData } from "@/lib/dispensaire-stats";
 import { Flash } from "@/components/edit-ui";
