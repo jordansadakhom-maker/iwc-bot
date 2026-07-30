@@ -1,12 +1,15 @@
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, Boxes, FlaskConical, Receipt, FileText, BadgeDollarSign, Package, Bandage, Stethoscope, Clock } from "lucide-react";
+import { ArrowRight, Boxes, FlaskConical, Receipt, FileText, BadgeDollarSign, Package, Bandage, Stethoscope, Clock, Users, CalendarClock, Activity } from "lucide-react";
 import { getAccueil } from "@/lib/dispensaire-accueil";
 import { getRoleDispensaire, getConfig } from "@/lib/dispensaire-roles";
 import { getConsigneDuJour } from "@/lib/dispensaire-consignes";
+import { getRendezVous } from "@/lib/dispensaire-rendez-vous";
+import { ymdParis } from "@/lib/dispensaire-dates";
 import { DISP_NAV } from "@/lib/dispensaire-nav";
 import { isStandalone } from "@/lib/standalone-server";
 import { AccueilService } from "@/components/dispensaire-accueil-service";
 import { DispensaireConsignes } from "@/components/dispensaire-consignes";
+import { StatWidget, PremiumCard, SectionHeader, EmptyState } from "@/components/dispensaire-premium";
 import { enregistrerConsigne } from "@/app/dispensaire/consignes-actions";
 
 export const dynamic = "force-dynamic";
@@ -16,36 +19,27 @@ const ACT_ICON: Record<string, typeof Package> = { stock: Package, vente: Bandag
 const heureCourte = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); } catch { return "—"; } };
 
 export default async function DispensaireAccueil() {
-  const [d, role, standalone, consigne, cfg] = await Promise.all([getAccueil(), getRoleDispensaire(), isStandalone(), getConsigneDuJour(), getConfig()]);
+  const [d, role, standalone, consigne, cfg, rdv] = await Promise.all([getAccueil(), getRoleDispensaire(), isStandalone(), getConsigneDuJour(), getConfig(), getRendezVous()]);
   const habilite = role.perms.rh || role.perms.factures || role.perms.admin;
   const modules = DISP_NAV.filter((t) => t.href !== "/dispensaire" && !t.direction && (!t.restreint || habilite) && !(standalone && t.href === "/repertoire"));
 
-  // Tuiles d'alerte du tableau de bord.
-  const tuiles = [
-    { href: "/dispensaire/stockage", icon: Boxes, label: "Stocks en alerte", val: d.stockAlertes.length, tone: d.stockAlertes.length ? "var(--oxblood)" : "var(--faint)", sous: d.stockAlertes.slice(0, 2).map((s) => `${s.nom} (${s.stock}${s.unite ? " " + s.unite : ""})`).join(" · ") || "Tout au-dessus du seuil" },
-    { href: "/dispensaire/matieres", icon: FlaskConical, label: "Matières en rupture", val: d.matieresRupture.length, tone: d.matieresRupture.length ? "var(--oxblood)" : "var(--faint)", sous: d.matieresRupture.slice(0, 2).map((m) => `${m.nom} (${m.quantite})`).join(" · ") || "Rien à commander" },
-    { href: "/dispensaire/ventes", icon: BadgeDollarSign, label: "Ventes du jour", val: d.ventesJourNb, tone: "var(--good)", sous: `Recette ${money(d.ventesJourCa)}` },
-    { href: "/dispensaire/frais", icon: FileText, label: "Frais en attente", val: d.fraisEnAttente, tone: d.fraisEnAttente ? "var(--warn)" : "var(--faint)", sous: d.fraisEnAttente ? "À valider" : "Rien en attente" },
-  ];
-  if (d.habilite) tuiles.push({ href: "/dispensaire/factures", icon: Receipt, label: "Factures impayées", val: d.facturesImpayees, tone: d.facturesRetard ? "var(--oxblood)" : "var(--warn)", sous: `${d.facturesRetard} en retard · ${money(d.du)} dû` });
+  const todayYmd = ymdParis(new Date().toISOString());
+  const rdvAujourdhui = (rdv?.aVenir || []).filter((r) => { try { return ymdParis(r.debut) === todayYmd; } catch { return false; } }).length;
+  const stockCrit = d.stockAlertes.length;
+  const matRupture = d.matieresRupture.length;
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Tuiles d'alerte */}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {tuiles.map((t) => {
-          const Icon = t.icon;
-          return (
-            <Link key={t.href} href={t.href} className="group flex items-center gap-3 rounded-[14px] border border-border bg-surface-2 p-4 transition hover:border-border-2">
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full" style={{ background: `color-mix(in srgb,${t.tone} 15%,transparent)` }}><Icon className="h-5 w-5" style={{ color: t.tone }} /></span>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 text-[0.88rem] font-semibold">{t.label} <span className="font-num" style={{ color: t.tone }}>{t.val}</span></div>
-                <div className="truncate text-[0.74rem] text-faint">{t.sous}</div>
-              </div>
-              <ArrowRight className="h-4 w-4 shrink-0 text-faint transition group-hover:translate-x-0.5" />
-            </Link>
-          );
-        })}
+      {/* Cockpit — widgets clés (compteurs animés, cliquables). */}
+      <div className="disp-rise grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
+        <StatWidget label="Médecins en service" value={d.enService.length} icon={Users} tone="good" live href="/dispensaire/pointage" sous={d.enService.length ? d.enService.slice(0, 2).map((s) => s.nom).join(" · ") : "Personne en service"} />
+        <StatWidget label="RDV aujourd'hui" value={rdvAujourdhui} icon={CalendarClock} href="/dispensaire/rendez-vous" sous={rdvAujourdhui ? "Consultations prévues" : "Aucun rendez-vous"} />
+        <StatWidget label="Soins du jour" value={d.ventesJourNb} icon={Activity} tone="good" href="/dispensaire/ventes" sous={`Recette ${money(d.ventesJourCa)}`} />
+        <StatWidget label="Stocks critiques" value={stockCrit} icon={Boxes} tone={stockCrit ? "crit" : "steel"} href="/dispensaire/stockage" sous={stockCrit ? d.stockAlertes.slice(0, 2).map((s) => s.nom).join(" · ") : "Tout au-dessus du seuil"} />
+        <StatWidget label="Matières en rupture" value={matRupture} icon={FlaskConical} tone={matRupture ? "crit" : "steel"} href="/dispensaire/matieres" sous={matRupture ? d.matieresRupture.slice(0, 2).map((m) => m.nom).join(" · ") : "Rien à commander"} />
+        <StatWidget label="Frais en attente" value={d.fraisEnAttente} icon={FileText} tone={d.fraisEnAttente ? "warn" : "steel"} href="/dispensaire/frais" sous={d.fraisEnAttente ? "À valider" : "Rien en attente"} />
+        {d.habilite ? <StatWidget label="Factures impayées" value={d.facturesImpayees} icon={Receipt} tone={d.facturesRetard ? "crit" : "warn"} href="/dispensaire/factures" sous={`${d.facturesRetard} en retard · ${money(d.du)} dû`} /> : null}
+        <StatWidget label="Recette du jour" value={d.ventesJourCa} format={money} icon={BadgeDollarSign} tone="good" href="/dispensaire/ventes" sous="Ventes encaissées aujourd'hui" />
       </div>
 
       {/* Consignes du jour (objectifs) — éditables par les responsables */}
@@ -55,10 +49,10 @@ export default async function DispensaireAccueil() {
       <AccueilService enService={d.enService} roster={d.roster} inactiviteMin={cfg.pointageInactiviteMin} />
 
       {/* Dernières activités */}
-      <section className="rounded-[14px] border border-border bg-surface p-4">
-        <h3 className="mb-2 flex items-center gap-2 text-[0.9rem] font-semibold"><Clock className="h-4 w-4 text-accent" /> Dernières activités</h3>
+      <PremiumCard lift={false} className="p-4">
+        <SectionHeader eyebrow="Temps réel" titre="Dernières activités" icon={Clock} />
         {d.activites.length === 0 ? (
-          <p className="py-4 text-center text-[0.82rem] italic text-faint">Le registre est encore silencieux — la première écriture s&apos;inscrira ici.</p>
+          <EmptyState icon={Activity} titre="Le registre est encore silencieux" sous="La première écriture s'inscrira ici — soins, stocks, personnel." />
         ) : (
           <div className="flex flex-col divide-y divide-border">
             {d.activites.map((a) => {
@@ -74,7 +68,7 @@ export default async function DispensaireAccueil() {
             })}
           </div>
         )}
-      </section>
+      </PremiumCard>
 
       {/* Accès aux modules */}
       <div>
@@ -82,16 +76,13 @@ export default async function DispensaireAccueil() {
         <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
           {modules.map((t) => {
             const Icon = t.icon;
-            const inner = (
-              <>
+            return (
+              <Link key={t.href} href={t.href} className="disp-lift flex items-center gap-3 rounded-[14px] border border-border bg-surface p-3 shadow-card transition">
                 <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg" style={{ background: "color-mix(in srgb,var(--accent) 14%,transparent)" }}><Icon className="h-4 w-4 text-accent" /></span>
-                <span className="min-w-0 flex-1"><span className="block text-[0.86rem] font-semibold">{t.label}</span>{!t.pret ? <span className="text-[0.68rem] text-faint">Bientôt disponible</span> : <span className="text-[0.68rem] text-faint">Ouvrir</span>}</span>
-                {t.pret ? <ArrowRight className="h-4 w-4 text-faint" /> : <span className="rounded-full border border-border px-1.5 text-[0.58rem] uppercase text-faint">bientôt</span>}
-              </>
+                <span className="min-w-0 flex-1"><span className="block text-[0.86rem] font-semibold">{t.label}</span><span className="text-[0.68rem] text-faint">Ouvrir</span></span>
+                <ArrowRight className="h-4 w-4 text-faint" />
+              </Link>
             );
-            return t.pret
-              ? <Link key={t.href} href={t.href} className="flex items-center gap-3 rounded-[12px] border border-border bg-surface-2 p-3 transition hover:border-border-2 hover:bg-[color-mix(in_srgb,var(--ink)_3%,var(--surface-2))]">{inner}</Link>
-              : <div key={t.href} className="flex cursor-not-allowed items-center gap-3 rounded-[12px] border border-border bg-surface-2 p-3 opacity-60">{inner}</div>;
           })}
         </div>
       </div>

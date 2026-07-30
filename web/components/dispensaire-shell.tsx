@@ -70,8 +70,8 @@ export function DispensaireShell({ children, perms = {}, notifCount = 0, standal
   };
 
   return (
-    <div className="disp-registre min-h-screen px-3 py-6">
-      <div className="disp-registre__sheet mx-auto max-w-[1180px] px-4 py-5 sm:px-6">
+    <div className="disp-premium min-h-screen px-3 py-6">
+      <div className="disp-premium__canvas mx-auto max-w-[1180px] px-4 py-5 sm:px-6">
         {/* Cartouche de couverture du registre */}
         <header className="flex items-start justify-between gap-3 border-b-2 pb-3" style={{ borderColor: "color-mix(in srgb,var(--accent) 45%,var(--border))" }}>
           <div className="flex items-center gap-3">

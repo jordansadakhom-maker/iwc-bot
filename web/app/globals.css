@@ -249,3 +249,112 @@ tbody tr:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); 
 @media (prefers-reduced-motion: reduce) { .iwc-pop { animation: none; } }
 
 /* Déploiement Production — Refonte « Effet Wouah » (mise en ligne). */
+
+/* ============================================================
+   DISPENSAIRE PREMIUM — identité « logiciel médical » moderne.
+   Scopée à .disp-premium (wrapper du Dispensaire) : réattribution des
+   jetons → tous les composants héritent du look bleu médical + verre,
+   sans être touchés un à un. Iron Wolf (data-pole, jamais .disp-*) intact.
+   Placé APRÈS .disp-registre et la surcharge globale .shadow-card
+   (source order → nos règles préfixées .disp-premium gagnent).
+   ============================================================ */
+.disp-premium {
+  /* Palette bleu médical — dark (défaut du scope). */
+  --bg:#0b1220; --bg-2:#070c14; --surface:#111b29; --surface-2:#182635;
+  --border:#263548; --border-2:#31435a;
+  --ink:#e9f1f9; --muted:#a2b4c8; --faint:#6d7f95;
+  --accent:#57a5e6; --accent-hi:#80bff3; --accent-lo:#2b6aa8;
+  --brass:#57a5e6; --brass-hi:#80bff3; --steel:#6f9fc4; --oxblood:#b0413a;
+  --good:#40c78a; --warn:#eea23a; --crit:#f0574e;
+  /* Verre + ombres + rayons + motion. */
+  --glass-bg:rgba(17,27,41,.55); --glass-bg-2:rgba(23,34,51,.68);
+  --glass-brd:rgba(255,255,255,.08); --glass-hi:rgba(255,255,255,.05); --glass-blur:14px;
+  --shadow-1:0 1px 2px -1px rgba(0,0,0,.5), 0 12px 28px -18px rgba(0,0,0,.65), inset 0 1px 0 0 var(--glass-hi);
+  --shadow-2:0 2px 6px -2px rgba(0,0,0,.5), 0 22px 46px -22px rgba(0,0,0,.7), 0 0 0 1px var(--glass-brd), 0 0 34px -10px color-mix(in srgb,var(--accent) 34%,transparent), inset 0 1px 0 0 rgba(255,255,255,.10);
+  --ring:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent);
+  --r-sm:10px; --r-md:14px; --r-lg:18px; --r-pill:999px;
+  --dur-1:150ms; --dur-2:250ms; --dur-3:400ms;
+  --ease-out:cubic-bezier(.22,.61,.36,1); --ease-inout:cubic-bezier(.4,0,.2,1); --ease-spring:cubic-bezier(.34,1.4,.64,1);
+  color: var(--ink);
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(1100px 520px at 50% -10%, color-mix(in srgb,var(--accent) 12%,transparent), transparent 60%),
+    radial-gradient(820px 560px at 108% 4%, color-mix(in srgb,var(--steel) 10%,transparent), transparent 55%),
+    radial-gradient(900px 640px at -8% 104%, color-mix(in srgb,var(--good) 7%,transparent), transparent 55%),
+    linear-gradient(180deg, var(--bg), var(--bg-2));
+  background-attachment: fixed;
+}
+/* Light — blanc / gris clair / bleu médical (média + toggle manuel data-theme). */
+.disp-premium-light-tokens, :root[data-theme="light"] .disp-premium {
+  --bg:#edf3f9; --bg-2:#e1eaf3; --surface:#ffffff; --surface-2:#f3f8fd;
+  --border:#dae4ef; --border-2:#c4d2e2;
+  --ink:#15283b; --muted:#566a7e; --faint:#8090a2;
+  --accent:#1f6fb2; --accent-hi:#3d8bd0; --accent-lo:#155a94;
+  --brass:#1f6fb2; --brass-hi:#3d8bd0; --steel:#3f6f96; --oxblood:#b23c30;
+  --good:#1f9d63; --warn:#c9821f; --crit:#d8423a;
+  --glass-bg:rgba(255,255,255,.60); --glass-bg-2:rgba(255,255,255,.78);
+  --glass-brd:rgba(31,111,178,.14); --glass-hi:rgba(255,255,255,.65); --glass-blur:12px;
+  --shadow-1:0 1px 2px -1px rgba(22,40,60,.14), 0 10px 26px -16px rgba(22,40,60,.20), inset 0 1px 0 0 rgba(255,255,255,.7);
+  --shadow-2:0 2px 6px -2px rgba(22,40,60,.16), 0 22px 44px -22px rgba(22,40,60,.26), 0 0 0 1px rgba(31,111,178,.10), 0 0 30px -12px color-mix(in srgb,var(--accent) 26%,transparent), inset 0 1px 0 0 rgba(255,255,255,.85);
+  --ring:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .disp-premium {
+    --bg:#edf3f9; --bg-2:#e1eaf3; --surface:#ffffff; --surface-2:#f3f8fd;
+    --border:#dae4ef; --border-2:#c4d2e2;
+    --ink:#15283b; --muted:#566a7e; --faint:#8090a2;
+    --accent:#1f6fb2; --accent-hi:#3d8bd0; --accent-lo:#155a94;
+    --brass:#1f6fb2; --brass-hi:#3d8bd0; --steel:#3f6f96; --oxblood:#b23c30;
+    --good:#1f9d63; --warn:#c9821f; --crit:#d8423a;
+    --glass-bg:rgba(255,255,255,.60); --glass-bg-2:rgba(255,255,255,.78);
+    --glass-brd:rgba(31,111,178,.14); --glass-hi:rgba(255,255,255,.65); --glass-blur:12px;
+    --shadow-1:0 1px 2px -1px rgba(22,40,60,.14), 0 10px 26px -16px rgba(22,40,60,.20), inset 0 1px 0 0 rgba(255,255,255,.7);
+    --shadow-2:0 2px 6px -2px rgba(22,40,60,.16), 0 22px 44px -22px rgba(22,40,60,.26), 0 0 0 1px rgba(31,111,178,.10), 0 0 30px -12px color-mix(in srgb,var(--accent) 26%,transparent), inset 0 1px 0 0 rgba(255,255,255,.85);
+    --ring:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent);
+  }
+}
+/* Canevas neutre (remplace la feuille réglée du registre). */
+.disp-premium__canvas { position: relative; }
+.disp-premium__canvas > * { position: relative; z-index: 1; }
+
+/* Verre — réservé au chrome & cartes de haut niveau (parcimonie). */
+.disp-glass {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.15);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.15);
+  border: 1px solid var(--glass-brd);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .disp-premium .disp-glass { background: var(--surface); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .disp-premium .disp-glass { background: var(--surface); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+
+/* .shadow-card premium — PRÉFIXÉ (n'affecte jamais Iron Wolf). */
+.disp-premium .shadow-card { box-shadow: var(--shadow-1); transition: box-shadow var(--dur-2) var(--ease-out), border-color var(--dur-2) var(--ease-out), transform var(--dur-2) var(--ease-out); }
+.disp-premium .shadow-card:hover { box-shadow: var(--shadow-2); border-color: color-mix(in srgb,var(--accent) 40%,var(--border)); }
+
+/* Carte premium : élévation douce au survol. */
+.disp-lift { transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out), border-color var(--dur-2) var(--ease-out); }
+.disp-lift:hover { transform: translateY(-3px); box-shadow: var(--shadow-2); border-color: color-mix(in srgb,var(--accent) 40%,var(--border)); }
+@media (prefers-reduced-motion: reduce) { .disp-lift:hover { transform: none; } }
+
+/* Point « live » (valeur temps réel). */
+@keyframes disp-pulse { 0%,100% { box-shadow: 0 0 0 0 color-mix(in srgb,var(--good) 55%,transparent); } 50% { box-shadow: 0 0 0 4px transparent; } }
+.disp-live-dot { animation: disp-pulse 2s var(--ease-inout) infinite; }
+
+/* Badge urgence : anneau pulsant. */
+@keyframes disp-urgent { 0%,100% { box-shadow: 0 0 0 0 color-mix(in srgb,var(--crit) 55%,transparent); } 50% { box-shadow: 0 0 0 4px color-mix(in srgb,var(--crit) 22%,transparent); } }
+.disp-urgent { animation: disp-urgent 1.6s var(--ease-inout) infinite; }
+
+/* Entrée séquencée des widgets. */
+@keyframes disp-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.disp-rise { animation: disp-rise var(--dur-3) var(--ease-out) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .disp-live-dot, .disp-urgent, .disp-rise { animation: none; }
+}
+
+/* Mode urgence — bascule d'ambiance (rouge dominant). */
+.disp-premium[data-mode="urgence"] { --accent:#f0574e; --accent-hi:#ff7a70; --accent-lo:#c23a33; }
