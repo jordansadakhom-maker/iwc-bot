@@ -1,23 +1,51 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowLeft, Cross, Search, Bell } from "lucide-react";
-import { DISP_NAV, DISP_EXTRA } from "@/lib/dispensaire-nav";
+import { ArrowLeft, Cross, Search, Bell, ChevronDown, LayoutGrid } from "lucide-react";
+import { DISP_NAV, DISP_EXTRA, DISP_CATEGORIES, DISP_DIRECT, DISP_DIRECTION, tabsDeCategorie, aPermDirection, aAccesDirection, type PermsLike, type DispTab } from "@/lib/dispensaire-nav";
 import { RegistreHeader } from "@/components/dispensaire-ui";
 import { LogoutButton } from "@/components/logout-button";
 
 // Coquille de la section « Dispensaire de Saint-Denis » : en-tête registre 1904
-// + barre d'onglets horizontale (responsive). Séparée de la coquille Iron Wolf.
-export function DispensaireShell({ children, habilite = false, estAdmin = false, notifCount = 0, standalone = false, dateline }: { children: React.ReactNode; habilite?: boolean; estAdmin?: boolean; notifCount?: number; standalone?: boolean; dateline?: string }) {
+// + menu par CATÉGORIES (Accueil / Assistant en accès direct, puis des menus
+// déroulants Soins / Stock / Administratif / Direction 🔒 / Ressources). La
+// catégorie Direction n'apparaît qu'aux comptes habilités, et chaque outil y est
+// filtré par sa permission exacte.
+export function DispensaireShell({ children, perms = {}, notifCount = 0, standalone = false, dateline }: { children: React.ReactNode; perms?: PermsLike; notifCount?: number; standalone?: boolean; dateline?: string }) {
   const path = usePathname();
-  // En mode autonome, on masque l'onglet Répertoire (page hébergée par la coquille
-  // Iron Wolf) pour ne laisser aucune trace de l'autre plateforme.
-  const tabs = DISP_NAV.filter((t) => (!t.restreint || habilite) && (!t.admin || estAdmin) && !(standalone && t.href === "/repertoire"));
+  const [openCat, setOpenCat] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const habilite = !!(perms.rh || perms.factures || perms.admin);
+
+  // Ferme le menu ouvert au clic extérieur ou au changement de page.
+  useEffect(() => { setOpenCat(null); }, [path]);
+  useEffect(() => {
+    if (!openCat) return;
+    const onDown = (e: MouseEvent) => { if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpenCat(null); };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [openCat]);
+
   const estActif = (href: string) => (href === "/dispensaire" ? path === "/dispensaire" : path.startsWith(href));
 
-  // En-tête de folio de la page courante : correspondance la plus précise dans la
-  // barre d'onglets (préfixe le plus long), sinon table des routes annexes.
+  // Onglets d'accès direct (Accueil, Assistant), masquant le Répertoire en mode autonome.
+  const directs = DISP_DIRECT.filter((t) => t.pret && !(standalone && t.href === "/repertoire"));
+
+  // Onglets accessibles d'une catégorie (filtrés par permission).
+  const tabsVisibles = (key: string): DispTab[] => {
+    if (key === "direction") return DISP_DIRECTION.filter((t) => aPermDirection(perms, t.perm));
+    return tabsDeCategorie(key as DispTab["cat"] & string).filter((t) => t.pret && (!t.restreint || habilite) && !(standalone && t.href === "/repertoire"));
+  };
+  // Catégories affichées : Direction seulement si le compte y a accès ; on masque une catégorie vide.
+  const categories = DISP_CATEGORIES
+    .filter((c) => (c.direction ? aAccesDirection(perms) : true))
+    .map((c) => ({ ...c, tabs: tabsVisibles(c.key) }))
+    .filter((c) => c.tabs.length > 0);
+
+  // En-tête de folio de la page courante : correspondance la plus précise (préfixe
+  // le plus long) dans la nav, sinon table des routes annexes.
   const folioFor = (() => {
     if (path === "/dispensaire") return { titre: DISP_NAV[0].label, sous: DISP_NAV[0].desc, folio: "Fol. 01" };
     const match = DISP_NAV
@@ -29,6 +57,17 @@ export function DispensaireShell({ children, habilite = false, estAdmin = false,
     if (extraKey) return { titre: DISP_EXTRA[extraKey].label, sous: DISP_EXTRA[extraKey].desc, folio: undefined };
     return null;
   })();
+
+  const lienTab = (t: DispTab, onNav?: () => void) => {
+    const Icon = t.icon;
+    const on = estActif(t.href);
+    return (
+      <Link key={t.href} href={t.href} onClick={onNav} className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-[0.82rem] font-semibold transition"
+        style={on ? { color: "#f8f1dd", background: "var(--accent)" } : { color: "var(--muted)" }}>
+        <Icon className="h-4 w-4 shrink-0" /> <span className="truncate">{t.label}</span>
+      </Link>
+    );
+  };
 
   return (
     <div className="disp-registre min-h-screen px-3 py-6">
@@ -63,21 +102,51 @@ export function DispensaireShell({ children, habilite = false, estAdmin = false,
           </div>
         </header>
 
-        {/* Onglets */}
-        <nav className="mt-3 flex gap-1 overflow-x-auto pb-1" style={{ scrollbarWidth: "thin" }}>
-          {tabs.map((t) => {
+        {/* Menu par catégories */}
+        <nav ref={menuRef} className="mt-3 flex flex-wrap items-center gap-1.5">
+          {/* Accès direct */}
+          {directs.map((t) => {
             const Icon = t.icon;
             const on = estActif(t.href);
-            if (!t.pret) return (
-              <span key={t.href} title="Bientôt disponible" className="inline-flex shrink-0 cursor-not-allowed items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.78rem] font-semibold text-faint opacity-60">
-                <Icon className="h-3.5 w-3.5" /> {t.label} <span className="rounded-full border border-border px-1.5 text-[0.6rem] uppercase">bientôt</span>
-              </span>
-            );
             return (
-              <Link key={t.href} href={t.href} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.78rem] font-semibold transition"
+              <Link key={t.href} href={t.href} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.8rem] font-semibold transition"
                 style={on ? { color: "#f8f1dd", background: "var(--accent)" } : { color: "var(--muted)" }}>
                 <Icon className="h-3.5 w-3.5" /> {t.label}
               </Link>
+            );
+          })}
+
+          {/* Catégories (menus déroulants) */}
+          {categories.map((c) => {
+            const Icon = c.icon;
+            const open = openCat === c.key;
+            const actif = c.tabs.some((t) => estActif(t.href)) || (c.direction && path.startsWith("/dispensaire/direction"));
+            return (
+              <div key={c.key} className="relative">
+                <button
+                  type="button"
+                  aria-expanded={open}
+                  onClick={() => setOpenCat(open ? null : c.key)}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.8rem] font-semibold transition"
+                  style={actif ? { color: "#f8f1dd", background: "color-mix(in srgb,var(--accent) 82%,#000)" } : { color: "var(--muted)", background: open ? "var(--surface-2)" : "transparent" }}
+                >
+                  <Icon className="h-3.5 w-3.5" /> {c.label}
+                  {c.direction ? <span className="text-[0.7rem]" title="Espace protégé">🔒</span> : null}
+                  <ChevronDown className="h-3.5 w-3.5 transition" style={{ transform: open ? "rotate(180deg)" : "none" }} />
+                </button>
+                {open ? (
+                  <div className="absolute left-0 top-full z-30 mt-1 min-w-[220px] rounded-xl border border-border bg-surface p-1.5 shadow-card" style={{ background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 92%,#000))" }}>
+                    {c.direction ? (
+                      <Link href="/dispensaire/direction" onClick={() => setOpenCat(null)} className="mb-1 flex items-center gap-2 rounded-lg border-b border-border px-2.5 py-2 text-[0.8rem] font-semibold text-accent hover:brightness-110">
+                        <LayoutGrid className="h-4 w-4" /> Vue d&apos;ensemble
+                      </Link>
+                    ) : null}
+                    <div className="flex flex-col gap-0.5">
+                      {c.tabs.map((t) => lienTab(t, () => setOpenCat(null)))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             );
           })}
         </nav>

@@ -1,6 +1,8 @@
 import { Suspense } from "react";
 import { getCockpit } from "@/lib/dispensaire-cockpit";
+import { peutAdministrer } from "@/lib/dispensaire-roles";
 import { DispensaireCockpit } from "@/components/dispensaire-cockpit";
+import { AccesDirection } from "@/components/dispensaire-acces-direction";
 
 export const dynamic = "force-dynamic";
 
@@ -19,8 +21,8 @@ function CockpitSquelette() {
   return (
     <div className="flex flex-col gap-4">
       <div className="h-6 w-64 animate-pulse rounded bg-surface-2" />
-      <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4 xl:grid-cols-7">
-        {Array.from({ length: 7 }).map((_, i) => <div key={i} className="h-[74px] animate-pulse rounded-[14px] border border-border bg-surface" />)}
+      <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-3 xl:grid-cols-6">
+        {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-[74px] animate-pulse rounded-[14px] border border-border bg-surface" />)}
       </div>
       <div className="grid gap-4 lg:grid-cols-2"><Bloc /><Bloc /><Bloc /><Bloc /></div>
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
@@ -33,7 +35,8 @@ function CockpitSquelette() {
   );
 }
 
-export default function DispensaireCockpitPage() {
+export default async function DispensaireCockpitPage() {
+  if (!(await peutAdministrer())) return <AccesDirection sous="Le cockpit de pilotage est réservé à la direction du dispensaire." />;
   return (
     <Suspense fallback={<CockpitSquelette />}>
       <CockpitContenu />

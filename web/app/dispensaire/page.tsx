@@ -18,7 +18,7 @@ const heureCourte = (iso: string) => { try { return new Intl.DateTimeFormat("fr-
 export default async function DispensaireAccueil() {
   const [d, role, standalone, consigne] = await Promise.all([getAccueil(), getRoleDispensaire(), isStandalone(), getConsigneDuJour()]);
   const habilite = role.perms.rh || role.perms.factures || role.perms.admin;
-  const modules = DISP_NAV.filter((t) => t.href !== "/dispensaire" && (!t.restreint || habilite) && (!t.admin || role.perms.admin) && !(standalone && t.href === "/repertoire"));
+  const modules = DISP_NAV.filter((t) => t.href !== "/dispensaire" && !t.direction && (!t.restreint || habilite) && !(standalone && t.href === "/repertoire"));
 
   // Tuiles d'alerte du tableau de bord.
   const tuiles = [

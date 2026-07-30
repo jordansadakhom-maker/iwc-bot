@@ -49,8 +49,8 @@ export const APP_ROUTES = [
 export const DISPENSAIRE_ROUTES = [
   "/dispensaire",
   "/dispensaire/assistant",
+  "/dispensaire/direction",
   "/dispensaire/cockpit",
-  "/dispensaire/prises-en-charge",
   "/dispensaire/rendez-vous",
   "/dispensaire/interventions",
   "/dispensaire/chambres",
@@ -61,7 +61,6 @@ export const DISPENSAIRE_ROUTES = [
   "/dispensaire/stockage",
   "/dispensaire/coffres",
   "/dispensaire/matieres",
-  "/dispensaire/fabrication",
   "/dispensaire/ventes",
   "/dispensaire/factures",
   "/dispensaire/comptabilite",
