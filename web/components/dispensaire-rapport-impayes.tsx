@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileText, Printer, Copy, History, Loader2, RefreshCw, Send, Check, ArrowLeft, CalendarClock } from "lucide-react";
-import { Modal } from "@/components/edit-ui";
+import { FileText, Printer, Copy, History, Loader2, RefreshCw, Send, Check, ArrowLeft, CalendarClock, ListChecks, AlertTriangle } from "lucide-react";
+import { Modal, inputCls } from "@/components/edit-ui";
 import type { RapportImpayes, RapportHisto } from "@/lib/dispensaire-rapport-impayes";
 import { RAPPORT_MODES, JOURS_SEMAINE, estModeAuto, type RapportConfig, type RapportMode } from "@/lib/dispensaire-rapport-const";
+import { FILTRES_FDO, ageFactureJours, joursDeRetard, estOuverte, money, type Facture, type FiltreFDO } from "@/lib/dispensaire-facturation-const";
 import { genererRapportImpayes, chargerSnapshotRapport, rafraichirRapport, setRapportConfig } from "@/app/dispensaire/factures/rapport-actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
@@ -198,7 +199,7 @@ export function RapportDoc({ rapport: r }: { rapport: RapportImpayes }) {
   );
 }
 
-export function RapportImpayesModal({ initial, historique, config, medecins = [], onClose }: { initial: RapportImpayes; historique: RapportHisto[]; config: RapportConfig; medecins?: Medecin[]; onClose: () => void }) {
+export function RapportImpayesModal({ initial, historique, config, medecins = [], factures = [], onClose }: { initial: RapportImpayes; historique: RapportHisto[]; config: RapportConfig; medecins?: Medecin[]; factures?: Facture[]; onClose: () => void }) {
   const router = useRouter();
   const [doc, setDoc] = useState<RapportImpayes>(initial);
 
@@ -209,10 +210,50 @@ export function RapportImpayesModal({ initial, historique, config, medecins = []
     setDoc((d) => ({ ...d, medecin: nom || d.medecin, medecinTitre: titreDe(m?.grade) }));
   }
   const [histo, setHisto] = useState<RapportHisto[]>(historique);
-  const [vue, setVue] = useState<"apercu" | "histo" | "plan">("apercu");
+  const [vue, setVue] = useState<"selection" | "apercu" | "histo" | "plan">("selection");
   const [busy, setBusy] = useState<string | null>(null);
   const [flash, setFlash] = useState<FlashMsg>(null);
   const [cfg, setCfg] = useState<RapportConfig>(config);
+
+  // ── Sélection des factures à déclarer ──────────────────────────────────────
+  const seuil = Math.max(0, cfg.joursRetard);                              // délai de retard (jours)
+  const [filtre, setFiltre] = useState<FiltreFDO>("retard");
+  const [joursN, setJoursN] = useState<number>(seuil);                     // seuil ad-hoc pour le filtre « Dépassant N jours »
+  // Factures candidates = uniquement les NON réglées (seules déclarables).
+  const candidats = useMemo(() => {
+    const now = Date.now();
+    return factures
+      .filter((f) => estOuverte(f.statuts))
+      .map((f) => ({ f, age: ageFactureJours(f, now), retard: joursDeRetard(f, seuil, now) }))
+      .sort((a, b) => b.age - a.age);
+  }, [factures, seuil]);
+  // Préselection selon le filtre choisi.
+  const preselection = (fi: FiltreFDO, n: number): Set<string> => {
+    const s = new Set<string>();
+    for (const c of candidats) {
+      const ok = fi === "retard" ? c.age >= seuil : fi === "jours" ? c.age >= Math.max(0, n) : true; // nonpayees / toutes → tout
+      if (ok) s.add(c.f.id);
+    }
+    return s;
+  };
+  const [checked, setChecked] = useState<Set<string>>(() => preselection("retard", seuil));
+  function appliquerFiltre(fi: FiltreFDO, n = joursN) { setFiltre(fi); setChecked(preselection(fi, n)); }
+  function bascule(id: string) { setChecked((p) => { const s = new Set(p); if (s.has(id)) s.delete(id); else s.add(id); return s; }); }
+
+  const selection = candidats.filter((c) => checked.has(c.f.id));
+  const patientsUniq = new Set(selection.map((c) => c.f.objet.trim().toLowerCase())).size;
+  const totalSel = selection.reduce((a, c) => a + c.f.montant, 0);
+
+  async function sauverSeuil(v: number) {
+    const n = Math.max(0, Math.min(365, Math.round(v)));
+    if (n === cfg.joursRetard) return;
+    const next = { ...cfg, joursRetard: n };
+    setCfg(next); setBusy("seuil");
+    const r = await setRapportConfig({ joursRetard: n });
+    setBusy(null);
+    if (!r.ok) { setCfg(cfg); setFlash({ t: "bad", m: r.error || "Impossible." }); }
+    else { setChecked(preselection(filtre, filtre === "jours" ? joursN : n)); setFlash({ t: "ok", m: `Délai de retard réglé à ${n} jour(s).` }); router.refresh(); }
+  }
 
   async function sauverPlan(patch: Partial<RapportConfig>) {
     const next = { ...cfg, ...patch };
@@ -222,12 +263,14 @@ export function RapportImpayesModal({ initial, historique, config, medecins = []
     if (!r.ok) { setCfg(cfg); setFlash({ t: "bad", m: r.error || "Impossible." }); } else { setFlash({ t: "ok", m: "Planification enregistrée." }); router.refresh(); }
   }
 
+  // Génère la déclaration à partir de la SÉLECTION cochée (récap de sécurité juste
+  // au-dessus). Le rapport ne contient QUE les factures cochées.
   async function generer() {
     setBusy("gen");
-    const r = await genererRapportImpayes(doc.medecin, doc.medecinTitre);
+    const r = await genererRapportImpayes({ medecin: doc.medecin, titre: doc.medecinTitre, factureIds: [...checked], seuil });
     setBusy(null);
     if (!r.ok || !r.rapport) { setFlash({ t: "bad", m: r.error || "Impossible." }); return; }
-    setDoc(r.rapport); setFlash({ t: "ok", m: `Rapport généré — ${r.rapport.impayes.length} impayé(s), ${r.rapport.payes.length} paiement(s).` });
+    setDoc(r.rapport); setVue("apercu"); setFlash({ t: "ok", m: `Déclaration générée — ${r.rapport.impayes.length} ligne(s).` });
     setHisto((p) => [{ id: "tmp", at: r.rapport!.genereLe, par: r.rapport!.medecin, nbImpayes: r.rapport!.impayes.length, nbPaiements: r.rapport!.payes.length }, ...p]);
     router.refresh();
   }
@@ -245,14 +288,15 @@ export function RapportImpayesModal({ initial, historique, config, medecins = []
         {/* Barre d'actions */}
         <div className="rapport-noprint flex flex-wrap items-center gap-1.5">
           <div className="flex overflow-hidden rounded-lg border border-border text-[0.74rem] font-semibold">
+            <button onClick={() => setVue("selection")} className="inline-flex items-center gap-1 px-2.5 py-1.5" style={vue === "selection" ? { background: "var(--accent)", color: "#000" } : { color: "var(--muted)" }}><ListChecks className="h-3.5 w-3.5" /> Sélection</button>
             <button onClick={() => setVue("apercu")} className="px-2.5 py-1.5" style={vue === "apercu" ? { background: "var(--accent)", color: "#000" } : { color: "var(--muted)" }}>Aperçu</button>
             <button onClick={() => setVue("histo")} className="inline-flex items-center gap-1 px-2.5 py-1.5" style={vue === "histo" ? { background: "var(--accent)", color: "#000" } : { color: "var(--muted)" }}><History className="h-3.5 w-3.5" /> Historique ({histo.length})</button>
             <button onClick={() => setVue("plan")} className="inline-flex items-center gap-1 px-2.5 py-1.5" style={vue === "plan" ? { background: "var(--accent)", color: "#000" } : { color: "var(--muted)" }}><CalendarClock className="h-3.5 w-3.5" /> Planification</button>
           </div>
           {vue === "apercu" ? (
             <>
+              <button onClick={() => setVue("selection")} className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted hover:text-ink"><ListChecks className="h-3.5 w-3.5" /> Modifier la sélection</button>
               <button onClick={actualiser} disabled={!!busy} className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted hover:text-ink disabled:opacity-50">{busy === "ref" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />} Actualiser</button>
-              <button onClick={generer} disabled={!!busy} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[0.74rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--warn)" }}>{busy === "gen" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />} Générer le rapport</button>
               <button onClick={() => imprimerRapport(doc)} className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted hover:text-ink"><Printer className="h-3.5 w-3.5" /> Imprimer / PDF</button>
               <button onClick={() => copier(false)} className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted hover:text-ink"><Copy className="h-3.5 w-3.5" /> Copier</button>
               <button onClick={() => copier(true)} className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted hover:text-ink"><Send className="h-3.5 w-3.5" /> Envoyer aux FDO</button>
@@ -260,7 +304,7 @@ export function RapportImpayesModal({ initial, historique, config, medecins = []
           ) : null}
         </div>
 
-        {vue === "apercu" ? (
+        {vue === "apercu" || vue === "selection" ? (
           <div className="rapport-noprint flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2">
             <span className="text-[0.72rem] font-semibold uppercase tracking-[0.05em] text-faint">Médecin signataire</span>
             <select value={doc.medecin} onChange={(e) => choisirMedecin(e.target.value)} className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[0.8rem]" title="Choisir le médecin qui édite le document">
@@ -272,7 +316,73 @@ export function RapportImpayesModal({ initial, historique, config, medecins = []
           </div>
         ) : null}
 
-        {vue === "plan" ? (
+        {vue === "selection" ? (
+          <div className="rapport-noprint flex flex-col gap-3">
+            <p className="text-[0.82rem] text-muted">Par défaut, seules les factures <b>réellement en retard</b> (délai dépassé) sont incluses. Vérifie la sélection ci-dessous <b>avant</b> de générer la déclaration.</p>
+
+            {/* Filtres + délai de retard configurable */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap gap-1">
+                {FILTRES_FDO.map((o) => (
+                  <button key={o.key} onClick={() => appliquerFiltre(o.key)} className="rounded-lg border px-2.5 py-1.5 text-[0.74rem] font-semibold transition" style={filtre === o.key ? { background: "var(--accent)", color: "#000", borderColor: "var(--accent)" } : { color: "var(--muted)", borderColor: "var(--border)" }}>{o.label}</button>
+                ))}
+              </div>
+              {filtre === "jours" ? (
+                <label className="inline-flex items-center gap-1.5 text-[0.74rem] text-muted">Dépassant <input type="number" min={0} value={joursN} onChange={(e) => { const n = Math.max(0, Math.round(Number(e.target.value) || 0)); setJoursN(n); appliquerFiltre("jours", n); }} className={inputCls + " w-16 text-center"} /> jours</label>
+              ) : null}
+              <label className="ml-auto inline-flex items-center gap-1.5 text-[0.74rem] text-muted" title="Réglable par la Direction — enregistré durablement">En retard après <input type="number" min={0} defaultValue={cfg.joursRetard} onBlur={(e) => sauverSeuil(Number(e.target.value))} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} className={inputCls + " w-16 text-center"} />{busy === "seuil" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null} jours</label>
+            </div>
+
+            {/* Récapitulatif de sécurité */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border px-3 py-2 text-[0.8rem]" style={{ borderColor: "color-mix(in srgb,var(--accent) 40%,var(--border))", background: "color-mix(in srgb,var(--accent) 6%,transparent)" }}>
+              <span className="inline-flex items-center gap-1.5 font-semibold"><ListChecks className="h-4 w-4 text-accent" /> {selection.length} facture{selection.length > 1 ? "s" : ""} sélectionnée{selection.length > 1 ? "s" : ""}</span>
+              <span className="text-muted">{patientsUniq} patient{patientsUniq > 1 ? "s" : ""}</span>
+              <span className="text-muted">Total : <b className="font-num text-ink">{money(totalSel)}</b></span>
+              <button onClick={() => setChecked((p) => (p.size === candidats.length ? new Set() : new Set(candidats.map((c) => c.f.id))))} className="ml-auto text-[0.74rem] font-semibold text-accent hover:underline">{checked.size === candidats.length && candidats.length ? "Tout décocher" : "Tout cocher"}</button>
+            </div>
+
+            {/* Liste des factures candidates avec cases à cocher */}
+            {candidats.length === 0 ? (
+              <p className="py-6 text-center text-[0.84rem] italic text-faint">Aucune facture non réglée à déclarer.</p>
+            ) : (
+              <div className="max-h-[42vh] overflow-auto rounded-lg border border-border">
+                <table className="w-full min-w-[520px] border-collapse text-left text-[0.8rem]">
+                  <thead className="sticky top-0 bg-surface">
+                    <tr className="text-[0.64rem] uppercase tracking-[0.05em] text-faint">
+                      <th className="border-b border-border px-2 py-2"></th>
+                      <th className="border-b border-border px-2 py-2 font-semibold">Patient</th>
+                      <th className="border-b border-border px-2 py-2 font-semibold">Émission</th>
+                      <th className="border-b border-border px-2 py-2 text-right font-semibold">Retard</th>
+                      <th className="border-b border-border px-2 py-2 text-right font-semibold">Montant</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {candidats.map((c) => {
+                      const on = checked.has(c.f.id);
+                      const enRetard = c.f && c.age >= seuil;
+                      return (
+                        <tr key={c.f.id} onClick={() => bascule(c.f.id)} className="cursor-pointer hover:bg-[color-mix(in_srgb,var(--ink)_4%,transparent)]" style={on ? { background: "color-mix(in srgb,var(--accent) 7%,transparent)" } : undefined}>
+                          <td className="border-b border-border px-2 py-1.5"><input type="checkbox" checked={on} onChange={() => bascule(c.f.id)} onClick={(e) => e.stopPropagation()} className="h-4 w-4 accent-[var(--accent)]" /></td>
+                          <td className="border-b border-border px-2 py-1.5 font-semibold">{c.f.objet}</td>
+                          <td className="border-b border-border px-2 py-1.5 font-num text-faint">{ddMM(c.f.dateEmission || c.f.createdAt)}</td>
+                          <td className="border-b border-border px-2 py-1.5 text-right font-num" style={{ color: enRetard ? "var(--oxblood)" : "var(--warn)" }}>{enRetard ? `${c.retard} j` : <span title="Encore dans les délais">dans les délais</span>}</td>
+                          <td className="border-b border-border px-2 py-1.5 text-right font-num">{money(c.f.montant)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {selection.some((c) => c.age < seuil) ? (
+              <p className="inline-flex items-center gap-1.5 text-[0.74rem]" style={{ color: "var(--warn)" }}><AlertTriangle className="h-3.5 w-3.5" /> Attention : une ou plusieurs factures sélectionnées ne sont pas encore en retard.</p>
+            ) : null}
+
+            <div className="flex justify-end">
+              <button onClick={generer} disabled={!!busy || selection.length === 0} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--accent)" }}>{busy === "gen" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Générer la déclaration ({selection.length})</button>
+            </div>
+          </div>
+        ) : vue === "plan" ? (
           <div className="rapport-noprint flex flex-col gap-3">
             <p className="text-[0.8rem] text-muted">Choisis la fréquence de génération automatique du rapport. La génération planifiée est assurée par le serveur (Cron).</p>
             <label className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Fréquence</span>
