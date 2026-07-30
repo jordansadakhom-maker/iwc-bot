@@ -356,5 +356,14 @@ tbody tr:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); 
   .disp-live-dot, .disp-urgent, .disp-rise { animation: none; }
 }
 
-/* Mode urgence — bascule d'ambiance (rouge dominant). */
+/* Mode urgence — bascule d'ambiance (rouge dominant) + bandeau d'alerte. */
 .disp-premium[data-mode="urgence"] { --accent:#f0574e; --accent-hi:#ff7a70; --accent-lo:#c23a33; }
+.disp-premium[data-mode="urgence"] .disp-premium__canvas { border-color: color-mix(in srgb,var(--crit) 45%,var(--border)); box-shadow: inset 0 3px 0 0 var(--crit), var(--shadow-1); }
+.disp-premium[data-mode="urgence"]::before {
+  content: "● MODE URGENCE ●"; position: fixed; inset: 0 0 auto 0; z-index: 90;
+  text-align: center; padding: 3px 0; font-size: 0.6rem; font-weight: 800; letter-spacing: 0.28em;
+  color: #fff; background: var(--crit); box-shadow: 0 2px 10px color-mix(in srgb,var(--crit) 45%,transparent);
+  animation: disp-urgent-bar 1.6s var(--ease-inout) infinite;
+}
+@keyframes disp-urgent-bar { 0%,100% { opacity: 0.95; } 50% { opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) { .disp-premium[data-mode="urgence"]::before { animation: none; } }
