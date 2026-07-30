@@ -5,6 +5,7 @@ import { History, Search, X } from "lucide-react";
 import type { HistoData, HistoItem } from "@/lib/dispensaire-historique";
 import { Flash, inputCls } from "@/components/edit-ui";
 import { PremiumCard, SectionHeader, EmptyState } from "@/components/dispensaire-premium";
+import { jourRelatif, heureCourte } from "@/lib/dispensaire-timefmt";
 
 // Centre d'activité PREMIUM (« main courante ») — flux horodaté de tout ce qui
 // est porté au registre : recherche plein-texte, filtres rapides par module
@@ -15,17 +16,6 @@ const norm = (x: string) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,
 const MOD_TONE: Record<string, string> = { Stockage: "var(--accent)", "Stock Matériel Médical": "var(--good)", Ventes: "var(--good)", Pointage: "var(--accent)", Frais: "var(--warn)", Factures: "var(--crit)", Certificats: "var(--accent)", Rapports: "var(--accent)", RH: "var(--warn)", "Matières": "var(--warn)", FDO: "var(--accent)" };
 const ACT_TONE: Record<string, string> = { "Entrée": "var(--good)", Sortie: "var(--crit)", "Déplacement": "var(--warn)", "Nouveau coffre": "var(--good)", "Coffre modifié": "var(--accent)" };
 const tonMod = (m: string) => MOD_TONE[m] || "var(--steel)";
-
-const heure = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); } catch { return "—"; } };
-function jourDe(iso: string): string {
-  const d = new Date(iso);
-  const key = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" });
-  const now = new Date();
-  const hier = new Date(now); hier.setDate(hier.getDate() - 1);
-  if (key.format(d) === key.format(now)) return "Aujourd'hui";
-  if (key.format(d) === key.format(hier)) return "Hier";
-  try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", weekday: "long", day: "2-digit", month: "long" }).format(d); } catch { return "Plus tôt"; }
-}
 
 export function DispensaireHistorique({ data }: { data: HistoData }) {
   const [q, setQ] = useState("");
@@ -79,8 +69,8 @@ export function DispensaireHistorique({ data }: { data: HistoData }) {
           <ol className="flex flex-col">
             {liste.map((i, idx) => {
               const ton = tonMod(i.module);
-              const jour = jourDe(i.at);
-              const nouveauJour = idx === 0 || jour !== jourDe(liste[idx - 1].at);
+              const jour = jourRelatif(i.at);
+              const nouveauJour = idx === 0 || jour !== jourRelatif(liste[idx - 1].at);
               return (
                 <li key={i.id}>
                   {nouveauJour ? (
@@ -100,7 +90,7 @@ export function DispensaireHistorique({ data }: { data: HistoData }) {
                       {i.detail ? <div className="mt-0.5 truncate text-[0.75rem] text-muted">{i.detail}</div> : null}
                     </div>
                     <div className="shrink-0 whitespace-nowrap text-right font-num text-[0.7rem] text-faint">
-                      <div>{heure(i.at)}</div>
+                      <div>{heureCourte(i.at)}</div>
                       {i.par ? <div className="text-[0.66rem]">{i.par}</div> : null}
                     </div>
                   </div>
