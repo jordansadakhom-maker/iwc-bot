@@ -2,67 +2,64 @@ import { LayoutDashboard, Users, ClipboardList, Boxes, FlaskConical, Archive, Ba
 
 // Onglets de la section Dispensaire de Saint-Denis.
 //   `pret`       = déjà construit (sinon « bientôt »).
-//   `restreint`  = réservé aux membres habilités (RH/chefs).
+//   `restreint`  = réservé aux membres habilités (RH / chefs).
 //   `direction`  = outil de l'espace Direction (protégé, regroupé dans la
 //                  catégorie Direction) ; `perm` = permission requise.
-//   `cat`        = catégorie du menu (regroupement par fonction). Les onglets
+//   `cat`        = catégorie du menu (regroupement par domaine). Les onglets
 //                  `direction` appartiennent d'office à la catégorie Direction.
-//   Sans `cat` ni `direction` → accès direct en tête de menu (Accueil, Assistant).
+//   Sans `cat` ni `direction` → accès direct en tête de menu (Tableau de bord).
 export type DispPerm = "admin" | "rh" | "factures";
-export type DispCatKey = "soins" | "stock" | "administratif" | "direction" | "ressources";
+export type DispCatKey = "medical" | "rh" | "direction" | "ressources";
 export type DispTab = { href: string; label: string; icon: LucideIcon; pret?: boolean; restreint?: boolean; direction?: boolean; perm?: DispPerm; cat?: DispCatKey; desc?: string };
 
 export const DISP_NAV: DispTab[] = [
-  // ── Accès direct (hors catégories) ──
-  { href: "/dispensaire", label: "Accueil", icon: LayoutDashboard, pret: true, desc: "Le registre du jour — soins, stocks et personnel réunis d'un même regard." },
-  { href: "/dispensaire/assistant", label: "Assistant", icon: Sparkles, pret: true, desc: "La veille automatique — ce que le dispensaire a détecté et ce qu'il te propose de faire." },
+  // ── Accès direct ──
+  { href: "/dispensaire", label: "Tableau de bord", icon: LayoutDashboard, pret: true, desc: "Le registre du jour — soins, stocks et personnel réunis d'un même regard." },
 
-  // ── Soins ──
-  { href: "/dispensaire/rendez-vous", label: "Rendez-vous", icon: CalendarClock, pret: true, cat: "soins", desc: "Le planning des consultations — patients attendus, praticiens, spécialités et salles." },
-  { href: "/dispensaire/interventions", label: "Interventions", icon: Scissors, pret: true, restreint: true, cat: "soins", desc: "Les opérations et leurs comptes-rendus opératoires (CRO)." },
-  { href: "/dispensaire/chambres", label: "Chambres", icon: BedDouble, pret: true, cat: "soins", desc: "Les lits et chambres — occupation, réservation, nettoyage." },
-  { href: "/dispensaire/ambulances", label: "Ambulances", icon: Truck, pret: true, cat: "soins", desc: "La flotte d'intervention — état, carburant, entretien et matériel." },
+  // ── 🏥 Gestion médicale ──
+  { href: "/dispensaire/rendez-vous", label: "Rendez-vous", icon: CalendarClock, pret: true, cat: "medical", desc: "Le planning des consultations — patients attendus, praticiens, spécialités et salles." },
+  { href: "/dispensaire/interventions", label: "Interventions", icon: Scissors, pret: true, restreint: true, cat: "medical", desc: "Les opérations et leurs comptes-rendus opératoires (CRO)." },
+  { href: "/dispensaire/chambres", label: "Chambres", icon: BedDouble, pret: true, cat: "medical", desc: "Les lits et chambres — occupation, réservation, nettoyage." },
+  { href: "/dispensaire/ambulances", label: "Ambulances", icon: Truck, pret: true, cat: "medical", desc: "La flotte d'intervention — état, carburant, entretien et matériel." },
+  { href: "/dispensaire/fdo", label: "Soins FDO", icon: ShieldCheck, pret: true, cat: "medical", desc: "Soins portés aux forces de l'ordre du comté." },
+  { href: "/dispensaire/certificats", label: "Certificats", icon: Stethoscope, pret: true, cat: "medical", desc: "Certificats médicaux, prêts à sceller et à imprimer." },
+  { href: "/dispensaire/rapports", label: "Rapports médicaux", icon: ScrollText, pret: true, cat: "medical", desc: "Comptes rendus et planches d'examen." },
+  { href: "/dispensaire/ventes", label: "Ventes", icon: BadgeDollarSign, pret: true, cat: "medical", desc: "Le cahier des soins délivrés, patient par patient." },
+  { href: "/dispensaire/frais", label: "Notes de frais", icon: FileText, pret: true, cat: "medical", desc: "Dépenses avancées, en attente de remboursement." },
+  { href: "/dispensaire/factures", label: "Factures en retard", icon: Receipt, pret: true, restreint: true, cat: "medical", desc: "Les créances impayées et l'état de leur relance." },
+  { href: "/dispensaire/coffres", label: "Stock Matériel Médical", icon: Archive, pret: true, cat: "medical", desc: "Le matériel médical rangé, coffre par coffre — et ce qu'il faut réapprovisionner." },
+  { href: "/dispensaire/matieres", label: "Matières premières", icon: FlaskConical, pret: true, cat: "medical", desc: "Ce qu'il faut réapprovisionner pour tenir l'officine." },
+  { href: "/dispensaire/stockage", label: "Stockage", icon: Boxes, pret: true, cat: "medical", desc: "L'inventaire des coffres — remèdes, matériel et matières." },
 
-  // ── Stock ──
-  { href: "/dispensaire/stockage", label: "Stockage", icon: Boxes, pret: true, cat: "stock", desc: "L'inventaire des coffres — remèdes, matériel et matières." },
-  { href: "/dispensaire/coffres", label: "Stock Matériel Médical", icon: Archive, pret: true, cat: "stock", desc: "Le matériel médical rangé, coffre par coffre — et ce qu'il faut réapprovisionner." },
-  { href: "/dispensaire/matieres", label: "Matières premières", icon: FlaskConical, pret: true, cat: "stock", desc: "Ce qu'il faut réapprovisionner pour tenir l'officine." },
+  // ── 👥 Ressources humaines (habilité RH) ──
+  { href: "/dispensaire/pointage", label: "Pointage", icon: ClipboardList, pret: true, restreint: true, cat: "rh", desc: "Assiduité, absences et validation des services (la prise de service reste sur le tableau de bord)." },
+  { href: "/dispensaire/rh", label: "Effectifs", icon: Users, pret: true, restreint: true, cat: "rh", desc: "Le personnel du dispensaire, ses fonctions, ses états de service et sa discipline." },
 
-  // ── Administratif ──
-  { href: "/dispensaire/ventes", label: "Ventes", icon: BadgeDollarSign, pret: true, cat: "administratif", desc: "Le cahier des soins délivrés, patient par patient." },
-  { href: "/dispensaire/pointage", label: "Pointage", icon: ClipboardList, pret: true, cat: "administratif", desc: "Prises et fins de service, absences et assiduité sur trois semaines." },
-  { href: "/dispensaire/fdo", label: "Soins FDO", icon: ShieldCheck, pret: true, cat: "administratif", desc: "Soins portés aux forces de l'ordre du comté." },
-  { href: "/dispensaire/frais", label: "Notes de frais", icon: FileText, pret: true, cat: "administratif", desc: "Dépenses avancées, en attente de remboursement." },
-  { href: "/dispensaire/certificats", label: "Certificats", icon: Stethoscope, pret: true, cat: "administratif", desc: "Certificats médicaux, prêts à sceller et à imprimer." },
-  { href: "/dispensaire/rapports", label: "Rapports médicaux", icon: ScrollText, pret: true, cat: "administratif", desc: "Comptes rendus et planches d'examen." },
-
-  // ── Direction (protégé) ──
+  // ── 📊 Direction (protégé) ──
   { href: "/dispensaire/cockpit", label: "Cockpit Direction", icon: LayoutDashboard, pret: true, direction: true, perm: "admin", desc: "La vue d'ensemble en temps réel — soins, planning, stock et finances d'un même regard." },
-  { href: "/dispensaire/rh", label: "RH / Salariés", icon: Users, pret: true, direction: true, perm: "rh", desc: "Le personnel du dispensaire, ses fonctions, ses états de service et sa discipline." },
   { href: "/dispensaire/salaires", label: "Salaires", icon: Coins, pret: true, direction: true, perm: "admin", desc: "Calcul automatique des salaires — 4 jours pointés = salaire plein." },
   { href: "/dispensaire/comptabilite", label: "Comptabilité", icon: Landmark, pret: true, direction: true, perm: "factures", desc: "Trésorerie, recettes, dépenses et grand-livre — reconstruits automatiquement." },
-  { href: "/dispensaire/factures", label: "Factures en retard", icon: Receipt, pret: true, direction: true, perm: "factures", desc: "Les créances impayées et l'état de leur relance." },
+  { href: "/dispensaire/assistant", label: "Assistant", icon: Sparkles, pret: true, direction: true, perm: "admin", desc: "La veille automatique — ce que le dispensaire a détecté et ce qu'il propose de faire." },
   { href: "/dispensaire/stats", label: "Statistiques", icon: BarChart3, pret: true, direction: true, perm: "admin", desc: "L'activité de l'officine en chiffres et en courbes." },
   { href: "/dispensaire/audit", label: "Mode Audit", icon: Gauge, pret: true, direction: true, perm: "admin", desc: "Le contrôle qualité — anomalies, cohérence des données et checklist de tests." },
-  { href: "/dispensaire/admin", label: "Administration", icon: ShieldAlert, pret: true, direction: true, perm: "admin", desc: "Rôles, habilitations, journal d'accès et réglages du dispensaire." },
+  { href: "/dispensaire/admin", label: "Administration", icon: ShieldAlert, pret: true, direction: true, perm: "admin", desc: "Rôles, habilitations, paramètres avancés et journal d'accès du dispensaire." },
 
-  // ── Ressources ──
+  // ── Ressources (utilitaires, ouvert) ──
   { href: "/repertoire", label: "Répertoire", icon: BookUser, pret: true, cat: "ressources", desc: "Les contacts et correspondants du dispensaire." },
   { href: "/dispensaire/reglement", label: "Règlement", icon: Scale, pret: true, cat: "ressources", desc: "Le règlement du cabinet et ses avenants — à connaître de tous." },
   { href: "/dispensaire/historique", label: "Historique", icon: History, pret: true, cat: "ressources", desc: "La main courante — tout ce qui a été porté au registre." },
 ];
 
-// ── Catégories du menu (regroupement par fonction) ──────────────────────────
+// ── Catégories du menu (regroupement par domaine) ───────────────────────────
 export type DispCategorie = { key: DispCatKey; label: string; icon: LucideIcon; direction?: boolean };
 export const DISP_CATEGORIES: DispCategorie[] = [
-  { key: "soins", label: "Soins", icon: HeartPulse },
-  { key: "stock", label: "Stock", icon: Boxes },
-  { key: "administratif", label: "Administratif", icon: FileText },
+  { key: "medical", label: "Gestion médicale", icon: HeartPulse },
+  { key: "rh", label: "Ressources humaines", icon: Users },
   { key: "direction", label: "Direction", icon: Crown, direction: true },
   { key: "ressources", label: "Ressources", icon: BookUser },
 ];
 
-// Onglets d'accès direct (ni catégorie, ni Direction) : Accueil, Assistant.
+// Onglets d'accès direct (ni catégorie, ni Direction) : Tableau de bord.
 export const DISP_DIRECT = DISP_NAV.filter((t) => !t.cat && !t.direction);
 // Onglets d'une catégorie « normale » (hors Direction).
 export const tabsDeCategorie = (key: DispCatKey): DispTab[] => DISP_NAV.filter((t) => t.cat === key);
