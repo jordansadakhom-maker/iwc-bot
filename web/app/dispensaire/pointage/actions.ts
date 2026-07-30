@@ -31,10 +31,24 @@ export async function prendreService(data: { salarieId?: string | null; nom: str
 
   const id = newId();
   const now = new Date().toISOString();
-  const { error } = await admin.from("DispensairePointage").insert({ id, salarieId, nom, debut: now, updatedBy: await qui(), updatedAt: now });
+  const { error } = await admin.from("DispensairePointage").insert({ id, salarieId, nom, debut: now, lastSeen: now, etat: "en_service", updatedBy: await qui(), updatedAt: now });
   if (error) return { ok: false, error: "Prise de service impossible (la table existe-t-elle ?)." };
   await emettreEvenementDispensaire({ aggregate: "pointage", type: "pointage.debut", cibleId: id, cibleLibelle: nom, apres: { nom, debut: now } });
   return { ok: true, id };
+}
+
+// Heartbeat : signal « je suis toujours là » d'un service ouvert (met à jour
+// lastSeen). Léger, silencieux (aucun événement), appelé périodiquement par le
+// navigateur. Sert à distinguer un service actif d'un service oublié.
+export async function battreCoeur(id: string): Promise<PointResult> {
+  if (!id) return { ok: false };
+  if (!(await estAutorise())) return { ok: false, error: REFUS };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false };
+  const now = new Date().toISOString();
+  // Ne touche QUE les services ouverts (fin absente) — jamais un service clôturé.
+  const { error } = await admin.from("DispensairePointage").update({ lastSeen: now, etat: "en_service" }).eq("id", id).is("fin", null);
+  return error ? { ok: false } : { ok: true };
 }
 
 // Terminer le service : renseigne la fin et calcule la durée (minutes).
@@ -50,9 +64,10 @@ export async function terminerService(id: string): Promise<PointResult> {
   const fin = new Date();
   const debut = new Date(String(r.debut));
   const dureeMin = Math.max(0, Math.round((fin.getTime() - debut.getTime()) / 60000));
-  const { error } = await admin.from("DispensairePointage").update({ fin: fin.toISOString(), dureeMin, updatedBy: await qui(), updatedAt: fin.toISOString() }).eq("id", id);
+  // Clôture NORMALE (par le salarié, en direct) → validée d'office.
+  const { error } = await admin.from("DispensairePointage").update({ fin: fin.toISOString(), dureeMin, etat: "cloture", finSource: "normal", valide: true, updatedBy: await qui(), updatedAt: fin.toISOString() }).eq("id", id);
   if (error) return { ok: false, error: "Clôture impossible." };
-  await emettreEvenementDispensaire({ aggregate: "pointage", type: "pointage.fin", cibleId: id, cibleLibelle: String(r.nom ?? ""), apres: { dureeMin } });
+  await emettreEvenementDispensaire({ aggregate: "pointage", type: "pointage.fin", cibleId: id, cibleLibelle: String(r.nom ?? ""), apres: { dureeMin, finSource: "normal" } });
   return { ok: true };
 }
 

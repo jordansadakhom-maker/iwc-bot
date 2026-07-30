@@ -2,6 +2,7 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAcces } from "@/lib/queries";
+import { getRoleDispensaire } from "@/lib/dispensaire-roles";
 import { ymdParis, dowParis, lundiCourant, lundiDecale, dimancheDe } from "@/lib/dispensaire-dates";
 
 // ── Pointage du Dispensaire (prise de service) ──────────────────────────────
@@ -181,4 +182,20 @@ export async function getEnService(): Promise<PointSession[]> {
   const { data, error } = await admin.from("DispensairePointage").select("*").is("fin", null).order("debut", { ascending: true });
   if (error) return [];
   return ((data || []) as Record<string, unknown>[]).map(toSession);
+}
+
+// Le service OUVERT du compte connecté (rapproché par nom), pour le heartbeat et
+// la reprise à la reconnexion. Renvoie null si le compte n'a pas de service ouvert.
+export type MonService = { id: string; debut: string; lastSeen: string | null; nom: string };
+export async function getMonServiceOuvert(): Promise<MonService | null> {
+  const admin = createAdminClient();
+  if (!admin) return null;
+  let nom = "";
+  try { nom = (await getRoleDispensaire()).nom || ""; } catch { return null; }
+  const cle = normNom(nom);
+  if (!cle) return null;
+  const { data } = await admin.from("DispensairePointage").select("id,nom,debut,lastSeen").is("fin", null).order("debut", { ascending: false }).limit(100);
+  const row = ((data || []) as Record<string, unknown>[]).find((r) => normNom(r.nom) === cle);
+  if (!row) return null;
+  return { id: String(row.id), debut: String(row.debut), lastSeen: row.lastSeen == null ? null : String(row.lastSeen), nom: String(row.nom || nom) };
 }

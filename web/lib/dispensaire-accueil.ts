@@ -6,7 +6,7 @@ import { ymdParis } from "@/lib/dispensaire-dates";
 import { estOuverte, statutsDe } from "@/lib/dispensaire-facturation-const";
 
 // ── Données consolidées du tableau de bord du Dispensaire ────────────────────
-export type ServiceEnCours = { id: string; nom: string; grade: string | null; debut: string };
+export type ServiceEnCours = { id: string; nom: string; grade: string | null; debut: string; lastSeen: string | null };
 export type AlerteStock = { nom: string; stock: number; seuil: number; unite: string | null };
 export type Activite = { id: string; type: string; texte: string; par: string | null; at: string };
 export type AccueilData = {
@@ -39,7 +39,7 @@ export async function getAccueil(): Promise<AccueilData> {
 
   const [rost, ouv, stock, matieres, factures, frais, ventes, mvts, ventesRec, pointRec, fraisRec, certsRec] = await Promise.all([
     q<Record<string, unknown>[]>(admin.from("DispensaireSalarie").select("id,nom,grade,statut").order("nom", { ascending: true })),
-    q<Record<string, unknown>[]>(admin.from("DispensairePointage").select("id,nom,salarieId,debut").is("fin", null).order("debut", { ascending: true })),
+    q<Record<string, unknown>[]>(admin.from("DispensairePointage").select("id,nom,salarieId,debut,lastSeen").is("fin", null).order("debut", { ascending: true })),
     q<Record<string, unknown>[]>(admin.from("DispensaireStock").select("nom,stock,seuil,unite")),
     q<Record<string, unknown>[]>(admin.from("DispensaireMatiere").select("nom,quantite,seuil,unite")),
     q<Record<string, unknown>[]>(admin.from("DispensaireFacture").select("montant,statut,statuts,dateEcheance")),
@@ -57,7 +57,7 @@ export async function getAccueil(): Promise<AccueilData> {
 
   const gradeDe = new Map<string, string | null>();
   const roster = (rost || []).filter((r) => String(r.statut || "actif") !== "renvoye").map((r) => { gradeDe.set(String(r.id), str(r.grade)); return { id: String(r.id), nom: String(r.nom || "Salarié"), grade: str(r.grade) }; });
-  const enService: ServiceEnCours[] = (ouv || []).map((r) => ({ id: String(r.id), nom: String(r.nom || "Salarié"), grade: r.salarieId ? gradeDe.get(String(r.salarieId)) ?? null : null, debut: String(r.debut) }));
+  const enService: ServiceEnCours[] = (ouv || []).map((r) => ({ id: String(r.id), nom: String(r.nom || "Salarié"), grade: r.salarieId ? gradeDe.get(String(r.salarieId)) ?? null : null, debut: String(r.debut), lastSeen: r.lastSeen == null ? null : String(r.lastSeen) }));
 
   const stockAlertes: AlerteStock[] = (stock || []).map((r) => ({ nom: String(r.nom || "Article"), stock: num(r.stock), seuil: num(r.seuil), unite: str(r.unite) })).filter((i) => i.seuil > 0 && i.stock <= i.seuil).sort((a, b) => a.stock - b.stock);
   const matieresRupture = (matieres || []).map((r) => ({ nom: String(r.nom || "Matière"), quantite: num(r.quantite), seuil: num(r.seuil), unite: str(r.unite) })).filter((i) => i.seuil > 0 && i.quantite <= i.seuil).sort((a, b) => a.quantite - b.quantite);

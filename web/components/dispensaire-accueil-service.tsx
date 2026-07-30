@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Play, Square, Loader2, Users } from "lucide-react";
 import type { ServiceEnCours } from "@/lib/dispensaire-accueil";
+import { estAConfirmer } from "@/lib/dispensaire-pointage-const";
 import { inputCls } from "@/components/edit-ui";
 import { prendreService, terminerService } from "@/app/dispensaire/pointage/actions";
 
@@ -11,7 +12,7 @@ const heureFR = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR",
 function fmtMin(min: number) { if (min <= 0) return "0 min"; const h = Math.floor(min / 60), m = min % 60; return h ? `${h} h ${String(m).padStart(2, "0")}` : `${m} min`; }
 
 // Tableau de bord — personnel en service (chrono live) + prise / fin de service.
-export function AccueilService({ enService, roster }: { enService: ServiceEnCours[]; roster: { id: string; nom: string; grade: string | null }[] }) {
+export function AccueilService({ enService, roster, inactiviteMin = 10 }: { enService: ServiceEnCours[]; roster: { id: string; nom: string; grade: string | null }[]; inactiviteMin?: number }) {
   const router = useRouter();
   const [liste, setListe] = useState<ServiceEnCours[]>(enService);
   const [choix, setChoix] = useState("");
@@ -35,7 +36,7 @@ export function AccueilService({ enService, roster }: { enService: ServiceEnCour
     if (!nom) { setErr("Choisis un salarié ou saisis un nom."); return; }
     if (liste.some((s) => s.nom.toLowerCase() === nom.toLowerCase())) { setErr(`${nom} est déjà en service.`); return; }
     setErr(null); setBusy(true);
-    const tmp: ServiceEnCours = { id: "tmp-" + Math.random().toString(36).slice(2, 8), nom, grade: nomManuel ? null : sal?.grade ?? null, debut: new Date().toISOString() };
+    const tmp: ServiceEnCours = { id: "tmp-" + Math.random().toString(36).slice(2, 8), nom, grade: nomManuel ? null : sal?.grade ?? null, debut: new Date().toISOString(), lastSeen: new Date().toISOString() };
     setListe((p) => [...p, tmp]); setChoix(""); setManuel("");
     const r = await prendreService({ salarieId: nomManuel ? null : sal?.id ?? null, nom });
     setBusy(false);
@@ -77,13 +78,18 @@ export function AccueilService({ enService, roster }: { enService: ServiceEnCour
             <tbody>
               {liste.map((s) => {
                 const live = now != null ? Math.max(0, Math.round((now - new Date(s.debut).getTime()) / 60000)) : null;
+                const aConf = now != null && estAConfirmer({ fin: null, lastSeen: s.lastSeen, debut: s.debut }, inactiviteMin, now);
                 return (
                   <tr key={s.id} className="border-b border-border/60">
                     <td className="py-2 pr-2 font-semibold">{s.nom}</td>
                     <td className="px-2 py-2 text-muted">{s.grade || "—"}</td>
                     <td className="px-2 py-2 font-num text-faint">{heureFR(s.debut)}</td>
                     <td className="px-2 py-2 font-num" style={{ color: "var(--ink)" }}>{live != null ? fmtMin(live) : "…"}</td>
-                    <td className="px-2 py-2"><span className="inline-flex items-center gap-1 text-[0.72rem] font-semibold" style={{ color: "var(--good)" }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--good)" }} /> En service</span></td>
+                    <td className="px-2 py-2">
+                      {aConf
+                        ? <span className="inline-flex items-center gap-1 text-[0.72rem] font-semibold" style={{ color: "var(--warn)" }} title="Aucun signal récent — à confirmer à la reconnexion"><span>⏳</span> À confirmer</span>
+                        : <span className="inline-flex items-center gap-1 text-[0.72rem] font-semibold" style={{ color: "var(--good)" }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--good)" }} /> En service</span>}
+                    </td>
                     <td className="py-2 text-right"><button onClick={() => terminer(s)} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[0.72rem] font-semibold text-muted hover:text-ink"><Square className="h-3 w-3" /> Fin</button></td>
                   </tr>
                 );

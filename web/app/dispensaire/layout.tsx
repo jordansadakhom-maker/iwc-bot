@@ -1,8 +1,10 @@
 import { getNotifCount } from "@/lib/dispensaire-notifications";
 import { getRoleDispensaire } from "@/lib/dispensaire-roles";
+import { getMonServiceOuvert } from "@/lib/dispensaire-pointage";
 import { isStandalone } from "@/lib/standalone-server";
 import { DispensaireShell } from "@/components/dispensaire-shell";
 import { DispensaireAccesReserve } from "@/components/dispensaire-acces-reserve";
+import { DispensaireKeepalive } from "@/components/dispensaire-keepalive";
 
 // Section dédiée « Dispensaire de Saint-Denis » — sa propre coquille (distincte
 // de la partie Iron Wolf). La visibilité des onglets suit le RÔLE du membre au
@@ -22,10 +24,16 @@ export default async function DispensaireLayout({ children }: { children: React.
   // NI la coquille NI les pages — juste l'écran « Accès réservé ».
   if (!role.autorise) return <DispensaireAccesReserve nom={role.nom} identifiant={role.identifiant} />;
 
-  const [notifCount, standalone] = await Promise.all([getNotifCount(), isStandalone()]);
+  const [notifCount, standalone, monService] = await Promise.all([getNotifCount(), isStandalone(), getMonServiceOuvert()]);
   // Dateline d'ambiance : jour réel, mais millésime figé à 1904 (la fiction du
   // registre). Calculée côté serveur pour éviter tout décalage d'hydratation.
   const jour = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "numeric", month: "long" }).format(new Date());
   const dateline = `le ${jour} · 1904`;
-  return <DispensaireShell perms={role.perms} notifCount={notifCount} standalone={standalone} dateline={dateline}>{children}</DispensaireShell>;
+  return (
+    <>
+      {/* Heartbeat du service ouvert du compte connecté (détection des oublis). */}
+      {monService ? <DispensaireKeepalive id={monService.id} /> : null}
+      <DispensaireShell perms={role.perms} notifCount={notifCount} standalone={standalone} dateline={dateline}>{children}</DispensaireShell>
+    </>
+  );
 }
