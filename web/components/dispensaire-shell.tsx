@@ -81,14 +81,14 @@ export function DispensaireShell({ children, perms = {}, notifCount = 0, standal
       <div className="disp-premium__canvas mx-auto max-w-[1180px] px-4 py-5 sm:px-6">
         {/* Cartouche de couverture du registre */}
         <header className="flex items-start justify-between gap-3 border-b-2 pb-3" style={{ borderColor: "color-mix(in srgb,var(--accent) 45%,var(--border))" }}>
-          <div className="flex items-center gap-3">
-            <span className="grid h-12 w-12 place-items-center rounded-full border-2" style={{ borderColor: "color-mix(in srgb,var(--accent) 55%,var(--border))", background: "color-mix(in srgb,var(--accent) 12%,transparent)" }}>
+          <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full border-2 sm:h-12 sm:w-12" style={{ borderColor: "color-mix(in srgb,var(--accent) 55%,var(--border))", background: "color-mix(in srgb,var(--accent) 12%,transparent)" }}>
               <Cross className="h-5 w-5 text-accent" strokeWidth={2.2} />
             </span>
-            <div>
-              <div className="text-[0.56rem] font-semibold uppercase tracking-[0.34em] text-faint">Comté de Lemoyne · Saint-Denis</div>
-              <div className="font-display text-[1.55rem] leading-tight tracking-[0.02em]">Dispensaire de Saint-Denis</div>
-              <div className="text-[0.76rem] italic text-faint">Grand-livre administratif · Année 1904</div>
+            <div className="min-w-0">
+              <div className="truncate text-[0.5rem] font-semibold uppercase tracking-[0.22em] text-faint sm:text-[0.56rem] sm:tracking-[0.34em]">Comté de Lemoyne · Saint-Denis</div>
+              <div className="truncate font-display text-[1.15rem] leading-tight tracking-[0.02em] sm:text-[1.55rem]">Dispensaire de Saint-Denis</div>
+              <div className="hidden text-[0.76rem] italic text-faint sm:block">Grand-livre administratif · Année 1904</div>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
@@ -108,8 +108,8 @@ export function DispensaireShell({ children, perms = {}, notifCount = 0, standal
             {standalone ? (
               <LogoutButton />
             ) : (
-              <Link href="/dashboard" className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.74rem] font-semibold text-muted transition hover:border-border-2 hover:text-ink">
-                <ArrowLeft className="h-3.5 w-3.5" /> Iron Wolf
+              <Link href="/dashboard" title="Retour à Iron Wolf" className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2 py-1.5 text-[0.74rem] font-semibold text-muted transition hover:border-border-2 hover:text-ink sm:px-2.5">
+                <ArrowLeft className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Iron Wolf</span>
               </Link>
             )}
           </div>
