@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ShieldCheck, Plus, Loader2, Trash2, Building2 } from "lucide-react";
 import { VideRegistre } from "@/components/dispensaire-ui";
@@ -14,6 +14,8 @@ const dtFR = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { 
 export function DispensaireFDO({ data }: { data: FDOData }) {
   const router = useRouter();
   const [soins, setSoins] = useState<SoinFDO[]>(data.soins);
+  // Re-synchronise avec la base après chaque enregistrement (plus de valeur fantôme).
+  useEffect(() => { setSoins(data.soins); }, [data]);
   const [flash, setFlash] = useState<FlashMsg>(null);
   const [busy, setBusy] = useState(false);
   const [v, setV] = useState({ agent: "", bureau: "" });

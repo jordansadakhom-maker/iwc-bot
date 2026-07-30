@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Receipt, Plus, Check, Pencil, Trash2, AlertTriangle, CalendarClock, Lock, Copy, FileText, Clock, Search, ArrowUpNarrowWide, ArrowDownWideNarrow } from "lucide-react";
 import { VideRegistre } from "@/components/dispensaire-ui";
@@ -21,6 +21,9 @@ const dtFR = (s: string | null) => { if (!s) return "—"; try { return new Intl
 export function DispensaireFactures({ data, rapport, historique, config, medecins = [] }: { data: FacturesData; rapport: RapportImpayes; historique: RapportHisto[]; config: RapportConfig; medecins?: { nom: string; grade: string | null }[] }) {
   const router = useRouter();
   const [factures, setFactures] = useState<Facture[]>(data.factures);
+  // Re-synchronise avec la base après chaque router.refresh() : l'affichage
+  // reflète toujours ce qui est réellement enregistré (plus de valeur fantôme).
+  useEffect(() => { setFactures(data.factures); }, [data]);
   const [flash, setFlash] = useState<FlashMsg>(null);
   const [form, setForm] = useState<Facture | "new" | null>(null);
   const [delId, setDelId] = useState<string | null>(null);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Stethoscope, Plus, Check, Trash2, Search, Eye, Printer, Copy, Cross } from "lucide-react";
 import { VideRegistre, SceauCire } from "@/components/dispensaire-ui";
@@ -72,6 +72,8 @@ function imprimer(c: Certificat) {
 export function DispensaireCertificats({ data, medecins = [] }: { data: CertData; medecins?: { nom: string; grade: string | null }[] }) {
   const router = useRouter();
   const [certs, setCerts] = useState<Certificat[]>(data.certificats);
+  // Re-synchronise avec la base après chaque enregistrement (plus de valeur fantôme).
+  useEffect(() => { setCerts(data.certificats); }, [data]);
   const [flash, setFlash] = useState<FlashMsg>(null);
   const [form, setForm] = useState(false);
   const [voir, setVoir] = useState<Certificat | null>(null);
