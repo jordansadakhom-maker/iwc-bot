@@ -102,8 +102,11 @@ export function DispensaireShell({ children, perms = {}, notifCount = 0, standal
           </div>
         </header>
 
-        {/* Menu par catégories */}
-        <nav ref={menuRef} className="mt-3 flex flex-wrap items-center gap-1.5">
+        {/* Menu par catégories. z-index élevé + position relative : la feuille de
+            registre force z-index:1 sur ses enfants directs (nav ET main) ; sans
+            ça, le <main> (plus bas dans le DOM) passerait AU-DESSUS des menus
+            déroulants du <nav>. On remonte donc le nav au-dessus du contenu. */}
+        <nav ref={menuRef} style={{ position: "relative", zIndex: 40 }} className="mt-3 flex flex-wrap items-center gap-1.5">
           {/* Accès direct */}
           {directs.map((t) => {
             const Icon = t.icon;
