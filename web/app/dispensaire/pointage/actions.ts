@@ -132,6 +132,32 @@ export async function cloturerManuel(id: string, finIso: string): Promise<PointR
   return { ok: true };
 }
 
+// Traitement d'un service par la DIRECTION (filet de sécurité) : clôturer à
+// l'heure du dernier signal, ou corriger l'heure de fin (finIso), avec un
+// commentaire. Service validé, marqué « corrigé (Direction) ». Réservé à
+// l'encadrement, tracé.
+export async function cloturerServiceDirection(id: string, finIso: string | null, commentaire?: string): Promise<PointResult> {
+  if (!(await peutGererRH())) return { ok: false, error: "Réservé à l'encadrement (RH/Direction)." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  const { data: ex } = await admin.from("DispensairePointage").select("id,nom,debut,fin,lastSeen").eq("id", id).maybeSingle();
+  if (!ex) return { ok: false, error: "Service introuvable." };
+  const r = ex as Record<string, unknown>;
+  const debut = new Date(String(r.debut));
+  let fin: Date;
+  if (finIso) { fin = new Date(finIso); if (isNaN(fin.getTime())) return { ok: false, error: "Heure de fin invalide." }; }
+  else { fin = r.lastSeen ? new Date(String(r.lastSeen)) : new Date(); }
+  if (isNaN(fin.getTime()) || fin.getTime() < debut.getTime()) fin = debut; // jamais avant le début
+  if (fin.getTime() > Date.now() + 60000) return { ok: false, error: "La fin ne peut pas être dans le futur." };
+  const dureeMin = Math.max(0, Math.round((fin.getTime() - debut.getTime()) / 60000));
+  const par = await qui();
+  const now = new Date().toISOString();
+  const { error } = await admin.from("DispensairePointage").update({ fin: fin.toISOString(), dureeMin, etat: "cloture", finSource: "direction", valide: true, commentaire: s(commentaire, 500), corrigePar: par, updatedBy: par, updatedAt: now }).eq("id", id);
+  if (error) return { ok: false, error: "Clôture impossible." };
+  await emettreEvenementDispensaire({ aggregate: "pointage", type: "pointage.validation", cibleId: id, cibleLibelle: String(r.nom ?? ""), apres: { dureeMin, finSource: "direction", fin: fin.toISOString(), commentaire: s(commentaire, 500) } });
+  return { ok: true };
+}
+
 // ── Absences (justifiées / injustifiées) — suivi d'assiduité ────────────────
 // Réservé à l'encadrement RH/Direction (peutGererRH), fail-closed : c'est un
 // jugement sur l'assiduité, pas un simple pointage.

@@ -2,7 +2,8 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAcces } from "@/lib/queries";
-import { getRoleDispensaire } from "@/lib/dispensaire-roles";
+import { getRoleDispensaire, getConfig, peutGererRH } from "@/lib/dispensaire-roles";
+import { estAConfirmer, estEscalade } from "@/lib/dispensaire-pointage-const";
 import { ymdParis, dowParis, lundiCourant, lundiDecale, dimancheDe } from "@/lib/dispensaire-dates";
 
 // ── Pointage du Dispensaire (prise de service) ──────────────────────────────
@@ -182,6 +183,34 @@ export async function getEnService(): Promise<PointSession[]> {
   const { data, error } = await admin.from("DispensairePointage").select("*").is("fin", null).order("debut", { ascending: true });
   if (error) return [];
   return ((data || []) as Record<string, unknown>[]).map(toSession);
+}
+
+// Services ouverts à traiter par la Direction : « à confirmer » (plus de signal)
+// ou escaladés (ouverts au-delà du seuil). Réservé à l'encadrement (RH/Direction).
+export type ServiceAValider = { id: string; nom: string; debut: string; lastSeen: string | null; dureeMin: number; motif: "a_confirmer" | "escalade" };
+export type ServicesAValiderData = { pret: boolean; peut: boolean; services: ServiceAValider[]; inactiviteMin: number; escaladeH: number };
+export async function getServicesAValider(): Promise<ServicesAValiderData> {
+  const cfg = await getConfig();
+  const base: ServicesAValiderData = { pret: false, peut: false, services: [], inactiviteMin: cfg.pointageInactiviteMin, escaladeH: cfg.pointageEscaladeH };
+  const admin = createAdminClient();
+  if (!admin) return base;
+  const peut = await peutGererRH();
+  if (!peut) return { ...base, pret: true };
+  const { data, error } = await admin.from("DispensairePointage").select("id,nom,debut,lastSeen").is("fin", null).order("debut", { ascending: true }).limit(200);
+  if (error) return { ...base, peut: true };
+  const now = Date.now();
+  const services: ServiceAValider[] = [];
+  for (const r of (data || []) as Record<string, unknown>[]) {
+    const debut = String(r.debut);
+    const lastSeen = r.lastSeen == null ? null : String(r.lastSeen);
+    const esc = estEscalade({ fin: null, debut }, cfg.pointageEscaladeH, now);
+    const aConf = estAConfirmer({ fin: null, lastSeen, debut }, cfg.pointageInactiviteMin, now);
+    if (!esc && !aConf) continue;
+    const t = Date.parse(debut);
+    const dureeMin = Number.isFinite(t) ? Math.max(0, Math.round((now - t) / 60000)) : 0;
+    services.push({ id: String(r.id), nom: String(r.nom || "Salarié"), debut, lastSeen, dureeMin, motif: esc ? "escalade" : "a_confirmer" });
+  }
+  return { pret: true, peut: true, services, inactiviteMin: cfg.pointageInactiviteMin, escaladeH: cfg.pointageEscaladeH };
 }
 
 // Le service OUVERT du compte connecté (rapproché par nom), pour le heartbeat et
