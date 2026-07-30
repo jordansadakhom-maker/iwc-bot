@@ -95,12 +95,12 @@ export async function getPointage(): Promise<PointData> {
 // ── Assiduité sur 3 semaines (précédente / actuelle / suivante) ─────────────
 // Pour chaque salarié et chaque semaine : jours travaillés, heures, absences
 // justifiées et injustifiées. Sert directement au calcul des salaires.
-export type SemaineAssiduite = { jours: number; heuresMin: number; absJust: number; absInj: number };
+export type SemaineAssiduite = { jours: number; heuresMin: number; absJust: number; absInj: number; oublis: number; corrections: number };
 export type LigneAssiduite = { nom: string; grade: string | null; semaines: SemaineAssiduite[] };
 export type AssiduiteData = { pret: boolean; lundis: string[]; lignes: LigneAssiduite[] };
 
 const normNom = (v: unknown) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ");
-const semaineVide = (): SemaineAssiduite => ({ jours: 0, heuresMin: 0, absJust: 0, absInj: 0 });
+const semaineVide = (): SemaineAssiduite => ({ jours: 0, heuresMin: 0, absJust: 0, absInj: 0, oublis: 0, corrections: 0 });
 
 export async function getAssiduite(): Promise<AssiduiteData> {
   const admin = createAdminClient();
@@ -135,7 +135,7 @@ export async function getAssiduite(): Promise<AssiduiteData> {
   // Services VALIDÉS de la fenêtre → jours + heures par semaine (le temps « ouvert »
   // ou non validé n'est jamais compté).
   try {
-    const { data: clos } = await admin.from("DispensairePointage").select("nom,debut,dureeMin,fin,valide").not("fin", "is", null).gte("debut", bMin.toISOString()).lte("debut", bMax.toISOString()).limit(2000);
+    const { data: clos } = await admin.from("DispensairePointage").select("nom,debut,dureeMin,fin,valide,finSource").not("fin", "is", null).gte("debut", bMin.toISOString()).lte("debut", bMax.toISOString()).limit(2000);
     for (const r of (clos || []) as Record<string, unknown>[]) {
       if (r.valide === false) continue;            // clôturé mais invalidé → exclu
       const ymd = ymdParis(String(r.debut));
@@ -144,6 +144,9 @@ export async function getAssiduite(): Promise<AssiduiteData> {
       const nom = String(r.nom || "Salarié");
       const l = ligne(nom, null);
       l.semaines[sem].heuresMin += Number(r.dureeMin) || 0;
+      const src = String(r.finSource || "normal");
+      if (src === "oubli") l.semaines[sem].oublis += 1;
+      else if (src === "user" || src === "direction") l.semaines[sem].corrections += 1;
       const k = `${normNom(nom)}|${sem}|${ymd}`;
       if (!joursSet.has(k)) { joursSet.add(k); l.semaines[sem].jours += 1; }
     }

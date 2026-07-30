@@ -37,9 +37,10 @@ export function estEscalade(s: { fin: string | null; debut: string }, escaladeH:
 // Statut affiché (badge) d'un service : combine ouvert / à-confirmer et la source
 // de clôture (normal / oubli / user / direction).
 export type StatutService = "en_service" | "a_confirmer" | "normal" | "oubli" | "user" | "direction";
-export function statutDe(s: { fin: string | null; lastSeen?: string | null; debut: string; finSource?: FinSource | null }, seuilMin: number, now: number = Date.now()): StatutService {
+export function statutDe(s: { fin: string | null; lastSeen?: string | null; debut: string; finSource?: string | null }, seuilMin: number, now: number = Date.now()): StatutService {
   if (!s.fin) return estAConfirmer(s, seuilMin, now) ? "a_confirmer" : "en_service";
-  return (s.finSource as StatutService) || "normal";
+  const src = (s.finSource || "normal") as StatutService;
+  return src in STATUT_META ? src : "normal";
 }
 
 export const STATUT_META: Record<StatutService, { label: string; icon: string; tone: string }> = {
