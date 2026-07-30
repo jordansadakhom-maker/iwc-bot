@@ -7,6 +7,7 @@ import { ArrowLeft, Cross, Search, Bell, ChevronDown, LayoutGrid } from "lucide-
 import { DISP_NAV, DISP_EXTRA, DISP_CATEGORIES, DISP_DIRECT, DISP_DIRECTION, tabsDeCategorie, aPermDirection, aAccesDirection, type PermsLike, type DispTab } from "@/lib/dispensaire-nav";
 import { RegistreHeader } from "@/components/dispensaire-ui";
 import { LogoutButton } from "@/components/logout-button";
+import { DispensaireCommandCenter } from "@/components/dispensaire-command-center";
 
 // Coquille de la section « Dispensaire de Saint-Denis » : en-tête registre 1904
 // + menu par CATÉGORIES (Accueil / Assistant en accès direct, puis des menus
@@ -85,7 +86,8 @@ export function DispensaireShell({ children, perms = {}, notifCount = 0, standal
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            <Link href="/dispensaire/recherche" title="Recherche globale" className="grid h-8 w-8 place-items-center rounded-lg border border-border bg-surface-2 text-muted transition hover:border-border-2 hover:text-ink">
+            <DispensaireCommandCenter perms={perms} standalone={standalone} />
+            <Link href="/dispensaire/recherche" title="Recherche globale" className="grid h-8 w-8 place-items-center rounded-lg border border-border bg-surface-2 text-muted transition hover:border-border-2 hover:text-ink sm:hidden">
               <Search className="h-4 w-4" />
             </Link>
             <Link href="/dispensaire/notifications" title="Notifications" className="relative grid h-8 w-8 place-items-center rounded-lg border border-border bg-surface-2 text-muted transition hover:border-border-2 hover:text-ink">
