@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ScrollText, Plus, Check, Pencil, Trash2, Search, ExternalLink, Printer } from "lucide-react";
 import { VideRegistre } from "@/components/dispensaire-ui";
@@ -66,6 +66,8 @@ function imprimerRapport(r: Rapport) {
 export function DispensaireRapports({ data, medecins = [] }: { data: RapportsData; medecins?: { nom: string; grade: string | null }[] }) {
   const router = useRouter();
   const [rapports, setRapports] = useState<Rapport[]>(data.rapports);
+  // Re-synchronise avec la base après chaque enregistrement (plus de valeur fantôme).
+  useEffect(() => { setRapports(data.rapports); }, [data]);
   const [flash, setFlash] = useState<FlashMsg>(null);
   const [form, setForm] = useState<Rapport | "new" | null>(null);
   const [delId, setDelId] = useState<string | null>(null);
