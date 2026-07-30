@@ -12,14 +12,39 @@ import { ymdParis, lundiCourant } from "@/lib/dispensaire-dates";
 
 export type SalaireFonction = { fonction: string; montantHebdo: number };
 export type LigneSalaire = { nom: string; fonction: string | null; montantHebdo: number; jours: number; heuresMin: number; salaire: number };
-export type SalairesData = { pret: boolean; autorise: boolean; semaineLundi: string; fonctions: SalaireFonction[]; lignes: LigneSalaire[] };
+export type LignePaieArchive = { nom: string; fonction: string | null; jours: number; heuresMin: number; salaire: number };
+export type ArchivePaie = { semaineLundi: string; at: string; par: string | null; total: number; lignes: LignePaieArchive[] };
+export type SalairesData = { pret: boolean; autorise: boolean; semaineLundi: string; fonctions: SalaireFonction[]; lignes: LigneSalaire[]; archives: ArchivePaie[]; semaineArchivee: boolean };
+
+// Archives de paie (semaines figées), les plus récentes d'abord. Dégradation
+// propre si la table n'existe pas encore.
+export async function getArchivesPaie(): Promise<ArchivePaie[]> {
+  const admin = createAdminClient();
+  if (!admin) return [];
+  try {
+    const { data, error } = await admin.from("DispensairePaie").select("*").order("semaineLundi", { ascending: false }).order("salaire", { ascending: false }).limit(400);
+    if (error) return [];
+    const parSemaine = new Map<string, ArchivePaie>();
+    for (const r of (data || []) as Record<string, unknown>[]) {
+      const sem = String(r.semaineLundi);
+      let a = parSemaine.get(sem);
+      if (!a) { a = { semaineLundi: sem, at: String(r.createdAt || ""), par: r.par == null ? null : String(r.par), total: 0, lignes: [] }; parSemaine.set(sem, a); }
+      const salaire = Number(r.salaire) || 0;
+      a.total += salaire;
+      a.lignes.push({ nom: String(r.nom || "Salarié"), fonction: r.fonction == null ? null : String(r.fonction), jours: Number(r.jours) || 0, heuresMin: Number(r.heuresMin) || 0, salaire });
+    }
+    return [...parSemaine.values()];
+  } catch {
+    return [];
+  }
+}
 
 const normNom = (v: unknown) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ");
 
 export async function getSalaires(): Promise<SalairesData> {
-  const vide: SalairesData = { pret: false, autorise: false, semaineLundi: "", fonctions: [], lignes: [] };
+  const vide: SalairesData = { pret: false, autorise: false, semaineLundi: "", fonctions: [], lignes: [], archives: [], semaineArchivee: false };
   const autorise = await peutAdministrer();
-  if (!autorise) return { pret: true, autorise: false, semaineLundi: "", fonctions: [], lignes: [] };
+  if (!autorise) return { pret: true, autorise: false, semaineLundi: "", fonctions: [], lignes: [], archives: [], semaineArchivee: false };
   const admin = createAdminClient();
   if (!admin) return vide;
 
@@ -69,5 +94,8 @@ export async function getSalaires(): Promise<SalairesData> {
   for (const [f, m] of bareme) if (f) fset.set(f, m);
   const fonctions = [...fset.entries()].map(([fonction, montantHebdo]) => ({ fonction, montantHebdo })).sort((a, b) => a.fonction.localeCompare(b.fonction));
 
-  return { pret: true, autorise: true, semaineLundi: monday, fonctions, lignes };
+  const archives = await getArchivesPaie();
+  const semaineArchivee = archives.some((a) => a.semaineLundi === monday);
+
+  return { pret: true, autorise: true, semaineLundi: monday, fonctions, lignes, archives, semaineArchivee };
 }
