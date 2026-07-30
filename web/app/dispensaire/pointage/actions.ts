@@ -71,6 +71,67 @@ export async function terminerService(id: string): Promise<PointResult> {
   return { ok: true };
 }
 
+// ── Reprise d'un service « à confirmer » (à la reconnexion) ─────────────────
+// Le salarié corrige lui-même son oubli en un geste : reprendre, clôturer à
+// l'heure du dernier signal, ou saisir l'heure réelle de fin.
+
+// Reprendre : le salarié était toujours en service → on relance le heartbeat.
+export async function reprendreService(id: string): Promise<PointResult> {
+  if (!(await estAutorise())) return { ok: false, error: REFUS };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  if (!id) return { ok: false, error: "Service introuvable." };
+  const now = new Date().toISOString();
+  const { error } = await admin.from("DispensairePointage").update({ lastSeen: now, etat: "en_service" }).eq("id", id).is("fin", null);
+  if (error) return { ok: false, error: "Reprise impossible." };
+  await emettreEvenementDispensaire({ aggregate: "pointage", type: "pointage.reprise", cibleId: id, cibleLibelle: "", apres: { at: now } });
+  return { ok: true };
+}
+
+// Clôturer « après oubli » : ferme à l'heure du DERNIER signal (lastSeen) — on ne
+// compte jamais le temps d'inactivité. Service validé, marqué « oubli ».
+export async function cloturerParOubli(id: string): Promise<PointResult> {
+  if (!(await estAutorise())) return { ok: false, error: REFUS };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  const { data: ex } = await admin.from("DispensairePointage").select("id,nom,debut,fin,lastSeen").eq("id", id).maybeSingle();
+  if (!ex) return { ok: false, error: "Service introuvable." };
+  const r = ex as Record<string, unknown>;
+  if (r.fin) return { ok: true };
+  const debut = new Date(String(r.debut));
+  let fin = r.lastSeen ? new Date(String(r.lastSeen)) : debut;
+  if (isNaN(fin.getTime()) || fin.getTime() < debut.getTime()) fin = debut;
+  const dureeMin = Math.max(0, Math.round((fin.getTime() - debut.getTime()) / 60000));
+  const now = new Date().toISOString();
+  const { error } = await admin.from("DispensairePointage").update({ fin: fin.toISOString(), dureeMin, etat: "cloture", finSource: "oubli", valide: true, updatedBy: await qui(), updatedAt: now }).eq("id", id);
+  if (error) return { ok: false, error: "Clôture impossible." };
+  await emettreEvenementDispensaire({ aggregate: "pointage", type: "pointage.oubli", cibleId: id, cibleLibelle: String(r.nom ?? ""), apres: { dureeMin, finSource: "oubli", fin: fin.toISOString() } });
+  return { ok: true };
+}
+
+// Clôturer avec l'heure de fin SAISIE par le salarié. Service validé, « corrigé
+// (salarié) ». La fin doit être ≥ début et non future.
+export async function cloturerManuel(id: string, finIso: string): Promise<PointResult> {
+  if (!(await estAutorise())) return { ok: false, error: REFUS };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  const { data: ex } = await admin.from("DispensairePointage").select("id,nom,debut,fin").eq("id", id).maybeSingle();
+  if (!ex) return { ok: false, error: "Service introuvable." };
+  const r = ex as Record<string, unknown>;
+  if (r.fin) return { ok: true };
+  const debut = new Date(String(r.debut));
+  const fin = new Date(String(finIso || ""));
+  if (isNaN(fin.getTime())) return { ok: false, error: "Heure de fin invalide." };
+  if (fin.getTime() < debut.getTime()) return { ok: false, error: "La fin ne peut pas précéder le début." };
+  if (fin.getTime() > Date.now() + 60000) return { ok: false, error: "La fin ne peut pas être dans le futur." };
+  const dureeMin = Math.max(0, Math.round((fin.getTime() - debut.getTime()) / 60000));
+  const now = new Date().toISOString();
+  const { error } = await admin.from("DispensairePointage").update({ fin: fin.toISOString(), dureeMin, etat: "cloture", finSource: "user", updatedBy: await qui(), valide: true, updatedAt: now }).eq("id", id);
+  if (error) return { ok: false, error: "Clôture impossible." };
+  await emettreEvenementDispensaire({ aggregate: "pointage", type: "pointage.correction", cibleId: id, cibleLibelle: String(r.nom ?? ""), apres: { dureeMin, finSource: "user", fin: fin.toISOString() } });
+  return { ok: true };
+}
+
 // ── Absences (justifiées / injustifiées) — suivi d'assiduité ────────────────
 // Réservé à l'encadrement RH/Direction (peutGererRH), fail-closed : c'est un
 // jugement sur l'assiduité, pas un simple pointage.
