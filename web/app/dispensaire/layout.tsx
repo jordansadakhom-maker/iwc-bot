@@ -1,8 +1,11 @@
 import { getNotifCount } from "@/lib/dispensaire-notifications";
-import { getRoleDispensaire } from "@/lib/dispensaire-roles";
+import { getRoleDispensaire, getConfig } from "@/lib/dispensaire-roles";
+import { getMonServiceOuvert } from "@/lib/dispensaire-pointage";
 import { isStandalone } from "@/lib/standalone-server";
 import { DispensaireShell } from "@/components/dispensaire-shell";
 import { DispensaireAccesReserve } from "@/components/dispensaire-acces-reserve";
+import { DispensaireKeepalive } from "@/components/dispensaire-keepalive";
+import { RepriseService } from "@/components/dispensaire-reprise-service";
 
 // Section dédiée « Dispensaire de Saint-Denis » — sa propre coquille (distincte
 // de la partie Iron Wolf). La visibilité des onglets suit le RÔLE du membre au
@@ -22,11 +25,18 @@ export default async function DispensaireLayout({ children }: { children: React.
   // NI la coquille NI les pages — juste l'écran « Accès réservé ».
   if (!role.autorise) return <DispensaireAccesReserve nom={role.nom} identifiant={role.identifiant} />;
 
-  const [notifCount, standalone] = await Promise.all([getNotifCount(), isStandalone()]);
-  const habilite = role.perms.rh || role.perms.factures || role.perms.admin;
+  const [notifCount, standalone, monService, cfg] = await Promise.all([getNotifCount(), isStandalone(), getMonServiceOuvert(), getConfig()]);
   // Dateline d'ambiance : jour réel, mais millésime figé à 1904 (la fiction du
   // registre). Calculée côté serveur pour éviter tout décalage d'hydratation.
   const jour = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "numeric", month: "long" }).format(new Date());
   const dateline = `le ${jour} · 1904`;
-  return <DispensaireShell habilite={habilite} estAdmin={role.perms.admin} notifCount={notifCount} standalone={standalone} dateline={dateline}>{children}</DispensaireShell>;
+  return (
+    <>
+      {/* Service ouvert du compte connecté : heartbeat (détection des oublis) +
+          fenêtre de reprise si le service est resté « à confirmer ». */}
+      {monService ? <DispensaireKeepalive id={monService.id} /> : null}
+      {monService ? <RepriseService id={monService.id} debut={monService.debut} lastSeen={monService.lastSeen} inactiviteMin={cfg.pointageInactiviteMin} /> : null}
+      <DispensaireShell perms={role.perms} notifCount={notifCount} standalone={standalone} dateline={dateline}>{children}</DispensaireShell>
+    </>
+  );
 }

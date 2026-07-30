@@ -31,11 +31,13 @@ export const roleDef = (k: string) => roleDefIn(GRADES_DEFAUT, k);
 export const roleLabel = (k: string) => roleDef(k).label;
 
 // ── Configuration / seuils (avec valeurs par défaut) ────────────────────────
-export type Config = { seuilRenvoi: number; prixBandage: number; plafondBandage: number; delaiFactureJours: number };
-export const CONFIG_DEFAUT: Config = { seuilRenvoi: 3, prixBandage: 4, plafondBandage: 10, delaiFactureJours: 7 };
+export type Config = { seuilRenvoi: number; prixBandage: number; plafondBandage: number; delaiFactureJours: number; pointageInactiviteMin: number; pointageEscaladeH: number };
+export const CONFIG_DEFAUT: Config = { seuilRenvoi: 3, prixBandage: 4, plafondBandage: 10, delaiFactureJours: 7, pointageInactiviteMin: 10, pointageEscaladeH: 24 };
 export const CONFIG_CHAMPS: { cle: keyof Config; label: string; aide: string }[] = [
   { cle: "seuilRenvoi", label: "Seuil de renvoi (absences injustifiées)", aide: "Un salarié est signalé « à renvoyer » au-delà de ce nombre." },
   { cle: "prixBandage", label: "Prix d'un bandage ($)", aide: "Prix unitaire appliqué aux ventes de bandages." },
   { cle: "plafondBandage", label: "Bandages max / semaine / patient", aide: "Au-delà, le patient est signalé en rouge." },
   { cle: "delaiFactureJours", label: "Délai de facture (jours)", aide: "Indicatif : délai standard avant échéance." },
+  { cle: "pointageInactiviteMin", label: "Inactivité avant « à confirmer » (min)", aide: "Sans signal du navigateur pendant cette durée, un service ouvert passe « à confirmer » (jamais clôturé de force)." },
+  { cle: "pointageEscaladeH", label: "Escalade Direction (heures)", aide: "Un service resté ouvert au-delà de cette durée remonte dans le tableau de validation de la Direction." },
 ];

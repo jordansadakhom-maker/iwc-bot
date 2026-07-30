@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LayoutDashboard, Wallet, HeartPulse, CalendarClock, Scissors, Users, Boxes, TrendingDown, ScrollText, ArrowRight, Lock, RefreshCw, BedDouble, AlertTriangle, Coins, UserX, Receipt } from "lucide-react";
+import { LayoutDashboard, Wallet, CalendarClock, Scissors, Users, Boxes, TrendingDown, ScrollText, ArrowRight, Lock, RefreshCw, BedDouble, AlertTriangle, Coins, UserX, Receipt } from "lucide-react";
 import { money } from "@/lib/dispensaire-facturation-const";
 import { Cartouche } from "@/components/dispensaire-ui";
 import { RealtimeRefresh } from "@/components/realtime-refresh";
@@ -38,10 +38,9 @@ export function DispensaireCockpit({ data }: { data: CockpitData }) {
       </div>
 
       {/* KPI */}
-      <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4 xl:grid-cols-7">
+      <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-3 xl:grid-cols-6">
         <Cartouche label="Trésorerie" valeur={money(data.tresorerie)} ton={data.tresorerie >= 0 ? "var(--good)" : "var(--oxblood)"} icon={Wallet} />
         <Cartouche label="Solde du mois" valeur={money(data.moisSolde)} ton={data.moisSolde >= 0 ? "var(--good)" : "var(--oxblood)"} icon={Wallet} />
-        <Cartouche label="En charge" valeur={data.pecEnCours} ton="var(--accent)" icon={HeartPulse} />
         <Cartouche label="Lits occupés" valeur={`${data.chambresOccupees}/${data.chambresTotal}`} ton={data.chambresOccupees ? "var(--oxblood)" : undefined} icon={BedDouble} />
         <Cartouche label="RDV aujourd'hui" valeur={data.rdvAujourdhui} icon={CalendarClock} />
         <Cartouche label="Interventions" valeur={data.intervEnCours} ton={data.intervEnCours ? "var(--oxblood)" : undefined} icon={Scissors} />
@@ -63,14 +62,6 @@ export function DispensaireCockpit({ data }: { data: CockpitData }) {
               ))}
             </div>
           )}
-        </Bloc>
-
-        {/* Prises en charge */}
-        <Bloc titre="Prises en charge" icon={HeartPulse} href="/dispensaire/prises-en-charge">
-          <div className="grid grid-cols-2 gap-2">
-            <div className="rounded-[11px] border border-border bg-surface-2 p-3 text-center"><div className="font-num text-[1.5rem] font-bold" style={{ color: "var(--warn)" }}>{data.pecAdmis}</div><div className="text-[0.72rem] text-faint">Admis (en attente)</div></div>
-            <div className="rounded-[11px] border border-border bg-surface-2 p-3 text-center"><div className="font-num text-[1.5rem] font-bold" style={{ color: "var(--accent)" }}>{data.pecEnSoin}</div><div className="text-[0.72rem] text-faint">En soin</div></div>
-          </div>
         </Bloc>
 
         {/* Prochains RDV */}

@@ -3,12 +3,18 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { peutAdministrer } from "@/lib/dispensaire-roles";
 import { ymdParis, lundiCourant } from "@/lib/dispensaire-dates";
+import { calculerSalaire } from "@/lib/dispensaire-salaires-const";
+
+export * from "@/lib/dispensaire-salaires-const";
 
 // ── Salaires (réservé à la Direction) ───────────────────────────────────────
-// La direction fixe un salaire HEBDOMADAIRE (plein, 7 jours) par FONCTION
-// (= grade du salarié). Le salaire réel est calculé AUTOMATIQUEMENT :
-//     salaire = montantHebdo ÷ 7 × jours travaillés (semaine courante, pointage).
-// Les heures sont affichées à part → la direction ajoute les primes à la main.
+// La direction fixe un salaire HEBDOMADAIRE PLEIN par FONCTION (= grade du
+// salarié). Le salaire réel est calculé AUTOMATIQUEMENT à partir des jours
+// POINTÉS de la semaine courante :
+//     • 4 jours pointés (ou plus) → salaire PLEIN ;
+//     • moins de 4 jours → prorata (jours ÷ 4).
+// (voir calculerSalaire — dispensaire-salaires-const). Les heures sont affichées
+// à part → la direction ajoute les primes à la main.
 
 export type SalaireFonction = { fonction: string; montantHebdo: number };
 export type LigneSalaire = { nom: string; fonction: string | null; montantHebdo: number; jours: number; heuresMin: number; salaire: number };
@@ -67,9 +73,10 @@ export async function getSalaires(): Promise<SalairesData> {
   const jm = new Map<string, { jours: number; heuresMin: number }>();
   try {
     const bMin = new Date(monday + "T00:00:00Z"); bMin.setUTCDate(bMin.getUTCDate() - 1);
-    const { data: clos } = await admin.from("DispensairePointage").select("nom,debut,dureeMin,fin").not("fin", "is", null).gte("debut", bMin.toISOString()).limit(2000);
+    const { data: clos } = await admin.from("DispensairePointage").select("nom,debut,dureeMin,fin,valide").not("fin", "is", null).gte("debut", bMin.toISOString()).limit(2000);
     const joursSet = new Set<string>();
     for (const r of (clos || []) as Record<string, unknown>[]) {
+      if (r.valide === false) continue;           // service invalidé → ne compte pas pour la paie
       const ymd = ymdParis(String(r.debut));
       if (ymd < monday) continue;                 // seulement la semaine courante
       const k = normNom(r.nom);
@@ -84,7 +91,8 @@ export async function getSalaires(): Promise<SalairesData> {
   const lignes: LigneSalaire[] = salaries.map((s) => {
     const montantHebdo = s.fonction ? (bareme.get(s.fonction) || 0) : 0;
     const stat = jm.get(normNom(s.nom)) || { jours: 0, heuresMin: 0 };
-    const salaire = Math.round((montantHebdo / 7) * stat.jours);
+    // Règle : 4 jours pointés = salaire plein ; en deçà, prorata (jours ÷ 4).
+    const salaire = calculerSalaire(montantHebdo, stat.jours);
     return { nom: s.nom, fonction: s.fonction, montantHebdo, jours: stat.jours, heuresMin: stat.heuresMin, salaire };
   }).sort((a, b) => b.salaire - a.salaire || a.nom.localeCompare(b.nom));
 

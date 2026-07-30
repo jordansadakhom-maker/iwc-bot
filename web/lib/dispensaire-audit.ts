@@ -12,9 +12,6 @@ const CATEGORIES = ["Intégrité", "Cohérence", "Dates", "Unicité", "Permissio
 const CHECKLIST: ChecklistItem[] = [
   { id: "d-acc-1", groupe: "Accès & rôles", libelle: "Un compte hors liste blanche est bien refusé (écran « Accès réservé »)." },
   { id: "d-acc-2", groupe: "Accès & rôles", libelle: "Un médecin ne voit pas les onglets Admin/Compta/Cockpit." },
-  { id: "d-pec-1", groupe: "Prise en charge", libelle: "Admettre un patient → il apparaît en « Admis »." },
-  { id: "d-pec-2", groupe: "Prise en charge", libelle: "Démarrer le soin → passe « En soin » ; terminer → facture créée + stock débité." },
-  { id: "d-pec-3", groupe: "Prise en charge", libelle: "Attribuer une chambre → la chambre passe « occupée » ; clôture → libérée." },
   { id: "d-stk-1", groupe: "Stock", libelle: "Entrée/sortie de stock → le stock glissant se met à jour + mouvement journalisé." },
   { id: "d-stk-2", groupe: "Stock", libelle: "Un article sous seuil déclenche l'alerte dans les notifications." },
   { id: "d-fac-1", groupe: "Facturation", libelle: "Encaisser une facture → statut « payée » ; le total colle aux lignes." },
@@ -43,8 +40,7 @@ export async function getAuditDispensaire(): Promise<RapportAudit> {
     catch { return []; }
   };
 
-  const [pec, chambres, factures, stock, mouvements, membres, grades, rdv, pointages, matieres, ambulances, frais, interventions] = await Promise.all([
-    q("DispensairePriseEnCharge", "id,patient,patientNormalise,etat,factureId,admisAt,soinAt,finAt"),
+  const [chambres, factures, stock, mouvements, membres, grades, rdv, pointages, matieres, ambulances, frais, interventions] = await Promise.all([
     q("DispensaireChambre", "id,nom,etat,patient,patientNormalise"),
     q("DispensaireFacture", "id,montant,statut"),
     q("DispensaireStock", "id,nom,stock,seuil,stockFixe"),
@@ -63,15 +59,11 @@ export async function getAuditDispensaire(): Promise<RapportAudit> {
   let controles = 0;
   const ctrl = () => { controles++; };
 
-  const factureIds = new Set(factures.map((f) => String(f.id)));
   const stockIds = new Set(stock.map((s) => String(s.id)));
   const gradeKeys = new Set(grades.map((g) => g.key));
   const gradeAdmin = new Set(grades.filter((g) => g.perms?.admin).map((g) => g.key));
 
   // ── Intégrité (références) ──────────────────────────────────────────────
-  ctrl();
-  for (const p of pec) if (p.factureId && !factureIds.has(String(p.factureId)))
-    A.push({ categorie: "Intégrité", gravite: "majeur", titre: "Prise en charge liée à une facture inexistante", detail: `${p.patient} → facture ${String(p.factureId).slice(0, 12)} introuvable`, suggestion: "Détacher la facture ou la recréer.", ref: String(p.id) });
   ctrl();
   for (const m of mouvements) if (m.stockId && !stockIds.has(String(m.stockId)))
     A.push({ categorie: "Intégrité", gravite: "mineur", titre: "Mouvement de stock orphelin", detail: `mouvement sur un article supprimé (${String(m.stockId).slice(0, 12)})`, suggestion: "Purge des mouvements orphelins.", ref: String(m.stockId) });
@@ -86,13 +78,10 @@ export async function getAuditDispensaire(): Promise<RapportAudit> {
     if (Number(s.seuil) < 0) A.push({ categorie: "Cohérence", gravite: "mineur", titre: "Seuil d'alerte négatif", detail: `${s.nom} : seuil ${s.seuil}`, suggestion: "Le seuil doit être ≥ 0.", ref: String(s.id) });
     if (Number(s.stockFixe) < 0) A.push({ categorie: "Cohérence", gravite: "mineur", titre: "Stock de référence négatif", detail: `${s.nom} : ${s.stockFixe}`, suggestion: "Corriger le stock fixe.", ref: String(s.id) });
   }
-  const pecActifNorm = new Set(pec.filter((p) => p.etat === "admis" || p.etat === "en_soin").map((p) => norm(p.patientNormalise || p.patient)));
   ctrl();
   for (const c of chambres) {
     if (c.etat !== "occupee") continue;
-    if (!String(c.patient ?? "").trim()) { A.push({ categorie: "Cohérence", gravite: "majeur", titre: "Chambre occupée sans patient", detail: `${c.nom}`, suggestion: "Libérer la chambre ou renseigner le patient.", ref: String(c.id) }); continue; }
-    if (!pecActifNorm.has(norm(c.patientNormalise || c.patient)))
-      A.push({ categorie: "Cohérence", gravite: "majeur", titre: "Lit occupé sans prise en charge active", detail: `${c.nom} — ${c.patient} n'a aucune PEC en cours`, suggestion: "Libérer le lit (PEC probablement clôturée).", ref: String(c.id) });
+    if (!String(c.patient ?? "").trim()) A.push({ categorie: "Cohérence", gravite: "majeur", titre: "Chambre occupée sans patient", detail: `${c.nom}`, suggestion: "Libérer la chambre ou renseigner le patient.", ref: String(c.id) });
   }
   ctrl();
   for (const f of factures) {
@@ -100,18 +89,6 @@ export async function getAuditDispensaire(): Promise<RapportAudit> {
       A.push({ categorie: "Cohérence", gravite: "mineur", titre: "Facture payée à 0 $", detail: `facture ${String(f.id).slice(0, 12)}`, suggestion: "Vérifier le montant encaissé.", ref: String(f.id) });
     if (Number(f.montant) < 0)
       A.push({ categorie: "Cohérence", gravite: "majeur", titre: "Facture à montant négatif", detail: `facture ${String(f.id).slice(0, 12)} = ${f.montant}`, suggestion: "Corriger le montant.", ref: String(f.id) });
-  }
-
-  // ── Dates ───────────────────────────────────────────────────────────────
-  ctrl();
-  for (const p of pec) {
-    const a = p.admisAt ? Date.parse(String(p.admisAt)) : NaN;
-    const fin = p.finAt ? Date.parse(String(p.finAt)) : NaN;
-    const soin = p.soinAt ? Date.parse(String(p.soinAt)) : NaN;
-    if (Number.isFinite(a) && Number.isFinite(fin) && fin < a)
-      A.push({ categorie: "Dates", gravite: "mineur", titre: "Clôture avant l'admission", detail: `${p.patient} : fin < admission`, suggestion: "Vérifier l'horodatage de la PEC.", ref: String(p.id) });
-    if (Number.isFinite(a) && Number.isFinite(soin) && soin < a)
-      A.push({ categorie: "Dates", gravite: "mineur", titre: "Soin daté avant l'admission", detail: `${p.patient} : soin < admission`, suggestion: "Vérifier l'horodatage de la PEC.", ref: String(p.id) });
   }
 
   // ── Unicité (doublons) ──────────────────────────────────────────────────

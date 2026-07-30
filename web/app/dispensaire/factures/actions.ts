@@ -6,7 +6,6 @@ import { peutFacturer, estAutorise, peutSoigner } from "@/lib/dispensaire-roles"
 import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenements";
 import { idAvecJeton, estDoublon } from "@/lib/dispensaire-idempotence";
 import { lireDossierMedical, ecrireDossierMedical, type DossierMedical } from "@/lib/dispensaire-patients";
-import { libererChambresDuPatient } from "@/lib/dispensaire-chambres";
 import { FACTURE_DELAI_H, statutsDe, serialiserStatuts, statutRepresentatif, estOuverte } from "@/lib/dispensaire-facturation-const";
 
 // Factures — RÉSERVÉ aux chefs (habilités). Suivi des impayés.
@@ -222,60 +221,6 @@ async function creerFactureDeSoins(admin: Admin, input: { patient: string; ligne
     } catch { /* décrément best-effort */ }
   }
   return { ok: true, id, montant, avertissements: avert.length ? avert : undefined };
-}
-
-// ── CLÔTURE D'UNE PRISE EN CHARGE (Lot 3.2) ──────────────────────────────────
-// Terminer un épisode de soin en un geste : génère la facture, décrémente le
-// stock, relie la facture à la prise en charge (factureId) et passe l'état à
-// « terminé ». Réservé au personnel SOIGNANT (le soignant facture son propre
-// soin, sans dépendre du droit « factures »).
-export async function terminerAvecFacture(pecId: string, input: { lignes: ConsultationLigne[]; regle: boolean; note?: string; cle?: string }): Promise<ConsultationResult> {
-  if (!(await peutSoigner())) return { ok: false, error: "Réservé au personnel soignant." };
-  const admin = createAdminClient();
-  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
-  if (!pecId) return { ok: false, error: "Prise en charge introuvable." };
-  const pec = await lireAvant("DispensairePriseEnCharge", pecId);
-  if (!pec) return { ok: false, error: "Prise en charge introuvable." };
-  const etat = String(pec.etat);
-  // Idempotence : une prise en charge déjà terminée renvoie sa facture liée.
-  if (etat === "termine") return { ok: true, id: pec.factureId ? String(pec.factureId) : undefined };
-  if (etat === "annule") return { ok: false, error: "Cette prise en charge a été annulée." };
-
-  const par = await qui();
-  const patient = String(pec.patient || "");
-  // 1) Facture + décrément de stock (cœur partagé).
-  const res = await creerFactureDeSoins(admin, { patient, lignes: input.lignes, regle: input.regle, note: input.note, cle: input.cle }, par);
-  if (!res.ok) return res;
-  // 2) Clôture de l'épisode + lien vers la facture.
-  const now = new Date().toISOString();
-  await admin.from("DispensairePriseEnCharge").update({ etat: "termine", finAt: now, factureId: res.id, updatedBy: par, updatedAt: now }).eq("id", pecId);
-  await emettreEvenementDispensaire({ aggregate: "prise_en_charge", type: "prise_en_charge.termine", cibleId: pecId, cibleLibelle: patient, avant: pec, apres: { etat: "termine", factureId: res.id, montant: res.montant } });
-  await libererChambresDuPatient(patient, par);   // sortie du patient → lit à nettoyer
-  return res;
-}
-
-// Encaissement depuis le tableau des prises en charge : marque la facture liée
-// comme réglée (boucle le parcours sans quitter la vue). Droit facturation.
-export async function encaisserPriseEnCharge(pecId: string): Promise<{ ok: boolean; error?: string }> {
-  if (!(await peutFacturer())) return { ok: false, error: "Réservé aux chefs (facturation)." };
-  const admin = createAdminClient();
-  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
-  const pec = await lireAvant("DispensairePriseEnCharge", pecId);
-  if (!pec) return { ok: false, error: "Prise en charge introuvable." };
-  const factureId = pec.factureId ? String(pec.factureId) : "";
-  if (!factureId) return { ok: false, error: "Aucune facture liée à cette prise en charge." };
-  const fac = await lireAvant("DispensaireFacture", factureId);
-  if (!fac) return { ok: false, error: "Facture introuvable." };
-  const statuts = statutsDe(fac);
-  if (statuts.includes("payee")) return { ok: true };   // déjà réglée (idempotent)
-  const arr = [...new Set([...statuts.filter((x) => x !== "non_payee"), "payee"])];
-  const now = new Date().toISOString();
-  const par = await qui();
-  const err = await ecrireFacture(admin, "update", { statuts: serialiserStatuts(arr), statut: statutRepresentatif(arr), datePaiement: now, payePar: par, updatedAt: now }, factureId);
-  if (err) return { ok: false, error: "Encaissement impossible." };
-  await logFacture(admin, factureId, "Paiement", "Encaissé depuis la prise en charge", par);
-  await emettreEvenementDispensaire({ aggregate: "prise_en_charge", type: "prise_en_charge.encaisse", cibleId: pecId, cibleLibelle: String(pec.patient ?? ""), avant: { statut: statutRepresentatif(statuts) }, apres: { statut: "payee", factureId } });
-  return { ok: true };
 }
 
 // ── DOSSIER PATIENT (dérivé à la lecture, sans nouvelle table) ────────────────

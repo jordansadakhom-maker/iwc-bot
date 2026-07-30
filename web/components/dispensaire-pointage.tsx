@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ClipboardList, Play, Square, Loader2, Trash2, CalendarDays, Clock, Users, CalendarRange, UserX, Plus, Check } from "lucide-react";
 import type { PointData, PointSession, AssiduiteData, AbsenceRow } from "@/lib/dispensaire-pointage";
+import { statutDe, STATUT_META } from "@/lib/dispensaire-pointage-const";
 import { Flash, inputCls } from "@/components/edit-ui";
 import { prendreService, terminerService, supprimerPointage, ajouterAbsence, supprimerAbsence } from "@/app/dispensaire/pointage/actions";
 
@@ -57,7 +58,7 @@ export function DispensairePointage({ data, assiduite, absences = [], peutGerer 
     if (!nom) { setFlash({ t: "bad", m: "Choisis un salarié ou saisis un nom." }); return; }
     if (enCours.some((s) => s.nom.toLowerCase() === nom.toLowerCase())) { setFlash({ t: "bad", m: `${nom} est déjà en service.` }); return; }
     setBusy(true);
-    const tmp: PointSession = { id: "tmp-" + Math.random().toString(36).slice(2, 8), salarieId: nomManuel ? null : salarie?.id ?? null, nom, debut: new Date().toISOString(), fin: null, dureeMin: null, note: null };
+    const tmp: PointSession = { id: "tmp-" + Math.random().toString(36).slice(2, 8), salarieId: nomManuel ? null : salarie?.id ?? null, nom, debut: new Date().toISOString(), fin: null, dureeMin: null, note: null, lastSeen: new Date().toISOString(), finSource: null, valide: null, etat: "en_service", commentaire: null, corrigePar: null };
     setEnCours((p) => [...p, tmp]); setChoix(""); setManuel("");
     const r = await prendreService({ salarieId: tmp.salarieId, nom });
     setBusy(false);
@@ -226,10 +227,12 @@ export function DispensairePointage({ data, assiduite, absences = [], peutGerer 
                     {ln.semaines.map((s, i) => (
                       <td key={i} className="border-b border-border px-2 py-2 text-center align-top" style={i === 1 ? { background: "color-mix(in srgb,var(--accent) 6%,transparent)" } : undefined}>
                         <div className="font-num"><b>{s.jours}</b> j · {fmtMin(s.heuresMin)}</div>
-                        <div className="mt-0.5 flex items-center justify-center gap-1.5 text-[0.66rem]">
+                        <div className="mt-0.5 flex flex-wrap items-center justify-center gap-x-1.5 text-[0.66rem]">
                           {s.absJust ? <span style={{ color: "var(--good)" }}>{s.absJust} just.</span> : null}
                           {s.absInj ? <span style={{ color: "var(--oxblood)" }}>{s.absInj} inj.</span> : null}
-                          {!s.absJust && !s.absInj ? <span className="text-faint">—</span> : null}
+                          {s.oublis ? <span style={{ color: "var(--warn)" }} title="services oubliés">⚠ {s.oublis}</span> : null}
+                          {s.corrections ? <span style={{ color: "var(--accent)" }} title="corrections">✏ {s.corrections}</span> : null}
+                          {!s.absJust && !s.absInj && !s.oublis && !s.corrections ? <span className="text-faint">—</span> : null}
                         </div>
                       </td>
                     ))}
@@ -291,14 +294,18 @@ export function DispensairePointage({ data, assiduite, absences = [], peutGerer 
         <section className="rounded-[14px] border border-border bg-surface p-4">
           <h3 className="mb-3 flex items-center gap-2 text-[0.9rem] font-semibold"><Clock className="h-4 w-4 text-accent" /> Derniers services</h3>
           <div className="flex flex-col divide-y divide-border">
-            {data.historique.map((s) => (
+            {data.historique.map((s) => {
+              const st = STATUT_META[statutDe(s, 10)];
+              return (
               <div key={s.id} className="group flex items-center justify-between gap-3 py-1.5 text-[0.8rem]">
                 <span className="min-w-0 truncate font-semibold">{s.nom}</span>
+                <span className="shrink-0 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[0.62rem] font-semibold" style={{ color: st.tone, background: `color-mix(in srgb,${st.tone} 12%,transparent)` }} title={st.label}><span>{st.icon}</span><span className="hidden sm:inline">{st.label}</span></span>
                 <span className="shrink-0 text-faint">{dateFR(s.debut)} · {heureFR(s.debut)}{s.fin ? `–${heureFR(s.fin)}` : ""}</span>
                 <span className="w-16 shrink-0 text-right font-num text-muted">{fmtMin(s.dureeMin || 0)}</span>
                 <button onClick={() => supprimer(s.id)} className="shrink-0 text-faint opacity-0 transition hover:text-oxblood group-hover:opacity-100" aria-label="Supprimer"><Trash2 className="h-3.5 w-3.5" /></button>
               </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       ) : null}

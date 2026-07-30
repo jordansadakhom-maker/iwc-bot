@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Coins, Lock, Loader2, Info, Archive, Printer, Trash2, Check } from "lucide-react";
 import { Flash, inputCls } from "@/components/edit-ui";
 import type { SalairesData, SalaireFonction, LigneSalaire, ArchivePaie } from "@/lib/dispensaire-salaires";
+import { salairePlein, SEUIL_JOURS_PLEIN } from "@/lib/dispensaire-salaires-const";
 import { setSalaireFonction, archiverSemaine, supprimerArchivePaie } from "@/app/dispensaire/salaires/actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
@@ -100,7 +101,7 @@ export function DispensaireSalaires({ data }: { data: SalairesData }) {
 
       <div className="flex items-start gap-2 rounded-[12px] border border-border bg-surface-2 px-3 py-2 text-[0.78rem] text-muted">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-faint" />
-        <span>Calcul automatique : <b>salaire = salaire de la fonction ÷ 7 × jours travaillés</b> (jours pris du pointage). Les heures sont affichées à part pour te permettre d&apos;ajouter les primes à la main.</span>
+        <span>Calcul automatique : <b>4 jours pointés dans la semaine = salaire plein</b>. En deçà, salaire au prorata (jours ÷ 4) ; au-delà de 4 jours, plus besoin d&apos;en faire davantage. Les jours viennent du <b>pointage</b> ; les heures sont affichées à part pour ajouter les primes à la main.</span>
       </div>
 
       {/* Barème par fonction */}
@@ -156,7 +157,9 @@ export function DispensaireSalaires({ data }: { data: SalairesData }) {
                     <td className="border-b border-border px-2 py-2 font-semibold">{l.nom}</td>
                     <td className="border-b border-border px-2 py-2 text-faint">{l.fonction || <span className="italic">— non défini —</span>}</td>
                     <td className="border-b border-border px-2 py-2 text-right font-num">{l.montantHebdo ? money(l.montantHebdo) : <span className="text-faint">à définir</span>}</td>
-                    <td className="border-b border-border px-2 py-2 text-center font-num">{l.jours}</td>
+                    <td className="border-b border-border px-2 py-2 text-center font-num">
+                      <span className="inline-flex items-center gap-1">{l.jours}{salairePlein(l.jours) ? <span title={`${SEUIL_JOURS_PLEIN} jours atteints — salaire plein`} className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[0.58rem] font-bold" style={{ color: "var(--good)", background: "color-mix(in srgb,var(--good) 16%,transparent)" }}><Check className="h-2.5 w-2.5" /> plein</span> : null}</span>
+                    </td>
                     <td className="border-b border-border px-2 py-2 text-right font-num text-muted">{fmtMin(l.heuresMin)}</td>
                     <td className="border-b border-border px-2 py-2 text-right font-num font-bold" style={{ color: l.salaire ? "var(--brass-hi)" : "var(--faint)" }}>{money(l.salaire)}</td>
                   </tr>

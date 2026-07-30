@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, Boxes, FlaskConical, Receipt, FileText, BadgeDollarSign, Package, Bandage, Stethoscope, Clock } from "lucide-react";
 import { getAccueil } from "@/lib/dispensaire-accueil";
-import { getRoleDispensaire } from "@/lib/dispensaire-roles";
+import { getRoleDispensaire, getConfig } from "@/lib/dispensaire-roles";
 import { getConsigneDuJour } from "@/lib/dispensaire-consignes";
 import { DISP_NAV } from "@/lib/dispensaire-nav";
 import { isStandalone } from "@/lib/standalone-server";
@@ -16,9 +16,9 @@ const ACT_ICON: Record<string, typeof Package> = { stock: Package, vente: Bandag
 const heureCourte = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); } catch { return "—"; } };
 
 export default async function DispensaireAccueil() {
-  const [d, role, standalone, consigne] = await Promise.all([getAccueil(), getRoleDispensaire(), isStandalone(), getConsigneDuJour()]);
+  const [d, role, standalone, consigne, cfg] = await Promise.all([getAccueil(), getRoleDispensaire(), isStandalone(), getConsigneDuJour(), getConfig()]);
   const habilite = role.perms.rh || role.perms.factures || role.perms.admin;
-  const modules = DISP_NAV.filter((t) => t.href !== "/dispensaire" && (!t.restreint || habilite) && (!t.admin || role.perms.admin) && !(standalone && t.href === "/repertoire"));
+  const modules = DISP_NAV.filter((t) => t.href !== "/dispensaire" && !t.direction && (!t.restreint || habilite) && !(standalone && t.href === "/repertoire"));
 
   // Tuiles d'alerte du tableau de bord.
   const tuiles = [
@@ -52,7 +52,7 @@ export default async function DispensaireAccueil() {
       <DispensaireConsignes data={consigne} canEdit={habilite} onSave={enregistrerConsigne} />
 
       {/* Personnel en service (live) + prise de service */}
-      <AccueilService enService={d.enService} roster={d.roster} />
+      <AccueilService enService={d.enService} roster={d.roster} inactiviteMin={cfg.pointageInactiviteMin} />
 
       {/* Dernières activités */}
       <section className="rounded-[14px] border border-border bg-surface p-4">

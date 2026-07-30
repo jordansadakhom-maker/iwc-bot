@@ -17,6 +17,7 @@ const LABEL: Record<string, string> = {
   "certificat.cree": "Certificat émis", "certificat.supprime": "Certificat supprimé",
   "rapport.cree": "Rapport créé", "rapport.maj": "Rapport modifié", "rapport.supprime": "Rapport supprimé",
   "pointage.debut": "Prise de service", "pointage.fin": "Fin de service", "pointage.supprime": "Pointage supprimé",
+  "pointage.reprise": "Service repris", "pointage.oubli": "Clôturé après oubli", "pointage.correction": "Fin corrigée (salarié)", "pointage.validation": "Validé par la Direction",
   "patient.dossier_maj": "Dossier médical modifié",
   "prise_en_charge.admis": "Patient admis", "prise_en_charge.attribue": "Médecin attribué", "prise_en_charge.soin": "Soin démarré", "prise_en_charge.termine": "Prise en charge terminée", "prise_en_charge.annule": "Prise en charge annulée", "prise_en_charge.encaisse": "Facture encaissée",
   "fabrication.recette_creee": "Recette créée", "fabrication.recette_supprimee": "Recette supprimée", "fabrication.produite": "Fabrication réalisée",

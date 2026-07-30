@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { UserPlus, CheckCircle2, Loader2 } from "lucide-react";
+import { UserPlus, CheckCircle2, Loader2, Copy, Check, ArrowRight } from "lucide-react";
 import { envoyerCandidature } from "./actions";
 
 const MOYENS = ["Discord", "Télégramme", "Autre"];
+const SOURCES = ["", "Un membre / une connaissance", "Discord", "Bouche-à-oreille RP", "Réseaux sociaux", "Autre"];
 const inputCls =
   "w-full rounded-xl border border-border bg-surface-2 px-3.5 py-2.5 text-[0.9rem] text-ink outline-none placeholder:text-faint focus:border-[color-mix(in_srgb,var(--accent)_55%,var(--border))]";
 const labelCls = "mb-1.5 block text-[0.76rem] font-semibold uppercase tracking-[0.06em] text-muted";
@@ -12,8 +13,10 @@ const labelCls = "mb-1.5 block text-[0.76rem] font-semibold uppercase tracking-[
 export function RejoindreForm() {
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
+  const [ref, setRef] = useState<string | null>(null);
+  const [copie, setCopie] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [form, setForm] = useState({ nomRP: "", age: "", moyen: MOYENS[0], contact: "", experience: "", motivation: "", disponibilites: "", website: "" });
+  const [form, setForm] = useState({ nomRP: "", age: "", moyen: MOYENS[0], contact: "", experience: "", motivation: "", disponibilites: "", source: "", website: "" });
   const set = <K extends keyof typeof form>(k: K, v: string) => setForm((f) => ({ ...f, [k]: v }));
   const montRef = useRef(0);
   useEffect(() => { montRef.current = Date.now(); }, []);
@@ -23,9 +26,14 @@ export function RejoindreForm() {
     try {
       const ms = montRef.current ? Date.now() - montRef.current : 9999;
       const r = await envoyerCandidature({ ...form, ms });
-      if (r.ok) setDone(true); else setErr(r.error || "Une erreur est survenue.");
+      if (r.ok) { setRef(r.ref || null); setDone(true); } else setErr(r.error || "Une erreur est survenue.");
     } catch { setErr("Envoi impossible pour le moment. Réessaie dans un instant."); }
     finally { setLoading(false); }
+  }
+
+  async function copierRef() {
+    if (!ref) return;
+    try { await navigator.clipboard.writeText(ref); setCopie(true); setTimeout(() => setCopie(false), 1800); } catch { /* copie best-effort */ }
   }
 
   if (done) {
@@ -34,7 +42,20 @@ export function RejoindreForm() {
         <span className="grid h-14 w-14 place-items-center rounded-2xl" style={{ color: "var(--good)", background: "color-mix(in srgb,var(--good) 16%,transparent)" }}><CheckCircle2 className="h-7 w-7" strokeWidth={1.8} /></span>
         <h2 className="font-display text-xl">Candidature envoyée&nbsp;!</h2>
         <p className="max-w-sm text-[0.88rem] leading-relaxed text-muted">Merci <b>{form.nomRP}</b>. Ta candidature est arrivée à la maison. Un membre te recontactera via <b>{form.moyen}</b> ({form.contact}) pour la suite.</p>
-        <button onClick={() => { setDone(false); setForm({ nomRP: "", age: "", moyen: MOYENS[0], contact: "", experience: "", motivation: "", disponibilites: "", website: "" }); }} className="mt-2 rounded-xl border border-border bg-surface px-4 py-2 text-[0.85rem] text-muted hover:text-ink">Envoyer une autre candidature</button>
+
+        {ref ? (
+          <div className="mt-1 w-full max-w-sm rounded-xl border border-border bg-surface-2 p-4 text-left">
+            <p className="text-[0.72rem] font-semibold uppercase tracking-[0.06em] text-muted">Ton numéro de dossier</p>
+            <div className="mt-1.5 flex items-center gap-2">
+              <code className="flex-1 rounded-lg border border-border bg-surface px-3 py-2 font-mono text-[0.95rem] tracking-wider text-ink">{ref}</code>
+              <button type="button" onClick={copierRef} aria-label="Copier le numéro" className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-surface text-muted hover:text-ink">{copie ? <Check className="h-4 w-4" style={{ color: "var(--good)" }} /> : <Copy className="h-4 w-4" />}</button>
+            </div>
+            <p className="mt-2 text-[0.76rem] leading-relaxed text-faint">Garde-le : il te permet de <b>suivre l&apos;avancement</b> de ta candidature à tout moment, sans connexion.</p>
+            <a href={`/candidature/${encodeURIComponent(ref)}`} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[0.88rem] font-semibold text-black/85" style={{ background: "linear-gradient(135deg,var(--accent),color-mix(in srgb,var(--accent) 55%,#000))" }}>Suivre ma candidature <ArrowRight className="h-4 w-4" /></a>
+          </div>
+        ) : null}
+
+        <button onClick={() => { setDone(false); setRef(null); setForm({ nomRP: "", age: "", moyen: MOYENS[0], contact: "", experience: "", motivation: "", disponibilites: "", source: "", website: "" }); }} className="mt-2 rounded-xl border border-border bg-surface px-4 py-2 text-[0.85rem] text-muted hover:text-ink">Envoyer une autre candidature</button>
       </div>
     );
   }
@@ -59,6 +80,13 @@ export function RejoindreForm() {
       <div><label className={labelCls}>Pourquoi nous rejoindre&nbsp;? *</label><textarea className={`${inputCls} min-h-[100px] resize-y`} required value={form.motivation} onChange={(e) => set("motivation", e.target.value)} placeholder="Parle-nous de toi et de ce qui te motive à rejoindre la Iron Wolf Company…" /></div>
 
       <div><label className={labelCls}>Tes disponibilités</label><input className={inputCls} value={form.disponibilites} onChange={(e) => set("disponibilites", e.target.value)} placeholder="Ex. soirs de semaine, week-ends…" /></div>
+
+      <div>
+        <label className={labelCls}>Comment nous as-tu connus&nbsp;?</label>
+        <select className={inputCls} value={form.source} onChange={(e) => set("source", e.target.value)}>
+          {SOURCES.map((s) => <option key={s} value={s}>{s || "— (facultatif)"}</option>)}
+        </select>
+      </div>
 
       <input type="text" tabIndex={-1} autoComplete="off" aria-hidden className="hidden" value={form.website} onChange={(e) => set("website", e.target.value)} />
       {err ? <p className="text-[0.82rem] text-crit">{err}</p> : null}

@@ -2,12 +2,15 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAcces } from "@/lib/queries";
+import { getRoleDispensaire, getConfig, peutGererRH } from "@/lib/dispensaire-roles";
+import { estAConfirmer, estEscalade } from "@/lib/dispensaire-pointage-const";
 import { ymdParis, dowParis, lundiCourant, lundiDecale, dimancheDe } from "@/lib/dispensaire-dates";
 
 // ── Pointage du Dispensaire (prise de service) ──────────────────────────────
 export type PointSession = {
   id: string; salarieId: string | null; nom: string;
   debut: string; fin: string | null; dureeMin: number | null; note: string | null;
+  lastSeen: string | null; finSource: string | null; valide: boolean | null; etat: string | null; commentaire: string | null; corrigePar: string | null;
 };
 export type PointSalarie = { id: string; nom: string; grade: string | null };
 export type SemaineJour = { dow: number; min: number };            // dow 0=Lun … 6=Dim
@@ -28,6 +31,9 @@ function toSession(r: Record<string, unknown>): PointSession {
     id: String(r.id), salarieId: r.salarieId == null ? null : String(r.salarieId), nom: String(r.nom || "Salarié"),
     debut: String(r.debut), fin: r.fin == null ? null : String(r.fin),
     dureeMin: r.dureeMin == null ? null : Number(r.dureeMin) || 0, note: r.note == null ? null : String(r.note),
+    lastSeen: r.lastSeen == null ? null : String(r.lastSeen), finSource: r.finSource == null ? null : String(r.finSource),
+    valide: r.valide == null ? null : Boolean(r.valide), etat: r.etat == null ? null : String(r.etat),
+    commentaire: r.commentaire == null ? null : String(r.commentaire), corrigePar: r.corrigePar == null ? null : String(r.corrigePar),
   };
 }
 
@@ -89,12 +95,12 @@ export async function getPointage(): Promise<PointData> {
 // ── Assiduité sur 3 semaines (précédente / actuelle / suivante) ─────────────
 // Pour chaque salarié et chaque semaine : jours travaillés, heures, absences
 // justifiées et injustifiées. Sert directement au calcul des salaires.
-export type SemaineAssiduite = { jours: number; heuresMin: number; absJust: number; absInj: number };
+export type SemaineAssiduite = { jours: number; heuresMin: number; absJust: number; absInj: number; oublis: number; corrections: number };
 export type LigneAssiduite = { nom: string; grade: string | null; semaines: SemaineAssiduite[] };
 export type AssiduiteData = { pret: boolean; lundis: string[]; lignes: LigneAssiduite[] };
 
 const normNom = (v: unknown) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ");
-const semaineVide = (): SemaineAssiduite => ({ jours: 0, heuresMin: 0, absJust: 0, absInj: 0 });
+const semaineVide = (): SemaineAssiduite => ({ jours: 0, heuresMin: 0, absJust: 0, absInj: 0, oublis: 0, corrections: 0 });
 
 export async function getAssiduite(): Promise<AssiduiteData> {
   const admin = createAdminClient();
@@ -126,16 +132,21 @@ export async function getAssiduite(): Promise<AssiduiteData> {
   };
   for (const r of roster) ligne(String(r.nom || "Salarié"), r.grade == null ? null : String(r.grade));
 
-  // Services clôturés de la fenêtre → jours + heures par semaine.
+  // Services VALIDÉS de la fenêtre → jours + heures par semaine (le temps « ouvert »
+  // ou non validé n'est jamais compté).
   try {
-    const { data: clos } = await admin.from("DispensairePointage").select("nom,debut,dureeMin,fin").not("fin", "is", null).gte("debut", bMin.toISOString()).lte("debut", bMax.toISOString()).limit(2000);
+    const { data: clos } = await admin.from("DispensairePointage").select("nom,debut,dureeMin,fin,valide,finSource").not("fin", "is", null).gte("debut", bMin.toISOString()).lte("debut", bMax.toISOString()).limit(2000);
     for (const r of (clos || []) as Record<string, unknown>[]) {
+      if (r.valide === false) continue;            // clôturé mais invalidé → exclu
       const ymd = ymdParis(String(r.debut));
       const sem = semaineDe(ymd);
       if (sem < 0) continue;
       const nom = String(r.nom || "Salarié");
       const l = ligne(nom, null);
       l.semaines[sem].heuresMin += Number(r.dureeMin) || 0;
+      const src = String(r.finSource || "normal");
+      if (src === "oubli") l.semaines[sem].oublis += 1;
+      else if (src === "user" || src === "direction") l.semaines[sem].corrections += 1;
       const k = `${normNom(nom)}|${sem}|${ymd}`;
       if (!joursSet.has(k)) { joursSet.add(k); l.semaines[sem].jours += 1; }
     }
@@ -175,4 +186,48 @@ export async function getEnService(): Promise<PointSession[]> {
   const { data, error } = await admin.from("DispensairePointage").select("*").is("fin", null).order("debut", { ascending: true });
   if (error) return [];
   return ((data || []) as Record<string, unknown>[]).map(toSession);
+}
+
+// Services ouverts à traiter par la Direction : « à confirmer » (plus de signal)
+// ou escaladés (ouverts au-delà du seuil). Réservé à l'encadrement (RH/Direction).
+export type ServiceAValider = { id: string; nom: string; debut: string; lastSeen: string | null; dureeMin: number; motif: "a_confirmer" | "escalade" };
+export type ServicesAValiderData = { pret: boolean; peut: boolean; services: ServiceAValider[]; inactiviteMin: number; escaladeH: number };
+export async function getServicesAValider(): Promise<ServicesAValiderData> {
+  const cfg = await getConfig();
+  const base: ServicesAValiderData = { pret: false, peut: false, services: [], inactiviteMin: cfg.pointageInactiviteMin, escaladeH: cfg.pointageEscaladeH };
+  const admin = createAdminClient();
+  if (!admin) return base;
+  const peut = await peutGererRH();
+  if (!peut) return { ...base, pret: true };
+  const { data, error } = await admin.from("DispensairePointage").select("id,nom,debut,lastSeen").is("fin", null).order("debut", { ascending: true }).limit(200);
+  if (error) return { ...base, peut: true };
+  const now = Date.now();
+  const services: ServiceAValider[] = [];
+  for (const r of (data || []) as Record<string, unknown>[]) {
+    const debut = String(r.debut);
+    const lastSeen = r.lastSeen == null ? null : String(r.lastSeen);
+    const esc = estEscalade({ fin: null, debut }, cfg.pointageEscaladeH, now);
+    const aConf = estAConfirmer({ fin: null, lastSeen, debut }, cfg.pointageInactiviteMin, now);
+    if (!esc && !aConf) continue;
+    const t = Date.parse(debut);
+    const dureeMin = Number.isFinite(t) ? Math.max(0, Math.round((now - t) / 60000)) : 0;
+    services.push({ id: String(r.id), nom: String(r.nom || "Salarié"), debut, lastSeen, dureeMin, motif: esc ? "escalade" : "a_confirmer" });
+  }
+  return { pret: true, peut: true, services, inactiviteMin: cfg.pointageInactiviteMin, escaladeH: cfg.pointageEscaladeH };
+}
+
+// Le service OUVERT du compte connecté (rapproché par nom), pour le heartbeat et
+// la reprise à la reconnexion. Renvoie null si le compte n'a pas de service ouvert.
+export type MonService = { id: string; debut: string; lastSeen: string | null; nom: string };
+export async function getMonServiceOuvert(): Promise<MonService | null> {
+  const admin = createAdminClient();
+  if (!admin) return null;
+  let nom = "";
+  try { nom = (await getRoleDispensaire()).nom || ""; } catch { return null; }
+  const cle = normNom(nom);
+  if (!cle) return null;
+  const { data } = await admin.from("DispensairePointage").select("id,nom,debut,lastSeen").is("fin", null).order("debut", { ascending: false }).limit(100);
+  const row = ((data || []) as Record<string, unknown>[]).find((r) => normNom(r.nom) === cle);
+  if (!row) return null;
+  return { id: String(row.id), debut: String(row.debut), lastSeen: row.lastSeen == null ? null : String(row.lastSeen), nom: String(row.nom || nom) };
 }
