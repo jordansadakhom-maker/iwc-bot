@@ -369,3 +369,21 @@ tbody tr:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); 
 }
 @keyframes disp-urgent-bar { 0%,100% { opacity: 0.95; } 50% { opacity: 0.55; } }
 @media (prefers-reduced-motion: reduce) { .disp-premium[data-mode="urgence"]::before { animation: none; } }
+
+/* ══ Refonte Far West — boutons « plaque » (laiton / bois / cuir) ═════════════
+   Relief physique discret : biseau clair en haut, arête sombre en bas, légère
+   ombre portée → sensation de plaque gravée. Au clic : enfoncement net. Scopé au
+   Dispensaire, additif (ne touche aucun composant). */
+.disp-premium button:not(:disabled),
+.disp-premium a[role="button"]:not([aria-disabled="true"]),
+.disp-premium [type="submit"]:not(:disabled) {
+  box-shadow:
+    inset 0 1px 0 0 rgba(255,250,235,.32),
+    inset 0 -1px 0 0 rgba(60,42,18,.14),
+    0 1px 2px -0.5px rgba(60,42,18,.24);
+}
+.disp-premium button:not(:disabled):active,
+.disp-premium a[role="button"]:not([aria-disabled="true"]):active,
+.disp-premium [type="submit"]:not(:disabled):active {
+  box-shadow: inset 0 2px 3px 0 rgba(60,42,18,.30), inset 0 1px 0 0 rgba(60,42,18,.10);
+}
