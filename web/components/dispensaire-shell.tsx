@@ -119,14 +119,14 @@ export function DispensaireShell({ children, perms = {}, notifCount = 0, standal
             registre force z-index:1 sur ses enfants directs (nav ET main) ; sans
             ça, le <main> (plus bas dans le DOM) passerait AU-DESSUS des menus
             déroulants du <nav>. On remonte donc le nav au-dessus du contenu. */}
-        <nav ref={menuRef} style={{ position: "relative", zIndex: 40 }} className="mt-3 flex flex-wrap items-center gap-1.5">
+        <nav ref={menuRef} style={{ position: "relative", zIndex: 40 }} className="disp-navbar mt-3 flex flex-wrap items-center gap-1.5">
           {/* Accès direct */}
           {directs.map((t) => {
             const Icon = t.icon;
             const on = estActif(t.href);
             return (
               <Link key={t.href} href={t.href} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.8rem] font-semibold transition"
-                style={on ? { color: "#f8f1dd", background: "var(--accent)" } : { color: "var(--muted)" }}>
+                style={on ? { color: "#f8f1dd", background: "var(--accent)" } : { color: "var(--nav-fg)" }}>
                 <Icon className="h-3.5 w-3.5" /> {t.label}
               </Link>
             );
@@ -144,7 +144,7 @@ export function DispensaireShell({ children, perms = {}, notifCount = 0, standal
                   aria-expanded={open}
                   onClick={() => setOpenCat(open ? null : c.key)}
                   className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.8rem] font-semibold transition"
-                  style={actif ? { color: "#f8f1dd", background: "color-mix(in srgb,var(--accent) 82%,#000)" } : { color: "var(--muted)", background: open ? "var(--surface-2)" : "transparent" }}
+                  style={actif ? { color: "#f8f1dd", background: "color-mix(in srgb,var(--accent) 82%,#000)" } : { color: "var(--nav-fg)", background: open ? "color-mix(in srgb,#000 16%,transparent)" : "transparent" }}
                 >
                   <Icon className="h-3.5 w-3.5" /> {c.label}
                   {c.direction ? <span className="text-[0.7rem]" title="Espace protégé">🔒</span> : null}
