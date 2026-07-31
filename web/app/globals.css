@@ -277,6 +277,9 @@ tbody tr:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); 
   --r-sm:10px; --r-md:14px; --r-lg:18px; --r-pill:999px;
   --dur-1:150ms; --dur-2:250ms; --dur-3:400ms;
   --ease-out:cubic-bezier(.22,.61,.36,1); --ease-inout:cubic-bezier(.4,0,.2,1); --ease-spring:cubic-bezier(.34,1.4,.64,1);
+  /* Police registre (Far West) : titres élégants « document officiel » —
+     scopée au Dispensaire, Iron Wolf garde sa serif système. */
+  --font-display: var(--font-registre), "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
   color: var(--ink);
   background-color: var(--bg);
   background-image:
