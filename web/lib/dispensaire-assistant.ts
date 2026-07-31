@@ -58,14 +58,10 @@ export async function getAssistantDispensaire(): Promise<AssistantData> {
   // Contrôle de cohérence & réappro sur le stock et les matières.
   const admin = createAdminClient();
   if (admin) {
-    const [stock, matieres] = await Promise.all([
-      rows(() => admin.from("DispensaireStock").select("nom,stock,seuil,stockFixe")),
-      rows(() => admin.from("DispensaireMatiere").select("nom,quantite,seuil,cible")),
-    ]);
-    const reappro = [
-      ...calculerReappro(stock, { qtyKey: "stock", seuilKey: "seuil", cibleKey: "stockFixe" }),
-      ...calculerReappro(matieres, { qtyKey: "quantite", seuilKey: "seuil", cibleKey: "cible" }),
-    ].sort((a, b) => b.manque - a.manque);
+    // Stock mutualisé : les matières premières sont désormais des articles de stock
+    // (catégorie « matiere »), donc ce seul réappro les couvre — plus de double compte.
+    const stock = await rows(() => admin.from("DispensaireStock").select("nom,stock,seuil,stockFixe"));
+    const reappro = calculerReappro(stock, { qtyKey: "stock", seuilKey: "seuil", cibleKey: "stockFixe" }).sort((a, b) => b.manque - a.manque);
     if (reappro.length) constats.push(mk({ id: "reappro", priorite: "importante", categorie: "Réappro", titre: `${reappro.length} article(s) à réapprovisionner`, detail: apercuReappro(reappro), suggestion: "Prépare la commande pour revenir aux quantités cibles.", href: "/dispensaire/coffres" }));
 
     const doublons = detecterDoublons(stock);

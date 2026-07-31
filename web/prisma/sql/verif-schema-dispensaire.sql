@@ -15,7 +15,6 @@ WITH attendus(objet, tbl, col) AS (VALUES
   -- répertoire Iron Wolf (voir verif-schema-iwc.sql). Son absence est normale.
   ('Table · DispensaireStock',             'DispensaireStock',         ''),
   ('Table · DispensaireStockMouvement',    'DispensaireStockMouvement',''),
-  ('Table · DispensaireMatiere',           'DispensaireMatiere',       ''),
   ('Table · DispensaireCoffre',            'DispensaireCoffre',        ''),
   ('Table · DispensaireVente',             'DispensaireVente',         ''),
   ('Table · DispensaireFacture',           'DispensaireFacture',       ''),
@@ -37,7 +36,8 @@ WITH attendus(objet, tbl, col) AS (VALUES
   ('Colonne · DispensaireFacture.datePaiement', 'DispensaireFacture', 'datePaiement'),
   ('Colonne · DispensaireFacture.payePar',      'DispensaireFacture', 'payePar'),
   ('Colonne · DispensaireContact.relation',     'DispensaireContact', 'relation'),
-  ('Colonne · DispensaireStock.stockFixe',      'DispensaireStock',   'stockFixe')
+  ('Colonne · DispensaireStock.stockFixe',      'DispensaireStock',   'stockFixe'),
+  ('Colonne · DispensaireStock.fournisseur',    'DispensaireStock',   'fournisseur')
 )
 SELECT a.objet AS "objet_attendu",
   CASE

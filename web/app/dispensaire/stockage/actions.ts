@@ -9,8 +9,8 @@ import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenem
 const REFUS = "Accès refusé : ton grade ne permet pas de modifier le stock.";
 export type StockResult = { ok: boolean; error?: string; id?: string; apres?: number };
 
-type Champ = "nom" | "categorie" | "coffre" | "unite" | "note" | "photo";
-const CHAMPS: Champ[] = ["nom", "categorie", "coffre", "unite", "note", "photo"];
+type Champ = "nom" | "categorie" | "coffre" | "unite" | "fournisseur" | "note" | "photo";
+const CHAMPS: Champ[] = ["nom", "categorie", "coffre", "unite", "fournisseur", "note", "photo"];
 const CATS = ["medicament", "materiel", "matiere", "nourriture", "autre"];
 const NUMS = ["stock", "stockFixe", "seuil"] as const;
 

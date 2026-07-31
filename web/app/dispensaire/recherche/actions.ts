@@ -22,8 +22,8 @@ export async function rechercher(terme: string): Promise<ResultItem[]> {
 
   const [sal, stock, matieres, coffres, rapports, ventes, certs, contacts, factures] = await Promise.all([
     q<Record<string, unknown>[]>(admin.from("DispensaireSalarie").select("nom,grade").or(`nom.ilike.${like},grade.ilike.${like}`).limit(6)),
-    q<Record<string, unknown>[]>(admin.from("DispensaireStock").select("nom,coffre").or(`nom.ilike.${like},coffre.ilike.${like}`).limit(6)),
-    q<Record<string, unknown>[]>(admin.from("DispensaireMatiere").select("nom,fournisseur").or(`nom.ilike.${like},fournisseur.ilike.${like}`).limit(6)),
+    q<Record<string, unknown>[]>(admin.from("DispensaireStock").select("nom,coffre").neq("categorie", "matiere").or(`nom.ilike.${like},coffre.ilike.${like}`).limit(6)),
+    q<Record<string, unknown>[]>(admin.from("DispensaireStock").select("nom,fournisseur").eq("categorie", "matiere").or(`nom.ilike.${like},fournisseur.ilike.${like}`).limit(6)),
     q<Record<string, unknown>[]>(admin.from("DispensaireCoffre").select("nom,emplacement,responsable").or(`nom.ilike.${like},emplacement.ilike.${like},responsable.ilike.${like}`).limit(6)),
     q<Record<string, unknown>[]>(admin.from("DispensaireRapport").select("titre,patient").or(`titre.ilike.${like},patient.ilike.${like}`).limit(6)),
     q<Record<string, unknown>[]>(admin.from("DispensaireVente").select("patient").ilike("patient", like).limit(20)),

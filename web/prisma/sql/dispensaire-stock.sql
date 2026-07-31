@@ -15,12 +15,15 @@ CREATE TABLE IF NOT EXISTS "DispensaireStock" (
   "stock"      INTEGER NOT NULL DEFAULT 0,              -- stock GLISSANT (actuel)
   "stockFixe"  INTEGER NOT NULL DEFAULT 0,              -- stock FIXE (référence / cible)
   "seuil"      INTEGER NOT NULL DEFAULT 0,              -- seuil d'alerte (0 = pas d'alerte)
+  "fournisseur" TEXT,                                   -- fournisseur (matières premières & matériel)
   "note"       TEXT,
   "createdAt"  TIMESTAMPTZ NOT NULL DEFAULT now(),
   "updatedAt"  TIMESTAMPTZ NOT NULL DEFAULT now(),
   "updatedBy"  TEXT
 );
 ALTER TABLE "DispensaireStock" ENABLE ROW LEVEL SECURITY;
+-- Idempotent : ajoute la colonne fournisseur sur une base déjà installée.
+ALTER TABLE "DispensaireStock" ADD COLUMN IF NOT EXISTS "fournisseur" TEXT;
 CREATE INDEX IF NOT EXISTS "DispensaireStock_coffre_idx" ON "DispensaireStock" (lower(coalesce("coffre", '')));
 
 -- Journal des mouvements (traçabilité des coffres).
@@ -38,3 +41,18 @@ CREATE TABLE IF NOT EXISTS "DispensaireStockMouvement" (
 ALTER TABLE "DispensaireStockMouvement" ENABLE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS "DispensaireStockMouvement_date_idx" ON "DispensaireStockMouvement" ("createdAt" DESC);
 CREATE INDEX IF NOT EXISTS "DispensaireStockMouvement_item_idx" ON "DispensaireStockMouvement" ("stockId");
+
+-- Coffres (entités : nom, emplacement, responsable) — référencés par le Stockage
+-- (les objets pointent sur un coffre par son NOM). Fait partie du système de stock.
+CREATE TABLE IF NOT EXISTS "DispensaireCoffre" (
+  "id"           TEXT PRIMARY KEY,
+  "nom"          TEXT NOT NULL,
+  "emplacement"  TEXT,
+  "responsable"  TEXT,
+  "note"         TEXT,
+  "createdAt"    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  "updatedAt"    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  "updatedBy"    TEXT
+);
+ALTER TABLE "DispensaireCoffre" ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS "DispensaireCoffre_nom_idx" ON "DispensaireCoffre" (lower("nom"));

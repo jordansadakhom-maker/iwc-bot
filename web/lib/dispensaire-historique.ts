@@ -17,7 +17,7 @@ export async function getHistorique(): Promise<HistoData> {
   const admin = createAdminClient();
   if (!admin) return { pret: false, items: [], modules: [], actions: [] };
 
-  const [mvts, coffres, ventes, point, frais, factures, factureLogs, certs, rapports, salaries, matieres, fdo] = await Promise.all([
+  const [mvts, coffres, ventes, point, frais, factures, factureLogs, certs, rapports, salaries, fdo] = await Promise.all([
     q<Record<string, unknown>[]>(admin.from("DispensaireStockMouvement").select("id,nomItem,coffre,delta,apres,motif,par,createdAt").order("createdAt", { ascending: false }).limit(L * 2)),
     q<Record<string, unknown>[]>(admin.from("DispensaireCoffre").select("id,nom,emplacement,responsable,createdAt,updatedAt,updatedBy").order("updatedAt", { ascending: false }).limit(L)),
     q<Record<string, unknown>[]>(admin.from("DispensaireVente").select("id,patient,quantite,item,total,par,createdAt").order("createdAt", { ascending: false }).limit(L)),
@@ -28,7 +28,6 @@ export async function getHistorique(): Promise<HistoData> {
     q<Record<string, unknown>[]>(admin.from("DispensaireCertificat").select("id,patient,type,par,createdAt").order("createdAt", { ascending: false }).limit(L)),
     q<Record<string, unknown>[]>(admin.from("DispensaireRapport").select("id,titre,par,createdAt").order("createdAt", { ascending: false }).limit(L)),
     q<Record<string, unknown>[]>(admin.from("DispensaireSalarie").select("id,nom,statut,updatedBy,updatedAt").order("updatedAt", { ascending: false }).limit(L)),
-    q<Record<string, unknown>[]>(admin.from("DispensaireMatiere").select("id,nom,quantite,updatedBy,updatedAt").order("updatedAt", { ascending: false }).limit(L)),
     q<Record<string, unknown>[]>(admin.from("DispensaireSoinFDO").select("id,bureau,agent,montant,par,createdAt").order("createdAt", { ascending: false }).limit(L)),
   ]);
 
@@ -55,7 +54,7 @@ export async function getHistorique(): Promise<HistoData> {
   for (const r of certs || []) items.push({ id: "c" + r.id, module: "Certificats", action: String(r.type), cible: String(r.patient), coffre: null, detail: null, par: str(r.par), at: String(r.createdAt) });
   for (const r of rapports || []) items.push({ id: "r" + r.id, module: "Rapports", action: "Rapport", cible: String(r.titre), coffre: null, detail: null, par: str(r.par), at: String(r.createdAt) });
   for (const r of salaries || []) items.push({ id: "s" + r.id, module: "RH", action: "Fiche", cible: String(r.nom), coffre: null, detail: String(r.statut), par: str(r.updatedBy), at: String(r.updatedAt) });
-  for (const r of matieres || []) items.push({ id: "mp" + r.id, module: "Matières", action: "Mise à jour", cible: String(r.nom), coffre: null, detail: `${num(r.quantite)} u`, par: str(r.updatedBy), at: String(r.updatedAt) });
+  // Matières premières = articles de stock : leurs mouvements figurent déjà dans le module « Stockage » ci-dessus.
   for (const r of fdo || []) items.push({ id: "fo" + r.id, module: "FDO", action: "Soin", cible: `${r.bureau}${r.agent ? " · " + r.agent : ""}`, coffre: null, detail: `$${num(r.montant)}`, par: str(r.par), at: String(r.createdAt) });
 
   const clean = items.filter((i) => i.at && i.at !== "null" && i.at !== "undefined").sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 200);
