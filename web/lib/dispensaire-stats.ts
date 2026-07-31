@@ -42,7 +42,7 @@ export async function getStats(): Promise<StatsData> {
 
   const moisPrefix = ymdParis(new Date().toISOString()).slice(0, 7);
 
-  const [sal, ouv, clos, ventes, mvts, fdo, factures, frais, stock, matieres] = await Promise.all([
+  const [sal, ouv, clos, ventes, mvts, fdo, factures, frais, stock] = await Promise.all([
     q<Record<string, unknown>[]>(admin.from("DispensaireSalarie").select("statut,absJustifiees,absInjustifiees")),
     q<Record<string, unknown>[]>(admin.from("DispensairePointage").select("id").is("fin", null)),
     q<Record<string, unknown>[]>(admin.from("DispensairePointage").select("debut,dureeMin").not("fin", "is", null).order("debut", { ascending: false }).limit(400)),
@@ -51,8 +51,7 @@ export async function getStats(): Promise<StatsData> {
     q<Record<string, unknown>[]>(admin.from("DispensaireSoinFDO").select("bureau,montant")),
     q<Record<string, unknown>[]>(admin.from("DispensaireFacture").select("montant,statut,statuts")),
     q<Record<string, unknown>[]>(admin.from("DispensaireFrais").select("montant,statut,createdAt")),
-    q<Record<string, unknown>[]>(admin.from("DispensaireStock").select("stock,seuil")),
-    q<Record<string, unknown>[]>(admin.from("DispensaireMatiere").select("quantite,seuil")),
+    q<Record<string, unknown>[]>(admin.from("DispensaireStock").select("categorie,stock,seuil")),
   ]);
 
   const pret = sal !== null || clos !== null;
@@ -60,9 +59,13 @@ export async function getStats(): Promise<StatsData> {
   // KPIs
   const salariesActifs = (sal || []).filter((r) => String(r.statut || "actif") === "actif").length;
   const enService = (ouv || []).length;
-  const articles = (stock || []).length;
-  const articlesAlerte = (stock || []).filter((r) => num(r.seuil) > 0 && num(r.stock) <= num(r.seuil)).length;
-  const matieresRupture = (matieres || []).filter((r) => num(r.seuil) > 0 && num(r.quantite) <= num(r.seuil)).length;
+  // Matières premières = catégorie « matiere » du stock mutualisé : on partitionne
+  // le stock pour compter le matériel médical et les matières SANS double comptage.
+  const stockMed = (stock || []).filter((r) => String(r.categorie) !== "matiere");
+  const stockMat = (stock || []).filter((r) => String(r.categorie) === "matiere");
+  const articles = stockMed.length;
+  const articlesAlerte = stockMed.filter((r) => num(r.seuil) > 0 && num(r.stock) <= num(r.seuil)).length;
+  const matieresRupture = stockMat.filter((r) => num(r.seuil) > 0 && num(r.stock) <= num(r.seuil)).length;
   // Ouverte (encore due) = tout SAUF « Payée » ou « Clôturé » — statuts multiples
   // pris en compte (une facture relancée / transmise reste due). Cohérent avec la
   // page Factures (getFactures).

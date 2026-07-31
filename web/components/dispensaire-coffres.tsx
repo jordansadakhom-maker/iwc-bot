@@ -122,7 +122,7 @@ export function DispensaireCoffres({ data }: { data: CoffresInvData }) {
       const r = await majItem(editing.id, clean);
       if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else router.refresh();
     } else {
-      const tmp: StockItem = { id: rid(), nom: vals.nom, categorie: vals.categorie || "materiel", coffre: vals.coffre || null, unite: vals.unite || null, stock: clean.stock, stockFixe: clean.stockFixe, seuil: clean.seuil, note: vals.note || null, photo: vals.photo || null, updatedAt: null, updatedBy: null };
+      const tmp: StockItem = { id: rid(), nom: vals.nom, categorie: vals.categorie || "materiel", coffre: vals.coffre || null, unite: vals.unite || null, stock: clean.stock, stockFixe: clean.stockFixe, seuil: clean.seuil, fournisseur: vals.fournisseur || null, note: vals.note || null, photo: vals.photo || null, updatedAt: null, updatedBy: null };
       setItems((p) => [...p, tmp]);
       const r = await creerItem(clean);
       if (!r.ok) { setItems((p) => p.filter((it) => it.id !== tmp.id)); setFlash({ t: "bad", m: r.error || "Impossible." }); }
@@ -155,7 +155,7 @@ export function DispensaireCoffres({ data }: { data: CoffresInvData }) {
 
   return (
     <div className="flex flex-col gap-4">
-      {!data.pret ? <Flash tone="bad">Lance <b>web/prisma/sql/dispensaire-matieres.sql</b> et <b>dispensaire-stock.sql</b> dans Supabase, puis recharge.</Flash> : null}
+      {!data.pret ? <Flash tone="bad">Lance <b>web/prisma/sql/dispensaire-stock.sql</b> dans Supabase, puis recharge.</Flash> : null}
       {flash ? <Flash tone={flash.t === "ok" ? "good" : "bad"}>{flash.m}</Flash> : null}
       {data.pret && !canEdit ? <div className="flex items-center gap-2 rounded-[12px] border border-border bg-surface-2 px-3 py-2 text-[0.78rem] text-muted"><Lock className="h-3.5 w-3.5 text-faint" /> Consultation seule — ton grade ne permet pas de modifier les coffres.</div> : null}
 
@@ -351,7 +351,7 @@ function CoffreForm({ initial, onClose, onSave }: { initial: CoffreMeta | null; 
 
 function ItemForm({ initial, defaultCoffre, coffres, onClose, onSave }: { initial: StockItem | null; defaultCoffre: string; coffres: string[]; onClose: () => void; onSave: (v: Record<string, string>) => void }) {
   const [v, setV] = useState<Record<string, string>>(() => ({
-    nom: initial?.nom || "", categorie: initial?.categorie || "materiel", coffre: initial?.coffre ?? defaultCoffre ?? "", unite: initial?.unite || "",
+    nom: initial?.nom || "", categorie: initial?.categorie || "materiel", coffre: initial?.coffre ?? defaultCoffre ?? "", unite: initial?.unite || "", fournisseur: initial?.fournisseur || "",
     stock: String(initial?.stock ?? 0), stockFixe: String(initial?.stockFixe ?? 0), seuil: String(initial?.seuil ?? 0), note: initial?.note || "", photo: initial?.photo || "",
   }));
   const [err, setErr] = useState<string | null>(null);
@@ -367,6 +367,7 @@ function ItemForm({ initial, defaultCoffre, coffres, onClose, onSave }: { initia
           <Champ label="Coffre"><input className={inputCls} value={v.coffre} onChange={set("coffre")} placeholder="Coffre principal… (vide = Non rangé)" list="disp-coffres-inv" /><datalist id="disp-coffres-inv">{coffres.map((c) => <option key={c} value={c} />)}</datalist></Champ>
           <Champ label="Unité"><input className={inputCls} value={v.unite} onChange={set("unite")} placeholder="u, flacon, kg…" /></Champ>
         </div>
+        <Champ label="Fournisseur (facultatif)"><input className={inputCls} value={v.fournisseur} onChange={set("fournisseur")} placeholder="Nom / entreprise" /></Champ>
         <div className="grid gap-3 sm:grid-cols-3">
           <Champ label="Stock actuel"><input className={inputCls} value={v.stock} onChange={setNum("stock")} inputMode="numeric" /></Champ>
           <Champ label="Stock fixe (cible)"><input className={inputCls} value={v.stockFixe} onChange={setNum("stockFixe")} inputMode="numeric" /></Champ>

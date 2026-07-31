@@ -40,7 +40,7 @@ export async function getAuditDispensaire(): Promise<RapportAudit> {
     catch { return []; }
   };
 
-  const [chambres, factures, stock, mouvements, membres, grades, rdv, pointages, matieres, ambulances, frais, interventions] = await Promise.all([
+  const [chambres, factures, stock, mouvements, membres, grades, rdv, pointages, ambulances, frais, interventions] = await Promise.all([
     q("DispensaireChambre", "id,nom,etat,patient,patientNormalise"),
     q("DispensaireFacture", "id,montant,statut"),
     q("DispensaireStock", "id,nom,stock,seuil,stockFixe"),
@@ -49,7 +49,6 @@ export async function getAuditDispensaire(): Promise<RapportAudit> {
     getGrades().catch(() => []),
     q("DispensaireRendezVous", "id,patient,etat,debut"),
     q("DispensairePointage", "id,nom,debut,fin"),
-    q("DispensaireMatiere", "id,nom,quantite"),
     q("DispensaireAmbulance", "id,nom,etat,essence"),
     q("DispensaireFrais", "id,objet,montant,statut"),
     q("DispensaireIntervention", "id,patient,statut"),
@@ -104,11 +103,10 @@ export async function getAuditDispensaire(): Promise<RapportAudit> {
   if (membres.length > 0 && admActifs === 0)
     A.push({ categorie: "Permissions", gravite: "majeur", titre: "Aucun administrateur actif", detail: "des membres existent mais aucun n'a le droit admin", suggestion: "Attribuer un grade « admin » à au moins un membre.", ref: "perms" });
 
-  // ── Élargissement : matières, rendez-vous, pointage, ambulances ───────────
+  // ── Élargissement : rendez-vous, pointage, ambulances ─────────────────────
+  // (Les matières premières sont des articles de stock : le contrôle « Stock
+  // négatif » ci-dessus les couvre déjà — pas de contrôle dédié.)
   const now = Date.now();
-  ctrl();
-  for (const m of matieres) if (Number(m.quantite) < 0)
-    A.push({ categorie: "Cohérence", gravite: "majeur", titre: "Matière première négative", detail: `${m.nom} = ${m.quantite}`, suggestion: "Corriger le stock de matière.", ref: String(m.id) });
   ctrl();
   for (const r of rdv) if (r.etat === "prevu") {
     const d = r.debut ? Date.parse(String(r.debut)) : NaN;

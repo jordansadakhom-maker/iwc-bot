@@ -29,10 +29,11 @@ CREATE INDEX IF NOT EXISTS "DispensairePointage_ouvert_idx" ON "DispensairePoint
 CREATE TABLE IF NOT EXISTS "DispensaireStock" (
   "id" TEXT PRIMARY KEY, "nom" TEXT NOT NULL, "categorie" TEXT NOT NULL DEFAULT 'materiel',
   "coffre" TEXT, "unite" TEXT, "stock" INTEGER NOT NULL DEFAULT 0, "stockFixe" INTEGER NOT NULL DEFAULT 0,
-  "seuil" INTEGER NOT NULL DEFAULT 0, "note" TEXT,
+  "seuil" INTEGER NOT NULL DEFAULT 0, "fournisseur" TEXT, "note" TEXT,
   "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(), "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now(), "updatedBy" TEXT
 );
 ALTER TABLE "DispensaireStock" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "DispensaireStock" ADD COLUMN IF NOT EXISTS "fournisseur" TEXT;
 CREATE INDEX IF NOT EXISTS "DispensaireStock_coffre_idx" ON "DispensaireStock" (lower(coalesce("coffre", '')));
 
 CREATE TABLE IF NOT EXISTS "DispensaireStockMouvement" (
@@ -43,15 +44,9 @@ ALTER TABLE "DispensaireStockMouvement" ENABLE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS "DispensaireStockMouvement_date_idx" ON "DispensaireStockMouvement" ("createdAt" DESC);
 CREATE INDEX IF NOT EXISTS "DispensaireStockMouvement_item_idx" ON "DispensaireStockMouvement" ("stockId");
 
--- ── Matières premières + Coffres ───────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS "DispensaireMatiere" (
-  "id" TEXT PRIMARY KEY, "nom" TEXT NOT NULL, "quantite" INTEGER NOT NULL DEFAULT 0,
-  "seuil" INTEGER NOT NULL DEFAULT 0, "cible" INTEGER NOT NULL DEFAULT 0, "unite" TEXT, "fournisseur" TEXT, "note" TEXT,
-  "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(), "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now(), "updatedBy" TEXT
-);
-ALTER TABLE "DispensaireMatiere" ENABLE ROW LEVEL SECURITY;
-CREATE INDEX IF NOT EXISTS "DispensaireMatiere_nom_idx" ON "DispensaireMatiere" (lower("nom"));
-
+-- ── Coffres (entités du stockage) ──────────────────────────────────────────
+-- Note : les « matières premières » ne sont plus une table dédiée — ce sont des
+-- articles de DispensaireStock avec categorie = 'matiere'.
 CREATE TABLE IF NOT EXISTS "DispensaireCoffre" (
   "id" TEXT PRIMARY KEY, "nom" TEXT NOT NULL, "emplacement" TEXT, "responsable" TEXT, "note" TEXT,
   "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(), "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now(), "updatedBy" TEXT

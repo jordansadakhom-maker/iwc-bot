@@ -30,9 +30,8 @@ export const getNotifications = cache(async (): Promise<{ items: Notif[]; count:
   const cfg = await getConfig();
   const monday = lundiCourant();
 
-  const [stock, matieres, factures, ventes, frais, salaries] = await Promise.all([
-    q<Record<string, unknown>[]>(admin.from("DispensaireStock").select("nom,stock,seuil,unite")),
-    q<Record<string, unknown>[]>(admin.from("DispensaireMatiere").select("nom,quantite,seuil")),
+  const [stock, factures, ventes, frais, salaries] = await Promise.all([
+    q<Record<string, unknown>[]>(admin.from("DispensaireStock").select("categorie,nom,stock,seuil,unite")),
     q<Record<string, unknown>[]>(admin.from("DispensaireFacture").select("objet,montant,statut,statuts,dateEcheance,dateEmission")),
     q<Record<string, unknown>[]>(admin.from("DispensaireVente").select("patient,quantite,item,createdAt").order("createdAt", { ascending: false }).limit(300)),
     q<Record<string, unknown>[]>(admin.from("DispensaireFrais").select("statut")),
@@ -42,9 +41,18 @@ export const getNotifications = cache(async (): Promise<{ items: Notif[]; count:
   const items: Notif[] = [];
   const today = ymdParis(new Date().toISOString());
 
+  // Stock mutualisé : une matière (catégorie « matiere ») donne une notif dédiée
+  // « Matière première » (→ page Matières) ; tout autre article donne « Stock faible »
+  // (→ page Stockage). Chaque article n'apparaît qu'UNE fois. `stockFaibleNoms` est
+  // alimenté dans les deux cas pour la dédup des ruptures prévues plus bas.
   const stockFaibleNoms = new Set<string>();
-  for (const r of stock || []) if (num(r.seuil) > 0 && num(r.stock) <= num(r.seuil)) { stockFaibleNoms.add(String(r.nom)); items.push({ id: "st-" + r.nom, severite: "alerte", type: "Stock faible", texte: `Stock faible : ${r.nom} (${num(r.stock)}${r.unite ? " " + r.unite : ""} / seuil ${num(r.seuil)})`, href: "/dispensaire/stockage" }); }
-  for (const r of matieres || []) if (num(r.seuil) > 0 && num(r.quantite) <= num(r.seuil)) items.push({ id: "mp-" + r.nom, severite: "alerte", type: "Matière première", texte: `Matière première basse : ${r.nom} (${num(r.quantite)} / seuil ${num(r.seuil)})`, href: "/dispensaire/matieres" });
+  for (const r of stock || []) {
+    if (!(num(r.seuil) > 0 && num(r.stock) <= num(r.seuil))) continue;
+    stockFaibleNoms.add(String(r.nom));
+    const q = `${num(r.stock)}${r.unite ? " " + r.unite : ""} / seuil ${num(r.seuil)}`;
+    if (String(r.categorie) === "matiere") items.push({ id: "mp-" + r.nom, severite: "alerte", type: "Matière première", texte: `Matière première basse : ${r.nom} (${q})`, href: "/dispensaire/matieres" });
+    else items.push({ id: "st-" + r.nom, severite: "alerte", type: "Stock faible", texte: `Stock faible : ${r.nom} (${q})`, href: "/dispensaire/stockage" });
+  }
 
   // Rupture PRÉVUE (prospectif) : au rythme de consommation actuel, l'article
   // tombera à zéro sous peu — et il n'est pas encore signalé « sous seuil ».

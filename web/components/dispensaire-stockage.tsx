@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Boxes, Plus, Search, Check, Pencil, Trash2, AlertTriangle, Archive, ArrowDownRight, ArrowUpRight, History, Lock, Layers } from "lucide-react";
+import { Boxes, Plus, Search, Check, Pencil, Trash2, AlertTriangle, Archive, ArrowDownRight, ArrowUpRight, History, Lock, Layers, FlaskConical, Truck, type LucideIcon } from "lucide-react";
 import { CATEGORIES, catLabel, enAlerte, type StockData, type StockItem, type StockMouvement } from "@/lib/dispensaire-stock-const";
 import { Modal, Flash, Champ, Picker, PhotoField, inputCls } from "@/components/edit-ui";
 import { VideRegistre } from "@/components/dispensaire-ui";
@@ -13,11 +13,37 @@ const norm = (x: string) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,
 const dtFR = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); } catch { return "—"; } };
 const catTone: Record<string, string> = { medicament: "var(--accent)", materiel: "var(--muted)", matiere: "var(--warn)", nourriture: "var(--good)", autre: "var(--faint)" };
 
-export function DispensaireStockage({ data }: { data: StockData }) {
+// Portée optionnelle : un écran « Stockage » restreint à une seule catégorie
+// (ex. les Matières premières). La prop est 100 % sérialisable (une chaîne) —
+// l'icône et les libellés sont résolus ICI, côté client, jamais passés depuis le
+// serveur (garde la frontière RSC propre). Sans `scope`, l'écran affiche TOUT le
+// stock, à l'identique du stock médical.
+export type StockScope = "matiere";
+const SCOPE_CFG: Record<StockScope, { categorie: string; titre: string; icon: LucideIcon; ajouter: string; chercher: string; videTitre: string; videSous: string }> = {
+  matiere: {
+    categorie: "matiere",
+    titre: "Matières premières",
+    icon: FlaskConical,
+    ajouter: "Ajouter une matière",
+    chercher: "Rechercher une matière, un fournisseur…",
+    videTitre: "Aucune matière première au registre",
+    videSous: "Inscris une première matière — quantité, seuil, fournisseur — et l'officine tiendra le compte, coffre par coffre.",
+  },
+};
+
+export function DispensaireStockage({ data, scope }: { data: StockData; scope?: StockScope }) {
   const router = useRouter();
   const canEdit = data.canEdit;
-  const [items, setItems] = useState<StockItem[]>(data.items);
-  const [mvts, setMvts] = useState<StockMouvement[]>(data.mouvements);
+  const cfg = scope ? SCOPE_CFG[scope] : null;
+  const Icon = cfg?.icon ?? Boxes;
+  // Restreint les articles (et les mouvements liés) à la catégorie de la portée.
+  // Sans portée, on renvoie les données telles quelles → stock médical inchangé.
+  const [items, setItems] = useState<StockItem[]>(() => (cfg ? data.items.filter((i) => i.categorie === cfg.categorie) : data.items));
+  const [mvts, setMvts] = useState<StockMouvement[]>(() => {
+    if (!cfg) return data.mouvements;
+    const ids = new Set(data.items.filter((i) => i.categorie === cfg.categorie).map((i) => i.id));
+    return data.mouvements.filter((m) => m.stockId != null && ids.has(m.stockId));
+  });
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("");
   const [coffreF, setCoffreF] = useState("");
@@ -32,14 +58,20 @@ export function DispensaireStockage({ data }: { data: StockData }) {
   // qui resterait affichée si une écriture avait échoué). `data` ne change
   // d'identité qu'au rendu serveur (montage + refresh), jamais sur un simple
   // re-render client — donc pas de scintillement pendant la saisie.
-  useEffect(() => { setItems(data.items); setMvts(data.mouvements); }, [data]);
+  useEffect(() => {
+    const its = cfg ? data.items.filter((i) => i.categorie === cfg.categorie) : data.items;
+    setItems(its);
+    if (!cfg) { setMvts(data.mouvements); return; }
+    const ids = new Set(its.map((i) => i.id));
+    setMvts(data.mouvements.filter((m) => m.stockId != null && ids.has(m.stockId)));
+  }, [data, cfg]);
 
   const query = norm(q.trim());
   const liste = useMemo(() => items.filter((it) =>
     (!cat || it.categorie === cat) &&
     (!coffreF || (it.coffre || "") === coffreF) &&
     (!seulAlerte || enAlerte(it)) &&
-    (!query || norm([it.nom, it.coffre, it.note, catLabel(it.categorie)].filter(Boolean).join(" ")).includes(query))
+    (!query || norm([it.nom, it.coffre, it.fournisseur, it.note, catLabel(it.categorie)].filter(Boolean).join(" ")).includes(query))
   ), [items, cat, coffreF, seulAlerte, query]);
 
   const coffres = useMemo(() => [...new Set(items.map((i) => (i.coffre || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [items]);
@@ -60,7 +92,7 @@ export function DispensaireStockage({ data }: { data: StockData }) {
     const m = new Map<string, { nom: string; unite: string | null; total: number; seuil: number; parCoffre: { coffre: string; stock: number }[] }>();
     for (const it of items) {
       if (cat && it.categorie !== cat) continue;
-      if (query && !norm([it.nom, it.coffre, it.note, catLabel(it.categorie)].filter(Boolean).join(" ")).includes(query)) continue;
+      if (query && !norm([it.nom, it.coffre, it.fournisseur, it.note, catLabel(it.categorie)].filter(Boolean).join(" ")).includes(query)) continue;
       const k = norm(it.nom.trim());
       const e = m.get(k) || { nom: it.nom, unite: it.unite, total: 0, seuil: 0, parCoffre: [] };
       e.total += it.stock;
@@ -79,7 +111,7 @@ export function DispensaireStockage({ data }: { data: StockData }) {
       const r = await majItem(editing.id, clean);
       if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else router.refresh();
     } else {
-      const tmp: StockItem = { id: "tmp-" + Math.random().toString(36).slice(2, 8), nom: vals.nom, categorie: vals.categorie || "materiel", coffre: vals.coffre || null, unite: vals.unite || null, stock: clean.stock, stockFixe: clean.stockFixe, seuil: clean.seuil, note: vals.note || null, photo: vals.photo || null, updatedAt: null, updatedBy: null };
+      const tmp: StockItem = { id: "tmp-" + Math.random().toString(36).slice(2, 8), nom: vals.nom, categorie: vals.categorie || "materiel", coffre: vals.coffre || null, unite: vals.unite || null, stock: clean.stock, stockFixe: clean.stockFixe, seuil: clean.seuil, fournisseur: vals.fournisseur || null, note: vals.note || null, photo: vals.photo || null, updatedAt: null, updatedBy: null };
       setItems((p) => [...p, tmp]); setForm(null);
       const r = await creerItem(clean);
       if (!r.ok) { setItems((p) => p.filter((it) => it.id !== tmp.id)); setFlash({ t: "bad", m: r.error || "Impossible." }); }
@@ -107,11 +139,11 @@ export function DispensaireStockage({ data }: { data: StockData }) {
       {/* Barre d'action */}
       <div className="flex flex-wrap items-center justify-between gap-2.5">
         <div className="flex items-center gap-2.5">
-          <h3 className="flex items-center gap-2 text-[0.95rem] font-semibold"><Boxes className="h-4 w-4 text-accent" /> Stockage</h3>
+          <h3 className="flex items-center gap-2 text-[0.95rem] font-semibold"><Icon className="h-4 w-4 text-accent" /> {cfg?.titre ?? "Stockage"}</h3>
           <span className="font-num text-[0.8rem] text-faint">{items.length}</span>
           {alertes.length ? <button onClick={() => setSeulAlerte((v) => !v)} className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.68rem] font-bold text-white" style={{ background: "var(--oxblood)", opacity: seulAlerte ? 1 : 0.85 }}><AlertTriangle className="h-3 w-3" /> {alertes.length} en alerte</button> : null}
         </div>
-        {canEdit ? <button onClick={() => setForm("new")} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Plus className="h-3.5 w-3.5" strokeWidth={2} /> Ajouter article</button> : null}
+        {canEdit ? <button onClick={() => setForm("new")} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Plus className="h-3.5 w-3.5" strokeWidth={2} /> {cfg?.ajouter ?? "Ajouter article"}</button> : null}
       </div>
 
       {/* Alertes */}
@@ -126,8 +158,8 @@ export function DispensaireStockage({ data }: { data: StockData }) {
 
       {/* Filtres */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[180px] flex-1"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" /><input className={inputCls + " pl-8"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un article, un coffre…" /></div>
-        <select className={inputCls + " max-w-[170px]"} value={cat} onChange={(e) => setCat(e.target.value)}><option value="">Toutes catégories</option>{CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select>
+        <div className="relative min-w-[180px] flex-1"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" /><input className={inputCls + " pl-8"} value={q} onChange={(e) => setQ(e.target.value)} placeholder={cfg?.chercher ?? "Rechercher un article, un coffre…"} /></div>
+        {!cfg ? <select className={inputCls + " max-w-[170px]"} value={cat} onChange={(e) => setCat(e.target.value)}><option value="">Toutes catégories</option>{CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select> : null}
         {vue === "coffre" && coffres.length ? <select className={inputCls + " max-w-[170px]"} value={coffreF} onChange={(e) => setCoffreF(e.target.value)}><option value="">Tous les coffres</option>{coffres.map((c) => <option key={c} value={c}>{c}</option>)}</select> : null}
         <div className="inline-flex rounded-lg border border-border bg-surface-2 p-0.5">
           {([["coffre", "Par coffre", Archive], ["global", "Vue globale", Layers]] as const).map(([k, lbl, Ic]) => (
@@ -172,7 +204,7 @@ export function DispensaireStockage({ data }: { data: StockData }) {
         liste.length === 0 ? (
           items.length
             ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">Aucun article ne correspond à ta recherche.</p>
-            : <VideRegistre icon={Boxes} titre="Les coffres sont encore vides" sous="Ajoute un premier article — remède, matériel ou matière — et l'inventaire se tiendra à jour, coffre par coffre." />
+            : <VideRegistre icon={Icon} titre={cfg?.videTitre ?? "Les coffres sont encore vides"} sous={cfg?.videSous ?? "Ajoute un premier article — remède, matériel ou matière — et l'inventaire se tiendra à jour, coffre par coffre."} />
         ) : groupes.map(([coffre, its]) => (
           <section key={coffre}>
             <div className="mb-1.5 flex items-center gap-1.5 text-[0.74rem] font-semibold uppercase tracking-[0.05em] text-faint"><Archive className="h-3.5 w-3.5" /> {coffre} <span className="font-num">({its.length})</span></div>
@@ -199,7 +231,7 @@ export function DispensaireStockage({ data }: { data: StockData }) {
         </section>
       ) : null}
 
-      {form ? <ItemForm initial={form === "new" ? null : form} coffres={coffres} onClose={() => setForm(null)} onSave={(v) => enregistrer(v, form === "new" ? null : form)} /> : null}
+      {form ? <ItemForm initial={form === "new" ? null : form} coffres={coffres} lockCat={cfg?.categorie} onClose={() => setForm(null)} onSave={(v) => enregistrer(v, form === "new" ? null : form)} /> : null}
       {delId ? <ConfirmDelete nom={items.find((i) => i.id === delId)?.nom || ""} onCancel={() => setDelId(null)} onConfirm={() => supprimer(delId)} /> : null}
     </div>
   );
@@ -227,6 +259,7 @@ function ItemCard({ it, canEdit, onEdit, onDel, onAdjust }: { it: StockItem; can
             <span className="rounded-full px-1.5 py-0.5 text-[0.6rem] font-bold uppercase" style={{ color: catTone[it.categorie] || "var(--muted)", background: `color-mix(in srgb,${catTone[it.categorie] || "var(--muted)"} 14%,transparent)` }}>{catLabel(it.categorie)}</span>
             {alerte ? <span className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[0.6rem] font-bold text-white" style={{ background: "var(--oxblood)" }}><AlertTriangle className="h-2.5 w-2.5" /> alerte</span> : null}
           </div>
+          {it.fournisseur ? <div className="mt-0.5 flex items-center gap-1 text-[0.72rem] text-faint"><Truck className="h-3 w-3" /> {it.fournisseur}</div> : null}
           {it.note ? <div className="mt-0.5 text-[0.72rem] text-faint">{it.note}</div> : null}
           </div>
         </div>
@@ -256,9 +289,9 @@ function ItemCard({ it, canEdit, onEdit, onDel, onAdjust }: { it: StockItem; can
   );
 }
 
-function ItemForm({ initial, coffres, onClose, onSave }: { initial: StockItem | null; coffres: string[]; onClose: () => void; onSave: (v: Record<string, string>) => void }) {
+function ItemForm({ initial, coffres, lockCat, onClose, onSave }: { initial: StockItem | null; coffres: string[]; lockCat?: string; onClose: () => void; onSave: (v: Record<string, string>) => void }) {
   const [v, setV] = useState<Record<string, string>>(() => ({
-    nom: initial?.nom || "", categorie: initial?.categorie || "materiel", coffre: initial?.coffre || "", unite: initial?.unite || "",
+    nom: initial?.nom || "", categorie: initial?.categorie || lockCat || "materiel", coffre: initial?.coffre || "", unite: initial?.unite || "", fournisseur: initial?.fournisseur || "",
     stock: String(initial?.stock ?? 0), stockFixe: String(initial?.stockFixe ?? 0), seuil: String(initial?.seuil ?? 0), note: initial?.note || "", photo: initial?.photo || "",
   }));
   const [err, setErr] = useState<string | null>(null);
@@ -269,11 +302,12 @@ function ItemForm({ initial, coffres, onClose, onSave }: { initial: StockItem | 
     <Modal titre={initial ? "✏️ Modifier l'article" : "➕ Ajouter un article"} onClose={onClose} max={560}>
       <div className="flex flex-col gap-3">
         <Champ label="Nom *"><input className={inputCls} value={v.nom} onChange={set("nom")} placeholder="Bandages, morphine, bois…" autoFocus /></Champ>
-        <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Catégorie</span><Picker options={CATEGORIES.map((c) => ({ key: c.key, label: c.label, tone: catTone[c.key] }))} value={v.categorie} onChange={(x) => setV((p) => ({ ...p, categorie: x }))} /></div>
+        {!lockCat ? <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Catégorie</span><Picker options={CATEGORIES.map((c) => ({ key: c.key, label: c.label, tone: catTone[c.key] }))} value={v.categorie} onChange={(x) => setV((p) => ({ ...p, categorie: x }))} /></div> : null}
         <div className="grid gap-3 sm:grid-cols-2">
           <Champ label="Coffre / emplacement"><input className={inputCls} value={v.coffre} onChange={set("coffre")} placeholder="Coffre principal…" list="disp-coffres" /><datalist id="disp-coffres">{coffres.map((c) => <option key={c} value={c} />)}</datalist></Champ>
           <Champ label="Unité"><input className={inputCls} value={v.unite} onChange={set("unite")} placeholder="u, flacon, kg…" /></Champ>
         </div>
+        <Champ label="Fournisseur (facultatif)"><input className={inputCls} value={v.fournisseur} onChange={set("fournisseur")} placeholder="Nom / entreprise" /></Champ>
         <div className="grid gap-3 sm:grid-cols-3">
           <Champ label="Stock actuel"><input className={inputCls} value={v.stock} onChange={setNum("stock")} inputMode="numeric" /></Champ>
           <Champ label="Stock fixe (cible)"><input className={inputCls} value={v.stockFixe} onChange={setNum("stockFixe")} inputMode="numeric" /></Champ>
