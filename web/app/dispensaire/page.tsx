@@ -11,13 +11,16 @@ import { AccueilService } from "@/components/dispensaire-accueil-service";
 import { DispensaireConsignes } from "@/components/dispensaire-consignes";
 import { DispensaireAccueilCockpit } from "@/components/dispensaire-accueil-cockpit";
 import { DispensaireTimeline } from "@/components/dispensaire-timeline";
+import { getDashboardPrefs } from "@/lib/dispensaire-dashboard-prefs";
 import { enregistrerConsigne } from "@/app/dispensaire/consignes-actions";
+import { enregistrerDashboardPrefs } from "@/app/dispensaire/dashboard-actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function DispensaireAccueil() {
   const [d, role, standalone, consigne, cfg, rdv] = await Promise.all([getAccueil(), getRoleDispensaire(), isStandalone(), getConsigneDuJour(), getConfig(), getRendezVous()]);
   const habilite = role.perms.rh || role.perms.factures || role.perms.admin;
+  const prefs = await getDashboardPrefs(role.identifiant);
   const modules = DISP_NAV.filter((t) => t.href !== "/dispensaire" && !t.direction && (!t.restreint || habilite) && !(standalone && t.href === "/repertoire"));
 
   const todayYmd = ymdParis(new Date().toISOString());
@@ -27,7 +30,7 @@ export default async function DispensaireAccueil() {
     <div className="flex flex-col gap-5">
       {/* Cockpit — widgets clés (compteurs animés, cliquables). Rendu dans un
           composant CLIENT : icônes & formateurs ne traversent pas la frontière RSC. */}
-      <DispensaireAccueilCockpit d={d} rdvAujourdhui={rdvAujourdhui} />
+      <DispensaireAccueilCockpit d={d} rdvAujourdhui={rdvAujourdhui} ordre={prefs.ordre} masques={prefs.masques} onSave={enregistrerDashboardPrefs} />
 
       {/* Consignes du jour (objectifs) — éditables par les responsables */}
       <DispensaireConsignes data={consigne} canEdit={habilite} onSave={enregistrerConsigne} />
