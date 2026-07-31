@@ -259,18 +259,20 @@ tbody tr:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); 
    (source order → nos règles préfixées .disp-premium gagnent).
    ============================================================ */
 .disp-premium {
-  /* Palette bleu médical — dark (défaut du scope). */
-  --bg:#0b1220; --bg-2:#070c14; --surface:#111b29; --surface-2:#182635;
-  --border:#263548; --border-2:#31435a;
-  --ink:#e9f1f9; --muted:#a2b4c8; --faint:#6d7f95;
-  --accent:#57a5e6; --accent-hi:#80bff3; --accent-lo:#2b6aa8;
-  --brass:#57a5e6; --brass-hi:#80bff3; --steel:#6f9fc4; --oxblood:#b0413a;
-  --good:#40c78a; --warn:#eea23a; --crit:#f0574e;
+  /* Far West — parchemin & encre (identité primaire du Dispensaire, scopée :
+     le reste d'Iron Wolf garde sa nuit sombre). Beige parchemin / papier jauni,
+     encre sépia, laiton ancien, vert bouteille (validation), bordeaux (alerte). */
+  --bg:#d9c5a0; --bg-2:#cfb992; --surface:#f5ead0; --surface-2:#ecdfc0;
+  --border:#c9b488; --border-2:#b39c6e;
+  --ink:#382a18; --muted:#6b5836; --faint:#98855e;
+  --accent:#9a761c; --accent-hi:#bd9430; --accent-lo:#75590f;
+  --brass:#9a761c; --brass-hi:#bd9430; --steel:#6d5a3e; --oxblood:#8f2f28;
+  --good:#3f6b34; --warn:#a9761e; --crit:#9a2f27;
   /* Verre + ombres + rayons + motion. */
-  --glass-bg:rgba(17,27,41,.55); --glass-bg-2:rgba(23,34,51,.68);
-  --glass-brd:rgba(255,255,255,.08); --glass-hi:rgba(255,255,255,.05); --glass-blur:14px;
-  --shadow-1:0 1px 2px -1px rgba(0,0,0,.5), 0 12px 28px -18px rgba(0,0,0,.65), inset 0 1px 0 0 var(--glass-hi);
-  --shadow-2:0 2px 6px -2px rgba(0,0,0,.5), 0 22px 46px -22px rgba(0,0,0,.7), 0 0 0 1px var(--glass-brd), 0 0 34px -10px color-mix(in srgb,var(--accent) 34%,transparent), inset 0 1px 0 0 rgba(255,255,255,.10);
+  --glass-bg:rgba(245,234,208,.62); --glass-bg-2:rgba(236,223,192,.72);
+  --glass-brd:rgba(56,42,24,.16); --glass-hi:rgba(255,250,235,.55); --glass-blur:6px;
+  --shadow-1:0 1px 2px -1px rgba(60,42,18,.26), 0 12px 26px -18px rgba(60,42,18,.40), inset 0 1px 0 0 var(--glass-hi);
+  --shadow-2:0 2px 6px -2px rgba(60,42,18,.28), 0 20px 44px -22px rgba(60,42,18,.44), 0 0 0 1px var(--glass-brd), 0 0 28px -12px color-mix(in srgb,var(--accent) 30%,transparent), inset 0 1px 0 0 rgba(255,250,235,.6);
   --ring:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent);
   --r-sm:10px; --r-md:14px; --r-lg:18px; --r-pill:999px;
   --dur-1:150ms; --dur-2:250ms; --dur-3:400ms;
@@ -278,9 +280,9 @@ tbody tr:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); 
   color: var(--ink);
   background-color: var(--bg);
   background-image:
-    radial-gradient(1100px 520px at 50% -10%, color-mix(in srgb,var(--accent) 12%,transparent), transparent 60%),
-    radial-gradient(820px 560px at 108% 4%, color-mix(in srgb,var(--steel) 10%,transparent), transparent 55%),
-    radial-gradient(900px 640px at -8% 104%, color-mix(in srgb,var(--good) 7%,transparent), transparent 55%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23p)' opacity='0.05'/%3E%3C/svg%3E"),
+    radial-gradient(1100px 520px at 50% -10%, rgba(154,118,28,.18), transparent 60%),
+    radial-gradient(820px 560px at 108% 4%, rgba(143,47,40,.09), transparent 55%),
     linear-gradient(180deg, var(--bg), var(--bg-2));
   background-attachment: fixed;
 }
