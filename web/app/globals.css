@@ -409,3 +409,13 @@ tbody tr:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); 
 }
 .disp-premium .disp-navbar > a:hover,
 .disp-premium .disp-navbar > div > button:hover { color: #fff8ea !important; }
+
+/* ══ Refonte Far West — tableaux « registre comptable du XIXe » ══════════════
+   En-tête teinté cuir/laiton avec double filet, lignes alternées (papier réglé),
+   surlignage doux au survol. Additif, scopé au Dispensaire. */
+.disp-premium thead th {
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface-2));
+  border-bottom: 2px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+}
+.disp-premium tbody tr:nth-child(even) { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.disp-premium tbody tr:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); }
