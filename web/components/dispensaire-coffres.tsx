@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Archive, Plus, Check, Pencil, Trash2, MapPin, UserRound, Search, Boxes, AlertTriangle, BadgePlus, ArrowDownAZ, ArrowDownWideNarrow, PackageOpen, ClipboardList, Loader2 } from "lucide-react";
+import { Archive, Plus, Check, Pencil, Trash2, MapPin, UserRound, Search, Boxes, AlertTriangle, BadgePlus, ArrowDownAZ, ArrowDownWideNarrow, PackageOpen, ClipboardList, Loader2, FlaskConical, type LucideIcon } from "lucide-react";
 import { CATEGORIES, catLabel, enAlerte, niveauStock, NIVEAU_TON, type StockItem, type CoffresInvData } from "@/lib/dispensaire-stock-const";
 import { Lock } from "lucide-react";
 import { Modal, Flash, Champ, Picker, PhotoField, inputCls } from "@/components/edit-ui";
@@ -25,10 +25,29 @@ const norm = (x: string) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,
 const rid = () => "tmp-" + Math.random().toString(36).slice(2, 8);
 const catTone: Record<string, string> = { medicament: "var(--accent)", materiel: "var(--muted)", matiere: "var(--warn)", nourriture: "var(--good)", autre: "var(--faint)" };
 
-export function DispensaireCoffres({ data }: { data: CoffresInvData }) {
+// Portée optionnelle : le MÊME écran « coffres » restreint à une seule catégorie
+// (ex. les Matières premières). Prop 100 % sérialisable (une chaîne) → l'icône et
+// les libellés sont résolus ICI, côté client (frontière RSC saine). Sans `scope`,
+// l'écran affiche tout le stock, à l'identique du Stock Matériel Médical.
+export type CoffresScope = "matiere";
+const SCOPE_CFG: Record<CoffresScope, { categorie: string; titre: string; icon: LucideIcon; chercher: string; videTitre: string; videSous: string }> = {
+  matiere: {
+    categorie: "matiere",
+    titre: "Matières premières",
+    icon: FlaskConical,
+    chercher: "Rechercher une matière…",
+    videTitre: "Aucun coffre n'est encore déclaré",
+    videSous: "Ajoute un premier coffre — nom, emplacement, responsable — puis range-y des matières premières. Chaque coffre tiendra son propre inventaire.",
+  },
+};
+
+export function DispensaireCoffres({ data, scope }: { data: CoffresInvData; scope?: CoffresScope }) {
   const router = useRouter();
   const canEdit = data.canEdit;
-  const [items, setItems] = useState<StockItem[]>(() => data.coffres.flatMap((c) => c.items));
+  const cfg = scope ? SCOPE_CFG[scope] : null;
+  const TitreIcon = cfg?.icon ?? Archive;
+  const filt = (arr: StockItem[]) => (cfg ? arr.filter((i) => i.categorie === cfg.categorie) : arr);
+  const [items, setItems] = useState<StockItem[]>(() => filt(data.coffres.flatMap((c) => c.items)));
   const [metas, setMetas] = useState<CoffreMeta[]>(() => data.coffres.filter((c) => c.id).map((c) => ({ id: c.id as string, nom: c.nom, emplacement: c.emplacement, responsable: c.responsable, note: c.note, photo: c.photo })));
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("");
@@ -44,9 +63,9 @@ export function DispensaireCoffres({ data }: { data: CoffresInvData }) {
   // rendu serveur (montage + refresh), pas sur un re-render client → pas de
   // scintillement.
   useEffect(() => {
-    setItems(data.coffres.flatMap((c) => c.items));
+    setItems(filt(data.coffres.flatMap((c) => c.items)));
     setMetas(data.coffres.filter((c) => c.id).map((c) => ({ id: c.id as string, nom: c.nom, emplacement: c.emplacement, responsable: c.responsable, note: c.note, photo: c.photo })));
-  }, [data]);
+  }, [data, cfg]);
 
   async function importerPlan() {
     setImportBusy(true);
@@ -162,13 +181,13 @@ export function DispensaireCoffres({ data }: { data: CoffresInvData }) {
       {/* Barre d'action */}
       <div className="flex flex-wrap items-center justify-between gap-2.5">
         <div className="flex items-center gap-2.5">
-          <h3 className="flex items-center gap-2 text-[0.95rem] font-semibold"><Archive className="h-4 w-4 text-accent" /> Stock Matériel Médical</h3>
+          <h3 className="flex items-center gap-2 text-[0.95rem] font-semibold"><TitreIcon className="h-4 w-4 text-accent" /> {cfg?.titre ?? "Stock Matériel Médical"}</h3>
           <span className="font-num text-[0.8rem] text-faint">{coffres.filter((c) => c.nom).length || metas.length}</span>
           {totalAlertes ? <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.68rem] font-bold text-white" style={{ background: "var(--oxblood)" }}><AlertTriangle className="h-3 w-3" /> {totalAlertes} en alerte</span> : null}
         </div>
         {canEdit ? (
           <div className="flex items-center gap-1.5">
-            <button onClick={importerPlan} disabled={importBusy} title="Crée les 20 coffres officiels manquants" className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-muted transition hover:text-ink disabled:opacity-60">{importBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ClipboardList className="h-3.5 w-3.5" />} Importer le plan officiel</button>
+            {!cfg ? <button onClick={importerPlan} disabled={importBusy} title="Crée les 20 coffres officiels manquants" className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-muted transition hover:text-ink disabled:opacity-60">{importBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ClipboardList className="h-3.5 w-3.5" />} Importer le plan officiel</button> : null}
             <button onClick={() => setModale({ type: "newCoffre" })} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.76rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Plus className="h-3.5 w-3.5" /> Ajouter un coffre</button>
           </div>
         ) : null}
@@ -177,15 +196,15 @@ export function DispensaireCoffres({ data }: { data: CoffresInvData }) {
 
       {/* Filtres */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[180px] flex-1"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" /><input className={inputCls + " pl-8"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un objet…" /></div>
-        <select className={inputCls + " max-w-[170px]"} value={cat} onChange={(e) => setCat(e.target.value)}><option value="">Toutes catégories</option>{CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select>
+        <div className="relative min-w-[180px] flex-1"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" /><input className={inputCls + " pl-8"} value={q} onChange={(e) => setQ(e.target.value)} placeholder={cfg?.chercher ?? "Rechercher un objet…"} /></div>
+        {!cfg ? <select className={inputCls + " max-w-[170px]"} value={cat} onChange={(e) => setCat(e.target.value)}><option value="">Toutes catégories</option>{CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select> : null}
         <button onClick={() => setTri((t) => (t === "alpha" ? "qte" : "alpha"))} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-2 text-[0.74rem] font-semibold text-muted hover:text-ink" title="Changer le tri">
           {tri === "alpha" ? <><ArrowDownAZ className="h-3.5 w-3.5" /> A→Z</> : <><ArrowDownWideNarrow className="h-3.5 w-3.5" /> Quantité</>}
         </button>
       </div>
 
       {rien ? (
-        <VideRegistre icon={Archive} titre="Aucun coffre n'est encore déclaré" sous="Ajoute un premier coffre — nom, emplacement, responsable — puis range-y des objets. Chaque coffre tiendra son propre inventaire." />
+        <VideRegistre icon={TitreIcon} titre={cfg?.videTitre ?? "Aucun coffre n'est encore déclaré"} sous={cfg?.videSous ?? "Ajoute un premier coffre — nom, emplacement, responsable — puis range-y des objets. Chaque coffre tiendra son propre inventaire."} />
       ) : coffres.length === 0 ? (
         <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">Aucun objet ne correspond à ta recherche.</p>
       ) : (
@@ -212,8 +231,8 @@ export function DispensaireCoffres({ data }: { data: CoffresInvData }) {
       {modale?.type === "newCoffre" ? <CoffreForm initial={null} onClose={() => setModale(null)} onSave={(v) => enregistrerCoffre(v, null)} /> : null}
       {modale?.type === "editCoffre" ? <CoffreForm initial={modale.meta} onClose={() => setModale(null)} onSave={(v) => enregistrerCoffre(v, modale.meta)} /> : null}
       {modale?.type === "delCoffre" ? <ConfirmCoffre nom={modale.meta.nom} onCancel={() => setModale(null)} onConfirm={() => supprimerLeCoffre(modale.meta)} /> : null}
-      {modale?.type === "newItem" ? <ItemForm initial={null} defaultCoffre={modale.coffre} coffres={nomsCoffres} onClose={() => setModale(null)} onSave={(v) => enregistrerItem(v, null)} /> : null}
-      {modale?.type === "editItem" ? <ItemForm initial={modale.item} defaultCoffre={modale.item.coffre || ""} coffres={nomsCoffres} onClose={() => setModale(null)} onSave={(v) => enregistrerItem(v, modale.item)} /> : null}
+      {modale?.type === "newItem" ? <ItemForm initial={null} defaultCoffre={modale.coffre} coffres={nomsCoffres} lockCat={cfg?.categorie} onClose={() => setModale(null)} onSave={(v) => enregistrerItem(v, null)} /> : null}
+      {modale?.type === "editItem" ? <ItemForm initial={modale.item} defaultCoffre={modale.item.coffre || ""} coffres={nomsCoffres} lockCat={cfg?.categorie} onClose={() => setModale(null)} onSave={(v) => enregistrerItem(v, modale.item)} /> : null}
       {modale?.type === "delItem" ? <ConfirmItem nom={modale.item.nom} onCancel={() => setModale(null)} onConfirm={() => supprimerItem_(modale.item)} /> : null}
     </div>
   );
@@ -349,9 +368,9 @@ function CoffreForm({ initial, onClose, onSave }: { initial: CoffreMeta | null; 
   );
 }
 
-function ItemForm({ initial, defaultCoffre, coffres, onClose, onSave }: { initial: StockItem | null; defaultCoffre: string; coffres: string[]; onClose: () => void; onSave: (v: Record<string, string>) => void }) {
+function ItemForm({ initial, defaultCoffre, coffres, lockCat, onClose, onSave }: { initial: StockItem | null; defaultCoffre: string; coffres: string[]; lockCat?: string; onClose: () => void; onSave: (v: Record<string, string>) => void }) {
   const [v, setV] = useState<Record<string, string>>(() => ({
-    nom: initial?.nom || "", categorie: initial?.categorie || "materiel", coffre: initial?.coffre ?? defaultCoffre ?? "", unite: initial?.unite || "", fournisseur: initial?.fournisseur || "",
+    nom: initial?.nom || "", categorie: initial?.categorie || lockCat || "materiel", coffre: initial?.coffre ?? defaultCoffre ?? "", unite: initial?.unite || "", fournisseur: initial?.fournisseur || "",
     stock: String(initial?.stock ?? 0), stockFixe: String(initial?.stockFixe ?? 0), seuil: String(initial?.seuil ?? 0), note: initial?.note || "", photo: initial?.photo || "",
   }));
   const [err, setErr] = useState<string | null>(null);
@@ -362,7 +381,7 @@ function ItemForm({ initial, defaultCoffre, coffres, onClose, onSave }: { initia
     <Modal titre={initial ? "✏️ Modifier l'objet" : "➕ Ajouter un objet"} onClose={onClose} max={560}>
       <div className="flex flex-col gap-3">
         <Champ label="Nom *"><input className={inputCls} value={v.nom} onChange={set("nom")} placeholder="Bandages, morphine, bois…" autoFocus /></Champ>
-        <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Catégorie</span><Picker options={CATEGORIES.map((c) => ({ key: c.key, label: c.label, tone: catTone[c.key] }))} value={v.categorie} onChange={(x) => setV((p) => ({ ...p, categorie: x }))} /></div>
+        {!lockCat ? <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Catégorie</span><Picker options={CATEGORIES.map((c) => ({ key: c.key, label: c.label, tone: catTone[c.key] }))} value={v.categorie} onChange={(x) => setV((p) => ({ ...p, categorie: x }))} /></div> : null}
         <div className="grid gap-3 sm:grid-cols-2">
           <Champ label="Coffre"><input className={inputCls} value={v.coffre} onChange={set("coffre")} placeholder="Coffre principal… (vide = Non rangé)" list="disp-coffres-inv" /><datalist id="disp-coffres-inv">{coffres.map((c) => <option key={c} value={c} />)}</datalist></Champ>
           <Champ label="Unité"><input className={inputCls} value={v.unite} onChange={set("unite")} placeholder="u, flacon, kg…" /></Champ>
