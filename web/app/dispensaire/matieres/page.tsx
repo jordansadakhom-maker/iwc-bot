@@ -1,12 +1,13 @@
-import { getStock } from "@/lib/dispensaire-stock";
-import { DispensaireStockage } from "@/components/dispensaire-stockage";
+import { getCoffresInventaire } from "@/lib/dispensaire-stock";
+import { DispensaireCoffres } from "@/components/dispensaire-coffres";
 
 export const dynamic = "force-dynamic";
 
-// Les matières premières sont désormais des articles du stock mutualisé, catégorie
-// « matiere » : on réutilise EXACTEMENT le même écran que le Stockage médical,
-// restreint à cette catégorie (prop `scope` 100 % sérialisable → frontière RSC saine).
+// Les matières premières réutilisent EXACTEMENT l'écran « Stock Matériel Médical »
+// (composant DispensaireCoffres) — coffres, ajout/renommage/suppression de coffres,
+// rangement et déplacement des objets — restreint à la catégorie « matiere » via la
+// prop `scope` (100 % sérialisable → frontière RSC saine). Seules les données changent.
 export default async function DispensaireMatieresPage() {
-  const data = await getStock();
-  return <DispensaireStockage data={data} scope="matiere" />;
+  const data = await getCoffresInventaire();
+  return <DispensaireCoffres data={data} scope="matiere" />;
 }
