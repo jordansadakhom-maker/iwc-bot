@@ -31,6 +31,7 @@ let echecs = {}; try { echecs = require('./echecs'); console.log('✅ Module éc
 let missionsIA = {}; try { missionsIA = require('./missions-ia'); console.log('✅ Module missions-ia chargé'); } catch (e) { console.log('⚠️ missions-ia non chargé:', e.message); }
 const rdvplus = require('./rdvplus');
 const reorg = require('./reorg');
+const menageDiscord = require('./menage-discord');
 
 let notionExtra = {};
 try { notionExtra = require('./notion-extra'); console.log('✅ Module notion-extra chargé'); }
@@ -4099,6 +4100,8 @@ client.on('messageCreate', async message => {
   } catch {}
   // Réorganisation du serveur : !reorg test / !reorg / !reorg annuler (direction uniquement)
   try { if (await reorg.onMessage?.(message)) return; } catch {}
+  // Ménage « gestion » (archivage réversible) : !menage test / !menage go / !menage annuler
+  try { if (await menageDiscord.onMessage?.(message)) return; } catch {}
   // Salon RP : on réécrit le message en western immersif puis on le re-poste sous le nom de l'auteur
   try {
     if (message.channel?.id === SALON_RP_REFORMULATION && !message.author?.bot && !message.webhookId && message.guild) {
