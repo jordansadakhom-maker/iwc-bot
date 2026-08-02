@@ -3,7 +3,7 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { peutAdministrer } from "@/lib/dispensaire-roles";
 import { ymdParis, lundiCourant } from "@/lib/dispensaire-dates";
-import { calculerSalaire } from "@/lib/dispensaire-salaires-const";
+import { joursRetenus as calcJoursRetenus, salaireFinal } from "@/lib/dispensaire-salaires-const";
 
 export * from "@/lib/dispensaire-salaires-const";
 
@@ -17,8 +17,9 @@ export * from "@/lib/dispensaire-salaires-const";
 // à part → la direction ajoute les primes à la main.
 
 export type SalaireFonction = { fonction: string; montantHebdo: number };
-export type LigneSalaire = { nom: string; fonction: string | null; montantHebdo: number; jours: number; heuresMin: number; salaire: number };
-export type LignePaieArchive = { nom: string; fonction: string | null; jours: number; heuresMin: number; salaire: number };
+// `jours` = jours RETENUS (auto + ajustement) ; `salaire` = salaire FINAL (base + prime).
+export type LigneSalaire = { nom: string; fonction: string | null; montantHebdo: number; joursAuto: number; ajustJours: number; jours: number; heuresMin: number; prime: number; salaireBase: number; salaire: number };
+export type LignePaieArchive = { nom: string; fonction: string | null; joursAuto: number; ajustJours: number; jours: number; heuresMin: number; prime: number; salaireBase: number; salaire: number };
 export type ArchivePaie = { semaineLundi: string; at: string; par: string | null; total: number; lignes: LignePaieArchive[] };
 export type SalairesData = { pret: boolean; autorise: boolean; semaineLundi: string; fonctions: SalaireFonction[]; lignes: LigneSalaire[]; archives: ArchivePaie[]; semaineArchivee: boolean };
 
@@ -37,7 +38,7 @@ export async function getArchivesPaie(): Promise<ArchivePaie[]> {
       if (!a) { a = { semaineLundi: sem, at: String(r.createdAt || ""), par: r.par == null ? null : String(r.par), total: 0, lignes: [] }; parSemaine.set(sem, a); }
       const salaire = Number(r.salaire) || 0;
       a.total += salaire;
-      a.lignes.push({ nom: String(r.nom || "Salarié"), fonction: r.fonction == null ? null : String(r.fonction), jours: Number(r.jours) || 0, heuresMin: Number(r.heuresMin) || 0, salaire });
+      a.lignes.push({ nom: String(r.nom || "Salarié"), fonction: r.fonction == null ? null : String(r.fonction), joursAuto: Number(r.joursAuto) || 0, ajustJours: Number(r.ajustJours) || 0, jours: Number(r.jours) || 0, heuresMin: Number(r.heuresMin) || 0, prime: Number(r.prime) || 0, salaireBase: Number(r.salaireBase) || 0, salaire });
     }
     return [...parSemaine.values()];
   } catch {
@@ -88,12 +89,24 @@ export async function getSalaires(): Promise<SalairesData> {
     }
   } catch { /* pointage absent → 0 partout */ }
 
+  // Ajustements manuels de la Direction pour la semaine courante (prime + correction
+  // de jours), rapprochés par nom normalisé. Dégradation propre si la table manque.
+  const ajust = new Map<string, { prime: number; ajustJours: number }>();
+  try {
+    const { data: aj } = await admin.from("DispensairePaieAjust").select("nomKey,prime,ajustJours").eq("semaineLundi", monday);
+    for (const r of (aj || []) as Record<string, unknown>[]) ajust.set(String(r.nomKey || ""), { prime: Number(r.prime) || 0, ajustJours: Number(r.ajustJours) || 0 });
+  } catch { /* table absente → aucun ajustement */ }
+
   const lignes: LigneSalaire[] = salaries.map((s) => {
     const montantHebdo = s.fonction ? (bareme.get(s.fonction) || 0) : 0;
-    const stat = jm.get(normNom(s.nom)) || { jours: 0, heuresMin: 0 };
-    // Règle : 4 jours pointés = salaire plein ; en deçà, prorata (jours ÷ 4).
-    const salaire = calculerSalaire(montantHebdo, stat.jours);
-    return { nom: s.nom, fonction: s.fonction, montantHebdo, jours: stat.jours, heuresMin: stat.heuresMin, salaire };
+    const k = normNom(s.nom);
+    const stat = jm.get(k) || { jours: 0, heuresMin: 0 };
+    const aj = ajust.get(k) || { prime: 0, ajustJours: 0 };
+    // Jours retenus = jours pointés + ajustement manuel ; salaire final = calcul + prime.
+    const jours = calcJoursRetenus(stat.jours, aj.ajustJours);
+    const prime = Math.max(0, Math.round(Number(aj.prime) || 0));
+    const salaire = salaireFinal(montantHebdo, jours, prime);
+    return { nom: s.nom, fonction: s.fonction, montantHebdo, joursAuto: stat.jours, ajustJours: aj.ajustJours, jours, heuresMin: stat.heuresMin, prime, salaireBase: salaire - prime, salaire };
   }).sort((a, b) => b.salaire - a.salaire || a.nom.localeCompare(b.nom));
 
   // Fonctions à barémer = celles présentes chez les salariés ∪ celles déjà au barème.

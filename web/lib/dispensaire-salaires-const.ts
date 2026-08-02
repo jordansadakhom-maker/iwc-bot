@@ -22,3 +22,13 @@ export function calculerSalaire(montantHebdo: number, jours: number): number {
 
 // Un salarié a-t-il atteint le seuil du salaire plein cette semaine ?
 export const salairePlein = (jours: number) => Math.floor(Number(jours) || 0) >= SEUIL_JOURS_PLEIN;
+
+// Jours RETENUS pour la paie = jours détectés au pointage + ajustement manuel de
+// la Direction (peut être négatif), borné à 0.
+export const joursRetenus = (joursAuto: number, ajust: number) =>
+  Math.max(0, (Math.floor(Number(joursAuto) || 0)) + Math.round(Number(ajust) || 0));
+
+// Salaire FINAL = salaire calculé (sur les jours retenus) + prime manuelle.
+export function salaireFinal(montantHebdo: number, joursRetenusVal: number, prime: number): number {
+  return calculerSalaire(montantHebdo, joursRetenusVal) + Math.max(0, Math.round(Number(prime) || 0));
+}

@@ -13,9 +13,13 @@ CREATE TABLE IF NOT EXISTS "DispensairePaie" (
   "nom"           TEXT NOT NULL,
   "fonction"      TEXT,
   "montantHebdo"  INTEGER NOT NULL DEFAULT 0,
-  "jours"         INTEGER NOT NULL DEFAULT 0,
+  "joursAuto"     INTEGER NOT NULL DEFAULT 0,            -- jours détectés au pointage
+  "ajustJours"    INTEGER NOT NULL DEFAULT 0,            -- correction manuelle de jours
+  "jours"         INTEGER NOT NULL DEFAULT 0,            -- jours retenus (auto + ajustement)
   "heuresMin"     INTEGER NOT NULL DEFAULT 0,
-  "salaire"       INTEGER NOT NULL DEFAULT 0,
+  "prime"         INTEGER NOT NULL DEFAULT 0,            -- prime versée
+  "salaireBase"   INTEGER NOT NULL DEFAULT 0,            -- salaire calculé (avant prime)
+  "salaire"       INTEGER NOT NULL DEFAULT 0,            -- salaire final (base + prime)
   "par"           TEXT,
   "createdAt"     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
