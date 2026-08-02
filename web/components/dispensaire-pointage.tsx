@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ClipboardList, Play, Square, Loader2, Trash2, CalendarDays, Clock, Users, CalendarRange, UserX, Plus, Check } from "lucide-react";
+import { ClipboardList, Play, Square, Loader2, Trash2, CalendarDays, Clock, Users, CalendarRange, UserX, Plus, Check, SlidersHorizontal } from "lucide-react";
 import type { PointData, PointSession, AssiduiteData, AbsenceRow } from "@/lib/dispensaire-pointage";
 import { statutDe, STATUT_META } from "@/lib/dispensaire-pointage-const";
-import { Flash, inputCls } from "@/components/edit-ui";
-import { prendreService, terminerService, supprimerPointage, ajouterAbsence, supprimerAbsence } from "@/app/dispensaire/pointage/actions";
+import { Flash, inputCls, Modal, Champ } from "@/components/edit-ui";
+import { prendreService, terminerService, supprimerPointage, ajouterAbsence, supprimerAbsence, ajusterHeures } from "@/app/dispensaire/pointage/actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
 const JOURS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
@@ -44,6 +44,19 @@ export function DispensairePointage({ data, assiduite, absences = [], peutGerer 
   const today = useMemo(() => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()), []);
   const [abs, setAbs] = useState({ choix: "", manuel: "", date: today, justifiee: true, motif: "" });
   const [absBusy, setAbsBusy] = useState(false);
+
+  // Ajustement manuel des heures d'effectif (Direction/RH) — modale par salarié.
+  const [ajust, setAjust] = useState<{ nom: string; effectifMin: number } | null>(null);
+  const [ajustBusy, setAjustBusy] = useState(false);
+  async function ajusterHeuresEmploye(nom: string, deltaMin: number, motif: string) {
+    setAjustBusy(true);
+    const r = await ajusterHeures(nom, deltaMin, motif);
+    setAjustBusy(false);
+    if (!r.ok) { setFlash({ t: "bad", m: r.error || "Impossible." }); return; }
+    setAjust(null);
+    setFlash({ t: "ok", m: `Heures d'effectif de ${nom} corrigées.` });
+    router.refresh();
+  }
 
   useEffect(() => { setEnCours(data.enCours); }, [data.enCours]);
   useEffect(() => { setAbsList(absences); }, [absences]);
@@ -223,10 +236,15 @@ export function DispensairePointage({ data, assiduite, absences = [], peutGerer 
               <tbody>
                 {assiduite.lignes.map((ln) => (
                   <tr key={ln.nom} className="hover:bg-[color-mix(in_srgb,var(--ink)_4%,transparent)]">
-                    <td className="border-b border-border px-2 py-2"><div className="font-semibold">{ln.nom}</div>{ln.grade ? <div className="text-[0.66rem] text-faint">{ln.grade}</div> : null}</td>
+                    <td className="border-b border-border px-2 py-2">
+                      <div className="font-semibold">{ln.nom}</div>
+                      {ln.grade ? <div className="text-[0.66rem] text-faint">{ln.grade}</div> : null}
+                      {peutGerer ? <button onClick={() => setAjust({ nom: ln.nom, effectifMin: ln.semaines[1]?.heuresMin || 0 })} className="mt-1 inline-flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[0.62rem] font-semibold text-muted transition hover:text-ink" title="Corriger les heures d'effectif (sans impact sur le salaire)"><SlidersHorizontal className="h-3 w-3" /> Ajuster les heures</button> : null}
+                    </td>
                     {ln.semaines.map((s, i) => (
                       <td key={i} className="border-b border-border px-2 py-2 text-center align-top" style={i === 1 ? { background: "color-mix(in srgb,var(--accent) 6%,transparent)" } : undefined}>
                         <div className="font-num"><b>{s.jours}</b> j · {fmtMin(s.heuresMin)}</div>
+                        {s.heuresAjustMin ? <div className="text-[0.6rem]" style={{ color: "var(--accent)" }} title="Ajustement manuel des heures">dont {s.heuresAjustMin > 0 ? "+" : "−"}{fmtMin(Math.abs(s.heuresAjustMin))} ajusté</div> : null}
                         <div className="mt-0.5 flex flex-wrap items-center justify-center gap-x-1.5 text-[0.66rem]">
                           {s.absJust ? <span style={{ color: "var(--good)" }}>{s.absJust} just.</span> : null}
                           {s.absInj ? <span style={{ color: "var(--oxblood)" }}>{s.absInj} inj.</span> : null}
@@ -243,6 +261,8 @@ export function DispensairePointage({ data, assiduite, absences = [], peutGerer 
           </div>
         )}
       </section>
+
+      {ajust ? <AjustHeuresModal nom={ajust.nom} effectifMin={ajust.effectifMin} busy={ajustBusy} onClose={() => setAjust(null)} onSave={(dm, mtf) => ajusterHeuresEmploye(ajust.nom, dm, mtf)} /> : null}
 
       {/* Absences (encadrement RH / Direction) */}
       {peutGerer ? (
@@ -310,5 +330,50 @@ export function DispensairePointage({ data, assiduite, absences = [], peutGerer 
         </section>
       ) : null}
     </div>
+  );
+}
+
+// Modale d'ajustement manuel des heures d'effectif (Direction/RH). Motif obligatoire.
+// N'impacte QUE les heures/stats — jamais le salaire.
+function AjustHeuresModal({ nom, effectifMin, busy, onClose, onSave }: { nom: string; effectifMin: number; busy: boolean; onClose: () => void; onSave: (deltaMin: number, motif: string) => void }) {
+  const [heures, setHeures] = useState("");
+  const [motif, setMotif] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const h = Number(heures.replace(",", "."));
+  const deltaMin = Number.isFinite(h) ? Math.round(h * 60) : 0;
+  const apercu = Math.max(0, effectifMin + deltaMin);
+  function go() {
+    if (!deltaMin) { setErr("Indique un nombre d'heures à ajouter (ex. 2) ou à retirer (ex. -1.5)."); return; }
+    if (!motif.trim()) { setErr("Le motif est obligatoire."); return; }
+    onSave(deltaMin, motif.trim());
+  }
+  return (
+    <Modal titre="⏱️ Ajuster les heures d'effectif" onClose={onClose} max={460}>
+      <div className="flex flex-col gap-3">
+        <p className="text-[0.82rem] text-muted"><b className="text-ink">{nom}</b> — effectif de cette semaine : <b className="font-num">{fmtMin(effectifMin)}</b>.</p>
+        <div className="flex items-start gap-2 rounded-[10px] border border-border bg-surface-2 px-3 py-2 text-[0.74rem] text-muted">
+          <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-faint" />
+          <span>Correction des heures uniquement (oubli de déconnexion, oubli de prise de service, erreur de pointage). <b>Sans aucun impact sur le salaire.</b></span>
+        </div>
+        <Champ label="Heures à ajouter (+) ou à retirer (−)">
+          <input className={inputCls + " font-num"} value={heures} onChange={(e) => setHeures(e.target.value.replace(/[^0-9.,-]/g, ""))} inputMode="decimal" placeholder="ex. 2  ·  -1.5" autoFocus />
+        </Champ>
+        {deltaMin ? <p className="text-[0.72rem] text-faint">Nouvel effectif : <b className="font-num text-ink">{fmtMin(apercu)}</b> ({deltaMin > 0 ? "+" : "−"}{fmtMin(Math.abs(deltaMin))}).</p> : null}
+        <Champ label="Motif (obligatoire)">
+          <input className={inputCls} value={motif} onChange={(e) => setMotif(e.target.value)} placeholder="Oubli de déconnexion, correction administrative…" list="disp-motifs-heures" maxLength={200} />
+          <datalist id="disp-motifs-heures">
+            <option value="Oubli de déconnexion (trop d'heures)" />
+            <option value="Oubli de prise de service (trop peu d'heures)" />
+            <option value="Correction administrative" />
+            <option value="Erreur de pointage" />
+          </datalist>
+        </Champ>
+        {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
+        <div className="mt-1 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2">Annuler</button>
+          <button onClick={go} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Valider</button>
+        </div>
+      </div>
+    </Modal>
   );
 }

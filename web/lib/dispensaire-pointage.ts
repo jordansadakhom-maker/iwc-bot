@@ -85,6 +85,27 @@ export async function getPointage(): Promise<PointData> {
       parNom.set(s.nom, (parNom.get(s.nom) || 0) + min);
     }
   }
+  // Ajustements manuels d'heures d'effectif de la SEMAINE COURANTE (Direction/RH) :
+  // corrigent le classement et les stats d'heures — SANS toucher aux salaires (qui
+  // ne dépendent que des jours). Best-effort : table absente → aucun ajustement.
+  try {
+    const { data: aj } = await admin.from("DispensaireEffectifAjust").select("nom,nomKey,deltaMin").eq("semaineLundi", monday);
+    if (aj && aj.length) {
+      const parKey = new Map<string, { nom: string; min: number }>();
+      for (const [nom, min] of parNom) parKey.set(normNom(nom), { nom, min });
+      for (const r of aj as Record<string, unknown>[]) {
+        const d = Number(r.deltaMin) || 0; if (!d) continue;
+        const k = String(r.nomKey || normNom(r.nom));
+        stats.semaineMin += d; stats.moisMin += d; stats.totalMin += d;
+        const e = parKey.get(k) || { nom: String(r.nom || "Salarié"), min: 0 };
+        e.min += d; parKey.set(k, e);
+      }
+      stats.semaineMin = Math.max(0, stats.semaineMin); stats.moisMin = Math.max(0, stats.moisMin); stats.totalMin = Math.max(0, stats.totalMin);
+      parNom.clear();
+      for (const { nom, min } of parKey.values()) parNom.set(nom, Math.max(0, min));
+    }
+  } catch { /* table absente → aucun ajustement */ }
+
   stats.jours = joursSet.size;
   stats.moyenneMin = stats.jours ? Math.round(stats.totalMin / stats.jours) : 0;
   const parSalarie = [...parNom.entries()].map(([nom, min]) => ({ nom, min })).sort((a, b) => b.min - a.min);
@@ -95,12 +116,12 @@ export async function getPointage(): Promise<PointData> {
 // ── Assiduité sur 3 semaines (précédente / actuelle / suivante) ─────────────
 // Pour chaque salarié et chaque semaine : jours travaillés, heures, absences
 // justifiées et injustifiées. Sert directement au calcul des salaires.
-export type SemaineAssiduite = { jours: number; heuresMin: number; absJust: number; absInj: number; oublis: number; corrections: number };
+export type SemaineAssiduite = { jours: number; heuresMin: number; heuresAjustMin: number; absJust: number; absInj: number; oublis: number; corrections: number };
 export type LigneAssiduite = { nom: string; grade: string | null; semaines: SemaineAssiduite[] };
 export type AssiduiteData = { pret: boolean; lundis: string[]; lignes: LigneAssiduite[] };
 
 const normNom = (v: unknown) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ");
-const semaineVide = (): SemaineAssiduite => ({ jours: 0, heuresMin: 0, absJust: 0, absInj: 0, oublis: 0, corrections: 0 });
+const semaineVide = (): SemaineAssiduite => ({ jours: 0, heuresMin: 0, heuresAjustMin: 0, absJust: 0, absInj: 0, oublis: 0, corrections: 0 });
 
 export async function getAssiduite(): Promise<AssiduiteData> {
   const admin = createAdminClient();
@@ -163,6 +184,21 @@ export async function getAssiduite(): Promise<AssiduiteData> {
       if (r.justifiee) l.semaines[sem].absJust += 1; else l.semaines[sem].absInj += 1;
     }
   } catch { /* table Absence pas encore créée → aucune absence */ }
+
+  // Ajustements manuels d'heures d'effectif (Direction/RH) par semaine : corrigent
+  // les heures affichées et le marqueur d'ajustement — SANS toucher aux salaires.
+  try {
+    const { data: aj } = await admin.from("DispensaireEffectifAjust").select("semaineLundi,nomKey,deltaMin").in("semaineLundi", lundis);
+    for (const r of (aj || []) as Record<string, unknown>[]) {
+      const sem = lundis.indexOf(String(r.semaineLundi));
+      if (sem < 0) continue;
+      const l = map.get(String(r.nomKey || ""));
+      if (!l) continue;
+      const d = Number(r.deltaMin) || 0;
+      l.semaines[sem].heuresAjustMin += d;
+      l.semaines[sem].heuresMin = Math.max(0, l.semaines[sem].heuresMin + d);
+    }
+  } catch { /* table absente → aucun ajustement */ }
 
   const lignes = [...map.values()].sort((a, b) => a.nom.localeCompare(b.nom));
   return { pret: true, lundis, lignes };

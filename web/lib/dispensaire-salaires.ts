@@ -89,6 +89,18 @@ export async function getSalaires(): Promise<SalairesData> {
     }
   } catch { /* pointage absent → 0 partout */ }
 
+  // Ajustements manuels d'heures d'effectif (Direction/RH) → corrigent l'AFFICHAGE
+  // des heures de cette colonne, JAMAIS le salaire (qui ne dépend que des jours).
+  try {
+    const { data: eh } = await admin.from("DispensaireEffectifAjust").select("nomKey,deltaMin").eq("semaineLundi", monday);
+    for (const r of (eh || []) as Record<string, unknown>[]) {
+      const k = String(r.nomKey || "");
+      const e = jm.get(k) || { jours: 0, heuresMin: 0 };
+      e.heuresMin = Math.max(0, e.heuresMin + (Number(r.deltaMin) || 0));
+      jm.set(k, e);
+    }
+  } catch { /* table absente → aucun ajustement */ }
+
   // Ajustements manuels de la Direction pour la semaine courante (prime + correction
   // de jours), rapprochés par nom normalisé. Dégradation propre si la table manque.
   const ajust = new Map<string, { prime: number; ajustJours: number }>();
