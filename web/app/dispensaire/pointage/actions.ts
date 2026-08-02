@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { estAutorise, peutGererRH } from "@/lib/dispensaire-roles";
 import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenements";
+import { ymdParis, lundiCourant } from "@/lib/dispensaire-dates";
 
 // Pointage — outil de service partagé (ouvert à tout le personnel du dispensaire).
 export type PointResult = { ok: boolean; error?: string; id?: string };
@@ -12,6 +13,68 @@ const REFUS = "Accès refusé.";
 const s = (v: unknown, max = 200) => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
 function newId() { return `dp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
 async function qui() { try { return (await getSessionProfile())?.nom || "Équipe"; } catch { return "Équipe"; } }
+const normNom = (v: unknown) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ");
+function newEhId() { return `deh-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
+
+// Somme des minutes VALIDÉES de la semaine courante pour un salarié (base d'audit).
+async function heuresBaseSemaine(admin: NonNullable<ReturnType<typeof createAdminClient>>, nom: string, monday: string): Promise<number> {
+  try {
+    const bMin = new Date(monday + "T00:00:00Z"); bMin.setUTCDate(bMin.getUTCDate() - 1);
+    const { data } = await admin.from("DispensairePointage").select("nom,debut,dureeMin,fin,valide").not("fin", "is", null).gte("debut", bMin.toISOString()).limit(2000);
+    const key = normNom(nom); let min = 0;
+    for (const r of (data || []) as Record<string, unknown>[]) {
+      if (r.valide === false) continue;
+      if (ymdParis(String(r.debut)) < monday) continue;
+      if (normNom(r.nom) !== key) continue;
+      min += Number(r.dureeMin) || 0;
+    }
+    return min;
+  } catch { return 0; }
+}
+
+// Ajuste (± minutes, cumulatif) les HEURES D'EFFECTIF d'un salarié pour la semaine
+// courante. Réservé Direction / RH. Motif OBLIGATOIRE. AUCUN impact sur le salaire
+// (qui ne dépend que des jours). Tracé au journal d'audit (avant → après).
+export async function ajusterHeures(nom: string, deltaMin: number, motif: string): Promise<PointResult> {
+  if (!(await peutGererRH())) return { ok: false, error: "Réservé à la Direction / RH." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  const n = s(nom);
+  if (!n) return { ok: false, error: "Salarié invalide." };
+  const mtf = s(motif, 200);
+  if (!mtf) return { ok: false, error: "Le motif est obligatoire." };
+  const d = Math.max(-1440, Math.min(1440, Math.round(Number(deltaMin) || 0)));
+  if (!d) return { ok: false, error: "Indique un nombre d'heures à ajouter ou à retirer." };
+
+  const monday = lundiCourant(new Date().toISOString());
+  const nomKey = normNom(n);
+  const par = await qui();
+  const now = new Date().toISOString();
+
+  let id: string | null = null, avantDelta = 0;
+  try {
+    const { data } = await admin.from("DispensaireEffectifAjust").select("id,deltaMin").eq("semaineLundi", monday).eq("nomKey", nomKey).maybeSingle();
+    if (data) { id = String(data.id); avantDelta = Number(data.deltaMin) || 0; }
+  } catch { return { ok: false, error: "Enregistrement impossible (lance dispensaire-effectif-ajust.sql ?)." }; }
+  const nouveauDelta = avantDelta + d;
+
+  if (id) {
+    const { error } = await admin.from("DispensaireEffectifAjust").update({ deltaMin: nouveauDelta, updatedAt: now, updatedBy: par }).eq("id", id);
+    if (error) return { ok: false, error: "Enregistrement impossible." };
+  } else {
+    const { error } = await admin.from("DispensaireEffectifAjust").insert({ id: newEhId(), semaineLundi: monday, nomKey, nom: n, deltaMin: nouveauDelta, updatedAt: now, updatedBy: par });
+    if (error) return { ok: false, error: "Enregistrement impossible (lance dispensaire-effectif-ajust.sql ?)." };
+  }
+
+  // Audit : total AVANT → APRÈS (base pointage + ajustement cumulé) + différence + motif.
+  const base = await heuresBaseSemaine(admin, n, monday);
+  await emettreEvenementDispensaire({
+    aggregate: "pointage", type: "pointage.heures_ajust", cibleLibelle: n,
+    avant: { heuresMin: Math.max(0, base + avantDelta) }, apres: { heuresMin: Math.max(0, base + nouveauDelta) },
+    payload: { deltaMin: d, motif: mtf, semaine: monday },
+  });
+  return { ok: true };
+}
 
 // Prendre le service : ouvre une ligne (début = maintenant). Bloque si le salarié
 // a déjà un service ouvert.
