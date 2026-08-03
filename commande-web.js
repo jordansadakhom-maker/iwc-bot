@@ -85,6 +85,37 @@ async function _pingClient(guildOrClient, userId, livre) {
     return !!sent;
   } catch { return false; }
 }
+
+// ── Annonces Discord des événements internes IWC (best-effort) ────
+// IDs de salons alignés sur config.js / rdv.assigner.
+const _SAL_ANNONCE = {
+  operations:   '1508756486892027904', // #operations
+  contrats:     '1508756442730074222', // #contrats
+  affaires:     '1508756508362674337', // #affaires (avis de recherche)
+  informateurs: '1509255294184853524', // #informateurs
+};
+const _ROLE_POLE_ANNONCE = { legal: '1508756436082102303', illegal: '1508898841993281658' };
+function _rolePoleAnnonce(pole) { return String(pole || '').toLowerCase().includes('ill') ? _ROLE_POLE_ANNONCE.illegal : _ROLE_POLE_ANNONCE.legal; }
+
+// Poste un embed dans un salon. Ping UNIQUEMENT le rôle fourni (anti-spam), ou
+// aucun si roleId est absent. No-op silencieux si salon/embed indisponible.
+async function _annonce(ctx, salonId, spec, roleId) {
+  try {
+    const guild = ctx && ctx.guild;
+    if (!guild || !salonId || !EmbedBuilder) return false;
+    const salon = guild.channels.cache.get(salonId);
+    if (!salon || typeof salon.isTextBased !== 'function' || !salon.isTextBased()) return false;
+    const e = new EmbedBuilder().setColor(spec.color || 0xC8A45C).setTitle(String(spec.title || 'IWC').slice(0, 250)).setTimestamp();
+    if (spec.desc) e.setDescription(String(spec.desc).slice(0, 1500));
+    const champs = (Array.isArray(spec.fields) ? spec.fields : []).filter(f => f && f.value != null && String(f.value).trim());
+    if (champs.length) e.addFields(champs.map(f => ({ name: String(f.name).slice(0, 250), value: String(f.value).slice(0, 1000), inline: !!f.inline })));
+    if (spec.image && /^https:\/\//.test(String(spec.image))) { try { e.setImage(String(spec.image)); } catch {} }
+    if (spec.footer) e.setFooter({ text: String(spec.footer).slice(0, 200) });
+    const rid = roleId && guild.roles.cache.has(roleId) ? roleId : null;
+    await salon.send({ content: rid ? `<@&${rid}>` : null, embeds: [e], allowedMentions: { roles: rid ? [rid] : [] } }).catch(() => {});
+    return true;
+  } catch { return false; }
+}
 function _medFiche(db, id) {
   if (!db.suiviMedical) db.suiviMedical = {};
   if (!db.suiviMedical[id]) db.suiviMedical[id] = { statut: 'non_teste', testValide: false, testDate: null, prochainRdv: null, notes: '', blessures: [], suivis: [], ordonnances: [], historique: [] };
@@ -266,7 +297,7 @@ const HANDLERS = {
   // ── Opérations ───────────────────────────────────────────
   // Les opérations vivent dans db.operations (lancées/programmées) ET
   // db.preparations (en préparation). On les retrouve par id dans les deux.
-  'operation.create': (db, p) => {
+  'operation.create': async (db, p, ctx) => {
     const cible = _s(p.cible, 200);
     if (!cible) return { ok: false, message: 'titre manquant' };
     if (!Array.isArray(db.operations)) db.operations = [];
@@ -279,6 +310,17 @@ const HANDLERS = {
       participants: [], agents: [], remuneration: _s(p.prime, 120), lieu: _s(p.lieu, 120),
       createdAt: new Date().toISOString(), createurNom: p.auteurNom || 'Site web', source: 'web',
     });
+    // Annonce Discord (#operations) — ping du rôle pôle uniquement. Best-effort.
+    await _annonce(ctx, _SAL_ANNONCE.operations, {
+      color: 0xC0392B, title: `🎯 Nouvelle opération — ${cible.slice(0, 80)}`,
+      desc: _s(p.objectif, 400) || null,
+      fields: [
+        { name: 'Type', value: _s(p.categorie, 80) || 'Opération', inline: true },
+        { name: 'Lieu', value: _s(p.lieu, 120) || '—', inline: true },
+        { name: 'Prime', value: _s(p.prime, 120) || '—', inline: true },
+      ],
+      footer: `Créée par ${p.auteurNom || 'Site web'}`,
+    }, _rolePoleAnnonce(pole)).catch(() => {});
     return { ok: true, message: `Opération « ${cible.slice(0, 60)} » créée` };
   },
   'operation.update': (db, p) => {
@@ -327,7 +369,7 @@ const HANDLERS = {
     return { ok: true, message: `${ids.length} agent(s) assigné(s) (${dm} MP)` };
   },
   // Terminer une opération : résultat/butin/débrief + versement éventuel de la prime au coffre.
-  'operation.terminer': (db, p) => {
+  'operation.terminer': async (db, p, ctx) => {
     const op = _findOp(db, p.id);
     if (!op) return { ok: false, message: 'Opération introuvable' };
     op.status = 'terminee'; op.endedAt = Date.now();
@@ -346,11 +388,21 @@ const HANDLERS = {
       supa.journaliserEvenement && supa.journaliserEvenement({ aggregate: 'operation', type: 'operation.terminee', cibleId: String(op.id), cibleLibelle: nom, actorNom: p.auteurNom || 'Site web', payload: { resultat: op.resultat || null, prime: credit || 0 } });
       for (const id of agents) supa.creerNotification && supa.creerNotification({ type: 'operation-statut', titre: `Opération terminée — ${nom}`, corps: op.resultat ? `Résultat : ${op.resultat}` : null, lien: '/operations', cibleId: String(op.id), membreId: String(id), ref: `op-terminee-${op.id}-${id}` });
     } catch {}
+    // Annonce Discord (#operations) — sans ping (bilan). Best-effort.
+    await _annonce(ctx, _SAL_ANNONCE.operations, {
+      color: 0x2ECC71, title: `✅ Opération terminée — ${_s(op.cible || op.name, 80) || 'Opération'}`,
+      fields: [
+        { name: 'Résultat', value: op.resultat || 'Réussite', inline: true },
+        { name: 'Butin', value: _s(op.butin, 120) || '—', inline: true },
+        { name: 'Prime coffre', value: credit ? `+${credit}$` : '—', inline: true },
+      ],
+      footer: `Clôturée par ${p.auteurNom || 'Site web'}`,
+    }, null).catch(() => {});
     return { ok: true, message: `Opération terminée${credit ? ` · +${credit}$ au coffre` : ''}` };
   },
 
   // ── Contrats ─────────────────────────────────────────────
-  'contrat.create': (db, p) => {
+  'contrat.create': async (db, p, ctx) => {
     const objet = _s(p.cible, 300);
     if (!objet) return { ok: false, message: 'objet manquant' };
     if (!Array.isArray(db.contrats)) db.contrats = [];
@@ -364,6 +416,16 @@ const HANDLERS = {
       echeanceTexte: _s(p.echeance, 60) || null, details: _s(p.details, 2000) || null,
       createurNom: p.auteurNom || 'Site web', source: 'web',
     });
+    // Annonce Discord (#contrats) — ping du rôle pôle. Best-effort.
+    await _annonce(ctx, _SAL_ANNONCE.contrats, {
+      color: 0xC8A45C, title: `📜 Nouveau contrat — ${objet.slice(0, 80)}`,
+      fields: [
+        { name: 'Commanditaire', value: _s(p.commanditaire, 200) || '—', inline: true },
+        { name: 'Rémunération', value: _s(p.remuneration, 120) || '—', inline: true },
+        { name: 'Échéance', value: _s(p.echeance, 60) || '—', inline: true },
+      ],
+      footer: `Créé par ${p.auteurNom || 'Site web'}`,
+    }, _rolePoleAnnonce(p.pole)).catch(() => {});
     return { ok: true, message: `Contrat « ${objet.slice(0, 50)} » créé` };
   },
   'contrat.update': (db, p) => {
@@ -400,7 +462,7 @@ const HANDLERS = {
     return { ok: true, message: `Suivi → ${stage}` };
   },
   // Honorer : crédite le coffre + crée une facture (comme sur Discord).
-  'contrat.honorer': (db, p) => {
+  'contrat.honorer': async (db, p, ctx) => {
     const c = (db.contrats || []).find(x => x && String(x.id) === String(p.id));
     if (!c) return { ok: false, message: 'Contrat introuvable' };
     if (c.remuVerseAuCoffre) return { ok: false, message: 'Contrat déjà honoré' };
@@ -430,6 +492,16 @@ const HANDLERS = {
       supa.journaliserEvenement && supa.journaliserEvenement({ aggregate: 'contrat', type: 'contrat.honore', cibleId: String(c.id), cibleLibelle: nom, actorNom: p.auteurNom || 'Site web', payload: { montant, facture: numero } });
       supa.creerNotification && supa.creerNotification({ type: 'contrat-statut', titre: `Contrat honoré — ${nom}`, corps: `+${montant}$ au coffre ${pole === 'illegal' ? 'Confrérie' : 'Iron Wolf'} · ${numero}`, lien: '/operations', cibleId: String(c.id), roleCible: 'officier', ref: `contrat-honore-${c.id}` });
     } catch {}
+    // Annonce Discord (#contrats) — sans ping (bilan). Best-effort.
+    await _annonce(ctx, _SAL_ANNONCE.contrats, {
+      color: 0x2ECC71, title: `⚖️ Contrat honoré — ${_s(c.objet || c.cible, 80) || 'Contrat'}`,
+      fields: [
+        { name: 'Montant', value: `+${montant}$`, inline: true },
+        { name: 'Coffre', value: pole === 'illegal' ? 'Confrérie' : 'Iron Wolf', inline: true },
+        { name: 'Facture', value: numero, inline: true },
+      ],
+      footer: `Honoré par ${p.auteurNom || 'Site web'}`,
+    }, null).catch(() => {});
     return { ok: true, message: `Contrat honoré : +${montant}$ au coffre · ${numero}` };
   },
 
@@ -546,12 +618,22 @@ Object.assign(HANDLERS, {
     return { ok: true, message: `${(fresh.user && fresh.user.username) || userId} est désormais ${nouveauGrade}.` };
   },
   // Rapports d'informateurs (db.informateurs)
-  'rapport.create': (db, p) => {
+  'rapport.create': async (db, p, ctx) => {
     const info = _s(p.info, 4000);
     if (!info) return { ok: false, message: 'info manquante' };
     if (!Array.isArray(db.informateurs)) db.informateurs = [];
     const id = `web-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
     db.informateurs.push({ id, source: _s(p.source, 200), cible: _s(p.cible, 200), info, fiabilite: _fiab05(p.fiabilite), statut: _s(p.statut, 40) || 'nouveau', createdAt: new Date().toISOString(), source_web: true });
+    // Annonce Discord (#informateurs) — sans ping (renseignement discret). Best-effort.
+    await _annonce(ctx, _SAL_ANNONCE.informateurs, {
+      color: 0x8B5A2A, title: '🕵️ Nouveau renseignement',
+      desc: info.slice(0, 600),
+      fields: [
+        { name: 'Source', value: _s(p.source, 200) || '—', inline: true },
+        { name: 'Cible', value: _s(p.cible, 200) || '—', inline: true },
+        { name: 'Fiabilité', value: `${_fiab05(p.fiabilite)}/5`, inline: true },
+      ],
+    }, null).catch(() => {});
     return { ok: true, message: 'Rapport ajouté' };
   },
   'rapport.update': (db, p) => {
@@ -571,18 +653,32 @@ Object.assign(HANDLERS, {
     return { ok: true, message: 'Rapport supprimé' };
   },
   // Personnes traquées (db.traques)
-  'traque.create': (db, p) => {
+  'traque.create': async (db, p, ctx) => {
     const cible = _s(p.cible, 200);
     if (!cible) return { ok: false, message: 'cible manquante' };
     if (!Array.isArray(db.traques)) db.traques = [];
     const id = `AR-${Date.now().toString().slice(-6)}`;
+    const photo = _s(p.photo, 500) || null;
     db.traques.push({
       id, cible, prime: _s(p.prime, 120) || '—', dangerosite: _s(p.dangerosite, 40) || 'moyen',
       status: _statutTraque(p.statut), position: _s(p.position, 200) || '—',
       vivantMort: _s(p.vivantMort, 40) || 'Indifférent', commanditaire: _s(p.commanditaire, 200) || '—',
-      signalement: _s(p.signalement, 2000), photo: _s(p.photo, 500) || null,
+      signalement: _s(p.signalement, 2000), photo,
       chasseurs: [], pistes: [], createdAt: new Date().toISOString(), source: 'web',
     });
+    // Annonce Discord (#affaires) — avis de recherche, ping du rôle pôle légal + photo.
+    await _annonce(ctx, _SAL_ANNONCE.affaires, {
+      color: 0x8B1A1A, title: `🔍 Avis de recherche — ${cible.slice(0, 80)}`,
+      desc: _s(p.signalement, 600) || null,
+      fields: [
+        { name: 'Prime', value: _s(p.prime, 120) || '—', inline: true },
+        { name: 'Dangerosité', value: _s(p.dangerosite, 40) || 'moyen', inline: true },
+        { name: 'Vivant / Mort', value: _s(p.vivantMort, 40) || 'Indifférent', inline: true },
+        { name: 'Position', value: _s(p.position, 200) || '—', inline: false },
+      ],
+      image: photo,
+      footer: `Réf. ${id}`,
+    }, _rolePoleAnnonce('legal')).catch(() => {});
     return { ok: true, message: `Avis de recherche émis : ${cible.slice(0, 50)}` };
   },
   'traque.update': (db, p) => {
