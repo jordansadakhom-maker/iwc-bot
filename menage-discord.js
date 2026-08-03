@@ -118,6 +118,19 @@ async function _apercu(guild) {
   else for (const c of aRanger) L.push(`   • #${c.name}  _(motif : ${motifGestion(norm(c.name))})_`);
   L.push('');
 
+  // Catégories qui seraient ENTIÈREMENT vidées par l'archivage (supprimables ensuite).
+  const idsRanger = new Set(aRanger.map(c => c.id));
+  const videesApres = [];
+  for (const cat of guild.channels.cache.filter(c => c.type === ChannelType.GuildCategory).values()) {
+    if (archiveCat && cat.id === archiveCat.id) continue;
+    const enfants = [...guild.channels.cache.filter(c => c.parentId === cat.id).values()];
+    if (enfants.length && enfants.every(c => idsRanger.has(c.id))) videesApres.push(cat.name);
+  }
+  if (videesApres.length) {
+    L.push(`🗂️ **${videesApres.length} catégorie(s) seraient ensuite vides** : ${videesApres.join(', ')} — supprimables via \`!menage vides\`.`);
+    L.push('');
+  }
+
   L.push('🔐 **Toujours conservés** : tous les vocaux, et les salons de discussion / RP / annonces / règlement / présentations / médias… (liste blanche prioritaire).');
   L.push('');
 
@@ -217,6 +230,29 @@ async function _supprimerWebhooks(guild) {
   return { supprimes, echecs };
 }
 
+// ── Catégories vides : repère et supprime les catégories sans aucun salon ─────
+// (typiquement d'anciennes catégories de gestion, entièrement vidées par
+// l'archivage). Ne touche JAMAIS la catégorie d'archive.
+function _categoriesVides(guild) {
+  const archiveNorm = norm(ARCHIVE_CAT);
+  const vides = [];
+  for (const cat of guild.channels.cache.filter(c => c.type === ChannelType.GuildCategory).values()) {
+    if (norm(cat.name) === archiveNorm) continue;                 // jamais l'archive
+    if (guild.channels.cache.filter(c => c.parentId === cat.id).size === 0) vides.push(cat);
+  }
+  return vides.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function _supprimerVides(guild) {
+  const vides = _categoriesVides(guild);
+  let supprimes = 0, echecs = 0;
+  for (const cat of vides) {
+    const ok = await cat.delete('Ménage : catégorie vide (finalisation)').then(() => true).catch(() => false);
+    if (ok) supprimes++; else echecs++;
+  }
+  return { supprimes, echecs, total: vides.length };
+}
+
 // ── Point d'entrée ───────────────────────────────────────────────────────────
 async function onMessage(message) {
   try {
@@ -252,18 +288,34 @@ async function onMessage(message) {
       return true;
     }
 
+    if (arg === 'vides' || arg === 'vide') {
+      const vides = _categoriesVides(message.guild);
+      if (!vides.length) { await message.reply({ content: '✨ Aucune catégorie vide à supprimer.', allowedMentions: { parse: [] } }).catch(() => {}); return true; }
+      const L = [`🗂️ **Catégories vides (0 salon) : ${vides.length}**`];
+      for (const c of vides) L.push(`   • ${c.name}`);
+      L.push('');
+      L.push('▶️ Tape **`!menage vides go`** pour les supprimer. ⚠️ Après ça, `!menage annuler` ne pourra plus remettre un salon dans une catégorie supprimée.');
+      await message.channel.send({ content: L.join('\n'), allowedMentions: { parse: [] } }).catch(() => {});
+      return true;
+    }
+    if (arg === 'videsgo' || arg === 'videsconfirmer' || arg === 'videsconfirm' || arg === 'videslancer') {
+      const r = await _supprimerVides(message.guild);
+      await message.reply({ content: r.total ? `🗑️ Catégories vides supprimées : **${r.supprimes}**${r.echecs ? ` · ${r.echecs} échec(s) (permissions ?)` : ''}.` : '✨ Aucune catégorie vide à supprimer.', allowedMentions: { parse: [] } }).catch(() => {});
+      return true;
+    }
+
     if (arg === 'go' || arg === 'confirmer' || arg === 'confirm' || arg === 'lancer') {
       const wait = await message.reply({ content: '⏳ Archivage en cours… (déplacement + masquage, rien n\'est supprimé)', allowedMentions: { parse: [] } }).catch(() => null);
       const { archives, echecs, rien } = await _appliquer(message.guild);
       const fin = rien
         ? '✅ Rien à archiver — le serveur est déjà propre.'
-        : `✅ Ménage terminé : **${archives}** salon(s) de gestion archivé(s)${echecs ? ` · ⚠️ ${echecs} échec(s) (permissions ?)` : ''}.\nIls sont masqués dans « 🗄️ ARCHIVE » — **rien n'est supprimé**. \`!menage annuler\` pour tout remettre, \`!menage webhooks\` pour retirer leurs webhooks.`;
+        : `✅ Ménage terminé : **${archives}** salon(s) de gestion archivé(s)${echecs ? ` · ⚠️ ${echecs} échec(s) (permissions ?)` : ''}.\nIls sont masqués dans « 🗄️ ARCHIVE » — **rien n'est supprimé**.\n↩️ \`!menage annuler\` pour tout remettre · 🪝 \`!menage webhooks\` pour leurs webhooks · 🗂️ \`!menage vides\` pour retirer les catégories devenues vides · 🧭 \`!reorg test\` pour ranger les salons de communication restants.`;
       if (wait) await wait.edit({ content: fin, allowedMentions: { parse: [] } }).catch(() => {});
       else await message.channel.send({ content: fin, allowedMentions: { parse: [] } }).catch(() => {});
       return true;
     }
 
-    await message.reply({ content: 'ℹ️ Commandes : `!menage test` (aperçu) · `!menage go` (archiver) · `!menage annuler` · `!menage webhooks`.', allowedMentions: { parse: [] } }).catch(() => {});
+    await message.reply({ content: 'ℹ️ Commandes : `!menage test` (aperçu/audit) · `!menage go` (archiver) · `!menage annuler` · `!menage webhooks` · `!menage vides` (catégories vides).', allowedMentions: { parse: [] } }).catch(() => {});
     return true;
   } catch (e) { console.log('⚠️ menage onMessage:', e.message); return false; }
 }
