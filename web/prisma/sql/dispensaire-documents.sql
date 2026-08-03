@@ -28,11 +28,13 @@ CREATE TABLE IF NOT EXISTS "DispensaireRapport" (
   "categorie"  TEXT,
   "patient"    TEXT,
   "lien"       TEXT,                                  -- lien Canva (ou autre)
+  "pieceJointe" TEXT,                                  -- lien image (référence visuelle : blessure, radio…)
   "auteur"     TEXT,
   "note"       TEXT,                                  -- description
   "par"        TEXT,
   "createdAt"  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE "DispensaireRapport" ADD COLUMN IF NOT EXISTS "pieceJointe" TEXT;
 ALTER TABLE "DispensaireRapport" ENABLE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS "DispensaireRapport_date_idx" ON "DispensaireRapport" ("createdAt" DESC);
 

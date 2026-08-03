@@ -100,9 +100,10 @@ CREATE INDEX IF NOT EXISTS "DispensaireCertificat_date_idx" ON "DispensaireCerti
 CREATE INDEX IF NOT EXISTS "DispensaireCertificat_patient_idx" ON "DispensaireCertificat" (lower("patient"));
 
 CREATE TABLE IF NOT EXISTS "DispensaireRapport" (
-  "id" TEXT PRIMARY KEY, "titre" TEXT NOT NULL, "categorie" TEXT, "patient" TEXT, "lien" TEXT, "auteur" TEXT, "note" TEXT, "par" TEXT,
+  "id" TEXT PRIMARY KEY, "titre" TEXT NOT NULL, "categorie" TEXT, "patient" TEXT, "lien" TEXT, "pieceJointe" TEXT, "auteur" TEXT, "note" TEXT, "par" TEXT,
   "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE "DispensaireRapport" ADD COLUMN IF NOT EXISTS "pieceJointe" TEXT;
 ALTER TABLE "DispensaireRapport" ENABLE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS "DispensaireRapport_date_idx" ON "DispensaireRapport" ("createdAt" DESC);
 

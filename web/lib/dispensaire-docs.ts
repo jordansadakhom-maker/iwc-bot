@@ -30,7 +30,7 @@ export async function getRapports(): Promise<RapportsData> {
   const { data, error } = await admin.from("DispensaireRapport").select("*").order("createdAt", { ascending: false }).limit(300);
   if (error) return { ...vide, connecte: true, pret: false, canEdit: true };
   const rapports: Rapport[] = ((data || []) as Record<string, unknown>[]).map((r) => ({
-    id: String(r.id), titre: String(r.titre || "Rapport"), categorie: s(r.categorie), patient: s(r.patient), lien: s(r.lien), auteur: s(r.auteur), note: s(r.note), par: s(r.par), createdAt: String(r.createdAt),
+    id: String(r.id), titre: String(r.titre || "Rapport"), categorie: s(r.categorie), patient: s(r.patient), lien: s(r.lien), pieceJointe: s(r.pieceJointe), auteur: s(r.auteur), note: s(r.note), par: s(r.par), createdAt: String(r.createdAt),
   }));
   const categories = [...new Set(rapports.map((d) => (d.categorie || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   return { connecte: true, pret: true, canEdit: true, rapports, categories };
