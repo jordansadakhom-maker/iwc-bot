@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { envoyerCommande, type CommandeResult } from "@/lib/commandes";
 import { supprimerFiable } from "@/lib/suppression";
+import { getActeur } from "@/lib/authz";
 
 // Ajoute une fiche de contact DEPUIS LE SITE (espace interne, membre connecté).
 // On enregistre la demande dans Supabase (table DemandeContact) ; le bot Discord
@@ -31,6 +32,9 @@ const STATUTS = ["Vivant", "Disparu", "Recherché", "Décédé"];
 const clip = (v: string | undefined, n: number) => (v || "").trim().slice(0, n);
 
 export async function ajouterContact(data: ContactInput): Promise<ContactResult> {
+  // Garde (fail-closed) : l'insertion alimente une file que le bot matérialise en
+  // vraies fiches + posts Discord → réservée aux membres connectés.
+  if (!(await getActeur())) return { ok: false, error: "Action réservée aux membres connectés." };
   const nom = clip(data.nom, 80);
   if (nom.length < 2) return { ok: false, error: "Le nom est obligatoire." };
 

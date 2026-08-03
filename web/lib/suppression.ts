@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { envoyerCommande, type CommandeResult } from "@/lib/commandes";
 import { emettreEvenement } from "@/lib/evenements";
+import { getActeur } from "@/lib/authz";
 
 // Suppression FIABLE d'un élément géré par le bot (tables réconciliées côté
 // bot → une suppression « fire-and-forget » revient toute seule).
@@ -18,6 +19,10 @@ export async function supprimerFiable(opts: {
 }): Promise<CommandeResult> {
   const v = String(opts.valeur || "").trim();
   if (!v) return { ok: false, error: "Élément introuvable." };
+  // Garde (fail-closed) : la suppression directe en base (service_role) ne doit
+  // JAMAIS s'exécuter pour un non-connecté. envoyerCommande refuse déjà côté bot,
+  // mais le delete local qui suit tournait sans condition — on ferme la porte ici.
+  if (!(await getActeur())) return { ok: false, error: "Action réservée aux membres connectés." };
   const r = await envoyerCommande(opts.type, opts.payload, { attendre: true, timeoutMs: 12000 });
   try {
     const admin = createAdminClient();
