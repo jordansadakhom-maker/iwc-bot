@@ -3,11 +3,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FileText, Wallet, Landmark, Target, Plug, Inbox, Users, Activity, Coins, Compass, ArrowRight, ListChecks, CheckCircle2, Megaphone, CalendarDays, Skull, Mic, Crosshair, Sparkles, Clock, UserCheck, ScrollText, RefreshCw, TrendingUp, TrendingDown } from "lucide-react";
+import { FileText, Wallet, Landmark, Target, Plug, Inbox, Users, Activity, Coins, Compass, ArrowRight, ListChecks, CheckCircle2, Megaphone, CalendarDays, Skull, Mic, Crosshair, Sparkles, Clock, UserCheck, ScrollText, RefreshCw, TrendingUp, TrendingDown, ChevronDown } from "lucide-react";
 import clsx from "clsx";
 import type { DashData, FeedItem, AlertesData, Acces } from "@/lib/queries";
 import { BarresH, Donut, Repartition } from "@/components/charts";
-import { PoleChip, SectionTitle, Ornement, Card, CardHeader } from "@/components/ui";
+import { PoleChip, Ornement, Card, CardHeader } from "@/components/ui";
 import { LiveFeed } from "@/components/live-feed";
 import { DemandesResume } from "@/components/demandes-resume";
 import type { DemandesData } from "@/lib/demandes-const";
@@ -70,6 +70,37 @@ function RefreshControl({ connecte }: { connecte: boolean }) {
       <RefreshCw className={clsx("h-3.5 w-3.5", busy && "animate-spin")} />
       {maj ? <span className="text-faint">· {maj}</span> : null}
     </button>
+  );
+}
+
+// ── Section repliable à mémoire : reprend à l'identique l'en-tête `SectionTitle`
+//    (design conservé) mais devient un bouton pliant/dépliant, et chacun retient
+//    son état par section dans le navigateur — chacun range son poste comme il veut.
+//    (Composant local au dashboard : `SectionTitle` partagé reste inchangé ailleurs.)
+const SECT_KEY = "iwc.dash.sections";
+function Section({ id, tone = "var(--accent)", icon: Icon, title, children }: { id: string; tone?: string; icon?: typeof Target; title: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(true);
+  useEffect(() => {
+    try { const raw = localStorage.getItem(SECT_KEY); if (raw) { const m = JSON.parse(raw); if (typeof m?.[id] === "boolean") setOpen(m[id]); } } catch { /* stockage indisponible */ }
+  }, [id]);
+  function toggle() {
+    setOpen((v) => {
+      const n = !v;
+      try { const raw = localStorage.getItem(SECT_KEY); const m = raw ? JSON.parse(raw) : {}; m[id] = n; localStorage.setItem(SECT_KEY, JSON.stringify(m)); } catch { /* ignore */ }
+      return n;
+    });
+  }
+  return (
+    <>
+      <button type="button" onClick={toggle} aria-expanded={open} className="group mt-2 flex w-full items-center gap-3 text-left">
+        <span className="h-4 w-1 rounded-full" style={{ background: tone, boxShadow: `0 0 10px -1px color-mix(in srgb,${tone} 70%,transparent)` }} />
+        {Icon ? <Icon className="h-4 w-4" style={{ color: tone, filter: `drop-shadow(0 0 6px color-mix(in srgb,${tone} 55%,transparent))` }} strokeWidth={2} /> : null}
+        <h2 className="text-[0.72rem] font-bold uppercase tracking-[0.16em] text-muted">{title}</h2>
+        <span className="h-px flex-1" style={{ background: "linear-gradient(90deg,var(--border),transparent)" }} />
+        <ChevronDown className={clsx("h-4 w-4 shrink-0 text-faint transition group-hover:text-muted", !open && "-rotate-90")} />
+      </button>
+      {open ? children : null}
+    </>
   );
 }
 
@@ -147,7 +178,7 @@ function Attention({ data }: { data: DashData }) {
                 <div className="text-[0.85rem] font-medium">{a.titre}</div>
                 <div className="mt-0.5 text-[0.75rem] text-muted">{a.detail}</div>
               </div>
-              <span className={clsx("ml-auto self-center whitespace-nowrap rounded-full px-2 py-[3px] text-[0.64rem] font-bold uppercase tracking-[0.04em]", SEV_LABEL[a.sev])} style={{ background: SEV_BG[a.sev] }}>
+              <span className={clsx("ml-auto self-center whitespace-nowrap rounded-full px-2 py-[3px] text-[0.66rem] font-bold uppercase tracking-[0.04em]", SEV_LABEL[a.sev])} style={{ background: SEV_BG[a.sev] }}>
                 {a.tag}
               </span>
             </Link>
@@ -179,7 +210,7 @@ function OpsBoard({ data }: { data: DashData }) {
                   <Link href="/operations" key={`${o.titre}-${i}`} className="mb-2.5 block cursor-pointer rounded-[11px] border border-border bg-surface-2 px-3 py-2.5 transition hover:-translate-y-0.5 hover:border-border-2">
                     <div className="text-[0.83rem] font-semibold">{o.titre}</div>
                     <div className="mt-2 flex items-center gap-2 text-[0.7rem] text-muted">
-                      <span className="rounded-md px-1.5 py-0.5 text-[0.62rem] font-bold" style={{ background: "color-mix(in srgb,var(--accent) 16%,transparent)", color: "var(--accent)" }}>{o.type}</span>
+                      <span className="rounded-md px-1.5 py-0.5 text-[0.66rem] font-bold" style={{ background: "color-mix(in srgb,var(--accent) 16%,transparent)", color: "var(--accent)" }}>{o.type}</span>
                       {o.membres.length ? <span>{o.membres.length} agent(s)</span> : null}
                     </div>
                   </Link>
@@ -351,83 +382,90 @@ export function Dashboard({ data, feed = [], alertes = { total: 0, items: [] }, 
 
       <BandeauAttente connecte={data.connecte} />
 
-      <SectionTitle tone="var(--warn)" icon={ListChecks}>Ton poste</SectionTitle>
-      <CeQuiTattend alertes={alertes} />
+      <Section id="poste" tone="var(--warn)" icon={ListChecks} title="Ton poste">
+        <CeQuiTattend alertes={alertes} />
+      </Section>
 
-      <SectionTitle tone="var(--accent)" icon={Coins}>Synthèse</SectionTitle>
-      <Kpis data={data} tendances={tendances} />
+      <Section id="synthese" tone="var(--accent)" icon={Coins} title="Synthèse">
+        <Kpis data={data} tendances={tendances} />
+      </Section>
 
       {demandes ? <DemandesResume data={demandes} monId={monId} /> : null}
 
-      <SectionTitle tone="var(--warn)" icon={Clock}>Échéances &amp; présence</SectionTitle>
-      <EcheancesPresence licences={licencesExpirant} presence={presence} />
+      <Section id="echeances" tone="var(--warn)" icon={Clock} title="Échéances & présence">
+        <EcheancesPresence licences={licencesExpirant} presence={presence} />
+      </Section>
 
       <Raccourcis acces={acces} />
 
       <BriefingIA />
 
-      <SectionTitle tone="#3987e5" icon={Users}>Effectifs &amp; activité</SectionTitle>
-      <div className="grid items-start gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2" delay={0.16}>
-          <CardHeader titre="Membres par grade" />
-          {data.membresParGrade.length ? (
-            <BarresH data={data.membresParGrade} />
-          ) : (
-            <Empty>La répartition par grade s&apos;affichera dès la synchronisation des membres.</Empty>
-          )}
-        </Card>
-        <Card delay={0.2}>
-          <CardHeader titre="Opérations par phase" />
-          {data.opsParPhase.some((p) => p.value > 0) ? (
-            <Donut data={data.opsParPhase} />
-          ) : (
-            <Empty>Aucune opération en cours.</Empty>
-          )}
-        </Card>
-      </div>
+      <Section id="effectifs" tone="#3987e5" icon={Users} title="Effectifs & activité">
+        <div className="grid items-start gap-4 lg:grid-cols-3">
+          <Card className="lg:col-span-2" delay={0.16}>
+            <CardHeader titre="Membres par grade" />
+            {data.membresParGrade.length ? (
+              <BarresH data={data.membresParGrade} />
+            ) : (
+              <Empty>La répartition par grade s&apos;affichera dès la synchronisation des membres.</Empty>
+            )}
+          </Card>
+          <Card delay={0.2}>
+            <CardHeader titre="Opérations par phase" />
+            {data.opsParPhase.some((p) => p.value > 0) ? (
+              <Donut data={data.opsParPhase} />
+            ) : (
+              <Empty>Aucune opération en cours.</Empty>
+            )}
+          </Card>
+        </div>
+      </Section>
 
-      <SectionTitle tone="#c98500" icon={Coins}>Finances</SectionTitle>
-      <div className="grid items-start gap-4 lg:grid-cols-2">
-        <Card delay={0.22}>
-          <CardHeader titre="Soldes des coffres" />
-          {data.connecte ? (
-            <BarresH
-              data={[
-                { label: "Commun", value: data.coffres.commun ?? 0 },
-                { label: "Iron Wolf", value: data.coffres.legal ?? 0 },
-                { label: "Confrérie", value: data.coffres.illegal ?? 0 },
-              ]}
-              money
-            />
-          ) : (
-            <Empty>Les soldes s&apos;afficheront à la connexion de la base.</Empty>
-          )}
-        </Card>
-        <Card delay={0.24}>
-          <CardHeader titre="Répartition de la trésorerie" />
-          {data.connecte && (data.coffres.commun || data.coffres.legal || data.coffres.illegal) ? (
-            <Repartition
-              data={[
-                { label: "Commun", value: data.coffres.commun ?? 0, color: "#c98500" },
-                { label: "Iron Wolf", value: data.coffres.legal ?? 0, color: "#3987e5" },
-                { label: "Confrérie", value: data.coffres.illegal ?? 0, color: "#e66767" },
-              ]}
-              money
-            />
-          ) : (
-            <Empty>La répartition s&apos;affichera dès que les coffres seront alimentés.</Empty>
-          )}
-        </Card>
-      </div>
+      <Section id="finances" tone="#c98500" icon={Coins} title="Finances">
+        <div className="grid items-start gap-4 lg:grid-cols-2">
+          <Card delay={0.22}>
+            <CardHeader titre="Soldes des coffres" />
+            {data.connecte ? (
+              <BarresH
+                data={[
+                  { label: "Commun", value: data.coffres.commun ?? 0 },
+                  { label: "Iron Wolf", value: data.coffres.legal ?? 0 },
+                  { label: "Confrérie", value: data.coffres.illegal ?? 0 },
+                ]}
+                money
+              />
+            ) : (
+              <Empty>Les soldes s&apos;afficheront à la connexion de la base.</Empty>
+            )}
+          </Card>
+          <Card delay={0.24}>
+            <CardHeader titre="Répartition de la trésorerie" />
+            {data.connecte && (data.coffres.commun || data.coffres.legal || data.coffres.illegal) ? (
+              <Repartition
+                data={[
+                  { label: "Commun", value: data.coffres.commun ?? 0, color: "#c98500" },
+                  { label: "Iron Wolf", value: data.coffres.legal ?? 0, color: "#3987e5" },
+                  { label: "Confrérie", value: data.coffres.illegal ?? 0, color: "#e66767" },
+                ]}
+                money
+              />
+            ) : (
+              <Empty>La répartition s&apos;affichera dès que les coffres seront alimentés.</Empty>
+            )}
+          </Card>
+        </div>
+      </Section>
 
-      <SectionTitle tone="#9085e9" icon={Activity}>Pilotage</SectionTitle>
-      <div className="grid items-start gap-4 lg:grid-cols-[2fr_1fr]">
-        <OpsBoard data={data} />
-        <Attention data={data} />
-      </div>
+      <Section id="pilotage" tone="#9085e9" icon={Activity} title="Pilotage">
+        <div className="grid items-start gap-4 lg:grid-cols-[2fr_1fr]">
+          <OpsBoard data={data} />
+          <Attention data={data} />
+        </div>
+      </Section>
 
-      <SectionTitle tone="var(--good)" icon={Activity}>En direct</SectionTitle>
-      <LiveFeed items={feed} />
+      <Section id="direct" tone="var(--good)" icon={Activity} title="En direct">
+        <LiveFeed items={feed} />
+      </Section>
     </>
   );
 }
