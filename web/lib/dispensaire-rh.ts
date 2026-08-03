@@ -13,6 +13,7 @@ export type Salarie = {
   id: string; nom: string; grade: string | null; qualifications: string | null;
   dateEmbauche: string | null; compteBancaire: string | null; telegramme: string | null;
   statut: string; absJustifiees: number; absInjustifiees: number; notes: string | null;
+  dateDepart: string | null; motifDepart: string | null;
   updatedAt: string | null; updatedBy: string | null; acces?: SalarieAcces | null;
 };
 export type RhData = { connecte: boolean; pret: boolean; canEdit: boolean; salaries: Salarie[]; seuilRenvoi: number; sanctionsParSalarie: Record<string, Sanction[]> };
@@ -69,7 +70,7 @@ export async function getRh(): Promise<RhData> {
     id: String(r.id), nom: String(r.nom || "Salarié"), grade: s(r.grade), qualifications: s(r.qualifications),
     dateEmbauche: s(r.dateEmbauche), compteBancaire: s(r.compteBancaire), telegramme: s(r.telegramme),
     statut: String(r.statut || "actif"), absJustifiees: num(r.absJustifiees), absInjustifiees: num(r.absInjustifiees),
-    notes: s(r.notes), updatedAt: s(r.updatedAt), updatedBy: s(r.updatedBy),
+    notes: s(r.notes), dateDepart: s(r.dateDepart), motifDepart: s(r.motifDepart), updatedAt: s(r.updatedAt), updatedBy: s(r.updatedBy),
     acces: accesParNom ? (accesParNom.get(cleNom(r.nom)) ?? { present: false, actif: false, role: null, lieDiscord: false }) : null,
   }));
   return { connecte: true, pret: true, canEdit, salaries, seuilRenvoi, sanctionsParSalarie };

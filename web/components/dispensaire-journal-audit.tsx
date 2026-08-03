@@ -6,7 +6,7 @@ const LABEL: Record<string, string> = {
   "membre.cree": "Membre ajouté", "membre.maj": "Membre modifié", "membre.supprime": "Membre supprimé",
   "grade.cree": "Grade créé", "grade.maj": "Grade modifié", "grade.supprime": "Grade supprimé", "grade.reordonne": "Grades réordonnés",
   "config.maj": "Paramètres modifiés",
-  "salarie.cree": "Salarié ajouté", "salarie.maj": "Salarié modifié", "salarie.supprime": "Salarié supprimé", "salarie.absence": "Absences ajustées",
+  "salarie.cree": "Salarié ajouté", "salarie.maj": "Salarié modifié", "salarie.supprime": "Salarié supprimé", "salarie.absence": "Absences ajustées", "salarie.renvoi": "Salarié renvoyé", "salarie.demission": "Démission enregistrée",
   "sanction.cree": "Sanction enregistrée", "sanction.supprime": "Sanction retirée",
   "stock.item_cree": "Article créé", "stock.item_maj": "Article modifié", "stock.item_supprime": "Article supprimé", "stock.ajuste": "Stock ajusté", "stock.deplace": "Article déplacé",
   "coffre.cree": "Coffre créé", "coffre.maj": "Coffre modifié", "coffre.supprime": "Coffre supprimé", "coffre.import_plan": "Plan de rangement importé",

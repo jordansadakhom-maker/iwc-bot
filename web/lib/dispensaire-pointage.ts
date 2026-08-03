@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { estSalarieActif } from "@/lib/dispensaire-personnel-const";
 import { getAcces } from "@/lib/queries";
 import { getRoleDispensaire, getConfig, peutGererRH } from "@/lib/dispensaire-roles";
 import { estAConfirmer, estEscalade } from "@/lib/dispensaire-pointage-const";
@@ -55,7 +56,7 @@ export async function getPointage(): Promise<PointData> {
   // Roster (salariés actifs) pour le sélecteur de prise de service.
   const { data: rost } = await admin.from("DispensaireSalarie").select("id,nom,grade,statut").order("nom", { ascending: true });
   const roster: PointSalarie[] = ((rost || []) as Record<string, unknown>[])
-    .filter((r) => String(r.statut || "actif") !== "renvoye")
+    .filter((r) => estSalarieActif(r.statut))
     .map((r) => ({ id: String(r.id), nom: String(r.nom || "Salarié"), grade: r.grade == null ? null : String(r.grade) }));
 
   // Sessions ouvertes (en service).
@@ -140,7 +141,7 @@ export async function getAssiduite(): Promise<AssiduiteData> {
 
   // Roster (salariés actifs) → toutes les personnes apparaissent, même à 0.
   const { data: rost } = await admin.from("DispensaireSalarie").select("id,nom,grade,statut").order("nom", { ascending: true });
-  const roster = ((rost || []) as Record<string, unknown>[]).filter((r) => String(r.statut || "actif") !== "renvoye");
+  const roster = ((rost || []) as Record<string, unknown>[]).filter((r) => estSalarieActif(r.statut));
 
   // Une ligne par personne (clé = nom normalisé), semences depuis le roster.
   const map = new Map<string, LigneAssiduite>();

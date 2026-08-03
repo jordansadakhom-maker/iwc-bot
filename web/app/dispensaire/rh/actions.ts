@@ -9,9 +9,9 @@ import { cleNom } from "@/lib/noms";
 // RH du Dispensaire — écriture réservée aux membres habilités (direction/médecin).
 export type RhResult = { ok: boolean; error?: string; id?: string };
 
-type Champ = "nom" | "grade" | "qualifications" | "dateEmbauche" | "compteBancaire" | "telegramme" | "statut" | "notes";
-const CHAMPS: Champ[] = ["nom", "grade", "qualifications", "dateEmbauche", "compteBancaire", "telegramme", "statut", "notes"];
-const STATUTS = ["actif", "suspendu", "renvoye"];
+type Champ = "nom" | "grade" | "qualifications" | "dateEmbauche" | "compteBancaire" | "telegramme" | "statut" | "notes" | "dateDepart" | "motifDepart";
+const CHAMPS: Champ[] = ["nom", "grade", "qualifications", "dateEmbauche", "compteBancaire", "telegramme", "statut", "notes", "dateDepart", "motifDepart"];
+const STATUTS = ["actif", "suspendu", "renvoye", "demission"];
 
 const s = (v: unknown, max = 500) => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
 function newId() { return `ds-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
@@ -42,7 +42,7 @@ function nettoyer(data: Record<string, unknown>) {
   const row: Record<string, unknown> = {};
   for (const c of CHAMPS) if (c in data) {
     if (c === "statut") row[c] = STATUTS.includes(String(data[c])) ? data[c] : "actif";
-    else if (c === "dateEmbauche") { const d = s(data[c], 20); row[c] = d && /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0, 10) : null; }
+    else if (c === "dateEmbauche" || c === "dateDepart") { const d = s(data[c], 20); row[c] = d && /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0, 10) : null; }
     else row[c] = s(data[c], c === "notes" || c === "qualifications" ? 2000 : 200);
   }
   return row;
@@ -73,11 +73,40 @@ export async function majSalarie(id: string, patch: Record<string, unknown>): Pr
   const { error } = await admin.from("DispensaireSalarie").update({ ...row, updatedBy: await qui(), updatedAt: new Date().toISOString() }).eq("id", id);
   if (error) return { ok: false, error: "Enregistrement impossible." };
   await emettreEvenementDispensaire({ aggregate: "salarie", type: "salarie.maj", cibleId: id, cibleLibelle: String((avant?.nom ?? row.nom) ?? ""), avant, apres: row });
-  // Le passage en « renvoyé » coupe l'accès au site dans la foulée.
-  if (String(patch.statut ?? "") === "renvoye") {
+  // Le passage en « renvoyé » ou « démissionnaire » coupe l'accès au site dans la foulée.
+  if (String(patch.statut ?? "") === "renvoye" || String(patch.statut ?? "") === "demission") {
     const nom = (row.nom as string | null | undefined) ?? (avant?.nom as string | null | undefined);
     await couperAccesDe(admin, nom);
   }
+  return { ok: true };
+}
+
+// Marque un salarié comme PARTI (renvoi ou démission) : statut + date de départ
+// (automatique) + motif facultatif, et coupe l'accès au site. Réservé RH/Direction.
+// Repli tolérant si la base n'a pas encore les colonnes dateDepart/motifDepart.
+export async function marquerDepart(id: string, type: "renvoye" | "demission", motif?: string): Promise<RhResult> {
+  if (!(await autorise())) return { ok: false, error: "Réservé aux membres habilités." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  if (!id) return { ok: false, error: "Salarié introuvable." };
+  if (type !== "renvoye" && type !== "demission") return { ok: false, error: "Type de départ invalide." };
+  const avant = await lire(admin, id);
+  const dateDepart = new Date().toISOString().slice(0, 10);
+  const mtf = s(motif, 500);
+  const meta = { updatedBy: await qui(), updatedAt: new Date().toISOString() };
+  let { error } = await admin.from("DispensaireSalarie").update({ statut: type, dateDepart, motifDepart: mtf, ...meta }).eq("id", id);
+  if (error) {
+    // Base pas encore migrée (colonnes de départ absentes) → au moins le statut.
+    ({ error } = await admin.from("DispensaireSalarie").update({ statut: type, ...meta }).eq("id", id));
+  }
+  if (error) return { ok: false, error: "Enregistrement impossible (lance dispensaire-rh.sql ?)." };
+  const nom = (avant?.nom as string | null | undefined) ?? null;
+  await couperAccesDe(admin, nom); // départ → accès au site coupé (best-effort)
+  await emettreEvenementDispensaire({
+    aggregate: "salarie", type: type === "renvoye" ? "salarie.renvoi" : "salarie.demission",
+    cibleId: id, cibleLibelle: String(nom ?? ""),
+    avant: { statut: avant?.statut ?? "actif" }, apres: { statut: type, dateDepart, motif: mtf },
+  });
   return { ok: true };
 }
 
