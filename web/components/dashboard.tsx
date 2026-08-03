@@ -1,9 +1,11 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { FileText, Wallet, Landmark, Target, Plug, Inbox, Users, Activity, Coins, Compass, ArrowRight, ListChecks, CheckCircle2, Megaphone, CalendarDays, Skull, Mic, Crosshair, Sparkles, Clock, UserCheck, ScrollText } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { FileText, Wallet, Landmark, Target, Plug, Inbox, Users, Activity, Coins, Compass, ArrowRight, ListChecks, CheckCircle2, Megaphone, CalendarDays, Skull, Mic, Crosshair, Sparkles, Clock, UserCheck, ScrollText, RefreshCw, TrendingUp, TrendingDown } from "lucide-react";
 import clsx from "clsx";
-import type { DashData, FeedItem, AlertesData } from "@/lib/queries";
+import type { DashData, FeedItem, AlertesData, Acces } from "@/lib/queries";
 import { BarresH, Donut, Repartition } from "@/components/charts";
 import { PoleChip, SectionTitle, Ornement, Card, CardHeader } from "@/components/ui";
 import { LiveFeed } from "@/components/live-feed";
@@ -44,17 +46,46 @@ function BandeauAttente({ connecte }: { connecte: boolean }) {
   );
 }
 
-function Kpis({ data }: { data: DashData }) {
+// Contrôle d'actualisation : bouton manuel + auto-rafraîchissement (2 min, onglet
+// visible) → le corps du dashboard suit les données, cohérent avec « En direct ».
+function RefreshControl({ connecte }: { connecte: boolean }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [maj, setMaj] = useState("");
+  useEffect(() => {
+    setMaj(new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }));
+    const id = window.setInterval(() => { if (document.visibilityState === "visible") router.refresh(); }, 120000);
+    return () => window.clearInterval(id);
+  }, [router]);
+  function go() {
+    setBusy(true);
+    router.refresh();
+    setMaj(new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }));
+    window.setTimeout(() => setBusy(false), 800);
+  }
+  return (
+    <button onClick={go} className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-[0.72rem] text-muted transition hover:border-border-2 hover:text-ink" title="Actualiser les données maintenant" aria-label="Actualiser les données">
+      <span className="h-2 w-2 rounded-full" style={{ background: connecte ? "var(--good)" : "var(--faint)" }} />
+      {connecte ? "En direct" : "Base non connectée"}
+      <RefreshCw className={clsx("h-3.5 w-3.5", busy && "animate-spin")} />
+      {maj ? <span className="text-faint">· {maj}</span> : null}
+    </button>
+  );
+}
+
+type Tendances = { commun: number; legal: number; illegal: number } | null;
+
+function Kpis({ data, tendances }: { data: DashData; tendances: Tendances }) {
   const K = data.connecte;
   const conf = data.pole === "confrerie";
   // L'argent se lit en OR (laiton clair), quel que soit le pôle — les coffres
   // brillent comme des pièces ; les compteurs restent en encre claire (hiérarchie).
   const OR = "var(--brass-hi)";
   const kpis = [
-    { label: "Coffre commun", value: K ? money(data.coffres.commun) : "—", icon: Wallet, tone: "#c98500", argent: true },
-    { label: conf ? "Coffre Confrérie" : "Coffre Iron Wolf", value: K ? money(conf ? data.coffres.illegal : data.coffres.legal) : "—", icon: Landmark, tone: conf ? "var(--oxblood)" : "#3987e5", argent: true },
-    { label: "Contrats en cours", value: K ? String(data.contratsEnCours) : "—", icon: FileText, tone: "#199e70" },
-    { label: "Opérations actives", value: K ? String(data.opsActives) : "—", icon: Target, tone: "#9085e9" },
+    { label: "Coffre commun", value: K ? money(data.coffres.commun) : "—", icon: Wallet, tone: "#c98500", argent: true, href: "/finances", delta: tendances?.commun ?? null },
+    { label: conf ? "Coffre Confrérie" : "Coffre Iron Wolf", value: K ? money(conf ? data.coffres.illegal : data.coffres.legal) : "—", icon: Landmark, tone: conf ? "var(--oxblood)" : "#3987e5", argent: true, href: "/finances", delta: conf ? (tendances?.illegal ?? null) : (tendances?.legal ?? null) },
+    { label: "Contrats en cours", value: K ? String(data.contratsEnCours) : "—", icon: FileText, tone: "#199e70", href: "/operations", delta: null },
+    { label: "Opérations actives", value: K ? String(data.opsActives) : "—", icon: Target, tone: "#9085e9", href: "/operations", delta: null },
   ];
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -62,20 +93,29 @@ function Kpis({ data }: { data: DashData }) {
         const Icon = k.icon;
         return (
           <Card key={k.label} delay={0.02 + i * 0.06}>
-            <div className="flex items-center justify-between">
-              <span className="text-[0.72rem] font-semibold uppercase tracking-[0.09em] text-muted">{k.label}</span>
-              <span className="grid h-[34px] w-[34px] place-items-center rounded-[10px]" style={{ color: k.tone, background: `color-mix(in srgb,${k.tone} 18%,transparent)`, boxShadow: `0 0 18px -4px color-mix(in srgb,${k.tone} 60%,transparent), inset 0 0 0 1px color-mix(in srgb,${k.tone} 30%,transparent)` }}>
-                <Icon className="h-4 w-4" strokeWidth={2} />
-              </span>
-            </div>
-            <div
-              className={clsx("tabular mb-1 mt-3 font-num text-[1.95rem] font-semibold", K ? (k.argent ? "" : "text-ink") : "text-faint")}
-              style={K && k.argent ? { color: OR, textShadow: `0 0 24px color-mix(in srgb, ${OR} 32%, transparent)` } : undefined}
-            >{k.value}</div>
-            <div className="flex items-center gap-1.5 text-[0.72rem] text-faint">
-              <span className="h-1.5 w-1.5 rounded-full" style={{ background: K ? "var(--good)" : "var(--faint)" }} />
-              {K ? "À jour" : "En attente de la base"}
-            </div>
+            {/* Carte cliquable → son module (finances / opérations). */}
+            <Link href={k.href} className="group -m-1 block rounded-[10px] p-1 transition hover:bg-[color-mix(in_srgb,var(--ink)_4%,transparent)]" aria-label={`${k.label} — ouvrir`}>
+              <div className="flex items-center justify-between">
+                <span className="text-[0.72rem] font-semibold uppercase tracking-[0.09em] text-muted">{k.label}</span>
+                <span className="grid h-[34px] w-[34px] place-items-center rounded-[10px]" style={{ color: k.tone, background: `color-mix(in srgb,${k.tone} 18%,transparent)`, boxShadow: `0 0 18px -4px color-mix(in srgb,${k.tone} 60%,transparent), inset 0 0 0 1px color-mix(in srgb,${k.tone} 30%,transparent)` }}>
+                  <Icon className="h-4 w-4" strokeWidth={2} />
+                </span>
+              </div>
+              <div
+                className={clsx("tabular mb-1 mt-3 font-num text-[1.95rem] font-semibold", K ? (k.argent ? "" : "text-ink") : "text-faint")}
+                style={K && k.argent ? { color: OR, textShadow: `0 0 24px color-mix(in srgb, ${OR} 32%, transparent)` } : undefined}
+              >{k.value}</div>
+              <div className="flex items-center gap-1.5 text-[0.73rem] text-faint">
+                {K && k.delta != null && k.delta !== 0 ? (
+                  <span className="inline-flex items-center gap-1 font-num font-semibold" style={{ color: k.delta > 0 ? "var(--good)" : "var(--oxblood)" }}>
+                    {k.delta > 0 ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
+                    {k.delta > 0 ? "+" : "−"}{money(Math.abs(k.delta))}<span className="font-normal text-faint"> · 7 j</span>
+                  </span>
+                ) : (
+                  <><span className="h-1.5 w-1.5 rounded-full" style={{ background: K ? "var(--good)" : "var(--faint)" }} />{K ? "À jour" : "En attente de la base"}</>
+                )}
+              </div>
+            </Link>
           </Card>
         );
       })}
@@ -192,20 +232,28 @@ function CeQuiTattend({ alertes }: { alertes: AlertesData }) {
 
 // ── Raccourcis : les gestes les plus fréquents, à un clic. Navigation pure
 //    (aucune écriture) → sûr et intuitif, comme les boutons d'un vrai poste. ──
-const RACCOURCIS: { label: string; href: string; icon: typeof Target; tone: string }[] = [
+type Raccourci = { label: string; href: string; icon: typeof Target; tone: string; perm?: keyof Acces; prio?: (keyof Acces)[] };
+const RACCOURCIS: Raccourci[] = [
   { label: "Répondre aux télégrammes", href: "/communication#telegrammes", icon: Megaphone, tone: "var(--accent)" },
   { label: "Rendez-vous clients", href: "/communication#rdv-clients", icon: CalendarDays, tone: "var(--warn)" },
-  { label: "Émettre un avis", href: "/wanted", icon: Skull, tone: "var(--oxblood)" },
-  { label: "Nouvelle opération", href: "/operations", icon: Target, tone: "#9085e9" },
+  { label: "Émettre un avis", href: "/wanted", icon: Skull, tone: "var(--oxblood)", perm: "peutRenseignement", prio: ["peutRenseignement"] },
+  { label: "Nouvelle opération", href: "/operations", icon: Target, tone: "#9085e9", prio: ["officier"] },
   { label: "Capturer une note", href: "/notes-vocales", icon: Mic, tone: "var(--good)" },
-  { label: "Armurerie", href: "/armurerie", icon: Crosshair, tone: "#3987e5" },
+  { label: "Armurerie", href: "/armurerie", icon: Crosshair, tone: "#3987e5", perm: "armurier", prio: ["armurier"] },
   { label: "Assistant IA", href: "/assistant", icon: Sparkles, tone: "var(--brass-hi)" },
-  { label: "Voir mes finances", href: "/finances", icon: Coins, tone: "#c98500" },
+  { label: "Voir mes finances", href: "/finances", icon: Coins, tone: "#c98500", prio: ["direction"] },
 ];
-function Raccourcis() {
+function Raccourcis({ acces }: { acces?: Acces }) {
+  // Personnalisé : on masque ce que le grade ne peut pas ouvrir, et on remonte les
+  // gestes pertinents pour son rôle (armurier → Armurerie, direction → Finances…).
+  const list = RACCOURCIS
+    .filter((r) => !r.perm || !acces || acces[r.perm])
+    .map((r, i) => ({ r, i, score: r.prio && acces && r.prio.some((p) => acces[p]) ? 1 : 0 }))
+    .sort((a, b) => b.score - a.score || a.i - b.i)
+    .map((x) => x.r);
   return (
     <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4">
-      {RACCOURCIS.map((r) => {
+      {list.map((r) => {
         const Icon = r.icon;
         return (
           <Link key={r.href + r.label} href={r.href}
@@ -277,7 +325,7 @@ function EcheancesPresence({ licences = [], presence }: { licences?: LicenceExpi
   );
 }
 
-export function Dashboard({ data, feed = [], alertes = { total: 0, items: [] }, demandes, monId, licencesExpirant = [], presence }: { data: DashData; feed?: FeedItem[]; alertes?: AlertesData; demandes?: DemandesData; monId?: string | null; licencesExpirant?: LicenceExpirant[]; presence?: { presents: number; absents: number } }) {
+export function Dashboard({ data, feed = [], alertes = { total: 0, items: [] }, demandes, monId, licencesExpirant = [], presence, profil = null, acces, tendances = null }: { data: DashData; feed?: FeedItem[]; alertes?: AlertesData; demandes?: DemandesData; monId?: string | null; licencesExpirant?: LicenceExpirant[]; presence?: { presents: number; absents: number }; profil?: { nom: string; role: string } | null; acces?: Acces; tendances?: Tendances }) {
   return (
     <>
       <div className="iwc-hero relative">
@@ -289,16 +337,13 @@ export function Dashboard({ data, feed = [], alertes = { total: 0, items: [] }, 
             </span>
             <div>
               <h1 className="font-display text-[2.2rem] leading-none tracking-[0.01em] sm:text-[2.5rem]" style={{ textWrap: "balance" } as React.CSSProperties}>Tableau de bord</h1>
-              <div className="mt-1.5 font-display text-[0.9rem] italic text-muted">Poste de commandement de la maison{data.connecte ? ` · ${data.membresCount} âme(s) sous ta bannière` : ""}</div>
+              <div className="mt-1.5 font-display text-[0.9rem] italic text-muted">{profil ? `${profil.nom}${profil.role ? ` · ${profil.role}` : ""} — ` : ""}poste de commandement{data.connecte ? ` · ${data.membresCount} âme(s) sous ta bannière` : ""}</div>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <HorlogeCampagne />
             <PoleChip pole={data.pole} />
-            <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-[0.72rem] text-muted">
-              <span className="h-2 w-2 rounded-full" style={{ background: data.connecte ? "var(--good)" : "var(--faint)" }} />
-              {data.connecte ? "Données en direct" : "Base non connectée"}
-            </span>
+            <RefreshControl connecte={data.connecte} />
           </div>
         </div>
         <Ornement className="mt-3.5" />
@@ -309,17 +354,17 @@ export function Dashboard({ data, feed = [], alertes = { total: 0, items: [] }, 
       <SectionTitle tone="var(--warn)" icon={ListChecks}>Ton poste</SectionTitle>
       <CeQuiTattend alertes={alertes} />
 
+      <SectionTitle tone="var(--accent)" icon={Coins}>Synthèse</SectionTitle>
+      <Kpis data={data} tendances={tendances} />
+
       {demandes ? <DemandesResume data={demandes} monId={monId} /> : null}
 
       <SectionTitle tone="var(--warn)" icon={Clock}>Échéances &amp; présence</SectionTitle>
       <EcheancesPresence licences={licencesExpirant} presence={presence} />
 
-      <Raccourcis />
+      <Raccourcis acces={acces} />
 
       <BriefingIA />
-
-      <SectionTitle tone="var(--accent)" icon={Coins}>Synthèse</SectionTitle>
-      <Kpis data={data} />
 
       <SectionTitle tone="#3987e5" icon={Users}>Effectifs &amp; activité</SectionTitle>
       <div className="grid items-start gap-4 lg:grid-cols-3">
