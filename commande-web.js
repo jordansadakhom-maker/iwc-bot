@@ -48,6 +48,41 @@ function _absencePatch(m) {
 }
 const _STATUTS_MED = new Set(['non_teste', 'apte', 'observation', 'inapte']);
 function _statutMed(s) { s = String(s || '').toLowerCase(); return _STATUTS_MED.has(s) ? s : 'non_teste'; }
+// Pièce jointe « référence visuelle » — rempart bot (le site valide déjà, on
+// double la barrière avant stockage) : uniquement un lien https vers une image
+// (extension connue) ou un CDN d'images Discord. Jamais de contenu exécutable.
+const _MED_HOTES_IMG = new Set(['cdn.discordapp.com', 'media.discordapp.net', 'images.discordapp.net', 'cdn.discordcdn.com']);
+function _pieceImg(v) {
+  const t = _s(v, 2000);
+  if (!t) return '';
+  try {
+    const u = new URL(t);
+    if (u.protocol !== 'https:') return '';
+    if (/\.(png|jpe?g|webp|gif)(?:[?#].*)?$/i.test(u.pathname) || _MED_HOTES_IMG.has(u.hostname.toLowerCase())) return u.toString();
+  } catch { /* lien invalide */ }
+  return '';
+}
+// URL publique du site (pour rediriger un client vers « Suivre ma demande »).
+function _siteUrl() {
+  return String(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || process.env.SITE_URL || 'https://iwc-bot-psi.vercel.app').replace(/\/+$/, '');
+}
+// Ping de secours : quand le MP au client échoue (messages privés fermés), on le
+// PINGUE dans le salon de notifications clients (env SALON_NOTIF_CLIENTS), SANS
+// le contenu privé — il est alerté et lit la réponse en MP ou sur le site. No-op
+// (renvoie false) si le salon n'est pas configuré → comportement inchangé.
+async function _pingClientMPferme(guildOrClient, userId) {
+  const salonId = String(process.env.SALON_NOTIF_CLIENTS || '').trim();
+  if (!salonId || !guildOrClient || !userId) return false;
+  try {
+    const ch = await guildOrClient.channels.fetch(salonId).catch(() => null);
+    if (!ch || typeof ch.isTextBased !== 'function' || !ch.isTextBased()) return false;
+    const sent = await ch.send({
+      content: `<@${userId}> ✉️ **Iron Wolf Company** t'a répondu — mais tes **messages privés sont fermés**. Ouvre-les (Paramètres Discord → Confidentialité & sécurité) ou retrouve ta réponse sur le site : ${_siteUrl()}/suivi`,
+      allowedMentions: { users: [String(userId)] },
+    }).catch(() => null);
+    return !!sent;
+  } catch { return false; }
+}
 function _medFiche(db, id) {
   if (!db.suiviMedical) db.suiviMedical = {};
   if (!db.suiviMedical[id]) db.suiviMedical[id] = { statut: 'non_teste', testValide: false, testDate: null, prochainRdv: null, notes: '', blessures: [], suivis: [], ordonnances: [], historique: [] };
@@ -189,7 +224,7 @@ const HANDLERS = {
     if (!soin) return { ok: false, message: 'soin manquant' };
     const f = _medFiche(db, id);
     if (!Array.isArray(f.suivis)) f.suivis = [];
-    f.suivis.push({ date: _dateFR(), soin, soignant: _s(p.soignant, 120), etat: _s(p.etat, 120), traitement: _s(p.traitement, 300) });
+    f.suivis.push({ date: _dateFR(), soin, soignant: _s(p.soignant, 120), etat: _s(p.etat, 120), traitement: _s(p.traitement, 300), pieceJointe: _pieceImg(p.pieceJointe) || undefined });
     f.majPar = p.auteurNom || 'Site web'; f.majAt = Date.now();
     _medLog(f, `Soin depuis le site : ${soin.slice(0, 80)}`, p.auteurNom);
     return { ok: true, message: 'Soin ajouté', discord: { type: 'medical', id } };
@@ -201,7 +236,7 @@ const HANDLERS = {
     if (!desc) return { ok: false, message: 'description manquante' };
     const f = _medFiche(db, id);
     if (!Array.isArray(f.blessures)) f.blessures = [];
-    f.blessures.push({ date: _dateFR(), desc, localisation: _s(p.localisation, 120), gravite: _s(p.gravite, 40) });
+    f.blessures.push({ date: _dateFR(), desc, localisation: _s(p.localisation, 120), gravite: _s(p.gravite, 40), pieceJointe: _pieceImg(p.pieceJointe) || undefined });
     if (p.statut !== undefined) f.statut = _statutMed(p.statut);
     f.majPar = p.auteurNom || 'Site web'; f.majAt = Date.now();
     _medLog(f, `Blessure signalée depuis le site : ${desc.slice(0, 80)}`, p.auteurNom);
@@ -214,7 +249,7 @@ const HANDLERS = {
     if (!medicaments) return { ok: false, message: 'médicament manquant' };
     const f = _medFiche(db, id);
     if (!Array.isArray(f.ordonnances)) f.ordonnances = [];
-    f.ordonnances.push({ at: Date.now(), medicaments, posologie: _s(p.posologie, 150), duree: _s(p.duree, 80), conseils: _s(p.conseils, 400) });
+    f.ordonnances.push({ at: Date.now(), medicaments, posologie: _s(p.posologie, 150), duree: _s(p.duree, 80), conseils: _s(p.conseils, 400), pieceJointe: _pieceImg(p.pieceJointe) || undefined });
     f.majPar = p.auteurNom || 'Site web'; f.majAt = Date.now();
     _medLog(f, `Ordonnance depuis le site : ${medicaments.slice(0, 80)}`, p.auteurNom);
     return { ok: true, message: 'Ordonnance ajoutée', discord: { type: 'medical', id } };
@@ -724,7 +759,12 @@ Object.assign(HANDLERS, {
     let emb = null;
     try { const { EmbedBuilder: EB } = require('discord.js'); emb = new EB().setColor(0xc8a45c).setTitle('✉️ TÉLÉGRAMME — IRON WOLF COMPANY').setDescription(texte.slice(0, 3500)).setFooter({ text: `Réponse de ${de}` }).setTimestamp(); } catch {}
     const sent = await user.send(emb ? { embeds: [emb] } : { content: `✉️ **TÉLÉGRAMME — IRON WOLF COMPANY**\n${texte.slice(0, 1800)}` }).catch(() => null);
-    return sent ? { ok: true, message: '✅ Réponse livrée au client en message privé (Discord).' } : { ok: false, message: '⚠️ Client trouvé, mais ses messages privés sont fermés — recontacte-le autrement.' };
+    if (sent) return { ok: true, message: '✅ Réponse livrée au client en message privé (Discord).' };
+    // MP fermés → ping de secours (salon dédié, sans le contenu privé) si configuré.
+    const pingue = await _pingClientMPferme(guild, user.id).catch(() => false);
+    return pingue
+      ? { ok: true, message: '📣 MP fermés — le client a été pingué sur Discord (réponse à lire en MP ou sur le site).' }
+      : { ok: false, message: '⚠️ Client trouvé, mais ses messages privés sont fermés — recontacte-le autrement.' };
   },
   // Marque un télégramme comme ayant donné un RDV (persisté côté bot).
   'telegramme.marquerRdv': (db, p) => {

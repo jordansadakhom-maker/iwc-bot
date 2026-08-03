@@ -545,9 +545,9 @@ export async function getAvisRecherche(): Promise<AvisData> {
 }
 
 // ── Médical (page dédiée) ────────────────────────────────────────
-export type Blessure = { date?: string; desc?: string; localisation?: string; gravite?: string };
-export type Suivi = { date?: string; soin?: string; soignant?: string; etat?: string; traitement?: string; suite?: string };
-export type Ordonnance = { medicaments?: string; posologie?: string; duree?: string; conseils?: string };
+export type Blessure = { date?: string; desc?: string; localisation?: string; gravite?: string; pieceJointe?: string };
+export type Suivi = { date?: string; soin?: string; soignant?: string; etat?: string; traitement?: string; suite?: string; pieceJointe?: string };
+export type Ordonnance = { medicaments?: string; posologie?: string; duree?: string; conseils?: string; pieceJointe?: string };
 export type Histo = { date?: string; action?: string; par?: string };
 export type DossierItem = {
   id: string; membreId: string; nom: string; statut: string;

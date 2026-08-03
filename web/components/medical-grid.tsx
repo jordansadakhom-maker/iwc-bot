@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { X, Bandage, Pill, Stethoscope, Clock, History, UserPlus, Loader2, Trash2, Plus, HeartPulse, CalendarClock, ClipboardCheck, Search, Activity, ScrollText, Printer } from "lucide-react";
 import type { DossierItem } from "@/lib/queries";
 import { creerDossier, majDossier, ajouterBlessure, ajouterOrdonnance, ajouterSuivi, supprimerDossier } from "@/app/(app)/medical/actions";
+import { ChampPieceJointe, PieceJointeVignette } from "@/components/piece-jointe";
 
 const STATUTS: { key: string; label: string; tone: string; vit: number | null }[] = [
   { key: "apte", label: "Apte", tone: "var(--good)", vit: 90 },
@@ -209,9 +210,9 @@ function DetailModal({ dossier, onClose, router }: { dossier: DossierItem; onClo
   const [flashBad, setFlashBad] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
 
-  const [bDesc, setBDesc] = useState(""); const [bLoc, setBLoc] = useState(""); const [bGrav, setBGrav] = useState("");
-  const [oMed, setOMed] = useState(""); const [oPoso, setOPoso] = useState(""); const [oDuree, setODuree] = useState("");
-  const [sSoin, setSSoin] = useState(""); const [sSoignant, setSSoignant] = useState(""); const [sEtat, setSEtat] = useState("");
+  const [bDesc, setBDesc] = useState(""); const [bLoc, setBLoc] = useState(""); const [bGrav, setBGrav] = useState(""); const [bPiece, setBPiece] = useState("");
+  const [oMed, setOMed] = useState(""); const [oPoso, setOPoso] = useState(""); const [oDuree, setODuree] = useState(""); const [oPiece, setOPiece] = useState("");
+  const [sSoin, setSSoin] = useState(""); const [sSoignant, setSSoignant] = useState(""); const [sEtat, setSEtat] = useState(""); const [sPiece, setSPiece] = useState("");
 
   const notify = (m: string, bad = false) => { setFlash(m); setFlashBad(bad); };
 
@@ -227,30 +228,30 @@ function DetailModal({ dossier, onClose, router }: { dossier: DossierItem; onClo
     if (bDesc.trim().length < 2) { notify("Décris la blessure.", true); return; }
     setBusy("blessure");
     const g = GRAVITES.find((x) => x.key === bGrav);
-    const r = await ajouterBlessure(id, { desc: bDesc, localisation: bLoc, gravite: bGrav, statut: g?.statut || undefined });
+    const r = await ajouterBlessure(id, { desc: bDesc, localisation: bLoc, gravite: bGrav, statut: g?.statut || undefined, pieceJointe: bPiece });
     setBusy(null);
     if (!r.ok) { notify(r.error || "Échec.", true); return; }
-    setBlessures((p) => [...p, { date: "à l'instant", desc: bDesc, localisation: bLoc, gravite: bGrav }]);
+    setBlessures((p) => [...p, { date: "à l'instant", desc: bDesc, localisation: bLoc, gravite: bGrav, pieceJointe: bPiece || undefined }]);
     if (g?.statut) setStatut(g.statut);
-    setBDesc(""); setBLoc(""); setBGrav(""); notify("Blessure ajoutée.");
+    setBDesc(""); setBLoc(""); setBGrav(""); setBPiece(""); notify("Blessure ajoutée.");
   }
   async function addOrdo() {
     if (oMed.trim().length < 2) { notify("Indique le médicament.", true); return; }
     setBusy("ordo");
-    const r = await ajouterOrdonnance(id, { medicaments: oMed, posologie: oPoso, duree: oDuree });
+    const r = await ajouterOrdonnance(id, { medicaments: oMed, posologie: oPoso, duree: oDuree, pieceJointe: oPiece });
     setBusy(null);
     if (!r.ok) { notify(r.error || "Échec.", true); return; }
-    setOrdos((p) => [...p, { medicaments: oMed, posologie: oPoso, duree: oDuree }]);
-    setOMed(""); setOPoso(""); setODuree(""); notify("Ordonnance ajoutée.");
+    setOrdos((p) => [...p, { medicaments: oMed, posologie: oPoso, duree: oDuree, pieceJointe: oPiece || undefined }]);
+    setOMed(""); setOPoso(""); setODuree(""); setOPiece(""); notify("Ordonnance ajoutée.");
   }
   async function addSuivi() {
     if (sSoin.trim().length < 2) { notify("Décris le soin.", true); return; }
     setBusy("suivi");
-    const r = await ajouterSuivi(id, { soin: sSoin, soignant: sSoignant, etat: sEtat });
+    const r = await ajouterSuivi(id, { soin: sSoin, soignant: sSoignant, etat: sEtat, pieceJointe: sPiece });
     setBusy(null);
     if (!r.ok) { notify(r.error || "Échec.", true); return; }
-    setSuivis((p) => [...p, { date: "à l'instant", soin: sSoin, soignant: sSoignant, etat: sEtat }]);
-    setSSoin(""); setSSoignant(""); setSEtat(""); notify("Soin enregistré.");
+    setSuivis((p) => [...p, { date: "à l'instant", soin: sSoin, soignant: sSoignant, etat: sEtat, pieceJointe: sPiece || undefined }]);
+    setSSoin(""); setSSoignant(""); setSEtat(""); setSPiece(""); notify("Soin enregistré.");
   }
   async function supprimer() { setBusy("del"); const r = await supprimerDossier(id); setBusy(null); if (!r.ok) { notify(r.error || "Échec.", true); return; } router.refresh(); onClose(); }
 
@@ -316,6 +317,7 @@ function DetailModal({ dossier, onClose, router }: { dossier: DossierItem; onClo
                   {b.gravite ? <span className="shrink-0 rounded px-1.5 py-0.5 text-[0.66rem] font-bold uppercase" style={{ color: g?.tone || "var(--oxblood)", background: `color-mix(in srgb,${g?.tone || "var(--oxblood)"} 15%,transparent)` }}>{b.gravite}</span> : null}
                 </div>
                 <div className="mt-0.5 text-[0.72rem] text-faint">{[b.date, b.localisation].filter(Boolean).join(" · ") || "—"}</div>
+                {b.pieceJointe ? <div className="mt-2"><PieceJointeVignette url={b.pieceJointe} /></div> : null}
               </div>
             );
           })}
@@ -327,6 +329,7 @@ function DetailModal({ dossier, onClose, router }: { dossier: DossierItem; onClo
               <span className="text-[0.72rem] text-faint">Gravité :</span>
               {GRAVITES.map((g) => <button key={g.key} onClick={() => setBGrav(g.key)} className="rounded-lg border px-2 py-1 text-[0.74rem] font-semibold" style={{ color: bGrav === g.key ? "#000" : g.tone, background: bGrav === g.key ? g.tone : "transparent", borderColor: `color-mix(in srgb,${g.tone} 45%,var(--border))` }}>{g.label}</button>)}
             </div>
+            <div className="mt-2"><ChampPieceJointe value={bPiece} onChange={setBPiece} label="📎 Photo de la blessure (facultative)" /></div>
             <div className="mt-1.5 flex justify-end"><button onClick={addBlessure} disabled={busy === "blessure"} className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">{busy === "blessure" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />} Ajouter</button></div>
           </div>
         </div>
@@ -338,6 +341,7 @@ function DetailModal({ dossier, onClose, router }: { dossier: DossierItem; onClo
             <div key={i} className="rounded-[9px] border border-border bg-surface-2 px-2.5 py-2 text-[0.82rem]">
               <div className="font-medium">{o.medicaments || "Traitement"}</div>
               <div className="mt-0.5 text-[0.72rem] text-muted">{[o.posologie, o.duree].filter(Boolean).join(" · ") || "—"}</div>
+              {o.pieceJointe ? <div className="mt-2"><PieceJointeVignette url={o.pieceJointe} /></div> : null}
             </div>
           ))}
           {ordos.length === 0 ? <p className="text-[0.8rem] text-faint">Aucune ordonnance.</p> : null}
@@ -350,6 +354,7 @@ function DetailModal({ dossier, onClose, router }: { dossier: DossierItem; onClo
               <input className={inputCls} value={oPoso} onChange={(e) => setOPoso(e.target.value)} placeholder="Posologie" maxLength={150} />
               <input className={inputCls} value={oDuree} onChange={(e) => setODuree(e.target.value)} placeholder="Durée" maxLength={80} />
             </div>
+            <div className="mt-2"><ChampPieceJointe value={oPiece} onChange={setOPiece} label="📎 Pièce jointe — ordonnance / radio (facultative)" /></div>
             <div className="mt-1.5 flex justify-end"><button onClick={addOrdo} disabled={busy === "ordo"} className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">{busy === "ordo" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />} Prescrire</button></div>
           </div>
         </div>
@@ -361,6 +366,7 @@ function DetailModal({ dossier, onClose, router }: { dossier: DossierItem; onClo
             <div key={i} className="rounded-[9px] border border-border bg-surface-2 px-2.5 py-2 text-[0.82rem]">
               <div className="flex items-start justify-between gap-2"><span className="font-medium">{s.soin || "Soin"}</span>{s.etat ? <span className="shrink-0 text-[0.7rem]" style={{ color: "var(--good)" }}>{s.etat}</span> : null}</div>
               <div className="mt-0.5 text-[0.72rem] text-faint">{[s.date, s.soignant].filter(Boolean).join(" · ") || "—"}</div>
+              {s.pieceJointe ? <div className="mt-2"><PieceJointeVignette url={s.pieceJointe} /></div> : null}
             </div>
           ))}
           {suivis.length === 0 ? <p className="text-[0.8rem] text-faint">Aucun soin enregistré.</p> : null}
@@ -370,6 +376,7 @@ function DetailModal({ dossier, onClose, router }: { dossier: DossierItem; onClo
               <input className={inputCls} value={sSoignant} onChange={(e) => setSSoignant(e.target.value)} placeholder="Soignant" maxLength={120} />
               <input className={inputCls} value={sEtat} onChange={(e) => setSEtat(e.target.value)} placeholder="État après soin" maxLength={120} />
             </div>
+            <div className="mt-2"><ChampPieceJointe value={sPiece} onChange={setSPiece} label="📎 Photo du soin (facultative)" /></div>
             <div className="mt-1.5 flex justify-end"><button onClick={addSuivi} disabled={busy === "suivi"} className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.76rem] font-semibold hover:border-border-2 disabled:opacity-60">{busy === "suivi" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />} Enregistrer le soin</button></div>
           </div>
         </div>
@@ -426,7 +433,15 @@ function CertificatOverlay({ nom, statut, notes, reposMotif, blessures, onClose 
             <p style={{ fontSize: "1.25rem", fontWeight: 700, textAlign: "center", margin: "10px 0" }}>{nom}</p>
             <p style={{ margin: "14px 0 6px" }}>et le déclare, à l&apos;issue de l&apos;examen :</p>
             <p style={{ textAlign: "center", fontSize: "1.1rem", fontWeight: 700, textTransform: "uppercase", padding: "8px", border: "1.5px solid #1a1206", borderRadius: 6, margin: "6px auto", maxWidth: 360 }}>{verdict}</p>
-            {actives.length ? <div style={{ marginTop: 16 }}><b>Blessures constatées :</b><ul style={{ margin: "6px 0 0 18px" }}>{actives.map((b, i) => <li key={i}>{b.desc || "—"}{b.localisation ? ` (${b.localisation})` : ""}{b.gravite ? ` — ${b.gravite}` : ""}</li>)}</ul></div> : null}
+            {actives.length ? <div style={{ marginTop: 16 }}><b>Blessures constatées :</b><ul style={{ margin: "6px 0 0 18px" }}>{actives.map((b, i) => (
+              <li key={i} style={{ marginBottom: b.pieceJointe ? 8 : 0 }}>
+                {b.desc || "—"}{b.localisation ? ` (${b.localisation})` : ""}{b.gravite ? ` — ${b.gravite}` : ""}
+                {b.pieceJointe ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <div style={{ marginTop: 4 }}><img src={b.pieceJointe} alt="Blessure" style={{ maxWidth: "100%", maxHeight: 200, border: "1px solid #b7a074", borderRadius: 4 }} onError={(e) => { (e.currentTarget.style.display = "none"); }} /></div>
+                ) : null}
+              </li>
+            ))}</ul></div> : null}
             {reposMotif ? <p style={{ marginTop: 12 }}><b>Convalescence prescrite :</b> {reposMotif}.</p> : null}
             {notes ? <p style={{ marginTop: 12 }}><b>Observations :</b> {notes}</p> : null}
             <p style={{ marginTop: 28 }}>Fait à Saint-Denis, le {dateStr}.</p>

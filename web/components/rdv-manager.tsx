@@ -148,7 +148,7 @@ function RdvModal({ rdv, membres, onClose, router }: { rdv: RdvComm; membres: Me
     const r = await majStatutRdv(rdv.id, s);
     setBusy(null);
     if (!r.ok) { setStatut(prev); setFlash(r.error || "Échec."); return; }
-    setFlash("Statut enregistré."); router.refresh();
+    setFlash(r.info || "Statut enregistré."); router.refresh();
   }
   async function repondre() {
     if (texte.trim().length < 1) return;
