@@ -32,21 +32,21 @@ const NOTION_TOKEN = process.env.NOTION_TOKEN || null;
 const NOTION_TELEGRAMMES_DB = process.env.NOTION_TELEGRAMMES_DB || null;
 
 function _dateHeure(d) { try { return new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return '—'; } }
-// Ping de secours : si le MP au client échoue (messages privés fermés), on le
-// pingue dans le salon de notifications clients (env SALON_NOTIF_CLIENTS), SANS
-// contenu privé — il est alerté et lit la réponse en MP ou sur le site. No-op
-// (false) si le salon n'est pas configuré → comportement inchangé.
-async function _pingClientMPferme(client, userId) {
+// Ping du client : à chaque réponse, on le pingue dans le salon de notifications
+// clients (env SALON_NOTIF_CLIENTS), SANS contenu privé — il est alerté même s'il
+// rate le MP ou l'a fermé. Message adapté selon que le MP a été livré ou non.
+// No-op (false) si le salon n'est pas configuré → comportement inchangé.
+async function _pingClient(client, userId, livre) {
   const salonId = String(process.env.SALON_NOTIF_CLIENTS || '').trim();
   if (!salonId || !client || !userId) return false;
   try {
     const ch = await client.channels.fetch(salonId).catch(() => null);
     if (!ch || typeof ch.isTextBased !== 'function' || !ch.isTextBased()) return false;
     const site = String(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || process.env.SITE_URL || 'https://iwc-bot-psi.vercel.app').replace(/\/+$/, '');
-    const sent = await ch.send({
-      content: `<@${userId}> ✉️ **Iron Wolf Company** t'a répondu — mais tes **messages privés sont fermés**. Ouvre-les (Paramètres Discord → Confidentialité & sécurité) ou retrouve ta réponse sur le site : ${site}/suivi`,
-      allowedMentions: { users: [String(userId)] },
-    }).catch(() => null);
+    const content = livre
+      ? `<@${userId}> ✉️ **Iron Wolf Company** t'a répondu — réponse envoyée en **message privé**. Tu peux aussi la retrouver sur le site : ${site}/suivi`
+      : `<@${userId}> ✉️ **Iron Wolf Company** t'a répondu — mais tes **messages privés sont fermés**. Ouvre-les (Paramètres Discord → Confidentialité & sécurité) ou retrouve ta réponse sur le site : ${site}/suivi`;
+    const sent = await ch.send({ content, allowedMentions: { users: [String(userId)] } }).catch(() => null);
     return !!sent;
   } catch { return false; }
 }
@@ -589,9 +589,10 @@ async function repondreDepuisWeb(client, db, rdvId, texte, parNom) {
     }
   } catch {}
 
-  // MP fermés → ping de secours (salon dédié, sans contenu privé) si configuré.
+  // Ping systématique dans le salon de notifications clients (si configuré), en
+  // plus du MP — sans contenu privé, message adapté selon la livraison du MP.
   let pingue = false;
-  if (!livre && conv.demandeurId) pingue = await _pingClientMPferme(client, conv.demandeurId).catch(() => false);
+  if (conv.demandeurId) pingue = await _pingClient(client, conv.demandeurId, livre).catch(() => false);
 
   // Trace (visible aussi sur le site après resync)
   _logMsg(conv, 'equipe', nom, corrige);

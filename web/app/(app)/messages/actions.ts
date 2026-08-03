@@ -20,6 +20,22 @@ async function notifierEquipe(admin: ReturnType<typeof createAdminClient>, n: { 
   } catch { /* best-effort */ }
 }
 
+// Notifie une LISTE de membres précis (une ligne ciblée par membre → chacun son
+// état de lecture, pas de flux d'équipe). Insert best-effort ligne par ligne :
+// un membre absent de la table ne bloque pas les autres. `ref` unique par membre.
+async function notifierMembres(admin: ReturnType<typeof createAdminClient>, membreIds: string[], n: { titre: string; corps: string; lien: string; cibleId: string; refBase: string }) {
+  if (!admin || !membreIds.length) return;
+  const now = new Date().toISOString();
+  for (const mid of membreIds.slice(0, 50)) {
+    try {
+      await admin.from("Notification").insert({
+        id: crypto.randomUUID(), membreId: mid, type: "message", titre: n.titre.slice(0, 200), corps: n.corps.slice(0, 200),
+        lien: n.lien, cibleId: n.cibleId, ref: `${n.refBase}-${mid}`, createdAt: now,
+      });
+    } catch { /* best-effort : un membre introuvable n'empêche pas les autres */ }
+  }
+}
+
 export async function listerConversations(): Promise<{ connecte: boolean; moiId: string | null; conversations: ConversationListe[] }> {
   const a = await getActeur();
   if (!a) return { connecte: false, moiId: null, conversations: [] };
@@ -107,6 +123,26 @@ export async function envoyerMessage(conversationId: string, corps: string): Pro
   await admin.from("Conversation").update({ lastMessageAt: now, lastApercu: apercu(c), lastAuteur: a.nomIC, updatedAt: now }).eq("id", conversationId);
   // L'auteur reste à jour de son propre message.
   try { await admin.from("ConversationVue").upsert({ conversationId, membreId: a.did, vuAt: now }, { onConflict: "conversationId,membreId" }); } catch { /* best-effort */ }
+  // Alerte les AUTRES participants du fil (ceux qui y ont déjà écrit + le
+  // créateur), chacun avec sa propre notification. L'auteur ne se notifie pas.
+  try {
+    const [{ data: conv }, { data: msgs }] = await Promise.all([
+      admin.from("Conversation").select("sujet,creeParId").eq("id", conversationId).maybeSingle(),
+      admin.from("Message").select("auteurId").eq("conversationId", conversationId).limit(500),
+    ]);
+    const participants = new Set<string>();
+    for (const m of (msgs || []) as { auteurId?: unknown }[]) { const id = String(m.auteurId || ""); if (id) participants.add(id); }
+    const creeParId = String((conv as { creeParId?: unknown } | null)?.creeParId || "");
+    if (creeParId) participants.add(creeParId);
+    participants.delete(a.did);
+    if (participants.size) {
+      const sujet = String((conv as { sujet?: unknown } | null)?.sujet || "Conversation");
+      await notifierMembres(admin, [...participants], {
+        titre: `Réponse — ${sujet}`, corps: `${a.nomIC} : ${apercu(c, 140)}`,
+        lien: `/messages?c=${conversationId}`, cibleId: conversationId, refBase: `msg-${mid}`,
+      });
+    }
+  } catch { /* best-effort */ }
   await emettreEvenement({ aggregate: "conversation", type: "message.envoye", cibleId: conversationId });
   return { ok: true };
 }
