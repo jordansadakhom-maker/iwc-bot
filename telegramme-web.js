@@ -24,7 +24,8 @@ function _boutonSite(url) {
   catch { return []; }
 }
 // Rôles à pinguer pour qu'on soit alerté sur Discord même sans le site ouvert.
-const PING_ROLES = ['Fondateur', 'Conseil', 'Directeur', 'Officier'];
+// (Le Panseur inclus : il doit être prévenu de chaque nouveau télégramme.)
+const PING_ROLES = ['Fondateur', 'Conseil', 'Directeur', 'Officier', 'Panseur'];
 function _ping(guild) {
   const ids = new Set();
   for (const motif of PING_ROLES) {

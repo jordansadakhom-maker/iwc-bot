@@ -336,9 +336,9 @@ async function onMessage(message) {
         .setAuthor({ name: `📨 ${conv.nomRP || message.author.username} (client)`, iconURL: message.author.displayAvatarURL?.() })
         .setDescription((message.content || '').slice(0, 4000) || '*(pièce jointe)*')
         .setTimestamp();
-      const ping = _pingRoles(thread.guild);
-      const tete = [ping.content ? `${ping.content} — 📨 **réponse d'un client**` : '', files.length ? files.join('\n') : ''].filter(Boolean).join('\n');
-      await thread.send({ content: tete || null, embeds: [e], allowedMentions: { roles: ping.ids } }).catch(() => {});
+      // Réponse d'un client : affichée dans le fil SANS ping (pas de notif auto).
+      const tete = [`📨 **réponse d'un client**`, files.length ? files.join('\n') : ''].filter(Boolean).join('\n');
+      await thread.send({ content: tete, embeds: [e], allowedMentions: { parse: [] } }).catch(() => {});
       _logMsg(conv, 'client', conv.nomRP || message.author.username, message.content || '', { files: files.length });
       persist(db);
       await message.react('📨').catch(() => {});
