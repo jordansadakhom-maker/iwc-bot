@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { estAutorise } from "@/lib/dispensaire-roles";
 import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenements";
+import { validerPieceJointe } from "@/lib/piece-jointe";
 
 // Certificats médicaux — ouvert au personnel soignant du dispensaire.
 export type CertResult = { ok: boolean; error?: string; id?: string };
@@ -23,11 +24,16 @@ export async function creerCertificat(data: Record<string, unknown>): Promise<Ce
   const patient = s(data.patient, 200);
   if (!patient) return { ok: false, error: "Indique le patient." };
   const type = TYPES.includes(String(data.type)) ? String(data.type) : "medical";
+  const pj = validerPieceJointe(String(data.pieceJointe ?? ""));
+  if (!pj.ok) return { ok: false, error: pj.error };
   const id = newId();
-  const { error } = await admin.from("DispensaireCertificat").insert({
+  const base = {
     id, patient, type, medecin: s(data.medecin, 200), dateActe: dt(data.dateActe), dureeRepos: n(data.dureeRepos),
-    contenu: s(data.contenu, 4000), note: s(data.note, 1000), par: await qui(), createdAt: new Date().toISOString(),
-  });
+    contenu: s(data.contenu, 4000), note: s(data.note, 1000), pieceJointe: pj.url || null, par: await qui(), createdAt: new Date().toISOString(),
+  };
+  // Écriture tolérante à l'absence de la colonne « pieceJointe » (avant SQL additif).
+  let { error } = await admin.from("DispensaireCertificat").insert(base);
+  if (error) { const { pieceJointe: _o, ...legacy } = base; void _o; ({ error } = await admin.from("DispensaireCertificat").insert(legacy)); }
   if (error) return { ok: false, error: "Enregistrement impossible (la table existe-t-elle ?)." };
   await emettreEvenementDispensaire({ aggregate: "certificat", type: "certificat.cree", cibleId: id, cibleLibelle: patient, apres: { patient, type, medecin: s(data.medecin, 200) } });
   return { ok: true, id };

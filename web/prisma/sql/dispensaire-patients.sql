@@ -25,10 +25,12 @@ CREATE TABLE IF NOT EXISTS "DispensairePatient" (
   "traitements"     TEXT,
   "medecinReferent" TEXT,
   "notes"           TEXT,
+  "pieceJointe"     TEXT,                     -- lien image (référence visuelle : blessure, radio…)
   "createdAt"       TIMESTAMPTZ NOT NULL DEFAULT now(),
   "updatedAt"       TIMESTAMPTZ,
   "updatedBy"       TEXT
 );
+ALTER TABLE "DispensairePatient" ADD COLUMN IF NOT EXISTS "pieceJointe" TEXT;
 
 -- Une seule fiche par patient (nom normalisé) → le « chercher ou créer » est
 -- idempotent et empêche les doublons d'homonymes silencieux.

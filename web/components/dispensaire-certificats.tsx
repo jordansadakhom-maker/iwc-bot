@@ -6,6 +6,7 @@ import { Stethoscope, Plus, Check, Trash2, Search, Eye, Printer, Copy, Cross } f
 import { VideRegistre, SceauCire } from "@/components/dispensaire-ui";
 import { CERT_TYPES, certType, modeleCertificat, type CertData, type Certificat } from "@/lib/dispensaire-docs-const";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
+import { ChampPieceJointe, PieceJointeVignette } from "@/components/piece-jointe";
 import { creerCertificat, supprimerCertificat } from "@/app/dispensaire/certificats/actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
@@ -59,6 +60,7 @@ function imprimer(c: Certificat) {
     <div class="sub">Registre administratif · Année 1904</div>
     <div class="type">${esc(certType(c.type).label)}</div>
     <div class="corps">${corps || "……"}</div>
+    ${c.pieceJointe ? `<figure style="margin:16px 0 0;text-align:center"><img src="${esc(c.pieceJointe).replace(/"/g, "&quot;")}" alt="Pièce jointe" style="max-width:100%;max-height:360px;border:1px solid #b7a074" onerror="this.parentNode.style.display='none'"><figcaption style="font-size:10px;font-style:italic;color:#6b5535;margin-top:4px">Pièce jointe — référence visuelle</figcaption></figure>` : ""}
     <div class="meta">Fait à Saint-Denis, le ${esc(dateFR(c.dateActe || c.createdAt))}.</div>
     <div class="footer">
       <div class="seal">${SCEAU_SVG}<div class="cachet">Sceau du Dispensaire</div></div>
@@ -84,7 +86,7 @@ export function DispensaireCertificats({ data, medecins = [] }: { data: CertData
   const liste = certs.filter((c) => !query || norm([c.patient, c.medecin, certType(c.type).label, c.contenu].filter(Boolean).join(" ")).includes(query));
 
   async function enregistrer(vals: Record<string, string>) {
-    const tmp: Certificat = { id: "tmp-" + Math.random().toString(36).slice(2, 8), patient: vals.patient, type: vals.type || "medical", medecin: vals.medecin || null, dateActe: vals.dateActe || null, dureeRepos: Number(vals.dureeRepos) || 0, contenu: vals.contenu || null, note: null, par: null, createdAt: new Date().toISOString() };
+    const tmp: Certificat = { id: "tmp-" + Math.random().toString(36).slice(2, 8), patient: vals.patient, type: vals.type || "medical", medecin: vals.medecin || null, dateActe: vals.dateActe || null, dureeRepos: Number(vals.dureeRepos) || 0, contenu: vals.contenu || null, note: null, pieceJointe: vals.pieceJointe || null, par: null, createdAt: new Date().toISOString() };
     setCerts((p) => [tmp, ...p]); setForm(false);
     const r = await creerCertificat({ ...vals, dureeRepos: Number(vals.dureeRepos) || 0 });
     if (!r.ok) { setCerts((p) => p.filter((c) => c.id !== tmp.id)); setFlash({ t: "bad", m: r.error || "Impossible." }); }
@@ -121,6 +123,7 @@ export function DispensaireCertificats({ data, medecins = [] }: { data: CertData
                   <div className="mt-0.5 text-[0.72rem] text-faint">{dateFR(c.dateActe || c.createdAt)}{c.medecin ? ` · ${c.medecin}` : ""}</div>
                   {c.contenu ? <div className="mt-1 line-clamp-2 text-[0.74rem] text-muted">{c.contenu}</div> : null}
                 </div>
+                {c.pieceJointe ? <div className="shrink-0"><PieceJointeVignette url={c.pieceJointe} taille="h-12 w-12" /></div> : null}
                 <div className="flex shrink-0 items-center gap-1">
                   <button onClick={() => setVoir(c)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Voir"><Eye className="h-3.5 w-3.5" /></button>
                   <button onClick={() => imprimer(c)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Imprimer / PDF"><Printer className="h-3.5 w-3.5" /></button>
@@ -141,7 +144,7 @@ export function DispensaireCertificats({ data, medecins = [] }: { data: CertData
 
 function CertForm({ medecins, onClose, onSave }: { medecins: { nom: string; grade: string | null }[]; onClose: () => void; onSave: (v: Record<string, string>) => void }) {
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-  const [v, setV] = useState<Record<string, string>>({ patient: "", medecin: "", type: "medical", dateActe: today, dureeRepos: "0", contenu: "" });
+  const [v, setV] = useState<Record<string, string>>({ patient: "", medecin: "", type: "medical", dateActe: today, dureeRepos: "0", contenu: "", pieceJointe: "" });
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setV((p) => ({ ...p, [k]: e.target.value }));
   const genererModele = (type = v.type) => setV((p) => ({ ...p, type, contenu: modeleCertificat(type, { patient: p.patient, medecin: p.medecin, dureeRepos: Number(p.dureeRepos) || 0 }) }));
@@ -169,6 +172,7 @@ function CertForm({ medecins, onClose, onSave }: { medecins: { nom: string; grad
           <div className="flex items-center justify-between"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Contenu</span><button onClick={() => genererModele()} className="text-[0.7rem] font-semibold text-accent hover:underline">↻ Générer le modèle</button></div>
           <textarea className={inputCls} rows={7} value={v.contenu} onChange={set("contenu")} placeholder="Choisis un type puis « Générer le modèle », ou rédige librement." />
         </div>
+        <ChampPieceJointe value={v.pieceJointe} onChange={(url) => setV((p) => ({ ...p, pieceJointe: url }))} />
         {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
         <div className="mt-1 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2">Annuler</button>
@@ -199,6 +203,7 @@ function VoirModal({ c, onClose, onPrint, onCopy }: { c: Certificat; onClose: ()
           <div className="text-center text-[0.7rem] italic text-faint">Registre administratif · Année 1904</div>
           <div className="mb-3 mt-2.5 border-y border-border py-1.5 text-center text-[0.72rem] font-bold uppercase tracking-[0.08em]" style={{ color: t.tone }}>{t.label}</div>
           <p className="whitespace-pre-wrap text-[0.86rem] leading-relaxed">{c.contenu || "……"}</p>
+          {c.pieceJointe ? <div className="mt-3 flex justify-center"><PieceJointeVignette url={c.pieceJointe} taille="h-24 w-24" /></div> : null}
           <div className="mt-4 text-[0.76rem] text-faint">Fait à Saint-Denis, le {dateFR(c.dateActe || c.createdAt)}.</div>
           <div className="mt-4 flex items-end justify-between gap-3">
             <div className="flex flex-col items-center">
