@@ -623,7 +623,7 @@ Object.assign(HANDLERS, {
     if (!info) return { ok: false, message: 'info manquante' };
     if (!Array.isArray(db.informateurs)) db.informateurs = [];
     const id = `web-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
-    db.informateurs.push({ id, source: _s(p.source, 200), cible: _s(p.cible, 200), info, fiabilite: _fiab05(p.fiabilite), statut: _s(p.statut, 40) || 'nouveau', createdAt: new Date().toISOString(), source_web: true });
+    db.informateurs.push({ id, source: _s(p.source, 200), cible: _s(p.cible, 200), info, fiabilite: _fiab05(p.fiabilite), statut: _s(p.statut, 40) || 'nouveau', pieceJointe: _pieceImg(p.pieceJointe) || undefined, createdAt: new Date().toISOString(), source_web: true });
     // Annonce Discord (#informateurs) — sans ping (renseignement discret). Best-effort.
     await _annonce(ctx, _SAL_ANNONCE.informateurs, {
       color: 0x8B5A2A, title: '🕵️ Nouveau renseignement',
@@ -644,6 +644,7 @@ Object.assign(HANDLERS, {
     if (p.info !== undefined) r.info = _s(p.info, 4000);
     if (p.fiabilite !== undefined) r.fiabilite = _fiab05(p.fiabilite);
     if (p.statut !== undefined) r.statut = _s(p.statut, 40);
+    if (p.pieceJointe !== undefined) r.pieceJointe = _pieceImg(p.pieceJointe) || null;
     return { ok: true, message: 'Rapport mis à jour' };
   },
   'rapport.delete': (db, p) => {

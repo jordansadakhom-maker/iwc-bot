@@ -491,7 +491,7 @@ export async function getAbsences(): Promise<AbsencesData> {
 }
 
 // ── Renseignement (page dédiée) ──────────────────────────────────
-export type RapportItem = { id: string; source: string | null; cible: string | null; info: string; fiabilite: number; statut: string; createdAt: string };
+export type RapportItem = { id: string; source: string | null; cible: string | null; info: string; fiabilite: number; statut: string; createdAt: string; pieceJointe: string | null };
 export type TraqueItem = { id: string; cible: string; prime: string | null; dangerosite: string | null; statut: string };
 export type RenseignementData = { connecte: boolean; rapports: RapportItem[]; traques: TraqueItem[] };
 
@@ -501,13 +501,18 @@ export async function getRenseignement(): Promise<RenseignementData> {
   const supabase = createAdminClient();
   if (!supabase) return vide;
   const [rapportsR, traquesR] = await Promise.all([
-    supabase.from("RapportInfo").select("id,source,cible,info,fiabilite,statut,createdAt").order("createdAt", { ascending: false }).limit(100),
+    // select("*") : tolérant à l'absence de la colonne « pieceJointe » (avant le SQL).
+    supabase.from("RapportInfo").select("*").order("createdAt", { ascending: false }).limit(100),
     supabase.from("Traque").select("id,cible,prime,dangerosite,statut").order("createdAt", { ascending: false }).limit(100),
   ]);
   if (rapportsR.error && traquesR.error) return vide;
   return {
     connecte: true,
-    rapports: ((rapportsR.data || []) as RapportItem[]),
+    rapports: ((rapportsR.data || []) as Record<string, unknown>[]).map((r) => ({
+      id: String(r.id), source: (r.source as string) ?? null, cible: (r.cible as string) ?? null,
+      info: String(r.info ?? ""), fiabilite: Number(r.fiabilite) || 0, statut: String(r.statut || "nouveau"),
+      createdAt: String(r.createdAt || ""), pieceJointe: (r.pieceJointe as string) ?? null,
+    })),
     traques: ((traquesR.data || []) as TraqueItem[]),
   };
 }

@@ -4,6 +4,15 @@ import { envoyerCommande, type CommandeResult } from "@/lib/commandes";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireRenseignement } from "@/lib/authz";
 import { iaTexte } from "@/lib/ia";
+import { validerPieceJointe } from "@/lib/piece-jointe";
+
+// Rempart serveur pour la photo de l'avis (https + image uniquement, jamais de
+// contenu exécutable). Renvoie l'URL normalisée ou une erreur.
+function photoOuErreur(brut?: string): { url?: string; error?: string } {
+  const pj = validerPieceJointe(String(brut ?? ""));
+  if (!pj.ok) return { error: pj.error };
+  return { url: pj.url || undefined };
+}
 
 // SÉCURITÉ (fail-closed) : les avis de recherche sont réservés à la Direction et
 // aux officiers de terrain (même règle que la page /wanted). Appliquée ici sur les
@@ -18,12 +27,17 @@ type AvisInput = {
 export async function emettreAvis(data: AvisInput): Promise<CommandeResult> {
   if (!(await requireRenseignement())) return REFUS;
   if (!data.cible || data.cible.trim().length < 2) return { ok: false, error: "Indique la cible de l'avis." };
-  return envoyerCommande("traque.create", { ...data });
+  const ph = photoOuErreur(data.photo);
+  if (ph.error) return { ok: false, error: ph.error };
+  return envoyerCommande("traque.create", { ...data, photo: ph.url });
 }
 export async function majAvis(id: string, patch: Partial<AvisInput>): Promise<CommandeResult> {
   if (!(await requireRenseignement())) return REFUS;
   if (!id) return { ok: false, error: "Avis introuvable." };
-  return envoyerCommande("traque.update", { id, ...patch });
+  const ph = photoOuErreur(patch.photo);
+  if (ph.error) return { ok: false, error: ph.error };
+  // Champ présent → URL validée, ou "" pour effacer (préserve l'effacement).
+  return envoyerCommande("traque.update", { id, ...patch, photo: patch.photo !== undefined ? (ph.url ?? "") : undefined });
 }
 export async function retirerAvis(id: string): Promise<CommandeResult> {
   if (!(await requireRenseignement())) return REFUS;

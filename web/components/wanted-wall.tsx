@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Loader2, Trash2, User, ScanSearch } from "lucide-react";
 import type { AvisItem } from "@/lib/queries";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
+import { ChampPieceJointe } from "@/components/piece-jointe";
 import { emettreAvis, majAvis, retirerAvis, genererFicheCible } from "@/app/(app)/wanted/actions";
 import { LireBtn } from "@/components/mic-dictee";
 
@@ -198,7 +199,7 @@ function AvisModal({ avis, onClose, router }: { avis?: AvisItem; onClose: () => 
             <Champ label="Cible *"><input className={inputCls} value={cible} onChange={(e) => setCible(e.target.value)} placeholder="Nom du recherché" maxLength={200} autoFocus /></Champ>
             <Champ label="Récompense"><input className={inputCls} value={prime} onChange={(e) => setPrime(e.target.value)} placeholder="$500" maxLength={120} /></Champ>
           </div>
-          <Champ label="Photo (lien image, optionnel)"><input className={inputCls} value={photo} onChange={(e) => setPhoto(e.target.value)} placeholder="https://…" maxLength={500} /></Champ>
+          <ChampPieceJointe value={photo} onChange={setPhoto} label="📎 Photo de l'avis (lien image, facultative)" />
           <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Dangerosité</span><Picker options={DANGER} value={dangerosite} onChange={setDangerosite} /></div>
           <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Consigne</span><Picker options={VIVANTMORT} value={vivantMort} onChange={setVivantMort} /></div>
           <div className="grid gap-3 sm:grid-cols-2">

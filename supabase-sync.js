@@ -309,6 +309,7 @@ function _construire(db) {
       fiabilite: _fiabiliteNum(r.fiabilite),
       statut: _str(r.statut || 'nouveau', 40),
       rapporteurId: r.rapporteurId ? String(r.rapporteurId) : null,
+      pieceJointe: _nn(r.pieceJointe, 2000),
       createdAt: r.createdAt || undefined,
     }));
 
@@ -557,7 +558,14 @@ async function syncAll(db) {
         rO = await _upsert('Operation', base);
       }
       results.push(rO);
-      results.push(await _upsert('RapportInfo', rapports)); // 5. renseignement — indépendant
+      // 5. renseignement — indépendant. Repli si la colonne « pieceJointe » n'existe
+      //    pas encore (avant le SQL) : on resynchronise sans elle → jamais bloquant.
+      let rR = await _upsert('RapportInfo', rapports);
+      if (!rR.ok && rR.status === 400) {
+        const base = rapports.map(({ pieceJointe, ...b }) => b);
+        rR = await _upsert('RapportInfo', base);
+      }
+      results.push(rR);
       // 6. Traques / avis de recherche — format complet, repli si colonnes riches absentes.
       let rT = await _upsert('Traque', traques);
       if (!rT.ok && rT.status === 400) {
