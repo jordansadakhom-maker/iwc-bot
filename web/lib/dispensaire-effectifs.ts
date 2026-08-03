@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { estSalarieActif } from "@/lib/dispensaire-personnel-const";
 
 // Liste des médecins/praticiens tirée des EFFECTIFS (table DispensaireSalarie),
 // hors renvoyés. Source unique pour les menus déroulants « médecin » (factures,
@@ -18,7 +19,7 @@ export async function getMedecinsEffectifs(): Promise<MedecinEffectif[]> {
       .order("nom", { ascending: true });
     if (error) return [];
     return ((data || []) as Record<string, unknown>[])
-      .filter((r) => String(r.statut || "actif") !== "renvoye")
+      .filter((r) => estSalarieActif(r.statut))
       .map((r) => ({ nom: String(r.nom || "").trim(), grade: r.grade == null ? null : String(r.grade) }))
       .filter((m) => m.nom);
   } catch {

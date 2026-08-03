@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { peutAdministrer } from "@/lib/dispensaire-roles";
 import { ymdParis, lundiCourant } from "@/lib/dispensaire-dates";
 import { joursRetenus as calcJoursRetenus, salaireFinal } from "@/lib/dispensaire-salaires-const";
+import { estSalarieActif } from "@/lib/dispensaire-personnel-const";
 
 export * from "@/lib/dispensaire-salaires-const";
 
@@ -60,7 +61,7 @@ export async function getSalaires(): Promise<SalairesData> {
   // Salariés actifs (fonction = grade, texte libre).
   const { data: sal } = await admin.from("DispensaireSalarie").select("nom,grade,statut").order("nom", { ascending: true });
   const salaries = ((sal || []) as Record<string, unknown>[])
-    .filter((r) => String(r.statut || "actif") !== "renvoye")
+    .filter((r) => estSalarieActif(r.statut))
     .map((r) => ({ nom: String(r.nom || "Salarié"), fonction: r.grade == null ? null : String(r.grade).trim() || null }));
 
   // Barème par fonction (clé = fonction exacte, comme la PK en base).

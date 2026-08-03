@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { estSalarieActif } from "@/lib/dispensaire-personnel-const";
 import { estAutorise } from "@/lib/dispensaire-roles";
 import { emettreEvenementDispensaire } from "@/lib/dispensaire-evenements";
 import { cleNom } from "@/lib/noms";
@@ -51,7 +52,7 @@ export async function getChambres(): Promise<ChambresData> {
   for (const r of ventes || []) { const t = String(r.patient || "").trim(); if (t) setP.add(t); }
   for (const r of certs || []) { const t = String(r.patient || "").trim(); if (t) setP.add(t); }
   const patients = [...setP].sort((a, b) => a.localeCompare(b)).slice(0, 400);
-  const medecins = ((salaries || []) as Record<string, unknown>[]).filter((s) => String(s.statut || "actif") !== "renvoye").map((s) => String(s.nom || "").trim()).filter(Boolean);
+  const medecins = ((salaries || []) as Record<string, unknown>[]).filter((s) => estSalarieActif(s.statut)).map((s) => String(s.nom || "").trim()).filter(Boolean);
 
   return { pret: true, canEdit, chambres, patients, medecins, stats };
 }

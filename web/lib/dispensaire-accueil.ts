@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { estSalarieActif } from "@/lib/dispensaire-personnel-const";
 import { peutFacturer } from "@/lib/dispensaire-roles";
 import { ymdParis } from "@/lib/dispensaire-dates";
 import { estOuverte, statutsDe } from "@/lib/dispensaire-facturation-const";
@@ -55,7 +56,7 @@ export async function getAccueil(): Promise<AccueilData> {
   const pret = ouv !== null;
 
   const gradeDe = new Map<string, string | null>();
-  const roster = (rost || []).filter((r) => String(r.statut || "actif") !== "renvoye").map((r) => { gradeDe.set(String(r.id), str(r.grade)); return { id: String(r.id), nom: String(r.nom || "Salarié"), grade: str(r.grade) }; });
+  const roster = (rost || []).filter((r) => estSalarieActif(r.statut)).map((r) => { gradeDe.set(String(r.id), str(r.grade)); return { id: String(r.id), nom: String(r.nom || "Salarié"), grade: str(r.grade) }; });
   const enService: ServiceEnCours[] = (ouv || []).map((r) => ({ id: String(r.id), nom: String(r.nom || "Salarié"), grade: r.salarieId ? gradeDe.get(String(r.salarieId)) ?? null : null, debut: String(r.debut), lastSeen: r.lastSeen == null ? null : String(r.lastSeen) }));
 
   // Matières premières = catégorie « matiere » du stock mutualisé : on partitionne
