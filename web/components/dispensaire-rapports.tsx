@@ -6,6 +6,7 @@ import { ScrollText, Plus, Check, Pencil, Trash2, Search, ExternalLink, Printer 
 import { VideRegistre } from "@/components/dispensaire-ui";
 import { RAPPORT_CATEGORIES, estCanva, normaliserLien, type RapportsData, type Rapport } from "@/lib/dispensaire-docs-const";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
+import { ChampPieceJointe, PieceJointeVignette } from "@/components/piece-jointe";
 import { creerRapport, majRapport, supprimerRapport } from "@/app/dispensaire/rapports/actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
@@ -54,6 +55,7 @@ function imprimerRapport(r: Rapport) {
     <div class="titre">${escH(r.titre)}</div>
     <div class="meta">${r.patient ? `Patient : <b>${escH(r.patient)}</b><br>` : ""}Fait à Saint-Denis, le <b>${escH(dateFR(r.createdAt))}</b>.</div>
     <div class="corps">${corps || "……"}</div>
+    ${r.pieceJointe ? `<figure style="margin:18px 0 0;text-align:center"><img src="${escH(r.pieceJointe).replace(/"/g, "&quot;")}" alt="Pièce jointe" style="max-width:100%;max-height:420px;border:1px solid #b7a074" onerror="this.parentNode.style.display='none'"><figcaption style="font-size:11px;font-style:italic;color:#6b5535;margin-top:4px">Pièce jointe — référence visuelle</figcaption></figure>` : ""}
     <div class="footer">
       <div></div>
       <div class="sign"><div class="l">Le praticien</div><div class="n">${escH(r.auteur || "……………")}</div><div class="st">Dispensaire de Saint-Denis</div></div>
@@ -85,7 +87,7 @@ export function DispensaireRapports({ data, medecins = [] }: { data: RapportsDat
       const res = await majRapport(editing.id, clean);
       if (!res.ok) setFlash({ t: "bad", m: res.error || "Impossible." }); else router.refresh();
     } else {
-      const tmp: Rapport = { id: "tmp-" + Math.random().toString(36).slice(2, 8), titre: vals.titre, categorie: vals.categorie || null, patient: vals.patient || null, lien: clean.lien || null, auteur: vals.auteur || null, note: vals.note || null, par: null, createdAt: new Date().toISOString() };
+      const tmp: Rapport = { id: "tmp-" + Math.random().toString(36).slice(2, 8), titre: vals.titre, categorie: vals.categorie || null, patient: vals.patient || null, lien: clean.lien || null, pieceJointe: vals.pieceJointe || null, auteur: vals.auteur || null, note: vals.note || null, par: null, createdAt: new Date().toISOString() };
       setRapports((p) => [tmp, ...p]); setForm(null);
       const res = await creerRapport(clean);
       if (!res.ok) { setRapports((p) => p.filter((r) => r.id !== tmp.id)); setFlash({ t: "bad", m: res.error || "Impossible." }); }
@@ -122,6 +124,7 @@ export function DispensaireRapports({ data, medecins = [] }: { data: RapportsDat
                   <div className="mt-0.5 text-[0.72rem] text-faint">{[r.patient, r.auteur].filter(Boolean).join(" · ") || "—"} · {dateFR(r.createdAt)}</div>
                   {r.note ? <div className="mt-1 line-clamp-2 text-[0.74rem] text-muted">{r.note}</div> : null}
                 </div>
+                {r.pieceJointe ? <div className="shrink-0"><PieceJointeVignette url={r.pieceJointe} /></div> : null}
                 <div className="flex shrink-0 items-center gap-1">
                   <button onClick={() => imprimerRapport(r)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Générer / Imprimer le rapport" title="Générer / Imprimer (PDF)"><Printer className="h-3.5 w-3.5" /></button>
                   <button onClick={() => setForm(r)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Modifier"><Pencil className="h-3.5 w-3.5" /></button>
@@ -141,7 +144,7 @@ export function DispensaireRapports({ data, medecins = [] }: { data: RapportsDat
 }
 
 function RapportForm({ initial, cats, medecins, onClose, onSave }: { initial: Rapport | null; cats: string[]; medecins: { nom: string; grade: string | null }[]; onClose: () => void; onSave: (v: Record<string, string>) => void }) {
-  const [v, setV] = useState<Record<string, string>>(() => ({ titre: initial?.titre || "", categorie: initial?.categorie || "", patient: initial?.patient || "", lien: initial?.lien || "", auteur: initial?.auteur || "", note: initial?.note || "" }));
+  const [v, setV] = useState<Record<string, string>>(() => ({ titre: initial?.titre || "", categorie: initial?.categorie || "", patient: initial?.patient || "", lien: initial?.lien || "", pieceJointe: initial?.pieceJointe || "", auteur: initial?.auteur || "", note: initial?.note || "" }));
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setV((p) => ({ ...p, [k]: e.target.value }));
   const options = [...new Set([...RAPPORT_CATEGORIES, ...cats])];
@@ -164,6 +167,7 @@ function RapportForm({ initial, cats, medecins, onClose, onSave }: { initial: Ra
         </Champ>
         <Champ label="Contenu du rapport"><textarea className={inputCls} rows={7} value={v.note} onChange={set("note")} placeholder="Rédige le compte rendu — il sera mis en page et imprimable directement (PDF)." /></Champ>
         <Champ label="Lien externe (facultatif)"><input className={inputCls} value={v.lien} onChange={set("lien")} placeholder="https://… (Canva ou autre — optionnel)" /></Champ>
+        <ChampPieceJointe value={v.pieceJointe} onChange={(url) => setV((p) => ({ ...p, pieceJointe: url }))} />
         {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
         <div className="mt-1 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2">Annuler</button>

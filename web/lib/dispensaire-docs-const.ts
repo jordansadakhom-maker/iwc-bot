@@ -38,7 +38,7 @@ export function modeleCertificat(type: string, ctx: { patient?: string; medecin?
 }
 
 // ── Rapports médicaux (Canva) ───────────────────────────────────────────────
-export type Rapport = { id: string; titre: string; categorie: string | null; patient: string | null; lien: string | null; auteur: string | null; note: string | null; par: string | null; createdAt: string };
+export type Rapport = { id: string; titre: string; categorie: string | null; patient: string | null; lien: string | null; pieceJointe: string | null; auteur: string | null; note: string | null; par: string | null; createdAt: string };
 export type RapportsData = { connecte: boolean; pret: boolean; canEdit: boolean; rapports: Rapport[]; categories: string[] };
 export const estCanva = (url: string | null) => !!url && /canva\./i.test(url);
 export const RAPPORT_CATEGORIES = ["Consultation", "Chirurgie", "Autopsie", "Expertise", "Suivi", "Autre"];
