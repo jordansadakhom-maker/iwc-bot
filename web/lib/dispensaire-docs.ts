@@ -17,7 +17,7 @@ export async function getCertificats(): Promise<CertData> {
   if (error) return { ...vide, connecte: true, pret: false, canEdit: true };
   const certificats: Certificat[] = ((data || []) as Record<string, unknown>[]).map((r) => ({
     id: String(r.id), patient: String(r.patient || "?"), type: String(r.type || "aptitude"), medecin: s(r.medecin),
-    dateActe: s(r.dateActe), dureeRepos: num(r.dureeRepos), contenu: s(r.contenu), note: s(r.note), par: s(r.par), createdAt: String(r.createdAt),
+    dateActe: s(r.dateActe), dureeRepos: num(r.dureeRepos), contenu: s(r.contenu), note: s(r.note), pieceJointe: s(r.pieceJointe), par: s(r.par), createdAt: String(r.createdAt),
   }));
   return { connecte: true, pret: true, canEdit: true, certificats };
 }

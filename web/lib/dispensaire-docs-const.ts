@@ -2,7 +2,7 @@
 // Importable côté client (aucun accès serveur).
 
 // ── Certificats ─────────────────────────────────────────────────────────────
-export type Certificat = { id: string; patient: string; type: string; medecin: string | null; dateActe: string | null; dureeRepos: number; contenu: string | null; note: string | null; par: string | null; createdAt: string };
+export type Certificat = { id: string; patient: string; type: string; medecin: string | null; dateActe: string | null; dureeRepos: number; contenu: string | null; note: string | null; pieceJointe: string | null; par: string | null; createdAt: string };
 export type CertData = { connecte: boolean; pret: boolean; canEdit: boolean; certificats: Certificat[] };
 
 export const CERT_TYPES = [

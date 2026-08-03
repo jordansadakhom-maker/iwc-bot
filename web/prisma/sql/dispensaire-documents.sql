@@ -14,9 +14,11 @@ CREATE TABLE IF NOT EXISTS "DispensaireCertificat" (
   "dureeRepos"  INTEGER NOT NULL DEFAULT 0,          -- jours de repos (si applicable)
   "contenu"     TEXT,
   "note"        TEXT,
+  "pieceJointe" TEXT,                                 -- lien image (référence visuelle)
   "par"         TEXT,
   "createdAt"   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE "DispensaireCertificat" ADD COLUMN IF NOT EXISTS "pieceJointe" TEXT;
 ALTER TABLE "DispensaireCertificat" ENABLE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS "DispensaireCertificat_date_idx" ON "DispensaireCertificat" ("createdAt" DESC);
 CREATE INDEX IF NOT EXISTS "DispensaireCertificat_patient_idx" ON "DispensaireCertificat" (lower("patient"));

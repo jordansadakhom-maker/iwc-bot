@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Loader2, Receipt, ShoppingBag, FileCheck, FileText, User, ArrowRight, HeartPulse, Pencil, Check, X, Droplet } from "lucide-react";
 import { Modal, inputCls } from "@/components/edit-ui";
+import { ChampPieceJointe, PieceJointeVignette } from "@/components/piece-jointe";
 import { money, factureStatut, factureOuverte } from "@/lib/dispensaire-facturation-const";
 import { getConsultationRefs, getDossierPatient, getDossierMedical, majDossierMedical, type DossierPatient, type DossierActe, type DossierMedicalResult } from "@/app/dispensaire/factures/actions";
 
@@ -15,11 +16,11 @@ const dateFR = (s: string | null) => { if (!s) return "—"; try { return new In
 const ICONE: Record<DossierActe["type"], typeof Receipt> = { Facture: Receipt, Vente: ShoppingBag, Certificat: FileCheck, Rapport: FileText };
 const GROUPES = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
 
-type MForm = { dateNaissance: string; telephone: string; groupeSanguin: string; allergies: string; antecedents: string; traitements: string; medecinReferent: string; notes: string };
-const vide = (): MForm => ({ dateNaissance: "", telephone: "", groupeSanguin: "", allergies: "", antecedents: "", traitements: "", medecinReferent: "", notes: "" });
+type MForm = { dateNaissance: string; telephone: string; groupeSanguin: string; allergies: string; antecedents: string; traitements: string; medecinReferent: string; notes: string; pieceJointe: string };
+const vide = (): MForm => ({ dateNaissance: "", telephone: "", groupeSanguin: "", allergies: "", antecedents: "", traitements: "", medecinReferent: "", notes: "", pieceJointe: "" });
 function fromDossier(m: DossierMedicalResult | null): MForm {
   const d = m?.dossier;
-  return { dateNaissance: d?.dateNaissance || "", telephone: d?.telephone || "", groupeSanguin: d?.groupeSanguin || "", allergies: d?.allergies || "", antecedents: d?.antecedents || "", traitements: d?.traitements || "", medecinReferent: d?.medecinReferent || "", notes: d?.notes || "" };
+  return { dateNaissance: d?.dateNaissance || "", telephone: d?.telephone || "", groupeSanguin: d?.groupeSanguin || "", allergies: d?.allergies || "", antecedents: d?.antecedents || "", traitements: d?.traitements || "", medecinReferent: d?.medecinReferent || "", notes: d?.notes || "", pieceJointe: d?.pieceJointe || "" };
 }
 
 export function DispensairePatientDossier({ onClose, initialNom }: { onClose: () => void; initialNom?: string }) {
@@ -55,7 +56,7 @@ export function DispensairePatientDossier({ onClose, initialNom }: { onClose: ()
   }
 
   const set = (k: keyof MForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setMf((p) => ({ ...p, [k]: e.target.value }));
-  const champsRenseignes = med?.dossier ? [med.dossier.groupeSanguin, med.dossier.allergies, med.dossier.antecedents, med.dossier.traitements, med.dossier.medecinReferent, med.dossier.dateNaissance, med.dossier.telephone, med.dossier.notes].some(Boolean) : false;
+  const champsRenseignes = med?.dossier ? [med.dossier.groupeSanguin, med.dossier.allergies, med.dossier.antecedents, med.dossier.traitements, med.dossier.medecinReferent, med.dossier.dateNaissance, med.dossier.telephone, med.dossier.notes, med.dossier.pieceJointe].some(Boolean) : false;
 
   return (
     <Modal titre="Dossier patient" onClose={onClose} max={640}>
@@ -96,6 +97,7 @@ export function DispensairePatientDossier({ onClose, initialNom }: { onClose: ()
                   <label className="flex flex-col gap-1 sm:col-span-2"><span className="text-[0.68rem] uppercase tracking-[0.04em] text-faint">Antécédents</span><textarea className={inputCls} rows={2} value={mf.antecedents} onChange={set("antecedents")} placeholder="Pathologies, opérations…" /></label>
                   <label className="flex flex-col gap-1 sm:col-span-2"><span className="text-[0.68rem] uppercase tracking-[0.04em] text-faint">Traitements en cours</span><textarea className={inputCls} rows={2} value={mf.traitements} onChange={set("traitements")} placeholder="Médicaments, posologie…" /></label>
                   <label className="flex flex-col gap-1 sm:col-span-2"><span className="text-[0.68rem] uppercase tracking-[0.04em] text-faint">Notes</span><textarea className={inputCls} rows={2} value={mf.notes} onChange={set("notes")} placeholder="Observations libres" /></label>
+                  <div className="sm:col-span-2"><ChampPieceJointe value={mf.pieceJointe} onChange={(url) => setMf((p) => ({ ...p, pieceJointe: url }))} /></div>
                   <div className="flex items-center justify-end gap-2 sm:col-span-2">
                     <button onClick={() => { setEdit(false); setMf(fromDossier(med)); }} className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-[0.78rem] font-semibold text-muted hover:text-ink"><X className="h-3.5 w-3.5" /> Annuler</button>
                     <button onClick={enregistrer} disabled={saving} className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-[0.78rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Enregistrer</button>
@@ -111,6 +113,7 @@ export function DispensairePatientDossier({ onClose, initialNom }: { onClose: ()
                   {med.dossier?.antecedents ? <Info label="Antécédents" val={med.dossier.antecedents} full /> : null}
                   {med.dossier?.traitements ? <Info label="Traitements" val={med.dossier.traitements} full /> : null}
                   {med.dossier?.notes ? <Info label="Notes" val={med.dossier.notes} full /> : null}
+                  {med.dossier?.pieceJointe ? <div className="sm:col-span-2"><span className="text-[0.66rem] uppercase tracking-[0.04em] text-faint">Pièce jointe</span><div className="mt-1"><PieceJointeVignette url={med.dossier.pieceJointe} /></div></div> : null}
                 </div>
               ) : (
                 <p className="text-[0.8rem] italic text-faint">Aucune information médicale renseignée{med.canEdit ? " — clique sur « Renseigner le dossier »." : "."}</p>

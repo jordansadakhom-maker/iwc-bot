@@ -2,6 +2,7 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { cleNom } from "@/lib/noms";
+import { validerPieceJointe } from "@/lib/piece-jointe";
 
 // ── Identité patient & dossier médical (Lot 2) ───────────────────────────────
 // Une fiche STABLE par patient, rapprochée par nom normalisé. N'écrase rien de
@@ -12,12 +13,12 @@ export type DossierMedical = {
   id: string; nom: string;
   dateNaissance: string | null; telephone: string | null; groupeSanguin: string | null;
   allergies: string | null; antecedents: string | null; traitements: string | null;
-  medecinReferent: string | null; notes: string | null;
+  medecinReferent: string | null; notes: string | null; pieceJointe: string | null;
   updatedAt: string | null; updatedBy: string | null;
 };
 
 // Champs éditables du dossier (le nom d'affichage `nom` est traité à part).
-export const CHAMPS_DOSSIER = ["dateNaissance", "telephone", "groupeSanguin", "allergies", "antecedents", "traitements", "medecinReferent", "notes"] as const;
+export const CHAMPS_DOSSIER = ["dateNaissance", "telephone", "groupeSanguin", "allergies", "antecedents", "traitements", "medecinReferent", "notes", "pieceJointe"] as const;
 export type ChampDossier = (typeof CHAMPS_DOSSIER)[number];
 
 const s = (v: unknown, max = 2000) => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
@@ -34,6 +35,7 @@ function toDossier(r: Record<string, unknown>): DossierMedical {
     traitements: r.traitements == null ? null : String(r.traitements),
     medecinReferent: r.medecinReferent == null ? null : String(r.medecinReferent),
     notes: r.notes == null ? null : String(r.notes),
+    pieceJointe: r.pieceJointe == null ? null : String(r.pieceJointe),
     updatedAt: r.updatedAt == null ? null : String(r.updatedAt),
     updatedBy: r.updatedBy == null ? null : String(r.updatedBy),
   };
@@ -61,22 +63,37 @@ export async function ecrireDossierMedical(nom: string, patch: Record<string, un
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
 
   const champs: Record<string, unknown> = {};
-  for (const c of CHAMPS_DOSSIER) if (c in patch) champs[c] = s(patch[c], c === "antecedents" || c === "traitements" || c === "notes" ? 4000 : 200);
+  for (const c of CHAMPS_DOSSIER) if (c in patch) champs[c] = s(patch[c], c === "antecedents" || c === "traitements" || c === "notes" ? 4000 : c === "pieceJointe" ? 2000 : 200);
+  // Rempart : la pièce jointe doit être un lien https vers une image (jamais de contenu exécutable).
+  if ("pieceJointe" in champs) {
+    const pj = validerPieceJointe(String(champs.pieceJointe ?? ""));
+    if (!pj.ok) return { ok: false, error: pj.error };
+    champs.pieceJointe = pj.url || null;
+  }
   const now = new Date().toISOString();
+
+  // Écriture tolérante à l'absence de la colonne « pieceJointe » (avant SQL additif) :
+  // on réessaie sans elle plutôt que d'échouer tout l'enregistrement du dossier.
+  const majTolerante = async (id: string) => {
+    let { error } = await admin.from("DispensairePatient").update({ nom: nomAff, ...champs, updatedBy: par, updatedAt: now }).eq("id", id);
+    if (error && "pieceJointe" in champs) { const { pieceJointe: _o, ...legacy } = champs; void _o; ({ error } = await admin.from("DispensairePatient").update({ nom: nomAff, ...legacy, updatedBy: par, updatedAt: now }).eq("id", id)); }
+    return error;
+  };
 
   try {
     const { data: ex } = await admin.from("DispensairePatient").select("id").eq("nomNormalise", cle).maybeSingle();
     if (ex) {
       const id = String((ex as Record<string, unknown>).id);
-      const { error } = await admin.from("DispensairePatient").update({ nom: nomAff, ...champs, updatedBy: par, updatedAt: now }).eq("id", id);
+      const error = await majTolerante(id);
       return error ? { ok: false, error: "Enregistrement impossible." } : { ok: true, id };
     }
     const id = newId();
-    const { error } = await admin.from("DispensairePatient").insert({ id, nom: nomAff, nomNormalise: cle, ...champs, updatedBy: par, updatedAt: now, createdAt: now });
+    let { error } = await admin.from("DispensairePatient").insert({ id, nom: nomAff, nomNormalise: cle, ...champs, updatedBy: par, updatedAt: now, createdAt: now });
+    if (error && "pieceJointe" in champs) { const { pieceJointe: _o, ...legacy } = champs; void _o; ({ error } = await admin.from("DispensairePatient").insert({ id, nom: nomAff, nomNormalise: cle, ...legacy, updatedBy: par, updatedAt: now, createdAt: now })); }
     if (!error) return { ok: true, id };
     // Course : une fiche vient d'être créée pour ce nom → on met à jour la sienne.
     const { data: ex2 } = await admin.from("DispensairePatient").select("id").eq("nomNormalise", cle).maybeSingle();
-    if (ex2) { const id2 = String((ex2 as Record<string, unknown>).id); await admin.from("DispensairePatient").update({ nom: nomAff, ...champs, updatedBy: par, updatedAt: now }).eq("id", id2); return { ok: true, id: id2 }; }
+    if (ex2) { const id2 = String((ex2 as Record<string, unknown>).id); await majTolerante(id2); return { ok: true, id: id2 }; }
     return { ok: false, error: "Création impossible (lance dispensaire-patients.sql ?)." };
   } catch { return { ok: false, error: "Création impossible (lance dispensaire-patients.sql ?)." }; }
 }
