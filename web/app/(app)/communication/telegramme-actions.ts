@@ -9,6 +9,30 @@ import { envoyerEmail } from "@/lib/email";
 
 export type TgResult = { ok: boolean; error?: string; info?: string };
 
+// Livre un message au client via le canal laissé (Discord MP par pseudo / e-mail),
+// sinon trace seule. Best-effort : renvoie un court état pour l'UI, ne jette jamais.
+// Utilisé pour les messages « d'état » (clôture…) — la réponse classique garde son
+// propre chemin pour ne rien changer à son comportement éprouvé.
+async function livrerAuContact(contact: string, texte: string, parNom: string, email: { sujet: string; corps: string }): Promise<string> {
+  const t = texte.slice(0, 2000);
+  const de = parNom || "Iron Wolf Company";
+  const m = contact.match(/discord\s*[:：]\s*(.+)$/i);
+  if (m && m[1].trim()) {
+    const r = await envoyerCommande("telegramme.mpDiscord", { pseudo: m[1].trim(), texte: t, de }, { attendre: true, timeoutMs: 12000 });
+    if (r.enAttente) return "livraison Discord en cours…";
+    if (r.ok) return r.message || "✅ livré au client en MP Discord.";
+    return `${r.error || "MP Discord non livré"} — gardé en trace.`;
+  }
+  const em = contact.match(/email\s*[:：]\s*([^\s]+@[^\s]+)/i) || contact.match(/([^\s]+@[^\s]+\.[^\s]+)/);
+  if (em && em[1]) {
+    const res = await envoyerEmail(em[1].trim(), email.sujet, email.corps);
+    if (res.ok) return "✅ envoyé par e-mail au client.";
+    if (res.reason === "non configuré") return "gardé en trace (e-mail non configuré) — lisible sur « Suivre ma demande ».";
+    return `gardé en trace (e-mail non envoyé : ${res.reason}) — lisible sur « Suivre ma demande ».`;
+  }
+  return "conservé (trace) — lisible par le client sur « Suivre ma demande ».";
+}
+
 export async function repondreTelegramme(rdvId: string, texte: string): Promise<TgResult> {
   const t = (texte || "").trim();
   if (!rdvId) return { ok: false, error: "Télégramme introuvable." };
@@ -68,10 +92,21 @@ export async function changerStatutTelegramme(id: string, clos: boolean): Promis
   if (!id) return { ok: false, error: "Télégramme introuvable." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
+  let livraison = "";
   if (id.startsWith("web-")) {
+    const realId = id.replace(/^web-/, "");
+    // À la clôture, on prévient le client via le contact laissé (best-effort).
+    if (clos) {
+      const { data } = await admin.from("TelegrammeWeb").select("contact").eq("id", realId).maybeSingle();
+      const contact = String((data as { contact?: unknown } | null)?.contact || "");
+      livraison = await livrerAuContact(contact, "📁 Ta demande auprès de la Iron Wolf Company a été clôturée. Merci de ta confiance !", "Iron Wolf Company", {
+        sujet: "Ta demande a été clôturée — Iron Wolf Company",
+        corps: "Bonjour,\n\nTa demande auprès de la Iron Wolf Company a été clôturée. Merci de ta confiance !\n\n— Iron Wolf Company\n\n(Tu peux revenir vers nous à tout moment via notre site.)",
+      });
+    }
     // Télégramme du SITE : réouverture en « transmis » (jamais « nouveau ») → le
     // bot ne le re-notifie JAMAIS sur Discord (zéro doublon).
-    const { error } = await admin.from("TelegrammeWeb").update({ statut: clos ? "clos" : "transmis" }).eq("id", id.replace(/^web-/, ""));
+    const { error } = await admin.from("TelegrammeWeb").update({ statut: clos ? "clos" : "transmis" }).eq("id", realId);
     if (error) return { ok: false, error: "Enregistrement impossible." };
   } else {
     // Télégramme DISCORD : on écrit le statut directement. Si le client réécrit,
@@ -80,7 +115,7 @@ export async function changerStatutTelegramme(id: string, clos: boolean): Promis
     const { error } = await admin.from("Telegramme").update({ statut: clos ? "cloture" : "ouvert", updatedAt: new Date().toISOString() }).eq("id", id);
     if (error) return { ok: false, error: "Enregistrement impossible." };
   }
-  return { ok: true, info: clos ? "Télégramme clôturé — trace conservée." : "Télégramme rouvert." };
+  return { ok: true, info: clos ? (livraison ? `Télégramme clôturé — client ${livraison}` : "Télégramme clôturé — trace conservée.") : "Télégramme rouvert." };
 }
 
 // ── Extraction lieu / heure depuis le texte d'un télégramme ──

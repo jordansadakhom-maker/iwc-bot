@@ -81,19 +81,22 @@ export async function majStatutRdv(id: string, statut: string): Promise<CommResu
 // Clôture un rendez-vous : il quitte la liste active et bascule dans le JOURNAL
 // DE BORD (avec son résultat, la date de clôture et l'auteur). Garde une trace
 // totale sans encombrer l'agenda ni le salon Discord.
-export async function cloturerRdv(id: string, resultat: string): Promise<CommResult> {
+export async function cloturerRdv(id: string, resultat: string): Promise<CommResult & { info?: string }> {
   const _g = await garde(); if (_g) return _g;
   if (!id) return { ok: false, error: "RDV introuvable." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service indisponible." };
   const { data } = await admin.from("Rdv").select("paiement").eq("id", id).maybeSingle();
   const paiement = (data?.paiement && typeof data.paiement === "object" ? data.paiement : {}) as Record<string, unknown>;
+  const par = await auteurNom();
   const { error } = await admin.from("Rdv").update({
     statut: "cloture",
-    paiement: { ...paiement, resultat: String(resultat || "").slice(0, 1200), closedAt: new Date().toISOString(), closedBy: await auteurNom() },
+    paiement: { ...paiement, resultat: String(resultat || "").slice(0, 1200), closedAt: new Date().toISOString(), closedBy: par },
   }).eq("id", id);
   if (error) { console.error("cloturerRdv:", error.message); return { ok: false, error: "Enregistrement impossible." }; }
-  return { ok: true };
+  // Prévient le client que sa demande est clôturée (MP Discord / e-mail / trace). Best-effort.
+  const info = await livrerReponseClient(String(paiement.contact || ""), "📁 Ta demande de rendez-vous auprès de la Iron Wolf Company a été clôturée. Merci de ta confiance !", par);
+  return { ok: true, info };
 }
 
 export async function repondreRdv(id: string, texte: string): Promise<CommResult & { info?: string }> {
