@@ -11,6 +11,8 @@ import { creerContrat, majContrat, supprimerContrat, majSuiviContrat, honorerCon
 import { cents } from "@/lib/format";
 
 const dateFR = (s: string | null) => { if (!s) return null; try { return new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" }); } catch { return null; } };
+// N° de contrat stable (dérivé de l'id) pour l'aperçu parchemin.
+const numeroContrat = (id: string) => { let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0; return "C-" + (100 + (h % 900)); };
 
 // Pipeline de suivi (5 étapes, comme sur Discord).
 const SUIVI = ["En attente", "En cours", "Validé", "Honoré", "Abandonné"];
@@ -308,7 +310,7 @@ function ContratVivant({ pole, categorie, risque, cible, commanditaire, remunera
     </div>
   );
   return (
-    <div id="contrat-vivant-doc" style={{ position: "relative", fontFamily: "Georgia,'Times New Roman',serif", color: "#2c2013", background: "linear-gradient(#f6ecd3,#efe3c6)", border: "1px solid #b39c6e", borderRadius: 10, padding: "22px 22px 26px", boxShadow: "inset 0 0 0 4px #f8f2e2, inset 0 0 0 5px #c2a86f, 0 10px 30px rgba(40,26,10,.28)" }}>
+    <div id="contrat-vivant-doc" style={{ position: "relative", fontFamily: "Georgia,'Times New Roman',serif", color: "#2c2013", background: "radial-gradient(58% 40% at 12% 8%, rgba(120,88,40,0.13), transparent 60%), radial-gradient(52% 42% at 92% 94%, rgba(90,60,20,0.12), transparent 60%), linear-gradient(#f6ecd3,#efe3c6)", border: "1px solid #b39c6e", borderRadius: 10, padding: "22px 22px 26px", boxShadow: "inset 0 0 0 4px #f8f2e2, inset 0 0 0 5px #c2a86f, 0 10px 30px rgba(40,26,10,.28)" }}>
       <div style={{ position: "absolute", top: 16, right: 14, transform: "rotate(-8deg)", border: `2px solid ${st.tone}`, color: st.tone, padding: "2px 8px", borderRadius: 4, fontFamily: "'Courier New',monospace", fontWeight: 700, fontSize: 10, letterSpacing: "0.12em", opacity: 0.9 }}>{st.label.toUpperCase()}</div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, borderBottom: "2px solid #2c2013", paddingBottom: 10 }}>
         <BlasonLoupP />
@@ -319,6 +321,12 @@ function ContratVivant({ pole, categorie, risque, cible, commanditaire, remunera
         <div style={{ marginLeft: "auto", textAlign: "right", fontFamily: "'Courier New',monospace", fontSize: 9, color: "#7a5a2a" }}>
           <div>N° {numero}</div><div>{dateStr}</div>
         </div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "9px 0 2px" }} aria-hidden>
+        <span style={{ height: 1, flex: 1, background: "linear-gradient(90deg,transparent,#b39c6e)" }} />
+        <span style={{ width: 6, height: 6, transform: "rotate(45deg)", background: "#9a761c" }} />
+        <span style={{ height: 1, flex: 1, background: "linear-gradient(270deg,transparent,#b39c6e)" }} />
       </div>
 
       <H t="ENTRE LES PARTIES" />
@@ -411,10 +419,14 @@ function EditModal({ contrat, onClose, router }: { contrat: ContratDetail; onClo
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
     router.refresh(); onClose();
   }
+  function imprimer() { if (typeof window !== "undefined") window.print(); }
 
   return (
-    <Modal titre={contrat.cible} onClose={onClose}>
+    <Modal titre={contrat.cible} onClose={onClose} max={920}>
+      <style>{`@media print{body *{visibility:hidden!important}#contrat-vivant-doc,#contrat-vivant-doc *{visibility:visible!important}#contrat-vivant-doc{position:fixed!important;inset:0!important;margin:0!important;border-radius:0!important;box-shadow:none!important;max-width:none!important}}`}</style>
       {flash ? <div className="mb-3"><Flash>{flash}</Flash></div> : null}
+      <div className="grid gap-4 lg:grid-cols-[1fr_minmax(300px,340px)]">
+        <div className="min-w-0">
       <ContratDetailBloc c={contrat} />
 
       {/* Suivi / pipeline */}
@@ -516,6 +528,19 @@ function EditModal({ contrat, onClose, router }: { contrat: ContratDetail; onClo
             <button onClick={() => setConfirmDel(true)} className="inline-flex items-center gap-1.5 text-[0.76rem] text-faint hover:text-ink"><Trash2 className="h-3.5 w-3.5" /> Supprimer</button>
           )}
           <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-[0.8rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}>Fermer</button>
+        </div>
+      </div>
+        </div>
+        <div className="min-w-0">
+          <div className="lg:sticky lg:top-0">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="text-[0.7rem] font-semibold uppercase tracking-[0.1em] text-faint">Aperçu du contrat</span>
+              <button onClick={imprimer} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.72rem] font-semibold hover:border-border-2"><Printer className="h-3.5 w-3.5" /> Imprimer</button>
+            </div>
+            <div className="max-h-[70vh] overflow-y-auto pr-1">
+              <ContratVivant pole={pole} categorie={categorie} risque={contrat.risque || "discret"} cible={cible} commanditaire={commanditaire} remuneration={remuneration} echeance={echeance} details={details} statut={statut} numero={numeroContrat(contrat.id)} dateStr={dateFR(contrat.createdAt) || "—"} />
+            </div>
+          </div>
         </div>
       </div>
     </Modal>
