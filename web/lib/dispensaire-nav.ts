@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, ClipboardList, Boxes, Warehouse, Archive, BadgeDollarSign, Receipt, ShieldCheck, FileText, BookUser, Stethoscope, ScrollText, BarChart3, History, ShieldAlert, Sparkles, Scale, HeartPulse, CalendarClock, Scissors, Landmark, BedDouble, Truck, Gauge, Coins, Crown, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Users, ClipboardList, Boxes, Warehouse, Archive, BadgeDollarSign, Receipt, ShieldCheck, FileText, BookUser, Stethoscope, ScrollText, BarChart3, History, ShieldAlert, Sparkles, Scale, HeartPulse, CalendarClock, Scissors, Landmark, BedDouble, Gauge, Coins, Crown, type LucideIcon } from "lucide-react";
 
 // Onglets de la section Dispensaire de Saint-Denis.
 //   `pret`       = déjà construit (sinon « bientôt »).
@@ -20,7 +20,6 @@ export const DISP_NAV: DispTab[] = [
   { href: "/dispensaire/rendez-vous", label: "Rendez-vous", icon: CalendarClock, pret: true, cat: "medical", desc: "Le planning des consultations — patients attendus, praticiens, spécialités et salles." },
   { href: "/dispensaire/interventions", label: "Interventions", icon: Scissors, pret: true, restreint: true, cat: "medical", desc: "Les opérations et leurs comptes-rendus opératoires (CRO)." },
   { href: "/dispensaire/chambres", label: "Chambres", icon: BedDouble, pret: true, cat: "medical", desc: "Les lits et chambres — occupation, réservation, nettoyage." },
-  { href: "/dispensaire/ambulances", label: "Ambulances", icon: Truck, pret: true, cat: "medical", desc: "La flotte d'intervention — état, carburant, entretien et matériel." },
   { href: "/dispensaire/fdo", label: "Soins FDO", icon: ShieldCheck, pret: true, cat: "medical", desc: "Soins aux forces de l'ordre — suivi hebdomadaire & remboursement État." },
   { href: "/dispensaire/certificats", label: "Certificats", icon: Stethoscope, pret: true, cat: "medical", desc: "Certificats médicaux, prêts à sceller et à imprimer." },
   { href: "/dispensaire/rapports", label: "Rapports médicaux", icon: ScrollText, pret: true, cat: "medical", desc: "Comptes rendus et planches d'examen." },

@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ShieldCheck, Plus, Loader2, Trash2, Building2, FileText, Printer, X, Search,
-  ChevronDown, TrendingUp, TrendingDown, Minus, Stethoscope, CalendarDays, Coins, Award,
+  ChevronDown, TrendingUp, TrendingDown, Minus, Stethoscope, CalendarDays, Coins,
+  Pencil, ListChecks, CheckSquare, Square,
 } from "lucide-react";
 import { VideRegistre, Cartouche, SceauCire, Fleuron } from "@/components/dispensaire-ui";
 import {
@@ -13,7 +14,7 @@ import {
 } from "@/lib/dispensaire-facturation-const";
 import { grouperParSemaine, statsFDO, cleSemaineDate, type SemaineFDO } from "@/lib/dispensaire-fdo-semaines";
 import { Flash, inputCls } from "@/components/edit-ui";
-import { creerSoin, supprimerSoin, majStatutSemaine, archiverRapportSemaine } from "@/app/dispensaire/fdo/actions";
+import { creerSoin, supprimerSoin, majSoin, majStatutSemaine, archiverRapportSemaine } from "@/app/dispensaire/fdo/actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
 const P = { timeZone: "Europe/Paris" } as const;
@@ -36,6 +37,8 @@ export function DispensaireFDO({ data }: { data: FDOData }) {
   const [ouvert, setOuvert] = useState<string | null>(null);
   const [filtres, setFiltres] = useState({ nom: "", bureau: "", medecin: "", date: "" });
   const [rapportSem, setRapportSem] = useState<SemaineFDO | null>(null);
+  const [editS, setEditS] = useState<SoinFDO | null>(null);
+  const [decl, setDecl] = useState<{ soins: SoinFDO[]; label: string } | null>(null);
 
   // « Maintenant » calculé après montage → pas de mismatch SSR (stats + semaine courante).
   const [now, setNow] = useState<Date | null>(null);
@@ -69,6 +72,16 @@ export function DispensaireFDO({ data }: { data: FDOData }) {
     setSoins((p) => p.filter((x) => x.id !== id));
     const r = await supprimerSoin(id);
     if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else router.refresh();
+  }
+  async function modifier(id: string, patch: { date: string; patient: string; bureau: string; medecin: string; soin: string; note: string }): Promise<boolean> {
+    const r = await majSoin(id, { date: patch.date, agent: patch.patient, bureau: patch.bureau, medecin: patch.medecin, soin: patch.soin, note: patch.note });
+    if (!r.ok) { setFlash({ t: "bad", m: r.error || "Impossible." }); return false; }
+    const iso = patch.date ? new Date(`${patch.date}T12:00:00`).toISOString() : null;
+    setSoins((p) => p.map((x) => (x.id === id ? { ...x, agent: patch.patient.trim() || null, bureau: patch.bureau.trim() || x.bureau, par: patch.medecin.trim() || null, soin: patch.soin.trim() || null, note: patch.note.trim() || null, ...(iso ? { createdAt: iso } : {}) } : x)));
+    setEditS(null);
+    setFlash({ t: "ok", m: "Soin modifié — date d'émission et détails mis à jour." });
+    router.refresh();
+    return true;
   }
   async function changerStatut(cle: string, statut: string) {
     const base: RapportFDO = rapports[cle] || { cle, statut, envoyeLe: null, genereLe: null, note: null, par: null };
@@ -122,6 +135,9 @@ export function DispensaireFDO({ data }: { data: FDOData }) {
         </div>
       </section>
 
+      {/* ── Fiche de déclaration cochable (sélection par bureau / date) ── */}
+      {soins.length > 0 ? <DeclarationPanel soins={soins} onGenerer={(s, label) => setDecl({ soins: s, label })} /> : null}
+
       {/* ── Registre hebdomadaire ── */}
       {soins.length === 0 ? (
         <VideRegistre icon={ShieldCheck} titre="Aucun soin porté aux forces de l'ordre" sous="Enregistre un premier soin — il sera classé automatiquement par semaine et prêt pour la demande de remboursement." />
@@ -138,6 +154,7 @@ export function DispensaireFDO({ data }: { data: FDOData }) {
               onStatut={(st) => changerStatut(sem.cle, st)}
               onGenerer={() => genererRapport(sem)}
               onSupprimer={supprimer}
+              onEditer={setEditS}
               filtres={filtres}
               setFiltres={setFiltres}
             />
@@ -146,16 +163,18 @@ export function DispensaireFDO({ data }: { data: FDOData }) {
       )}
 
       {rapportSem ? <RapportModal sem={rapportSem} onClose={() => setRapportSem(null)} /> : null}
+      {editS ? <EditSoinModal soin={editS} onClose={() => setEditS(null)} onSave={modifier} bureaux={bureauxSugg} medecins={medecinsConnus} /> : null}
+      {decl ? <DeclarationModal soins={decl.soins} label={decl.label} onClose={() => setDecl(null)} /> : null}
     </div>
   );
 }
 
 // ── Carte d'une semaine (registre) ────────────────────────────────────────────
 function SemaineCarte({
-  sem, rapport, courante, ouvert, onToggle, onStatut, onGenerer, onSupprimer, filtres, setFiltres,
+  sem, rapport, courante, ouvert, onToggle, onStatut, onGenerer, onSupprimer, onEditer, filtres, setFiltres,
 }: {
   sem: SemaineFDO; rapport: RapportFDO | null; courante: boolean; ouvert: boolean;
-  onToggle: () => void; onStatut: (s: string) => void; onGenerer: () => void; onSupprimer: (id: string) => void;
+  onToggle: () => void; onStatut: (s: string) => void; onGenerer: () => void; onSupprimer: (id: string) => void; onEditer: (s: SoinFDO) => void;
   filtres: { nom: string; bureau: string; medecin: string; date: string }; setFiltres: (f: { nom: string; bureau: string; medecin: string; date: string }) => void;
 }) {
   const statutKey = rapport?.statut || "en_attente";
@@ -259,7 +278,7 @@ function SemaineCarte({
                     <td className="border-b border-border px-2 py-1.5 text-muted">{s.soin || "—"}</td>
                     <td className="border-b border-border px-2 py-1.5 text-right font-num">{money(s.montant)}</td>
                     <td className="border-b border-border px-2 py-1.5 text-faint">{s.note || "—"}</td>
-                    <td className="border-b border-border px-2 py-1.5 text-right"><button onClick={() => onSupprimer(s.id)} className="text-faint opacity-0 transition hover:text-oxblood group-hover:opacity-100" aria-label="Supprimer"><Trash2 className="h-3.5 w-3.5" /></button></td>
+                    <td className="border-b border-border px-2 py-1.5 text-right"><div className="flex justify-end gap-2"><button onClick={() => onEditer(s)} className="text-faint opacity-0 transition hover:text-accent group-hover:opacity-100" aria-label="Modifier (date, détails)" title="Modifier la date d'émission et les détails"><Pencil className="h-3.5 w-3.5" /></button><button onClick={() => onSupprimer(s.id)} className="text-faint opacity-0 transition hover:text-oxblood group-hover:opacity-100" aria-label="Supprimer"><Trash2 className="h-3.5 w-3.5" /></button></div></td>
                   </tr>
                 ))}
               </tbody>
@@ -388,3 +407,173 @@ function RapportImprimable({ sem, genLe }: { sem: SemaineFDO; genLe: string }) {
     </article>
   );
 }
+
+// ── Édition d'un soin (date d'émission modifiable + détails) ──────────────────
+function EditSoinModal({ soin, onClose, onSave, bureaux, medecins }: { soin: SoinFDO; onClose: () => void; onSave: (id: string, patch: { date: string; patient: string; bureau: string; medecin: string; soin: string; note: string }) => Promise<boolean>; bureaux: string[]; medecins: string[] }) {
+  const [f, setF] = useState({ date: (soin.createdAt || "").slice(0, 10), patient: soin.agent || "", bureau: soin.bureau, medecin: soin.par || "", soin: soin.soin || "", note: soin.note || "" });
+  const [busy, setBusy] = useState(false);
+  const upd = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setF((p) => ({ ...p, [k]: e.target.value }));
+  async function save() { if (!f.bureau.trim()) return; setBusy(true); await onSave(soin.id, f); setBusy(false); }
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center overflow-auto bg-black/55 p-4" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="iwc-pop w-full max-w-[520px] rounded-[14px] border border-border-2 bg-surface shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <h2 className="flex items-center gap-2 font-display text-[1.05rem]"><Pencil className="h-4 w-4 text-accent" /> Modifier le soin</h2>
+          <button onClick={onClose} className="text-faint hover:text-ink"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="grid gap-2 p-4 sm:grid-cols-2">
+          <label className="flex flex-col gap-1"><span className={labelCls}>Date d&apos;émission</span><input type="date" className={inputCls} value={f.date} onChange={upd("date")} /></label>
+          <label className="flex flex-col gap-1"><span className={labelCls}>Patient (agent)</span><input className={inputCls} value={f.patient} onChange={upd("patient")} /></label>
+          <label className="flex flex-col gap-1"><span className={labelCls}>Bureau</span><input className={inputCls} value={f.bureau} onChange={upd("bureau")} list="fdo-edit-bureaux" /><datalist id="fdo-edit-bureaux">{bureaux.map((b) => <option key={b} value={b} />)}</datalist></label>
+          <label className="flex flex-col gap-1"><span className={labelCls}>Médecin</span><input className={inputCls} value={f.medecin} onChange={upd("medecin")} list="fdo-edit-medecins" /><datalist id="fdo-edit-medecins">{medecins.map((m) => <option key={m} value={m} />)}</datalist></label>
+          <label className="flex flex-col gap-1"><span className={labelCls}>Type de soin</span><input className={inputCls} value={f.soin} onChange={upd("soin")} /></label>
+          <label className="flex flex-col gap-1"><span className={labelCls}>Observations</span><input className={inputCls} value={f.note} onChange={upd("note")} /></label>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
+          <button onClick={onClose} className="rounded-lg border border-border px-3 py-1.5 text-[0.8rem] font-semibold transition hover:border-accent">Annuler</button>
+          <button onClick={save} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[0.8rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Enregistrer</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Fiche de déclaration cochable (sélection par bureau / date) ────────────────
+function DeclarationPanel({ soins, onGenerer }: { soins: SoinFDO[]; onGenerer: (sel: SoinFDO[], label: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [bureau, setBureau] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const bureaux = useMemo(() => [...new Set(soins.map((s) => s.bureau))].sort((a, b) => a.localeCompare(b)), [soins]);
+  const liste = useMemo(() => soins.filter((s) => {
+    if (bureau && s.bureau !== bureau) return false;
+    const d = ymd(s.createdAt);
+    if (from && d < from) return false;
+    if (to && d > to) return false;
+    return true;
+  }).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)), [soins, bureau, from, to]);
+  const allChecked = liste.length > 0 && liste.every((s) => checked.has(s.id));
+  const toggle = (id: string) => setChecked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const toggleAll = () => setChecked((p) => { const n = new Set(p); if (allChecked) liste.forEach((s) => n.delete(s.id)); else liste.forEach((s) => n.add(s.id)); return n; });
+  const sel = liste.filter((s) => checked.has(s.id));
+  const total = sel.reduce((a, s) => a + s.montant, 0);
+  const label = `${bureau || "Tous les bureaux"} · ${from || to ? `du ${from || "…"} au ${to || "…"}` : "toutes dates"}`;
+  return (
+    <section className="rounded-[14px] border border-border bg-surface">
+      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-2 px-4 py-3 text-left">
+        <ListChecks className="h-4 w-4 text-accent" />
+        <span className="text-[0.9rem] font-semibold">Fiche de déclaration — sélection par bureau / date</span>
+        <ChevronDown className={`ml-auto h-4 w-4 text-faint transition ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open ? (
+        <div className="border-t border-border px-4 py-3">
+          <div className="mb-2 grid gap-2 sm:grid-cols-3">
+            <label className="flex flex-col gap-1"><span className={labelCls}>Bureau</span>
+              <select className={inputCls} value={bureau} onChange={(e) => setBureau(e.target.value)}><option value="">Tous les bureaux</option>{bureaux.map((b) => <option key={b} value={b}>{b}</option>)}</select>
+            </label>
+            <label className="flex flex-col gap-1"><span className={labelCls}>Du</span><input type="date" className={inputCls} value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+            <label className="flex flex-col gap-1"><span className={labelCls}>Au</span><input type="date" className={inputCls} value={to} onChange={(e) => setTo(e.target.value)} /></label>
+          </div>
+          <div className="mb-1.5 flex items-center justify-between">
+            <button onClick={toggleAll} className="inline-flex items-center gap-1.5 text-[0.76rem] font-semibold text-accent">{allChecked ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />} Tout {allChecked ? "décocher" : "cocher"} ({liste.length})</button>
+            <span className="text-[0.72rem] text-faint">{sel.length} sélectionné(s) · <span className="font-num font-semibold text-muted">{money(total)}</span></span>
+          </div>
+          <div className="max-h-[280px] overflow-auto rounded-lg border border-border">
+            {liste.length === 0 ? <div className="px-3 py-6 text-center text-[0.8rem] text-faint">Aucun soin pour ces critères.</div> : (
+              <ul className="divide-y divide-border">
+                {liste.map((s) => (
+                  <li key={s.id} className="flex items-center gap-2 px-3 py-1.5 text-[0.78rem]">
+                    <button onClick={() => toggle(s.id)} className="shrink-0" aria-label="Sélectionner">{checked.has(s.id) ? <CheckSquare className="h-4 w-4 text-accent" /> : <Square className="h-4 w-4 text-faint" />}</button>
+                    <span className="w-[76px] shrink-0 font-num text-faint">{dateFR(s.createdAt)}</span>
+                    <span className="flex-1 truncate font-semibold">{s.agent || "—"}</span>
+                    <span className="hidden max-w-[130px] truncate text-muted sm:block">{s.bureau}</span>
+                    <span className="shrink-0 font-num">{money(s.montant)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="mt-2.5 flex justify-end">
+            <button onClick={() => sel.length && onGenerer(sel, label)} disabled={!sel.length} className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-[0.8rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--accent)" }}><FileText className="h-4 w-4" /> Générer la fiche de déclaration ({sel.length})</button>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+// ── Fiche de déclaration imprimable (sélection libre) ─────────────────────────
+function DeclarationModal({ soins, label, onClose }: { soins: SoinFDO[]; label: string; onClose: () => void }) {
+  const genLe = new Intl.DateTimeFormat("fr-FR", { ...P, day: "2-digit", month: "long", year: "numeric" }).format(new Date());
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-start overflow-auto bg-black/55 p-4 sm:p-8" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <style>{`@media print{body *{visibility:hidden!important}#fdo-decl-print,#fdo-decl-print *{visibility:visible!important}#fdo-decl-print{position:fixed!important;inset:0!important;margin:0!important;max-width:none!important;border-radius:0!important;box-shadow:none!important}.fdo-no-print{display:none!important}}`}</style>
+      <div className="mx-auto w-full max-w-[820px]">
+        <div className="fdo-no-print mb-2 flex items-center justify-between gap-2">
+          <span className="text-[0.8rem] font-semibold text-white">Fiche de déclaration — {soins.length} soin(s)</span>
+          <div className="flex gap-2">
+            <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[0.78rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}><Printer className="h-3.5 w-3.5" /> Imprimer / PDF</button>
+            <button onClick={onClose} className="inline-flex items-center gap-1.5 rounded-lg border border-white/30 px-3 py-1.5 text-[0.78rem] font-semibold text-white"><X className="h-3.5 w-3.5" /> Fermer</button>
+          </div>
+        </div>
+        <DeclarationImprimable soins={soins} label={label} genLe={genLe} />
+      </div>
+    </div>
+  );
+}
+
+function DeclarationImprimable({ soins, label, genLe }: { soins: SoinFDO[]; label: string; genLe: string }) {
+  const pb = parBureauDe(soins);
+  const total = soins.reduce((a, s) => a + s.montant, 0);
+  const patients = patientsDe(soins);
+  const tries = [...soins].sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+  return (
+    <article id="fdo-decl-print" className="rounded-[10px] border p-8 text-[#2a2115]" style={{ borderColor: "#cabfa6", background: "radial-gradient(1200px 300px at 50% -8%, #efe7d2, transparent 60%), linear-gradient(#f7f1e2,#f2ead6)", fontFamily: "Georgia, 'Times New Roman', serif", boxShadow: "0 18px 50px -14px rgba(0,0,0,.5)" }}>
+      <header className="flex items-start justify-between gap-4 border-b-2 pb-3" style={{ borderColor: "#b79e70" }}>
+        <div>
+          <div className="text-[0.66rem] font-bold uppercase tracking-[0.2em]" style={{ color: "#8a7648" }}>Comté de Lemoyne · 1904</div>
+          <h1 className="mt-1 text-[1.5rem] font-bold" style={{ letterSpacing: ".02em" }}>{DISPENSAIRE_NOM}</h1>
+          <p className="mt-0.5 text-[0.86rem] italic" style={{ color: "#6e6353" }}>Fiche de déclaration — Demande de remboursement des soins prodigués aux Forces de l&apos;Ordre.</p>
+        </div>
+        <SceauCire size={62} />
+      </header>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-[0.82rem]" style={{ fontFamily: "'Courier New', monospace" }}>
+        <div><b>Sélection :</b> {label}</div>
+        <div className="text-right"><b>Généré le :</b> {genLe}</div>
+        <div><b>Soins retenus :</b> {soins.length}</div>
+        <div className="text-right"><b>Patients :</b> {patients}</div>
+      </div>
+      <Fleuron className="my-4" />
+      <table className="w-full border-collapse text-[0.76rem]" style={{ fontFamily: "'Courier New', monospace" }}>
+        <thead><tr style={{ borderBottom: "1.5px solid #b79e70" }}>
+          <th className="py-1 pr-2 text-left">Date</th><th className="py-1 pr-2 text-left">Patient</th><th className="py-1 pr-2 text-left">Bureau</th><th className="py-1 pr-2 text-left">Médecin</th><th className="py-1 pr-2 text-left">Soin</th><th className="py-1 pr-2 text-right">Montant</th>
+        </tr></thead>
+        <tbody>{tries.map((s) => (
+          <tr key={s.id} style={{ borderBottom: "1px dotted #cabfa6" }}>
+            <td className="py-1 pr-2">{dateFR(s.createdAt)}</td><td className="py-1 pr-2">{s.agent || "—"}</td><td className="py-1 pr-2">{s.bureau}</td><td className="py-1 pr-2">{s.par || "—"}</td><td className="py-1 pr-2">{s.soin || "—"}</td><td className="py-1 pr-2 text-right">{money(s.montant)}</td>
+          </tr>
+        ))}</tbody>
+      </table>
+      <div className="mt-4">
+        <div className="mb-1 text-[0.72rem] font-bold uppercase tracking-[0.08em]" style={{ color: "#8a7648" }}>Totaux par administration</div>
+        <table className="w-full border-collapse text-[0.8rem]" style={{ fontFamily: "'Courier New', monospace" }}><tbody>
+          {pb.map((b) => (<tr key={b.bureau} style={{ borderBottom: "1px dotted #cabfa6" }}><td className="py-1">{b.bureau}</td><td className="py-1 text-center">{b.nb} soin(s)</td><td className="py-1 text-right font-bold">{money(b.total)}</td></tr>))}
+          <tr style={{ borderTop: "2px solid #b79e70" }}><td className="py-1.5 font-bold">TOTAL GÉNÉRAL</td><td className="py-1.5 text-center font-bold">{soins.length} soin(s)</td><td className="py-1.5 text-right text-[1rem] font-bold" style={{ color: "#8a5a1a" }}>{money(total)}</td></tr>
+        </tbody></table>
+      </div>
+      <div className="mt-10 grid grid-cols-2 gap-8 text-[0.8rem]">
+        <div><div className="h-10 border-b" style={{ borderColor: "#8a7648" }} /><div className="mt-1 text-[0.72rem] uppercase tracking-[0.08em]" style={{ color: "#6e6353" }}>Signature du Directeur</div></div>
+        <div><div className="h-10 border-b" style={{ borderColor: "#8a7648" }} /><div className="mt-1 text-[0.72rem] uppercase tracking-[0.08em]" style={{ color: "#6e6353" }}>Signature du Comptable</div></div>
+      </div>
+      <p className="mt-6 text-center text-[0.72rem] italic" style={{ color: "#6e6353" }}>Document officiel du {DISPENSAIRE_NOM}. « Demande de remboursement des soins prodigués aux Forces de l&apos;Ordre. »</p>
+    </article>
+  );
+}
+
+function parBureauDe(soins: SoinFDO[]): { bureau: string; nb: number; total: number }[] {
+  const m = new Map<string, { nb: number; total: number }>();
+  for (const s of soins) { const e = m.get(s.bureau) || { nb: 0, total: 0 }; e.nb += 1; e.total += s.montant; m.set(s.bureau, e); }
+  return [...m.entries()].map(([bureau, e]) => ({ bureau, ...e })).sort((a, b) => b.total - a.total || a.bureau.localeCompare(b.bureau));
+}
+function patientsDe(soins: SoinFDO[]): number { return new Set(soins.map((s) => (s.agent || "—").toLowerCase().trim())).size; }

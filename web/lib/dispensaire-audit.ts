@@ -40,7 +40,7 @@ export async function getAuditDispensaire(): Promise<RapportAudit> {
     catch { return []; }
   };
 
-  const [chambres, factures, stock, mouvements, membres, grades, rdv, pointages, ambulances, frais, interventions] = await Promise.all([
+  const [chambres, factures, stock, mouvements, membres, grades, rdv, pointages, frais, interventions] = await Promise.all([
     q("DispensaireChambre", "id,nom,etat,patient,patientNormalise"),
     q("DispensaireFacture", "id,montant,statut"),
     q("DispensaireStock", "id,nom,stock,seuil,stockFixe"),
@@ -49,7 +49,6 @@ export async function getAuditDispensaire(): Promise<RapportAudit> {
     getGrades().catch(() => []),
     q("DispensaireRendezVous", "id,patient,etat,debut"),
     q("DispensairePointage", "id,nom,debut,fin"),
-    q("DispensaireAmbulance", "id,nom,etat,essence"),
     q("DispensaireFrais", "id,objet,montant,statut"),
     q("DispensaireIntervention", "id,patient,statut"),
   ]);
@@ -103,7 +102,7 @@ export async function getAuditDispensaire(): Promise<RapportAudit> {
   if (membres.length > 0 && admActifs === 0)
     A.push({ categorie: "Permissions", gravite: "majeur", titre: "Aucun administrateur actif", detail: "des membres existent mais aucun n'a le droit admin", suggestion: "Attribuer un grade « admin » à au moins un membre.", ref: "perms" });
 
-  // ── Élargissement : rendez-vous, pointage, ambulances ─────────────────────
+  // ── Élargissement : rendez-vous, pointage ─────────────────────────────────
   // (Les matières premières sont des articles de stock : le contrôle « Stock
   // négatif » ci-dessus les couvre déjà — pas de contrôle dédié.)
   const now = Date.now();
@@ -121,15 +120,6 @@ export async function getAuditDispensaire(): Promise<RapportAudit> {
       A.push({ categorie: "Cohérence", gravite: "info", titre: "Service non clôturé depuis plus de 24 h", detail: `${p.nom} — pointage resté ouvert`, suggestion: "Clôturer le pointage oublié.", ref: String(p.id) });
     if (Number.isFinite(deb) && Number.isFinite(fin) && fin < deb)
       A.push({ categorie: "Dates", gravite: "mineur", titre: "Fin de service avant le début", detail: `${p.nom}`, suggestion: "Corriger l'horodatage du pointage.", ref: String(p.id) });
-  }
-  ctrl();
-  const etatsAmb = new Set(["disponible", "en_intervention", "entretien", "hs"]);
-  for (const amb of ambulances) {
-    if (amb.etat && !etatsAmb.has(String(amb.etat)))
-      A.push({ categorie: "Cohérence", gravite: "mineur", titre: "État d'ambulance inconnu", detail: `${amb.nom} → « ${amb.etat} »`, suggestion: "Ramener à disponible/en_intervention/entretien/hs.", ref: String(amb.id) });
-    const e = Number(amb.essence);
-    if (amb.essence != null && (e < 0 || e > 100))
-      A.push({ categorie: "Cohérence", gravite: "mineur", titre: "Niveau d'essence hors bornes", detail: `${amb.nom} = ${amb.essence} %`, suggestion: "L'essence doit être entre 0 et 100 %.", ref: String(amb.id) });
   }
 
   // ── Notes de frais & interventions ───────────────────────────────────────

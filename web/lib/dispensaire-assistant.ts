@@ -103,13 +103,12 @@ export async function getAssistantDispensaire(): Promise<AssistantData> {
       if (ficheSansAcces.length) constats.push(mk({ id: "rh-fiche-sans-acces", priorite: "faible", categorie: "RH", titre: `${ficheSansAcces.length} salarié(s) actif(s) sans accès`, detail: ficheSansAcces.slice(0, 3).map((s) => String(s.nom ?? "?")).join(" · "), suggestion: "Ajoute leur accès dans l'Administration s'ils doivent utiliser le site.", href: "/dispensaire/admin" }));
     }
 
-    // ── Enrichissement : planning médical & flotte (détections transverses) ──
+    // ── Enrichissement : planning médical & chambres (détections transverses) ──
     // Toutes guardées (rows() renvoie [] si la table n'existe pas encore).
     const today = ymdParis(new Date().toISOString());
-    const [rdvs, chambres, ambulances] = await Promise.all([
+    const [rdvs, chambres] = await Promise.all([
       rows(() => admin.from("DispensaireRendezVous").select("patient,medecin,debut,etat").eq("etat", "prevu")),
       rows(() => admin.from("DispensaireChambre").select("etat")),
-      rows(() => admin.from("DispensaireAmbulance").select("nom,etat")),
     ]);
 
     // RDV du jour encore « prévu » et sans praticien attribué → risque de consultation non couverte.
@@ -117,14 +116,6 @@ export async function getAssistantDispensaire(): Promise<AssistantData> {
       .filter((r) => { try { return ymdParis(String(r.debut)) === today; } catch { return false; } })
       .filter((r) => !String(r.medecin ?? "").trim());
     if (rdvSansMedecin.length) constats.push(mk({ id: "rdv-sans-medecin", priorite: "importante", categorie: "Planning", titre: `${rdvSansMedecin.length} rendez-vous aujourd'hui sans médecin`, detail: rdvSansMedecin.slice(0, 3).map((r) => String(r.patient ?? "?")).join(" · "), suggestion: "Attribue un praticien avant l'heure du rendez-vous.", href: "/dispensaire/rendez-vous" }));
-
-    // Flotte d'ambulances : aucune disponible (couverture nulle), sinon véhicules immobilisés.
-    if (ambulances.length) {
-      const dispo = ambulances.filter((a) => String(a.etat ?? "disponible") === "disponible").length;
-      const immobilisees = ambulances.filter((a) => ["hs", "entretien"].includes(String(a.etat ?? "")));
-      if (dispo === 0) constats.push(mk({ id: "ambu-aucune", priorite: "critique", categorie: "Flotte", titre: "Aucune ambulance disponible", detail: `${ambulances.length} véhicule(s), tous indisponibles.`, suggestion: "Remets une ambulance en service : aucune intervention n'est couverte.", href: "/dispensaire/ambulances" }));
-      else if (immobilisees.length) constats.push(mk({ id: "ambu-immo", priorite: "normale", categorie: "Flotte", titre: `${immobilisees.length} ambulance(s) immobilisée(s)`, detail: immobilisees.slice(0, 3).map((a) => String(a.nom ?? "?")).join(" · "), suggestion: "Planifie l'entretien ou la remise en service.", href: "/dispensaire/ambulances" }));
-    }
 
     // Chambres : capacité saturée (plus aucune libre alors que des lits existent).
     if (chambres.length) {
