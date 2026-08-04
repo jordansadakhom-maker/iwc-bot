@@ -35,7 +35,7 @@ export async function rechercher(terme: string): Promise<ResultItem[]> {
   const out: ResultItem[] = [];
   for (const r of sal || []) out.push({ type: "Salarié", label: String(r.nom), sub: r.grade ? String(r.grade) : null, href: "/dispensaire/rh" });
   for (const r of stock || []) out.push({ type: "Produit", label: String(r.nom), sub: r.coffre ? `Coffre ${r.coffre}` : null, href: "/dispensaire/stockage" });
-  for (const r of matieres || []) out.push({ type: "Matière", label: String(r.nom), sub: r.fournisseur ? String(r.fournisseur) : null, href: "/dispensaire/matieres" });
+  for (const r of matieres || []) out.push({ type: "Matière", label: String(r.nom), sub: r.fournisseur ? String(r.fournisseur) : null, href: "/dispensaire/stockage" });
   for (const r of coffres || []) out.push({ type: "Stock Matériel Médical", label: String(r.nom), sub: [r.emplacement, r.responsable].filter(Boolean).join(" · ") || null, href: "/dispensaire/coffres" });
   for (const r of rapports || []) out.push({ type: "Rapport", label: String(r.titre), sub: r.patient ? String(r.patient) : null, href: "/dispensaire/rapports" });
   for (const r of contacts || []) out.push({ type: "Entreprise", label: String(r.nom), sub: null, href: "/repertoire" });

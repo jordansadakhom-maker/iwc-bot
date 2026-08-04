@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, ClipboardList, Boxes, FlaskConical, Archive, BadgeDollarSign, Receipt, ShieldCheck, FileText, BookUser, Stethoscope, ScrollText, BarChart3, History, ShieldAlert, Sparkles, Scale, HeartPulse, CalendarClock, Scissors, Landmark, BedDouble, Truck, Gauge, Coins, Crown, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Users, ClipboardList, Boxes, Warehouse, Archive, BadgeDollarSign, Receipt, ShieldCheck, FileText, BookUser, Stethoscope, ScrollText, BarChart3, History, ShieldAlert, Sparkles, Scale, HeartPulse, CalendarClock, Scissors, Landmark, BedDouble, Truck, Gauge, Coins, Crown, type LucideIcon } from "lucide-react";
 
 // Onglets de la section Dispensaire de Saint-Denis.
 //   `pret`       = déjà construit (sinon « bientôt »).
@@ -28,7 +28,7 @@ export const DISP_NAV: DispTab[] = [
   { href: "/dispensaire/frais", label: "Notes de frais", icon: FileText, pret: true, cat: "medical", desc: "Dépenses avancées, en attente de remboursement." },
   { href: "/dispensaire/factures", label: "Factures en retard", icon: Receipt, pret: true, restreint: true, cat: "medical", desc: "Les créances impayées et l'état de leur relance." },
   { href: "/dispensaire/coffres", label: "Stock Matériel Médical", icon: Archive, pret: true, cat: "medical", desc: "Le matériel médical rangé, coffre par coffre — et ce qu'il faut réapprovisionner." },
-  { href: "/dispensaire/matieres", label: "Matières premières", icon: FlaskConical, pret: true, cat: "medical", desc: "Ce qu'il faut réapprovisionner pour tenir l'officine." },
+  { href: "/dispensaire/inventaire", label: "Inventaire global", icon: Warehouse, pret: true, cat: "medical", desc: "Vue d'ensemble en lecture seule — quantité totale de chaque produit, tous coffres confondus." },
   { href: "/dispensaire/stockage", label: "Stockage", icon: Boxes, pret: true, cat: "medical", desc: "L'inventaire des coffres — remèdes, matériel et matières." },
 
   // ── 👥 Ressources humaines (habilité RH) ──
