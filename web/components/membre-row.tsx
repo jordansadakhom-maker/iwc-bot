@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Loader2, Check, X, Star, BadgeDollarSign } from "lucide-react";
+import { Pencil, Loader2, Check, X, Star, BadgeDollarSign, Target, BadgeCheck, HeartPulse, type LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui";
 import { cents } from "@/lib/format";
 import { majFicheMembre } from "@/app/(app)/membres/actions";
@@ -16,6 +16,30 @@ function initiales(nom: string) {
 }
 const inputCls = "w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-[0.86rem] text-ink outline-none placeholder:text-faint focus:border-[color-mix(in_srgb,var(--accent)_55%,var(--border))]";
 
+// Rang → nombre d'insignes (étoiles), pour lire la hiérarchie d'un coup d'œil.
+function gradeRang(grade: string | null): number {
+  const g = (grade || "").toLowerCase();
+  if (/fondateur/.test(g)) return 6;
+  if (/conseil|directeur/.test(g)) return 5;
+  if (/officier/.test(g)) return 4;
+  if (/confirm/.test(g)) return 3;
+  if (/op[ée]rateur/.test(g)) return 2;
+  if (/recrue|probatoire/.test(g)) return 1;
+  return 0;
+}
+function hashId(id: string) { let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0; return h; }
+// N° de matricule stable (préfixe selon le pôle).
+const matriculeFor = (m: MembreDetail) => (m.pole === "illegal" ? "CFR-" : "IWC-") + (1000 + (hashId(m.id) % 9000));
+const clamp2: React.CSSProperties = { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" };
+
+function RankPips({ n, tone }: { n: number; tone: string }) {
+  if (n <= 0) return null;
+  return <span className="inline-flex items-center gap-0.5" aria-hidden>{Array.from({ length: n }).map((_, i) => <Star key={i} className="h-3 w-3" style={{ color: tone, fill: tone }} strokeWidth={0} />)}</span>;
+}
+function Info({ icon: Icon, label, children }: { icon: LucideIcon; label: string; children: React.ReactNode }) {
+  return <span title={label} className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[0.68rem]"><Icon className="h-3 w-3 text-faint" /> <b className="font-medium text-ink">{children}</b></span>;
+}
+
 export function MembreRow({ m, tone, peutEditer = false, peutHabiliterMedecin = false }: { m: MembreDetail; tone: "accent" | "oxblood"; peutEditer?: boolean; peutHabiliterMedecin?: boolean }) {
   const router = useRouter();
   const f = m.ficheRH || {};
@@ -27,8 +51,7 @@ export function MembreRow({ m, tone, peutEditer = false, peutHabiliterMedecin = 
   const [medecin, setMedecin] = useState(!!f.medecin);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-
-  const resume = [f.specialite, f.statutInterne, f.salaire ? `${cents(f.salaire)}$` : "", f.medecin ? "Médecin" : ""].filter(Boolean).join(" · ");
+  const toneCol = tone === "oxblood" ? "var(--oxblood)" : "var(--brass)";
 
   async function enregistrer() {
     setErr(null);
@@ -42,18 +65,38 @@ export function MembreRow({ m, tone, peutEditer = false, peutHabiliterMedecin = 
 
   return (
     <>
-      <div className="group flex items-center gap-3 py-2.5">
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-[0.72rem] font-extrabold text-black/85" style={{ background: tone === "oxblood" ? "linear-gradient(135deg,var(--oxblood),#000)" : "linear-gradient(135deg,var(--accent),color-mix(in srgb,var(--accent) 30%,#000))" }}>
-          {initiales(m.nomIC)}
-        </div>
-        <div className="min-w-0">
-          <div className="truncate text-[0.9rem] font-semibold">{m.nomIC}</div>
-          <div className="truncate text-[0.74rem] text-muted">{m.grade || "—"}{resume ? <span className="text-faint"> · {resume}</span> : null}</div>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <Badge tone={STATUT_TONE[m.statut?.toLowerCase()] ?? "muted"}>{m.statut}</Badge>
+      <div className="group relative rounded-[12px] border p-3.5" style={{ borderColor: `color-mix(in srgb,${toneCol} 26%,var(--border))`, background: "linear-gradient(160deg,color-mix(in srgb,var(--surface-2) 94%,transparent),color-mix(in srgb,var(--surface-2) 82%,#000))" }}>
+        <div className="flex items-start gap-3">
+          {/* Médaillon matricule (disque frappé) */}
+          <div className="relative grid h-12 w-12 shrink-0 place-items-center rounded-full text-[0.82rem] font-extrabold text-black/85" style={{ background: tone === "oxblood" ? "radial-gradient(circle at 32% 26%,#d06a62,#7c1d16)" : "radial-gradient(circle at 32% 26%,var(--brass-hi),color-mix(in srgb,var(--brass) 40%,#000))", boxShadow: `inset 0 0 0 2px color-mix(in srgb,${toneCol} 45%,#000), 0 2px 6px rgba(0,0,0,0.4)` }}>
+            {initiales(m.nomIC)}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="truncate font-display text-[1.05rem] font-semibold leading-tight">{m.nomIC}</div>
+                <div className="mt-0.5 flex items-center gap-1.5">
+                  <span className="truncate text-[0.72rem] text-muted">{m.grade || "—"}</span>
+                  <RankPips n={gradeRang(m.grade)} tone={toneCol} />
+                </div>
+              </div>
+              <div className="flex shrink-0 flex-col items-end gap-1">
+                <span className="text-[0.56rem] tracking-[0.12em] text-faint" style={{ fontFamily: "'Courier New',monospace" }}>{matriculeFor(m)}</span>
+                <Badge tone={STATUT_TONE[m.statut?.toLowerCase()] ?? "muted"}>{m.statut}</Badge>
+              </div>
+            </div>
+            {(f.specialite || f.statutInterne || f.salaire || f.medecin) ? (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {f.specialite ? <Info icon={Target} label="Spécialité">{f.specialite}</Info> : null}
+                {f.statutInterne ? <Info icon={BadgeCheck} label="Statut interne">{f.statutInterne}</Info> : null}
+                {f.salaire ? <Info icon={BadgeDollarSign} label="Salaire">{cents(f.salaire)}$</Info> : null}
+                {f.medecin ? <span title="Habilitation médecin" className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[0.68rem] font-semibold" style={{ borderColor: "color-mix(in srgb,var(--good) 45%,var(--border))", background: "color-mix(in srgb,var(--good) 12%,transparent)", color: "var(--good)" }}><HeartPulse className="h-3 w-3" /> Médecin</span> : null}
+              </div>
+            ) : null}
+            {f.notes ? <div className="mt-2 text-[0.72rem] leading-snug text-faint" style={clamp2}>{f.notes}</div> : null}
+          </div>
           {peutEditer ? (
-            <button onClick={() => setOpen(true)} className="grid h-8 w-8 place-items-center rounded-lg border border-border text-faint opacity-0 transition hover:border-accent hover:text-ink group-hover:opacity-100" aria-label="Éditer la fiche RH" title="Fiche RH">
+            <button onClick={() => setOpen(true)} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border text-faint opacity-70 transition hover:border-accent hover:text-ink hover:opacity-100" aria-label="Éditer la fiche RH" title="Fiche RH">
               <Pencil className="h-[15px] w-[15px]" />
             </button>
           ) : null}

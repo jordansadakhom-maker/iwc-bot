@@ -25,7 +25,7 @@ export function MembresListe({ iwc, conf, peutEditer = false, peutHabiliterMedec
         {list.length === 0 ? (
           <Empty icon={Users}>{t ? "Aucun membre ne correspond à ta recherche." : "Aucun membre synchronisé dans ce pôle pour l'instant."}</Empty>
         ) : (
-          <div className="flex flex-col divide-y divide-border">
+          <div className="flex flex-col gap-2.5">
             {list.map((m) => <MembreRow key={m.id} m={m} tone={tone} peutEditer={peutEditer} peutHabiliterMedecin={peutHabiliterMedecin} />)}
           </div>
         )}
