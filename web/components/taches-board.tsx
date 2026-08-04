@@ -35,9 +35,11 @@ function LigneTache({ t, moiId, onStatut, onMoi, onSuggerer, onSuppr, busy, now,
   const p = prioriteMeta(t.priorite);
   const faite = estFaite(t);
   const retard = estEnRetard(t, now);
+  const accent = retard ? "var(--oxblood)" : "var(--" + p.tone + ")";
   const StatutIc = faite ? Check : t.statut === "en_cours" ? CircleDot : Circle;
   return (
-    <div className="flex items-start gap-3 py-3">
+    <div className="relative flex items-start gap-3 overflow-hidden rounded-[12px] border p-3.5 pl-4" style={{ borderColor: faite ? "var(--border)" : `color-mix(in srgb,${accent} 24%,var(--border))`, background: faite ? "var(--surface-2)" : "linear-gradient(160deg,color-mix(in srgb,var(--surface-2) 94%,transparent),color-mix(in srgb,var(--surface-2) 82%,#000))" }}>
+      <span aria-hidden className="absolute left-0 top-0 h-full w-1" style={{ background: faite ? "var(--good)" : accent }} />
       <button
         onClick={() => onStatut(t.id, faite ? "a_faire" : "faite")} disabled={busy}
         title={faite ? "Rouvrir" : "Marquer faite"}
@@ -197,7 +199,7 @@ export function TachesBoard({ connecte, moiId, taches }: { connecte: boolean; mo
             {filtre === "faites" ? "Aucune tâche terminée pour l'instant." : filtre === "moi" ? "Aucune tâche ne t'est assignée. 🐺" : "Aucune tâche en cours. Tout est sous contrôle."}
           </Empty>
         ) : (
-          <div className="flex flex-col divide-y divide-border">
+          <div className="flex flex-col gap-2.5">
             {liste.map((t) => (
               <div key={t.id}>
                 <LigneTache t={t} moiId={moiId} now={now} busy={busyId === t.id} suggOuvert={suggFor === t.id}

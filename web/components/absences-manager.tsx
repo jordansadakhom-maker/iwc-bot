@@ -26,7 +26,8 @@ function joursRestants(s: string | null): string {
 function LigneAbsent({ m, onRetour, busy }: { m: MembreAbsence; onRetour: (m: MembreAbsence) => void; busy: boolean }) {
   const jr = joursRestants(m.absence?.jusqu ?? null);
   return (
-    <div className="flex items-start gap-3 py-3">
+    <div className="relative flex items-start gap-3 overflow-hidden rounded-[12px] border p-3.5 pl-4" style={{ borderColor: "color-mix(in srgb,var(--warn) 24%,var(--border))", background: "linear-gradient(160deg,color-mix(in srgb,var(--surface-2) 94%,transparent),color-mix(in srgb,var(--surface-2) 82%,#000))" }}>
+      <span aria-hidden className="absolute left-0 top-0 h-full w-1" style={{ background: "var(--warn)" }} />
       <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full" style={{ color: "var(--warn)", background: "color-mix(in srgb,var(--warn) 15%,transparent)" }}>
         <Moon className="h-[17px] w-[17px]" strokeWidth={1.8} />
       </span>
@@ -125,7 +126,7 @@ export function AbsencesManager({ data }: { data: AbsencesData }) {
           {absents.length === 0 ? (
             <Empty icon={Check}>Toute la troupe est sur le pont. 🐺</Empty>
           ) : (
-            <div className="flex flex-col divide-y divide-border">
+            <div className="flex flex-col gap-2.5">
               {absentsTri.map((m) => <LigneAbsent key={m.id} m={m} onRetour={retour} busy={busyId === m.id} />)}
             </div>
           )}
@@ -136,9 +137,10 @@ export function AbsencesManager({ data }: { data: AbsencesData }) {
           {programmees.length === 0 ? (
             <Empty icon={CalendarClock}>Aucune absence programmée.</Empty>
           ) : (
-            <div className="flex flex-col divide-y divide-border">
+            <div className="flex flex-col gap-2.5">
               {programmees.map((m) => (
-                <div key={m.id} className="flex items-start gap-3 py-3">
+                <div key={m.id} className="relative flex items-start gap-3 overflow-hidden rounded-[12px] border p-3.5 pl-4" style={{ borderColor: "color-mix(in srgb,var(--steel) 24%,var(--border))", background: "linear-gradient(160deg,color-mix(in srgb,var(--surface-2) 94%,transparent),color-mix(in srgb,var(--surface-2) 82%,#000))" }}>
+                  <span aria-hidden className="absolute left-0 top-0 h-full w-1" style={{ background: "var(--steel)" }} />
                   <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full" style={{ color: "var(--steel)", background: "color-mix(in srgb,var(--steel) 15%,transparent)" }}>
                     <CalendarPlus className="h-[17px] w-[17px]" strokeWidth={1.8} />
                   </span>
