@@ -115,11 +115,13 @@ function ListePane({ liste, selected, onSelect, flash }: { liste: ConversationLi
       {liste.length === 0 ? (
         <Empty icon={MessagesSquare}>Aucune conversation. Lance-en une pour coordonner la compagnie.</Empty>
       ) : (
-        <div className="flex flex-col divide-y divide-border">
+        <div className="flex flex-col gap-2">
           {liste.map((c) => {
             const on = c.id === selected;
+            const tone = c.nonLu ? "var(--accent)" : c.pole === "confrerie" ? "var(--oxblood)" : c.pole === "iwc" ? "var(--brass)" : "var(--faint)";
             return (
-              <button key={c.id} onClick={() => onSelect(c.id)} className="flex items-start gap-2.5 py-2.5 text-left transition" style={on ? { background: "color-mix(in srgb,var(--accent) 8%,transparent)" } : undefined}>
+              <button key={c.id} onClick={() => onSelect(c.id)} className="relative flex items-start gap-2.5 overflow-hidden rounded-[11px] border px-3 py-2.5 pl-4 text-left transition hover:border-border-2" style={{ borderColor: on ? "color-mix(in srgb,var(--accent) 45%,var(--border))" : "var(--border)", background: on ? "color-mix(in srgb,var(--accent) 10%,transparent)" : "var(--surface-2)" }}>
+                <span aria-hidden className="absolute left-0 top-0 h-full w-1" style={{ background: tone }} />
                 <span className="mt-1 shrink-0" style={{ color: c.nonLu ? "var(--accent)" : "transparent" }}><Circle className="h-2 w-2 fill-current" /></span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
