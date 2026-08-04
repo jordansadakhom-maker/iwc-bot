@@ -66,6 +66,11 @@ export async function majSoin(id: string, patch: Record<string, unknown>): Promi
   if (!id) return { ok: false, error: "Soin introuvable." };
   const row = nettoyer(patch);
   if ("bureau" in row && !row.bureau) return { ok: false, error: "Le bureau ne peut pas être vide." };
+  // Date d'émission modifiable (le soin n'est pas toujours saisi le jour même).
+  const dIso = dateSoinIso(patch.date);
+  if (dIso) row.createdAt = dIso;
+  // Médecin modifiable.
+  if ("medecin" in patch) { const md = s(patch.medecin, 120); if (md) row.par = md; }
   if (!Object.keys(row).length) return { ok: true };
   const avant = await lireAvant("DispensaireSoinFDO", id);
   const { error } = await admin.from("DispensaireSoinFDO").update({ ...row, updatedAt: new Date().toISOString() }).eq("id", id);
