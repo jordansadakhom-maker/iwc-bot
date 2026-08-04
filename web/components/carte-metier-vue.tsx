@@ -39,7 +39,8 @@ function CarteMetier({ s, peutAssigner, onAssigner }: { s: MetierStat; peutAssig
   const Ic = ICONE[s.key] || Users;
   const cv = COUV[s.couverture];
   return (
-    <Card className="flex flex-col gap-3">
+    <Card className="relative flex flex-col gap-3 overflow-hidden">
+      <span aria-hidden className="absolute left-0 top-0 h-full w-1" style={{ background: cv.c }} />
       <div className="flex items-start gap-3">
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl" style={{ color: cv.c, background: "color-mix(in srgb," + cv.c + " 14%,transparent)" }}>
           <Ic className="h-5 w-5" strokeWidth={1.8} />
