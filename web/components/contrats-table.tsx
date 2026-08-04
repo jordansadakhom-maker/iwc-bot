@@ -185,6 +185,14 @@ function NouveauModal({ onClose, router }: { onClose: () => void; router: Router
   const [echeance, setEcheance] = useState("");
   const [details, setDetails] = useState("");
   const [statut, setStatut] = useState("en_attente");
+  // Champs détaillés (consolidés dans les consignes du contrat à la création).
+  const [lieu, setLieu] = useState("");
+  const [delai, setDelai] = useState("");
+  const [agents, setAgents] = useState("");
+  const [acompte, setAcompte] = useState("");
+  const [paiement, setPaiement] = useState("");
+  const [clauses, setClauses] = useState("");
+  const [confidentiel, setConfidentiel] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState(false);
@@ -201,6 +209,18 @@ function NouveauModal({ onClose, router }: { onClose: () => void; router: Router
     if (categorie && !typesPour(p).includes(categorie)) setCategorie("");
   }
   function imprimer() { if (typeof window !== "undefined") window.print(); }
+  // Consolide les champs détaillés dans les consignes → rien n'est perdu au contrat.
+  function composeDetails(): string {
+    const extra: string[] = [];
+    if (lieu.trim()) extra.push(`Lieu / zone : ${lieu.trim()}`);
+    if (delai.trim()) extra.push(`Durée / délai : ${delai.trim()}`);
+    if (agents.trim()) extra.push(`Effectif requis : ${agents.trim()} agent(s)`);
+    if (acompte.trim()) extra.push(`Acompte : ${acompte.trim()}`);
+    if (paiement.trim()) extra.push(`Modalités de paiement : ${paiement.trim()}`);
+    if (clauses.trim()) extra.push(`Conditions particulières : ${clauses.trim()}`);
+    if (confidentiel) extra.push("Contrat confidentiel.");
+    return [details.trim(), extra.join("\n")].filter(Boolean).join("\n\n");
+  }
 
   async function creer() {
     setErr(null);
@@ -211,7 +231,7 @@ function NouveauModal({ onClose, router }: { onClose: () => void; router: Router
       categorie: categorie || undefined,
       risque: conf ? risque : undefined,
       echeance: echeance || undefined,
-      details: details || undefined,
+      details: composeDetails() || undefined,
     });
     setBusy(false);
     if (!r.ok) { setErr(r.error || "Impossible."); return; }
@@ -231,34 +251,62 @@ function NouveauModal({ onClose, router }: { onClose: () => void; router: Router
           <div className="grid gap-4 lg:grid-cols-[1fr_minmax(300px,344px)]">
             {/* Formulaire */}
             <div className="flex min-w-0 flex-col gap-3">
+              <SousTitre>Les parties</SousTitre>
               <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Pôle</span><Picker options={POLES} value={pole} onChange={changerPole} /></div>
-              <Champ label="Type de mission">
-                <select className={inputCls} value={categorie} onChange={(e) => setCategorie(e.target.value)}>
-                  <option value="">— Choisir un type —</option>
-                  {types.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </Champ>
-              {conf ? (
-                <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Niveau de risque</span><Picker options={RISQUES} value={risque} onChange={setRisque} /></div>
-              ) : null}
               <Champ label="Commanditaire"><input className={inputCls} value={commanditaire} onChange={(e) => setCommanditaire(e.target.value)} placeholder={conf ? "Vide = anonyme & confidentiel" : "M. Ross"} maxLength={200} /></Champ>
+
+              <SousTitre>La mission</SousTitre>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Champ label="Type de mission">
+                  <select className={inputCls} value={categorie} onChange={(e) => setCategorie(e.target.value)}>
+                    <option value="">— Choisir un type —</option>
+                    {types.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </Champ>
+                <Champ label="Lieu / zone d'opération"><input className={inputCls} value={lieu} onChange={(e) => setLieu(e.target.value)} placeholder="Valentine, route de Saint-Denis…" maxLength={160} /></Champ>
+              </div>
+              {conf ? <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Niveau de risque</span><Picker options={RISQUES} value={risque} onChange={setRisque} /></div> : null}
               <Champ label="Objet de la mission *"><input className={inputCls} value={cible} onChange={(e) => setCible(e.target.value)} placeholder={conf ? "Ex : récupérer la cargaison volée à Valentine…" : "Escorte d'un convoi de médicaments"} maxLength={300} autoFocus /></Champ>
+
+              <SousTitre>Rémunération &amp; paiement</SousTitre>
               <div className="grid gap-3 sm:grid-cols-2">
                 <Champ label="Prime / Rémunération"><input className={inputCls} value={remuneration} onChange={(e) => setRemuneration(e.target.value)} placeholder={conf ? "2000$ + part du butin" : "$1200"} maxLength={120} /></Champ>
-                <Champ label="Échéance (optionnel)"><input className={inputCls} value={echeance} onChange={(e) => setEcheance(e.target.value)} placeholder="30/08/2026" maxLength={60} /></Champ>
+                <Champ label="Acompte (optionnel)"><input className={inputCls} value={acompte} onChange={(e) => setAcompte(e.target.value)} placeholder="$300 à la signature" maxLength={120} /></Champ>
               </div>
-              <Champ label="Consignes / détails (optionnel)"><textarea className={inputCls + " min-h-[80px] resize-y leading-relaxed"} value={details} onChange={(e) => setDetails(e.target.value)} placeholder="Lieu, cible, méthode, contacts, infos utiles…" maxLength={2000} /></Champ>
+              <Champ label="Modalités de paiement">
+                <select className={inputCls} value={paiement} onChange={(e) => setPaiement(e.target.value)}>
+                  <option value="">— Non précisé —</option>
+                  {["À la signature", "À la livraison", "Moitié / moitié", "Au résultat", "Échelonné"].map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </Champ>
+
+              <SousTitre>Délais &amp; moyens</SousTitre>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Champ label="Échéance"><input className={inputCls} value={echeance} onChange={(e) => setEcheance(e.target.value)} placeholder="30/08/2026" maxLength={60} /></Champ>
+                <Champ label="Durée / délai"><input className={inputCls} value={delai} onChange={(e) => setDelai(e.target.value)} placeholder="48 h, 1 semaine…" maxLength={60} /></Champ>
+                <Champ label="Effectif"><input className={inputCls} value={agents} onChange={(e) => setAgents(e.target.value.replace(/[^0-9]/g, ""))} inputMode="numeric" placeholder="3" maxLength={3} /></Champ>
+              </div>
+
+              <SousTitre>Clauses &amp; consignes</SousTitre>
+              <Champ label="Consignes / contexte"><textarea className={inputCls + " min-h-[70px] resize-y leading-relaxed"} value={details} onChange={(e) => setDetails(e.target.value)} placeholder="Cible, méthode, contacts, infos utiles…" maxLength={2000} /></Champ>
+              <Champ label="Conditions particulières (optionnel)"><textarea className={inputCls + " min-h-[54px] resize-y leading-relaxed"} value={clauses} onChange={(e) => setClauses(e.target.value)} placeholder="Aucune perte civile, pas de traces, matériel fourni…" maxLength={800} /></Champ>
+              <label className="flex items-center gap-2.5 rounded-lg border border-border bg-surface-2 px-3 py-2 text-[0.82rem]">
+                <input type="checkbox" checked={confidentiel} onChange={(e) => setConfidentiel(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />
+                <span>Contrat <b>confidentiel</b> (clause de discrétion)</span>
+              </label>
               <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Statut</span><Picker options={STATUTS} value={statut} onChange={setStatut} /></div>
             </div>
 
             {/* Aperçu du contrat vivant (parchemin) */}
             <div className="min-w-0">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <span className="text-[0.7rem] font-semibold uppercase tracking-[0.1em] text-faint">Aperçu du contrat</span>
-                <button onClick={imprimer} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.72rem] font-semibold hover:border-border-2"><Printer className="h-3.5 w-3.5" /> Imprimer</button>
-              </div>
-              <div className="max-h-[60vh] overflow-y-auto pr-1">
-                <ContratVivant pole={pole} categorie={categorie} risque={risque} cible={cible} commanditaire={commanditaire} remuneration={remuneration} echeance={echeance} details={details} statut={statut} numero={numero} dateStr={dateStr} />
+              <div className="lg:sticky lg:top-0">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="text-[0.7rem] font-semibold uppercase tracking-[0.1em] text-faint">Aperçu du contrat</span>
+                  <button onClick={imprimer} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-[0.72rem] font-semibold hover:border-border-2"><Printer className="h-3.5 w-3.5" /> Imprimer</button>
+                </div>
+                <div className="max-h-[66vh] overflow-y-auto pr-1">
+                  <ContratVivant pole={pole} categorie={categorie} risque={risque} cible={cible} commanditaire={commanditaire} remuneration={remuneration} echeance={echeance} details={details} statut={statut} numero={numero} dateStr={dateStr} lieu={lieu} delai={delai} agents={agents} acompte={acompte} paiement={paiement} clauses={clauses} confidentiel={confidentiel} />
+                </div>
               </div>
             </div>
           </div>
@@ -296,19 +344,62 @@ function SceauCireP({ size = 52 }: { size?: number }) {
   );
 }
 const RISQUE_PLAIN: Record<string, string> = { discret: "Discret", risque: "Risqué", sanglant: "Sanglant" };
+const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"];
 
-function ContratVivant({ pole, categorie, risque, cible, commanditaire, remuneration, echeance, details, statut, numero, dateStr }: { pole: string; categorie: string; risque: string; cible: string; commanditaire: string; remuneration: string; echeance: string; details: string; statut: string; numero: string; dateStr: string }) {
+// Sous-titre de section du formulaire (repère laiton).
+function SousTitre({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mt-1 flex items-center gap-2 text-[0.62rem] font-bold uppercase tracking-[0.14em] text-faint">
+      <span className="h-3 w-0.5 rounded-full" style={{ background: "var(--brass)" }} /> {children}
+    </div>
+  );
+}
+
+function ContratVivant({ pole, categorie, risque, cible, commanditaire, remuneration, echeance, details, statut, numero, dateStr, lieu = "", delai = "", agents = "", acompte = "", paiement = "", clauses = "", confidentiel = false }: { pole: string; categorie: string; risque: string; cible: string; commanditaire: string; remuneration: string; echeance: string; details: string; statut: string; numero: string; dateStr: string; lieu?: string; delai?: string; agents?: string; acompte?: string; paiement?: string; clauses?: string; confidentiel?: boolean }) {
   const conf = pole === "illegal";
   const maison = conf ? "La Confrérie" : "Iron Wolf Company";
   const st = STATUTS.find((s) => s.key === statut) || STATUTS[0];
-  const preambule = `Entre la ${maison} (le Prestataire) et ${commanditaire.trim() || (conf ? "un Commanditaire anonyme" : "le Commanditaire")} (le Commanditaire), il est convenu la mission ci-après, que le Prestataire s'engage à mener aux conditions énoncées.`;
-  const H = ({ t }: { t: string }) => <div style={{ margin: "12px 0 5px", fontFamily: "'Courier New',monospace", fontSize: 10, fontWeight: 700, letterSpacing: "0.16em", color: "#7a5a2a", borderBottom: "1.5px solid #7a5a2a", paddingBottom: 2 }}>{t}</div>;
+  const preambule = `Entre la ${maison} (ci-après « le Prestataire ») et ${commanditaire.trim() || (conf ? "un Commanditaire anonyme" : "le Commanditaire")} (ci-après « le Commanditaire »), il est convenu et arrêté ce qui suit :`;
+  const H = ({ t }: { t: string }) => <div style={{ margin: "12px 0 5px", fontFamily: "'Courier New',monospace", fontSize: 10, fontWeight: 700, letterSpacing: "0.13em", color: "#7a5a2a", borderBottom: "1.5px solid #7a5a2a", paddingBottom: 2 }}>{t}</div>;
   const DL = ({ k, v }: { k: string; v: React.ReactNode }) => (
-    <div style={{ display: "grid", gridTemplateColumns: "42% 58%", gap: 8, padding: "3px 0", borderBottom: "1px dotted #cbb488" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "44% 56%", gap: 8, padding: "3px 0", borderBottom: "1px dotted #cbb488" }}>
       <span style={{ fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: "#8a6f43" }}>{k}</span>
       <span style={{ fontSize: 12.5, color: "#2c2013", fontWeight: 600 }}>{v}</span>
     </div>
   );
+  const P = ({ children }: { children: React.ReactNode }) => <div style={{ fontSize: 11.5, lineHeight: 1.5, color: "#3a2c17", whiteSpace: "pre-wrap" }}>{children}</div>;
+
+  // Articles du contrat — masqués si vides, numérotés dynamiquement.
+  const arts: { titre: string; body: React.ReactNode }[] = [];
+  arts.push({ titre: "OBJET DE LA MISSION", body: (
+    <>
+      <div style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.3, marginBottom: 3 }}>{cible.trim() || <span style={{ color: "#a08a5e", fontWeight: 400, fontStyle: "italic" }}>À préciser…</span>}</div>
+      <DL k="Type de mission" v={categorie || "—"} />
+      {conf ? <DL k="Niveau de risque" v={RISQUE_PLAIN[risque] || "—"} /> : null}
+    </>
+  ) });
+  arts.push({ titre: "RÉMUNÉRATION & PAIEMENT", body: (
+    <>
+      <DL k="Rémunération convenue" v={remuneration || "—"} />
+      {acompte.trim() ? <DL k="Acompte à la signature" v={acompte} /> : null}
+      {paiement.trim() ? <DL k="Modalités de paiement" v={paiement} /> : null}
+    </>
+  ) });
+  if (echeance.trim() || delai.trim()) arts.push({ titre: "DÉLAIS D'EXÉCUTION", body: (
+    <>
+      {echeance.trim() ? <DL k="Échéance" v={echeance} /> : null}
+      {delai.trim() ? <DL k="Durée / délai" v={delai} /> : null}
+    </>
+  ) });
+  if (lieu.trim() || agents.trim()) arts.push({ titre: "LIEU & MOYENS", body: (
+    <>
+      {lieu.trim() ? <DL k="Lieu / zone" v={lieu} /> : null}
+      {agents.trim() ? <DL k="Effectif requis" v={`${agents} agent(s)`} /> : null}
+    </>
+  ) });
+  if (clauses.trim() || details.trim()) arts.push({ titre: "CONDITIONS PARTICULIÈRES", body: <P>{[clauses.trim(), details.trim()].filter(Boolean).join("\n")}</P> });
+  if (confidentiel || conf) arts.push({ titre: "CONFIDENTIALITÉ", body: <P>Les parties s&apos;engagent à la plus stricte discrétion sur l&apos;existence, l&apos;objet et l&apos;exécution du présent contrat. Toute divulgation engage la responsabilité de son auteur.</P> });
+
   return (
     <div id="contrat-vivant-doc" style={{ position: "relative", fontFamily: "Georgia,'Times New Roman',serif", color: "#2c2013", background: "radial-gradient(58% 40% at 12% 8%, rgba(120,88,40,0.13), transparent 60%), radial-gradient(52% 42% at 92% 94%, rgba(90,60,20,0.12), transparent 60%), linear-gradient(#f6ecd3,#efe3c6)", border: "1px solid #b39c6e", borderRadius: 10, padding: "22px 22px 26px", boxShadow: "inset 0 0 0 4px #f8f2e2, inset 0 0 0 5px #c2a86f, 0 10px 30px rgba(40,26,10,.28)" }}>
       <div style={{ position: "absolute", top: 16, right: 14, transform: "rotate(-8deg)", border: `2px solid ${st.tone}`, color: st.tone, padding: "2px 8px", borderRadius: 4, fontFamily: "'Courier New',monospace", fontWeight: 700, fontSize: 10, letterSpacing: "0.12em", opacity: 0.9 }}>{st.label.toUpperCase()}</div>
@@ -329,19 +420,15 @@ function ContratVivant({ pole, categorie, risque, cible, commanditaire, remunera
         <span style={{ height: 1, flex: 1, background: "linear-gradient(270deg,transparent,#b39c6e)" }} />
       </div>
 
-      <H t="ENTRE LES PARTIES" />
+      <H t="PRÉAMBULE" />
       <div style={{ fontSize: 11.5, lineHeight: 1.5, textAlign: "justify", color: "#3a2c17" }}>{preambule}</div>
 
-      <H t="OBJET DE LA MISSION" />
-      <div style={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.3 }}>{cible.trim() || <span style={{ color: "#a08a5e", fontWeight: 400, fontStyle: "italic" }}>À préciser…</span>}</div>
-
-      <DL k="Type" v={categorie || "—"} />
-      {conf ? <DL k="Niveau de risque" v={RISQUE_PLAIN[risque] || "—"} /> : null}
-      <DL k="Rémunération" v={remuneration || "—"} />
-      <DL k="Échéance" v={echeance || "—"} />
-
-      {details.trim() ? (<><H t="CONSIGNES & CONDITIONS" />
-        <div style={{ fontSize: 11.5, lineHeight: 1.5, color: "#3a2c17", whiteSpace: "pre-wrap" }}>{details}</div></>) : null}
+      {arts.map((a, i) => (
+        <div key={i}>
+          <H t={`${i === 0 ? "ARTICLE PREMIER" : "ARTICLE " + ROMAN[i]} — ${a.titre}`} />
+          {a.body}
+        </div>
+      ))}
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: 18, paddingTop: 12, borderTop: "1px solid #cbb488" }}>
         <div style={{ fontSize: 10, color: "#5c4a2f", textAlign: "center" }}>
