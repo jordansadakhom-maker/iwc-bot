@@ -50,7 +50,7 @@ export const getNotifications = cache(async (): Promise<{ items: Notif[]; count:
     if (!(num(r.seuil) > 0 && num(r.stock) <= num(r.seuil))) continue;
     stockFaibleNoms.add(String(r.nom));
     const q = `${num(r.stock)}${r.unite ? " " + r.unite : ""} / seuil ${num(r.seuil)}`;
-    if (String(r.categorie) === "matiere") items.push({ id: "mp-" + r.nom, severite: "alerte", type: "Matière première", texte: `Matière première basse : ${r.nom} (${q})`, href: "/dispensaire/matieres" });
+    if (String(r.categorie) === "matiere") items.push({ id: "mp-" + r.nom, severite: "alerte", type: "Matière première", texte: `Matière première basse : ${r.nom} (${q})`, href: "/dispensaire/stockage" });
     else items.push({ id: "st-" + r.nom, severite: "alerte", type: "Stock faible", texte: `Stock faible : ${r.nom} (${q})`, href: "/dispensaire/stockage" });
   }
 
