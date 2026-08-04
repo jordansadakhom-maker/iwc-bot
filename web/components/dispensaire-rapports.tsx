@@ -2,12 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ScrollText, Plus, Check, Pencil, Trash2, Search, ExternalLink, Printer } from "lucide-react";
+import { ScrollText, Plus, Check, Pencil, Trash2, Search, ExternalLink, Printer, Loader2 } from "lucide-react";
 import { VideRegistre } from "@/components/dispensaire-ui";
 import { RAPPORT_CATEGORIES, estCanva, normaliserLien, type RapportsData, type Rapport } from "@/lib/dispensaire-docs-const";
 import { Modal, Flash, Champ, inputCls } from "@/components/edit-ui";
 import { ChampPieceJointe, PieceJointeVignette } from "@/components/piece-jointe";
-import { creerRapport, majRapport, supprimerRapport } from "@/app/dispensaire/rapports/actions";
+import { creerRapport, majRapport, supprimerRapport, chargerMedecins } from "@/app/dispensaire/rapports/actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
 const norm = (x: string) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
@@ -147,6 +147,21 @@ function RapportForm({ initial, cats, medecins, onClose, onSave }: { initial: Ra
   const [v, setV] = useState<Record<string, string>>(() => ({ titre: initial?.titre || "", categorie: initial?.categorie || "", patient: initial?.patient || "", lien: initial?.lien || "", pieceJointe: initial?.pieceJointe || "", auteur: initial?.auteur || "", note: initial?.note || "" }));
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setV((p) => ({ ...p, [k]: e.target.value }));
+
+  // Liste des médecins : robuste face aux ratés réseau. On part de ce que le
+  // serveur a fourni, PUIS on rafraîchit à l'ouverture (retries côté serveur) →
+  // le menu se remplit tout seul dès que les données arrivent, sans recharger.
+  const [meds, setMeds] = useState(medecins);
+  const [etatMed, setEtatMed] = useState<"load" | "ok" | "err">(medecins.length ? "ok" : "load");
+  async function chargerListe() {
+    if (!meds.length) setEtatMed("load");
+    try {
+      const r = await chargerMedecins();
+      if (r.ok) { setMeds(r.medecins); setEtatMed("ok"); }
+      else if (!meds.length) setEtatMed("err");
+    } catch { if (!meds.length) setEtatMed("err"); }
+  }
+  useEffect(() => { chargerListe(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const options = [...new Set([...RAPPORT_CATEGORIES, ...cats])];
   function go() { if (v.titre.trim().length < 1) { setErr("Le nom est obligatoire."); return; } onSave(v); }
   return (
@@ -158,12 +173,24 @@ function RapportForm({ initial, cats, medecins, onClose, onSave }: { initial: Ra
           <Champ label="Patient"><input className={inputCls} value={v.patient} onChange={set("patient")} placeholder="Optionnel" /></Champ>
         </div>
         <Champ label="Médecin (praticien)">
-          <select className={inputCls} value={v.auteur} onChange={(e) => setV((p) => ({ ...p, auteur: e.target.value }))}>
-            <option value="">— Choisir un médecin —</option>
-            {medecins.map((m) => <option key={m.nom} value={m.nom}>{m.nom}{m.grade ? ` — ${m.grade}` : ""}</option>)}
-            {v.auteur && !medecins.some((m) => m.nom === v.auteur) ? <option value={v.auteur}>{v.auteur}</option> : null}
+          <select className={inputCls} value={v.auteur} disabled={etatMed === "load" && meds.length === 0} onChange={(e) => setV((p) => ({ ...p, auteur: e.target.value }))}>
+            {etatMed === "load" && meds.length === 0 ? (
+              <option value="">Chargement des médecins…</option>
+            ) : (
+              <>
+                <option value="">— Choisir un médecin —</option>
+                {meds.map((m) => <option key={m.nom} value={m.nom}>{m.nom}{m.grade ? ` — ${m.grade}` : ""}</option>)}
+                {v.auteur && !meds.some((m) => m.nom === v.auteur) ? <option value={v.auteur}>{v.auteur}</option> : null}
+              </>
+            )}
           </select>
-          {medecins.length === 0 ? <span className="mt-1 text-[0.68rem] italic text-faint">Aucun médecin dans les effectifs — ajoute-les dans RH.</span> : null}
+          {etatMed === "load" && meds.length === 0 ? (
+            <span className="mt-1 flex items-center gap-1.5 text-[0.68rem] italic text-faint"><Loader2 className="h-3 w-3 animate-spin" /> Chargement des médecins…</span>
+          ) : etatMed === "err" && meds.length === 0 ? (
+            <span className="mt-1 flex flex-wrap items-center gap-2 text-[0.68rem] italic" style={{ color: "var(--oxblood)" }}>Impossible de charger la liste des médecins. Réessaie dans quelques instants.<button type="button" onClick={chargerListe} className="not-italic font-semibold text-accent underline">Réessayer</button></span>
+          ) : etatMed === "ok" && meds.length === 0 ? (
+            <span className="mt-1 text-[0.68rem] italic text-faint">Aucun médecin disponible — ajoute-les dans RH (Effectifs).</span>
+          ) : null}
         </Champ>
         <Champ label="Contenu du rapport"><textarea className={inputCls} rows={7} value={v.note} onChange={set("note")} placeholder="Rédige le compte rendu — il sera mis en page et imprimable directement (PDF)." /></Champ>
         <Champ label="Lien externe (facultatif)"><input className={inputCls} value={v.lien} onChange={set("lien")} placeholder="https://… (Canva ou autre — optionnel)" /></Champ>
