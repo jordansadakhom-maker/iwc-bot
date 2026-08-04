@@ -137,7 +137,33 @@ export const FDO_STATUTS = [
 export const fdoStatut = (k: string) => FDO_STATUTS.find((s) => s.key === k) || FDO_STATUTS[0];
 export type SoinFDO = { id: string; bureau: string; agent: string | null; soin: string | null; montant: number; statut: string; note: string | null; par: string | null; createdAt: string };
 export type BureauFDO = { bureau: string; nb: number; total: number };
-export type FDOData = { connecte: boolean; pret: boolean; canEdit: boolean; soins: SoinFDO[]; bureaux: BureauFDO[] };
+
+// Bureaux / administrations bénéficiaires par défaut. La liste est EXTENSIBLE
+// sans toucher au code : tout bureau déjà saisi une fois s'ajoute automatiquement
+// aux suggestions (datalist), et on peut en taper un nouveau à tout moment.
+export const BUREAUX_FDO_DEFAUT = [
+  "Bureau du Shérif",
+  "Bureau de Police",
+  "Bureau des Marshals",
+  "Pinkerton",
+  "Bureau du Gouverneur",
+];
+
+// Statut d'un RAPPORT hebdomadaire FDO (demande de remboursement à l'État).
+export const FDO_RAPPORT_STATUTS = [
+  { key: "en_attente", label: "En attente", tone: "var(--warn)" },
+  { key: "envoye", label: "Envoyé à l'État", tone: "var(--steel)" },
+  { key: "paye", label: "Payé", tone: "var(--good)" },
+  { key: "refuse", label: "Refusé", tone: "var(--oxblood)" },
+];
+export const FDO_RAPPORT_KEYS = FDO_RAPPORT_STATUTS.map((s) => s.key);
+export const fdoRapportStatut = (k: string) => FDO_RAPPORT_STATUTS.find((s) => s.key === k) || FDO_RAPPORT_STATUTS[0];
+// Statut d'une semaine (par clé « AAAA-MM-Sn »), persisté dans DispensaireFdoRapport.
+export type RapportFDO = { cle: string; statut: string; envoyeLe: string | null; genereLe: string | null; note: string | null; par: string | null };
+
+export const DISPENSAIRE_NOM = "Dispensaire de Saint-Denis";
+
+export type FDOData = { connecte: boolean; pret: boolean; canEdit: boolean; soins: SoinFDO[]; bureaux: BureauFDO[]; rapports: Record<string, RapportFDO> };
 
 // ── Notes de frais ──────────────────────────────────────────────────────────
 export const FRAIS_STATUTS = [
