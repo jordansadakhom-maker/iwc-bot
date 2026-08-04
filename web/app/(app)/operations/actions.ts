@@ -113,6 +113,18 @@ export async function majSuiviContrat(id: string, suivi: string): Promise<Comman
   return envoyerCommande("contrat.suivi", { id, suivi });
 }
 
+// Envoyer un CONTRAT au commanditaire pour signature par lien sécurisé (le bot
+// le DM ; le commanditaire signe/refuse sur /suivi/contrat/<token>). On ATTEND
+// le verdict du bot (MP remis / MP fermés).
+export async function envoyerContratSignature(data: {
+  id: string; clientDiscordId: string; commanditaire?: string;
+}): Promise<CommandeResult> {
+  const did = String(data.clientDiscordId || "").trim();
+  if (!data.id) return { ok: false, error: "Contrat introuvable." };
+  if (!did) return { ok: false, error: "Renseigne l'ID Discord du commanditaire pour l'envoi." };
+  return envoyerCommande("contrat.envoi", { id: data.id, clientDiscordId: did, commanditaire: data.commanditaire || "" }, { attendre: true });
+}
+
 // Honorer : crédite le coffre + crée une facture (via le bot).
 export async function honorerContrat(id: string, montant: number): Promise<CommandeResult> {
   if (!id) return { ok: false, error: "Contrat introuvable." };

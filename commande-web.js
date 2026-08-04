@@ -1052,6 +1052,67 @@ Object.assign(HANDLERS, {
     return { ok: true, message: 'Contrat refusé par le client (via le site)' };
   },
 
+  // ── Contrat autonome : envoi au commanditaire pour signature (lien sécurisé) ──
+  'contrat.envoi': async (db, p, ctx) => {
+    const guild = ctx?.guild;
+    const did = _s(p.clientDiscordId, 40);
+    if (!guild || !did) return { ok: false, message: 'Commanditaire Discord introuvable' };
+    const c = _findContrat(db, p.id);
+    if (!c) return { ok: false, message: 'Contrat introuvable' };
+    const conf = _poleC(c.pole) === 'illegal';
+    const maison = conf ? 'La Confrérie' : 'Iron Wolf Company';
+    const lienSig = lienSignature('ctr:' + String(c.id));
+    const lignes = [
+      '```', '   ' + maison.toUpperCase() + '   ', '```',
+      '📜 **CONTRAT DE MISSION**',
+      '',
+      `**Commanditaire :** ${_s(p.commanditaire, 200) || c.commanditaire || '—'}`,
+      _s(c.type, 120) ? `**Type de mission :** ${_s(c.type, 120)}` : null,
+      c.objet ? `**Objet :** ${_s(c.objet, 800)}` : null,
+      c.remuneration ? `**Rémunération :** ${_s(c.remuneration, 120)}` : null,
+      _s(c.echeanceTexte, 60) ? `**Échéance :** ${_s(c.echeanceTexte, 60)}` : null,
+      _s(c.details, 1500) ? `\n**Conditions :**\n${_s(c.details, 1500)}` : null,
+      '',
+      `En signant, vous confiez la mission ci-dessus à la ${maison} aux conditions convenues.`,
+      '',
+      lienSig
+        ? `✍️ **Pour signer ou refuser, ouvrez ce lien sécurisé :**\n${lienSig}`
+        : '✍️ *La signature se fait sur le site — ouvrez votre espace de suivi.*',
+    ].filter(x => x != null);
+    try {
+      const user = await guild.client.users.fetch(did).catch(() => null);
+      if (!user) return { ok: false, message: 'Commanditaire introuvable sur Discord' };
+      const sent = await user.send(lignes.join('\n')).catch(() => null);
+      if (!sent) return { ok: false, message: 'MP du commanditaire fermés — envoi impossible' };
+      c.signature = {
+        statut: 'envoye',
+        commanditaire: _s(p.commanditaire, 200) || c.commanditaire || null,
+        clientDiscordId: did,
+        envoyeAt: new Date().toISOString(),
+      };
+      return { ok: true, message: 'Contrat envoyé au commanditaire en message privé' };
+    } catch (e) { return { ok: false, message: e.message }; }
+  },
+  // ── Contrat autonome : signature / refus DEPUIS LE SITE (lien à jeton) ──
+  'contrat.signerWeb': (db, p) => {
+    const c = _findContrat(db, p.contratId);
+    if (!c || !c.signature) return { ok: false, message: 'Contrat introuvable' };
+    if (c.signature.statut !== 'envoye') return { ok: false, message: 'Contrat déjà traité' };
+    c.signature.statut = 'signe';
+    c.signature.signeAt = new Date().toISOString();
+    c.status = _statutContrat('signe');
+    return { ok: true, message: 'Contrat signé par le commanditaire (via le site)' };
+  },
+  'contrat.refuserWeb': (db, p) => {
+    const c = _findContrat(db, p.contratId);
+    if (!c || !c.signature) return { ok: false, message: 'Contrat introuvable' };
+    if (c.signature.statut !== 'envoye') return { ok: false, message: 'Contrat déjà traité' };
+    c.signature.statut = 'refuse';
+    c.signature.refuseAt = new Date().toISOString();
+    c.status = _statutContrat('refuse');
+    return { ok: true, message: 'Contrat refusé par le commanditaire (via le site)' };
+  },
+
   // ── Documents : envoyer un document rédigé sur le site à quelqu'un (MP) ──
   'document.envoyer': async (db, p, ctx) => {
     const guild = ctx?.guild;
@@ -1158,6 +1219,11 @@ function _findOp(db, id) {
   return (db.operations || []).find(o => o && String(o.id) === id)
     || (db.preparations || []).find(o => o && String(o.id) === id)
     || null;
+}
+// Retrouve un contrat autonome (id éventuellement préfixé « ctr: » par le token).
+function _findContrat(db, id) {
+  id = String(id || '').replace(/^ctr:/, '');
+  return (db.contrats || []).find(c => c && String(c.id) === id) || null;
 }
 // Normalise une phase web vers un `status` reconnu par le bot (voir supabase-sync _phase).
 const _PHASES_OP = new Set(['preparation', 'en_cours', 'terminee', 'annulee']);

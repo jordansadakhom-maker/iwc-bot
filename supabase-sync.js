@@ -250,6 +250,8 @@ function _construire(db) {
       categorie: _nn(c.type || c.categorie || c.typeMission, 80),
       risque: _nn(c.risk || c.risque, 40),
       echeance: _nn(c.echeanceTexte || c.echeance, 60),
+      // Signature par lien sécurisé (statut envoyé/signé/refusé) — colonne optionnelle.
+      signature: (c.signature && typeof c.signature === 'object') ? c.signature : null,
     }));
   const contratIds = new Set(contrats.map(c => c.id));
 
@@ -548,7 +550,7 @@ async function syncAll(db) {
       // 3. Contrats — tente le suivi complet ; repli si colonnes optionnelles absentes.
       let rCo = await _upsert('Contrat', contrats);
       if (!rCo.ok && rCo.status === 400) {
-        const base = contrats.map(({ suivi, remuVerseAuCoffre, categorie, risque, echeance, ...b }) => b);
+        const base = contrats.map(({ suivi, remuVerseAuCoffre, categorie, risque, echeance, signature, ...b }) => b);
         rCo = await _upsert('Contrat', base);
       }
       results.push(rCo);
