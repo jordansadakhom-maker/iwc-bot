@@ -17,6 +17,8 @@ import {
 } from "@/components/armurerie-erp";
 import { SimulateurFiscal } from "@/components/armurerie-fiscal";
 import { snapshotCycle } from "@/lib/armurerie-fiscal";
+import { KpiBand } from "@/components/erp-kpi";
+import { echantillonner, type Kpi } from "@/lib/erp-kpi-const";
 import { toastErreur } from "@/lib/toast";
 import {
   creerClient, majClient, supprimerClient,
@@ -111,12 +113,52 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
   const demarrerDepuisRdv = (p: CaissePrefill) => { setPrefill(p); setTab("caisse"); };
   // Bénéfice du cycle fiscal courant (dérivé du coffre) — alimente le simulateur
   // en caisse : impact d'une vente sur la tranche/l'impôt avant de valider.
-  const beneficeCycle = snapshotCycle(mouvementsCoffre, impots.filter((i) => i.statut === "paye")).benefice;
+  const cycle = snapshotCycle(mouvementsCoffre, impots.filter((i) => i.statut === "paye"));
+  const beneficeCycle = cycle.benefice;
   const signes = contrats.filter((c) => c.statut === "signe").length;
   const paiesDues = paies.filter((p) => p.statut !== "paye").length;
   const impotsDus = impots.filter((i) => i.statut !== "paye").length;
   const tachesAFaire = taches.filter((t) => !t.fait).length;
   const rdvsAVenir = rdvs.filter((r) => r.statut === "a_venir").length;
+
+  // ── Cockpit : métriques de pilotage (données déjà en props) ──
+  const totalPaiesDues = paies.filter((p) => p.statut !== "paye").reduce((s, p) => s + p.montant, 0);
+  const _estCapital = (m: ArmMouvement) => (m.nature || "").toLowerCase() === "capital";
+  const _recettes = mouvementsCoffre.filter((m) => m.sens === "entree" && !_estCapital(m)).reduce((s, m) => s + m.montant, 0);
+  const _depenses = mouvementsCoffre.filter((m) => m.sens === "sortie" && !_estCapital(m)).reduce((s, m) => s + m.montant, 0);
+  const resultatNet = _recettes - _depenses;
+  const rupturesStock = produits.filter((p) => !p.aLaDemande && p.stock <= 0).length;
+  const pointagesOuverts = pointages.filter((p) => !p.fin).length;
+  const commandesActives = commandes.filter((c) => c.statut === "en_attente" || c.statut === "prete").length;
+  // Tendance du solde du coffre reconstruite depuis les mouvements datés (solde
+  // d'ouverture implicite = solde actuel − somme nette des mouvements).
+  const coffreSpark = (() => {
+    const movs = mouvementsCoffre.filter((m) => m.createdAt).slice().sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+    if (movs.length < 2) return [] as number[];
+    const signed = movs.map((m) => (m.sens === "entree" ? m.montant : -m.montant));
+    let bal = coffre - signed.reduce((s, v) => s + v, 0);
+    const serie: number[] = [];
+    for (const d of signed) { bal += d; serie.push(bal); }
+    return echantillonner(serie, 24);
+  })();
+  const cockpitKpis: Kpi[] = [
+    { id: "coffre", label: "Coffre", value: money(coffre), tone: "var(--brass)", spark: coffreSpark },
+    { id: "ca", label: "Chiffre d'affaires", value: money(ca), tone: "var(--accent)" },
+    { id: "benef", label: "Bénéfice du cycle", value: money(beneficeCycle), tone: beneficeCycle >= 0 ? "var(--good)" : "var(--oxblood)" },
+    { id: "impot", label: "Impôt dû (cycle)", value: money(cycle.impot), tone: "var(--warn)", sub: `tranche ${cycle.taux}%` },
+    { id: "net", label: "Résultat net", value: money(resultatNet), tone: resultatNet >= 0 ? "var(--good)" : "var(--oxblood)" },
+    { id: "paies", label: "Paies à verser", value: money(totalPaiesDues), tone: totalPaiesDues > 0 ? "var(--warn)" : "var(--faint)", sub: paiesDues ? `${paiesDues} fiche(s)` : null },
+  ];
+  const attentionsToutes: { label: string; n: number; tab: TabKey; tone: string }[] = [
+    { label: "paie(s) à verser", n: paiesDues, tab: "paies", tone: "var(--warn)" },
+    { label: "impôt(s) dû(s)", n: impotsDus, tab: "impots", tone: "var(--oxblood)" },
+    { label: "service(s) en cours", n: pointagesOuverts, tab: "pointage", tone: "var(--steel)" },
+    { label: "produit(s) en rupture", n: rupturesStock, tab: "produits", tone: "var(--oxblood)" },
+    { label: "anomalie(s) de stock", n: scan?.nb ?? 0, tab: "scan", tone: "var(--oxblood)" },
+    { label: "commande(s) en cours", n: commandesActives, tab: "commandes", tone: "var(--accent)" },
+    { label: "RDV à venir", n: rdvsAVenir, tab: "rdv", tone: "var(--good)" },
+  ];
+  const attentions = attentionsToutes.filter((a) => a.n > 0);
 
   const TABS: { key: TabKey; label: string; icon: typeof Users; n: number }[] = [
     { key: "caisse", label: "Caisse", icon: ShoppingCart, n: produits.length },
@@ -144,12 +186,21 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
       {/* Coffre propre à l'armurerie */}
       <CoffreArmurerie solde={coffre} mouvements={mouvementsCoffre} router={router} />
 
-      {/* KPIs */}
-      <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-        <Kpi label="Chiffre d'affaires" value={money(ca)} tone="var(--accent)" icon={CircleDollarSign} />
-        <Kpi label="Ventes au registre" value={String(ventes.length)} tone="var(--brass)" icon={ScrollText} />
-        <Kpi label="Clients fichés" value={String(clients.length)} tone="var(--steel)" icon={Users} />
-        <Kpi label="Contrats signés" value={String(signes)} tone="var(--good)" icon={Check} />
+      {/* Cockpit : pilotage synthétique (tuiles + barre d'alertes cliquable) */}
+      <div className="mb-4 flex flex-col gap-3">
+        <KpiBand items={cockpitKpis} />
+        {attentions.length ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-[12px] border border-border bg-surface-2 px-3 py-2.5">
+            <span className="inline-flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.05em] text-faint"><AlertTriangle className="h-3.5 w-3.5" /> À traiter</span>
+            {attentions.map((a) => (
+              <button key={a.tab + a.label} onClick={() => setTab(a.tab)} className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[0.76rem] font-semibold transition hover:brightness-110" style={{ borderColor: `color-mix(in srgb,${a.tone} 45%,var(--border))`, background: `color-mix(in srgb,${a.tone} 10%,transparent)`, color: a.tone }}>
+                <span className="font-num">{a.n}</span> {a.label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-[12px] border border-border bg-surface-2 px-3 py-2 text-[0.76rem] text-faint">✓ Rien en attente — tout est à jour.</div>
+        )}
       </div>
 
       {/* Onglets */}
@@ -980,15 +1031,6 @@ function CoffreModal({ onClose, router }: { onClose: () => void; router: Router 
         </div>
       </div>
     </Modal>
-  );
-}
-
-function Kpi({ label, value, tone, icon: Icon }: { label: string; value: string; tone: string; icon: typeof Users }) {
-  return (
-    <div className="rounded-[12px] border border-border bg-surface-2 px-3 py-2.5">
-      <div className="flex items-center gap-1.5 text-[0.68rem] uppercase tracking-[0.06em] text-faint"><Icon className="h-3.5 w-3.5" style={{ color: tone }} /> {label}</div>
-      <div className="mt-1 font-num text-[1.15rem] font-bold" style={{ color: tone }}>{value}</div>
-    </div>
   );
 }
 
