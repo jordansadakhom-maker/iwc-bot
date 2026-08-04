@@ -62,6 +62,14 @@ function _pieceImg(v) {
   } catch { /* lien invalide */ }
   return '';
 }
+// Dossier de mission (blob JSON riche rédigé sur le site) — gardé tel quel s'il
+// s'agit d'un objet, borné en taille pour ne pas gonfler la db. Même principe que
+// le sous-objet `contrat` déjà stocké sur une opération.
+function _dossierBlob(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  try { if (JSON.stringify(v).length > 40000) return undefined; } catch { return undefined; }
+  return v;
+}
 // URL publique du site (pour rediriger un client vers « Suivre ma demande »).
 function _siteUrl() {
   return String(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || process.env.SITE_URL || 'https://iwc-bot-psi.vercel.app').replace(/\/+$/, '');
@@ -308,6 +316,7 @@ const HANDLERS = {
       id, name: cible, cible, objectif: _s(p.objectif, 500) || cible,
       categorie: _s(p.categorie, 80) || 'Opération', pole, status,
       participants: [], agents: [], remuneration: _s(p.prime, 120), lieu: _s(p.lieu, 120),
+      dossier: _dossierBlob(p.dossier),
       createdAt: new Date().toISOString(), createurNom: p.auteurNom || 'Site web', source: 'web',
     });
     // Annonce Discord (#operations) — ping du rôle pôle uniquement. Best-effort.
@@ -333,6 +342,7 @@ const HANDLERS = {
     if (p.objectif !== undefined) { op.objectif = _s(p.objectif, 500); }
     if (p.lieu !== undefined) { op.lieu = _s(p.lieu, 120); }
     if (p.phase !== undefined) { const s = _phaseOp(p.phase); op.status = s; ch.push(`phase → ${s}`); }
+    if (p.dossier !== undefined) { op.dossier = _dossierBlob(p.dossier) || null; ch.push('dossier'); }
     op.majPar = p.auteurNom || 'Site web'; op.majAt = Date.now();
     return { ok: true, message: `Opération mise à jour (${ch.join(', ') || '—'})` };
   },

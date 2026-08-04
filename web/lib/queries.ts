@@ -269,6 +269,7 @@ export type OpDetail = {
   etapes: EtapeDetail[]; createurNom: string | null; createdAt: string | null; contratLie: string | null;
   resultat: string | null; butin: string | null; debrief: string | null;
   contrat: { statut: string; commanditaire: string | null; sens: string | null; envoyeAt: string | null; signeAt: string | null } | null;
+  dossier: Record<string, unknown> | null;
 };
 export type ContratDetail = {
   id: string; cible: string; commanditaire: string | null; statut: string; pole: string;
@@ -385,6 +386,7 @@ export async function getOperations(): Promise<OperationsData> {
       butin: (o.butin as string) ?? null,
       debrief: (o.debrief as string) ?? null,
       contrat: (o.contrat && typeof o.contrat === "object") ? (o.contrat as OpDetail["contrat"]) : null,
+      dossier: (o.dossier && typeof o.dossier === "object" && !Array.isArray(o.dossier)) ? (o.dossier as Record<string, unknown>) : null,
     });
   }
   const contrats: ContratDetail[] = ((contratsR.data || []) as Raw[])
