@@ -9,6 +9,7 @@ import { NAV, ME, type Pole } from "@/lib/data";
 import { LogoutButton } from "@/components/logout-button";
 import { CommandPalette } from "@/components/command-palette";
 import { CaptureFlottante } from "@/components/capture-flottante";
+import { WidgetsFlottants } from "@/components/widgets-flottants";
 import { rafraichirAlertes } from "@/app/(app)/notifs-actions";
 import { toast } from "@/lib/toast";
 import { notifMeta, versCentreNotif } from "@/lib/notifications-centre";
@@ -455,6 +456,7 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
         </div>
       ) : null}
       <CaptureFlottante />
+      <WidgetsFlottants />
     </div>
   );
 }
