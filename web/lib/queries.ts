@@ -271,11 +271,13 @@ export type OpDetail = {
   contrat: { statut: string; commanditaire: string | null; sens: string | null; envoyeAt: string | null; signeAt: string | null } | null;
   dossier: Record<string, unknown> | null;
 };
+export type ContratSignature = { statut?: string; commanditaire?: string; clientDiscordId?: string; envoyeAt?: string; signeAt?: string; refuseAt?: string };
 export type ContratDetail = {
   id: string; cible: string; commanditaire: string | null; statut: string; pole: string;
   remuneration: string | null; motif: string | null; agentsNoms: string[]; createdAt: string | null;
   suivi: string | null; remuVerseAuCoffre: number | null;
   categorie: string | null; risque: string | null; echeance: string | null;
+  signature: ContratSignature | null;
 };
 export type OperationsData = {
   connecte: boolean;
@@ -408,6 +410,7 @@ export async function getOperations(): Promise<OperationsData> {
         categorie: (c.categorie as string) ?? null,
         risque: (c.risque as string) ?? null,
         echeance: (c.echeance as string) ?? null,
+        signature: (c.signature && typeof c.signature === "object") ? (c.signature as ContratSignature) : null,
       };
     });
 

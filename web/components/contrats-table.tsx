@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FileText, Plus, Loader2, Trash2, Users, CalendarClock, Landmark, Check, Sparkles, Printer } from "lucide-react";
+import { FileText, Plus, Loader2, Trash2, Users, CalendarClock, Landmark, Check, Sparkles, Printer, Send } from "lucide-react";
 import type { ContratDetail } from "@/lib/queries";
 import type { Suggestion } from "@/lib/attribution";
 import { Badge } from "@/components/ui";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
-import { creerContrat, majContrat, supprimerContrat, majSuiviContrat, honorerContrat, suggererAgents } from "@/app/(app)/operations/actions";
+import { creerContrat, majContrat, supprimerContrat, majSuiviContrat, honorerContrat, suggererAgents, envoyerContratSignature } from "@/app/(app)/operations/actions";
 import { cents } from "@/lib/format";
 
 const dateFR = (s: string | null) => { if (!s) return null; try { return new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" }); } catch { return null; } };
@@ -467,6 +467,18 @@ function EditModal({ contrat, onClose, router }: { contrat: ContratDetail; onClo
   // Attribution assistée (indicative) : agents recommandés pour staffer le contrat.
   const [suggBusy, setSuggBusy] = useState(false);
   const [suggList, setSuggList] = useState<Suggestion[] | null>(null);
+  // Signature du commanditaire par lien sécurisé (envoi en MP Discord).
+  const sig = contrat.signature;
+  const [ctrDid, setCtrDid] = useState("");
+
+  async function envoyerSignature() {
+    if (!ctrDid.trim()) { setFlash("Renseigne l'ID Discord du commanditaire."); return; }
+    setBusy("sign");
+    const r = await envoyerContratSignature({ id: contrat.id, clientDiscordId: ctrDid.trim(), commanditaire });
+    setBusy(null);
+    setFlash(r.ok ? (r.message || "Contrat envoyé au commanditaire — en attente de signature.") : (r.error || "Échec de l'envoi."));
+    if (r.ok) router.refresh();
+  }
 
   async function suggerer() {
     setSuggBusy(true);
@@ -544,6 +556,34 @@ function EditModal({ contrat, onClose, router }: { contrat: ContratDetail; onClo
           </div>
         ) : null}
         {dejaHonore ? <p className="flex items-center gap-1.5 text-[0.78rem]" style={{ color: "var(--good)" }}><Check className="h-3.5 w-3.5" /> Contrat honoré — {cents(contrat.remuVerseAuCoffre || 0)}$ au coffre.</p> : null}
+      </div>
+
+      {/* Signature du commanditaire (lien sécurisé en MP Discord) */}
+      <div className="mb-3 flex flex-col gap-2 border-t border-border pt-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[0.72rem] uppercase tracking-[0.06em] text-faint">Signature du commanditaire</span>
+          {sig?.statut === "signe" ? <Badge tone="good">Signé</Badge> : sig?.statut === "refuse" ? <Badge tone="oxblood">Refusé</Badge> : sig?.statut === "envoye" ? <Badge tone="warn">Envoyé</Badge> : null}
+        </div>
+        {sig?.statut === "signe" ? (
+          <p className="flex items-center gap-1.5 text-[0.8rem]" style={{ color: "var(--good)" }}><Check className="h-3.5 w-3.5" /> Signé par {sig.commanditaire || "le commanditaire"}.</p>
+        ) : sig?.statut === "refuse" ? (
+          <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>Refusé par le commanditaire. Tu peux le renvoyer.</p>
+        ) : sig?.statut === "envoye" ? (
+          <p className="text-[0.8rem] text-muted">Contrat envoyé en MP — en attente de signature (lien sécurisé).</p>
+        ) : (
+          <p className="text-[0.78rem] text-faint">Envoie le contrat au commanditaire en message privé Discord : il le lira et le signera par lien sécurisé, et le statut passera à « Signé » automatiquement.</p>
+        )}
+        {(!sig || sig.statut === "refuse") ? (
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex min-w-[160px] flex-1 flex-col gap-1">
+              <span className="text-[0.7rem] text-faint">ID Discord du commanditaire</span>
+              <input className={inputCls} value={ctrDid} onChange={(e) => setCtrDid(e.target.value.replace(/[^0-9]/g, ""))} inputMode="numeric" placeholder="123456789012345678" />
+            </label>
+            <button onClick={envoyerSignature} disabled={busy === "sign"} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[0.8rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>
+              {busy === "sign" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Envoyer pour signature
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {/* Attribution assistée (indicative) */}

@@ -25,7 +25,7 @@ export default async function SignatureContratPage({ params }: { params: Promise
             <Crest />
           </div>
           <h1 className="font-display text-2xl tracking-[0.1em]">IRON WOLF COMPANY</h1>
-          <p className="mt-2 max-w-[340px] text-[0.86rem] leading-relaxed text-muted">Signature de ton contrat d&apos;opération.</p>
+          <p className="mt-2 max-w-[340px] text-[0.86rem] leading-relaxed text-muted">Signature de ton contrat.</p>
         </div>
 
         <section className="rounded-card border border-border bg-surface p-6 shadow-card" style={{ background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,#000))" }}>
