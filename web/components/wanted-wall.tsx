@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Loader2, Trash2, User, ScanSearch } from "lucide-react";
+import { Plus, Loader2, Trash2, User, ScanSearch, Printer } from "lucide-react";
 import type { AvisItem } from "@/lib/queries";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { ChampPieceJointe } from "@/components/piece-jointe";
@@ -34,52 +34,80 @@ function mortVif(vm?: string | null) {
   return "MORT OU VIF";
 }
 
+// N° de dossier & inclinaison déterministes (stables SSR/CSR → pas de mismatch).
+function hashId(id: string) { let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0; return h; }
+const numeroFor = (id: string) => "N° " + (1000 + (hashId(id) % 9000));
+const tiltFor = (id: string) => ((hashId(id) % 5) - 2) * 0.6; // -1,2° … +1,2°
+
 // Couleurs « parchemin » (objet volontairement clair, épinglé sur le mur sombre).
 const PAPER = "linear-gradient(160deg,#e9ddc2,#d9c7a1)";
 const INK = "#2c2013";
 const REDINK = "#8a271f";
 
-function Affiche({ a, onClick }: { a: AvisItem; onClick: () => void }) {
+type AvisLike = {
+  cible: string; prime?: string | null; dangerosite?: string | null; statut?: string | null;
+  photo?: string | null; position?: string | null; vivantMort?: string | null;
+  commanditaire?: string | null; signalement?: string | null; chasseurs?: number; numero?: string;
+};
+
+// Affiche « WANTED » — le vrai document, réutilisé sur le mur ET en aperçu/impression.
+function AffichePoster({ a }: { a: AvisLike }) {
   const st = sInfo(a.statut);
-  const clos = a.statut && !["chasse"].includes(a.statut.toLowerCase());
+  const clos = !!a.statut && a.statut.toLowerCase() !== "chasse";
+  const crimes = (a.signalement || "").trim();
+  const clamp2: React.CSSProperties = { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" };
   return (
-    <button onClick={onClick} className="group relative text-left transition hover:-translate-y-1" style={{ transform: "rotate(-0.6deg)" }}>
-      <div className="rounded-[6px] p-3.5 shadow-[0_10px_24px_rgba(0,0,0,0.45)]" style={{ background: PAPER, color: INK, border: "1px solid #b9a675", boxShadow: "inset 0 0 44px rgba(120,88,40,0.28), 0 10px 22px rgba(0,0,0,0.45)" }}>
-        {/* punaise */}
-        <span className="absolute left-1/2 top-1 h-3 w-3 -translate-x-1/2 rounded-full" style={{ background: "radial-gradient(circle at 35% 30%, #d76b60, #7c1d16)", boxShadow: "0 1px 2px rgba(0,0,0,0.5)" }} />
-        <div className="text-center">
-          <div className="font-display text-[1.7rem] font-bold leading-none tracking-[0.14em]" style={{ color: REDINK }}>WANTED</div>
-          <div className="mt-0.5 text-[0.6rem] font-bold uppercase tracking-[0.3em]" style={{ color: INK }}>{mortVif(a.vivantMort)}</div>
-        </div>
-        {/* portrait */}
-        <div className="mx-auto mt-2.5 aspect-square w-full overflow-hidden rounded-[3px]" style={{ border: "2px solid " + INK, background: "#c9b58c" }}>
-          {a.photo ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={a.photo} alt={a.cible} className="h-full w-full object-cover" style={{ filter: "sepia(0.5) contrast(1.05)" }} />
-          ) : (
-            <div className="grid h-full w-full place-items-center" style={{ color: "#7a6a4c" }}><User className="h-14 w-14" strokeWidth={1.2} /></div>
-          )}
-        </div>
-        <div className="mt-2 text-center font-display text-[1.15rem] font-bold uppercase leading-tight tracking-[0.03em]">{a.cible}</div>
-        <div className="my-2 h-px" style={{ background: "repeating-linear-gradient(90deg," + INK + " 0 6px,transparent 6px 10px)", opacity: 0.5 }} />
-        <div className="text-center">
-          <div className="text-[0.58rem] font-bold uppercase tracking-[0.24em]" style={{ color: INK }}>Récompense</div>
-          <div className="font-display text-[1.5rem] font-bold" style={{ color: REDINK }}>{a.prime || "—"}</div>
-        </div>
-        <div className="mt-2 flex items-center justify-center gap-2 text-[0.62rem] uppercase tracking-[0.05em]">
-          <span className="rounded-sm px-1.5 py-0.5 font-bold" style={{ color: "#fff", background: dTone(a.dangerosite) }}>{dLabel(a.dangerosite)}</span>
-          {a.position ? <span style={{ color: INK }}>vu à {a.position}</span> : null}
-        </div>
-        {a.chasseurs > 0 ? (
-          <div className="mt-1.5 text-center text-[0.6rem] font-bold uppercase tracking-[0.1em]" style={{ color: REDINK }}>
-            🐺 {a.chasseurs} chasseur{a.chasseurs > 1 ? "s" : ""} sur la piste
-          </div>
-        ) : null}
-        {/* tampon de statut */}
-        {clos && st ? (
-          <span className="pointer-events-none absolute left-1/2 top-[38%] -translate-x-1/2 -translate-y-1/2 rotate-[-14deg] rounded border-[3px] px-3 py-0.5 font-display text-[1.15rem] font-bold uppercase tracking-[0.12em]" style={{ color: st.tone, borderColor: st.tone, opacity: 0.9, background: "rgba(233,221,194,0.35)" }}>{st.label}</span>
-        ) : null}
+    <div className="relative rounded-[6px] p-3.5" style={{ background: PAPER, color: INK, border: "1px solid #b9a675", boxShadow: "inset 0 0 44px rgba(120,88,40,0.28), 0 10px 22px rgba(0,0,0,0.45)" }}>
+      {/* taches d'usure du papier */}
+      <span aria-hidden className="pointer-events-none absolute inset-0 rounded-[6px]" style={{ background: "radial-gradient(58% 40% at 12% 8%, rgba(90,60,20,0.18), transparent 60%), radial-gradient(50% 40% at 90% 94%, rgba(70,45,15,0.16), transparent 60%)" }} />
+      <div className="absolute right-2 top-1.5 text-[0.54rem] tracking-[0.1em]" style={{ color: "#7a5a2a", fontFamily: "'Courier New',monospace" }}>{a.numero || "N° —"}</div>
+      <div className="relative text-center">
+        <div className="text-[0.5rem] font-bold uppercase tracking-[0.24em]" style={{ color: INK, opacity: 0.7 }}>Par ordre de la compagnie</div>
+        <div className="font-display text-[1.7rem] font-bold leading-none tracking-[0.14em]" style={{ color: REDINK }}>WANTED</div>
+        <div className="mt-0.5 text-[0.6rem] font-bold uppercase tracking-[0.3em]" style={{ color: INK }}>{mortVif(a.vivantMort)}</div>
       </div>
+      <div className="relative mx-auto mt-2.5 aspect-square w-full overflow-hidden rounded-[3px]" style={{ border: "2px solid " + INK, background: "#c9b58c" }}>
+        {a.photo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={a.photo} alt={a.cible} className="h-full w-full object-cover" style={{ filter: "sepia(0.5) contrast(1.05)" }} />
+        ) : (
+          <div className="grid h-full w-full place-items-center" style={{ color: "#7a6a4c" }}><User className="h-14 w-14" strokeWidth={1.2} /></div>
+        )}
+      </div>
+      <div className="relative mt-2 text-center font-display text-[1.15rem] font-bold uppercase leading-tight tracking-[0.03em]">{a.cible || "Inconnu"}</div>
+      {crimes ? (
+        <div className="relative mt-1 text-center">
+          <div className="text-[0.5rem] font-bold uppercase tracking-[0.2em]" style={{ color: INK, opacity: 0.7 }}>Recherché pour</div>
+          <div className="text-[0.68rem] italic leading-snug" style={{ color: INK, ...clamp2 }}>{crimes}</div>
+        </div>
+      ) : null}
+      <div className="relative my-2 h-px" style={{ background: "repeating-linear-gradient(90deg," + INK + " 0 6px,transparent 6px 10px)", opacity: 0.5 }} />
+      <div className="relative text-center">
+        <div className="text-[0.58rem] font-bold uppercase tracking-[0.24em]" style={{ color: INK }}>Récompense</div>
+        <div className="font-display text-[1.5rem] font-bold" style={{ color: REDINK }}>{a.prime || "—"}</div>
+      </div>
+      <div className="relative mt-2 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[0.62rem] uppercase tracking-[0.05em]">
+        <span className="rounded-sm px-1.5 py-0.5 font-bold" style={{ color: "#fff", background: dTone(a.dangerosite) }}>{dLabel(a.dangerosite)}</span>
+        {a.position ? <span style={{ color: INK }}>vu à {a.position}</span> : null}
+      </div>
+      {a.commanditaire ? <div className="relative mt-1 text-center text-[0.58rem] uppercase tracking-[0.08em]" style={{ color: INK, opacity: 0.75 }}>Émis par {a.commanditaire}</div> : null}
+      {a.chasseurs && a.chasseurs > 0 ? (
+        <div className="relative mt-1.5 text-center text-[0.6rem] font-bold uppercase tracking-[0.1em]" style={{ color: REDINK }}>🐺 {a.chasseurs} chasseur{a.chasseurs > 1 ? "s" : ""} sur la piste</div>
+      ) : null}
+      <div className="relative mt-2 border-t pt-1.5 text-center text-[0.5rem] uppercase tracking-[0.18em]" style={{ borderColor: "rgba(44,32,19,0.3)", color: INK, opacity: 0.62 }}>Iron Wolf Company · Bureau des primes</div>
+      {clos && st ? (
+        <span className="pointer-events-none absolute left-1/2 top-[40%] -translate-x-1/2 -translate-y-1/2 rotate-[-14deg] rounded border-[3px] px-3 py-0.5 font-display text-[1.15rem] font-bold uppercase tracking-[0.12em]" style={{ color: st.tone, borderColor: st.tone, opacity: 0.9, background: "rgba(233,221,194,0.35)" }}>{st.label}</span>
+      ) : null}
+    </div>
+  );
+}
+
+// Affiche punaisée (mur) : inclinaison propre + punaise + survol.
+function Affiche({ a, onClick }: { a: AvisItem; onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="group relative block text-left transition hover:z-10 hover:-translate-y-1" style={{ transform: `rotate(${tiltFor(a.id)}deg)` }}>
+      <span className="absolute left-1/2 top-1 z-10 h-3 w-3 -translate-x-1/2 rounded-full" style={{ background: "radial-gradient(circle at 35% 30%, #d76b60, #7c1d16)", boxShadow: "0 1px 2px rgba(0,0,0,0.5)" }} />
+      <AffichePoster a={{ ...a, numero: numeroFor(a.id) }} />
     </button>
   );
 }
@@ -102,7 +130,7 @@ export function WantedWall({ avis }: { avis: AvisItem[] }) {
     <>
       <div className="mb-4 flex items-center justify-between gap-2.5">
         <div className="flex items-center gap-2.5">
-          <h3 className="text-[0.8rem] font-semibold uppercase tracking-[0.06em] text-muted">Avis de recherche</h3>
+          <h3 className="text-[0.8rem] font-semibold uppercase tracking-[0.06em] text-muted">Bureau des primes</h3>
           <span className="font-num text-[0.8rem] text-faint">{avis.length}</span>
         </div>
         <button onClick={() => setNouveau(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-ink transition hover:border-border-2">
@@ -135,8 +163,13 @@ export function WantedWall({ avis }: { avis: AvisItem[] }) {
               })}
             </div>
           ) : null}
-          <div className="grid gap-6 px-1 py-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {affiches.map((a) => <Affiche key={a.id} a={a} onClick={() => setSel(a)} />)}
+
+          {/* Le mur : un vrai panneau de bois du bureau des primes */}
+          <div className="rounded-[12px] p-4 sm:p-6" style={{ backgroundColor: "#2e2115", backgroundImage: "repeating-linear-gradient(0deg, rgba(0,0,0,0.28) 0 1px, transparent 1px 48px), repeating-linear-gradient(90deg, rgba(255,220,170,0.035) 0 2px, transparent 2px 8px), radial-gradient(120% 90% at 50% 0%, rgba(96,68,36,0.35), transparent 72%)", boxShadow: "inset 0 0 70px rgba(0,0,0,0.6)", border: "1px solid #180f08" }}>
+            <div className="mb-4 text-center text-[0.6rem] uppercase tracking-[0.3em]" style={{ color: "#c9a45c", opacity: 0.8 }}>— Par ordre de la Compagnie —</div>
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {affiches.map((a) => <Affiche key={a.id} a={a} onClick={() => setSel(a)} />)}
+            </div>
           </div>
         </>
       )}
@@ -162,6 +195,13 @@ function AvisModal({ avis, onClose, router }: { avis?: AvisItem; onClose: () => 
   const [flash, setFlash] = useState<string | null>(null);
   const [ok, setOk] = useState(false);
   const [fiche, setFiche] = useState<string | null>(null);
+
+  // Aperçu vivant de l'affiche (se met à jour pendant la saisie) — imprimable.
+  const apercu: AvisLike = {
+    cible, prime, dangerosite, vivantMort, statut, photo, position, commanditaire, signalement,
+    chasseurs: avis?.chasseurs ?? 0, numero: avis ? numeroFor(avis.id) : "N° —",
+  };
+  function imprimer() { if (typeof window !== "undefined") window.print(); }
 
   async function ficheIA() {
     if (!avis) return;
@@ -189,46 +229,56 @@ function AvisModal({ avis, onClose, router }: { avis?: AvisItem; onClose: () => 
   }
 
   return (
-    <Modal titre={editing ? `Avis — ${avis!.cible}` : "🪧 Nouvel avis de recherche"} onClose={onClose} max={520}>
+    <Modal titre={editing ? `Avis — ${avis!.cible}` : "🪧 Nouvel avis de recherche"} onClose={onClose} max={560}>
+      <style>{`@media print{body *{visibility:hidden!important}#wanted-affiche-print,#wanted-affiche-print *{visibility:visible!important}#wanted-affiche-print{position:fixed!important;top:24px!important;left:50%!important;margin-left:-230px!important;width:460px!important}}`}</style>
       {ok ? (
         <div className="flex flex-col gap-3"><Flash>Avis placardé — le mur et Discord se mettent à jour dans ~30 s.</Flash><div className="flex justify-end"><button onClick={onClose} className="rounded-lg px-3 py-1.5 text-[0.8rem] font-semibold text-black/85" style={{ background: "var(--accent)" }}>Fermer</button></div></div>
       ) : (
-        <div className="flex flex-col gap-3">
-          {flash ? <Flash tone="bad">{flash}</Flash> : null}
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Champ label="Cible *"><input className={inputCls} value={cible} onChange={(e) => setCible(e.target.value)} placeholder="Nom du recherché" maxLength={200} autoFocus /></Champ>
-            <Champ label="Récompense"><input className={inputCls} value={prime} onChange={(e) => setPrime(e.target.value)} placeholder="$500" maxLength={120} /></Champ>
+        <div className="grid gap-4 sm:grid-cols-[280px_1fr]">
+          {/* Aperçu de l'affiche */}
+          <div className="flex flex-col items-center gap-2">
+            <div id="wanted-affiche-print" className="w-full max-w-[280px]"><AffichePoster a={apercu} /></div>
+            <button onClick={imprimer} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-3 py-1.5 text-[0.76rem] font-semibold hover:border-border-2"><Printer className="h-3.5 w-3.5" /> Imprimer l&apos;affiche</button>
           </div>
-          <ChampPieceJointe value={photo} onChange={setPhoto} label="📎 Photo de l'avis (lien image, facultative)" />
-          <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Dangerosité</span><Picker options={DANGER} value={dangerosite} onChange={setDangerosite} /></div>
-          <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Consigne</span><Picker options={VIVANTMORT} value={vivantMort} onChange={setVivantMort} /></div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Champ label="Dernière position"><input className={inputCls} value={position} onChange={(e) => setPosition(e.target.value)} placeholder="Valentine, Colter…" maxLength={200} /></Champ>
-            <Champ label="Commanditaire"><input className={inputCls} value={commanditaire} onChange={(e) => setCommanditaire(e.target.value)} placeholder="Qui met la prime" maxLength={200} /></Champ>
-          </div>
-          <Champ label="Signalement"><textarea className={inputCls + " min-h-[64px] resize-y"} value={signalement} onChange={(e) => setSignalement(e.target.value)} placeholder="Crimes, description, dernières nouvelles…" maxLength={2000} /></Champ>
-          <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Statut</span><Picker options={STATUT} value={statut} onChange={setStatut} /></div>
-          <div className="flex justify-end"><button onClick={valider} disabled={busy === "save"} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{busy === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" strokeWidth={2} />} {editing ? "Enregistrer" : "Placarder l'avis"}</button></div>
-          {editing ? (
-            <div className="mt-1 flex flex-col gap-2.5 border-t border-border pt-3">
-              <div className="flex items-center gap-2">
-                <button onClick={ficheIA} disabled={busy === "fiche"} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-3 py-1.5 text-[0.78rem] font-semibold text-muted transition hover:border-[color-mix(in_srgb,var(--accent)_55%,var(--border))] hover:text-ink disabled:opacity-60">
-                  {busy === "fiche" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ScanSearch className="h-3.5 w-3.5" />} Fiche cible IA
-                </button>
-                {fiche ? <LireBtn texte={fiche} /> : null}
-                <span className="text-[0.7rem] text-faint">Profil, dangerosité & recommandations</span>
-              </div>
-              {fiche ? (
-                <div className="rounded-[10px] border border-border bg-surface-2 p-3">
-                  <p className="whitespace-pre-wrap text-[0.84rem] leading-relaxed text-ink">{fiche}</p>
-                </div>
-              ) : null}
-              <div className="flex items-center justify-between">
-                <ConfirmDel onDelete={supprimer} busy={busy === "del"} />
-                <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3 py-1.5 text-[0.8rem] font-semibold hover:border-border-2">Fermer</button>
-              </div>
+
+          {/* Formulaire */}
+          <div className="flex flex-col gap-3">
+            {flash ? <Flash tone="bad">{flash}</Flash> : null}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Champ label="Cible *"><input className={inputCls} value={cible} onChange={(e) => setCible(e.target.value)} placeholder="Nom du recherché" maxLength={200} autoFocus /></Champ>
+              <Champ label="Récompense"><input className={inputCls} value={prime} onChange={(e) => setPrime(e.target.value)} placeholder="$500" maxLength={120} /></Champ>
             </div>
-          ) : null}
+            <ChampPieceJointe value={photo} onChange={setPhoto} label="📎 Photo de l'avis (lien image, facultative)" />
+            <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Dangerosité</span><Picker options={DANGER} value={dangerosite} onChange={setDangerosite} /></div>
+            <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Consigne</span><Picker options={VIVANTMORT} value={vivantMort} onChange={setVivantMort} /></div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Champ label="Dernière position"><input className={inputCls} value={position} onChange={(e) => setPosition(e.target.value)} placeholder="Valentine, Colter…" maxLength={200} /></Champ>
+              <Champ label="Commanditaire"><input className={inputCls} value={commanditaire} onChange={(e) => setCommanditaire(e.target.value)} placeholder="Qui met la prime" maxLength={200} /></Champ>
+            </div>
+            <Champ label="Signalement"><textarea className={inputCls + " min-h-[64px] resize-y"} value={signalement} onChange={(e) => setSignalement(e.target.value)} placeholder="Crimes, description, dernières nouvelles…" maxLength={2000} /></Champ>
+            <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Statut</span><Picker options={STATUT} value={statut} onChange={setStatut} /></div>
+            <div className="flex justify-end"><button onClick={valider} disabled={busy === "save"} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{busy === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" strokeWidth={2} />} {editing ? "Enregistrer" : "Placarder l'avis"}</button></div>
+            {editing ? (
+              <div className="mt-1 flex flex-col gap-2.5 border-t border-border pt-3">
+                <div className="flex items-center gap-2">
+                  <button onClick={ficheIA} disabled={busy === "fiche"} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-3 py-1.5 text-[0.78rem] font-semibold text-muted transition hover:border-[color-mix(in_srgb,var(--accent)_55%,var(--border))] hover:text-ink disabled:opacity-60">
+                    {busy === "fiche" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ScanSearch className="h-3.5 w-3.5" />} Fiche cible IA
+                  </button>
+                  {fiche ? <LireBtn texte={fiche} /> : null}
+                  <span className="text-[0.7rem] text-faint">Profil, dangerosité & recommandations</span>
+                </div>
+                {fiche ? (
+                  <div className="rounded-[10px] border border-border bg-surface-2 p-3">
+                    <p className="whitespace-pre-wrap text-[0.84rem] leading-relaxed text-ink">{fiche}</p>
+                  </div>
+                ) : null}
+                <div className="flex items-center justify-between">
+                  <ConfirmDel onDelete={supprimer} busy={busy === "del"} />
+                  <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3 py-1.5 text-[0.8rem] font-semibold hover:border-border-2">Fermer</button>
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
       )}
     </Modal>
