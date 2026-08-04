@@ -30,6 +30,21 @@ import {
 
 type Router = ReturnType<typeof useRouter>;
 const money = (n: number) => `${cents(n)}$`;
+// Ancienneté depuis une date ISO (jours entiers, null si absente/future) + libellé.
+function joursDepuis(iso: string | null): number | null {
+  if (!iso) return null;
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  return Math.floor(ms / 86400000);
+}
+function ilYa(iso: string | null): string {
+  const j = joursDepuis(iso);
+  if (j == null) return "";
+  if (j >= 1) return `il y a ${j} j`;
+  const ms = Date.now() - new Date(iso as string).getTime();
+  const h = Math.floor(ms / 3600000);
+  return h >= 1 ? `il y a ${h} h` : "à l'instant";
+}
 const fourchette = (n: number): [number, number] => [Math.round(n * 95) / 100, Math.round(n * 105) / 100];
 // Coût de fabrication d'une recette à partir des prix des ressources.
 const _normIng = (x: string) => x.toLowerCase().normalize("NFD").replace(/[^a-z0-9]/g, "");
@@ -1685,13 +1700,22 @@ function ContratsTab({ contrats, clients, produits, router }: { contrats: ArmCon
         <p className="py-8 text-center text-[0.82rem] text-faint">Aucun contrat « {CTR_FILTRES.find((f) => f.key === filtre)?.label} ».</p>
       ) : (
         <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
-          {liste.map((c) => { const cli = c.clientId ? cliById.get(c.clientId) : null; return (
-            <button key={c.id} onClick={() => setSel(c)} className="flex flex-col gap-1 rounded-[12px] border border-border bg-surface-2 px-3.5 py-3 text-left transition hover:-translate-y-0.5 hover:border-border-2">
+          {liste.map((c) => {
+            const cli = c.clientId ? cliById.get(c.clientId) : null;
+            const jEnvoi = c.statut === "envoye" ? joursDepuis(c.envoyeAt) : null;
+            const relance = jEnvoi != null && jEnvoi >= 3;
+            return (
+            <button key={c.id} onClick={() => setSel(c)} className="flex flex-col gap-1 rounded-[12px] border bg-surface-2 px-3.5 py-3 text-left transition hover:-translate-y-0.5 hover:border-border-2" style={{ borderColor: relance ? "color-mix(in srgb,var(--oxblood) 45%,var(--border))" : "var(--border)" }}>
               <div className="flex items-center justify-between gap-2">
                 <span className="min-w-0 truncate text-[0.88rem] font-semibold">{c.clientNom}</span>
                 <Badge tone={ctrTone(c.statut)}>{ctrLabel(c.statut)}</Badge>
               </div>
               <div className="truncate text-[0.76rem] text-muted">{c.arme || "Arme à définir"}{c.numeroSerie ? ` · ${c.numeroSerie}` : ""}</div>
+              {c.statut === "envoye" && c.envoyeAt ? (
+                <div className="text-[0.7rem] font-semibold" style={{ color: relance ? "var(--oxblood)" : "var(--faint)" }}>{relance ? "⏳ à relancer — " : "📨 "}envoyé {ilYa(c.envoyeAt)}</div>
+              ) : c.statut === "signe" && c.signeAt ? (
+                <div className="text-[0.7rem] text-faint">✍️ signé {ilYa(c.signeAt)}</div>
+              ) : null}
               <div className="flex items-center justify-between gap-2">
                 {c.prix ? <span className="font-num text-[0.82rem] font-semibold" style={{ color: "var(--accent)" }}>{money(c.prix)}</span> : <span />}
                 <span className="text-[0.62rem] text-faint">{(c.clientDiscordId || cli?.discordId) ? "💬 Discord" : "✍️ manuel"}</span>

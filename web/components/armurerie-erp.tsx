@@ -40,6 +40,23 @@ const hm = (min: number) => { const h = Math.floor(min / 60); const m = min % 60
 // minuscules, sans accents, espaces normalisés. Évite qu'une commission tombe
 // silencieusement à 0 pour un simple écart de casse ou d'accent.
 const normNom = (s: string | null | undefined) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim();
+// Ancienneté depuis une date ISO — nombre de jours entiers (null si absente/future).
+function joursDepuis(iso: string | null): number | null {
+  if (!iso) return null;
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  return Math.floor(ms / 86400000);
+}
+// « il y a X j / h » compact.
+function ilYa(iso: string | null): string {
+  if (!iso) return "";
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const j = Math.floor(ms / 86400000);
+  if (j >= 1) return `il y a ${j} j`;
+  const h = Math.floor(ms / 3600000);
+  return h >= 1 ? `il y a ${h} h` : "à l'instant";
+}
 
 function Vide({ icon: Icon, texte }: { icon: typeof Users; texte: string }) {
   return (
@@ -1422,13 +1439,20 @@ export function CarnetCommandesTab({ commandes, produits, clients, router }: { c
           {commandes.map((c) => {
             const st = cmdStatut(c.statut);
             const nbPieces = c.lignes.reduce((s, l) => s + l.qte, 0);
+            const jours = joursDepuis(c.createdAt);
+            const active = c.statut === "en_attente" || c.statut === "prete";
+            const retard = active && jours != null && jours >= 3;
             return (
-              <button key={c.id} onClick={() => setSel(c)} className="rounded-[12px] border border-border bg-surface-2 px-3.5 py-3 text-left transition hover:-translate-y-0.5 hover:border-border-2">
+              <button key={c.id} onClick={() => setSel(c)} className="rounded-[12px] border bg-surface-2 px-3.5 py-3 text-left transition hover:-translate-y-0.5 hover:border-border-2" style={{ borderColor: retard ? "color-mix(in srgb,var(--oxblood) 45%,var(--border))" : "var(--border)" }}>
                 <div className="flex items-center justify-between gap-2">
                   <span className="min-w-0 truncate text-[0.88rem] font-semibold">{[c.clientPrenom, c.clientNom].filter(Boolean).join(" ")}</span>
                   <Badge tone={st.tone}>{st.label}</Badge>
                 </div>
-                {c.categorie ? <div className="mt-0.5 text-[0.72rem] text-faint">{c.categorie}</div> : null}
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[0.72rem] text-faint">
+                  {c.categorie ? <span>{c.categorie}</span> : null}
+                  {c.createdAt ? <span>· {ilYa(c.createdAt)}</span> : null}
+                  {retard ? <span className="font-semibold" style={{ color: "var(--oxblood)" }}>⏳ en attente depuis {jours} j</span> : null}
+                </div>
                 <div className="mt-1.5 text-[0.74rem] text-muted">{c.lignes.length} objet{c.lignes.length > 1 ? "s" : ""} · {nbPieces} pièce{nbPieces > 1 ? "s" : ""}</div>
                 <div className="mt-1 font-num text-[1rem] font-bold" style={{ color: "var(--accent)" }}>{money(c.total)}</div>
               </button>
@@ -1593,13 +1617,17 @@ export function RdvArmurerieTab({ rdvs, clients, router, onDemarrer }: { rdvs: A
   const [nouveau, setNouveau] = useState(false);
   const now = Date.now();
   const t = (r: ArmRdv) => (r.dateRdv ? new Date(r.dateRdv).getTime() : 0);
-  const aVenir = rdvs.filter((r) => r.statut === "a_venir").sort((a, b) => t(a) - t(b));
+  const aVenirTous = rdvs.filter((r) => r.statut === "a_venir").sort((a, b) => t(a) - t(b));
+  // « En retard » = toujours marqué à venir, mais l'heure est passée → à traiter.
+  const enRetard = aVenirTous.filter((r) => r.dateRdv && t(r) < now);
+  const aVenir = aVenirTous.filter((r) => !(r.dateRdv && t(r) < now));
   const prochain = aVenir[0] || null;
   const passes = rdvs.filter((r) => r.statut !== "a_venir").sort((a, b) => t(b) - t(a));
 
   return (
     <>
-      <div className="mb-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+      <div className={`mb-3 grid grid-cols-2 gap-2.5 ${enRetard.length ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
+        {enRetard.length ? <Stat label="En retard" value={String(enRetard.length)} tone="var(--oxblood)" icon={AlertTriangle} /> : null}
         <Stat label="À venir" value={String(aVenir.length)} tone="var(--accent)" icon={CalendarClock} />
         <Stat label="Prochain" value={prochain ? rdvDateFR(prochain.dateRdv) : "—"} tone="var(--brass)" icon={Clock} />
         <Stat label="Honorés" value={String(rdvs.filter((r) => r.statut === "honore").length)} tone="var(--good)" icon={Check} />
@@ -1608,10 +1636,18 @@ export function RdvArmurerieTab({ rdvs, clients, router, onDemarrer }: { rdvs: A
         <p className="text-[0.74rem] italic text-faint">Rendez-vous clients — heure + commande. L&apos;équipe est prévenue sur Discord 45 min & 15 min avant.</p>
         <Btn onClick={() => setNouveau(true)}><Plus className="h-3.5 w-3.5" /> Nouveau rendez-vous</Btn>
       </TopBar>
-      {aVenir.length === 0 && passes.length === 0 ? (
+      {aVenirTous.length === 0 && passes.length === 0 ? (
         <Vide icon={CalendarClock} texte="Aucun rendez-vous. Crée-en un : nom du client, heure et commande — glisse une pièce d'identité pour remplir le nom tout seul. Un rappel part sur Discord 45 et 15 min avant l'heure." />
       ) : (
         <div className="flex flex-col gap-4">
+          {enRetard.length ? (
+            <div>
+              <div className="mb-1.5 inline-flex items-center gap-1.5 text-[0.72rem] font-semibold uppercase tracking-[0.05em]" style={{ color: "var(--oxblood)" }}><AlertTriangle className="h-3.5 w-3.5" /> En retard ({enRetard.length}) — heure dépassée, à traiter</div>
+              <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
+                {enRetard.map((r) => <RdvCarte key={r.id} r={r} now={now} onClick={() => setSel(r)} />)}
+              </div>
+            </div>
+          ) : null}
           {aVenir.length ? (
             <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
               {aVenir.map((r) => <RdvCarte key={r.id} r={r} now={now} onClick={() => setSel(r)} />)}
