@@ -69,7 +69,7 @@ export function Portefeuilles({ portefeuilles, transactions, membres, total, peu
       {transactions.length ? (
         <div className="mt-4 border-t border-border pt-3">
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            <span className="text-[0.72rem] uppercase tracking-[0.06em] text-faint">Journal de trésorerie du coffre</span>
+            <span className="text-[0.72rem] uppercase tracking-[0.06em] text-faint">Grand-livre du coffre</span>
             <div className="flex items-center gap-1">
               {([["", "Tout"], ["entree", "Entrées"], ["sortie", "Sorties"]] as [string, string][]).map(([k, l]) => {
                 const on = sensF === k;

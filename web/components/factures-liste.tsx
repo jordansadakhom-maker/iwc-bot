@@ -37,7 +37,7 @@ export function FacturesListe({ factures, total }: { factures: FactureItem[]; to
       {flash ? <div className="mb-3"><Flash>{flash}</Flash></div> : null}
       <div className="mb-3.5 flex items-center justify-between gap-2.5">
         <div className="flex items-center gap-2.5">
-          <h3 className="text-[0.8rem] font-semibold uppercase tracking-[0.06em] text-muted">Factures</h3>
+          <h3 className="text-[0.8rem] font-semibold uppercase tracking-[0.06em] text-muted">Quittances &amp; factures</h3>
           <span className="font-num text-[0.8rem] text-faint">{factures.length}</span>
           {total > 0 ? <span className="rounded-md px-1.5 py-0.5 font-num text-[0.72rem] font-semibold" style={{ color: "var(--good)", background: "color-mix(in srgb,var(--good) 14%,transparent)" }}>{money(total)} encaissés</span> : null}
         </div>
@@ -85,7 +85,12 @@ export function FacturesListe({ factures, total }: { factures: FactureItem[]; to
                     ) : null}
                   </td>
                   <td className="border-b border-border px-2.5 py-2.5 font-num text-faint">{dateFR(f.createdAt)}</td>
-                  <td className="border-b border-border px-2.5 py-2.5 text-right font-num font-semibold" style={{ color: "var(--good)" }}>{money(f.montant)}</td>
+                  <td className="border-b border-border px-2.5 py-2.5 text-right">
+                    <div className="flex flex-col items-end gap-0.5">
+                      <span className="font-num font-semibold" style={{ color: "var(--good)" }}>{money(f.montant)}</span>
+                      <span className="inline-block -rotate-3 rounded border px-1 text-[0.52rem] font-bold uppercase tracking-[0.14em]" style={{ borderColor: "color-mix(in srgb,var(--good) 55%,transparent)", color: "var(--good)" }}>Payé</span>
+                    </div>
+                  </td>
                   <td className="border-b border-border px-2.5 py-2.5 text-right">
                     {delId === f.id ? (
                       <span className="inline-flex items-center gap-1.5 text-[0.74rem]">
