@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Eye, Crosshair, Plus, Loader2, Trash2, Pencil } from "lucide-react";
 import type { RapportItem, TraqueItem } from "@/lib/queries";
 import { Card, CardHeader, Empty, Badge } from "@/components/ui";
+import { Tampon } from "@/components/registre-ui";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
 import { ChampPieceJointe, PieceJointeVignette } from "@/components/piece-jointe";
 import { creerRapport, majRapport, supprimerRapport, creerTraque, majTraque, supprimerTraque } from "@/app/(app)/renseignement/actions";
@@ -32,6 +33,9 @@ const tone = (arr: { key: string; tone?: string }[], k: string) => arr.find((x) 
 const label = (arr: { key: string; label: string }[], k: string) => arr.find((x) => x.key === (k || "").toLowerCase())?.label || k;
 const badgeTone = (t?: string): "good" | "warn" | "muted" | "oxblood" | "accent" =>
   t === "var(--good)" ? "good" : t === "var(--warn)" ? "warn" : t === "var(--oxblood)" ? "oxblood" : "muted";
+// N° de dossier stable (pour l'ambiance « rapport confidentiel »).
+const hashId = (id: string) => { let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0; return h; };
+const numeroFor = (id: string) => "N° " + (100 + (hashId(id) % 900));
 
 function Fiabilite({ n }: { n: number }) {
   const v = Math.max(0, Math.min(5, Math.round(n)));
@@ -89,26 +93,33 @@ export function RenseignementPanel({ rapports, traques }: { rapports: RapportIte
         {rapports.length === 0 ? (
           <Empty icon={Eye}>Aucun rapport. Ajoute un renseignement avec « Nouveau rapport ».</Empty>
         ) : (
-          <div className="flex flex-col divide-y divide-border">
-            {rapportsTri.map((r) => (
-              <div key={r.id} className="group py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-[0.9rem] font-semibold">
-                      {r.cible ? <>Cible : {r.cible}</> : "Renseignement"}
-                      {r.source ? <span className="ml-2 text-[0.74rem] font-normal text-muted">source : {r.source}</span> : null}
+          <div className="flex flex-col gap-2.5">
+            {rapportsTri.map((r) => {
+              const neuf = (r.statut || "").toLowerCase() === "nouveau";
+              return (
+                <div key={r.id} className="group relative overflow-hidden rounded-[12px] border p-3.5" style={{ borderColor: "color-mix(in srgb,var(--oxblood) 20%,var(--border))", background: "linear-gradient(160deg,color-mix(in srgb,var(--surface-2) 94%,transparent),color-mix(in srgb,var(--surface-2) 82%,#000))" }}>
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <span className="text-[0.54rem] tracking-[0.14em] text-faint" style={{ fontFamily: "'Courier New',monospace" }}>DOSSIER {numeroFor(r.id)}</span>
+                    <Tampon texte={neuf ? "CONFIDENTIEL" : "CLASSÉ"} tone={neuf ? "var(--oxblood)" : "var(--muted)"} />
+                  </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-[0.9rem] font-semibold">
+                        {r.cible ? <>Cible : {r.cible}</> : "Renseignement"}
+                        {r.source ? <span className="ml-2 text-[0.74rem] font-normal text-muted">source : {r.source}</span> : null}
+                      </div>
+                      <p className="mt-1 text-[0.82rem] leading-relaxed text-muted">{r.info}</p>
+                      {r.pieceJointe ? <div className="mt-2"><PieceJointeVignette url={r.pieceJointe} taille="h-14 w-14" /></div> : null}
                     </div>
-                    <p className="mt-1 text-[0.82rem] leading-relaxed text-muted">{r.info}</p>
-                    {r.pieceJointe ? <div className="mt-2"><PieceJointeVignette url={r.pieceJointe} taille="h-14 w-14" /></div> : null}
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Badge tone={badgeTone(tone(STATUT_RAPPORT, r.statut))}>{label(STATUT_RAPPORT, r.statut)}</Badge>
+                      <button onClick={() => setRapEdit(r)} className="opacity-60 transition hover:opacity-100" aria-label="Modifier"><Pencil className="h-3.5 w-3.5" /></button>
+                    </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <Badge tone={badgeTone(tone(STATUT_RAPPORT, r.statut))}>{label(STATUT_RAPPORT, r.statut)}</Badge>
-                    <button onClick={() => setRapEdit(r)} className="opacity-60 transition hover:opacity-100" aria-label="Modifier"><Pencil className="h-3.5 w-3.5" /></button>
-                  </div>
+                  <div className="mt-2 flex items-center gap-2 border-t border-border pt-2 text-[0.72rem] text-faint"><span>Fiabilité</span> <Fiabilite n={r.fiabilite} /></div>
                 </div>
-                <div className="mt-2 flex items-center gap-2 text-[0.72rem] text-faint"><span>Fiabilité</span> <Fiabilite n={r.fiabilite} /></div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </Card>

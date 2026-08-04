@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { Bell } from "lucide-react";
+import { Bell, MailOpen, Activity } from "lucide-react";
 import { getNotificationsFeed, getSessionDiscordId, getAcces } from "@/lib/queries";
 import { listerNotifications } from "./actions";
 import { NotificationCenter } from "@/components/notification-center";
 import { compteNonLus } from "@/lib/notifications-centre";
 import { rolesDeActeur } from "@/lib/notif-ciblage";
 import { PageHeader, Card, CardHeader, Empty } from "@/components/ui";
+import { PlaqueBand } from "@/components/registre-ui";
 
 export const dynamic = "force-dynamic";
 
@@ -19,10 +20,16 @@ export default async function NotificationsPage() {
   const [{ connecte, notifs }, feed, monId, acces] = await Promise.all([listerNotifications(), getNotificationsFeed(), getSessionDiscordId(), getAcces()]);
   const nonLus = compteNonLus(notifs);
   const cible = { did: monId, roles: rolesDeActeur(acces) };
+  const band = [
+    { icon: Bell, label: "Notifications", val: String(notifs.length), sous: "au centre" },
+    { icon: MailOpen, label: "Non lues", val: String(nonLus), sous: "à consulter" },
+    { icon: Activity, label: "Activité récente", val: String(feed.items.length), sous: "au fil de l'eau" },
+  ];
 
   return (
     <>
-      <PageHeader titre="Notifications" sous="Télégrammes, messages, rendez-vous & activité de la maison" actif={connecte || feed.connecte} />
+      <PageHeader titre="Notifications" sous="Registre des dépêches — télégrammes, messages, rendez-vous & activité" actif={connecte || feed.connecte} />
+      {(notifs.length + feed.items.length) > 0 ? <PlaqueBand items={band} cols={3} /> : null}
 
       {/* Centre de notifications — persistant, lu/non-lu, archivage, filtres, historique. */}
       <Card>
