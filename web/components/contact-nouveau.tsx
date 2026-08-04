@@ -70,7 +70,7 @@ export function ContactNouveau() {
       </button>
 
       {open ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={fermer}>
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onPointerDown={(e) => { if (e.target === e.currentTarget) fermer(); }}>
           <div
             className="max-h-[88vh] w-full max-w-[520px] overflow-y-auto rounded-card border border-border bg-surface p-5 shadow-card"
             style={{ background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,#000))" }}

@@ -415,7 +415,7 @@ function CertificatOverlay({ nom, statut, notes, reposMotif, blessures, onClose 
   const actives = blessures.slice(-6).reverse();
   const dateStr = new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
   return (
-    <div className="fixed inset-0 z-[60] grid place-items-center bg-black/70 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] grid place-items-center bg-black/70 p-4" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <style>{`@media print{body *{visibility:hidden!important}#certif-doc,#certif-doc *{visibility:visible!important}#certif-doc{position:fixed;inset:0;margin:0;padding:44px;background:#fff}.no-print{display:none!important}}`}</style>
       <div className="w-full max-w-[620px] overflow-y-auto rounded-card border border-border-2 bg-surface p-5 shadow-card" style={{ maxHeight: "88vh" }} onClick={(e) => e.stopPropagation()}>
         <div className="no-print mb-3 flex items-center justify-between">
@@ -455,7 +455,7 @@ function CertificatOverlay({ nom, statut, notes, reposMotif, blessures, onClose 
 
 function Modal({ titre, children, onClose, max = 540 }: { titre: string; children: React.ReactNode; onClose: () => void; max?: number }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="max-h-[88vh] w-full overflow-y-auto rounded-card border border-border bg-surface p-5 shadow-card" style={{ maxWidth: max, background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,#000))" }} onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <div className="font-display text-xl">{titre}</div>
