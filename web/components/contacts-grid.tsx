@@ -20,6 +20,11 @@ const AFFILIATIONS = ["Civil", "Loi", "Hors-la-loi", "Loups de Fer", "Cartel", "
 const RELATIONS = ["Amicale", "Professionnelle", "Affaire", "Tendue", "Hostile"];
 const STATUTS = ["Vivant", "Disparu", "Recherché", "Décédé"];
 const TYPE_TONE: Record<string, string> = { "Allié": "var(--good)", "Client": "var(--accent)", "Indic": "var(--steel)", "Ennemi": "var(--oxblood)", "Neutre": "var(--muted)" };
+const initiales = (nom: string) => nom.split(/\s+/).filter(Boolean).map((s) => s[0]).slice(0, 2).join("").toUpperCase() || "?";
+
+function Cartouche({ children }: { children: React.ReactNode }) {
+  return <span className="inline-flex items-center rounded border border-border bg-surface px-1.5 py-0.5 text-[0.62rem] text-muted">{children}</span>;
+}
 
 function Stars({ n }: { n: number }) {
   const v = Math.max(0, Math.min(5, Math.round(n)));
@@ -57,18 +62,33 @@ export function ContactsGrid({ contacts }: { contacts: ContactItem[] }) {
   return (
     <>
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
-        {contacts.map((c) => (
-          <button key={c.id} onClick={() => setSel(c)} className="rounded-[11px] border border-border bg-surface-2 px-3 py-2.5 text-left transition hover:-translate-y-0.5 hover:border-border-2">
-            <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0 truncate text-[0.88rem] font-semibold">{c.nom}</div>
-              <TypeBadge type={c.type} />
-            </div>
-            <div className="mt-2 flex items-center justify-between gap-2 text-[0.72rem] text-muted">
-              {c.secteur ? <span className="truncate">{c.secteur}</span> : <span className="text-faint">—</span>}
-              <Stars n={c.fiabilite} />
-            </div>
-          </button>
-        ))}
+        {contacts.map((c) => {
+          const t = TYPE_TONE[c.type] || "var(--muted)";
+          return (
+            <button key={c.id} onClick={() => setSel(c)} className="group relative overflow-hidden rounded-[12px] border p-3.5 pl-4 text-left transition hover:-translate-y-0.5 hover:border-border-2" style={{ borderColor: `color-mix(in srgb,${t} 24%,var(--border))`, background: "linear-gradient(160deg,color-mix(in srgb,var(--surface-2) 94%,transparent),color-mix(in srgb,var(--surface-2) 82%,#000))" }}>
+              <span aria-hidden className="absolute left-0 top-0 h-full w-1" style={{ background: t }} />
+              <div className="flex items-start gap-3">
+                <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-[0.76rem] font-extrabold text-black/85" style={{ background: `radial-gradient(circle at 32% 26%, color-mix(in srgb,${t} 78%,#fff), color-mix(in srgb,${t} 45%,#000))`, boxShadow: `inset 0 0 0 2px color-mix(in srgb,${t} 45%,#000)` }}>{initiales(c.nom)}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate font-display text-[0.96rem] font-semibold leading-tight">{c.nom}</div>
+                      {c.metier || c.secteur ? <div className="truncate text-[0.72rem] text-muted">{[c.metier, c.secteur].filter(Boolean).join(" · ")}</div> : null}
+                    </div>
+                    <TypeBadge type={c.type} />
+                  </div>
+                  <div className="mt-1.5 flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 flex-wrap gap-1">
+                      {c.affiliation ? <Cartouche>{c.affiliation}</Cartouche> : null}
+                      {c.statutRP ? <Cartouche>{c.statutRP}</Cartouche> : null}
+                    </div>
+                    <Stars n={c.fiabilite} />
+                  </div>
+                </div>
+              </div>
+            </button>
+          );
+        })}
       </div>
 
       {sel ? <ContactModal contact={sel} onClose={() => setSel(null)} router={router} /> : null}
