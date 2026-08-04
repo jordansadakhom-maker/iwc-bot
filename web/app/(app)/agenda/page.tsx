@@ -1,6 +1,7 @@
-import { Users } from "lucide-react";
+import { Users, CalendarDays, BookUser } from "lucide-react";
 import { getAgenda } from "@/lib/queries";
 import { PageHeader, Card, CardHeader, Empty } from "@/components/ui";
+import { PlaqueBand } from "@/components/registre-ui";
 import { ContactsGrid } from "@/components/contacts-grid";
 import { ContactNouveau } from "@/components/contact-nouveau";
 import { AgendaRdvs } from "@/components/agenda-rdvs";
@@ -9,10 +10,15 @@ export const dynamic = "force-dynamic";
 
 export default async function AgendaPage() {
   const { connecte, rdvs, contacts } = await getAgenda();
+  const band = [
+    { icon: CalendarDays, label: "Rendez-vous", val: String(rdvs.length), sous: "au planning" },
+    { icon: BookUser, label: "Contacts", val: String(contacts.length), sous: "au carnet" },
+  ];
 
   return (
     <>
-      <PageHeader titre="Agenda & Clients" sous="Rendez-vous et carnet de contacts" actif={connecte} />
+      <PageHeader titre="Agenda & Clients" sous="Livre de rendez-vous et carnet de contacts" actif={connecte} />
+      {connecte ? <PlaqueBand items={band} cols={2} /> : null}
 
       <Card>
         <CardHeader titre="Rendez-vous" compteur={rdvs.length} />
