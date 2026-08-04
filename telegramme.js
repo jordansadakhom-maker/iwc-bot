@@ -621,4 +621,19 @@ function marquerRdvCree(db, rdvId) {
   return { ok: true, message: 'Télégramme marqué (RDV créé)' };
 }
 
-module.exports = { ouvrirConversation, ajouterAuFil, cloturerAuto, marquerFixe, onMessage, routeInteraction, telegrammeCommands, verifierInactivite, repondreDepuisWeb, marquerRdvCree };
+// Clôture / réouverture d'un télégramme DEPUIS LE SITE (appelé par commande-web.js).
+// Le bot est la SOURCE DE VÉRITÉ (db.conversations) : sans passer par ici, une
+// clôture écrite en direct dans Supabase serait ÉCRASÉE à la resync suivante.
+// MUTE le `db` passé (l'appelant le sauvegarde). Ne touche pas aux conversations
+// déjà archivées (« classe »).
+function changerStatutDepuisWeb(db, rdvId, clos) {
+  const store = _store(db);
+  const conv = store[rdvId];
+  if (!conv) return { ok: false, message: 'Conversation introuvable' };
+  if (conv.status === 'classe') return { ok: false, message: 'Conversation archivée' };
+  conv.status = clos ? 'cloture' : 'ouvert';
+  if (clos) conv.closedAt = Date.now(); else { conv.reopenedAt = Date.now(); conv.lastActivityAt = Date.now(); }
+  return { ok: true, message: clos ? 'Télégramme clôturé' : 'Télégramme rouvert' };
+}
+
+module.exports = { ouvrirConversation, ajouterAuFil, cloturerAuto, marquerFixe, onMessage, routeInteraction, telegrammeCommands, verifierInactivite, repondreDepuisWeb, marquerRdvCree, changerStatutDepuisWeb };

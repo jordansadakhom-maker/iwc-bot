@@ -109,11 +109,16 @@ export async function changerStatutTelegramme(id: string, clos: boolean): Promis
     const { error } = await admin.from("TelegrammeWeb").update({ statut: clos ? "clos" : "transmis" }).eq("id", realId);
     if (error) return { ok: false, error: "Enregistrement impossible." };
   } else {
-    // Télégramme DISCORD : on écrit le statut directement. Si le client réécrit,
-    // le bot rouvrira la conversation (comportement voulu). Le fil du salon Discord
-    // n'est pas archivé automatiquement tant que Discord reste actif — sans impact.
-    const { error } = await admin.from("Telegramme").update({ statut: clos ? "cloture" : "ouvert", updatedAt: new Date().toISOString() }).eq("id", id);
-    if (error) return { ok: false, error: "Enregistrement impossible." };
+    // Télégramme DISCORD : le BOT est la source de vérité (db.conversations). On
+    // ROUTE par une commande bot pour que la resync PROPAGE le statut — une
+    // écriture directe dans « Telegramme » était ÉCRASÉE à la synchro suivante
+    // (la clôture « revenait »). On reflète AUSSI en direct pour un retour visuel
+    // immédiat ; la resync du bot confirme/renforce ensuite.
+    const r = await envoyerCommande(clos ? "telegramme.cloturer" : "telegramme.rouvrir", { rdvId: id }, { attendre: true, timeoutMs: 12000 });
+    if (!r.ok && !r.enAttente) return { ok: false, error: r.error || "Le bot n'a pas confirmé la mise à jour." };
+    await admin.from("Telegramme").update({ statut: clos ? "cloture" : "ouvert", updatedAt: new Date().toISOString() }).eq("id", id);
+    if (r.enAttente) return { ok: true, info: clos ? "Clôture enregistrée — confirmation par le bot en cours (~30 s)." : "Réouverture enregistrée — confirmation par le bot en cours (~30 s)." };
+    return { ok: true, info: clos ? "Télégramme clôturé." : "Télégramme rouvert." };
   }
   return { ok: true, info: clos ? (livraison ? `Télégramme clôturé — client ${livraison}` : "Télégramme clôturé — trace conservée.") : "Télégramme rouvert." };
 }

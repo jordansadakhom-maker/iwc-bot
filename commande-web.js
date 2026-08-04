@@ -881,6 +881,17 @@ Object.assign(HANDLERS, {
     if (!telegramme?.marquerRdvCree) return { ok: false, message: 'Indisponible' };
     return telegramme.marquerRdvCree(db, _s(p.rdvId, 80));
   },
+  // Clôture / réouverture d'un télégramme Discord DEPUIS LE SITE. On modifie la
+  // source de vérité du bot (db.conversations) pour que la resync PROPAGE le
+  // statut au lieu de l'écraser (l'écriture directe côté site était annulée).
+  'telegramme.cloturer': (db, p) => {
+    if (!telegramme?.changerStatutDepuisWeb) return { ok: false, message: 'Indisponible' };
+    return telegramme.changerStatutDepuisWeb(db, _s(p.rdvId, 80), true);
+  },
+  'telegramme.rouvrir': (db, p) => {
+    if (!telegramme?.changerStatutDepuisWeb) return { ok: false, message: 'Indisponible' };
+    return telegramme.changerStatutDepuisWeb(db, _s(p.rdvId, 80), false);
+  },
 
   // ── Inventaire du coffre commun (db.inventaire.stock) ─────
   'inventaire.ajuster': (db, p) => {
