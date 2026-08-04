@@ -7,7 +7,7 @@ import {
   estBandage, estOuverte, statutsDe, statutRepresentatif,
   type Vente, type PatientSemaine, type VentesData,
   type Facture, type FacturesData,
-  type SoinFDO, type BureauFDO, type FDOData,
+  type SoinFDO, type BureauFDO, type FDOData, type RapportFDO,
   type Frais, type FraisData,
 } from "@/lib/dispensaire-facturation-const";
 
@@ -71,10 +71,10 @@ export async function getFactures(): Promise<FacturesData> {
 
 // ── 3) Soins FDO ────────────────────────────────────────────────────────────
 export async function getFDO(): Promise<FDOData> {
-  const vide: FDOData = { connecte: false, pret: false, canEdit: false, soins: [], bureaux: [] };
+  const vide: FDOData = { connecte: false, pret: false, canEdit: false, soins: [], bureaux: [], rapports: {} };
   const admin = createAdminClient();
   if (!admin) return vide;
-  const { data, error } = await admin.from("DispensaireSoinFDO").select("*").order("createdAt", { ascending: false }).limit(300);
+  const { data, error } = await admin.from("DispensaireSoinFDO").select("*").order("createdAt", { ascending: false }).limit(1000);
   if (error) return { ...vide, connecte: true, pret: false, canEdit: true };
   const soins: SoinFDO[] = ((data || []) as Record<string, unknown>[]).map((r) => ({
     id: String(r.id), bureau: String(r.bureau || "Bureau"), agent: s(r.agent), soin: s(r.soin), montant: num(r.montant),
@@ -83,7 +83,16 @@ export async function getFDO(): Promise<FDOData> {
   const map = new Map<string, { nb: number; total: number }>();
   for (const x of soins) { const e = map.get(x.bureau) || { nb: 0, total: 0 }; e.nb += 1; e.total += x.montant; map.set(x.bureau, e); }
   const bureaux: BureauFDO[] = [...map.entries()].map(([bureau, e]) => ({ bureau, nb: e.nb, total: e.total })).sort((a, b) => a.bureau.localeCompare(b.bureau));
-  return { connecte: true, pret: true, canEdit: true, soins, bureaux };
+
+  // Statuts hebdomadaires (demande de remboursement à l'État) — table optionnelle :
+  // si elle n'existe pas encore, on n'échoue pas (les soins restent affichés).
+  const rapports: Record<string, RapportFDO> = {};
+  const { data: rp } = await admin.from("DispensaireFdoRapport").select("*");
+  for (const r of ((rp || []) as Record<string, unknown>[])) {
+    const cle = String(r.id || "");
+    if (cle) rapports[cle] = { cle, statut: String(r.statut || "en_attente"), envoyeLe: s(r.envoyeLe), genereLe: s(r.genereLe), note: s(r.note), par: s(r.par) };
+  }
+  return { connecte: true, pret: true, canEdit: true, soins, bureaux, rapports };
 }
 
 // ── 4) Notes de frais ───────────────────────────────────────────────────────

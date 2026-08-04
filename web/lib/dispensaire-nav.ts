@@ -21,7 +21,7 @@ export const DISP_NAV: DispTab[] = [
   { href: "/dispensaire/interventions", label: "Interventions", icon: Scissors, pret: true, restreint: true, cat: "medical", desc: "Les opérations et leurs comptes-rendus opératoires (CRO)." },
   { href: "/dispensaire/chambres", label: "Chambres", icon: BedDouble, pret: true, cat: "medical", desc: "Les lits et chambres — occupation, réservation, nettoyage." },
   { href: "/dispensaire/ambulances", label: "Ambulances", icon: Truck, pret: true, cat: "medical", desc: "La flotte d'intervention — état, carburant, entretien et matériel." },
-  { href: "/dispensaire/fdo", label: "Soins FDO", icon: ShieldCheck, pret: true, cat: "medical", desc: "Soins portés aux forces de l'ordre du comté." },
+  { href: "/dispensaire/fdo", label: "Soins FDO", icon: ShieldCheck, pret: true, cat: "medical", desc: "Soins aux forces de l'ordre — suivi hebdomadaire & remboursement État." },
   { href: "/dispensaire/certificats", label: "Certificats", icon: Stethoscope, pret: true, cat: "medical", desc: "Certificats médicaux, prêts à sceller et à imprimer." },
   { href: "/dispensaire/rapports", label: "Rapports médicaux", icon: ScrollText, pret: true, cat: "medical", desc: "Comptes rendus et planches d'examen." },
   { href: "/dispensaire/ventes", label: "Ventes", icon: BadgeDollarSign, pret: true, cat: "medical", desc: "Le cahier des soins délivrés, patient par patient." },
