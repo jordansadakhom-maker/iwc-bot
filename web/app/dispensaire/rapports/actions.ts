@@ -5,6 +5,14 @@ import { getSessionProfile } from "@/lib/queries";
 import { estAutorise } from "@/lib/dispensaire-roles";
 import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenements";
 import { validerPieceJointe } from "@/lib/piece-jointe";
+import { getMedecinsEffectifsResult, type MedecinsResult } from "@/lib/dispensaire-effectifs";
+
+// (Re)charge la liste des médecins depuis le client — permet au formulaire de se
+// remplir tout seul si le rendu serveur est tombé sur un raté réseau (sans avoir
+// à recharger la page). Renvoie { ok, medecins } avec retries côté serveur.
+export async function chargerMedecins(): Promise<MedecinsResult> {
+  return await getMedecinsEffectifsResult();
+}
 
 // Rapports médicaux (liens Canva) — ouvert au personnel soignant du dispensaire.
 export type RapportResult = { ok: boolean; error?: string; id?: string };
