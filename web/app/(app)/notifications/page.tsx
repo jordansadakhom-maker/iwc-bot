@@ -46,9 +46,10 @@ export default async function NotificationsPage() {
         {feed.items.length === 0 ? (
           <Empty icon={Bell}>Aucune activité récente. Les télégrammes, demandes de rendez-vous, factures et opérations terminées s&apos;affichent ici au fil de l&apos;eau.</Empty>
         ) : (
-          <div className="flex flex-col divide-y divide-border">
+          <div className="flex flex-col gap-2">
             {feed.items.map((n) => (
-              <Link key={n.id} href={n.lien} className="flex items-start gap-3 py-3 transition hover:bg-[color-mix(in_srgb,var(--ink)_3%,transparent)]">
+              <Link key={n.id} href={n.lien} className="relative flex items-start gap-3 overflow-hidden rounded-[10px] border border-border bg-surface-2 px-3 py-2.5 pl-4 transition hover:border-border-2">
+                <span aria-hidden className="absolute left-0 top-0 h-full w-1" style={{ background: TONE_TXT[n.tone] || "var(--faint)" }} />
                 <span className="mt-0.5 text-[1.05rem]">{n.icon}</span>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[0.88rem] font-medium">{n.titre}</div>

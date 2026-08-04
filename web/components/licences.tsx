@@ -196,15 +196,19 @@ export function LicencesRegistre({ data, config, caps = CAPS_TOUT, roleLabel, me
             <table className="w-full min-w-[640px] text-left text-[0.8rem]">
               <thead><tr className="border-b border-border text-[0.64rem] uppercase tracking-[0.04em] text-faint"><th className="py-1.5 pr-2">Numéro</th><th className="px-2">Titulaire</th><th className="px-2">Type</th><th className="px-2">Statut</th><th className="px-2">Expiration</th></tr></thead>
               <tbody>
-                {licences.map((l) => (
+                {licences.map((l) => {
+                  const eff = statutEffectif(l);
+                  const stTone = eff === "active" ? "var(--good)" : eff === "suspendue" ? "var(--warn)" : "var(--oxblood)";
+                  return (
                   <tr key={l.id} className="cursor-pointer border-b border-border/50 hover:bg-surface-2" onClick={() => setFiche(l)}>
-                    <td className="py-2 pr-2 font-num text-[0.74rem] text-faint">{l.numero}</td>
+                    <td className="py-2 pr-2 font-num text-[0.74rem] text-faint" style={{ borderLeft: `3px solid ${stTone}`, paddingLeft: 8 }}>{l.numero}</td>
                     <td className="px-2 font-semibold">{l.nom}{l.prenom ? ` ${l.prenom}` : ""}</td>
                     <td className="px-2 text-faint">{l.typeNom || l.typeCode}</td>
                     <td className="px-2"><StatutBadge l={l} /></td>
                     <td className="px-2 font-num text-faint">{dateFR(l.dateExpiration)}</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
