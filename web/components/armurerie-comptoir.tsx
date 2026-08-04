@@ -17,6 +17,8 @@ import {
 } from "@/components/armurerie-erp";
 import { SimulateurFiscal } from "@/components/armurerie-fiscal";
 import { snapshotCycle } from "@/lib/armurerie-fiscal";
+import { KpiBand } from "@/components/erp-kpi";
+import { echantillonner, type Kpi } from "@/lib/erp-kpi-const";
 import { toastErreur } from "@/lib/toast";
 import {
   creerClient, majClient, supprimerClient,
@@ -28,6 +30,21 @@ import {
 
 type Router = ReturnType<typeof useRouter>;
 const money = (n: number) => `${cents(n)}$`;
+// Ancienneté depuis une date ISO (jours entiers, null si absente/future) + libellé.
+function joursDepuis(iso: string | null): number | null {
+  if (!iso) return null;
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  return Math.floor(ms / 86400000);
+}
+function ilYa(iso: string | null): string {
+  const j = joursDepuis(iso);
+  if (j == null) return "";
+  if (j >= 1) return `il y a ${j} j`;
+  const ms = Date.now() - new Date(iso as string).getTime();
+  const h = Math.floor(ms / 3600000);
+  return h >= 1 ? `il y a ${h} h` : "à l'instant";
+}
 const fourchette = (n: number): [number, number] => [Math.round(n * 95) / 100, Math.round(n * 105) / 100];
 // Coût de fabrication d'une recette à partir des prix des ressources.
 const _normIng = (x: string) => x.toLowerCase().normalize("NFD").replace(/[^a-z0-9]/g, "");
@@ -111,12 +128,52 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
   const demarrerDepuisRdv = (p: CaissePrefill) => { setPrefill(p); setTab("caisse"); };
   // Bénéfice du cycle fiscal courant (dérivé du coffre) — alimente le simulateur
   // en caisse : impact d'une vente sur la tranche/l'impôt avant de valider.
-  const beneficeCycle = snapshotCycle(mouvementsCoffre, impots.filter((i) => i.statut === "paye")).benefice;
+  const cycle = snapshotCycle(mouvementsCoffre, impots.filter((i) => i.statut === "paye"));
+  const beneficeCycle = cycle.benefice;
   const signes = contrats.filter((c) => c.statut === "signe").length;
   const paiesDues = paies.filter((p) => p.statut !== "paye").length;
   const impotsDus = impots.filter((i) => i.statut !== "paye").length;
   const tachesAFaire = taches.filter((t) => !t.fait).length;
   const rdvsAVenir = rdvs.filter((r) => r.statut === "a_venir").length;
+
+  // ── Cockpit : métriques de pilotage (données déjà en props) ──
+  const totalPaiesDues = paies.filter((p) => p.statut !== "paye").reduce((s, p) => s + p.montant, 0);
+  const _estCapital = (m: ArmMouvement) => (m.nature || "").toLowerCase() === "capital";
+  const _recettes = mouvementsCoffre.filter((m) => m.sens === "entree" && !_estCapital(m)).reduce((s, m) => s + m.montant, 0);
+  const _depenses = mouvementsCoffre.filter((m) => m.sens === "sortie" && !_estCapital(m)).reduce((s, m) => s + m.montant, 0);
+  const resultatNet = _recettes - _depenses;
+  const rupturesStock = produits.filter((p) => !p.aLaDemande && p.stock <= 0).length;
+  const pointagesOuverts = pointages.filter((p) => !p.fin).length;
+  const commandesActives = commandes.filter((c) => c.statut === "en_attente" || c.statut === "prete").length;
+  // Tendance du solde du coffre reconstruite depuis les mouvements datés (solde
+  // d'ouverture implicite = solde actuel − somme nette des mouvements).
+  const coffreSpark = (() => {
+    const movs = mouvementsCoffre.filter((m) => m.createdAt).slice().sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+    if (movs.length < 2) return [] as number[];
+    const signed = movs.map((m) => (m.sens === "entree" ? m.montant : -m.montant));
+    let bal = coffre - signed.reduce((s, v) => s + v, 0);
+    const serie: number[] = [];
+    for (const d of signed) { bal += d; serie.push(bal); }
+    return echantillonner(serie, 24);
+  })();
+  const cockpitKpis: Kpi[] = [
+    { id: "coffre", label: "Coffre", value: money(coffre), tone: "var(--brass)", spark: coffreSpark },
+    { id: "ca", label: "Chiffre d'affaires", value: money(ca), tone: "var(--accent)" },
+    { id: "benef", label: "Bénéfice du cycle", value: money(beneficeCycle), tone: beneficeCycle >= 0 ? "var(--good)" : "var(--oxblood)" },
+    { id: "impot", label: "Impôt dû (cycle)", value: money(cycle.impot), tone: "var(--warn)", sub: `tranche ${cycle.taux}%` },
+    { id: "net", label: "Résultat net", value: money(resultatNet), tone: resultatNet >= 0 ? "var(--good)" : "var(--oxblood)" },
+    { id: "paies", label: "Paies à verser", value: money(totalPaiesDues), tone: totalPaiesDues > 0 ? "var(--warn)" : "var(--faint)", sub: paiesDues ? `${paiesDues} fiche(s)` : null },
+  ];
+  const attentionsToutes: { label: string; n: number; tab: TabKey; tone: string }[] = [
+    { label: "paie(s) à verser", n: paiesDues, tab: "paies", tone: "var(--warn)" },
+    { label: "impôt(s) dû(s)", n: impotsDus, tab: "impots", tone: "var(--oxblood)" },
+    { label: "service(s) en cours", n: pointagesOuverts, tab: "pointage", tone: "var(--steel)" },
+    { label: "produit(s) en rupture", n: rupturesStock, tab: "produits", tone: "var(--oxblood)" },
+    { label: "anomalie(s) de stock", n: scan?.nb ?? 0, tab: "scan", tone: "var(--oxblood)" },
+    { label: "commande(s) en cours", n: commandesActives, tab: "commandes", tone: "var(--accent)" },
+    { label: "RDV à venir", n: rdvsAVenir, tab: "rdv", tone: "var(--good)" },
+  ];
+  const attentions = attentionsToutes.filter((a) => a.n > 0);
 
   const TABS: { key: TabKey; label: string; icon: typeof Users; n: number }[] = [
     { key: "caisse", label: "Caisse", icon: ShoppingCart, n: produits.length },
@@ -144,12 +201,21 @@ export function ArmurerieComptoir({ clients, ventes, contrats, ca, coffre, mouve
       {/* Coffre propre à l'armurerie */}
       <CoffreArmurerie solde={coffre} mouvements={mouvementsCoffre} router={router} />
 
-      {/* KPIs */}
-      <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-        <Kpi label="Chiffre d'affaires" value={money(ca)} tone="var(--accent)" icon={CircleDollarSign} />
-        <Kpi label="Ventes au registre" value={String(ventes.length)} tone="var(--brass)" icon={ScrollText} />
-        <Kpi label="Clients fichés" value={String(clients.length)} tone="var(--steel)" icon={Users} />
-        <Kpi label="Contrats signés" value={String(signes)} tone="var(--good)" icon={Check} />
+      {/* Cockpit : pilotage synthétique (tuiles + barre d'alertes cliquable) */}
+      <div className="mb-4 flex flex-col gap-3">
+        <KpiBand items={cockpitKpis} />
+        {attentions.length ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-[12px] border border-border bg-surface-2 px-3 py-2.5">
+            <span className="inline-flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.05em] text-faint"><AlertTriangle className="h-3.5 w-3.5" /> À traiter</span>
+            {attentions.map((a) => (
+              <button key={a.tab + a.label} onClick={() => setTab(a.tab)} className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[0.76rem] font-semibold transition hover:brightness-110" style={{ borderColor: `color-mix(in srgb,${a.tone} 45%,var(--border))`, background: `color-mix(in srgb,${a.tone} 10%,transparent)`, color: a.tone }}>
+                <span className="font-num">{a.n}</span> {a.label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-[12px] border border-border bg-surface-2 px-3 py-2 text-[0.76rem] text-faint">✓ Rien en attente — tout est à jour.</div>
+        )}
       </div>
 
       {/* Onglets */}
@@ -374,12 +440,19 @@ function CaisseTab({ produits, ressources, clients, router, prefill = null, onPr
   const vente = lignes.reduce((s, l) => s + pu(l.p) * l.n, 0);
   const cout = lignes.reduce((s, l) => s + l.p.cout * l.n, 0);
   const benefice = vente - cout;
+  // Statut du client sélectionné : on bloque la vente à un client « interdit » et
+  // on avertit pour un client « sous surveillance » (le statut existait mais
+  // n'était pas exploité à la caisse).
+  const clientSel = clientId ? clients.find((c) => c.id === clientId) || null : null;
+  const clientInterdit = (clientSel?.statut || "").toLowerCase() === "interdit";
+  const clientSurveille = (clientSel?.statut || "").toLowerCase() === "surveillance";
 
   const add = (id: string) => setCart((c) => ({ ...c, [id]: (c[id] || 0) + 1 }));
   const sub = (id: string) => setCart((c) => ({ ...c, [id]: Math.max(0, (c[id] || 0) - 1) }));
 
   async function valider(forcer = false) {
     if (!lignes.length) return;
+    if (clientInterdit) { setFlash("Vente refusée — ce client est interdit de vente."); return; }
     setBusy(true); setManques(null);
     const payload: LigneCaisse[] = lignes.map((l) => ({ produitId: l.p.id, nom: l.p.nom, categorie: l.p.categorie, prix: pu(l.p), cout: l.p.cout, qte: l.n, aLaDemande: l.p.aLaDemande }));
     const r = await validerCaisse(payload, clientId ? "" : client, notes, clientId || undefined, { serie: serie.trim() || undefined, photo: photo || undefined, forcer });
@@ -504,6 +577,17 @@ function CaisseTab({ produits, ressources, clients, router, prefill = null, onPr
             ) : null}
             {!clientId ? <input className={inputCls} value={client} onChange={(e) => setClient(e.target.value)} placeholder="Nom du client de passage — optionnel" maxLength={120} /> : null}
             {clientId ? <p className="text-[0.7rem] text-faint">📇 Client fiché — sa carte d&apos;identité &amp; son télégramme seront joints au registre.</p> : null}
+            {clientInterdit ? (
+              <div className="flex items-start gap-1.5 rounded-lg border px-2.5 py-2 text-[0.76rem]" style={{ borderColor: "color-mix(in srgb,var(--oxblood) 55%,var(--border))", background: "color-mix(in srgb,var(--oxblood) 12%,transparent)", color: "var(--oxblood)" }}>
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span><b>Client interdit de vente.</b> L&apos;encaissement est bloqué — choisis un autre client pour continuer.</span>
+              </div>
+            ) : clientSurveille ? (
+              <div className="flex items-start gap-1.5 rounded-lg border px-2.5 py-2 text-[0.76rem]" style={{ borderColor: "color-mix(in srgb,var(--warn) 50%,var(--border))", background: "color-mix(in srgb,var(--warn) 9%,transparent)", color: "var(--warn)" }}>
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span><b>Client sous surveillance.</b> Vente possible — vérifie l&apos;identité avant d&apos;encaisser.</span>
+              </div>
+            ) : null}
             <div>
               <input className={inputCls} value={serie} onChange={(e) => setSerie(e.target.value)} placeholder="N° de série de l'arme — optionnel" maxLength={60} />
               <div className="mt-1">
@@ -532,15 +616,15 @@ function CaisseTab({ produits, ressources, clients, router, prefill = null, onPr
                 <div className="mb-1 font-semibold" style={{ color: "var(--warn)" }}>⚠️ Composants insuffisants pour fabriquer :</div>
                 <ul className="mb-2 list-disc pl-4 text-muted">{manques.map((m, i) => <li key={i}>{m}</li>)}</ul>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => valider(true)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.78rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--warn)" }}>
+                  <button onClick={() => valider(true)} disabled={busy || clientInterdit} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.78rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--warn)" }}>
                     {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null} Vendre quand même
                   </button>
                   <button onClick={() => setManques(null)} className="text-[0.78rem] text-faint hover:text-ink">Annuler</button>
                 </div>
               </div>
             ) : null}
-            <button onClick={() => valider()} disabled={busy || !lignes.length} className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-[0.86rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--good)" }}>
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Encaisser {money(vente)}
+            <button onClick={() => valider()} disabled={busy || !lignes.length || clientInterdit} className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-[0.86rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: clientInterdit ? "var(--oxblood)" : "var(--good)" }}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} {clientInterdit ? "Vente interdite" : `Encaisser ${money(vente)}`}
             </button>
           </div>
         </div>
@@ -962,15 +1046,6 @@ function CoffreModal({ onClose, router }: { onClose: () => void; router: Router 
         </div>
       </div>
     </Modal>
-  );
-}
-
-function Kpi({ label, value, tone, icon: Icon }: { label: string; value: string; tone: string; icon: typeof Users }) {
-  return (
-    <div className="rounded-[12px] border border-border bg-surface-2 px-3 py-2.5">
-      <div className="flex items-center gap-1.5 text-[0.68rem] uppercase tracking-[0.06em] text-faint"><Icon className="h-3.5 w-3.5" style={{ color: tone }} /> {label}</div>
-      <div className="mt-1 font-num text-[1.15rem] font-bold" style={{ color: tone }}>{value}</div>
-    </div>
   );
 }
 
@@ -1625,13 +1700,22 @@ function ContratsTab({ contrats, clients, produits, router }: { contrats: ArmCon
         <p className="py-8 text-center text-[0.82rem] text-faint">Aucun contrat « {CTR_FILTRES.find((f) => f.key === filtre)?.label} ».</p>
       ) : (
         <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
-          {liste.map((c) => { const cli = c.clientId ? cliById.get(c.clientId) : null; return (
-            <button key={c.id} onClick={() => setSel(c)} className="flex flex-col gap-1 rounded-[12px] border border-border bg-surface-2 px-3.5 py-3 text-left transition hover:-translate-y-0.5 hover:border-border-2">
+          {liste.map((c) => {
+            const cli = c.clientId ? cliById.get(c.clientId) : null;
+            const jEnvoi = c.statut === "envoye" ? joursDepuis(c.envoyeAt) : null;
+            const relance = jEnvoi != null && jEnvoi >= 3;
+            return (
+            <button key={c.id} onClick={() => setSel(c)} className="flex flex-col gap-1 rounded-[12px] border bg-surface-2 px-3.5 py-3 text-left transition hover:-translate-y-0.5 hover:border-border-2" style={{ borderColor: relance ? "color-mix(in srgb,var(--oxblood) 45%,var(--border))" : "var(--border)" }}>
               <div className="flex items-center justify-between gap-2">
                 <span className="min-w-0 truncate text-[0.88rem] font-semibold">{c.clientNom}</span>
                 <Badge tone={ctrTone(c.statut)}>{ctrLabel(c.statut)}</Badge>
               </div>
               <div className="truncate text-[0.76rem] text-muted">{c.arme || "Arme à définir"}{c.numeroSerie ? ` · ${c.numeroSerie}` : ""}</div>
+              {c.statut === "envoye" && c.envoyeAt ? (
+                <div className="text-[0.7rem] font-semibold" style={{ color: relance ? "var(--oxblood)" : "var(--faint)" }}>{relance ? "⏳ à relancer — " : "📨 "}envoyé {ilYa(c.envoyeAt)}</div>
+              ) : c.statut === "signe" && c.signeAt ? (
+                <div className="text-[0.7rem] text-faint">✍️ signé {ilYa(c.signeAt)}</div>
+              ) : null}
               <div className="flex items-center justify-between gap-2">
                 {c.prix ? <span className="font-num text-[0.82rem] font-semibold" style={{ color: "var(--accent)" }}>{money(c.prix)}</span> : <span />}
                 <span className="text-[0.62rem] text-faint">{(c.clientDiscordId || cli?.discordId) ? "💬 Discord" : "✍️ manuel"}</span>

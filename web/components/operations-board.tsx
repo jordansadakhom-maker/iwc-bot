@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { X, Target, Plus, Loader2, Trash2, MapPin, Users, CalendarClock, Link2, CheckCircle2, Clock3, Lock, Send, Flag, Landmark, Check, ScrollText, Download, Sparkles } from "lucide-react";
 import type { OpDetail, EtapeDetail, MembreLite } from "@/lib/queries";
@@ -43,7 +44,7 @@ function Flash({ children }: { children: React.ReactNode }) {
 
 function Modal({ titre, children, onClose }: { titre: string; children: React.ReactNode; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div
         className="max-h-[88vh] w-full max-w-[500px] overflow-y-auto rounded-card border border-border bg-surface p-5 shadow-card"
         style={{ background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,#000))" }}
@@ -115,12 +116,22 @@ export function OperationsBoard({ operations, membres = [] }: { operations: Boar
           <h3 className="text-[0.8rem] font-semibold uppercase tracking-[0.06em] text-muted">Opérations</h3>
           <span className="font-num text-[0.8rem] text-faint">{total}</span>
         </div>
-        <button
-          onClick={() => setNouveau(true)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-ink transition hover:border-border-2"
-        >
-          <Plus className="h-3.5 w-3.5" strokeWidth={2} /> Nouvelle opération
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setNouveau(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[0.76rem] font-semibold text-muted transition hover:border-border-2 hover:text-ink"
+            title="Création rapide (titre, type, prime…)"
+          >
+            <Plus className="h-3.5 w-3.5" strokeWidth={2} /> Rapide
+          </button>
+          <Link
+            href="/operations/nouvelle"
+            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[0.76rem] font-semibold text-black/85 transition hover:brightness-110"
+            style={{ background: "var(--accent)" }}
+          >
+            <ScrollText className="h-3.5 w-3.5" strokeWidth={2} /> Nouveau dossier d&apos;opération
+          </Link>
+        </div>
       </div>
 
       {total === 0 ? (

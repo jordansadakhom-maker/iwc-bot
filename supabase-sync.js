@@ -295,6 +295,8 @@ function _construire(db) {
       debrief: _nn(o.debrief || o.pertes, 800),
       // Feuille de contrat de l'opération (statut de signature, commanditaire…).
       contrat: (o.contrat && typeof o.contrat === 'object') ? o.contrat : null,
+      // Dossier de mission « 1904 » (blob rédigé sur le site) — colonne optionnelle.
+      dossier: (o.dossier && typeof o.dossier === 'object') ? o.dossier : null,
     });
   }
 
@@ -309,6 +311,7 @@ function _construire(db) {
       fiabilite: _fiabiliteNum(r.fiabilite),
       statut: _str(r.statut || 'nouveau', 40),
       rapporteurId: r.rapporteurId ? String(r.rapporteurId) : null,
+      pieceJointe: _nn(r.pieceJointe, 2000),
       createdAt: r.createdAt || undefined,
     }));
 
@@ -553,11 +556,18 @@ async function syncAll(db) {
       //    les colonnes optionnelles (objectif, lieu, pole, createurNom) n'existent pas.
       let rO = await _upsert('Operation', operations);
       if (!rO.ok && rO.status === 400) {
-        const base = operations.map(({ objectif, lieu, pole, createurNom, resultat, butin, debrief, contrat, ...b }) => b);
+        const base = operations.map(({ objectif, lieu, pole, createurNom, resultat, butin, debrief, contrat, dossier, ...b }) => b);
         rO = await _upsert('Operation', base);
       }
       results.push(rO);
-      results.push(await _upsert('RapportInfo', rapports)); // 5. renseignement — indépendant
+      // 5. renseignement — indépendant. Repli si la colonne « pieceJointe » n'existe
+      //    pas encore (avant le SQL) : on resynchronise sans elle → jamais bloquant.
+      let rR = await _upsert('RapportInfo', rapports);
+      if (!rR.ok && rR.status === 400) {
+        const base = rapports.map(({ pieceJointe, ...b }) => b);
+        rR = await _upsert('RapportInfo', base);
+      }
+      results.push(rR);
       // 6. Traques / avis de recherche — format complet, repli si colonnes riches absentes.
       let rT = await _upsert('Traque', traques);
       if (!rT.ok && rT.status === 400) {

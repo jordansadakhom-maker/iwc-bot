@@ -36,6 +36,27 @@ const money = (n: number) => `${cents(n)}$`;
 const dateFR = (s: string | null) => { if (!s) return ""; try { return new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
 const heureFR = (s: string | null) => { if (!s) return ""; try { return new Date(s).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
 const hm = (min: number) => { const h = Math.floor(min / 60); const m = min % 60; return h ? `${h} h ${String(m).padStart(2, "0")}` : `${m} min`; };
+// Rapprochement tolérant d'un nom (vendeur enregistré à la vente ↔ nom d'employé) :
+// minuscules, sans accents, espaces normalisés. Évite qu'une commission tombe
+// silencieusement à 0 pour un simple écart de casse ou d'accent.
+const normNom = (s: string | null | undefined) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim();
+// Ancienneté depuis une date ISO — nombre de jours entiers (null si absente/future).
+function joursDepuis(iso: string | null): number | null {
+  if (!iso) return null;
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  return Math.floor(ms / 86400000);
+}
+// « il y a X j / h » compact.
+function ilYa(iso: string | null): string {
+  if (!iso) return "";
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const j = Math.floor(ms / 86400000);
+  if (j >= 1) return `il y a ${j} j`;
+  const h = Math.floor(ms / 3600000);
+  return h >= 1 ? `il y a ${h} h` : "à l'instant";
+}
 
 function Vide({ icon: Icon, texte }: { icon: typeof Users; texte: string }) {
   return (
@@ -633,11 +654,11 @@ export function PaiesTab({ paies, employes, ventes, router }: { paies: ArmPaie[]
           ))}
         </div>
       )}
-      {nouveau ? <PaieModal employes={employes} ventes={ventes} onClose={() => setNouveau(false)} router={router} /> : null}
+      {nouveau ? <PaieModal employes={employes} ventes={ventes} paies={paies} onClose={() => setNouveau(false)} router={router} /> : null}
     </>
   );
 }
-function PaieModal({ employes, ventes, onClose, router }: { employes: ArmEmploye[]; ventes: ArmVente[]; onClose: () => void; router: Router }) {
+function PaieModal({ employes, ventes, paies, onClose, router }: { employes: ArmEmploye[]; ventes: ArmVente[]; paies: ArmPaie[]; onClose: () => void; router: Router }) {
   const [employeId, setEmployeId] = useState(employes[0]?.id || "");
   const [periode, setPeriode] = useState("");
   const [prime, setPrime] = useState("");
@@ -646,7 +667,27 @@ function PaieModal({ employes, ventes, onClose, router }: { employes: ArmEmploye
   const [err, setErr] = useState<string | null>(null);
 
   const emp = employes.find((e) => e.id === employeId);
-  const caEmploye = useMemo(() => emp ? ventes.filter((v) => (v.vendeur || "").toLowerCase() === emp.nom.toLowerCase()).reduce((s, v) => s + v.prix, 0) : 0, [emp, ventes]);
+  // Borne de période : date de la dernière fiche de paie de cet employé. On ne
+  // recompte QUE les ventes postérieures → pas de double-comptage si on crée une
+  // nouvelle fiche (bug corrigé).
+  const depuis = useMemo(() => {
+    if (!emp) return null;
+    const dates = paies
+      .filter((p) => (p.employeId && p.employeId === emp.id) || normNom(p.employeNom) === normNom(emp.nom))
+      .map((p) => p.createdAt || p.payeAt)
+      .filter((d): d is string => !!d);
+    return dates.length ? dates.reduce((mx, d) => (d > mx ? d : mx), dates[0]) : null;
+  }, [emp, paies]);
+  // Ventes de l'employé : rapprochement de nom TOLÉRANT (casse/accents) + borne de
+  // période. Sans borne (1ʳᵉ fiche) on prend tout ; avec borne, on exclut aussi les
+  // ventes non datées par prudence (mieux vaut sous-compter que payer deux fois).
+  const caEmploye = useMemo(() => {
+    if (!emp) return 0;
+    return ventes
+      .filter((v) => normNom(v.vendeur) === normNom(emp.nom))
+      .filter((v) => !depuis || (v.createdAt != null && v.createdAt > depuis))
+      .reduce((s, v) => s + v.prix, 0);
+  }, [emp, ventes, depuis]);
   const commission = emp ? Math.round((caEmploye * emp.commission) / 100) : 0;
   const base = emp?.salaireBase || 0;
   const montant = commission + base + (Number(prime) || 0);
@@ -670,8 +711,13 @@ function PaieModal({ employes, ventes, onClose, router }: { employes: ArmEmploye
           <Champ label="Période"><input className={inputCls} value={periode} onChange={(e) => setPeriode(e.target.value)} placeholder="Ex : 1–15 juillet" maxLength={80} /></Champ>
           <Champ label="Prime ($)"><input className={inputCls} type="number" min={0} step="0.01" value={prime} onChange={(e) => setPrime(e.target.value)} /></Champ>
         </div>
+        {emp && caEmploye === 0 ? (
+          <div className="rounded-[10px] border px-3 py-2 text-[0.76rem]" style={{ borderColor: "color-mix(in srgb,var(--warn) 50%,var(--border))", background: "color-mix(in srgb,var(--warn) 9%,transparent)", color: "var(--warn)" }}>
+            ⚠️ Aucune vente rattachée à « {emp.nom} »{depuis ? ` depuis la dernière paie (${dateFR(depuis)})` : ""}. Vérifie que le <b>vendeur enregistré</b> à la caisse porte bien ce nom (la commission serait sinon à 0).
+          </div>
+        ) : null}
         <div className="rounded-[10px] border border-border bg-surface-2 p-3 text-[0.82rem]">
-          <div className="flex justify-between text-faint"><span>Ventes rattachées ({emp?.nom || "—"})</span><span className="font-num">{money(caEmploye)}</span></div>
+          <div className="flex justify-between text-faint"><span>Ventes rattachées ({emp?.nom || "—"}){depuis ? <span className="text-[0.72rem]"> · depuis {dateFR(depuis)}</span> : null}</span><span className="font-num">{money(caEmploye)}</span></div>
           <div className="flex justify-between"><span className="text-faint">Commission ({emp?.commission || 0}%)</span><span className="font-num">{money(commission)}</span></div>
           <div className="flex justify-between"><span className="text-faint">Salaire fixe</span><span className="font-num">{money(base)}</span></div>
           <div className="flex justify-between"><span className="text-faint">Prime</span><span className="font-num">{money(Number(prime) || 0)}</span></div>
@@ -1393,13 +1439,20 @@ export function CarnetCommandesTab({ commandes, produits, clients, router }: { c
           {commandes.map((c) => {
             const st = cmdStatut(c.statut);
             const nbPieces = c.lignes.reduce((s, l) => s + l.qte, 0);
+            const jours = joursDepuis(c.createdAt);
+            const active = c.statut === "en_attente" || c.statut === "prete";
+            const retard = active && jours != null && jours >= 3;
             return (
-              <button key={c.id} onClick={() => setSel(c)} className="rounded-[12px] border border-border bg-surface-2 px-3.5 py-3 text-left transition hover:-translate-y-0.5 hover:border-border-2">
+              <button key={c.id} onClick={() => setSel(c)} className="rounded-[12px] border bg-surface-2 px-3.5 py-3 text-left transition hover:-translate-y-0.5 hover:border-border-2" style={{ borderColor: retard ? "color-mix(in srgb,var(--oxblood) 45%,var(--border))" : "var(--border)" }}>
                 <div className="flex items-center justify-between gap-2">
                   <span className="min-w-0 truncate text-[0.88rem] font-semibold">{[c.clientPrenom, c.clientNom].filter(Boolean).join(" ")}</span>
                   <Badge tone={st.tone}>{st.label}</Badge>
                 </div>
-                {c.categorie ? <div className="mt-0.5 text-[0.72rem] text-faint">{c.categorie}</div> : null}
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[0.72rem] text-faint">
+                  {c.categorie ? <span>{c.categorie}</span> : null}
+                  {c.createdAt ? <span>· {ilYa(c.createdAt)}</span> : null}
+                  {retard ? <span className="font-semibold" style={{ color: "var(--oxblood)" }}>⏳ en attente depuis {jours} j</span> : null}
+                </div>
                 <div className="mt-1.5 text-[0.74rem] text-muted">{c.lignes.length} objet{c.lignes.length > 1 ? "s" : ""} · {nbPieces} pièce{nbPieces > 1 ? "s" : ""}</div>
                 <div className="mt-1 font-num text-[1rem] font-bold" style={{ color: "var(--accent)" }}>{money(c.total)}</div>
               </button>
@@ -1564,13 +1617,17 @@ export function RdvArmurerieTab({ rdvs, clients, router, onDemarrer }: { rdvs: A
   const [nouveau, setNouveau] = useState(false);
   const now = Date.now();
   const t = (r: ArmRdv) => (r.dateRdv ? new Date(r.dateRdv).getTime() : 0);
-  const aVenir = rdvs.filter((r) => r.statut === "a_venir").sort((a, b) => t(a) - t(b));
+  const aVenirTous = rdvs.filter((r) => r.statut === "a_venir").sort((a, b) => t(a) - t(b));
+  // « En retard » = toujours marqué à venir, mais l'heure est passée → à traiter.
+  const enRetard = aVenirTous.filter((r) => r.dateRdv && t(r) < now);
+  const aVenir = aVenirTous.filter((r) => !(r.dateRdv && t(r) < now));
   const prochain = aVenir[0] || null;
   const passes = rdvs.filter((r) => r.statut !== "a_venir").sort((a, b) => t(b) - t(a));
 
   return (
     <>
-      <div className="mb-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+      <div className={`mb-3 grid grid-cols-2 gap-2.5 ${enRetard.length ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
+        {enRetard.length ? <Stat label="En retard" value={String(enRetard.length)} tone="var(--oxblood)" icon={AlertTriangle} /> : null}
         <Stat label="À venir" value={String(aVenir.length)} tone="var(--accent)" icon={CalendarClock} />
         <Stat label="Prochain" value={prochain ? rdvDateFR(prochain.dateRdv) : "—"} tone="var(--brass)" icon={Clock} />
         <Stat label="Honorés" value={String(rdvs.filter((r) => r.statut === "honore").length)} tone="var(--good)" icon={Check} />
@@ -1579,10 +1636,18 @@ export function RdvArmurerieTab({ rdvs, clients, router, onDemarrer }: { rdvs: A
         <p className="text-[0.74rem] italic text-faint">Rendez-vous clients — heure + commande. L&apos;équipe est prévenue sur Discord 45 min & 15 min avant.</p>
         <Btn onClick={() => setNouveau(true)}><Plus className="h-3.5 w-3.5" /> Nouveau rendez-vous</Btn>
       </TopBar>
-      {aVenir.length === 0 && passes.length === 0 ? (
+      {aVenirTous.length === 0 && passes.length === 0 ? (
         <Vide icon={CalendarClock} texte="Aucun rendez-vous. Crée-en un : nom du client, heure et commande — glisse une pièce d'identité pour remplir le nom tout seul. Un rappel part sur Discord 45 et 15 min avant l'heure." />
       ) : (
         <div className="flex flex-col gap-4">
+          {enRetard.length ? (
+            <div>
+              <div className="mb-1.5 inline-flex items-center gap-1.5 text-[0.72rem] font-semibold uppercase tracking-[0.05em]" style={{ color: "var(--oxblood)" }}><AlertTriangle className="h-3.5 w-3.5" /> En retard ({enRetard.length}) — heure dépassée, à traiter</div>
+              <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
+                {enRetard.map((r) => <RdvCarte key={r.id} r={r} now={now} onClick={() => setSel(r)} />)}
+              </div>
+            </div>
+          ) : null}
           {aVenir.length ? (
             <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
               {aVenir.map((r) => <RdvCarte key={r.id} r={r} now={now} onClick={() => setSel(r)} />)}

@@ -25,7 +25,7 @@ function StatutBadge({ l }: { l: Licence }) {
 
 function Modal({ titre, onClose, children, max = 640 }: { titre: string; onClose: () => void; children: React.ReactNode; max?: number }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 backdrop-blur-sm" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="my-8 w-full rounded-2xl border border-border bg-surface shadow-2xl" style={{ maxWidth: max }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-border px-5 py-3">
           <h3 className="font-display text-[1.05rem]">{titre}</h3>

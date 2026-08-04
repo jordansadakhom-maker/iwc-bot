@@ -13,7 +13,7 @@ import { validerPieceJointe } from "@/lib/piece-jointe";
 function Lightbox({ url, onClose }: { url: string; onClose: () => void }) {
   const [casse, setCasse] = useState(false);
   return (
-    <div className="fixed inset-0 z-[60] grid place-items-center bg-black/80 p-4" onClick={onClose} role="dialog" aria-modal="true" aria-label="Aperçu de la pièce jointe">
+    <div className="fixed inset-0 z-[60] grid place-items-center bg-black/80 p-4" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }} role="dialog" aria-modal="true" aria-label="Aperçu de la pièce jointe">
       <button onClick={onClose} className="absolute right-4 top-4 grid h-9 w-9 place-items-center rounded-lg border border-white/25 text-white/90 hover:bg-white/10" aria-label="Fermer l'aperçu"><X className="h-5 w-5" /></button>
       {casse ? (
         <div className="flex flex-col items-center gap-2 text-white/80" onClick={(e) => e.stopPropagation()}>

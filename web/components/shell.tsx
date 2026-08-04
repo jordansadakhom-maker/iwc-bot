@@ -429,7 +429,7 @@ export function Shell({ children, connecte = false, profil = null, initialPole =
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
 
       {aideOpen ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4" onClick={() => setAideOpen(false)}>
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4" onPointerDown={(e) => { if (e.target === e.currentTarget) setAideOpen(false); }}>
           <div className="iwc-pop w-full max-w-sm rounded-card border border-border bg-[color-mix(in_srgb,var(--surface)_85%,transparent)] p-5 shadow-card backdrop-blur-xl" onClick={(e) => e.stopPropagation()}>
             <h2 className="mb-3 font-display text-lg tracking-[0.02em]">Raccourcis clavier</h2>
             <ul className="flex flex-col gap-1.5 text-[0.85rem]">

@@ -48,6 +48,82 @@ function _absencePatch(m) {
 }
 const _STATUTS_MED = new Set(['non_teste', 'apte', 'observation', 'inapte']);
 function _statutMed(s) { s = String(s || '').toLowerCase(); return _STATUTS_MED.has(s) ? s : 'non_teste'; }
+// Pièce jointe « référence visuelle » — rempart bot (le site valide déjà, on
+// double la barrière avant stockage) : uniquement un lien https vers une image
+// (extension connue) ou un CDN d'images Discord. Jamais de contenu exécutable.
+const _MED_HOTES_IMG = new Set(['cdn.discordapp.com', 'media.discordapp.net', 'images.discordapp.net', 'cdn.discordcdn.com']);
+function _pieceImg(v) {
+  const t = _s(v, 2000);
+  if (!t) return '';
+  try {
+    const u = new URL(t);
+    if (u.protocol !== 'https:') return '';
+    if (/\.(png|jpe?g|webp|gif)(?:[?#].*)?$/i.test(u.pathname) || _MED_HOTES_IMG.has(u.hostname.toLowerCase())) return u.toString();
+  } catch { /* lien invalide */ }
+  return '';
+}
+// Dossier de mission (blob JSON riche rédigé sur le site) — gardé tel quel s'il
+// s'agit d'un objet, borné en taille pour ne pas gonfler la db. Même principe que
+// le sous-objet `contrat` déjà stocké sur une opération.
+function _dossierBlob(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  try { if (JSON.stringify(v).length > 40000) return undefined; } catch { return undefined; }
+  return v;
+}
+// URL publique du site (pour rediriger un client vers « Suivre ma demande »).
+function _siteUrl() {
+  return String(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || process.env.SITE_URL || 'https://iwc-bot-psi.vercel.app').replace(/\/+$/, '');
+}
+// Ping du client : à chaque réponse, on le PINGUE dans le salon de notifications
+// clients (env SALON_NOTIF_CLIENTS), SANS le contenu privé — il est alerté même
+// s'il rate le MP ou l'a fermé. Le message s'adapte : MP livré → « voir tes MP » ;
+// MP fermé → « lis sur le site ». No-op (false) si le salon n'est pas configuré
+// → comportement strictement inchangé.
+async function _pingClient(guildOrClient, userId, livre) {
+  const salonId = String(process.env.SALON_NOTIF_CLIENTS || '').trim();
+  if (!salonId || !guildOrClient || !userId) return false;
+  try {
+    const ch = await guildOrClient.channels.fetch(salonId).catch(() => null);
+    if (!ch || typeof ch.isTextBased !== 'function' || !ch.isTextBased()) return false;
+    const site = _siteUrl();
+    const content = livre
+      ? `<@${userId}> ✉️ **Iron Wolf Company** t'a répondu — réponse envoyée en **message privé**. Tu peux aussi la retrouver sur le site : ${site}/suivi`
+      : `<@${userId}> ✉️ **Iron Wolf Company** t'a répondu — mais tes **messages privés sont fermés**. Ouvre-les (Paramètres Discord → Confidentialité & sécurité) ou retrouve ta réponse sur le site : ${site}/suivi`;
+    const sent = await ch.send({ content, allowedMentions: { users: [String(userId)] } }).catch(() => null);
+    return !!sent;
+  } catch { return false; }
+}
+
+// ── Annonces Discord des événements internes IWC (best-effort) ────
+// IDs de salons alignés sur config.js / rdv.assigner.
+const _SAL_ANNONCE = {
+  operations:   '1508756486892027904', // #operations
+  contrats:     '1508756442730074222', // #contrats
+  affaires:     '1508756508362674337', // #affaires (avis de recherche)
+  informateurs: '1509255294184853524', // #informateurs
+};
+const _ROLE_POLE_ANNONCE = { legal: '1508756436082102303', illegal: '1508898841993281658' };
+function _rolePoleAnnonce(pole) { return String(pole || '').toLowerCase().includes('ill') ? _ROLE_POLE_ANNONCE.illegal : _ROLE_POLE_ANNONCE.legal; }
+
+// Poste un embed dans un salon. Ping UNIQUEMENT le rôle fourni (anti-spam), ou
+// aucun si roleId est absent. No-op silencieux si salon/embed indisponible.
+async function _annonce(ctx, salonId, spec, roleId) {
+  try {
+    const guild = ctx && ctx.guild;
+    if (!guild || !salonId || !EmbedBuilder) return false;
+    const salon = guild.channels.cache.get(salonId);
+    if (!salon || typeof salon.isTextBased !== 'function' || !salon.isTextBased()) return false;
+    const e = new EmbedBuilder().setColor(spec.color || 0xC8A45C).setTitle(String(spec.title || 'IWC').slice(0, 250)).setTimestamp();
+    if (spec.desc) e.setDescription(String(spec.desc).slice(0, 1500));
+    const champs = (Array.isArray(spec.fields) ? spec.fields : []).filter(f => f && f.value != null && String(f.value).trim());
+    if (champs.length) e.addFields(champs.map(f => ({ name: String(f.name).slice(0, 250), value: String(f.value).slice(0, 1000), inline: !!f.inline })));
+    if (spec.image && /^https:\/\//.test(String(spec.image))) { try { e.setImage(String(spec.image)); } catch {} }
+    if (spec.footer) e.setFooter({ text: String(spec.footer).slice(0, 200) });
+    const rid = roleId && guild.roles.cache.has(roleId) ? roleId : null;
+    await salon.send({ content: rid ? `<@&${rid}>` : null, embeds: [e], allowedMentions: { roles: rid ? [rid] : [] } }).catch(() => {});
+    return true;
+  } catch { return false; }
+}
 function _medFiche(db, id) {
   if (!db.suiviMedical) db.suiviMedical = {};
   if (!db.suiviMedical[id]) db.suiviMedical[id] = { statut: 'non_teste', testValide: false, testDate: null, prochainRdv: null, notes: '', blessures: [], suivis: [], ordonnances: [], historique: [] };
@@ -189,7 +265,7 @@ const HANDLERS = {
     if (!soin) return { ok: false, message: 'soin manquant' };
     const f = _medFiche(db, id);
     if (!Array.isArray(f.suivis)) f.suivis = [];
-    f.suivis.push({ date: _dateFR(), soin, soignant: _s(p.soignant, 120), etat: _s(p.etat, 120), traitement: _s(p.traitement, 300) });
+    f.suivis.push({ date: _dateFR(), soin, soignant: _s(p.soignant, 120), etat: _s(p.etat, 120), traitement: _s(p.traitement, 300), pieceJointe: _pieceImg(p.pieceJointe) || undefined });
     f.majPar = p.auteurNom || 'Site web'; f.majAt = Date.now();
     _medLog(f, `Soin depuis le site : ${soin.slice(0, 80)}`, p.auteurNom);
     return { ok: true, message: 'Soin ajouté', discord: { type: 'medical', id } };
@@ -201,7 +277,7 @@ const HANDLERS = {
     if (!desc) return { ok: false, message: 'description manquante' };
     const f = _medFiche(db, id);
     if (!Array.isArray(f.blessures)) f.blessures = [];
-    f.blessures.push({ date: _dateFR(), desc, localisation: _s(p.localisation, 120), gravite: _s(p.gravite, 40) });
+    f.blessures.push({ date: _dateFR(), desc, localisation: _s(p.localisation, 120), gravite: _s(p.gravite, 40), pieceJointe: _pieceImg(p.pieceJointe) || undefined });
     if (p.statut !== undefined) f.statut = _statutMed(p.statut);
     f.majPar = p.auteurNom || 'Site web'; f.majAt = Date.now();
     _medLog(f, `Blessure signalée depuis le site : ${desc.slice(0, 80)}`, p.auteurNom);
@@ -214,7 +290,7 @@ const HANDLERS = {
     if (!medicaments) return { ok: false, message: 'médicament manquant' };
     const f = _medFiche(db, id);
     if (!Array.isArray(f.ordonnances)) f.ordonnances = [];
-    f.ordonnances.push({ at: Date.now(), medicaments, posologie: _s(p.posologie, 150), duree: _s(p.duree, 80), conseils: _s(p.conseils, 400) });
+    f.ordonnances.push({ at: Date.now(), medicaments, posologie: _s(p.posologie, 150), duree: _s(p.duree, 80), conseils: _s(p.conseils, 400), pieceJointe: _pieceImg(p.pieceJointe) || undefined });
     f.majPar = p.auteurNom || 'Site web'; f.majAt = Date.now();
     _medLog(f, `Ordonnance depuis le site : ${medicaments.slice(0, 80)}`, p.auteurNom);
     return { ok: true, message: 'Ordonnance ajoutée', discord: { type: 'medical', id } };
@@ -229,7 +305,7 @@ const HANDLERS = {
   // ── Opérations ───────────────────────────────────────────
   // Les opérations vivent dans db.operations (lancées/programmées) ET
   // db.preparations (en préparation). On les retrouve par id dans les deux.
-  'operation.create': (db, p) => {
+  'operation.create': async (db, p, ctx) => {
     const cible = _s(p.cible, 200);
     if (!cible) return { ok: false, message: 'titre manquant' };
     if (!Array.isArray(db.operations)) db.operations = [];
@@ -240,8 +316,20 @@ const HANDLERS = {
       id, name: cible, cible, objectif: _s(p.objectif, 500) || cible,
       categorie: _s(p.categorie, 80) || 'Opération', pole, status,
       participants: [], agents: [], remuneration: _s(p.prime, 120), lieu: _s(p.lieu, 120),
+      dossier: _dossierBlob(p.dossier),
       createdAt: new Date().toISOString(), createurNom: p.auteurNom || 'Site web', source: 'web',
     });
+    // Annonce Discord (#operations) — ping du rôle pôle uniquement. Best-effort.
+    await _annonce(ctx, _SAL_ANNONCE.operations, {
+      color: 0xC0392B, title: `🎯 Nouvelle opération — ${cible.slice(0, 80)}`,
+      desc: _s(p.objectif, 400) || null,
+      fields: [
+        { name: 'Type', value: _s(p.categorie, 80) || 'Opération', inline: true },
+        { name: 'Lieu', value: _s(p.lieu, 120) || '—', inline: true },
+        { name: 'Prime', value: _s(p.prime, 120) || '—', inline: true },
+      ],
+      footer: `Créée par ${p.auteurNom || 'Site web'}`,
+    }, _rolePoleAnnonce(pole)).catch(() => {});
     return { ok: true, message: `Opération « ${cible.slice(0, 60)} » créée` };
   },
   'operation.update': (db, p) => {
@@ -254,6 +342,7 @@ const HANDLERS = {
     if (p.objectif !== undefined) { op.objectif = _s(p.objectif, 500); }
     if (p.lieu !== undefined) { op.lieu = _s(p.lieu, 120); }
     if (p.phase !== undefined) { const s = _phaseOp(p.phase); op.status = s; ch.push(`phase → ${s}`); }
+    if (p.dossier !== undefined) { op.dossier = _dossierBlob(p.dossier) || null; ch.push('dossier'); }
     op.majPar = p.auteurNom || 'Site web'; op.majAt = Date.now();
     return { ok: true, message: `Opération mise à jour (${ch.join(', ') || '—'})` };
   },
@@ -290,7 +379,7 @@ const HANDLERS = {
     return { ok: true, message: `${ids.length} agent(s) assigné(s) (${dm} MP)` };
   },
   // Terminer une opération : résultat/butin/débrief + versement éventuel de la prime au coffre.
-  'operation.terminer': (db, p) => {
+  'operation.terminer': async (db, p, ctx) => {
     const op = _findOp(db, p.id);
     if (!op) return { ok: false, message: 'Opération introuvable' };
     op.status = 'terminee'; op.endedAt = Date.now();
@@ -309,11 +398,21 @@ const HANDLERS = {
       supa.journaliserEvenement && supa.journaliserEvenement({ aggregate: 'operation', type: 'operation.terminee', cibleId: String(op.id), cibleLibelle: nom, actorNom: p.auteurNom || 'Site web', payload: { resultat: op.resultat || null, prime: credit || 0 } });
       for (const id of agents) supa.creerNotification && supa.creerNotification({ type: 'operation-statut', titre: `Opération terminée — ${nom}`, corps: op.resultat ? `Résultat : ${op.resultat}` : null, lien: '/operations', cibleId: String(op.id), membreId: String(id), ref: `op-terminee-${op.id}-${id}` });
     } catch {}
+    // Annonce Discord (#operations) — sans ping (bilan). Best-effort.
+    await _annonce(ctx, _SAL_ANNONCE.operations, {
+      color: 0x2ECC71, title: `✅ Opération terminée — ${_s(op.cible || op.name, 80) || 'Opération'}`,
+      fields: [
+        { name: 'Résultat', value: op.resultat || 'Réussite', inline: true },
+        { name: 'Butin', value: _s(op.butin, 120) || '—', inline: true },
+        { name: 'Prime coffre', value: credit ? `+${credit}$` : '—', inline: true },
+      ],
+      footer: `Clôturée par ${p.auteurNom || 'Site web'}`,
+    }, null).catch(() => {});
     return { ok: true, message: `Opération terminée${credit ? ` · +${credit}$ au coffre` : ''}` };
   },
 
   // ── Contrats ─────────────────────────────────────────────
-  'contrat.create': (db, p) => {
+  'contrat.create': async (db, p, ctx) => {
     const objet = _s(p.cible, 300);
     if (!objet) return { ok: false, message: 'objet manquant' };
     if (!Array.isArray(db.contrats)) db.contrats = [];
@@ -327,6 +426,16 @@ const HANDLERS = {
       echeanceTexte: _s(p.echeance, 60) || null, details: _s(p.details, 2000) || null,
       createurNom: p.auteurNom || 'Site web', source: 'web',
     });
+    // Annonce Discord (#contrats) — ping du rôle pôle. Best-effort.
+    await _annonce(ctx, _SAL_ANNONCE.contrats, {
+      color: 0xC8A45C, title: `📜 Nouveau contrat — ${objet.slice(0, 80)}`,
+      fields: [
+        { name: 'Commanditaire', value: _s(p.commanditaire, 200) || '—', inline: true },
+        { name: 'Rémunération', value: _s(p.remuneration, 120) || '—', inline: true },
+        { name: 'Échéance', value: _s(p.echeance, 60) || '—', inline: true },
+      ],
+      footer: `Créé par ${p.auteurNom || 'Site web'}`,
+    }, _rolePoleAnnonce(p.pole)).catch(() => {});
     return { ok: true, message: `Contrat « ${objet.slice(0, 50)} » créé` };
   },
   'contrat.update': (db, p) => {
@@ -363,7 +472,7 @@ const HANDLERS = {
     return { ok: true, message: `Suivi → ${stage}` };
   },
   // Honorer : crédite le coffre + crée une facture (comme sur Discord).
-  'contrat.honorer': (db, p) => {
+  'contrat.honorer': async (db, p, ctx) => {
     const c = (db.contrats || []).find(x => x && String(x.id) === String(p.id));
     if (!c) return { ok: false, message: 'Contrat introuvable' };
     if (c.remuVerseAuCoffre) return { ok: false, message: 'Contrat déjà honoré' };
@@ -393,6 +502,16 @@ const HANDLERS = {
       supa.journaliserEvenement && supa.journaliserEvenement({ aggregate: 'contrat', type: 'contrat.honore', cibleId: String(c.id), cibleLibelle: nom, actorNom: p.auteurNom || 'Site web', payload: { montant, facture: numero } });
       supa.creerNotification && supa.creerNotification({ type: 'contrat-statut', titre: `Contrat honoré — ${nom}`, corps: `+${montant}$ au coffre ${pole === 'illegal' ? 'Confrérie' : 'Iron Wolf'} · ${numero}`, lien: '/operations', cibleId: String(c.id), roleCible: 'officier', ref: `contrat-honore-${c.id}` });
     } catch {}
+    // Annonce Discord (#contrats) — sans ping (bilan). Best-effort.
+    await _annonce(ctx, _SAL_ANNONCE.contrats, {
+      color: 0x2ECC71, title: `⚖️ Contrat honoré — ${_s(c.objet || c.cible, 80) || 'Contrat'}`,
+      fields: [
+        { name: 'Montant', value: `+${montant}$`, inline: true },
+        { name: 'Coffre', value: pole === 'illegal' ? 'Confrérie' : 'Iron Wolf', inline: true },
+        { name: 'Facture', value: numero, inline: true },
+      ],
+      footer: `Honoré par ${p.auteurNom || 'Site web'}`,
+    }, null).catch(() => {});
     return { ok: true, message: `Contrat honoré : +${montant}$ au coffre · ${numero}` };
   },
 
@@ -509,12 +628,22 @@ Object.assign(HANDLERS, {
     return { ok: true, message: `${(fresh.user && fresh.user.username) || userId} est désormais ${nouveauGrade}.` };
   },
   // Rapports d'informateurs (db.informateurs)
-  'rapport.create': (db, p) => {
+  'rapport.create': async (db, p, ctx) => {
     const info = _s(p.info, 4000);
     if (!info) return { ok: false, message: 'info manquante' };
     if (!Array.isArray(db.informateurs)) db.informateurs = [];
     const id = `web-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
-    db.informateurs.push({ id, source: _s(p.source, 200), cible: _s(p.cible, 200), info, fiabilite: _fiab05(p.fiabilite), statut: _s(p.statut, 40) || 'nouveau', createdAt: new Date().toISOString(), source_web: true });
+    db.informateurs.push({ id, source: _s(p.source, 200), cible: _s(p.cible, 200), info, fiabilite: _fiab05(p.fiabilite), statut: _s(p.statut, 40) || 'nouveau', pieceJointe: _pieceImg(p.pieceJointe) || undefined, createdAt: new Date().toISOString(), source_web: true });
+    // Annonce Discord (#informateurs) — sans ping (renseignement discret). Best-effort.
+    await _annonce(ctx, _SAL_ANNONCE.informateurs, {
+      color: 0x8B5A2A, title: '🕵️ Nouveau renseignement',
+      desc: info.slice(0, 600),
+      fields: [
+        { name: 'Source', value: _s(p.source, 200) || '—', inline: true },
+        { name: 'Cible', value: _s(p.cible, 200) || '—', inline: true },
+        { name: 'Fiabilité', value: `${_fiab05(p.fiabilite)}/5`, inline: true },
+      ],
+    }, null).catch(() => {});
     return { ok: true, message: 'Rapport ajouté' };
   },
   'rapport.update': (db, p) => {
@@ -525,6 +654,7 @@ Object.assign(HANDLERS, {
     if (p.info !== undefined) r.info = _s(p.info, 4000);
     if (p.fiabilite !== undefined) r.fiabilite = _fiab05(p.fiabilite);
     if (p.statut !== undefined) r.statut = _s(p.statut, 40);
+    if (p.pieceJointe !== undefined) r.pieceJointe = _pieceImg(p.pieceJointe) || null;
     return { ok: true, message: 'Rapport mis à jour' };
   },
   'rapport.delete': (db, p) => {
@@ -534,18 +664,32 @@ Object.assign(HANDLERS, {
     return { ok: true, message: 'Rapport supprimé' };
   },
   // Personnes traquées (db.traques)
-  'traque.create': (db, p) => {
+  'traque.create': async (db, p, ctx) => {
     const cible = _s(p.cible, 200);
     if (!cible) return { ok: false, message: 'cible manquante' };
     if (!Array.isArray(db.traques)) db.traques = [];
     const id = `AR-${Date.now().toString().slice(-6)}`;
+    const photo = _s(p.photo, 500) || null;
     db.traques.push({
       id, cible, prime: _s(p.prime, 120) || '—', dangerosite: _s(p.dangerosite, 40) || 'moyen',
       status: _statutTraque(p.statut), position: _s(p.position, 200) || '—',
       vivantMort: _s(p.vivantMort, 40) || 'Indifférent', commanditaire: _s(p.commanditaire, 200) || '—',
-      signalement: _s(p.signalement, 2000), photo: _s(p.photo, 500) || null,
+      signalement: _s(p.signalement, 2000), photo,
       chasseurs: [], pistes: [], createdAt: new Date().toISOString(), source: 'web',
     });
+    // Annonce Discord (#affaires) — avis de recherche, ping du rôle pôle légal + photo.
+    await _annonce(ctx, _SAL_ANNONCE.affaires, {
+      color: 0x8B1A1A, title: `🔍 Avis de recherche — ${cible.slice(0, 80)}`,
+      desc: _s(p.signalement, 600) || null,
+      fields: [
+        { name: 'Prime', value: _s(p.prime, 120) || '—', inline: true },
+        { name: 'Dangerosité', value: _s(p.dangerosite, 40) || 'moyen', inline: true },
+        { name: 'Vivant / Mort', value: _s(p.vivantMort, 40) || 'Indifférent', inline: true },
+        { name: 'Position', value: _s(p.position, 200) || '—', inline: false },
+      ],
+      image: photo,
+      footer: `Réf. ${id}`,
+    }, _rolePoleAnnonce('legal')).catch(() => {});
     return { ok: true, message: `Avis de recherche émis : ${cible.slice(0, 50)}` };
   },
   'traque.update': (db, p) => {
@@ -724,7 +868,13 @@ Object.assign(HANDLERS, {
     let emb = null;
     try { const { EmbedBuilder: EB } = require('discord.js'); emb = new EB().setColor(0xc8a45c).setTitle('✉️ TÉLÉGRAMME — IRON WOLF COMPANY').setDescription(texte.slice(0, 3500)).setFooter({ text: `Réponse de ${de}` }).setTimestamp(); } catch {}
     const sent = await user.send(emb ? { embeds: [emb] } : { content: `✉️ **TÉLÉGRAMME — IRON WOLF COMPANY**\n${texte.slice(0, 1800)}` }).catch(() => null);
-    return sent ? { ok: true, message: '✅ Réponse livrée au client en message privé (Discord).' } : { ok: false, message: '⚠️ Client trouvé, mais ses messages privés sont fermés — recontacte-le autrement.' };
+    // Ping systématique dans le salon de notifications clients (si configuré),
+    // en plus du MP — sans le contenu privé.
+    const pingue = await _pingClient(guild, user.id, !!sent).catch(() => false);
+    if (sent) return { ok: true, message: pingue ? '✅ Réponse livrée en MP + client pingué sur Discord.' : '✅ Réponse livrée au client en message privé (Discord).' };
+    return pingue
+      ? { ok: true, message: '📣 MP fermés — le client a été pingué sur Discord (réponse à lire sur le site).' }
+      : { ok: false, message: '⚠️ Client trouvé, mais ses messages privés sont fermés — recontacte-le autrement.' };
   },
   // Marque un télégramme comme ayant donné un RDV (persisté côté bot).
   'telegramme.marquerRdv': (db, p) => {

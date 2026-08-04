@@ -269,6 +269,7 @@ export type OpDetail = {
   etapes: EtapeDetail[]; createurNom: string | null; createdAt: string | null; contratLie: string | null;
   resultat: string | null; butin: string | null; debrief: string | null;
   contrat: { statut: string; commanditaire: string | null; sens: string | null; envoyeAt: string | null; signeAt: string | null } | null;
+  dossier: Record<string, unknown> | null;
 };
 export type ContratDetail = {
   id: string; cible: string; commanditaire: string | null; statut: string; pole: string;
@@ -385,6 +386,7 @@ export async function getOperations(): Promise<OperationsData> {
       butin: (o.butin as string) ?? null,
       debrief: (o.debrief as string) ?? null,
       contrat: (o.contrat && typeof o.contrat === "object") ? (o.contrat as OpDetail["contrat"]) : null,
+      dossier: (o.dossier && typeof o.dossier === "object" && !Array.isArray(o.dossier)) ? (o.dossier as Record<string, unknown>) : null,
     });
   }
   const contrats: ContratDetail[] = ((contratsR.data || []) as Raw[])
@@ -491,7 +493,7 @@ export async function getAbsences(): Promise<AbsencesData> {
 }
 
 // ── Renseignement (page dédiée) ──────────────────────────────────
-export type RapportItem = { id: string; source: string | null; cible: string | null; info: string; fiabilite: number; statut: string; createdAt: string };
+export type RapportItem = { id: string; source: string | null; cible: string | null; info: string; fiabilite: number; statut: string; createdAt: string; pieceJointe: string | null };
 export type TraqueItem = { id: string; cible: string; prime: string | null; dangerosite: string | null; statut: string };
 export type RenseignementData = { connecte: boolean; rapports: RapportItem[]; traques: TraqueItem[] };
 
@@ -501,13 +503,18 @@ export async function getRenseignement(): Promise<RenseignementData> {
   const supabase = createAdminClient();
   if (!supabase) return vide;
   const [rapportsR, traquesR] = await Promise.all([
-    supabase.from("RapportInfo").select("id,source,cible,info,fiabilite,statut,createdAt").order("createdAt", { ascending: false }).limit(100),
+    // select("*") : tolérant à l'absence de la colonne « pieceJointe » (avant le SQL).
+    supabase.from("RapportInfo").select("*").order("createdAt", { ascending: false }).limit(100),
     supabase.from("Traque").select("id,cible,prime,dangerosite,statut").order("createdAt", { ascending: false }).limit(100),
   ]);
   if (rapportsR.error && traquesR.error) return vide;
   return {
     connecte: true,
-    rapports: ((rapportsR.data || []) as RapportItem[]),
+    rapports: ((rapportsR.data || []) as Record<string, unknown>[]).map((r) => ({
+      id: String(r.id), source: (r.source as string) ?? null, cible: (r.cible as string) ?? null,
+      info: String(r.info ?? ""), fiabilite: Number(r.fiabilite) || 0, statut: String(r.statut || "nouveau"),
+      createdAt: String(r.createdAt || ""), pieceJointe: (r.pieceJointe as string) ?? null,
+    })),
     traques: ((traquesR.data || []) as TraqueItem[]),
   };
 }
@@ -545,9 +552,9 @@ export async function getAvisRecherche(): Promise<AvisData> {
 }
 
 // ── Médical (page dédiée) ────────────────────────────────────────
-export type Blessure = { date?: string; desc?: string; localisation?: string; gravite?: string };
-export type Suivi = { date?: string; soin?: string; soignant?: string; etat?: string; traitement?: string; suite?: string };
-export type Ordonnance = { medicaments?: string; posologie?: string; duree?: string; conseils?: string };
+export type Blessure = { date?: string; desc?: string; localisation?: string; gravite?: string; pieceJointe?: string };
+export type Suivi = { date?: string; soin?: string; soignant?: string; etat?: string; traitement?: string; suite?: string; pieceJointe?: string };
+export type Ordonnance = { medicaments?: string; posologie?: string; duree?: string; conseils?: string; pieceJointe?: string };
 export type Histo = { date?: string; action?: string; par?: string };
 export type DossierItem = {
   id: string; membreId: string; nom: string; statut: string;

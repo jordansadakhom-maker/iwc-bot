@@ -29,7 +29,7 @@ const s = (v: unknown, max = 4000) => { const t = String(v ?? "").trim(); return
 function newId(p: string) { return `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
 
 async function qui() { try { const p = await getSessionProfile(); return p?.nom || "Équipe"; } catch { return "Équipe"; } }
-async function autorise() { try { const a = await getAcces(); return a.peutMedical; } catch { return true; } }
+async function autorise() { try { const a = await getAcces(); return a.peutMedical; } catch { return false; } }
 
 async function tracer(admin: Admin, rows: { contactId: string; contactNom: string; action: string; champ?: string; ancien?: string | null; nouveau?: string | null; par: string }[]) {
   if (!rows.length) return;

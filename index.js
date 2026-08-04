@@ -4241,10 +4241,6 @@ client.on('messageCreate', async message => {
         const rdv = rdvs[rdvs.length - 1]; // la plus récente
         const salonDemandes = client.channels.cache.get('1512175624176009348');
         if (salonDemandes) {
-          const PING_DEMANDE = ['1508459187456442561', '1508290255055229019']; // Opérateur + Officier de terrain
-          let mentionIds = PING_DEMANDE.filter(id => salonDemandes.guild.roles.cache.has(id));
-          if (!mentionIds.length) { const op = salonDemandes.guild.roles.cache.find(r => r.name.includes('Opérateur') || r.name.includes('Operateur') || r.name.includes('Officier')); if (op) mentionIds = [op.id]; }
-          const ping = mentionIds.map(id => `<@&${id}>`).join(' ');
           const embed = new EmbedBuilder()
             .setColor(0x5865F2)
             .setAuthor({ name: `💬 Réponse de ${rdv.nom}` })
@@ -4255,10 +4251,11 @@ client.on('messageCreate', async message => {
             )
             .setFooter({ text: `Client : ${message.author.tag} · Réponds avec « 💬 Répondre au client »` })
             .setTimestamp();
+          // Réponse d'un client : affichée SANS ping (pas de notification automatique).
           await salonDemandes.send({
-            content: `${ping ? ping + ' — ' : ''}📨 **Un client a répondu**`,
+            content: `📨 **Un client a répondu**`,
             embeds: [embed],
-            allowedMentions: { roles: mentionIds },
+            allowedMentions: { parse: [] },
           }).catch(() => {});
           // Accusé de réception au client
           await message.react('✅').catch(() => {});

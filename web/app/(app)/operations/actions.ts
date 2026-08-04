@@ -11,6 +11,7 @@ import { suggererAssignation, type CandidatMembre, type Suggestion } from "@/lib
 
 export async function creerOperation(data: {
   cible: string; categorie?: string; pole?: string; prime?: string; lieu?: string; objectif?: string; phase?: string;
+  dossier?: Record<string, unknown>;
 }): Promise<CommandeResult> {
   if (!data.cible || data.cible.trim().length < 2) return { ok: false, error: "Donne un titre à l'opération." };
   return envoyerCommande("operation.create", { ...data });
@@ -18,7 +19,7 @@ export async function creerOperation(data: {
 
 export async function majOperation(
   id: string,
-  patch: { cible?: string; categorie?: string; prime?: string; lieu?: string; objectif?: string; phase?: string }
+  patch: { cible?: string; categorie?: string; prime?: string; lieu?: string; objectif?: string; phase?: string; dossier?: Record<string, unknown> }
 ): Promise<CommandeResult> {
   if (!id) return { ok: false, error: "Opération introuvable." };
   return envoyerCommande("operation.update", { id, ...patch });

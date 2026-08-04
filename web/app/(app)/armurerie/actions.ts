@@ -607,6 +607,17 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
   const _ga = await garde(); if (_ga) return _ga;
   const items = (Array.isArray(lignes) ? lignes : []).filter((l) => l && Number(l.qte) > 0);
   if (!items.length) return { ok: false, error: "Le panier est vide." };
+  // Garde-fou métier : on refuse la vente à un client fiché « interdit de vente »
+  // (l'UI le bloque déjà ; on double la barrière côté serveur). Non contournable
+  // par « forcer ». Jamais bloquant sur erreur technique.
+  if (clientId) {
+    try {
+      const { data: cli } = await admin.from("ArmurerieClient").select("statut").eq("id", clientId).maybeSingle();
+      if (cli && String((cli as { statut?: string }).statut || "").toLowerCase() === "interdit") {
+        return { ok: false, error: "Vente refusée — ce client est interdit de vente." };
+      }
+    } catch { /* best-effort : ne bloque pas sur incident technique */ }
+  }
   // Vérif stock AVANT d'encaisser : on bloque si un composant manque (sauf « forcer »).
   if (!opts?.forcer) {
     const manques = await _manquesCaisse(admin, items);
@@ -768,6 +779,7 @@ async function _vision(url: string, system: string, userText: string, maxTokens 
 
 // Lecture IA d'une carte d'identité (RDR2/Louisiane) : extrait nom, prénom, etc.
 export async function lireCarteIdentite(url: string): Promise<{ ok: boolean; nom?: string; prenom?: string; dateNaissance?: string; residence?: string; error?: string }> {
+  const g = await garde(); if (g) return g;
   const r = await _vision(url, "Tu lis une carte d'identité de jeu de rôle (RDR2, État de Louisiane). Réponds UNIQUEMENT par un JSON compact, sans texte autour : {\"nom\":\"\",\"prenom\":\"\",\"dateNaissance\":\"\",\"pays\":\"\",\"residence\":\"\"}. Recopie exactement ce qui est écrit ; laisse la valeur vide si un champ est illisible ou absent.", "Lis cette carte d'identité et renvoie le JSON.");
   if (!r.ok) return { ok: false, error: r.error };
   const m = (r.txt || "").match(/\{[\s\S]*\}/);
@@ -780,6 +792,7 @@ export async function lireCarteIdentite(url: string): Promise<{ ok: boolean; nom
 
 // Lecture IA du numéro de série d'une arme sur une capture.
 export async function lireNumeroSerie(url: string): Promise<{ ok: boolean; serie?: string; error?: string }> {
+  const g = await garde(); if (g) return g;
   const r = await _vision(url, "Tu lis une capture d'écran de jeu (RDR2/RedM) où figure le NUMÉRO DE SÉRIE d'une arme. Réponds UNIQUEMENT par un JSON compact : {\"serie\":\"\"}. Recopie exactement le numéro de série (lettres/chiffres, garde tirets et espaces). Laisse vide si tu ne le trouves pas.", "Lis le numéro de série de l'arme et renvoie le JSON.");
   if (!r.ok) return { ok: false, error: r.error };
   const m = (r.txt || "").match(/\{[\s\S]*\}/);
@@ -795,6 +808,7 @@ export async function lireNumeroSerie(url: string): Promise<{ ok: boolean; serie
 // visible avec sa quantité (le nombre après « x »). Sert à réactualiser le stock des
 // ressources sans saisie à la main.
 export async function lireCoffreRessources(url: string): Promise<{ ok: boolean; lignes?: { nom: string; quantite: number }[]; error?: string }> {
+  const g = await garde(); if (g) return g;
   const r = await _vision(
     url,
     "Tu regardes une capture d'écran qui liste des matières / objets avec leur STOCK. Ça peut être : (a) un coffre/inventaire de jeu (RDR2/RedM) où le stock est noté « x123 », ou (b) un panneau web de gestion (type Reckless RP) où le stock est noté « Stock : 123 », « 123 en stock », ou un simple nombre à côté du nom. Pour CHAQUE ligne, relève le NOM exact de la matière et sa QUANTITÉ EN STOCK. Réponds UNIQUEMENT par un JSON compact, sans texte autour : {\"lignes\":[{\"nom\":\"Nom exact\",\"quantite\":123}]}. Recopie le nom EXACTEMENT. IMPORTANT : relève bien le STOCK — surtout PAS une quantité de recette (« QTÉ / UNITÉ », « ×6 »), PAS un coût unitaire, PAS un prix de vente, PAS un poids en kg. Ne liste QUE ce qui est réellement visible — n'invente rien.",
@@ -818,6 +832,7 @@ export async function lireCoffreRessources(url: string): Promise<{ ok: boolean; 
 // dépenses, bénéfice + détail « Top catégories ». Sert à mettre à jour la
 // comptabilité depuis une simple capture d'écran.
 export async function lireFinancesReckless(url: string): Promise<{ ok: boolean; recettes?: number; depenses?: number; benefice?: number; categories?: { nom: string; montant: number }[]; detailType?: "recettes" | "depenses"; error?: string }> {
+  const g = await garde(); if (g) return g;
   const r = await _vision(
     url,
     "Tu regardes une capture du TABLEAU DE BORD FINANCIER d'une armurerie (panel de gestion type Reckless RP). Relève : le total des RECETTES, le total des DÉPENSES, le BÉNÉFICE (peut être négatif), et la liste « Top catégories » (le nom de chaque ligne et son montant en dollars). Indique aussi \"detailType\" : « recettes » ou « depenses » selon ce que montre le panneau « Top catégories » — regarde le libellé au centre du cercle (« TOTAL RECETTES » ou « TOTAL DÉPENSES ») et l'onglet actif Recettes/Dépenses. Réponds UNIQUEMENT par un JSON compact, sans texte autour : {\"recettes\":0,\"depenses\":0,\"benefice\":0,\"detailType\":\"recettes\",\"categories\":[{\"nom\":\"Nom exact\",\"montant\":0}]}. Recopie les nombres SANS le symbole $, sans les % et sans séparateur de milliers (ex. « $803.20 » → 803.20). N'invente rien : laisse 0 ou une liste vide si absent.",

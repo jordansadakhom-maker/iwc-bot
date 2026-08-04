@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { lireStockDepuisImage, type LigneStock } from "@/lib/vision";
 import { getSessionProfile } from "@/lib/queries";
+import { getActeur } from "@/lib/authz";
 import { construireCanon } from "@/lib/chasse-canon";
 import { cleNom } from "@/lib/noms";
 
@@ -32,6 +33,14 @@ async function acteur(fourni?: string | null): Promise<string | null> {
   try { const p = await getSessionProfile(); if (p?.nom) return String(p.nom).slice(0, 120); } catch { /* session indisponible */ }
   const f = (fourni || "").trim();
   return f ? f.slice(0, 120) : null;
+}
+
+// Garde d'écriture (fail-closed) : ces Server Actions écrivent DIRECTEMENT en base
+// via le service_role (tables site-native, non réconciliées par le bot). Le gate
+// de page ne protège que l'affichage (GET) → chaque mutation doit se garder elle-
+// même contre un appel d'un non-connecté.
+async function garde(): Promise<ChasseResult | null> {
+  return (await getActeur()) ? null : { ok: false, error: "Action réservée aux membres connectés." };
 }
 
 // HistoryService — trace un mouvement (best-effort : n'échoue jamais l'action).
@@ -84,6 +93,7 @@ export async function ajusterChasse(input: {
   zoneId: string; nom: string; mode: Mode; quantite: number;
   categorie?: string | null; seuil?: number | null; par?: string | null; commentaire?: string | null;
 }): Promise<ChasseResult> {
+  const g = await garde(); if (g) return g;
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const zoneId = s(input.zoneId, 40);
@@ -95,6 +105,7 @@ export async function ajusterChasse(input: {
 
 // ── HuntingService : déplacer une ressource entre deux zones ──────
 export async function deplacerChasse(input: { nom: string; deZone: string; versZone: string; quantite: number; par?: string | null }): Promise<ChasseResult> {
+  const g = await garde(); if (g) return g;
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const nom = s(input.nom, 100), de = s(input.deZone, 40), vers = s(input.versZone, 40);
@@ -116,6 +127,7 @@ export async function deplacerChasse(input: { nom: string; deZone: string; versZ
 
 // ── HuntingService : seuil de réappro d'une ressource ────────────
 export async function definirSeuilChasse(input: { zoneId: string; nom: string; seuil: number | null }): Promise<ChasseResult> {
+  const g = await garde(); if (g) return g;
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const { data: ex } = await admin.from("ChasseStock").select("id").eq("zoneId", s(input.zoneId, 40)).ilike("nom", s(input.nom, 100)).limit(1).maybeSingle();
@@ -126,6 +138,7 @@ export async function definirSeuilChasse(input: { zoneId: string; nom: string; s
 
 // ── HuntingService : supprimer une ressource (suppression fiable) ──
 export async function supprimerRessourceChasse(input: { zoneId: string; nom: string; par?: string | null }): Promise<ChasseResult> {
+  const g = await garde(); if (g) return g;
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const zoneId = s(input.zoneId, 40), nom = s(input.nom, 100);
@@ -140,6 +153,7 @@ export async function supprimerRessourceChasse(input: { zoneId: string; nom: str
 
 // ── HuntingService : capacité / nom d'une zone (upsert) ───────────
 export async function definirCapaciteChasse(input: { zoneId: string; nom?: string; capacite: number | null }): Promise<ChasseResult> {
+  const g = await garde(); if (g) return g;
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const zoneId = s(input.zoneId, 40);
@@ -158,6 +172,7 @@ export async function definirCapaciteChasse(input: { zoneId: string; nom?: strin
 
 // ── HuntingService : ajouter une zone (Charrette 3, Entrepôt…) ────
 export async function ajouterZoneChasse(input: { nom: string; capacite?: number | null }): Promise<ChasseResult> {
+  const g = await garde(); if (g) return g;
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const nom = s(input.nom, 60);
@@ -171,6 +186,9 @@ export async function ajouterZoneChasse(input: { nom: string; capacite?: number 
 
 // ── OCRService : lire une photo/scan/PDF → liste corrigeable ──────
 export async function lireStockChasse(url: string): Promise<{ ok: boolean; lignes?: LigneStock[]; error?: string }> {
+  // Garde : la lecture OCR dépense des crédits IA et fait un fetch serveur de l'URL
+  // → réservée aux membres connectés.
+  if (!(await getActeur())) return { ok: false, error: "Action réservée aux membres connectés." };
   const u = String(url || "");
   if (!/^https?:\/\//.test(u)) return { ok: false, error: "Photo invalide." };
   return lireStockDepuisImage(u);
@@ -178,6 +196,7 @@ export async function lireStockChasse(url: string): Promise<{ ok: boolean; ligne
 
 // ── InventoryService : appliquer un import OCR corrigé ───────────
 export async function importerStockChasse(input: { zoneId: string; lignes: LigneStock[]; mode?: "add" | "set"; par?: string | null }): Promise<ChasseResult> {
+  const g = await garde(); if (g) return g;
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const zoneId = s(input.zoneId, 40);

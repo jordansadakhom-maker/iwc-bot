@@ -32,6 +32,24 @@ const NOTION_TOKEN = process.env.NOTION_TOKEN || null;
 const NOTION_TELEGRAMMES_DB = process.env.NOTION_TELEGRAMMES_DB || null;
 
 function _dateHeure(d) { try { return new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return '—'; } }
+// Ping du client : à chaque réponse, on le pingue dans le salon de notifications
+// clients (env SALON_NOTIF_CLIENTS), SANS contenu privé — il est alerté même s'il
+// rate le MP ou l'a fermé. Message adapté selon que le MP a été livré ou non.
+// No-op (false) si le salon n'est pas configuré → comportement inchangé.
+async function _pingClient(client, userId, livre) {
+  const salonId = String(process.env.SALON_NOTIF_CLIENTS || '').trim();
+  if (!salonId || !client || !userId) return false;
+  try {
+    const ch = await client.channels.fetch(salonId).catch(() => null);
+    if (!ch || typeof ch.isTextBased !== 'function' || !ch.isTextBased()) return false;
+    const site = String(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || process.env.SITE_URL || 'https://iwc-bot-psi.vercel.app').replace(/\/+$/, '');
+    const content = livre
+      ? `<@${userId}> ✉️ **Iron Wolf Company** t'a répondu — réponse envoyée en **message privé**. Tu peux aussi la retrouver sur le site : ${site}/suivi`
+      : `<@${userId}> ✉️ **Iron Wolf Company** t'a répondu — mais tes **messages privés sont fermés**. Ouvre-les (Paramètres Discord → Confidentialité & sécurité) ou retrouve ta réponse sur le site : ${site}/suivi`;
+    const sent = await ch.send({ content, allowedMentions: { users: [String(userId)] } }).catch(() => null);
+    return !!sent;
+  } catch { return false; }
+}
 function _dureeHumaine(ms) {
   if (!ms || ms < 0) return '—';
   const min = Math.floor(ms / 60000), h = Math.floor(min / 60), j = Math.floor(h / 24);
@@ -318,9 +336,9 @@ async function onMessage(message) {
         .setAuthor({ name: `📨 ${conv.nomRP || message.author.username} (client)`, iconURL: message.author.displayAvatarURL?.() })
         .setDescription((message.content || '').slice(0, 4000) || '*(pièce jointe)*')
         .setTimestamp();
-      const ping = _pingRoles(thread.guild);
-      const tete = [ping.content ? `${ping.content} — 📨 **réponse d'un client**` : '', files.length ? files.join('\n') : ''].filter(Boolean).join('\n');
-      await thread.send({ content: tete || null, embeds: [e], allowedMentions: { roles: ping.ids } }).catch(() => {});
+      // Réponse d'un client : affichée dans le fil SANS ping (pas de notif auto).
+      const tete = [`📨 **réponse d'un client**`, files.length ? files.join('\n') : ''].filter(Boolean).join('\n');
+      await thread.send({ content: tete, embeds: [e], allowedMentions: { parse: [] } }).catch(() => {});
       _logMsg(conv, 'client', conv.nomRP || message.author.username, message.content || '', { files: files.length });
       persist(db);
       await message.react('📨').catch(() => {});
@@ -571,6 +589,11 @@ async function repondreDepuisWeb(client, db, rdvId, texte, parNom) {
     }
   } catch {}
 
+  // Ping systématique dans le salon de notifications clients (si configuré), en
+  // plus du MP — sans contenu privé, message adapté selon la livraison du MP.
+  let pingue = false;
+  if (conv.demandeurId) pingue = await _pingClient(client, conv.demandeurId, livre).catch(() => false);
+
   // Trace (visible aussi sur le site après resync)
   _logMsg(conv, 'equipe', nom, corrige);
   conv.lastActivityAt = Date.now();
@@ -580,12 +603,13 @@ async function repondreDepuisWeb(client, db, rdvId, texte, parNom) {
     if (conv.threadId) {
       const thread = await client.channels.fetch(conv.threadId).catch(() => null);
       if (thread?.isThread?.()) {
-        await thread.send({ content: `🌐 **${nom}** (depuis le site)${livre ? '' : ' — ⚠️ MP non livré au client'} :\n> ${corrige.slice(0, 1500)}` }).catch(() => {});
+        const suffixe = livre ? '' : pingue ? ' — 📣 client pingué (MP fermés)' : ' — ⚠️ MP non livré au client';
+        await thread.send({ content: `🌐 **${nom}** (depuis le site)${suffixe} :\n> ${corrige.slice(0, 1500)}` }).catch(() => {});
       }
     }
   } catch {}
 
-  return { ok: true, message: livre ? '✅ Réponse livrée au client en message privé (Discord).' : "⚠️ Réponse enregistrée, mais le message privé n'a PAS pu être livré (le client a peut-être fermé ses MP, ou n'est plus sur le serveur).", livre };
+  return { ok: true, message: livre ? '✅ Réponse livrée au client en message privé (Discord).' : pingue ? '📣 MP fermés — le client a été pingué sur Discord (réponse à lire sur le site).' : "⚠️ Réponse enregistrée, mais le message privé n'a PAS pu être livré (le client a peut-être fermé ses MP, ou n'est plus sur le serveur).", livre };
 }
 
 // Marque une conversation comme ayant donné lieu à un RDV (persisté côté bot).

@@ -6,6 +6,7 @@ import { Eye, Crosshair, Plus, Loader2, Trash2, Pencil } from "lucide-react";
 import type { RapportItem, TraqueItem } from "@/lib/queries";
 import { Card, CardHeader, Empty, Badge } from "@/components/ui";
 import { Modal, Flash, Champ, Picker, inputCls } from "@/components/edit-ui";
+import { ChampPieceJointe, PieceJointeVignette } from "@/components/piece-jointe";
 import { creerRapport, majRapport, supprimerRapport, creerTraque, majTraque, supprimerTraque } from "@/app/(app)/renseignement/actions";
 
 type Router = ReturnType<typeof useRouter>;
@@ -98,6 +99,7 @@ export function RenseignementPanel({ rapports, traques }: { rapports: RapportIte
                       {r.source ? <span className="ml-2 text-[0.74rem] font-normal text-muted">source : {r.source}</span> : null}
                     </div>
                     <p className="mt-1 text-[0.82rem] leading-relaxed text-muted">{r.info}</p>
+                    {r.pieceJointe ? <div className="mt-2"><PieceJointeVignette url={r.pieceJointe} taille="h-14 w-14" /></div> : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <Badge tone={badgeTone(tone(STATUT_RAPPORT, r.statut))}>{label(STATUT_RAPPORT, r.statut)}</Badge>
@@ -172,6 +174,7 @@ function RapportModal({ rapport, onClose, router }: { rapport?: RapportItem; onC
   const [info, setInfo] = useState(rapport?.info || "");
   const [fiabilite, setFiabilite] = useState(String(rapport?.fiabilite ?? ""));
   const [statut, setStatut] = useState((rapport?.statut || "nouveau").toLowerCase());
+  const [piece, setPiece] = useState(rapport?.pieceJointe || "");
   const [busy, setBusy] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [ok, setOk] = useState(false);
@@ -179,7 +182,7 @@ function RapportModal({ rapport, onClose, router }: { rapport?: RapportItem; onC
   async function valider() {
     if (info.trim().length < 2) { setFlash("Écris le renseignement."); return; }
     setBusy("save");
-    const payload = { source, cible, info, fiabilite: fiabilite ? Number(fiabilite) : 0, statut };
+    const payload = { source, cible, info, fiabilite: fiabilite ? Number(fiabilite) : 0, statut, pieceJointe: piece };
     const r = editing ? await majRapport(rapport!.id, payload) : await creerRapport(payload);
     setBusy(null);
     if (!r.ok) { setFlash(r.error || "Échec."); return; }
@@ -209,6 +212,7 @@ function RapportModal({ rapport, onClose, router }: { rapport?: RapportItem; onC
             <Picker options={[1, 2, 3, 4, 5].map((n) => ({ key: String(n), label: "★".repeat(n) }))} value={fiabilite} onChange={setFiabilite} />
           </div>
           <div className="flex flex-col gap-1"><span className="text-[0.72rem] uppercase tracking-[0.05em] text-faint">Statut</span><Picker options={STATUT_RAPPORT} value={statut} onChange={setStatut} /></div>
+          <ChampPieceJointe value={piece} onChange={setPiece} label="📎 Pièce jointe — preuve / photo (facultative)" />
           <div className="flex justify-end"><button onClick={valider} disabled={busy === "save"} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{busy === "save" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null} {editing ? "Enregistrer" : "Ajouter"}</button></div>
           {editing ? <DelBar onDelete={supprimer} onClose={onClose} busy={busy === "del"} /> : null}
         </div>

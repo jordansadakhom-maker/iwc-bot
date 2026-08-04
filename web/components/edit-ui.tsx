@@ -72,7 +72,7 @@ export function Picker({ options, value, onChange }: { options: { key: string; l
 
 export function Modal({ titre, children, onClose, max = 500 }: { titre: string; children: React.ReactNode; onClose: () => void; max?: number }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div
         className="max-h-[88vh] w-full overflow-y-auto rounded-card border border-border bg-surface p-5 shadow-card"
         style={{ maxWidth: max, background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,#000))" }}
