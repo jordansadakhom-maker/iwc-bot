@@ -374,12 +374,19 @@ function CaisseTab({ produits, ressources, clients, router, prefill = null, onPr
   const vente = lignes.reduce((s, l) => s + pu(l.p) * l.n, 0);
   const cout = lignes.reduce((s, l) => s + l.p.cout * l.n, 0);
   const benefice = vente - cout;
+  // Statut du client sélectionné : on bloque la vente à un client « interdit » et
+  // on avertit pour un client « sous surveillance » (le statut existait mais
+  // n'était pas exploité à la caisse).
+  const clientSel = clientId ? clients.find((c) => c.id === clientId) || null : null;
+  const clientInterdit = (clientSel?.statut || "").toLowerCase() === "interdit";
+  const clientSurveille = (clientSel?.statut || "").toLowerCase() === "surveillance";
 
   const add = (id: string) => setCart((c) => ({ ...c, [id]: (c[id] || 0) + 1 }));
   const sub = (id: string) => setCart((c) => ({ ...c, [id]: Math.max(0, (c[id] || 0) - 1) }));
 
   async function valider(forcer = false) {
     if (!lignes.length) return;
+    if (clientInterdit) { setFlash("Vente refusée — ce client est interdit de vente."); return; }
     setBusy(true); setManques(null);
     const payload: LigneCaisse[] = lignes.map((l) => ({ produitId: l.p.id, nom: l.p.nom, categorie: l.p.categorie, prix: pu(l.p), cout: l.p.cout, qte: l.n, aLaDemande: l.p.aLaDemande }));
     const r = await validerCaisse(payload, clientId ? "" : client, notes, clientId || undefined, { serie: serie.trim() || undefined, photo: photo || undefined, forcer });
@@ -504,6 +511,17 @@ function CaisseTab({ produits, ressources, clients, router, prefill = null, onPr
             ) : null}
             {!clientId ? <input className={inputCls} value={client} onChange={(e) => setClient(e.target.value)} placeholder="Nom du client de passage — optionnel" maxLength={120} /> : null}
             {clientId ? <p className="text-[0.7rem] text-faint">📇 Client fiché — sa carte d&apos;identité &amp; son télégramme seront joints au registre.</p> : null}
+            {clientInterdit ? (
+              <div className="flex items-start gap-1.5 rounded-lg border px-2.5 py-2 text-[0.76rem]" style={{ borderColor: "color-mix(in srgb,var(--oxblood) 55%,var(--border))", background: "color-mix(in srgb,var(--oxblood) 12%,transparent)", color: "var(--oxblood)" }}>
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span><b>Client interdit de vente.</b> L&apos;encaissement est bloqué — choisis un autre client pour continuer.</span>
+              </div>
+            ) : clientSurveille ? (
+              <div className="flex items-start gap-1.5 rounded-lg border px-2.5 py-2 text-[0.76rem]" style={{ borderColor: "color-mix(in srgb,var(--warn) 50%,var(--border))", background: "color-mix(in srgb,var(--warn) 9%,transparent)", color: "var(--warn)" }}>
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span><b>Client sous surveillance.</b> Vente possible — vérifie l&apos;identité avant d&apos;encaisser.</span>
+              </div>
+            ) : null}
             <div>
               <input className={inputCls} value={serie} onChange={(e) => setSerie(e.target.value)} placeholder="N° de série de l'arme — optionnel" maxLength={60} />
               <div className="mt-1">
@@ -532,15 +550,15 @@ function CaisseTab({ produits, ressources, clients, router, prefill = null, onPr
                 <div className="mb-1 font-semibold" style={{ color: "var(--warn)" }}>⚠️ Composants insuffisants pour fabriquer :</div>
                 <ul className="mb-2 list-disc pl-4 text-muted">{manques.map((m, i) => <li key={i}>{m}</li>)}</ul>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => valider(true)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.78rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--warn)" }}>
+                  <button onClick={() => valider(true)} disabled={busy || clientInterdit} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[0.78rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--warn)" }}>
                     {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null} Vendre quand même
                   </button>
                   <button onClick={() => setManques(null)} className="text-[0.78rem] text-faint hover:text-ink">Annuler</button>
                 </div>
               </div>
             ) : null}
-            <button onClick={() => valider()} disabled={busy || !lignes.length} className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-[0.86rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: "var(--good)" }}>
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Encaisser {money(vente)}
+            <button onClick={() => valider()} disabled={busy || !lignes.length || clientInterdit} className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-[0.86rem] font-semibold text-black/85 disabled:opacity-50" style={{ background: clientInterdit ? "var(--oxblood)" : "var(--good)" }}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} {clientInterdit ? "Vente interdite" : `Encaisser ${money(vente)}`}
             </button>
           </div>
         </div>

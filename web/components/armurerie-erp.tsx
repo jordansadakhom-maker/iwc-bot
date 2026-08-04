@@ -36,6 +36,10 @@ const money = (n: number) => `${cents(n)}$`;
 const dateFR = (s: string | null) => { if (!s) return ""; try { return new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
 const heureFR = (s: string | null) => { if (!s) return ""; try { return new Date(s).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
 const hm = (min: number) => { const h = Math.floor(min / 60); const m = min % 60; return h ? `${h} h ${String(m).padStart(2, "0")}` : `${m} min`; };
+// Rapprochement tolérant d'un nom (vendeur enregistré à la vente ↔ nom d'employé) :
+// minuscules, sans accents, espaces normalisés. Évite qu'une commission tombe
+// silencieusement à 0 pour un simple écart de casse ou d'accent.
+const normNom = (s: string | null | undefined) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim();
 
 function Vide({ icon: Icon, texte }: { icon: typeof Users; texte: string }) {
   return (
@@ -633,11 +637,11 @@ export function PaiesTab({ paies, employes, ventes, router }: { paies: ArmPaie[]
           ))}
         </div>
       )}
-      {nouveau ? <PaieModal employes={employes} ventes={ventes} onClose={() => setNouveau(false)} router={router} /> : null}
+      {nouveau ? <PaieModal employes={employes} ventes={ventes} paies={paies} onClose={() => setNouveau(false)} router={router} /> : null}
     </>
   );
 }
-function PaieModal({ employes, ventes, onClose, router }: { employes: ArmEmploye[]; ventes: ArmVente[]; onClose: () => void; router: Router }) {
+function PaieModal({ employes, ventes, paies, onClose, router }: { employes: ArmEmploye[]; ventes: ArmVente[]; paies: ArmPaie[]; onClose: () => void; router: Router }) {
   const [employeId, setEmployeId] = useState(employes[0]?.id || "");
   const [periode, setPeriode] = useState("");
   const [prime, setPrime] = useState("");
@@ -646,7 +650,27 @@ function PaieModal({ employes, ventes, onClose, router }: { employes: ArmEmploye
   const [err, setErr] = useState<string | null>(null);
 
   const emp = employes.find((e) => e.id === employeId);
-  const caEmploye = useMemo(() => emp ? ventes.filter((v) => (v.vendeur || "").toLowerCase() === emp.nom.toLowerCase()).reduce((s, v) => s + v.prix, 0) : 0, [emp, ventes]);
+  // Borne de période : date de la dernière fiche de paie de cet employé. On ne
+  // recompte QUE les ventes postérieures → pas de double-comptage si on crée une
+  // nouvelle fiche (bug corrigé).
+  const depuis = useMemo(() => {
+    if (!emp) return null;
+    const dates = paies
+      .filter((p) => (p.employeId && p.employeId === emp.id) || normNom(p.employeNom) === normNom(emp.nom))
+      .map((p) => p.createdAt || p.payeAt)
+      .filter((d): d is string => !!d);
+    return dates.length ? dates.reduce((mx, d) => (d > mx ? d : mx), dates[0]) : null;
+  }, [emp, paies]);
+  // Ventes de l'employé : rapprochement de nom TOLÉRANT (casse/accents) + borne de
+  // période. Sans borne (1ʳᵉ fiche) on prend tout ; avec borne, on exclut aussi les
+  // ventes non datées par prudence (mieux vaut sous-compter que payer deux fois).
+  const caEmploye = useMemo(() => {
+    if (!emp) return 0;
+    return ventes
+      .filter((v) => normNom(v.vendeur) === normNom(emp.nom))
+      .filter((v) => !depuis || (v.createdAt != null && v.createdAt > depuis))
+      .reduce((s, v) => s + v.prix, 0);
+  }, [emp, ventes, depuis]);
   const commission = emp ? Math.round((caEmploye * emp.commission) / 100) : 0;
   const base = emp?.salaireBase || 0;
   const montant = commission + base + (Number(prime) || 0);
@@ -670,8 +694,13 @@ function PaieModal({ employes, ventes, onClose, router }: { employes: ArmEmploye
           <Champ label="Période"><input className={inputCls} value={periode} onChange={(e) => setPeriode(e.target.value)} placeholder="Ex : 1–15 juillet" maxLength={80} /></Champ>
           <Champ label="Prime ($)"><input className={inputCls} type="number" min={0} step="0.01" value={prime} onChange={(e) => setPrime(e.target.value)} /></Champ>
         </div>
+        {emp && caEmploye === 0 ? (
+          <div className="rounded-[10px] border px-3 py-2 text-[0.76rem]" style={{ borderColor: "color-mix(in srgb,var(--warn) 50%,var(--border))", background: "color-mix(in srgb,var(--warn) 9%,transparent)", color: "var(--warn)" }}>
+            ⚠️ Aucune vente rattachée à « {emp.nom} »{depuis ? ` depuis la dernière paie (${dateFR(depuis)})` : ""}. Vérifie que le <b>vendeur enregistré</b> à la caisse porte bien ce nom (la commission serait sinon à 0).
+          </div>
+        ) : null}
         <div className="rounded-[10px] border border-border bg-surface-2 p-3 text-[0.82rem]">
-          <div className="flex justify-between text-faint"><span>Ventes rattachées ({emp?.nom || "—"})</span><span className="font-num">{money(caEmploye)}</span></div>
+          <div className="flex justify-between text-faint"><span>Ventes rattachées ({emp?.nom || "—"}){depuis ? <span className="text-[0.72rem]"> · depuis {dateFR(depuis)}</span> : null}</span><span className="font-num">{money(caEmploye)}</span></div>
           <div className="flex justify-between"><span className="text-faint">Commission ({emp?.commission || 0}%)</span><span className="font-num">{money(commission)}</span></div>
           <div className="flex justify-between"><span className="text-faint">Salaire fixe</span><span className="font-num">{money(base)}</span></div>
           <div className="flex justify-between"><span className="text-faint">Prime</span><span className="font-num">{money(Number(prime) || 0)}</span></div>

@@ -607,6 +607,17 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
   const _ga = await garde(); if (_ga) return _ga;
   const items = (Array.isArray(lignes) ? lignes : []).filter((l) => l && Number(l.qte) > 0);
   if (!items.length) return { ok: false, error: "Le panier est vide." };
+  // Garde-fou métier : on refuse la vente à un client fiché « interdit de vente »
+  // (l'UI le bloque déjà ; on double la barrière côté serveur). Non contournable
+  // par « forcer ». Jamais bloquant sur erreur technique.
+  if (clientId) {
+    try {
+      const { data: cli } = await admin.from("ArmurerieClient").select("statut").eq("id", clientId).maybeSingle();
+      if (cli && String((cli as { statut?: string }).statut || "").toLowerCase() === "interdit") {
+        return { ok: false, error: "Vente refusée — ce client est interdit de vente." };
+      }
+    } catch { /* best-effort : ne bloque pas sur incident technique */ }
+  }
   // Vérif stock AVANT d'encaisser : on bloque si un composant manque (sauf « forcer »).
   if (!opts?.forcer) {
     const manques = await _manquesCaisse(admin, items);
