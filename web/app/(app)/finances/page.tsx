@@ -6,6 +6,7 @@ import { FinancesCoffres } from "@/components/finances-coffres";
 import { FacturesListe } from "@/components/factures-liste";
 import { Portefeuilles } from "@/components/portefeuilles";
 import { cents } from "@/lib/format";
+import { Coins, Receipt, Wallet, ArrowLeftRight, type LucideIcon } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -23,30 +24,42 @@ export default async function FinancesPage() {
       : { cible: "legal", label: "Coffre Iron Wolf", val: coffres.legal, tone: "var(--brass)" },
   ];
 
+  // Total en coffre : les quatre coffres de la maison (commun + les deux pôles + Van Horn).
+  const totalCoffres = (coffres.commun ?? 0) + (coffres.legal ?? 0) + (coffres.illegal ?? 0) + (coffres.vanhorn ?? 0);
+
+  // Bandeau de synthèse « registre » — l'état de la caisse d'un coup d'œil.
+  const kpis: { icon: LucideIcon; label: string; val: string; sous: string }[] = [
+    { icon: Coins, label: "Total en coffre", val: connecte ? "$" + cents(totalCoffres) : "—", sous: "tous coffres réunis" },
+    { icon: Receipt, label: "Encaissé", val: "$" + cents(fact.total), sous: `${fact.factures.length} quittance(s)` },
+    { icon: Wallet, label: "En circulation", val: "$" + cents(porte.total), sous: `${porte.portefeuilles.length} portefeuille(s)` },
+    { icon: ArrowLeftRight, label: "Mouvements", val: String(porte.transactions.length), sous: "au grand-livre" },
+  ];
+
   return (
     <>
-      <PageHeader titre="Finances" sous="Coffres modifiables — dépôt / retrait" actif={connecte} pole={pole} />
+      <PageHeader titre="Finances" sous="Grand-livre & coffre — dépôts, retraits, quittances" actif={connecte} pole={pole} />
+
+      {/* Bandeau de synthèse (plaques de laiton) */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {kpis.map((k) => {
+          const Icon = k.icon;
+          return (
+            <div key={k.label} className="rounded-card border border-border p-4 shadow-card" style={{ background: "linear-gradient(180deg,color-mix(in srgb,var(--surface) 94%,var(--brass)),color-mix(in srgb,var(--surface) 86%,#000))" }}>
+              <div className="flex items-center gap-1.5 text-[0.64rem] font-semibold uppercase tracking-[0.1em] text-faint"><Icon className="h-3.5 w-3.5" style={{ color: "var(--brass)" }} /> {k.label}</div>
+              <div className="mt-2 font-num text-[1.5rem] font-semibold tabular" style={{ color: connecte ? "var(--brass-hi)" : "var(--faint)" }}>{k.val}</div>
+              <div className="mt-0.5 text-[0.68rem] text-faint">{k.sous}</div>
+            </div>
+          );
+        })}
+      </div>
 
       <FinancesCoffres cartes={cartes} connecte={connecte} peut={peutAjusterCoffre} />
 
       {connecte ? (
-        (() => {
-          // Chaque coffre garde SA couleur d'identité (comme sur le tableau de
-          // bord) → on distingue d'un coup d'œil. Palette validée (contraste + CVD).
-          const barres = [
-            { label: "Coffre commun", value: coffres.commun ?? 0, color: "#c98500" },
-            { label: "Coffre Iron Wolf", value: coffres.legal ?? 0, color: "#3987e5" },
-            { label: "Coffre Confrérie", value: coffres.illegal ?? 0, color: "#e66767" },
-            { label: "Coffre Van Horn", value: coffres.vanhorn ?? 0, color: "#9085e9" },
-          ];
-          const totalCoffres = barres.reduce((a, b) => a + b.value, 0);
-          return (
-            <Card>
-              <CardHeader titre="Trésorerie (tous pôles)" compteur={`total : $${cents(totalCoffres)}`} />
-              <TresorerieChart points={evolution.points} />
-            </Card>
-          );
-        })()
+        <Card>
+          <CardHeader titre="Évolution du coffre — trésorerie (tous pôles)" compteur={`total : $${cents(totalCoffres)}`} />
+          <TresorerieChart points={evolution.points} />
+        </Card>
       ) : null}
 
       <Card>
