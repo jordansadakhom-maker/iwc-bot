@@ -91,7 +91,8 @@ function LigneDemande({ d, monId }: { d: Demande; monId: string | null }) {
   const ty = typeDemandeDef(d.type);
   const mien = d.assigneId && d.assigneId === monId;
   return (
-    <Link href={`/demandes/${d.id}`} className="flex items-start gap-3 rounded-[12px] border border-border bg-surface-2 px-3 py-2.5 transition hover:-translate-y-0.5 hover:border-border-2">
+    <Link href={`/demandes/${d.id}`} className="relative flex items-start gap-3 overflow-hidden rounded-[12px] border px-3 py-2.5 pl-4 transition hover:-translate-y-0.5 hover:border-border-2" style={{ borderColor: `color-mix(in srgb,${pr.tone} 22%,var(--border))`, background: "linear-gradient(160deg,color-mix(in srgb,var(--surface-2) 94%,transparent),color-mix(in srgb,var(--surface-2) 82%,#000))" }}>
+      <span aria-hidden className="absolute left-0 top-0 h-full w-1" style={{ background: pr.tone }} />
       <span className="mt-0.5 text-[1.1rem]" aria-hidden>{ty.icon}</span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">

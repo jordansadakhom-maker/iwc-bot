@@ -21,7 +21,8 @@ export function JournalBord({ rdvs }: { rdvs: JournalRdv[] }) {
   return (
     <div className="flex flex-col gap-3">
       {rdvs.map((r) => (
-        <div key={r.id} className="rounded-card border border-border bg-surface p-4 shadow-card">
+        <div key={r.id} className="relative overflow-hidden rounded-card border border-border bg-surface p-4 pl-5 shadow-card">
+          <span aria-hidden className="absolute left-0 top-0 h-full w-1" style={{ background: "var(--good)" }} />
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
