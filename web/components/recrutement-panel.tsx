@@ -22,6 +22,8 @@ const STATUTS = [
   { key: "refuse", label: "Refusé", tone: "oxblood" as const },
 ];
 const stConf = (s: string) => STATUTS.find((x) => x.key === s) || STATUTS[0];
+const initiales = (nom: string) => nom.split(/\s+/).filter(Boolean).map((s) => s[0]).slice(0, 2).join("").toUpperCase() || "?";
+const courier: React.CSSProperties = { fontFamily: "'Courier New',monospace" };
 
 export function RecrutementPanel({ candidatures }: { candidatures: CandidatureItem[] }) {
   const router = useRouter();
@@ -83,19 +85,27 @@ export function RecrutementPanel({ candidatures }: { candidatures: CandidatureIt
             const st = stConf(c.statut);
             const att = enAttente(c);
             return (
-              <button key={c.id} onClick={() => setSel(c)} className="rounded-[12px] border border-border bg-surface-2 px-3.5 py-3 text-left transition hover:-translate-y-0.5 hover:border-border-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="min-w-0 truncate text-[0.9rem] font-semibold">{c.nomRP}{c.age ? <span className="ml-1 text-[0.74rem] font-normal text-faint">· {c.age}</span> : null}</span>
-                  <Badge tone={st.tone}>{st.label}</Badge>
+              <button key={c.id} onClick={() => setSel(c)} className="group relative overflow-hidden rounded-[12px] border p-3.5 text-left transition hover:-translate-y-0.5 hover:border-border-2" style={{ borderColor: "color-mix(in srgb,var(--brass) 22%,var(--border))", background: "linear-gradient(160deg,color-mix(in srgb,var(--surface-2) 94%,transparent),color-mix(in srgb,var(--surface-2) 82%,#000))" }}>
+                <div className="flex items-start gap-3">
+                  <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-[0.78rem] font-extrabold text-black/85" style={{ background: "radial-gradient(circle at 32% 26%,var(--brass-hi),color-mix(in srgb,var(--brass) 40%,#000))", boxShadow: "inset 0 0 0 2px color-mix(in srgb,var(--brass) 45%,#000)" }}>{initiales(c.nomRP)}</div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate font-display text-[0.98rem] font-semibold leading-tight">{c.nomRP}{c.age ? <span className="ml-1 text-[0.72rem] font-normal text-faint">· {c.age}</span> : null}</div>
+                        <div className="text-[0.54rem] tracking-[0.12em] text-faint" style={courier}>DOSSIER {c.ref || "—"}</div>
+                      </div>
+                      <Badge tone={st.tone}>{st.label}</Badge>
+                    </div>
+                  </div>
                 </div>
                 {(att != null || c.doublon) ? (
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  <div className="mt-2 flex flex-wrap gap-1.5">
                     {att != null ? <MiniTag tone="warn"><Clock className="h-3 w-3" /> En attente {att} j</MiniTag> : null}
                     {c.doublon ? <MiniTag tone="oxblood"><AlertTriangle className="h-3 w-3" /> Doublon possible</MiniTag> : null}
                   </div>
                 ) : null}
-                <p className="mt-1.5 line-clamp-2 text-[0.76rem] text-muted">{c.motivation || "—"}</p>
-                <div className="mt-2 flex items-center gap-2 text-[0.68rem] text-faint">
+                <p className="mt-2 line-clamp-2 text-[0.76rem] italic text-muted">« {c.motivation || "—"} »</p>
+                <div className="mt-2 flex items-center gap-2 border-t border-border pt-2 text-[0.68rem] text-faint">
                   <span className="inline-flex items-center gap-1"><Calendar className="h-3 w-3" /> {dateFR(c.createdAt)}</span>
                   {c.contact ? <span className="truncate">· {c.moyen ? c.moyen + " : " : ""}{c.contact}</span> : null}
                 </div>
