@@ -1,6 +1,7 @@
 import { Landmark, TrendingUp, TrendingDown, Wallet, Lock, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { money } from "@/lib/dispensaire-facturation-const";
 import { Cartouche } from "@/components/dispensaire-ui";
+import { ComptaManuelle } from "@/components/dispensaire-comptabilite-manuel";
 import type { ComptabiliteData } from "@/lib/dispensaire-comptabilite";
 
 const dateFR = (s: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "short", year: "2-digit" }).format(new Date(s)); } catch { return "—"; } };
@@ -48,6 +49,9 @@ export function DispensaireComptabilite({ data }: { data: ComptabiliteData }) {
         )}
       </section>
 
+      {/* Écritures manuelles (Direction) — ajout/édition/suppression + factures en jeu */}
+      <ComptaManuelle manuelles={data.manuelles} canEditer={data.canEditer} />
+
       {/* Grand-livre */}
       <section className="rounded-[14px] border border-border bg-surface p-4">
         <h3 className="mb-3 flex items-center gap-2 text-[0.9rem] font-semibold"><Wallet className="h-4 w-4 text-accent" /> Grand-livre <span className="font-num text-[0.8rem] text-faint">{data.ecritures.length}</span></h3>
@@ -71,7 +75,7 @@ export function DispensaireComptabilite({ data }: { data: ComptabiliteData }) {
                   return (
                     <tr key={e.id} className="border-b border-border/60">
                       <td className="py-2 pr-2 font-num text-faint">{dateFR(e.date)}</td>
-                      <td className="px-2 py-2"><span className="line-clamp-1">{e.libelle}</span></td>
+                      <td className="px-2 py-2"><span className="line-clamp-1">{e.libelle}{e.manuelle ? <span className="ml-1.5 rounded border border-accent/40 px-1 py-px align-middle text-[0.58rem] font-semibold uppercase tracking-[0.04em] text-accent">Manuel</span> : null}</span></td>
                       <td className="px-2 py-2 text-muted">{e.categorie}</td>
                       <td className="px-2 py-2 text-right"><span className="inline-flex items-center gap-1 font-num font-semibold" style={{ color: ton }}><Ic className="h-3.5 w-3.5" />{e.type === "recette" ? "+" : "−"}{money(e.montant)}</span></td>
                     </tr>
