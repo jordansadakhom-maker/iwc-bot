@@ -176,5 +176,6 @@ export const fraisStatut = (k: string) => FRAIS_STATUTS.find((s) => s.key === k)
 export type Frais = { id: string; objet: string; montant: number; demandeur: string | null; statut: string; validePar: string | null; note: string | null; par: string | null; createdAt: string };
 export type FraisData = { connecte: boolean; pret: boolean; canValidate: boolean; frais: Frais[]; enAttente: number };
 
-// Format monétaire commun.
-export const money = (n: number) => `$${Math.round(n).toLocaleString("fr-FR")}`;
+// Format monétaire commun — centimes toujours affichés (comptabilité exacte,
+// jamais arrondie). Ex. 4543 → « $4 543,00 », 4543.5 → « $4 543,50 ».
+export const money = (n: number) => `$${(Number(n) || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

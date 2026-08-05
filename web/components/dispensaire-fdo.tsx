@@ -291,8 +291,8 @@ function SemaineCarte({
 function RapportModal({ sem, onClose }: { sem: SemaineFDO; onClose: () => void }) {
   const genLe = new Intl.DateTimeFormat("fr-FR", { ...P, day: "2-digit", month: "long", year: "numeric" }).format(new Date());
   return (
-    <div className="fixed inset-0 z-50 grid place-items-start overflow-auto bg-black/55 p-4 sm:p-8" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <style>{`@media print{body *{visibility:hidden!important}#fdo-rapport-print,#fdo-rapport-print *{visibility:visible!important}#fdo-rapport-print{position:fixed!important;inset:0!important;margin:0!important;max-width:none!important;border-radius:0!important;box-shadow:none!important}.fdo-no-print{display:none!important}}`}</style>
+    <div className="iwc-print-host fixed inset-0 z-50 grid place-items-start overflow-auto bg-black/55 p-4 sm:p-8" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <style>{`@media print{body *{visibility:hidden!important}.iwc-print-host{position:static!important;overflow:visible!important;inset:auto!important;height:auto!important;padding:0!important;background:none!important}#fdo-rapport-print,#fdo-rapport-print *{visibility:visible!important}#fdo-rapport-print{position:absolute!important;left:0!important;top:0!important;width:100%!important;max-width:none!important;margin:0!important;border-radius:0!important;box-shadow:none!important}.fdo-no-print{display:none!important}}`}</style>
       <div className="mx-auto w-full max-w-[820px]">
         <div className="fdo-no-print mb-2 flex items-center justify-between gap-2">
           <span className="text-[0.8rem] font-semibold text-white">Rapport hebdomadaire — Semaine {sem.n}</span>
@@ -502,8 +502,8 @@ function DeclarationPanel({ soins, onGenerer }: { soins: SoinFDO[]; onGenerer: (
 function DeclarationModal({ soins, label, onClose }: { soins: SoinFDO[]; label: string; onClose: () => void }) {
   const genLe = new Intl.DateTimeFormat("fr-FR", { ...P, day: "2-digit", month: "long", year: "numeric" }).format(new Date());
   return (
-    <div className="fixed inset-0 z-50 grid place-items-start overflow-auto bg-black/55 p-4 sm:p-8" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <style>{`@media print{body *{visibility:hidden!important}#fdo-decl-print,#fdo-decl-print *{visibility:visible!important}#fdo-decl-print{position:fixed!important;inset:0!important;margin:0!important;max-width:none!important;border-radius:0!important;box-shadow:none!important}.fdo-no-print{display:none!important}}`}</style>
+    <div className="iwc-print-host fixed inset-0 z-50 grid place-items-start overflow-auto bg-black/55 p-4 sm:p-8" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <style>{`@media print{body *{visibility:hidden!important}.iwc-print-host{position:static!important;overflow:visible!important;inset:auto!important;height:auto!important;padding:0!important;background:none!important}#fdo-decl-print,#fdo-decl-print *{visibility:visible!important}#fdo-decl-print{position:absolute!important;left:0!important;top:0!important;width:100%!important;max-width:none!important;margin:0!important;border-radius:0!important;box-shadow:none!important}.fdo-no-print{display:none!important}}`}</style>
       <div className="mx-auto w-full max-w-[820px]">
         <div className="fdo-no-print mb-2 flex items-center justify-between gap-2">
           <span className="text-[0.8rem] font-semibold text-white">Fiche de déclaration — {soins.length} soin(s)</span>
