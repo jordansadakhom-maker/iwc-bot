@@ -2,10 +2,10 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarClock, Plus, Loader2, Check, UserX, X, Trash2, Stethoscope, DoorClosed } from "lucide-react";
+import { CalendarClock, Plus, Loader2, Check, UserX, X, Trash2, Stethoscope, DoorClosed, Pencil, MessageSquareText } from "lucide-react";
 import { Flash, inputCls } from "@/components/edit-ui";
 import { ETAT_RDV_LABEL, PRIORITES, PRIORITE_LABEL, PRIORITE_TON, type RendezVousData, type RendezVous } from "@/lib/dispensaire-rendez-vous-const";
-import { creerRDV, changerEtatRDV, supprimerRDV } from "@/app/dispensaire/rendez-vous/actions";
+import { creerRDV, majRDV, changerEtatRDV, supprimerRDV } from "@/app/dispensaire/rendez-vous/actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
 const jourFR = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", weekday: "long", day: "2-digit", month: "long" }).format(new Date(iso)); } catch { return "—"; } };
@@ -17,6 +17,7 @@ export function DispensaireRendezVous({ data }: { data: RendezVousData }) {
   const [flash, setFlash] = useState<FlashMsg>(null);
   const [busy, setBusy] = useState(false);
   const [actif, setActif] = useState<string | null>(null);
+  const [editRdv, setEditRdv] = useState<RendezVous | null>(null);
   const [form, setForm] = useState({ patient: "", type: "", debut: "", medecin: "", salle: "", priorite: "normale", motif: "" });
   const cleRef = useRef("");
   const jeton = () => (cleRef.current ||= (globalThis.crypto?.randomUUID?.() ?? String(Date.now()) + Math.random()));
@@ -104,10 +105,12 @@ export function DispensaireRendezVous({ data }: { data: RendezVousData }) {
                       <span className="rounded-full px-2 py-0.5 text-[0.64rem] font-bold uppercase" style={{ color: PRIORITE_TON[r.priorite], background: `color-mix(in srgb,${PRIORITE_TON[r.priorite]} 14%,transparent)` }}>{PRIORITE_LABEL[r.priorite]}</span>
                       <span className="min-w-0 flex-1 truncate"><b className="font-semibold">{r.patient}</b>{r.type ? <span className="text-faint"> · {r.type}</span> : ""}{r.medecin ? <span className="inline-flex items-center gap-0.5 text-faint"> · <Stethoscope className="h-3 w-3" />{r.medecin}</span> : ""}{r.salle ? <span className="inline-flex items-center gap-0.5 text-faint"> · <DoorClosed className="h-3 w-3" />{r.salle}</span> : ""}</span>
                       <div className="flex shrink-0 items-center gap-1">
+                        <button onClick={() => setEditRdv(r)} disabled={actif === r.id} className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[0.72rem] font-semibold text-muted hover:text-accent disabled:opacity-50" title="Modifier le rendez-vous"><Pencil className="h-3 w-3" /> Modifier</button>
                         <button onClick={() => faire(r.id, () => changerEtatRDV(r.id, "honore"), "Marqué honoré.")} disabled={actif === r.id} className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[0.72rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--good)" }}><Check className="h-3 w-3" /> Honoré</button>
                         <button onClick={() => faire(r.id, () => changerEtatRDV(r.id, "absent"), "Marqué absent.")} disabled={actif === r.id} className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[0.72rem] font-semibold text-muted hover:text-ink disabled:opacity-50"><UserX className="h-3 w-3" /> Absent</button>
                         <button onClick={() => faire(r.id, () => changerEtatRDV(r.id, "annule"), "Rendez-vous annulé.")} disabled={actif === r.id} className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[0.72rem] font-semibold text-muted hover:text-oxblood disabled:opacity-50"><X className="h-3 w-3" /> Annuler</button>
                       </div>
+                      {r.motif ? <p className="basis-full text-[0.78rem] text-muted"><MessageSquareText className="mr-1 inline h-3.5 w-3.5 align-[-2px] text-faint" /><span className="text-faint">Motif :</span> {r.motif}</p> : null}
                     </div>
                   ))}
                 </div>
@@ -133,6 +136,65 @@ export function DispensaireRendezVous({ data }: { data: RendezVousData }) {
           </div>
         </section>
       ) : null}
+
+      {editRdv ? (
+        <EditRDVModal
+          rdv={editRdv}
+          patients={data.patients}
+          medecins={data.medecins}
+          onClose={() => setEditRdv(null)}
+          onDone={(m) => { setFlash(m); if (m?.t === "ok") { setEditRdv(null); router.refresh(); } }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+// Convertit un ISO en valeur pour <input type="datetime-local"> (heure locale du
+// navigateur, cohérent avec la création qui interprète la saisie en heure locale).
+function isoVersLocal(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
+// ── Modale d'édition d'un rendez-vous ─────────────────────────────────────────
+function EditRDVModal({ rdv, patients, medecins, onClose, onDone }: { rdv: RendezVous; patients: string[]; medecins: string[]; onClose: () => void; onDone: (m: FlashMsg) => void }) {
+  const [f, setF] = useState({ patient: rdv.patient, debut: isoVersLocal(rdv.debut), type: rdv.type || "", medecin: rdv.medecin || "", salle: rdv.salle || "", priorite: rdv.priorite as string, motif: rdv.motif || "" });
+  const [busy, setBusy] = useState(false);
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF((p) => ({ ...p, [k]: e.target.value }));
+  async function save() {
+    if (!f.patient.trim()) { onDone({ t: "bad", m: "Indique le patient." }); return; }
+    if (!f.debut) { onDone({ t: "bad", m: "Choisis la date et l'heure." }); return; }
+    let debutIso = "";
+    try { debutIso = new Date(f.debut).toISOString(); } catch { onDone({ t: "bad", m: "Date invalide." }); return; }
+    setBusy(true);
+    const r = await majRDV(rdv.id, { patient: f.patient, debut: debutIso, type: f.type, medecin: f.medecin, salle: f.salle, priorite: f.priorite, motif: f.motif });
+    setBusy(false);
+    if (!r.ok) { onDone({ t: "bad", m: r.error || "Impossible." }); return; }
+    onDone({ t: "ok", m: "Rendez-vous modifié." });
+  }
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center overflow-auto bg-black/55 p-4" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="iwc-pop w-full max-w-[560px] rounded-[14px] border border-border-2 bg-surface shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <h2 className="flex items-center gap-2 font-display text-[1.05rem]"><Pencil className="h-4 w-4 text-accent" /> Modifier le rendez-vous</h2>
+          <button onClick={onClose} className="text-faint hover:text-ink"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="grid gap-2 p-4 sm:grid-cols-2">
+          <label className="flex flex-col gap-1"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Patient</span><input className={inputCls} list="rdv-patients" value={f.patient} onChange={set("patient")} /></label>
+          <label className="flex flex-col gap-1"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Date &amp; heure</span><input type="datetime-local" className={inputCls} value={f.debut} onChange={set("debut")} /></label>
+          <label className="flex flex-col gap-1"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Type</span><input className={inputCls} value={f.type} onChange={set("type")} placeholder="Consultation, contrôle…" /></label>
+          <label className="flex flex-col gap-1"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Médecin</span><input className={inputCls} list="rdv-medecins" value={f.medecin} onChange={set("medecin")} placeholder="Optionnel" /></label>
+          <label className="flex flex-col gap-1"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Salle</span><input className={inputCls} value={f.salle} onChange={set("salle")} placeholder="Optionnel" /></label>
+          <label className="flex flex-col gap-1"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Priorité</span><select className={inputCls} value={f.priorite} onChange={set("priorite")}>{PRIORITES.map((p) => <option key={p} value={p}>{PRIORITE_LABEL[p]}</option>)}</select></label>
+          <label className="flex flex-col gap-1 sm:col-span-2"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Motif</span><textarea className={inputCls} rows={2} value={f.motif} onChange={set("motif")} placeholder="Motif du rendez-vous" /></label>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
+          <button onClick={onClose} className="rounded-lg border border-border px-3 py-1.5 text-[0.8rem] font-semibold transition hover:border-accent">Annuler</button>
+          <button onClick={save} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[0.8rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Enregistrer</button>
+        </div>
+      </div>
     </div>
   );
 }
