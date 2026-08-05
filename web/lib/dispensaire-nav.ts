@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, ClipboardList, Boxes, Warehouse, Archive, BadgeDollarSign, Receipt, ShieldCheck, FileText, BookUser, Stethoscope, ScrollText, BarChart3, History, ShieldAlert, Sparkles, Scale, HeartPulse, CalendarClock, Scissors, Landmark, BedDouble, Caravan, Gauge, Coins, Crown, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Users, ClipboardList, Boxes, Warehouse, Archive, BadgeDollarSign, Receipt, ShieldCheck, FileText, BookUser, Stethoscope, ScrollText, BarChart3, History, ShieldAlert, Sparkles, Scale, HeartPulse, CalendarClock, Scissors, Landmark, BedDouble, Caravan, Gauge, Coins, Crown, Truck, type LucideIcon } from "lucide-react";
 
 // Onglets de la section Dispensaire de Saint-Denis.
 //   `pret`       = déjà construit (sinon « bientôt »).
@@ -30,6 +30,7 @@ export const DISP_NAV: DispTab[] = [
   { href: "/dispensaire/coffres", label: "Stock Matériel Médical", icon: Archive, pret: true, cat: "medical", desc: "Le matériel médical rangé, coffre par coffre — et ce qu'il faut réapprovisionner." },
   { href: "/dispensaire/inventaire", label: "Inventaire global", icon: Warehouse, pret: true, cat: "medical", desc: "Vue d'ensemble en lecture seule — quantité totale de chaque produit, tous coffres confondus." },
   { href: "/dispensaire/stockage", label: "Stockage", icon: Boxes, pret: true, cat: "medical", desc: "L'inventaire des coffres — remèdes, matériel et matières." },
+  { href: "/dispensaire/approvisionnements", label: "Approvisionnements", icon: Truck, pret: true, cat: "medical", desc: "Seuils de commande, dates prévues, statut des commandes et coordonnées des fournisseurs." },
 
   // ── 👥 Ressources humaines (habilité RH) ──
   { href: "/dispensaire/pointage", label: "Pointage", icon: ClipboardList, pret: true, restreint: true, cat: "rh", desc: "Assiduité, absences et validation des services (la prise de service reste sur le tableau de bord)." },
