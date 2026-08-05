@@ -19,7 +19,6 @@ import { creerSoin, supprimerSoin, majSoin, majStatutSemaine, archiverRapportSem
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
 const P = { timeZone: "Europe/Paris" } as const;
 const dateFR = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { ...P, day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(iso)); } catch { return "—"; } };
-const heureFR = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { ...P, hour: "2-digit", minute: "2-digit" }).format(new Date(iso)).replace(":", "h"); } catch { return "—"; } };
 const ymd = (iso: string) => (iso || "").slice(0, 10);
 const labelCls = "text-[0.68rem] uppercase tracking-[0.05em] text-faint";
 
@@ -255,7 +254,6 @@ function SemaineCarte({
               <thead>
                 <tr className="text-left text-[0.66rem] uppercase tracking-[0.05em] text-faint">
                   <th className="border-b border-border px-2 py-1.5">Date</th>
-                  <th className="border-b border-border px-2 py-1.5">Heure</th>
                   <th className="border-b border-border px-2 py-1.5">Patient</th>
                   <th className="border-b border-border px-2 py-1.5">Bureau</th>
                   <th className="border-b border-border px-2 py-1.5">Médecin</th>
@@ -267,11 +265,10 @@ function SemaineCarte({
               </thead>
               <tbody>
                 {liste.length === 0 ? (
-                  <tr><td colSpan={9} className="px-2 py-4 text-center text-faint">Aucun soin ne correspond aux filtres.</td></tr>
+                  <tr><td colSpan={8} className="px-2 py-4 text-center text-faint">Aucun soin ne correspond aux filtres.</td></tr>
                 ) : liste.map((s) => (
                   <tr key={s.id} className="group">
                     <td className="border-b border-border px-2 py-1.5 font-num">{dateFR(s.createdAt)}</td>
-                    <td className="border-b border-border px-2 py-1.5 font-num text-muted">{heureFR(s.createdAt)}</td>
                     <td className="border-b border-border px-2 py-1.5 font-semibold">{s.agent || "—"}</td>
                     <td className="border-b border-border px-2 py-1.5">{s.bureau}</td>
                     <td className="border-b border-border px-2 py-1.5 text-muted">{s.par || "—"}</td>
@@ -345,7 +342,6 @@ function RapportImprimable({ sem, genLe }: { sem: SemaineFDO; genLe: string }) {
         <thead>
           <tr style={{ borderBottom: "1.5px solid #b79e70" }}>
             <th className="py-1 pr-2 text-left">Date</th>
-            <th className="py-1 pr-2 text-left">Heure</th>
             <th className="py-1 pr-2 text-left">Patient</th>
             <th className="py-1 pr-2 text-left">Bureau</th>
             <th className="py-1 pr-2 text-left">Médecin</th>
@@ -357,7 +353,6 @@ function RapportImprimable({ sem, genLe }: { sem: SemaineFDO; genLe: string }) {
           {sem.soins.map((s) => (
             <tr key={s.id} style={{ borderBottom: "1px dotted #cabfa6" }}>
               <td className="py-1 pr-2">{dateFR(s.createdAt)}</td>
-              <td className="py-1 pr-2">{heureFR(s.createdAt)}</td>
               <td className="py-1 pr-2">{s.agent || "—"}</td>
               <td className="py-1 pr-2">{s.bureau}</td>
               <td className="py-1 pr-2">{s.par || "—"}</td>
