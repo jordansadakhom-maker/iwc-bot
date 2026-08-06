@@ -39,6 +39,20 @@ export function DispensaireConsignes({ data, canEdit, onSave }: { data: Consigne
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => sauver(val), 1000); // sauvegarde auto après une pause
   }
+
+  // Re-synchronise l'affichage quand le serveur renvoie des données fraîches
+  // (rafraîchissement temps réel du tableau de bord). SANS jamais écraser une
+  // saisie locale non encore enregistrée. Corrige le bug « la consigne ne reste
+  // pas affichée » : les autres membres voyaient un état figé au 1er chargement.
+  useEffect(() => {
+    setMaj({ par: data.updatedBy, at: data.updatedAt });
+    setHisto(data.historique);
+    setTexte((cur) => {
+      if (cur === dernierEnvoye.current) { dernierEnvoye.current = data.texte; return data.texte; }
+      return cur; // édition locale en cours → on préserve la saisie
+    });
+  }, [data]);
+
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
   return (

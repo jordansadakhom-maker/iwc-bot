@@ -62,39 +62,6 @@ function agregerPayes(fs: Facture[]): LignePaye[] {
   return [...m.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)));
 }
 
-// FDO — soins aux forces de l'ordre (tarif fixe 2 $). Statut « facture » = dû,
-// « regle » = payé. Ces sommes sont dues au dispensaire au même titre qu'une
-// facture patient → on les intègre au rapport (impayés + payés depuis `depuis`),
-// regroupées par bureau. Dégradation propre si la table n'existe pas encore.
-async function fdoLignes(depuis: string | null): Promise<{ impayes: LigneImpaye[]; payes: LignePaye[] }> {
-  const admin = createAdminClient();
-  if (!admin) return { impayes: [], payes: [] };
-  let rows: Record<string, unknown>[] = [];
-  try { const { data } = await admin.from("DispensaireSoinFDO").select("bureau,agent,soin,montant,statut,par,createdAt,updatedAt"); rows = (data as Record<string, unknown>[]) || []; } catch { return { impayes: [], payes: [] }; }
-  const val = (v: unknown) => Number(v) || 0;
-  const impM = new Map<string, LigneImpaye>();
-  const payM = new Map<string, LignePaye>();
-  for (const r of rows) {
-    const bureau = String(r.bureau ?? "Forces de l'ordre");
-    const k = "fdo-" + norm(bureau);
-    const regle = String(r.statut ?? "") === "regle";
-    if (!regle) {
-      const d = r.createdAt ? String(r.createdAt) : null;
-      const agent = r.agent ? String(r.agent) : null;
-      const e = impM.get(k);
-      if (e) { e.montant += val(r.montant); if (d && (!e.date || d < e.date)) e.date = d; if (agent && (!e.soins || !e.soins.includes(agent))) e.soins = [e.soins, agent].filter(Boolean).join(", "); }
-      else impM.set(k, { date: d, nom: `FDO — ${bureau}`, montant: val(r.montant), soins: agent, medecin: r.par ? String(r.par) : null, refs: [] });
-    } else if (r.updatedAt && (!depuis || String(r.updatedAt) > depuis)) {
-      const d = String(r.updatedAt);
-      const em = r.createdAt ? String(r.createdAt) : null;
-      const e = payM.get(k);
-      if (e) { e.montant += val(r.montant); if (d && (!e.date || d < e.date)) e.date = d; if (em && (!e.emission || em < e.emission)) e.emission = em; }
-      else payM.set(k, { date: d, emission: em, nom: `FDO — ${bureau}`, montant: val(r.montant) });
-    }
-  }
-  return { impayes: [...impM.values()], payes: [...payM.values()] };
-}
-
 async function dernierRapportAt(admin: NonNullable<ReturnType<typeof createAdminClient>>): Promise<string | null> {
   try { const { data } = await admin.from("DispensaireRapportImpayes").select("at").order("at", { ascending: false }).limit(1).maybeSingle(); return data ? String((data as Record<string, unknown>).at) : null; } catch { return null; }
 }
@@ -121,10 +88,9 @@ async function batirRapport(medecin: string, depuis: string | null, titre?: stri
   const payesF = data.factures.filter((f) => f.statut === "payee" && f.datePaiement && (!depuis || String(f.datePaiement) > depuis));
   const impayes = agregerImpayes(impayesF);
   const payes = agregerPayes(payesF);
-  // Ajout des soins FDO (dus / réglés) au même rapport, triés avec le reste.
-  const fdo = await fdoLignes(depuis);
-  if (fdo.impayes.length) { impayes.push(...fdo.impayes); impayes.sort((a, b) => String(a.date).localeCompare(String(b.date))); }
-  if (fdo.payes.length) { payes.push(...fdo.payes); payes.sort((a, b) => String(a.date).localeCompare(String(b.date))); }
+  // Les soins FDO NE sont PLUS intégrés à ce document : ce ne sont pas des
+  // factures et ils disposent de leur propre déclaration dédiée (onglet Soins FDO
+  // → fiche de déclaration à l'État). On ne mélange donc plus les deux registres.
   return { pret: true, rapport: { genereLe: new Date().toISOString(), medecin, medecinTitre, depuis, impayes, payes, totalImpaye: impayes.reduce((a, l) => a + l.montant, 0), totalPaye: payes.reduce((a, l) => a + l.montant, 0) } };
 }
 
