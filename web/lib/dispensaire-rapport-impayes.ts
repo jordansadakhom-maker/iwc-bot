@@ -62,6 +62,30 @@ function agregerPayes(fs: Facture[]): LignePaye[] {
   return [...m.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)));
 }
 
+// Soins FDO RÉGLÉS depuis `depuis`, regroupés par bureau → alimentent UNIQUEMENT
+// la liste « payés depuis le dernier rapport » (jamais les impayés). Dégrade
+// proprement si la table n'existe pas encore.
+async function fdoPayes(depuis: string | null): Promise<LignePaye[]> {
+  const admin = createAdminClient();
+  if (!admin) return [];
+  let rows: Record<string, unknown>[] = [];
+  try { const { data } = await admin.from("DispensaireSoinFDO").select("bureau,montant,statut,createdAt,updatedAt"); rows = (data as Record<string, unknown>[]) || []; } catch { return []; }
+  const val = (v: unknown) => Number(v) || 0;
+  const payM = new Map<string, LignePaye>();
+  for (const r of rows) {
+    if (String(r.statut ?? "") !== "regle") continue;
+    if (!(r.updatedAt && (!depuis || String(r.updatedAt) > depuis))) continue;
+    const bureau = String(r.bureau ?? "Forces de l'ordre");
+    const k = "fdo-" + norm(bureau);
+    const d = String(r.updatedAt);
+    const em = r.createdAt ? String(r.createdAt) : null;
+    const e = payM.get(k);
+    if (e) { e.montant += val(r.montant); if (d && (!e.date || d < e.date)) e.date = d; if (em && (!e.emission || em < e.emission)) e.emission = em; }
+    else payM.set(k, { date: d, emission: em, nom: `FDO — ${bureau}`, montant: val(r.montant) });
+  }
+  return [...payM.values()];
+}
+
 async function dernierRapportAt(admin: NonNullable<ReturnType<typeof createAdminClient>>): Promise<string | null> {
   try { const { data } = await admin.from("DispensaireRapportImpayes").select("at").order("at", { ascending: false }).limit(1).maybeSingle(); return data ? String((data as Record<string, unknown>).at) : null; } catch { return null; }
 }
@@ -88,9 +112,12 @@ async function batirRapport(medecin: string, depuis: string | null, titre?: stri
   const payesF = data.factures.filter((f) => f.statut === "payee" && f.datePaiement && (!depuis || String(f.datePaiement) > depuis));
   const impayes = agregerImpayes(impayesF);
   const payes = agregerPayes(payesF);
-  // Les soins FDO NE sont PLUS intégrés à ce document : ce ne sont pas des
-  // factures et ils disposent de leur propre déclaration dédiée (onglet Soins FDO
-  // → fiche de déclaration à l'État). On ne mélange donc plus les deux registres.
+  // Les soins FDO n'apparaissent PAS dans les IMPAYÉS (ce ne sont pas des factures,
+  // ils ont leur propre déclaration). En revanche, les FDO RÉGLÉS depuis le dernier
+  // rapport sont réintégrés à la liste « payés depuis le dernier rapport » du
+  // document à transmettre — les factures payées doivent s'y afficher comme avant.
+  const fdoP = await fdoPayes(depuis);
+  if (fdoP.length) { payes.push(...fdoP); payes.sort((a, b) => String(a.date).localeCompare(String(b.date))); }
   return { pret: true, rapport: { genereLe: new Date().toISOString(), medecin, medecinTitre, depuis, impayes, payes, totalImpaye: impayes.reduce((a, l) => a + l.montant, 0), totalPaye: payes.reduce((a, l) => a + l.montant, 0) } };
 }
 

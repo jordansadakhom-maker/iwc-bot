@@ -19,7 +19,7 @@ export * from "@/lib/dispensaire-salaires-const";
 
 export type SalaireFonction = { fonction: string; montantHebdo: number };
 // `jours` = jours RETENUS (auto + ajustement) ; `salaire` = salaire FINAL (base + prime).
-export type LigneSalaire = { nom: string; fonction: string | null; montantHebdo: number; joursAuto: number; ajustJours: number; jours: number; heuresMin: number; prime: number; salaireBase: number; salaire: number };
+export type LigneSalaire = { nom: string; fonction: string | null; montantHebdo: number; joursAuto: number; ajustJours: number; jours: number; heuresAutoMin: number; ajustMin: number; heuresMin: number; prime: number; salaireBase: number; salaire: number };
 export type LignePaieArchive = { nom: string; fonction: string | null; joursAuto: number; ajustJours: number; jours: number; heuresMin: number; prime: number; salaireBase: number; salaire: number };
 export type ArchivePaie = { semaineLundi: string; at: string; par: string | null; total: number; lignes: LignePaieArchive[] };
 export type SalairesData = { pret: boolean; autorise: boolean; semaineLundi: string; fonctions: SalaireFonction[]; lignes: LigneSalaire[]; archives: ArchivePaie[]; semaineArchivee: boolean };
@@ -92,14 +92,12 @@ export async function getSalaires(): Promise<SalairesData> {
 
   // Ajustements manuels d'heures d'effectif (Direction/RH) → corrigent l'AFFICHAGE
   // des heures de cette colonne, JAMAIS le salaire (qui ne dépend que des jours).
+  // On garde le delta À PART (jm reste les heures AUTO du pointage) pour pouvoir
+  // afficher « auto X · ajust Y » et permettre l'édition depuis la page salaires.
+  const deltaMin = new Map<string, number>();
   try {
     const { data: eh } = await admin.from("DispensaireEffectifAjust").select("nomKey,deltaMin").eq("semaineLundi", monday);
-    for (const r of (eh || []) as Record<string, unknown>[]) {
-      const k = String(r.nomKey || "");
-      const e = jm.get(k) || { jours: 0, heuresMin: 0 };
-      e.heuresMin = Math.max(0, e.heuresMin + (Number(r.deltaMin) || 0));
-      jm.set(k, e);
-    }
+    for (const r of (eh || []) as Record<string, unknown>[]) deltaMin.set(String(r.nomKey || ""), Number(r.deltaMin) || 0);
   } catch { /* table absente → aucun ajustement */ }
 
   // Ajustements manuels de la Direction pour la semaine courante (prime + correction
@@ -119,7 +117,10 @@ export async function getSalaires(): Promise<SalairesData> {
     const jours = calcJoursRetenus(stat.jours, aj.ajustJours);
     const prime = Math.max(0, Math.round(Number(aj.prime) || 0));
     const salaire = salaireFinal(montantHebdo, jours, prime);
-    return { nom: s.nom, fonction: s.fonction, montantHebdo, joursAuto: stat.jours, ajustJours: aj.ajustJours, jours, heuresMin: stat.heuresMin, prime, salaireBase: salaire - prime, salaire };
+    // Heures = heures pointées (auto) + ajustement manuel (peut être négatif), borné à 0.
+    const ajustMin = deltaMin.get(k) || 0;
+    const heuresMin = Math.max(0, stat.heuresMin + ajustMin);
+    return { nom: s.nom, fonction: s.fonction, montantHebdo, joursAuto: stat.jours, ajustJours: aj.ajustJours, jours, heuresAutoMin: stat.heuresMin, ajustMin, heuresMin, prime, salaireBase: salaire - prime, salaire };
   }).sort((a, b) => b.salaire - a.salaire || a.nom.localeCompare(b.nom));
 
   // Fonctions à barémer = celles présentes chez les salariés ∪ celles déjà au barème.
