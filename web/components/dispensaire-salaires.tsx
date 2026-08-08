@@ -6,11 +6,23 @@ import { Coins, Lock, Loader2, Info, Archive, Printer, Trash2, Check } from "luc
 import { Flash, inputCls } from "@/components/edit-ui";
 import type { SalairesData, SalaireFonction, LigneSalaire, ArchivePaie } from "@/lib/dispensaire-salaires";
 import { salairePlein, SEUIL_JOURS_PLEIN, joursRetenus, salaireFinal } from "@/lib/dispensaire-salaires-const";
-import { setSalaireFonction, archiverSemaine, supprimerArchivePaie, setPrime, setAjustJours } from "@/app/dispensaire/salaires/actions";
+import { setSalaireFonction, archiverSemaine, supprimerArchivePaie, setPrime, setAjustJours, setAjustHeures } from "@/app/dispensaire/salaires/actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
 const money = (n: number) => "$" + (Number(n) || 0).toLocaleString("fr-FR");
 const fmtMin = (min: number) => { if (min <= 0) return "0 min"; const h = Math.floor(min / 60), m = min % 60; return h ? `${h} h ${String(m).padStart(2, "0")}` : `${m} min`; };
+// Valeur éditable des heures, pré-remplie « H:MM ».
+const hhmm = (min: number) => { const v = Math.max(0, Math.round(min)); return `${Math.floor(v / 60)}:${String(v % 60).padStart(2, "0")}`; };
+// Parse une saisie d'heures en minutes : « 72 », « 72:30 », « 72h30 », « 72,5 », « 72.5 ». null si invalide.
+function heuresSaisieMin(v: string): number | null {
+  const t = v.trim().toLowerCase().replace(/\s/g, "");
+  if (t === "") return null;
+  const m = t.match(/^(\d+)[:h](\d{1,2})$/);
+  if (m) return Number(m[1]) * 60 + Math.min(59, Number(m[2]));
+  const dec = Number(t.replace(",", "."));
+  if (Number.isFinite(dec) && dec >= 0) return Math.round(dec * 60);
+  return null;
+}
 const jjmm = (ymd: string) => { const p = (ymd || "").split("-"); return p.length === 3 ? `${p[2]}/${p[1]}` : ymd; };
 const escH = (t: unknown) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -113,6 +125,22 @@ export function DispensaireSalaires({ data }: { data: SalairesData }) {
     if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else setFlash({ t: "ok", m: `Jours de ${nom} ajustés (${a >= 0 ? "+" : ""}${a}).` });
     router.refresh();
   }
+  // Ajustement manuel des HEURES (n'impacte PAS le salaire) : on saisit le total
+  // corrigé (72 / 72:30 / 72,5), on en déduit le delta vs les heures pointées.
+  async function sauverHeures(nom: string, valeur: string) {
+    const cur = lignes.find((l) => l.nom === nom);
+    if (!cur) return;
+    const target = heuresSaisieMin(valeur);
+    if (target === null) { setFlash({ t: "bad", m: "Heures invalides — utilise « 72 », « 72:30 » ou « 72,5 »." }); return; }
+    if (target === cur.heuresMin) return;
+    const delta = target - cur.heuresAutoMin;
+    setLignes((prev) => prev.map((l) => (l.nom === nom ? { ...l, heuresMin: Math.max(0, target), ajustMin: delta } : l)));
+    setSaving(nom + "|heures");
+    const r = await setAjustHeures(nom, delta);
+    setSaving(null);
+    if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else setFlash({ t: "ok", m: `Heures de ${nom} : ${fmtMin(Math.max(0, target))}.` });
+    router.refresh();
+  }
 
   const totalSemaine = lignes.reduce((a, l) => a + l.salaire, 0);
   const editable = data.autorise;
@@ -199,7 +227,15 @@ export function DispensaireSalaires({ data }: { data: SalairesData }) {
                         </span>
                       ) : (l.ajustJours ? `${l.ajustJours > 0 ? "+" : ""}${l.ajustJours}` : "—")}
                     </td>
-                    <td className="border-b border-border px-2 py-2 text-right font-num text-muted">{fmtMin(l.heuresMin)}</td>
+                    <td className="border-b border-border px-2 py-2 text-right">
+                      {editable ? (
+                        <span className="inline-flex items-center justify-end gap-1">
+                          {saving === l.nom + "|heures" ? <Loader2 className="h-3 w-3 animate-spin text-faint" /> : null}
+                          <input key={`he-${l.nom}-${l.heuresMin}`} type="text" inputMode="decimal" defaultValue={hhmm(l.heuresMin)} onBlur={(e) => sauverHeures(l.nom, e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} className={inputCls + " w-[68px] text-right font-num !py-1"} title="Heures retenues — corrige à la main (72, 72:30 ou 72,5)" />
+                        </span>
+                      ) : <span className="font-num text-muted">{fmtMin(l.heuresMin)}</span>}
+                      {l.ajustMin !== 0 ? <div className="mt-0.5 text-[0.58rem] text-faint" title="Heures pointées · ajustement manuel">auto {fmtMin(l.heuresAutoMin)}</div> : null}
+                    </td>
                     <td className="border-b border-border px-2 py-2 text-right">
                       {editable ? (
                         <span className="inline-flex items-center gap-1">
@@ -218,7 +254,7 @@ export function DispensaireSalaires({ data }: { data: SalairesData }) {
             </table>
           </div>
         )}
-        <p className="mt-2 text-[0.7rem] text-faint">Les jours et heures proviennent du <b>pointage</b> de la semaine courante ; corrige les jours (<b>Ajust.</b>) ou ajoute une <b>prime</b> au besoin — le salaire final se recalcule aussitôt. Renseigne le barème d&apos;une fonction ci-dessus pour que le salaire se calcule.</p>
+        <p className="mt-2 text-[0.7rem] text-faint">Les jours et heures proviennent du <b>pointage</b> de la semaine courante ; corrige les jours (<b>Ajust.</b>), les <b>heures</b> (saisis le total corrigé : 72, 72:30 ou 72,5) ou ajoute une <b>prime</b> au besoin. Les heures sont indicatives — elles n&apos;influent pas sur le salaire (calculé sur les jours). Renseigne le barème d&apos;une fonction ci-dessus pour que le salaire se calcule.</p>
       </section>
 
       {/* Archives de paie (semaines figées) */}

@@ -11,6 +11,7 @@ export type SalaireResult = { ok: boolean; error?: string; total?: number; nb?: 
 async function qui() { try { return (await getSessionProfile())?.nom || "Direction"; } catch { return "Direction"; } }
 function newId() { return `dpa-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
 function newAjustId() { return `dpaj-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
+function newEhId() { return `deh-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
 const normNom = (v: unknown) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ");
 
 // Fixe le salaire hebdomadaire (plein, 7 jours) d'une fonction. Réservé Direction.
@@ -76,6 +77,44 @@ export async function setPrime(nom: string, prime: number, motif?: string): Prom
 // Ajustement manuel des jours (±) d'un salarié pour la semaine courante. Réservé Direction.
 export async function setAjustJours(nom: string, ajustJours: number, motif?: string): Promise<SalaireResult> {
   return majAjust(nom, "ajustJours", ajustJours, motif);
+}
+
+// Ajustement manuel des HEURES d'un salarié pour la semaine courante, directement
+// depuis la page Salaires. `deltaMin` est la correction ABSOLUE à appliquer aux
+// heures pointées (peut être négative) — la colonne « Heures » affiche alors
+// heures pointées + delta. N'a AUCUN impact sur le salaire (qui ne dépend que des
+// jours). Écrit dans DispensaireEffectifAjust (même table que le pointage).
+export async function setAjustHeures(nom: string, deltaMin: number, motif?: string): Promise<SalaireResult> {
+  if (!(await peutAdministrer())) return { ok: false, error: "Réservé à la direction." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  const n = String(nom || "").trim();
+  if (!n) return { ok: false, error: "Salarié invalide." };
+  const d = Math.max(-6000, Math.min(6000, Math.round(Number(deltaMin) || 0))); // borne ±100 h
+  const semaineLundi = lundiCourant(new Date().toISOString());
+  const nomKey = normNom(n);
+  const par = await qui();
+  const now = new Date().toISOString();
+
+  let id: string | null = null, avant = 0;
+  try {
+    const { data } = await admin.from("DispensaireEffectifAjust").select("id,deltaMin").eq("semaineLundi", semaineLundi).eq("nomKey", nomKey).maybeSingle();
+    if (data) { id = String(data.id); avant = Number((data as Record<string, unknown>).deltaMin) || 0; }
+  } catch { return { ok: false, error: "Enregistrement impossible (lance dispensaire-effectif-ajust.sql ?)." }; }
+  if (avant === d) return { ok: true };
+
+  if (id) {
+    const { error } = await admin.from("DispensaireEffectifAjust").update({ deltaMin: d, updatedAt: now, updatedBy: par }).eq("id", id);
+    if (error) return { ok: false, error: "Enregistrement impossible." };
+  } else {
+    const { error } = await admin.from("DispensaireEffectifAjust").insert({ id: newEhId(), semaineLundi, nomKey, nom: n, deltaMin: d, updatedAt: now, updatedBy: par });
+    if (error) return { ok: false, error: "Enregistrement impossible (lance dispensaire-effectif-ajust.sql ?)." };
+  }
+
+  const payload: Record<string, unknown> = { semaine: semaineLundi };
+  if (motif && String(motif).trim()) payload.motif = String(motif).trim().slice(0, 200);
+  await emettreEvenementDispensaire({ aggregate: "pointage", type: "pointage.heures_ajust", cibleLibelle: n, avant: { deltaMin: avant }, apres: { deltaMin: d }, payload });
+  return { ok: true };
 }
 
 // Fige (archive) les salaires de la SEMAINE COURANTE : un instantané par salarié.
