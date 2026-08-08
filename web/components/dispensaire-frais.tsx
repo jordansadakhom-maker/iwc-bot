@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileText, Plus, Loader2, Trash2, Check, X, Banknote } from "lucide-react";
 import { VideRegistre } from "@/components/dispensaire-ui";
-import { FRAIS_STATUTS, fraisStatut, money, type FraisData, type Frais } from "@/lib/dispensaire-facturation-const";
+import { FRAIS_STATUTS, fraisStatut, money, parseMontant, type FraisData, type Frais } from "@/lib/dispensaire-facturation-const";
 import { Flash, inputCls } from "@/components/edit-ui";
 import { creerFrais, statutFrais, supprimerFrais } from "@/app/dispensaire/frais/actions";
 
@@ -18,7 +18,7 @@ export function DispensaireFrais({ data }: { data: FraisData }) {
   const [flash, setFlash] = useState<FlashMsg>(null);
   const [busy, setBusy] = useState(false);
   const [filtre, setFiltre] = useState("");
-  const [v, setV] = useState({ objet: "", montant: "0", demandeur: "", note: "" });
+  const [v, setV] = useState({ objet: "", montant: "", demandeur: "", note: "" });
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setV((p) => ({ ...p, [k]: e.target.value }));
 
   const liste = frais.filter((f) => !filtre || f.statut === filtre);
@@ -27,12 +27,12 @@ export function DispensaireFrais({ data }: { data: FraisData }) {
   async function ajouter() {
     if (!v.objet.trim()) { setFlash({ t: "bad", m: "Donne l'objet de la note." }); return; }
     setBusy(true);
-    const r = await creerFrais({ ...v, montant: Number(v.montant) || 0 });
+    const r = await creerFrais({ ...v, montant: v.montant });
     setBusy(false);
     if (!r.ok) { setFlash({ t: "bad", m: r.error || "Impossible." }); return; }
-    const tmp: Frais = { id: r.id || "tmp", objet: v.objet.trim(), montant: Number(v.montant) || 0, demandeur: v.demandeur || null, statut: "en_attente", validePar: null, note: v.note || null, par: null, createdAt: new Date().toISOString() };
+    const tmp: Frais = { id: r.id || "tmp", objet: v.objet.trim(), montant: parseMontant(v.montant), demandeur: v.demandeur || null, statut: "en_attente", validePar: null, note: v.note || null, par: null, createdAt: new Date().toISOString() };
     setFrais((p) => [tmp, ...p]);
-    setV({ objet: "", montant: "0", demandeur: "", note: "" });
+    setV({ objet: "", montant: "", demandeur: "", note: "" });
     setFlash({ t: "ok", m: "Note de frais déposée." });
     router.refresh();
   }
@@ -53,7 +53,7 @@ export function DispensaireFrais({ data }: { data: FraisData }) {
         <h3 className="mb-3 flex items-center gap-2 text-[0.9rem] font-semibold"><FileText className="h-4 w-4 text-accent" /> Déposer une note de frais</h3>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <label className="flex flex-col gap-1 lg:col-span-2"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Objet</span><input className={inputCls} value={v.objet} onChange={set("objet")} placeholder="Achat, déplacement…" /></label>
-          <label className="flex flex-col gap-1"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Montant ($)</span><input className={inputCls} value={v.montant} onChange={(e) => setV((p) => ({ ...p, montant: e.target.value.replace(/[^0-9]/g, "") }))} inputMode="numeric" /></label>
+          <label className="flex flex-col gap-1"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Montant ($)</span><input className={inputCls} value={v.montant} onChange={(e) => setV((p) => ({ ...p, montant: e.target.value.replace(/[^0-9.,]/g, "") }))} inputMode="decimal" placeholder="0,00" /></label>
           <label className="flex flex-col gap-1"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Demandeur</span><input className={inputCls} value={v.demandeur} onChange={set("demandeur")} placeholder="Toi par défaut" /></label>
           <label className="flex flex-col gap-1 lg:col-span-3"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Note</span><input className={inputCls} value={v.note} onChange={set("note")} placeholder="Optionnel" /></label>
           <div className="flex items-end justify-end"><button onClick={ajouter} disabled={busy} className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[0.8rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Déposer</button></div>

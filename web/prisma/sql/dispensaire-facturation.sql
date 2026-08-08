@@ -60,7 +60,7 @@ CREATE INDEX IF NOT EXISTS "DispensaireSoinFDO_bureau_idx" ON "DispensaireSoinFD
 CREATE TABLE IF NOT EXISTS "DispensaireFrais" (
   "id"          TEXT PRIMARY KEY,
   "objet"       TEXT NOT NULL,
-  "montant"     INTEGER NOT NULL DEFAULT 0,
+  "montant"     DOUBLE PRECISION NOT NULL DEFAULT 0,       -- décimales conservées (ex. 10,50)
   "demandeur"   TEXT,
   "statut"      TEXT NOT NULL DEFAULT 'en_attente',     -- en_attente | valide | refuse | vire
   "validePar"   TEXT,

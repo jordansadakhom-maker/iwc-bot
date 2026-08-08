@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { estAutorise, peutFacturer } from "@/lib/dispensaire-roles";
 import { emettreEvenementDispensaire, lireAvant } from "@/lib/dispensaire-evenements";
+import { parseMontant } from "@/lib/dispensaire-facturation-const";
 
 // Notes de frais — dépôt ouvert au personnel ; validation/virement réservés aux
 // chefs (droit « factures »). Gardes fail-closed : au moindre doute, refusé.
@@ -11,7 +12,8 @@ export type FraisResult = { ok: boolean; error?: string; id?: string };
 
 const STATUTS = ["en_attente", "valide", "refuse", "vire"];
 const s = (v: unknown, max = 300) => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
-const n = (v: unknown) => Math.max(0, Math.round(Number(v) || 0));
+// Montant en centimes conservés (virgule ou point acceptés) — plus d'arrondi entier.
+const n = (v: unknown) => parseMontant(v);
 function newId() { return `dfr-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
 async function peutValider() { return peutFacturer(); }
 async function qui() { try { return (await getSessionProfile())?.nom || "Équipe"; } catch { return "Équipe"; } }

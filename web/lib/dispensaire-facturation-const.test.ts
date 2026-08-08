@@ -5,6 +5,7 @@ import {
   statutsDe, serialiserStatuts, statutRepresentatif, incoherencesStatuts,
   estOuverte, estClose,
   ageFactureJours, joursDeRetard, estDeclarableFDO, RETARD_DEFAUT_JOURS,
+  parseMontant, money,
 } from "./dispensaire-facturation-const";
 
 describe("factureOuverte — une facture encore due", () => {
@@ -133,6 +134,40 @@ describe("Constantes & helpers de facturation", () => {
   });
   it("norm déburre et met en minuscules (en gardant les mots)", () => {
     expect(norm("  Médicament ")).toBe("medicament");
+  });
+});
+
+describe("parseMontant — saisie de montants décimaux (virgule ou point)", () => {
+  it("accepte la virgule comme séparateur décimal", () => {
+    expect(parseMontant("10,50")).toBe(10.5);
+    expect(parseMontant("25,75")).toBe(25.75);
+    expect(parseMontant("99,99")).toBe(99.99);
+  });
+  it("accepte aussi le point", () => {
+    expect(parseMontant("10.50")).toBe(10.5);
+    expect(parseMontant("0.99")).toBe(0.99);
+  });
+  it("gère les entiers et ignore espaces / symbole $", () => {
+    expect(parseMontant("100")).toBe(100);
+    expect(parseMontant(" 1 234,5 $")).toBe(1234.5);
+  });
+  it("arrondit au centime et n'accepte jamais de négatif", () => {
+    expect(parseMontant("10,999")).toBe(11);      // arrondi au centime
+    expect(parseMontant("-5")).toBe(0);           // pas de négatif
+    expect(parseMontant("abc")).toBe(0);          // invalide → 0
+    expect(parseMontant("")).toBe(0);
+  });
+  it("conserve les centimes (pas d'arrondi entier)", () => {
+    expect(parseMontant(10.5)).toBe(10.5);
+    expect(parseMontant("99,99")).not.toBe(100);
+  });
+});
+
+describe("money — affichage avec centimes (fr-FR)", () => {
+  it("affiche toujours deux décimales, virgule française", () => {
+    expect(money(10.5)).toBe("$10,50");
+    expect(money(99.99)).toBe("$99,99");
+    expect(money(100)).toBe("$100,00");
   });
 });
 
