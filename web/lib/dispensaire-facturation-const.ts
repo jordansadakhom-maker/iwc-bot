@@ -179,3 +179,14 @@ export type FraisData = { connecte: boolean; pret: boolean; canValidate: boolean
 // Format monétaire commun — centimes toujours affichés (comptabilité exacte,
 // jamais arrondie). Ex. 4543 → « $4 543,00 », 4543.5 → « $4 543,50 ».
 export const money = (n: number) => `$${(Number(n) || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// Parse un montant saisi en nombre à 2 décimales (centimes). Accepte la virgule
+// OU le point comme séparateur décimal, ignore espaces et « $ ».
+// Ex. « 10,50 » → 10.5 · « 10.50 » → 10.5 · « 99,99 » → 99.99 · « 100 » → 100
+// · saisie invalide → 0. Toujours ≥ 0, arrondi au centime le plus proche.
+export function parseMontant(v: unknown): number {
+  if (typeof v === "number") return Number.isFinite(v) ? Math.max(0, Math.round(v * 100) / 100) : 0;
+  const t = String(v ?? "").trim().replace(/[\s$]/g, "").replace(",", ".");
+  const n = Number(t);
+  return Number.isFinite(n) ? Math.max(0, Math.round(n * 100) / 100) : 0;
+}
