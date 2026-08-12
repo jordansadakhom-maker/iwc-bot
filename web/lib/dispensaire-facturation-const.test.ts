@@ -120,8 +120,8 @@ describe("echeanceEtat — prise en compte des statuts multiples", () => {
 });
 
 describe("Constantes & helpers de facturation", () => {
-  it("délai de paiement automatique = 72 h", () => {
-    expect(FACTURE_DELAI_H).toBe(72);
+  it("délai d'échéance par défaut = 48 h", () => {
+    expect(FACTURE_DELAI_H).toBe(48);
   });
   it("factureStatut retombe sur le 1er statut si inconnu", () => {
     expect(factureStatut("relancee").label).toBe("Relancée");
