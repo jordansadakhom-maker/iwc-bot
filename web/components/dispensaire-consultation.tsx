@@ -17,7 +17,7 @@ type Refs = { patients: string[]; stock: { id: string; nom: string; stock: numbe
 type FlashOut = { t: "ok" | "bad"; m: string };
 
 function ymdAuj() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
-function ymdPlus72(iso: string) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso); if (!m) return ""; const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])); d.setUTCDate(d.getUTCDate() + Math.round(FACTURE_DELAI_H / 24)); return d.toISOString().slice(0, 10); }
+function ymdEcheance(iso: string) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso); if (!m) return ""; const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])); d.setUTCDate(d.getUTCDate() + Math.round(FACTURE_DELAI_H / 24)); return d.toISOString().slice(0, 10); }
 
 export function DispensaireConsultation({ onClose, onDone }: { onClose: () => void; onDone: (f: FlashOut) => void }) {
   const [patient, setPatient] = useState("");
@@ -36,7 +36,7 @@ export function DispensaireConsultation({ onClose, onDone }: { onClose: () => vo
   useEffect(() => { let ok = true; getConsultationRefs().then((r) => { if (ok) setRefs(r); }).catch(() => {}); return () => { ok = false; }; }, []);
 
   const total = useMemo(() => lignes.reduce((a, l) => a + (Number(l.prix) || 0) * Math.max(1, Math.round(Number(l.quantite) || 1)), 0), [lignes]);
-  const echeance = ymdPlus72(emission);
+  const echeance = ymdEcheance(emission);
 
   const setL = (i: number, patch: Partial<LigneUI>) => setLignes((p) => p.map((l, k) => (k === i ? { ...l, ...patch } : l)));
   const pickStock = (i: number, stockId: string) => {

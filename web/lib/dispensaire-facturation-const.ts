@@ -12,7 +12,7 @@ export type PatientSemaine = { patient: string; bandages: number; total: number;
 export type VentesData = { connecte: boolean; pret: boolean; canEdit: boolean; ventes: Vente[]; semaine: PatientSemaine[]; caSemaine: number; mondayYmd: string; prix: number; plafond: number };
 
 // ── Factures ────────────────────────────────────────────────────────────────
-export const FACTURE_DELAI_H = 72; // délai de paiement automatique (heures)
+export const FACTURE_DELAI_H = 48; // délai d'échéance par défaut (heures) — modifiable à la saisie
 export const FACTURE_STATUTS = [
   { key: "non_payee", label: "Non payée", tone: "var(--warn)" },
   { key: "relancee", label: "Relancée", tone: "var(--accent)" },
