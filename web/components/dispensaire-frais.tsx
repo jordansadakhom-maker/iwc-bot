@@ -30,7 +30,7 @@ export function DispensaireFrais({ data }: { data: FraisData }) {
     const r = await creerFrais({ ...v, montant: v.montant });
     setBusy(false);
     if (!r.ok) { setFlash({ t: "bad", m: r.error || "Impossible." }); return; }
-    const tmp: Frais = { id: r.id || "tmp", objet: v.objet.trim(), montant: parseMontant(v.montant), demandeur: v.demandeur || null, statut: "en_attente", validePar: null, note: v.note || null, par: null, createdAt: new Date().toISOString() };
+    const tmp: Frais = { id: r.id || "tmp", objet: v.objet.trim(), montant: parseMontant(v.montant), demandeur: v.demandeur.trim() || r.par || null, statut: "en_attente", validePar: null, note: v.note || null, par: r.par ?? null, createdAt: new Date().toISOString() };
     setFrais((p) => [tmp, ...p]);
     setV({ objet: "", montant: "", demandeur: "", note: "" });
     setFlash({ t: "ok", m: "Note de frais déposée." });
@@ -77,7 +77,7 @@ export function DispensaireFrais({ data }: { data: FraisData }) {
               <div key={f.id} className="group flex flex-wrap items-center gap-2 rounded-[12px] border border-border bg-surface-2 px-3 py-2.5">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-1.5"><span className="text-[0.86rem] font-semibold">{f.objet}</span><span className="rounded-full px-1.5 py-0.5 text-[0.62rem] font-bold uppercase" style={{ color: st.tone, background: `color-mix(in srgb,${st.tone} 14%,transparent)` }}>{st.label}</span></div>
-                  <div className="mt-0.5 text-[0.72rem] text-faint">{f.demandeur || "—"} · {dtFR(f.createdAt)}{f.validePar ? ` · validé par ${f.validePar}` : ""}{f.note ? ` · ${f.note}` : ""}</div>
+                  <div className="mt-0.5 text-[0.72rem] text-faint">{f.demandeur || "—"} · {dtFR(f.createdAt)}{f.par && f.par !== f.demandeur ? ` · saisi par ${f.par}` : ""}{f.validePar ? ` · validé par ${f.validePar}` : ""}{f.note ? ` · ${f.note}` : ""}</div>
                 </div>
                 <span className="shrink-0 font-num text-[0.95rem] font-bold">{money(f.montant)}</span>
                 {canValidate ? (

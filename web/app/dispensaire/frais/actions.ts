@@ -8,7 +8,7 @@ import { parseMontant } from "@/lib/dispensaire-facturation-const";
 
 // Notes de frais — dépôt ouvert au personnel ; validation/virement réservés aux
 // chefs (droit « factures »). Gardes fail-closed : au moindre doute, refusé.
-export type FraisResult = { ok: boolean; error?: string; id?: string };
+export type FraisResult = { ok: boolean; error?: string; id?: string; par?: string };
 
 const STATUTS = ["en_attente", "valide", "refuse", "vire"];
 const s = (v: unknown, max = 300) => { const t = String(v ?? "").trim(); return t ? t.slice(0, max) : null; };
@@ -30,7 +30,7 @@ export async function creerFrais(data: Record<string, unknown>): Promise<FraisRe
   const { error } = await admin.from("DispensaireFrais").insert({ id, objet, montant: n(data.montant), demandeur: s(data.demandeur) || par, statut: "en_attente", note: s(data.note, 1000), par, createdAt: now, updatedAt: now });
   if (error) return { ok: false, error: "Création impossible (la table existe-t-elle ?)." };
   await emettreEvenementDispensaire({ aggregate: "frais", type: "frais.cree", cibleId: id, cibleLibelle: objet, apres: { objet, montant: n(data.montant), demandeur: s(data.demandeur) || par } });
-  return { ok: true, id };
+  return { ok: true, id, par };
 }
 
 // Change le statut (valider / refuser / marquer virée). Réservé aux chefs.
