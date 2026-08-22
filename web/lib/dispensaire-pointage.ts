@@ -117,12 +117,12 @@ export async function getPointage(): Promise<PointData> {
 // ── Assiduité sur 3 semaines (précédente / actuelle / suivante) ─────────────
 // Pour chaque salarié et chaque semaine : jours travaillés, heures, absences
 // justifiées et injustifiées. Sert directement au calcul des salaires.
-export type SemaineAssiduite = { jours: number; heuresMin: number; heuresAjustMin: number; absJust: number; absInj: number; oublis: number; corrections: number };
+export type SemaineAssiduite = { jours: number; joursAuto: number; joursAjust: number; heuresMin: number; heuresAjustMin: number; absJust: number; absInj: number; oublis: number; corrections: number };
 export type LigneAssiduite = { nom: string; grade: string | null; semaines: SemaineAssiduite[] };
 export type AssiduiteData = { pret: boolean; lundis: string[]; lignes: LigneAssiduite[] };
 
 const normNom = (v: unknown) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ");
-const semaineVide = (): SemaineAssiduite => ({ jours: 0, heuresMin: 0, heuresAjustMin: 0, absJust: 0, absInj: 0, oublis: 0, corrections: 0 });
+const semaineVide = (): SemaineAssiduite => ({ jours: 0, joursAuto: 0, joursAjust: 0, heuresMin: 0, heuresAjustMin: 0, absJust: 0, absInj: 0, oublis: 0, corrections: 0 });
 
 export async function getAssiduite(): Promise<AssiduiteData> {
   const admin = createAdminClient();
@@ -198,6 +198,27 @@ export async function getAssiduite(): Promise<AssiduiteData> {
       const d = Number(r.deltaMin) || 0;
       l.semaines[sem].heuresAjustMin += d;
       l.semaines[sem].heuresMin = Math.max(0, l.semaines[sem].heuresMin + d);
+    }
+  } catch { /* table absente → aucun ajustement */ }
+
+  // Snapshot des JOURS auto (pointés) avant tout ajustement manuel — sert à
+  // l'affichage « auto X » et au calcul du delta lors d'une correction.
+  for (const l of map.values()) for (const s of l.semaines) s.joursAuto = s.jours;
+
+  // Ajustements manuels de JOURS (Direction) — MÊME champ que la page Salaires
+  // (DispensairePaieAjust.ajustJours) : ils corrigent les jours retenus et donc
+  // le salaire. Par semaine. Best-effort : table absente → aucun ajustement.
+  try {
+    const { data: ajJ } = await admin.from("DispensairePaieAjust").select("semaineLundi,nomKey,ajustJours").in("semaineLundi", lundis);
+    for (const r of (ajJ || []) as Record<string, unknown>[]) {
+      const sem = lundis.indexOf(String(r.semaineLundi));
+      if (sem < 0) continue;
+      const l = map.get(String(r.nomKey || ""));
+      if (!l) continue;
+      const a = Math.round(Number(r.ajustJours) || 0);
+      if (!a) continue;
+      l.semaines[sem].joursAjust += a;
+      l.semaines[sem].jours = Math.max(0, l.semaines[sem].jours + a);
     }
   } catch { /* table absente → aucun ajustement */ }
 

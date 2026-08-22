@@ -7,6 +7,7 @@ import type { PointData, PointSession, AssiduiteData, AbsenceRow } from "@/lib/d
 import { statutDe, STATUT_META } from "@/lib/dispensaire-pointage-const";
 import { Flash, inputCls, Modal, Champ } from "@/components/edit-ui";
 import { prendreService, terminerService, supprimerPointage, ajouterAbsence, supprimerAbsence, ajusterHeures } from "@/app/dispensaire/pointage/actions";
+import { setAjustJours } from "@/app/dispensaire/salaires/actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
 const JOURS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
@@ -30,7 +31,7 @@ function useNow(actif: boolean) {
   return now;
 }
 
-export function DispensairePointage({ data, assiduite, absences = [], peutGerer = false }: { data: PointData; assiduite?: AssiduiteData; absences?: AbsenceRow[]; peutGerer?: boolean }) {
+export function DispensairePointage({ data, assiduite, absences = [], peutGerer = false, peutAdmin = false }: { data: PointData; assiduite?: AssiduiteData; absences?: AbsenceRow[]; peutGerer?: boolean; peutAdmin?: boolean }) {
   const router = useRouter();
   const [enCours, setEnCours] = useState<PointSession[]>(data.enCours);
   const [flash, setFlash] = useState<FlashMsg>(null);
@@ -55,6 +56,20 @@ export function DispensairePointage({ data, assiduite, absences = [], peutGerer 
     if (!r.ok) { setFlash({ t: "bad", m: r.error || "Impossible." }); return; }
     setAjust(null);
     setFlash({ t: "ok", m: `Heures d'effectif de ${nom} corrigées.` });
+    router.refresh();
+  }
+
+  // Ajustement manuel des JOURS travaillés (Direction) — impacte le salaire
+  // (même champ que la page Salaires). Modale par salarié, semaine courante.
+  const [ajustJ, setAjustJ] = useState<{ nom: string; joursAuto: number; joursActuel: number } | null>(null);
+  const [ajustJBusy, setAjustJBusy] = useState(false);
+  async function ajusterJoursEmploye(nom: string, joursTotal: number, joursAuto: number, motif: string) {
+    setAjustJBusy(true);
+    const r = await setAjustJours(nom, Math.round(joursTotal - joursAuto), motif || undefined);
+    setAjustJBusy(false);
+    if (!r.ok) { setFlash({ t: "bad", m: r.error || "Impossible." }); return; }
+    setAjustJ(null);
+    setFlash({ t: "ok", m: `Jours travaillés de ${nom} ajustés.` });
     router.refresh();
   }
 
@@ -239,11 +254,15 @@ export function DispensairePointage({ data, assiduite, absences = [], peutGerer 
                     <td className="border-b border-border px-2 py-2">
                       <div className="font-semibold">{ln.nom}</div>
                       {ln.grade ? <div className="text-[0.66rem] text-faint">{ln.grade}</div> : null}
-                      {peutGerer ? <button onClick={() => setAjust({ nom: ln.nom, effectifMin: ln.semaines[1]?.heuresMin || 0 })} className="mt-1 inline-flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[0.62rem] font-semibold text-muted transition hover:text-ink" title="Corriger les heures d'effectif (sans impact sur le salaire)"><SlidersHorizontal className="h-3 w-3" /> Ajuster les heures</button> : null}
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {peutGerer ? <button onClick={() => setAjust({ nom: ln.nom, effectifMin: ln.semaines[1]?.heuresMin || 0 })} className="inline-flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[0.62rem] font-semibold text-muted transition hover:text-ink" title="Corriger les heures d'effectif (sans impact sur le salaire)"><SlidersHorizontal className="h-3 w-3" /> Ajuster les heures</button> : null}
+                        {peutAdmin ? <button onClick={() => setAjustJ({ nom: ln.nom, joursAuto: ln.semaines[1]?.joursAuto || 0, joursActuel: ln.semaines[1]?.jours || 0 })} className="inline-flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[0.62rem] font-semibold text-muted transition hover:text-ink" title="Corriger les jours travaillés de la semaine courante (impacte le salaire)"><CalendarDays className="h-3 w-3" /> Ajuster les jours</button> : null}
+                      </div>
                     </td>
                     {ln.semaines.map((s, i) => (
                       <td key={i} className="border-b border-border px-2 py-2 text-center align-top" style={i === 1 ? { background: "color-mix(in srgb,var(--accent) 6%,transparent)" } : undefined}>
                         <div className="font-num"><b>{s.jours}</b> j · {fmtMin(s.heuresMin)}</div>
+                        {s.joursAjust ? <div className="text-[0.6rem]" style={{ color: "var(--accent)" }} title="Ajustement manuel des jours">auto {s.joursAuto} j · {s.joursAjust > 0 ? "+" : "−"}{Math.abs(s.joursAjust)} j</div> : null}
                         {s.heuresAjustMin ? <div className="text-[0.6rem]" style={{ color: "var(--accent)" }} title="Ajustement manuel des heures">dont {s.heuresAjustMin > 0 ? "+" : "−"}{fmtMin(Math.abs(s.heuresAjustMin))} ajusté</div> : null}
                         <div className="mt-0.5 flex flex-wrap items-center justify-center gap-x-1.5 text-[0.66rem]">
                           {s.absJust ? <span style={{ color: "var(--good)" }}>{s.absJust} just.</span> : null}
@@ -263,6 +282,7 @@ export function DispensairePointage({ data, assiduite, absences = [], peutGerer 
       </section>
 
       {ajust ? <AjustHeuresModal nom={ajust.nom} effectifMin={ajust.effectifMin} busy={ajustBusy} onClose={() => setAjust(null)} onSave={(dm, mtf) => ajusterHeuresEmploye(ajust.nom, dm, mtf)} /> : null}
+      {ajustJ ? <AjustJoursModal nom={ajustJ.nom} joursAuto={ajustJ.joursAuto} joursActuel={ajustJ.joursActuel} busy={ajustJBusy} onClose={() => setAjustJ(null)} onSave={(total, mtf) => ajusterJoursEmploye(ajustJ.nom, total, ajustJ.joursAuto, mtf)} /> : null}
 
       {/* Absences (encadrement RH / Direction) */}
       {peutGerer ? (
@@ -335,6 +355,51 @@ export function DispensairePointage({ data, assiduite, absences = [], peutGerer 
 
 // Modale d'ajustement manuel des heures d'effectif (Direction/RH). Motif obligatoire.
 // N'impacte QUE les heures/stats — jamais le salaire.
+// Ajustement manuel des JOURS travaillés (Direction) — semaine courante. On saisit
+// le total corrigé (0 à 7) ; le delta vs les jours pointés est calculé côté parent.
+// Impacte le salaire (même champ que la page Salaires). Motif recommandé (facultatif).
+function AjustJoursModal({ nom, joursAuto, joursActuel, busy, onClose, onSave }: { nom: string; joursAuto: number; joursActuel: number; busy: boolean; onClose: () => void; onSave: (joursTotal: number, motif: string) => void }) {
+  const [jours, setJours] = useState(String(joursActuel));
+  const [motif, setMotif] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const n = Math.round(Number(jours.replace(",", ".")));
+  const valide = Number.isFinite(n) && n >= 0 && n <= 7;
+  const delta = valide ? n - joursAuto : 0;
+  function go() {
+    if (!valide) { setErr("Indique un nombre de jours entre 0 et 7."); return; }
+    if (n === joursActuel) { setErr("Le nombre de jours est déjà à cette valeur."); return; }
+    onSave(n, motif.trim());
+  }
+  return (
+    <Modal titre="📅 Ajuster les jours travaillés" onClose={onClose} max={460}>
+      <div className="flex flex-col gap-3">
+        <p className="text-[0.82rem] text-muted"><b className="text-ink">{nom}</b> — jours pointés cette semaine : <b className="font-num">{joursAuto} j</b>{joursActuel !== joursAuto ? <> · retenus actuellement : <b className="font-num">{joursActuel} j</b></> : null}.</p>
+        <div className="flex items-start gap-2 rounded-[10px] border border-border bg-surface-2 px-3 py-2 text-[0.74rem] text-muted">
+          <CalendarDays className="mt-0.5 h-3.5 w-3.5 shrink-0 text-faint" />
+          <span>Corrige le nombre de jours travaillés retenus (oubli de pointage, jour compté à tort…). <b>Impacte le salaire</b> (4 jours = salaire plein).</span>
+        </div>
+        <Champ label="Nombre de jours retenus (0 à 7)">
+          <input className={inputCls + " font-num"} value={jours} onChange={(e) => setJours(e.target.value.replace(/[^0-9]/g, ""))} inputMode="numeric" placeholder="ex. 4" autoFocus />
+        </Champ>
+        {valide && delta !== 0 ? <p className="text-[0.72rem] text-faint">Ajustement appliqué : <b className="font-num text-ink">{delta > 0 ? "+" : "−"}{Math.abs(delta)} j</b> (par rapport aux {joursAuto} j pointés).</p> : null}
+        <Champ label="Motif (facultatif)">
+          <input className={inputCls} value={motif} onChange={(e) => setMotif(e.target.value)} placeholder="Oubli de pointage, correction administrative…" list="disp-motifs-jours" maxLength={200} />
+          <datalist id="disp-motifs-jours">
+            <option value="Oubli de pointage" />
+            <option value="Jour compté à tort" />
+            <option value="Correction administrative" />
+          </datalist>
+        </Champ>
+        {err ? <p className="text-[0.8rem]" style={{ color: "var(--oxblood)" }}>{err}</p> : null}
+        <div className="mt-1 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border border-border bg-surface-2 px-3.5 py-2 text-[0.82rem] font-semibold hover:border-border-2">Annuler</button>
+          <button onClick={go} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[0.82rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Valider</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function AjustHeuresModal({ nom, effectifMin, busy, onClose, onSave }: { nom: string; effectifMin: number; busy: boolean; onClose: () => void; onSave: (deltaMin: number, motif: string) => void }) {
   const [heures, setHeures] = useState("");
   const [motif, setMotif] = useState("");
