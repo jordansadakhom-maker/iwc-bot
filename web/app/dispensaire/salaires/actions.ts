@@ -28,6 +28,21 @@ export async function setSalaireFonction(fonction: string, montantHebdo: number)
   return { ok: true };
 }
 
+// Supprime une fonction (catégorie de métier) du barème hebdomadaire. Réservé
+// Direction. Si un salarié actif porte encore cette fonction, elle réapparaîtra
+// avec un barème à 0 (c'est le grade du salarié, géré dans RH, qui la fait vivre).
+export async function supprimerFonction(fonction: string): Promise<SalaireResult> {
+  if (!(await peutAdministrer())) return { ok: false, error: "Réservé à la direction." };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  const f = String(fonction || "").trim();
+  if (!f) return { ok: false, error: "Fonction invalide." };
+  const { error } = await admin.from("DispensaireSalaireFonction").delete().eq("fonction", f);
+  if (error) return { ok: false, error: "Suppression impossible." };
+  await emettreEvenementDispensaire({ aggregate: "salaire", type: "salaire.bareme_supprime", cibleLibelle: f });
+  return { ok: true };
+}
+
 // ── Ajustements manuels de la Direction (prime + correction de jours) ───────
 // Persistés par salarié + semaine dans DispensairePaieAjust, tracés dans le
 // journal d'audit (qui, quand, avant → après, motif). Réservé Direction.

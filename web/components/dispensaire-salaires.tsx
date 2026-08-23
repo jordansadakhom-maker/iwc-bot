@@ -6,7 +6,7 @@ import { Coins, Lock, Loader2, Info, Archive, Printer, Trash2, Check } from "luc
 import { Flash, inputCls } from "@/components/edit-ui";
 import type { SalairesData, SalaireFonction, LigneSalaire, ArchivePaie } from "@/lib/dispensaire-salaires";
 import { salairePlein, SEUIL_JOURS_PLEIN, joursRetenus, salaireFinal } from "@/lib/dispensaire-salaires-const";
-import { setSalaireFonction, archiverSemaine, supprimerArchivePaie, setPrime, setAjustJours, setAjustHeures } from "@/app/dispensaire/salaires/actions";
+import { setSalaireFonction, archiverSemaine, supprimerArchivePaie, setPrime, setAjustJours, setAjustHeures, supprimerFonction } from "@/app/dispensaire/salaires/actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
 const money = (n: number) => "$" + (Number(n) || 0).toLocaleString("fr-FR");
@@ -99,6 +99,21 @@ export function DispensaireSalaires({ data }: { data: SalairesData }) {
     if (!r.ok) { setFlash({ t: "bad", m: r.error || "Impossible." }); } else { setFlash({ t: "ok", m: `Barème « ${fonction} » enregistré.` }); router.refresh(); }
   }
 
+  // Supprime une catégorie de métier du barème (Direction). Confirme d'abord, et
+  // avertit si un salarié la porte encore (elle réapparaîtra alors avec un barème 0).
+  async function supprimerBareme(f: SalaireFonction) {
+    const msg = f.utilisee
+      ? `« ${f.fonction} » est encore portée par un salarié : son barème sera remis à 0 et la fonction réapparaîtra tant qu'un salarié la porte (change son grade dans RH pour la retirer). Continuer ?`
+      : `Supprimer la fonction « ${f.fonction} » du barème ?`;
+    if (typeof window !== "undefined" && !window.confirm(msg)) return;
+    setFonctions((p) => p.filter((x) => x.fonction !== f.fonction));
+    setSaving(f.fonction);
+    const r = await supprimerFonction(f.fonction);
+    setSaving(null);
+    if (!r.ok) { setFlash({ t: "bad", m: r.error || "Impossible." }); } else { setFlash({ t: "ok", m: `Fonction « ${f.fonction} » supprimée du barème.` }); }
+    router.refresh();
+  }
+
   // Prime manuelle : optimiste (recalcule le salaire final = base + prime) puis persiste + trace.
   async function sauverPrime(nom: string, valeur: string) {
     const p = Math.max(0, Math.round(Number(valeur) || 0));
@@ -168,14 +183,15 @@ export function DispensaireSalaires({ data }: { data: SalairesData }) {
         ) : (
           <div className="grid gap-2 sm:grid-cols-2">
             {fonctions.map((f) => (
-              <label key={f.fonction} className="flex items-center justify-between gap-2 rounded-[10px] border border-border bg-surface-2 px-3 py-2">
+              <div key={f.fonction} className="flex items-center justify-between gap-2 rounded-[10px] border border-border bg-surface-2 px-3 py-2">
                 <span className="min-w-0 truncate text-[0.84rem] font-medium">{f.fonction}</span>
                 <span className="flex shrink-0 items-center gap-1.5">
                   {saving === f.fonction ? <Loader2 className="h-3.5 w-3.5 animate-spin text-faint" /> : null}
                   <span className="text-[0.72rem] text-faint">$/sem.</span>
-                  <input type="number" min={0} step="1" defaultValue={f.montantHebdo || ""} onBlur={(e) => sauver(f.fonction, e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} className={inputCls + " w-24 text-right font-num"} placeholder="0" />
+                  <input type="number" min={0} step="1" defaultValue={f.montantHebdo || ""} onBlur={(e) => sauver(f.fonction, e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} className={inputCls + " w-24 text-right font-num"} placeholder="0" aria-label={`Barème hebdomadaire de ${f.fonction}`} />
+                  {editable ? <button onClick={() => supprimerBareme(f)} className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-border text-faint transition hover:border-oxblood hover:text-oxblood" aria-label={`Supprimer la fonction ${f.fonction}`} title="Supprimer cette fonction du barème"><Trash2 className="h-3.5 w-3.5" /></button> : null}
                 </span>
-              </label>
+              </div>
             ))}
           </div>
         )}
