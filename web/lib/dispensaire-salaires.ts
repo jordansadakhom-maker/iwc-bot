@@ -17,7 +17,7 @@ export * from "@/lib/dispensaire-salaires-const";
 // (voir calculerSalaire — dispensaire-salaires-const). Les heures sont affichées
 // à part → la direction ajoute les primes à la main.
 
-export type SalaireFonction = { fonction: string; montantHebdo: number };
+export type SalaireFonction = { fonction: string; montantHebdo: number; utilisee: boolean };
 // `jours` = jours RETENUS (auto + ajustement) ; `salaire` = salaire FINAL (base + prime).
 export type LigneSalaire = { nom: string; fonction: string | null; montantHebdo: number; joursAuto: number; ajustJours: number; jours: number; heuresAutoMin: number; ajustMin: number; heuresMin: number; prime: number; salaireBase: number; salaire: number };
 export type LignePaieArchive = { nom: string; fonction: string | null; joursAuto: number; ajustJours: number; jours: number; heuresMin: number; prime: number; salaireBase: number; salaire: number };
@@ -124,10 +124,13 @@ export async function getSalaires(): Promise<SalairesData> {
   }).sort((a, b) => b.salaire - a.salaire || a.nom.localeCompare(b.nom));
 
   // Fonctions à barémer = celles présentes chez les salariés ∪ celles déjà au barème.
+  // `utilisee` = au moins un salarié actif porte cette fonction (⇒ suppression du
+  // barème = remise à 0, la fonction réapparaît). Sinon = entrée orpheline supprimable.
+  const usedF = new Set(salaries.map((s) => s.fonction).filter(Boolean) as string[]);
   const fset = new Map<string, number>();
   for (const s of salaries) if (s.fonction) fset.set(s.fonction, bareme.get(s.fonction) || 0);
   for (const [f, m] of bareme) if (f) fset.set(f, m);
-  const fonctions = [...fset.entries()].map(([fonction, montantHebdo]) => ({ fonction, montantHebdo })).sort((a, b) => a.fonction.localeCompare(b.fonction));
+  const fonctions = [...fset.entries()].map(([fonction, montantHebdo]) => ({ fonction, montantHebdo, utilisee: usedF.has(fonction) })).sort((a, b) => a.fonction.localeCompare(b.fonction));
 
   const archives = await getArchivesPaie();
   const semaineArchivee = archives.some((a) => a.semaineLundi === monday);
