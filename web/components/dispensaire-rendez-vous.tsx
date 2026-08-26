@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarClock, Plus, Loader2, Check, UserX, X, Trash2, Stethoscope, DoorClosed, Pencil, MessageSquareText } from "lucide-react";
+import { CalendarClock, Plus, Loader2, Check, UserX, X, Trash2, Stethoscope, DoorClosed, Pencil, MessageSquareText, ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
 import { Flash, inputCls } from "@/components/edit-ui";
 import { ETAT_RDV_LABEL, PRIORITES, PRIORITE_LABEL, PRIORITE_TON, type RendezVousData, type RendezVous } from "@/lib/dispensaire-rendez-vous-const";
 import { creerRDV, majRDV, changerEtatRDV, supprimerRDV } from "@/app/dispensaire/rendez-vous/actions";
@@ -10,6 +10,10 @@ import { creerRDV, majRDV, changerEtatRDV, supprimerRDV } from "@/app/dispensair
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
 const jourFR = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", weekday: "long", day: "2-digit", month: "long" }).format(new Date(iso)); } catch { return "—"; } };
 const heureFR = (iso: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); } catch { return "—"; } };
+// Date civile Paris « YYYY-MM-DD » d'un instant (clé de regroupement du calendrier).
+const ymdOf = (iso: string) => { try { return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso)); } catch { return ""; } };
+const pad2 = (n: number) => String(n).padStart(2, "0");
+const dateLongue = (ymd: string) => { try { return new Intl.DateTimeFormat("fr-FR", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date(ymd + "T12:00:00Z")); } catch { return ymd; } };
 const ETAT_TON: Record<string, string> = { prevu: "var(--accent)", honore: "var(--good)", absent: "var(--warn)", annule: "var(--muted)" };
 
 export function DispensaireRendezVous({ data }: { data: RendezVousData }) {
@@ -19,17 +23,22 @@ export function DispensaireRendezVous({ data }: { data: RendezVousData }) {
   const [actif, setActif] = useState<string | null>(null);
   const [editRdv, setEditRdv] = useState<RendezVous | null>(null);
   const [form, setForm] = useState({ patient: "", type: "", debut: "", medecin: "", salle: "", priorite: "normale", motif: "" });
+  const [filtreDate, setFiltreDate] = useState(""); // ymd Paris sélectionné dans le calendrier (vide = tout)
   const cleRef = useRef("");
   const jeton = () => (cleRef.current ||= (globalThis.crypto?.randomUUID?.() ?? String(Date.now()) + Math.random()));
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((p) => ({ ...p, [k]: e.target.value }));
 
-  // Regroupe les rendez-vous à venir par jour (Paris).
+  // Regroupe les rendez-vous à venir par jour (Paris), filtrés par la date choisie
+  // dans le calendrier le cas échéant.
   const parJour = useMemo(() => {
     const m = new Map<string, RendezVous[]>();
-    for (const r of data.aVenir) { const j = jourFR(r.debut); if (!m.has(j)) m.set(j, []); m.get(j)!.push(r); }
+    for (const r of data.aVenir) {
+      if (filtreDate && ymdOf(r.debut) !== filtreDate) continue;
+      const j = jourFR(r.debut); if (!m.has(j)) m.set(j, []); m.get(j)!.push(r);
+    }
     return [...m.entries()];
-  }, [data.aVenir]);
+  }, [data.aVenir, filtreDate]);
 
   async function creer() {
     if (!form.patient.trim()) { setFlash({ t: "bad", m: "Indique le patient." }); return; }
@@ -37,7 +46,11 @@ export function DispensaireRendezVous({ data }: { data: RendezVousData }) {
     let debutIso = "";
     try { debutIso = new Date(form.debut).toISOString(); } catch { setFlash({ t: "bad", m: "Date invalide." }); return; }
     setBusy(true);
-    const r = await creerRDV({ ...form, debut: debutIso, cle: jeton() });
+    let r = await creerRDV({ ...form, debut: debutIso, cle: jeton() });
+    // Chevauchement médecin/salle → NON bloquant : on propose de planifier quand même.
+    if (!r.ok && r.conflit && typeof window !== "undefined" && window.confirm(`${r.error}\n\nPlanifier quand même ce rendez-vous à cette date et heure ?`)) {
+      r = await creerRDV({ ...form, debut: debutIso, cle: jeton(), forcer: true });
+    }
     setBusy(false);
     if (!r.ok) { setFlash({ t: "bad", m: r.error || "Impossible." }); return; }
     cleRef.current = "";
@@ -91,8 +104,18 @@ export function DispensaireRendezVous({ data }: { data: RendezVousData }) {
           <h3 className="flex items-center gap-2 text-[0.9rem] font-semibold"><CalendarClock className="h-4 w-4 text-accent" /> À venir</h3>
           <span className="rounded-full px-2 py-0.5 text-[0.68rem] font-bold" style={{ color: data.aVenir.length ? "var(--accent)" : "var(--faint)", background: data.aVenir.length ? "color-mix(in srgb,var(--accent) 14%,transparent)" : "transparent" }}>{data.aVenir.length}</span>
         </div>
+
+        {/* Calendrier — aperçu des dates réservées à l'avance */}
+        {data.aVenir.length > 0 ? <CalendrierRDV rdvs={data.aVenir} selected={filtreDate} onPick={(y) => setFiltreDate((cur) => (cur === y ? "" : y))} /> : null}
+        {filtreDate ? (
+          <div className="mb-2 flex flex-wrap items-center gap-2 text-[0.76rem]">
+            <span className="rounded-full border border-accent/40 px-2 py-0.5 font-semibold capitalize text-accent">{dateLongue(filtreDate)}</span>
+            <button onClick={() => setFiltreDate("")} className="inline-flex items-center gap-1 text-faint hover:text-ink"><X className="h-3 w-3" /> Tout afficher</button>
+          </div>
+        ) : null}
+
         {parJour.length === 0 ? (
-          <p className="py-6 text-center text-[0.85rem] italic text-faint">Aucun rendez-vous à venir.</p>
+          <p className="py-6 text-center text-[0.85rem] italic text-faint">{filtreDate ? "Aucun rendez-vous ce jour-là." : "Aucun rendez-vous à venir."}</p>
         ) : (
           <div className="flex flex-col gap-3">
             {parJour.map(([jour, liste]) => (
@@ -150,6 +173,59 @@ export function DispensaireRendezVous({ data }: { data: RendezVousData }) {
   );
 }
 
+// ── Calendrier mensuel des rendez-vous à venir (aperçu des dates réservées) ───
+function CalendrierRDV({ rdvs, selected, onPick }: { rdvs: RendezVous[]; selected: string; onPick: (ymd: string) => void }) {
+  const counts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of rdvs) { const y = ymdOf(r.debut); if (y) m.set(y, (m.get(y) || 0) + 1); }
+    return m;
+  }, [rdvs]);
+  const todayYmd = ymdOf(new Date().toISOString());
+  const [cur, setCur] = useState(() => ({ y: Number(todayYmd.slice(0, 4)) || 1970, m: Number(todayYmd.slice(5, 7)) || 1 }));
+  const bump = (delta: number) => setCur((c) => { const idx = c.y * 12 + (c.m - 1) + delta; return { y: Math.floor(idx / 12), m: (idx % 12) + 1 }; });
+
+  const daysInMonth = new Date(Date.UTC(cur.y, cur.m, 0)).getUTCDate();
+  const startDow = (new Date(Date.UTC(cur.y, cur.m - 1, 1)).getUTCDay() + 6) % 7; // Lun = 0
+  const cells: (number | null)[] = [...Array(startDow).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
+  const moisLabel = new Intl.DateTimeFormat("fr-FR", { timeZone: "UTC", month: "long", year: "numeric" }).format(new Date(Date.UTC(cur.y, cur.m - 1, 1)));
+
+  return (
+    <div className="mb-3 rounded-[12px] border border-border bg-surface-2 p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <button onClick={() => bump(-1)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Mois précédent"><ChevronLeft className="h-4 w-4" /></button>
+        <span className="inline-flex items-center gap-1.5 text-[0.82rem] font-semibold capitalize"><CalendarDays className="h-3.5 w-3.5 text-accent" /> {moisLabel}</span>
+        <button onClick={() => bump(1)} className="grid h-7 w-7 place-items-center rounded-md border border-border text-faint hover:text-ink" aria-label="Mois suivant"><ChevronRight className="h-4 w-4" /></button>
+      </div>
+      <div className="grid grid-cols-7 gap-1 text-center text-[0.6rem] font-semibold uppercase text-faint">
+        {["L", "M", "M", "J", "V", "S", "D"].map((d, i) => <div key={i}>{d}</div>)}
+      </div>
+      <div className="mt-1 grid grid-cols-7 gap-1">
+        {cells.map((d, i) => {
+          if (d === null) return <div key={i} />;
+          const ymd = `${cur.y}-${pad2(cur.m)}-${pad2(d)}`;
+          const n = counts.get(ymd) || 0;
+          const isToday = ymd === todayYmd;
+          const isSel = ymd === selected;
+          return (
+            <button key={i} onClick={() => n && onPick(ymd)} disabled={!n}
+              className="relative grid aspect-square place-items-center rounded-md border text-[0.72rem] font-num transition disabled:cursor-default"
+              style={{
+                borderColor: isSel ? "var(--accent)" : isToday ? "color-mix(in srgb,var(--accent) 45%,var(--border))" : "var(--border)",
+                background: isSel ? "color-mix(in srgb,var(--accent) 22%,transparent)" : n ? "color-mix(in srgb,var(--accent) 9%,transparent)" : "transparent",
+                color: n ? "var(--ink)" : "var(--faint)", fontWeight: n ? 700 : 400,
+              }}
+              title={n ? `${n} rendez-vous` : undefined}>
+              {d}
+              {n ? <span className="absolute bottom-0.5 right-0.5 grid h-3 min-w-[12px] place-items-center rounded-full px-0.5 text-[0.5rem] font-bold text-black/85" style={{ background: "var(--accent)" }}>{n}</span> : null}
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-[0.66rem] text-faint">Les jours surlignés sont réservés — clique dessus pour n&apos;afficher que ce jour.</p>
+    </div>
+  );
+}
+
 // Convertit un ISO en valeur pour <input type="datetime-local"> (heure locale du
 // navigateur, cohérent avec la création qui interprète la saisie en heure locale).
 function isoVersLocal(iso: string): string {
@@ -169,7 +245,11 @@ function EditRDVModal({ rdv, patients, medecins, onClose, onDone }: { rdv: Rende
     let debutIso = "";
     try { debutIso = new Date(f.debut).toISOString(); } catch { onDone({ t: "bad", m: "Date invalide." }); return; }
     setBusy(true);
-    const r = await majRDV(rdv.id, { patient: f.patient, debut: debutIso, type: f.type, medecin: f.medecin, salle: f.salle, priorite: f.priorite, motif: f.motif });
+    const patch = { patient: f.patient, debut: debutIso, type: f.type, medecin: f.medecin, salle: f.salle, priorite: f.priorite, motif: f.motif };
+    let r = await majRDV(rdv.id, patch);
+    if (!r.ok && r.conflit && typeof window !== "undefined" && window.confirm(`${r.error}\n\nEnregistrer quand même ce rendez-vous ?`)) {
+      r = await majRDV(rdv.id, { ...patch, forcer: true });
+    }
     setBusy(false);
     if (!r.ok) { onDone({ t: "bad", m: r.error || "Impossible." }); return; }
     onDone({ t: "ok", m: "Rendez-vous modifié." });
