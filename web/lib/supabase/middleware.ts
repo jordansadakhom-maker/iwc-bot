@@ -77,7 +77,9 @@ export async function updateSession(request: NextRequest) {
   if (standalone) {
     const auth = path === "/login" || path.startsWith("/auth");
     const meta = path === "/opengraph-image" || path === "/manifest.webmanifest" || path === "/pwa-icon" || path === "/icon" || path === "/apple-icon";
-    const autorise = path.startsWith("/dispensaire") || auth || meta;
+    // Les routes API (ex. /api/health du keep-alive) s'auto-protègent → elles
+    // passent librement, même en mode autonome, sans être renvoyées au Dispensaire.
+    const autorise = path.startsWith("/dispensaire") || path.startsWith("/api/") || auth || meta;
     if (!autorise) {
       const to = request.nextUrl.clone();
       to.pathname = "/dispensaire";

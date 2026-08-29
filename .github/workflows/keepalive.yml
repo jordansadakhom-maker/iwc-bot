@@ -1,0 +1,47 @@
+name: Keep-alive (anti-pause Supabase)
+
+# Empêche la cause n°1 des « soucis serveur » intermittents : sur le plan gratuit,
+# le projet Supabase se met en PAUSE après une longue inactivité, et toutes les
+# pages tombent alors en erreur. Ce job appelle régulièrement /api/health, qui fait
+# une requête minime sur la base → elle ne s'endort plus jamais. Réveille aussi la
+# page principale (garde l'hébergement Vercel « chaud »).
+#
+# ── Réglage éventuel ──
+# L'URL du site est devinée par défaut. Pour la changer, définir une VARIABLE de
+# dépôt (Settings → Secrets and variables → Actions → Variables) :
+#     Name : SITE_URL   Value : https://mon-domaine.example
+# (les workflows programmés ne s'exécutent que depuis la branche par défaut, main.)
+
+on:
+  schedule:
+    - cron: "7 */6 * * *"   # toutes les 6 heures (marge énorme : la pause n'arrive qu'après ~7 jours)
+  workflow_dispatch: {}
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    name: Réveiller la base
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /api/health (+ page principale)
+        run: |
+          BASE="${{ vars.SITE_URL || 'https://dispensaire-saint-denis.vercel.app' }}"
+          echo "Base : $BASE"
+          for i in 1 2 3; do
+            code=$(curl -sS -o /tmp/health.json -w "%{http_code}" --max-time 30 "$BASE/api/health" || echo "000")
+            echo "Tentative $i → /api/health : HTTP $code"
+            cat /tmp/health.json 2>/dev/null || true; echo
+            # Succès si la base a bien répondu ("db":true).
+            if [ "$code" = "200" ] && grep -q '"db":true' /tmp/health.json 2>/dev/null; then
+              ok=1; break
+            fi
+            sleep 20
+          done
+          # Réveille aussi la page principale (cold start Vercel).
+          curl -sS -o /dev/null -w "page /dispensaire : HTTP %{http_code}\n" --max-time 30 "$BASE/dispensaire" || true
+          # Un hoquet ponctuel ne doit pas faire échouer le job (le prochain tir réessaiera).
+          if [ "${ok:-0}" != "1" ]; then echo "::warning::Base non confirmée réveillée ce tour-ci (réessai au prochain passage)."; fi
+          exit 0
