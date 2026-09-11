@@ -6,7 +6,8 @@ import { Boxes, Plus, Search, Check, Pencil, Trash2, AlertTriangle, Archive, Arr
 import { CATEGORIES, catLabel, enAlerte, type StockData, type StockItem, type StockMouvement } from "@/lib/dispensaire-stock-const";
 import { Modal, Flash, Champ, Picker, PhotoField, inputCls } from "@/components/edit-ui";
 import { VideRegistre } from "@/components/dispensaire-ui";
-import { creerItem, majItem, supprimerItem, ajusterStock } from "@/app/dispensaire/stockage/actions";
+import { creerItem, majItem, supprimerItem } from "@/app/dispensaire/stockage/actions";
+import { useAjusterStock } from "@/lib/use-ajuster-stock";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
 const norm = (x: string) => x.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
@@ -52,6 +53,7 @@ export function DispensaireStockage({ data, scope }: { data: StockData; scope?: 
   const [flash, setFlash] = useState<FlashMsg>(null);
   const [form, setForm] = useState<StockItem | "new" | null>(null);
   const [delId, setDelId] = useState<string | null>(null);
+  const { enfiler, enVol } = useAjusterStock();
 
   // Re-synchronise l'état avec la base après chaque router.refresh() : ce que
   // l'écran montre = ce qui est RÉELLEMENT enregistré (plus de valeur « fantôme »
@@ -59,12 +61,16 @@ export function DispensaireStockage({ data, scope }: { data: StockData; scope?: 
   // d'identité qu'au rendu serveur (montage + refresh), jamais sur un simple
   // re-render client — donc pas de scintillement pendant la saisie.
   useEffect(() => {
+    // Ne pas écraser une rafale de +/− encore en cours d'écriture (sinon la
+    // valeur affichée « sauterait » en arrière) : la synchro se fera au refresh
+    // final déclenché quand la rafale est entièrement enregistrée.
+    if (enVol.current > 0) return;
     const its = cfg ? data.items.filter((i) => i.categorie === cfg.categorie) : data.items;
     setItems(its);
     if (!cfg) { setMvts(data.mouvements); return; }
     const ids = new Set(its.map((i) => i.id));
     setMvts(data.mouvements.filter((m) => m.stockId != null && ids.has(m.stockId)));
-  }, [data, cfg]);
+  }, [data, cfg, enVol]);
 
   const query = norm(q.trim());
   const liste = useMemo(() => items.filter((it) =>
@@ -120,14 +126,20 @@ export function DispensaireStockage({ data, scope }: { data: StockData; scope?: 
   }
   async function supprimer(id: string) { setItems((p) => p.filter((it) => it.id !== id)); setDelId(null); const r = await supprimerItem(id); if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else router.refresh(); }
 
-  async function ajuster(it: StockItem, delta: number, motif: string) {
-    const apres = Math.max(0, it.stock + delta);
-    setItems((p) => p.map((x) => (x.id === it.id ? { ...x, stock: apres } : x)));
-    const tmp: StockMouvement = { id: "tmp-" + Math.random().toString(36).slice(2, 8), stockId: it.id, nomItem: it.nom, coffre: it.coffre, delta, apres, motif: motif || null, par: null, createdAt: new Date().toISOString() };
+  function ajuster(it: StockItem, delta: number, motif: string) {
+    const id = it.id;
+    // Optimiste RELATIF : accumule depuis l'état COURANT (pas depuis une valeur
+    // figée) → deux clics rapprochés comptent bien pour deux. L'appel serveur est
+    // ensuite sérialisé par article (voir useAjusterStock) : plus de perte, et un
+    // seul refresh à la fin de la rafale.
+    setItems((p) => p.map((x) => (x.id === id ? { ...x, stock: Math.max(0, x.stock + delta) } : x)));
+    const tmp: StockMouvement = { id: "tmp-" + Math.random().toString(36).slice(2, 8), stockId: id, nomItem: it.nom, coffre: it.coffre, delta, apres: null, motif: motif || null, par: null, createdAt: new Date().toISOString() };
     setMvts((p) => [tmp, ...p].slice(0, 60));
-    const r = await ajusterStock(it.id, delta, motif);
-    if (!r.ok) { setItems((p) => p.map((x) => (x.id === it.id ? { ...x, stock: it.stock } : x))); setMvts((p) => p.filter((m) => m.id !== tmp.id)); setFlash({ t: "bad", m: r.error || "Impossible." }); }
-    else router.refresh();
+    enfiler(id, delta, motif, (msg) => {
+      setItems((p) => p.map((x) => (x.id === id ? { ...x, stock: Math.max(0, x.stock - delta) } : x)));
+      setMvts((p) => p.filter((m) => m.id !== tmp.id));
+      setFlash({ t: "bad", m: msg });
+    });
   }
 
   return (
