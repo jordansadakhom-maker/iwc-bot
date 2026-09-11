@@ -8,7 +8,8 @@ import { Lock } from "lucide-react";
 import { Modal, Flash, Champ, Picker, PhotoField, inputCls } from "@/components/edit-ui";
 import { VideRegistre } from "@/components/dispensaire-ui";
 import { creerCoffre, majCoffre, supprimerCoffre, importerPlanRangement } from "@/app/dispensaire/coffres/actions";
-import { creerItem, majItem, supprimerItem, ajusterStock, deplacerItem } from "@/app/dispensaire/stockage/actions";
+import { creerItem, majItem, supprimerItem, deplacerItem } from "@/app/dispensaire/stockage/actions";
+import { useAjusterStock } from "@/lib/use-ajuster-stock";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
 type CoffreMeta = { id: string; nom: string; emplacement: string | null; responsable: string | null; note: string | null; photo: string | null };
@@ -55,6 +56,7 @@ export function DispensaireCoffres({ data, scope }: { data: CoffresInvData; scop
   const [flash, setFlash] = useState<FlashMsg>(null);
   const [modale, setModale] = useState<Modale>(null);
   const [importBusy, setImportBusy] = useState(false);
+  const { enfiler, enVol } = useAjusterStock();
 
   // Re-synchronise l'état avec la base après chaque router.refresh() : la quantité
   // affichée = la quantité RÉELLEMENT enregistrée. Sans ça, la valeur optimiste
@@ -63,9 +65,13 @@ export function DispensaireCoffres({ data, scope }: { data: CoffresInvData; scop
   // rendu serveur (montage + refresh), pas sur un re-render client → pas de
   // scintillement.
   useEffect(() => {
+    // Ne pas écraser une rafale de +/− encore en cours d'écriture (sinon la
+    // quantité affichée « sauterait » en arrière) : la synchro se fera au refresh
+    // final déclenché quand la rafale est entièrement enregistrée.
+    if (enVol.current > 0) return;
     setItems(filt(data.coffres.flatMap((c) => c.items)));
     setMetas(data.coffres.filter((c) => c.id).map((c) => ({ id: c.id as string, nom: c.nom, emplacement: c.emplacement, responsable: c.responsable, note: c.note, photo: c.photo })));
-  }, [data, cfg]);
+  }, [data, cfg, enVol]);
 
   async function importerPlan() {
     setImportBusy(true);
@@ -154,12 +160,21 @@ export function DispensaireCoffres({ data, scope }: { data: CoffresInvData; scop
     const r = await supprimerItem(item.id);
     if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else router.refresh();
   }
-  async function ajuster(it: StockItem, delta: number) {
-    const apres = Math.max(0, it.stock + delta);
-    if (apres === it.stock) return;
-    setItems((p) => p.map((x) => (x.id === it.id ? { ...x, stock: apres } : x)));
-    const r = await ajusterStock(it.id, apres - it.stock);
-    if (!r.ok) { setItems((p) => p.map((x) => (x.id === it.id ? { ...x, stock: it.stock } : x))); setFlash({ t: "bad", m: r.error || "Impossible." }); } else router.refresh();
+  function ajuster(it: StockItem, delta: number) {
+    if (!delta) return;
+    const id = it.id;
+    // Rien à retirer si déjà à zéro (évite un mouvement « −1 → 0 » inutile).
+    const cur = items.find((x) => x.id === id)?.stock ?? it.stock;
+    if (delta < 0 && cur <= 0) return;
+    // Optimiste RELATIF : accumule depuis l'état COURANT (pas depuis une valeur
+    // figée) → cliquer plusieurs fois d'affilée compte bien à chaque fois. Les
+    // appels serveur sont sérialisés par article (voir useAjusterStock) : plus de
+    // « mise à jour perdue », et un seul refresh à la fin de la rafale.
+    setItems((p) => p.map((x) => (x.id === id ? { ...x, stock: Math.max(0, x.stock + delta) } : x)));
+    enfiler(id, delta, undefined, (msg) => {
+      setItems((p) => p.map((x) => (x.id === id ? { ...x, stock: Math.max(0, x.stock - delta) } : x)));
+      setFlash({ t: "bad", m: msg });
+    });
   }
   async function deplacer(it: StockItem, dest: string) {
     const destC = dest || null;
