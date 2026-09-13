@@ -362,7 +362,7 @@ export function RapportImpayesModal({ initial, historique, config, medecins = []
                       const enRetard = c.f && c.age >= seuil;
                       return (
                         <tr key={c.f.id} onClick={() => bascule(c.f.id)} className="cursor-pointer hover:bg-[color-mix(in_srgb,var(--ink)_4%,transparent)]" style={on ? { background: "color-mix(in srgb,var(--accent) 7%,transparent)" } : undefined}>
-                          <td className="border-b border-border px-2 py-1.5"><input type="checkbox" checked={on} onChange={() => bascule(c.f.id)} onClick={(e) => e.stopPropagation()} className="h-4 w-4 accent-[var(--accent)]" /></td>
+                          <td className="border-b border-border px-2 py-1.5"><input type="checkbox" aria-label="Sélectionner cette facture" checked={on} onChange={() => bascule(c.f.id)} onClick={(e) => e.stopPropagation()} className="h-4 w-4 accent-[var(--accent)]" /></td>
                           <td className="border-b border-border px-2 py-1.5 font-semibold">{c.f.objet}</td>
                           <td className="border-b border-border px-2 py-1.5 font-num text-faint">{ddMM(c.f.dateEmission || c.f.createdAt)}</td>
                           <td className="border-b border-border px-2 py-1.5 text-right font-num" style={{ color: enRetard ? "var(--oxblood)" : "var(--warn)" }}>{enRetard ? `${c.retard} j` : <span title="Encore dans les délais">dans les délais</span>}</td>

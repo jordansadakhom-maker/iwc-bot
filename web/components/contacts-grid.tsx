@@ -61,6 +61,7 @@ export function ContactsGrid({ contacts }: { contacts: ContactItem[] }) {
 
   return (
     <>
+      {contacts.length === 0 ? <p className="px-1 py-10 text-center text-[0.85rem] italic text-faint">Aucun contact au répertoire pour le moment.</p> : null}
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
         {contacts.map((c) => {
           const t = TYPE_TONE[c.type] || "var(--muted)";

@@ -15,6 +15,11 @@ export type VisionResult = { ok: boolean; txt?: string; error?: string };
 
 export async function lireImageVision(url: string, system: string, userText: string, maxTokens = 400): Promise<VisionResult> {
   if (!/^https?:\/\//.test(String(url || ""))) return { ok: false, error: "Photo invalide." };
+  // Sécurité (anti-SSRF) : n'accepte QUE les fichiers de NOTRE stockage Supabase
+  // (téléversés via uploadPhoto), jamais une URL arbitraire — le serveur ne doit
+  // pas pouvoir être détourné pour lire des adresses internes.
+  const supaUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  if (!supaUrl || !String(url).startsWith(supaUrl)) return { ok: false, error: "Photo invalide." };
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return { ok: false, error: "Lecture automatique indisponible (variable ANTHROPIC_API_KEY absente sur Vercel)." };
   try {

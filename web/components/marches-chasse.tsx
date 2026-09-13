@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Store, Search, Plus, Trash2, Loader2, Check, X, Trophy, History, ChevronDown,
@@ -35,6 +35,10 @@ export function MarchesChasse({ data, stockRes = [] }: { data: MarchesData; stoc
   const [villes, setVilles] = useState<VilleMarche[]>(data.villes);
   const [ressources, setRessources] = useState<RessourceMarche[]>(data.ressources);
   const [prix, setPrix] = useState<Record<string, Record<string, number>>>(data.prix);
+  // Re-synchronise avec la base après chaque router.refresh() : sans ça, une ville
+  // créée (qui n'est pas insérée en optimiste) n'apparaissait qu'après un
+  // rechargement complet de la page.
+  useEffect(() => { setVilles(data.villes); setRessources(data.ressources); setPrix(data.prix); }, [data]);
   const [q, setQ] = useState("");
   const [fVille, setFVille] = useState<string>("all");
   const [fCat, setFCat] = useState<"all" | CategorieMarche>("all");

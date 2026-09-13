@@ -390,7 +390,7 @@ function WChecklist() {
               {x.fait ? <Check className="h-3 w-3 text-black/80" /> : null}
             </button>
             <span className={`flex-1 truncate text-[0.8rem] ${x.fait ? "text-faint line-through" : "text-ink"}`}>{x.t}</span>
-            <button onClick={() => retirer(x.id)} className="shrink-0 text-faint opacity-0 transition hover:text-oxblood group-hover:opacity-100"><Trash2 className="h-3.5 w-3.5" /></button>
+            <button onClick={() => retirer(x.id)} aria-label="Retirer" className="shrink-0 text-faint opacity-0 transition hover:text-oxblood group-hover:opacity-100"><Trash2 className="h-3.5 w-3.5" /></button>
           </li>
         ))}
       </ul>

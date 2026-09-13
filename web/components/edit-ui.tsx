@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useId } from "react";
 import { X, Trash2 } from "lucide-react";
 import { PhotoDrop } from "@/components/photo-drop";
 
@@ -71,15 +72,26 @@ export function Picker({ options, value, onChange }: { options: { key: string; l
 }
 
 export function Modal({ titre, children, onClose, max = 500 }: { titre: string; children: React.ReactNode; onClose: () => void; max?: number }) {
+  const titreId = useId();
+  // Accessibilité + confort : fermeture au clavier via Échap (en plus du clic sur
+  // le fond). Purement additif — le comportement souris reste identique.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titreId}
         className="max-h-[88vh] w-full overflow-y-auto rounded-card border border-border bg-surface p-5 shadow-card"
         style={{ maxWidth: max, background: "linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,#000))" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-start justify-between gap-3">
-          <div className="font-display text-xl">{titre}</div>
+          <div id={titreId} className="font-display text-xl">{titre}</div>
           <button onClick={onClose} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border text-muted hover:text-ink" aria-label="Fermer">
             <X className="h-4 w-4" />
           </button>

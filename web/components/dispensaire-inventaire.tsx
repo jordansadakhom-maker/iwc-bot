@@ -188,7 +188,7 @@ function FicheProduit({ produit, onClose }: { produit: Produit; onClose: () => v
             </div>
             <div className="mt-0.5 text-[0.72rem] text-faint">{NIVEAU_LABEL[produit.niveau]} · seuil {produit.seuil || "—"}</div>
           </div>
-          <button onClick={onClose} className="shrink-0 rounded-md p-1 text-faint hover:text-ink"><X className="h-4 w-4" /></button>
+          <button onClick={onClose} aria-label="Fermer" className="shrink-0 rounded-md p-1 text-faint hover:text-ink"><X className="h-4 w-4" /></button>
         </div>
 
         <div className="max-h-[70vh] overflow-auto px-4 py-3">

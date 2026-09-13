@@ -286,7 +286,7 @@ function ModaleCadre({ titre, onClose, children }: { titre: string; onClose: () 
       <div className="iwc-pop w-full max-w-[480px] rounded-[14px] border border-border-2 bg-surface shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h2 className="flex items-center gap-2 font-display text-[1.05rem]"><Caravan className="h-4 w-4 text-accent" /> {titre}</h2>
-          <button onClick={onClose} className="text-faint hover:text-ink"><X className="h-4 w-4" /></button>
+          <button onClick={onClose} aria-label="Fermer" className="text-faint hover:text-ink"><X className="h-4 w-4" /></button>
         </div>
         {children}
       </div>

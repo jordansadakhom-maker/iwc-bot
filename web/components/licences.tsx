@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ShieldCheck, Search, Plus, X, Loader2, CheckCircle2, XCircle, BadgeCheck, Ban, RotateCcw, RefreshCw, Trash2, Pencil, Clock, FileText, BarChart3, Crosshair } from "lucide-react";
 import {
@@ -29,7 +29,7 @@ function Modal({ titre, onClose, children, max = 640 }: { titre: string; onClose
       <div className="my-8 w-full rounded-2xl border border-border bg-surface shadow-2xl" style={{ maxWidth: max }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-border px-5 py-3">
           <h3 className="font-display text-[1.05rem]">{titre}</h3>
-          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg border border-border text-faint hover:text-ink"><X className="h-4 w-4" /></button>
+          <button onClick={onClose} aria-label="Fermer" className="grid h-8 w-8 place-items-center rounded-lg border border-border text-faint hover:text-ink"><X className="h-4 w-4" /></button>
         </div>
         <div className="p-5">{children}</div>
       </div>
@@ -48,7 +48,11 @@ function raisonNonAutorise(l: Licence): string {
 
 export function LicencesRegistre({ data, config, caps = CAPS_TOUT, roleLabel, membres = [] }: { data: { pret: boolean; licences: Licence[]; types: LicenceType[] }; config?: { bloquerVentes: boolean }; caps?: CapsLicence; roleLabel?: string; membres?: MembreRole[] }) {
   const router = useRouter();
-  const [licences] = useState<Licence[]>(data.licences);
+  const [licences, setLicences] = useState<Licence[]>(data.licences);
+  // Re-synchronise la liste après chaque router.refresh() (création / renouvellement
+  // / révocation) : sans ça, `router.refresh()` ne remontant pas le composant
+  // client, une licence créée n'apparaissait qu'après un rechargement complet.
+  useEffect(() => { setLicences(data.licences); }, [data.licences]);
   const [bloque, setBloque] = useState(!!config?.bloquerVentes);
   const [q, setQ] = useState("");
   const [flash, setFlash] = useState<Flash>(null);

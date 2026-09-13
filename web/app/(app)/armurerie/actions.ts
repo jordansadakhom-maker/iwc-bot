@@ -155,7 +155,10 @@ export async function creerVente(d: { clientId?: string; acquereur: string; date
   const prix = total;
   if (prix > 0) {
     const arme = [s(d.marque, 80), s(d.modele, 80)].filter(Boolean).join(" ") || "arme";
-    try { await _mouvementCoffre(admin, prix, "entree", `Vente — ${arme} à ${s(d.acquereur, 120)}`, s(d.vendeur, 120) || (await auteurNom())); } catch {}
+    // On ne bloque JAMAIS la vente si le crédit du coffre échoue, mais on trace
+    // l'échec (sinon un écart coffre/ventes passerait totalement inaperçu).
+    try { await _mouvementCoffre(admin, prix, "entree", `Vente — ${arme} à ${s(d.acquereur, 120)}`, s(d.vendeur, 120) || (await auteurNom())); }
+    catch (e) { console.error("credit coffre vente:", (e as Error).message); }
   }
   return { ok: true, id };
 }
@@ -744,6 +747,10 @@ export async function validerCaisse(lignes: LigneCaisse[], client: string, notes
 // robuste et indépendant de la version d'API) et renvoie le texte produit.
 async function _vision(url: string, system: string, userText: string, maxTokens = 400): Promise<{ ok: boolean; txt?: string; error?: string }> {
   if (!/^https?:\/\//.test(String(url || ""))) return { ok: false, error: "Photo invalide." };
+  // Sécurité (anti-SSRF) : on ne télécharge QUE des fichiers issus de NOTRE stockage
+  // Supabase (téléversés via uploadPhoto), jamais une adresse arbitraire du client.
+  const supaUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  if (!supaUrl || !String(url).startsWith(supaUrl)) return { ok: false, error: "Photo invalide." };
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return { ok: false, error: "Lecture automatique indisponible (variable ANTHROPIC_API_KEY absente sur Vercel)." };
   try {

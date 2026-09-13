@@ -53,10 +53,10 @@ export async function updateSession(request: NextRequest) {
   // URL inconnues, qui rendent ainsi une VRAIE page 404 au lieu d'être renvoyées
   // vers /login. Chaque page interne se protège en plus via getActeur (fail-closed).
   const PROTECTED = [
-    "/absences", "/activite", "/agenda", "/armurerie", "/assistant", "/carte", "/carte-metier",
-    "/chasse", "/communication", "/dashboard", "/direction", "/documents", "/finances", "/inventaire",
-    "/journal", "/medical", "/membres", "/messages", "/mouvements", "/notes-vocales", "/notifications",
-    "/operations", "/recrutement", "/renseignement", "/repertoire", "/statistiques", "/taches", "/wanted",
+    "/absences", "/activite", "/agenda", "/armurerie", "/assistant", "/audit", "/carte", "/carte-metier",
+    "/chasse", "/communication", "/dashboard", "/demandes", "/direction", "/documents", "/finances", "/inventaire",
+    "/journal", "/licences", "/medical", "/membres", "/messages", "/mouvements", "/notes-vocales", "/notifications",
+    "/operations", "/recrutement", "/renseignement", "/repertoire", "/sante", "/statistiques", "/taches", "/wanted",
     "/dispensaire",
   ];
   // Frontière stricte : "/armurerie" protégé n'attrape PAS le public "/armurerie-vh".

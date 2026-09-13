@@ -89,6 +89,11 @@ async function _visionDoc(url: string, userText: string, maxTokens = 1600): Prom
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return { ok: false, error: "Le générateur IA n'est pas activé (ANTHROPIC_API_KEY manquante)." };
   if (!/^https?:\/\//.test(String(url || ""))) return { ok: false, error: "Image invalide." };
+  // Sécurité (anti-SSRF) : on ne télécharge QUE des images issues de NOTRE stockage
+  // Supabase (téléversées via uploadPhoto), jamais une adresse arbitraire fournie
+  // par le client — sinon le serveur pourrait être forcé de lire des URL internes.
+  const supaUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  if (!supaUrl || !String(url).startsWith(supaUrl)) return { ok: false, error: "Image invalide." };
   try {
     const img = await fetch(url);
     if (!img.ok) return { ok: false, error: "Image inaccessible." };

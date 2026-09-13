@@ -72,7 +72,7 @@ export function DispensaireInterventions({ data }: { data: InterventionsData }) 
         {actions ? <button onClick={() => setCro({ interv: i, mode: "terminer" })} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[0.74rem] font-semibold text-black/85" style={{ background: "var(--good)" }}><Check className="h-3.5 w-3.5" /> Terminer</button> : null}
         <button onClick={() => setCro({ interv: i, mode: "editer" })} className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-[0.74rem] font-semibold text-muted hover:text-ink"><ClipboardCheck className="h-3.5 w-3.5" /> CRO</button>
         {actions ? <button onClick={() => faire(i.id, () => annulerIntervention(i.id), "Intervention annulée.")} disabled={actif === i.id} className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-[0.74rem] font-semibold text-muted hover:text-oxblood disabled:opacity-50"><X className="h-3.5 w-3.5" /> Annuler</button> : null}
-        <button onClick={() => faire(i.id, () => supprimerIntervention(i.id), "Intervention supprimée.")} disabled={actif === i.id} className="ml-auto inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-[0.72rem] font-semibold text-muted hover:text-oxblood disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" /></button>
+        <button onClick={() => faire(i.id, () => supprimerIntervention(i.id), "Intervention supprimée.")} disabled={actif === i.id} aria-label="Supprimer l'intervention" className="ml-auto inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-[0.72rem] font-semibold text-muted hover:text-oxblood disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" /></button>
       </div>
     </div>
   );
