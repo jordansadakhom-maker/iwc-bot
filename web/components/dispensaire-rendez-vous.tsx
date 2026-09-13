@@ -259,7 +259,7 @@ function EditRDVModal({ rdv, patients, medecins, onClose, onDone }: { rdv: Rende
       <div className="iwc-pop w-full max-w-[560px] rounded-[14px] border border-border-2 bg-surface shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h2 className="flex items-center gap-2 font-display text-[1.05rem]"><Pencil className="h-4 w-4 text-accent" /> Modifier le rendez-vous</h2>
-          <button onClick={onClose} className="text-faint hover:text-ink"><X className="h-4 w-4" /></button>
+          <button onClick={onClose} aria-label="Fermer" className="text-faint hover:text-ink"><X className="h-4 w-4" /></button>
         </div>
         <div className="grid gap-2 p-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1"><span className="text-[0.7rem] uppercase tracking-[0.05em] text-faint">Patient</span><input className={inputCls} list="rdv-patients" value={f.patient} onChange={set("patient")} /></label>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Boxes, Plus, Minus, Loader2, Camera, AlertTriangle, History, X, Check, SlidersHorizontal, Search, ChevronDown } from "lucide-react";
 import type { StockItem, MouvementItem } from "@/lib/queries";
@@ -26,6 +26,12 @@ export function InventaireStock({ stock, mouvements }: { stock: StockItem[]; mou
   const [stepItem, setStepItem] = useState<StockItem | null>(null);
   const [journal, setJournal] = useState(false);
   const [pending, setPending] = useState(0);
+  const pendingRef = useRef(0);
+  // Re-synchronise avec le serveur quand les props changent (ex. après une photo →
+  // router.refresh()), SAUF si un envoi optimiste est encore en vol (sinon on
+  // écraserait l'affichage en cours). Corrige l'ancienne « valeur fantôme » qui
+  // restait affichée même si rien n'avait été enregistré.
+  useEffect(() => { if (pendingRef.current > 0) return; setItems(stock); }, [stock]);
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [basSeul, setBasSeul] = useState(false); // n'afficher que les objets sous leur seuil
@@ -43,6 +49,9 @@ export function InventaireStock({ stock, mouvements }: { stock: StockItem[]; mou
   async function applique(categorie: string, nom: string, mode: "add" | "remove" | "set", qte: number) {
     const q = Math.abs(Math.round(qte)) || 0;
     if (mode !== "set" && q === 0) return;
+    // Mémorise la quantité AVANT pour pouvoir rétablir en cas d'échec.
+    const avant = items.find((x) => x.categorie === categorie && norm(x.nom) === norm(nom));
+    const avantQ = avant ? avant.quantite : null;
     // 1) mise à jour immédiate à l'écran
     setItems((prev) => {
       const i = prev.findIndex((x) => x.categorie === categorie && norm(x.nom) === norm(nom));
@@ -58,9 +67,22 @@ export function InventaireStock({ stock, mouvements }: { stock: StockItem[]; mou
     });
     // 2) envoi au bot
     setPending((p) => p + 1);
+    pendingRef.current += 1;
     const r = await ajusterStock(categorie, nom, mode, q);
     setPending((p) => Math.max(0, p - 1));
-    if (!r.ok) { setFlash(r.error || "Échec — le changement pourrait ne pas être enregistré."); }
+    pendingRef.current = Math.max(0, pendingRef.current - 1);
+    if (!r.ok) {
+      setFlash(r.error || "Échec — le changement n'a pas été enregistré, la quantité a été rétablie.");
+      // Rollback : rétablit la quantité d'avant (ou retire l'objet créé en optimiste).
+      setItems((prev) => {
+        const i = prev.findIndex((x) => x.categorie === categorie && norm(x.nom) === norm(nom));
+        if (i === -1) return prev;
+        const copy = [...prev];
+        if (avantQ == null) { copy.splice(i, 1); return copy; }
+        copy[i] = { ...copy[i], quantite: avantQ };
+        return copy;
+      });
+    }
   }
 
   return (

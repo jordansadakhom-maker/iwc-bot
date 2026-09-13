@@ -6,7 +6,12 @@ import { createClient } from "@/lib/supabase/server";
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/dashboard";
+  // Sécurité : `next` ne doit rester qu'un chemin LOCAL. Sans ce filtre, une
+  // valeur comme "@evil.com" ou "//evil.com" détournerait la redirection post-
+  // connexion vers un domaine externe (open redirect → hameçonnage). On n'accepte
+  // donc qu'un chemin commençant par "/" mais pas "//" ni "/\".
+  const nextBrut = searchParams.get("next") ?? "/dashboard";
+  const next = nextBrut.startsWith("/") && !nextBrut.startsWith("//") && !nextBrut.startsWith("/\\") ? nextBrut : "/dashboard";
 
   if (code) {
     const supabase = await createClient();

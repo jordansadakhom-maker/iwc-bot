@@ -129,7 +129,7 @@ export function DispensaireChambres({ data }: { data: ChambresData }) {
               <option value="">État…</option>
               {ETATS_CHAMBRE.filter((e) => e !== "occupee" && e !== c.etat).map((e) => <option key={e} value={e}>{ETAT_CHAMBRE_LABEL[e]}</option>)}
             </select>
-            <button onClick={() => faire(c.id, () => supprimerChambre(c.id), "Chambre supprimée.")} disabled={busyRow} className="ml-auto inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-[0.72rem] font-semibold text-muted transition hover:text-oxblood disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" /></button>
+            <button onClick={() => faire(c.id, () => supprimerChambre(c.id), "Chambre supprimée.")} disabled={busyRow} aria-label="Supprimer la chambre" className="ml-auto inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-[0.72rem] font-semibold text-muted transition hover:text-oxblood disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" /></button>
           </div>
         )}
       </div>

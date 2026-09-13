@@ -228,7 +228,7 @@ export function PointageTab({ employes, pointages, router }: { employes: ArmEmpl
                 <span className="min-w-0 flex-1 truncate font-medium">{p.employeNom}</span>
                 <span className="shrink-0 text-faint">{heureFR(p.debut)} → {heureFR(p.fin)}</span>
                 <span className="shrink-0 font-num font-semibold" style={{ color: "var(--accent)" }}>{hm(p.minutes)}</span>
-                <button onClick={async () => { setBusy(p.id); const r = await supprimerPointage(p.id); setBusy(null); if (r.ok) router.refresh(); else toastErreur(r.error || "Suppression impossible — réessaie."); }} className="shrink-0 text-faint hover:text-ink"><Trash2 className="h-3.5 w-3.5" /></button>
+                <button onClick={async () => { setBusy(p.id); const r = await supprimerPointage(p.id); setBusy(null); if (r.ok) router.refresh(); else toastErreur(r.error || "Suppression impossible — réessaie."); }} aria-label="Supprimer le pointage" className="shrink-0 text-faint hover:text-ink"><Trash2 className="h-3.5 w-3.5" /></button>
               </div>
             ))}
           </div>
@@ -1011,7 +1011,7 @@ export function TachesTab({ taches, router }: { taches: ArmTache[]; router: Rout
       <button onClick={() => basculer(t)} disabled={busy === t.id} className="grid h-5 w-5 shrink-0 place-items-center rounded border" style={{ borderColor: t.fait ? "var(--good)" : "var(--border)", background: t.fait ? "var(--good)" : "transparent" }}>{t.fait ? <Check className="h-3.5 w-3.5 text-black/85" /> : null}</button>
       <span className={`min-w-0 flex-1 truncate ${t.fait ? "text-faint line-through" : ""}`}>{t.texte}</span>
       {t.assigneA ? <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-[0.68rem] text-muted">{t.assigneA}</span> : null}
-      <button onClick={() => suppr(t)} disabled={busy === t.id} className="shrink-0 text-faint hover:text-ink"><Trash2 className="h-3.5 w-3.5" /></button>
+      <button onClick={() => suppr(t)} disabled={busy === t.id} aria-label="Supprimer" className="shrink-0 text-faint hover:text-ink"><Trash2 className="h-3.5 w-3.5" /></button>
     </div>
   );
 
