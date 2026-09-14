@@ -4,11 +4,19 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/queries";
 import { peutAdministrer } from "@/lib/dispensaire-roles";
 import { emettreEvenementDispensaire } from "@/lib/dispensaire-evenements";
-import { getSalaires } from "@/lib/dispensaire-salaires";
-import { lundiCourant } from "@/lib/dispensaire-dates";
+import { getSalaires, contextePaie } from "@/lib/dispensaire-salaires";
 
 export type SalaireResult = { ok: boolean; error?: string; total?: number; nb?: number };
 async function qui() { try { return (await getSessionProfile())?.nom || "Direction"; } catch { return "Direction"; } }
+// Semaine ciblée par une action : la semaine explicitement affichée (navigation)
+// si elle est valide, sinon la « semaine active » par défaut (même règle que la
+// page Salaires) — pour que les ajustements et l'archivage tombent bien sur la
+// semaine que la Direction a sous les yeux.
+type AdminCli = NonNullable<ReturnType<typeof createAdminClient>>;
+async function semainePaie(admin: AdminCli, cible?: string): Promise<string> {
+  if (cible && /^\d{4}-\d{2}-\d{2}$/.test(cible)) return cible;
+  return (await contextePaie(admin)).active;
+}
 function newId() { return `dpa-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
 function newAjustId() { return `dpaj-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
 function newEhId() { return `deh-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
@@ -48,7 +56,7 @@ export async function supprimerFonction(fonction: string): Promise<SalaireResult
 // journal d'audit (qui, quand, avant → après, motif). Réservé Direction.
 type ChampAjust = "prime" | "ajustJours";
 
-async function majAjust(nom: string, champ: ChampAjust, valeur: number, motif?: string): Promise<SalaireResult> {
+async function majAjust(nom: string, champ: ChampAjust, valeur: number, motif?: string, semaineCible?: string): Promise<SalaireResult> {
   if (!(await peutAdministrer())) return { ok: false, error: "Réservé à la direction." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
@@ -56,7 +64,7 @@ async function majAjust(nom: string, champ: ChampAjust, valeur: number, motif?: 
   if (!n) return { ok: false, error: "Salarié invalide." };
   // Prime : entier ≥ 0. Ajustement de jours : entier borné (une semaine = 7 jours).
   const v = champ === "prime" ? Math.max(0, Math.round(Number(valeur) || 0)) : Math.max(-14, Math.min(14, Math.round(Number(valeur) || 0)));
-  const semaineLundi = lundiCourant(new Date().toISOString());
+  const semaineLundi = await semainePaie(admin, semaineCible);
   const nomKey = normNom(n);
   const par = await qui();
   const now = new Date().toISOString();
@@ -85,13 +93,13 @@ async function majAjust(nom: string, champ: ChampAjust, valeur: number, motif?: 
   return { ok: true };
 }
 
-// Prime manuelle (€ ≥ 0) d'un salarié pour la semaine courante. Réservé Direction.
-export async function setPrime(nom: string, prime: number, motif?: string): Promise<SalaireResult> {
-  return majAjust(nom, "prime", prime, motif);
+// Prime manuelle (€ ≥ 0) d'un salarié pour la semaine affichée. Réservé Direction.
+export async function setPrime(nom: string, prime: number, motif?: string, semaineCible?: string): Promise<SalaireResult> {
+  return majAjust(nom, "prime", prime, motif, semaineCible);
 }
-// Ajustement manuel des jours (±) d'un salarié pour la semaine courante. Réservé Direction.
-export async function setAjustJours(nom: string, ajustJours: number, motif?: string): Promise<SalaireResult> {
-  return majAjust(nom, "ajustJours", ajustJours, motif);
+// Ajustement manuel des jours (±) d'un salarié pour la semaine affichée. Réservé Direction.
+export async function setAjustJours(nom: string, ajustJours: number, motif?: string, semaineCible?: string): Promise<SalaireResult> {
+  return majAjust(nom, "ajustJours", ajustJours, motif, semaineCible);
 }
 
 // Ajustement manuel des HEURES d'un salarié pour la semaine courante, directement
@@ -99,14 +107,14 @@ export async function setAjustJours(nom: string, ajustJours: number, motif?: str
 // heures pointées (peut être négative) — la colonne « Heures » affiche alors
 // heures pointées + delta. N'a AUCUN impact sur le salaire (qui ne dépend que des
 // jours). Écrit dans DispensaireEffectifAjust (même table que le pointage).
-export async function setAjustHeures(nom: string, deltaMin: number, motif?: string): Promise<SalaireResult> {
+export async function setAjustHeures(nom: string, deltaMin: number, motif?: string, semaineCible?: string): Promise<SalaireResult> {
   if (!(await peutAdministrer())) return { ok: false, error: "Réservé à la direction." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
   const n = String(nom || "").trim();
   if (!n) return { ok: false, error: "Salarié invalide." };
   const d = Math.max(-6000, Math.min(6000, Math.round(Number(deltaMin) || 0))); // borne ±100 h
-  const semaineLundi = lundiCourant(new Date().toISOString());
+  const semaineLundi = await semainePaie(admin, semaineCible);
   const nomKey = normNom(n);
   const par = await qui();
   const now = new Date().toISOString();
@@ -132,13 +140,13 @@ export async function setAjustHeures(nom: string, deltaMin: number, motif?: stri
   return { ok: true };
 }
 
-// Fige (archive) les salaires de la SEMAINE COURANTE : un instantané par salarié.
+// Fige (archive) les salaires de la semaine AFFICHÉE : un instantané par salarié.
 // Ré-archiver la même semaine remplace l'instantané précédent. Réservé Direction.
-export async function archiverSemaine(): Promise<SalaireResult> {
+export async function archiverSemaine(semaineCible?: string): Promise<SalaireResult> {
   if (!(await peutAdministrer())) return { ok: false, error: "Réservé à la direction." };
   const admin = createAdminClient();
   if (!admin) return { ok: false, error: "Service momentanément indisponible." };
-  const data = await getSalaires();
+  const data = await getSalaires(semaineCible);
   if (!data.autorise) return { ok: false, error: "Réservé à la direction." };
   const semaineLundi = data.semaineLundi;
   const lignes = data.lignes.filter((l) => l.salaire > 0 || l.jours > 0);

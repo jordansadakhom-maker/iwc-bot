@@ -13,7 +13,7 @@ import { estDeclarableFDO } from "@/lib/dispensaire-facturation-const";
 import { getRapportConfig } from "@/lib/dispensaire-rapport-impayes";
 import { getSalaires } from "@/lib/dispensaire-salaires";
 import { getAssiduite } from "@/lib/dispensaire-pointage";
-import { ymdParis } from "@/lib/dispensaire-dates";
+import { ymdParis, lundiCourant } from "@/lib/dispensaire-dates";
 
 // ── Cockpit Direction (Lot 7) — vue agrégée de tout le SIH ───────────────────
 // Compose les modules existants en un tableau de bord unique (100 % dérivé, aucun
@@ -61,7 +61,7 @@ export async function getCockpit(): Promise<CockpitData> {
     getJournalAudit({ limit: 8 }).catch(() => ({ pret: false, entrees: [] })),
     getFactures().catch(() => null),
     getRapportConfig().catch(() => null),
-    getSalaires().catch(() => null),
+    getSalaires(lundiCourant(new Date().toISOString())).catch(() => null),
     getAssiduite().catch(() => null),
   ]);
 
