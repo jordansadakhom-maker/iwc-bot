@@ -65,7 +65,10 @@ export function DispensairePointage({ data, assiduite, absences = [], peutGerer 
   const [ajustJBusy, setAjustJBusy] = useState(false);
   async function ajusterJoursEmploye(nom: string, joursTotal: number, joursAuto: number, motif: string) {
     setAjustJBusy(true);
-    const r = await setAjustJours(nom, Math.round(joursTotal - joursAuto), motif || undefined);
+    // Cible EXPLICITEMENT la semaine courante (colonne « actuelle » = lundis[1]) :
+    // la page Salaires peut afficher par défaut une autre semaine (non figée), on ne
+    // veut pas que cet ajustement du pointage y aille par erreur.
+    const r = await setAjustJours(nom, Math.round(joursTotal - joursAuto), motif || undefined, assiduite?.lundis?.[1]);
     setAjustJBusy(false);
     if (!r.ok) { setFlash({ t: "bad", m: r.error || "Impossible." }); return; }
     setAjustJ(null);

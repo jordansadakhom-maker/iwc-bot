@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Coins, Lock, Loader2, Info, Archive, Printer, Trash2, Check } from "lucide-react";
+import { Coins, Lock, Loader2, Info, Archive, Printer, Trash2, Check, ChevronLeft, ChevronRight, CalendarClock } from "lucide-react";
 import { Flash, inputCls } from "@/components/edit-ui";
+import { dimancheDe, lundiCourant } from "@/lib/dispensaire-dates";
 import type { SalairesData, SalaireFonction, LigneSalaire, ArchivePaie } from "@/lib/dispensaire-salaires";
 import { salairePlein, SEUIL_JOURS_PLEIN, joursRetenus, salaireFinal } from "@/lib/dispensaire-salaires-const";
 import { setSalaireFonction, archiverSemaine, supprimerArchivePaie, setPrime, setAjustJours, setAjustHeures, supprimerFonction } from "@/app/dispensaire/salaires/actions";
@@ -65,9 +66,12 @@ export function DispensaireSalaires({ data }: { data: SalairesData }) {
 
   useEffect(() => { setFonctions(data.fonctions); setLignes(data.lignes); setArchives(data.archives); }, [data]);
 
+  // Navigation entre semaines (via l'URL → rendu serveur, jamais dans le futur).
+  const allerSemaine = (wk: string) => router.push(`/dispensaire/salaires?semaine=${wk}`, { scroll: false });
+
   async function archiver() {
     setBusy("arch");
-    const r = await archiverSemaine();
+    const r = await archiverSemaine(data.semaineLundi);
     setBusy(null);
     if (!r.ok) { setFlash({ t: "bad", m: r.error || "Impossible." }); return; }
     setFlash({ t: "ok", m: `Semaine figée — ${r.nb} salarié(s), total ${money(r.total || 0)}.` });
@@ -121,7 +125,7 @@ export function DispensaireSalaires({ data }: { data: SalairesData }) {
     if (!cur || cur.prime === p) return;
     setLignes((prev) => prev.map((l) => (l.nom === nom ? { ...l, prime: p, salaire: l.salaireBase + p } : l)));
     setSaving(nom + "|prime");
-    const r = await setPrime(nom, p);
+    const r = await setPrime(nom, p, undefined, data.semaineLundi);
     setSaving(null);
     if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else setFlash({ t: "ok", m: `Prime de ${nom} : ${money(p)}.` });
     router.refresh();
@@ -135,7 +139,7 @@ export function DispensaireSalaires({ data }: { data: SalairesData }) {
     const base = salaireFinal(cur.montantHebdo, jr, 0);
     setLignes((prev) => prev.map((l) => (l.nom === nom ? { ...l, ajustJours: a, jours: jr, salaireBase: base, salaire: base + l.prime } : l)));
     setSaving(nom + "|jours");
-    const r = await setAjustJours(nom, a);
+    const r = await setAjustJours(nom, a, undefined, data.semaineLundi);
     setSaving(null);
     if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else setFlash({ t: "ok", m: `Jours de ${nom} ajustés (${a >= 0 ? "+" : ""}${a}).` });
     router.refresh();
@@ -151,7 +155,7 @@ export function DispensaireSalaires({ data }: { data: SalairesData }) {
     const delta = target - cur.heuresAutoMin;
     setLignes((prev) => prev.map((l) => (l.nom === nom ? { ...l, heuresMin: Math.max(0, target), ajustMin: delta } : l)));
     setSaving(nom + "|heures");
-    const r = await setAjustHeures(nom, delta);
+    const r = await setAjustHeures(nom, delta, undefined, data.semaineLundi);
     setSaving(null);
     if (!r.ok) setFlash({ t: "bad", m: r.error || "Impossible." }); else setFlash({ t: "ok", m: `Heures de ${nom} : ${fmtMin(Math.max(0, target))}.` });
     router.refresh();
@@ -167,8 +171,25 @@ export function DispensaireSalaires({ data }: { data: SalairesData }) {
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="flex items-center gap-2 text-[0.95rem] font-semibold"><Coins className="h-4 w-4 text-accent" /> Salaires</h3>
-        <span className="text-[0.74rem] text-faint">Semaine courante · dès {jjmm(data.semaineLundi)}</span>
+        <div className="flex items-center gap-1">
+          <button onClick={() => allerSemaine(data.semainePrec)} aria-label="Semaine précédente" title="Semaine précédente" className="grid h-7 w-7 place-items-center rounded-md border border-border text-muted transition hover:text-ink"><ChevronLeft className="h-4 w-4" /></button>
+          <span className="min-w-[10.5rem] text-center text-[0.76rem] font-medium">{data.semaineLundi ? <>Semaine du {jjmm(data.semaineLundi)} au {jjmm(dimancheDe(data.semaineLundi))}</> : "—"}{data.estCourante ? <span className="ml-1 text-[0.64rem] text-faint">· en cours</span> : null}</span>
+          <button onClick={() => data.semaineSuiv && allerSemaine(data.semaineSuiv)} disabled={!data.semaineSuiv} aria-label="Semaine suivante" title={data.semaineSuiv ? "Semaine suivante" : "Semaine en cours — pas de suivante"} className="grid h-7 w-7 place-items-center rounded-md border border-border text-muted transition hover:text-ink disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button>
+          {!data.estCourante ? <button onClick={() => allerSemaine(lundiCourant(new Date().toISOString()))} className="ml-1 rounded-md border border-border px-2 py-1 text-[0.72rem] font-semibold text-muted transition hover:text-ink" title="Aller à la semaine en cours">En cours</button> : null}
+        </div>
       </div>
+
+      {!data.estCourante ? (
+        <div className="flex items-start gap-2 rounded-[12px] border px-3 py-2 text-[0.78rem]" style={{ borderColor: "color-mix(in srgb,var(--warn) 45%,var(--border))", background: "color-mix(in srgb,var(--warn) 8%,transparent)", color: "var(--muted)" }}>
+          <CalendarClock className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: "var(--warn)" }} />
+          <span>Tu regardes une <b>semaine passée pas encore figée</b>{data.semainesEnAttente.length > 1 ? ` — ${data.semainesEnAttente.length} semaines en attente` : ""}. Ses jours et ses heures <b>restent ici et continuent de se cumuler</b> tant que tu ne l&apos;as pas figée. Fais les salaires, clique <b>« Figer la semaine »</b>, puis passe à la suivante.</span>
+        </div>
+      ) : data.semainesEnAttente.length ? (
+        <div className="flex items-start gap-2 rounded-[12px] border px-3 py-2 text-[0.78rem]" style={{ borderColor: "color-mix(in srgb,var(--warn) 45%,var(--border))", background: "color-mix(in srgb,var(--warn) 8%,transparent)", color: "var(--muted)" }}>
+          <CalendarClock className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: "var(--warn)" }} />
+          <span><b>{data.semainesEnAttente.length} semaine{data.semainesEnAttente.length > 1 ? "s" : ""} précédente{data.semainesEnAttente.length > 1 ? "s" : ""}</b> pas encore figée{data.semainesEnAttente.length > 1 ? "s" : ""} — clique ◀ pour y revenir et faire les salaires avant de figer.</span>
+        </div>
+      ) : null}
 
       <div className="flex items-start gap-2 rounded-[12px] border border-border bg-surface-2 px-3 py-2 text-[0.78rem] text-muted">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-faint" />
@@ -270,7 +291,7 @@ export function DispensaireSalaires({ data }: { data: SalairesData }) {
             </table>
           </div>
         )}
-        <p className="mt-2 text-[0.7rem] text-faint">Les jours et heures proviennent du <b>pointage</b> de la semaine courante ; corrige les jours (<b>Ajust.</b>), les <b>heures</b> (saisis le total corrigé : 72, 72:30 ou 72,5) ou ajoute une <b>prime</b> au besoin. Les heures sont indicatives — elles n&apos;influent pas sur le salaire (calculé sur les jours). Renseigne le barème d&apos;une fonction ci-dessus pour que le salaire se calcule.</p>
+        <p className="mt-2 text-[0.7rem] text-faint">Les jours et heures proviennent du <b>pointage</b> de la semaine affichée ; corrige les jours (<b>Ajust.</b>), les <b>heures</b> (saisis le total corrigé : 72, 72:30 ou 72,5) ou ajoute une <b>prime</b> au besoin. Les heures sont indicatives — elles n&apos;influent pas sur le salaire (calculé sur les jours). Renseigne le barème d&apos;une fonction ci-dessus pour que le salaire se calcule.</p>
       </section>
 
       {/* Archives de paie (semaines figées) */}

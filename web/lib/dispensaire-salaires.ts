@@ -2,7 +2,7 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { peutAdministrer } from "@/lib/dispensaire-roles";
-import { ymdParis, lundiCourant } from "@/lib/dispensaire-dates";
+import { ymdParis, lundiCourant, lundiDecale, dimancheDe } from "@/lib/dispensaire-dates";
 import { joursRetenus as calcJoursRetenus, salaireFinal } from "@/lib/dispensaire-salaires-const";
 import { estSalarieActif } from "@/lib/dispensaire-personnel-const";
 
@@ -22,7 +22,11 @@ export type SalaireFonction = { fonction: string; montantHebdo: number; utilisee
 export type LigneSalaire = { nom: string; fonction: string | null; montantHebdo: number; joursAuto: number; ajustJours: number; jours: number; heuresAutoMin: number; ajustMin: number; heuresMin: number; prime: number; salaireBase: number; salaire: number };
 export type LignePaieArchive = { nom: string; fonction: string | null; joursAuto: number; ajustJours: number; jours: number; heuresMin: number; prime: number; salaireBase: number; salaire: number };
 export type ArchivePaie = { semaineLundi: string; at: string; par: string | null; total: number; lignes: LignePaieArchive[] };
-export type SalairesData = { pret: boolean; autorise: boolean; semaineLundi: string; fonctions: SalaireFonction[]; lignes: LigneSalaire[]; archives: ArchivePaie[]; semaineArchivee: boolean };
+export type SalairesData = { pret: boolean; autorise: boolean; semaineLundi: string; fonctions: SalaireFonction[]; lignes: LigneSalaire[]; archives: ArchivePaie[]; semaineArchivee: boolean;
+  // Navigation & « semaine active » : la semaine affichée n'est plus forcément la
+  // semaine civile courante — c'est la plus ancienne semaine NON figée avec activité
+  // (elle reste affichée tant qu'on ne l'a pas figée → plus de « disparition » le lundi).
+  estCourante: boolean; semainePrec: string; semaineSuiv: string | null; semainesEnAttente: string[] };
 
 // Archives de paie (semaines figées), les plus récentes d'abord. Dégradation
 // propre si la table n'existe pas encore.
@@ -49,14 +53,56 @@ export async function getArchivesPaie(): Promise<ArchivePaie[]> {
 
 const normNom = (v: unknown) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ");
 
-export async function getSalaires(): Promise<SalairesData> {
-  const vide: SalairesData = { pret: false, autorise: false, semaineLundi: "", fonctions: [], lignes: [], archives: [], semaineArchivee: false };
+type Admin = NonNullable<ReturnType<typeof createAdminClient>>;
+
+// Contexte de paie : quelle semaine afficher par DÉFAUT et lesquelles restent « en
+// attente de figeage ». Règle demandée par la Direction : tant qu'une semaine n'est
+// pas figée manuellement, ses jours/heures ne doivent PAS disparaître au passage à
+// la semaine civile suivante. On renvoie donc comme semaine « active » la PLUS
+// ANCIENNE semaine (fenêtre de 6 semaines) qui a de l'activité pointée ET n'est pas
+// encore figée ; à défaut, la semaine courante.
+const FENETRE_SEMAINES = 6;
+export async function contextePaie(admin: Admin): Promise<{ active: string; enAttente: string[]; courante: string }> {
+  const courante = lundiCourant(new Date().toISOString());
+  // Semaines déjà figées (archivées).
+  const figes = new Set<string>();
+  try {
+    const { data } = await admin.from("DispensairePaie").select("semaineLundi");
+    for (const r of (data || []) as Record<string, unknown>[]) figes.add(String(r.semaineLundi));
+  } catch { /* table absente → aucune semaine figée */ }
+  // Semaines (dans la fenêtre) ayant au moins un service validé & clôturé.
+  const avecActivite = new Set<string>();
+  try {
+    const debut = lundiDecale(courante, -FENETRE_SEMAINES);
+    const bMin = new Date(debut + "T00:00:00Z"); bMin.setUTCDate(bMin.getUTCDate() - 1);
+    const { data } = await admin.from("DispensairePointage").select("debut,fin,valide").not("fin", "is", null).gte("debut", bMin.toISOString()).limit(4000);
+    for (const r of (data || []) as Record<string, unknown>[]) {
+      if (r.valide === false) continue;
+      avecActivite.add(lundiCourant(String(r.debut)));
+    }
+  } catch { /* pointage absent → aucune activité */ }
+  // De la plus ancienne (−6) à la précédente (−1) : semaines passées non figées avec activité.
+  const enAttente: string[] = [];
+  for (let i = FENETRE_SEMAINES; i >= 1; i--) {
+    const wk = lundiDecale(courante, -i);
+    if (avecActivite.has(wk) && !figes.has(wk)) enAttente.push(wk);
+  }
+  const active = enAttente.length ? enAttente[0] : courante;
+  return { active, enAttente, courante };
+}
+
+export async function getSalaires(semaineCible?: string): Promise<SalairesData> {
+  const navVide = { estCourante: true, semainePrec: "", semaineSuiv: null, semainesEnAttente: [] as string[] };
+  const vide: SalairesData = { pret: false, autorise: false, semaineLundi: "", fonctions: [], lignes: [], archives: [], semaineArchivee: false, ...navVide };
   const autorise = await peutAdministrer();
-  if (!autorise) return { pret: true, autorise: false, semaineLundi: "", fonctions: [], lignes: [], archives: [], semaineArchivee: false };
+  if (!autorise) return { pret: true, autorise: false, semaineLundi: "", fonctions: [], lignes: [], archives: [], semaineArchivee: false, ...navVide };
   const admin = createAdminClient();
   if (!admin) return vide;
 
-  const monday = lundiCourant(new Date().toISOString());
+  // Semaine affichée : celle demandée (navigation) si valide, sinon la « semaine
+  // active » (plus ancienne semaine non figée avec activité, ou la courante).
+  const ctx = await contextePaie(admin);
+  const monday = (semaineCible && /^\d{4}-\d{2}-\d{2}$/.test(semaineCible)) ? semaineCible : ctx.active;
 
   // Salariés actifs (fonction = grade, texte libre).
   const { data: sal } = await admin.from("DispensaireSalarie").select("nom,grade,statut").order("nom", { ascending: true });
@@ -71,16 +117,18 @@ export async function getSalaires(): Promise<SalairesData> {
     for (const r of (b || []) as Record<string, unknown>[]) bareme.set(String(r.fonction || "").trim(), Number(r.montantHebdo) || 0);
   } catch { /* table absente → barème vide (tout à 0) */ }
 
-  // Jours + heures de la SEMAINE COURANTE, par salarié (rapproché par nom).
+  // Jours + heures de la SEMAINE AFFICHÉE (bornée lundi→dimanche), par salarié.
+  const dimanche = dimancheDe(monday);
   const jm = new Map<string, { jours: number; heuresMin: number }>();
   try {
     const bMin = new Date(monday + "T00:00:00Z"); bMin.setUTCDate(bMin.getUTCDate() - 1);
-    const { data: clos } = await admin.from("DispensairePointage").select("nom,debut,dureeMin,fin,valide").not("fin", "is", null).gte("debut", bMin.toISOString()).limit(2000);
+    const bMax = new Date(dimanche + "T00:00:00Z"); bMax.setUTCDate(bMax.getUTCDate() + 2);
+    const { data: clos } = await admin.from("DispensairePointage").select("nom,debut,dureeMin,fin,valide").not("fin", "is", null).gte("debut", bMin.toISOString()).lte("debut", bMax.toISOString()).limit(2000);
     const joursSet = new Set<string>();
     for (const r of (clos || []) as Record<string, unknown>[]) {
       if (r.valide === false) continue;           // service invalidé → ne compte pas pour la paie
       const ymd = ymdParis(String(r.debut));
-      if (ymd < monday) continue;                 // seulement la semaine courante
+      if (ymd < monday || ymd > dimanche) continue; // strictement la semaine affichée
       const k = normNom(r.nom);
       const e = jm.get(k) || { jours: 0, heuresMin: 0 };
       e.heuresMin += Number(r.dureeMin) || 0;
@@ -135,5 +183,12 @@ export async function getSalaires(): Promise<SalairesData> {
   const archives = await getArchivesPaie();
   const semaineArchivee = archives.some((a) => a.semaineLundi === monday);
 
-  return { pret: true, autorise: true, semaineLundi: monday, fonctions, lignes, archives, semaineArchivee };
+  // Navigation : on ne va jamais dans le futur (semaine suivante nulle si on est
+  // déjà sur la semaine courante). `semainesEnAttente` alimente l'indicateur
+  // « semaines à figer ».
+  const estCourante = monday === ctx.courante;
+  const semainePrec = lundiDecale(monday, -1);
+  const semaineSuiv = monday < ctx.courante ? lundiDecale(monday, 1) : null;
+
+  return { pret: true, autorise: true, semaineLundi: monday, fonctions, lignes, archives, semaineArchivee, estCourante, semainePrec, semaineSuiv, semainesEnAttente: ctx.enAttente };
 }
