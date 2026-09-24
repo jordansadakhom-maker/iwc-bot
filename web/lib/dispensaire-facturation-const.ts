@@ -137,6 +137,9 @@ export const FDO_STATUTS = [
 export const fdoStatut = (k: string) => FDO_STATUTS.find((s) => s.key === k) || FDO_STATUTS[0];
 export type SoinFDO = { id: string; bureau: string; agent: string | null; soin: string | null; montant: number; statut: string; note: string | null; par: string | null; createdAt: string };
 export type BureauFDO = { bureau: string; nb: number; total: number };
+// Policier enregistré (carnet FDO) : sélectionnable dans un menu déroulant lors
+// de la saisie d'un soin, au lieu de retaper le nom. `bureau` = pré-remplissage.
+export type PolicierFDO = { id: string; nom: string; bureau: string | null };
 
 // Bureaux / administrations bénéficiaires par défaut. La liste est EXTENSIBLE
 // sans toucher au code : tout bureau déjà saisi une fois s'ajoute automatiquement
@@ -163,7 +166,7 @@ export type RapportFDO = { cle: string; statut: string; envoyeLe: string | null;
 
 export const DISPENSAIRE_NOM = "Dispensaire de Saint-Denis";
 
-export type FDOData = { connecte: boolean; pret: boolean; canEdit: boolean; soins: SoinFDO[]; bureaux: BureauFDO[]; rapports: Record<string, RapportFDO> };
+export type FDOData = { connecte: boolean; pret: boolean; canEdit: boolean; soins: SoinFDO[]; bureaux: BureauFDO[]; rapports: Record<string, RapportFDO>; policiers: PolicierFDO[] };
 
 // ── Notes de frais ──────────────────────────────────────────────────────────
 export const FRAIS_STATUTS = [

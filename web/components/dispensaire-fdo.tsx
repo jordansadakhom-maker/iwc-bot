@@ -10,11 +10,11 @@ import {
 import { VideRegistre, Cartouche, SceauCire, Fleuron } from "@/components/dispensaire-ui";
 import {
   FDO_PRIX, money, norm, BUREAUX_FDO_DEFAUT, FDO_RAPPORT_STATUTS, fdoRapportStatut,
-  DISPENSAIRE_NOM, type FDOData, type SoinFDO, type RapportFDO,
+  DISPENSAIRE_NOM, type FDOData, type SoinFDO, type RapportFDO, type PolicierFDO,
 } from "@/lib/dispensaire-facturation-const";
 import { grouperParSemaine, statsFDO, cleSemaineDate, type SemaineFDO } from "@/lib/dispensaire-fdo-semaines";
 import { Flash, inputCls } from "@/components/edit-ui";
-import { creerSoin, supprimerSoin, majSoin, majStatutSemaine, archiverRapportSemaine } from "@/app/dispensaire/fdo/actions";
+import { creerSoin, supprimerSoin, majSoin, majStatutSemaine, archiverRapportSemaine, creerPolicier, supprimerPolicier } from "@/app/dispensaire/fdo/actions";
 
 type FlashMsg = { t: "ok" | "bad"; m: string } | null;
 const P = { timeZone: "Europe/Paris" } as const;
@@ -26,12 +26,50 @@ export function DispensaireFDO({ data }: { data: FDOData }) {
   const router = useRouter();
   const [soins, setSoins] = useState<SoinFDO[]>(data.soins);
   const [rapports, setRapports] = useState<Record<string, RapportFDO>>(data.rapports);
-  useEffect(() => { setSoins(data.soins); setRapports(data.rapports); }, [data]);
+  const [policiers, setPoliciers] = useState<PolicierFDO[]>(data.policiers);
+  useEffect(() => { setSoins(data.soins); setRapports(data.rapports); setPoliciers(data.policiers); }, [data]);
 
   const [flash, setFlash] = useState<FlashMsg>(null);
   const [busy, setBusy] = useState(false);
   const [v, setV] = useState({ patient: "", bureau: "", medecin: "", date: "", soin: "", note: "" });
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setV((p) => ({ ...p, [k]: e.target.value }));
+
+  // Carnet des policiers : menu déroulant (trié) + gestion + saisie libre en repli.
+  const [agentManuel, setAgentManuel] = useState(false);
+  const [gestion, setGestion] = useState(false);
+  const [np, setNp] = useState({ nom: "", bureau: "" });
+  const [busyPol, setBusyPol] = useState(false);
+  const policiersTries = useMemo(() => [...policiers].sort((a, b) => a.nom.localeCompare(b.nom, "fr")), [policiers]);
+  const estDansListe = (nom: string) => policiers.some((p) => p.nom === nom);
+
+  // Sélection d'un policier dans le menu → renseigne le nom, et pré-remplit le
+  // bureau s'il est connu et encore vide. « __manuel__ » bascule en saisie libre.
+  function choisirPolicier(e: React.ChangeEvent<HTMLSelectElement>) {
+    const val = e.target.value;
+    if (val === "__manuel__") { setAgentManuel(true); setV((p) => ({ ...p, patient: "" })); return; }
+    const pol = policiers.find((x) => x.nom === val);
+    setV((p) => ({ ...p, patient: val, bureau: (!p.bureau.trim() && pol?.bureau) ? pol.bureau : p.bureau }));
+  }
+
+  async function ajouterPolicier() {
+    const nom = np.nom.trim();
+    if (!nom) { setFlash({ t: "bad", m: "Indique le nom du policier." }); return; }
+    if (policiers.some((p) => norm(p.nom) === norm(nom))) { setFlash({ t: "bad", m: "Ce policier est déjà dans la liste." }); return; }
+    setBusyPol(true);
+    const r = await creerPolicier({ nom, bureau: np.bureau });
+    setBusyPol(false);
+    if (!r.ok) { setFlash({ t: "bad", m: r.error || "Impossible." }); return; }
+    setPoliciers((p) => [...p, { id: r.id || "tmp-" + Math.random().toString(36).slice(2, 7), nom, bureau: np.bureau.trim() || null }]);
+    setNp({ nom: "", bureau: "" });
+    setFlash({ t: "ok", m: `Policier « ${nom} » ajouté à la liste.` });
+    router.refresh();
+  }
+  async function retirerPolicier(id: string, nom: string) {
+    setPoliciers((p) => p.filter((x) => x.id !== id));
+    const r = await supprimerPolicier(id);
+    if (!r.ok) { setFlash({ t: "bad", m: r.error || "Impossible." }); router.refresh(); }
+    else { setFlash({ t: "ok", m: `Policier « ${nom} » retiré.` }); router.refresh(); }
+  }
 
   const [ouvert, setOuvert] = useState<string | null>(null);
   const [filtres, setFiltres] = useState({ nom: "", bureau: "", medecin: "", date: "" });
@@ -122,7 +160,22 @@ export function DispensaireFDO({ data }: { data: FDOData }) {
       <section className="rounded-[14px] border border-border bg-surface p-4">
         <h3 className="mb-3 flex items-center gap-2 text-[0.9rem] font-semibold"><ShieldCheck className="h-4 w-4 text-accent" /> Enregistrer un soin aux forces de l&apos;ordre <span className="ml-auto rounded-md border border-border bg-surface-2 px-2 py-0.5 font-num text-[0.72rem] text-muted">{money(FDO_PRIX)} · fixe · remboursé par l&apos;État</span></h3>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          <label className="flex flex-col gap-1"><span className={labelCls}>Nom du patient (agent) *</span><input className={inputCls} value={v.patient} onChange={set("patient")} placeholder="Nom de l'agent soigné" /></label>
+          <label className="flex flex-col gap-1">
+            <span className={labelCls}>Policier soigné (agent) *</span>
+            {policiers.length > 0 && !agentManuel ? (
+              <select className={inputCls} value={estDansListe(v.patient) ? v.patient : ""} onChange={choisirPolicier} aria-label="Choisir le policier soigné">
+                <option value="">— Choisir un policier —</option>
+                {policiersTries.map((p) => <option key={p.id} value={p.nom}>{p.nom}{p.bureau ? ` · ${p.bureau}` : ""}</option>)}
+                <option value="__manuel__">✎ Autre / saisir à la main…</option>
+              </select>
+            ) : (
+              <input className={inputCls} value={v.patient} onChange={set("patient")} placeholder="Nom de l'agent soigné" />
+            )}
+            <span className="flex flex-wrap gap-x-3 gap-y-0.5">
+              <button type="button" onClick={() => setGestion((g) => !g)} className="text-[0.66rem] text-accent hover:underline">{policiers.length ? (gestion ? "Masquer la gestion" : "Gérer les policiers") : "＋ Enregistrer des policiers"}</button>
+              {policiers.length > 0 && agentManuel ? <button type="button" onClick={() => { setAgentManuel(false); setV((p) => ({ ...p, patient: "" })); }} className="text-[0.66rem] text-faint hover:underline">↩ Menu déroulant</button> : null}
+            </span>
+          </label>
           <label className="flex flex-col gap-1"><span className={labelCls}>Bureau bénéficiaire *</span><input className={inputCls} value={v.bureau} onChange={set("bureau")} placeholder="Bureau des Marshals…" list="fdo-bureaux" /><datalist id="fdo-bureaux">{bureauxSugg.map((b) => <option key={b} value={b} />)}</datalist></label>
           <label className="flex flex-col gap-1"><span className={labelCls}>Médecin</span><input className={inputCls} value={v.medecin} onChange={set("medecin")} placeholder="Toi par défaut" list="fdo-medecins" /><datalist id="fdo-medecins">{medecinsConnus.map((m) => <option key={m} value={m} />)}</datalist></label>
           <label className="flex flex-col gap-1"><span className={labelCls}>Date du soin</span><input type="date" className={inputCls} value={v.date} onChange={set("date")} /></label>
@@ -133,6 +186,31 @@ export function DispensaireFDO({ data }: { data: FDOData }) {
           <button onClick={ajouter} disabled={busy} className="inline-flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-[0.8rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Enregistrer le soin</button>
         </div>
       </section>
+
+      {/* ── Carnet des policiers (menu déroulant de saisie) ── */}
+      {gestion ? (
+        <section className="rounded-[14px] border border-border bg-surface p-4">
+          <h3 className="mb-1 flex items-center gap-2 text-[0.9rem] font-semibold"><ListChecks className="h-4 w-4 text-accent" /> Policiers enregistrés <span className="font-num text-[0.78rem] text-faint">({policiers.length})</span></h3>
+          <p className="mb-3 text-[0.72rem] text-faint">Enregistre les policiers une fois : ils apparaissent ensuite dans le menu déroulant « Policier soigné », triés par ordre alphabétique. Le bureau (facultatif) se pré-remplit à la sélection.</p>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex flex-1 flex-col gap-1" style={{ minWidth: 160 }}><span className={labelCls}>Nom du policier *</span><input className={inputCls} value={np.nom} onChange={(e) => setNp((p) => ({ ...p, nom: e.target.value }))} onKeyDown={(e) => { if (e.key === "Enter") ajouterPolicier(); }} placeholder="Nom & prénom" /></label>
+            <label className="flex flex-1 flex-col gap-1" style={{ minWidth: 160 }}><span className={labelCls}>Bureau (facultatif)</span><input className={inputCls} value={np.bureau} onChange={(e) => setNp((p) => ({ ...p, bureau: e.target.value }))} onKeyDown={(e) => { if (e.key === "Enter") ajouterPolicier(); }} placeholder="Bureau des Marshals…" list="fdo-bureaux" /></label>
+            <button onClick={ajouterPolicier} disabled={busyPol} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[0.8rem] font-semibold text-black/85 disabled:opacity-60" style={{ background: "var(--accent)" }}>{busyPol ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Ajouter</button>
+          </div>
+          {policiersTries.length === 0 ? (
+            <p className="mt-3 text-center text-[0.8rem] italic text-faint">Aucun policier enregistré pour le moment.</p>
+          ) : (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {policiersTries.map((p) => (
+                <span key={p.id} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 py-1 pl-3 pr-1.5 text-[0.78rem]">
+                  <span className="font-semibold">{p.nom}</span>{p.bureau ? <span className="text-faint">· {p.bureau}</span> : null}
+                  <button onClick={() => retirerPolicier(p.id, p.nom)} aria-label={`Retirer ${p.nom}`} title="Retirer de la liste" className="grid h-5 w-5 place-items-center rounded-full text-faint transition hover:text-oxblood"><X className="h-3.5 w-3.5" /></button>
+                </span>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
 
       {/* ── Fiche de déclaration cochable (sélection par bureau / date) ── */}
       {soins.length > 0 ? <DeclarationPanel soins={soins} onGenerer={(s, label) => setDecl({ soins: s, label })} /> : null}

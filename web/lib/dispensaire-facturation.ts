@@ -7,7 +7,7 @@ import {
   estBandage, estOuverte, statutsDe, statutRepresentatif,
   type Vente, type PatientSemaine, type VentesData,
   type Facture, type FacturesData,
-  type SoinFDO, type BureauFDO, type FDOData, type RapportFDO,
+  type SoinFDO, type BureauFDO, type FDOData, type RapportFDO, type PolicierFDO,
   type Frais, type FraisData,
 } from "@/lib/dispensaire-facturation-const";
 
@@ -71,7 +71,7 @@ export async function getFactures(): Promise<FacturesData> {
 
 // ── 3) Soins FDO ────────────────────────────────────────────────────────────
 export async function getFDO(): Promise<FDOData> {
-  const vide: FDOData = { connecte: false, pret: false, canEdit: false, soins: [], bureaux: [], rapports: {} };
+  const vide: FDOData = { connecte: false, pret: false, canEdit: false, soins: [], bureaux: [], rapports: {}, policiers: [] };
   const admin = createAdminClient();
   if (!admin) return vide;
   const { data, error } = await admin.from("DispensaireSoinFDO").select("*").order("createdAt", { ascending: false }).limit(1000);
@@ -92,7 +92,18 @@ export async function getFDO(): Promise<FDOData> {
     const cle = String(r.id || "");
     if (cle) rapports[cle] = { cle, statut: String(r.statut || "en_attente"), envoyeLe: s(r.envoyeLe), genereLe: s(r.genereLe), note: s(r.note), par: s(r.par) };
   }
-  return { connecte: true, pret: true, canEdit: true, soins, bureaux, rapports };
+  // Carnet des policiers (menu déroulant à la saisie) — table optionnelle : si
+  // elle n'existe pas encore, on n'échoue pas (le champ reste en saisie libre).
+  let policiers: PolicierFDO[] = [];
+  try {
+    const { data: pol } = await admin.from("DispensairePolicier").select("id,nom,bureau,actif").order("nom", { ascending: true }).limit(2000);
+    policiers = ((pol || []) as Record<string, unknown>[])
+      .filter((r) => r.actif == null || r.actif === true)
+      .map((r) => ({ id: String(r.id), nom: String(r.nom || "").trim(), bureau: s(r.bureau) }))
+      .filter((p) => p.nom);
+  } catch { /* table absente → saisie libre uniquement */ }
+
+  return { connecte: true, pret: true, canEdit: true, soins, bureaux, rapports, policiers };
 }
 
 // ── 4) Notes de frais ───────────────────────────────────────────────────────

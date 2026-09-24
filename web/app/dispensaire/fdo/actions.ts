@@ -121,3 +121,54 @@ export async function archiverRapportSemaine(cle: string): Promise<FdoResult> {
   if (error) return { ok: false, error: "Archivage impossible (table DispensaireFdoRapport à créer ?)." };
   return { ok: true };
 }
+
+// ── Carnet des policiers (menu déroulant de saisie des soins) ─────────────────
+// Enregistrés à la main une fois, puis sélectionnables par nom. Table site-native
+// DispensairePolicier. Mêmes gardes fail-closed que les soins (estAutorise).
+function newPolicierId() { return `dpol-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
+
+export async function creerPolicier(data: Record<string, unknown>): Promise<FdoResult> {
+  if (!(await estAutorise())) return { ok: false, error: REFUS };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  const nom = s(data.nom, 120);
+  if (!nom) return { ok: false, error: "Indique le nom du policier." };
+  const id = newPolicierId();
+  const now = new Date().toISOString();
+  const { error } = await admin.from("DispensairePolicier").insert({
+    id, nom, bureau: s(data.bureau, 200), matricule: s(data.matricule, 60), note: s(data.note, 500),
+    actif: true, updatedAt: now, updatedBy: await qui(),
+  });
+  if (error) return { ok: false, error: "Enregistrement impossible (lance dispensaire-policiers.sql ?)." };
+  await emettreEvenementDispensaire({ aggregate: "fdo", type: "fdo.policier_cree", cibleId: id, cibleLibelle: nom, apres: { nom, bureau: s(data.bureau, 200) } });
+  return { ok: true, id };
+}
+
+export async function majPolicier(id: string, patch: Record<string, unknown>): Promise<FdoResult> {
+  if (!(await estAutorise())) return { ok: false, error: REFUS };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  if (!id) return { ok: false, error: "Policier introuvable." };
+  const row: Record<string, unknown> = {};
+  if ("nom" in patch) { const n = s(patch.nom, 120); if (!n) return { ok: false, error: "Le nom ne peut pas être vide." }; row.nom = n; }
+  if ("bureau" in patch) row.bureau = s(patch.bureau, 200);
+  if ("matricule" in patch) row.matricule = s(patch.matricule, 60);
+  if ("note" in patch) row.note = s(patch.note, 500);
+  if ("actif" in patch) row.actif = !!patch.actif;
+  if (!Object.keys(row).length) return { ok: true };
+  const { error } = await admin.from("DispensairePolicier").update({ ...row, updatedAt: new Date().toISOString(), updatedBy: await qui() }).eq("id", id);
+  if (error) return { ok: false, error: "Enregistrement impossible." };
+  await emettreEvenementDispensaire({ aggregate: "fdo", type: "fdo.policier_maj", cibleId: id, cibleLibelle: String(row.nom ?? ""), apres: row });
+  return { ok: true };
+}
+
+export async function supprimerPolicier(id: string): Promise<FdoResult> {
+  if (!(await estAutorise())) return { ok: false, error: REFUS };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false, error: "Service momentanément indisponible." };
+  if (!id) return { ok: false, error: "Policier introuvable." };
+  const { error } = await admin.from("DispensairePolicier").delete().eq("id", id);
+  if (error) return { ok: false, error: "Suppression impossible." };
+  await emettreEvenementDispensaire({ aggregate: "fdo", type: "fdo.policier_supprime", cibleId: id });
+  return { ok: true };
+}
