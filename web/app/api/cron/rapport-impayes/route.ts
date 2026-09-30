@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getRapportConfig, enregistrerRapport } from "@/lib/dispensaire-rapport-impayes";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // marge pour le traitement (compatible forfait gratuit Vercel)
 
 // Génération planifiée du rapport d'impayés. Déclenchée par Vercel Cron.
 // PROTÉGÉE : exige l'en-tête « Authorization: Bearer $CRON_SECRET » (Vercel

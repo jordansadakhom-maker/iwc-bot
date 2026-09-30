@@ -79,7 +79,12 @@ export async function envoyerCommande(
   }
   // Retour « temps réel » : on attend le verdict du bot (appliqué / échec).
   if (opts?.attendre) {
-    const res = await attendreResultat(admin, id, opts.timeoutMs);
+    // Attente PLAFONNÉE sous la limite des fonctions du forfait gratuit (~10 s) :
+    // si le bot ne répond pas à temps (lent, ou éteint), on ne bloque JAMAIS la
+    // requête — la commande reste en file et sera appliquée dès son retour. Pas
+    // d'erreur affichée : simple « en cours de traitement ».
+    const timeout = Math.min(Math.max(1000, opts.timeoutMs ?? 7000), 7000);
+    const res = await attendreResultat(admin, id, timeout);
     if (res) return res;
     return { ok: true, enAttente: true, message: "Envoi en cours de traitement…" };
   }

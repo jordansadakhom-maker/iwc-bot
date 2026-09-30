@@ -4,6 +4,7 @@ import { PageHeader, SectionTitle } from "@/components/ui";
 import { getOperations } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // lecture IA d'images (peut dépasser 10 s) — compatible forfait gratuit
 export const metadata = { title: "Documents — Iron Wolf Company" };
 
 export default async function Page() {
