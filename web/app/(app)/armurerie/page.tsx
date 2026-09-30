@@ -6,6 +6,7 @@ import { ArmurerieComptoir } from "@/components/armurerie-comptoir";
 
 // Relance de déploiement (mise en ligne « fabricable » Produits/Caisse).
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // lecture IA (carte d'identité, coffre) — compatible forfait gratuit
 
 export default async function ArmureriePage() {
   // Garde CÔTÉ SERVEUR : seuls les employés de l'Armurerie (roster, rôle « armur… »

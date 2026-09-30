@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { reapprovisionner } from "@/lib/armurerie-reappro";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // marge pour le traitement (compatible forfait gratuit Vercel)
 
 // Réapprovisionnement quotidien RÉEL de l'armurerie, déclenché par Vercel Cron.
 // Remonte chaque produit vendable sous sa cible (jamais de réduction). Programmé
