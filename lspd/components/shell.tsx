@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, Users, Radio, ScrollText, Settings, Shield, LogOut } from "lucide-react";
+import { LayoutDashboard, Users, Car, Radio, ScrollText, Settings, Shield, LogOut } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 type Item = { href: string; label: string; icon: typeof LayoutDashboard; pret: boolean };
 const ITEMS: Item[] = [
   { href: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard, pret: true },
   { href: "/agents", label: "Agents", icon: Users, pret: true },
+  { href: "/patrouilles", label: "Patrouilles", icon: Car, pret: true },
   { href: "/dispatch", label: "Dispatch", icon: Radio, pret: false },
   { href: "/audit", label: "Journal d'audit", icon: ScrollText, pret: false },
   { href: "/admin", label: "Administration", icon: Settings, pret: false },

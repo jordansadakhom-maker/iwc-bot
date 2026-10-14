@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 const ACCES: { href: string; perm: Perm }[] = [
   { href: "/dashboard", perm: "dashboard.voir" },
   { href: "/agents", perm: "agents.voir" },
+  { href: "/patrouilles", perm: "interventions.voir" },
   { href: "/dispatch", perm: "interventions.voir" },
   { href: "/audit", perm: "audit.voir" },
   { href: "/admin", perm: "admin.config" },
