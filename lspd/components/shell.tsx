@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 type Item = { href: string; label: string; icon: typeof LayoutDashboard; pret: boolean };
 const ITEMS: Item[] = [
   { href: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard, pret: true },
-  { href: "/agents", label: "Agents", icon: Users, pret: false },
+  { href: "/agents", label: "Agents", icon: Users, pret: true },
   { href: "/dispatch", label: "Dispatch", icon: Radio, pret: false },
   { href: "/audit", label: "Journal d'audit", icon: ScrollText, pret: false },
   { href: "/admin", label: "Administration", icon: Settings, pret: false },

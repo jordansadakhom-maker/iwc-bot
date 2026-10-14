@@ -3,6 +3,8 @@ import { requirePerm } from "@/lib/rbac";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PageHeader, StatTile, Card, Banner, EmptyState, Pill } from "@/components/ui";
 import { dateHeureFR } from "@/lib/dates";
+import { getCanaux, getMonService, indicatifLibre } from "@/lib/service";
+import { MonService } from "@/components/mon-service";
 
 export const dynamic = "force-dynamic";
 
@@ -31,12 +33,14 @@ export default async function DashboardPage() {
   const admin = createAdminClient();
   const connectee = !!admin;
 
-  let agents = 0, ouvertes = 0, urgentes = 0, unites = 0;
+  let agents = 0, enService = 0, ouvertes = 0, urgentes = 0, unites = 0;
   let activite: { id: string; type: string; cible: string | null; par: string | null; at: string }[] = [];
 
   if (admin) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     agents = await compte(admin, "LspdAgent", (q: any) => q.eq("actif", true));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    enService = await compte(admin, "LspdService", (q: any) => q.is("fin", null));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ouvertes = await compte(admin, "LspdIntervention", (q: any) => q.in("statut", OUVERTES));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -49,10 +53,23 @@ export default async function DashboardPage() {
     } catch { /* table absente */ }
   }
 
+  // Prise de service « en quelques clics » : service ouvert de l'agent, canaux
+  // radio, et indicatif libre pré-proposé.
+  const monService = await getMonService(a.agentId);
+  const canaux = await getCanaux();
+  const indicatifPropose = monService ? null : await indicatifLibre();
+
   return (
     <div className="flex flex-col gap-4">
       <PageHeader titre={`Bonjour, ${a.nom.split(" ")[0]}`} sous={`Centre opérationnel du LSPD${a.gradeNom ? ` · ${a.gradeNom}` : ""}`}
         action={<Pill tone="navy">{a.source === "amorcage" ? "Amorçage" : "En service"}</Pill>} />
+
+      <MonService
+        enService={monService ? { id: monService.id, indicatif: monService.indicatif, canalNom: monService.canalNom, statutRadio: monService.statutRadio, debut: monService.debut } : null}
+        canaux={canaux}
+        agentId={a.agentId}
+        indicatifPropose={indicatifPropose}
+      />
 
       {!connectee ? (
         <Banner tone="warn">
@@ -62,7 +79,7 @@ export default async function DashboardPage() {
       ) : null}
 
       <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
-        <StatTile icon={Users} label="Agents actifs" value={agents} sous="effectif en service" tone="navy" />
+        <StatTile icon={Users} label="Agents actifs" value={agents} sous={`${enService} actuellement en service`} tone="navy" />
         <StatTile icon={Radio} label="Interventions ouvertes" value={ouvertes} sous="en cours de traitement" tone="good" />
         <StatTile icon={AlertTriangle} label="Urgentes" value={urgentes} sous="priorité maximale" tone="crit" />
         <StatTile icon={Building2} label="Unités actives" value={unites} sous="divisions configurées" tone="gold" />
