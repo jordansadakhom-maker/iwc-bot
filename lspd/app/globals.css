@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   Design system LSPD — « command center » institutionnel.
+   Dark = identité principale (centre opérationnel), light géré.
+   Bleu nuit + acier + accent laiton (badge). Couleurs
+   fonctionnelles séparées de l'accent (good/warn/crit).
+   ============================================================ */
+:root {
+  --bg:#0c121c; --bg-2:#080d15; --surface:#141e2b; --surface-2:#0f1a27;
+  --border:#223142; --border-2:#2f4459;
+  --ink:#dde5ef; --muted:#92a0b2; --faint:#6b7a8c;
+  --navy:#4e88c4; --navy-hi:#79a9db; --gold:#d6a84d; --steel:#6f9fc4;
+  --good:#53b17d; --warn:#d7a34b; --crit:#db7a6f;
+  --font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --font-display:"Oswald","Arial Narrow",system-ui,sans-serif;
+  --font-mono:"IBM Plex Mono","SF Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg:#e8ecf1; --bg-2:#dfe5ec; --surface:#f8fafc; --surface-2:#eef2f7;
+    --border:#ccd4df; --border-2:#b6c1d0; --ink:#111823; --muted:#505d6d; --faint:#788394;
+    --navy:#214a74; --navy-hi:#2d6299; --gold:#8f6710; --steel:#3f6f96;
+    --good:#2e7d4f; --warn:#a9781a; --crit:#9d2b2b;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg:#e8ecf1; --bg-2:#dfe5ec; --surface:#f8fafc; --surface-2:#eef2f7;
+  --border:#ccd4df; --border-2:#b6c1d0; --ink:#111823; --muted:#505d6d; --faint:#788394;
+  --navy:#214a74; --navy-hi:#2d6299; --gold:#8f6710; --steel:#3f6f96;
+  --good:#2e7d4f; --warn:#a9781a; --crit:#9d2b2b;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+html, body { padding: 0; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "tnum" 0;
+}
+a { color: inherit; text-decoration: none; }
+.font-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+:focus-visible { outline: 2px solid var(--navy-hi); outline-offset: 2px; border-radius: 4px; }
