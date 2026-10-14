@@ -17,6 +17,7 @@ on:
     branches: [main]
     paths-ignore:
       - 'web/**'          # les changements du site (Vercel) ne redémarrent pas le bot
+      - 'lspd/**'         # le projet LSPD (séparé) ne redémarre pas le bot RDR
   workflow_dispatch: {}   # permet aussi de le lancer à la main depuis l'onglet Actions
 
 jobs:

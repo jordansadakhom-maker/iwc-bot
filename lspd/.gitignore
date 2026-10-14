@@ -1,0 +1,13 @@
+# dépendances & build
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# environnement (ne jamais committer les secrets)
+.env
+.env*.local
+
+# divers
+.DS_Store

@@ -12,6 +12,7 @@ on:
     branches: [main]
     paths-ignore:
       - 'web/**'          # les changements du site (Vercel) ne redéploient pas le bot
+      - 'lspd/**'         # le projet LSPD (séparé) ne redéploie pas le bot RDR
   workflow_dispatch:
 
 jobs:
